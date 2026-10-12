@@ -16,7 +16,8 @@ import { computeSlotScopeKey, type SlotScopeQuery } from "./slotRegistry";
  * provision or delete devices are refused with `device_outside_managed_slots`. Reads stay open everywhere (owner
  * decision Q6). Unbound (generic) connections are unaffected; their protection against slot devices
  * is the generic `device_assigned_to_managed_slot` exclusion.
- * Direct `daemon/releaseExecution` is confined to its slot sessions, `daemon/resetSlotScope` to its
+ * Direct `daemon/releaseExecution` is confined to its slot sessions unless the live managed
+ * execution's owner token proves ownership, `daemon/resetSlotScope` to its
  * exact scope; host-wide `daemon/refreshDevices` and `ide/setFeatureFlag` are refused (#11596).
  */
 
@@ -115,6 +116,26 @@ export function managedConnectionControlRefusal(input: {
     }
   }
   return new DeviceOutsideManagedSlotsError(action, "device", binding.scopeKey, { deviceId });
+}
+
+/** Refuse a platform-only selector only when every slot's known platform differs. */
+export function managedConnectionPlatformRefusal(input: {
+  binding: ManagedConnectionBinding | undefined;
+  action: string;
+  platform?: string;
+  slotPlatformOf: (sessionUuid: string) => string | undefined;
+}): DeviceOutsideManagedSlotsError | undefined {
+  const { binding, action, platform } = input;
+  if (!binding || platform === undefined || binding.sessionUuids.size === 0) {
+    return undefined;
+  }
+  for (const sessionUuid of binding.sessionUuids) {
+    const slotPlatform = input.slotPlatformOf(sessionUuid);
+    if (slotPlatform === undefined || slotPlatform === platform) {
+      return undefined;
+    }
+  }
+  return new DeviceOutsideManagedSlotsError(action, "device", binding.scopeKey, { platform });
 }
 
 /** Host-wide mutations cannot be confined to a bound connection's slots. */

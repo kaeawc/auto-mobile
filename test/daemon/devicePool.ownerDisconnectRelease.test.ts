@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   OWNER_DISCONNECT_GRACE_MS,
@@ -78,6 +79,47 @@ describe("DevicePool owner-disconnect release (#10503)", () => {
 
   afterEach(() => {
     sessionManager.stopCleanupTimer();
+  });
+
+  test("a connected live holder keeps the identical non-retryable bind refusal", async () => {
+    const error = await bind("rival", NEW_CONNECTION).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(InputDeviceOwnedError);
+    if (!(error instanceof InputDeviceOwnedError)) {
+      throw new Error("expected typed refusal");
+    }
+    expect(error.toPayload()).toEqual({
+      code: "device_owned_by_other_session",
+      deviceId: DEVICE.deviceId,
+      retryable: false,
+    });
+    expect(error.message).toBe(
+      `Device '${DEVICE.deviceId}' is already assigned to another session. Acquire a different device or wait for its owner to release it.`,
+    );
+  });
+
+  test("a rival receives exactly the remaining disconnect grace without extending any clock", async () => {
+    const session = ownerSession();
+    const clocks = [session.lastUsedAt, session.lastHeartbeat, session.lastOwnerHeartbeat];
+    devicePool.releaseMcpSessionBindings(OWNER_CONNECTION);
+    fakeTimer.advanceTime(2_000);
+    const error = await bind("rival", NEW_CONNECTION).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(InputDeviceOwnedError);
+    if (!(error instanceof InputDeviceOwnedError)) {
+      throw new Error("expected typed refusal");
+    }
+    expect(error.toPayload()).toEqual({
+      code: "device_owned_by_other_session",
+      deviceId: DEVICE.deviceId,
+      retryable: true,
+      retryAfterMs: OWNER_DISCONNECT_GRACE_MS - 2_000,
+    });
+    expect([session.lastUsedAt, session.lastHeartbeat, session.lastOwnerHeartbeat]).toEqual(clocks);
+    fakeTimer.advanceTime(error.retryAfterMs! - 1);
+    expect(sessionManager.hasSession(OWNER_SESSION)).toBe(true);
+    fakeTimer.advanceTime(1);
+    await awaitOwnerRelease();
+    await expect(bind("rival", NEW_CONNECTION)).resolves.toBe("rival");
+    expect(releaseReasons).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
   });
 
   test("a new client acquires the device once the owner's connection has been closed for the grace", async () => {
@@ -163,7 +205,31 @@ describe("DevicePool owner-disconnect release (#10503)", () => {
     fakeTimer.advanceTime(1_000);
     sessionManager.recordHeartbeat(OWNER_SESSION);
 
-    fakeTimer.advanceTime(OWNER_DISCONNECT_GRACE_MS);
+    for (const elapsed of [0, 2_000, 2_000, 2_000, 999]) {
+      fakeTimer.advanceTime(elapsed);
+      sessionManager.recordHeartbeat(OWNER_SESSION);
+      const clocks = [
+        ownerSession().lastUsedAt,
+        ownerSession().lastHeartbeat,
+        ownerSession().lastOwnerHeartbeat,
+      ];
+      const error = await bind("rival", NEW_CONNECTION).catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(InputDeviceOwnedError);
+      if (!(error instanceof InputDeviceOwnedError)) {
+        throw new Error("expected typed refusal");
+      }
+      expect(error.toPayload()).toEqual({
+        code: "device_owned_by_other_session",
+        deviceId: DEVICE.deviceId,
+        retryable: false,
+      });
+      expect([
+        ownerSession().lastUsedAt,
+        ownerSession().lastHeartbeat,
+        ownerSession().lastOwnerHeartbeat,
+      ]).toEqual(clocks);
+    }
+    fakeTimer.advanceTime(2);
     await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
 
     expect(sessionManager.getSession(OWNER_SESSION)).not.toBeNull();

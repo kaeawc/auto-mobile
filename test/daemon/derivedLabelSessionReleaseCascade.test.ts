@@ -139,7 +139,9 @@ describe("derived label sessions are released with their base (#11091)", () => {
                 throw error;
               }
               expect(error.sessionUuid).toBe("base:B");
-              expect(error.release.releaseReason).toBe(reason);
+              expect(error.release.releaseReason).toBe(
+                reason === "lazy-expiry" ? "cleanup-expired" : reason,
+              );
             },
           ),
         );

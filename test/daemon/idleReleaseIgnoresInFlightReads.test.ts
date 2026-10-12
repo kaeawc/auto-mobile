@@ -91,7 +91,7 @@ describe("idle release ignores in-flight reads (#11381)", () => {
   for (const kind of ["device", "inventory"] as const) {
     for (const [path, reason] of [
       ["sweep", "cleanup-expired"],
-      ["lazy lookup", "lazy-expiry"],
+      ["lazy lookup", "cleanup-expired"],
     ] as const) {
       test(`${path}: cuts a ${kind} read at the first instant past idle`, async () => {
         const read = startRead(kind);
@@ -154,12 +154,12 @@ describe("idle release ignores in-flight reads (#11381)", () => {
       expect(refusal).toBeInstanceOf(TerminalSessionError);
       expect((refusal as TerminalSessionError).release).toMatchObject({
         sessionId: SESSION,
-        releaseReason: "lazy-expiry",
+        releaseReason: "cleanup-expired",
         terminal: true,
       });
       await manager.waitForSessionRelease(SESSION);
-      expect(releases).toEqual(["lazy-expiry"]);
-      expectCutRead(read, "lazy-expiry");
+      expect(releases).toEqual(["cleanup-expired"]);
+      expectCutRead(read, "cleanup-expired");
       expect(arriving.abortController.signal.aborted).toBe(false);
     });
   }

@@ -91,7 +91,7 @@ test("idle expiry before the heartbeat lease lapses keeps its idle diagnostic", 
 
     expect(await persistence.getSession?.("idle-expired")).toMatchObject({
       status: "expired",
-      release_reason: "lazy-expiry",
+      release_reason: "cleanup-expired",
     });
   } finally {
     manager.stopCleanupTimer();
@@ -116,30 +116,37 @@ test("an idle window as short as the lease releases at the idle deadline, withou
 
     expect(await persistence.getSession?.("idle-at-deadline")).toMatchObject({
       status: "expired",
-      release_reason: "lazy-expiry",
+      release_reason: "cleanup-expired",
     });
   } finally {
     manager.stopCleanupTimer();
   }
 });
 
-test("a lookup that finds both the idle deadline and the lease lapsed keeps the heartbeat diagnostic", async () => {
-  const timer = new FakeTimer();
-  const persistence = new FakeDeviceSessionPersistence();
-  const manager = new SessionManager(timer, persistence);
-  try {
-    await manager.createSession("lease-lapsed", "emulator-5554", "android", 1_000, 1_000);
-    manager.recordHeartbeat("lease-lapsed");
-    timer.advanceTime(1_000 + SUSPECT_GRACE_MS + 1);
+test.each(["lookup", "sweep"])(
+  "a %s that finds both the idle deadline and the lease lapsed keeps the heartbeat diagnostic",
+  async (path) => {
+    const timer = new FakeTimer();
+    const persistence = new FakeDeviceSessionPersistence();
+    const manager = new SessionManager(timer, persistence);
+    try {
+      await manager.createSession("lease-lapsed", "emulator-5554", "android", 1_000, 1_000);
+      manager.recordHeartbeat("lease-lapsed");
+      timer.advanceTime(1_000 + SUSPECT_GRACE_MS + 1);
 
-    expect(manager.getSession("lease-lapsed")).toBeNull();
-    await manager.waitForSessionRelease("lease-lapsed");
+      if (path === "sweep") {
+        manager.cleanupExpiredSessions();
+      } else {
+        expect(manager.getSession("lease-lapsed")).toBeNull();
+      }
+      await manager.waitForSessionRelease("lease-lapsed");
 
-    expect(await persistence.getSession?.("lease-lapsed")).toMatchObject({
-      status: "expired",
-      release_reason: "heartbeat-timeout",
-    });
-  } finally {
-    manager.stopCleanupTimer();
-  }
-});
+      expect(await persistence.getSession?.("lease-lapsed")).toMatchObject({
+        status: "expired",
+        release_reason: "heartbeat-timeout",
+      });
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  },
+);

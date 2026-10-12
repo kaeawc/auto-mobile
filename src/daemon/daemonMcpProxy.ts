@@ -37,6 +37,7 @@ import {
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_RELEASE_EXECUTION_METHOD,
+  DAEMON_RELEASE_SESSION_METHOD,
   DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
   DAEMON_REGISTER_SESSION_METHOD,
   CLI_SESSION_LIVENESS_POLICY,
@@ -58,6 +59,7 @@ import {
   isGatedToolErrorCode,
   DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
   DAEMON_LIVENESS_OWNER_UNOWNED_CODE,
+  DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE,
   PROGRESS_NOTIFICATION_METHOD,
   RESOURCE_SUBSCRIBE_METHOD,
   RESOURCE_UNSUBSCRIBE_METHOD,
@@ -139,7 +141,11 @@ import {
   getStaticToolDefinitions,
 } from "./staticToolDefinitions";
 import { DaemonRestartDeferredError } from "./daemonRestartAdmission";
-import { isRecoverableDaemonReleaseReason } from "./releaseReasons";
+import {
+  isRecoverableDaemonReleaseReason,
+  isRecoverableDaemonHandoffReason,
+  SESSION_NOT_FOUND_REASON,
+} from "./releaseReasons";
 import { daemonProcessOptions, daemonReuseOptions } from "./daemonOptionScopes";
 import {
   DAEMON_STALLED_CODE,
@@ -297,8 +303,11 @@ interface StallHandoverRecord {
   probeDaemonInstance?: string;
   /** First instance-change answer; marks a managed session reclaiming without a daemon pin. */
   managedReclaimSince?: number;
-  /** First reasonless not-found in a continuous answering stretch; cleared on an unanswered probe. */
-  managedNotFoundSince?: number;
+  /**
+   * First awaitable not-found from an answering daemon process; silence never resets it.
+   * Only an answer naming a different defined daemon instance opens a fresh window.
+   */
+  managedNotFoundWindow?: { since: number; daemonInstance: string | undefined };
   /**
    * The daemon process that last acknowledged a heartbeat before the handover, kept even after
    * probing stops, so a resume acknowledged by another process is reported as a restart (#11018).
@@ -1347,6 +1356,7 @@ function logManagedExecutionReleaseOutcome(sessionId: string, result: unknown): 
 
 export class DaemonMcpProxy {
   private client: DaemonClientLike | null = null;
+  private closePromise: Promise<void> | undefined;
   private config: DaemonMcpProxyConfig;
   private daemonManager: DaemonManagerLike;
   private clientFactory: DaemonClientFactory;
@@ -1371,7 +1381,10 @@ export class DaemonMcpProxy {
    * What the daemon's latest not-found answer to a liveness recovery heartbeat means, per session,
    * until recovery acts on that answer.
    */
-  private readonly recoveryNotFoundOutcomes = new Map<string, NotFoundAnswerOutcome>();
+  private readonly recoveryNotFoundOutcomes = new Map<
+    string,
+    { outcome: NotFoundAnswerOutcome; releaseReason: string | undefined }
+  >();
   /**
    * Each session's latest not-found window (when it opened, by the injected timer) and the
    * handoffs it has had a window for ({@link decideNotFoundAnswer}). An entry outlives its window,
@@ -1616,6 +1629,8 @@ export class DaemonMcpProxy {
         reason: string;
         fromResultMint: boolean;
         release?: SessionReleaseSnapshot;
+        /** First reported managed stall loss; lives and clears with this terminal binding. */
+        reportedStallLossReason?: string;
       }
     | undefined;
   /** A recoverable daemon release needs a replacement transport, not a UUID fence. */
@@ -1961,6 +1976,66 @@ export class DaemonMcpProxy {
           logger.warn(
             `[DaemonMcpProxy] Releasing managed execution session ${sessionId} failed; the daemon ` +
               `releases it after the no-heartbeat window: ${errorMessage(error)}`,
+            error,
+          );
+        }
+      }),
+    );
+  }
+
+  /** Release only this process's ordinary heartbeat holds; harness and CLI holds survive exit. */
+  private async releaseOwnedSessions(client: DaemonClientLike | null): Promise<void> {
+    if (
+      !client ||
+      stableLivenessOwnerToken(this.config) ||
+      this.config.oneShotCli ||
+      this.cliSessionLivenessDeclared
+    ) {
+      return;
+    }
+    const sessions = this.heldSessionUuids().filter(
+      (sessionId) =>
+        sessionId !== this.config.initialSessionUuid?.trim() &&
+        !this.managedExecutionSessions.has(sessionId) &&
+        !this.releasedSessionReasons.has(sessionId),
+    );
+    await Promise.all(
+      sessions.map(async (sessionId) => {
+        try {
+          const result: unknown = await raceWithDeadline(
+            () =>
+              client.callDaemonMethod(
+                DAEMON_RELEASE_SESSION_METHOD,
+                { sessionId, livenessOwnerToken: this.livenessOwnerToken },
+                { timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS },
+              ),
+            {
+              timer: this.timer,
+              timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS,
+              label: `Release owned session ${sessionId}`,
+            },
+          );
+          // DaemonClientLike permits arbitrary results; injected clients can resolve refusal envelopes.
+          if (result && typeof result === "object" && Reflect.get(result, "success") === false) {
+            throw Object.assign(new ActionableError(String(Reflect.get(result, "error"))), {
+              code: Reflect.get(result, "code"),
+            });
+          }
+        } catch (error) {
+          if (
+            error &&
+            typeof error === "object" &&
+            Reflect.get(error, "code") === DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE
+          ) {
+            // A successor or explicit handoff owns this session now; its lifecycle must continue.
+            logger.debug(
+              `[DaemonMcpProxy] Session ${sessionId} no longer belongs to this proxy; keeping it`,
+              error,
+            );
+            return;
+          }
+          logger.warn(
+            `[DaemonMcpProxy] Releasing owned session ${sessionId} failed; falling back to owner-disconnect release: ${errorMessage(error)}`,
             error,
           );
         }
@@ -2698,8 +2773,7 @@ export class DaemonMcpProxy {
       const keepsHandover =
         this.managedExecutionSessions.has(releasedSessionUuid) &&
         this.stallHandovers.get(releasedSessionUuid)?.handover.code === DAEMON_STALLED_CODE &&
-        isRecoverableDaemonReleaseReason(notification.reason ?? "") &&
-        !notification.reason?.startsWith("device-restart:");
+        isRecoverableDaemonHandoffReason(notification.reason ?? "");
       if (!keepsHandover) {
         this.endLostSessionHandover(releasedSessionUuid, notification.reason);
       }
@@ -2747,10 +2821,17 @@ export class DaemonMcpProxy {
     ) {
       this.fenceBoundSessionUuid(
         releasedSessionUuid,
-        notification.reason ?? "released",
+        this.reasonForReleaseNotification(releasedSessionUuid, notification.reason),
         notification.release,
       );
     }
+  }
+
+  private reasonForReleaseNotification(sessionUuid: string, reason?: string): string {
+    const terminal = this.terminalBoundSession;
+    const reported =
+      terminal?.sessionUuid === sessionUuid ? terminal.reportedStallLossReason : undefined;
+    return reported ?? reason ?? "released";
   }
 
   /**
@@ -6120,7 +6201,9 @@ export class DaemonMcpProxy {
         // The same decision as a keeper tick answered not-found: a replacement daemon that has
         // not materialised a persisted session yet says so with no release reason, and the next
         // tool call restores it (#11411).
-        const outcome = this.recoveryNotFoundOutcomes.get(sessionUuid) ?? { kind: "stopped" };
+        const outcome = this.recoveryNotFoundOutcomes.get(sessionUuid)?.outcome ?? {
+          kind: "stopped",
+        };
         this.recoveryNotFoundOutcomes.delete(sessionUuid);
         this.applyNotFoundOutcome(sessionUuid, outcome);
       },
@@ -6252,15 +6335,15 @@ export class DaemonMcpProxy {
     if (this.isDaemonSessionNotFoundError(error)) {
       // The same decision as any other heartbeat's not-found: an attempt that reached a daemon
       // this proxy just connected to gets that session's first answer on the connection (#11570).
-      this.recoveryNotFoundOutcomes.set(
-        sessionUuid,
-        this.noteNotFoundAnswer(
+      this.recoveryNotFoundOutcomes.set(sessionUuid, {
+        outcome: this.noteNotFoundAnswer(
           sessionUuid,
           attemptedClient,
           releaseReasonFromError(error),
           daemonInstanceFromError(error),
         ),
-      );
+        releaseReason: releaseReasonFromError(error),
+      });
       return "session-gone";
     }
     if (!this.isMissingHeartbeatAcknowledgement(error)) {
@@ -6305,6 +6388,19 @@ export class DaemonMcpProxy {
    * structured error for the next tool call that reaches each of them, and tell the harness now.
    */
   private deliverLivenessHandover(handover: LivenessHandover): void {
+    if (handover.code === PROXY_STALLED_CODE) {
+      // Capture each recovery refusal before fencing forgets its liveness state.
+      handover = {
+        ...handover,
+        releaseReasons: Object.fromEntries(
+          handover.sessions.map(({ sessionUuid }) => [
+            sessionUuid,
+            this.recoveryNotFoundOutcomes.get(sessionUuid)?.releaseReason ??
+              SESSION_NOT_FOUND_REASON,
+          ]),
+        ),
+      };
+    }
     if (this.isHandoverAfterCleanDaemonShutdown(handover)) {
       logger.warn(
         `[DaemonMcpProxy] ${handover.code} after a clean daemon shutdown (no daemon has ` +
@@ -6326,7 +6422,7 @@ export class DaemonMcpProxy {
     if (handover.code === PROXY_STALLED_CODE) {
       // Recovery already received a definitive missing-session or superseded-owner answer.
       for (const { sessionUuid } of handover.sessions) {
-        this.endLostSessionHandover(sessionUuid);
+        this.endLostSessionHandover(sessionUuid, handover.releaseReasons?.[sessionUuid]);
       }
     }
     this.notifyLivenessHandoverListeners(handover);
@@ -6490,30 +6586,54 @@ export class DaemonMcpProxy {
       const releaseReason = releaseReasonFromError(error);
       if (
         record.managedReclaimSince !== undefined &&
-        releaseReason === undefined &&
-        this.isDaemonSessionNotFoundError(error)
+        this.awaitManagedReclaimNotFound(sessionUuid, record, error)
       ) {
-        record.managedNotFoundSince ??= this.timer.now();
-        if (
-          this.timer.now() - record.managedNotFoundSince <
-          RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS
-        ) {
-          // The successor may not have rehydrated this session yet; keep the same probe cadence.
-          logger.debug(
-            `[DaemonMcpProxy] Managed session ${sessionUuid} is still awaiting rehydration`,
-          );
-          return;
-        }
+        // The successor may not have rehydrated this session yet; keep the same probe cadence.
+        logger.debug(
+          `[DaemonMcpProxy] Managed session ${sessionUuid} is still awaiting rehydration`,
+        );
+        return;
       }
       // The daemon answered that the session is gone or owned by another token: the next call
       // that reaches it reports the loss once.
       this.endLostSessionHandover(sessionUuid, releaseReason);
       return;
     }
-    record.managedNotFoundSince = undefined;
     // Expected while the daemon is still stalled; the next probe round asks again.
     logger.debug(
       `[DaemonMcpProxy] Stalled-daemon probe for session ${sessionUuid} got no answer: ${errorMessage(error)}`,
+    );
+  }
+
+  /** Await only rehydratable not-found answers, within one window per answering process. */
+  private awaitManagedReclaimNotFound(
+    sessionUuid: string,
+    record: StallHandoverRecord,
+    error: unknown,
+  ): boolean {
+    const releaseReason = releaseReasonFromError(error);
+    if (
+      !this.managedExecutionSessions.has(sessionUuid) ||
+      record.handover.code !== DAEMON_STALLED_CODE ||
+      isLivenessOwnershipLostError(error) ||
+      isLivenessOwnerConflictError(error) ||
+      !this.isDaemonSessionNotFoundError(error) ||
+      (releaseReason !== undefined && !isRecoverableDaemonHandoffReason(releaseReason))
+    ) {
+      return false;
+    }
+    // An unpinned not-found proves the daemon answered but has not rehydrated this execution.
+    record.managedReclaimSince ??= this.timer.now();
+    record.probeDaemonInstance = undefined;
+    this.stallResumeProbe.start();
+    const daemonInstance = daemonInstanceFromError(error);
+    const window = record.managedNotFoundWindow;
+    if (!window || (daemonInstance !== undefined && daemonInstance !== window.daemonInstance)) {
+      record.managedNotFoundWindow = { since: this.timer.now(), daemonInstance };
+    }
+    return (
+      this.timer.now() - record.managedNotFoundWindow!.since <
+      RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS
     );
   }
 
@@ -6598,7 +6718,10 @@ export class DaemonMcpProxy {
     try {
       ack = await this.sendStalledSessionResumeHeartbeat(sessionUuid);
     } catch (error) {
-      if (this.isDefinitiveSessionLoss(error)) {
+      if (
+        this.isDefinitiveSessionLoss(error) &&
+        !this.awaitManagedReclaimNotFound(sessionUuid, record, error)
+      ) {
         this.endLostSessionHandover(sessionUuid, releaseReasonFromError(error));
         this.reportPendingSessionLoss(args);
         return;
@@ -6647,7 +6770,10 @@ export class DaemonMcpProxy {
     );
   }
 
-  private endLostSessionHandover(sessionUuid: string, releaseReason?: string): void {
+  private endLostSessionHandover(
+    sessionUuid: string,
+    releaseReason = SESSION_NOT_FOUND_REASON,
+  ): void {
     const record = this.stallHandovers.get(sessionUuid);
     if (!record) {
       return;
@@ -6658,7 +6784,7 @@ export class DaemonMcpProxy {
         ...record.handover,
         code: PROXY_STALLED_CODE,
         ...(record.handover.code === DAEMON_STALLED_CODE ? { stalledBy: "daemon" as const } : {}),
-        releaseReason,
+        releaseReasons: { [sessionUuid]: releaseReason },
         sessions: record.handover.sessions.filter((session) => session.sessionUuid === sessionUuid),
         lastAcknowledgedHeartbeatAt:
           record.handover.sessions.find((session) => session.sessionUuid === sessionUuid)
@@ -6679,8 +6805,17 @@ export class DaemonMcpProxy {
     }
     this.ownedDeviceSessions.delete(sessionUuid);
     this.claimableSessions.delete(sessionUuid);
-    if (this.terminalBoundSession?.sessionUuid === sessionUuid) {
-      this.terminalBoundSession.reason = releaseReason ?? "session-not-found";
+    this.recordTerminalStallLoss(sessionUuid, releaseReason);
+  }
+
+  private recordTerminalStallLoss(sessionUuid: string, releaseReason: string): void {
+    const terminal = this.terminalBoundSession;
+    if (terminal?.sessionUuid !== sessionUuid) {
+      return;
+    }
+    terminal.reason = releaseReason;
+    if (this.managedExecutionSessions.has(sessionUuid)) {
+      terminal.reportedStallLossReason = releaseReason;
     }
   }
 
@@ -8283,7 +8418,13 @@ export class DaemonMcpProxy {
    * unadmitted and leave the session to the owner-disconnect release (#11642). Each caller is
    * answered with a typed `DaemonUnavailableError`, never left waiting.
    */
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    // EOF and signal/transport shutdown may overlap: keep the socket until the same release settles.
+    return (this.closePromise ??= this.closeOnce());
+  }
+
+  private async closeOnce(): Promise<void> {
+    const connectedClient = this.connected ? this.client : null;
     this.closing = true;
     const closingError = new DaemonUnavailableError("MCP proxy is closing");
     this.managedSlotsAcquisitionAbort?.abort(closingError);
@@ -8301,7 +8442,10 @@ export class DaemonMcpProxy {
     this.cancelConnectedFallbackReconcile();
     this.connectionCloseReject?.(new DaemonUnavailableError("MCP proxy is closing"));
     // Before the keeper stops, so the lease stays live until the release lands (#11176).
-    await this.releaseManagedExecutionSessions();
+    await Promise.all([
+      this.releaseOwnedSessions(connectedClient),
+      this.releaseManagedExecutionSessions(),
+    ]);
     await this.stopBoundSessionHeartbeat();
     if (this.client) {
       await this.client.close();

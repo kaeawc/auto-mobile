@@ -14,7 +14,7 @@ import {
 
 const DEVICE_A = "emulator-5554";
 const DEVICE_B = "emulator-5556";
-const IDLE_REASONS = ["cleanup-expired", "lazy-expiry"];
+const IDLE_REASONS = ["cleanup-expired"];
 
 let scenario: LivenessScenario;
 

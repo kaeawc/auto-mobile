@@ -2025,7 +2025,7 @@ describe("SessionManager", () => {
         expect(refusal).toBeInstanceOf(TerminalSessionError);
         expect((refusal as TerminalSessionError).release).toMatchObject({
           sessionId: "s1",
-          releaseReason: "lazy-expiry",
+          releaseReason: "cleanup-expired",
           terminal: true,
         });
         expect(assignedSessionIds).toEqual([]);
@@ -4924,7 +4924,7 @@ describe("SessionManager", () => {
         await manager.waitForSessionRelease("periodic-expiry");
 
         expect(releases).toEqual([
-          { sessionId: "lazy-expiry", status: "expired", reason: "lazy-expiry" },
+          { sessionId: "lazy-expiry", status: "expired", reason: "cleanup-expired" },
           { sessionId: "periodic-expiry", status: "expired", reason: "cleanup-expired" },
         ]);
       } finally {

@@ -18,8 +18,16 @@ const IDLE_REASONS = ["cleanup-expired"];
 
 let scenario: LivenessScenario;
 
+// Pay the process's one-time first-acquire/first-call module-load cost outside the test budget.
 beforeAll(async () => {
-  await (await LivenessScenario.start()).stop();
+  const warm = await LivenessScenario.start({ devices: [DEVICE_A, DEVICE_B] });
+  try {
+    const session = await warm.acquire(DEVICE_A);
+    await warm.toolCall(session);
+    await warm.idleUntilReleased(session, IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+  } finally {
+    await warm.stop();
+  }
 });
 
 afterEach(async () => {

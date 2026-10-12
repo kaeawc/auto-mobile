@@ -15,6 +15,7 @@ import type {
 import { AdbCommandTimeoutError } from "../../src/utils/android-cmdline-tools/AdbClient";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import type { SetTextOptions } from "../../src/features/observe/DeviceService";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import {
@@ -245,7 +246,8 @@ describe("UnixSocketServer input/typeText", () => {
   test("tracks direct input until a session-loss drain can safely finish", async () => {
     const operationStarted = Promise.withResolvers<void>();
     const releaseOperation = Promise.withResolvers<void>();
-    const requestSetText = mock(async () => {
+    const requestSetText = mock(async (_text: string, options: SetTextOptions = {}) => {
+      options.onDispatch?.();
       operationStarted.resolve();
       await releaseOperation.promise;
       return { success: true, totalTimeMs: 1 };
@@ -287,12 +289,75 @@ describe("UnixSocketServer input/typeText", () => {
         return result;
       });
     await flushMicrotasks();
+    // A dispatched text request may still be typing: drain waits for the runner to settle,
+    // bounded by the request's remaining budget.
     expect(drained).toBe(false);
 
     releaseOperation.resolve();
     expect(await drain).toBe(true);
+    const failedResponse = await response;
+    expect(failedResponse.success).toBe(false);
+    expect(failedResponse.error).toContain("indeterminate");
+    expect(executionTracker.hasActiveSessionUuidExecutions(sessionId)).toBe(false);
+  });
+
+  test("a direct input cancelled before dispatch lets a session-loss drain finish at once and is never sent", async () => {
+    const operationStarted = Promise.withResolvers<void>();
+    const releaseOperation = Promise.withResolvers<void>();
+    let sent = false;
+    const requestSetText = mock(async (_text: string, options: SetTextOptions = {}) => {
+      operationStarted.resolve();
+      await releaseOperation.promise;
+      options.onDispatch?.();
+      sent = true;
+      return { success: true, totalTimeMs: 1 };
+    });
+    AndroidCtrlProxyClient.getInstance = mock(() => ({
+      requestSetText,
+      requestImeAction: mock(async () => ({ success: true, totalTimeMs: 1 })),
+    })) as unknown as typeof AndroidCtrlProxyClient.getInstance;
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    const sessionId = "direct-input-before-dispatch-session";
+    const sessions = new Map([
+      [sessionId, createFakeSession(sessionId, androidDevice.deviceId, "android")],
+    ]);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createFakeDaemonState(sessions),
+      fakeTimer,
+    );
+    await server.start();
+
+    const response = sendRequest(socketPath, "input/typeText", {
+      platform: "android",
+      deviceId: androidDevice.deviceId,
+      text: "not sent",
+      sessionUuid: sessionId,
+    });
+    await operationStarted.promise;
+    expect(executionTracker.hasActiveSessionUuidExecutions(sessionId)).toBe(true);
+
+    expect(await executionTracker.cancelDeviceSessionExecutions(sessionId, "test recovery")).toBe(
+      1,
+    );
+    let drained = false;
+    const drain = executionTracker
+      .waitForDeviceSessionExecutionsToEnd(sessionId, 1_000)
+      .then((result) => {
+        drained = result;
+        return result;
+      });
+    await flushMicrotasks();
+    expect(drained).toBe(true);
+    expect(await drain).toBe(true);
     expect((await response).success).toBe(false);
     expect(executionTracker.hasActiveSessionUuidExecutions(sessionId)).toBe(false);
+
+    releaseOperation.resolve();
+    await expect(requestSetText.mock.results[0]!.value).rejects.toThrow();
+    await flushMicrotasks();
+    expect(sent).toBe(false);
   });
 
   // Issue #3351: requestSetText is ACTION_SET_TEXT, which REPLACES the focused

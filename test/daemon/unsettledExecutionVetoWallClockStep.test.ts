@@ -1,8 +1,10 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { UNSETTLED_EXECUTION_VETO_CEILING_MS } from "../../src/daemon/unsettledExecutionVeto";
 import {
+  IDLE_WINDOW_MS,
   LivenessScenario,
   NO_HEARTBEAT_BUDGET_MS,
+  RELEASE_SLACK_MS,
   SCAN_MS,
 } from "../helpers/livenessScenarioHarness";
 
@@ -14,9 +16,18 @@ const HOUR_MS = 3_600_000;
 
 let scenario: LivenessScenario | undefined;
 
-// The first scenario pays for module-level one-time costs, outside the per-test budget.
+// Pay the process's one-time first-acquire/first-call module-load cost outside the test budget.
 beforeAll(async () => {
-  await (await LivenessScenario.start()).stop();
+  const warm = await LivenessScenario.start();
+  try {
+    const session = await warm.acquire();
+    const call = warm.startLongCall(session);
+    await warm.idle(0);
+    await call.settle();
+    await warm.idleUntilReleased(session, IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+  } finally {
+    await warm.stop();
+  }
 });
 
 afterEach(async () => {

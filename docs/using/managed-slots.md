@@ -517,7 +517,8 @@ slot. Only control and lifecycle calls on another slot's device are refused.
   retryable `discovery_incomplete` rather than treat unknown as free (#11410). A
   host with no registry at all has no managed slots, and devices are free. A
   registry that was read successfully once and then fails keeps its last good
-  snapshot.
+  snapshot for reads and inventory. Taking an unheld device requires a current
+  snapshot; a failed read refuses with retryable `discovery_incomplete`.
 
 ## Boot capacity
 

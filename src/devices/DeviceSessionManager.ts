@@ -1146,6 +1146,12 @@ export class DeviceSessionManager implements DeviceSessionManager {
     options: DeviceReadyOptions,
   ): Promise<BootedDevice> {
     const image = await this.findProvidedReadinessImage(platform, providedDeviceId, scan, options);
+    if (image?.platform === "android" && image.isRunning === true) {
+      throw new AndroidBootedDeviceDiscoveryIncompleteError(
+        undefined,
+        `Android AVD '${image.name}' is running but its serial could not be resolved yet.`,
+      );
+    }
     if (
       !image ||
       image.isRunning !== false ||

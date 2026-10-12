@@ -1297,6 +1297,7 @@ export class Daemon {
     // Sessionless network mocks and simulations are cleared the same way (#11130).
     const clearOwnerlessNetworkState = createOwnerlessNetworkStateAcquisitionCleanup(
       this.sessionManager,
+      { timer: this.timer },
     );
     // Display/system settings a previous session changed are reset to the recorded device
     // defaults when a different session acquires the device (#11145).
@@ -1311,6 +1312,7 @@ export class Daemon {
     const resetSettingDefaults = createDeviceSettingDefaultsAcquisitionReset(
       this.sessionManager,
       settingDefaults,
+      this.timer,
     );
     this.sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId, sessionId) => {
       executionTracker.cancelSessionlessDeviceUse(deviceId, {

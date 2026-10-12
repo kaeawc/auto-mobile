@@ -2199,7 +2199,7 @@ export class DaemonMcpProxy {
     const first = this.stallHandovers.entries().next().value;
     if (first) {
       const [sessionUuid, record] = first;
-      throw new DaemonSessionStalledError(sessionUuid, record.handover);
+      throw new DaemonSessionStalledError(sessionUuid, this.currentHandover(sessionUuid, record));
     }
   }
 
@@ -5611,7 +5611,10 @@ export class DaemonMcpProxy {
       const namedStall = this.stallHandovers.get(namedSessionUuid);
       if (namedStall) {
         namedStall.delivered = true;
-        return new DaemonSessionStalledError(namedSessionUuid, namedStall.handover);
+        return new DaemonSessionStalledError(
+          namedSessionUuid,
+          this.currentHandover(namedSessionUuid, namedStall),
+        );
       }
       if (!this.stallHandovers.has(terminal.sessionUuid)) {
         return new DaemonBoundSessionExpiredError(
@@ -5623,7 +5626,10 @@ export class DaemonMcpProxy {
     const stall = this.stallHandovers.get(terminal.sessionUuid);
     if (stall) {
       stall.delivered = true;
-      return new DaemonSessionStalledError(terminal.sessionUuid, stall.handover);
+      return new DaemonSessionStalledError(
+        terminal.sessionUuid,
+        this.currentHandover(terminal.sessionUuid, stall),
+      );
     }
     return new DaemonBoundSessionExpiredError(
       terminal.sessionUuid,
@@ -6539,6 +6545,25 @@ export class DaemonMcpProxy {
     };
   }
 
+  /** Answers keep their named session and those still handed over; listeners keep the snapshot. */
+  private currentHandover(sessionUuid: string, record: StallHandoverRecord): LivenessHandover {
+    const handover = record.handover;
+    const sessions = handover.sessions.filter(
+      (session) =>
+        session.sessionUuid === sessionUuid || this.stallHandovers.has(session.sessionUuid),
+    );
+    if (sessions.length === handover.sessions.length) {
+      return handover;
+    }
+    return {
+      ...handover,
+      sessions,
+      lastAcknowledgedHeartbeatAt: Math.max(
+        ...sessions.map((session) => session.lastAcknowledgedHeartbeatAt),
+      ),
+    };
+  }
+
   /** How a session is held right before it is handed over, so a resume restores it as it was. */
   private stallRestoreSnapshot(sessionUuid: string): StallHandoverRecord["restore"] {
     const bound = sessionUuid === this.boundSessionUuid && !this.terminalBoundSession;
@@ -6797,7 +6822,7 @@ export class DaemonMcpProxy {
         error,
       );
       record.delivered = true;
-      throw new DaemonSessionStalledError(sessionUuid, record.handover);
+      throw new DaemonSessionStalledError(sessionUuid, this.currentHandover(sessionUuid, record));
     }
     if (this.stallHandovers.get(sessionUuid) === record) {
       this.restoreResumedSession(sessionUuid, daemonRestartEvidence(record, ack));
@@ -8374,7 +8399,7 @@ export class DaemonMcpProxy {
       this.terminalBoundSession?.sessionUuid;
     const record = sessionUuid ? this.stallHandovers.get(sessionUuid) : undefined;
     if (sessionUuid && record) {
-      throw new DaemonSessionStalledError(sessionUuid, record.handover);
+      throw new DaemonSessionStalledError(sessionUuid, this.currentHandover(sessionUuid, record));
     }
   }
 

@@ -1,7 +1,10 @@
 import { DaemonState } from "../daemon/daemonState";
 import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
 import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
-import { assertInputRequesterHoldsDevice } from "../daemon/inputDeviceOwnership";
+import {
+  assertInputRequesterHoldsDevice,
+  InputDeviceOwnedError,
+} from "../daemon/inputDeviceOwnership";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import type { Platform } from "../models";
@@ -56,6 +59,8 @@ export function assertLifecycleCallerHoldsDevice(input: {
   force: boolean;
   /** Extra stable identities of the target (an AVD name the caller resolved). */
   stableIds?: ReadonlyArray<string | undefined>;
+  /** Stop tools also fence a restart hold's original connection, even with force. */
+  checkRestartHold?: boolean;
 }): void {
   const { toolName, device, requester, force } = input;
   const daemonState = DaemonState.getInstance();
@@ -65,6 +70,8 @@ export function assertLifecycleCallerHoldsDevice(input: {
   const sessionManager = daemonState.getSessionManager();
   const base = (uuid: string) => resolveToolSelectionBaseSessionUuid(uuid, sessionManager) ?? uuid;
   assertNotForeignManagedSlotFromSnapshot(daemonState, input);
+  const pool = daemonState.getDevicePool();
+  assertLifecycleRequesterOwnsRestartHold(pool, input);
   const owner = sessionManager.getSessionForDevice(device.deviceId) ?? undefined;
   if (!owner) {
     return;
@@ -72,7 +79,6 @@ export function assertLifecycleCallerHoldsDevice(input: {
   if (requester.sessionUuid && base(requester.sessionUuid) === base(owner)) {
     return;
   }
-  const pool = daemonState.getDevicePool();
   if (
     requester.mcpSessionId &&
     pool.getDevice(device.deviceId)?.autolockSessionId === owner &&
@@ -100,6 +106,36 @@ export function assertLifecycleCallerHoldsDevice(input: {
     sessionManager,
     remedy: LIFECYCLE_TOOL_REMEDY,
   });
+}
+
+/** Naming a handed-off holder remains connection-owned even while no live session exists. */
+function assertLifecycleRequesterOwnsRestartHold(
+  pool: ReturnType<DaemonState["getDevicePool"]>,
+  {
+    toolName,
+    device,
+    requester,
+    checkRestartHold,
+  }: Pick<
+    Parameters<typeof assertLifecycleCallerHoldsDevice>[0],
+    "toolName" | "device" | "requester" | "checkRestartHold"
+  >,
+): void {
+  if (!checkRestartHold) {
+    return;
+  }
+  if (pool.isRestartReservationOwnedByOtherConnection?.(device.deviceId, requester)) {
+    throw new InputDeviceOwnedError(
+      toolName,
+      device.deviceId,
+      requester.sessionUuid,
+      undefined,
+      `${toolName} refused: device '${device.deviceId}' is reserved for session ` +
+        `${requester.sessionUuid}'s device-restart recovery, and this connection did not own ` +
+        "that session when the device restarted. Call from the owning connection, or wait for " +
+        "the recovery window to end. force: true does not override naming another client's session.",
+    );
+  }
 }
 
 /** Remedy text for a lifecycle call refused because another live daemon holds the device. */

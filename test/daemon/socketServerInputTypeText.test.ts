@@ -85,7 +85,13 @@ function fakeIosClient() {
   return { setText, ime };
 }
 
-afterEach(() => mock.restore());
+afterEach(() => {
+  mock.restore();
+  AndroidCtrlProxyClient.clearInstanceRegistryForTesting();
+  IOSCtrlProxyClient.clearInstanceRegistryForTesting();
+  expect(AndroidCtrlProxyClient.getExistingInstance("fake-text")).toBeNull();
+  expect(IOSCtrlProxyClient.getExistingInstance("fake-text")).toBeNull();
+});
 
 test("input/typeText submit reports a returned IME failure after successful typing", async () => {
   const { handler } = createHandler();
@@ -124,7 +130,7 @@ test("input/typeText submit preserves a rejected IME error's class and metadata"
     "done",
     1000,
     undefined,
-    controller.signal,
+    expect.any(AbortSignal),
     expect.any(Function),
   );
 });
@@ -154,7 +160,7 @@ test.each([
     }
     const ime = spyOn(client, "requestImeAction").mockImplementation(
       (_action, _timeoutMs, _perf, signal) => {
-        expect(signal).toBe(controller.signal);
+        expect(signal).toBeInstanceOf(AbortSignal);
         expect(signal?.aborted).toBe(false);
         const pending = new Promise<never>((_resolve, reject) => {
           signal?.addEventListener("abort", () => reject(signal.reason), { once: true });

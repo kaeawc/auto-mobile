@@ -958,10 +958,19 @@ async function bindBootedDeviceSession(
   // Reserve the exact ready device before resource notifications publish it
   // to concurrent allocators.
   const daemonState = DaemonState.getInstance();
+  if (!daemonState.isInitialized()) {
+    const sessionId = getDeviceToolsDependencies().idGenerator.next();
+    registerDirectSessionDevice(sessionId, device);
+    return sessionId;
+  }
+  // An admitted restart must resume R even when autolock is enabled. Ordinary autolock
+  // mints a session and must never replace a holder released or expired during this boot.
+  const resumeSessionId = restartResumeSessionForDevice(args, device);
   // A one-shot `--cli` call is anonymous: autolock keys its session on the per-connection MCP id,
   // which the next CLI call never shares, so it would refuse that call. Bind it as an anonymous
   // acquisition below, which later one-shot calls reuse (#11096, #11148).
-  if (autolockEnabled && args.__oneShotCli !== true && daemonState.isInitialized()) {
+  const useAutolock = autolockEnabled && args.__oneShotCli !== true;
+  if (useAutolock && !resumeSessionId) {
     const autolockSessionId = await daemonState
       .getDevicePool()
       .autolockDevice(
@@ -987,12 +996,7 @@ async function bindBootedDeviceSession(
     }
   }
 
-  const resumeSessionId = restartResumeSessionForDevice(args, device);
   const sessionId = resumeSessionId ?? getDeviceToolsDependencies().idGenerator.next();
-  if (!daemonState.isInitialized()) {
-    registerDirectSessionDevice(sessionId, device);
-    return sessionId;
-  }
   const bind = (recoveryTarget?: SessionRecoveryTarget) =>
     daemonState
       .getDevicePool()
@@ -1013,9 +1017,13 @@ async function bindBootedDeviceSession(
         false,
         recoveryTarget,
       );
-  const boundSessionId = resumeSessionId
-    ? await resumePreparedDeviceSession(device, args, resumeSessionId, bind)
-    : await bind();
+  if (resumeSessionId) {
+    return await resumePreparedDeviceSession(device, args, resumeSessionId, bind, {
+      autolockEnabled: useAutolock,
+      achievedReadiness,
+    });
+  }
+  const boundSessionId = await bind();
   recordAcquiredSessionReadiness(daemonState, boundSessionId, achievedReadiness);
   return boundSessionId;
 }
@@ -1026,40 +1034,66 @@ async function resumePreparedDeviceSession(
   args: StartDeviceArgs,
   resumeSessionId: string,
   bind: (target?: SessionRecoveryTarget) => Promise<string>,
+  {
+    autolockEnabled,
+    achievedReadiness,
+  }: {
+    autolockEnabled: boolean;
+    achievedReadiness: DeviceReadinessLevel;
+  },
 ): Promise<string> {
   const daemonState = DaemonState.getInstance();
-  let boundByStart = false;
-  let recoveryTarget: SessionRecoveryTarget | undefined = args.__restartResumeTargets?.find(
-    (reservation) => reservation.sessionId === resumeSessionId,
-  )?.target;
-  const session = await daemonState.getSessionManager().getOrCreateSession(
-    resumeSessionId,
-    {
-      assignDeviceToSession: async (_id, _platform, target) => {
-        if (!target || !daemonState.getDevicePool().matchesRestartRecoveryTarget(device, target)) {
-          throw new ActionableError(
-            `Cannot safely recover session ${resumeSessionId}: prepared device does not match its recovery target.`,
-          );
-        }
-        recoveryTarget = target;
-        const bound = await bind(target);
-        boundByStart = true;
-        return bound;
+  const pool = daemonState.getDevicePool();
+  // The resume bind and adoption share a close fence, including provisionDevice callers.
+  const endResumeBind = pool.beginMcpBind(args.__mcpSessionId);
+  try {
+    let boundByStart = false;
+    let recoveryTarget: SessionRecoveryTarget | undefined = args.__restartResumeTargets?.find(
+      (reservation) => reservation.sessionId === resumeSessionId,
+    )?.target;
+    const session = await daemonState.getSessionManager().getOrCreateSession(
+      resumeSessionId,
+      {
+        assignDeviceToSession: async (_id, _platform, target) => {
+          if (
+            !target ||
+            !daemonState.getDevicePool().matchesRestartRecoveryTarget(device, target)
+          ) {
+            throw new ActionableError(
+              `Cannot safely recover session ${resumeSessionId}: prepared device does not match its recovery target.`,
+            );
+          }
+          recoveryTarget = target;
+          const bound = await bind(target);
+          boundByStart = true;
+          return bound;
+        },
       },
-    },
-    device.platform,
-    undefined,
-    true,
-  );
-  if (session.assignedDevice !== device.deviceId || session.platform !== device.platform) {
-    throw new ActionableError(
-      `Session '${resumeSessionId}' is already assigned to a different device.`,
+      device.platform,
+      undefined,
+      true,
     );
+    if (session.assignedDevice !== device.deviceId || session.platform !== device.platform) {
+      throw new ActionableError(
+        `Session '${resumeSessionId}' is already assigned to a different device.`,
+      );
+    }
+    if (!boundByStart) {
+      await bind(recoveryTarget);
+    }
+    recordAcquiredSessionReadiness(daemonState, resumeSessionId, achievedReadiness);
+    if (autolockEnabled) {
+      await pool.adoptResumedAutolockSession(
+        resumeSessionId,
+        device,
+        args.__mcpSessionId,
+        achievedReadiness,
+      );
+    }
+    return resumeSessionId;
+  } finally {
+    endResumeBind();
   }
-  if (!boundByStart) {
-    await bind(recoveryTarget);
-  }
-  return resumeSessionId;
 }
 
 export function restartResumeSessionForDevice(
@@ -1279,11 +1313,17 @@ export function createStartDeviceHandlers(hooks: StartDeviceHooks) {
       options: BootPreparationOptions,
     ) => {
       const bootOptions = { ...options, rollbackCreatedDevice };
+      // Keep a close during boot visible through a resumed session's bind and autolock adoption.
+      const endAutolockBind = options.autolockEnabled
+        ? initializedDevicePool()?.beginMcpBind(args.__mcpSessionId)
+        : undefined;
       try {
         return await bootAndPrepareDevice(args, budgets, deps, deviceUtils, bootOptions);
       } catch (error) {
         await rollbackCreatedDeviceAfterBoot(bootOptions, error);
         throw error;
+      } finally {
+        endAutolockBind?.();
       }
     },
     startDeviceHandler,

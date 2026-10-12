@@ -196,7 +196,10 @@ connection used for tools and resources:
    holds (`managed_slot_registration_refused`, a protocol answer rather than a
    device-tool refusal). A daemon restart does not end the execution: its session
    is rehydrated, the proxy re-binds, and the restarted daemon records itself as
-   the slot's owner. While the daemon is away, tool calls answer `daemon_stalled`
+   the slot's owner. If registration arrives before the session is rehydrated, the
+   proxy retries on the same confined socket with backoff until it binds or the
+   execution ends; permanent refusals are not retried. While the daemon is away,
+   tool calls answer `daemon_stalled`
    after automatic recovery is exhausted. Its message names the affected sessions
    and attempt count, with `recovery.action: "wait_for_managed_reclaim"`: the proxy
    keeps probing every heartbeat interval, however long the daemon was away, and
@@ -234,7 +237,11 @@ connection used for tools and resources:
    in the draining daemon, but it names that daemon's running process, so other
    daemons on the host answer `slot_in_use` for it until the retry lands. The
    retry clears only that ended session's record; one a live execution holds
-   again is left to that execution's own release. If the
+   again is left to that execution's own release. Failed acquisition back-out also
+   retries owed session release and owner clearing in the background, with eight
+   attempts at 250 ms doubling to 5 s, then every 30 s until it lands or the daemon
+   closes. It clears only the backed-out session's
+   record belonging to that daemon and preserves the device assignment. If the
    `settling` mark itself cannot be written, the slot keeps its owner record and
    the daemon keeps treating that owner as live for as long as the released work
    runs, so the slot is never handed to the next execution under running work;
@@ -295,7 +302,9 @@ A managed-execution session uses the `managed-execution` liveness policy:
 - **Execution owner.** The proxy checks every second that its owner (by default
   the parent process that launched it, or `executionOwnerPid`) is running and,
   for the default owner, that it has not been re-parented. Either loss shuts the
-  proxy down and releases its sessions. Stdin EOF ends the execution the same
+  proxy down and releases its sessions. The owner is identified by PID plus OS process
+  start identity where readable, so a reused PID counts as the owner having exited;
+  where that identity cannot be read, the PID alone is used. Stdin EOF ends the execution the same
   way. If the proxy is killed outright, the ~10 s no-heartbeat release applies.
   Limit: with the default owner, a launch parent pid of 1 is treated as already
   orphaned and a parent pid of 0 (for example `docker exec`) as exited. When the
@@ -563,7 +572,8 @@ slot. Only control and lifecycle calls on another slot's device are refused.
   retryable `discovery_incomplete` rather than treat unknown as free (#11410). A
   host with no registry at all has no managed slots, and devices are free. A
   registry that was read successfully once and then fails keeps its last good
-  snapshot.
+  snapshot for reads and inventory. Taking an unheld device requires a current
+  snapshot; a failed read refuses with retryable `discovery_incomplete`.
 
 ## Boot capacity
 
@@ -578,6 +588,21 @@ retryAfterMs, externalDevices }` on the initialize outcome, the
 call's `acquisitionFailure` (#11402).
 `capacity_exhausted` applies to all boots, including a slot that must create or
 boot its device.
+
+## Total-resource capacity
+
+Boot capacity limits booted devices per platform. Total-resource capacity is a
+separate count of every distinct managed device on the host, whatever its power
+state: active, assigned idle, cached in the free pool, being prepared, being
+deleted or cleanup pending.
+
+The count comes from the host-wide slot registry, so every daemon shares it and
+its commitments survive restarts. A device stays counted until its absence is
+verified. A creation's journal entry is its reservation; the reservation becomes
+the device's charge when creation commits, without counting it twice.
+
+This count is **not enforced yet** (#12051). No total-resource limit is
+configurable, nothing is evicted, and no acquisition is refused because of it.
 
 ## Error codes
 

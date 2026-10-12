@@ -114,6 +114,44 @@ describe("Android CtrlProxyText", () => {
   );
 
   test.each([
+    ["hello", "hello\n", true, true],
+    ["hello", "hello\n", false, false],
+    ["hello", "hello\n", undefined, false],
+    ["hello\n", "hello\n\n", true, true],
+    ["hello", "hello\n\n", true, false],
+    ["onetwo", "one\ntwo\n", true, false],
+    ["onetwo", "one\ntwo", true, false],
+    ["one\ntwo", "one\ntwo\n", true, true],
+    ["", "\n", true, true],
+    ["!", "\n", true, true],
+    ["x", "\n", true, false],
+    ["1", "\n", true, false],
+    ["\u0301", "\n", true, false],
+    ["", "\n", false, false],
+    ["", "\n", undefined, false],
+    ["HELLO", "hello\n", true, true],
+    ["• item", "- item\n", true, true],
+    ["hell", "hello\n", true, false],
+    ["hello", "hello\r\n", true, false],
+    ["hello\r", "hello\r\n", true, false],
+    ["hello", "hello\r", true, false],
+    ["e\u0301", "é\n", true, true],
+    ["bold", "*bold*\n", true, true],
+    ["١٢٣", "123\n", true, true],
+    ["(555) 123-4567", "5551234567\n", true, true],
+    ["prefix name there", "@name there\n", true, true],
+  ] as const)(
+    "checks final-newline IME delta: inserted=%j sent=%j deviceSucceeded=%s",
+    (inserted, text, deviceSucceeded, matches) => {
+      const actual =
+        deviceSucceeded === undefined
+          ? imeInsertedTextMatches(inserted, text)
+          : imeInsertedTextMatches(inserted, text, { deviceSucceeded });
+      expect(actual).toBe(matches);
+    },
+  );
+
+  test.each([
     ["١٢٣", "123"],
     ["१२३", "123"],
     ["𝟙𝟚𝟛", "123"],

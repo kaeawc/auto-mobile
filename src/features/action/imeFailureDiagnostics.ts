@@ -237,7 +237,7 @@ export function verifyImeInsertedText(
   if (
     insertedText === undefined ||
     text.length === 0 ||
-    imeInsertedTextMatches(insertedText, text)
+    imeInsertedTextMatches(insertedText, text, { deviceSucceeded: result.success === true })
   ) {
     return result;
   }
@@ -368,6 +368,11 @@ async function verifyImeCommitReadBack(
   text: string,
   verification: ImeVerification,
 ): Promise<TextActionResult> {
+  const isSubmitAndClear = (observedText: string): boolean =>
+    result.success === true &&
+    result.insertedText === "" &&
+    text.endsWith("\n") &&
+    observedText === "";
   try {
     for (let attempt = 0; attempt < 3; attempt++) {
       verification.checkAbort();
@@ -388,6 +393,9 @@ async function verifyImeCommitReadBack(
         );
       }
       if (observedText === undefined) {
+        return result;
+      }
+      if (isSubmitAndClear(observedText)) {
         return result;
       }
       const deltaVerified = verifyImeInsertedText(result, text, {

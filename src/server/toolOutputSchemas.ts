@@ -1208,7 +1208,7 @@ export const skeletonElementSchema = z
       .literal(true)
       .optional()
       .describe(
-        "Fully covered by the Android IME window or the visible iOS keyboard, or an iOS row scrolled out of its scroll container or covered by another control; this row has no actionable affordance.",
+        "Fully covered by the Android IME window or the visible iOS keyboard, or an iOS row with no visible tap area: off screen, under a navigation/status/tab bar, scrolled out of its scroll container, or covered by another control; this row has no actionable affordance.",
       ),
     checked: z.boolean().optional(),
     selected: z

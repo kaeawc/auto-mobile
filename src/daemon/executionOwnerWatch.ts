@@ -7,19 +7,23 @@
  *
  * - its declared execution owner (by default the parent it was launched by) is still running, and
  * - with the default owner only, it has not been re-parented (the launching parent died and init
- *   or a subreaper adopted it); an explicit owner pid is judged by its liveness alone.
+ *   or a subreaper adopted it); an explicit owner pid is judged without the re-parent heuristic.
  *
  * Either loss fires `onOwnerLost` exactly once; the caller then releases the execution's sessions
  * and shuts the proxy down. Stdin EOF is the third end-of-execution signal and is already handled
  * by the process-wide stdin shutdown handler, which closes the proxy the same way.
  */
 
+import type { LockOwnerGenerationProbe } from "../utils/fileLock";
 import type { Timer } from "../utils/SystemTimer";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 
 /** How often the owner is checked. With a ~1.5 s bounded release this keeps death-to-release ≲ 2.5 s. */
 export const EXECUTION_OWNER_CHECK_INTERVAL_MS = 1_000;
+
+/** Bound synchronous OS identity reads while probing PID liveness on every check. */
+export const EXECUTION_OWNER_GENERATION_CHECK_EVERY = 5;
 
 /** The pid that adopts orphans; a launch parent of 1 means the launcher was already gone. */
 const INIT_PID = 1;
@@ -41,6 +45,8 @@ export interface ExecutionOwnerWatchOptions {
   launchParentPid: number;
   /** A declared supervising process; defaults to {@link launchParentPid}. */
   ownerPid?: number;
+  /** Process identity captured at the caller's startup liveness check, when readable. */
+  ownerGenerationToken?: string;
   onOwnerLost: (reason: ExecutionOwnerLossReason) => void | Promise<void>;
   intervalMs?: number;
 }
@@ -50,12 +56,16 @@ export class ExecutionOwnerWatch {
   private lost: ExecutionOwnerLossReason | undefined;
   private readonly ownerPid: number;
   private readonly intervalMs: number;
+  private ownerGenerationToken: string | undefined;
+  private checks = 0;
 
   constructor(
     private readonly options: ExecutionOwnerWatchOptions,
     private readonly probe: ExecutionOwnerProcessProbe,
     private readonly timer: Timer,
+    private readonly generation?: Pick<LockOwnerGenerationProbe, "current" | "compare">,
   ) {
+    this.ownerGenerationToken = options.ownerGenerationToken;
     this.ownerPid = options.ownerPid ?? options.launchParentPid;
     this.intervalMs = options.intervalMs ?? EXECUTION_OWNER_CHECK_INTERVAL_MS;
   }
@@ -64,6 +74,9 @@ export class ExecutionOwnerWatch {
   start(): void {
     if (this.handle !== undefined || this.lost !== undefined) {
       return;
+    }
+    if (this.ownerGenerationToken === undefined) {
+      this.captureGeneration();
     }
     this.handle = this.timer.setInterval(() => {
       this.check();
@@ -119,7 +132,7 @@ export class ExecutionOwnerWatch {
     if (this.options.ownerPid === undefined && this.options.launchParentPid === INIT_PID) {
       return "parent-changed";
     }
-    // An explicit owner pid replaces the parent heuristic (#11342): only its liveness matters, so
+    // An explicit owner pid replaces the parent heuristic (#11342): judge its process identity, so
     // an intermediate wrapper that launched the proxy and exited does not end the execution.
     if (
       this.options.ownerPid === undefined &&
@@ -127,6 +140,41 @@ export class ExecutionOwnerWatch {
     ) {
       return "parent-changed";
     }
-    return this.probe.isProcessRunning(this.ownerPid) ? undefined : "owner-exited";
+    if (!this.probe.isProcessRunning(this.ownerPid)) {
+      return "owner-exited";
+    }
+    this.checks++;
+    return this.checks % EXECUTION_OWNER_GENERATION_CHECK_EVERY === 0 && this.generationChanged()
+      ? "owner-exited"
+      : undefined;
+  }
+
+  private captureGeneration(): void {
+    try {
+      this.ownerGenerationToken = this.generation?.current(this.ownerPid);
+    } catch (error) {
+      // An unreadable identity proves nothing; the live PID remains trusted.
+      logger.debug(`[ExecutionOwnerWatch] Owner identity unreadable: ${errorMessage(error)}`);
+    }
+  }
+
+  private generationChanged(): boolean {
+    if (this.ownerGenerationToken === undefined) {
+      return false;
+    }
+    try {
+      if (this.generation?.compare(this.ownerPid, this.ownerGenerationToken) === "different") {
+        logger.warn(
+          `[ExecutionOwnerWatch] Owner PID ${this.ownerPid} now names a different process`,
+        );
+        return true;
+      }
+    } catch (error) {
+      // An unavailable comparison is unknown, so it cannot evict a live owner.
+      logger.debug(
+        `[ExecutionOwnerWatch] Owner identity comparison unavailable: ${errorMessage(error)}`,
+      );
+    }
+    return false;
   }
 }

@@ -1,14 +1,247 @@
-import type { Element, ElementBounds } from "../../models";
+import type { Element, ElementBounds, ViewHierarchyResult, ScreenSize } from "../../models";
 import { boundsArea, boundsEqual, intersectBounds } from "../../utils/bounds";
 import { contains, subtractCover, uniqueBySource } from "../observe/ApplicationWindowCover";
 import type { SearchableEntry } from "../utility/SearchableNode";
 import { isUsableScreenSize } from "../utility/ElementGeometry";
 import {
   hasDispatchableExposedTapPoint,
+  clipProjectedIosChromeBounds,
+  projectIosChromeFrames,
+  type IosChromeFrame,
   IOS_MIN_EXPOSED_TAP_HEIGHT_POINTS,
 } from "./swipeon/iosChromeInsets";
 
+import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
+
 type TapPoint = { x: number; y: number };
+
+const IOS_STATUS_BAR_CLASSES = new Set([
+  "XCUIElementTypeStatusBar",
+  "UIStatusBar",
+  "UIStatusBarWindow",
+]);
+
+export interface IosVisibleTapContext {
+  screen: ScreenSize;
+  chromeFrames: readonly IosChromeFrame[];
+  statusBars: readonly SearchableEntry[];
+  statusBarTop: number;
+  tabBars: readonly SearchableEntry[];
+  bySource: ReadonlyMap<SearchableEntry["source"], SearchableEntry>;
+}
+
+/** Build once per capture; preserves the tap path's first projected source match. */
+export function createIosVisibleTapContext(
+  nodes: readonly SearchableEntry[],
+  screen: ScreenSize | undefined,
+  hierarchy?: ViewHierarchyResult,
+): IosVisibleTapContext | undefined {
+  if (!isUsableScreenSize(screen)) {
+    return undefined;
+  }
+  const statusBars = nodes.filter((node) => IOS_STATUS_BAR_CLASSES.has(node.className ?? ""));
+  const bySource = new Map<SearchableEntry["source"], SearchableEntry>();
+  for (const node of nodes) {
+    if (!bySource.has(node.source)) {
+      bySource.set(node.source, node);
+    }
+  }
+  return {
+    screen,
+    chromeFrames: projectIosChromeFrames(nodes, screen),
+    statusBars,
+    statusBarTop:
+      hierarchy?.systemInsets?.top ??
+      statusBars.find(
+        (node) => node.bounds && node.bounds.bottom > 0 && node.bounds.bottom < screen.height,
+      )?.bounds?.bottom ??
+      0,
+    tabBars: nodes.filter(
+      (node) => node.className === "UITabBar" || node.className === "XCUIElementTypeTabBar",
+    ),
+    bySource,
+  };
+}
+
+function contextTargetNode(
+  nodes: readonly SearchableEntry[],
+  context: IosVisibleTapContext | undefined,
+  element: Element,
+  requireElement = true,
+): SearchableEntry | undefined {
+  const source = getHierarchyNodeSource(element);
+  return (
+    (source &&
+      (context ? context.bySource.get(source) : nodes.find((node) => node.source === source))) ||
+    nodes.find(
+      (node) =>
+        (!requireElement || node.element) &&
+        node.bounds &&
+        boundsEqual(node.bounds, element.bounds) &&
+        node.nativeId === element["resource-id"] &&
+        node.nodeKey === element["view-id"],
+    )
+  );
+}
+
+/** Shared iOS tap admission after screen/matched clipping, in dispatch order. */
+export function iosVisibleTapArea({
+  bounds,
+  matched,
+  target,
+  nodes,
+  context,
+  targetNode,
+}: {
+  bounds: ElementBounds;
+  matched: Element;
+  target: Element;
+  nodes: readonly SearchableEntry[];
+  context?: IosVisibleTapContext;
+  targetNode?: SearchableEntry;
+}): ElementBounds | null {
+  if (!context) {
+    return clipIosTapBoundsToScrollAncestors(
+      nodes,
+      targetNode ?? contextTargetNode(nodes, context, target),
+      bounds,
+    );
+  }
+  const chromeTarget =
+    contextTargetNode(nodes, context, matched, false) ??
+    contextTargetNode(nodes, context, target, false);
+  const belowChrome = clipProjectedIosChromeBounds({
+    bounds,
+    nodes,
+    target: chromeTarget,
+    frames: context.chromeFrames,
+    forTapTarget: true,
+  }).bounds;
+  const belowStatus =
+    belowChrome && clipBelowStatusBar(belowChrome, matched, target, nodes, context);
+  const belowTabs = belowStatus && clipBelowTabBars(belowStatus, matched, target, nodes, context);
+  return (
+    belowTabs &&
+    clipIosTapBoundsToScrollAncestors(nodes, contextTargetNode(nodes, context, target), belowTabs)
+  );
+}
+
+function clipBelowStatusBar(
+  visible: ElementBounds,
+  matched: Element,
+  target: Element,
+  nodes: readonly SearchableEntry[],
+  context: IosVisibleTapContext,
+): ElementBounds | null {
+  const screenSize = context.screen;
+  const matchedNode = contextTargetNode(nodes, context, matched);
+  const targetNode = matchedNode ?? contextTargetNode(nodes, context, target);
+  // A status-bar control is itself a valid target even though app content
+  // beneath the bar must not receive a coordinate tap there.
+  if (
+    (targetNode &&
+      context.statusBars.some((bar) => isInsideHierarchyNode(targetNode, bar, nodes))) ||
+    [matched.class, target.class].some((className) => IOS_STATUS_BAR_CLASSES.has(className ?? ""))
+  ) {
+    return visible;
+  }
+  const top = context.statusBarTop;
+  return intersectBounds(visible, {
+    left: 0,
+    top: Math.max(0, top),
+    right: screenSize.width,
+    bottom: screenSize.height,
+  });
+}
+
+function clipBelowTabBars(
+  visible: ElementBounds,
+  matched: Element,
+  target: Element,
+  nodes: readonly SearchableEntry[],
+  context: IosVisibleTapContext,
+): ElementBounds | null {
+  // A tab bar is app chrome, so it need not appear in systemInsets.
+  const screenSize = context.screen;
+  const matchedNode = contextTargetNode(nodes, context, matched);
+  const targetNode = matchedNode ?? contextTargetNode(nodes, context, target);
+  if (!targetNode) {
+    return visible;
+  }
+  let clipped: ElementBounds | null = visible;
+  for (const bar of context.tabBars) {
+    if (!clipped) {
+      return null;
+    }
+    if (!isTabBarCovering(bar, clipped)) {
+      continue;
+    }
+    if (!isTabBarAboveMatch(bar, targetNode)) {
+      continue;
+    }
+    if (!isMatchedInsideTabBar(matchedNode, matched, bar, nodes)) {
+      clipped = intersectBounds(clipped, {
+        left: 0,
+        top: 0,
+        right: screenSize.width,
+        bottom: bar.bounds?.top ?? 0,
+      });
+    }
+  }
+  return clipped;
+}
+
+function isTabBarAboveMatch(bar: SearchableEntry, matchedNode: SearchableEntry): boolean {
+  return bar.rootGroup === matchedNode.rootGroup && bar.windowRank <= matchedNode.windowRank;
+}
+
+function isMatchedInsideTabBar(
+  matchedNode: SearchableEntry | undefined,
+  matched: Element,
+  bar: SearchableEntry,
+  nodes: readonly SearchableEntry[],
+): boolean {
+  if (matchedNode) {
+    return isInsideHierarchyNode(matchedNode, bar, nodes);
+  }
+  const bounds = matched.bounds;
+  const barBounds = bar.bounds;
+  return (
+    !!bounds &&
+    !!barBounds &&
+    bounds.left >= barBounds.left &&
+    bounds.top >= barBounds.top &&
+    bounds.right <= barBounds.right &&
+    bounds.bottom <= barBounds.bottom
+  );
+}
+
+function isTabBarCovering(bar: SearchableEntry, visible: ElementBounds): boolean {
+  const bounds = bar.bounds;
+  return (
+    (bar.className === "UITabBar" || bar.className === "XCUIElementTypeTabBar") &&
+    !!bounds &&
+    bounds.left < visible.right &&
+    bounds.right > visible.left &&
+    bounds.top < visible.bottom &&
+    bounds.bottom > visible.top
+  );
+}
+
+function isInsideHierarchyNode(
+  node: SearchableEntry | undefined,
+  ancestor: SearchableEntry,
+  nodes: readonly SearchableEntry[],
+): boolean {
+  let current = node;
+  while (current) {
+    if (current === ancestor) {
+      return true;
+    }
+    current = current.parentIndex === undefined ? undefined : nodes[current.parentIndex];
+  }
+  return false;
+}
 
 function scrollAncestors(
   nodes: readonly SearchableEntry[],

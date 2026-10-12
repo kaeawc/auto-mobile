@@ -288,6 +288,9 @@ const highlightSessionsByDeviceId = new Map<string, string>();
  */
 const recordingOwners = new Map<string, { ownerSessionUuid?: string; deviceId: string }>();
 const stoppingVideoRecordings = new Map<string, Promise<StopVideoRecordingResult>>();
+const abandoningVideoRecordings = new Map<string, Promise<StopVideoRecordingResult>>();
+/** Retained host captures must never retry against the serial's replacement occupant. */
+const hostOnlyRecordingTeardowns = new Set<string>();
 const recordingDisplaySessions = new Map<string, RecordingDisplaySession>();
 
 function panelFromTransition(
@@ -378,6 +381,7 @@ async function finalizeRecordingDisplaySession(
   recordingId: string,
   metadata: VideoRecordingMetadata,
   deps: VideoRecordingManagerDependencies,
+  options?: ForceStopOptions,
 ): Promise<void> {
   const session = recordingDisplaySessions.get(recordingId);
   if (!session) {
@@ -386,7 +390,8 @@ async function finalizeRecordingDisplaySession(
   session.unsubscribe();
   recordingDisplaySessions.delete(recordingId);
   const pending = session.transitions.at(-1);
-  if (pending?.to.key === "unknown") {
+  const hostOnly = options?.hostOnly || hostOnlyRecordingTeardowns.has(recordingId);
+  if (pending?.to.key === "unknown" && !hostOnly) {
     try {
       const current = await deps.resolveAndroidDisplay(session.device, "active");
       if (current) {
@@ -556,6 +561,8 @@ function resetVideoRecordingManagerState(): void {
   highlightSessions.clear();
   highlightSessionsByDeviceId.clear();
   stoppingVideoRecordings.clear();
+  hostOnlyRecordingTeardowns.clear();
+  abandoningVideoRecordings.clear();
   for (const session of recordingDisplaySessions.values()) {
     session.unsubscribe();
   }
@@ -1443,6 +1450,9 @@ async function stopVideoRecordingWithDependencies(
   recordingId?: string,
 ): Promise<StopVideoRecordingResult> {
   const resolvedId = await resolveActiveRecordingId(deps, recordingId);
+  if (hostOnlyRecordingTeardowns.has(resolvedId)) {
+    return abandonVideoRecordingWithDependencies(resolvedId, deps);
+  }
   const stopping = stoppingVideoRecordings.get(resolvedId);
   if (stopping) {
     return stopping;
@@ -1456,6 +1466,21 @@ async function stopVideoRecordingWithDependencies(
     if (stoppingVideoRecordings.get(resolvedId) === stop) {
       stoppingVideoRecordings.delete(resolvedId);
     }
+    if (
+      hostOnlyRecordingTeardowns.has(resolvedId) &&
+      !deps.videoRecorderService.listActiveRecordingIds().includes(resolvedId)
+    ) {
+      hostOnlyRecordingTeardowns.delete(resolvedId);
+    }
+  }
+}
+
+async function rethrowAfterHostAbandon(recordingId: string, error: unknown): Promise<void> {
+  const abandoning = abandoningVideoRecordings.get(recordingId);
+  if (abandoning) {
+    // Host cleanup owns row settlement; the device-bound caller keeps its service failure.
+    await abandoning;
+    throw toActionableError(error, `Failed to stop video recording ${recordingId}`);
   }
 }
 
@@ -1470,6 +1495,7 @@ async function stopActiveVideoRecording(
   try {
     metadata = await videoRecorderService.stopRecording(resolvedId);
   } catch (error) {
+    await rethrowAfterHostAbandon(resolvedId, error);
     // A stop failure means one of two very different things at the service
     // layer (see VideoRecorderService.handleStopFailure), and the durable row
     // must track which one happened, not assume the worse case unconditionally
@@ -1577,6 +1603,7 @@ export async function interruptVideoRecording(recordingId: string): Promise<void
 async function interruptVideoRecordingWithDependencies(
   recordingId: string,
   deps: VideoRecordingManagerDependencies,
+  options?: ForceStopOptions,
 ): Promise<void> {
   const { recordingRepository, now, statFileSize } = deps;
   const owner = recordingOwners.get(recordingId);
@@ -1591,7 +1618,7 @@ async function interruptVideoRecordingWithDependencies(
     return;
   }
 
-  await finalizeRecordingDisplaySession(recordingId, record, deps);
+  await finalizeRecordingDisplaySession(recordingId, record, deps, options);
 
   const endedAt = now().toISOString();
   const highlightSession = disposeHighlightSession(recordingId);
@@ -1601,7 +1628,7 @@ async function interruptVideoRecordingWithDependencies(
 
   await recordingRepository.updateRecording(recordingId, {
     status: "interrupted",
-    ownerSessionUuid: owner?.ownerSessionUuid,
+    ownerSessionUuid: owner?.ownerSessionUuid ?? record.ownerSessionUuid,
     endedAt,
     lastAccessedAt: endedAt,
     // Through the injected seam, not a direct fs.stat, so an interrupt does no real I/O in tests.
@@ -1615,28 +1642,135 @@ async function interruptVideoRecordingWithDependencies(
   await notifyVideoRecordingResources([recordingId]);
 }
 
+/** Reap only the released owner's host capture and retain its existing host artifact. */
+export async function abandonVideoRecordingOnReplacedDevice(recordingId: string): Promise<void> {
+  const deps = await getVideoRecordingDependencies();
+  await abandonVideoRecordingWithDependencies(recordingId, deps);
+}
+
+async function abandonVideoRecordingWithDependencies(
+  recordingId: string,
+  deps: VideoRecordingManagerDependencies,
+): Promise<StopVideoRecordingResult> {
+  const abandoning = abandoningVideoRecordings.get(recordingId);
+  if (abandoning) {
+    return abandoning;
+  }
+  hostOnlyRecordingTeardowns.add(recordingId);
+  const stopping = stoppingVideoRecordings.get(recordingId);
+  if (stopping && !deps.videoRecorderService.listActiveRecordingIds().includes(recordingId)) {
+    try {
+      const record = await deps.recordingRepository.getRecording(recordingId);
+      if (record && record.status !== "recording") {
+        return { metadata: toMetadata(record), evictedRecordingIds: [] };
+      }
+      // Capture teardown already won; only the original stop's host persistence remains.
+      return await stopping;
+    } finally {
+      hostOnlyRecordingTeardowns.delete(recordingId);
+    }
+  }
+  const abandon = abandonActiveVideoRecording(recordingId, deps);
+  abandoningVideoRecordings.set(recordingId, abandon);
+  try {
+    return await abandon;
+  } finally {
+    if (abandoningVideoRecordings.get(recordingId) === abandon) {
+      abandoningVideoRecordings.delete(recordingId);
+    }
+    if (!deps.videoRecorderService.listActiveRecordingIds().includes(recordingId)) {
+      hostOnlyRecordingTeardowns.delete(recordingId);
+    }
+  }
+}
+
+async function abandonActiveVideoRecording(
+  recordingId: string,
+  deps: VideoRecordingManagerDependencies,
+): Promise<StopVideoRecordingResult> {
+  const owner = recordingOwners.get(recordingId);
+  if (deps.videoRecorderService.listActiveRecordingIds().includes(recordingId)) {
+    try {
+      await deps.videoRecorderService.forceStopRecording(recordingId, { hostOnly: true });
+    } catch (error) {
+      if (deps.videoRecorderService.listActiveRecordingIds().includes(recordingId)) {
+        await rearmRetainedRecordingSafety(recordingId, deps).catch((rearmError: unknown) => {
+          logger.warn(
+            `[VideoRecording] Failed to re-arm retained safety enforcement for ${recordingId}: ${errorMessage(rearmError)}`,
+            rearmError,
+          );
+        });
+        throw new VideoRecordingTeardownUnconfirmedError(recordingId, owner?.deviceId, error);
+      }
+      logger.warn(
+        `[VideoRecording] Host-only force-stop of ${recordingId} failed: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+  await interruptVideoRecordingWithDependencies(recordingId, deps, { hostOnly: true });
+  const record = await deps.recordingRepository.getRecording(recordingId);
+  if (!record) {
+    throw new ActionableError(`No video recording found for id ${recordingId}`);
+  }
+  return { metadata: toMetadata(record), evictedRecordingIds: [] };
+}
+
 /** Force-stops the owning capture process before its recording is marked interrupted. */
 export async function forceStopVideoRecording(recordingId: string): Promise<void> {
   const { videoRecorderService } = await getVideoRecordingDependencies();
-  await videoRecorderService.forceStopRecording(recordingId);
+  await videoRecorderService.forceStopRecording(
+    recordingId,
+    hostOnlyRecordingTeardowns.has(recordingId) ? { hostOnly: true } : undefined,
+  );
+}
+
+/** A retained capture is still owned and must be retried before device reuse is safe. */
+export class VideoRecordingTeardownUnconfirmedError extends ActionableError {
+  constructor(
+    readonly recordingId: string,
+    readonly deviceId: string | undefined,
+    cause: unknown,
+  ) {
+    super(
+      `Teardown of video recording ${recordingId}${deviceId ? ` on ${deviceId}` : ""} is unconfirmed; ` +
+        "the capture process may still be running on the device. Retry stopping the original recording or recover the device.",
+      { cause },
+    );
+    this.name = "VideoRecordingTeardownUnconfirmedError";
+  }
 }
 
 /**
- * Gives up on a recording whose finalize exceeded its cap (#10957): force-stops the capture so
- * the device is free, then marks a row still `recording` as `incomplete` (keeping whatever
- * reached the host). A row the slow stop has since finished is left as it is.
+ * Force-stop a recording whose finalize exceeded its cap (#10957), then mark a row still
+ * `recording` as `incomplete`. Unconfirmed capture teardown retains ownership and safety;
+ * an incomplete artifact is never evidence that a retained capture stopped.
  */
 export async function markVideoRecordingIncomplete(recordingId: string): Promise<void> {
   const owner = recordingOwners.get(recordingId);
   const deps = await getVideoRecordingDependencies();
   try {
-    await deps.videoRecorderService.forceStopRecording(recordingId);
+    await deps.videoRecorderService.forceStopRecording(
+      recordingId,
+      hostOnlyRecordingTeardowns.has(recordingId) ? { hostOnly: true } : undefined,
+    );
   } catch (error) {
-    // The capture may already be gone; the row below still has to leave the "recording" state.
     logger.warn(
       `[VideoRecording] Force-stop of ${recordingId} failed: ${errorMessage(error)}`,
       error,
     );
+    if (deps.videoRecorderService.listActiveRecordingIds().includes(recordingId)) {
+      try {
+        await rearmRetainedRecordingSafety(recordingId, deps);
+      } catch (rearmError) {
+        logger.warn(
+          `[VideoRecording] Failed to re-arm retained safety enforcement for ${recordingId}: ${errorMessage(rearmError)}`,
+          rearmError,
+        );
+      }
+      throw new VideoRecordingTeardownUnconfirmedError(recordingId, owner?.deviceId, error);
+    }
+    // No retained capture remains; keep the incomplete artifact even if it was already gone.
   }
   clearAutoStop(recordingId);
   clearInProgressSizeCap(recordingId);

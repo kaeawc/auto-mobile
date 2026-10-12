@@ -1,7 +1,6 @@
 import { createDevicePoolDependencies } from "../../helpers/devicePoolDependencies";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
-import { registerInteractionTools } from "../../../src/server/interactionTools";
 import { NavigateTo } from "../../../src/features/navigation/NavigateTo";
 import { FakeDeviceSessionManager } from "../../fakes/FakeDeviceSessionManager";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
@@ -18,6 +17,10 @@ import type { ObserveResult } from "../../../src/models/ObserveResult";
 import type { NavigationGraphService } from "../../../src/features/navigation/NavigationGraphManager";
 import type { UIStateSetup } from "../../../src/features/navigation/interfaces/UIStateSetup";
 import type { ScreenTransitionWaiter } from "../../../src/features/navigation/interfaces/ScreenTransitionWaiter";
+
+import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 /**
  * End-to-end guard for issue #3087 (the NavigateTo half): run a real `NavigateTo`
@@ -107,7 +110,6 @@ describe("NavigateTo → finalize internal no-diff (end-to-end, #3087)", () => {
     serverConfig.setActionsDiffObserveEnabled(originalDiff);
     delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
     delete process.env.AUTO_MOBILE_DEVICE_POOL_AUTOLOCK;
-    registerInteractionTools();
   });
 
   test("a NavigateTo tapOn replay neither diffs its observation nor advances the agent baseline", async () => {

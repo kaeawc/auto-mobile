@@ -62,6 +62,9 @@ export type SessionReleaseReasonLiteral =
   | "daemon-restart"
   | "expired";
 
+/** One live idle-window end, whether a lookup or the sweep discovers it. */
+export const IDLE_WINDOW_RELEASE_REASON: SessionReleaseReasonLiteral = "cleanup-expired";
+
 /** Prefixes of the reasons built from a prefix plus an id (a device, an incident, a sub-reason). */
 export type SessionReleaseReasonFamily =
   | "identity-recovery-"
@@ -107,9 +110,12 @@ export const SESSION_RELEASE_REASON_TRAITS: Readonly<
 > = {
   /** A client or the daemon released the session on purpose. */
   "explicit-release": TERMINAL,
-  /** The idle window ran out, found by a lookup of the session. */
+  /**
+   * No longer produced. Rows or wire answers written by an older daemon may still carry it;
+   * it means the same idle end as `cleanup-expired`. Legacy values are not rewritten.
+   */
   "lazy-expiry": IDLE_EXPIRY,
-  /** The idle window ran out, found by the periodic expiry sweep. */
+  /** The live idle window ran out, whether a lookup or the periodic sweep found it. */
   "cleanup-expired": IDLE_EXPIRY,
   /** A one-shot CLI session's idle window ran out. */
   "cli-idle-timeout": IDLE_EXPIRY,
@@ -225,6 +231,14 @@ export function idleReleaseField(reason: string | undefined): { idle?: true } {
 /** Whether a restarted daemon may rehydrate the session (see {@link SessionReleaseReasonTraits.recoverable}). */
 export function isRecoverableDaemonReleaseReason(reason: string): boolean {
   return sessionReleaseReasonTraits(reason).recoverable;
+}
+
+/** Stable proxy fallback when a definitive loss answer names no daemon release reason. */
+export const SESSION_NOT_FOUND_REASON = "session-not-found";
+
+/** Only daemon handoffs can rehydrate without restarting the managed execution's device. */
+export function isRecoverableDaemonHandoffReason(reason: string): boolean {
+  return isRecoverableDaemonReleaseReason(reason) && !reason.startsWith("device-restart:");
 }
 
 /**

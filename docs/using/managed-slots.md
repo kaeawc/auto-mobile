@@ -201,9 +201,11 @@ connection used for tools and resources:
    interval, however long the daemon was away, and reclaims the rehydrated session
    when the restarted daemon answers; the next call carries `daemon_restart_resumed`.
    The restarted daemon waits lease + suspect grace (about 8 s) for the owner.
-   If the session is released instead, `managed_execution_ended.reason` names the
-   daemon's release reason, the same value `daemon session-info` shows as
-   `releaseReason`. While the session is live, a duplicate proxy still gets
+   During reclaim, reasonless not-found answers and `daemon-shutdown` or
+   `daemon-restart` answers are awaited for the existing rehydration window, once
+   per answering daemon instance; silence never resets that window.
+   If the execution ends, every managed answer, notification and resource reports
+   the daemon's release reason, or `session-not-found` when none was named. While the session is live, a duplicate proxy still gets
    `slot_in_use` and the scope is never treated as abandoned.
 4. **Drain and release.** When the execution ends (stdin EOF, cancellation or
    owner loss) the proxy releases its sessions with a bounded wait
@@ -475,7 +477,10 @@ slot. Only control and lifecycle calls on another slot's device are refused.
   control, start, provision or delete anything outside its own slot devices or
   sessions gets the non-retryable `device_outside_managed_slots`, with a reason
   of `device`, `session`, `tool`, `scope` or `host` (device-acquiring tools are left to slot
-  acquisition). Lifecycle tools (`getAndroid`, `getApple`, `startDevice`,
+  acquisition). A platform-only call (control or read) naming a platform none of its slot
+  devices holds is refused with reason `device` and the requested `platform`; a read may
+  name a device outside the slots by `deviceId`.
+  Lifecycle tools (`getAndroid`, `getApple`, `startDevice`,
   `provisionDevice`, `killDevice`, `deleteDevice`) are refused with reason `tool`
   even on the connection's own slot device: it could not boot the device again,
   so a stop would strand the execution. End the execution instead; the next
@@ -484,8 +489,12 @@ slot. Only control and lifecycle calls on another slot's device are refused.
   `input/*`, the device-mutating `ide/*` routes (`force` or not),
   `ide/setSessionToolEnabled`, `daemon/releaseSession` and
   `daemon/relinquishDeviceLease` are refused off-slot (#11596).
-  `daemon/releaseExecution` is confined to its own slot sessions, and
-  `daemon/resetSlotScope` to its own scope named by all three identity parts.
+  `daemon/releaseExecution` is confined to its own slot sessions unless the caller
+  presents the recorded owner token of a live managed execution. That owner may
+  release its own execution even after a refused rebind leaves the connection
+  with zero slot sessions. A foreign token, an ownerless session or a session
+  outside the binding that is not a managed execution remains refused.
+  `daemon/resetSlotScope` is confined to its own scope named by all three identity parts.
   `daemon/refreshDevices` and `ide/setFeatureFlag` are refused (#11596). An
   ordinary connection may still release any session.
 - A managed connection's multi-device plan labels are served only by its own slot

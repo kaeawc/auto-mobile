@@ -1,3 +1,4 @@
+import { managedConnectionPlatformRefusal } from "../daemon/managedSlots/managedConnectionScope";
 import {
   getLiveDeadlineMs,
   getLiveTextRequestState,
@@ -1098,6 +1099,30 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         }
         resolvedImplicitAutolockSessionUuid = routingSessionUuid;
       } else {
+        const managedBinding =
+          daemonMode && daemonState.isInitialized()
+            ? daemonState.getManagedConnectionScopes().get(requestMcpSessionId)
+            : undefined;
+        const refusal = managedConnectionPlatformRefusal({
+          binding:
+            !rawArgs.deviceId && !rawArgs.device && !rawArgs.sessionUuid
+              ? managedBinding
+              : undefined,
+          action: name,
+          platform:
+            rawArgs.platform === "android" || rawArgs.platform === "ios"
+              ? rawArgs.platform
+              : undefined,
+          slotPlatformOf: (sessionUuid) => {
+            const session = daemonState.getSessionManager().peekSession(sessionUuid);
+            return session?.assignedDevice
+              ? daemonState.getDevicePool().getDevice(session.assignedDevice)?.platform
+              : undefined;
+          },
+        });
+        if (refusal) {
+          throw refusal;
+        }
         routingSessionUuid = sessionToolBinding.resolveDeviceSessionUuid(
           sessionId,
           toolParams,

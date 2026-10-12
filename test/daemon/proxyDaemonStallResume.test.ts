@@ -377,6 +377,27 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
     expect(reaped).toEqual([]);
   });
 
+  test("PIN: a plain named resume answered not-found ends immediately", async () => {
+    const proxy = createProxy();
+    await acquireBoth(proxy);
+    daemonTimer.stop();
+    await advance(STOP_MS);
+    expect(handovers.map((handover) => handover.code)).toEqual(["daemon_stalled"]);
+    daemonInstance = "daemon-2";
+    await sessionManager.releaseSession("ios-session", "daemon-shutdown");
+    daemonTimer.resume();
+    await drainUntilQuiescent(baseTimer);
+    expect(handovers.map((handover) => handover.code)).toEqual(["daemon_stalled"]);
+    expect(proxy.getTerminalSessionRelease()).toBeUndefined();
+    await expect(proxy.callTool("observe", { sessionUuid: "ios-session" })).rejects.toMatchObject({
+      handover: { code: "proxy_stalled" },
+    });
+    expect(proxy.getTerminalSessionRelease()).toEqual({
+      sessionUuid: "ios-session",
+      reason: "session-not-found",
+    });
+  });
+
   test("a restarted daemon is not adopted by the probe: the handover stands, as before", async () => {
     const proxy = createProxy();
     await acquireBoth(proxy);

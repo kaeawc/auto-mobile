@@ -230,7 +230,7 @@ an idle or owner-disconnect release; the release cuts it with the typed terminal
 refusal `session_ownership_lost` (#11381). An agent that
 acquires a device and then makes no tool calls for 2 minutes loses the session
 and its device even while its proxy stays open and keeps heartbeating; the
-release reason is `cleanup-expired` (or `lazy-expiry`), not `heartbeat-timeout`.
+release reason is `cleanup-expired` whichever path discovers it, not `heartbeat-timeout`.
 Watching is not use, and desktop input is (owner decisions 2026-10-08, #10693,
 #10730). A desktop or IDE window that only watches a device holds no session on it: it
 registers an observer session, which the idle window does not apply to. Its
@@ -281,6 +281,15 @@ and records nothing; it cannot take an owned session back. An explicit release
 opens the session to a new claim, including one from a previously used token.
 To take a session from a displaced owner, claim with a fresh token after
 that owner's lease has expired.
+
+On clean proxy close (stdin EOF, transport close or SIGTERM), ordinary sessions
+that proxy acquired and heartbeats are explicitly released under its current
+owner token before the daemon connection closes. Releases run in parallel with
+a 1.5 s bound; failure leaves the existing disconnect/heartbeat fallback. A
+configured `--initial-session-uuid`, a harness-supplied stable owner token and
+CLI-owned sessions retain their existing resume/idle behavior; managed executions
+use their separate release path. A predecessor cannot release a session whose
+liveness ownership was handed off (#11920).
 
 A stdio/HTTP proxy claims and heartbeats only the sessions it acquired itself
 (from a `getAndroid`, `getApple`, `startDevice` or `provisionDevice` result, which
@@ -550,6 +559,13 @@ reacquire, then normal lifecycle behavior returns. An unreachable daemon retains
 the handover and the no-start fence; the harness must restart it. Recovery cannot join a pending
 connection allowed to start or restart the daemon. Healthy proxies and proxies
 without device sessions retain normal auto-start and skew reconciliation.
+
+Managed reclaim awaits reasonless not-found and recoverable daemon handoff answers
+(`daemon-shutdown` or `daemon-restart`) for one existing rehydration window per
+answering daemon process; silence does not reset it, and only an answer naming a
+different daemon instance opens a new window.
+A managed execution's terminal answers, notification and slot resource all name
+the daemon's release reason, falling back to `session-not-found` when none was named.
 
 A claim the daemon refuses with `liveness_owner_conflict` keeps being retried for
 the other owner's lease plus its grace window (plus one heartbeat interval), so a

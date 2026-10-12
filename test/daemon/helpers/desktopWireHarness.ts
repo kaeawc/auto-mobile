@@ -131,7 +131,14 @@ interface SocketServerInternals {
   handleConnection(socket: Socket): void;
 }
 
-const setActiveDeviceTool = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+const setActiveDeviceTool = createSetActiveDeviceHandler({
+  resumeCtrlProxy: async () => {},
+  transportWait: {
+    timer: new FakeTimer(),
+    probe: async () => new Map(),
+    invalidateDeviceList: () => {},
+  },
+});
 
 /** One daemon process: real SessionManager, DevicePool, registries and socket handler. */
 class DaemonUnderTest {

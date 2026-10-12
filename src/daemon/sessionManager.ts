@@ -131,6 +131,7 @@ import {
   isReissuableByNameReleaseReason,
   isTerminalReleaseReason,
   outranksReleaseReason,
+  IDLE_WINDOW_RELEASE_REASON,
   releasedRowStatus,
   shouldJudgeOwnerLeaseForRelease,
   type SessionReleaseReason,
@@ -3787,8 +3788,8 @@ export class SessionManager {
       return;
     }
     const sessionId = session.sessionId;
-    logger.info(`Session ${sessionId} has expired, releasing`);
-    const releaseReason = this.expiredSessionReleaseReason(session, "lazy-expiry");
+    logger.info(`Session ${sessionId} has expired, found by lookup, releasing`);
+    const releaseReason = this.expiredSessionReleaseReason(session);
     this.cancelExecutionsOverriddenByExpiry(session, releaseReason, callerExecutionId);
     const release = this.releaseSession(sessionId, releaseReason, true, undefined, {
       expiryOrigin: "lazy-expiry",
@@ -5672,6 +5673,12 @@ export class SessionManager {
 
   isAdmittedForAutomation(session: Session): boolean {
     return this.isCurrentSession(session) && !this.releasingSessions.has(session);
+  }
+
+  /** Read ownership without admission, expiry cleanup or the stall probe (release guard, #11920). */
+  getSessionLivenessOwnerToken(sessionId: string): string | undefined {
+    return (this.sessions.get(sessionId) ?? this.releasePromises.get(sessionId)?.session)
+      ?.livenessOwnerToken;
   }
 
   /** Resolve an admitted release even after ordinary session lookup hides its identity. */
@@ -10830,9 +10837,7 @@ export class SessionManager {
     if (inFlight?.session === session && isTerminalReleaseReason(inFlight.reason.value)) {
       return inFlight.reason.value;
     }
-    return this.isSessionExpired(session)
-      ? this.expiredSessionReleaseReason(session, "lazy-expiry")
-      : undefined;
+    return this.isSessionExpired(session) ? this.expiredSessionReleaseReason(session) : undefined;
   }
 
   /** A looked-up session, unless it is a plan label whose base has ended (#11640). */
@@ -11829,17 +11834,14 @@ export class SessionManager {
   }
 
   /** Keep the heartbeat diagnostic when idle expiry wins the scan or lookup race (#10051). */
-  private expiredSessionReleaseReason(
-    session: Session,
-    idleReason: "lazy-expiry" | "cleanup-expired",
-  ): SessionReleaseReason {
+  private expiredSessionReleaseReason(session: Session): SessionReleaseReason {
     if (
       suspectGraceMsFor(session) > 0 &&
       livenessLeaseState(sessionJudgedLeaseSnapshot(session, this.sessionNow())).phase === "lapsed"
     ) {
       return "heartbeat-timeout";
     }
-    return idleReason;
+    return session.livenessPolicy === "cli-idle" ? "cli-idle-timeout" : IDLE_WINDOW_RELEASE_REASON;
   }
 
   private isSessionExpiredForNewExecution(
@@ -11928,7 +11930,8 @@ export class SessionManager {
     }
 
     logger.info(
-      `Cleaning up ${expiredSessions.length} expired sessions: ` + expiredSessions.join(", "),
+      `Cleaning up ${expiredSessions.length} expired sessions found by sweep: ` +
+        expiredSessions.join(", "),
     );
 
     for (const sessionId of expiredSessions) {
@@ -11936,7 +11939,7 @@ export class SessionManager {
       if (!session) {
         continue;
       }
-      const releaseReason = this.expiredSessionReleaseReason(session, "cleanup-expired");
+      const releaseReason = this.expiredSessionReleaseReason(session);
       const overridesControl = this.activeSessionExecutionChecker(sessionId, {
         excludeReads: true,
       });

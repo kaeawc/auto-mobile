@@ -1,3 +1,5 @@
+import { assertAndroidImageRunningStateKnown } from "../../src/devices/deviceUtils";
+import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { describe, expect, spyOn, test } from "bun:test";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { ActionableError, type BootedDevice, type DeviceInfo } from "../../src/models";
@@ -2045,4 +2047,20 @@ describe("discovery classifies tooling that is not installed apart from a failed
       ),
     ).toBe("incomplete");
   });
+});
+
+test("unknown Android running state is a typed retryable discovery refusal", () => {
+  const attempt = () =>
+    assertAndroidImageRunningStateKnown({
+      name: "Pixel",
+      platform: "android",
+      isRunning: false,
+      isRunningStateKnown: false,
+    });
+  expect(attempt).toThrow(AndroidBootedDeviceDiscoveryIncompleteError);
+  try {
+    attempt();
+  } catch (error) {
+    expect(error).toMatchObject({ code: "discovery_incomplete", retryable: true });
+  }
 });

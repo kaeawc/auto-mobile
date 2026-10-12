@@ -31,10 +31,7 @@ import {
 } from "./deviceToolsSystemUiAnr";
 import { errorMessage } from "../utils/describeUnknownError";
 import { releaseSessionAndDevice } from "../daemon/releaseSessionAndDevice";
-import {
-  deviceAlreadyAssignedToAnotherSessionError,
-  isSameHolderSession,
-} from "../daemon/inputDeviceOwnership";
+import { heldDeviceBindRefusal, isSameHolderSession } from "../daemon/inputDeviceOwnership";
 import { lifecycleRequester } from "./lifecycleDeviceOwnership";
 import { deviceLossCancellationReason } from "../utils/deviceLossCancellationReason";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -4558,7 +4555,13 @@ function createSystemUiAnrRebooter(
     };
     const assertHolder = () => {
       if (hasOtherHolder(candidate.device.deviceId)) {
-        throw deviceAlreadyAssignedToAnotherSessionError(candidate.device.deviceId);
+        throw heldDeviceBindRefusal(
+          devicePool,
+          candidate.device.deviceId,
+          liveHolderOtherThanThisRequest(candidate.device.deviceId),
+          entitlement.requesterSessionUuid,
+          "another",
+        );
       }
     };
     const sessionId = devicePool?.getDevice(candidate.device.deviceId)?.sessionId;

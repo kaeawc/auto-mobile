@@ -273,7 +273,7 @@ test.each(["explicit-release", "heartbeat-timeout", "superseded", "device-killed
 // #11361: a bound session whose row ran out its idle window with nobody holding it has ended. Its
 // owner is told so with the recorded reason, as an unbound call naming it is, not "not found".
 test.each([undefined, "device-restart:Pixel", "daemon-shutdown"])(
-  "bound call names expired for a row past its idle deadline (handoff %s)",
+  "bound call names the first deadline for a row past idle expiry (handoff %s)",
   async (handoff) => {
     const h = await boundRecoveryHarness();
     try {
@@ -287,14 +287,15 @@ test.each([undefined, "device-restart:Pixel", "daemon-shutdown"])(
       h.server["daemonState"].getSessionManager = () => restarted;
       h.timer.setCurrentTime(row!.expires_at_ms + 1);
 
+      const reason = handoff === "device-restart:Pixel" ? "restart-recovery-timeout" : "expired";
       const response = await h.call();
       expect(response).toMatchObject({
         success: false,
         boundSessionLoss: {
           code: "bound_session_lost",
           sessionUuid: "bound",
-          reason: "expired",
-          release: { sessionId: "bound", releaseReason: "expired", terminal: true },
+          reason,
+          release: { sessionId: "bound", releaseReason: reason, terminal: true },
         },
       });
       expect(h.forwarded).toHaveLength(1);
@@ -330,7 +331,7 @@ test.each(["expired", "no-row", "query-failure"])(
         boundSessionLoss: {
           code: "bound_session_lost",
           sessionUuid: "bound",
-          reason: "session-not-found",
+          reason: failure === "expired" ? "restart-recovery-timeout" : "session-not-found",
         },
       });
       expect(h.forwarded).toHaveLength(1);
@@ -450,7 +451,7 @@ test.each(["tools/list", "resources/list", "resources/list-templates", "resource
         success: false,
         boundSessionLoss: {
           sessionUuid: "bound",
-          reason: "session-not-found",
+          reason: "restart-recovery-timeout",
         },
       });
       expect(h.discoverySeeds).toHaveLength(1);
@@ -564,7 +565,10 @@ test.each(["expiry", "stale-true", "probe-throw"])(
       try {
         expect(await h.call()).toMatchObject({
           success: false,
-          boundSessionLoss: { sessionUuid: "bound", reason: "session-not-found" },
+          boundSessionLoss: {
+            sessionUuid: "bound",
+            reason: race === "expiry" ? "restart-recovery-timeout" : "session-not-found",
+          },
         });
         expect(probes).toBeGreaterThanOrEqual(2);
         expect(h.forwarded).toHaveLength(1);

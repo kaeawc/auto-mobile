@@ -159,7 +159,9 @@ liveness policy (heartbeat, one-shot CLI or managed execution; owner decision
 | `device-disconnected:<device>`                                                                          | Yes        | `session_ownership_lost`: the device was lost.                                                                                                                                                                                                                      |
 | `identity-recovery-<reason>`                                                                            | Yes        | `session_ownership_lost` with `recoveryReason` and `deviceId` (and `ownerPid` when another daemon holds the device): restart recovery could not prove the device's identity (#11414).                                                                               |
 | `session-creation-cancelled`                                                                            | Yes        | `session_ownership_lost`: the creation was cancelled before the session was handed out.                                                                                                                                                                             |
-| `daemon-shutdown`, `daemon-restart`, `device-restart:<device>`                                          | No         | The restarted daemon rehydrates the session; its owner reclaims it under the same UUID.                                                                                                                                                                             |
+| `daemon-shutdown`, `daemon-restart`                                                                     | No         | The restarted daemon rehydrates the session; its owner reclaims it under the same UUID.                                                                                                                                                                             |
+| `restart-recovery-timeout`                                                                              | Yes        | `session_ownership_lost`, without `idle`: the device-restart recovery window ended without a resume. Acquire a new session.                                                                                                                                         |
+| `device-restart:<device>`                                                                               | No         | The owner can resume the same UUID within the fixed 180 s recovery window. If it lapses unresumed, the session ends terminally as `restart-recovery-timeout`; an earlier idle deadline ends it as `expired` with `idle: true`.                                      |
 | `superseded`                                                                                            | No         | Nothing: a newer incarnation of the same UUID holds the device.                                                                                                                                                                                                     |
 | `plan-auto-release`                                                                                     | No         | The plan freed the device. Naming the same session UUID in a later plan re-issues the session; another client may take the device in between. It is not rehydrated after a daemon restart.                                                                          |
 | `session-creation-timeout`, `allocation-rollback`, `device-disconnected-during-session-create:<device>` | No         | The session was never handed out; the UUID may be created again.                                                                                                                                                                                                    |
@@ -418,8 +420,13 @@ Ownership comes from its routing session (including labels resolved through live
 state) or the MCP connection that owned it at handoff. An anonymous or one-shot CLI
 caller without that routing session cannot claim the hold. Reads remain available.
 The hold ends on successful recovery, any terminal session
-release, the three-minute window ending, or daemon shutdown. An idle expiry inside the
-window ends the hold without another call. Tool activity extends only the idle deadline;
+release, the three-minute window ending, or daemon shutdown. When the fixed 180 s
+window lapses without a resume or an in-flight recovery call, the session ends terminally
+with `restart-recovery-timeout`, even if its idle deadline is later. Heartbeat and
+`daemon/sessionInfo` answer `daemon_session_not_found` with that `releaseReason` and no
+`idle`. An earlier idle deadline ends the hold as `expired` with `idle: true`; the first
+deadline determines the reason even if the daemon was down through both deadlines.
+Tool activity extends only the idle deadline;
 the hold never outlasts the fixed three-minute window from device loss. A call in flight
 can retain the hold only within that window. `killDevice` and `deleteDevice`
 drop the device-restart hold only for their admitted routing session on Android and iOS;
@@ -427,7 +434,8 @@ another session's stop (even with `force: true`) or a sessionless stop leaves it
 A base/label match requires live label state, so a label requester whose base was handed
 off leaves the hold to recovery, terminal release, idle expiry, or the window.
 An intentional stop never ends the daemon-restart source; its batch still releases it.
-Concurrent daemon-restart and device-restart holds end independently. Managed slots still
+Concurrent daemon-restart and device-restart holds end independently while the session
+remains recoverable. A terminal release, including `restart-recovery-timeout`, ends both. Managed slots still
 win, and the reservation does not extend the owner's heartbeat lease. A wiped or
 re-imaged device returning under the same AVD name or UDID remains an identity gap.
 

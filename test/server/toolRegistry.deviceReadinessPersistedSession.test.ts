@@ -186,7 +186,7 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
   });
 
   test.each([undefined, 180_500, 241_000])(
-    "registry settled loss terminalizes after the restart window with request deadline %s",
+    "registry refuses a settled loss after the restart window with request deadline %s",
     async (deadline) => {
       const { timer, call, persistence, persisted, incidents, manager, pool } =
         await setupRestartRecovery();
@@ -209,11 +209,13 @@ describe("ToolRegistry persisted daemon-session deviceReadiness gating (#6227)",
       await expect(call(120_000)).rejects.toThrow("180 seconds remaining");
       expect(await persistence.getSession?.(persisted.session_uuid)).toEqual(originalRow);
       timer.advanceTime(240_000);
-      await expect(call(deadline)).rejects.toThrow("recovery reason: target-absent");
-      expect(await persistence.getSession?.(persisted.session_uuid)).toMatchObject({
-        release_reason: "identity-recovery-target-absent",
-        released_at_ms: 240_000,
+      const error = await call(deadline).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(TerminalSessionError);
+      expect(error).toMatchObject({
+        release: { releaseReason: "restart-recovery-timeout", terminal: true },
       });
+      // Pool-less admission answers without writing.
+      expect(await persistence.getSession?.(persisted.session_uuid)).toEqual(originalRow);
       manager.bootedDevices = [androidA];
       await pool.addDevice(androidA);
       await expect(call(360_000)).rejects.toThrow(TerminalSessionError);

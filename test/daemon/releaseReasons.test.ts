@@ -49,6 +49,19 @@ describe("session release-reason table (#11258)", () => {
     });
   });
 
+  test("restart recovery timeout is terminal expiry without idle", () => {
+    expect(sessionReleaseReasonTraits("restart-recovery-timeout")).toEqual({
+      terminal: true,
+      expiry: true,
+      idle: false,
+      recoverable: false,
+      reissuableByName: false,
+    });
+    expect(releaseReasonStrength("restart-recovery-timeout")).toBe(2);
+    expect(releasedRowStatus("restart-recovery-timeout")).toBe("expired");
+    expect(idleReleaseField("restart-recovery-timeout")).toEqual({});
+  });
+
   test("pins: expired keeps its non-terminal precedence and released-row status", () => {
     expect(releaseReasonStrength("expired")).toBe(0);
     expect(releasedRowStatus("expired")).toBe("released");
@@ -95,6 +108,7 @@ describe("session release-reason table (#11258)", () => {
         "lazy-expiry",
         "missing-first-heartbeat",
         "rehydration-owner-timeout",
+        "restart-recovery-timeout",
       ].sort(),
     );
     expect(releasedRowStatus("heartbeat-timeout")).toBe("expired");
@@ -114,6 +128,7 @@ describe("session release-reason table (#11258)", () => {
         "missing-first-heartbeat",
         "owner-disconnected",
         "rehydration-owner-timeout",
+        "restart-recovery-timeout",
         "session-creation-cancelled",
       ].sort(),
     );

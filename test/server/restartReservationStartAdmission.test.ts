@@ -481,8 +481,8 @@ describe("start admission and owner resume for restart reservations", () => {
     expect(await f.persistence.getSession!("rival-session")).toEqual(rivalRow);
     expect(f.sessions.getSession(HOLDER)).toBeNull();
     expect(await f.persistence.getSession!(HOLDER)).toMatchObject({
-      status: "released",
-      release_reason: "device-restart:restart-phone",
+      status: "expired",
+      release_reason: "restart-recovery-timeout",
     });
     expect(f.internals.rehydrationReservations.size).toBe(0);
     expect(f.internals.restartReadiness.size).toBe(0);
@@ -490,6 +490,25 @@ describe("start admission and owner resume for restart reservations", () => {
     expect(f.timer.getPendingTimeoutCount()).toBe(0);
     expect(f.timer.getPendingSleepCount()).toBe(0);
     expect(f.timer.getPendingIntervalCount()).toBe(0);
+
+    // A later selector acquires a new UUID on the spare; it cannot revive the terminal holder.
+    f.manager.beforeReady = undefined;
+    const spare = { ...f.device, name: "spare-phone", deviceId: "emulator-5556" };
+    f.manager.setBootedDevices("android", [f.device, spare]);
+    f.manager.setDeviceImages("android", [f.image, { ...f.image, ...spare }]);
+    expect(
+      await f.call("startDevice", { platform: "android", createIfMissing: false }, HOLDER),
+    ).toMatchObject({
+      structuredContent: {
+        runtime: { deviceId: spare.deviceId, session: { sessionUuid: "fake-1" } },
+      },
+    });
+    expect(f.sessions.getSession(HOLDER)).toBeNull();
+    expect(await f.persistence.getSession!(HOLDER)).toMatchObject({
+      status: "expired",
+      release_reason: "restart-recovery-timeout",
+    });
+    expect(f.internals.rehydrationReservations.has(HOLDER)).toBe(false);
   });
 
   test("owner readiness on an unheld device still resumes R", async () => {
@@ -897,7 +916,11 @@ describe("start admission and owner resume for restart reservations", () => {
               HOLDER,
             )
           : f.start({ avdName: f.device.name, bootTimeoutMs: 240_000 }, HOLDER);
-      await expect(call()).rejects.toThrow(`Cannot safely recover session ${HOLDER}`);
+      const error = await call().catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(TerminalSessionError);
+      expect(error).toMatchObject({
+        release: { releaseReason: "restart-recovery-timeout", terminal: true },
+      });
       expect(f.sessions.getAllSessions()).toHaveLength(0);
       expect(child.killed).toBe(true);
       f.timer.advanceTime(0);

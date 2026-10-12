@@ -1,6 +1,7 @@
 import { sql, type ExpressionBuilder, type Kysely } from "kysely";
 import { getDatabase } from "./database";
 import type { Database, DeviceSession, DeviceSessionStatus, NewDeviceSession } from "./types";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { Platform } from "../models";
@@ -47,6 +48,26 @@ export function isRecoverableDeviceSession(session: DeviceSession, nowMs: number
     session.expires_at_ms > nowMs &&
     (session.released_at_ms === null || session.released_at_ms >= retentionCutoffMs)
   );
+}
+
+/** The first deadline that ended an unresumed handoff, independent of when it is read. */
+export function persistedSessionExpiryReason(
+  session: DeviceSession,
+  nowMs: number,
+): "expired" | "restart-recovery-timeout" | undefined {
+  if (
+    session.release_reason &&
+    isDeviceRestartReleaseReason(session.release_reason) &&
+    session.released_at_ms !== null
+  ) {
+    const windowEnd = session.released_at_ms + DEFAULT_DEVICE_READY_TIMEOUT_MS;
+    if (windowEnd < session.expires_at_ms && nowMs >= windowEnd) {
+      return "restart-recovery-timeout";
+    }
+  }
+  return session.expires_at_ms <= nowMs || session.release_reason === "expired"
+    ? "expired"
+    : undefined;
 }
 
 /** SQL form of {@link isRecoverableDaemonReleaseReason} on `device_sessions.release_reason`. */
@@ -298,6 +319,12 @@ export interface MarkReleasedOptions {
    */
   onlyIfRecoverable?: boolean;
   /**
+   * Apply only to a device-restart handoff at or before the wall-ms threshold, whose idle
+   * deadline is later than its stored handoff time plus the window duration. A resume or a
+   * newer, unexpired handoff loses the statement; activity cannot extend the window.
+   */
+  onlyIfRestartRecoveryHandoff?: { releasedAtOrBeforeMs: number; recoveryWindowMs: number };
+  /**
    * Apply the release only while the row's `expires_at_ms` is at or before this instant (single
    * statement): the expiry sweep must not terminalize a row whose deadline was extended (restart-
    * recovery activity, #11281) after it selected the row (#11448).
@@ -346,8 +373,12 @@ export interface DeviceSessionPersistence {
   /**
    * `nowMs` is on the clock the persisted stamps were written with: wall-clock epoch ms (#11162),
    * converted from the session clock by the session manager's `sessionClockPersistence.ts`.
+   * Discover peers only when a window-first row needs terminalizing; ordinary listing stays local.
    */
-  listRecoverableSessions?(nowMs?: number): Promise<DeviceSession[]>;
+  listRecoverableSessions?(
+    nowMs?: number,
+    livePeerDaemonSessionIds?: () => readonly string[],
+  ): Promise<DeviceSession[]>;
   recordActivity(sessionUuid: string, update: DeviceSessionActivityUpdate): Promise<void>;
   /**
    * Extend a device-restart-released row's expiry to `activityAtMs + session_timeout_ms` when that
@@ -871,6 +902,13 @@ export class DeviceSessionRepository {
       if (onlyIfRecoverable) {
         update = update.where((eb) => hasRecoverableReleaseReason(eb));
       }
+      const handoff = options.onlyIfRestartRecoveryHandoff;
+      if (handoff) {
+        update = update
+          .where("release_reason", "like", `${DEVICE_RESTART_RELEASE_REASON_PREFIX}_%`)
+          .where("released_at_ms", "<=", handoff.releasedAtOrBeforeMs)
+          .where("expires_at_ms", ">", sql<number>`released_at_ms + ${handoff.recoveryWindowMs}`);
+      }
       if (onlyIfExpiredAtMs !== undefined) {
         update = update.where("expires_at_ms", "<=", onlyIfExpiredAtMs);
       }
@@ -989,21 +1027,48 @@ export class DeviceSessionRepository {
    * on the clock the stamps were written with: wall-clock epoch ms (#11162), which the session
    * manager converts its session clock to; the timer is only a fallback for callers without one.
    */
-  async listRecoverableSessions(nowMs: number = this.timer.now()): Promise<DeviceSession[]> {
+  async listRecoverableSessions(
+    nowMs: number = this.timer.now(),
+    livePeerDaemonSessionIds: () => readonly string[] = () => [],
+  ): Promise<DeviceSession[]> {
     const db = await this.getDb();
     await this.pruneExpiredSessions(nowMs);
     const expired = await db
       .selectFrom("device_sessions")
-      .select(["session_uuid", "stable_identity_generation"])
+      .selectAll()
       .where((eb) => hasRecoverableReleaseReason(eb))
-      .where("expires_at_ms", "<=", nowMs)
+      .where((eb) =>
+        eb.or([
+          eb("expires_at_ms", "<=", nowMs),
+          eb.and([
+            eb("release_reason", "like", `${DEVICE_RESTART_RELEASE_REASON_PREFIX}_%`),
+            eb("released_at_ms", "<=", nowMs - DEFAULT_DEVICE_READY_TIMEOUT_MS),
+          ]),
+        ]),
+      )
       .execute();
     for (const row of expired) {
       try {
-        await this.markReleased(row.session_uuid, "expired", nowMs, "expired", {
+        const reason = persistedSessionExpiryReason(row, nowMs)!;
+        await this.markReleased(row.session_uuid, "expired", nowMs, reason, {
           expectedRowGeneration: row.stable_identity_generation ?? 0,
           onlyIfRecoverable: true,
-          onlyIfExpiredAtMs: nowMs,
+          ...(reason === "restart-recovery-timeout"
+            ? {
+                onlyIfRestartRecoveryHandoff: {
+                  releasedAtOrBeforeMs: nowMs - DEFAULT_DEVICE_READY_TIMEOUT_MS,
+                  recoveryWindowMs: DEFAULT_DEVICE_READY_TIMEOUT_MS,
+                },
+              }
+            : { onlyIfExpiredAtMs: nowMs }),
+          unlessTerminalOrOwnedByLivePeer: {
+            livePeerDaemonSessionIds:
+              isDeviceRestartReleaseReason(row.release_reason!) &&
+              row.released_at_ms !== null &&
+              nowMs >= row.released_at_ms + DEFAULT_DEVICE_READY_TIMEOUT_MS
+                ? livePeerDaemonSessionIds()
+                : [],
+          },
         });
       } catch (error) {
         logger.warn(
@@ -1024,6 +1089,13 @@ export class DeviceSessionRepository {
         ]),
       )
       .where("expires_at_ms", ">", nowMs)
+      .where((eb) =>
+        eb.or([
+          eb("release_reason", "not like", `${DEVICE_RESTART_RELEASE_REASON_PREFIX}_%`),
+          eb("released_at_ms", "is", null),
+          eb("released_at_ms", ">", nowMs - DEFAULT_DEVICE_READY_TIMEOUT_MS),
+        ]),
+      )
       .orderBy("last_used_at_ms", "desc")
       .execute();
   }

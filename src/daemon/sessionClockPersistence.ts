@@ -165,9 +165,9 @@ class SessionClockPersistence implements DeviceSessionPersistence {
       return undefined;
     }
     const listRecoverableSessions = this.inner.listRecoverableSessions.bind(this.inner);
-    return (nowMs) =>
-      listRecoverableSessions(toWallIfGiven(this.frame, nowMs)).then((rows) =>
-        rows.map((row) => deviceSessionOnSessionClock(row, this.frame, this.written)),
+    return (nowMs, livePeerDaemonSessionIds) =>
+      listRecoverableSessions(toWallIfGiven(this.frame, nowMs), livePeerDaemonSessionIds).then(
+        (rows) => rows.map((row) => deviceSessionOnSessionClock(row, this.frame, this.written)),
       );
   }
 

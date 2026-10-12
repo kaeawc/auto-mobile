@@ -14,6 +14,7 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import {
   ANONYMOUS_ACQUISITION_SESSION_SOURCE,
   SessionManager,
+  TerminalSessionError,
 } from "../../src/daemon/sessionManager";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
@@ -6650,10 +6651,15 @@ describe("DevicePool", () => {
         sessionManager.getOrCreateSession("session-1", devicePool, "android"),
       ).rejects.toThrow("watched-process-exit (code=1, signal=null); recovery outcome: exhausted");
       fakeTimer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS);
+      // A new call after the recovery window lapses terminalizes the released row.
       const resume = sessionManager.getOrCreateSession("session-1", devicePool, "android");
-      await expect(resume).rejects.toThrow("recovery reason: target-absent");
+      await expect(resume).rejects.toBeInstanceOf(TerminalSessionError);
+      await expect(resume).rejects.toMatchObject({
+        release: { releaseReason: "restart-recovery-timeout", terminal: true },
+      });
       expect(await persistence.getSession?.("session-1")).toMatchObject({
-        release_reason: "identity-recovery-target-absent",
+        status: "expired",
+        release_reason: "restart-recovery-timeout",
       });
     });
 

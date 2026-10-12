@@ -15,6 +15,7 @@ import {
 } from "../../src/db/deviceSessionRepository";
 import type { Database } from "../../src/db/types";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createTestDatabase } from "./testDbHelper";
 
@@ -79,6 +80,54 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
   async function rowOf(persistence: DeviceSessionPersistence) {
     return await persistence.getSession?.(SESSION);
   }
+
+  test.each(["unchanged", "resumed", "new-handoff", "idle-first", "generation", "peer"])(
+    "restart window statement preserves a %s row",
+    async (change) => {
+      const persistence = await create();
+      const generation = await persistence.upsertActiveSession(record({ expiresAtMs: 301_000 }));
+      await persistence.markReleased(SESSION, "released", 1_000, "device-restart:Pixel_8");
+      if (change === "resumed" || change === "generation" || change === "peer") {
+        await persistence.upsertActiveSession(
+          record({
+            expiresAtMs: 301_000,
+            daemonSessionId: change === "peer" ? "peer" : "daemon-a",
+          }),
+        );
+        if (change !== "resumed") {
+          await persistence.markReleased(SESSION, "released", 1_000, "device-restart:Pixel_8");
+        }
+      } else if (change === "new-handoff") {
+        await persistence.markReleased(SESSION, "released", 2_000, "device-restart:Pixel_8");
+      } else if (change === "idle-first") {
+        await persistence.upsertActiveSession(record({ expiresAtMs: 181_000 }));
+        await persistence.markReleased(SESSION, "released", 1_000, "device-restart:Pixel_8");
+      }
+      const before = structuredClone(await rowOf(persistence));
+      await persistence.markReleased(SESSION, "expired", 181_001, "restart-recovery-timeout", {
+        expectedRowGeneration:
+          change === "generation"
+            ? typeof generation === "number"
+              ? generation
+              : 0
+            : (before?.stable_identity_generation ?? 0),
+        onlyIfOwnedByDaemon: "daemon-a",
+        onlyIfRecoverable: true,
+        onlyIfRestartRecoveryHandoff: {
+          releasedAtOrBeforeMs: 1_000,
+          recoveryWindowMs: DEFAULT_DEVICE_READY_TIMEOUT_MS,
+        },
+      });
+      if (change === "unchanged") {
+        expect(await rowOf(persistence)).toMatchObject({
+          status: "expired",
+          release_reason: "restart-recovery-timeout",
+        });
+      } else {
+        expect(await rowOf(persistence)).toEqual(before);
+      }
+    },
+  );
 
   test.each([null, "daemon-a", "daemon-other"])(
     "own-or-unowned statement predicates with owner %p",

@@ -15,9 +15,11 @@ import {
   type DeviceSessionPersistence,
   type DeviceSessionRecord,
   type MarkReleasedOptions,
+  persistedSessionExpiryReason,
   type RecoverableRowIncarnation,
   type UpsertActiveSessionOptions,
 } from "../../src/db/deviceSessionRepository";
+import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../src/utils/deviceTimeouts";
 import type { DeviceSession, DeviceSessionStatus } from "../../src/db/types";
 
 export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
@@ -146,9 +148,47 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
     this.getSession = (sessionUuid) => Promise.resolve(this.rows.get(sessionUuid));
   }
 
-  async listRecoverableSessions(): Promise<DeviceSession[]> {
-    return Array.from(this.rows.values())
-      .filter((row) => row.release_reason && isRecoverableDaemonReleaseReason(row.release_reason))
+  async listRecoverableSessions(
+    nowMs?: number,
+    livePeerDaemonSessionIds: () => readonly string[] = () => [],
+  ): Promise<DeviceSession[]> {
+    const rows = Array.from(this.rows.values()).filter(
+      (row) => row.release_reason && isRecoverableDaemonReleaseReason(row.release_reason),
+    );
+    if (nowMs !== undefined) {
+      for (const row of rows) {
+        const reason = persistedSessionExpiryReason(row, nowMs);
+        const peers =
+          reason &&
+          isDeviceRestartReleaseReason(row.release_reason!) &&
+          row.released_at_ms !== null &&
+          nowMs >= row.released_at_ms + DEFAULT_DEVICE_READY_TIMEOUT_MS
+            ? livePeerDaemonSessionIds()
+            : [];
+        if (reason && !peers.includes(row.daemon_session_id ?? "")) {
+          await this.markReleased(row.session_uuid, "expired", nowMs, reason, {
+            expectedRowGeneration: row.stable_identity_generation ?? 0,
+            onlyIfRecoverable: true,
+            ...(reason === "restart-recovery-timeout"
+              ? {
+                  onlyIfRestartRecoveryHandoff: {
+                    releasedAtOrBeforeMs: nowMs - DEFAULT_DEVICE_READY_TIMEOUT_MS,
+                    recoveryWindowMs: DEFAULT_DEVICE_READY_TIMEOUT_MS,
+                  },
+                }
+              : { onlyIfExpiredAtMs: nowMs }),
+            unlessTerminalOrOwnedByLivePeer: { livePeerDaemonSessionIds: peers },
+          });
+        }
+      }
+    }
+    return rows
+      .filter(
+        (row) =>
+          row.release_reason &&
+          isRecoverableDaemonReleaseReason(row.release_reason) &&
+          (nowMs === undefined || !persistedSessionExpiryReason(row, nowMs)),
+      )
       .sort((a, b) => b.last_used_at_ms - a.last_used_at_ms);
   }
 
@@ -239,6 +279,13 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       (options.onlyIfRecoverable &&
         !(row.release_reason && isRecoverableDaemonReleaseReason(row.release_reason))) ||
       // Like the repository's statement: a deadline extended past the instant is not released.
+      (options.onlyIfRestartRecoveryHandoff !== undefined &&
+        (!row.release_reason ||
+          !isDeviceRestartReleaseReason(row.release_reason) ||
+          row.released_at_ms === null ||
+          row.released_at_ms > options.onlyIfRestartRecoveryHandoff.releasedAtOrBeforeMs ||
+          row.expires_at_ms <=
+            row.released_at_ms + options.onlyIfRestartRecoveryHandoff.recoveryWindowMs)) ||
       (options.onlyIfExpiredAtMs !== undefined && row.expires_at_ms > options.onlyIfExpiredAtMs) ||
       (options.onlyIfOwnedByDaemon !== undefined &&
         row.daemon_session_id !== options.onlyIfOwnedByDaemon)

@@ -4,6 +4,8 @@ import {
   SessionManager,
   TerminalSessionError,
   UnissuedSessionError,
+  type SessionDeviceAssigner,
+  type SessionRecoveryTarget,
 } from "../../src/daemon/sessionManager";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
@@ -308,18 +310,280 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
     });
   }
 
-  test("pins: pool-less control admission after restart recovery but before a 300-second idle deadline remains admissible", async () => {
+  for (const now of [181_001, 301_001]) {
+    for (const withPool of [false, true]) {
+      test(`a lapsed 300-second restart row refuses ${withPool ? "device-tool" : "pool-less"} admission at ${now}`, async () => {
+        await seedRow(`device-restart:${DEVICE}`, 300_000);
+        timer.setCurrentTime(now);
+        const manager = restartedDaemon();
+        expect(await manager.isReleasedSessionInRestartRecoveryWindow(SESSION)).toBe(false);
+        expect(await manager.getExpiredReleaseSnapshot(SESSION)).toMatchObject({
+          releaseReason: "restart-recovery-timeout",
+          terminal: true,
+        });
+        expect(await refusal(manager, "read-only")).toBeInstanceOf(UnissuedSessionError);
+        for (const method of ["daemon/heartbeat", "daemon/sessionInfo"]) {
+          expect(await wireAnswer(manager, method)).toEqual({
+            success: false,
+            error: `Session not found: ${SESSION}`,
+            code: "daemon_session_not_found",
+            releaseReason: "restart-recovery-timeout",
+          });
+        }
+        const assigned: string[] = [];
+        const pool = {
+          async assignDeviceToSession(id: string) {
+            assigned.push(id);
+            return DEVICE;
+          },
+        };
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const error = withPool
+            ? await manager.getOrCreateSession(SESSION, pool, "android", undefined, true).then(
+                () => undefined,
+                (caught: unknown) => caught,
+              )
+            : await refusal(manager);
+          expect(error).toBeInstanceOf(TerminalSessionError);
+          if (!(error instanceof TerminalSessionError)) {
+            throw new Error("expected terminal refusal");
+          }
+          expect(error.release).toMatchObject({
+            releaseReason: "restart-recovery-timeout",
+            terminal: true,
+          });
+          const wire = sessionOwnershipLostPayload({
+            message: error.message,
+            sessionUuid: SESSION,
+            reason: error.release.releaseReason,
+            release: error.release,
+          }).error;
+          expect(wire).not.toHaveProperty("idle");
+          expect(wire).toMatchObject({
+            code: "session_ownership_lost",
+            reason: "restart-recovery-timeout",
+            retryable: false,
+            nextAction: "acquire_new_session",
+          });
+          expect(mcpRequestFailureDetails(error, undefined).details).toEqual({
+            sessionUuid: SESSION,
+            reason: "restart-recovery-timeout",
+          });
+        }
+        expect(assigned).toEqual([]);
+        expect(await repo.getSession(SESSION)).toMatchObject({
+          status: withPool ? "expired" : "released",
+          release_reason: withPool ? "restart-recovery-timeout" : `device-restart:${DEVICE}`,
+        });
+      });
+    }
+    test(`startup sweep preserves the window-first reason at ${now}`, async () => {
+      await seedRow(`device-restart:${DEVICE}`, 300_000);
+      timer.setCurrentTime(now);
+      expect(await repo.listRecoverableSessions(now)).toEqual([]);
+      expect(await repo.getSession(SESSION)).toMatchObject({
+        status: "expired",
+        release_reason: "restart-recovery-timeout",
+      });
+    });
+  }
+
+  test("startup never assigns a lapsed restart row", async () => {
+    await seedRow(`device-restart:${DEVICE}`, 300_000);
+    timer.setCurrentTime(181_001);
+    const assigned: string[] = [];
+    const manager = restartedDaemon();
+    const result = await manager.rehydratePersistedSessions({
+      async assignDeviceToSession(id: string) {
+        assigned.push(id);
+        return DEVICE;
+      },
+    });
+    expect(result.rehydrated).toEqual([]);
+    expect(assigned).toEqual([]);
+    expect(await repo.getSession(SESSION)).toMatchObject({
+      status: "expired",
+      release_reason: "restart-recovery-timeout",
+    });
+  });
+
+  for (const now of [179_000, 181_001]) {
+    test(`non-device-tool admission respects the restart window at ${now}`, async () => {
+      await seedRow(`device-restart:${DEVICE}`, 300_000);
+      timer.setCurrentTime(now);
+      const manager = restartedDaemon();
+      const targets: Array<SessionRecoveryTarget | undefined> = [];
+      const pool: SessionDeviceAssigner = {
+        async assignDeviceToSession(id, platform, target) {
+          targets.push(target);
+          await manager.createSession(
+            id,
+            DEVICE,
+            platform ?? "android",
+            undefined,
+            undefined,
+            target?.stableDeviceId,
+            target?.liveness,
+          );
+          return DEVICE;
+        },
+      };
+      const result = manager.getOrCreateSession(SESSION, pool, "android");
+      if (now === 179_000) {
+        await expect(result).resolves.toMatchObject({ assignedDevice: DEVICE });
+        expect(targets).toHaveLength(1);
+        expect(targets[0]).toMatchObject({
+          deviceId: DEVICE,
+          stableDeviceId: "Pixel_8_API_35",
+          restartRecoveryDeadlineMs: 181_000,
+        });
+      } else {
+        const error = await result.catch((caught: unknown) => caught);
+        expect(error).toBeInstanceOf(TerminalSessionError);
+        expect(error).toMatchObject({
+          release: { releaseReason: "restart-recovery-timeout", terminal: true },
+        });
+        expect(targets).toEqual([]);
+        expect(await repo.getSession(SESSION)).toMatchObject({
+          status: "expired",
+          release_reason: "restart-recovery-timeout",
+        });
+      }
+    });
+  }
+
+  test("failed peer discovery refuses a lapsed restart row without writing or fencing it", async () => {
+    await seedRow(`device-restart:${DEVICE}`, 300_000);
+    timer.setCurrentTime(181_001);
+    const before = await repo.getSession(SESSION);
+    const manager = restartedDaemon();
+    manager.attachLiveDaemonSessionIds(() => {
+      throw new Error("live daemon discovery unavailable");
+    });
+    let assigned = false;
+    let notices = 0;
+    manager.onSessionRelease(() => {
+      notices++;
+    });
+    const error = await manager
+      .getOrCreateSession(
+        SESSION,
+        {
+          async assignDeviceToSession() {
+            assigned = true;
+            return DEVICE;
+          },
+        },
+        "android",
+        undefined,
+        true,
+      )
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(TerminalSessionError);
+    expect(error).toMatchObject({
+      release: { releaseReason: "restart-recovery-timeout", terminal: true },
+    });
+    expect(await repo.getSession(SESSION)).toEqual(before);
+    expect(manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
+    expect(assigned).toBe(false);
+    expect(notices).toBe(0);
+  });
+
+  for (const idleWindow of [120_000, 180_000]) {
+    test(`startup keeps idle-first semantics for a ${idleWindow} ms idle deadline`, async () => {
+      await seedRow(`device-restart:${DEVICE}`, idleWindow);
+      timer.setCurrentTime(301_001);
+      expect(await repo.listRecoverableSessions(timer.now())).toEqual([]);
+      expect(await repo.getSession(SESSION)).toMatchObject({
+        status: "expired",
+        release_reason: "expired",
+      });
+      const error = await refusal(restartedDaemon());
+      expect(error).toBeInstanceOf(TerminalSessionError);
+      if (!(error instanceof TerminalSessionError)) {
+        throw new Error("expected terminal refusal");
+      }
+      expect(mcpRequestFailureDetails(error, undefined).details).toEqual({
+        sessionUuid: SESSION,
+        reason: "expired",
+        idle: true,
+      });
+    });
+  }
+
+  for (const idleWindow of [120_000, 300_000]) {
+    test(`startup does not write a live peer's lapsed ${idleWindow} ms restart row`, async () => {
+      await seedRow(`device-restart:${DEVICE}`, idleWindow);
+      timer.setCurrentTime(301_001);
+      const before = await repo.getSession(SESSION);
+      expect(await repo.listRecoverableSessions(timer.now(), () => ["dead-daemon"])).toEqual([]);
+      expect(await repo.getSession(SESSION)).toEqual(before);
+    });
+  }
+
+  test("device-tool admission leaves a live peer's row untouched after both deadlines", async () => {
+    await seedRow(`device-restart:${DEVICE}`, 300_000);
+    timer.setCurrentTime(301_001);
+    const before = await repo.getSession(SESSION);
+    const manager = restartedDaemon();
+    manager.attachLiveDaemonSessionIds(() => new Set(["daemon-b", "dead-daemon"]));
+    let assigned = false;
+    const pool = {
+      async assignDeviceToSession() {
+        assigned = true;
+        return DEVICE;
+      },
+    };
+    await expect(
+      manager.getOrCreateSession(SESSION, pool, "android", undefined, true),
+    ).rejects.toMatchObject({ release: { releaseReason: "expired" } });
+    expect(assigned).toBe(false);
+    expect(await repo.getSession(SESSION)).toEqual(before);
+    expect(manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
+  });
+
+  test("device-tool admission may terminalize a null-owner lapsed restart row", async () => {
+    await seedRow(`device-restart:${DEVICE}`, 300_000);
+    await db
+      .updateTable("device_sessions")
+      .set({ daemon_session_id: null })
+      .where("session_uuid", "=", SESSION)
+      .execute();
+    timer.setCurrentTime(181_001);
+    let assigned = false;
+    const pool = {
+      async assignDeviceToSession() {
+        assigned = true;
+        return DEVICE;
+      },
+    };
+    await expect(
+      restartedDaemon().getOrCreateSession(SESSION, pool, "android", undefined, true),
+    ).rejects.toMatchObject({
+      release: { releaseReason: "restart-recovery-timeout", terminal: true },
+    });
+    expect(assigned).toBe(false);
+    expect(await repo.getSession(SESSION)).toMatchObject({
+      status: "expired",
+      release_reason: "restart-recovery-timeout",
+    });
+  });
+
+  test("a 300-second restart row remains admissible at 179 seconds", async () => {
+    await seedRow(`device-restart:${DEVICE}`, 300_000);
+    timer.setCurrentTime(180_000);
+    expect(await refusal(restartedDaemon())).toBeUndefined();
+  });
+
+  test("a live peer's lapsed recovery row is neither refused for lapse nor written", async () => {
     await seedRow(`device-restart:${DEVICE}`, 300_000);
     timer.setCurrentTime(181_001);
     const manager = restartedDaemon();
-    expect(await manager.isReleasedSessionInRestartRecoveryWindow(SESSION)).toBe(false);
+    manager.attachLiveDaemonSessionIds(() => new Set(["daemon-b", "dead-daemon"]));
+    const before = await repo.getSession(SESSION);
     expect(await refusal(manager)).toBeUndefined();
-    expect(manager.hasSession(SESSION)).toBe(false);
-    expect(await repo.getSession(SESSION)).toMatchObject({
-      status: "released",
-      release_reason: `device-restart:${DEVICE}`,
-      expires_at_ms: 301_000,
-    });
+    expect(await manager.getExpiredReleaseSnapshot(SESSION)).toBeUndefined();
+    expect(await repo.getSession(SESSION)).toEqual(before);
   });
 
   test("a terminally released row is not offered as expired", async () => {

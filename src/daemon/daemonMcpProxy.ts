@@ -8500,14 +8500,14 @@ export class DaemonMcpProxy {
   }
 
   /**
-   * Close the connection to the daemon. Neither a signal nor stdin EOF closes the MCP server, so
-   * nothing else cancels calls in flight; cancel them here for both, before managed execution
-   * release. The daemon admits `daemon/releaseExecution` in arrival order on this proxy's socket,
-   * behind any call still running there; otherwise release would time out unadmitted and leave
-   * the session to the owner-disconnect release (#11642). Each caller is answered with a typed
-   * `DaemonUnavailableError`, never left waiting. Once the stdio client closes its end (stdin EOF
-   * or a stdout write error), `OutputGatedTransport` drops those answers and any notification
-   * instead of writing them (#11951), while the daemon-side release still completes.
+   * Close the connection to the daemon. Stdin EOF waits for received requests' answers before
+   * reaching close (#12049); a signal, a stdout write error, or the EOF hard bound still cancels
+   * calls here, before managed execution release. The daemon admits `daemon/releaseExecution`
+   * in arrival order on this proxy's socket, behind any call still running there; otherwise
+   * release would time out unadmitted and leave the session to owner-disconnect release (#11642).
+   * Each caller is answered with a typed `DaemonUnavailableError`, never left waiting. At the
+   * EOF hard bound, `OutputGatedTransport` still writes received answers while dropping all
+   * unsolicited output; a stdout write error closes that gate fully at once (#11951).
    */
   close(): Promise<void> {
     // EOF and signal/transport shutdown may overlap: keep the socket until the same release settles.

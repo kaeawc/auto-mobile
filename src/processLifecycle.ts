@@ -93,6 +93,7 @@ export class ProcessLifecycleHandlers {
   private stderrErrorGuardInstalled = false;
   private hangupShutdownHandlerInstalled = false;
   private shutdownInProgress = false;
+  private readonly shutdownStarted = Promise.withResolvers<void>();
   private shutdownHandler: ProcessShutdownHandler | undefined;
   private shutdownTimeoutHandler: ProcessShutdownTimeoutHandler | undefined;
   private fatalProcessHandler: FatalProcessHandler | undefined;
@@ -149,23 +150,61 @@ export class ProcessLifecycleHandlers {
     });
   }
 
-  installStdinShutdownHandlers(stdin: StdinShutdownSource, onClientGone?: () => void): void {
+  /**
+   * EOF waits at most answerWaitTimeoutMs (30 min as wired; each call normally has its own
+   * 120 s deadline via AUTOMOBILE_DAEMON_TIMEOUT_MS), plus PROCESS_SHUTDOWN_TIMEOUT_MS (9 s)
+   * and the 100 ms finalization, before exit.
+   */
+  installStdinShutdownHandlers(
+    stdin: StdinShutdownSource,
+    onClientGone?: () => void | Promise<void>,
+    answerWaitTimeoutMs: number = PROCESS_SHUTDOWN_TIMEOUT_MS,
+  ): void {
     if (this.stdinShutdownHandlersInstalled) {
       return;
     }
     this.stdinShutdownHandlersInstalled = true;
+    let clientGone = false;
 
     const shutdownOnStdinClose = () => {
+      if (clientGone) {
+        return;
+      }
+      clientGone = true;
+      let answers: void | Promise<void> = undefined;
       try {
-        onClientGone?.();
+        answers = onClientGone?.();
       } catch (error) {
         writeEmergencyLog("Error in stdin client-gone callback", error);
       }
-      void this.shutdown("stdin");
+      if (answers) {
+        if (this.shutdownInProgress) {
+          // The callback still gates output; existing shutdown owns cleanup and exit.
+          void answers.catch((error) => writeEmergencyLog("Error in stdin answer wait", error));
+          return;
+        }
+        void this.waitForStdinAnswers(answers, answerWaitTimeoutMs);
+      } else {
+        void this.shutdown("stdin");
+      }
     };
     stdin.on("end", shutdownOnStdinClose);
     stdin.on("error", shutdownOnStdinClose);
     stdin.on("close", shutdownOnStdinClose);
+  }
+
+  private async waitForStdinAnswers(answers: Promise<void>, timeoutMs: number): Promise<void> {
+    try {
+      // A signal or stdout error ends the wait and clears its deadline before process exit.
+      await raceWithDeadline([answers, this.shutdownStarted.promise], {
+        timer: this.timer,
+        timeoutMs,
+        label: "stdin answer wait",
+      });
+    } catch (error) {
+      writeEmergencyLog("Error in stdin answer wait", error);
+    }
+    await this.shutdown("stdin");
   }
 
   installStdoutShutdownHandler(stdout: StdioWriteErrorSource, onClientGone?: () => void): void {
@@ -203,6 +242,7 @@ export class ProcessLifecycleHandlers {
       return;
     }
     this.shutdownInProgress = true;
+    this.shutdownStarted.resolve();
 
     try {
       const shutdownCompleted = await this.runShutdownHandler(signal);
@@ -304,9 +344,10 @@ export function installHangupShutdownHandler(): void {
 
 export function installStdinShutdownHandlers(
   stdin: StdinShutdownSource = process.stdin,
-  onClientGone?: () => void,
+  onClientGone?: () => void | Promise<void>,
+  answerWaitTimeoutMs?: number,
 ): void {
-  processLifecycleHandlers.installStdinShutdownHandlers(stdin, onClientGone);
+  processLifecycleHandlers.installStdinShutdownHandlers(stdin, onClientGone, answerWaitTimeoutMs);
 }
 
 export function installStdoutShutdownHandler(

@@ -5527,6 +5527,8 @@ export class DaemonMcpProxy {
       }
       return;
     }
+    // A surfaced release belongs to this fence alone, even when a later fence reuses its UUID.
+    this.releaseSurfacedFor = undefined;
     this.terminalBoundSession = {
       sessionUuid,
       reason,
@@ -6715,6 +6717,7 @@ export class DaemonMcpProxy {
     const terminal = this.terminalBoundSession;
     if (terminal?.sessionUuid === sessionUuid) {
       this.terminalBoundSession = undefined;
+      this.releaseSurfacedFor = undefined;
       if (record.restore.bound && this.boundSessionUuid === undefined) {
         this.rebindResumedSession(sessionUuid, record, terminal.fromResultMint);
       }

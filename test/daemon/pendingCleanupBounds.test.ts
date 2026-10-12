@@ -31,6 +31,8 @@ import {
 } from "../../src/daemon/sessionLivenessWindows";
 import { forceStuckSessionRelease } from "../../src/daemon/releaseSessionAndDevice";
 import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
+import { ExecutionTracker } from "../../src/server/executionTracker";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 
 const device = {
   deviceId: "12345678-1234-1234-1234-123456789ABC",
@@ -275,6 +277,79 @@ test("throwing abandonment still frees the device", async () => {
   expect(h.warn).toHaveBeenCalledTimes(2); // Fence failure and the single abandonment warning.
 });
 
+for (const reason of [undefined, "heartbeat-timeout"] as const) {
+  test(`a late set during the same session's ${reason ?? "default"} release gets a manager-capped clear`, async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    const gate = Promise.withResolvers<void>();
+    const h = harness(persistence);
+    const session = await h.manager.createSession("old", device.deviceId, "ios");
+    const commands: string[][] = [];
+    let signal: AbortSignal | undefined;
+    const clears = new MockLocationClearRegistry({
+      timer: h.timer,
+      simctlFactory: () => ({
+        executeCommandArgs: (args, _timeout, abort) => {
+          commands.push(args);
+          signal = abort;
+          return new Promise<string>(() => {});
+        },
+      }),
+    });
+    const applied = createSessionLocationAppliedCallback({
+      sessionManager: h.manager,
+      sessionUuid: "old",
+      device,
+      mockLocationClears: clears,
+    });
+    const write = spyOn(persistence, "markReleased").mockImplementation(() => gate.promise);
+    const register = spyOn(h.manager, "registerPendingDeviceCleanup");
+    dispose.push(() => {
+      write.mockRestore();
+      register.mockRestore();
+    });
+    const release = h.manager.releaseSession("old", reason);
+    await flush();
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(h.manager.getSessionForDevice(device.deviceId)).toBe("old");
+    expect(h.manager.peekSession("old")).toBeNull();
+    expect(h.manager.getReleasingSession("old")).toBe(session);
+    applied!();
+    await flush();
+    expect(commands).toEqual([["location", device.deviceId, "clear"]]);
+    expect(h.warn).not.toHaveBeenCalled();
+    expect(register).toHaveBeenCalledWith(device.deviceId, expect.any(Promise), {
+      name: "clear mock location",
+      leftover: "the released session's simulated location",
+      abandon: expect.any(Function),
+    });
+    expect(h.manager.getPendingDeviceCleanup(device.deviceId)).not.toBeNull();
+    gate.resolve();
+    await release;
+    expect(h.manager.getDeviceCleanupRetryAfterMs(device.deviceId)).toBe(cap);
+    // One turn reaches abandonment before the hung attempt's rejection can schedule a retry.
+    h.timer.advanceTime(cap);
+    await flush();
+    expect(signal?.aborted).toBe(true);
+    expect(h.manager.hasDeviceCleanupInProgress(device.deviceId)).toBe(false);
+    expect(h.warn).toHaveBeenCalledTimes(1);
+    expect(String(h.warn.mock.calls[0][0])).toContain("clear mock location");
+    expect(String(h.warn.mock.calls[0][0])).not.toContain("now held by");
+  });
+}
+
+for (const holderId of ["old", "next"]) {
+  test(`location holder accessors identify the ${holderId === "old" ? "same" : "different"}-UUID replacement object`, async () => {
+    const h = harness();
+    const old = await h.manager.createSession("old", device.deviceId, "ios");
+    await h.manager.releaseSession("old", "plan-auto-release");
+    const holder = await h.manager.createSession(holderId, device.deviceId, "ios");
+    expect(holder).not.toBe(old);
+    expect(h.manager.getSessionForDevice(device.deviceId)).toBe(holderId);
+    expect(h.manager.peekSession(holderId)).toBe(holder);
+    expect(h.manager.getReleasingSession(holderId)).toBeNull();
+  });
+}
+
 for (const marked of [false, true]) {
   test(`a late set on a new holder ${marked ? "preserves" : "creates"} its marker until release`, async () => {
     const h = harness();
@@ -394,6 +469,7 @@ for (const interval of [3_000, 7_000]) {
       h.timer,
       { forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id) },
     );
+    const scanOrigin = h.timer.now();
     monitor.start();
     dispose.push(() => {
       void monitor.stop();
@@ -403,6 +479,9 @@ for (const interval of [3_000, 7_000]) {
     const startedAt = h.timer.now();
     void h.manager.releaseSession("old", "plan-auto-release");
     await flush();
+    expect(h.manager.getSessionForDevice(android.deviceId)).toBe("old");
+    expect(h.manager.peekSession("old")).toBe(h.manager.getReleasingSession("old"));
+    expect(h.manager.peekSession("old")).not.toBeNull();
     const worst = getSessionReleaseCleanupWorstCaseMs();
     expect(h.manager.getDeviceCleanupRetryAfterMs(android.deviceId)).toBe(worst);
     expect(() => h.pool.assertDeviceCleanupComplete(android.deviceId)).toThrow(
@@ -427,14 +506,72 @@ for (const interval of [3_000, 7_000]) {
     await h.timer.advanceTimeAsync(1, observe);
     expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(false);
     expect(() => h.pool.assertDeviceCleanupComplete(android.deviceId)).not.toThrow();
-    // The join restamps at the first scan; force runs at the first scan >= 40s later.
-    const actualMs = interval + Math.ceil(STUCK_REAP_WARN_MS / interval) * interval + cap - 1;
-    expect(freedAt).toBe(startedAt + actualMs);
-    expect(actualMs).toBe(interval === 3_000 ? 54_999 : 58_999);
-    expect(worst - actualMs).toBeGreaterThanOrEqual(0);
-    expect(worst - actualMs).toBeLessThan(interval);
+    // Joining keeps the source deadline: force at the first scan on/after that deadline.
+    const forcedAt =
+      scanOrigin + Math.ceil((startedAt + STUCK_REAP_WARN_MS - scanOrigin) / interval) * interval;
+    expect(freedAt).toBe(forcedAt + cap);
+    expect(freedAt!).toBeLessThanOrEqual(startedAt + worst);
   });
 }
+
+test("a monitor reap joining after an execution veto still meets the advertised release bound", async () => {
+  // The scans are synchronous; only the parked release's promise chain needs draining between ticks.
+  const step = () => drainMicrotasks(20);
+  class ParkedPersistence extends FakeDeviceSessionPersistence {
+    gate: Promise<void> | undefined;
+    override async upsertActiveSession(record: DeviceSessionRecord) {
+      await this.gate;
+      await super.upsertActiveSession(record);
+    }
+  }
+  const persistence = new ParkedPersistence();
+  const h = harness(persistence);
+  await h.manager.createSession("old", android.deviceId, "android", 600_000);
+  await h.timer.advanceTimeAsync(90_000, step);
+  persistence.gate = new Promise<void>(() => {});
+  void h.manager.rebindSession("old", "emulator-5556", "android");
+  await step();
+  const startedAt = h.timer.now();
+  const tracker = new ExecutionTracker(h.timer, new FakeIdGenerator(["hung-call"]));
+  const execution = tracker.startExecution("tapOn", undefined, "old");
+  tracker.setExecutionDeadline(execution.id, () => startedAt + 20_000);
+  const hasActiveExecutions = (id: string) => tracker.hasActiveSessionUuidExecutions(id);
+  h.manager.setActiveSessionExecutionChecker(hasActiveExecutions);
+  void h.manager.releaseSession("old", "plan-auto-release");
+  await step();
+  expect(h.manager.isReleaseInProgress("old", startedAt)).toBe(true);
+  let reaps = 0;
+  let joinedAt: number | undefined;
+  const monitor = new SessionHeartbeatMonitor(
+    h.manager,
+    {
+      hasActiveExecutions,
+      latestExecutionDeadlineMs: (id) => tracker.getLatestSessionExecutionDeadlineMs(id),
+    },
+    async (id, reason) => {
+      reaps++;
+      joinedAt = h.timer.now();
+      await h.manager.releaseSession(id, reason);
+    },
+    h.timer,
+    { forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id) },
+  );
+  monitor.start();
+  dispose.push(() => {
+    tracker.endExecution(execution.id);
+    void monitor.stop();
+  });
+  const interval = getSessionHeartbeatCheckIntervalMs();
+  await h.timer.advanceTimeAsync(30_000 - interval, step);
+  expect(reaps).toBe(0);
+  await h.timer.advanceTimeAsync(interval, step);
+  expect(reaps).toBe(1);
+  expect(joinedAt).toBe(startedAt + 30_000);
+  const worst = getSessionReleaseCleanupWorstCaseMs();
+  await h.timer.advanceTimeAsync(startedAt + worst - h.timer.now(), step);
+  expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(false);
+  expect(() => h.pool.assertDeviceCleanupComplete(android.deviceId)).not.toThrow();
+});
 
 test("a monitor-tracked wedged release advertises the whole forced-release worst case", async () => {
   class ParkedPersistence extends FakeDeviceSessionPersistence {

@@ -1319,8 +1319,9 @@ export const SESSION_RELEASE_STUCK_DEADLINE_MS =
   SESSION_RELEASE_STUCK_MARGIN_MS;
 
 /**
- * One scan may pass before a monitor reap joins the release and restarts its monitor clock.
- * Allow one more scan to find it past the stuck deadline, then the capped forced quarantine.
+ * Force at the first scan at or after the stuck deadline measured from the release's own start,
+ * even when a monitor reap joins it: one interval, then the capped forced quarantine. A second
+ * interval allows a late timer tick so the advertised hint never understates the cleanup bound.
  * Only monitor-tracked releases are forced; terminal explicit releases rely on their own stages.
  */
 export function getSessionReleaseCleanupWorstCaseMs(env: NodeJS.ProcessEnv = process.env): number {

@@ -545,7 +545,13 @@ export class SessionHeartbeatMonitor {
       () => undefined,
     );
     this.reapsInFlight.set(sessionId, settled);
-    const tracked: TrackedRelease = { at: this.now(), reported: false };
+    const existing = this.reapStartedAt.get(sessionId);
+    // Keep sourceRelease so scans forget an ended release even while its join promise unwinds.
+    const tracked: TrackedRelease =
+      existing?.sourceRelease &&
+      this.sessions.isReleaseInProgress?.(sessionId, existing.at) === true
+        ? { ...existing }
+        : { at: this.now(), reported: false };
     this.reapStartedAt.set(sessionId, tracked);
     void settled.then(() => {
       if (this.reapsInFlight.get(sessionId) === settled) {

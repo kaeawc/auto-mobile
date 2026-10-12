@@ -68,7 +68,11 @@ export function createSessionLocationAppliedCallback(
       return;
     }
     const holder = sessionManager.getSessionForDevice(options.device.deviceId);
-    if (holder !== null && sessionManager.getSession(holder) !== session) {
+    const heldByAnother =
+      holder !== null &&
+      sessionManager.peekSession(holder) !== session &&
+      sessionManager.getReleasingSession(holder) !== session;
+    if (heldByAnother) {
       registry.markSet(holder, options.device);
       logger.warn(
         `Released session ${session.sessionId}'s late location write landed on device ` +

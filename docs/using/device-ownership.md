@@ -784,8 +784,9 @@ and contribute no bound (a 1 s polling hint when nothing else bounds cleanup).
 Trusted numeric caps remain owned by recording finalize, held-plan app cleanup,
 forced stuck release, network-condition TTL restore, deferred rebind gates, and
 bounded acquisition cleanups. An in-flight release
-advertises the stuck deadline plus two heartbeat-monitor intervals plus 10 s
-quarantine (54 s with the default interval); the monitor only forces releases
+advertises the stuck deadline from its own start plus two heartbeat-monitor intervals
+(one to scan, one for a late tick) plus 10 s quarantine (54 s with the default interval);
+the monitor only forces releases
 it tracks, while terminal explicit releases rely on their own bounded stages.
 `device_shutting_down` always
 advertises 2 s: a shutdown reservation is held across several separately bounded

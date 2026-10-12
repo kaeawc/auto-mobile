@@ -1,7 +1,8 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { getFocusedTextField } from "../../../src/features/action/ClearText";
 import { DefaultSendKeysCommandExecutor, SendKeys } from "../../../src/features/action/SendKeys";
 import { runWithTextRequestContext } from "../../../src/features/action/textTransportTimeout";
+import { logger } from "../../../src/utils/logger";
 import type { ObserveScreenExecuteOptions } from "../../../src/features/observe/interfaces/ObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { typedObservation } from "./IosTypedTextTestHarness";
@@ -96,17 +97,276 @@ test("popup reinsertion is read after acknowledgement and typing follows the ver
   expect(h.timer.getSleepHistory()).toEqual([100]);
 });
 
-test("empty clear needs one fresh hierarchy-only read and no retry", async () => {
+test("#12023: replacement fails when two acknowledged clears remove nothing", async () => {
+  const h = harness("old value");
+  h.client.clear = async () => {
+    h.calls.push("clear");
+    return { success: true };
+  };
+  const result = await h.action.execute([{ action: "type", text: "new", operation: "replace" }]);
+  expect(result).toMatchObject({ success: false, failedIndex: 0 });
+  expect(result.commands).toHaveLength(1);
+  expect(result.commands[0]?.error).toContain("removed nothing");
+  expect(result.commands[0]).toMatchObject({
+    success: false,
+    error: expect.stringContaining('remaining value: "old value"'),
+  });
+  expect(result.commands[0]).not.toHaveProperty("partialApplication");
+  expect(h.calls).toEqual(["clear", "clear"]);
+  expect(h.value).toBe("old value");
+  expect(h.timer.getSleepHistory()).toEqual([100]);
+});
+
+test.each(["batch", "replace"])(
+  "#12023: restored pre-clear value stops %s typing after three clears",
+  async (mode) => {
+    const h = harness("old");
+    h.client.clear = async () => {
+      h.calls.push("clear");
+      h.value = h.calls.length === 1 ? "ol" : "old";
+      return { success: true };
+    };
+    const result = await h.action.execute(
+      mode === "batch"
+        ? [{ action: "clear" }, { action: "type", text: "new" }]
+        : [{ action: "type", text: "new", operation: "replace" }],
+    );
+    expect(result.success).toBe(false);
+    expect(result.failedIndex).toBe(0);
+    expect(result.commands).toHaveLength(1);
+    expect(result.commands[0]?.success).toBe(false);
+    expect(result.commands[0]?.error).toContain('remaining value: "old"');
+    expect(result.commands[0]?.error).toContain("removed nothing");
+    expect(result.commands[0]?.error).toContain("after 3 attempt(s)");
+    expect(result.commands[0]).not.toHaveProperty("partialApplication");
+    expect(h.calls).toEqual(["clear", "clear", "clear"]);
+    expect(h.value).toBe("old");
+    expect(h.timer.getSleepHistory()).toEqual([100, 200]);
+  },
+);
+
+test.each([
+  { initial: "old value", text: "new" },
+  { initial: ":son", text: ":sonr" },
+])("#12023: untouched clear stops the batch for $initial", async ({ initial, text }) => {
+  const h = harness(initial);
+  h.client.clear = async () => {
+    h.calls.push("clear");
+    return { success: true };
+  };
+  const result = await h.action.execute([{ action: "clear" }, { action: "type", text }]);
+  expect(result).toMatchObject({ success: false, failedIndex: 0 });
+  expect(result.commands).toHaveLength(1);
+  expect(result.commands[0]).toMatchObject({
+    success: false,
+    error: expect.stringContaining(`remaining value: ${JSON.stringify(initial)}`),
+  });
+  expect(result.commands[0]).not.toHaveProperty("partialApplication");
+  expect(h.calls).toEqual(["clear", "clear"]);
+  expect(h.value).toBe(initial);
+  expect(h.timer.getSleepHistory()).toEqual([100]);
+});
+
+test("#12023: split-call clear fails before a separately requested type", async () => {
+  const h = harness("old value");
+  h.client.clear = async () => {
+    h.calls.push("clear");
+    return { success: true };
+  };
+  const cleared = await h.action.execute([{ action: "clear" }]);
+  expect(cleared).toMatchObject({ success: false, failedIndex: 0 });
+  expect(cleared.commands).toHaveLength(1);
+  expect(cleared.commands[0]?.error).toContain('remaining value: "old value"');
+  expect(cleared.commands[0]).not.toHaveProperty("partialApplication");
+  expect(h.calls).toEqual(["clear", "clear"]);
+  expect(h.value).toBe("old value");
+  const typed = await h.action.execute([{ action: "type", text: "new" }]);
+  expect(typed.success).toBe(true);
+  expect(typed.commands).toHaveLength(1);
+  expect(cleared.commands).toHaveLength(1);
+  expect(cleared.success).toBe(false);
+  expect(h.calls).toEqual(["clear", "clear", "insert:new"]);
+});
+
+test.each(["old value", "$0.00"])(
+  "#12023: standalone clear fails for an untouched pre-clear value %s",
+  async (initial) => {
+    const h = harness(initial);
+    h.client.clear = async () => {
+      h.calls.push("clear");
+      return { success: true };
+    };
+    const result = await h.executor.clear();
+    expect(result).toEqual({
+      success: false,
+      error: expect.stringContaining(`remaining value: ${JSON.stringify(initial)}`),
+    });
+    expect(result.error).toContain("removed nothing");
+    expect(h.calls).toEqual(["clear", "clear"]);
+    expect(h.value).toBe(initial);
+    expect(h.timer.getSleepHistory()).toEqual([100]);
+  },
+);
+
+test("#12023: untouched first clear succeeds when the retry empties the field", async () => {
+  const h = harness("old value");
+  h.client.clear = async () => {
+    h.calls.push("clear");
+    if (h.calls.length === 2) {
+      h.value = "";
+    }
+    return { success: true };
+  };
+  expect(await h.executor.clear()).toEqual({ success: true });
+  expect(h.calls).toEqual(["clear", "clear"]);
+  expect(h.value).toBe("");
+  expect(h.timer.getSleepHistory()).toEqual([100]);
+});
+
+test.each(["", "Email"])(
+  "#12023: a pre-clear blank or placeholder %j stays successful",
+  async (initial) => {
+    const h = harness(initial);
+    h.client.clear = async () => {
+      h.calls.push("clear");
+      return { success: true };
+    };
+    expect(await h.executor.clear()).toEqual({ success: true });
+    expect(h.calls).toEqual(["clear"]);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  },
+);
+
+test("#12023: a failed pre-read warns without values and preserves legacy verification", async () => {
   const h = harness("old");
+  const observe = h.observer.execute;
+  let reads = 0;
+  h.observer.execute = async (options) => {
+    if (++reads === 1) {
+      throw new Error("transport could expose old");
+    }
+    return observe(options);
+  };
+  h.client.clear = async () => {
+    h.calls.push("clear");
+    return { success: true };
+  };
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    const result = await h.executor.clear();
+    expect(result.success).toBe(true);
+    expect(result.warning).toContain("mask or permanent prefix");
+    expect(h.calls).toEqual(["clear", "clear"]);
+    expect(h.value).toBe("old");
+    expect(reads).toBe(3);
+    expect(warn).toHaveBeenCalled();
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("old");
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test.each(["stale", "no hierarchy", "omitted value"])(
+  "#12023: unavailable pre-clear %s falls back with a value-free warning",
+  async (kind) => {
+    const h = harness("old");
+    const observe = h.observer.execute;
+    let reads = 0;
+    h.observer.execute = async (options) => {
+      if (++reads !== 1) {
+        return observe(options);
+      }
+      const observation = typedObservation("old", false, kind === "omitted value");
+      if (kind === "no hierarchy") {
+        delete observation.viewHierarchy;
+      } else if (kind === "stale") {
+        observation.freshness = { isFresh: false, staleDurationMs: 1000 };
+      }
+      return observation;
+    };
+    h.client.clear = async () => {
+      h.calls.push("clear");
+      return { success: true };
+    };
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const result = await h.executor.clear();
+      expect(result.success).toBe(true);
+      expect(result.warning).toContain("mask or permanent prefix");
+      expect(reads).toBe(3);
+      expect(h.calls).toEqual(["clear", "clear"]);
+      expect(warn).toHaveBeenCalled();
+      expect(JSON.stringify(warn.mock.calls)).not.toContain("old");
+    } finally {
+      warn.mockRestore();
+    }
+  },
+);
+
+test("#12023: abort during the pre-read prevents the first clear", async () => {
+  const h = harness("old");
+  const controller = new AbortController();
+  const reason = new Error("cancel pre-read");
+  h.observer.execute = async (options) => {
+    expect(options?.signal).toBeDefined();
+    controller.abort(reason);
+    return typedObservation("old");
+  };
+  await expect(h.executor.clear(controller.signal)).rejects.toBe(reason);
+  expect(h.calls).toEqual([]);
+});
+
+test("#12023: pre-read uses the live text deadline and falls back after timing out", async () => {
+  const h = harness("old");
+  const deadline = h.timer.now() + 1050;
+  let reads = 0;
+  let readSignal: AbortSignal | undefined;
+  h.observer.execute = async (options) => {
+    reads++;
+    expect(h.calls).toEqual([]);
+    expect(options?.timeoutMs).toBe(50);
+    readSignal = options?.signal;
+    return new Promise(() => {});
+  };
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    const result = await runWithTextRequestContext({ getDeadlineMs: () => deadline }, () =>
+      h.executor.clear(),
+    );
+    expect(result).toEqual({
+      success: true,
+      warning: "iOS clear was not verified: the focused field could not be read.",
+    });
+    expect(reads).toBe(1);
+    expect(readSignal?.aborted).toBe(true);
+    expect(h.calls).toEqual(["clear"]);
+    expect(warn).toHaveBeenCalled();
+    expect(h.timer.now()).toBe(50);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test("empty clear reads the field before and after clearing with fresh hierarchy-only options", async () => {
+  const h = harness("old");
+  const observe = h.observer.execute;
+  const values: string[] = [];
+  h.observer.execute = async (options) => {
+    values.push(h.value);
+    return observe(options);
+  };
   expect(await h.executor.clear(undefined, "main")).toEqual({ success: true });
   expect(h.calls).toEqual(["clear"]);
-  expect(h.reads).toHaveLength(1);
-  expect(h.reads[0]).toMatchObject({
-    freshness: "fresh",
-    skipScreenshot: true,
-    skipAccessibilityAudit: true,
-    display: "main",
-  });
+  expect(values).toEqual(["old", ""]);
+  expect(h.reads).toHaveLength(2);
+  for (const read of h.reads) {
+    expect(read).toMatchObject({
+      freshness: "fresh",
+      skipScreenshot: true,
+      skipAccessibilityAudit: true,
+      display: "main",
+    });
+  }
   expect(h.timer.getSleepHistory()).toEqual([]);
 });
 
@@ -236,9 +496,10 @@ test.each([
 });
 
 test("unchanged mask settles after one retry with remaining-value evidence", async () => {
-  const h = harness("$0.00");
+  const h = harness("$5.00");
   h.client.clear = async () => {
     h.calls.push("clear");
+    h.value = "$0.00";
     return { success: true };
   };
   const result = await h.executor.clear();
@@ -246,6 +507,22 @@ test("unchanged mask settles after one retry with remaining-value evidence", asy
   expect(result.warning).toContain('The field still holds "$0.00"');
   expect(result.warning).toContain("mask or permanent prefix");
   expect(h.calls).toEqual(["clear", "clear"]);
+});
+
+test("#12023: a changed mask settles on the third clear with a warning", async () => {
+  const h = harness("$5.00");
+  h.client.clear = async () => {
+    h.calls.push("clear");
+    h.value = h.calls.length === 1 ? "$0.0" : "$0.00";
+    return { success: true };
+  };
+  const result = await h.executor.clear();
+  expect(result.success).toBe(true);
+  expect(result.warning).toContain('The field still holds "$0.00"');
+  expect(result.warning).toContain("mask or permanent prefix");
+  expect(h.calls).toEqual(["clear", "clear", "clear"]);
+  expect(h.value).toBe("$0.00");
+  expect(h.timer.getSleepHistory()).toEqual([100, 200]);
 });
 
 test("secure clear skips verification without reading or exposing its value", async () => {
@@ -273,12 +550,12 @@ test("unreadable observation preserves acknowledgement with an explicit warning"
   expect(h.calls).toEqual(["clear"]);
 });
 
-test("runner clear failure is returned unchanged without observation", async () => {
+test("runner clear failure is returned unchanged after the pre-read", async () => {
   const h = harness();
   const failure = { success: false, error: "runner refused", retryable: false };
   h.client.clear = async () => failure;
   expect(await h.executor.clear()).toBe(failure);
-  expect(h.reads).toEqual([]);
+  expect(h.reads).toHaveLength(1);
 });
 
 test("runner retry failure is returned without further read or mutation", async () => {
@@ -290,7 +567,7 @@ test("runner retry failure is returned without further read or mutation", async 
   };
   expect(await h.executor.clear()).toEqual({ ...failure, partialApplication: true });
   expect(h.calls).toEqual(["clear", "clear"]);
-  expect(h.reads).toHaveLength(1);
+  expect(h.reads).toHaveLength(2);
 });
 
 test("abort while sleeping propagates without another clear", async () => {
@@ -334,9 +611,10 @@ test("replacement does not insert after clear attempts leave changing text", asy
 });
 
 test("replacement preserves both clear and typed verification warnings", async () => {
-  const h = harness("$0.00");
+  const h = harness("$5.00");
   h.client.clear = async () => {
     h.calls.push("clear");
+    h.value = "$0.00";
     return { success: true };
   };
   h.client.insert = async () => {

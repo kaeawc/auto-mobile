@@ -10,6 +10,7 @@ import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
+import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { logger } from "../../../src/utils/logger";
 import { loggerCallsWithPrefix } from "../../helpers/loggerCallsWithPrefix";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
@@ -745,6 +746,7 @@ test("iOS clear forwards cancellation and preserves indeterminate guidance witho
       undefined,
       timer,
     );
+    action.observeScreen = new FakeObserveScreen();
     expect(await action["executeiOSClearText"]({ updatedAt: 0 }, controller.signal)).toEqual({
       success: false,
       retryable: false,

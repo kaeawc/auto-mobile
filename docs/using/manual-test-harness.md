@@ -537,27 +537,48 @@ reaping. A correct client keeps contexts in one task and closes them LIFO.
 For the 1.x transport bug, upgrade to 2.x or catch the exception group at
 `stdio_client` exit; client ordering alone cannot fix a server's post-EOF writes.
 
-Where auto-mobile's proxy falls, from **code reading only** of origin/main on
-2026-10-12, **not yet observed against a live daemon**: stdin EOF starts bounded
-shutdown through `src/processLifecycle.ts` (`installStdinShutdownHandlers`) and
-`src/shutdownCleanup.ts`. The stdio-proxy stage has a 2000 ms budget inside the
-9000 ms process limit, then the process exits, so the proxy does not ignore EOF.
-However, shutdown never closes the MCP Server/StdioServerTransport; stdout
-remains writable until `process.exit`. This puts it in the post-EOF-write row
-for 1.x Python clients. An in-flight tool/resource handler aborted by
-`DaemonMcpProxy.closeOnce`/`untilClosed` returns a structured error which the SDK
-writes within milliseconds of EOF (`src/daemon/daemonMcpProxy.ts`,
-`src/server/proxyServer.ts` tools/call catch → `resolveCallToolErrorResult`).
-While `closeOnce` awaits session releases (up to 1500 ms each), daemon
-notifications can still be forwarded. `handleDaemonNotification`,
-`notifyListChanged`, and `proxyServer.ts`'s `sendToolListChanged` have no closing
-guard for tools/list_changed or resources/list_changed; this notification race
-is plausible and needs a live run. resources/updated is suppressed because its
-listeners are cleared synchronously.
+Where auto-mobile's stdio server falls. Before #11951 it was in the
+post-EOF-write row for 1.x Python clients: stdin EOF started the bounded shutdown
+(`src/processLifecycle.ts`, `src/shutdownCleanup.ts`) but never closed the MCP
+server or its `StdioServerTransport`, so stdout stayed writable until
+`process.exit`. A tool call or resource read aborted by `DaemonMcpProxy.close()`
+had its structured error written within milliseconds of EOF, and a
+tools/list_changed or resources/list_changed notification arriving while the
+session release was awaited (up to 1500 ms) was still forwarded.
 
-A product fix, **not made here**, would stop stdout writes on EOF before any
-awaited cleanup: close the MCP server/transport, or gate every send on a client
-input-closed flag, then release sessions and exit. That makes the server safe
-for every SDK line; a 1.x client cannot prevent the transport error by itself.
+Since #11951 the stdio transport is wrapped in `OutputGatedTransport`
+(`src/server/outputGatedTransport.ts`). The stdin `end`/`close`/`error` listeners
+and the stdout `error` listener close the gate synchronously, before shutdown
+starts and also when a signal shutdown is already running; every later result,
+error and notification is dropped with a debug log. In-flight calls are still
+aborted and sessions are still released on the daemon socket. A SIGTERM or SIGINT
+shutdown with stdin still open answers in-flight calls as before, because that
+client is still reading. `test/server/stdioClientGoneSilence.test.ts` pins each
+ordering with fake streams; it has **not yet been observed against a live
+daemon**.
+
+To confirm on devices, use the 1.30.0 venv (the line that raises) against a
+private daemon built from the commit under test, two clients on two emulators,
+ten lifetimes each. Every `close` record must be `CLOSE_OK`, each client's
+session must be gone from the daemon within about 2 s of its close, and no
+stdio server process may remain:
+
+```bash
+B=/absolute/private/batch
+PY="$(bash scripts/manual-test/python/setup-venv.sh --batch-dir "$B" --mcp-version 1.30.0)"
+for ORDER in a-first simultaneous; do
+  "$PY" scripts/manual-test/python/two_clients.py \
+    --batch-dir "$B" --daemon 1 \
+    --script scripts/manual-test/python/scripts/observe-then-close.json \
+    --var-a platform=android --var-a deviceId=emulator-a \
+    --var-b platform=android --var-b deviceId=emulator-b \
+    --out-dir "$B/python-pair-1x-$ORDER" --lifetimes 10 --close-order "$ORDER" \
+    --stagger-ms 200 --close-mode-a normal --close-mode-b normal
+done
+```
+
+Then repeat the single-client loop above with `--close-mode mid-call` on the same
+venv: before the fix that mode raised `anyio.BrokenResourceError` at
+`stdio_client` exit whenever the aborted call's error reached stdout.
 
 The Python check uses python3 >=3.11, falling back to a uv-managed interpreter (finding an existing one or installing 3.11), and runs when `scripts/manual-test/python/` or the validator changes (path-selected in `scripts/prepush-shell.sh`) and locally via `bash scripts/all_fast_validate_checks.sh --only manual-test-python`.

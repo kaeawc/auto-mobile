@@ -1167,6 +1167,7 @@ export class Daemon {
     // it out. A pass still running when the registry closes fails, logs, and the loop exits.
     void this.managedSlotRedrive?.stop();
     this.managedSlotRedrive = undefined;
+    this.managedSlotAcquisition?.acquisition.close();
     this.managedSlotAcquisition = undefined;
     const registry = this.managedSlotRegistry;
     this.managedSlotRegistry = undefined;

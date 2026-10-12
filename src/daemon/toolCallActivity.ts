@@ -55,7 +55,9 @@ export function hasActiveSessionExecution(
   const executionSessionId =
     resolveToolSelectionBaseSessionUuid(sessionId, sessionManager) ?? sessionId;
   return (
-    devicePool.isSessionRecoveryInFlight(sessionId) ||
+    // Recovery holds the release veto, but is not a timely control call admitting later work.
+    (query?.sessionClockStartedAtOrBefore === undefined &&
+      devicePool.isSessionRecoveryInFlight(sessionId)) ||
     tracker.hasActiveSessionUuidExecutions(sessionId, query) ||
     tracker.hasActiveAutolockSessionExecutions(sessionId, query) ||
     (executionSessionId !== sessionId &&

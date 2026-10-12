@@ -918,7 +918,9 @@ test.each(["structuredClone", "sanitize", "sanitize compact"])(
 
 test("one emitted duplicate still resolves when a hidden promoted candidate consumes slot zero", () => {
   const observation = capturedPromotedPeers([50]);
-  const fresh = projectSkeleton(observation.elements!, observation.screenSize).skeleton;
+  const fresh = projectSkeleton(observation.elements!, observation.screenSize, undefined, {
+    ios: true,
+  }).skeleton;
   const rows = fresh.filter((row) => row.elementId === "magnifyingglass");
   expect(rows).toHaveLength(1);
   expect(rows[0].index).toBe(1);

@@ -48,6 +48,16 @@ export interface LivenessLeaseState {
   remainingMs: number;
 }
 
+/** The reaper's strict lease-plus-grace boundary, using its already-judged heartbeat. */
+export function heartbeatLeasePastGrace(
+  now: number,
+  judgedHeartbeat: number,
+  timeoutMs: number,
+  suspectGraceMs: number,
+): boolean {
+  return now - judgedHeartbeat > timeoutMs + suspectGraceMs;
+}
+
 /**
  * Where the lease stands.
  *

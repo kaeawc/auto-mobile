@@ -5018,6 +5018,13 @@ export class DaemonMcpProxy {
     namesOwnedSession = false,
     isSessionAcquisition: boolean,
   ): Record<string, unknown> {
+    // Acquisition identity is independent of retained-session restoration. CLI callers keep
+    // their existing wire, including the owner token when restoration itself requires it.
+    const acquisitionIdentity = (): Record<string, unknown> =>
+      this.config.oneShotCli || this.cliSessionLivenessDeclared
+        ? args
+        : { ...args, [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: this.livenessOwnerToken };
+    args = acquisitionIdentity();
     if (!namesOwnedSession && (!restore || this.sessionUuidFromArgs(args))) {
       return args;
     }

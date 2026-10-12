@@ -1,3 +1,4 @@
+import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { describe, expect, test, spyOn, beforeEach, afterEach } from "bun:test";
 import {
   DaemonMcpProxy,
@@ -233,7 +234,10 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
       // Naming a session never claims it: only a minted or startup session is this proxy's to own,
       // so a session another owner must reclaim stays awaiting that owner.
       expect(fakeClient.callToolCalls).toEqual([
-        { toolName: "tapOn", params: { sessionUuid: BOUND_SESSION, x: 10, y: 20 } },
+        {
+          toolName: "tapOn",
+          params: withProxyOwnerToken({ sessionUuid: BOUND_SESSION, x: 10, y: 20 }),
+        },
       ]);
       expect(
         fakeClient.callDaemonMethodCalls.filter((call) => call.method === "daemon/heartbeat"),
@@ -1368,7 +1372,7 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
         ],
       });
       expect(replacementDaemon.callToolCalls).toEqual([
-        { toolName: "getAndroid", params: { avdName: "am-api34-ga-arm64" } },
+        { toolName: "getAndroid", params: withProxyOwnerToken({ avdName: "am-api34-ga-arm64" }) },
       ]);
     } finally {
       isAvailableSpy.mockRestore();

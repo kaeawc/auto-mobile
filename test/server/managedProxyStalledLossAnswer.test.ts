@@ -1,3 +1,4 @@
+import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { afterEach, beforeAll, beforeEach, expect, spyOn, test } from "bun:test";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -279,7 +280,12 @@ async function expectNextReadForwardedSessionless(
   expect(forwarded()).toEqual([]);
   const read = await callTool("observe", { deviceId: "emulator-5554" });
   expect(read.isError).not.toBe(true);
-  expect(forwarded()).toEqual([{ toolName: "observe", params: { deviceId: "emulator-5554" } }]);
+  expect(forwarded()).toEqual([
+    {
+      toolName: "observe",
+      params: withProxyOwnerToken({ deviceId: "emulator-5554" }, "managed-proxy-token"),
+    },
+  ]);
 }
 
 test.each(["heartbeat-timeout", "session-not-found"] as const)(

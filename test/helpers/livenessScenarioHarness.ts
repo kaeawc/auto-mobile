@@ -338,11 +338,15 @@ function matchingDaemonManager(): FakeDaemonManager {
   return manager;
 }
 
-const AUTOLOCK_ENV_KEYS = [
+const SCENARIO_ENV_KEYS = [
   "AUTOMOBILE_DEVICE_POOL_AUTOLOCK",
   "AUTO_MOBILE_DEVICE_POOL_AUTOLOCK",
   "AUTOMOBILE_DEVICE_POOL_TIMEOUT",
   "AUTO_MOBILE_DEVICE_POOL_TIMEOUT",
+  "AUTOMOBILE_APPEARANCE_SYNC",
+  "AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES",
+  "AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES",
+  "AUTOMOBILE_IOS_WARMUP_DEVICES",
 ] as const;
 
 export class LivenessScenario {
@@ -484,7 +488,8 @@ export class LivenessScenario {
       spyOn(DefaultDeviceSettingsAccess.prototype, "read").mockResolvedValue({}),
       spyOn(DefaultDeviceSettingsAccess.prototype, "write").mockResolvedValue([]),
     );
-    for (const key of AUTOLOCK_ENV_KEYS) {
+    // Keep every daemon in this scenario independent of inherited passive-work switches.
+    for (const key of SCENARIO_ENV_KEYS) {
       this.savedEnv.set(key, process.env[key]);
       delete process.env[key];
     }
@@ -589,8 +594,10 @@ export class LivenessScenario {
     // One database across daemon "processes", so a restart rehydrates what the last one persisted.
     this.repository ??= new DeviceSessionRepository(await createTestDatabase(), this.timer);
     const repository = this.repository;
-    // Each process has its own daemon session id, so a restart sees the last one's rows as stale.
-    const daemonIds = new FakeIdGenerator([`scenario-daemon-${++this.daemonCount}`]);
+    // Both process identity and session identity come from the daemon's injected id generator.
+    const daemonName = `scenario-daemon-${++this.daemonCount}`;
+    const daemonIds = new FakeIdGenerator([`${daemonName}:instance`, daemonName]);
+    const daemonInstance = daemonIds.next();
     // The process's own timers: they die with it, while the proxies' run on.
     const clock = new ProcessTimer(this.timer);
     const daemon = new Daemon(
@@ -654,7 +661,7 @@ export class LivenessScenario {
     });
     let socket: InMemoryControlSocket | undefined;
     await daemon.startOn(
-      this.startHost(clock, startupMs, (bound) => {
+      this.startHost(clock, startupMs, daemonInstance, (bound) => {
         socket = bound;
       }),
     );
@@ -673,6 +680,7 @@ export class LivenessScenario {
   private startHost(
     clock: ProcessTimer,
     startupMs: number,
+    daemonInstance: string,
     onSocket: (socket: InMemoryControlSocket) => void,
   ): DaemonStartHost {
     const steps: string[] = [];
@@ -699,6 +707,7 @@ export class LivenessScenario {
         }
         const socket = InMemoryControlSocket.attach({
           timer: clock,
+          daemonInstance,
           connectionIds: new FakeIdGenerator(),
           // Every tool is enabled for every session: the selection store is a database table.
           startupOptions: {

@@ -170,7 +170,10 @@ themselves; control calls, the holder's own reads and reads of a free device (wh
 readiness) stay on the control lane.
 A `deviceReadOnly` call whose `sessionUuid` names no device session this
 daemon issued (the IDE injects its observer session UUID into every call) is
-handled as sessionless rather than refused as unissued (#10968). Read-only tools
+handled as sessionless rather than refused as unissued (#10968). Reads also treat device-restart recovery reservations as held: running devices remain readable,
+while stopped reserved devices answer retryable `device_owned_by_other_session` with no boot;
+transient read discovery failure retries briefly before `discovery_incomplete`, never readiness (#11918).
+Read-only tools
 (owner decisions 2026-10-09, #10965: anything that changes visible UI or starts a
 device-side process is control; read-only access never requires a session):
 `observe`, `snapshotOf`, `hitTest`, `identifyInteractions`, `listApps`,

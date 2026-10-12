@@ -233,6 +233,14 @@ export function isRecoverableDaemonReleaseReason(reason: string): boolean {
   return sessionReleaseReasonTraits(reason).recoverable;
 }
 
+/** Stable proxy fallback when a definitive loss answer names no daemon release reason. */
+export const SESSION_NOT_FOUND_REASON = "session-not-found";
+
+/** Only daemon handoffs can rehydrate without restarting the managed execution's device. */
+export function isRecoverableDaemonHandoffReason(reason: string): boolean {
+  return isRecoverableDaemonReleaseReason(reason) && !reason.startsWith("device-restart:");
+}
+
 /**
  * Whether `candidate` replaces `current` as the reason of one release. A terminal reason replaces a
  * non-terminal one. An idle reason is the weakest terminal reason: any other terminal reason

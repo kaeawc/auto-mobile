@@ -230,3 +230,45 @@ describe("transitional adb bind wait", () => {
     }
   });
 });
+
+for (const hold of [true, false]) {
+  test(`absence after an observed offline row holds only when opted in: ${hold}`, async () => {
+    const timer = new FakeTimer();
+    let states = offline();
+    const wait = new TransitionalAdbBindWait(id, {
+      timer,
+      getSignal: () => undefined,
+      probeTimeoutMs: 10000,
+      backoff: fixedBackoff(2500),
+      holdAbsenceAfterTransitional: hold,
+      probe: async () => states,
+    });
+    const first = wait.waitIfTransitional();
+    await drainUntilQuiescent(timer);
+    timer.advanceTime(2500);
+    expect(await first).toBe(true);
+    states = new Map();
+    const absent = wait.waitIfTransitional();
+    await drainUntilQuiescent(timer);
+    expect(timer.getPendingTimeouts()).toEqual(hold ? [2500] : []);
+    if (hold) {
+      timer.advanceTime(2500);
+    }
+    expect(await absent).toBe(hold);
+    expect(await wait.waitIfTransitional()).toBe(false);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+}
+
+test("opted-in absence never seen transitional returns immediately", async () => {
+  const timer = new FakeTimer();
+  const wait = new TransitionalAdbBindWait(id, {
+    timer,
+    getSignal: () => undefined,
+    probeTimeoutMs: 10000,
+    holdAbsenceAfterTransitional: true,
+    probe: async () => new Map(),
+  });
+  expect(await wait.waitIfTransitional()).toBe(false);
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+});

@@ -201,9 +201,11 @@ connection used for tools and resources:
    interval, however long the daemon was away, and reclaims the rehydrated session
    when the restarted daemon answers; the next call carries `daemon_restart_resumed`.
    The restarted daemon waits lease + suspect grace (about 8 s) for the owner.
-   If the session is released instead, `managed_execution_ended.reason` names the
-   daemon's release reason, the same value `daemon session-info` shows as
-   `releaseReason`. While the session is live, a duplicate proxy still gets
+   During reclaim, reasonless not-found answers and `daemon-shutdown` or
+   `daemon-restart` answers are awaited for the existing rehydration window, once
+   per answering daemon instance; silence never resets that window.
+   If the execution ends, every managed answer, notification and resource reports
+   the daemon's release reason, or `session-not-found` when none was named. While the session is live, a duplicate proxy still gets
    `slot_in_use` and the scope is never treated as abandoned.
 4. **Drain and release.** When the execution ends (stdin EOF, cancellation or
    owner loss) the proxy releases its sessions with a bounded wait

@@ -8,6 +8,8 @@ import { DaemonFrameTooLargeError } from "../../src/daemon/socketServer/LineFram
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 
 function setup(limit = 256) {
   const timer = new FakeTimer();
@@ -203,7 +205,14 @@ test("notification preserves extras and split UTF-8, and a replacement connectio
   }
 });
 
-test("overflow through connect closes once, ignores old bytes, and reconnects with a fresh framer", async () => {
+async function withSocketConnection(
+  scenario: (
+    client: DaemonClient,
+    sockets: FakeSocket[],
+    callbacks: Array<() => void>,
+    timer: FakeTimer,
+  ) => Promise<void>,
+): Promise<void> {
   const timer = new FakeTimer();
   const sockets: FakeSocket[] = [];
   const callbacks: Array<() => void> = [];
@@ -223,38 +232,153 @@ test("overflow through connect closes once, ignores old bytes, and reconnects wi
     "win32",
     128,
   );
-  let closed = 0;
-  client.onConnectionClosed(() => closed++);
   try {
+    await scenario(client, sockets, callbacks, timer);
+  } finally {
+    for (const socket of sockets) {
+      socket.emit("close");
+      socket.destroy();
+    }
+    await client.close();
+    create.mockRestore();
+  }
+}
+
+test("test socket attachment adds no listeners", async () => {
+  const socket = new FakeSocket();
+  const client = new DaemonClient("/fake/socket", 1000, new FakeTimer(), {}, null);
+  const listeners = socket.eventNames().map((event) => [event, socket.listeners(event)]);
+  try {
+    client.attachSocketForTesting(socket);
+    expect(socket.eventNames().map((event) => [event, socket.listeners(event)])).toEqual(listeners);
+  } finally {
+    await client.close();
+  }
+});
+
+test("connect rejects a destroyed socket error without advancing fake time", async () => {
+  await withSocketConnection(async (client, sockets, _callbacks, timer) => {
+    const controller = new AbortController();
+    const connecting = client.connect(1000, controller.signal).catch((error: unknown) => error);
+    const errors = spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      const socket = sockets[0]!;
+      socket.destroyed = true;
+      const transportError = new Error("connect ENOENT");
+      socket.emit("error", transportError);
+      const outcome = await Promise.race([connecting, drainMicrotasks(16).then(() => "unsettled")]);
+      expect(outcome).toBeInstanceOf(DaemonUnavailableError);
+      expect(outcome).toHaveProperty("message", "Daemon socket connection lost: connect ENOENT");
+      expect(outcome).toHaveProperty("cause", transportError);
+      expect(errors).toHaveBeenCalledWith("Daemon socket error: connect ENOENT");
+      expect(timer.now()).toBe(0);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      controller.abort(new Error("test cleanup"));
+      await connecting;
+      errors.mockRestore();
+    }
+  });
+});
+
+test("established destroyed socket preserves transport error before close and notifies once", async () => {
+  await withSocketConnection(async (client, sockets, callbacks, timer) => {
     const connecting = client.connect();
     callbacks[0]!();
     await connecting;
-    const pending = client.callTool("tapOn", {}).catch((error: unknown) => error);
-    sockets[0]!.feed(Buffer.from("x".repeat(129)));
-    expect(await pending).toBeInstanceOf(DaemonFrameTooLargeError);
-    expect(closed).toBe(1);
-    expect(timer.getPendingTimeoutCount()).toBe(0);
-    const reconnect = client.connect();
-    callbacks[1]!();
-    await reconnect;
-    const result = client.callTool("tapOn", {});
-    const bytes = Buffer.from(
-      JSON.stringify({ type: "mcp_response", id: "q", success: true, result: "😀" }) + "\n",
-    );
-    const split = bytes.indexOf(Buffer.from("😀")) + 1;
-    sockets[1]!.feed(bytes.subarray(0, split));
-    sockets[0]!.emit("data", Buffer.from("old socket data\n"));
-    sockets[0]!.emit("error", new Error("late socket error"));
-    sockets[0]!.emit("close");
-    expect(client.hasPendingRequestForTesting("q")).toBe(true);
-    expect(closed).toBe(1);
-    sockets[1]!.feed(bytes.subarray(split));
-    expect(await result).toBe("😀");
-    expect(timer.getPendingTimeoutCount()).toBe(0);
-  } finally {
-    timer.advanceTime(120_000);
-    await client.close();
-    sockets.forEach((socket) => socket.destroy());
-    create.mockRestore();
-  }
+    let closed = 0;
+    client.onConnectionClosed(() => closed++);
+    const pending = client.callDaemonMethod("tools/list", {}).catch((error: unknown) => error);
+    const errors = spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      const socket = sockets[0]!;
+      socket.destroyed = true;
+      socket.emit("error", new Error("read ECONNRESET"));
+      socket.emit("close");
+      const error = await pending;
+      expect(error).toBeInstanceOf(DaemonUnavailableError);
+      expect(error).toHaveProperty("message", "Daemon socket connection lost: read ECONNRESET");
+      expect(error.cause).toBeInstanceOf(DaemonDisconnectError);
+      expect(error.cause.toolName).toBe("tools/list");
+      expect(errors).toHaveBeenCalledWith("Daemon socket error: read ECONNRESET");
+      expect(closed).toBe(1);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      errors.mockRestore();
+    }
+  });
 });
+
+test("plain close notifies once", async () => {
+  await withSocketConnection(async (client, sockets, callbacks) => {
+    const connecting = client.connect();
+    callbacks[0]!();
+    await connecting;
+    let closed = 0;
+    client.onConnectionClosed(() => closed++);
+    sockets[0]!.destroy();
+    expect(closed).toBe(1);
+    sockets[0]!.emit("close");
+    expect(closed).toBe(1);
+  });
+});
+
+for (const reconnectBeforeClose of [false, true]) {
+  test(`overflow notifies synchronously once with old close ${reconnectBeforeClose ? "after" : "before"} reconnect`, async () => {
+    await withSocketConnection(async (client, sockets, callbacks, timer) => {
+      const connecting = client.connect();
+      callbacks[0]!();
+      await connecting;
+      const socket = sockets[0]!;
+      // Suppress FakeSocket's synchronous destroy-close; emit the close explicitly later.
+      const destroy = spyOn(socket, "destroy").mockImplementation(() => {
+        socket.destroyed = true;
+        socket.writable = false;
+        return socket;
+      });
+      let closed = 0;
+      const unsubscribe = client.onConnectionClosed(() => {
+        closed++;
+        expect(socket.destroyed).toBe(false);
+        expect(client.hasPendingRequestForTesting("p")).toBe(true);
+      });
+      const otherData = () => {};
+      socket.on("data", otherData);
+      const pending = client.callTool("tapOn", {}).catch((error: unknown) => error);
+      try {
+        socket.feed(Buffer.from("x".repeat(129)));
+        expect(closed).toBe(1);
+        expect(socket.destroyed).toBe(true);
+        expect(socket.listeners("data")).toContain(otherData);
+        expect(await pending).toBeInstanceOf(DaemonFrameTooLargeError);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+        if (!reconnectBeforeClose) {
+          socket.emit("close");
+          expect(closed).toBe(1);
+        }
+        const reconnect = client.connect();
+        callbacks[1]!();
+        await reconnect;
+        const result = client.callTool("tapOn", {}).catch((error: unknown) => error);
+        const bytes = Buffer.from(
+          JSON.stringify({ type: "mcp_response", id: "q", success: true, result: "😀" }) + "\n",
+        );
+        const split = bytes.indexOf(Buffer.from("😀")) + 1;
+        sockets[1]!.feed(bytes.subarray(0, split));
+        socket.emit("data", Buffer.from("old socket data\n"));
+        socket.emit("error", new Error("late socket error"));
+        if (reconnectBeforeClose) {
+          socket.emit("close");
+        }
+        expect(client.hasPendingRequestForTesting("q")).toBe(true);
+        expect(closed).toBe(1);
+        sockets[1]!.feed(bytes.subarray(split));
+        expect(await result).toBe("😀");
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        unsubscribe();
+        destroy.mockRestore();
+      }
+    });
+  });
+}

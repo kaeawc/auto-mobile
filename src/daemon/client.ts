@@ -427,6 +427,7 @@ export class DaemonClient {
   private readonly cancelledRequestIds = new Set<string>();
   private framer: LineFramer;
   private inboundClosed = false;
+  private readonly closedSockets = new WeakSet<Socket | Duplex>();
   private connected: boolean = false;
   private connectInFlight: Promise<void> | null = null;
   private notificationHandlers: Set<(notification: DaemonNotification) => void> = new Set();
@@ -474,11 +475,6 @@ export class DaemonClient {
     this.connected = true;
     this.inboundClosed = false;
     this.framer = this.createInboundFramer();
-    socket.once("close", () => {
-      if (this.socket === null || this.socket === socket) {
-        this.handleSocketClosed();
-      }
-    });
   }
 
   /** Test-only seam for delivering a daemon frame. */
@@ -813,14 +809,14 @@ export class DaemonClient {
       this.socket = socket;
 
       socket.on("data", (data) => {
-        if (isStaleSocket() || socket.destroyed) {
+        if (isStaleSocket()) {
           return;
         }
         this.handleData(typeof data === "string" ? Buffer.from(data) : data);
       });
 
       socket.on("error", (error) => {
-        if (isStaleSocket() || socket.destroyed) {
+        if (isStaleSocket()) {
           return;
         }
         logger.error(`Daemon socket error: ${error.message}`);
@@ -830,10 +826,10 @@ export class DaemonClient {
       socket.once("close", () => {
         // fail() clears this.socket before destroy emits close. Preserve that
         // notification path; only a different installed socket makes this stale.
-        if (isStaleSocket()) {
+        if (isStaleSocket() || this.closedSockets.has(socket)) {
           return;
         }
-        this.handleSocketClosed();
+        this.handleSocketClosed(socket);
         // A daemon restart/crash closes the socket. Over a Unix domain socket
         // (no TCP RST) a dying daemon delivers EOF -> "close" with no "error"
         // event, so any in-flight request would otherwise hang until its request
@@ -894,21 +890,21 @@ export class DaemonClient {
   private handleInboundOverflow(): void {
     const error = new DaemonFrameTooLargeError(this.maxInboundFrameBytes);
     logger.warn(error.message);
+    const socket = this.socket;
+    this.handleSocketClosed(socket);
     for (const pending of this.pendingRequests.values()) {
       this.timer.clearTimeout(pending.timeout);
       pending.removeAbortListener?.();
       pending.reject(error);
     }
     this.pendingRequests.clear();
-    this.connected = false;
-    this.inboundClosed = true;
-    const socket = this.socket;
-    this.socket = null;
-    socket?.removeAllListeners("data");
     socket?.destroy();
   }
 
-  private handleSocketClosed(): void {
+  private handleSocketClosed(socket: Socket | Duplex | null): void {
+    if (socket) {
+      this.closedSockets.add(socket);
+    }
     this.connected = false;
     this.socket = null;
     this.inboundClosed = true;

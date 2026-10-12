@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import fc from "fast-check";
-import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
+import {
+  DaemonAmbiguousSessionSelectorError,
+  DaemonMcpProxy,
+} from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
 import {
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
@@ -441,14 +444,15 @@ describe("#10692: a selector-routed call keeps the session it reached in use", (
     test("an ambiguous platform selector credits neither same-platform session", async () => {
       await proxy.callTool("getAndroid", {});
       await proxy.callTool("provisionDevice", {});
-      await callEvery(
-        CONTROL,
-        { ...CONTROL_ARGS, platform: "android" },
-        IDLE_WINDOW_MS / 3,
-        IDLE_WINDOW_MS - INTERVAL_MS,
-      );
+      const until = timer.now() + IDLE_WINDOW_MS - INTERVAL_MS;
+      while (timer.now() + IDLE_WINDOW_MS / 3 <= until) {
+        await timer.advanceTimeAsync(IDLE_WINDOW_MS / 3);
+        await expect(
+          proxy.callTool(CONTROL, { ...CONTROL_ARGS, platform: "android" }),
+        ).rejects.toBeInstanceOf(DaemonAmbiguousSessionSelectorError);
+      }
       await timer.advanceTimeAsync(IDLE_WINDOW_MS / 3);
-      // With no echo, both sessions idle out; a platform control reports the release.
+      // Refused calls credit neither session; both idle out and control reports the release.
       await expect(
         proxy.callTool(CONTROL, { ...CONTROL_ARGS, platform: "android" }),
       ).rejects.toThrow(/released/);

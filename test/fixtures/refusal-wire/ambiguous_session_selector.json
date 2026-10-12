@@ -1,0 +1,13 @@
+{
+  "code": "ambiguous_session_selector",
+  "builder": "ambiguousSessionSelectorResult",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":{\"code\":\"ambiguous_session_selector\",\"message\":\"Platform 'android' alone matches 2 device sessions this MCP connection holds: 11111111-2222-4333-8444-555555555555 (device 'emulator-5554'), second-android-session (device 'emulator-5556'). Name one with sessionUuid or deviceId.\",\"platform\":\"android\",\"candidates\":[{\"sessionUuid\":\"11111111-2222-4333-8444-555555555555\",\"deviceId\":\"emulator-5554\"},{\"sessionUuid\":\"second-android-session\",\"deviceId\":\"emulator-5556\"}],\"retryable\":false}}"
+      }
+    ],
+    "isError": true
+  }
+}

@@ -1,7 +1,8 @@
 import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createProxyMcpServer } from "../../src/server/proxyServer";
+import { ambiguousSessionSelectorResult, createProxyMcpServer } from "../../src/server/proxyServer";
+import { DaemonAmbiguousSessionSelectorError } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
@@ -53,6 +54,33 @@ describe("appendHeartbeatExpiryMessage", () => {
 });
 
 let isAvailableSpy: ReturnType<typeof spyOn> | null = null;
+
+test("a platform ambiguity is a typed non-retryable tool result without session recovery", () => {
+  const candidates = [
+    { sessionUuid: "default", deviceId: "emulator-5554" },
+    { sessionUuid: "sibling" },
+  ];
+  const error = new DaemonAmbiguousSessionSelectorError("android", candidates);
+  expect(error.message).toBe(
+    "Platform 'android' alone matches 2 device sessions this MCP connection holds: " +
+      "default (device 'emulator-5554'), sibling. Name one with sessionUuid or deviceId.",
+  );
+  const result = ambiguousSessionSelectorResult(error);
+  const payload = {
+    error: {
+      code: "ambiguous_session_selector",
+      message: error.message,
+      platform: "android",
+      candidates,
+      retryable: false,
+    },
+  };
+  expect(result).toEqual({
+    isError: true,
+    content: [{ type: "text", text: JSON.stringify(payload) }],
+  });
+  expect(JSON.parse((result.content[0] as { text: string }).text)).toEqual(payload);
+});
 
 afterEach(() => {
   isAvailableSpy?.mockRestore();

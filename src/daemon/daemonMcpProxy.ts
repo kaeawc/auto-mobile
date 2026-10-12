@@ -862,6 +862,25 @@ export class DaemonConnectionSessionReleasedError extends Error {
   }
 }
 
+/** A platform-only control selector matches several sessions this connection holds. */
+export class DaemonAmbiguousSessionSelectorError extends Error {
+  constructor(
+    readonly platform: "android" | "ios",
+    readonly candidates: ReadonlyArray<{ sessionUuid: string; deviceId?: string }>,
+  ) {
+    const sessions = candidates
+      .map(({ sessionUuid, deviceId }) =>
+        deviceId === undefined ? sessionUuid : `${sessionUuid} (device '${deviceId}')`,
+      )
+      .join(", ");
+    super(
+      `Platform '${platform}' alone matches ${candidates.length} device sessions this MCP connection holds: ` +
+        `${sessions}. Name one with sessionUuid or deviceId.`,
+    );
+    this.name = "DaemonAmbiguousSessionSelectorError";
+  }
+}
+
 /** Raised when a frontend-advertised tool is rejected by the daemon as unknown. */
 export class DaemonToolUnavailableError extends Error {
   /** Set when the daemon's availability gate rejected the call, so callers can tell it from skew. */
@@ -4369,6 +4388,7 @@ export class DaemonMcpProxy {
       await this.waitForLivenessRecovery(signal);
     }
     callerArgs = this.withFencedControlDeviceSession(name, callerArgs);
+    this.refuseAmbiguousSessionSelector(name, callerArgs);
     this.reportToolSessionLoss(name, callerArgs);
     if (this.stallHandovers.size > 0) {
       await this.resumeStalledSessionNamedBy(callerArgs);
@@ -4627,19 +4647,23 @@ export class DaemonMcpProxy {
     };
   }
 
+  private isSessionlessControlDeviceTool(name: string): boolean {
+    return (
+      !this.config.initialSessionUuid &&
+      !isDeviceBindingTool(name) &&
+      !isDeviceInventoryTool(name) &&
+      name !== SET_TOOL_ENABLED_TOOL_NAME &&
+      this.toolTargetsDevice(name) &&
+      !this.isDeviceReadOnlyTool(name)
+    );
+  }
+
   /** A fenced control must name a held session or its known, unique device (#11656). */
   private withFencedControlDeviceSession(
     name: string,
     args: Record<string, unknown>,
   ): Record<string, unknown> {
-    if (
-      this.config.initialSessionUuid ||
-      isDeviceBindingTool(name) ||
-      isDeviceInventoryTool(name) ||
-      name === SET_TOOL_ENABLED_TOOL_NAME ||
-      !this.toolTargetsDevice(name) ||
-      this.isDeviceReadOnlyTool(name)
-    ) {
+    if (!this.isSessionlessControlDeviceTool(name)) {
       return args;
     }
     // A selector call may itself discover the idle release. Fence before resolving its device,
@@ -4657,6 +4681,33 @@ export class DaemonMcpProxy {
     return holder === undefined
       ? args
       : { ...args, sessionUuid: holder, [DAEMON_BOUND_SESSION_PARAM]: terminal.sessionUuid };
+  }
+
+  private refuseAmbiguousSessionSelector(name: string, args: Record<string, unknown>): void {
+    const platform = args.platform;
+    const bound = this.boundSessionUuid;
+    if (
+      this.initialSessionBindingConfigured ||
+      !this.isSessionlessControlDeviceTool(name) ||
+      (platform !== "android" && platform !== "ios") ||
+      typeof args.deviceId === "string" ||
+      this.sessionUuidFromArgs(args) !== undefined ||
+      args.device ||
+      !bound ||
+      this.terminalBoundSession
+    ) {
+      return;
+    }
+    // Unknown platforms cannot truthfully count as matches (#11714).
+    const candidates = [...new Set([bound, ...this.otherHeldSessions.keys()])]
+      .filter((id) => this.sessionPlatforms.get(id) === platform)
+      .map((sessionUuid) => {
+        const deviceId = this.sessionDeviceIds.get(sessionUuid);
+        return { sessionUuid, ...(deviceId === undefined ? {} : { deviceId }) };
+      });
+    if (candidates.length > 1) {
+      throw new DaemonAmbiguousSessionSelectorError(platform, candidates);
+    }
   }
 
   private survivingSessionHoldingDevice(args: Record<string, unknown>): string | undefined {
@@ -5570,6 +5621,9 @@ export class DaemonMcpProxy {
       // naming it carry none: the daemon's answer is the only place the proxy learns it, and
       // loss reports need it (#11028).
       this.rememberSessionDevice(sessionId, session.deviceId);
+      if (session.platform !== undefined) {
+        this.sessionPlatforms.set(sessionId, session.platform);
+      }
       return false;
     }
     if (

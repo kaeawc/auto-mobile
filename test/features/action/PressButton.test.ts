@@ -17,6 +17,7 @@ import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
 import { holdDispatchedRequest } from "../../../src/daemon/dispatchedRequestHold";
 import { drainMicrotasks, drainUntil } from "../../helpers/fakeTimerStepping";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
+import { SimctlCommandTimeoutError } from "../../../src/utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 
 describe("PressButton", () => {
   const iosDevice: BootedDevice = {
@@ -204,6 +205,40 @@ describe("PressButton", () => {
       }
     },
   );
+
+  test("simulator launch budget regression retries a timed-out Home launch", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const client = new FakeIOSCtrlProxy(timer);
+    client.setHierarchyData({
+      packageName: "com.apple.springboard",
+      updatedAt: 1,
+      hierarchy: { className: "XCUIApplication" },
+    });
+    const instance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      client as unknown as IOSCtrlProxyClient,
+    );
+    const timeouts: number[] = [];
+    try {
+      const action = new PressButton(iosSimulator, null, timer, {
+        executeCommandArgs: async (_args, timeoutMs = 0) => {
+          timeouts.push(timeoutMs);
+          if (timeouts.length === 1) {
+            await timer.sleep(timeoutMs);
+            throw new SimctlCommandTimeoutError("busy host launch timed out");
+          }
+          return { stdout: "", stderr: "" };
+        },
+      });
+      expect((await action.press("home")).success).toBe(true);
+      expect(timeouts).toEqual([2500, 2400]);
+      expect(timer.getSleepHistory()).toEqual([2500, 100]);
+      expect(client.getPressHomeRequestCount()).toBe(0);
+      expect(client.getHierarchyRequestCount()).toBe(1);
+    } finally {
+      instance.mockRestore();
+    }
+  });
 
   test.each([false, true])("simulator Home marks at launch, abort=%s", async (aborted) => {
     const timer = new FakeTimer();

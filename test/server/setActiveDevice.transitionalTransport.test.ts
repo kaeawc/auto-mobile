@@ -1,3 +1,4 @@
+import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessService";
 import { afterEach, expect, test } from "bun:test";
 import {
   createSetActiveDeviceHandler,
@@ -97,6 +98,68 @@ test("legacy not-found retries offline then not listed then ready", async () => 
   await h.select({ deviceId: device.deviceId });
   expect(h.calls).toEqual(["ready", "invalidate", "ready", "invalidate", "ready", "resume", "pin"]);
   expect(h.timer.now()).toBe(300);
+});
+
+for (const deadlineExhausted of [true, false]) {
+  test(`runner readiness error retries offline then device: deadlineExhausted=${deadlineExhausted}`, async () => {
+    const original = new RunnerReadinessError(
+      "runner deadline",
+      false,
+      deadlineExhausted,
+      "runner-connect",
+    );
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let state = "offline";
+    let attempts = 0;
+    const probedStates: string[] = [];
+    const legacy: LegacyDeviceSelection = {
+      getCurrentDevice: () => undefined,
+      getCurrentPlatform: () => undefined,
+      ensureDeviceReady: async () => {
+        attempts++;
+        if (state === "offline") {
+          throw original;
+        }
+        expect(state).toBe("device");
+        return device;
+      },
+      setExplicitDevicePin: () => {},
+    };
+    const select = createSetActiveDeviceHandler({
+      legacyDeviceSelection: () => legacy,
+      resumeCtrlProxy: async () => {},
+      transportWait: {
+        timer,
+        invalidateDeviceList: () => {
+          state = "device";
+        },
+        probe: async () => {
+          probedStates.push(state);
+          return new Map([[device.deviceId, state]]);
+        },
+      },
+    });
+    await select({ deviceId: device.deviceId });
+    expect(attempts).toBe(2);
+    expect(probedStates).toEqual(["offline"]);
+    expect(timer.now()).toBe(100);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+}
+
+test("runner readiness deadline finally propagates with the typed timeout wire shape", async () => {
+  const original = new RunnerReadinessError("runner deadline", false, true, "runner-connect");
+  const h = arrange(["offline", "device"], 2, original);
+  const error = await h.select({ deviceId: device.deviceId }).catch((caught: unknown) => caught);
+  expect(error).toBe(original);
+  expect(h.probes()).toBe(2);
+  expect(h.timer.now()).toBe(100);
+  expect(
+    JSON.parse(
+      shapeToolCallError(error, { toolName: "setActiveDevice", source: "MCP" }).content[0].text,
+    ),
+  ).toMatchObject({ code: "timeout", retryable: true });
 });
 
 test("fresh readiness retries recover offline then absent then ready at 700ms", async () => {

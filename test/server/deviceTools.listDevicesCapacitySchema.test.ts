@@ -45,6 +45,35 @@ describe("listDevices output schema accepts the real capacity shape (#11268)", (
     expect(validate(envelope({ android })), JSON.stringify(validate.errors)).toBe(true);
   });
 
+  test("android describeCapacity processTable diagnostics validate strictly", async () => {
+    const source = new FakeAndroidCapacitySource();
+    source.emulatorProcessRssBytes = undefined;
+    source.processTableFailure = {
+      reason: "timeout",
+      transient: true,
+      attempts: 3,
+      detail: "ps timed out",
+    };
+    const gate = new AndroidBootAdmissionGate(source, new FakeTimer(), { env: {} });
+    (await gate.admit({ avdName: "Pixel", timeoutMs: 60_000 })).release();
+    const android = await gate.describeCapacity();
+    expect(android.processTable).toMatchObject({
+      unavailable: true,
+      reason: "timeout",
+      attempts: 3,
+      admissionsWithoutProcessTable: 1,
+      lastAdmissionWithoutProcessTableAtMs: 0,
+    });
+    expect(validate(envelope({ android })), JSON.stringify(validate.errors)).toBe(true);
+    expect(
+      validate(
+        envelope({
+          android: { ...android, processTable: { ...android.processTable, unexpected: true } },
+        }),
+      ),
+    ).toBe(false);
+  });
+
   test("ios describeCapacity output, including hostPressure, validates", async () => {
     const source = new FakeFleetHostSource();
     source.inventory = parseSimctlInventory(SIMCTL);

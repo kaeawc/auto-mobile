@@ -20,6 +20,8 @@ const EXTENDED_SWEEP_CASES = 50;
  */
 const REGRESSION_SEEDS = [
   122, 131, 155, 185, 275, 381, 562, 605, 747, 819, 838, 968, 1012, 1086, 1140,
+  // An earlier superseded release's late terminal row survives a later refused release.
+  27666, 30896, 37137, 77727,
 ];
 
 /**
@@ -45,6 +47,8 @@ const EXTENDED_REGRESSION_SEEDS = [
   [9271, 17669, 15266, 19329],
   // A parked plan release overwrote the announced shutdown handoff of the same incarnation.
   [3144, 3760, 4352, 5646],
+  // A later superseded release refuses its write over an earlier superseded terminal row.
+  [97677],
 ];
 const EXTENDED: SessionRowRunOptions = { allowed: EXTENDED_OPERATIONS };
 

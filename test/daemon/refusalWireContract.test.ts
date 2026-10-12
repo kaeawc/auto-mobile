@@ -8,6 +8,7 @@ import * as deviceLost from "../../src/models/DeviceLostError";
 import * as managedSlotConfig from "../../src/models/managedSlotConfig";
 import * as discoveryRefusals from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import * as shutdownTimeout from "../../src/models/DeviceShutdownTimeoutError";
+import * as iosHomeLaunchTimeout from "../../src/models/IosHomeLaunchTimeoutError";
 import * as recoveryAssignment from "../../src/models/SessionRecoveryAssignmentError";
 import * as streamPolicy from "../../src/daemon/streamSubscriptionPolicy";
 import * as namespaceGuard from "../../src/daemon/sharedNamespaceGuard";
@@ -83,6 +84,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "models/managedSlotConfig": managedSlotConfig,
   "models/BootedDeviceDiscoveryIncompleteError": discoveryRefusals,
   "models/DeviceShutdownTimeoutError": shutdownTimeout,
+  "models/IosHomeLaunchTimeoutError": iosHomeLaunchTimeout,
   "models/SessionRecoveryAssignmentError": recoveryAssignment,
   "daemon/streamSubscriptionPolicy": streamPolicy,
   "daemon/sharedNamespaceGuard": namespaceGuard,

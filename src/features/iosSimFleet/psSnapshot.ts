@@ -1,10 +1,11 @@
 import type { HostProcessRow, SimulatorProcessCost } from "./types";
 
 const KIB = 1024;
-const PS_ROW = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+(?:\.\d+)?)\s+(\S.*)$/;
+const PS_ROW = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+(?:[.,]\d+)?)\s+(\S.*)$/;
 
 /** Read-only argv for the host process table snapshot. */
 export const PS_SNAPSHOT_ARGS = ["-axo", "pid=,ppid=,rss=,pcpu=,command="];
+export const PS_SNAPSHOT_MAX_BUFFER_BYTES = 32 * 1024 ** 2;
 
 /**
  * Parses `ps -axo pid=,ppid=,rss=,pcpu=,command=` output. Malformed rows are
@@ -23,7 +24,7 @@ export function parsePsSnapshot(stdout: string): { rows: HostProcessRow[]; skipp
         pid: Number(match[1]),
         ppid: Number(match[2]),
         rssBytes: Number(match[3]) * KIB,
-        cpuPercent: Number(match[4]),
+        cpuPercent: Number(match[4].replace(",", ".")),
         command: match[5],
       });
     } else {

@@ -71,8 +71,11 @@ export interface ManagedSlotResultEntry {
   device: ManagedSlotDeviceEvidence | null;
   /** The fresh session this execution holds on the slot's device (null when the slot failed). */
   sessionUuid: string | null;
-  /** Set by the proxy's resource once this slot's session was terminally released (#11712). */
-  executionEnded?: { reason: string; nextAction: "relaunch_execution" };
+  /**
+   * Set by the proxy's resource once this slot's session was terminally released (#11712).
+   * The idle field is true only for an idle release and absent otherwise.
+   */
+  executionEnded?: { reason: string; idle?: true; nextAction: "relaunch_execution" };
   requestedSpec: unknown;
   resolvedSpec: unknown;
   specFingerprint: { version: number; hash: string } | null;

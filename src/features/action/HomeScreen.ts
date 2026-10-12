@@ -16,6 +16,7 @@ import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { deriveIosScreenIdentity } from "../observe/ios/IosScreenIdentity";
+import { hierarchyChanged } from "../../utils/hierarchyFingerprint";
 import type { CtrlProxyHierarchy } from "../observe/ios/types";
 import { resolveIosHomeBackend } from "../../utils/ios-cmdline-tools/IosHomeBackend";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -93,7 +94,8 @@ export class HomeScreen extends BaseVisualChange {
       signal,
     };
 
-    return await this.observedInteraction(async (previousObservation) => {
+    let possiblyAlreadyHome: ViewHierarchyResult | undefined;
+    const result = await this.observedInteraction(async (previousObservation) => {
       const previousHierarchy = await this.readHomeHierarchy(
         previousObservation,
         perf,
@@ -111,16 +113,21 @@ export class HomeScreen extends BaseVisualChange {
           await perf.track("iOSHomeNavigation", () =>
             this.executeIosHomeNavigation(perf, undefined, undefined, signal),
           );
-          alreadyOnHome =
+          // A fallback can also be the real home screen. Navigation above verifies
+          // SpringBoard foreground; compare the final tree before calling it already home.
+          if (
             previousHierarchy?.packageName === "com.apple.springboard" &&
-            previousHierarchy.fallbackToSpringboard !== true;
+            !previousHierarchy.hierarchy?.error
+          ) {
+            alreadyOnHome = previousHierarchy.fallbackToSpringboard !== true;
+            possiblyAlreadyHome = alreadyOnHome ? undefined : previousHierarchy;
+          }
           break;
         default:
           throw unsupportedPlatformError(this.device.platform, "return to the home screen");
       }
 
-      alreadyOnHome = alreadyOnHome && !previousHierarchy?.hierarchy?.error;
-      options.changeExpected = !alreadyOnHome;
+      options.changeExpected = !alreadyOnHome && !possiblyAlreadyHome;
 
       return {
         success: true,
@@ -128,6 +135,14 @@ export class HomeScreen extends BaseVisualChange {
         ...(alreadyOnHome ? { message: "Already on the home screen" } : {}),
       };
     }, options);
+    if (
+      result.success &&
+      possiblyAlreadyHome &&
+      hierarchyChanged(possiblyAlreadyHome, result.observation?.viewHierarchy) === false
+    ) {
+      result.message = "Already on the home screen";
+    }
+    return result;
   }
 
   private async readHomeHierarchy(

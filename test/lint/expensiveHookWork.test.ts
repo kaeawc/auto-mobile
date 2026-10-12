@@ -112,7 +112,7 @@ describe("expensive per-test hook work stays out of unit tests", () => {
         ),
       );
     }
-    baseline = readFileSync(BASELINE_FILE, "utf8").split("\n").filter(Boolean);
+    baseline = readFileSync(BASELINE_FILE, "utf8").split(/\r?\n/).filter(Boolean);
   }, TREE_SCAN_HOOK_TIMEOUT_MS);
 
   test("no new test does mkdtemp, rm, image/zip or DevicePool construction in beforeEach/afterEach", () => {

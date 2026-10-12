@@ -406,12 +406,14 @@ The registry tracks each scope as `valid`, `invalidating` or `invalidated`
   `--allow-shared-namespace` (or `AUTOMOBILE_ALLOW_SHARED_DAEMON_NAMESPACE=1`)
   deliberately.
 
-- **Abandoned scopes.** A scope with no acquisition and no live owner for one
-  hour (`MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS`) is abandoned, and a daemon
-  sweep may then delete its devices. If the **same incarnation** returns, the
-  scope is revived (`revived: true` in the result): surviving devices are reused
-  and deleted ones recreated. Only an explicit reset or a new incarnation
-  invalidates a scope permanently.
+- **Abandoned scopes.** A scope idle for one hour
+  (`MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS`) with no live owner is abandoned.
+  A returning **same incarnation** revives it (`revived: true`). Slots the sweep
+  has not yet journaled keep their devices. An already journaled delete, even if
+  blocked by a held device or unknown state, always completes first: acquisitions
+  answer retryable `device_busy` / `discovery_incomplete` / `cleanup_pending`
+  meanwhile. The slot then gets a new device with a later `assignmentGeneration`
+  (#11545). Only an explicit reset or a new incarnation invalidates permanently.
 
 Numeric slot `0` can repeat across scopes, but the scoped identity is new each
 time.

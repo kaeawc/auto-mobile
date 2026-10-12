@@ -1,4 +1,5 @@
 import {
+  isAbandonedScope,
   isSlotJournalPhaseOpen,
   journalOwnersEqual,
   journalTargetEntries,
@@ -594,6 +595,11 @@ export class FakeSlotRegistry implements SlotRegistry {
     return true;
   }
 
+  openSlotJournal(
+    key: SlotKey,
+    input: OpenSlotJournalInput & { requireAbandonedScope?: false },
+  ): Promise<Exclude<OpenSlotJournalResult, { kind: "scope_not_abandoned" }>>;
+  openSlotJournal(key: SlotKey, input: OpenSlotJournalInput): Promise<OpenSlotJournalResult>;
   async openSlotJournal(key: SlotKey, input: OpenSlotJournalInput): Promise<OpenSlotJournalResult> {
     assertValidSlotKey(key);
     if (!isSlotJournalPhaseOpen(input.phase)) {
@@ -611,6 +617,12 @@ export class FakeSlotRegistry implements SlotRegistry {
     const open = this.findOpenEntry(key);
     if (open) {
       return { kind: "journal_open", entry: copyEntry(open) };
+    }
+    if (input.requireAbandonedScope) {
+      const scope = this.scopes.get(key.scopeKey) ?? null;
+      if (!isAbandonedScope(scope)) {
+        return { kind: "scope_not_abandoned", scope: scope ? { ...scope } : null };
+      }
     }
     const applied = this.applyAssignmentChange(key, input.assignment);
     if ("kind" in applied) {

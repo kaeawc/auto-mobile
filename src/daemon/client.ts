@@ -13,7 +13,8 @@ import {
   DaemonRequest,
   DaemonResponse,
   DaemonNotification,
-  isDaemonNotification,
+  daemonNotificationSchema,
+  daemonResponseSchema,
   PROGRESS_NOTIFICATION_METHOD,
   boundSessionLossMessage,
   sanitizeBoundSessionLoss,
@@ -51,6 +52,11 @@ import {
 import { readPidFileDataSync, isProcessRunning } from "./daemonFiles";
 import { isDaemonHandshakeFailure, type DaemonHandshakeFailure } from "./daemonHandshake";
 import type { DaemonOptions, DaemonStatus } from "./types";
+import {
+  DAEMON_CLIENT_MAX_FRAME_BYTES,
+  DaemonFrameTooLargeError,
+  LineFramer,
+} from "./socketServer/LineFramer";
 
 export const daemonOptionsSchema = z.object({
   port: z.number().finite().optional(),
@@ -419,8 +425,8 @@ export class DaemonClient {
    * Insertion-ordered and capped so a daemon that never answers cannot grow it.
    */
   private readonly cancelledRequestIds = new Set<string>();
-  private buffer: string = "";
-  private decoder = new TextDecoder();
+  private framer: LineFramer;
+  private inboundClosed = false;
   private connected: boolean = false;
   private connectInFlight: Promise<void> | null = null;
   private notificationHandlers: Set<(notification: DaemonNotification) => void> = new Set();
@@ -450,6 +456,7 @@ export class DaemonClient {
     },
     idGenerator: IdGenerator = defaultIdGenerator,
     platformOverride: NodeJS.Platform = platform(),
+    private readonly maxInboundFrameBytes: number = DAEMON_CLIENT_MAX_FRAME_BYTES,
   ) {
     this.socketPath = socketPath;
     this.connectionTimeout = connectionTimeout;
@@ -458,12 +465,20 @@ export class DaemonClient {
     this.clientIdentity = clientIdentity;
     this.idGenerator = idGenerator;
     this.platform = platformOverride;
+    this.framer = this.createInboundFramer();
   }
 
   /** Test-only seam for attaching an in-memory socket. */
   attachSocketForTesting(socket: Duplex): void {
     this.socket = socket;
     this.connected = true;
+    this.inboundClosed = false;
+    this.framer = this.createInboundFramer();
+    socket.once("close", () => {
+      if (this.socket === null || this.socket === socket) {
+        this.handleSocketClosed();
+      }
+    });
   }
 
   /** Test-only seam for delivering a daemon frame. */
@@ -786,8 +801,8 @@ export class DaemonClient {
         }
         this.timer.clearTimeout(timeout);
         removeAbortListener();
-        this.buffer = "";
-        this.decoder = new TextDecoder();
+        this.framer = this.createInboundFramer();
+        this.inboundClosed = false;
         this.connected = true;
         logger.info(`Connected to daemon at ${this.socketPath}`);
         if (!settled) {
@@ -798,34 +813,27 @@ export class DaemonClient {
       this.socket = socket;
 
       socket.on("data", (data) => {
-        if (isStaleSocket()) {
+        if (isStaleSocket() || socket.destroyed) {
           return;
         }
         this.handleData(typeof data === "string" ? Buffer.from(data) : data);
       });
 
       socket.on("error", (error) => {
-        if (isStaleSocket()) {
+        if (isStaleSocket() || socket.destroyed) {
           return;
         }
         logger.error(`Daemon socket error: ${error.message}`);
         fail(error);
       });
 
-      socket.on("close", () => {
+      socket.once("close", () => {
         // fail() clears this.socket before destroy emits close. Preserve that
         // notification path; only a different installed socket makes this stale.
         if (isStaleSocket()) {
           return;
         }
-        this.connected = false;
-        this.socket = null;
-        this.buffer = "";
-        this.decoder = new TextDecoder();
-        logger.info("Daemon socket connection closed");
-        for (const handler of this.connectionClosedHandlers) {
-          handler();
-        }
+        this.handleSocketClosed();
         // A daemon restart/crash closes the socket. Over a Unix domain socket
         // (no TCP RST) a dying daemon delivers EOF -> "close" with no "error"
         // event, so any in-flight request would otherwise hang until its request
@@ -847,26 +855,67 @@ export class DaemonClient {
    * Handle incoming data from daemon
    */
   private handleData(data: Buffer): void {
-    this.buffer += this.decoder.decode(data, { stream: true });
+    if (!this.inboundClosed) {
+      this.framer.push(data);
+    }
+  }
 
-    // Process complete JSON messages (newline-delimited)
-    const lines = this.buffer.split("\n");
-    this.buffer = lines.pop() || ""; // Keep incomplete line in buffer
+  private createInboundFramer(): LineFramer {
+    return new LineFramer(this.maxInboundFrameBytes, {
+      onLine: (line) => this.handleInboundLine(line),
+      onOverflow: () => this.handleInboundOverflow(),
+    });
+  }
 
-    for (const line of lines) {
-      if (!line.trim()) {
-        continue;
-      }
-      try {
-        const frame: unknown = JSON.parse(line);
-        if (isDaemonNotification(frame)) {
-          this.handleNotification(frame);
-        } else {
-          this.handleResponse(frame as DaemonResponse);
-        }
-      } catch (error) {
-        logger.error(`Error parsing daemon response: ${error}`);
-      }
+  private handleInboundLine(line: string): void {
+    if (!line.trim() || this.inboundClosed) {
+      return;
+    }
+    let frame: unknown;
+    try {
+      frame = JSON.parse(line);
+    } catch (error) {
+      logger.error(`Error parsing daemon response: ${error}`);
+      return;
+    }
+    const notification = daemonNotificationSchema.safeParse(frame);
+    if (notification.success) {
+      this.handleNotification(notification.data);
+      return;
+    }
+    const response = daemonResponseSchema.safeParse(frame);
+    if (response.success) {
+      this.handleResponse(response.data);
+      return;
+    }
+    logger.warn("Dropped daemon frame: invalid response or notification envelope");
+  }
+
+  private handleInboundOverflow(): void {
+    const error = new DaemonFrameTooLargeError(this.maxInboundFrameBytes);
+    logger.warn(error.message);
+    for (const pending of this.pendingRequests.values()) {
+      this.timer.clearTimeout(pending.timeout);
+      pending.removeAbortListener?.();
+      pending.reject(error);
+    }
+    this.pendingRequests.clear();
+    this.connected = false;
+    this.inboundClosed = true;
+    const socket = this.socket;
+    this.socket = null;
+    socket?.removeAllListeners("data");
+    socket?.destroy();
+  }
+
+  private handleSocketClosed(): void {
+    this.connected = false;
+    this.socket = null;
+    this.inboundClosed = true;
+    this.framer = this.createInboundFramer();
+    logger.info("Daemon socket connection closed");
+    for (const handler of this.connectionClosedHandlers) {
+      handler();
     }
   }
 

@@ -9,6 +9,8 @@ import type {
 } from "../../src/daemon/webrtcStreamSocketTypes";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { DaemonFrameTooLargeError } from "../../src/daemon/socketServer/LineFramer";
+import { ActionableError } from "../../src/models/ActionableError";
 
 const request: WebRtcStreamSocketRequest = { action: "status", id: "request-1" };
 const response: WebRtcStreamSocketResponse = {
@@ -78,4 +80,46 @@ describe("webrtcStreamClient", () => {
     await expect(result).rejects.toThrow(SyntaxError);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
+});
+
+for (const shape of [
+  42,
+  {},
+  { type: "webrtc_stream_response" },
+  { type: "webrtc_stream_response", success: "yes" },
+]) {
+  test(`rejects wrong-shape WebRTC answer ${JSON.stringify(shape)}`, async () => {
+    const { socket, timer, result } = await createRequestHarness();
+    socket.simulateData(JSON.stringify(shape) + "\n");
+    await expect(result).rejects.toThrow(ActionableError);
+    expect(socket.destroyed).toBe(true);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+}
+
+test("oversized unterminated WebRTC answer closes the socket and clears its timer", async () => {
+  const socket = new FakeSocket();
+  const timer = new FakeTimer();
+  const result = sendWebRtcStreamRequest(request, {
+    socketPath: "/fake/webrtc.sock",
+    socketFactory: () => socket,
+    timer,
+    maxFrameBytes: 64,
+  }).catch((error: unknown) => error);
+  socket.simulateData("x".repeat(65));
+  expect(socket.destroyed).toBe(true);
+  expect(await result).toBeInstanceOf(DaemonFrameTooLargeError);
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("valid WebRTC envelope preserves extras and unchecked additive fields across split UTF-8", async () => {
+  const { socket, timer, result } = await createRequestHarness();
+  const futureResponse = { ...response, extra: "😀", action: 42, stream: "future" };
+  const bytes = Buffer.from(JSON.stringify(futureResponse) + "\n");
+  const split = bytes.indexOf(Buffer.from("😀")) + 1;
+  socket.feed(bytes.subarray(0, split));
+  socket.feed(bytes.subarray(split));
+  await expect(result).resolves.toEqual(futureResponse);
+  expect(socket.destroyed).toBe(true);
+  expect(timer.getPendingTimeoutCount()).toBe(0);
 });

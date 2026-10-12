@@ -50,6 +50,7 @@ import {
   verifyTeardownAbsence,
 } from "./deviceTools";
 import {
+  commitStoppedRestartHold,
   createKillDeviceResponse,
   shutdownDevice,
   shutdownTimeoutError,
@@ -97,6 +98,7 @@ type TeardownState = {
   androidManager?: AndroidCtrlProxyManager;
   earlyResponse?: TeardownToolResponse;
   lastVerificationFailure?: TeardownToolResponse;
+  commitRestartHoldStop?: () => void | Promise<void>;
 };
 
 /**
@@ -109,23 +111,27 @@ async function teardownOwnershipRefusal(
   target: TeardownResolvedTarget,
   requester: LifecycleRequester | undefined,
 ): Promise<TeardownToolResponse | undefined> {
-  if (!requester || !target.wasBooted) {
+  if (!requester) {
     return undefined;
   }
   try {
     assertLifecycleCallerHoldsDevice({
       checkRestartHold: true,
       toolName: "deleteDevice",
-      device: target.bootedDevice,
+      device: target.wasBooted
+        ? target.bootedDevice
+        : { deviceId: args.target.stableId, platform: args.target.platform },
       requester,
       force: args.force ?? false,
       stableIds: [args.target.stableId],
     });
-    await assertLifecycleTargetNotHeldByOtherDaemon({
-      toolName: "deleteDevice",
-      device: target.bootedDevice,
-      force: args.force ?? false,
-    });
+    if (target.wasBooted) {
+      await assertLifecycleTargetNotHeldByOtherDaemon({
+        toolName: "deleteDevice",
+        device: target.bootedDevice,
+        force: args.force ?? false,
+      });
+    }
     return undefined;
   } catch (error) {
     const refusal = typedTeardownRefusal(args, error, target.device);
@@ -283,6 +289,70 @@ async function preLeaseHolderRefusal(
   return await teardownOwnershipRefusal(args, resolution.target, requester);
 }
 
+/** Stopped image destruction captures the stable target before any platform mutation. */
+function captureStoppedImageRestartHold(
+  args: TeardownDeviceArgs,
+  requester: LifecycleRequester | undefined,
+): (() => void | Promise<void>) | undefined {
+  const daemonState = DaemonState.getInstance();
+  if (!requester || !daemonState.isInitialized()) {
+    return undefined;
+  }
+  return daemonState
+    .getDevicePool()
+    .releaseDeviceRestartReservationForStop(args.target.stableId, requester.sessionUuid, {
+      mcpSessionId: requester.mcpSessionId,
+      platform: args.target.platform,
+      stableIds: [args.target.stableId],
+    });
+}
+
+async function destroyDeleteDeviceTarget(
+  state: TeardownState,
+  args: TeardownDeviceArgs,
+  requester: LifecycleRequester | undefined,
+  retainLeaseUntil: (operation: Promise<unknown>) => void,
+): Promise<void> {
+  if (state.earlyResponse) {
+    return;
+  }
+  const { context, target } = state;
+  if (!target.wasBooted) {
+    const refusal = await teardownOwnershipRefusal(args, target, requester);
+    if (refusal) {
+      state.earlyResponse = refusal;
+      return;
+    }
+    state.commitRestartHoldStop = captureStoppedImageRestartHold(args, requester);
+  }
+  await destroyTeardownTarget(context, target, retainLeaseUntil, () => {
+    void finalizeTeardownEviction(context, target, state.androidManager);
+  });
+  await finalizeTeardownEviction(context, target, state.androidManager);
+}
+
+async function verifyDeleteDeviceTarget(
+  state: TeardownState,
+  stop: "accepted" | "not_required",
+  deps: DeviceToolsDependencies,
+): Promise<TeardownToolResponse> {
+  if (state.earlyResponse) {
+    return state.earlyResponse;
+  }
+  const response = await verifyTeardownAbsence(state.context, state.target, stop, (failure) => {
+    state.lastVerificationFailure = failure;
+  });
+  if ("structuredContent" in response) {
+    await commitStoppedRestartHold(
+      { device: state.context.deadlineDevice, deadlineMs: state.context.deadlineMs },
+      deps,
+      state.commitRestartHoldStop,
+      state.context.timeoutMs,
+    );
+  }
+  return response;
+}
+
 function createDeleteDeviceWorkflow(
   args: TeardownDeviceArgs,
   deps: DeviceToolsDependencies,
@@ -340,6 +410,7 @@ function createDeleteDeviceWorkflow(
             strictDeadline: true,
             timeoutMs: context.timeoutMs,
             stoppingSessionUuid: requester?.sessionUuid,
+            stoppingMcpSessionId: requester?.mcpSessionId,
             retainLifecycleUntil: retainLeaseUntil,
             pooledAvdIdentity: {
               capture: target.pooledAvdCapture,
@@ -377,24 +448,9 @@ function createDeleteDeviceWorkflow(
       }
       return stop;
     },
-    destroy: async (state, _requestAbortSignal, retainLeaseUntil) => {
-      if (state.earlyResponse) {
-        return;
-      }
-      const { context, target } = state;
-      await destroyTeardownTarget(context, target, retainLeaseUntil, () => {
-        void finalizeTeardownEviction(context, target, state.androidManager);
-      });
-      await finalizeTeardownEviction(context, target, state.androidManager);
-    },
-    verify: async (state, stop) => {
-      if (state.earlyResponse) {
-        return state.earlyResponse;
-      }
-      return await verifyTeardownAbsence(state.context, state.target, stop, (failure) => {
-        state.lastVerificationFailure = failure;
-      });
-    },
+    destroy: async (state, _requestAbortSignal, retainLeaseUntil) =>
+      await destroyDeleteDeviceTarget(state, args, requester, retainLeaseUntil),
+    verify: async (state, stop) => await verifyDeleteDeviceTarget(state, stop, deps),
     failure: (phase: DeviceTeardownPhase, error, state) => {
       if (error instanceof DeviceTeardownDeadlineError) {
         const mapped = teardownDeadlineFailure(phase, state, args, timeoutMs);
@@ -527,6 +583,7 @@ export function createLifecycleHandlers() {
           strictDeadline: false,
           timeoutMs: DEVICE_SHUTDOWN_TIMEOUT_MS,
           stoppingSessionUuid: lifecycleRequester(args).sessionUuid,
+          stoppingMcpSessionId: lifecycleRequester(args).mcpSessionId,
           retainLifecycleUntil,
           pooledAvdIdentity: pooledAvdKillIdentity(pooledAvdCapture, args.force ?? false),
           // The entry check predates the lease wait; re-check under the assignment mutex.

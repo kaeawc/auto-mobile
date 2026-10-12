@@ -116,15 +116,29 @@ function assertLifecycleRequesterOwnsRestartHold(
     device,
     requester,
     checkRestartHold,
+    stableIds,
   }: Pick<
     Parameters<typeof assertLifecycleCallerHoldsDevice>[0],
-    "toolName" | "device" | "requester" | "checkRestartHold"
+    "toolName" | "device" | "requester" | "checkRestartHold" | "stableIds"
   >,
 ): void {
   if (!checkRestartHold) {
     return;
   }
-  if (pool.isRestartReservationOwnedByOtherConnection?.(device.deviceId, requester)) {
+  const reservation = pool.restartReservationForStop?.(
+    device.deviceId,
+    requester,
+    stableIds
+      ? {
+          platform: device.platform,
+          stableIds: [device.deviceId, ...stableIds.filter((id): id is string => id !== undefined)],
+        }
+      : undefined,
+  );
+  if (
+    reservation?.foreignConnection ||
+    pool.isRestartReservationOwnedByOtherConnection?.(device.deviceId, requester)
+  ) {
     throw new InputDeviceOwnedError(
       toolName,
       device.deviceId,
@@ -136,6 +150,44 @@ function assertLifecycleRequesterOwnsRestartHold(
         "the recovery window to end. force: true does not override naming another client's session.",
     );
   }
+  assertNotStoppingAnotherRestartHold(pool, { toolName, device, requester }, reservation);
+}
+
+function assertNotStoppingAnotherRestartHold(
+  pool: ReturnType<DaemonState["getDevicePool"]>,
+  {
+    toolName,
+    device,
+    requester,
+  }: Pick<
+    Parameters<typeof assertLifecycleCallerHoldsDevice>[0],
+    "toolName" | "device" | "requester"
+  >,
+  reservation: ReturnType<ReturnType<DaemonState["getDevicePool"]>["restartReservationForStop"]>,
+): void {
+  if (!reservation || reservation.owned) {
+    return;
+  }
+  const differentSession =
+    requester.sessionUuid !== undefined ||
+    pool.restartStopConnectionHasLiveSession?.(requester.mcpSessionId);
+  if (!differentSession) {
+    return;
+  }
+  throw new InputDeviceOwnedError(
+    toolName,
+    device.deviceId,
+    requester.sessionUuid,
+    undefined,
+    `${toolName} refused: device '${device.deviceId}' is reserved for session ` +
+      `${reservation.sessionUuid}'s device-restart recovery. ` +
+      (requester.sessionUuid
+        ? `Session ${requester.sessionUuid} does not hold it. `
+        : "This connection holds another device session. ") +
+      `Retry in ${reservation.retryAfterMs}ms, once the recovery window ends. ` +
+      "force: true does not override a reservation held for another session.",
+    reservation.retryAfterMs,
+  );
 }
 
 /** Remedy text for a lifecycle call refused because another live daemon holds the device. */

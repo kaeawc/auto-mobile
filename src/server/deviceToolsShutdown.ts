@@ -1383,6 +1383,7 @@ async function resolvePooledAvdKillTarget(
 
 interface KillProcessAndRetireOwnershipOptions {
   stoppingSessionUuid?: string;
+  stoppingMcpSessionId?: string;
   androidObserverState: AndroidObserverShutdownState;
   releaseShutdownReservation: () => Promise<void>;
   strictDeadline: boolean;
@@ -1492,6 +1493,38 @@ async function handleUnconfirmedKillCommandError(
   return handleShutdownCommandError(device, error, devicePool, keepIntentionalShutdown);
 }
 
+/** Confirmed stops await a bounded terminal write attempt; persistence cannot undo the stop. */
+export async function commitStoppedRestartHold(
+  context: Pick<ShutdownEntryContext, "device" | "deadlineMs">,
+  dependencies: Pick<DeviceToolsDependencies, "timer">,
+  commit: (() => void | Promise<void>) | undefined,
+  timeoutMs: number,
+): Promise<void> {
+  if (!commit) {
+    return;
+  }
+  try {
+    const attempt = Promise.resolve(commit());
+    await runWithinShutdownDeadline(
+      context.device,
+      dependencies.timer,
+      context.deadlineMs,
+      "restart holder terminal write did not complete",
+      {
+        // Invoke before racing: even a spent shutdown budget must attempt the durable write.
+        requestAbortSignal: undefined,
+        operation: async () => await attempt,
+        timeoutMs,
+      },
+    );
+  } catch (error) {
+    logger.warn(
+      `[DeviceTools] Stopped device ${context.device.deviceId} restart holder write failed: ${error}`,
+      error,
+    );
+  }
+}
+
 async function killProcessAndRetireOwnership(
   context: ShutdownEntryContext &
     Pick<
@@ -1517,14 +1550,17 @@ async function killProcessAndRetireOwnership(
   const deviceManager = dependencies.deviceManagerFactory();
   // A failed/cancelled/timed-out call never commits, including a late platform settlement:
   // the unchanged restart hold remains governed by its original recovery window.
-  let commitRestartHoldStop: (() => void) | undefined;
+  let commitRestartHoldStop: (() => void | Promise<void>) | undefined;
   if (devicePool) {
     commitRestartHoldStop =
       device.platform === "android"
-        ? devicePool.markIntentionalShutdown(device.deviceId, options.stoppingSessionUuid)
+        ? devicePool.markIntentionalShutdown(device.deviceId, options.stoppingSessionUuid, {
+            mcpSessionId: options.stoppingMcpSessionId,
+          })
         : devicePool.releaseDeviceRestartReservationForStop(
             device.deviceId,
             options.stoppingSessionUuid,
+            { mcpSessionId: options.stoppingMcpSessionId },
           );
   }
 
@@ -1588,7 +1624,7 @@ async function killProcessAndRetireOwnership(
   perf.endOperation("killProcess");
 
   if (alreadyStoppedMessage !== undefined) {
-    commitRestartHoldStop?.();
+    await commitStoppedRestartHold(context, dependencies, commitRestartHoldStop, timeoutMs);
     return alreadyStoppedMessage;
   }
 
@@ -1614,7 +1650,7 @@ async function killProcessAndRetireOwnership(
         );
     perf.endOperation("waitForShutdown");
     shutdownWasConfirmed = true;
-    commitRestartHoldStop?.();
+    await commitStoppedRestartHold(context, dependencies, commitRestartHoldStop, timeoutMs);
 
     perf.startOperation("retireOwnership");
     await retireShutdownOwnership(
@@ -1739,6 +1775,7 @@ interface ShutdownDeviceOptions {
   strictDeadline: boolean;
   timeoutMs: number;
   stoppingSessionUuid?: string;
+  stoppingMcpSessionId?: string;
   retainLifecycleUntil?: (operation: Promise<unknown>) => void;
   pooledAvdIdentity?: PooledAvdKillIdentity;
   /** Re-checks the caller still holds the device; runs under the pool's assignment mutex. */
@@ -1847,6 +1884,7 @@ export async function shutdownDevice(
           {
             androidObserverState,
             stoppingSessionUuid: options.stoppingSessionUuid,
+            stoppingMcpSessionId: options.stoppingMcpSessionId,
             releaseShutdownReservation,
             retainReservationUntil: retainShutdownUntil,
             strictDeadline,

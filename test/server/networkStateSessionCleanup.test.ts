@@ -30,16 +30,22 @@ class FakeSessionManager implements CleanupManager {
     this.pendingCleanups.push({ deviceId, cleanup });
   }
 
-  release(sessionId: string, deviceId: string): void {
+  release(sessionId: string, deviceId: string, deviceIdentityReplaced = false): void {
     for (const callback of this.releaseCallbacks) {
-      callback(sessionId, deviceId, "explicit-release", {
+      callback(
         sessionId,
         deviceId,
-        releaseReason: "explicit-release",
-        releasedAtMs: 0,
-        terminal: true,
-        heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
-      });
+        "explicit-release",
+        {
+          sessionId,
+          deviceId,
+          releaseReason: "explicit-release",
+          releasedAtMs: 0,
+          terminal: true,
+          heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
+        },
+        { deviceIdentityReplaced },
+      );
     }
   }
 
@@ -111,6 +117,16 @@ describe("registerNetworkStateSessionCleanup (#10061)", () => {
     expect(manager.pendingCleanups.map((entry) => entry.deviceId)).toEqual([DEVICE_A]);
     await manager.pendingCleanups[0].cleanup;
     expect(pusher.pushes).toEqual([{ deviceId: DEVICE_A, ruleIds: [], simulating: false }]);
+  });
+
+  test("identity replacement clears host state without a device push or quarantine", () => {
+    state.addMock(DEVICE_A, rule("a.com"), "session-1");
+    state.startSimulation(DEVICE_A, "timeout", 30, null, "session-1");
+    manager.release("session-1", DEVICE_A, true);
+    expect(state.getMocks(DEVICE_A).size).toBe(0);
+    expect(state.getSimulation(DEVICE_A)).toBeNull();
+    expect(pusher.pushes).toEqual([]);
+    expect(manager.pendingCleanups).toEqual([]);
   });
 
   test("a second session's device keeps its rules when the first session is released", async () => {

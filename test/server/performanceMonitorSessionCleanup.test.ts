@@ -22,16 +22,22 @@ class FakeSessionManager implements CleanupManager {
     this.unboundCallbacks.push(callback);
   }
 
-  release(sessionId: string, deviceId: string): void {
+  release(sessionId: string, deviceId: string, deviceIdentityReplaced = false): void {
     for (const callback of this.releaseCallbacks) {
-      callback(sessionId, deviceId, "explicit-release", {
+      callback(
         sessionId,
         deviceId,
-        releaseReason: "explicit-release",
-        releasedAtMs: 0,
-        terminal: true,
-        heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
-      });
+        "explicit-release",
+        {
+          sessionId,
+          deviceId,
+          releaseReason: "explicit-release",
+          releasedAtMs: 0,
+          terminal: true,
+          heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
+        },
+        { deviceIdentityReplaced },
+      );
     }
   }
 
@@ -84,6 +90,14 @@ describe("registerPerformanceMonitorSessionCleanup", () => {
     await timer.advanceTimeAsync(PerformanceMonitor.TICK_INTERVAL_MS * 10);
 
     expect(gfxinfoPolls()).toBe(1);
+    expect(monitor.getMonitoredDeviceCount()).toBe(0);
+  });
+
+  test("identity replacement stops host polling without another adb command", async () => {
+    manager.release("session-1", deviceId, true);
+    await timer.advanceTimeAsync(PerformanceMonitor.TICK_INTERVAL_MS * 10);
+    expect(gfxinfoPolls()).toBe(0);
+    expect(adb.getCommandCount("shell")).toBe(0);
     expect(monitor.getMonitoredDeviceCount()).toBe(0);
   });
 

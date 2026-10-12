@@ -1,3 +1,15 @@
+import { HostBootAdmissionRegistryError } from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
+import { StageSessionDownloadsRefusal } from "../../src/server/downloadsFixtureService";
+import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
+import { DeviceLostError } from "../../src/models/DeviceLostError";
+import { ManagedSlotConfigError } from "../../src/models/managedSlotConfig";
+import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
+import { DeviceShutdownTimeoutError } from "../../src/models/DeviceShutdownTimeoutError";
+import { SharedDaemonNamespaceError } from "../../src/daemon/sharedNamespaceGuard";
+import { DeviceSessionSupersededByRestoreError } from "../../src/daemon/deviceSessionResolver";
+import { TestRecordingStartUnheldError } from "../../src/daemon/testRecordingStartAdmission";
+import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";
+import { DaemonCommandRefusal } from "../../src/daemon/cli/runDaemonCommand";
 import { join } from "node:path";
 import {
   assertBootCapacityGranted,
@@ -9,6 +21,8 @@ import {
   DeviceShuttingDownError,
   DeviceTransportOfflineError,
   SessionCreationTimeoutError,
+  RetryableDeviceAcquisitionError,
+  SessionReleasedDuringCreationError,
 } from "../../src/daemon/deviceAcquisitionRefusals";
 import { IOS_SIM_MAX_BOOTED_ENV } from "../../src/features/iosSimFleet/capacityPolicy";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
@@ -16,6 +30,7 @@ import {
   MCP_OVERLOAD_ERROR_CODE,
   MCP_QUEUE_TIMEOUT_ERROR_CODE,
   McpTimeoutError,
+  McpOverloadError,
 } from "../../src/daemon/McpTimeoutError";
 import {
   DaemonRestartDeferredError,
@@ -25,23 +40,46 @@ import {
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { mcpRequestFailureDetails, strokeAdmissionEndedError } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
+import { daemonResponseError } from "../../src/daemon/client";
+import type { DaemonResponse } from "../../src/daemon/types";
+import { ViewerReadOnlyError } from "../../src/daemon/streamSubscriptionPolicy";
+import {
+  AndroidAvdIdentityUnresolvedError,
+  AndroidAvdIdentityConflictError,
+  DeviceBootTimeoutError,
+} from "../../src/devices/deviceBootService";
 import type { SessionReleaseReason } from "../../src/daemon/releaseReasons";
 import { typedTeardownRefusal } from "../../src/server/deviceToolsLifecycle";
 import {
   DaemonConnectionSessionReleasedError,
   DaemonAmbiguousSessionSelectorError,
+  DaemonAssetVersionMismatchError,
+  DaemonBoundSessionExpiredError,
+  DaemonBuildMismatchError,
+  DaemonSessionStalledError,
+  DaemonToolOutcomeUnknownError,
+  DaemonToolUnavailableError,
+  DaemonVersionMismatchError,
+  LifecycleConnectionInFlightError,
 } from "../../src/daemon/daemonMcpProxy";
 import { daemonShuttingDownMcpOutcome } from "../../src/daemon/daemonShutdownOutcome";
 import { deviceAssignedToOtherSessionError } from "../../src/daemon/inputDeviceOwnership";
 import {
   SessionNoLongerOwnsDeviceError,
+  DaemonSessionCreationRejectedError,
+  SessionActivityPersistenceError,
+  SessionReleasePersistTimeoutError,
+  UnissuedSessionError,
   SessionRecoveryIdentityLossError,
   SessionRebindingError,
   SessionSuspectError,
   SessionTerminalReleaseInProgressError,
   TerminalSessionError,
 } from "../../src/daemon/sessionManager";
-import { ProvisionDeviceError } from "../../src/devices/exactDeviceProvisioning";
+import {
+  ProvisionDeviceError,
+  ProvisionDeviceCreateRejectedError,
+} from "../../src/devices/exactDeviceProvisioning";
 import {
   DeviceAssignedToManagedSlotError,
   DeviceOutsideManagedSlotsError,
@@ -52,6 +90,7 @@ import { BootedDeviceDiscoveryIncompleteError } from "../../src/devices/deviceBo
 import { createToolErrorResponse } from "../../src/server/deviceTools";
 import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
 import {
+  mcpOverloadResult,
   managedEndedPayload,
   managedSlotsFailedToolResult,
   noActiveDeviceSessionResult,
@@ -103,7 +142,35 @@ export function shapedRefusalResult(error: unknown): RefusalWireResult {
   return shaped(error);
 }
 
+// Only a collection call records constructors; ordinary helper use cannot leak coverage between files.
+let drivenClasses: Set<Error["constructor"]> | undefined;
+
+function driven<T>(error: T): T {
+  if (error instanceof Error) {
+    drivenClasses?.add(error.constructor);
+  }
+  return error;
+}
+
+/** Own constructors only: a subclass fixture never covers its base class. Rebuilt on every call. */
+export function fixtureDrivenErrorClasses(): ReadonlySet<Error["constructor"]> {
+  const previous = drivenClasses;
+  const collected = new Set<Error["constructor"]>();
+  drivenClasses = collected;
+  try {
+    buildRefusalWireFixtures();
+    buildRefusalSurfaceFixtures();
+    for (const fixture of EXTERNALLY_CAPTURED_SURFACE_FIXTURES) {
+      collected.add(fixture.errorClass);
+    }
+    return collected;
+  } finally {
+    drivenClasses = previous;
+  }
+}
+
 function shaped(error: unknown): RefusalWireResult {
+  driven(error);
   // shapeToolCallError logs every error it shapes; the fixtures are not failures.
   const original = logger.error;
   logger.error = () => {};
@@ -135,12 +202,14 @@ function jsonResult(payload: unknown): RefusalWireResult {
 }
 
 function provisionFailure(error: BootedDeviceDiscoveryIncompleteError): RefusalWireResult {
+  driven(error);
   return provisionEnvelope(
     new ProvisionDeviceError("discovery_incomplete", error.message, error.retryable),
   );
 }
 
 function provisionEnvelope(failure: ProvisionDeviceError): RefusalWireResult {
+  driven(failure);
   // The provisionDevice failure envelope (`provisionDeviceErrorResponse` in
   // deviceToolsProvisioning) around the real ProvisionDeviceError.
   return createToolErrorResponse(failure.code, failure.message, {
@@ -200,8 +269,49 @@ const CUT_RELEASE_REASONS: readonly (readonly [string, SessionReleaseReason])[] 
   ["explicit_release", "explicit-release"],
 ];
 
+/** Exact literal from requireRemainingMcpForwardBudget; the private throw site needs a cast. */
+function overloadError(): McpOverloadError {
+  return new McpOverloadError(
+    "Daemon overloaded while handling observe: spent 750ms queueing, leaving 250ms of the 1000ms deadline. Retry after 250ms.",
+    {
+      code: "daemon_overloaded",
+      retryable: true,
+      retryAfterMs: 250,
+      reason: "insufficient_forward_budget",
+      queueWaitMs: 750,
+      remainingTimeoutMs: 250,
+    },
+  );
+}
+
 /** One entry per wire code, each produced by the builder the daemon itself calls. */
 const BUILDERS: readonly FixtureEntry[] = [
+  [
+    "daemon_overloaded",
+    "McpOverloadError constructed from the private forward-budget throw site's literal via mcpRequestFailureDetails -> daemonResponseError -> mcpOverloadResult",
+    () => {
+      const error = daemonResponseError({
+        id: "overload-fixture",
+        ...socketFrame(overloadError()),
+      });
+      if (!(error instanceof McpOverloadError)) {
+        throw new Error("daemonResponseError did not preserve McpOverloadError");
+      }
+      const { isError, content } = mcpOverloadResult(driven(error));
+      if (isError !== true) {
+        throw new Error("mcpOverloadResult did not return an error result");
+      }
+      return {
+        isError,
+        content: content.map((block) => {
+          if (block.type !== "text") {
+            throw new Error("mcpOverloadResult returned non-text content");
+          }
+          return { type: "text" as const, text: block.text };
+        }),
+      };
+    },
+  ],
   [
     "device_owned_by_other_session",
     "deviceAssignedToOtherSessionError via shapeToolCallError",
@@ -289,7 +399,7 @@ const BUILDERS: readonly FixtureEntry[] = [
     "noActiveDeviceSessionResult",
     () =>
       noActiveDeviceSessionResult(
-        new DaemonConnectionSessionReleasedError("heartbeat_timeout"),
+        driven(new DaemonConnectionSessionReleasedError("heartbeat_timeout")),
       ) as RefusalWireResult,
   ],
   [
@@ -297,10 +407,12 @@ const BUILDERS: readonly FixtureEntry[] = [
     "ambiguousSessionSelectorResult",
     () =>
       ambiguousSessionSelectorResult(
-        new DaemonAmbiguousSessionSelectorError("android", [
-          { sessionUuid: SESSION, deviceId: DEVICE },
-          { sessionUuid: "second-android-session", deviceId: "emulator-5556" },
-        ]),
+        driven(
+          new DaemonAmbiguousSessionSelectorError("android", [
+            { sessionUuid: SESSION, deviceId: DEVICE },
+            { sessionUuid: "second-android-session", deviceId: "emulator-5556" },
+          ]),
+        ),
       ) as RefusalWireResult,
   ],
   [
@@ -407,7 +519,9 @@ const BUILDERS: readonly FixtureEntry[] = [
     "daemon_restart_pending",
     "daemonRestartPendingToolResult",
     () => {
-      const { isError, content } = daemonRestartPendingToolResult(new DaemonRestartPendingError());
+      const { isError, content } = daemonRestartPendingToolResult(
+        driven(new DaemonRestartPendingError()),
+      );
       return { isError, content };
     },
   ],
@@ -585,7 +699,22 @@ export function buildRefusalWireFixtures(): RefusalWireFixture[] {
  * the managed slots result (MCP initialize outcome and the `automobile:managed-slots` resource).
  * They live beside the tool-result fixtures in `surfaces/`, named `<surface>.<name>.json`.
  */
-export type RefusalSurface = "socket-frame" | "delete-device" | "managed-slots-result";
+export type RefusalSurface =
+  | "socket-frame"
+  | "delete-device"
+  | "managed-slots-result"
+  | "overload-frame"
+  | "webrtc-stream-response";
+
+/** Asynchronous real-wire captures: their owning test always checks the committed bytes. */
+export const EXTERNALLY_CAPTURED_SURFACE_FIXTURES = [
+  {
+    surface: "webrtc-stream-response",
+    name: "viewer_read_only",
+    testFile: "test/daemon/webrtcStreamSocketServer.viewerSubscription.test.ts",
+    errorClass: ViewerReadOnlyError,
+  },
+] as const;
 
 export interface RefusalSurfaceFixture {
   surface: RefusalSurface;
@@ -603,7 +732,8 @@ export function surfaceFixtureStem(fixture: Pick<RefusalSurfaceFixture, "surface
 }
 
 /** The failure frame the control socket writes for a thrown error (`mcpRequestFailureDetails`). */
-function socketFrame(error: Error): unknown {
+function socketFrame(error: Error): Omit<DaemonResponse, "id"> {
+  driven(error);
   return JSON.parse(
     JSON.stringify({
       type: "mcp_response",
@@ -644,6 +774,7 @@ const SLOT_HOLDER = {
 } as const;
 
 function teardownFailure(error: unknown): unknown {
+  driven(error);
   const response = typedTeardownRefusal(
     {
       target: { platform: "android", isVirtual: true, stableId: "Pixel_8_API_35" },
@@ -674,6 +805,12 @@ function terminalAtAdmission(releaseReason: SessionReleaseReason): TerminalSessi
 }
 
 const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
+  // shapeToolCallError returns plain Error: text; no top-level JSON refusal. Inline
+  // deleteDevice/provisionDevice target_identity_unresolved literals have no shared capture builder.
+  [
+    "target_identity_unresolved",
+    () => new AndroidAvdIdentityUnresolvedError("Pixel_8_API_35", [DEVICE]),
+  ],
   // Direct input/* admitted as a non-owner control call on the holder's session (#11439).
   ["daemon_session_suspect", () => new SessionSuspectError(SESSION, 8_000)],
   [
@@ -725,6 +862,12 @@ const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
 /** Every surface fixture, built fresh from the real serializers. */
 export function buildRefusalSurfaceFixtures(): RefusalSurfaceFixture[] {
   return [
+    {
+      surface: "overload-frame",
+      name: "daemon_overloaded",
+      builder: "mcpRequestFailureDetails",
+      payload: socketFrame(overloadError()),
+    },
     ...SOCKET_FRAME_ERRORS.map(([name, error]): RefusalSurfaceFixture => ({
       surface: "socket-frame",
       name,
@@ -792,14 +935,128 @@ export const LITERAL_CLIENT_REACHABLE_CODES: readonly string[] = [
   "target_identity_unresolved",
 ];
 
+/** Every exported Error in the coded-refusal modules is covered or has an honest, reviewable gap. */
+export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], string> = new Map<
+  Error["constructor"],
+  string
+>([
+  [
+    HostBootAdmissionRegistryError,
+    "internal host-lock failure; AndroidBootAdmissionGate maps it to discovery_incomplete before the wire",
+  ],
+  [
+    StageSessionDownloadsRefusal,
+    "no wire code: shapeToolCallError returns plain 'Error: ...' text for this Downloads-staging refusal",
+  ],
+  [
+    AdbDeviceOfflineError,
+    "GAP: readiness cause maps to ProvisionDeviceError device_offline with diagnostics; capturing that real mapping needs the readiness path beyond the three added rows",
+  ],
+  [
+    DeviceLostError,
+    "GAP: device-loss cancellation has its own outcome serializer and provision readiness mapping; neither is captured by this three-row corpus lane",
+  ],
+  [
+    ManagedSlotConfigError,
+    "GAP: daemon/acquireManagedSlots returns its code beside error with no retryable flag; needs a protocol-response surface outside the three added rows",
+  ],
+  [
+    AndroidBootedDeviceDiscoveryIncompleteError,
+    "GAP: typed discovery_incomplete subclass; the existing base-class fixture does not drive this constructor and an additional capture is outside the file allowlist",
+  ],
+  [
+    DeviceShutdownTimeoutError,
+    "GAP: typed retryable timeout; a shutdown-class capture is outside the three added rows",
+  ],
+  [
+    SharedDaemonNamespaceError,
+    "CLI and proxy restart-admission guard with no retryable flag; shapeToolCallError returns plain 'Error: ...' text",
+  ],
+  [
+    DeviceSessionSupersededByRestoreError,
+    "GAP: device-data aux-socket refusal uses deviceSessionErrorFields; needs its own response surface outside the three added rows",
+  ],
+  [
+    TestRecordingStartUnheldError,
+    "GAP: typed no_active_device_session recording-start payload; an additional class capture is outside the file allowlist",
+  ],
+  [
+    DaemonHandoffInterruptionError,
+    "GAP: typed retryable daemon_handoff_interrupted on the socket and provisionDevice; an additional capture is outside the file allowlist",
+  ],
+  [
+    DaemonAssetVersionMismatchError,
+    "no wire code: version-skew failure reaches shapeToolCallError as plain 'Error: ...' text",
+  ],
+  [
+    DaemonBoundSessionExpiredError,
+    "GAP: proxyServer privately maps it to session_ownership_lost or managed_execution_ended; current fixtures build the payload directly without this constructor",
+  ],
+  [
+    DaemonBuildMismatchError,
+    "no wire code: build-skew failure reaches shapeToolCallError as plain 'Error: ...' text",
+  ],
+  [
+    DaemonSessionStalledError,
+    "GAP: proxyServer maps its liveness handover to daemon_stalled/proxy_stalled or a managed stall loss; needs a separate handover capture outside the three added rows",
+  ],
+  [
+    DaemonToolOutcomeUnknownError,
+    "no wire code: uncertain dispatch reaches shapeToolCallError as plain 'Error: ...' text",
+  ],
+  [
+    DaemonToolUnavailableError,
+    "untyped tool-result text today: its optional gate code has no retryable flag and shapeToolCallError returns plain 'Error: ...' text",
+  ],
+  [
+    DaemonVersionMismatchError,
+    "no wire code: version-skew failure reaches shapeToolCallError as plain 'Error: ...' text",
+  ],
+  [
+    LifecycleConnectionInFlightError,
+    "internal observation-only connection refusal with no wire code; never a typed tool-result refusal",
+  ],
+  [
+    DaemonSessionCreationRejectedError,
+    "no wire code: shutdown creation rejection reaches shapeToolCallError as plain 'Error: ...' text",
+  ],
+  [
+    SessionActivityPersistenceError,
+    "no wire code: persistence failure reaches shapeToolCallError as plain 'Error: ...' text",
+  ],
+  [
+    SessionReleasePersistTimeoutError,
+    "no wire code: release persistence timeout has a reason only; shapeToolCallError returns plain 'Error: ...' text",
+  ],
+  [
+    UnissuedSessionError,
+    "no wire code: unissued-session refusal reaches shapeToolCallError as plain 'Error: ...' text",
+  ],
+  [DaemonCommandRefusal, "daemon CLI refusal wrapper, never crosses the MCP/socket wire"],
+  [
+    ProvisionDeviceCreateRejectedError,
+    "GAP: typed platform_command_failed subclass; the existing ProvisionDeviceError fixture does not drive it and an additional capture is outside the file allowlist",
+  ],
+  [
+    AndroidAvdIdentityConflictError,
+    "GAP: knownProvisionDeviceError maps it to typed identity_conflict; the current provision fixture constructs the wrapper directly without driving this class",
+  ],
+  [
+    DeviceBootTimeoutError,
+    "GAP: typed retryable timeout; a boot-class capture is outside the three added rows",
+  ],
+  [
+    RetryableDeviceAcquisitionError,
+    "base class instantiated only through its concrete acquisition subclasses, which the fixtures drive",
+  ],
+  [
+    SessionReleasedDuringCreationError,
+    "untyped on the wire today; issue #11351 row g awaits an owner decision",
+  ],
+]);
+
 /** Codes that exist as named constants but never reach a client as a typed JSON refusal. */
 export const UNFIXTURED_REFUSAL_CODES: Readonly<Record<string, string>> = {
-  daemon_overloaded:
-    "carried on the socket failure frame as `overloadFailure` (no top-level code), which no surface fixture models yet (#11351)",
-  viewer_read_only:
-    "an aux-socket (WebRTC) response `errorCode` beside `error`; aux-socket error responses are not fixtured yet (#11351)",
-  target_identity_unresolved:
-    "typed on the socket frame only: shapeToolCallError answers AndroidAvdIdentityUnresolvedError as plain 'Error: ...' text, and deleteDevice/provisionDevice write the code inline with no shared builder to capture (#11351)",
   session_released_during_creation:
     "SessionReleasedDuringCreationError is not typed by shapeToolCallError: clients get plain 'Error: ...' text with no code",
   daemon_session_not_found:

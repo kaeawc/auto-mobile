@@ -587,6 +587,15 @@
         "acquireNewSession": false,
         "retryAfterMs": 1000
       }
+    },
+    "daemon_overloaded": {
+      "expected": "retry",
+      "fields": {
+        "code": "daemon_overloaded",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 250
+      }
     }
   }
 }

@@ -1,6 +1,27 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import * as hostBootRegistry from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
+import * as downloadsRefusals from "../../src/server/downloadsFixtureService";
+import * as adbHealth from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
+import * as deviceLost from "../../src/models/DeviceLostError";
+import * as managedSlotConfig from "../../src/models/managedSlotConfig";
+import * as discoveryRefusals from "../../src/models/BootedDeviceDiscoveryIncompleteError";
+import * as shutdownTimeout from "../../src/models/DeviceShutdownTimeoutError";
+import * as recoveryAssignment from "../../src/models/SessionRecoveryAssignmentError";
+import * as streamPolicy from "../../src/daemon/streamSubscriptionPolicy";
+import * as namespaceGuard from "../../src/daemon/sharedNamespaceGuard";
+import * as restartAdmission from "../../src/daemon/daemonRestartAdmission";
+import * as deviceSessionResolver from "../../src/daemon/deviceSessionResolver";
+import * as recordingAdmission from "../../src/daemon/testRecordingStartAdmission";
+import * as handoffInterruption from "../../src/daemon/daemonHandoffInterruption";
+import * as daemonProxy from "../../src/daemon/daemonMcpProxy";
+import * as sessionManager from "../../src/daemon/sessionManager";
+import * as sessionOwnership from "../../src/daemon/sessionNoLongerOwnsDevice";
+import * as daemonCommand from "../../src/daemon/cli/runDaemonCommand";
+import * as provisioning from "../../src/devices/exactDeviceProvisioning";
+import * as deviceBoot from "../../src/devices/deviceBootService";
+import { ActionableError } from "../../src/models/ActionableError";
 import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
 import * as inputOwnership from "../../src/daemon/inputDeviceOwnership";
 import * as managedSlotRefusals from "../../src/daemon/managedSlots/managedSlotRefusal";
@@ -22,6 +43,9 @@ import {
   DaemonRestartPendingError,
 } from "../../src/daemon/daemonRestartAdmission";
 import {
+  EXTERNALLY_CAPTURED_SURFACE_FIXTURES,
+  EXEMPT_REFUSAL_ERROR_CLASSES,
+  fixtureDrivenErrorClasses,
   MANAGED_SLOT_FIXTURE_PREFIX,
   recoveryPendingError,
   shapedRefusalResult,
@@ -41,6 +65,57 @@ import {
   serializeRefusalFixture,
   type RefusalDisposition,
 } from "../helpers/refusalWireFixtures";
+
+/** Runtime exports, not source text: adding an Error subclass to these modules extends coverage. */
+const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
+  "features/bootAdmission/HostBootAdmissionRegistry": hostBootRegistry,
+  "server/downloadsFixtureService": downloadsRefusals,
+  "utils/android-cmdline-tools/AdbDeviceHealth": adbHealth,
+  "models/DeviceLostError": deviceLost,
+  "models/managedSlotConfig": managedSlotConfig,
+  "models/BootedDeviceDiscoveryIncompleteError": discoveryRefusals,
+  "models/DeviceShutdownTimeoutError": shutdownTimeout,
+  "models/SessionRecoveryAssignmentError": recoveryAssignment,
+  "daemon/streamSubscriptionPolicy": streamPolicy,
+  "daemon/sharedNamespaceGuard": namespaceGuard,
+  "daemon/daemonRestartAdmission": restartAdmission,
+  "daemon/deviceSessionResolver": deviceSessionResolver,
+  "daemon/testRecordingStartAdmission": recordingAdmission,
+  "daemon/daemonHandoffInterruption": handoffInterruption,
+  "daemon/daemonMcpProxy": daemonProxy,
+  "daemon/sessionManager": sessionManager,
+  "daemon/sessionNoLongerOwnsDevice": sessionOwnership,
+  "daemon/cli/runDaemonCommand": daemonCommand,
+  "devices/exactDeviceProvisioning": provisioning,
+  "devices/deviceBootService": deviceBoot,
+  "daemon/deviceAcquisitionRefusals": acquisitionRefusals,
+  "daemon/inputDeviceOwnership": inputOwnership,
+  "daemon/managedSlots/managedSlotRefusal": managedSlotRefusals,
+  "models/BootCapacityExhaustedError": bootCapacity,
+  "server/deviceOutsideBoundSessionRefusal": boundSessionRefusal,
+  "daemon/McpTimeoutError": mcpTimeouts,
+  "daemon/sessionReleasedDuringCall": sessionReleasedDuringCall,
+  "models/AppNotRunningError": appNotRunning,
+};
+
+function exportedErrorClasses(modules: typeof refusalErrorModules) {
+  return Object.entries(modules).flatMap(([module, exports]) =>
+    Object.entries(exports)
+      .filter(([, value]) => typeof value === "function" && value.prototype instanceof Error)
+      .map(([name, errorClass]) => ({ name, module, errorClass })),
+  );
+}
+
+/** Pure coverage checker; the mutation test can extend exports without changing production code. */
+function missingErrorClasses(
+  modules: typeof refusalErrorModules,
+  driven: ReadonlySet<unknown>,
+  exempt: ReadonlyMap<unknown, string>,
+): string[] {
+  return exportedErrorClasses(modules)
+    .filter(({ errorClass }) => !driven.has(errorClass) && !exempt.get(errorClass)?.trim())
+    .map(({ name, module }) => `${name} (${module})`);
+}
 
 /**
  * Cross-language contract for typed daemon refusals: the JUnit runner and XCTestRunner decode the
@@ -200,6 +275,21 @@ function surfaceTyped(fixture: RefusalSurfaceFixture): {
   if (fixture.surface === "socket-frame") {
     return { typed: payload as TypedFields, details: payload.details as Record<string, unknown> };
   }
+  if (fixture.surface === "overload-frame") {
+    const { code, retryable, retryAfterMs, reason, queueWaitMs, remainingTimeoutMs } =
+      payload.overloadFailure as TypedFields & {
+        reason: string;
+        queueWaitMs: number;
+        remainingTimeoutMs: number;
+      };
+    return {
+      typed: { code, retryable, retryAfterMs },
+      details: { queueWaitMs, remainingTimeoutMs, reason },
+    };
+  }
+  if (fixture.surface === "webrtc-stream-response") {
+    return { typed: { code: String(payload.errorCode), retryable: false } };
+  }
   if (fixture.surface === "delete-device") {
     const text = (payload as unknown as RefusalWireResult).content[0].text;
     const failure = (JSON.parse(text) as { failure: Record<string, unknown> }).failure;
@@ -230,6 +320,18 @@ function surfaceFields(fixture: RefusalSurfaceFixture): SurfaceFields {
 }
 
 const surfaceFixtures = buildRefusalSurfaceFixtures();
+const capturedSurfaceFixtures = EXTERNALLY_CAPTURED_SURFACE_FIXTURES.map(
+  (fixture) =>
+    JSON.parse(
+      readFileSync(join(REFUSAL_SURFACES_DIR, `${surfaceFixtureStem(fixture)}.json`), "utf8"),
+    ) as RefusalSurfaceFixture,
+);
+const allSurfaceFixtures = [...surfaceFixtures, ...capturedSurfaceFixtures];
+const coveredWireCodes = new Set([
+  ...fixtureCodes.map((code) => expectedWireCodes(code)[0]),
+  ...allSurfaceFixtures.flatMap((fixture) => expectedWireCodes(fixture.name)),
+]);
+const drivenErrorClasses = fixtureDrivenErrorClasses();
 const surfaceExpectations = JSON.parse(
   readFileSync(join(REFUSAL_SURFACES_DIR, "expectations.json"), "utf8"),
 ) as SurfaceExpectations;
@@ -309,10 +411,46 @@ describe("refusal wire contract", () => {
     expect(rows.some((fields) => fields.acquireNewSession)).toBe(true);
   });
 
+  test("every exported error class is driven by a fixture or exempted with a reason", () => {
+    expect(
+      missingErrorClasses(refusalErrorModules, drivenErrorClasses, EXEMPT_REFUSAL_ERROR_CLASSES),
+      "Drive each missing class through a serializer in refusalWireFixtures.ts, capture its fixture, or record a written exemption.",
+    ).toEqual([]);
+  });
+
+  test("an exemption never outlives its gap or names a class no longer exported", () => {
+    const exported = new Set(
+      exportedErrorClasses(refusalErrorModules).map(({ errorClass }) => errorClass),
+    );
+    for (const [errorClass, reason] of EXEMPT_REFUSAL_ERROR_CLASSES) {
+      expect(reason.trim().length, errorClass.name).toBeGreaterThan(0);
+      expect(exported.has(errorClass), errorClass.name).toBe(true);
+      expect(drivenErrorClasses.has(errorClass), errorClass.name).toBe(false);
+    }
+    expect(fixtureDrivenErrorClasses()).toEqual(drivenErrorClasses);
+    expect(drivenErrorClasses.has(acquisitionRefusals.RetryableDeviceAcquisitionError)).toBe(false);
+  });
+
+  test("the class coverage checker detects a new coded refusal", () => {
+    class NewCodedRefusal extends ActionableError {
+      readonly code = "x";
+    }
+    const modules = {
+      mutation: {
+        NewCodedRefusal,
+        AppNotRunningError: appNotRunning.AppNotRunningError,
+        nonError: () => "x",
+      },
+    };
+    expect(
+      missingErrorClasses(modules, new Set([appNotRunning.AppNotRunningError]), new Map()),
+    ).toEqual(["NewCodedRefusal (mutation)"]);
+  });
+
   test("every refusal code constant has a fixture or a recorded reason it has none", () => {
     const missing: string[] = [];
     for (const [code, constant] of exportedCodeConstants()) {
-      if (!fixtureCodes.includes(code) && !(code in UNFIXTURED_REFUSAL_CODES)) {
+      if (!coveredWireCodes.has(code) && !(code in UNFIXTURED_REFUSAL_CODES)) {
         missing.push(`${constant} = "${code}"`);
       }
     }
@@ -323,12 +461,12 @@ describe("refusal wire contract", () => {
 
   test("every client-reachable code defined as a literal has a fixture or a recorded reason", () => {
     const missing = LITERAL_CLIENT_REACHABLE_CODES.filter(
-      (code) => !fixtureCodes.includes(code) && !(code in UNFIXTURED_REFUSAL_CODES),
+      (code) => !coveredWireCodes.has(code) && !(code in UNFIXTURED_REFUSAL_CODES),
     );
     expect(missing).toEqual([]);
     // A recorded reason never outlives its gap: a code with a fixture must not stay excused.
     expect(
-      Object.keys(UNFIXTURED_REFUSAL_CODES).filter((code) => fixtureCodes.includes(code)),
+      Object.keys(UNFIXTURED_REFUSAL_CODES).filter((code) => coveredWireCodes.has(code)),
     ).toEqual([]);
   });
 
@@ -447,12 +585,12 @@ describe("refusal wire contract", () => {
       const files = readdirSync(REFUSAL_SURFACES_DIR)
         .filter((name) => name.endsWith(".json") && name !== "expectations.json")
         .map((name) => name.replace(/\.json$/, ""));
-      expect(files.sort()).toEqual(surfaceFixtures.map(surfaceFixtureStem).sort());
+      expect(files.sort()).toEqual(allSurfaceFixtures.map(surfaceFixtureStem).sort());
       expect(Object.keys(surfaceExpectations.fixtures).sort()).toEqual(files.sort());
     });
 
     test("the expectations pin the fields and disposition each surface carries", () => {
-      for (const fixture of surfaceFixtures) {
+      for (const fixture of allSurfaceFixtures) {
         const stem = surfaceFixtureStem(fixture);
         const row = surfaceExpectations.fixtures[stem];
         const fields = surfaceFields(fixture);

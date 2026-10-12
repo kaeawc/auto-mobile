@@ -1,8 +1,10 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { ActionableError } from "../../src/models/ActionableError";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import {
   resolveAutoMobileBaseDir,
   resolveAutoMobileLogsDir,
@@ -13,6 +15,72 @@ import {
   ensureSecureTempDirSync,
   TEMP_SUBDIRS,
 } from "../../src/utils/tempDir";
+
+describe("coordination defaults in a child Bun process", () => {
+  const scratch = useScratchRoot("coordination-home-");
+  let childHome: string;
+  let child: { homedir: string; shared: string; adbServer: string };
+  let exitCode: number;
+  let stderr: string;
+  beforeAll(() => {
+    childHome = scratch.next();
+    const script = path.join(childHome, "probe.ts");
+    const tempDirModule = fileURLToPath(new URL("../../src/utils/tempDir.ts", import.meta.url));
+    fs.writeFileSync(
+      script,
+      `import os from "node:os";
+import { getSharedAutoMobileDir, getAdbServerScopedAutoMobileDir } from ${JSON.stringify(tempDirModule)};
+console.log(JSON.stringify({ homedir: os.userInfo().homedir,
+  shared: getSharedAutoMobileDir("x"),
+  adbServer: getAdbServerScopedAutoMobileDir("tcp-localhost-5037", "x") }));
+`,
+    );
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      HOME: childHome,
+      USERPROFILE: childHome,
+      AUTOMOBILE_DATA_DIR: path.join(childHome, "data"),
+      AUTOMOBILE_LOG_DIR: path.join(childHome, "logs"),
+    };
+    for (const key of [
+      "AUTOMOBILE_COORDINATION_DIR",
+      "AUTO_MOBILE_COORDINATION_DIR",
+      "AUTOMOBILE_ADB_SERVER_COORDINATION_DIR",
+      "AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR",
+      "BUN_OPTIONS",
+      "AUTOMOBILE_SPAWN_GUARD_CENSUS_FILE",
+      "AUTOMOBILE_SPAWN_GUARD_ALLOWLIST",
+    ]) {
+      delete env[key];
+    }
+    const result = Bun.spawnSync([process.execPath, script], {
+      cwd: childHome,
+      env,
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: 5000,
+    });
+    exitCode = result.exitCode;
+    stderr = result.stderr.toString();
+    child = JSON.parse(result.stdout.toString());
+  });
+
+  test("both coordination roots follow the child's os.userInfo().homedir", () => {
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+    expect(child.shared).toBe(path.join(child.homedir, ".auto-mobile", "x"));
+    expect(child.adbServer).toBe(
+      path.join(child.homedir, ".auto-mobile", "adb-servers", "tcp-localhost-5037", "x"),
+    );
+  });
+
+  test.skipIf(process.platform !== "darwin")(
+    "Bun's account home follows HOME at startup on macOS",
+    () => {
+      expect(fs.realpathSync(child.homedir)).toBe(fs.realpathSync(childHome));
+    },
+  );
+});
 
 describe("resolveAutoMobileBaseDir", () => {
   const home = path.resolve("/home/tester");
@@ -177,7 +245,7 @@ describe("getTempDir", () => {
 });
 
 describe("getSharedAutoMobileDir", () => {
-  test("uses the OS-account home instead of an agent-specific HOME", () => {
+  test("defaults to the home returned by os.userInfo", () => {
     const userInfoSpy = spyOn(os, "userInfo").mockReturnValue({
       uid: 501,
       gid: 20,

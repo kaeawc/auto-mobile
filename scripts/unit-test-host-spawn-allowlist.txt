@@ -28,3 +28,7 @@ test/scripts/spmRootToolchainWorkflow.test.ts bash
 test/server/appFileService.test.ts sh
 # Runs a nested `bun test --isolate` on a probe spec in a temp dir to prove the timing preload.
 test/setup/fileTimingProbe.test.ts bun
+# Runs nested unit and integration probes in an OS temp dir to prove the directory preload.
+test/setup/testDirectories.test.ts bun
+# Runs a plain Bun script under an isolated HOME to inspect coordination path defaults.
+test/utils/dataDir.test.ts bun

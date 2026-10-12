@@ -31,7 +31,10 @@ test("a generic connection keeps the handover payload", () => {
 });
 
 test("a daemon release reason names the managed loss without changing the generic payload", () => {
-  const released: LivenessHandover = { ...handover, releaseReason: "rehydration-owner-timeout" };
+  const released: LivenessHandover = {
+    ...handover,
+    releaseReasons: { [SESSION]: "rehydration-owner-timeout" },
+  };
   expect(livenessHandoverNotificationPayloads(released, readyManagedSlotsResult(SESSION))).toEqual([
     managedEndedPayload(readyManagedSlotsResult(SESSION), SESSION, "rehydration-owner-timeout"),
   ]);
@@ -53,7 +56,24 @@ test("a lost session that is not one of the connection's slots keeps the handove
   const other = { ...handover.sessions[0], sessionUuid: OTHER };
   const mixed = { ...handover, sessions: [handover.sessions[0], other] };
   expect(livenessHandoverNotificationPayloads(mixed, managedSlots)).toEqual([
-    managedEndedPayload(managedSlots, SESSION, "proxy_stalled"),
+    managedEndedPayload(managedSlots, SESSION, "session-not-found"),
     livenessHandoverPayload({ ...handover, sessions: [other] }),
   ]);
+});
+
+test("a multi-session handover reports each managed session's own reason", () => {
+  const managedSlots = readyManagedSlotsResult(SESSION);
+  managedSlots.slots.push({ ...managedSlots.slots[0], slotIndex: 2, sessionUuid: OTHER });
+  const mixed = {
+    ...handover,
+    sessions: [handover.sessions[0], { ...handover.sessions[0], sessionUuid: OTHER }],
+    releaseReasons: { [SESSION]: "heartbeat-timeout", [OTHER]: "daemon-shutdown" },
+  };
+  expect(livenessHandoverNotificationPayloads(mixed, managedSlots)).toEqual([
+    managedEndedPayload(managedSlots, SESSION, "heartbeat-timeout"),
+    managedEndedPayload(managedSlots, OTHER, "daemon-shutdown"),
+  ]);
+  expect(livenessHandoverPayload(mixed)).toEqual(
+    livenessHandoverPayload({ ...mixed, releaseReasons: undefined }),
+  );
 });

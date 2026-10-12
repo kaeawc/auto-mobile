@@ -587,6 +587,23 @@
         "acquireNewSession": false,
         "retryAfterMs": 1000
       }
+    },
+    "daemon_overloaded": {
+      "expected": "retry",
+      "fields": {
+        "code": "daemon_overloaded",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 250
+      }
+    },
+    "provision_device.platform_command_failed.create_rejected": {
+      "expected": "fail",
+      "fields": {
+        "code": "platform_command_failed",
+        "retryable": false,
+        "acquireNewSession": false
+      }
     }
   }
 }

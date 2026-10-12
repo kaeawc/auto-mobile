@@ -1,0 +1,12 @@
+{
+  "surface": "socket-frame",
+  "name": "discovery_incomplete.android",
+  "builder": "mcpRequestFailureDetails",
+  "payload": {
+    "type": "mcp_response",
+    "success": false,
+    "error": "discovery_incomplete: Android booted-device discovery was incomplete and is retryable: adb devices failed",
+    "code": "discovery_incomplete",
+    "retryable": true
+  }
+}

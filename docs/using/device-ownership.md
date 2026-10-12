@@ -168,7 +168,9 @@ liveness policy (heartbeat, one-shot CLI or managed execution; owner decision
 `idle` sits beside the reason it qualifies: `error.reason`/`error.idle` in an MCP envelope,
 `details.reason`/`details.idle` in a typed failure frame, or top-level `releaseReason`/`idle`
 on a not-found answer. It is only ever `true` and is absent otherwise; a heartbeat lapse
-(`heartbeat-timeout`, `missing-first-heartbeat`) never carries `idle`.
+(`heartbeat-timeout`, `missing-first-heartbeat`) never carries `idle`. For `expired`, `idle: true`
+means the row's idle deadline passed with no daemon holding the session: time the daemon was
+down counts toward the window, and no heartbeat was judged during it.
 
 A call still running when its session is released (heartbeat reap, idle sweep,
 owner disconnect or explicit release) is cut and answered with

@@ -87,10 +87,11 @@ export interface ActiveExecution {
   unsubscribeDeadlineExtensions?: () => void;
   /**
    * Devices this call was admitted to drive without a session, because no session held them
-   * (#10829). A session that acquires one of them cancels the call: it may not keep driving the
-   * new holder's device.
+   * (#10829). Acquisition cancels control calls or only a read's readiness; reads then watch.
    */
   sessionlessDeviceUse?: Set<string>;
+  sessionlessControlUse?: Set<string>;
+  sessionlessReadReadiness?: Map<string, Set<AbortController>>;
 }
 
 /**
@@ -149,6 +150,8 @@ export type ExecutionCancellationReason = string | Error;
 export interface ActiveExecutionQuery {
   onlyToolName?: string;
   startedAtOrBefore?: number;
+  /** Bound the captured session-clock start rather than its wall-clock counterpart (#11290). */
+  sessionClockStartedAtOrBefore?: number;
   excludeExecutionId?: string;
   /** Same session filter as {@link ExecutionCancellationOptions.onlySessionUuid}. */
   onlySessionUuid?: string;
@@ -176,13 +179,20 @@ function executionDeadlineMs(execution: ActiveExecution, onSessionClock?: boolea
   return onSessionClock ? wallDeadline + (execution.sessionClockOffsetMs ?? 0) : wallDeadline;
 }
 
-/** Whether `query` leaves this execution out by id or as a read ({@link ActiveExecutionQuery}). */
+/** Whether `query` leaves this execution out by id, session-clock start or as a read. */
 function isExcludedByQuery(
   executionId: string,
   execution: ActiveExecution | undefined,
   query: ActiveExecutionQuery | undefined,
 ): boolean {
   if (executionId === query?.excludeExecutionId) {
+    return true;
+  }
+  if (
+    query?.sessionClockStartedAtOrBefore !== undefined &&
+    (execution === undefined ||
+      execution.sessionClockStartTime > query.sessionClockStartedAtOrBefore)
+  ) {
     return true;
   }
   return query?.excludeReads === true && execution !== undefined && isReadExecution(execution);
@@ -192,6 +202,7 @@ function isExcludedByQuery(
 function isUnfilteredQuery(query: ActiveExecutionQuery | undefined): boolean {
   return (
     query?.startedAtOrBefore === undefined &&
+    query?.sessionClockStartedAtOrBefore === undefined &&
     query?.excludeExecutionId === undefined &&
     query?.onlyToolName === undefined &&
     query?.onlySessionUuid === undefined &&
@@ -508,18 +519,62 @@ export class ExecutionTracker {
     if (execution) {
       execution.sessionlessDeviceUse ??= new Set();
       execution.sessionlessDeviceUse.add(deviceId);
+      execution.sessionlessControlUse ??= new Set();
+      execution.sessionlessControlUse.add(deviceId);
     }
   }
 
   /** Drop a mark when the call's readiness settled on another device than it was admitted to. */
   unmarkSessionlessDeviceUse(executionId: string, deviceId: string): void {
-    this.executions.get(executionId)?.sessionlessDeviceUse?.delete(deviceId);
+    const execution = this.executions.get(executionId);
+    execution?.sessionlessControlUse?.delete(deviceId);
+    if (!execution?.sessionlessReadReadiness?.has(deviceId)) {
+      execution?.sessionlessDeviceUse?.delete(deviceId);
+    }
+  }
+
+  /** Readiness cancellation leaves the read execution alive to watch the acquired device. */
+  markSessionlessReadReadiness(
+    executionId: string,
+    deviceId: string,
+    controller: AbortController,
+  ): void {
+    const execution = this.executions.get(executionId);
+    if (!execution) {
+      return;
+    }
+    execution.sessionlessDeviceUse ??= new Set();
+    execution.sessionlessDeviceUse.add(deviceId);
+    execution.sessionlessReadReadiness ??= new Map();
+    const controllers = execution.sessionlessReadReadiness.get(deviceId) ?? new Set();
+    controllers.add(controller);
+    execution.sessionlessReadReadiness.set(deviceId, controllers);
+  }
+
+  /** Removing a nested read's mark must preserve its outer control call's mark. */
+  unmarkSessionlessReadReadiness(
+    executionId: string,
+    deviceId: string,
+    controller: AbortController,
+  ): void {
+    const execution = this.executions.get(executionId);
+    if (!execution) {
+      return;
+    }
+    const controllers = execution.sessionlessReadReadiness?.get(deviceId);
+    controllers?.delete(controller);
+    if (!controllers?.size) {
+      execution.sessionlessReadReadiness?.delete(deviceId);
+      if (!execution.sessionlessControlUse?.has(deviceId)) {
+        execution.sessionlessDeviceUse?.delete(deviceId);
+      }
+    }
   }
 
   /**
-   * A session just acquired `deviceId`: abort every sessionless call admitted to drive it while it
-   * was free, synchronously, with the same typed ownership refusal a new sessionless call gets
-   * (#10829). `excludeExecutionId` spares the call performing the acquisition. Returns the count.
+   * A session acquired `deviceId`: cancel controls with the typed refusal (#10829), or only a
+   * read's readiness so it can watch. `excludeExecutionId` spares the acquiring call. Returns
+   * the number of executions cancelled.
    */
   cancelSessionlessDeviceUse(
     deviceId: string,
@@ -534,21 +589,37 @@ export class ExecutionTracker {
       ) {
         continue;
       }
-      this.abortExecution(
-        execution,
-        new InputDeviceOwnedError(
-          execution.toolName,
-          deviceId,
-          undefined,
-          SESSIONLESS_DEVICE_ACQUIRED_REMEDY,
-        ),
+      const reason = new InputDeviceOwnedError(
+        execution.toolName,
+        deviceId,
+        undefined,
+        SESSIONLESS_DEVICE_ACQUIRED_REMEDY,
       );
+      if (execution.sessionlessControlUse?.has(deviceId)) {
+        this.abortExecution(execution, reason);
+      } else if (!this.cancelReadReadiness(execution, deviceId, reason)) {
+        continue;
+      }
       cancelled++;
       logger.info(
         `[ExecutionTracker] Cancelled sessionless execution ${execution.id} on ${deviceId}: a session acquired the device (tool=${execution.toolName})`,
       );
     }
     return cancelled;
+  }
+
+  private cancelReadReadiness(
+    execution: ActiveExecution,
+    deviceId: string,
+    reason: Error,
+  ): boolean {
+    const controllers = [...(execution.sessionlessReadReadiness?.get(deviceId) ?? [])].filter(
+      (controller) => !controller.signal.aborted,
+    );
+    for (const controller of controllers) {
+      controller.abort(reason);
+    }
+    return controllers.length > 0;
   }
 
   /**

@@ -66,6 +66,7 @@ interface Internals {
   acceptingRequests: boolean;
   handleConnection(socket: Socket): void;
   activeRequestHandlers: Set<Promise<void>>;
+  handleIdeSocketRequest(request: DaemonRequest): Promise<unknown>;
 }
 
 const SESSION = "idle-input-session";
@@ -105,11 +106,17 @@ const FRAMES: ReadonlyArray<{
     params: { ...KEY_VALUE, key: "k", value: "v", type: "STRING" },
     sends: "setPreference",
   },
+  {
+    method: "ide/setKeyValue",
+    params: { ...KEY_VALUE, key: "k", value: null, type: "STRING" },
+    sends: "removePreference",
+  },
   { method: "ide/removeKeyValue", params: { ...KEY_VALUE, key: "k" }, sends: "removePreference" },
   { method: "ide/clearKeyValueFile", params: { ...KEY_VALUE }, sends: "clearPreferenceStore" },
   { method: "ide/updateService", params: {}, sends: "updateService" },
 ];
 const INPUT_FRAMES = FRAMES.filter((frame) => frame.method.startsWith("input/"));
+const IDE_FRAMES = FRAMES.filter((frame) => frame.method.startsWith("ide/"));
 
 describe("a holder's control frame refused before it reaches the device", () => {
   let timer: FakeTimer;
@@ -123,6 +130,8 @@ describe("a holder's control frame refused before it reaches the device", () => 
   let discoveryTakesMs: number;
   let screenGeometry: { pixelWidth: number; pixelHeight: number } | null;
   let toolsEnabled: boolean;
+  let beforeDeviceWork: (() => void) | undefined;
+  let duringOwnershipGate: (() => void) | undefined;
   const pool = { isSessionRecoveryInFlight: () => false, sessionExecutionsEnded: () => {} };
 
   function stateFor(): DaemonStateAccess {
@@ -187,6 +196,8 @@ describe("a holder's control frame refused before it reaches the device", () => 
     discoveryTakesMs = 0;
     screenGeometry = null;
     toolsEnabled = true;
+    beforeDeviceWork = undefined;
+    duringOwnershipGate = undefined;
     timer = new FakeTimer();
     serverTimer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -205,21 +216,22 @@ describe("a holder's control frame refused before it reaches the device", () => 
         return { devices: [androidDevice], succeededPlatforms: new Set(["android", "ios"]) };
       },
     } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
-      () =>
-        ({
-          getScreenScaleMetadata: () => screenGeometry,
-          requestTapCoordinates: record("tap"),
-          requestSwipe: record("swipe"),
-          requestGestureStart: record("gestureStart"),
-          requestGestureMove: record("gestureMove"),
-          requestGestureEnd: record("gestureEnd"),
-          requestSetText: record("setText"),
-          setPreference: record("setPreference"),
-          removePreference: record("removePreference"),
-          clearPreferenceStore: record("clearPreferenceStore"),
-        }) as unknown as AndroidCtrlProxyClient,
-    );
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
+      // After resolveKeyValueMutationClient's abort check, before the mutation's own check.
+      beforeDeviceWork?.();
+      return {
+        getScreenScaleMetadata: () => screenGeometry,
+        requestTapCoordinates: record("tap"),
+        requestSwipe: record("swipe"),
+        requestGestureStart: record("gestureStart"),
+        requestGestureMove: record("gestureMove"),
+        requestGestureEnd: record("gestureEnd"),
+        requestSetText: record("setText"),
+        setPreference: record("setPreference"),
+        removePreference: record("removePreference"),
+        clearPreferenceStore: record("clearPreferenceStore"),
+      } as unknown as AndroidCtrlProxyClient;
+    });
     spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(
       () =>
         ({
@@ -235,7 +247,12 @@ describe("a holder's control frame refused before it reaches the device", () => 
     spyOn(InputKey.prototype, "press").mockImplementation(
       record("key") as unknown as InputKey["press"],
     );
-    const fakePool = createFakeDaemonState().getDevicePool();
+    const fakePool = {
+      ...createFakeDaemonState().getDevicePool(),
+      assertNotClaimedByForeignDaemon: async () => {
+        duringOwnershipGate?.();
+      },
+    };
     const server = new UnixSocketServer(
       "unused",
       "http://localhost:0/mcp",
@@ -254,6 +271,8 @@ describe("a holder's control frame refused before it reaches the device", () => 
       },
     );
     internals = server as unknown as Internals;
+    // Observe the route rejection even when a closed socket suppresses its response.
+    spyOn(internals, "handleIdeSocketRequest");
     internals.acceptingRequests = true;
     socket = new FakeSocket();
     internals.handleConnection(socket as unknown as Socket);
@@ -267,6 +286,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
     await Promise.all([...internals.activeRequestHandlers]);
+    spyOn(internals, "handleIdeSocketRequest").mockRestore();
     unsubscribeActivity();
     executionTracker.setSessionClockOffsetProvider(() => 0);
     spyOn(AndroidCtrlProxyClient, "getInstance").mockRestore();
@@ -372,6 +392,55 @@ describe("a holder's control frame refused before it reaches the device", () => 
       expect(sent).toEqual([frame.sends]);
       expect(idleClock().lastUsedAt).toBe(before.lastUsedAt! + 1_000);
     });
+
+    for (const interruption of ["cancel", "close"] as const) {
+      test.each(IDE_FRAMES)(
+        `$method ($sends) ${interruption} before device work leaves the idle window alone`,
+        async (frame) => {
+          const before = idleClock();
+          timer.advanceTime(1_000);
+          let interrupted = false;
+          const interrupt = () => {
+            interrupted = true;
+            if (interruption === "close") {
+              socket.destroy();
+            } else {
+              socket.send({
+                id: "cancel-cut",
+                type: "daemon_request",
+                method: "daemon/cancelRequest",
+                params: { requestId: "cut" },
+              });
+            }
+          };
+          if (frame.method === "ide/updateService") {
+            duringOwnershipGate = interrupt;
+          } else {
+            beforeDeviceWork = interrupt;
+          }
+
+          await send("cut", frame.method, frame.params);
+
+          expect(interrupted).toBe(true);
+          if (interruption === "cancel") {
+            expect(socket.responses.find((response) => response.id === "cancel-cut")).toMatchObject(
+              {
+                success: true,
+                result: { cancelled: true },
+              },
+            );
+            expect(socket.responses.find((response) => response.id === "cut")).toMatchObject({
+              success: false,
+            });
+          }
+          const route = spyOn(internals, "handleIdeSocketRequest").mock.results[0];
+          expect(route?.type).toBe("return");
+          await expect(route?.value).rejects.toThrow();
+          expect(sent).toEqual([]);
+          expect(idleClock()).toEqual(before);
+        },
+      );
+    }
 
     test.each(FRAMES)("$method from a session that does not hold the device", async (frame) => {
       await expectRefusedWithoutUse(frame, { sessionUuid: "someone" });

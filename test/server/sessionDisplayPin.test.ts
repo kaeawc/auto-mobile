@@ -1117,7 +1117,7 @@ test("omitted display preserves main's routing order without accessing the inven
   });
   const bind = spyOn(pool, "bindOrReuseDeviceSession").mockImplementation(async (...args) => {
     steps.push("bind");
-    // The trailing receipt records the move for a cancelled call's undo (#11593).
+    // The receipt records cancellation undo (#11593); the final flag refuses live preparation (#11651).
     expect(args.slice(0, 7)).toEqual([
       "one",
       "other",
@@ -1127,7 +1127,15 @@ test("omitted display preserves main's routing order without accessing the inven
       undefined,
       true,
     ]);
-    expect(args.slice(7)).toEqual([undefined, undefined, undefined, undefined, undefined, {}]);
+    expect(args.slice(7)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {},
+      true,
+    ]);
     return "one";
   });
   const readiness = spyOn(sessions, "setDeviceReadiness").mockImplementation(() => {

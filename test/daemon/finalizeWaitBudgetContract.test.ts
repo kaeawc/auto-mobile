@@ -16,10 +16,14 @@ import {
 } from "../../src/daemon/sessionManager";
 import { readDeviceCleanupInProgressRefusal } from "../../src/server/deviceSessionResult";
 import {
+  createOwnerlessRecordingAcquisitionCleanup,
   defaultRecordingSessionCleanupDeps,
   registerRecordingSessionCleanup,
 } from "../../src/server/recordingSessionCleanup";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { createDeviceSettingDefaultsAcquisitionReset } from "../../src/features/utility/DeviceSettingDefaults";
+import { NetworkState } from "../../src/server/NetworkState";
+import { createOwnerlessNetworkStateAcquisitionCleanup } from "../../src/server/networkStateSessionCleanup";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 /**
@@ -121,5 +125,48 @@ describe("finalize wait budget shared with the runners (#11360)", () => {
     expect(Math.max(...advertised.map((capMs) => capMs ?? Infinity))).toBeLessThanOrEqual(
       waitBudgetMs,
     );
+  });
+
+  test("the three acquisition factories register caps within the shared waitBudgetMs", async () => {
+    const timer = new FakeTimer();
+    const caps: Array<number | undefined> = [];
+    const cleanups: Promise<unknown>[] = [];
+    const manager = {
+      getSessionForDevice: () => "holder",
+      registerAcquisitionDeviceCleanup: (
+        _deviceId: string,
+        cleanup: Promise<unknown>,
+        capMs?: number,
+      ) => {
+        caps.push(capMs);
+        cleanups.push(cleanup);
+      },
+    };
+    createOwnerlessRecordingAcquisitionCleanup(manager, {
+      timer,
+      adoptVideoRecordings: async () => {},
+      adoptSegmentedRecordings: () => {},
+      adoptTestRecording: () => false,
+    })("device", "holder");
+    const state = new NetworkState({ timer, notifier: { notifyResourceUpdated: () => {} } });
+    state.startSimulation("device", "timeout", 30, null);
+    createOwnerlessNetworkStateAcquisitionCleanup(manager, {
+      timer,
+      state: () => state,
+      pusher: { push: async () => {} },
+    })("device");
+    createDeviceSettingDefaultsAcquisitionReset(
+      manager,
+      {
+        resetOnAcquisition: async () => {},
+      },
+      timer,
+    )("device", "holder");
+    await Promise.all(cleanups);
+    expect(caps).toEqual([5_000, 10_000, 15_000]);
+    expect(Math.max(...caps.map((cap) => cap ?? Infinity))).toBeLessThanOrEqual(
+      finalizeWait().waitBudgetMs,
+    );
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 });

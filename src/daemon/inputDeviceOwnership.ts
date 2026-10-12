@@ -28,8 +28,13 @@ export const TOOL_CALL_REMEDY =
  */
 export class InputDeviceOwnedError extends ActionableError {
   readonly code = DEVICE_OWNED_BY_OTHER_SESSION_CODE;
-  /** The holder keeps the device until it releases it; the same call cannot succeed as-is. */
-  readonly retryable = false;
+  /**
+   * False when a session holds the device: the holder keeps it until it releases it, so the same
+   * call cannot succeed as-is. True, with `retryAfterMs`, only for a device another request is
+   * still preparing (#11651), which ends by itself.
+   */
+  readonly retryable: boolean;
+  declare readonly retryAfterMs?: number;
 
   constructor(
     action: string,
@@ -38,6 +43,8 @@ export class InputDeviceOwnedError extends ActionableError {
     remedy = INPUT_REMEDY,
     /** Replaces the composed message where a caller's existing wording must stay stable. */
     message?: string,
+    /** Set only when the refusal ends without the caller or a holder doing anything. */
+    retryAfterMs?: number,
   ) {
     super(
       message ??
@@ -48,12 +55,46 @@ export class InputDeviceOwnedError extends ActionableError {
           remedy,
     );
     this.name = "InputDeviceOwnedError";
+    this.retryable = retryAfterMs !== undefined;
+    if (retryAfterMs !== undefined) {
+      this.retryAfterMs = retryAfterMs;
+    }
   }
 
   /** The wire evidence: the held device, never the holder's session. */
   toPayload(): Record<string, unknown> {
-    return { code: this.code, deviceId: this.deviceId, retryable: this.retryable };
+    return {
+      code: this.code,
+      deviceId: this.deviceId,
+      retryable: this.retryable,
+      ...(this.retryAfterMs === undefined ? {} : { retryAfterMs: this.retryAfterMs }),
+    };
   }
+}
+
+/** Retry hint for a device another request is preparing: a poll interval, not a bound. */
+export const DEVICE_PREPARED_FOR_OTHER_REQUEST_RETRY_AFTER_MS = 2_000;
+
+/**
+ * The refusal for selecting a device another request booted or picked and is still preparing: it
+ * holds a readiness reservation and has not bound a session yet (#11651, owner decision
+ * 2026-10-11). No session holds the device, so the message names none. Unlike a held device this
+ * ends by itself, when that request binds (the held-device rules apply from then on) or fails
+ * (the device is free), so this one emission is retryable with a hint. The reservation lasts as
+ * long as that request's preparation and its cleanup, which nothing else bounds.
+ */
+export function devicePreparedForOtherRequestError(deviceId: string): InputDeviceOwnedError {
+  const retryAfterMs = DEVICE_PREPARED_FOR_OTHER_REQUEST_RETRY_AFTER_MS;
+  return new InputDeviceOwnedError(
+    "setActiveDevice",
+    deviceId,
+    undefined,
+    undefined,
+    `Device '${deviceId}' is being prepared for another request, which has not bound it to a ` +
+      `session yet. Retry in about ${retryAfterMs}ms, once that request has bound the device or ` +
+      "failed, or use another device.",
+    retryAfterMs,
+  );
 }
 
 /**

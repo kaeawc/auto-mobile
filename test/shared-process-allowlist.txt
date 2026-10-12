@@ -252,6 +252,8 @@ test/daemon/testRecordingSocketServerReadinessSession.test.ts
 test/daemon/tokenOwnedSessionsLastUsedAt.test.ts
 test/daemon/toolCallActivityLatestDeadline.test.ts
 test/daemon/toolCallDeviceIdentity.test.ts
+test/daemon/undeliveredRebindRevertsOverrides.test.ts
+test/daemon/undeliveredRebindStrandedByOwnRestore.test.ts
 test/daemon/unsettledExecutionVeto.test.ts
 test/daemon/unsettledExecutionVetoWallClockStep.test.ts
 test/daemon/videoRecordingSocketServerAuth.test.ts

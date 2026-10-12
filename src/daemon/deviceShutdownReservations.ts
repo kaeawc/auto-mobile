@@ -55,7 +55,8 @@ export interface DeviceShutdownReservationsPoolPort {
 
 /** Owns readiness and shutdown reservations while the pool retains ownership decisions. */
 export class DeviceShutdownReservations {
-  private readonly readinessReservationCounts: Map<string, number> = new Map();
+  /** Per device, the owner symbols of every live readiness reservation. */
+  private readonly readinessOwnersByDevice: Map<string, Set<symbol>> = new Map();
   private readonly readinessReservationNames: Map<string, Map<symbol, ReadinessReservationTarget>> =
     new Map();
   private readonly shutdownReservations: Map<string, PooledDevice> = new Map();
@@ -106,10 +107,9 @@ export class DeviceShutdownReservations {
         current?.platform === "android" &&
         current.id.startsWith("emulator-") &&
         (current.avdName === stableRuntimeName || verifiedAndroidAvdName === stableRuntimeName);
-      this.readinessReservationCounts.set(
-        deviceId,
-        (this.readinessReservationCounts.get(deviceId) ?? 0) + 1,
-      );
+      const deviceOwners = this.readinessOwnersByDevice.get(deviceId) ?? new Set<symbol>();
+      deviceOwners.add(owner);
+      this.readinessOwnersByDevice.set(deviceId, deviceOwners);
       if (trackStableName && current) {
         const owners =
           this.readinessReservationNames.get(stableRuntimeKey) ??
@@ -126,11 +126,10 @@ export class DeviceShutdownReservations {
       }
       released = true;
       await this.pool.getAssignmentMutex().runExclusive(() => {
-        const count = this.readinessReservationCounts.get(deviceId);
-        if (count === undefined || count <= 1) {
-          this.readinessReservationCounts.delete(deviceId);
-        } else {
-          this.readinessReservationCounts.set(deviceId, count - 1);
+        const deviceOwners = this.readinessOwnersByDevice.get(deviceId);
+        deviceOwners?.delete(owner);
+        if (deviceOwners?.size === 0) {
+          this.readinessOwnersByDevice.delete(deviceId);
         }
         if (!trackStableName) {
           return;
@@ -148,8 +147,16 @@ export class DeviceShutdownReservations {
     return Object.assign(release, { owner });
   }
 
-  isReservedForReadiness(deviceId: string): boolean {
-    return (this.readinessReservationCounts.get(deviceId) ?? 0) > 0;
+  /**
+   * Whether a live readiness reservation holds the device. With `exceptOwners`, a request asks
+   * about every reservation but its own: whether ANOTHER request is preparing the device.
+   */
+  isReservedForReadiness(deviceId: string, exceptOwners?: ReadonlySet<symbol>): boolean {
+    const owners = this.readinessOwnersByDevice.get(deviceId);
+    if (!owners) {
+      return false;
+    }
+    return exceptOwners ? [...owners].some((owner) => !exceptOwners.has(owner)) : owners.size > 0;
   }
 
   private readinessReservationNameKey(device: Pick<BootedDevice, "name" | "platform">): string {

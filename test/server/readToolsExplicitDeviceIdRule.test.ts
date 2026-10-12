@@ -44,6 +44,7 @@ import {
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { createExecResult } from "../../src/utils/execResult";
 import { executionTracker } from "../../src/server/executionTracker";
+import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
@@ -255,6 +256,7 @@ function harness(
     iosManager,
     androidManager,
     handledDevices: [] as BootedDevice[],
+    handlerSignals: [] as Array<AbortSignal | undefined>,
     runs: [] as Array<{ deviceId: string; sessionUuid: unknown; readPath: boolean }>,
   };
 }
@@ -320,6 +322,7 @@ beforeAll(async () => {
         schema,
         async (device, args) => {
           h!.handledDevices.push(device);
+          h!.handlerSignals.push(getAbortSignal());
           h!.runs.push({
             deviceId: device.deviceId,
             sessionUuid: args.sessionUuid,
@@ -1869,6 +1872,7 @@ for (const platform of ["android", "ios"] as const) {
         const callerFailure = new ActionableError("caller cancelled readiness");
         const realVerify = DeviceSessionManager.prototype.verifyDevice.bind(current.manager);
         const seen: Array<{ marks: string[]; cancelled: number; aborted: boolean }> = [];
+        const readinessAmbientAborted: Array<boolean | undefined> = [];
         const verify = async (...args: Parameters<typeof realVerify>) => {
           expect(args[0]).toBe(device.deviceId);
           const marks = [...(execution.sessionlessDeviceUse ?? [])];
@@ -1878,6 +1882,10 @@ for (const platform of ["android", "ios"] as const) {
             bound = true;
             const cancelled = executionTracker.cancelSessionlessDeviceUse(device.deviceId);
             seen.push({ marks, cancelled, aborted: execution.abortController.signal.aborted });
+            expect(cancelled).toBe(1);
+            readinessAmbientAborted.push(getAbortSignal()?.aborted);
+            expect(getAbortSignal()?.aborted).toBe(true);
+            expect(execution.abortController.signal.aborted).toBe(false);
           }
           if (acquisition === "verify returns") {
             return;
@@ -1904,15 +1912,17 @@ for (const platform of ["android", "ios"] as const) {
         }
         const shutdown = spyOn(current.discovery, "killDevice");
         try {
-          const outcome = ToolRegistry.getTool("listApps")!.handler(
-            {
-              platform,
-              deviceId: platform === "android" ? device.name : device.deviceId,
-              [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
-              [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
-            },
-            undefined,
-            execution.abortController.signal,
+          const outcome = runWithAbortSignal(execution.abortController.signal, () =>
+            ToolRegistry.getTool("listApps")!.handler(
+              {
+                platform,
+                deviceId: platform === "android" ? device.name : device.deviceId,
+                [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
+                [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
+              },
+              undefined,
+              execution.abortController.signal,
+            ),
           );
           // Attach rejection handling before releasing the fake lifecycle barrier.
           const result = outcome.then(
@@ -1934,6 +1944,11 @@ for (const platform of ["android", "ios"] as const) {
             expect(current.runs).toEqual([
               { deviceId: device.deviceId, sessionUuid: undefined, readPath: true },
             ]);
+            expect(current.handlerSignals).toEqual([execution.abortController.signal]);
+            expect(current.handlerSignals[0]?.aborted).toBe(false);
+            if (acquisition === "during verify" || acquisition === "verify returns") {
+              expect(readinessAmbientAborted).toEqual([true]);
+            }
             if (acquisition === "held" || acquisition === "during ownership") {
               expect(current.verify).not.toHaveBeenCalled();
               expect(coldVerify?.mock.calls.length ?? 0).toBe(0);

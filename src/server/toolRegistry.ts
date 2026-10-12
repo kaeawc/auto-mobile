@@ -954,22 +954,27 @@ async function ensureReadTargetOrWatch(
   if (readinessTarget) {
     mark(readinessTarget);
   }
+  const combinedSignal = combineAbortSignals(options.signal, readiness.signal);
   try {
-    const device = await input.deviceSessionManager.ensureDeviceReady(platform, providedDeviceId, {
-      ...options,
-      signal: combineAbortSignals(options.signal, readiness.signal),
-      beforeReadBoot: providedDeviceId ? (image) => recheckReadBootTarget(input, image) : undefined,
-      beforeReadReadiness: async (device) => {
-        resolvedDevice = device;
-        mark(device.deviceId);
-        const held = await findHeldReadIdentity(input, [device.deviceId], device.platform);
-        if (held) {
-          throw new ReadTargetBecameHeld(held, device);
-        }
-        input.signal?.throwIfAborted();
-        readiness.signal.throwIfAborted();
-      },
-    });
+    const device = await runWithAbortSignal(combinedSignal, () =>
+      input.deviceSessionManager.ensureDeviceReady(platform, providedDeviceId, {
+        ...options,
+        signal: combinedSignal,
+        beforeReadBoot: providedDeviceId
+          ? (image) => recheckReadBootTarget(input, image)
+          : undefined,
+        beforeReadReadiness: async (device) => {
+          resolvedDevice = device;
+          mark(device.deviceId);
+          const held = await findHeldReadIdentity(input, [device.deviceId], device.platform);
+          if (held) {
+            throw new ReadTargetBecameHeld(held, device);
+          }
+          input.signal?.throwIfAborted();
+          readiness.signal.throwIfAborted();
+        },
+      }),
+    );
     input.signal?.throwIfAborted();
     if (readiness.signal.aborted) {
       unmark();

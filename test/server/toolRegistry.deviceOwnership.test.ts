@@ -24,8 +24,10 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { setDebugModeEnabled } from "../../src/utils/debug";
 import { executionTracker } from "../../src/server/executionTracker";
+import { getAbortSignal, runWithAbortSignal } from "../../src/utils/AbortContext";
 import {
   getToolSelectionContext,
+  isSessionlessDeviceRead,
   runWithToolSelectionContext,
 } from "../../src/features/toolSelection/toolSelectionContext";
 
@@ -52,6 +54,8 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
   let devices: FakeDeviceSessionManager;
   let gate: Promise<void> | undefined;
   let dispatched: (() => void) | undefined;
+  let callerSignal: AbortSignal | undefined;
+  let watchContexts: Array<{ signal: AbortSignal | undefined; readPath: boolean }>;
 
   const call = (name: string, args: Record<string, unknown>) =>
     ToolRegistry.getTool(name)!.handler(args);
@@ -67,6 +71,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
 
   beforeEach(async () => {
     ran = [];
+    watchContexts = [];
     ToolRegistry.clearTools();
     restorePipeline = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
@@ -130,6 +135,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
       createScreen: (device) => ({
         executeDeviceRead: async () => {
           ran.push({ name: "observe", deviceId: device.deviceId });
+          watchContexts.push({ signal: getAbortSignal(), readPath: isSessionlessDeviceRead() });
           return loadAndroidHomeObserve().observe;
         },
         execute: async () => {
@@ -144,6 +150,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
   afterEach(() => {
     gate = undefined;
     dispatched = undefined;
+    callerSignal = undefined;
     restorePipeline();
     Reflect.set(ToolRegistry, "deviceSessionManager", originalDeviceSessionManager);
     Reflect.set(ToolRegistry, "toolCallRepository", originalToolCallRepository);
@@ -282,11 +289,14 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
   /** Run a call as a tracked execution, as the MCP ingress does, with the tracker's signal. */
   async function tracked(name: string, args: Record<string, unknown>): Promise<unknown> {
     const execution = executionTracker.startExecution(name);
+    callerSignal = execution.abortController.signal;
     try {
       return await runWithToolSelectionContext(
         { execution: { executionId: execution.id, startTime: execution.startTime } },
         () =>
-          ToolRegistry.getTool(name)!.handler(args, undefined, execution.abortController.signal),
+          runWithAbortSignal(execution.abortController.signal, () =>
+            ToolRegistry.getTool(name)!.handler(args, undefined, execution.abortController.signal),
+          ),
       );
     } finally {
       executionTracker.endExecution(execution.id);
@@ -359,7 +369,9 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
   async function startInReadiness(name: string, args: Record<string, unknown>) {
     const release = Promise.withResolvers<void>();
     const entered = Promise.withResolvers<void>();
+    let ambientSignal: AbortSignal | undefined;
     devices.setEnsureDeviceReadyHook(async () => {
+      ambientSignal = getAbortSignal();
       entered.resolve();
       await release.promise;
     });
@@ -368,7 +380,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
       (error: unknown) => error,
     );
     await entered.promise;
-    return { outcome, release: () => release.resolve() };
+    return { outcome, release: () => release.resolve(), ambientSignal };
   }
 
   // #10905: the call was marked only after readiness, so an acquisition during a slow readiness
@@ -407,9 +419,13 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
       await sessionManager.createSession("late-holder", free.deviceId, "android");
       call.release();
       expect(await call.outcome).toBeUndefined();
+      expect(call.ambientSignal?.aborted).toBe(true);
+      expect(callerSignal?.aborted).toBe(false);
 
       expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
       expect(ran).toEqual([{ name: "observe", deviceId: free.deviceId }]);
+      expect(watchContexts).toEqual([{ signal: callerSignal, readPath: true }]);
+      expect(watchContexts[0].signal?.aborted).toBe(false);
     });
   }
 

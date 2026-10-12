@@ -3015,6 +3015,17 @@ export class SessionManager {
     this.deviceUnboundCallbacks.push(callback);
   }
 
+  private managedExecutionRecoveryListener?: (
+    sessionId: string,
+    recovered: Promise<unknown>,
+  ) => void;
+
+  setManagedExecutionRecoveryListener(
+    listener: (sessionId: string, recovered: Promise<unknown>) => void,
+  ): void {
+    this.managedExecutionRecoveryListener = listener;
+  }
+
   /**
    * Create a new session with an assigned device
    *
@@ -3106,11 +3117,20 @@ export class SessionManager {
     };
 
     const creation: PendingSessionCreation = { promise: Promise.resolve(session) };
-    creation.promise = this.persistAndPublishSession(
-      session,
-      creation,
-      this.claimedIncarnation(persistedRecovery),
+    // Queue publication so the synchronous recovery hook receives the actual creation promise.
+    creation.promise = Promise.resolve().then(() =>
+      this.persistAndPublishSession(session, creation, this.claimedIncarnation(persistedRecovery)),
     );
+    (() => {
+      if (!persistedRecovery || session.livenessPolicy !== MANAGED_EXECUTION_LIVENESS_POLICY) {
+        return;
+      }
+      try {
+        this.managedExecutionRecoveryListener?.(sessionId, creation.promise);
+      } catch (error) {
+        logger.warn(`[SessionManager] Managed recovery hook failed for ${sessionId}`, error);
+      }
+    })();
     this.pendingSessionCreations.set(sessionId, creation);
     try {
       const created = await this.withinCreateDeadline(

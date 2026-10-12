@@ -1,5 +1,5 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry, type AuditRunnerInput } from "../../src/server/toolRegistry";
 import {
@@ -33,6 +33,8 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import type { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
+import { ManagedExecutionReowner } from "../../src/daemon/managedSlots/managedExecutionReowner";
+import { ManagedSlotOwnershipUnconfirmedError } from "../../src/daemon/managedSlots/managedSlotRefusal";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   isSessionlessDeviceRead,
@@ -70,6 +72,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
   let devices: FakeDeviceSessionManager;
   let timer: FakeTimer;
   let persistence: FakeDeviceSessionPersistence;
+  let reowner: ManagedExecutionReowner | undefined;
 
   const call = (name: string, args: Record<string, unknown>) =>
     ToolRegistry.getTool(name)!.handler(args);
@@ -88,6 +91,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
   }
 
   beforeEach(async () => {
+    reowner = undefined;
     audited = [];
     recorded = [];
     reads = [];
@@ -141,6 +145,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       createDevicePoolDependencies(sessionManager, "read-only-device-path", {
         timer,
         deviceManager: fakeDeviceUtils,
+        managedExecutionOwnership: () => reowner,
       }),
     );
     await pool.initializeWithDevices([held, free]);
@@ -166,6 +171,8 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
   });
 
   afterEach(() => {
+    reowner?.close();
+    expect(executionTracker.getActiveExecutionCount()).toBe(0);
     serverConfig.setEmbeddedSdkEnabled(false);
     restorePipeline();
     resetListAppsToolDependencies();
@@ -175,6 +182,69 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     sessionManager.stopCleanupTimer();
+  });
+
+  test.each(["unconfirmed", "lost"] as const)(
+    "a %s managed session read watches without admission, readiness or use",
+    async (state) => {
+      const recovered = Promise.withResolvers<void>();
+      reowner = new ManagedExecutionReowner({
+        registry: async () => ({
+          findExecutionAssignments: async () => [],
+          claimExecution: async () => {
+            throw new Error("must not claim");
+          },
+        }),
+        owner: () => ({ daemonId: "test", pid: 1 }),
+        timer,
+      });
+      if (state === "unconfirmed") {
+        reowner.noteRecovering(agent, recovered.promise);
+      } else {
+        await reowner.reown([agent], { rehydrated: true });
+      }
+      const admission = spyOn(sessionManager, "admitIssuedSessionForAutomation");
+      const mark = spyOn(executionTracker, "markSessionAdmitted");
+      try {
+        await call("readProbe", { sessionUuid: agent });
+        expect(reads).toEqual([
+          { deviceId: held.deviceId, readPath: true, sessionUuid: undefined },
+        ]);
+        expectNoReadiness();
+        expect(admission).not.toHaveBeenCalled();
+        expect(mark).not.toHaveBeenCalled();
+      } finally {
+        admission.mockRestore();
+        mark.mockRestore();
+        recovered.resolve();
+      }
+    },
+  );
+
+  test("gated control keeps its unconfirmed refusal and a foreign read keeps its explicit target", async () => {
+    const recovered = Promise.withResolvers<void>();
+    reowner = new ManagedExecutionReowner({
+      registry: async () => {
+        throw new Error("must not open");
+      },
+      owner: () => ({ daemonId: "test", pid: 1 }),
+      timer,
+    });
+    reowner.noteRecovering(agent, recovered.promise);
+    ToolRegistry.registerDeviceAware(
+      "controlProbe",
+      "Control probe",
+      z.object({}).passthrough(),
+      async () => ({ success: true }),
+    );
+    expect(await outcome("controlProbe", { sessionUuid: agent })).toBeInstanceOf(
+      ManagedSlotOwnershipUnconfirmedError,
+    );
+    await call("readProbe", { sessionUuid: agent, deviceId: free.deviceId });
+    expect(reads).toEqual([{ deviceId: free.deviceId, readPath: true, sessionUuid: undefined }]);
+    expectNoReadiness();
+    reowner.close();
+    recovered.resolve();
   });
 
   test("a sessionless read with a held deviceId runs on the read-only path with no readiness", async () => {

@@ -51,6 +51,7 @@ export interface ManagedExecutionReownerDependencies {
   retryBackoff?: BackoffPolicy;
   /** Absent: keep marked sessions. */
   isSessionHeld?: (sessionUuid: string) => boolean;
+  onOwnershipConfirmed?: (sessionUuid: string) => void;
 }
 
 type OwnershipState = "unconfirmed" | "lost";
@@ -60,6 +61,9 @@ type ReownAttempt = {
 };
 
 export class ManagedExecutionReowner {
+  private readonly recovering = new Map<string, Promise<unknown>>();
+  /** Deduplicates the startup/late batch against each creation's own trigger, until release. */
+  private readonly recoveredSessions = new Set<string>();
   private readonly ownership = new Map<string, OwnershipState>();
   private readonly attempts = new Map<string, Promise<ReownAttempt>>();
   private readonly background = new Map<string, Promise<void>>();
@@ -86,13 +90,43 @@ export class ManagedExecutionReowner {
     }
     this.pruneReleasedSessions();
     if (options?.rehydrated) {
-      this.markUnconfirmed(sessionUuids);
+      this.markUnconfirmed(sessionUuids.filter((id) => !this.recoveredSessions.has(id)));
     }
     const assignments: SlotAssignmentRecord[] = [];
     for (const id of sessionUuids) {
       assignments.push(...(await this.reownInline(id)));
     }
     return assignments;
+  }
+
+  /** Close admission before a recovered session becomes visible, without starting registry work yet. */
+  noteRecovering(sessionUuid: string, recovered: Promise<unknown>): void {
+    if (this.closed || this.deps.registryExists?.() === false || this.recovering.has(sessionUuid)) {
+      return;
+    }
+    this.recovering.set(sessionUuid, recovered);
+    this.recoveredSessions.add(sessionUuid);
+    this.ownership.set(sessionUuid, "unconfirmed");
+    void recovered.then(
+      () => {
+        this.recovering.delete(sessionUuid);
+        if (this.isHeld(sessionUuid)) {
+          void this.reown([sessionUuid], { rehydrated: true });
+        }
+      },
+      (error: unknown) => {
+        // Failed creation publishes no usable session; the creation path reports the failure.
+        logger.debug(`[ManagedSlots] Recovery of ${sessionUuid} failed before re-owning`, error);
+        this.recovering.delete(sessionUuid);
+        this.isHeld(sessionUuid);
+      },
+    );
+  }
+
+  ownershipState(sessionUuid: string): OwnershipState | undefined {
+    return this.isHeld(sessionUuid) || this.recovering.has(sessionUuid)
+      ? this.ownership.get(sessionUuid)
+      : undefined;
   }
 
   private markUnconfirmed(ids: readonly string[]): void {
@@ -130,15 +164,12 @@ export class ManagedExecutionReowner {
   }
 
   private canAttempt(id: string): boolean {
-    return !this.closed && this.isHeld(id);
+    return !this.closed && !this.recovering.has(id) && this.isHeld(id);
   }
 
   /** Synchronous O(1) automation admission for sessions marked by rehydration or foreign-owner evidence. */
   automationRefusal(sessionUuid: string): ActionableError | undefined {
-    if (!this.isHeld(sessionUuid)) {
-      return undefined;
-    }
-    switch (this.ownership.get(sessionUuid)) {
+    switch (this.ownershipState(sessionUuid)) {
       case "unconfirmed":
         return new ManagedSlotOwnershipUnconfirmedError(sessionUuid);
       case "lost":
@@ -164,12 +195,15 @@ export class ManagedExecutionReowner {
     if (this.deps.isSessionHeld?.(id) !== false) {
       return true;
     }
-    this.ownership.delete(id);
+    if (!this.recovering.has(id)) {
+      this.ownership.delete(id);
+      this.recoveredSessions.delete(id);
+    }
     return false;
   }
 
   private pruneReleasedSessions(): void {
-    for (const id of this.ownership.keys()) {
+    for (const id of new Set([...this.ownership.keys(), ...this.recoveredSessions])) {
       this.isHeld(id);
     }
   }
@@ -180,6 +214,11 @@ export class ManagedExecutionReowner {
     }
     if (outcome === "confirmed") {
       this.ownership.delete(id);
+      try {
+        this.deps.onOwnershipConfirmed?.(id);
+      } catch (error) {
+        logger.warn(`[ManagedSlots] Ownership-confirmed hook failed for ${id}`, error);
+      }
     }
     if (outcome === "lost") {
       this.ownership.set(id, "lost");

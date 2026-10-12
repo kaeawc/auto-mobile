@@ -930,6 +930,7 @@ export interface OwnerDisconnectOptions {
 
 export interface ManagedExecutionOwnership {
   automationRefusal(sessionId: string): ActionableError | undefined;
+  ownershipState?(sessionId: string): "unconfirmed" | "lost" | undefined;
 }
 
 export interface DevicePoolDependencies {
@@ -10557,6 +10558,10 @@ export class DevicePool {
    */
   getDeviceForSession(sessionId: string): PooledDevice | null {
     return Array.from(this.devices.values()).find((d) => d.sessionId === sessionId) || null;
+  }
+
+  managedSlotOwnershipGate(sessionId: string): "unconfirmed" | "lost" | undefined {
+    return this.managedExecutionOwnership?.()?.ownershipState?.(sessionId);
   }
 
   assertSessionReadyForAutomation(sessionId: string): void {

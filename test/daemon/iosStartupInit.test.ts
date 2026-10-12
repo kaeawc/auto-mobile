@@ -46,6 +46,25 @@ describe("initializeIosCtrlProxyAtStartup (#7032)", () => {
     ).toEqual([]);
   });
 
+  test("startup warm-up skips gated iOS holders and names them in one info", () => {
+    const info = spyOn(logger, "info").mockImplementation(() => {});
+    try {
+      const devices = [
+        { id: "unconfirmed", platform: "ios" },
+        { id: "lost", platform: "ios" },
+        { id: "confirmed", platform: "ios" },
+      ];
+      const policy = new PassiveWorkPolicy(parsePassiveWorkSettings({}, "secret"), () => true);
+      expect(selectIosStartupWarmupDevices(devices, policy, (id) => id !== "confirmed")).toEqual([
+        devices[2]!,
+      ]);
+      expect(info.mock.calls).toHaveLength(1);
+      expect(String(info.mock.calls[0]?.[0])).toContain("unconfirmed, lost");
+    } finally {
+      info.mockRestore();
+    }
+  });
+
   test("skips a device when shutdown begins before its verification starts", async () => {
     const timer = new FakeTimer();
     const calls: string[] = [];

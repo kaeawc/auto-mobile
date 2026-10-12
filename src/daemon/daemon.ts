@@ -1110,6 +1110,11 @@ export class Daemon {
       owner: () => this.managedSlotJournalOwner(),
       timer: this.timer,
       isSessionHeld: (id) => this.sessionManager.isLiveManagedExecutionSession(id),
+      onOwnershipConfirmed: (id) => {
+        void this.warmConfirmedManagedExecution(id).catch((error: unknown) => {
+          logger.warn(`[Daemon] Confirmed managed execution ${id} iOS warm-up failed`, error);
+        });
+      },
     });
     DaemonState.getInstance().setManagedExecutionReowner(this.managedExecutionReowner);
     // Interrupted journaled work (#11179) is redriven in the background. The loop starts when this
@@ -1314,6 +1319,9 @@ export class Daemon {
         this.deviceDataStreamServer?.invalidateInitialDeviceFrames(deviceId);
       }
     });
+    this.sessionManager.setManagedExecutionRecoveryListener((id, recovered) =>
+      this.managedExecutionReowner?.noteRecovering(id, recovered),
+    );
     this.sessionManager.setLateRehydrationListener((rehydrated) =>
       this.reownRehydratedManagedExecutions(rehydrated),
     );
@@ -4958,6 +4966,12 @@ export class Daemon {
     const iosDevices = selectIosStartupWarmupDevices(
       this.devicePool.getAllDevices(),
       this.passiveWorkPolicy,
+      (deviceId) => {
+        const holder = this.sessionManager.getSessionForDevice(deviceId);
+        return (
+          holder !== null && this.managedExecutionReowner?.ownershipState(holder) !== undefined
+        );
+      },
     );
     if (iosDevices.length === 0) {
       logger.debug("[Daemon] No iOS devices to initialize CtrlProxy iOS for");
@@ -4979,6 +4993,42 @@ export class Daemon {
           deviceSessionManager.verifyIosDevice(deviceId, options),
       },
     );
+  }
+
+  private async warmConfirmedManagedExecution(sessionUuid: string): Promise<void> {
+    const session = this.sessionManager.getSession(sessionUuid);
+    if (
+      this.shutdownInProgress ||
+      !session ||
+      !this.sessionManager.isLiveManagedExecutionSession(sessionUuid)
+    ) {
+      return;
+    }
+    const deviceId = session.assignedDevice;
+    const devices = selectIosStartupWarmupDevices(
+      [{ id: deviceId, platform: session.platform }],
+      this.passiveWorkPolicy,
+    );
+    if (devices.length === 0 || this.sessionManager.getSessionForDevice(deviceId) !== sessionUuid) {
+      return;
+    }
+    await initializeIosCtrlProxyAtStartup([deviceId], {
+      timer: this.timer,
+      perDeviceTimeoutMs: 5000,
+      pendingPrefetch: () => IosCtrlProxyBuilder.pendingPrefetch(),
+      isShuttingDown: () => this.shutdownInProgress,
+      verifyIosDevice: async (id, options) => {
+        if (
+          !this.shutdownInProgress &&
+          this.sessionManager.isLiveManagedExecutionSession(sessionUuid) &&
+          this.sessionManager.getSession(sessionUuid)?.assignedDevice === id &&
+          this.sessionManager.getSessionForDevice(id) === sessionUuid &&
+          this.managedExecutionReowner?.ownershipState(sessionUuid) === undefined
+        ) {
+          await DeviceSessionManager.getInstance().verifyIosDevice(id, options);
+        }
+      },
+    });
   }
 
   /**

@@ -493,6 +493,7 @@ describe("rehydrated managed execution peer claim fence", () => {
       owner: () => OWNER,
       timer,
     });
+    absent.noteRecovering(S, Promise.resolve());
     expect(await absent.reown([S], { rehydrated: true })).toEqual([]);
     expect(absent.automationRefusal(S)).toBeUndefined();
     absent.close();
@@ -703,6 +704,80 @@ describe("rehydrated managed execution peer claim fence", () => {
       await advance(10);
       await reowner.whenIdle();
       expect(reowner.automationRefusal("missing")?.message).toContain("no longer owns");
+    },
+  );
+  testWithFreshSlot(
+    "recovering before publication keeps its gate through early pruning and starts its own claim",
+    async () => {
+      held = false;
+      const recovered = Promise.withResolvers<void>();
+      reowner.noteRecovering(S, recovered.promise);
+      expect(reowner.ownershipState(S)).toBe("unconfirmed");
+      expect(reowner.automationRefusal(S)).toBeInstanceOf(ManagedSlotOwnershipUnconfirmedError);
+      await reowner.reown(["other"], { rehydrated: true });
+      expect(reowner.automationRefusal(S)).toBeInstanceOf(ManagedSlotOwnershipUnconfirmedError);
+      expect(faults.calls.findExecutionAssignments).toBeUndefined();
+      held = true;
+      recovered.resolve();
+      await drainMicrotasks(80);
+      await reowner.whenIdle();
+      expect(reowner.automationRefusal(S)).toBeUndefined();
+      expect(faults.calls.claimExecution).toBe(1);
+      await reowner.reown([S], { rehydrated: true });
+      expect(reowner.automationRefusal(S)).toBeUndefined();
+    },
+  );
+
+  testWithFreshSlot(
+    "a failed unpublished recovery drops its gate without registry work",
+    async () => {
+      held = false;
+      const recovered = Promise.withResolvers<void>();
+      reowner.noteRecovering(S, recovered.promise);
+      expect(reowner.automationRefusal(S)).toBeDefined();
+      recovered.reject(new Error("creation rolled back"));
+      await drainMicrotasks(80);
+      expect(reowner.ownershipState(S)).toBeUndefined();
+      expect(faults.calls.findExecutionAssignments).toBeUndefined();
+    },
+  );
+
+  testWithFreshSlot(
+    "a rejected recovery retains its gate only while a session is still held",
+    async () => {
+      const recovered = Promise.withResolvers<void>();
+      reowner.noteRecovering(S, recovered.promise);
+      recovered.reject(new Error("creation failed while another holder remained"));
+      await drainMicrotasks(80);
+      expect(reowner.ownershipState(S)).toBe("unconfirmed");
+      held = false;
+      expect(reowner.automationRefusal(S)).toBeUndefined();
+      reowner.close();
+      reowner.noteRecovering(S, Promise.resolve());
+      expect(reowner.ownershipState(S)).toBeUndefined();
+    },
+  );
+
+  testWithFreshSlot(
+    "only a marked confirmation notifies warm-up once; loss never does",
+    async () => {
+      reowner.close();
+      const confirmed: string[] = [];
+      reowner = new ManagedExecutionReowner({
+        registry: async () => faults.faulty,
+        owner: () => OWNER,
+        timer,
+        isSessionHeld: () => held,
+        onOwnershipConfirmed: (id) => {
+          confirmed.push(id);
+        },
+      });
+      await reowner.reown([S], { rehydrated: true });
+      await reowner.reown([S]);
+      expect(confirmed).toEqual([S]);
+      await reowner.reown(["missing"], { rehydrated: true });
+      expect(confirmed).toEqual([S]);
+      expect(reowner.ownershipState("missing")).toBe("lost");
     },
   );
 });

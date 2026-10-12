@@ -157,7 +157,10 @@ import {
   type CanonicalFrameDiscovery,
   type FrameDeviceIdentityPool,
 } from "./frameDeviceIdentity";
-import { managedConnectionControlRefusal } from "./managedSlots/managedConnectionScope";
+import {
+  managedConnectionControlRefusal,
+  managedConnectionHostMutationRefusal,
+} from "./managedSlots/managedConnectionScope";
 import { provisionCancellationOutcomes } from "../server/provisionCancellationOutcomes";
 import { PROVISION_DEVICE_SETTLEMENT_WAIT_MS } from "../server/deviceTools";
 
@@ -5359,6 +5362,7 @@ export class UnixSocketServer {
         if (!args.key || typeof args.enabled !== "boolean") {
           throw new Error("setFeatureFlag requires 'key' (string) and 'enabled' (boolean) params");
         }
+        this.assertManagedConnectionHostMutation(socketSessionId, "ide/setFeatureFlag");
         const updated = await featureFlagService.setFlag(
           args.key as FeatureFlagKey,
           args.enabled,
@@ -7751,6 +7755,22 @@ export class UnixSocketServer {
       deviceId: target.deviceId,
       requesterSessionUuid: target.requesterSessionUuid,
       slotDeviceOf: (sessionUuid) => sessionManager.getSession(sessionUuid)?.assignedDevice,
+    });
+    if (refusal) {
+      throw refusal;
+    }
+  }
+
+  private assertManagedConnectionHostMutation(
+    socketSessionId: string | undefined,
+    action: string,
+  ): void {
+    if (!this.daemonState.isInitialized()) {
+      return;
+    }
+    const refusal = managedConnectionHostMutationRefusal({
+      binding: this.daemonState.getManagedConnectionScopes?.().get(socketSessionId),
+      action,
     });
     if (refusal) {
       throw refusal;

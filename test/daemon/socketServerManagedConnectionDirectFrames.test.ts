@@ -4,7 +4,13 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { DeviceAssignedToManagedSlotError } from "../../src/daemon/managedSlots/managedSlotRefusal";
-import type { ManagedDeviceEntry } from "../../src/daemon/managedSlots/slotRegistry";
+import {
+  computeSlotScopeKey,
+  type ManagedDeviceEntry,
+} from "../../src/daemon/managedSlots/slotRegistry";
+import type { SlotScopeResetRequest } from "../../src/daemon/managedSlots/slotScopeReset";
+import type { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
+import { DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE } from "../../src/daemon/types";
 import { ManagedConnectionScopes } from "../../src/daemon/managedSlots/managedConnectionScope";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
@@ -24,11 +30,12 @@ import { createFakeDaemonState } from "./helpers/inputSocketHarness";
  * naming any other session ... are refused with `device_outside_managed_slots`"). Every direct
  * control and lifecycle frame applies that confinement (#11596): `input/*`, the device-mutating
  * `ide/*` routes (`force` or not), `ide/setSessionToolEnabled`, `daemon/registerSession`,
- * `daemon/releaseSession` and `daemon/relinquishDeviceLease`. Reads stay open, and an ordinary
+ * `daemon/releaseSession`, `daemon/releaseExecution`, `daemon/resetSlotScope`,
+ * `daemon/refreshDevices`, `ide/setFeatureFlag` and `daemon/relinquishDeviceLease`. Reads stay open, and an ordinary
  * (unbound) connection is never confined: anyone may release a session from one.
  *
  * Real socket server, real SessionManager and ManagedConnectionScopes on a FakeTimer; only the
- * device clients are fakes.
+ * device clients and mutation services are fakes.
  */
 
 class FakeSocket extends EventEmitter {
@@ -67,6 +74,12 @@ interface Internals {
 
 const SLOT_SESSION = "slot-exec";
 const GENERIC_SESSION = "generic-harness";
+const SCOPE_IDENTITY = {
+  managedHostScope: "host-a",
+  runnerNamespace: "runner-a",
+  runnerIncarnation: "incarnation-a",
+};
+const SCOPE_KEY = computeSlotScopeKey(SCOPE_IDENTITY);
 const slotDevice: BootedDevice = { deviceId: "emulator-5554", name: "Slot", platform: "android" };
 const freeDevice: BootedDevice = { deviceId: "emulator-5556", name: "Free", platform: "android" };
 const heldDevice: BootedDevice = { deviceId: "emulator-5558", name: "Held", platform: "android" };
@@ -86,11 +99,16 @@ describe("direct frames from a managed connection outside its slots", () => {
   let unidentifiableIds: Set<string>;
   let discovered: BootedDevice[];
   let managedSlotHeld: boolean;
+  let releasedExecutions: string[];
+  let scopeResets: SlotScopeResetRequest[];
+  let poolRefreshes: string[];
+  let flagWrites: Array<{ key: string; enabled: boolean }>;
+  const flags = [{ key: "debug", label: "Debug", description: "Debug", enabled: false }];
   const slotEntry: ManagedDeviceEntry = {
     platform: "android",
     stableDeviceId: slotDevice.deviceId,
     holder: "slot",
-    scopeKey: "scope-a",
+    scopeKey: SCOPE_KEY,
     slotIndex: 0,
     scopeState: "valid",
     execSessionUuid: SLOT_SESSION,
@@ -127,6 +145,10 @@ describe("direct frames from a managed connection outside its slots", () => {
     writes = [];
     taps = 0;
     toolSelections = [];
+    releasedExecutions = [];
+    scopeResets = [];
+    poolRefreshes = [];
+    flagWrites = [];
     canonicalIds = new Map();
     unidentifiableIds = new Set();
     managedSlotHeld = true;
@@ -190,6 +212,14 @@ describe("direct frames from a managed connection outside its slots", () => {
     );
     const fakePool = {
       ...createFakeDaemonState().getDevicePool(),
+      refreshDevices: async () => {
+        poolRefreshes.push("refreshDevices");
+        return 0;
+      },
+      refreshDevicesWithOutcome: async () => {
+        poolRefreshes.push("refreshDevicesWithOutcome");
+        return { addedCount: 0 };
+      },
       resolveAndroidCanonicalId: (deviceId: string) => canonicalIds.get(deviceId) ?? deviceId,
       isAndroidTransportAssignable: (device: BootedDevice) =>
         !unidentifiableIds.has(device.deviceId),
@@ -220,9 +250,37 @@ describe("direct frames from a managed connection outside its slots", () => {
         getDevicePool: () => fakePool,
         getDeviceSessionRegistry: () => new DeviceSessionRegistry(),
         getManagedConnectionScopes: () => scopes,
+        getManagedExecutionRelease: () => ({
+          releaseExecution: async (sessionId: string) => {
+            releasedExecutions.push(sessionId);
+            return {
+              sessionId,
+              outcome: "reusable_for_this_slot",
+              settlement: "confirmed",
+              alreadyReleased: false,
+              cancellationRequested: 0,
+              releaseForced: false,
+              device: null,
+              slots: [],
+              slotFailures: [],
+            };
+          },
+        }),
+        getSlotScopeReset: () => ({
+          reset: async (request: SlotScopeResetRequest) => {
+            scopeResets.push(request);
+            return { outcome: "invalidated", retryable: false, scopes: [], waitedMs: 0 };
+          },
+        }),
       } as unknown as DaemonStateAccess,
       new FakeTimer(),
-      null,
+      {
+        setFlag: async (key: string, enabled: boolean) => {
+          flagWrites.push({ key, enabled });
+          return { key, enabled };
+        },
+        listFlags: async () => flags,
+      } as unknown as FeatureFlagService,
       // The storage tools are enabled, so the frames reach the ownership gate.
       {
         sessionToolSelectionService: {
@@ -239,7 +297,7 @@ describe("direct frames from a managed connection outside its slots", () => {
     internals.handleConnection(managed as unknown as Socket);
     // What `daemon/acquireManagedSlots` does for the socket that asked (`bindManagedConnection`).
     const [socketSessionId] = [...internals.sessions.keys()];
-    scopes.bind(socketSessionId!, { scopeKey: "scope-a", sessionUuids: [SLOT_SESSION] });
+    scopes.bind(socketSessionId!, { scopeKey: SCOPE_KEY, sessionUuids: [SLOT_SESSION] });
     // An ordinary connection on the same daemon: never bound, never confined.
     generic = new FakeSocket();
     internals.handleConnection(generic as unknown as Socket);
@@ -266,6 +324,125 @@ describe("direct frames from a managed connection outside its slots", () => {
 
     expect(taps).toBe(0);
     expect(response).toMatchObject(OUTSIDE_SLOTS);
+  });
+
+  test.each([GENERIC_SESSION, "never-registered"])(
+    "remaining confinement: releaseExecution refuses outside session %s",
+    async (sessionId) => {
+      if (sessionId === GENERIC_SESSION) {
+        expect(sessionManager.claimUnownedLivenessOwnership(sessionId, "foreign-owner")).toBe(true);
+      }
+      const response = await send("execution-foreign", "daemon/releaseExecution", {
+        sessionId,
+        livenessOwnerToken: "owner",
+      });
+      expect(response).toMatchObject(OUTSIDE_SLOTS);
+      expect(releasedExecutions).toEqual([]);
+    },
+  );
+
+  test.each([
+    { ...SCOPE_IDENTITY, runnerNamespace: "other" },
+    { ...SCOPE_IDENTITY, runnerIncarnation: "other" },
+    { ...SCOPE_IDENTITY, managedHostScope: "other" },
+  ])("remaining confinement: resetSlotScope refuses another identity %j", async (identity) => {
+    const response = await send("reset-foreign", "daemon/resetSlotScope", {
+      ...identity,
+      force: true,
+    });
+    expect(response).toMatchObject(OUTSIDE_SLOTS);
+    expect(scopeResets).toEqual([]);
+  });
+
+  test("remaining confinement: resetSlotScope refuses an omitted host scope", async () => {
+    const response = await send("reset-hosts", "daemon/resetSlotScope", {
+      runnerNamespace: SCOPE_IDENTITY.runnerNamespace,
+      runnerIncarnation: SCOPE_IDENTITY.runnerIncarnation,
+    });
+    expect(response).toMatchObject(OUTSIDE_SLOTS);
+    expect(scopeResets).toEqual([]);
+  });
+
+  test("remaining confinement: refreshDevices refuses before pool refresh", async () => {
+    const response = await send("refresh", "daemon/refreshDevices", {});
+    expect(response).toMatchObject(OUTSIDE_SLOTS);
+    expect(poolRefreshes).toEqual([]);
+  });
+
+  test("remaining confinement: setFeatureFlag refuses before flag mutation", async () => {
+    const response = await send("flag", "ide/setFeatureFlag", { key: "debug", enabled: true });
+    expect(response).toMatchObject({
+      ...OUTSIDE_SLOTS,
+      type: "mcp_response",
+      id: "flag",
+      retryable: false,
+      details: { action: "ide/setFeatureFlag", reason: "host", scopeKey: SCOPE_KEY },
+    });
+    expect(response?.error).toContain("ide/setFeatureFlag refused");
+    expect(flagWrites).toEqual([]);
+  });
+
+  test("releaseExecution of its own slot reaches the drain once", async () => {
+    const response = await send("execution-own", "daemon/releaseExecution", {
+      sessionId: SLOT_SESSION,
+      livenessOwnerToken: "owner",
+    });
+    expect(response).toMatchObject({ success: true });
+    expect(releasedExecutions).toEqual([SLOT_SESSION]);
+  });
+
+  test("releaseExecution of its own slot retains the liveness owner token gate", async () => {
+    expect(sessionManager.claimUnownedLivenessOwnership(SLOT_SESSION, "owner")).toBe(true);
+    const response = await send("execution-wrong-token", "daemon/releaseExecution", {
+      sessionId: SLOT_SESSION,
+      livenessOwnerToken: "wrong",
+    });
+    expect(response).toMatchObject({ success: false, code: DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE });
+    expect(releasedExecutions).toEqual([]);
+  });
+
+  test("an empty managed binding refuses every execution release", async () => {
+    const [socketSessionId] = [...internals.sessions.keys()];
+    scopes.bind(socketSessionId!, { scopeKey: SCOPE_KEY, sessionUuids: [] });
+    const response = await send("execution-empty", "daemon/releaseExecution", {
+      sessionId: SLOT_SESSION,
+      livenessOwnerToken: "owner",
+    });
+    expect(response).toMatchObject(OUTSIDE_SLOTS);
+    expect(releasedExecutions).toEqual([]);
+  });
+
+  test("resetSlotScope of its exact scope reaches reset once", async () => {
+    const response = await send("reset-own", "daemon/resetSlotScope", SCOPE_IDENTITY);
+    expect(response).toMatchObject({ success: true });
+    expect(scopeResets).toEqual([SCOPE_IDENTITY]);
+  });
+
+  test("listFeatureFlags stays open on the managed connection", async () => {
+    const response = await send("flags", "ide/listFeatureFlags", {});
+    expect(response).toMatchObject({ success: true, result: { flags } });
+    expect(flagWrites).toEqual([]);
+  });
+
+  test("an ordinary connection passes all four remaining mutations through", async () => {
+    const refresh = await sendOn(generic, "generic-refresh", "daemon/refreshDevices", {});
+    const release = await sendOn(generic, "generic-execution", "daemon/releaseExecution", {
+      sessionId: "never-registered",
+      livenessOwnerToken: "owner",
+    });
+    const identity = { runnerNamespace: "other", runnerIncarnation: "other" };
+    const reset = await sendOn(generic, "generic-reset", "daemon/resetSlotScope", identity);
+    const flag = await sendOn(generic, "generic-flag", "ide/setFeatureFlag", {
+      key: "debug",
+      enabled: true,
+    });
+    for (const response of [refresh, release, reset, flag]) {
+      expect(response).toMatchObject({ success: true });
+    }
+    expect(poolRefreshes).toEqual(["refreshDevicesWithOutcome"]);
+    expect(releasedExecutions).toEqual(["never-registered"]);
+    expect(scopeResets).toEqual([identity]);
+    expect(flagWrites).toEqual([{ key: "debug", enabled: true }]);
   });
 
   test("control: ide/setKeyValue on the connection's own slot device is written", async () => {
@@ -365,6 +542,15 @@ describe("direct frames from a managed connection outside its slots", () => {
     });
 
     expect(foreign).toMatchObject(OUTSIDE_SLOTS);
+    expect(foreign).toMatchObject({
+      retryable: false,
+      details: {
+        action: "ide/setSessionToolEnabled",
+        reason: "session",
+        scopeKey: SCOPE_KEY,
+        sessionUuid: GENERIC_SESSION,
+      },
+    });
     expect(toolSelections).toEqual([`${SLOT_SESSION}:setKeyValue:false`]);
     expect(own).toMatchObject({ success: true });
   });

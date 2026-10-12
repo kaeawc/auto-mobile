@@ -50,8 +50,10 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.repository == 'kaeawc/auto-mobile')
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # No continue-on-error (#11368): a failed scenario fails this job and the run. The evidence
-    # artifact is uploaded either way.
+    # No continue-on-error (#11368): a failed scenario fails this job and the run. The shared
+    # android-emulator action's second attempt only helps infrastructure failures: once an
+    # attempt records a failed scenario, the runner refuses to re-run it, so the job stays red.
+    # The evidence artifact is uploaded either way.
     needs: build-control-proxy-apk
     # Job-level so only this job can write issues (the alert step below); other jobs keep the
     # workflow's read-only default.

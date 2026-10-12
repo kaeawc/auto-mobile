@@ -871,7 +871,7 @@ describe("HomeScreen", () => {
         );
         expect(error).toHaveProperty("message", expect.stringContaining("host may be busy"));
         expect(error).toHaveProperty("message", expect.stringContaining("retried"));
-      }, 15);
+      });
 
       test("verifies SpringBoard when a successful retry leaves 1ms of Home budget", async () => {
         const timeouts: number[] = [];
@@ -895,7 +895,7 @@ describe("HomeScreen", () => {
         expect(fakeTimer.getSleepHistory()).toEqual([2500, 100, 2399]);
         expect(fakeTimer.now()).toBe(4999);
         expect(client.getHierarchyRequestCount()).toBeGreaterThanOrEqual(1);
-      }, 15);
+      });
 
       test("retries a busy host timeout with one dispatch and a short backoff", async () => {
         const timeouts: number[] = [];

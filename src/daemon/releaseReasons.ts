@@ -50,6 +50,7 @@ export type SessionReleaseReasonLiteral =
   | "missing-first-heartbeat"
   | "heartbeat-timeout"
   | "rehydration-owner-timeout"
+  | "restart-recovery-timeout"
   | "owner-disconnected"
   | "device-killed"
   | "session-creation-cancelled"
@@ -118,6 +119,8 @@ export const SESSION_RELEASE_REASON_TRAITS: Readonly<
   "heartbeat-timeout": TERMINAL_EXPIRY,
   /** A rehydrated session's owner never reclaimed it. */
   "rehydration-owner-timeout": TERMINAL_EXPIRY,
+  /** A device-restart handoff's recovery window ran out with no resume. */
+  "restart-recovery-timeout": TERMINAL_EXPIRY,
   /** The owning connection closed and no other client owns the session. */
   "owner-disconnected": TERMINAL,
   /** The session's device was killed. */

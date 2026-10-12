@@ -1945,10 +1945,10 @@ test.each([180_000, 240_000])(
     timer.advanceTime(elapsed);
     await expect(
       sessions.getOrCreateSession("session", pool, "android", undefined, true),
-    ).rejects.toThrow("recovery reason: target-absent");
+    ).rejects.toThrow("terminal after restart-recovery-timeout");
     expect(await persistence.getSession?.("session")).toMatchObject({
-      status: "released",
-      release_reason: "identity-recovery-target-absent",
+      status: "expired",
+      release_reason: "restart-recovery-timeout",
       released_at_ms: elapsed,
     });
     manager.bootedDevices = [original];
@@ -1958,7 +1958,7 @@ test.each([180_000, 240_000])(
       .catch((error: unknown) => error);
     expect(terminalError).toBeInstanceOf(TerminalSessionError);
     expect(terminalError.message).toBe(
-      "Session session is terminal after identity-recovery-target-absent and cannot be reused. " +
+      "Session session is terminal after restart-recovery-timeout and cannot be reused. " +
         "Acquire a new device with getAndroid or getApple.",
     );
   },
@@ -2096,7 +2096,7 @@ test("device-restart resume after 45 seconds binds a new serial by AVD name and 
   }
 });
 
-test("device-restart resume accepts a present device after the full recovery deadline", async () => {
+test("device-restart resume refuses a present device after the full recovery deadline", async () => {
   const { timer, persistence, sessions, manager, pool } = await setupPassiveRestart();
   try {
     timer.advanceTime(DEFAULT_DEVICE_READY_TIMEOUT_MS + 1);
@@ -2105,9 +2105,12 @@ test("device-restart resume accepts a present device after the full recovery dea
 
     await expect(
       sessions.getOrCreateSession("session", pool, "android", undefined, true),
-    ).resolves.toMatchObject({ sessionId: "session", assignedDevice: original.deviceId });
+    ).rejects.toMatchObject({
+      release: { releaseReason: "restart-recovery-timeout", terminal: true },
+    });
     expect(await persistence.getSession?.("session")).toMatchObject({
-      status: "active",
+      status: "expired",
+      release_reason: "restart-recovery-timeout",
       device_id: original.deviceId,
     });
   } finally {

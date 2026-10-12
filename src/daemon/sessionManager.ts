@@ -57,6 +57,7 @@ import {
   DeviceSessionTerminallyReleasedError,
   isDeviceRestartReleaseReason,
   isRecoverableDeviceSession,
+  persistedSessionExpiryReason,
   type DeviceSessionActivityUpdate,
   type DeviceSessionPersistence,
   type MarkReleasedOptions,
@@ -1403,9 +1404,9 @@ function isDeviceRestartReleasedRow(
 }
 
 /**
- * When a device-restart recovery must give up. Admission is bounded by the session's idle
- * expiry; a caller-driven wait (`callerInFlight`) is not, because a tool call in flight is
- * activity and is never released mid-call (owner decision 2026-10-08) — only the cold-boot
+ * When a device-restart recovery must give up. Admission ends at the first of idle expiry
+ * and the fixed handoff window. A caller-driven wait (`callerInFlight`) ignores idle expiry:
+ * a tool call in flight is activity and is never released mid-call (owner decision 2026-10-08) — only the cold-boot
  * allowance bounds it.
  */
 function restartRecoveryDeadlineFromPersisted(
@@ -1417,6 +1418,12 @@ function restartRecoveryDeadlineFromPersisted(
   }
   const restartWindowEnd = persisted.released_at_ms + DEVICE_RESTART_RECOVERY_WINDOW_MS;
   return callerInFlight ? restartWindowEnd : Math.min(persisted.expires_at_ms, restartWindowEnd);
+}
+
+/** The persisted handoff's fixed window; idle activity never moves this deadline. */
+function hasLapsedRestartRecoveryWindow(persisted: DeviceSession, nowMs: number): boolean {
+  const deadline = restartRecoveryDeadlineFromPersisted(persisted, true);
+  return deadline !== undefined && nowMs >= deadline;
 }
 
 /**
@@ -3332,11 +3339,17 @@ export class SessionManager {
    * as is a missing row. This is wider than startup rehydration, which only takes
    * the recoverable handoffs. The claim and the claimed-row upsert share it.
    */
-  private isReissuablePersistedSession(persisted: DeviceSession | undefined): boolean {
+  private isReissuablePersistedSession(
+    persisted: DeviceSession | undefined,
+    callerInFlight = false,
+  ): boolean {
     return Boolean(
       persisted &&
       (!persisted.release_reason || isReissuableByNameReleaseReason(persisted.release_reason)) &&
-      isRecoverableDeviceSession(persisted, this.sessionNow()),
+      isRecoverableDeviceSession(persisted, this.sessionNow()) &&
+      (callerInFlight ||
+        this.isRowOwnedByLivePeer(persisted) ||
+        !hasLapsedRestartRecoveryWindow(persisted, this.sessionNow())),
     );
   }
 
@@ -3353,7 +3366,8 @@ export class SessionManager {
       persisted &&
       persisted.source !== PLAN_LABEL_SESSION_SOURCE &&
       (!persisted.release_reason || isRecoverableDaemonReleaseReason(persisted.release_reason)) &&
-      isRecoverableDeviceSession(persisted, this.sessionNow()),
+      isRecoverableDeviceSession(persisted, this.sessionNow()) &&
+      !hasLapsedRestartRecoveryWindow(persisted, this.sessionNow()),
     );
   }
 
@@ -3385,6 +3399,16 @@ export class SessionManager {
   ): Promise<DeviceSession | undefined> {
     const now = this.sessionNow();
     if (
+      persisted &&
+      hasLapsedRestartRecoveryWindow(persisted, now) &&
+      this.isRowOwnedByLivePeer(persisted)
+    ) {
+      return persisted;
+    }
+    if (persisted && persistedSessionExpiryReason(persisted, now) === "restart-recovery-timeout") {
+      return this.terminalizeRestartRecoveryTimeout(persisted, onlyIfOwnedByDaemon);
+    }
+    if (
       !persisted ||
       persisted.expires_at_ms > now ||
       (persisted.release_reason && isTerminalReleaseReason(persisted.release_reason))
@@ -3411,21 +3435,66 @@ export class SessionManager {
       },
     );
     const current = await this.readPersistedSession(persisted.session_uuid);
-    if (
-      !this.terminalReleaseSnapshots.has(persisted.session_uuid) &&
-      current?.release_reason === "expired" &&
-      current.stable_identity_generation === persisted.stable_identity_generation
-    ) {
-      const snapshot = this.expiredReleaseFromPersisted(persisted.session_uuid, current);
-      if (snapshot) {
-        this.terminalReleaseSnapshots.set(persisted.session_uuid, snapshot);
-        this.notifySessionRelease(snapshot, { upgradeOnly: true });
-      }
-    }
+    this.confirmPersistedExpiry(persisted, current, "expired");
     if (!this.isReissuablePersistedSession(current)) {
       this.restartRecoveryActivityAt.delete(persisted.session_uuid);
     }
     return current;
+  }
+
+  /** A conditional handoff expiry uses the terminal journal, but fences only a confirmed row. */
+  private async terminalizeRestartRecoveryTimeout(
+    persisted: DeviceSession,
+    onlyIfOwnedByDaemon?: string,
+  ): Promise<DeviceSession | undefined> {
+    const snapshot = this.releaseSnapshotFromPersisted(
+      persisted.session_uuid,
+      persisted,
+      "restart-recovery-timeout",
+    );
+    snapshot.releasedAtMs = this.sessionNow();
+    await this.persistSessionRelease(snapshot, false, {
+      expectedRowGeneration: persisted.stable_identity_generation ?? 0,
+      onlyIfRecoverable: true,
+      onlyIfOwnedByDaemon: onlyIfOwnedByDaemon ?? persisted.daemon_session_id ?? undefined,
+      unlessTerminalOrOwnedByLivePeer: {
+        livePeerDaemonSessionIds: this.rowWriteLivePeerDaemonSessionIds(),
+        reportRefusal: true,
+      },
+      onlyIfRestartRecoveryHandoff: {
+        releasedAtOrBeforeMs: this.sessionClockToWall(
+          snapshot.releasedAtMs - DEVICE_RESTART_RECOVERY_WINDOW_MS,
+        ),
+        recoveryWindowMs: DEVICE_RESTART_RECOVERY_WINDOW_MS,
+      },
+    });
+    const current = await this.readPersistedSession(persisted.session_uuid);
+    this.confirmPersistedExpiry(persisted, current, "restart-recovery-timeout");
+    return current;
+  }
+
+  /** Only the confirmed release of the generation read may end the local reservation. */
+  private confirmPersistedExpiry(
+    persisted: DeviceSession,
+    current: DeviceSession | undefined,
+    reason: "expired" | "restart-recovery-timeout",
+  ): void {
+    if (
+      this.terminalReleaseSnapshots.has(persisted.session_uuid) ||
+      current?.release_reason !== reason ||
+      current.stable_identity_generation !== persisted.stable_identity_generation
+    ) {
+      return;
+    }
+    const snapshot =
+      reason === "expired"
+        ? this.expiredReleaseFromPersisted(persisted.session_uuid, current)
+        : this.terminalReleaseFromPersisted(persisted.session_uuid, current);
+    if (snapshot) {
+      this.terminalReleaseSnapshots.set(persisted.session_uuid, snapshot);
+      this.restartRecoveryActivityAt.delete(persisted.session_uuid);
+      this.notifySessionRelease(snapshot, { upgradeOnly: true });
+    }
   }
 
   /**
@@ -3457,10 +3526,9 @@ export class SessionManager {
    * The release a call naming a row past its deadline is refused with (#11361), or undefined when
    * the row is not one: a session that ran out its idle or recovery window while no daemon was
    * there to release it is gone, so a control call naming it gets the typed terminal refusal (with
-   * the `expired` reason) rather than the untyped "not found" of a never-issued id. Only that
-   * answer is terminal: the row keeps its non-terminal `expired` reason and no in-memory fence is
-   * raised, so `daemon/registerSession` still accepts the UUID as an observer and createSession
-   * or a plan re-issue can issue the name again.
+   * the first deadline's reason) rather than the untyped "not found" of a never-issued id. An
+   * idle-first answer keeps the non-terminal `expired` row reason; a window-first answer names
+   * the terminal `restart-recovery-timeout`. This read writes neither a row nor a fence.
    */
   private expiredReleaseFromPersisted(
     sessionId: string,
@@ -3469,11 +3537,16 @@ export class SessionManager {
     if (persisted.release_reason && isTerminalReleaseReason(persisted.release_reason)) {
       return undefined;
     }
-    if (persisted.release_reason !== "expired" && persisted.expires_at_ms > this.sessionNow()) {
+    const reason = this.isRowOwnedByLivePeer(persisted)
+      ? persisted.expires_at_ms <= this.sessionNow()
+        ? "expired"
+        : undefined
+      : persistedSessionExpiryReason(persisted, this.sessionNow());
+    if (!reason) {
       return undefined;
     }
     return {
-      ...this.releaseSnapshotFromPersisted(sessionId, persisted, "expired"),
+      ...this.releaseSnapshotFromPersisted(sessionId, persisted, reason),
       terminal: true,
     };
   }
@@ -4180,7 +4253,7 @@ export class SessionManager {
     shared: SharedSessionAssignment,
   ): Promise<Session> {
     const claim =
-      listed && this.isReissuablePersistedSession(listed)
+      listed && this.isReissuablePersistedSession(listed, true)
         ? await this.claimRecoverableRow(sessionId, listed)
         : undefined;
     try {
@@ -4301,7 +4374,7 @@ export class SessionManager {
       this.terminalReleaseSnapshots.set(sessionId, terminalRelease);
       throw new TerminalSessionError(sessionId, terminalRelease);
     }
-    if (current && this.isReissuablePersistedSession(current)) {
+    if (current && this.isReissuablePersistedSession(current, true)) {
       const reclaimed = await this.tryClaimRecoverableRow(
         sessionId,
         current,
@@ -4784,8 +4857,9 @@ export class SessionManager {
   ): Promise<DeviceSession[]> {
     const deadlineWon = Symbol("startup-deadline");
     const recoverableSessions =
-      this.deviceSessionRepository.listRecoverableSessions?.(this.sessionNow()) ??
-      Promise.resolve([]);
+      this.deviceSessionRepository.listRecoverableSessions?.(this.sessionNow(), () =>
+        this.rowWriteLivePeerDaemonSessionIds(),
+      ) ?? Promise.resolve([]);
     let result: typeof deadlineWon | DeviceSession[];
     try {
       result = await raceWithDeadline(recoverableSessions, {
@@ -5295,8 +5369,8 @@ export class SessionManager {
     if (!persisted) {
       return undefined;
     }
-    // A row past its deadline is answered as admission answers it (#11361): `expired`, whatever
-    // handoff reason (or none) it still stores, so a heartbeat or session-info client is not told
+    // A row past its first deadline is answered as admission answers it (#11361), so a
+    // heartbeat or session-info client is not told
     // a session is resumable when a call naming it is refused for good.
     return (
       this.expiredReleaseOfUnheldRow(sessionId, persisted)?.releaseReason ??
@@ -7454,6 +7528,7 @@ export class SessionManager {
   private async persistSessionRelease(
     snapshot: SessionReleaseSnapshot,
     retryPending: boolean = false,
+    statementConditions?: MarkReleasedOptions,
   ): Promise<boolean> {
     // A resumed UUID can be in flight before it publishes. Check immediately
     // before issuing a retry so it cannot release the newly active row. The release stays
@@ -7471,7 +7546,7 @@ export class SessionManager {
           at: this.sessionClockToWall(snapshot.releasedAtMs),
         });
       }
-      const precondition = this.releaseWritePrecondition(snapshot);
+      const precondition = { ...this.releaseWritePrecondition(snapshot), ...statementConditions };
       const issueWrite = (options: MarkReleasedOptions) =>
         this.deviceSessionRepository.markReleased(
           snapshot.sessionId,
@@ -11850,7 +11925,8 @@ export class SessionManager {
     requestedPlatform: Platform | undefined,
     callerInFlight: boolean,
   ): Promise<SessionRecoveryTarget | undefined> {
-    if (!persisted || !this.isReissuablePersistedSession(persisted)) {
+    // Admission already accepted this recovery; its own target wait decides at the window end.
+    if (!persisted || !this.isReissuablePersistedSession(persisted, true)) {
       return undefined;
     }
     const stableDeviceId = persistedStableDeviceId(persisted);

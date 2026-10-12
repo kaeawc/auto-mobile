@@ -1,11 +1,4 @@
-import {
-  readFileSync,
-  readdirSync,
-  renameSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
@@ -17,6 +10,7 @@ import {
   takeOverExclusiveLock,
   tryAcquireExclusiveLock,
 } from "../../utils/fileLock";
+import { sortedReaddirSync } from "../../utils/io";
 import { logger } from "../../utils/logger";
 import { isProcessRunning } from "../../utils/processLiveness";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -187,7 +181,7 @@ export class FileHostBootAdmissionRegistry implements HostBootAdmissionRegistry 
 
   private listFiles(dir: string): string[] {
     try {
-      return readdirSync(dir).filter((name) => name.endsWith(".json"));
+      return sortedReaddirSync(dir).filter((name) => name.endsWith(".json"));
     } catch (error) {
       if (!this.missing(error, dir)) {
         throw error;

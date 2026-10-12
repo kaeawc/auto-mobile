@@ -28,6 +28,7 @@ import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { AdmittingAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
 
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
 
@@ -353,17 +354,73 @@ describe("sessionless identity quarantine", () => {
       new FakeTimer(),
     );
     let executionId: string | undefined;
-    await server["runTrackedDeviceInput"]("input/tap", device, async (signal) => {
-      executionId = getToolSelectionContext()?.execution?.executionId;
-      expect(executionId).toBeDefined();
-      expect(getToolSelectionContext()?.execution?.deviceBinding).toBeDefined();
-      expect(getAbortSignal()).toBe(signal);
-      expect(signal?.aborted).toBe(false);
-      expect(executionTracker.hasActiveDeviceExecutions(device.deviceId)).toBe(true);
-      await h.quarantine();
-      expect(signal?.aborted).toBe(true);
+    const callbackCompletion = Promise.withResolvers<void>();
+    const input = server["runTrackedDeviceInput"]("input/tap", device, (signal) => {
+      const operation = (async () => {
+        executionId = getToolSelectionContext()?.execution?.executionId;
+        expect(executionId).toBeDefined();
+        expect(getToolSelectionContext()?.execution?.deviceBinding).toBeDefined();
+        expect(getAbortSignal()).toBe(signal);
+        expect(signal?.aborted).toBe(false);
+        expect(executionTracker.hasActiveDeviceExecutions(device.deviceId)).toBe(true);
+        await h.quarantine();
+        expect(signal?.aborted).toBe(true);
+      })();
+      callbackCompletion.resolve(operation);
+      return operation;
     });
+    await Promise.all([
+      expect(input).rejects.toBeInstanceOf(DeviceLostError),
+      expect(input).rejects.toMatchObject({ code: "device_lost" }),
+      callbackCompletion.promise,
+    ]);
     expect(executionTracker.hasActiveDeviceExecutions(device.deviceId)).toBe(false);
     expect(executionId).toBeDefined();
+  });
+
+  test("a direct tracked input dispatched before a quarantine is held until its operation settles", async () => {
+    const h = await setup(executionTracker);
+    const server = new UnixSocketServer(
+      "scratch/never-listened.sock",
+      "http://localhost:0/mcp",
+      DaemonState.getInstance(),
+      new FakeTimer(),
+    );
+    const gate = Promise.withResolvers<void>();
+    let quarantined = false;
+    let answered = false;
+    const input = server["runTrackedDeviceInput"](
+      "input/tap",
+      device,
+      async (signal, dispatching) => {
+        dispatching?.();
+        await h.quarantine();
+        expect(signal?.aborted).toBe(true);
+        quarantined = true;
+        await gate.promise;
+        return "operation result";
+      },
+    );
+    void input.then(
+      () => {
+        answered = true;
+      },
+      () => {
+        answered = true;
+      },
+    );
+    try {
+      await drainUntil(() => quarantined, { description: "dispatched input quarantine" });
+      await drainMicrotasks(100);
+      expect(answered).toBe(false);
+      expect(executionTracker.hasActiveDeviceExecutions(device.deviceId)).toBe(true);
+      gate.resolve();
+      await expect(input).resolves.toBe("operation result");
+      expect(answered).toBe(true);
+      expect(executionTracker.hasActiveDeviceExecutions(device.deviceId)).toBe(false);
+    } finally {
+      gate.resolve();
+      await Promise.allSettled([input]);
+    }
   });
 });

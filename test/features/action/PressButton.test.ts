@@ -13,6 +13,9 @@ import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { BootedDevice } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { OPERATION_CANCELLED_MESSAGE } from "../../../src/utils/constants";
+import { holdDispatchedRequest } from "../../../src/daemon/dispatchedRequestHold";
+import { drainMicrotasks, drainUntil } from "../../helpers/fakeTimerStepping";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { SimctlCommandTimeoutError } from "../../../src/utils/ios-cmdline-tools/SimctlCommandTimeoutError";
 
@@ -58,6 +61,150 @@ describe("PressButton", () => {
       getInstanceSpy.mockRestore();
     }
   });
+
+  test("held simulator Home stops verification reads on caller cancellation", async () => {
+    const timer = new FakeTimer();
+    const controller = new AbortController();
+    const client = new FakeIOSCtrlProxy(timer);
+    const hierarchy =
+      Promise.withResolvers<Awaited<ReturnType<typeof client.requestHierarchySync>>>();
+    const instance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      client as unknown as IOSCtrlProxyClient,
+    );
+    const reads = spyOn(client, "requestHierarchySync").mockImplementation(() => hierarchy.promise);
+    let launches = 0;
+    let marks = 0;
+    const action = new PressButton(
+      iosSimulator,
+      null,
+      timer,
+      {
+        executeCommandArgs: async () => {
+          launches++;
+          return { stdout: "", stderr: "" };
+        },
+      },
+      (signal, timeoutMs, send, onDispatch) =>
+        holdDispatchedRequest({
+          timer,
+          signal,
+          timeoutMs: timeoutMs ?? 5000,
+          label: "Home launch",
+          send,
+          onDispatch,
+        }),
+    );
+    let answered = false;
+    const pending = action
+      .press("home", 500, undefined, controller.signal, () => marks++)
+      .finally(() => {
+        answered = true;
+      });
+    void pending.catch(() => {});
+    try {
+      await drainUntil(() => reads.mock.calls.length === 1, {
+        description: "home verification read",
+      });
+      controller.abort(new Error("cancel home verification"));
+      await drainMicrotasks(100);
+      expect(answered).toBe(true);
+      await expect(pending).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+      hierarchy.resolve({
+        hierarchy: {
+          packageName: "com.example.app",
+          updatedAt: 1,
+          hierarchy: { className: "XCUIApplication" },
+        },
+      });
+      timer.advanceTime(500);
+      await drainMicrotasks(100);
+      expect(reads).toHaveBeenCalledTimes(1);
+      expect(launches).toBe(1);
+      expect(marks).toBe(1);
+    } finally {
+      controller.abort();
+      hierarchy.resolve({
+        hierarchy: {
+          packageName: "com.apple.springboard",
+          updatedAt: 1,
+          hierarchy: { className: "XCUIApplication" },
+        },
+      });
+      await pending.catch(() => {});
+      reads.mockRestore();
+      instance.mockRestore();
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    }
+  });
+
+  test.each(["reply", "deadline"] as const)(
+    "held simulator Home keeps only the launch in flight until %s after cancellation",
+    async (end) => {
+      const timer = new FakeTimer();
+      const controller = new AbortController();
+      const client = new FakeIOSCtrlProxy(timer);
+      const launch = Promise.withResolvers<{ stdout: string; stderr: string }>();
+      const instance = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        client as unknown as IOSCtrlProxyClient,
+      );
+      const reads = spyOn(client, "requestHierarchySync");
+      let sent = false;
+      let marks = 0;
+      const action = new PressButton(
+        iosSimulator,
+        null,
+        timer,
+        {
+          executeCommandArgs: () => {
+            sent = true;
+            return launch.promise;
+          },
+        },
+        (signal, timeoutMs, send, onDispatch) =>
+          holdDispatchedRequest({
+            timer,
+            signal,
+            timeoutMs: timeoutMs ?? 5000,
+            label: "Home launch",
+            send,
+            onDispatch,
+          }),
+      );
+      let answered = false;
+      const pending = action
+        .press("home", 500, undefined, controller.signal, () => marks++)
+        .finally(() => {
+          answered = true;
+        });
+      void pending.catch(() => {});
+      try {
+        await drainUntil(() => sent, { description: "simctl launch dispatch" });
+        timer.advanceTime(200);
+        controller.abort(new Error("cancel launch"));
+        await drainMicrotasks(100);
+        expect(answered).toBe(false);
+        expect(reads).not.toHaveBeenCalled();
+        if (end === "deadline") {
+          timer.advanceTime(299);
+          await drainMicrotasks(100);
+          expect(answered).toBe(false);
+          timer.advanceTime(1);
+        } else {
+          launch.resolve({ stdout: "", stderr: "" });
+        }
+        await expect(pending).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
+        expect(reads).not.toHaveBeenCalled();
+        expect(marks).toBe(1);
+      } finally {
+        controller.abort();
+        launch.resolve({ stdout: "", stderr: "" });
+        await pending.catch(() => {});
+        reads.mockRestore();
+        instance.mockRestore();
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      }
+    },
+  );
 
   test("simulator launch budget regression retries a timed-out Home launch", async () => {
     const timer = new FakeTimer();

@@ -126,6 +126,64 @@ describe("SetUIState", () => {
   });
 
   describe("text field handling", () => {
+    test("clear warnings are selector-prefixed, deduplicated, and stripped from fields", async () => {
+      fakeObserve.setResult(
+        createObserveResult(
+          createHierarchyWithElement({
+            "resource-id": "name",
+            class: "UITextField",
+            text: "old",
+            editable: true,
+          }),
+        ),
+      );
+      fakeFieldTypeDetector.setFieldType("name", "text");
+      fakeClear.setResult({ success: true, warnings: ["clear warning", "clear warning"] });
+      const result = await createSetUIState(undefined, "ios").execute({
+        fields: [
+          { selector: { elementId: "name" }, value: "Jane" },
+          { selector: { elementId: "name" }, value: "Janet" },
+        ],
+      });
+      expect(result.success).toBe(true);
+      expect(result.warnings).toEqual(['elementId="name": clear warning']);
+      expect(result.fields).toHaveLength(2);
+      for (const field of result.fields) {
+        expect(field).not.toHaveProperty("warnings");
+      }
+    });
+
+    test("only the successful field attempt contributes its clear warning", async () => {
+      fakeObserve.setResult(
+        createObserveResult(
+          createHierarchyWithElement({
+            "resource-id": "name",
+            class: "UITextField",
+            text: "old",
+            editable: true,
+          }),
+        ),
+      );
+      fakeFieldTypeDetector.setFieldType("name", "text");
+      const clear = spyOn(fakeClear, "execute")
+        .mockResolvedValueOnce({ success: true, warnings: ["discarded warning"] })
+        .mockResolvedValue({ success: true, warnings: ["successful warning"] });
+      const input = spyOn(fakeInput, "execute")
+        .mockResolvedValueOnce({ success: false, text: "Jane", error: "retry input" })
+        .mockResolvedValue({ success: true, text: "Jane" });
+      try {
+        const result = await createSetUIState(undefined, "ios").execute({
+          fields: [{ selector: { text: "old" }, value: "Jane" }],
+        });
+        expect(result.success).toBe(true);
+        expect(result.totalAttempts).toBe(2);
+        expect(result.warnings).toEqual(['text="old": successful warning']);
+      } finally {
+        clear.mockRestore();
+        input.mockRestore();
+      }
+    });
+
     test("Android setUIState opts into hint fallback when primary field text misses", async () => {
       const hierarchy = createHierarchyWithElement({
         "resource-id": "phone",

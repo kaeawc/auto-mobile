@@ -101,7 +101,10 @@ describe("input/* cut by a session release (#11381)", () => {
       () =>
         ({
           getScreenScaleMetadata: () => null,
-          requestTapCoordinates: () => {
+          requestTapCoordinates: (
+            ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
+          ) => {
+            args[6]?.();
             tapEntered.resolve();
             return tapOutcome.promise;
           },
@@ -154,9 +157,9 @@ describe("input/* cut by a session release (#11381)", () => {
 
     const response = await failTapAndCollectResponse();
 
-    expect(response).toMatchObject({
+    expect({ ...response }).toMatchObject({
       success: false,
-      error: release.message,
+      error: expect.stringContaining(release.message),
       code: "session_ownership_lost",
       retryable: false,
       nextAction: "acquire_new_session",
@@ -164,8 +167,8 @@ describe("input/* cut by a session release (#11381)", () => {
     });
     // The same refusal the MCP path builds from the same cancellation.
     const mcp = sessionReleasedDuringCallPayload(release)?.error;
-    expect(response).toMatchObject({
-      error: mcp?.message,
+    expect({ ...response }).toMatchObject({
+      error: expect.stringContaining(mcp!.message),
       code: mcp?.code,
       retryable: mcp?.retryable,
       nextAction: mcp?.nextAction,
@@ -173,13 +176,16 @@ describe("input/* cut by a session release (#11381)", () => {
     });
   });
 
-  test("a cancellation that is not a session release keeps the operation's own failure", async () => {
+  test("a dispatched cancellation that is not a session release reports indeterminate delivery", async () => {
     await startTap();
     expect(await executionTracker.cancelSessionUuidExecutions(OWNER, "explicit-release")).toBe(1);
 
     const response = await failTapAndCollectResponse();
 
-    expect(response).toMatchObject({ success: false, error: "The operation was aborted" });
+    expect({ ...response }).toMatchObject({
+      success: false,
+      error: expect.stringContaining("Tap outcome is indeterminate"),
+    });
     expect(response?.code).toBeUndefined();
     expect(response?.nextAction).toBeUndefined();
   });

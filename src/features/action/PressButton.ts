@@ -1,3 +1,4 @@
+import type { DispatchedRequestHold } from "../../daemon/dispatchedRequestHold";
 import type { IOSDispatchResult } from "../observe/ios/CtrlProxyDispatch";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { unsupportedPlatformError } from "../../models/ActionableError";
@@ -23,9 +24,30 @@ export class PressButton extends BaseVisualChange {
     adb: AdbExecutor | null = null,
     timer: Timer = defaultTimer,
     private readonly simctl: Pick<SimCtl, "executeCommandArgs"> = new SimCtlClient(device),
+    private readonly holdRequest?: DispatchedRequestHold,
   ) {
     super(device, adb, timer);
     this.device = device;
+  }
+
+  private assertHeldRequestLive(signal?: AbortSignal): void {
+    if (this.holdRequest) {
+      throwIfAborted(signal);
+    }
+  }
+
+  private awaitDispatchedRequest<T>(
+    signal: AbortSignal | undefined,
+    timeoutMs: number | undefined,
+    send: (fenced: AbortSignal | undefined, onDispatch: () => void) => Promise<T>,
+    onDispatch?: () => void,
+    liveWait = false,
+  ): Promise<T> {
+    if (this.holdRequest) {
+      return this.holdRequest(signal, timeoutMs, send, onDispatch);
+    }
+    const request = send(signal, () => onDispatch?.());
+    return liveWait ? awaitWhileRequestIsLive(request, signal) : request;
   }
 
   async execute(
@@ -203,41 +225,47 @@ export class PressButton extends BaseVisualChange {
     const dispatchSignal = combineWithAmbientAbort(signal);
     let validationFailure: PressButtonResult | undefined;
     try {
-      await awaitWhileRequestIsLive(
-        Promise.resolve().then(() =>
-          this.adb.execute(["shell", "input", "keyevent", String(keyCode)], {
-            timeoutMs: adbBudget,
-            noRetry: true,
-            signal: dispatchSignal,
-            beforeDispatch: async () => {
-              throwIfAborted(dispatchSignal);
-              validationFailure = await this.validateFrameContextBeforeAdb(
-                button,
-                keyCode,
-                deadlineMs,
-                frameContext,
-                signal,
-              );
-              throwIfAborted(dispatchSignal);
-              if (validationFailure) {
-                throw new Error(validationFailure.error);
-              }
-              const remainingMs = this.remainingMs(deadlineMs);
-              if (remainingMs !== undefined && remainingMs <= 0) {
-                validationFailure = {
-                  success: false,
-                  button,
-                  keyCode: -1,
-                  error: `Button press deadline exhausted before ADB keyevent for ${button}`,
-                };
-                throw new Error(validationFailure.error);
-              }
-              onDispatch?.();
-            },
-          }),
-        ),
+      await this.awaitDispatchedRequest(
         signal,
+        adbBudget,
+        (fenced, dispatched) =>
+          Promise.resolve().then(() =>
+            this.adb.execute(["shell", "input", "keyevent", String(keyCode)], {
+              timeoutMs: adbBudget,
+              noRetry: true,
+              signal: combineWithAmbientAbort(fenced),
+              beforeDispatch: async () => {
+                throwIfAborted(dispatchSignal);
+                validationFailure = await this.validateFrameContextBeforeAdb(
+                  button,
+                  keyCode,
+                  deadlineMs,
+                  frameContext,
+                  signal,
+                );
+                throwIfAborted(dispatchSignal);
+                if (validationFailure) {
+                  throw new Error(validationFailure.error);
+                }
+                const remainingMs = this.remainingMs(deadlineMs);
+                if (remainingMs !== undefined && remainingMs <= 0) {
+                  validationFailure = {
+                    success: false,
+                    button,
+                    keyCode: -1,
+                    error: `Button press deadline exhausted before ADB keyevent for ${button}`,
+                  };
+                  throw new Error(validationFailure.error);
+                }
+                fenced?.throwIfAborted();
+                dispatched();
+              },
+            }),
+          ),
+        onDispatch,
+        true,
       );
+      this.assertHeldRequestLive(signal);
     } catch (error) {
       if (validationFailure) {
         return validationFailure;
@@ -303,20 +331,24 @@ export class PressButton extends BaseVisualChange {
     try {
       throwIfAborted(signal);
       const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-      const result = await awaitWhileRequestIsLive(
-        client.requestGlobalAction(
-          normalized,
-          globalActionTimeout,
-          undefined,
-          frameContext,
-          signal,
-          () => {
-            // HOME is idempotent; only latch presses that must not be replayed.
-            dispatched = normalized !== "home";
-            onDispatch?.();
-          },
-        ),
+      const result = await this.awaitDispatchedRequest(
         signal,
+        globalActionTimeout,
+        (fenced, markDispatch) =>
+          client.requestGlobalAction(
+            normalized,
+            globalActionTimeout,
+            undefined,
+            frameContext,
+            fenced,
+            markDispatch,
+          ),
+        () => {
+          // HOME is idempotent; only latch presses that must not be replayed.
+          dispatched = normalized !== "home";
+          onDispatch?.();
+        },
+        true,
       );
       throwIfAborted(signal);
       if (result.success) {
@@ -420,14 +452,21 @@ export class PressButton extends BaseVisualChange {
             signal,
             onDispatch,
           )
-        : await client.requestPressButton(
-            normalizedButton,
-            timeoutMs,
-            undefined,
-            frameContext,
+        : await this.awaitDispatchedRequest(
             signal,
+            timeoutMs,
+            (fenced, dispatch) =>
+              client.requestPressButton(
+                normalizedButton,
+                timeoutMs,
+                undefined,
+                frameContext,
+                fenced,
+                dispatch,
+              ),
             onDispatch,
           );
+      this.assertHeldRequestLive(signal);
       if (!result.success) {
         if (normalizedButton !== "home" && result.dispatched && result.acknowledged === false) {
           return {
@@ -482,41 +521,72 @@ export class PressButton extends BaseVisualChange {
         if (
           resolveIosHomeBackend(this.device.deviceId, { simctl: this.simctl }).kind === "simulator"
         ) {
-          await awaitWhileRequestIsLive(
-            new HomeScreen(this.device, null, this.timer, this.simctl).executeIosHomeNavigation(
+          if (!this.holdRequest) {
+            await awaitWhileRequestIsLive(
+              new HomeScreen(this.device, null, this.timer, this.simctl).executeIosHomeNavigation(
+                undefined,
+                frameContext,
+                timeoutMs,
+                signal,
+                onDispatch,
+              ),
+              signal,
+            );
+            return { success: true };
+          }
+          let launch: ReturnType<SimCtl["executeCommandArgs"]> | undefined;
+          const simctl: Pick<SimCtl, "executeCommandArgs"> = {
+            executeCommandArgs: (args, options) => {
+              launch = this.awaitDispatchedRequest(
+                signal,
+                timeoutMs,
+                (fenced, dispatch) => {
+                  throwIfAborted(fenced);
+                  dispatch();
+                  return this.simctl.executeCommandArgs(args, options);
+                },
+                onDispatch,
+              );
+              return launch;
+            },
+          };
+          try {
+            // Verification uses the caller signal; only the launch wait is fenced.
+            await new HomeScreen(this.device, null, this.timer, simctl).executeIosHomeNavigation(
               undefined,
               frameContext,
               timeoutMs,
               signal,
-              onDispatch,
-            ),
-            signal,
-          );
+            );
+          } finally {
+            // HomeScreen can stop on cancellation before simctl settles; retain the key until then.
+            await launch;
+          }
           return { success: true };
         }
-        const result = await client.requestPressHome(
-          timeoutMs,
-          undefined,
-          frameContext,
+        const result = await this.awaitDispatchedRequest(
           signal,
+          timeoutMs,
+          (fenced, dispatch) =>
+            client.requestPressHome(timeoutMs, undefined, frameContext, fenced, dispatch),
           onDispatch,
         );
         throwIfAborted(signal);
         return result;
       case "back":
-        return await client.requestPressBack(
-          timeoutMs,
-          undefined,
-          frameContext,
+        return await this.awaitDispatchedRequest(
           signal,
+          timeoutMs,
+          (fenced, dispatch) =>
+            client.requestPressBack(timeoutMs, undefined, frameContext, fenced, dispatch),
           onDispatch,
         );
       case "recent":
-        return await client.requestRecentApps(
-          timeoutMs,
-          undefined,
-          frameContext,
+        return await this.awaitDispatchedRequest(
           signal,
+          timeoutMs,
+          (fenced, dispatch) =>
+            client.requestRecentApps(timeoutMs, undefined, frameContext, fenced, dispatch),
           onDispatch,
         );
       default:

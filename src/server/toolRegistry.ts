@@ -1,5 +1,9 @@
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
-import { matchRunningReadTarget, isProvidedReadTargetNotFound } from "../devices/runningReadTarget";
+import {
+  explicitReadTargetPlatform,
+  matchRunningReadTarget,
+  isProvidedReadTargetNotFound,
+} from "../devices/runningReadTarget";
 import { DUMPSYS_MAX_BUFFER } from "../utils/android-cmdline-tools/dumpsysLimits";
 import {
   runWithPostActionCaptureScope,
@@ -88,6 +92,7 @@ import {
   defaultDeviceObservationAccess,
   sessionlessDeviceReadFor,
   type DeviceObservationAccess,
+  type ConfirmStoppedReadTarget,
 } from "./deviceObservationAccess";
 import { createToolExecutionContext } from "./ToolExecutionContext";
 import { resolveTransportDeadlineMs } from "./formTools";
@@ -434,6 +439,7 @@ interface SessionlessDeviceRead {
     deviceId: string,
     signal?: AbortSignal,
     platform?: SomePlatform,
+    confirmStopped?: ConfirmStoppedReadTarget,
   ): Promise<BootedDevice | undefined>;
   assertAuthorized(device: BootedDevice): void;
 }
@@ -931,6 +937,47 @@ async function ensureReadTargetOrWatch(
   }
 }
 
+/** One verdict for every explicit read: running, proven absence/image, or incomplete discovery. */
+async function findExplicitReadTarget(
+  input: ExecutionTargetInput,
+  read: SessionlessDeviceRead,
+  platform: SomePlatform,
+  fallback?: () => Promise<BootedDevice | undefined>,
+): Promise<BootedDevice | undefined> {
+  return withReadRestartReservation(input, input.args.deviceId, () =>
+    read.findRunning
+      ? read.findRunning(input.args.deviceId, input.signal, platform, async (listing) => {
+          // A bare name may identify a stopped image on the completed platform. Probe inventory
+          // before backoff, without entering readiness or changing any device/session state.
+          // Keep the bounded discovery verdict for a reserved target; reservation wins at
+          // the outer error boundary, before readiness can start.
+          if (readRestartReservation([input.args.deviceId], input.args.platform)) {
+            return false;
+          }
+          const targetPlatform = explicitReadTargetPlatform(input.args.deviceId, platform);
+          const healthy = (["android", "ios"] as const).filter(
+            (p) => listing.scanned[p] && (targetPlatform === "either" || targetPlatform === p),
+          );
+          for (const p of healthy) {
+            const image = await input.deviceSessionManager.findProvidedReadinessImage(
+              p,
+              input.args.deviceId,
+              listing,
+              { intent: "read", signal: input.signal },
+            );
+            input.signal?.throwIfAborted();
+            if (image) {
+              return true;
+            }
+          }
+          return false;
+        })
+      : fallback
+        ? fallback()
+        : read.resolve(input.args.deviceId, input.signal, platform),
+  );
+}
+
 /** Raw ids avoid name enrichment; names use the same fresh inventory as explicit observe. */
 async function findRunningExplicitReadTarget(
   input: ExecutionTargetInput,
@@ -951,22 +998,9 @@ async function findRunningExplicitReadTarget(
   if (alreadyChecked) {
     return undefined;
   }
-  let running: BootedDevice | undefined;
-  try {
-    running = await withReadRestartReservation(input, input.args.deviceId, () =>
-      read.findRunning
-        ? read.findRunning(input.args.deviceId, input.signal, platform)
-        : Promise.resolve(matchRunningReadTarget(scan.devices, input.args.deviceId, platform)),
-    );
-  } catch (error) {
-    input.signal?.throwIfAborted();
-    if (!(error instanceof BootedDeviceDiscoveryIncompleteError)) {
-      throw error;
-    }
-    // Readiness re-judges discovery per platform and never boots an unknown-state image.
-    logger.debug("[ToolRegistry] Running read target unproven; deferring to readiness", error);
-    return undefined;
-  }
+  const running = await findExplicitReadTarget(input, read, platform, async () =>
+    matchRunningReadTarget(scan.devices, input.args.deviceId, platform),
+  );
   if (
     running &&
     !scan.devices.some(
@@ -1306,11 +1340,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       !input.args.sessionUuid
     ) {
       const read = input.options.sessionlessDeviceRead;
-      const running = await withReadRestartReservation(input, input.args.deviceId, () =>
-        read.findRunning
-          ? read.findRunning(input.args.deviceId, input.signal, input.args.platform || "either")
-          : read.resolve(input.args.deviceId, input.signal),
-      );
+      const running = await findExplicitReadTarget(input, read, input.args.platform || "either");
       if (running) {
         // A running explicit observe keeps its lightweight handler readiness.
         return resolveSessionlessDeviceRead(input, read, running.deviceId, running);

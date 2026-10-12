@@ -1,5 +1,7 @@
 import { describe, expect, spyOn } from "bun:test";
 import { z } from "zod";
+import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
+import { InMemoryEmulatorLossIncidentStore } from "../../src/daemon/emulatorLossIncident";
 import { McpSessionRecoveryInProgressError } from "../../src/daemon/deviceAutolockManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -106,6 +108,7 @@ describe("start admission and owner resume for restart reservations", () => {
     manager.setDeviceImages(platform, [image]);
     manager.setMockChildProcess(device.name, null);
     const persistence = new FakeDeviceSessionPersistence();
+    const incidents = new InMemoryEmulatorLossIncidentStore(timer);
     const autolockWrites: Array<{ sessionId: string; mcpSessionId: string | null }> = [];
     const sessions = new SessionManager(
       timer,
@@ -120,6 +123,7 @@ describe("start admission and owner resume for restart reservations", () => {
         env,
         timer,
         deviceManager: manager,
+        emulatorLossIncidentStore: incidents,
         installedAppsRepository: new FakeInstalledAppsRepository(),
         recoveryPolicy: { onLoss: false, maxAttempts: 1 },
         idGenerator: new FakeIdGenerator(options.autolock ? [holder] : []),
@@ -214,6 +218,14 @@ describe("start admission and owner resume for restart reservations", () => {
       const replacement = { ...device, name: "AVD-B", observedAt: timer.now() };
       manager.setBootedDevices(platform, [replacement]);
       expect(await pool.settlePooledRuntimeIdentity(device.deviceId)).toBe("replaced");
+      const incident = await incidents.open({
+        deviceId: device.deviceId,
+        avdName: device.name,
+        detectionPath: "watched-process-exit",
+        session: { sessionUuid: holder, state: "awaiting-device" },
+        recoveryPolicy: { onLoss: false, maxAttempts: 1 },
+      });
+      await incidents.completeRecovery(incident.id, "not-attempted");
       manager.setDeviceImages(platform, [
         { ...image, deviceId: "emulator-5556" },
         { ...image, ...replacement, isRunning: true },
@@ -330,6 +342,23 @@ describe("start admission and owner resume for restart reservations", () => {
         connection: CONNECTION,
         ownerToken: "holder-token",
       });
+      f.timer.advanceTime(500);
+      const pending = await f.sessions
+        .getOrCreateSession(HOLDER, f.pool, undefined, undefined, true)
+        .catch((error: unknown) => error);
+      expect(pending).toBeInstanceOf(SessionRecoveryAssignmentError);
+      expect(pending).toMatchObject({
+        details: {
+          code: "session_recovery_pending",
+          retryable: true,
+          recoveryWindowRemainingMs: 179_500,
+        },
+      });
+      expect((await f.persistence.getSession!(HOLDER))?.release_reason).toBe(
+        `device-restart:${f.device.name}`,
+      );
+      expect(f.internals.rehydrationReservations.has(HOLDER)).toBe(true);
+      expect(f.pool.getDevice(f.device.deviceId)).toMatchObject({ name: "AVD-B", sessionId: null });
       const connection = reconnect ? "reconnected" : CONNECTION;
       if (reconnect) {
         expect(

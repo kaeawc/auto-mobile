@@ -413,6 +413,7 @@ export class DeviceRuntimeIdentity {
       return;
     }
     delete pooled.identityUnresolved;
+    delete pooled.preQuarantineStableDeviceId;
     this.deferredQuarantineCancellations.delete(pooled);
     // Full: quarantine hid an untrusted runtime; lifting it needs a fresh trusted screen.
     this.pool.notifyDeviceFramesInvalidated?.(pooled.id);
@@ -764,6 +765,12 @@ export class DeviceRuntimeIdentity {
       return;
     }
     if (pooled.identityUnresolved !== true) {
+      pooled.preQuarantineStableDeviceId = this.pool.hasReusableSerial(pooled)
+        ? (pooled.avdName ??
+          (this.hasUnresolvedEmulatorName({ deviceId: pooled.id, ...pooled })
+            ? undefined
+            : pooled.name))
+        : pooled.id;
       pooled.identityUnresolved = true;
       // Full: the serial may now identify another runtime, so its screen/context is untrusted.
       this.pool.notifyDeviceFramesInvalidated?.(pooled.id);

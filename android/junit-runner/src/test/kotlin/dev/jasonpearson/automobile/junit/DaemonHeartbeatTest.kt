@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.junit
 
 import com.sun.net.httpserver.HttpServer
+import java.net.HttpURLConnection
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -9,6 +10,9 @@ import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.concurrent.thread
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -348,10 +352,31 @@ class DaemonHeartbeatTest {
     }
   }
 
-  private fun withHeartbeatServer(status: Int, body: String, block: (java.net.URL) -> Unit) {
+  @Test
+  fun `the http heartbeat sends its process token and session id`() {
+    val bodies = ConcurrentLinkedQueue<String>()
+    withHeartbeatServer(HttpURLConnection.HTTP_OK, """{"status":"ok"}""", { bodies.add(it) }) { url
+      ->
+      DaemonHeartbeat.sendHeartbeat(url, "default-session")
+      DaemonHeartbeat.sendHeartbeat(url, "injected-session", "injected-owner")
+    }
+    val default = Json.parseToJsonElement(bodies.remove()).jsonObject
+    val injected = Json.parseToJsonElement(bodies.remove()).jsonObject
+    assertEquals("default-session", default["sessionId"]!!.jsonPrimitive.content)
+    assertEquals(DaemonLivenessOwner.token, default["livenessOwnerToken"]!!.jsonPrimitive.content)
+    assertEquals("injected-session", injected["sessionId"]!!.jsonPrimitive.content)
+    assertEquals("injected-owner", injected["livenessOwnerToken"]!!.jsonPrimitive.content)
+  }
+
+  private fun withHeartbeatServer(
+    status: Int,
+    body: String,
+    onRequest: (String) -> Unit = {},
+    block: (java.net.URL) -> Unit,
+  ) {
     val server = HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0)
     server.createContext("/heartbeat") { exchange ->
-      exchange.requestBody.use { it.readBytes() }
+      onRequest(exchange.requestBody.use { String(it.readBytes()) })
       val bytes = body.toByteArray()
       exchange.sendResponseHeaders(status, bytes.size.toLong())
       exchange.responseBody.use { it.write(bytes) }

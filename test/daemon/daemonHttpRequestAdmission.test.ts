@@ -527,6 +527,41 @@ test("HTTP heartbeat accepts an unregistered non-releasing object", async () => 
 });
 
 describe("HTTP heartbeat on a proxy-owned session", () => {
+  test.each([
+    ["owner", "owner", true],
+    // Pins: rejected proofs stay no-ops, including missing, blank and non-string tokens.
+    ["owner", "rival", false],
+    ["owner", undefined, false],
+    ["owner", "   ", false],
+    ["owner", 42, false],
+    [undefined, "junit-owner", true],
+    // Pin: a tokenless session still accepts its legacy tokenless heartbeat.
+    [undefined, undefined, true],
+  ] as const)("HTTP owner %s with token %s records=%s", async (owner, token, records) => {
+    const h = releasingSessionHarness();
+    try {
+      const session = await h.create();
+      session.livenessOwnerToken = owner;
+      const before = session.lastHeartbeat;
+      h.timer.advanceTime(100);
+      const { server } = await harness(h.manager);
+      const response = await server.dispatch(
+        { host: `127.0.0.1:${port}` },
+        "POST",
+        "/heartbeat",
+        JSON.stringify({ sessionId: releasingSessionId, livenessOwnerToken: token }),
+      );
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toBe('{"status":"ok"}');
+      expect(session.lastHeartbeat).toBe(records ? h.timer.now() : before);
+      expect(session.hasReceivedHeartbeat).toBe(records);
+      expect(session.livenessOwnerToken).toBe(owner ?? token);
+      expect(session.livenessOwnershipClaims?.size ?? 0).toBe(0);
+    } finally {
+      h.dispose();
+    }
+  });
+
   for (const kind of ["token-owned", "claim-pending"] as const) {
     test(`tokenless HTTP heartbeat is a 200 no-op on a ${kind} session`, async () => {
       const h = releasingSessionHarness();

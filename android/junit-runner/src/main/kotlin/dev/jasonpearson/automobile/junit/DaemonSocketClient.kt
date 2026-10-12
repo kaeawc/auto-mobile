@@ -914,6 +914,7 @@ internal class DaemonSocketClient(
   private val clientVersion: String? = DaemonSocketPaths.resolveClientVersion(),
   private val clientBuildId: String? = DaemonSocketPaths.resolveClientBuildId(),
   private val clientEntryScript: String? = DaemonSocketPaths.resolveLocalDaemonEntryScript(),
+  private val livenessOwnerToken: String = DaemonLivenessOwner.token,
 ) : Closeable, DaemonToolClient {
   private val json = Json { ignoreUnknownKeys = true }
   private val pending = ConcurrentHashMap<String, CompletableFuture<DaemonResponse>>()
@@ -1149,6 +1150,7 @@ internal class DaemonSocketClient(
           if (!containsKey("sessionUuid")) {
             put("sessionUuid", JsonPrimitive(sessionUuid))
           }
+          put("__autoMobileOwnedSessionsOwnerToken", JsonPrimitive(livenessOwnerToken))
         },
       )
     return JsonObject(mapOf("name" to JsonPrimitive(toolName), "arguments" to argumentsWithSession))

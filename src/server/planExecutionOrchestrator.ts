@@ -1,3 +1,4 @@
+import { idleReleaseField } from "../daemon/releaseReasons";
 import {
   ActionableError,
   BootedDevice,
@@ -321,7 +322,11 @@ export function planBaseEndFields(
     code: SESSION_OWNERSHIP_LOST_CODE,
     retryable: false,
     nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION,
-    details: { sessionUuid: ended.sessionUuid, reason: ended.release.releaseReason },
+    details: {
+      sessionUuid: ended.sessionUuid,
+      reason: ended.release.releaseReason,
+      ...idleReleaseField(ended.release.releaseReason),
+    },
   };
 }
 

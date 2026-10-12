@@ -242,7 +242,7 @@ describe("registration-only daemon requests", () => {
         retryable: false,
         nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION,
         error: expect.stringContaining(`Session ${sessionId} is terminal after ${releaseReason}`),
-        details: { sessionUuid: sessionId, reason: releaseReason },
+        details: { sessionUuid: sessionId, reason: releaseReason, ...(idle ? { idle: true } : {}) },
         releaseReason,
         ...(idle ? { idle: true } : {}),
       });

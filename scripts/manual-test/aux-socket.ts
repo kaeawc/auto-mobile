@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { basename, join, isAbsolute } from "node:path";
 import {
-  TEST_RECORDING_SOCKET_CONFIG,
+  DEVICE_GESTURE_RECORDING_SOCKET_CONFIG,
   VIDEO_STREAM_SOCKET_CONFIG,
   resolveWebRtcStreamSocketPath,
 } from "../../src/daemon/daemonFiles";
@@ -12,9 +12,9 @@ import {
   DAEMON_RELEASE_SESSION_METHOD,
 } from "../../src/daemon/constants";
 import type {
-  TestRecordingCommand,
-  TestRecordingResponse,
-} from "../../src/daemon/testRecordingSocketTypes";
+  DeviceGestureRecordingCommand,
+  DeviceGestureRecordingResponse,
+} from "../../src/daemon/deviceGestureRecordingSocketTypes";
 import type {
   VideoStreamSocketRequest,
   VideoStreamSocketResponse,
@@ -52,7 +52,7 @@ then release on exit. Video reports bytes only (the product exports no packet de
 Exit codes: 0 success, 1 typed refusal, 2 usage/guard, 3 timeout/connection error.`;
 export interface AuxSocketCommand {
   kind: "recording" | "video" | "webrtc";
-  request: TestRecordingCommand | VideoStreamSocketRequest | WebRtcStreamSocketRequest;
+  request: DeviceGestureRecordingCommand | VideoStreamSocketRequest | WebRtcStreamSocketRequest;
   observer: boolean;
   observerName: string;
   heartbeatMs: number;
@@ -203,7 +203,7 @@ export interface AuxSocketDeps {
 }
 async function recording(
   connection: FrameConnection,
-  request: TestRecordingCommand,
+  request: DeviceGestureRecordingCommand,
   deps: AuxSocketDeps,
   timeoutMs: number,
 ): Promise<number> {
@@ -236,7 +236,7 @@ async function recording(
       }
       deps.out(line);
       try {
-        const response: TestRecordingResponse = JSON.parse(line);
+        const response: DeviceGestureRecordingResponse = JSON.parse(line);
         finish(undefined, response.success === true ? 0 : 1);
       } catch (error) {
         finish(new Error(`Invalid recording response: ${errorMessage(error)}`));
@@ -336,8 +336,10 @@ export async function runAuxSocket(
       : join(
           resolveAuxSocketDir(env),
           basename(
-            (command.kind === "video" ? VIDEO_STREAM_SOCKET_CONFIG : TEST_RECORDING_SOCKET_CONFIG)
-              .defaultPath,
+            (command.kind === "video"
+              ? VIDEO_STREAM_SOCKET_CONFIG
+              : DEVICE_GESTURE_RECORDING_SOCKET_CONFIG
+            ).defaultPath,
           ),
         );
   const socketRefusal = privatePathRefusal(socket, deps.host);
@@ -420,7 +422,12 @@ export async function runAuxSocket(
       connection = await connectWithDeadline(deps.connect, socket, deps.timer, command.timeoutMs);
       code =
         command.kind === "recording"
-          ? await recording(connection, request as TestRecordingCommand, deps, command.timeoutMs)
+          ? await recording(
+              connection,
+              request as DeviceGestureRecordingCommand,
+              deps,
+              command.timeoutMs,
+            )
           : await video(connection, request as VideoStreamSocketRequest, command, deps);
     }
     control?.assertOpen();

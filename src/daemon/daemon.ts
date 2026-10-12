@@ -220,6 +220,7 @@ import {
   getDatabase,
   getDatabasePath,
   getDbWriteBarrier,
+  refusedDatabaseAccessCountAfterShutdownClose,
 } from "../db";
 import { NavigationRetention } from "../db/navigationRetention";
 import { NavigationRetentionMonitor } from "./NavigationRetentionMonitor";
@@ -1297,6 +1298,7 @@ export class Daemon {
     // Sessionless network mocks and simulations are cleared the same way (#11130).
     const clearOwnerlessNetworkState = createOwnerlessNetworkStateAcquisitionCleanup(
       this.sessionManager,
+      { timer: this.timer },
     );
     // Display/system settings a previous session changed are reset to the recorded device
     // defaults when a different session acquires the device (#11145).
@@ -1311,6 +1313,7 @@ export class Daemon {
     const resetSettingDefaults = createDeviceSettingDefaultsAcquisitionReset(
       this.sessionManager,
       settingDefaults,
+      this.timer,
     );
     this.sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId, sessionId) => {
       executionTracker.cancelSessionlessDeviceUse(deviceId, {
@@ -5184,7 +5187,9 @@ export class Daemon {
     // Abandoned is not cancelled: the connection stays open while an abandoned stage that may
     // write is still running, and closes late if those stragglers finish in time (#11601).
     const databaseTail = createShutdownDatabaseTail({
-      closeDatabase: () => closeDatabase(),
+      // The shutdown close: late work is refused from here on instead of reopening it.
+      closeDatabase: () => closeDatabase({ forShutdown: true }),
+      refusedAccessCount: () => refusedDatabaseAccessCountAfterShutdownClose(),
       drainWrites: (timeoutMs) => this.drainShutdownDatabaseWrites(timeoutMs),
       keepOpenReason: () =>
         this.shutdownSessionReleasesDrained

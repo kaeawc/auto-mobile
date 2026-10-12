@@ -123,3 +123,32 @@ wiring_requires_yq() {
   [ "$(yq -r '.runs.steps[] | select(.name == "Upload Emulator Diagnostics") | .if' "$ACTION")" = "always() && (steps.emulator-attempt-1.outcome == 'failure' || steps.avd-create.outcome == 'failure')" ]
   [ "$(yq -r '.runs.steps[] | select(.name == "Upload Emulator Diagnostics") | .with.path' "$ACTION")" = "android-emulator-diagnostics/" ]
 }
+
+@test "pull requests restore the AVD cache but never save it (#11578)" {
+  wiring_requires_yq
+  local save_if save_index verify_index
+  # The combined actions/cache action saves in a post-job step, while the
+  # emulator still runs: on pull requests that save failed on every cache miss.
+  [ "$(yq -r '.runs.steps[] | select(.id == "avd-cache") | .uses' "$ACTION")" = "actions/cache/restore@v5" ]
+  [ "$(yq -r '[.runs.steps[] | select(.uses == "actions/cache@v5")] | length' "$ACTION")" = "0" ]
+  [ "$(yq -r '[.runs.steps[] | select((.uses // "") | test("^actions/cache/save@"))] | length' "$ACTION")" = "1" ]
+  save_if="$(yq -r '.runs.steps[] | select(.name == "Save AVD cache") | .if' "$ACTION")"
+  [ "$save_if" = "success() && github.event_name != 'pull_request' && steps.avd-cache.outputs.cache-hit != 'true'" ]
+  [ "$(yq -r '.runs.steps[] | select(.name == "Save AVD cache") | ."continue-on-error"' "$ACTION")" = "true" ]
+  # The save writes exactly what the restore reads.
+  [ "$(yq -r '.runs.steps[] | select(.name == "Save AVD cache") | .with.key' "$ACTION")" = "$(yq -r '.runs.steps[] | select(.id == "avd-cache") | .with.key' "$ACTION")" ]
+  [ "$(yq -r '.runs.steps[] | select(.name == "Save AVD cache") | .with.path' "$ACTION")" = "$(yq -r '.runs.steps[] | select(.id == "avd-cache") | .with.path' "$ACTION")" ]
+  # It still runs after the tests, as the post-job save did.
+  save_index="$(yq -r '.runs.steps | to_entries[] | select(.value.name == "Save AVD cache") | .key' "$ACTION")"
+  verify_index="$(yq -r '.runs.steps | to_entries[] | select(.value.name == "Verify Emulator Tests Passed") | .key' "$ACTION")"
+  [ "$save_index" -gt "$verify_index" ]
+}
+
+@test "the emulator action reads Gradle caches with the version that writes them (#11578)" {
+  wiring_requires_yq
+  local writer reader
+  writer="$(yq -r '.runs.steps[] | select(.name == "Setup Gradle") | .uses' .github/actions/gradle-task-run/action.yml)"
+  reader="$(yq -r '.runs.steps[] | select(.name == "Setup Gradle") | .uses' "$ACTION")"
+  [[ "$writer" == gradle/actions/setup-gradle@* ]]
+  [ "$reader" = "$writer" ]
+}

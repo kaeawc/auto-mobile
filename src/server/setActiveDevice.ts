@@ -259,6 +259,8 @@ async function bindRequestedDevice(input: {
     undefined,
     // Records the move (or the mint), so a call cancelled before it answers is undone (#11593).
     receipt,
+    // Asked again under the pool's assignment mutex: a start may have reserved the device since.
+    true,
   );
   if (boundSession !== args.sessionUuid) {
     throw deviceAssignedToOtherSessionError(args.deviceId, boundSession, args.sessionUuid);
@@ -297,6 +299,8 @@ async function selectSessionDevice(input: {
   const sessions = DaemonState.getInstance().getSessionManager();
   const pool = DaemonState.getInstance().getDevicePool();
   const device = await requestedPoolDevice(pool, args.deviceId, args.platform);
+  // A device another request is still preparing is refused before anything touches it (#11651).
+  pool.assertNotPreparedForOtherRequest(args.deviceId);
   const hadDisplayPin = sessions.getDisplayPin(args.sessionUuid) !== undefined;
   const displayPin =
     args.display === undefined
@@ -310,6 +314,7 @@ async function selectSessionDevice(input: {
   pool.assertDeviceCleanupComplete(args.deviceId);
   // Refused before the resume: resuming re-arms the device's CtrlProxy restart budget and drops
   // its admitted attempt, which a caller that does not hold the device must not do (#11651).
+  pool.assertNotPreparedForOtherRequest(args.deviceId);
   assertDeviceOwner({ device, sessionUuid: args.sessionUuid, sessions });
   await dependencies.resumeCtrlProxy(args.deviceId, device.platform);
   // Checked again: another session may have bound the device while the resume listed devices.
@@ -358,8 +363,17 @@ function admitSessionlessSelection(args: HandlerArgs): void {
     }
     throw deviceAssignedToOtherSessionError(args.deviceId, liveHolder, undefined);
   }
+  // No session holds it yet, but another request is preparing it and will bind it (#11651).
+  pool.assertNotPreparedForOtherRequest(args.deviceId);
   if (args.__executionId && args.display === undefined) {
     executionTracker.markSessionlessDeviceUse(args.__executionId, args.deviceId);
+  }
+}
+
+function assertNotPreparedForOtherRequest(deviceId: string): void {
+  const daemonState = DaemonState.getInstance();
+  if (daemonState.isInitialized()) {
+    daemonState.getDevicePool().assertNotPreparedForOtherRequest(deviceId);
   }
 }
 
@@ -380,9 +394,11 @@ async function selectLegacyDevice(input: {
   );
   // A session that acquired the device during readiness cancelled this call: never pin its device.
   signal?.throwIfAborted();
+  assertNotPreparedForOtherRequest(readyDevice.deviceId);
   const resolvedPlatform = args.platform ?? readyDevice.platform;
   await resumeCtrlProxy(readyDevice.deviceId, resolvedPlatform);
   signal?.throwIfAborted();
+  assertNotPreparedForOtherRequest(readyDevice.deviceId);
   if (args.sessionUuid && resolveDirectSessionDevice(args.sessionUuid)) {
     registerDirectSessionDevice(args.sessionUuid, readyDevice);
   }

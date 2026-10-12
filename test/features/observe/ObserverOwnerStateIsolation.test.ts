@@ -1,5 +1,6 @@
 import { FakeScreenshotPathProtection } from "../../fakes/FakeScreenshotPathProtection";
-import { afterEach, expect, spyOn, test } from "bun:test";
+import { expect, spyOn } from "bun:test";
+import { warmedTests } from "../../helpers/warmedTests";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -139,7 +140,8 @@ function snapshotMaps(maps: Map<unknown, unknown>[]): unknown {
   return structuredClone(maps.map((map) => [...map]));
 }
 
-afterEach(() => {
+// First-use costs are paid in beforeAll (outside CI's per-test time); this resets between runs.
+const test = warmedTests(() => {
   sessions?.stopCleanupTimer();
   sessions = undefined;
   AndroidCtrlProxyClient.resetInstances();

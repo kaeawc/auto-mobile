@@ -1,5 +1,5 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
-import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
+import { describe, it, expect, beforeAll, beforeEach, afterEach, spyOn } from "bun:test";
 import {
   setDeviceToolsDependencies,
   resetDeviceToolsDependencies,
@@ -14,7 +14,6 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/RunnerReadinessService";
 
 import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
-import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -40,7 +39,7 @@ describe("createIfMissing rollback after System UI recovery", () => {
   let fakeProvisioner: FakeDeviceProvisioner;
   let sessionManager: SessionManager;
 
-  beforeEach(() => {
+  const arrange = (): void => {
     resetDeviceToolsDependencies();
     DaemonState.getInstance().reset();
     clearDirectSessionDevices();
@@ -90,9 +89,10 @@ describe("createIfMissing rollback after System UI recovery", () => {
       new DeviceSessionRegistry(timer, idGenerator),
     );
     registerDeviceTools();
-  });
+  };
+  beforeEach(arrange);
 
-  afterEach(() => {
+  const dispose = (): void => {
     resetDeviceToolsDependencies();
     DaemonState.getInstance().reset();
     sessionManager.stopCleanupTimer();
@@ -100,7 +100,8 @@ describe("createIfMissing rollback after System UI recovery", () => {
     setDeviceManager(null);
     PlatformDeviceManagerFactory.reset();
     resetVideoRecordingManagerDependencies();
-  });
+  };
+  afterEach(dispose);
 
   async function callStartDevice(args: Record<string, unknown>): Promise<Record<string, unknown>> {
     const tool = ToolRegistry.getTool("startDevice");
@@ -138,6 +139,20 @@ describe("createIfMissing rollback after System UI recovery", () => {
       fakeDeviceUtils.setBootedDevices(platform, []);
     };
   }
+
+  // Pay start/bind module and JIT costs on a throwaway pool, outside all scenarios.
+  beforeAll(async () => {
+    arrange();
+    const warm = { deviceId: "emulator-5590", name: "warm-up", platform: "android" as const };
+    fakeDeviceUtils.setBootedDevices("android", [warm]);
+    fakeMatcher.setBootedResult(warm);
+    setDeviceToolsDependencies({ avdManagerFactory: () => ({ listDeviceImages: async () => [] }) });
+    try {
+      await callStartDevice({ platform: "android" });
+    } finally {
+      dispose();
+    }
+  });
 
   it("deletes the AVD it created when binding fails after a System UI ANR replacement boot", async () => {
     fakeGate.setAllowed(true);
@@ -243,9 +258,11 @@ describe("createIfMissing rollback after System UI recovery", () => {
         },
       }),
       ensureCtrlProxyReady: async () => {
-        // The readiness reservation admits an exact bind by another session (#11651).
-        const select = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
-        await select({ deviceId: createdDeviceId, sessionUuid: "other-session" });
+        // An internal binder remains permissive under the readiness reservation (#11651);
+        // setActiveDevice now refuses this window, so exercise the cleanup safety net directly.
+        await DaemonState.getInstance()
+          .getDevicePool()
+          .bindOrReuseDeviceSession("other-session", createdDeviceId, "android");
         throw new Error("automation runner did not become ready");
       },
     });

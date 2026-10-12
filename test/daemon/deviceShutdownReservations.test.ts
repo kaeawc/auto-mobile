@@ -181,3 +181,25 @@ describe("DeviceShutdownReservations", () => {
     expect(h.intentional.get(deviceId)).toBe(first.incarnation);
   });
 });
+
+describe("readiness reservation owners (#11651)", () => {
+  test("exceptOwners excludes only the named owners; releases are independent and idempotent", async () => {
+    const h = harness();
+    h.devices.set(deviceId, pooled());
+    const first = await h.reservations.reserveDeviceForReadiness(deviceId, identity);
+    const second = await h.reservations.reserveDeviceForReadiness(deviceId, identity);
+    expect(h.reservations.isReservedForReadiness(deviceId, new Set())).toBe(true);
+    expect(h.reservations.isReservedForReadiness(deviceId, new Set([first.owner]))).toBe(true);
+    expect(
+      h.reservations.isReservedForReadiness(deviceId, new Set([first.owner, second.owner])),
+    ).toBe(false);
+    await first();
+    await first();
+    expect(h.reservations.isReservedForReadiness(deviceId)).toBe(true);
+    expect(h.reservations.isReservedForReadiness(deviceId, new Set([first.owner]))).toBe(true);
+    expect(h.reservations.isReservedForReadiness(deviceId, new Set([second.owner]))).toBe(false);
+    await second();
+    await second();
+    expect(h.reservations.isReservedForReadiness(deviceId)).toBe(false);
+  });
+});

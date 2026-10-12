@@ -38,14 +38,19 @@ export async function runFakeTime(
   }
 }
 
-/** A database connection that fails loudly when anything uses it after it was closed. */
+/**
+ * A database connection that fails loudly when anything uses it after it was closed, and counts
+ * those refusals as the real shutdown close does.
+ */
 export class FakeShutdownDatabase {
   closes = 0;
   drains = 0;
+  refusals = 0;
   private closed = false;
 
   write(): void {
     if (this.closed) {
+      this.refusals++;
       throw new Error("database used after close");
     }
   }

@@ -142,15 +142,18 @@ describe("DeviceSettingDefaults (#11145)", () => {
   test("the acquisition reset is tracked as acquisition cleanup for the device", async () => {
     const h = harness({ fontScale: "default" });
     await h.change({ fontScale: 1.3 });
-    const tracked: Array<[string, Promise<unknown>]> = [];
+    const tracked: Array<[string, Promise<unknown>, number | undefined]> = [];
     const reset = createDeviceSettingDefaultsAcquisitionReset(
       {
-        registerAcquisitionDeviceCleanup: (deviceId, cleanup) => tracked.push([deviceId, cleanup]),
+        registerAcquisitionDeviceCleanup: (deviceId, cleanup, capMs) =>
+          tracked.push([deviceId, cleanup, capMs]),
       },
       h.defaults,
+      new FakeTimer(),
     );
     reset(device.deviceId, "session-b");
     expect(tracked.map(([deviceId]) => deviceId)).toEqual([device.deviceId]);
+    expect(tracked[0][2]).toBe(PENDING_RESET_WAIT_MS);
     await tracked[0][1];
     expect(h.settings.current.fontScale).toBe("default");
   });

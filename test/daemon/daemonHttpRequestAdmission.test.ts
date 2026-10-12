@@ -415,7 +415,10 @@ describe("HTTP heartbeat during release", () => {
         await finish();
         expect(response.statusCode).toBe(404);
         expect(response.body).toBe(
-          JSON.stringify({ error: `Session not found: ${releasingSessionId}` }),
+          JSON.stringify({
+            error: `Session not found: ${releasingSessionId}`,
+            ...(phase === "B" ? { releaseReason: "explicit-release" } : {}),
+          }),
         );
         expect(called).toBe(0);
         const after = await send();

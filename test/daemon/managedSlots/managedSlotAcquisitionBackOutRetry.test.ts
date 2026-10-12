@@ -99,12 +99,15 @@ describe("ManagedSlotAcquisition back-out retry", () => {
   let local: SlotExecOwnerLiveness;
   let peer: SlotExecOwnerLiveness;
   let busy: number;
+  let busyUntilMs: number;
   let lostAck: boolean;
   let clearCalls: Array<{ key: SlotKey; session: string; at: number }>;
   let afterRead: (() => void) | undefined;
   let readFailures: number;
   let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
   let debug: ReturnType<typeof spyOn<typeof logger, "debug">>;
+  let info: ReturnType<typeof spyOn<typeof logger, "info">>;
+  let warnedAt: number[];
 
   async function setUp(): Promise<void> {
     timer = new FakeTimer();
@@ -126,6 +129,7 @@ describe("ManagedSlotAcquisition back-out retry", () => {
       isExecOwnerLive: (owner) => judge(owner),
     });
     busy = 0;
+    busyUntilMs = 0;
     lostAck = false;
     clearCalls = [];
     afterRead = undefined;
@@ -136,7 +140,7 @@ describe("ManagedSlotAcquisition back-out retry", () => {
           return async (key: SlotKey, session: string) => {
             clearCalls.push({ key, session, at: timer.now() });
             sessions.events.push(`owner:${session}`);
-            if (busy-- > 0) {
+            if (busy-- > 0 || timer.now() < busyUntilMs) {
               if (lostAck) {
                 await target.releaseExecution(key, session);
               }
@@ -187,8 +191,12 @@ describe("ManagedSlotAcquisition back-out retry", () => {
       timer,
     };
     acquisition = new ManagedSlotAcquisition(deps);
-    warn = spyOn(logger, "warn").mockImplementation(() => {});
+    warnedAt = [];
+    warn = spyOn(logger, "warn").mockImplementation(() => {
+      warnedAt.push(timer.now());
+    });
     debug = spyOn(logger, "debug").mockImplementation(() => {});
+    info = spyOn(logger, "info").mockImplementation(() => {});
   }
 
   async function tearDown(): Promise<void> {
@@ -200,6 +208,7 @@ describe("ManagedSlotAcquisition back-out retry", () => {
     await registry.close();
     warn.mockRestore();
     debug.mockRestore();
+    info.mockRestore();
   }
 
   // Each scenario has an isolated in-memory database. Migration/driver setup is fixture work,
@@ -294,8 +303,7 @@ describe("ManagedSlotAcquisition back-out retry", () => {
         expect((await claim(peer, "peer-probe")).kind).toBe("slot_in_use");
       }
       expect(acquisition.pendingBackOutCleanups()).toHaveLength(inlineCalls);
-      timer.advanceTime(250);
-      await drainMicrotasks(40);
+      await tick();
       await acquisition.whenIdle();
       expect(acquisition.pendingBackOutCleanups()).toEqual([]);
       expect(await registry.getAssignment(KEY)).toMatchObject({
@@ -325,163 +333,154 @@ describe("ManagedSlotAcquisition back-out retry", () => {
     if ("pendingBackOutCleanups" in acquisition) {
       expect(acquisition.pendingBackOutCleanups()).toEqual([]);
     }
+    expect(warn).not.toHaveBeenCalled();
   });
 
-  async function tick(ms = 250): Promise<void> {
+  async function tick(ms = 25): Promise<void> {
     timer.advanceTime(ms);
-    await drainMicrotasks(80);
-  }
-
-  function boundedRound() {
-    const attempts: number[] = [];
-    const delays = [10, 30, 70];
-    acquisition = new ManagedSlotAcquisition({
-      ...deps,
-      backOutRetryMaxAttempts: 3,
-      backOutRetryBackoff: {
-        delayForAttempt: (attempt) => {
-          attempts.push(attempt);
-          return delays[attempt - 1]!;
-        },
-      },
-    });
-    return { attempts, delays };
+    // Two group-slot retries share the registry's serialized transaction queue.
+    await drainMicrotasks(60);
   }
 
   scenario(
-    "bounded attempts continue slowly with one give-up warning and pending whenIdle",
+    "transient busy write lands at 25 ms without delaying the acquisition answer",
     async () => {
-      const { attempts, delays } = boundedRound();
-      busy = Infinity;
-      await fail("refused");
-      let idle = false;
-      const idlePromise = acquisition.whenIdle().then(() => {
-        idle = true;
+      busy = 1;
+      const start = timer.now();
+      expect((await fail("refused")).outcome).toBe("failed");
+      expect(timer.now()).toBe(start);
+      expect(acquisition.pendingBackOutCleanups()[0]).toMatchObject({
+        attempts: 0,
+        owedSinceMs: start,
+        ageMs: 0,
       });
-      for (const delay of delays) {
-        expect(timer.getPendingTimeouts()).toEqual([delay]);
-        await tick(delay - 1);
-        expect(idle).toBe(false);
-        await tick(1);
-      }
-      expect(idle).toBe(false);
-      expect(attempts).toEqual([1, 2, 3]);
-      expect(clearCalls.map((call) => call.at)).toEqual([
-        1_000_000, 1_000_010, 1_000_040, 1_000_110,
-      ]);
-      expect(acquisition.pendingBackOutCleanups()).toEqual([
-        {
-          key: KEY,
-          sessionUuid: "session-1",
-          state: "gave_up",
-          attempts: 3,
-          ownerClearOwed: true,
-          sessionReleaseOwed: false,
-          lastError: "SQLITE_BUSY: database is locked",
-        },
-      ]);
-      expect(
-        warn.mock.calls.filter(([message]) => String(message).includes("gave up")),
-      ).toHaveLength(1);
-      expect(
-        warn.mock.calls.filter(([message]) => String(message).includes("retry failed")),
-      ).toHaveLength(1);
-      expect(
-        debug.mock.calls.filter(([message]) => String(message).includes("retry failed")),
-      ).toHaveLength(2);
-      for (const [message] of warn.mock.calls) {
-        expect(String(message)).toContain(KEY.scopeKey);
-        expect(String(message)).toContain("session-1");
-      }
-      expect(timer.getPendingTimeouts()).toEqual([30_000]);
+      const before = (await registry.getAssignment(KEY))!;
       expect((await claim(peer, "peer-probe")).kind).toBe("slot_in_use");
-      // Accessor returns snapshots, including the nested key.
-      const snapshot = acquisition.pendingBackOutCleanups()[0]!;
-      snapshot.key.slotIndex = 99;
-      expect(acquisition.pendingBackOutCleanups()[0]!.key).toEqual(KEY);
-      busy = 0;
-      await tick(30_000);
-      await idlePromise;
-      expect(idle).toBe(true);
+      await tick(24);
+      expect(clearCalls).toHaveLength(1);
+      expect(acquisition.pendingBackOutCleanups()[0]?.ageMs).toBe(24);
+      await tick(1);
+      expect(clearCalls).toHaveLength(2);
+      await acquisition.whenIdle();
+      expect(await registry.getAssignment(KEY)).toMatchObject({
+        execOwner: null,
+        stableDeviceId: before.stableDeviceId,
+        state: "ready",
+      });
       expect(acquisition.pendingBackOutCleanups()).toEqual([]);
+      expect((await claim(peer, "peer-next")).kind).toBe("claimed");
+      expect(info.mock.calls.filter(([message]) => String(message).includes("landed"))).toEqual([
+        [expect.stringContaining("landed after 25 ms (1 retries)")],
+      ]);
+      expect(
+        info.mock.calls.filter(([message]) => String(message).includes("background")),
+      ).toHaveLength(1);
+      expect(warn).not.toHaveBeenCalled();
     },
   );
 
-  async function slowPhase(kind: FailureCase = "refused"): Promise<void> {
-    acquisition = new ManagedSlotAcquisition({ ...deps, backOutRetryMaxAttempts: 1 });
-    busy = Infinity;
-    await fail(kind);
-    await tick();
-    expect(acquisition.pendingBackOutCleanups()[0]).toMatchObject({
-      state: "gave_up",
-      attempts: 1,
-    });
-    expect(timer.getPendingTimeouts()).toEqual(kind === "group" ? [30_000, 30_000] : [30_000]);
-  }
-
-  scenario("slow continuation recovers peer and local without another acquisition", async () => {
-    busy = Infinity;
+  scenario("default schedule doubles from 25 ms to the 1 s cap", async () => {
+    busy = 7; // One inline failure plus six background failures.
     await fail("refused");
-    for (const delay of [250, 500, 1_000, 2_000, 4_000, 5_000, 5_000, 5_000]) {
+    for (const delay of [25, 50, 100, 200, 400, 800, 1_000]) {
+      expect(timer.getPendingTimeouts()).toEqual([delay]);
       await tick(delay);
     }
-    expect(acquisition.pendingBackOutCleanups()[0]).toMatchObject({
-      state: "gave_up",
-      attempts: 8,
-    });
-    expect(timer.getPendingTimeouts()).toEqual([30_000]);
-    const before = (await registry.getAssignment(KEY))!;
-    expect((await claim(peer, "peer-probe")).kind).toBe("slot_in_use");
-    busy = 0;
-    await tick(30_000);
+    expect(clearCalls.map((call) => call.at - 1_000_000)).toEqual([
+      0, 25, 75, 175, 375, 775, 1_575, 2_575,
+    ]);
     await acquisition.whenIdle();
     expect(acquisition.pendingBackOutCleanups()).toEqual([]);
-    expect(await registry.getAssignment(KEY)).toMatchObject({
-      state: "ready",
-      stableDeviceId: before.stableDeviceId,
-      deviceName: before.deviceName,
-      execOwner: null,
-    });
-    expect((await claim(peer, "peer-next")).kind).toBe("claimed");
-    await registry.releaseExecution(KEY, "peer-next");
-    expect((await claim(local, "local-next")).kind).toBe("claimed");
+    expect(warn).not.toHaveBeenCalled();
   });
 
-  scenario("slow failures keep counting at 30 seconds and log only at debug", async () => {
-    const { delays } = boundedRound();
-    busy = Infinity;
+  scenario("registry busy for 3 s lands within 1 s of becoming writable", async () => {
+    busyUntilMs = timer.now() + 3_000;
     await fail("refused");
-    for (const delay of delays) {
+    for (const delay of [25, 50, 100, 200, 400, 800, 1_000]) {
       await tick(delay);
     }
-    expect(timer.getPendingTimeouts()).toEqual([30_000]);
-    for (let attempt = 4; attempt <= 6; attempt++) {
-      await tick(29_999);
-      expect(clearCalls).toHaveLength(attempt);
-      await tick(1);
-      expect(acquisition.pendingBackOutCleanups()[0]).toMatchObject({
-        state: "gave_up",
-        attempts: attempt,
-      });
-      expect(timer.getPendingTimeouts()).toEqual([30_000]);
-    }
-    expect(clearCalls.map((call) => call.at)).toEqual([
-      1_000_000, 1_000_010, 1_000_040, 1_000_110, 1_030_110, 1_060_110, 1_090_110,
-    ]);
-    const giveUps = warn.mock.calls.filter(([message]) => String(message).includes("gave up"));
-    expect(giveUps).toHaveLength(1);
-    expect(String(giveUps[0]![0])).toContain("every 30 s");
-    expect(String(giveUps[0]![0])).toContain("daemon closes");
-    expect(
-      warn.mock.calls.filter(([message]) => String(message).includes("retry failed")),
-    ).toHaveLength(1);
-    expect(
-      debug.mock.calls.filter(([message]) => String(message).includes("retry failed")),
-    ).toHaveLength(5);
+    expect(acquisition.pendingBackOutCleanups()[0]?.attempts).toBe(7);
+    await tick(1_000);
+    expect(clearCalls.at(-1)?.at).toBe(1_003_575);
+    expect(clearCalls.at(-1)!.at - busyUntilMs).toBeLessThanOrEqual(1_000);
+    await acquisition.whenIdle();
+    expect(acquisition.pendingBackOutCleanups()).toEqual([]);
+    expect(warn).not.toHaveBeenCalled();
   });
 
-  scenario("later acquisitions schedule no extra slow timer or registry work", async () => {
-    await slowPhase();
+  scenario("registry busy for 60 s keeps the 1 s cadence and warns once after 5 s", async () => {
+    const start = timer.now();
+    busyUntilMs = start + 60_001;
+    await fail("refused");
+    let idle = false;
+    const idlePromise = acquisition.whenIdle().then(() => {
+      idle = true;
+    });
+    for (const delay of [25, 50, 100, 200, 400, 800]) {
+      await tick(delay);
+    }
+    for (let step = 0; step < 58; step++) {
+      await tick(1_000);
+    }
+    await tick(425);
+    expect(acquisition.pendingBackOutCleanups()[0]).toMatchObject({
+      key: KEY,
+      sessionUuid: "session-1",
+      attempts: 64,
+      owedSinceMs: start,
+      ageMs: 60_000,
+      ownerClearOwed: true,
+      sessionReleaseOwed: false,
+      lastError: "SQLITE_BUSY: database is locked",
+    });
+    expect(idle).toBe(false);
+    const lateCalls = clearCalls.slice(-5);
+    expect(
+      lateCalls.map((call, index) => (index === 0 ? 1_000 : call.at - lateCalls[index - 1]!.at)),
+    ).toEqual([1_000, 1_000, 1_000, 1_000, 1_000]);
+    expect(warn.mock.calls).toEqual([
+      [expect.stringContaining("5575 ms (10 retries)"), expect.any(Error)],
+    ]);
+    expect(String(warn.mock.calls[0]![0])).toContain("SQLITE_BUSY: database is locked");
+    expect(String(warn.mock.calls[0]![0])).toContain("retries continue every 1 s");
+    expect(warnedAt).toEqual([start + 5_575]);
+    expect(
+      debug.mock.calls.filter(([message]) => String(message).includes("retry failed")),
+    ).toHaveLength(64);
+    expect((await claim(peer, "peer-probe")).kind).toBe("slot_in_use");
+    // Accessor returns copies, including the nested key and an age computed at call time.
+    const snapshot = acquisition.pendingBackOutCleanups()[0]!;
+    snapshot.key.slotIndex = 99;
+    snapshot.attempts = -1;
+    expect(acquisition.pendingBackOutCleanups()[0]!.key).toEqual(KEY);
+    await tick(1);
+    expect(snapshot.ageMs).toBe(60_000);
+    expect(acquisition.pendingBackOutCleanups()[0]?.ageMs).toBe(60_001);
+    await tick(574);
+    expect(clearCalls.at(-1)!.at - busyUntilMs).toBeLessThanOrEqual(1_000);
+    await idlePromise;
+    expect(idle).toBe(true);
+    expect(acquisition.pendingBackOutCleanups()).toEqual([]);
+    expect(info.mock.calls.filter(([message]) => String(message).includes("landed"))).toEqual([
+      [expect.stringContaining("landed after 60575 ms (65 retries)")],
+    ]);
+    expect(warn.mock.calls).toHaveLength(1);
+    expect((await claim(peer, "peer-next")).kind).toBe("claimed");
+  });
+
+  async function cappedWait(kind: FailureCase = "refused"): Promise<void> {
+    busy = Infinity;
+    await fail(kind);
+    for (const delay of [25, 50, 100, 200, 400, 800]) {
+      await tick(delay);
+    }
+    expect(acquisition.pendingBackOutCleanups()[0]?.attempts).toBe(6);
+    expect(timer.getPendingTimeouts()).toEqual(kind === "group" ? [1_000, 1_000] : [1_000]);
+  }
+
+  scenario("later acquisitions schedule no extra timer or registry work", async () => {
+    await cappedWait();
     const elsewhere = { ...CONFIG, runnerNamespace: "other-runner", requests: [] };
     const before = clearCalls.length;
     const reads = spyOn(registry, "getAssignment");
@@ -490,135 +489,108 @@ describe("ManagedSlotAcquisition back-out retry", () => {
       expect((await acquisition.acquire(elsewhere, OPTIONS)).outcome).toBe("ready");
       expect(reads).not.toHaveBeenCalled();
       expect(clearCalls).toHaveLength(before);
-      expect(timer.getPendingTimeouts()).toEqual([30_000]);
-      expect(acquisition.pendingBackOutCleanups()[0]).toMatchObject({
-        state: "gave_up",
-        attempts: 1,
-      });
+      expect(timer.getPendingTimeouts()).toEqual([1_000]);
+      expect(acquisition.pendingBackOutCleanups()[0]?.attempts).toBe(6);
     } finally {
       reads.mockRestore();
     }
   });
 
-  scenario("whenIdle stays pending during slow cleanup and resolves on convergence", async () => {
-    await slowPhase();
+  scenario("whenIdle stays pending during owed cleanup and resolves on convergence", async () => {
+    await cappedWait();
     let idle = false;
     const idlePromise = acquisition.whenIdle().then(() => {
       idle = true;
     });
-    await drainMicrotasks(40);
+    await drainMicrotasks(20);
     expect(idle).toBe(false);
     busy = 0;
-    await tick(30_000);
+    await tick(1_000);
     await idlePromise;
     expect(idle).toBe(true);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
-  scenario("throwing backoff gives up once then recovers on the slow cadence", async () => {
-    acquisition = new ManagedSlotAcquisition({
-      ...deps,
-      backOutRetryBackoff: {
-        delayForAttempt: () => {
-          throw new Error("backoff failed");
-        },
-      },
-    });
-    busy = Infinity;
-    await fail("refused");
-    await drainMicrotasks(40);
-    expect(timer.getPendingTimeouts()).toEqual([30_000]);
-    expect(acquisition.pendingBackOutCleanups()[0]).toMatchObject({
-      state: "gave_up",
-      attempts: 0,
-      lastError: "backoff failed",
-    });
-    expect(warn.mock.calls.filter(([message]) => String(message).includes("gave up"))).toHaveLength(
-      1,
-    );
-    await tick(30_000);
-    expect(
-      warn.mock.calls.filter(([message]) => String(message).includes("retry failed")),
-    ).toHaveLength(0);
-    expect(
-      debug.mock.calls.filter(([message]) => String(message).includes("retry failed")),
-    ).toHaveLength(1);
-    busy = 0;
-    await tick(30_000);
-    await acquisition.whenIdle();
-    expect(acquisition.pendingBackOutCleanups()).toEqual([]);
-    expect(await registry.getAssignment(KEY)).toMatchObject({ execOwner: null });
-  });
-
-  scenario(
-    "an injected slow interval drives retries and appears in the give-up warning",
-    async () => {
+  scenarios(
+    ["oversized", "throwing", "NaN", "infinite"] as const,
+    (kind) => `injected ${kind} backoff retries at the 1 s cap`,
+    async (kind) => {
+      const attempts: number[] = [];
       acquisition = new ManagedSlotAcquisition({
         ...deps,
-        backOutRetryMaxAttempts: 1,
-        backOutRetrySlowPollMs: 2_000,
+        backOutRetryBackoff: {
+          delayForAttempt: (attempt) => {
+            attempts.push(attempt);
+            if (kind === "throwing") {
+              throw new Error("backoff failed");
+            }
+            return { oversized: 30_000, NaN: NaN, infinite: Infinity }[kind];
+          },
+        },
       });
-      busy = Infinity;
+      busy = 2;
       await fail("refused");
-      await tick();
-      expect(timer.getPendingTimeouts()).toEqual([2_000]);
-      expect(warn.mock.calls.some(([message]) => String(message).includes("every 2 s"))).toBe(true);
-      busy = 0;
-      await tick(2_000);
+      expect(timer.getPendingTimeouts()).toEqual([1_000]);
+      await tick(999);
+      expect(clearCalls).toHaveLength(1);
+      await tick(1);
+      expect(clearCalls).toHaveLength(2);
+      expect(acquisition.pendingBackOutCleanups()[0]?.attempts).toBe(1);
+      expect(timer.getPendingTimeouts()).toEqual([1_000]);
+      await tick(1_000);
       await acquisition.whenIdle();
+      expect(attempts).toEqual([1, 2]);
       expect(acquisition.pendingBackOutCleanups()).toEqual([]);
+      expect(await registry.getAssignment(KEY)).toMatchObject({ execOwner: null });
+      expect(warn).not.toHaveBeenCalled();
+      if (kind !== "oversized") {
+        expect(
+          debug.mock.calls.filter(([message]) => String(message).includes("backoff")),
+        ).toHaveLength(2);
+      }
     },
   );
 
-  scenario("a failed bounded timer switches to the slow phase", async () => {
-    const schedule = timer.setTimeout.bind(timer);
-    const timers = spyOn(timer, "setTimeout").mockImplementation((callback, ms) => {
-      if (ms === 250) {
-        throw new Error("bounded timer failed");
-      }
-      return schedule(callback, ms);
-    });
-    try {
+  scenarios(
+    [false, true],
+    (later) => `timer failure leaves inspectable cleanup with no task, after a retry=${later}`,
+    async (later) => {
       busy = Infinity;
-      await fail("refused");
-      await drainMicrotasks(40);
-      expect(timer.getPendingTimeouts()).toEqual([30_000]);
-      busy = 0;
-      await tick(30_000);
-      await acquisition.whenIdle();
-      expect(acquisition.pendingBackOutCleanups()).toEqual([]);
-      expect(
-        warn.mock.calls.filter(([message]) => String(message).includes("gave up")),
-      ).toHaveLength(1);
-    } finally {
-      timers.mockRestore();
-    }
-  });
-
-  scenario("a failed slow timer warns once and leaves the row without a task", async () => {
-    await slowPhase();
-    const timers = spyOn(timer, "setTimeout").mockImplementation(() => {
-      throw new Error("slow timer failed");
-    });
-    try {
-      await tick(30_000);
-      await acquisition.whenIdle();
-      expect(timer.getPendingTimeoutCount()).toBe(0);
-      expect(acquisition.pendingBackOutCleanups()[0]).toMatchObject({
-        state: "gave_up",
-        attempts: 2,
-        lastError: "slow timer failed",
+      if (later) {
+        await fail("refused");
+      }
+      const timers = spyOn(timer, "setTimeout").mockImplementation(() => {
+        throw new Error("retry timer failed");
       });
-      expect(
-        warn.mock.calls.filter(([message]) => String(message).includes("slow retry stopped")),
-      ).toHaveLength(1);
-      expect(await registry.getAssignment(KEY)).toMatchObject({
-        execOwner: { sessionUuid: "session-1" },
-      });
-    } finally {
-      timers.mockRestore();
-    }
-  });
+      try {
+        if (later) {
+          await tick();
+        } else {
+          await fail("refused");
+        }
+        await acquisition.whenIdle();
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+        expect(acquisition.pendingBackOutCleanups()[0]).toMatchObject({
+          attempts: later ? 1 : 0,
+          lastError: "retry timer failed",
+        });
+        expect(warn.mock.calls).toEqual([
+          [expect.stringContaining("no task remains: retry timer failed"), expect.any(Error)],
+        ]);
+        expect(await registry.getAssignment(KEY)).toMatchObject({
+          execOwner: { sessionUuid: "session-1" },
+        });
+        const elsewhere = { ...CONFIG, runnerNamespace: "other-runner", requests: [] };
+        expect((await acquisition.acquire(elsewhere, OPTIONS)).outcome).toBe("ready");
+        await tick(60_000);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+        expect(clearCalls).toHaveLength(later ? 2 : 1);
+        expect(warn.mock.calls).toHaveLength(1);
+      } finally {
+        timers.mockRestore();
+      }
+    },
+  );
 
   scenario(
     "a newer acquisition owns the slot before the retry: no old-session write follows",
@@ -640,7 +612,7 @@ describe("ManagedSlotAcquisition back-out retry", () => {
   );
 
   scenario(
-    "duplicate back-outs of one scope/slot/session retain all owed work in one round",
+    "duplicate back-outs of one scope/slot/session retain all owed work in one task",
     async () => {
       busy = 2;
       await fail("refused");
@@ -651,7 +623,7 @@ describe("ManagedSlotAcquisition back-out retry", () => {
       });
       sessions.releaseFailures = 1;
       await fail("refused");
-      expect(timer.getPendingTimeouts()).toEqual([250]);
+      expect(timer.getPendingTimeouts()).toEqual([25]);
       expect(acquisition.pendingBackOutCleanups()).toHaveLength(1);
       expect(acquisition.pendingBackOutCleanups()[0]).toMatchObject({
         ownerClearOwed: true,
@@ -668,47 +640,25 @@ describe("ManagedSlotAcquisition back-out retry", () => {
     },
   );
 
-  scenario(
-    "default round makes eight background attempts with capped exponential backoff",
-    async () => {
-      busy = Infinity;
-      await fail("refused");
-      const delays = [250, 500, 1_000, 2_000, 4_000, 5_000, 5_000, 5_000];
-      for (const delay of delays) {
-        expect(timer.getPendingTimeouts()).toEqual([delay]);
-        await tick(delay);
-      }
-      expect(clearCalls).toHaveLength(9);
-      expect(acquisition.pendingBackOutCleanups()[0]).toMatchObject({
-        state: "gave_up",
-        attempts: 8,
-      });
-      expect(timer.getPendingTimeouts()).toEqual([30_000]);
-    },
-  );
-
-  scenario("every failed group slot continues slowly without another acquisition", async () => {
-    await slowPhase("group");
-    expect(acquisition.pendingBackOutCleanups().map((cleanup) => cleanup.state)).toEqual([
-      "gave_up",
-      "gave_up",
-    ]);
+  scenario("every failed group slot keeps retrying without another acquisition", async () => {
+    await cappedWait("group");
+    expect(acquisition.pendingBackOutCleanups().map((cleanup) => cleanup.attempts)).toEqual([6, 6]);
     busy = 0;
-    await tick(30_000);
+    await tick(1_000);
     await acquisition.whenIdle();
     expect(acquisition.pendingBackOutCleanups()).toEqual([]);
     expect((await claim(peer, "peer-next")).kind).toBe("claimed");
     expect((await claim(peer, "peer-secondary", { ...KEY, slotIndex: 1 })).kind).toBe("claimed");
   });
 
-  scenario("a newer acquisition during the slow phase prevents an old owner write", async () => {
-    await slowPhase();
+  scenario("a newer acquisition during the capped wait prevents an old owner write", async () => {
+    await cappedWait();
     sessions.refuse = undefined;
     const next = await acquisition.acquire(CONFIG, OPTIONS);
     expect(next.outcome).toBe("ready");
     expect(next.slots[0]?.sessionUuid).toBe("session-2");
     const before = clearCalls.length;
-    await tick(30_000);
+    await tick(1_000);
     await acquisition.whenIdle();
     expect(clearCalls).toHaveLength(before);
     expect(await registry.getAssignment(KEY)).toMatchObject({
@@ -720,16 +670,16 @@ describe("ManagedSlotAcquisition back-out retry", () => {
   scenarios(
     [PEER, { ...OWNER, processGenerationToken: "linux:boot:99" }],
     (other) =>
-      `slow phase leaves same session under other process ${other.pid}/${other.processGenerationToken}`,
+      `capped wait leaves same session under other process ${other.pid}/${other.processGenerationToken}`,
     async (other) => {
-      await slowPhase();
+      await cappedWait();
       await registry.releaseExecution(KEY, "session-1");
       const binding = (await registry.getAssignment(KEY))!;
       expect(
         (await registry.claimExecution(KEY, binding, { ...other, sessionUuid: "session-1" })).kind,
       ).toBe("claimed");
       const before = clearCalls.length;
-      await tick(30_000);
+      await tick(1_000);
       await acquisition.whenIdle();
       expect(clearCalls).toHaveLength(before);
       expect(await registry.getAssignment(KEY)).toMatchObject({
@@ -739,42 +689,38 @@ describe("ManagedSlotAcquisition back-out retry", () => {
     },
   );
 
-  scenario("slow phase releases the session before attempting to clear its owner", async () => {
+  scenario("capped wait releases the session before attempting to clear its owner", async () => {
     sessions.releaseFailures = Infinity;
-    await slowPhase();
-    await tick(30_000);
+    await cappedWait();
+    await tick(1_000);
     expect(clearCalls).toHaveLength(1);
-    expect(sessions.releases).toHaveLength(3);
+    expect(sessions.releases).toHaveLength(8);
     expect(acquisition.pendingBackOutCleanups()[0]).toMatchObject({
-      state: "gave_up",
-      attempts: 2,
+      attempts: 7,
       sessionReleaseOwed: true,
       ownerClearOwed: true,
     });
     expect((await claim(peer, "peer-probe")).kind).toBe("slot_in_use");
     sessions.releaseFailures = 0;
     busy = 0;
-    await tick(30_000);
+    await tick(1_000);
     await acquisition.whenIdle();
     expect(sessions.events).toEqual([
       "owner:session-1",
-      "session:session-1",
-      "session:session-1",
-      "session:session-1",
-      "session:session-1",
+      ...Array<string>(9).fill("session:session-1"),
       "owner:session-1",
     ]);
     expect(acquisition.pendingBackOutCleanups()).toEqual([]);
     expect((await claim(peer, "peer-next")).kind).toBe("claimed");
   });
 
-  scenario("close in the slow phase cancels immediately and logs nothing afterward", async () => {
-    await slowPhase();
+  scenario("close in the capped wait cancels immediately and logs nothing afterward", async () => {
+    await cappedWait();
     const cleared = clearCalls.length;
     const released = sessions.releases.length;
     const warned = warn.mock.calls.length;
     const debugged = debug.mock.calls.length;
-    const info = spyOn(logger, "info").mockImplementation(() => {});
+    const informed = info.mock.calls.length;
     const reads = spyOn(registry, "getAssignment");
     try {
       acquisition.close();
@@ -786,13 +732,12 @@ describe("ManagedSlotAcquisition back-out retry", () => {
       expect(sessions.releases).toHaveLength(released);
       expect(warn.mock.calls).toHaveLength(warned);
       expect(debug.mock.calls).toHaveLength(debugged);
-      expect(info).not.toHaveBeenCalled();
+      expect(info.mock.calls).toHaveLength(informed);
       expect(await registry.getAssignment(KEY)).toMatchObject({
         execOwner: { sessionUuid: "session-1" },
       });
     } finally {
       reads.mockRestore();
-      info.mockRestore();
     }
   });
 
@@ -850,7 +795,7 @@ describe("ManagedSlotAcquisition back-out retry", () => {
       expect(clearCalls).toHaveLength(1);
       expect(sessions.releases).toEqual(["session-1", "session-1"]);
       expect((await claim(peer, "peer-probe")).kind).toBe("slot_in_use");
-      await tick(500);
+      await tick(50);
       await acquisition.whenIdle();
       expect(sessions.events).toEqual([
         "owner:session-1",
@@ -959,7 +904,7 @@ describe("ManagedSlotAcquisition back-out retry", () => {
       attempts: 1,
       lastError: "SQLITE_BUSY: owner read is locked",
     });
-    await tick(500);
+    await tick(50);
     await acquisition.whenIdle();
     expect(clearCalls).toHaveLength(2);
     expect(acquisition.pendingBackOutCleanups()).toEqual([]);

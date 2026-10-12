@@ -709,7 +709,7 @@ describe("managed slot journal redrive", () => {
         5_000,
       );
       const untilSleeping = async () => {
-        for (let turn = 0; turn < 50 && timer.getPendingSleepCount() === 0; turn += 1) {
+        for (let turn = 0; turn < 50 && timer.getPendingTimeoutCount() === 0; turn += 1) {
           await Promise.resolve();
         }
       };

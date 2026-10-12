@@ -204,7 +204,7 @@ is kept — same session, same `incarnation` — but:
   `subscribe_storage` expands to (`Daemon.applyStorageSubscriptionRequest`, which
   reports the refused targets so the request is not acked as complete), and the
   capture servers — video-stream `subscribe`, `webrtcStream` `start` and
-  `testRecording` `start`. Authorization is NOT this gate: the quarantine
+  `deviceGestureRecording` `start`. Authorization is NOT this gate: the quarantine
   deliberately preserves the owning session, so an authorized subscribe or start
   still passes it and would capture whichever replacement AVD now answers on the
   serial. The push servers reach the gate through the `DeviceSessionResolver`

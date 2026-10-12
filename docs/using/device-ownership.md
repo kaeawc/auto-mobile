@@ -61,7 +61,7 @@ UUID never takes it over. While the owner is connected, a control call from any
 other connection that names the session is refused, with autolock on or off, and
 that connection is never bound to the session. The rule covers control tools
 that take no device routing too (`killDevice`, `deleteDevice`, `exportPlan`,
-`recordSteps` start and stop): the refused call does not run and does not extend the session's
+`recordToolCalls` start and stop): the refused call does not run and does not extend the session's
 idle window (#11542). A plan step, or a tool another tool calls, is judged by the
 same rule as a direct call from the connection that started it (#11469, #11555).
 `setToolEnabled` is not refused (see
@@ -128,7 +128,7 @@ below are the defaults; the constants live in
   call ends. An idle release is terminal: the session UUID ends with it. The
   grace does not stretch it: a heartbeating session is released at the idle
   deadline. Heartbeats and reads (`observe`, `listDevices`, `doctor`,
-  `recordSteps` status and the other reads listed above) never extend it. Only a control
+  `recordToolCalls` status and the other reads listed above) never extend it. Only a control
   call still in flight holds the release, until its request deadline plus 10 s
   (or the 30 min ceiling without a deadline). A read in flight never holds it;
   the release cuts the read with the typed terminal refusal `session_ownership_lost`.
@@ -602,14 +602,14 @@ Owner decisions 2026-10-09 (#10982):
 - Hiding a desktop or IDE window during a recording does not release the device.
 
 A video start from the connection holding a device belongs to that holding session,
-even when the call omits `sessionUuid`. Starting a test recording on an unheld device
+even when the call omits `sessionUuid`. Starting a device gesture recording on an unheld device
 is refused with `no_active_device_session`; acquire a session on that device first.
 
 An active recording with no owner keeps running when a session acquires its device:
 the acquiring holder adopts it (owner decision 2026-10-11, #11665, replacing #10961).
 Until acquisition it remains stoppable sessionless; afterwards only the holder or
 the connection that acquired its session may stop it. This includes segmented video
-and test recordings. Release finalizes adopted recordings within the existing cap,
+and device gesture recordings. Release finalizes adopted recordings within the existing cap,
 announces their recording ids, and keeps their artifacts fetchable by id (#10958).
 
 An undelivered `setActiveDevice` rebind moves its existing session back to the device

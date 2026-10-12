@@ -106,8 +106,10 @@ describe("a slot's emulator whose AVD name the pool could not read", () => {
     );
   });
 
-  test("a testRecording gate with no identity at all is refused", async () => {
-    expect(await gate({ action: "testRecording" })).toBe("device_assigned_to_managed_slot");
+  test("a deviceGestureRecording gate with no identity at all is refused", async () => {
+    expect(await gate({ action: "deviceGestureRecording" })).toBe(
+      "device_assigned_to_managed_slot",
+    );
   });
 
   test("an input gate with only undefined identities is refused", async () => {

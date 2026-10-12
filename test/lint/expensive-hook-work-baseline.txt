@@ -16,6 +16,7 @@ test/daemon/daemonRequestHandlers.releaseRetry.test.ts	heavy-harness
 test/daemon/daemonSocketReachability.test.ts	recursive-rm
 test/daemon/debugTools.test.ts	recursive-rm
 test/daemon/debugToolsNonDestructive.test.ts	recursive-rm
+test/daemon/deviceGestureRecordingSocketServerStartOwnership.test.ts	heavy-harness
 test/daemon/deviceLeaseOwnerQuery.test.ts	recursive-rm
 test/daemon/devicePool.autolock.test.ts	heavy-harness
 test/daemon/devicePool.criteriaRollback.test.ts	heavy-harness
@@ -49,7 +50,6 @@ test/daemon/rehydrationReservationAutolock.test.ts	heavy-harness
 test/daemon/socketServerDirectFrameTransportAlias.test.ts	heavy-harness
 test/daemon/socketServerFramerInteractions.test.ts	recursive-rm
 test/daemon/socketServerFramerInteractions.test.ts	temp-dir
-test/daemon/testRecordingSocketServerStartOwnership.test.ts	heavy-harness
 test/features/action/CaptureSnapshot.test.ts	recursive-rm
 test/features/action/CaptureSnapshot.test.ts	temp-dir
 test/features/action/ClearAppData.test.ts	recursive-rm
@@ -128,6 +128,7 @@ test/server/planExecutionOrchestratorVideoWarnings.test.ts	recursive-rm
 test/server/planExecutionOrchestratorVideoWarnings.test.ts	temp-dir
 test/server/planLifecycleCleanup.test.ts	heavy-harness
 test/server/planStepForeignOwnedSession.test.ts	heavy-harness
+test/server/recordDeviceGesturesTool.test.ts	heavy-harness
 test/server/recordingAcquisitionAdoption.test.ts	heavy-harness
 test/server/sdkProviderReadAccess.test.ts	heavy-harness
 test/server/segmentManifest.test.ts	recursive-rm
@@ -138,7 +139,6 @@ test/server/setActiveDevice.refusedBeforeResume.test.ts	heavy-harness
 test/server/setActiveDevice.sessionlessOwnership.test.ts	heavy-harness
 test/server/setActiveDeviceDiscoveryIncompleteWire.test.ts	heavy-harness
 test/server/snapshotOfTools.test.ts	recursive-rm
-test/server/startTestRecordingTool.test.ts	heavy-harness
 test/server/toolRegistry.deviceOwnership.test.ts	heavy-harness
 test/server/toolRegistry.foreignDaemonControl.test.ts	heavy-harness
 test/server/toolRegistry.holderConnection.test.ts	heavy-harness

@@ -5,16 +5,19 @@ import { DeviceSessionManager } from "../devices/DeviceSessionManager";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import { ActionableError, type BootedDevice, type Platform } from "../models";
 import {
-  getTestRecordingStatus,
-  startTestRecording,
-  getStoppedTestRecording,
-  joinInFlightTestRecordingStop,
-  stopTestRecording,
+  getDeviceGestureRecordingStatus,
+  startDeviceGestureRecording,
+  getStoppedDeviceGestureRecording,
+  joinInFlightDeviceGestureRecordingStop,
+  stopDeviceGestureRecording,
   NoUserInputCapturedError,
-} from "../server/testRecordingManager";
+} from "../server/deviceGestureRecordingManager";
 import { logger } from "../utils/logger";
-import { TestRecordingCommand, TestRecordingResponse } from "./testRecordingSocketTypes";
-import { TEST_RECORDING_SOCKET_CONFIG } from "./daemonFiles";
+import {
+  DeviceGestureRecordingCommand,
+  DeviceGestureRecordingResponse,
+} from "./deviceGestureRecordingSocketTypes";
+import { DEVICE_GESTURE_RECORDING_SOCKET_CONFIG } from "./daemonFiles";
 import {
   authorizeResolvedDevice,
   createDefaultStreamSocketAuthenticator,
@@ -24,10 +27,10 @@ import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/de
 import { reconcileDiscoveryObservation } from "./discoveryReconcile";
 import { assertInputNotOnForeignManagedSlotDevice } from "./inputDeviceOwnership";
 import { DaemonState } from "./daemonState";
-import { testRecordingStartOwnershipRefusal } from "./testRecordingStartAdmission";
+import { deviceGestureRecordingStartOwnershipRefusal } from "./deviceGestureRecordingStartAdmission";
 
 /** Completes the FUNNEL 2 refusal: "Refusing `<purpose>` on device '<serial>'". */
-const TEST_RECORDING_PURPOSE = "to start a test recording";
+const DEVICE_GESTURE_RECORDING_PURPOSE = "to start a device gesture recording";
 
 /**
  * Device resolution for a `start`, in two steps the server keeps apart so the
@@ -36,7 +39,7 @@ const TEST_RECORDING_PURPOSE = "to start a test recording";
  * setup on a device the gate has already admitted). Injected so the server can
  * be tested without a device pool or a real runner (#6923).
  */
-export interface TestRecordingDeviceResolution {
+export interface DeviceGestureRecordingDeviceResolution {
   selectDevice(deviceId?: string, platform?: Platform): Promise<BootedDevice>;
   /**
    * `sessionUuid` is the session that asked for the recording: readiness writes to the device
@@ -47,7 +50,7 @@ export interface TestRecordingDeviceResolution {
 }
 
 /** What device resolution needs of the device session manager; narrowed so a test can supply one. */
-export type TestRecordingDeviceSessions = Pick<
+export type DeviceGestureRecordingDeviceSessions = Pick<
   DeviceSessionManager,
   "ensureDeviceReady" | "getPlatformDeviceManager" | "getCurrentDevice"
 >;
@@ -66,20 +69,20 @@ export type TestRecordingDeviceSessions = Pick<
  *
  * Reconciling happens BEFORE the serial is matched, so an observation about
  * some OTHER serial is still folded in even when this request goes on to fail.
- * Selection only: readiness is {@link TestRecordingDeviceResolution.readyDevice}.
+ * Selection only: readiness is {@link DeviceGestureRecordingDeviceResolution.readyDevice}.
  *
  * With no serial named, several connected devices resolve to `currentDevice`
  * (the one `setActiveDevice` selected) when it is among them, preserving the
  * tie-break `ensureDeviceReady` applied before selection was split out.
  */
-export async function resolveTestRecordingDevice(
+export async function resolveDeviceGestureRecordingDevice(
   deviceManager: Pick<PlatformDeviceManager, "getBootedDevices">,
   deviceId?: string,
   platform?: Platform,
   currentDevice: () => BootedDevice | undefined = () => undefined,
 ): Promise<BootedDevice> {
   const observed = await deviceManager.getBootedDevices(platform ?? "either");
-  await reconcileDiscoveryObservation(observed, "test-recording-resolve");
+  await reconcileDiscoveryObservation(observed, "device-gesture-recording-resolve");
   // Discovery is already platform-scoped; the filter guards the same
   // cross-platform contamination `ensureDeviceReady` checks for.
   const devices = platform ? observed.filter((device) => device.platform === platform) : observed;
@@ -118,13 +121,13 @@ export async function resolveTestRecordingDevice(
  * holds, idle or executing, is recorded only by that slot's own execution. Refuses with the typed
  * `device_assigned_to_managed_slot`. Injected so tests can assert on the call without a pool.
  */
-export type TestRecordingManagedSlotGate = (input: {
+export type DeviceGestureRecordingManagedSlotGate = (input: {
   action: string;
   device: { deviceId: string; platform: Platform };
   requesterSessionUuid: string | undefined;
 }) => Promise<void>;
 
-const defaultManagedSlotGate: TestRecordingManagedSlotGate = async (input) => {
+const defaultManagedSlotGate: DeviceGestureRecordingManagedSlotGate = async (input) => {
   const daemonState = DaemonState.getInstance();
   if (!daemonState.isInitialized()) {
     return;
@@ -143,13 +146,14 @@ const defaultManagedSlotGate: TestRecordingManagedSlotGate = async (input) => {
  * The production device resolution over a device session manager, resolved at each use. Exported
  * with the manager injectable so a test can drive real readiness (and its device writes) on fakes.
  */
-export function createTestRecordingDeviceResolution(
-  deviceSessions: () => TestRecordingDeviceSessions = () => DeviceSessionManager.getInstance(),
-): TestRecordingDeviceResolution {
+export function createDeviceGestureRecordingDeviceResolution(
+  deviceSessions: () => DeviceGestureRecordingDeviceSessions = () =>
+    DeviceSessionManager.getInstance(),
+): DeviceGestureRecordingDeviceResolution {
   return {
     selectDevice: (deviceId, platform) => {
       const deviceSessionManager = deviceSessions();
-      return resolveTestRecordingDevice(
+      return resolveDeviceGestureRecordingDevice(
         deviceSessionManager.getPlatformDeviceManager(),
         deviceId,
         platform,
@@ -179,36 +183,38 @@ const ensurePlatform = (value: unknown): Platform | undefined => {
 };
 
 /**
- * Socket server for test recording commands.
+ * Socket server for device gesture recording commands.
  * Handles start, stop, and status commands.
  */
-export class TestRecordingSocketServer extends RequestResponseSocketServer<
-  TestRecordingCommand,
-  TestRecordingResponse
+export class DeviceGestureRecordingSocketServer extends RequestResponseSocketServer<
+  DeviceGestureRecordingCommand,
+  DeviceGestureRecordingResponse
 > {
   private readonly authenticator: StreamSocketAuthenticator;
   private readonly admissionGate: DeviceAdmissionGate;
-  private readonly deviceResolution: TestRecordingDeviceResolution;
-  private readonly managedSlotGate: TestRecordingManagedSlotGate;
+  private readonly deviceResolution: DeviceGestureRecordingDeviceResolution;
+  private readonly managedSlotGate: DeviceGestureRecordingManagedSlotGate;
 
   constructor(
-    socketPath: string = getSocketPath(TEST_RECORDING_SOCKET_CONFIG),
+    socketPath: string = getSocketPath(DEVICE_GESTURE_RECORDING_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
     authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
-      "testRecording",
+      "deviceGestureRecording",
     ),
     admissionGate: DeviceAdmissionGate = daemonDeviceAdmissionGate,
-    deviceResolution: TestRecordingDeviceResolution = createTestRecordingDeviceResolution(),
-    managedSlotGate: TestRecordingManagedSlotGate = defaultManagedSlotGate,
+    deviceResolution: DeviceGestureRecordingDeviceResolution = createDeviceGestureRecordingDeviceResolution(),
+    managedSlotGate: DeviceGestureRecordingManagedSlotGate = defaultManagedSlotGate,
   ) {
-    super(socketPath, timer, "TestRecording");
+    super(socketPath, timer, "DeviceGestureRecording");
     this.authenticator = authenticator;
     this.admissionGate = admissionGate;
     this.deviceResolution = deviceResolution;
     this.managedSlotGate = managedSlotGate;
   }
 
-  protected async handleRequest(request: TestRecordingCommand): Promise<TestRecordingResponse> {
+  protected async handleRequest(
+    request: DeviceGestureRecordingCommand,
+  ): Promise<DeviceGestureRecordingResponse> {
     const command = request?.command;
     if (!command) {
       throw new Error("Request missing command field.");
@@ -217,7 +223,10 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
     switch (command) {
       case "start": {
         if (request.deviceId !== undefined) {
-          const refusal = testRecordingStartOwnershipRefusal(request.deviceId, request.sessionUuid);
+          const refusal = deviceGestureRecordingStartOwnershipRefusal(
+            request.deviceId,
+            request.sessionUuid,
+          );
           if (refusal) {
             return refusal;
           }
@@ -239,7 +248,10 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
         // selection — and selection is kept apart from readiness precisely so
         // this second gate runs BEFORE any runner setup side effect (#6923).
         if (request.deviceId !== undefined) {
-          this.admissionGate.assertDeviceActionable(request.deviceId, TEST_RECORDING_PURPOSE);
+          this.admissionGate.assertDeviceActionable(
+            request.deviceId,
+            DEVICE_GESTURE_RECORDING_PURPOSE,
+          );
         }
         return this.handleStart(request, daemonInitialized);
       }
@@ -254,25 +266,28 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
           deviceId: request.deviceId,
           admitViewer: true,
         });
-        const recording = getTestRecordingStatus();
+        const recording = getDeviceGestureRecordingStatus();
         if (!recording) {
           return { success: true };
         }
         return { success: true, recording };
       }
       default:
-        throw new Error(`Unsupported test recording command: ${String(command)}`);
+        throw new Error(`Unsupported device gesture recording command: ${String(command)}`);
     }
   }
 
   private async handleStart(
-    request: TestRecordingCommand,
+    request: DeviceGestureRecordingCommand,
     daemonInitialized: boolean,
-  ): Promise<TestRecordingResponse> {
+  ): Promise<DeviceGestureRecordingResponse> {
     const platform = ensurePlatform(request.platform);
     const selected = await this.deviceResolution.selectDevice(request.deviceId, platform);
-    this.admissionGate.assertDeviceActionable(selected.deviceId, TEST_RECORDING_PURPOSE);
-    const refusal = testRecordingStartOwnershipRefusal(selected.deviceId, request.sessionUuid);
+    this.admissionGate.assertDeviceActionable(selected.deviceId, DEVICE_GESTURE_RECORDING_PURPOSE);
+    const refusal = deviceGestureRecordingStartOwnershipRefusal(
+      selected.deviceId,
+      request.sessionUuid,
+    );
     if (refusal) {
       return refusal;
     }
@@ -284,11 +299,11 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
     }
     // Preserve managed-slot refusals before the unheld-device start refusal (#11665).
     await this.managedSlotGate({
-      action: "testRecording start",
+      action: "deviceGestureRecording start",
       device: selected,
       requesterSessionUuid: request.sessionUuid,
     });
-    const postSlotRefusal = testRecordingStartOwnershipRefusal(
+    const postSlotRefusal = deviceGestureRecordingStartOwnershipRefusal(
       selected.deviceId,
       request.sessionUuid,
       true,
@@ -303,7 +318,7 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
       });
     }
     const device = await this.deviceResolution.readyDevice(selected, request.sessionUuid);
-    const result = await startTestRecording(
+    const result = await startDeviceGestureRecording(
       device,
       undefined,
       undefined,
@@ -319,14 +334,16 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
     };
   }
 
-  private async handleStop(request: TestRecordingCommand): Promise<TestRecordingResponse> {
+  private async handleStop(
+    request: DeviceGestureRecordingCommand,
+  ): Promise<DeviceGestureRecordingResponse> {
     // Authorize the stop against the active recording's device so a session
     // that does not own it cannot stop another session's recording — the
-    // recordingId-only guard in stopTestRecording is not an ownership check
+    // recordingId-only guard in stopDeviceGestureRecording is not an ownership check
     // (issue #4752).
     if (request.recordingId) {
       try {
-        const joined = await joinInFlightTestRecordingStop(
+        const joined = await joinInFlightDeviceGestureRecordingStop(
           request.recordingId,
           request.sessionUuid,
         );
@@ -337,12 +354,12 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
         return this.toStopFailure(error);
       }
     }
-    const active = getTestRecordingStatus();
+    const active = getDeviceGestureRecordingStatus();
     // A stop by id after a release-time stop returns the owner's retained plan (#10958).
     // It needs no device and no live session: the owning session's uuid is the scope.
     const retained =
       !active && request.recordingId
-        ? getStoppedTestRecording(request.recordingId, request.sessionUuid)
+        ? getStoppedDeviceGestureRecording(request.recordingId, request.sessionUuid)
         : undefined;
     if (retained) {
       return this.toStopResponse(retained);
@@ -358,26 +375,26 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
       throw new ActionableError(`No active recording found for device ${request.deviceId}.`);
     }
     await this.managedSlotGate({
-      action: "testRecording stop",
+      action: "deviceGestureRecording stop",
       device: { deviceId: active.deviceId, platform: active.platform },
       requesterSessionUuid: request.sessionUuid,
     });
-    return stopTestRecording(request.recordingId, request.planName)
+    return stopDeviceGestureRecording(request.recordingId, request.planName)
       .then((result) => this.toStopResponse(result))
       .catch((error: unknown) => this.toStopFailure(error));
   }
 
-  private toStopFailure(error: unknown): TestRecordingResponse {
+  private toStopFailure(error: unknown): DeviceGestureRecordingResponse {
     if (!(error instanceof NoUserInputCapturedError)) {
       throw error;
     }
-    logger.warn(`[TestRecording] ${error.message}`, error);
+    logger.warn(`[DeviceGestureRecording] ${error.message}`, error);
     return { success: false, error: error.message, reason: error.reason };
   }
 
   private toStopResponse(
-    result: Awaited<ReturnType<typeof stopTestRecording>>,
-  ): TestRecordingResponse {
+    result: Awaited<ReturnType<typeof stopDeviceGestureRecording>>,
+  ): DeviceGestureRecordingResponse {
     return {
       success: true,
       recordingId: result.recordingId,
@@ -393,7 +410,10 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
     };
   }
 
-  protected createErrorResponse(_id: string | undefined, error: string): TestRecordingResponse {
+  protected createErrorResponse(
+    _id: string | undefined,
+    error: string,
+  ): DeviceGestureRecordingResponse {
     return {
       success: false,
       error,
@@ -401,16 +421,18 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
   }
 }
 
-const socketServer = new SocketServerSingleton<TestRecordingSocketServer>();
+const socketServer = new SocketServerSingleton<DeviceGestureRecordingSocketServer>();
 
-export function getTestRecordingSocketPath(): string {
-  return socketServer.instance?.getSocketPath() ?? getSocketPath(TEST_RECORDING_SOCKET_CONFIG);
+export function getDeviceGestureRecordingSocketPath(): string {
+  return (
+    socketServer.instance?.getSocketPath() ?? getSocketPath(DEVICE_GESTURE_RECORDING_SOCKET_CONFIG)
+  );
 }
 
-export async function startTestRecordingSocketServer(): Promise<void> {
-  await socketServer.start(() => new TestRecordingSocketServer());
+export async function startDeviceGestureRecordingSocketServer(): Promise<void> {
+  await socketServer.start(() => new DeviceGestureRecordingSocketServer());
 }
 
-export async function stopTestRecordingSocketServer(): Promise<void> {
+export async function stopDeviceGestureRecordingSocketServer(): Promise<void> {
   await socketServer.stop();
 }

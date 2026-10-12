@@ -115,7 +115,7 @@ const booleanFlags: Partial<Record<string, DaemonBooleanOption>> = {
   "--raw-element-search": "rawElementSearch",
   "--skip-ctrl-proxy-download": "skipCtrlProxyDownload",
   "--skip-accessibility-download": "skipCtrlProxyDownload",
-  "--mcp-recording": "mcpRecording",
+  "--tool-call-recording": "toolCallRecording",
   "--observe-result-include-elements": "observeResultIncludeElements",
   "--tool-results-no-structured-content": "toolResultsNoStructuredContent",
   "--actions-diff-observe": "actionsDiffObserve",

@@ -2235,7 +2235,8 @@
               "putAppFile",
               "recentApps",
               "reconcileDeviceResources",
-              "recordSteps",
+              "recordDeviceGestures",
+              "recordToolCalls",
               "removeKeyValue",
               "resetAppLogs",
               "resetKeychain",
@@ -2256,7 +2257,6 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
-              "startTestRecording",
               "swipeOn",
               "systemTray",
               "tapAny",
@@ -2362,7 +2362,8 @@
               "putAppFile",
               "recentApps",
               "reconcileDeviceResources",
-              "recordSteps",
+              "recordDeviceGestures",
+              "recordToolCalls",
               "removeKeyValue",
               "resetAppLogs",
               "resetKeychain",
@@ -2383,7 +2384,6 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
-              "startTestRecording",
               "swipeOn",
               "systemTray",
               "tapAny",
@@ -22776,7 +22776,8 @@
               "putAppFile",
               "recentApps",
               "reconcileDeviceResources",
-              "recordSteps",
+              "recordDeviceGestures",
+              "recordToolCalls",
               "removeKeyValue",
               "resetAppLogs",
               "resetKeychain",
@@ -22797,7 +22798,6 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
-              "startTestRecording",
               "swipeOn",
               "systemTray",
               "tapAny",
@@ -23994,8 +23994,82 @@
     }
   },
   {
-    "name": "recordSteps",
-    "description": "Record MCP tool calls to YAML. begin/end require mcp-recording; status always works.",
+    "name": "recordDeviceGestures",
+    "description": "Start recording on-device user input (not tool calls) for exportPlan.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "recordingId": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "artifact": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
+            }
+          },
+          "required": ["path", "format", "payload", "bytes", "tool"],
+          "additionalProperties": {}
+        }
+      },
+      "required": ["success"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "recordToolCalls",
+    "description": "Record MCP tool calls to YAML. begin/end require tool-call-recording; status always works.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -30007,7 +30081,8 @@
             "putAppFile",
             "recentApps",
             "reconcileDeviceResources",
-            "recordSteps",
+            "recordDeviceGestures",
+            "recordToolCalls",
             "removeKeyValue",
             "resetAppLogs",
             "resetKeychain",
@@ -30028,7 +30103,6 @@
             "snapshotOf",
             "sqlQuery",
             "stageSessionDownloads",
-            "startTestRecording",
             "swipeOn",
             "systemTray",
             "tapAny",
@@ -30100,7 +30174,8 @@
               "putAppFile",
               "recentApps",
               "reconcileDeviceResources",
-              "recordSteps",
+              "recordDeviceGestures",
+              "recordToolCalls",
               "removeKeyValue",
               "resetAppLogs",
               "resetKeychain",
@@ -30121,7 +30196,6 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
-              "startTestRecording",
               "swipeOn",
               "systemTray",
               "tapAny",
@@ -30533,80 +30607,6 @@
         }
       },
       "required": ["sessionUuid", "directory", "files"],
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "startTestRecording",
-    "description": "Start recording on-device user input (not tool calls) for exportPlan.",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "sessionUuid": {
-          "description": "Session",
-          "type": "string"
-        },
-        "keepScreenAwake": {
-          "type": "boolean"
-        }
-      },
-      "additionalProperties": false
-    },
-    "outputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "success": {
-          "type": "boolean"
-        },
-        "recordingId": {
-          "type": "string"
-        },
-        "startedAt": {
-          "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
-        },
-        "platform": {
-          "type": "string"
-        },
-        "error": {
-          "type": "string"
-        },
-        "artifact": {
-          "$schema": "https://json-schema.org/draft/2020-12/schema",
-          "type": "object",
-          "properties": {
-            "path": {
-              "type": "string"
-            },
-            "format": {
-              "type": "string",
-              "const": "json"
-            },
-            "payload": {
-              "type": "string"
-            },
-            "bytes": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 9007199254740991
-            },
-            "tool": {
-              "type": "string"
-            },
-            "resourceUri": {
-              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
-              "type": "string"
-            }
-          },
-          "required": ["path", "format", "payload", "bytes", "tool"],
-          "additionalProperties": {}
-        }
-      },
-      "required": ["success"],
       "additionalProperties": false
     }
   },

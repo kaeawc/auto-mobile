@@ -74,7 +74,7 @@ export function responseCarriesStructuredContent(response: unknown): boolean {
  *   `structuredContent` and keep working — the strip only affects what leaves the
  *   server toward the MCP client.
  * - It covers every tool regardless of registration path, including plain
- *   `register()` tools (`exportPlan`, `recordSteps`) that bypass
+ *   `register()` tools (`exportPlan`, `recordToolCalls`) that bypass
  *   `finalizeToolResponse`.
  *
  * Non-envelope, primitive, and already-`structuredContent`-free responses pass

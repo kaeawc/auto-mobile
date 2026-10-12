@@ -67,7 +67,7 @@ const booleanOptions = Object.fromEntries(
     "embedded-sdk",
     "network-mockable",
     "dismiss-keyboard-after-input",
-    "mcp-recording",
+    "tool-call-recording",
     "no-navigation-screenshots",
     "no-waitfor-polling-overhead",
     "no-include-not-important-views",
@@ -150,7 +150,7 @@ export function parseArgs(
   const dismissKeyboardAfterInput = hasFlag("dismiss-keyboard-after-input");
   const eventAllMarkers = parseEventAllMarkersConfig(args, process.env);
   const eventAllMarkersCliOverride = hasEventAllMarkersCliOverride(args);
-  const mcpRecording = hasFlag("mcp-recording");
+  const toolCallRecording = hasFlag("tool-call-recording");
   const navigationScreenshots = !hasFlag("no-navigation-screenshots");
   const noWaitForPollingOverhead = hasFlag("no-waitfor-polling-overhead");
   const noA11yIncludeNotImportantViews = hasFlag("no-include-not-important-views");
@@ -229,7 +229,7 @@ export function parseArgs(
     dismissKeyboardAfterInput,
     eventAllMarkers,
     eventAllMarkersCliOverride,
-    mcpRecording,
+    toolCallRecording,
     navigationScreenshots,
     noWaitForPollingOverhead,
     noProxy,

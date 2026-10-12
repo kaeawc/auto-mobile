@@ -9,7 +9,7 @@ import { logger } from "../utils/logger";
 import { noActiveDeviceSessionPayload } from "../server/proxyServer";
 
 /** Preserve the typed holder refusal on the recording socket's response boundary. */
-export function testRecordingStartOwnershipRefusal(
+export function deviceGestureRecordingStartOwnershipRefusal(
   deviceId: string | undefined,
   requesterSessionUuid: string | undefined,
   requireHeldSession = false,
@@ -26,8 +26,8 @@ export function testRecordingStartOwnershipRefusal(
     const { error } = noActiveDeviceSessionPayload({
       message:
         (deviceId
-          ? `testRecording start refused: no session of yours holds device '${deviceId}'. `
-          : "testRecording start refused: the session holds no device. ") +
+          ? `deviceGestureRecording start refused: no session of yours holds device '${deviceId}'. `
+          : "deviceGestureRecording start refused: the session holds no device. ") +
         "Call getAndroid or getApple to acquire a session on it first.",
       reason: "device_not_held",
     });
@@ -39,7 +39,7 @@ export function testRecordingStartOwnershipRefusal(
   }
   try {
     assertInputRequesterHoldsDevice({
-      action: "testRecording start",
+      action: "deviceGestureRecording start",
       deviceId,
       ownerSessionUuid,
       requesterSessionUuid,
@@ -50,14 +50,14 @@ export function testRecordingStartOwnershipRefusal(
     if (!(error instanceof InputDeviceOwnedError)) {
       throw error;
     }
-    logger.warn(`[TestRecording] ${error.message}`);
+    logger.warn(`[DeviceGestureRecording] ${error.message}`);
     return { success: false, error: error.message, ...error.toPayload() };
   }
   return undefined;
 }
 
 /** The socket's unheld-start refusal, thrown at the MCP response boundary. */
-export class TestRecordingStartUnheldError extends ActionableError {
+export class DeviceGestureRecordingStartUnheldError extends ActionableError {
   readonly code = "no_active_device_session";
   readonly retryable = false;
 
@@ -66,7 +66,7 @@ export class TestRecordingStartUnheldError extends ActionableError {
     private readonly payload: Record<string, unknown>,
   ) {
     super(message);
-    this.name = "TestRecordingStartUnheldError";
+    this.name = "DeviceGestureRecordingStartUnheldError";
   }
 
   toPayload(): Record<string, unknown> {
@@ -83,12 +83,12 @@ export class TestRecordingStartUnheldError extends ActionableError {
 }
 
 /** Apply the shared recording-start rule before MCP readiness or assignment. */
-export function assertTestRecordingStartHeldDevice(
+export function assertDeviceGestureRecordingStartHeldDevice(
   deviceId: string | undefined,
   requesterSessionUuid: string | undefined,
   requireHeldSession = true,
 ): void {
-  const refusal = testRecordingStartOwnershipRefusal(
+  const refusal = deviceGestureRecordingStartOwnershipRefusal(
     deviceId,
     requesterSessionUuid,
     requireHeldSession,
@@ -102,12 +102,12 @@ export function assertTestRecordingStartHeldDevice(
   delete payload.error;
   if ("code" in refusal && refusal.code === "device_owned_by_other_session" && deviceId) {
     throw new InputDeviceOwnedError(
-      "testRecording start",
+      "deviceGestureRecording start",
       deviceId,
       requesterSessionUuid,
       TOOL_CALL_REMEDY,
       message,
     );
   }
-  throw new TestRecordingStartUnheldError(message, payload);
+  throw new DeviceGestureRecordingStartUnheldError(message, payload);
 }

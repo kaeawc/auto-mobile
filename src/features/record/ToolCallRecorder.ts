@@ -9,7 +9,7 @@ import { isInternalStepParam } from "../../constants/internalStepParams";
  * The registry carries no per-tool "mutates the device" flag (`planExecutable`
  * only widens which gated tools a plan may run), so this list is hand-kept.
  * Infrastructure tools (device management, recording meta-tools, read-only
- * queries) are excluded. `test/features/record/McpCallRecorderCoverage.test.ts`
+ * queries) are excluded. `test/features/record/ToolCallRecorderCoverage.test.ts`
  * requires every tool in `schemas/tool-definitions.json` to be listed here or
  * excluded there with a reason, so a new action tool cannot be silently left
  * out of the exported plan (#9928).
@@ -144,7 +144,7 @@ export function withholdDestructiveConfirmations(
 
 /**
  * Largest single param, JSON-encoded, that a recording keeps. A recorded step is
- * stored in the plan and the whole plan comes back inline in the `recordSteps`
+ * stored in the plan and the whole plan comes back inline in the `recordToolCalls`
  * end response, so this matches the 64 KiB inline response budget
  * (`DEFAULT_OBSERVATION_INLINE_MAX_BYTES`, not imported to avoid pulling the
  * response finalizer into the recorder). Larger inline fixtures are skipped
@@ -212,7 +212,7 @@ export function stripInternalParams(args: Record<string, unknown>): Record<strin
  * Records successful MCP tool calls as PlanStep entries.
  * Designed to be wired into ToolRegistry's wrappedHandler success path.
  */
-export class McpCallRecorder {
+export class ToolCallRecorder {
   private steps: PlanStep[] = [];
   private warnings: string[] = [];
   private recording = false;
@@ -221,7 +221,7 @@ export class McpCallRecorder {
     this.steps = [];
     this.warnings = [];
     this.recording = true;
-    logger.info("[McpCallRecorder] Recording started");
+    logger.info("[ToolCallRecorder] Recording started");
   }
 
   stop(): PlanStep[] {
@@ -239,7 +239,7 @@ export class McpCallRecorder {
     this.steps = [];
     this.warnings = [];
     logger.info(
-      `[McpCallRecorder] Recording stopped with ${result.steps.length} steps and ${result.warnings.length} warnings`,
+      `[ToolCallRecorder] Recording stopped with ${result.steps.length} steps and ${result.warnings.length} warnings`,
     );
     return result;
   }
@@ -267,7 +267,7 @@ export class McpCallRecorder {
     const skipReason = this.skipReason(toolName, params);
     if (skipReason) {
       const warning = `${toolName} was not recorded (after ${this.steps.length} recorded steps): ${skipReason}`;
-      logger.warn(`[McpCallRecorder] ${warning}`);
+      logger.warn(`[ToolCallRecorder] ${warning}`);
       this.warnings.push(warning);
       return;
     }
@@ -284,7 +284,7 @@ export class McpCallRecorder {
     if (toolName === "tapAt" && context && !geometry) {
       const warning =
         "tapAt was recorded without geometry: native geometry provenance is unavailable; observe with rotation metadata and record again to capture provenance";
-      logger.warn(`[McpCallRecorder] ${warning}`);
+      logger.warn(`[ToolCallRecorder] ${warning}`);
       this.warnings.push(warning);
     }
     if (geometry) {
@@ -299,7 +299,7 @@ export class McpCallRecorder {
     } else {
       this.steps.push({ tool: toolName, params: recorded });
     }
-    logger.info(`[McpCallRecorder] Recorded step ${this.steps.length}: ${toolName}`);
+    logger.info(`[ToolCallRecorder] Recorded step ${this.steps.length}: ${toolName}`);
   }
 
   private skipReason(toolName: string, params: Record<string, unknown>): string | undefined {

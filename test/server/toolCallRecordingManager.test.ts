@@ -1,126 +1,130 @@
 import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import {
-  startMcpRecording,
-  stopMcpRecording,
-  getMcpRecordingStatus,
-  getMcpRecorder,
-  resetMcpRecordingState,
-  dropMcpRecording,
-} from "../../src/server/mcpRecordingManager";
+  startToolCallRecording,
+  stopToolCallRecording,
+  getToolCallRecordingStatus,
+  getToolCallRecorder,
+  resetToolCallRecordingState,
+  dropToolCallRecording,
+} from "../../src/server/toolCallRecordingManager";
 import { PlanValidator } from "../../src/utils/plan/PlanValidator";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-describe("mcpRecordingManager", () => {
+describe("toolCallRecordingManager", () => {
   beforeEach(() => {
-    resetMcpRecordingState();
+    resetToolCallRecordingState();
   });
 
   describe("connection isolation", () => {
     test("two connections begin independently and only duplicate their own begin", () => {
       const timer = new FakeTimer();
-      startMcpRecording({ connectionId: "A", timer });
-      const second = startMcpRecording({ connectionId: "B", timer });
+      startToolCallRecording({ connectionId: "A", timer });
+      const second = startToolCallRecording({ connectionId: "B", timer });
       expect(second.alreadyActive).toBeUndefined();
-      expect(getMcpRecorder({ connectionId: "A" })).not.toBe(getMcpRecorder({ connectionId: "B" }));
-      expect(startMcpRecording({ connectionId: "A", timer }).alreadyActive).toBe(true);
-      expect(getMcpRecordingStatus({ connectionId: "C", timer })).toBeNull();
-      expect(getMcpRecorder()).toBeNull();
+      expect(getToolCallRecorder({ connectionId: "A" })).not.toBe(
+        getToolCallRecorder({ connectionId: "B" }),
+      );
+      expect(startToolCallRecording({ connectionId: "A", timer }).alreadyActive).toBe(true);
+      expect(getToolCallRecordingStatus({ connectionId: "C", timer })).toBeNull();
+      expect(getToolCallRecorder()).toBeNull();
     });
 
     test("ending one connection preserves the other's status and steps", () => {
       const timer = new FakeTimer();
-      startMcpRecording({ connectionId: "A", timer });
-      startMcpRecording({ connectionId: "B", timer });
-      getMcpRecorder({ connectionId: "A" })!.record("tapOn", { text: "Only A" });
-      getMcpRecorder({ connectionId: "B" })!.record("tapOn", { text: "Only B" });
-      const a = stopMcpRecording({ connectionId: "A", timer });
+      startToolCallRecording({ connectionId: "A", timer });
+      startToolCallRecording({ connectionId: "B", timer });
+      getToolCallRecorder({ connectionId: "A" })!.record("tapOn", { text: "Only A" });
+      getToolCallRecorder({ connectionId: "B" })!.record("tapOn", { text: "Only B" });
+      const a = stopToolCallRecording({ connectionId: "A", timer });
       expect(a.planContent).toContain("Only A");
       expect(a.planContent).not.toContain("Only B");
-      expect(getMcpRecordingStatus({ connectionId: "A", timer })).toBeNull();
-      expect(getMcpRecordingStatus({ connectionId: "B", timer })).toMatchObject({
+      expect(getToolCallRecordingStatus({ connectionId: "A", timer })).toBeNull();
+      expect(getToolCallRecordingStatus({ connectionId: "B", timer })).toMatchObject({
         recording: true,
         stepCount: 1,
       });
-      const b = stopMcpRecording({ connectionId: "B", timer });
+      const b = stopToolCallRecording({ connectionId: "B", timer });
       expect(b.planContent).toContain("Only B");
       expect(b.planContent).not.toContain("Only A");
     });
 
     test("ending an absent connection cannot stop another recording", () => {
       const timer = new FakeTimer();
-      startMcpRecording({ connectionId: "B", timer });
-      getMcpRecorder({ connectionId: "B" })!.record("tapOn", { text: "Only B" });
-      expect(() => stopMcpRecording({ connectionId: "A", timer })).toThrow(
-        "No active MCP recording",
+      startToolCallRecording({ connectionId: "B", timer });
+      getToolCallRecorder({ connectionId: "B" })!.record("tapOn", { text: "Only B" });
+      expect(() => stopToolCallRecording({ connectionId: "A", timer })).toThrow(
+        "No active tool call recording",
       );
-      expect(getMcpRecordingStatus({ connectionId: "B", timer })?.stepCount).toBe(1);
+      expect(getToolCallRecordingStatus({ connectionId: "B", timer })?.stepCount).toBe(1);
     });
 
     test("an empty end clears only its connection", () => {
       const timer = new FakeTimer();
-      startMcpRecording({ connectionId: "A", timer });
-      startMcpRecording({ connectionId: "B", timer });
-      getMcpRecorder({ connectionId: "B" })!.record("tapOn", { text: "Only B" });
-      expect(() => stopMcpRecording({ connectionId: "A", timer })).toThrow(
+      startToolCallRecording({ connectionId: "A", timer });
+      startToolCallRecording({ connectionId: "B", timer });
+      getToolCallRecorder({ connectionId: "B" })!.record("tapOn", { text: "Only B" });
+      expect(() => stopToolCallRecording({ connectionId: "A", timer })).toThrow(
         "No MCP tool calls were recorded",
       );
-      expect(getMcpRecorder({ connectionId: "A" })).toBeNull();
-      expect(getMcpRecordingStatus({ connectionId: "B", timer })?.stepCount).toBe(1);
-      expect(stopMcpRecording({ connectionId: "B", timer }).stepCount).toBe(1);
+      expect(getToolCallRecorder({ connectionId: "A" })).toBeNull();
+      expect(getToolCallRecordingStatus({ connectionId: "B", timer })?.stepCount).toBe(1);
+      expect(stopToolCallRecording({ connectionId: "B", timer }).stepCount).toBe(1);
     });
 
     test("a validation failure clears only its connection", () => {
       const timer = new FakeTimer();
       for (const connectionId of ["A", "B"]) {
-        startMcpRecording({ connectionId, timer });
-        getMcpRecorder({ connectionId })!.record("tapOn", { text: connectionId });
+        startToolCallRecording({ connectionId, timer });
+        getToolCallRecorder({ connectionId })!.record("tapOn", { text: connectionId });
       }
       const spy = spyOn(PlanValidator, "validate").mockImplementation(() => {
         throw new Error("validation boom");
       });
       try {
-        expect(() => stopMcpRecording({ connectionId: "A", timer })).toThrow("validation boom");
-        expect(getMcpRecorder({ connectionId: "A" })).toBeNull();
-        expect(getMcpRecordingStatus({ connectionId: "B", timer })).toMatchObject({
+        expect(() => stopToolCallRecording({ connectionId: "A", timer })).toThrow(
+          "validation boom",
+        );
+        expect(getToolCallRecorder({ connectionId: "A" })).toBeNull();
+        expect(getToolCallRecordingStatus({ connectionId: "B", timer })).toMatchObject({
           recording: true,
           stepCount: 1,
         });
       } finally {
         spy.mockRestore();
       }
-      expect(stopMcpRecording({ connectionId: "B", timer }).stepCount).toBe(1);
+      expect(stopToolCallRecording({ connectionId: "B", timer }).stepCount).toBe(1);
     });
 
     test("drop discards only its connection and is idempotent for absent ids", () => {
       const timer = new FakeTimer();
-      startMcpRecording({ connectionId: "A", timer });
-      startMcpRecording({ connectionId: "B", timer });
-      const recorder = getMcpRecorder({ connectionId: "A" })!;
-      dropMcpRecording("unknown");
-      dropMcpRecording("A");
-      dropMcpRecording("A");
-      expect(getMcpRecordingStatus({ connectionId: "A", timer })).toBeNull();
-      expect(getMcpRecorder({ connectionId: "A" })).toBeNull();
+      startToolCallRecording({ connectionId: "A", timer });
+      startToolCallRecording({ connectionId: "B", timer });
+      const recorder = getToolCallRecorder({ connectionId: "A" })!;
+      dropToolCallRecording("unknown");
+      dropToolCallRecording("A");
+      dropToolCallRecording("A");
+      expect(getToolCallRecordingStatus({ connectionId: "A", timer })).toBeNull();
+      expect(getToolCallRecorder({ connectionId: "A" })).toBeNull();
       expect(recorder.isRecording()).toBe(false);
-      expect(getMcpRecorder({ connectionId: "B" })?.isRecording()).toBe(true);
+      expect(getToolCallRecorder({ connectionId: "B" })?.isRecording()).toBe(true);
     });
 
     test("anonymous calls share a default recording separate from named connections", () => {
       const timer = new FakeTimer();
-      startMcpRecording({ timer });
-      startMcpRecording({ connectionId: "A", timer });
-      expect(startMcpRecording({ connectionId: undefined, timer }).alreadyActive).toBe(true);
-      getMcpRecorder()!.record("tapOn", { text: "Anonymous" });
-      expect(stopMcpRecording({ timer }).planContent).toContain("Anonymous");
-      expect(getMcpRecorder({ connectionId: "A" })?.isRecording()).toBe(true);
+      startToolCallRecording({ timer });
+      startToolCallRecording({ connectionId: "A", timer });
+      expect(startToolCallRecording({ connectionId: undefined, timer }).alreadyActive).toBe(true);
+      getToolCallRecorder()!.record("tapOn", { text: "Anonymous" });
+      expect(stopToolCallRecording({ timer }).planContent).toContain("Anonymous");
+      expect(getToolCallRecorder({ connectionId: "A" })?.isRecording()).toBe(true);
     });
   });
 
-  describe("startMcpRecording", () => {
+  describe("startToolCallRecording", () => {
     test("starts a recording session", () => {
       const timer = new FakeTimer();
       timer.setCurrentTime(1000);
-      const result = startMcpRecording({ timer });
+      const result = startToolCallRecording({ timer });
 
       expect(result.recording).toBe(true);
       expect(result.startedAt).toBe(new Date(1000).toISOString());
@@ -129,11 +133,11 @@ describe("mcpRecordingManager", () => {
     test("returns existing session if already recording", () => {
       const timer = new FakeTimer();
       timer.setCurrentTime(1000);
-      startMcpRecording({ timer });
+      startToolCallRecording({ timer });
 
       const timer2 = new FakeTimer();
       timer2.setCurrentTime(2000);
-      const result = startMcpRecording({ timer: timer2 });
+      const result = startToolCallRecording({ timer: timer2 });
 
       // Should return original startedAt, not the second call's time
       expect(result.recording).toBe(true);
@@ -143,52 +147,52 @@ describe("mcpRecordingManager", () => {
     test("returns alreadyActive and currentStepCount on duplicate begin", () => {
       const timer = new FakeTimer();
       timer.setCurrentTime(1000);
-      startMcpRecording({ timer });
+      startToolCallRecording({ timer });
 
-      const recorder = getMcpRecorder()!;
+      const recorder = getToolCallRecorder()!;
       recorder.record("tapOn", { text: "A" });
       recorder.record("tapOn", { text: "B" });
 
-      const result = startMcpRecording({ timer });
+      const result = startToolCallRecording({ timer });
 
       expect(result.alreadyActive).toBe(true);
       expect(result.currentStepCount).toBe(2);
     });
   });
 
-  describe("getMcpRecorder", () => {
+  describe("getToolCallRecorder", () => {
     test("returns null when no recording active", () => {
-      expect(getMcpRecorder()).toBeNull();
+      expect(getToolCallRecorder()).toBeNull();
     });
 
     test("returns recorder when recording is active", () => {
       const timer = new FakeTimer();
       timer.setCurrentTime(1000);
-      startMcpRecording({ timer });
+      startToolCallRecording({ timer });
 
-      const recorder = getMcpRecorder();
+      const recorder = getToolCallRecorder();
       expect(recorder).not.toBeNull();
       expect(recorder!.isRecording()).toBe(true);
     });
   });
 
-  describe("getMcpRecordingStatus", () => {
+  describe("getToolCallRecordingStatus", () => {
     test("returns null when no recording active", () => {
-      expect(getMcpRecordingStatus()).toBeNull();
+      expect(getToolCallRecordingStatus()).toBeNull();
     });
 
     test("returns status with step count and duration", () => {
       const timer = new FakeTimer();
       timer.setCurrentTime(1000);
-      startMcpRecording({ timer });
+      startToolCallRecording({ timer });
 
-      const recorder = getMcpRecorder()!;
+      const recorder = getToolCallRecorder()!;
       recorder.record("tapOn", { text: "Login" });
       recorder.record("sendKeys", { commands: [{ action: "type", text: "test" }] });
 
       const statusTimer = new FakeTimer();
       statusTimer.setCurrentTime(3000);
-      const status = getMcpRecordingStatus({ timer: statusTimer });
+      const status = getToolCallRecordingStatus({ timer: statusTimer });
 
       expect(status).not.toBeNull();
       expect(status!.recording).toBe(true);
@@ -197,34 +201,34 @@ describe("mcpRecordingManager", () => {
     });
   });
 
-  describe("stopMcpRecording", () => {
+  describe("stopToolCallRecording", () => {
     test("exports launchApp without transport metadata", () => {
       const timer = new FakeTimer();
-      startMcpRecording({ timer });
-      getMcpRecorder()!.record("launchApp", {
+      startToolCallRecording({ timer });
+      getToolCallRecorder()!.record("launchApp", {
         appId: "com.android.settings",
         sessionUuid: "session",
         __mcpRequestTimeoutMs: 120000,
         __mcpRequestDeadlineMs: 1790948577851,
         __foo: "reserved",
       });
-      const result = stopMcpRecording({ planName: "clean-launch", timer });
+      const result = stopToolCallRecording({ planName: "clean-launch", timer });
       expect(result.planContent).toContain("appId: com.android.settings");
       expect(result.planContent).not.toContain("__");
     });
 
     test("throws when no recording active", () => {
-      expect(() => stopMcpRecording()).toThrow("No active MCP recording");
+      expect(() => stopToolCallRecording()).toThrow("No active tool call recording");
     });
 
     test("throws when no steps were recorded", () => {
       const timer = new FakeTimer();
       timer.setCurrentTime(1000);
-      startMcpRecording({ timer });
+      startToolCallRecording({ timer });
 
       const stopTimer = new FakeTimer();
       stopTimer.setCurrentTime(2000);
-      expect(() => stopMcpRecording({ timer: stopTimer })).toThrow(
+      expect(() => stopToolCallRecording({ timer: stopTimer })).toThrow(
         "No MCP tool calls were recorded",
       );
     });
@@ -232,16 +236,16 @@ describe("mcpRecordingManager", () => {
     test("returns YAML plan content with recorded steps", () => {
       const timer = new FakeTimer();
       timer.setCurrentTime(1000);
-      startMcpRecording({ timer });
+      startToolCallRecording({ timer });
 
-      const recorder = getMcpRecorder()!;
+      const recorder = getToolCallRecorder()!;
       recorder.record("launchApp", { appId: "com.test.app", platform: "android" });
       recorder.record("tapOn", { text: "Login", sessionUuid: "abc" });
       recorder.record("terminateApp", { appId: "com.test.app" });
 
       const stopTimer = new FakeTimer();
       stopTimer.setCurrentTime(5000);
-      const result = stopMcpRecording({ planName: "test-plan", timer: stopTimer });
+      const result = stopToolCallRecording({ planName: "test-plan", timer: stopTimer });
 
       expect(result.planName).toBe("test-plan");
       expect(result.stepCount).toBe(3);
@@ -258,12 +262,12 @@ describe("mcpRecordingManager", () => {
       // so a dev build's git-SHA stamp must be stripped or replay is unusable.
       const timer = new FakeTimer();
       timer.setCurrentTime(1000);
-      startMcpRecording({ timer });
-      getMcpRecorder()!.record("tapOn", { text: "Login" });
+      startToolCallRecording({ timer });
+      getToolCallRecorder()!.record("tapOn", { text: "Login" });
 
       const stopTimer = new FakeTimer();
       stopTimer.setCurrentTime(5000);
-      const result = stopMcpRecording({ planName: "schema-test", timer: stopTimer });
+      const result = stopToolCallRecording({ planName: "schema-test", timer: stopTimer });
 
       const mcpVersion = result.planContent.match(/mcpVersion:\s*(\S+)/)?.[1];
       expect(mcpVersion).toMatch(/^\d+\.\d+\.\d+$/);
@@ -273,9 +277,9 @@ describe("mcpRecordingManager", () => {
     test("strips internal params from plan content", () => {
       const timer = new FakeTimer();
       timer.setCurrentTime(1000);
-      startMcpRecording({ timer });
+      startToolCallRecording({ timer });
 
-      const recorder = getMcpRecorder()!;
+      const recorder = getToolCallRecorder()!;
       recorder.record("tapOn", {
         text: "Login",
         action: "tap",
@@ -286,7 +290,7 @@ describe("mcpRecordingManager", () => {
 
       const stopTimer = new FakeTimer();
       stopTimer.setCurrentTime(2000);
-      const result = stopMcpRecording({ planName: "stripped-test", timer: stopTimer });
+      const result = stopToolCallRecording({ planName: "stripped-test", timer: stopTimer });
 
       // Internal params should not appear in YAML
       expect(result.planContent).not.toContain("platform:");
@@ -300,14 +304,14 @@ describe("mcpRecordingManager", () => {
     test("auto-generates plan name when not provided", () => {
       const timer = new FakeTimer();
       timer.setCurrentTime(1000);
-      startMcpRecording({ timer });
+      startToolCallRecording({ timer });
 
-      const recorder = getMcpRecorder()!;
+      const recorder = getToolCallRecorder()!;
       recorder.record("observe", {});
 
       const stopTimer = new FakeTimer();
       stopTimer.setCurrentTime(2000);
-      const result = stopMcpRecording({ timer: stopTimer });
+      const result = stopToolCallRecording({ timer: stopTimer });
 
       expect(result.planName).toMatch(/^mcp-recorded-plan-/);
     });
@@ -315,17 +319,17 @@ describe("mcpRecordingManager", () => {
     test("clears recording state after stop", () => {
       const timer = new FakeTimer();
       timer.setCurrentTime(1000);
-      startMcpRecording({ timer });
+      startToolCallRecording({ timer });
 
-      const recorder = getMcpRecorder()!;
+      const recorder = getToolCallRecorder()!;
       recorder.record("observe", {});
 
       const stopTimer = new FakeTimer();
       stopTimer.setCurrentTime(2000);
-      stopMcpRecording({ planName: "test", timer: stopTimer });
+      stopToolCallRecording({ planName: "test", timer: stopTimer });
 
-      expect(getMcpRecorder()).toBeNull();
-      expect(getMcpRecordingStatus()).toBeNull();
+      expect(getToolCallRecorder()).toBeNull();
+      expect(getToolCallRecordingStatus()).toBeNull();
     });
 
     test("clears session when validation throws (no zombie session)", () => {
@@ -335,14 +339,14 @@ describe("mcpRecordingManager", () => {
 
       const timer = new FakeTimer();
       timer.setCurrentTime(1000);
-      startMcpRecording({ timer });
+      startToolCallRecording({ timer });
 
-      const recorder = getMcpRecorder()!;
+      const recorder = getToolCallRecorder()!;
       recorder.record("tapOn", { text: "Login" });
 
-      expect(() => stopMcpRecording({ planName: "test", timer })).toThrow("validation boom");
-      expect(getMcpRecorder()).toBeNull();
-      expect(getMcpRecordingStatus()).toBeNull();
+      expect(() => stopToolCallRecording({ planName: "test", timer })).toThrow("validation boom");
+      expect(getToolCallRecorder()).toBeNull();
+      expect(getToolCallRecordingStatus()).toBeNull();
 
       spy.mockRestore();
     });

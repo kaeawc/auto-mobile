@@ -63,7 +63,7 @@ const PROPAGATING_BOOLEAN_FLAGS: (keyof DaemonOptions)[] = [
   // A representative sample of the hand-written relay.
   "predictiveUi",
   "rawElementSearch",
-  "mcpRecording",
+  "toolCallRecording",
   "memPerfAudit",
   "noOcclusion",
 ];

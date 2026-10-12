@@ -20,7 +20,7 @@ class MySocketServer extends RequestResponseSocketServer<MyRequest, MyResponse> 
 }
 ```
 
-**Examples:** `videoRecordingSocketServer`, `deviceSnapshotSocketServer`, `testRecordingSocketServer`, `appearanceSocketServer`, `performanceStreamSocketServer`, `failuresStreamSocketServer`
+**Examples:** `videoRecordingSocketServer`, `deviceSnapshotSocketServer`, `deviceGestureRecordingSocketServer`, `appearanceSocketServer`, `performanceStreamSocketServer`, `failuresStreamSocketServer`
 
 Requests are sequential per socket unless a subclass explicitly opts a safe control request out of the chain, such as WebRTC `stop` or appearance's read-only `get_appearance_config`.
 
@@ -148,7 +148,7 @@ Device-aware `tools/call` follows the same rule (`assertToolCallerHoldsDevice` i
 `src/server/toolRegistry.ts`): on a held device, a call from another session or
 with no session is refused with the same code before admission or device work,
 unless the tool is registered `deviceReadOnly` (watching).
-`startTestRecording` also refuses an unheld device (`no_active_device_session`) before readiness;
+`recordDeviceGestures` also refuses an unheld device (`no_active_device_session`) before readiness;
 a live session holding no device is refused before context creation can auto-acquire one (#11716).
 A call without a deviceId is checked against the device readiness would select (the
 `setActiveDevice` pin, the current device, or the only candidate) before

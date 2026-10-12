@@ -7,7 +7,7 @@ import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../src/models/Bo
 import { DeviceShutdownTimeoutError } from "../../src/models/DeviceShutdownTimeoutError";
 import { SharedDaemonNamespaceError } from "../../src/daemon/sharedNamespaceGuard";
 import { DeviceSessionSupersededByRestoreError } from "../../src/daemon/deviceSessionResolver";
-import { TestRecordingStartUnheldError } from "../../src/daemon/testRecordingStartAdmission";
+import { DeviceGestureRecordingStartUnheldError } from "../../src/daemon/deviceGestureRecordingStartAdmission";
 import { DaemonHandoffInterruptionError } from "../../src/daemon/daemonHandoffInterruption";
 import { DaemonCommandRefusal } from "../../src/daemon/cli/runDaemonCommand";
 import { join } from "node:path";
@@ -1006,7 +1006,7 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
     "GAP: deviceSessionErrorFields puts DEVICE_SESSION_SUPERSEDED_BY_RESTORE beside error on the device-data aux socket; no fixture captures this class yet (#11351)",
   ],
   [
-    TestRecordingStartUnheldError,
+    DeviceGestureRecordingStartUnheldError,
     "GAP: toPayload supplies the typed no_active_device_session recording-start fields to the MCP result and socket frame; no fixture captures this class yet (#11351)",
   ],
   [

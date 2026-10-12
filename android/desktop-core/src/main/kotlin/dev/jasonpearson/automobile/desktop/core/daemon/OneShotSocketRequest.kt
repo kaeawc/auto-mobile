@@ -24,7 +24,7 @@ internal const val DEVICE_SNAPSHOT_REQUEST_TIMEOUT_MS = 30_000L
 internal const val VIDEO_RECORDING_REQUEST_TIMEOUT_MS = 30_000L
 
 /** Allows start to probe a device and stop to assemble its recorded plan. */
-internal const val TEST_RECORDING_REQUEST_TIMEOUT_MS = 60_000L
+internal const val DEVICE_GESTURE_RECORDING_REQUEST_TIMEOUT_MS = 60_000L
 
 /** Allows start to negotiate WHIP with the remote server before replying. */
 internal const val WEBRTC_STREAM_REQUEST_TIMEOUT_MS = 60_000L

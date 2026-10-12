@@ -16,7 +16,7 @@ import { logger } from "../utils/logger";
  * observation and never touches the baseline.
  *
  * The wrapped handler reads `INTERNAL_NO_DIFF_PARAM` off its args at entry (see
- * `toolRegistry.registerDeviceAware`), and `McpCallRecorder.INTERNAL_PARAMS`
+ * `toolRegistry.registerDeviceAware`), and `ToolCallRecorder.INTERNAL_PARAMS`
  * strips it from recordings. Both reference this constant so the literal has a
  * single source of truth. It lives in `daemon/constants` as part of the canonical
  * `INTERNAL_TOOL_PARAM_NAMES`, so every strict-schema handler that strips that list

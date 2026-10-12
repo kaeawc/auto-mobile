@@ -40,9 +40,9 @@ export const VIDEO_STREAM_SOCKET_CONFIG: SocketServerConfig = {
   },
 };
 
-export const TEST_RECORDING_SOCKET_CONFIG: SocketServerConfig = {
+export const DEVICE_GESTURE_RECORDING_SOCKET_CONFIG: SocketServerConfig = {
   get defaultPath() {
-    return path.join(resolveAuxSocketDir(), "test-recording.sock");
+    return path.join(resolveAuxSocketDir(), "device-gesture-recording.sock");
   },
 };
 
@@ -127,7 +127,7 @@ export const AUXILIARY_SOCKET_CONFIGS_BY_NAME: Record<
   "performance-push": PERFORMANCE_PUSH_SOCKET_CONFIG,
   "performance-stream": PERFORMANCE_STREAM_SOCKET_CONFIG,
   "telemetry-push": TELEMETRY_PUSH_SOCKET_CONFIG,
-  "test-recording": TEST_RECORDING_SOCKET_CONFIG,
+  "device-gesture-recording": DEVICE_GESTURE_RECORDING_SOCKET_CONFIG,
   "video-recording": VIDEO_RECORDING_SOCKET_CONFIG,
   "video-stream": VIDEO_STREAM_SOCKET_CONFIG,
   "webrtc-stream": WEBRTC_STREAM_SOCKET_CONFIG,

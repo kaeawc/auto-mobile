@@ -29,7 +29,7 @@ import {
 import { DeviceOutsideBoundSessionError } from "./deviceOutsideBoundSessionRefusal";
 import { AppNotRunningError } from "../models/AppNotRunningError";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
-import { TestRecordingStartUnheldError } from "../daemon/testRecordingStartAdmission";
+import { DeviceGestureRecordingStartUnheldError } from "../daemon/deviceGestureRecordingStartAdmission";
 import {
   DeviceAssignedToManagedSlotError,
   DeviceOutsideManagedSlotsError,
@@ -150,7 +150,7 @@ function hasSelfDescribedRefusalPayload(
   | DeviceOutsideManagedSlotsError
   | DeviceOutsideBoundSessionError
   | InputDeviceOwnedError
-  | TestRecordingStartUnheldError
+  | DeviceGestureRecordingStartUnheldError
   | AppNotRunningError
   | ManagedSlotDiscoveryIncompleteError {
   return (
@@ -158,7 +158,7 @@ function hasSelfDescribedRefusalPayload(
     error instanceof DeviceOutsideManagedSlotsError ||
     error instanceof DeviceOutsideBoundSessionError ||
     error instanceof InputDeviceOwnedError ||
-    error instanceof TestRecordingStartUnheldError ||
+    error instanceof DeviceGestureRecordingStartUnheldError ||
     error instanceof AppNotRunningError ||
     error instanceof ManagedSlotDiscoveryIncompleteError
   );

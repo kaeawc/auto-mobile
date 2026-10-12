@@ -60,7 +60,7 @@ describe("daemon auxiliary socket exit cleanup", () => {
   test("refused contender exit preserves the owner's aux socket", async () => {
     const { daemon, pidFilePath } = makeDaemon();
     const ownerPath = getDaemonSocketPathsByName()["video-recording"];
-    const otherOwnerPath = getDaemonSocketPathsByName()["test-recording"];
+    const otherOwnerPath = getDaemonSocketPathsByName()["device-gesture-recording"];
     writeFileSync(ownerPath, "owner socket");
     writeFileSync(otherOwnerPath, "owner socket");
 
@@ -90,7 +90,7 @@ describe("daemon auxiliary socket exit cleanup", () => {
     const { daemon, pidFilePath } = makeDaemon();
     const paths = getDaemonSocketPathsByName();
     const ownedName: AuxiliaryDaemonSocketName = "video-recording";
-    const refusedName: AuxiliaryDaemonSocketName = "test-recording";
+    const refusedName: AuxiliaryDaemonSocketName = "device-gesture-recording";
     const ownedPath = paths[ownedName];
     const refusedPath = paths[refusedName];
     await daemon["startAuxiliarySocket"](ownedName, fakeSuccessfulBind(ownedPath));

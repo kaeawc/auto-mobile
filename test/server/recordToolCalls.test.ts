@@ -10,11 +10,13 @@ import {
 } from "bun:test";
 import { createMcpServer } from "../../src/server/index";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { registerPlanTools } from "../../src/server/planTools";
+import { getRemovedToolHint } from "../../src/models/removedTools";
 import {
-  getMcpRecorder,
-  resetMcpRecordingState,
-  startMcpRecording,
-} from "../../src/server/mcpRecordingManager";
+  getToolCallRecorder,
+  resetToolCallRecordingState,
+  startToolCallRecording,
+} from "../../src/server/toolCallRecordingManager";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { getStructuredField } from "../../src/utils/toolUtils";
 import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
@@ -24,7 +26,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 
 // Exercise plain registered handlers and the existing protocol onclose hook
 // directly: no live transport, SDK request timers, device, or database needed.
-describe("recordSteps connection scope and direct transport teardown", () => {
+describe("recordToolCalls connection scope and direct transport teardown", () => {
   let direct: ReturnType<typeof createMcpServer>;
   let loopback: ReturnType<typeof createMcpServer>;
   let restoreHermeticServer: () => void;
@@ -37,19 +39,19 @@ describe("recordSteps connection scope and direct transport teardown", () => {
     const timer = new FakeTimer();
     clockSpy = spyOn(defaultTimer, "now").mockImplementation(() => timer.now());
     initializeSpy = spyOn(FeatureFlagService.prototype, "initialize").mockResolvedValue();
-    originallyEnabled = serverConfig.isMcpRecordingEnabled();
+    originallyEnabled = serverConfig.isToolCallRecordingEnabled();
     direct = createMcpServer({ sessionContext: { sessionId: "direct-A" } });
     loopback = createMcpServer({ daemonMode: true, sessionContext: { sessionId: "loopback" } });
   });
 
   beforeEach(() => {
     // Recorder state is module-level; another file in the same process may have left some.
-    resetMcpRecordingState();
+    resetToolCallRecordingState();
   });
 
   afterEach(() => {
-    resetMcpRecordingState();
-    serverConfig.setMcpRecordingEnabled(originallyEnabled);
+    resetToolCallRecordingState();
+    serverConfig.setToolCallRecordingEnabled(originallyEnabled);
   });
 
   afterAll(() => {
@@ -60,16 +62,36 @@ describe("recordSteps connection scope and direct transport teardown", () => {
     restoreHermeticServer();
   });
 
-  test("recordSteps begin, status, and end use the injected connection identity", async () => {
-    serverConfig.setMcpRecordingEnabled(true);
-    const tool = ToolRegistry.getTool("recordSteps")!;
+  test("only recordToolCalls is registered, with the same plain read/control classification", () => {
+    registerPlanTools();
+    expect(ToolRegistry.getRegisteredTool("recordSteps")).toBeUndefined();
+    const tool = ToolRegistry.getRegisteredTool("recordToolCalls");
+    expect(tool).toBeDefined();
+    expect(tool!.requiresDevice).toBe(false);
+    expect(tool!.hidden).not.toBe(true);
+    expect(tool!.defaultEnabled).toBe(false);
+    expect(tool!.outputSchema).toBeDefined();
+    const classify = tool!.deviceReadOnly;
+    expect(typeof classify).toBe("function");
+    if (typeof classify !== "function") {
+      throw new Error("Expected a per-args read/control classifier");
+    }
+    expect(classify({ action: "status" })).toBe(true);
+    expect(classify({ action: "begin" })).toBe(false);
+    expect(classify({ action: "end" })).toBe(false);
+    expect(getRemovedToolHint("recordSteps")).toContain("recordToolCalls");
+  });
+
+  test("recordToolCalls begin, status, and end use the injected connection identity", async () => {
+    serverConfig.setToolCallRecordingEnabled(true);
+    const tool = ToolRegistry.getTool("recordToolCalls")!;
     // executeToolCall validates public args first, then injects internal params.
     const publicBegin = tool.schema.parse({ action: "begin" });
     const a = await tool.handler({ ...publicBegin, __mcpSessionId: "A" });
     const b = await tool.handler({ ...publicBegin, __mcpSessionId: "B" });
     expect(getStructuredField(a, "success")).toBe(true);
     expect(getStructuredField(b, "alreadyActive")).toBeUndefined();
-    getMcpRecorder({ connectionId: "A" })!.record("tapOn", { text: "Only A" });
+    getToolCallRecorder({ connectionId: "A" })!.record("tapOn", { text: "Only A" });
     const statusB = await tool.handler({ action: "status", __mcpSessionId: "B" });
     expect(getStructuredField(statusB, "stepCount")).toBe(0);
     const endB = await tool.handler({ action: "end", __mcpSessionId: "B" });
@@ -83,19 +105,20 @@ describe("recordSteps connection scope and direct transport teardown", () => {
   });
 
   test("disabled recording and ending without a recording are errors", async () => {
-    const tool = ToolRegistry.getTool("recordSteps")!;
-    serverConfig.setMcpRecordingEnabled(false);
+    const tool = ToolRegistry.getTool("recordToolCalls")!;
+    serverConfig.setToolCallRecordingEnabled(false);
     for (const action of ["begin", "end"]) {
       const response = await tool.handler({ action });
       const payload = {
         success: false,
-        error: "MCP recording is disabled. Enable the 'mcp-recording' feature flag first.",
+        error:
+          "Tool call recording is disabled. Enable the 'tool-call-recording' feature flag first.",
       };
       expect(response.isError).toBe(true);
       expect(response.structuredContent).toEqual(payload);
       expect(JSON.parse(response.content[0].text)).toEqual(payload);
     }
-    serverConfig.setMcpRecordingEnabled(true);
+    serverConfig.setToolCallRecordingEnabled(true);
     const response = await tool.handler({ action: "end" });
     expect(response.isError).toBe(true);
     expect(getStructuredField(response, "success")).toBe(false);
@@ -103,11 +126,11 @@ describe("recordSteps connection scope and direct transport teardown", () => {
   });
 
   test("a caught begin failure marks the original payload", async () => {
-    serverConfig.setMcpRecordingEnabled(true);
+    serverConfig.setToolCallRecordingEnabled(true);
     clockSpy.mockImplementationOnce(() => {
       throw new Error("Fake recorder clock failure");
     });
-    const response = await ToolRegistry.getTool("recordSteps")!.handler({ action: "begin" });
+    const response = await ToolRegistry.getTool("recordToolCalls")!.handler({ action: "begin" });
     const payload = { success: false, action: "begin", error: "Fake recorder clock failure" };
     expect(response.isError).toBe(true);
     expect(response.structuredContent).toEqual(payload);
@@ -115,12 +138,12 @@ describe("recordSteps connection scope and direct transport teardown", () => {
   });
 
   test("inactive status and already-active begin remain successful", async () => {
-    const tool = ToolRegistry.getTool("recordSteps")!;
-    serverConfig.setMcpRecordingEnabled(false);
+    const tool = ToolRegistry.getTool("recordToolCalls")!;
+    serverConfig.setToolCallRecordingEnabled(false);
     const status = await tool.handler({ action: "status" });
     expect(status.isError).toBeUndefined();
     expect(status.structuredContent).toEqual({ success: true, action: "status", recording: false });
-    serverConfig.setMcpRecordingEnabled(true);
+    serverConfig.setToolCallRecordingEnabled(true);
     const first = await tool.handler({ action: "begin" });
     const second = await tool.handler({ action: "begin" });
     expect(first.isError).toBeUndefined();
@@ -130,11 +153,11 @@ describe("recordSteps connection scope and direct transport teardown", () => {
     expect(second.structuredContent).toEqual(JSON.parse(second.content[0].text));
   });
 
-  test("recordSteps end exports launchApp without transport metadata", async () => {
-    serverConfig.setMcpRecordingEnabled(true);
-    const tool = ToolRegistry.getTool("recordSteps")!;
+  test("recordToolCalls end exports launchApp without transport metadata", async () => {
+    serverConfig.setToolCallRecordingEnabled(true);
+    const tool = ToolRegistry.getTool("recordToolCalls")!;
     await tool.handler({ action: "begin", __mcpSessionId: "clean-export" });
-    getMcpRecorder({ connectionId: "clean-export" })!.record("launchApp", {
+    getToolCallRecorder({ connectionId: "clean-export" })!.record("launchApp", {
       appId: "com.android.settings",
       sessionUuid: "session",
       __mcpRequestTimeoutMs: 120000,
@@ -153,21 +176,21 @@ describe("recordSteps connection scope and direct transport teardown", () => {
 
   test("direct onclose discards its recording and preserves other connections", () => {
     const timer = new FakeTimer();
-    startMcpRecording({ connectionId: "direct-A", timer });
-    startMcpRecording({ connectionId: "other", timer });
+    startToolCallRecording({ connectionId: "direct-A", timer });
+    startToolCallRecording({ connectionId: "other", timer });
     direct.server.onclose?.();
-    expect(getMcpRecorder({ connectionId: "direct-A" })).toBeNull();
-    expect(getMcpRecorder({ connectionId: "other" })?.isRecording()).toBe(true);
+    expect(getToolCallRecorder({ connectionId: "direct-A" })).toBeNull();
+    expect(getToolCallRecorder({ connectionId: "other" })?.isRecording()).toBe(true);
   });
 
   test("loopback onclose preserves socket recordings until the direct owner closes", () => {
     const timer = new FakeTimer();
-    startMcpRecording({ connectionId: "loopback", timer });
-    startMcpRecording({ connectionId: "direct-A", timer });
+    startToolCallRecording({ connectionId: "loopback", timer });
+    startToolCallRecording({ connectionId: "direct-A", timer });
     loopback.server.onclose?.();
-    expect(getMcpRecorder({ connectionId: "loopback" })?.isRecording()).toBe(true);
+    expect(getToolCallRecorder({ connectionId: "loopback" })?.isRecording()).toBe(true);
     direct.server.onclose?.();
-    expect(getMcpRecorder({ connectionId: "direct-A" })).toBeNull();
-    expect(getMcpRecorder({ connectionId: "loopback" })?.isRecording()).toBe(true);
+    expect(getToolCallRecorder({ connectionId: "direct-A" })).toBeNull();
+    expect(getToolCallRecorder({ connectionId: "loopback" })?.isRecording()).toBe(true);
   });
 });

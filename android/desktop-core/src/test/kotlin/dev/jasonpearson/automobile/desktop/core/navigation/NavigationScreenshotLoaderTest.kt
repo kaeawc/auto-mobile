@@ -406,9 +406,10 @@ class FakeAutoMobileClient : AutoMobileClient {
     query: dev.jasonpearson.automobile.desktop.core.daemon.TestTimingQuery,
   ) = notImplemented()
 
-  override fun startTestRecording(platform: String) = notImplemented()
+  override fun startDeviceGestureRecording(platform: String) = notImplemented()
 
-  override fun stopTestRecording(recordingId: String?, planName: String?) = notImplemented()
+  override fun stopDeviceGestureRecording(recordingId: String?, planName: String?) =
+    notImplemented()
 
   override fun executePlan(
     planContent: String,

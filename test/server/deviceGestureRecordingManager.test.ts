@@ -1,16 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { ActionableError, type BootedDevice, type PlanStep } from "../../src/models";
 import {
-  adoptOwnerlessTestRecording,
-  getStoppedTestRecording,
-  getTestRecordingStatus,
-  isTestRecordingOwnedBy,
+  adoptOwnerlessDeviceGestureRecording,
+  getStoppedDeviceGestureRecording,
+  getDeviceGestureRecordingStatus,
+  isDeviceGestureRecordingOwnedBy,
   NoUserInputCapturedError,
-  TEST_RECORDING_USER_INPUT_ONLY_NOTICE,
-  resetStoppedTestRecordings,
-  startTestRecording,
-  stopTestRecording,
-} from "../../src/server/testRecordingManager";
+  DEVICE_GESTURE_RECORDING_USER_INPUT_ONLY_NOTICE,
+  resetStoppedDeviceGestureRecordings,
+  startDeviceGestureRecording,
+  stopDeviceGestureRecording,
+} from "../../src/server/deviceGestureRecordingManager";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { DualTrackRecorder } from "../../src/features/record/android/DualTrackRecorder";
 import type {
@@ -71,7 +71,7 @@ const start = async (
   ids = new CountingIdGenerator("recording"),
   factory: (device: BootedDevice) => FakeRecorder = () => recorder,
 ) => {
-  const pending = startTestRecording(device, timer, ids, factory);
+  const pending = startDeviceGestureRecording(device, timer, ids, factory);
   await Promise.resolve();
   recorder.startGate.resolve();
   return { result: await pending, ids };
@@ -80,12 +80,12 @@ const start = async (
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
 const otherDevice: BootedDevice = { ...device, deviceId: "emulator-5556" };
 
-describe("testRecordingManager user-input capture contract (#11919)", () => {
+describe("deviceGestureRecordingManager user-input capture contract (#11919)", () => {
   afterEach(async () => {
-    if (getTestRecordingStatus()) {
-      await stopTestRecording(undefined, "cleanup").catch(() => undefined);
+    if (getDeviceGestureRecordingStatus()) {
+      await stopDeviceGestureRecording(undefined, "cleanup").catch(() => undefined);
     }
-    resetStoppedTestRecordings();
+    resetStoppedDeviceGestureRecordings();
   });
 
   test.each([0, 1])("status documents user-input scope with %s steps", async (count) => {
@@ -93,12 +93,12 @@ describe("testRecordingManager user-input capture contract (#11919)", () => {
     const recorder = new FakeRecorder();
     recorder.steps = count ? [capturedStep] : [];
     await start(timer, recorder);
-    const status = getTestRecordingStatus(timer);
+    const status = getDeviceGestureRecordingStatus(timer);
     expect(status?.eventCount).toBe(count);
     expect(status?.captureScope).toBe("user-input");
     if (count === 0) {
-      expect(status?.notice).toBe(TEST_RECORDING_USER_INPUT_ONLY_NOTICE);
-      expect(status?.notice).toContain("recordSteps");
+      expect(status?.notice).toBe(DEVICE_GESTURE_RECORDING_USER_INPUT_ONLY_NOTICE);
+      expect(status?.notice).toContain("recordToolCalls");
     } else {
       expect(status).not.toHaveProperty("notice");
     }
@@ -107,15 +107,15 @@ describe("testRecordingManager user-input capture contract (#11919)", () => {
   test("zero-step stop explains why injected input is not recorded", async () => {
     const timer = new FakeTimer();
     await start(timer, new FakeRecorder());
-    const result = stopTestRecording(undefined, "empty", timer);
+    const result = stopDeviceGestureRecording(undefined, "empty", timer);
     await expect(result).rejects.toBeInstanceOf(NoUserInputCapturedError);
     await expect(result).rejects.toMatchObject({ reason: "no_user_input_captured" });
     await expect(result).rejects.toThrow(/^No recorded interactions were captured\./);
-    await expect(result).rejects.toThrow("recordSteps");
+    await expect(result).rejects.toThrow("recordToolCalls");
   });
 });
 
-describe("testRecordingManager ownership", () => {
+describe("deviceGestureRecordingManager ownership", () => {
   for (const phase of ["starting", "active"] as const) {
     for (const [owner, caller, admitted] of [
       ["S", "S:label", true],
@@ -132,7 +132,7 @@ describe("testRecordingManager ownership", () => {
         recorder.steps = [capturedStep];
         const ids = new CountingIdGenerator("equivalent");
         const baseSessionUuid = (uuid: string) => uuid.split(":")[0];
-        const pending = startTestRecording(
+        const pending = startDeviceGestureRecording(
           device,
           timer,
           ids,
@@ -146,7 +146,7 @@ describe("testRecordingManager ownership", () => {
           await pending;
         }
         try {
-          const joined = startTestRecording(
+          const joined = startDeviceGestureRecording(
             device,
             timer,
             ids,
@@ -165,11 +165,11 @@ describe("testRecordingManager ownership", () => {
             expect(await joined).toEqual(first);
           }
           expect(recorder.startCount).toBe(1);
-          expect(isTestRecordingOwnedBy(owner, device.deviceId)).toBe(true);
+          expect(isDeviceGestureRecordingOwnedBy(owner, device.deviceId)).toBe(true);
         } finally {
           recorder.startGate.resolve();
           await pending;
-          await stopTestRecording(undefined, undefined, timer);
+          await stopDeviceGestureRecording(undefined, undefined, timer);
         }
       });
     }
@@ -181,7 +181,7 @@ describe("testRecordingManager ownership", () => {
       const timer = new FakeTimer();
       const recorder = new FakeRecorder();
       recorder.steps = [capturedStep];
-      const pending = startTestRecording(
+      const pending = startDeviceGestureRecording(
         device,
         timer,
         new CountingIdGenerator("adopt"),
@@ -192,35 +192,35 @@ describe("testRecordingManager ownership", () => {
         recorder.startGate.resolve();
         await pending;
       }
-      let stop: ReturnType<typeof stopTestRecording> | undefined;
+      let stop: ReturnType<typeof stopDeviceGestureRecording> | undefined;
       if (phase === "stopping") {
         recorder.stopGate = new Deferred();
-        stop = stopTestRecording(undefined, undefined, timer);
+        stop = stopDeviceGestureRecording(undefined, undefined, timer);
       }
       try {
-        expect(isTestRecordingOwnedBy(undefined, device.deviceId)).toBe(true);
-        expect(adoptOwnerlessTestRecording(otherDevice.deviceId, "holder")).toBe(false);
-        expect(adoptOwnerlessTestRecording(device.deviceId, "holder")).toBe(true);
-        expect(adoptOwnerlessTestRecording(device.deviceId, "loser")).toBe(false);
-        expect(isTestRecordingOwnedBy(undefined, device.deviceId)).toBe(false);
-        expect(isTestRecordingOwnedBy("holder", device.deviceId)).toBe(true);
+        expect(isDeviceGestureRecordingOwnedBy(undefined, device.deviceId)).toBe(true);
+        expect(adoptOwnerlessDeviceGestureRecording(otherDevice.deviceId, "holder")).toBe(false);
+        expect(adoptOwnerlessDeviceGestureRecording(device.deviceId, "holder")).toBe(true);
+        expect(adoptOwnerlessDeviceGestureRecording(device.deviceId, "loser")).toBe(false);
+        expect(isDeviceGestureRecordingOwnedBy(undefined, device.deviceId)).toBe(false);
+        expect(isDeviceGestureRecordingOwnedBy("holder", device.deviceId)).toBe(true);
         expect(recorder.stopCount).toBe(phase === "stopping" ? 1 : 0);
         recorder.startGate.resolve();
         const started = await pending;
         recorder.stopGate?.resolve({ steps: recorder.steps, stepCount: 1 });
-        const stopped = await (stop ?? stopTestRecording(undefined, undefined, timer));
+        const stopped = await (stop ?? stopDeviceGestureRecording(undefined, undefined, timer));
         expect(stopped.recordingId).toBe(started.recordingId);
-        expect(getStoppedTestRecording(started.recordingId, "holder")?.stepCount).toBe(1);
-        expect(getStoppedTestRecording(started.recordingId, "loser")).toBeUndefined();
-        expect(adoptOwnerlessTestRecording(device.deviceId, "next")).toBe(false);
+        expect(getStoppedDeviceGestureRecording(started.recordingId, "holder")?.stepCount).toBe(1);
+        expect(getStoppedDeviceGestureRecording(started.recordingId, "loser")).toBeUndefined();
+        expect(adoptOwnerlessDeviceGestureRecording(device.deviceId, "next")).toBe(false);
       } finally {
         recorder.startGate.resolve();
         recorder.stopGate?.resolve({ steps: recorder.steps, stepCount: 1 });
         if (
-          isTestRecordingOwnedBy("holder", device.deviceId) ||
-          isTestRecordingOwnedBy(undefined, device.deviceId)
+          isDeviceGestureRecordingOwnedBy("holder", device.deviceId) ||
+          isDeviceGestureRecordingOwnedBy(undefined, device.deviceId)
         ) {
-          await stopTestRecording(undefined, undefined, timer);
+          await stopDeviceGestureRecording(undefined, undefined, timer);
         }
       }
     },
@@ -229,7 +229,7 @@ describe("testRecordingManager ownership", () => {
   test("a recording is owned by the session that started it, on its device only", async () => {
     const timer = new FakeTimer();
     const recorder = new FakeRecorder();
-    const pending = startTestRecording(
+    const pending = startDeviceGestureRecording(
       device,
       timer,
       new CountingIdGenerator("recording"),
@@ -240,21 +240,21 @@ describe("testRecordingManager ownership", () => {
     recorder.startGate.resolve();
     await pending;
 
-    expect(isTestRecordingOwnedBy("session-a", device.deviceId)).toBe(true);
-    expect(isTestRecordingOwnedBy("session-b", device.deviceId)).toBe(false);
-    expect(isTestRecordingOwnedBy("session-a", otherDevice.deviceId)).toBe(false);
+    expect(isDeviceGestureRecordingOwnedBy("session-a", device.deviceId)).toBe(true);
+    expect(isDeviceGestureRecordingOwnedBy("session-b", device.deviceId)).toBe(false);
+    expect(isDeviceGestureRecordingOwnedBy("session-a", otherDevice.deviceId)).toBe(false);
 
     recorder.steps.push(capturedStep);
-    await stopTestRecording(undefined, "owned", timer);
-    expect(isTestRecordingOwnedBy("session-a", device.deviceId)).toBe(false);
+    await stopDeviceGestureRecording(undefined, "owned", timer);
+    expect(isDeviceGestureRecordingOwnedBy("session-a", device.deviceId)).toBe(false);
   });
 });
 
-describe("testRecordingManager retained plan (#10958)", () => {
+describe("deviceGestureRecordingManager retained plan (#10958)", () => {
   test("an owned recording's plan stays fetchable by its owner after the stop, and only by it", async () => {
     const timer = new FakeTimer();
     const recorder = new FakeRecorder();
-    const pending = startTestRecording(
+    const pending = startDeviceGestureRecording(
       device,
       timer,
       new CountingIdGenerator("recording"),
@@ -266,17 +266,17 @@ describe("testRecordingManager retained plan (#10958)", () => {
     const { recordingId } = await pending;
     recorder.steps.push(capturedStep);
 
-    const stopped = await stopTestRecording(undefined, "owned", timer);
+    const stopped = await stopDeviceGestureRecording(undefined, "owned", timer);
 
-    expect(getStoppedTestRecording(recordingId, "session-a")).toEqual(stopped);
-    expect(getStoppedTestRecording(recordingId, "session-b")).toBeUndefined();
-    expect(getStoppedTestRecording(recordingId, undefined)).toBeUndefined();
+    expect(getStoppedDeviceGestureRecording(recordingId, "session-a")).toEqual(stopped);
+    expect(getStoppedDeviceGestureRecording(recordingId, "session-b")).toBeUndefined();
+    expect(getStoppedDeviceGestureRecording(recordingId, undefined)).toBeUndefined();
   });
 
   test("a derived owner's retained plan is fetchable by its base and sibling sessions, never another base (#11533)", async () => {
     const timer = new FakeTimer();
     const recorder = new FakeRecorder();
-    const pending = startTestRecording(
+    const pending = startDeviceGestureRecording(
       device,
       timer,
       new CountingIdGenerator("recording"),
@@ -287,22 +287,24 @@ describe("testRecordingManager retained plan (#10958)", () => {
     recorder.startGate.resolve();
     const { recordingId } = await pending;
     recorder.steps.push(capturedStep);
-    const stopped = await stopTestRecording(undefined, "owned", timer);
+    const stopped = await stopDeviceGestureRecording(undefined, "owned", timer);
 
     const base = (uuid: string) => uuid.split(":")[0];
-    expect(getStoppedTestRecording(recordingId, "plan-base", base)).toEqual(stopped);
-    expect(getStoppedTestRecording(recordingId, "plan-base:tablet", base)).toEqual(stopped);
-    expect(getStoppedTestRecording(recordingId, "plan-base:pixel", base)).toEqual(stopped);
-    expect(getStoppedTestRecording(recordingId, "other-base", base)).toBeUndefined();
-    expect(getStoppedTestRecording(recordingId, "other-base:pixel", base)).toBeUndefined();
-    expect(getStoppedTestRecording(recordingId, "plan-base2", base)).toBeUndefined();
-    expect(getStoppedTestRecording(recordingId, undefined, base)).toBeUndefined();
+    expect(getStoppedDeviceGestureRecording(recordingId, "plan-base", base)).toEqual(stopped);
+    expect(getStoppedDeviceGestureRecording(recordingId, "plan-base:tablet", base)).toEqual(
+      stopped,
+    );
+    expect(getStoppedDeviceGestureRecording(recordingId, "plan-base:pixel", base)).toEqual(stopped);
+    expect(getStoppedDeviceGestureRecording(recordingId, "other-base", base)).toBeUndefined();
+    expect(getStoppedDeviceGestureRecording(recordingId, "other-base:pixel", base)).toBeUndefined();
+    expect(getStoppedDeviceGestureRecording(recordingId, "plan-base2", base)).toBeUndefined();
+    expect(getStoppedDeviceGestureRecording(recordingId, undefined, base)).toBeUndefined();
     // Without a resolver the base session still matches by the derived-id prefix.
-    expect(getStoppedTestRecording(recordingId, "plan-base")).toEqual(stopped);
+    expect(getStoppedDeviceGestureRecording(recordingId, "plan-base")).toEqual(stopped);
   });
 });
 
-describe("testRecordingManager startup reservation", () => {
+describe("deviceGestureRecordingManager startup reservation", () => {
   for (const [owner, stranger] of [
     [undefined, "stranger"],
     ["owner-a", undefined],
@@ -319,10 +321,10 @@ describe("testRecordingManager startup reservation", () => {
         factories += 1;
         return recorder;
       };
-      const first = startTestRecording(device, timer, ids, factory, owner);
+      const first = startDeviceGestureRecording(device, timer, ids, factory, owner);
       const checkRefusal = async () => {
         try {
-          await startTestRecording(device, timer, ids, factory, stranger);
+          await startDeviceGestureRecording(device, timer, ids, factory, stranger);
           throw new Error("expected an ownership refusal");
         } catch (error) {
           expect(error).toBeInstanceOf(ActionableError);
@@ -335,15 +337,17 @@ describe("testRecordingManager startup reservation", () => {
         expect(recorder.stopCount).toBe(0);
       };
       await checkRefusal();
-      const sameOwner = startTestRecording(device, timer, ids, factory, owner);
+      const sameOwner = startDeviceGestureRecording(device, timer, ids, factory, owner);
       recorder.startGate.resolve();
       expect(await sameOwner).toEqual(await first);
       await checkRefusal();
-      expect(await startTestRecording(device, timer, ids, factory, owner)).toEqual(await first);
-      await expect(startTestRecording(otherDevice, timer, ids, factory, stranger)).rejects.toThrow(
-        "Recording already active on device",
+      expect(await startDeviceGestureRecording(device, timer, ids, factory, owner)).toEqual(
+        await first,
       );
-      await stopTestRecording(undefined, undefined, timer);
+      await expect(
+        startDeviceGestureRecording(otherDevice, timer, ids, factory, stranger),
+      ).rejects.toThrow("Recording already active on device");
+      await stopDeviceGestureRecording(undefined, undefined, timer);
     });
   }
 
@@ -357,20 +361,20 @@ describe("testRecordingManager startup reservation", () => {
       return recorder;
     };
 
-    const first = startTestRecording(device, timer, ids, factory);
-    const second = startTestRecording(device, timer, ids, factory);
-    await expect(startTestRecording(otherDevice, timer, ids, factory)).rejects.toThrow(
+    const first = startDeviceGestureRecording(device, timer, ids, factory);
+    const second = startDeviceGestureRecording(device, timer, ids, factory);
+    await expect(startDeviceGestureRecording(otherDevice, timer, ids, factory)).rejects.toThrow(
       "Recording already active on device emulator-5554",
     );
     await Promise.resolve();
     expect(constructed).toBe(1);
     expect(recorder.startCount).toBe(1);
-    expect(getTestRecordingStatus(timer)).toBeNull();
+    expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
 
     recorder.startGate.resolve();
     expect(await first).toEqual(await second);
-    expect(getTestRecordingStatus(timer)?.recordingId).toBe("recording-1");
-    await expect(stopTestRecording(undefined, undefined, timer)).rejects.toThrow(
+    expect(getDeviceGestureRecordingStatus(timer)?.recordingId).toBe("recording-1");
+    await expect(stopDeviceGestureRecording(undefined, undefined, timer)).rejects.toThrow(
       "No recorded interactions",
     );
     expect(recorder.stopCount).toBe(1);
@@ -380,8 +384,8 @@ describe("testRecordingManager startup reservation", () => {
     const timer = new FakeTimer();
     const ids = new CountingIdGenerator("recording");
     const failed = new FakeRecorder();
-    const first = startTestRecording(device, timer, ids, () => failed);
-    const joined = startTestRecording(device, timer, ids, () => {
+    const first = startDeviceGestureRecording(device, timer, ids, () => failed);
+    const joined = startDeviceGestureRecording(device, timer, ids, () => {
       throw new Error("second recorder must not be constructed");
     });
     const failures = Promise.allSettled([first, joined]);
@@ -394,35 +398,35 @@ describe("testRecordingManager startup reservation", () => {
       if (outcome.status === "rejected") {
         expect(outcome.reason).toHaveProperty(
           "message",
-          "Failed to start test recording: adb startup failed",
+          "Failed to start device gesture recording: adb startup failed",
         );
       }
     }
     expect(failed.stopCount).toBe(1);
-    expect(getTestRecordingStatus(timer)).toBeNull();
+    expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
 
     const next = new FakeRecorder();
-    const retry = startTestRecording(otherDevice, timer, ids, () => next);
+    const retry = startDeviceGestureRecording(otherDevice, timer, ids, () => next);
     next.startGate.resolve();
     expect((await retry).deviceId).toBe(otherDevice.deviceId);
-    await expect(stopTestRecording(undefined, undefined, timer)).rejects.toThrow(
+    await expect(stopDeviceGestureRecording(undefined, undefined, timer)).rejects.toThrow(
       "No recorded interactions",
     );
   });
 });
 
-describe("testRecordingManager stopping reservation", () => {
+describe("deviceGestureRecordingManager stopping reservation", () => {
   test("successful stop releases the active recording and returns its result", async () => {
     const timer = new FakeTimer();
     const recorder = new FakeRecorder();
     recorder.steps = [capturedStep];
     const { result: started } = await start(timer, recorder);
 
-    const result = await stopTestRecording(started.recordingId, undefined, timer);
+    const result = await stopDeviceGestureRecording(started.recordingId, undefined, timer);
 
     expect(result.recordingId).toBe(started.recordingId);
     expect(result.stepCount).toBe(1);
-    expect(getTestRecordingStatus(timer)).toBeNull();
+    expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
     expect(recorder.stopCount).toBe(1);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
@@ -434,19 +438,19 @@ describe("testRecordingManager stopping reservation", () => {
     failed.stopError = new Error("device disconnected");
     const { result: started } = await start(timer, failed, ids);
 
-    const stopError = await stopTestRecording(started.recordingId, undefined, timer).catch(
+    const stopError = await stopDeviceGestureRecording(started.recordingId, undefined, timer).catch(
       (error: unknown) => error,
     );
     expect(stopError).toBeInstanceOf(ActionableError);
     expect(stopError).toHaveProperty(
       "message",
-      "Failed to stop test recording: device disconnected",
+      "Failed to stop device gesture recording: device disconnected",
     );
-    expect(getTestRecordingStatus(timer)).toBeNull();
+    expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
 
     const replacement = new FakeRecorder();
     let factoryCalls = 0;
-    const next = startTestRecording(device, timer, ids, () => {
+    const next = startDeviceGestureRecording(device, timer, ids, () => {
       factoryCalls++;
       return replacement;
     });
@@ -455,7 +459,7 @@ describe("testRecordingManager stopping reservation", () => {
     const nextStarted = await next;
     expect(nextStarted.recordingId).not.toBe(started.recordingId);
     expect(factoryCalls).toBe(1);
-    await expect(stopTestRecording(undefined, undefined, timer)).rejects.toThrow(
+    await expect(stopDeviceGestureRecording(undefined, undefined, timer)).rejects.toThrow(
       "No recorded interactions",
     );
   });
@@ -467,23 +471,23 @@ describe("testRecordingManager stopping reservation", () => {
     hung.stopGate = new Deferred<{ steps: PlanStep[]; stepCount: number }>();
     const { result: started } = await start(timer, hung, ids);
 
-    const stopping = stopTestRecording(started.recordingId, undefined, timer);
+    const stopping = stopDeviceGestureRecording(started.recordingId, undefined, timer);
     await Promise.resolve();
     timer.advanceTime(10_000);
     const timeoutError = await stopping.catch((error: unknown) => error);
     expect(timeoutError).toBeInstanceOf(ActionableError);
     expect(timeoutError).toHaveProperty(
       "message",
-      "Failed to stop test recording: Test recording stop timed out after 10000 ms",
+      "Failed to stop device gesture recording: Device gesture recording stop timed out after 10000 ms",
     );
-    expect(getTestRecordingStatus(timer)).toBeNull();
+    expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
 
     const replacement = new FakeRecorder();
-    const next = startTestRecording(device, timer, ids, () => replacement);
+    const next = startDeviceGestureRecording(device, timer, ids, () => replacement);
     await Promise.resolve();
     replacement.startGate.resolve();
     expect((await next).recordingId).not.toBe(started.recordingId);
-    await expect(stopTestRecording(undefined, undefined, timer)).rejects.toThrow(
+    await expect(stopDeviceGestureRecording(undefined, undefined, timer)).rejects.toThrow(
       "No recorded interactions",
     );
   });
@@ -495,7 +499,7 @@ describe("testRecordingManager stopping reservation", () => {
     hung.capturedSteps = [capturedStep];
     const { result: started } = await start(timer, hung);
 
-    const stopping = stopTestRecording(started.recordingId, undefined, timer);
+    const stopping = stopDeviceGestureRecording(started.recordingId, undefined, timer);
     await Promise.resolve();
     timer.advanceTime(10_000);
     const result = await stopping;
@@ -504,7 +508,7 @@ describe("testRecordingManager stopping reservation", () => {
     expect(result.planContent).toContain("OK");
     expect(result.error).toContain("Stopping the recorder did not finish");
     expect(result.error).toContain("timed out after 10000 ms");
-    expect(getTestRecordingStatus(timer)).toBeNull();
+    expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
   });
 
   test("a stop that fails with nothing captured still rejects", async () => {
@@ -514,8 +518,8 @@ describe("testRecordingManager stopping reservation", () => {
     failed.capturedSteps = [];
     const { result: started } = await start(timer, failed);
 
-    await expect(stopTestRecording(started.recordingId, undefined, timer)).rejects.toThrow(
-      "Failed to stop test recording: device disconnected",
+    await expect(stopDeviceGestureRecording(started.recordingId, undefined, timer)).rejects.toThrow(
+      "Failed to stop device gesture recording: device disconnected",
     );
   });
 
@@ -526,14 +530,14 @@ describe("testRecordingManager stopping reservation", () => {
     recorder.stopGate = new Deferred<{ steps: PlanStep[]; stepCount: number }>();
     const { result: started } = await start(timer, recorder);
 
-    const first = stopTestRecording(started.recordingId, undefined, timer);
-    const second = stopTestRecording(started.recordingId, undefined, timer);
+    const first = stopDeviceGestureRecording(started.recordingId, undefined, timer);
+    const second = stopDeviceGestureRecording(started.recordingId, undefined, timer);
     await Promise.resolve();
     expect(recorder.stopCount).toBe(1);
     recorder.stopGate.resolve({ steps: [capturedStep], stepCount: 1 });
     const [firstResult, secondResult] = await Promise.all([first, second]);
     expect(firstResult).toBe(secondResult);
-    expect(getTestRecordingStatus(timer)).toBeNull();
+    expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
   });
 
   test("concurrent stops share the same failure", async () => {
@@ -542,8 +546,8 @@ describe("testRecordingManager stopping reservation", () => {
     recorder.stopGate = new Deferred<{ steps: PlanStep[]; stepCount: number }>();
     const { result: started } = await start(timer, recorder);
 
-    const first = stopTestRecording(started.recordingId, undefined, timer);
-    const second = stopTestRecording(started.recordingId, undefined, timer);
+    const first = stopDeviceGestureRecording(started.recordingId, undefined, timer);
+    const second = stopDeviceGestureRecording(started.recordingId, undefined, timer);
     await Promise.resolve();
     expect(recorder.stopCount).toBe(1);
     recorder.stopGate.reject(new Error("stop failed"));
@@ -554,7 +558,7 @@ describe("testRecordingManager stopping reservation", () => {
       expect(outcomes[0].reason).toBe(outcomes[1].reason);
       expect(outcomes[0].reason.message).toContain("stop failed");
     }
-    expect(getTestRecordingStatus(timer)).toBeNull();
+    expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
   });
 
   test("start during an in-flight stop waits, then creates a fresh recording", async () => {
@@ -565,12 +569,12 @@ describe("testRecordingManager stopping reservation", () => {
     firstRecorder.stopGate = new Deferred<{ steps: PlanStep[]; stepCount: number }>();
     const { result: started } = await start(timer, firstRecorder, ids);
 
-    const stopping = stopTestRecording(started.recordingId, undefined, timer);
+    const stopping = stopDeviceGestureRecording(started.recordingId, undefined, timer);
     await Promise.resolve();
-    expect(getTestRecordingStatus(timer)).toBeNull();
+    expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
     const nextRecorder = new FakeRecorder();
     let factoryCalls = 0;
-    const starting = startTestRecording(device, timer, ids, () => {
+    const starting = startDeviceGestureRecording(device, timer, ids, () => {
       factoryCalls++;
       return nextRecorder;
     });
@@ -584,7 +588,7 @@ describe("testRecordingManager stopping reservation", () => {
     nextRecorder.startGate.resolve();
     const nextStarted = await starting;
     expect(nextStarted.recordingId).not.toBe(started.recordingId);
-    await expect(stopTestRecording(undefined, undefined, timer)).rejects.toThrow(
+    await expect(stopDeviceGestureRecording(undefined, undefined, timer)).rejects.toThrow(
       "No recorded interactions",
     );
   });
@@ -623,7 +627,7 @@ async function startDualTrack() {
   timer.advanceTime(10_000);
   const gestures = new RecordingGestures();
   const a11y = new RecordingA11y();
-  await startTestRecording(
+  await startDeviceGestureRecording(
     device,
     timer,
     new CountingIdGenerator("touch-health"),
@@ -632,20 +636,20 @@ async function startDualTrack() {
   return { timer, gestures, a11y };
 }
 
-describe("testRecordingManager touch-track health", () => {
+describe("deviceGestureRecordingManager touch-track health", () => {
   test("spawn failure with zero steps rejects with actionable getevent cause", async () => {
     const { timer, gestures } = await startDualTrack();
     gestures.onError?.(new Error("spawn adb ENOENT"));
-    const outcome = await stopTestRecording(undefined, "failed-touch", timer).catch(
+    const outcome = await stopDeviceGestureRecording(undefined, "failed-touch", timer).catch(
       (error: unknown) => error,
     );
     expect(outcome).toBeInstanceOf(ActionableError);
     expect(outcome).not.toBeInstanceOf(NoUserInputCapturedError);
     expect(outcome).toHaveProperty(
       "message",
-      "Failed to stop test recording: Touch track (getevent) stopped 0 ms after recording start: spawn adb ENOENT. Later taps may be missing.",
+      "Failed to stop device gesture recording: Touch track (getevent) stopped 0 ms after recording start: spawn adb ENOENT. Later taps may be missing.",
     );
-    expect(getTestRecordingStatus(timer)).toBeNull();
+    expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
   });
 
   test.each(["code 1", "signal SIGTERM"])(
@@ -657,7 +661,7 @@ describe("testRecordingManager touch-track health", () => {
       gestures.onError?.(new Error(`getevent exited with ${cause}`));
       timer.advanceTime(500);
       gestures.onError?.(new Error("later error"));
-      const result = await stopTestRecording(undefined, "partial-touch", timer);
+      const result = await stopDeviceGestureRecording(undefined, "partial-touch", timer);
       expect(result.stepCount).toBe(1);
       expect(result.planContent).toContain("tapAt");
       expect(result.error).toBe(
@@ -673,7 +677,7 @@ describe("testRecordingManager touch-track health", () => {
     a11y.listener?.({ type: "tap", timestamp: 0 });
     a11y.listener?.({ type: "inputText", text: "hello", timestamp: 0 });
     a11y.listener?.({ type: "tap", timestamp: 0 });
-    const result = await stopTestRecording(undefined, "text-only", timer);
+    const result = await stopDeviceGestureRecording(undefined, "text-only", timer);
     expect(result.stepCount).toBe(1);
     expect(result.planContent).toContain("sendKeys");
     expect(result.planContent).toContain("hello");
@@ -684,7 +688,7 @@ describe("testRecordingManager touch-track health", () => {
   test("healthy stop has no warning even when the emitter reports its own shutdown", async () => {
     const { timer, gestures } = await startDualTrack();
     gestures.onGesture?.({ type: "tap", arrivedAt: timer.now(), screenX: 10, screenY: 20 });
-    const result = await stopTestRecording(undefined, "healthy-touch", timer);
+    const result = await stopDeviceGestureRecording(undefined, "healthy-touch", timer);
     expect(result.stepCount).toBe(1);
     expect(Object.keys(result).sort()).toEqual(
       [
@@ -718,13 +722,13 @@ function geometryTracker(timer: FakeTimer, deviceRotation: number): DisplayGeome
   );
 }
 
-describe("testRecordingManager display geometry (#10174)", () => {
+describe("deviceGestureRecordingManager display geometry (#10174)", () => {
   test("a rotation that was never pushed warns on the stop result", async () => {
     const timer = new FakeTimer();
     timer.advanceTime(10_000);
     const gestures = new RecordingGestures();
     const tracker = geometryTracker(timer, 1);
-    await startTestRecording(
+    await startDeviceGestureRecording(
       device,
       timer,
       new CountingIdGenerator("geometry"),
@@ -738,7 +742,7 @@ describe("testRecordingManager display geometry (#10174)", () => {
       downAt: timer.now() - 100,
     });
     // The device reads rotation 1 although none was pushed; the stop-time check notices.
-    const result = await stopTestRecording(undefined, "rotated", timer);
+    const result = await stopDeviceGestureRecording(undefined, "rotated", timer);
 
     expect(result.stepCount).toBe(1);
     expect(result.error).toStartWith(
@@ -752,7 +756,7 @@ describe("testRecordingManager display geometry (#10174)", () => {
     timer.advanceTime(10_000);
     const gestures = new RecordingGestures();
     const tracker = geometryTracker(timer, 1);
-    await startTestRecording(
+    await startDeviceGestureRecording(
       device,
       timer,
       new CountingIdGenerator("geometry-label"),
@@ -767,7 +771,7 @@ describe("testRecordingManager display geometry (#10174)", () => {
       screenY: 162,
       downAt: timer.now() - 50,
     });
-    const result = await stopTestRecording(undefined, "labelled", timer);
+    const result = await stopDeviceGestureRecording(undefined, "labelled", timer);
 
     expect(result.stepCount).toBe(1);
     expect(result.planContent).toContain("label: 'Warning: display rotation/size changed within");
@@ -779,7 +783,7 @@ describe("testRecordingManager display geometry (#10174)", () => {
     timer.advanceTime(10_000);
     const gestures = new RecordingGestures();
     const tracker = geometryTracker(timer, 0);
-    await startTestRecording(
+    await startDeviceGestureRecording(
       device,
       timer,
       new CountingIdGenerator("geometry-clean"),
@@ -793,7 +797,7 @@ describe("testRecordingManager display geometry (#10174)", () => {
       screenY: 1184,
       downAt: timer.now() - 100,
     });
-    const result = await stopTestRecording(undefined, "steady", timer);
+    const result = await stopDeviceGestureRecording(undefined, "steady", timer);
 
     expect(result.error).toBeUndefined();
     expect(result.planContent).not.toContain("label");

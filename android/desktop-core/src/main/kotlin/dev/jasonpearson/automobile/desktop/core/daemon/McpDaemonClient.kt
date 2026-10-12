@@ -122,7 +122,7 @@ class McpDaemonClient(
   override val connectionDescription: String
     get() = socketPathValue
 
-  private val testRecordingClient = TestRecordingSocketClient()
+  private val deviceGestureRecordingClient = DeviceGestureRecordingSocketClient()
   private var daemonCapabilities: CachedDaemonCapabilities? = null
   private val ownedSessionUuids =
     ConcurrentHashMap.newKeySet<String>().apply { sessionUuid?.let(::add) }
@@ -233,16 +233,16 @@ class McpDaemonClient(
     return decodeResourceResponse(json, contents, serializer<TestRunSummary>())
   }
 
-  override fun startTestRecording(platform: String): TestRecordingStartResult {
-    return testRecordingClient.startTestRecording(platform)
+  override fun startDeviceGestureRecording(platform: String): DeviceGestureRecordingStartResult {
+    return deviceGestureRecordingClient.startDeviceGestureRecording(platform)
   }
 
-  override fun stopTestRecording(
+  override fun stopDeviceGestureRecording(
     recordingId: String?,
     planName: String?,
-  ): TestRecordingStopResult {
+  ): DeviceGestureRecordingStopResult {
     val resolvedPlanName = planName?.ifBlank { null }
-    return testRecordingClient.stopTestRecording(recordingId, resolvedPlanName)
+    return deviceGestureRecordingClient.stopDeviceGestureRecording(recordingId, resolvedPlanName)
   }
 
   override fun executePlan(

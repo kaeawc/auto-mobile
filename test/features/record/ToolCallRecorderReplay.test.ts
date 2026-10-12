@@ -3,16 +3,16 @@ import * as yaml from "js-yaml";
 import { ResetKeychain } from "../../../src/features/action/ResetKeychain";
 import {
   MAX_RECORDED_PARAM_BYTES,
-  McpCallRecorder,
-} from "../../../src/features/record/McpCallRecorder";
+  ToolCallRecorder,
+} from "../../../src/features/record/ToolCallRecorder";
 import type { BootedDevice, Plan } from "../../../src/models";
 import { resetKeychainSchema } from "../../../src/server/appTools";
 import {
-  getMcpRecorder,
-  resetMcpRecordingState,
-  startMcpRecording,
-  stopMcpRecording,
-} from "../../../src/server/mcpRecordingManager";
+  getToolCallRecorder,
+  resetToolCallRecordingState,
+  startToolCallRecording,
+  stopToolCallRecording,
+} from "../../../src/server/toolCallRecordingManager";
 import { createJSONToolResponse } from "../../../src/utils/toolUtils";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { DefaultPlanExecutor } from "../../../src/utils/plan/PlanExecutor";
@@ -28,7 +28,7 @@ const SIMULATOR: BootedDevice = {
 
 afterEach(() => {
   ToolRegistry.clearTools();
-  resetMcpRecordingState();
+  resetToolCallRecordingState();
 });
 
 /**
@@ -60,15 +60,15 @@ function registerResetKeychain(simctl: FakeSimCtlClient): void {
 
 function recordResetKeychain(): Plan {
   const timer = new FakeTimer();
-  startMcpRecording({ timer });
-  getMcpRecorder()!.record("resetKeychain", {
+  startToolCallRecording({ timer });
+  getToolCallRecorder()!.record("resetKeychain", {
     appId: "com.example.app",
     confirm: true,
     deviceId: SIMULATOR.deviceId,
     sessionUuid: "recording-session",
     platform: "ios",
   });
-  return yaml.load(stopMcpRecording({ timer }).planContent) as Plan;
+  return yaml.load(stopToolCallRecording({ timer }).planContent) as Plan;
 }
 
 describe("resetKeychain replay of a recorded plan (#10052)", () => {
@@ -118,9 +118,9 @@ describe("resetKeychain replay of a recorded plan (#10052)", () => {
 
   test("the export tells the user the confirmation was withheld", () => {
     const timer = new FakeTimer();
-    startMcpRecording({ timer });
-    getMcpRecorder()!.record("resetKeychain", { appId: "com.example.app", confirm: true });
-    const result = stopMcpRecording({ timer });
+    startToolCallRecording({ timer });
+    getToolCallRecorder()!.record("resetKeychain", { appId: "com.example.app", confirm: true });
+    const result = stopToolCallRecording({ timer });
 
     expect(result.warnings).toEqual([
       "resetKeychain was recorded with its destructive confirmation set to false: a replay stops at this step until you set confirm: true in the plan by hand",
@@ -131,14 +131,14 @@ describe("resetKeychain replay of a recorded plan (#10052)", () => {
 describe("recording export warnings (#10052)", () => {
   test("a skipped sourcePath call is named with the reason and its position", () => {
     const timer = new FakeTimer();
-    startMcpRecording({ timer });
-    const recorder = getMcpRecorder()!;
+    startToolCallRecording({ timer });
+    const recorder = getToolCallRecorder()!;
     recorder.record("launchApp", { appId: "com.example.app" });
     recorder.record("putAppFile", {
       target: { domain: "media_library" },
       files: [{ destinationPath: "pic.png", sourcePath: "/Users/dev/pic.png" }],
     });
-    const result = stopMcpRecording({ timer });
+    const result = stopToolCallRecording({ timer });
 
     expect(result.stepCount).toBe(1);
     expect(result.warnings).toHaveLength(1);
@@ -150,27 +150,27 @@ describe("recording export warnings (#10052)", () => {
 
   test("a recording with no skipped calls has an empty warnings list", () => {
     const timer = new FakeTimer();
-    startMcpRecording({ timer });
-    getMcpRecorder()!.record("launchApp", { appId: "com.example.app" });
-    expect(stopMcpRecording({ timer }).warnings).toEqual([]);
+    startToolCallRecording({ timer });
+    getToolCallRecorder()!.record("launchApp", { appId: "com.example.app" });
+    expect(stopToolCallRecording({ timer }).warnings).toEqual([]);
   });
 
   test("an all-skipped recording reports the skipped calls instead of the generic error", () => {
     const timer = new FakeTimer();
-    startMcpRecording({ timer });
-    getMcpRecorder()!.record("stageSessionDownloads", {
+    startToolCallRecording({ timer });
+    getToolCallRecorder()!.record("stageSessionDownloads", {
       directory: "fixtures",
       files: [{ destinationPath: "a.txt", sourcePath: "/tmp/a.txt" }],
     });
 
-    expect(() => stopMcpRecording({ timer })).toThrow(
+    expect(() => stopToolCallRecording({ timer })).toThrow(
       /No MCP tool calls were recorded\. 1 call\(s\) were skipped: stageSessionDownloads was not recorded .*sourcePath/,
     );
   });
 
   test("an empty recording keeps the generic hint", () => {
-    startMcpRecording({ timer: new FakeTimer() });
-    expect(() => stopMcpRecording({ timer: new FakeTimer() })).toThrow(
+    startToolCallRecording({ timer: new FakeTimer() });
+    expect(() => stopToolCallRecording({ timer: new FakeTimer() })).toThrow(
       "Ensure plan-relevant tools were called during the recording.",
     );
   });
@@ -178,7 +178,7 @@ describe("recording export warnings (#10052)", () => {
 
 describe("recorded param size cap (#10052)", () => {
   test("a param over the cap is skipped with a warning that names the param", () => {
-    const recorder = new McpCallRecorder();
+    const recorder = new ToolCallRecorder();
     recorder.start();
     recorder.record("putAppFile", {
       target: { domain: "app_containers", appId: "com.example", container: "documents" },
@@ -195,7 +195,7 @@ describe("recorded param size cap (#10052)", () => {
   });
 
   test("a param just under the cap is still recorded", () => {
-    const recorder = new McpCallRecorder();
+    const recorder = new ToolCallRecorder();
     recorder.start();
     recorder.record("sendKeys", { text: "A".repeat(MAX_RECORDED_PARAM_BYTES - 10) });
     const { steps, warnings } = recorder.stopWithWarnings();
@@ -210,7 +210,7 @@ test.each([
   { x: 0.25, y: 0.5, coordinateSpace: "normalized" },
   { x: 20, y: 30, image: "reference.png", action: "longPress", durationMs: 800 },
 ])("missing tapAt geometry preserves legacy params %p and warns", (params) => {
-  const recorder = new McpCallRecorder();
+  const recorder = new ToolCallRecorder();
   const warning = spyOn(logger, "warn");
   try {
     recorder.start();

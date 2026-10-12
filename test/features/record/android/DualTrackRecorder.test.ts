@@ -1634,7 +1634,7 @@ describe("DualTrackRecorder", () => {
     expect(steps[1].params.button).toBe("home");
   });
 
-  test("stopTestRecording returns correct step count", async () => {
+  test("stopDeviceGestureRecording returns correct step count", async () => {
     await recorder.start();
     fakeGestures.emit({ type: "pressButton", arrivedAt: fakeTimer.now(), button: "back" });
     const { stepCount } = await recorder.stop();
@@ -1703,7 +1703,7 @@ test("coordinate fallback without geometry records a legacy tap and warns", asyn
   }
 });
 
-test("coordinate fallback carries the same native provenance as MCP recording", async () => {
+test("coordinate fallback carries the same native provenance as tool call recording", async () => {
   const emitter = new FakeGestureEmitter();
   const timer = new FakeTimer();
   const recorder = new DualTrackRecorder(fakeDevice, emitter, new FakeA11ySource(), timer);

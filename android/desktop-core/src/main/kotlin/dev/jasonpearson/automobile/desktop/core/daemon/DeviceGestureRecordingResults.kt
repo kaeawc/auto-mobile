@@ -3,7 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.daemon
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class TestRecordingStartResult(
+data class DeviceGestureRecordingStartResult(
   val recordingId: String,
   val startedAt: String,
   val deviceId: String? = null,
@@ -11,7 +11,7 @@ data class TestRecordingStartResult(
 )
 
 @Serializable
-data class TestRecordingStopResult(
+data class DeviceGestureRecordingStopResult(
   val recordingId: String,
   val startedAt: String,
   val stoppedAt: String,

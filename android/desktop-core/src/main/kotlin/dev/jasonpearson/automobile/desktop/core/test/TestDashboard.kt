@@ -44,11 +44,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.components.Link
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceGestureRecordingClient
 import dev.jasonpearson.automobile.desktop.core.daemon.HierarchyStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.daemon.NavigationGraphStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ScreenshotStreamUpdate
-import dev.jasonpearson.automobile.desktop.core.daemon.TestRecordingClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.formatUiNumber
@@ -79,7 +79,8 @@ fun TestDashboard(
   clientProvider: (() -> AutoMobileClient)? = null, // MCP client for real data
   observationStreamClient: ObservationStreamClient? =
     null, // Real-time stream client for hierarchy/screenshot/navigation updates
-  testRecordingClient: TestRecordingClient? = null, // Client for test recording operations
+  deviceGestureRecordingClient: DeviceGestureRecordingClient? =
+    null, // Client for device gesture recording operations
   fileSaver: dev.jasonpearson.automobile.desktop.core.platform.FileSaver =
     dev.jasonpearson.automobile.desktop.core.platform.SwingFileSaver,
 ) {
@@ -215,7 +216,7 @@ fun TestDashboard(
         screenshotUpdate = currentScreenshotUpdate,
         hierarchyUpdate = currentHierarchyUpdate,
         navigationUpdate = currentNavigationUpdate,
-        testRecordingClient = testRecordingClient,
+        deviceGestureRecordingClient = deviceGestureRecordingClient,
         fileSaver = fileSaver,
       )
     TestScreen.ModuleSelection ->
@@ -298,7 +299,7 @@ internal fun TestDashboardHome(
 
     Spacer(Modifier.height(20.dp))
 
-    // TODO: Once we have a proper test recording flow, make this button available again
+    // TODO: Once we have a proper device gesture recording flow, make this button available again
     // Button(onClick = onRecordTest) { Text("Record Test") }
 
     Spacer(Modifier.height(24.dp))
@@ -540,7 +541,7 @@ private fun RecordingTestScreen(
   screenshotUpdate: ScreenshotStreamUpdate? = null,
   hierarchyUpdate: HierarchyStreamUpdate? = null,
   navigationUpdate: NavigationGraphStreamUpdate? = null,
-  testRecordingClient: TestRecordingClient? = null,
+  deviceGestureRecordingClient: DeviceGestureRecordingClient? = null,
   fileSaver: dev.jasonpearson.automobile.desktop.core.platform.FileSaver =
     dev.jasonpearson.automobile.desktop.core.platform.SwingFileSaver,
 ) {
@@ -790,13 +791,13 @@ private fun RecordingTestScreen(
 
           Button(
             onClick = {
-              if (testRecordingClient != null && !isStoppingRecording) {
+              if (deviceGestureRecordingClient != null && !isStoppingRecording) {
                 isStoppingRecording = true
                 stopError = null
                 coroutineScope.launch(Dispatchers.IO) {
                   try {
                     val result =
-                      testRecordingClient.stopTestRecording(
+                      deviceGestureRecordingClient.stopDeviceGestureRecording(
                         recordingId = currentRecordingId,
                         planName = null,
                       )

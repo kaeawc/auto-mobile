@@ -150,7 +150,8 @@ async function main() {
   const { guardDatabaseStartup } = await import("./daemon/daemonStartupGuard");
   const { DefaultDatabaseInitializer } = await import("./db/DatabaseInitializer");
   const videoRecordingSocketServer = await import("./daemon/videoRecordingSocketServer");
-  const testRecordingSocketServer = await import("./daemon/testRecordingSocketServer");
+  const deviceGestureRecordingSocketServer =
+    await import("./daemon/deviceGestureRecordingSocketServer");
   const deviceSnapshotSocketServer = await import("./daemon/deviceSnapshotSocketServer");
   const appearanceSocketServer = await import("./daemon/appearanceSocketServer");
   const webrtcStreamSocketServer = await import("./daemon/webrtcStreamSocketServer");
@@ -168,8 +169,8 @@ async function main() {
 
   const { startVideoRecordingSocketServer, stopVideoRecordingSocketServer } =
     videoRecordingSocketServer;
-  const { startTestRecordingSocketServer, stopTestRecordingSocketServer } =
-    testRecordingSocketServer;
+  const { startDeviceGestureRecordingSocketServer, stopDeviceGestureRecordingSocketServer } =
+    deviceGestureRecordingSocketServer;
   const { startDeviceSnapshotSocketServer, stopDeviceSnapshotSocketServer } =
     deviceSnapshotSocketServer;
   const { startAppearanceSocketServer, stopAppearanceSocketServer } = appearanceSocketServer;
@@ -192,7 +193,7 @@ async function main() {
           cleanupChildProcesses: () => cleanupDaemonChildProcesses(),
           stopManagedAdbServer: () => stopManagedAdbServer(),
           stopVideoRecordingSocketServer: () => stopVideoRecordingSocketServer(),
-          stopTestRecordingSocketServer: () => stopTestRecordingSocketServer(),
+          stopDeviceGestureRecordingSocketServer: () => stopDeviceGestureRecordingSocketServer(),
           stopDeviceSnapshotSocketServer: () => stopDeviceSnapshotSocketServer(),
           stopAppearanceSocketServer: () => stopAppearanceSocketServer(),
           stopWebRtcStreamSocketServer: () => stopWebRtcStreamSocketServer(),
@@ -279,7 +280,7 @@ async function main() {
       dismissKeyboardAfterInput,
       eventAllMarkers,
       eventAllMarkersCliOverride,
-      mcpRecording,
+      toolCallRecording,
       navigationScreenshots,
       noWaitForPollingOverhead,
       noProxy,
@@ -446,7 +447,7 @@ async function main() {
       ["accessibility-audit", a11yAuditMode, "--accessibility-audit", accessibilityConfig],
       ["predictive-ui", predictiveUi, "--predictive/--predictive-ui"],
       ["raw-element-search", rawElementSearch, "--raw-element-search"],
-      ["mcp-recording", mcpRecording, "--mcp-recording"],
+      ["tool-call-recording", toolCallRecording, "--tool-call-recording"],
       ...persistedOutputReductionOverrides(outputReduction).map(
         ({ key, label }): CliFeatureFlagOverride => [key, true, label, undefined],
       ),
@@ -456,7 +457,7 @@ async function main() {
     // reads AND the CLI-override setFlag() writes. In --daemon-mode this runs
     // inside the circuit breaker (below) so a startup DB failure anywhere here —
     // including a write that fails on a read-only/full DB launched with --debug,
-    // --mcp-recording, --no-navigation-screenshots — funnels through the same
+    // --tool-call-recording, --no-navigation-screenshots — funnels through the same
     // classify/record/backoff/rethrow path instead of escaping to main().catch
     // and tight-respawning (issue #2784).
     const applyFeatureFlagStartup = async (): Promise<void> => {
@@ -603,7 +604,7 @@ async function main() {
         predictiveUi,
         rawElementSearch,
         skipCtrlProxyDownload,
-        mcpRecording,
+        toolCallRecording,
         noNavigationScreenshots: !navigationScreenshots,
         noWaitForPollingOverhead,
         noA11yIncludeNotImportantViews,
@@ -655,7 +656,7 @@ async function main() {
       ...(debugPerf ? { debugPerf: true } : {}),
       ...(planExecutionLockScopeExplicit ? { planExecutionLockScope } : {}),
       ...(runnerReadinessTimeoutMs !== undefined ? { runnerReadinessTimeoutMs } : {}),
-      ...(mcpRecording ? { mcpRecording: true } : {}),
+      ...(toolCallRecording ? { toolCallRecording: true } : {}),
       videoQualityPreset: videoRecordingDefaults.qualityPreset,
       videoTargetBitrateKbps: videoRecordingDefaults.targetBitrateKbps,
       videoMaxThroughputMbps: videoRecordingDefaults.maxThroughputMbps,
@@ -731,7 +732,7 @@ async function main() {
         logger.info("Starting MCP server in direct mode (--no-proxy flag)");
         // Start auxiliary services only in direct mode
         await startVideoRecordingSocketServer();
-        await startTestRecordingSocketServer();
+        await startDeviceGestureRecordingSocketServer();
         await startDeviceSnapshotSocketServer();
         await startAppearanceSocketServer();
         await startWebRtcStreamSocketServer();

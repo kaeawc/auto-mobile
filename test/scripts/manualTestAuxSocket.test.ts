@@ -9,7 +9,7 @@ import {
 import { derivePrivateDaemonBatch } from "../../scripts/manual-test/privateDaemonEnv";
 import type { FrameConnection } from "../../scripts/manual-test/frameWire";
 import {
-  TEST_RECORDING_SOCKET_CONFIG,
+  DEVICE_GESTURE_RECORDING_SOCKET_CONFIG,
   VIDEO_STREAM_SOCKET_CONFIG,
   resolveWebRtcStreamSocketPath,
 } from "../../src/daemon/daemonFiles";
@@ -197,7 +197,7 @@ posixTest(
     expect(f.paths).toEqual([
       join(
         f.deps.env.AUTOMOBILE_AUX_SOCKET_DIR!,
-        basename(TEST_RECORDING_SOCKET_CONFIG.defaultPath),
+        basename(DEVICE_GESTURE_RECORDING_SOCKET_CONFIG.defaultPath),
       ),
     ]);
     expect(f.aux.writes).toEqual([{ command: "status", sessionUuid: "uuid" }]);
@@ -346,7 +346,7 @@ posixTest("canonical auxiliary socket pointing into default state refuses before
   const f = fixture();
   const socket = join(
     f.deps.env.AUTOMOBILE_AUX_SOCKET_DIR!,
-    basename(TEST_RECORDING_SOCKET_CONFIG.defaultPath),
+    basename(DEVICE_GESTURE_RECORDING_SOCKET_CONFIG.defaultPath),
   );
   f.deps.host.canonicalize = (path) =>
     path === socket ? resolve("/fake/home/.auto-mobile/recording.sock") : resolve(path);

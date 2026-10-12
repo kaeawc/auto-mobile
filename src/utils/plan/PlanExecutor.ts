@@ -289,7 +289,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     const { platform, deviceId, sessionUuid, signal, executionOptions } = options;
     let executedSteps = 0;
     const startTime = this.timer.now();
-    // Always capture step data for test recording, not just in debug mode
+    // Always capture step data for device gesture recording, not just in debug mode
     const debugSteps: ExecutePlanStepDebugInfo[] = [];
     // Promoted out of the debug trace so an ordinary plan's caller sees them
     // (#6887 review).

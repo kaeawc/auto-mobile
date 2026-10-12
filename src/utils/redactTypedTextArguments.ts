@@ -6,7 +6,7 @@ import { decodePlanYamlContent, PLAN_YAML_LOAD_OPTIONS } from "./plan/planYaml";
 /**
  * Generic request and argument logs run before a tool knows whether the target field is a
  * password field, so they never carry typed user text: each typed string is replaced with
- * this placeholder. Functional records (plan and test recording, navigation edges) keep the
+ * this placeholder. Functional records (plan and device gesture recording, navigation edges) keep the
  * real text because they replay it.
  */
 export function typedTextPlaceholder(text: string): string {

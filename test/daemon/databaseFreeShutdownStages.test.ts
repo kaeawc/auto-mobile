@@ -275,7 +275,7 @@ function probes(): Record<string, Probe> {
           cleanupChildProcesses: unused,
           stopManagedAdbServer: managedAdbShutdown(timer, adbCommands),
           stopVideoRecordingSocketServer: unused,
-          stopTestRecordingSocketServer: unused,
+          stopDeviceGestureRecordingSocketServer: unused,
           stopDeviceSnapshotSocketServer: unused,
           stopAppearanceSocketServer: unused,
           stopWebRtcStreamSocketServer: unused,

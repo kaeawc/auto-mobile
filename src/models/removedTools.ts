@@ -1,5 +1,7 @@
 /** Known removed MCP tools and the supported tool to use in their place. */
 export const REMOVED_TOOLS: Readonly<Record<string, string>> = {
+  recordSteps: "recordToolCalls",
+  startTestRecording: "recordDeviceGestures",
   captureScreenshot: 'observe {screenshot:"settled"} (returns screenshotPath)',
   inputText: "sendKeys",
   clearText: "sendKeys",

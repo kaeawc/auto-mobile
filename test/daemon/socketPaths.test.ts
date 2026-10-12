@@ -21,7 +21,7 @@ describe("daemon socket paths", () => {
       "performance-push": path.join(auxDir, "performance-push.sock"),
       "performance-stream": path.join(auxDir, "performance-stream.sock"),
       "telemetry-push": path.join(auxDir, "telemetry-push.sock"),
-      "test-recording": path.join(auxDir, "test-recording.sock"),
+      "device-gesture-recording": path.join(auxDir, "device-gesture-recording.sock"),
       "video-recording": path.join(auxDir, "video-recording.sock"),
       // Issue #4195: started by the daemon but previously absent from both registries.
       "video-stream": path.join(auxDir, "video-stream.sock"),

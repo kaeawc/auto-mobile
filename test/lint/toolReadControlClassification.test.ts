@@ -108,6 +108,7 @@ const CLASSIFICATION: Classification = {
     "putAppFile",
     "recentApps",
     "reconcileDeviceResources",
+    "recordDeviceGestures",
     "removeKeyValue",
     "resetAppLogs",
     "resetKeychain",
@@ -125,7 +126,6 @@ const CLASSIFICATION: Classification = {
     "setUIState",
     "shake",
     "stageSessionDownloads",
-    "startTestRecording",
     "swipeOn",
     // Pulls the notification shade down, even to list or find.
     "systemTray",
@@ -148,7 +148,7 @@ const CLASSIFICATION: Classification = {
 const PLAIN_CLASSIFICATION: Classification = {
   read: ["doctor", "getIosSimulatorCapabilities", "listDeviceImages", "listDevices"],
   perArgs: {
-    recordSteps: {
+    recordToolCalls: {
       reads: [{ action: "status" }],
       controls: [{ action: "begin" }, { action: "end", planName: "p" }],
     },

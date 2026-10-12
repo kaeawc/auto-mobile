@@ -166,7 +166,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       reason:
         "Shared video/WebRTC discovery reconciles before selection, including bounded iOS retries.",
     },
-    "src/daemon/testRecordingSocketServer.ts": {
+    "src/daemon/deviceGestureRecordingSocketServer.ts": {
       calls: 1,
       reason:
         "Selects the recording target from the AVD-name-aware manager, reconciles before the " +
@@ -291,7 +291,7 @@ describe("Android discovery reconcile funnel (issue #6863)", () => {
       "src/server/deviceToolsProvisioning.ts",
       "src/server/utilityTools.ts",
       "src/daemon/streamDeviceResolver.ts",
-      "src/daemon/testRecordingSocketServer.ts",
+      "src/daemon/deviceGestureRecordingSocketServer.ts",
       "src/server/resourceDeviceResolver.ts",
     ];
     routedSources = routed.map((file) => ({ file, source: sourceWithoutComments(file) }));

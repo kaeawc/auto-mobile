@@ -22,11 +22,11 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `identifyInteractions`, `inspectPackageSigning`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
 `mockNetwork`, `navigateTo`, `network`, `observe`, `openLink`, `phoneCall`, `pinchOn`,
 `postNotification`, `pressButton`, `prototype`, `putAppFile`, `recentApps`,
-`reconcileDeviceResources`, `recordSteps`, `removeKeyValue`,
+`reconcileDeviceResources`, `recordDeviceGestures`, `recordToolCalls`, `removeKeyValue`,
 `resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendKeys`, `sendSms`,
 `setActiveDevice`, `setAppPermissions`, `setDeviceResources`, `setDeviceState`, `setKeyValue`,
 `setNotificationPolicy`, `setPosture`, `setPreference`, `setUIState`, `shake`, `snapshotOf`,
-`sqlQuery`, `startTestRecording`,
+`sqlQuery`,
 `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`, `uninstallApp`,
 `videoRecording`, `wakeAndUnlock`.
 
@@ -2140,18 +2140,18 @@ while the shared 10,000 ms read continues; coalesced AVD reads use a 30,000 ms s
 
 ## Network, plans & recording
 
-| Tool                                                           | What it does                                                                   |
-| -------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| 🌐 <code>network</code>                                        | Controls network capture and error simulation.                                 |
-| 🎭 <code>mockNetwork</code> / 🧹 <code>clearMockNetwork</code> | Adds or clears mock network response rules.                                    |
-| 🕸️ <code>getNetworkGraph</code>                                | Returns the aggregate captured network graph.                                  |
-| 🧪 <code>executePlan</code>                                    | Executes YAML plan steps and stops at the first failure.                       |
-| 🔒 <code>criticalSection</code>                                | Synchronizes devices, then runs steps serially.                                |
-| 🚧 <code>barrier</code>                                        | Synchronizes devices, then lets them proceed concurrently.                     |
-| 📝 <code>recordSteps</code>                                    | Records MCP calls to YAML; begin and end require <code>--mcp-recording</code>. |
-| ⏺️ <code>startTestRecording</code>                             | Records on-device user input (not tool calls) for <code>exportPlan</code>.     |
-| 📤 <code>exportPlan</code>                                     | Stops the active recording and exports a YAML plan.                            |
-| 🎥 <code>videoRecording</code>                                 | Starts or stops device video recording.                                        |
+| Tool                                                           | What it does                                                                              |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| 🌐 <code>network</code>                                        | Controls network capture and error simulation.                                            |
+| 🎭 <code>mockNetwork</code> / 🧹 <code>clearMockNetwork</code> | Adds or clears mock network response rules.                                               |
+| 🕸️ <code>getNetworkGraph</code>                                | Returns the aggregate captured network graph.                                             |
+| 🧪 <code>executePlan</code>                                    | Executes YAML plan steps and stops at the first failure.                                  |
+| 🔒 <code>criticalSection</code>                                | Synchronizes devices, then runs steps serially.                                           |
+| 🚧 <code>barrier</code>                                        | Synchronizes devices, then lets them proceed concurrently.                                |
+| 📝 <code>recordToolCalls</code>                                | Records MCP tool calls to YAML; begin and end require <code>--tool-call-recording</code>. |
+| ⏺️ <code>recordDeviceGestures</code>                           | Records on-device user input (not tool calls) for <code>exportPlan</code>.                |
+| 📤 <code>exportPlan</code>                                     | Stops the active recording and exports a YAML plan.                                       |
+| 🎥 <code>videoRecording</code>                                 | Starts or stops device video recording.                                                   |
 
 ### Network options
 
@@ -2209,7 +2209,7 @@ the caller then releases the session (plans with device labels are always releas
 lifts. `criticalSection.deviceCount` specifies the devices required at its
 barrier before serial execution.
 
-`recordSteps.planName` names the plan for `action: "end"`. The end response
+`recordToolCalls.planName` names the plan for `action: "end"`. The end response
 carries a `warnings` list when a call was skipped (a file-staging call with a
 host `sourcePath`, or a param over 64 KiB) or recorded in a weakened form:
 `resetKeychain` is recorded with `confirm: false`, so a replay stops at that
@@ -2218,12 +2218,12 @@ were all skipped fails with an error that lists them.
 `exportPlan.recordingId` identifies the recording to export, and `planName`
 names the exported plan.
 
-Test recordings capture input made on the device itself: touches on its touch
+Device gesture recordings capture input made on the device itself: touches on its touch
 screen or emulator window, and text changes in input fields. A text change is recorded whatever produced it,
 so text typed by a tool becomes a `sendKeys` step. Taps, swipes and
 other gestures sent through AutoMobile tools (`tapAt`, `tapOn`, `swipeOn`, etc.)
 or `adb shell input` are injected and are not recorded by design; use
-`recordSteps` to record tool calls. Recording status always reports
+`recordToolCalls` to record tool calls. Recording status always reports
 `captureScope: "user-input"` and includes a `notice` while `eventCount` is zero.
 A stop or `exportPlan` with no captured input fails with
 `reason: "no_user_input_captured"` and the same explanation; touch-track or

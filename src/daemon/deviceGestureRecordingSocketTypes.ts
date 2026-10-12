@@ -1,8 +1,8 @@
 import type { Platform } from "../models";
-import type { TestRecordingStatus } from "../server/testRecordingManager";
+import type { DeviceGestureRecordingStatus } from "../server/deviceGestureRecordingManager";
 import type { SocketRequest } from "./socketServer/SocketServerTypes";
 
-export interface TestRecordingCommand extends SocketRequest {
+export interface DeviceGestureRecordingCommand extends SocketRequest {
   command: "start" | "stop" | "status";
   deviceId?: string;
   platform?: Platform;
@@ -12,7 +12,7 @@ export interface TestRecordingCommand extends SocketRequest {
   sessionUuid?: string;
 }
 
-export interface TestRecordingResponse {
+export interface DeviceGestureRecordingResponse {
   success: boolean;
   recordingId?: string;
   startedAt?: string;
@@ -23,7 +23,7 @@ export interface TestRecordingResponse {
   planContent?: string;
   stepCount?: number;
   durationMs?: number;
-  recording?: TestRecordingStatus;
+  recording?: DeviceGestureRecordingStatus;
   error?: string;
   /** Machine-readable cause of an unsuccessful recording command, when available. */
   reason?: string;

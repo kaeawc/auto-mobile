@@ -33,7 +33,7 @@ class ServerConfig {
   private _skipCtrlProxyDownload: boolean = false;
   private _embeddedSdkEnabled: boolean = false;
   private _networkMockableEnabled: boolean = false;
-  private _mcpRecordingEnabled: boolean = false;
+  private _toolCallRecordingEnabled: boolean = false;
   private _dismissKeyboardAfterInputEnabled: boolean = false;
   private _eventAllMarkers: string[] = [];
   private _navigationScreenshotsEnabled: boolean = true;
@@ -185,12 +185,12 @@ class ServerConfig {
     return this._networkMockableEnabled;
   }
 
-  setMcpRecordingEnabled(enabled: boolean): void {
-    this._mcpRecordingEnabled = enabled;
+  setToolCallRecordingEnabled(enabled: boolean): void {
+    this._toolCallRecordingEnabled = enabled;
   }
 
-  isMcpRecordingEnabled(): boolean {
-    return this._mcpRecordingEnabled;
+  isToolCallRecordingEnabled(): boolean {
+    return this._toolCallRecordingEnabled;
   }
 
   setDismissKeyboardAfterInputEnabled(enabled: boolean): void {

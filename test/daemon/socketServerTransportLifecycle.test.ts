@@ -16,11 +16,11 @@ import { FakeSocket } from "../fakes/FakeNetServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import {
-  getMcpRecorder,
-  getMcpRecordingStatus,
-  resetMcpRecordingState,
-  startMcpRecording,
-} from "../../src/server/mcpRecordingManager";
+  getToolCallRecorder,
+  getToolCallRecordingStatus,
+  resetToolCallRecordingState,
+  startToolCallRecording,
+} from "../../src/server/toolCallRecordingManager";
 
 interface ServerInternals {
   resourceSubscriptions: Map<string, Set<string>>;
@@ -49,7 +49,7 @@ class RpcSocket extends FakeSocket {
 }
 
 describe("daemon socket transport lifecycle", () => {
-  afterEach(() => resetMcpRecordingState());
+  afterEach(() => resetToolCallRecordingState());
 
   test("ide/status advertises structured session-not-found errors", async () => {
     const server = new UnixSocketServer(
@@ -110,12 +110,12 @@ describe("daemon socket transport lifecycle", () => {
       internals.acceptingRequests = true;
       const socket = new RpcSocket();
       internals.handleConnection(socket as unknown as Socket);
-      startMcpRecording({ connectionId: "recording-socket-1", timer });
-      startMcpRecording({ connectionId: "other-socket", timer });
+      startToolCallRecording({ connectionId: "recording-socket-1", timer });
+      startToolCallRecording({ connectionId: "other-socket", timer });
       socket.emit(event, event === "error" ? new Error("fake disconnect") : false);
-      expect(getMcpRecorder({ connectionId: "recording-socket-1" })).toBeNull();
-      expect(getMcpRecordingStatus({ connectionId: "recording-socket-1", timer })).toBeNull();
-      expect(getMcpRecorder({ connectionId: "other-socket" })?.isRecording()).toBe(true);
+      expect(getToolCallRecorder({ connectionId: "recording-socket-1" })).toBeNull();
+      expect(getToolCallRecordingStatus({ connectionId: "recording-socket-1", timer })).toBeNull();
+      expect(getToolCallRecorder({ connectionId: "other-socket" })?.isRecording()).toBe(true);
     });
   }
 
@@ -126,11 +126,11 @@ describe("daemon socket transport lifecycle", () => {
     const oldSocket = new RpcSocket() as unknown as Socket;
     const newSocket = new RpcSocket() as unknown as Socket;
     internals.clientSockets.set("reused-id", newSocket);
-    startMcpRecording({ connectionId: "reused-id", timer });
+    startToolCallRecording({ connectionId: "reused-id", timer });
     internals.releaseSocketSession("reused-id", oldSocket);
-    expect(getMcpRecorder({ connectionId: "reused-id" })?.isRecording()).toBe(true);
+    expect(getToolCallRecorder({ connectionId: "reused-id" })?.isRecording()).toBe(true);
     internals.releaseSocketSession("reused-id", newSocket);
-    expect(getMcpRecorder({ connectionId: "reused-id" })).toBeNull();
+    expect(getToolCallRecorder({ connectionId: "reused-id" })).toBeNull();
   });
 
   test("reset sends HTTP DELETE before closing the loopback MCP client", async () => {

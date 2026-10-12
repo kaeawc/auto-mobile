@@ -3,8 +3,8 @@ import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import type { BootedDevice, PlanStep } from "../../src/models";
 import type { SessionManager } from "../../src/daemon/sessionManager";
 import { SessionScopedStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
-import { TestRecordingSocketServer } from "../../src/daemon/testRecordingSocketServer";
-import type { TestRecordingCommand } from "../../src/daemon/testRecordingSocketTypes";
+import { DeviceGestureRecordingSocketServer } from "../../src/daemon/deviceGestureRecordingSocketServer";
+import type { DeviceGestureRecordingCommand } from "../../src/daemon/deviceGestureRecordingSocketTypes";
 import { registerPlanTools } from "../../src/server/planTools";
 import {
   defaultRecordingSessionCleanupDeps,
@@ -12,10 +12,10 @@ import {
   takeRecordingIdsFinalizedByRelease,
 } from "../../src/server/recordingSessionCleanup";
 import {
-  resetStoppedTestRecordings,
-  startTestRecording,
-  stopTestRecording,
-} from "../../src/server/testRecordingManager";
+  resetStoppedDeviceGestureRecordings,
+  startDeviceGestureRecording,
+  stopDeviceGestureRecording,
+} from "../../src/server/deviceGestureRecordingManager";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -29,8 +29,8 @@ const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platfor
 const step: PlanStep = { tool: "tapOn", params: { text: "OK" } };
 const OWNER = "session-a";
 
-class TestableServer extends TestRecordingSocketServer {
-  invoke(request: TestRecordingCommand) {
+class TestableServer extends DeviceGestureRecordingSocketServer {
+  invoke(request: DeviceGestureRecordingCommand) {
     return this.handleRequest(request);
   }
 }
@@ -70,15 +70,15 @@ class FakeSessionManager implements CleanupManager {
  * "Recording artifacts stay fetchable by id" (#10958, docs/using/device-ownership.md): the
  * `notifications/session/released` payload names the recordings the release finalizes
  * (`recordingIds`), and it is emitted from the release callback, while the finalize is still in
- * flight. `stopTestRecording(recordingId)` already joins a stop in flight, but neither surface
- * reaches it: both gate on `getTestRecordingStatus()`, which is null once the stop has begun, and
+ * flight. `stopDeviceGestureRecording(recordingId)` already joins a stop in flight, but neither surface
+ * reaches it: both gate on `getDeviceGestureRecordingStatus()`, which is null once the stop has begun, and
  * the retained plan does not exist until the stop ends.
  *
  * So the previous owner, fetching the id it was just handed, is told "No active recording. Start
  * a recording before exporting." by exportPlan and "not an active daemon session" by the socket
  * stop. A moment later the same request returns the plan.
  */
-describe("the previous owner fetches the announced test recording while its release-time stop is in flight", () => {
+describe("the previous owner fetches the announced device gesture recording while its release-time stop is in flight", () => {
   let finishStop!: () => void;
   const timer = new FakeTimer();
 
@@ -90,8 +90,8 @@ describe("the previous owner fetches the announced test recording while its rele
 
   afterEach(async () => {
     finishStop();
-    await stopTestRecording(undefined, undefined, timer).catch(() => undefined);
-    resetStoppedTestRecordings();
+    await stopDeviceGestureRecording(undefined, undefined, timer).catch(() => undefined);
+    resetStoppedDeviceGestureRecordings();
   });
 
   /** Releases the owner; returns the recording id the released notification would name. */
@@ -103,7 +103,7 @@ describe("the previous owner fetches the announced test recording while its rele
       finishStop = resolve;
     });
     let stopBegan = false;
-    await startTestRecording(
+    await startDeviceGestureRecording(
       device,
       timer,
       new CountingIdGenerator("recording"),
@@ -162,7 +162,7 @@ describe("the previous owner fetches the announced test recording while its rele
           getSessionForDevice: () => null,
           getDeviceLabels: () => undefined,
         }),
-        "testRecording",
+        "deviceGestureRecording",
         {},
       ),
     );
@@ -182,7 +182,7 @@ describe("the previous owner fetches the announced test recording while its rele
     const gate = new Promise<void>((resolve) => {
       finishStop = resolve;
     });
-    const started = await startTestRecording(
+    const started = await startDeviceGestureRecording(
       device,
       timer,
       new CountingIdGenerator("join"),
@@ -199,7 +199,7 @@ describe("the previous owner fetches the announced test recording while its rele
       }),
       OWNER,
     );
-    const stopped = stopTestRecording(started.recordingId, undefined, timer);
+    const stopped = stopDeviceGestureRecording(started.recordingId, undefined, timer);
     // Observe rejection immediately while the requester joins the same stop.
     const outcome = stopped.then(
       () => undefined,
@@ -218,7 +218,7 @@ describe("the previous owner fetches the announced test recording while its rele
           getSessionForDevice: () => null,
           getDeviceLabels: () => undefined,
         }),
-        "testRecording",
+        "deviceGestureRecording",
         {},
       ),
     );

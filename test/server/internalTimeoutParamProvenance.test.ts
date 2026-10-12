@@ -16,7 +16,7 @@ import { stripInternalToolParams } from "../../src/server/index";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { logger } from "../../src/utils/logger";
 import { TelemetryRecorder } from "../../src/features/telemetry/TelemetryRecorder";
-import { stripInternalParams } from "../../src/features/record/McpCallRecorder";
+import { stripInternalParams } from "../../src/features/record/ToolCallRecorder";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createStructuredToolResponse, getStructuredField } from "../../src/utils/toolUtils";
 import {

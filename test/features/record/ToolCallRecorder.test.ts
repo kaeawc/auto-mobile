@@ -1,28 +1,28 @@
 import { expect, describe, test } from "bun:test";
 import {
-  McpCallRecorder,
+  ToolCallRecorder,
   PLAN_RELEVANT_TOOLS,
   stripInternalParams,
-} from "../../../src/features/record/McpCallRecorder";
+} from "../../../src/features/record/ToolCallRecorder";
 
 import { INTERNAL_TOOL_PARAM_NAMES } from "../../../src/daemon/constants";
 
-describe("McpCallRecorder", () => {
+describe("ToolCallRecorder", () => {
   describe("recording lifecycle", () => {
     test("starts in non-recording state", () => {
-      const recorder = new McpCallRecorder();
+      const recorder = new ToolCallRecorder();
       expect(recorder.isRecording()).toBe(false);
       expect(recorder.stepCount).toBe(0);
     });
 
     test("start enables recording", () => {
-      const recorder = new McpCallRecorder();
+      const recorder = new ToolCallRecorder();
       recorder.start();
       expect(recorder.isRecording()).toBe(true);
     });
 
     test("stop returns recorded steps and disables recording", () => {
-      const recorder = new McpCallRecorder();
+      const recorder = new ToolCallRecorder();
       recorder.start();
       recorder.record("tapOn", { text: "Login" });
       recorder.record("sendKeys", { commands: [{ action: "type", text: "user@test.com" }] });
@@ -38,7 +38,7 @@ describe("McpCallRecorder", () => {
     });
 
     test("start clears previous steps", () => {
-      const recorder = new McpCallRecorder();
+      const recorder = new ToolCallRecorder();
       recorder.start();
       recorder.record("tapOn", { text: "Login" });
       expect(recorder.stepCount).toBe(1);
@@ -48,7 +48,7 @@ describe("McpCallRecorder", () => {
     });
 
     test("stop returns a copy, not a reference to internal state", () => {
-      const recorder = new McpCallRecorder();
+      const recorder = new ToolCallRecorder();
       recorder.start();
       recorder.record("tapOn", { text: "Login" });
       const steps = recorder.stop();
@@ -64,7 +64,7 @@ describe("McpCallRecorder", () => {
 
   describe("tool filtering", () => {
     test("records plan-relevant tools", () => {
-      const recorder = new McpCallRecorder();
+      const recorder = new ToolCallRecorder();
       recorder.start();
 
       recorder.record("launchApp", { appId: "com.test" });
@@ -79,7 +79,7 @@ describe("McpCallRecorder", () => {
     });
 
     test("records crashApp with only reproducible plan parameters", () => {
-      const recorder = new McpCallRecorder();
+      const recorder = new ToolCallRecorder();
       recorder.start();
 
       recorder.record("crashApp", {
@@ -92,7 +92,7 @@ describe("McpCallRecorder", () => {
     });
 
     test("records sendKeys clear and dragAndDrop as plan steps", () => {
-      const recorder = new McpCallRecorder();
+      const recorder = new ToolCallRecorder();
       recorder.start();
 
       recorder.record("sendKeys", { commands: [{ action: "clear" }] });
@@ -105,7 +105,7 @@ describe("McpCallRecorder", () => {
     });
 
     test("ignores infrastructure tools", () => {
-      const recorder = new McpCallRecorder();
+      const recorder = new ToolCallRecorder();
       recorder.start();
 
       recorder.record("listDevices", {});
@@ -113,7 +113,7 @@ describe("McpCallRecorder", () => {
       recorder.record("killDevice", { deviceId: "emulator-5554" });
       recorder.record("setActiveDevice", { deviceId: "emulator-5554" });
       recorder.record("installApp", { appPath: "/tmp/app.apk" });
-      recorder.record("startTestRecording", {});
+      recorder.record("recordDeviceGestures", {});
       recorder.record("exportPlan", {});
       recorder.record("executePlan", { plan: "test" });
       recorder.record("screenshot", {});
@@ -122,7 +122,7 @@ describe("McpCallRecorder", () => {
     });
 
     test("does not record when not in recording state", () => {
-      const recorder = new McpCallRecorder();
+      const recorder = new ToolCallRecorder();
       recorder.record("tapOn", { text: "Login" });
       expect(recorder.stepCount).toBe(0);
     });
@@ -130,7 +130,7 @@ describe("McpCallRecorder", () => {
 
   describe("param stripping", () => {
     test("drops canonical transport metadata and reserved double-underscore keys", () => {
-      const recorder = new McpCallRecorder();
+      const recorder = new ToolCallRecorder();
       recorder.start();
       const args = {
         ...Object.fromEntries(INTERNAL_TOOL_PARAM_NAMES.map((key) => [key, "internal"])),
@@ -151,7 +151,7 @@ describe("McpCallRecorder", () => {
     });
 
     test("records only non-internal params", () => {
-      const recorder = new McpCallRecorder();
+      const recorder = new ToolCallRecorder();
       recorder.start();
 
       recorder.record("tapOn", {
@@ -184,7 +184,7 @@ describe("McpCallRecorder", () => {
       "__lockNamespace",
       "__internalNoDiff",
     ])("strips the internal routing param %p from a recorded step", (internalParam) => {
-      const recorder = new McpCallRecorder();
+      const recorder = new ToolCallRecorder();
       recorder.start();
 
       recorder.record("tapOn", { text: "keep-me", [internalParam]: "leak" });
@@ -195,7 +195,7 @@ describe("McpCallRecorder", () => {
     });
 
     test("preserves all non-internal params", () => {
-      const recorder = new McpCallRecorder();
+      const recorder = new ToolCallRecorder();
       recorder.start();
 
       recorder.record("tapOn", {
@@ -260,7 +260,7 @@ describe("PLAN_RELEVANT_TOOLS", () => {
       "killDevice",
       "setActiveDevice",
       "installApp",
-      "startTestRecording",
+      "recordDeviceGestures",
       "exportPlan",
       "executePlan",
       "screenshot",

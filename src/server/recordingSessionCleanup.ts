@@ -5,11 +5,11 @@ import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import {
-  adoptOwnerlessTestRecording,
-  isTestRecordingOwnedBy,
-  ownedTestRecordingId,
-  stopTestRecording,
-} from "./testRecordingManager";
+  adoptOwnerlessDeviceGestureRecording,
+  isDeviceGestureRecordingOwnedBy,
+  ownedDeviceGestureRecordingId,
+  stopDeviceGestureRecording,
+} from "./deviceGestureRecordingManager";
 import {
   adoptOwnerlessSegmentedVideoRecordings,
   hasSegmentedVideoRecordingsForOwner,
@@ -56,9 +56,12 @@ export interface RecordingSessionCleanupDeps {
     }>
   >;
   stopVideoRecording(recordingId: string): Promise<void>;
-  isTestRecordingOwnedBy(sessionId: string | undefined, deviceId: string): boolean;
-  stopTestRecording(recordingId?: string): Promise<void>;
-  ownedTestRecordingId(sessionId: string | undefined, deviceId: string): string | undefined;
+  isDeviceGestureRecordingOwnedBy(sessionId: string | undefined, deviceId: string): boolean;
+  stopDeviceGestureRecording(recordingId?: string): Promise<void>;
+  ownedDeviceGestureRecordingId(
+    sessionId: string | undefined,
+    deviceId: string,
+  ): string | undefined;
   /** Ids of the recordings a session owns on the device, from memory only (no DB read). */
   activeRecordingIdsForOwner(sessionId: string | undefined, deviceId: string): string[];
   /** Deadline clock for the finalize cap; a FakeTimer in tests. */
@@ -73,25 +76,25 @@ export const defaultRecordingSessionCleanupDeps: RecordingSessionCleanupDeps = {
   hasRecordingsToStop: (sessionId, deviceId) =>
     listOwnedActiveVideoRecordingIds().length > 0 ||
     hasSegmentedVideoRecordingsForOwner(sessionId, deviceId) ||
-    isTestRecordingOwnedBy(sessionId, deviceId),
+    isDeviceGestureRecordingOwnedBy(sessionId, deviceId),
   stopSegmentedRecordings: stopSegmentedVideoRecordingsForOwner,
   listActiveVideoRecordings: (deviceId) => listActiveVideoRecordings({ deviceId }),
   stopVideoRecording: async (recordingId) => {
     await stopVideoRecordingUnattended(recordingId);
   },
-  isTestRecordingOwnedBy,
-  ownedTestRecordingId,
+  isDeviceGestureRecordingOwnedBy,
+  ownedDeviceGestureRecordingId,
   activeRecordingIdsForOwner: (sessionId, deviceId) => {
     // One id, not a string to spread: spreading it would split the id into characters.
-    const testRecordingId = ownedTestRecordingId(sessionId, deviceId);
+    const deviceGestureRecordingId = ownedDeviceGestureRecordingId(sessionId, deviceId);
     return [
       ...listActiveVideoRecordingIdsForOwner(sessionId, deviceId),
       ...segmentedVideoRecordingHandlesForOwner(sessionId, deviceId),
-      ...(testRecordingId === undefined ? [] : [testRecordingId]),
+      ...(deviceGestureRecordingId === undefined ? [] : [deviceGestureRecordingId]),
     ];
   },
-  stopTestRecording: async (recordingId) => {
-    await stopTestRecording(recordingId);
+  stopDeviceGestureRecording: async (recordingId) => {
+    await stopDeviceGestureRecording(recordingId);
   },
   timer: defaultTimer,
   finalizeCapMs: defaultFinalizeCapMs,
@@ -136,7 +139,7 @@ async function stopOwnedRecordings(
   sessionId: string | undefined,
   deviceId: string,
   stopping: Set<string>,
-  testRecordingId: string | undefined,
+  deviceGestureRecordingId: string | undefined,
 ): Promise<void> {
   // `stopping` starts as every recording the owner has; a stage that finished drops the ids that
   // are no longer active, so only what is still stopping is force-stopped at the cap (#11041).
@@ -179,15 +182,18 @@ async function stopOwnedRecordings(
       }
     },
   );
-  if (testRecordingId !== undefined && deps.isTestRecordingOwnedBy(sessionId, deviceId)) {
+  if (
+    deviceGestureRecordingId !== undefined &&
+    deps.isDeviceGestureRecordingOwnedBy(sessionId, deviceId)
+  ) {
     await attempt(
-      `stop test recording of released session ${sessionId ?? "(owner-less)"} on ${deviceId}`,
+      `stop device gesture recording of released session ${sessionId ?? "(owner-less)"} on ${deviceId}`,
       async () => {
-        await deps.stopTestRecording(testRecordingId);
+        await deps.stopDeviceGestureRecording(deviceGestureRecordingId);
         pruneFinalized();
         // The plan is retained by recording id for the owning session (#10958).
         logger.info(
-          `[recording] Test recording on ${deviceId} stopped: owning session ${sessionId ?? "(owner-less)"} was released; its plan stays fetchable by the owner`,
+          `[recording] Device gesture recording on ${deviceId} stopped: owning session ${sessionId ?? "(owner-less)"} was released; its plan stays fetchable by the owner`,
         );
       },
     );
@@ -203,14 +209,14 @@ async function stopOwnedRecordingsWithinCap(
   sessionId: string | undefined,
   deviceId: string,
 ): Promise<void> {
-  // Every recording the owner has, up front: single-file, segmented and the test recording, so
+  // Every recording the owner has, up front: single-file, segmented and the device gesture recording, so
   // the cap force-stops all of them rather than only the one mid-stop (#11041).
   const stopping = new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId));
-  const testRecordingId = deps.ownedTestRecordingId(sessionId, deviceId);
+  const deviceGestureRecordingId = deps.ownedDeviceGestureRecordingId(sessionId, deviceId);
   const capMs = deps.finalizeCapMs(deviceId);
   try {
     await raceWithDeadline(
-      stopOwnedRecordings(deps, sessionId, deviceId, stopping, testRecordingId),
+      stopOwnedRecordings(deps, sessionId, deviceId, stopping, deviceGestureRecordingId),
       {
         timer: deps.timer,
         timeoutMs: capMs,
@@ -233,8 +239,8 @@ async function stopOwnedRecordingsWithinCap(
         attempt(`force-stop recording ${recordingId}`, () =>
           raceWithDeadline(
             () =>
-              recordingId === testRecordingId
-                ? deps.stopTestRecording(recordingId)
+              recordingId === deviceGestureRecordingId
+                ? deps.stopDeviceGestureRecording(recordingId)
                 : deps.markVideoRecordingIncomplete(recordingId),
             {
               timer: deps.timer,
@@ -253,14 +259,14 @@ export interface RecordingAcquisitionDeps {
   timer: Pick<Timer, "setTimeout" | "clearTimeout">;
   adoptVideoRecordings(deviceId: string, sessionId: string): Promise<void> | undefined;
   adoptSegmentedRecordings(deviceId: string, sessionId: string): void;
-  adoptTestRecording(deviceId: string, sessionId: string): boolean;
+  adoptDeviceGestureRecording(deviceId: string, sessionId: string): boolean;
 }
 
 const defaultRecordingAcquisitionDeps: RecordingAcquisitionDeps = {
   timer: defaultTimer,
   adoptVideoRecordings: adoptOwnerlessActiveVideoRecordings,
   adoptSegmentedRecordings: adoptOwnerlessSegmentedVideoRecordings,
-  adoptTestRecording: adoptOwnerlessTestRecording,
+  adoptDeviceGestureRecording: adoptOwnerlessDeviceGestureRecording,
 };
 
 /**
@@ -290,7 +296,7 @@ export function createOwnerlessRecordingAcquisitionCleanup(
       return;
     }
     deps.adoptSegmentedRecordings(deviceId, sessionId);
-    deps.adoptTestRecording(deviceId, sessionId);
+    deps.adoptDeviceGestureRecording(deviceId, sessionId);
     const persistence = deps.adoptVideoRecordings(deviceId, sessionId);
     if (!persistence) {
       return;
@@ -307,7 +313,7 @@ export function createOwnerlessRecordingAcquisitionCleanup(
  * Stop and finalize the recordings a session owns when it is released or moves off the device
  * (issue #10826), so a recording started by a previous owner cannot capture the next owner's
  * activity or block its own recording start. Covers `videoRecording` (single-file and segmented)
- * and IDE test recordings. The stop is registered as pending device cleanup so the next session
+ * and IDE device gesture recordings. The stop is registered as pending device cleanup so the next session
  * does not acquire the device before the capture is finalized. Registers on the same release and
  * unbound seams as `registerNetworkStateSessionCleanup`.
  */

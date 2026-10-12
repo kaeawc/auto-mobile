@@ -61,7 +61,7 @@ UUID never takes it over. While the owner is connected, a control call from any
 other connection that names the session is refused, with autolock on or off, and
 that connection is never bound to the session. The rule covers control tools
 that take no device routing too (`killDevice`, `deleteDevice`, `exportPlan`,
-`recordSteps` start and stop): the refused call does not run and does not extend the session's
+`recordToolCalls` start and stop): the refused call does not run and does not extend the session's
 idle window (#11542). A plan step, or a tool another tool calls, is judged by the
 same rule as a direct call from the connection that started it (#11469, #11555).
 `setToolEnabled` is not refused (see
@@ -128,7 +128,7 @@ below are the defaults; the constants live in
   call ends. An idle release is terminal: the session UUID ends with it. The
   grace does not stretch it: a heartbeating session is released at the idle
   deadline. Heartbeats and reads (`observe`, `listDevices`, `doctor`,
-  `recordSteps` status and the other reads listed above) never extend it. Only a control
+  `recordToolCalls` status and the other reads listed above) never extend it. Only a control
   call still in flight holds the release, until its request deadline plus 10 s
   (or the 30 min ceiling without a deadline). A read in flight never holds it;
   the release cuts the read with the typed terminal refusal `session_ownership_lost`.

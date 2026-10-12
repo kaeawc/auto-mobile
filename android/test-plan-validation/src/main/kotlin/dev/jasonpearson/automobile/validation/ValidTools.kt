@@ -58,7 +58,7 @@ object ValidTools {
         "recentApps",
         "recordDeviceGestures",
         "recordDeviceGestures",
-        "recordSteps",
+        "recordToolCalls",
         "removeKeyValue",
         "rotate",
         "selectAllText",

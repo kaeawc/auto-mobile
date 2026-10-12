@@ -1125,7 +1125,7 @@ export const REUSE_CRITICAL_OPTION_KEYS: (keyof DaemonOptions)[] = [
   "accessibilityAudit",
   "predictiveUi",
   "rawElementSearch",
-  "mcpRecording",
+  "toolCallRecording",
   "noNavigationScreenshots",
   ...OUTPUT_REDUCTION_FLAG_SPECS.filter(
     (spec) =>

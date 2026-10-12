@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { McpCallRecorder, PLAN_RELEVANT_TOOLS } from "../../../src/features/record/McpCallRecorder";
+import {
+  ToolCallRecorder,
+  PLAN_RELEVANT_TOOLS,
+} from "../../../src/features/record/ToolCallRecorder";
 import { registerMcpTools } from "../../../src/server/index";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 
@@ -45,7 +48,7 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   reconcileDeviceResources: DEVICE_MANAGEMENT,
   executePlan: SESSION_META,
   exportPlan: SESSION_META,
-  recordSteps: SESSION_META,
+  recordToolCalls: SESSION_META,
   recordDeviceGestures: SESSION_META,
   setToolEnabled: SESSION_META,
   criticalSection: "Multi-device coordination primitive, handled by the plan executor",
@@ -103,7 +106,7 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
   });
 
   test("a recorded tapAt step carries no snapshot reference and parses for replay", () => {
-    const recorder = new McpCallRecorder();
+    const recorder = new ToolCallRecorder();
     recorder.start();
     recorder.record("tapAt", { x: 10, y: 20, snapshotId: "snap-1", deviceId: "emulator-5554" });
     const [step] = recorder.stop();
@@ -115,14 +118,14 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
   });
 
   test("tools other than tapAt keep their params untouched", () => {
-    const recorder = new McpCallRecorder();
+    const recorder = new ToolCallRecorder();
     recorder.start();
     recorder.record("tapAny", { container: { text: "List" } });
     expect(recorder.stop()[0].params).toEqual({ container: { text: "List" } });
   });
 
   test("read-only actions of multi-action tools are not recorded", () => {
-    const recorder = new McpCallRecorder();
+    const recorder = new ToolCallRecorder();
     recorder.start();
     recorder.record("keyboard", { action: "detect" });
     recorder.record("keyboard", { action: "listImes" });
@@ -134,7 +137,7 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
   });
 
   test("mutating actions of the same tools are recorded", () => {
-    const recorder = new McpCallRecorder();
+    const recorder = new ToolCallRecorder();
     recorder.start();
     recorder.record("keyboard", { action: "open" });
     recorder.record("clipboard", { action: "copy", text: "x" });
@@ -151,7 +154,7 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
   });
 
   test("records the action tools a session can run, in order (issue scenario)", () => {
-    const recorder = new McpCallRecorder();
+    const recorder = new ToolCallRecorder();
     recorder.start();
     recorder.record("launchApp", { appId: "com.example" });
     recorder.record("tapAny", { container: { text: "List" } });
@@ -171,10 +174,10 @@ describe("PLAN_RELEVANT_TOOLS coverage (#9928)", () => {
   });
 
   test("still skips excluded tools", () => {
-    const recorder = new McpCallRecorder();
+    const recorder = new ToolCallRecorder();
     recorder.start();
     recorder.record("listDevices", {});
-    recorder.record("recordSteps", { action: "end" });
+    recorder.record("recordToolCalls", { action: "end" });
     expect(recorder.stop()).toEqual([]);
   });
 
@@ -257,7 +260,7 @@ const RECORDED_TOOLS_9966 = [
 
 describe("tools recorded by #9966", () => {
   test.each(RECORDED_STEP_CALLS)("%s step parses with the live schema", (tool, args) => {
-    const recorder = new McpCallRecorder();
+    const recorder = new ToolCallRecorder();
     recorder.start();
     // Session and routing params are injected by the registry and must be stripped.
     recorder.record(tool, {
@@ -286,7 +289,7 @@ describe("tools recorded by #9966", () => {
   });
 
   test("accessibility state queries are not recorded", () => {
-    const recorder = new McpCallRecorder();
+    const recorder = new ToolCallRecorder();
     recorder.start();
     recorder.record("accessibility", {});
     recorder.record("accessibility", { deviceId: "emulator-5554" });
@@ -294,7 +297,7 @@ describe("tools recorded by #9966", () => {
   });
 
   test("a file-staging call that copies a host file is not recorded", () => {
-    const recorder = new McpCallRecorder();
+    const recorder = new ToolCallRecorder();
     recorder.start();
     recorder.record("putAppFile", {
       target: { domain: "media_library" },

@@ -98,7 +98,7 @@ describe("deviceGestureRecordingManager user-input capture contract (#11919)", (
     expect(status?.captureScope).toBe("user-input");
     if (count === 0) {
       expect(status?.notice).toBe(DEVICE_GESTURE_RECORDING_USER_INPUT_ONLY_NOTICE);
-      expect(status?.notice).toContain("recordSteps");
+      expect(status?.notice).toContain("recordToolCalls");
     } else {
       expect(status).not.toHaveProperty("notice");
     }
@@ -111,7 +111,7 @@ describe("deviceGestureRecordingManager user-input capture contract (#11919)", (
     await expect(result).rejects.toBeInstanceOf(NoUserInputCapturedError);
     await expect(result).rejects.toMatchObject({ reason: "no_user_input_captured" });
     await expect(result).rejects.toThrow(/^No recorded interactions were captured\./);
-    await expect(result).rejects.toThrow("recordSteps");
+    await expect(result).rejects.toThrow("recordToolCalls");
   });
 });
 

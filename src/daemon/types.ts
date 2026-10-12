@@ -663,8 +663,8 @@ export interface DaemonOptions {
   rawElementSearch?: boolean;
   /** Skip CtrlProxy download */
   skipCtrlProxyDownload?: boolean;
-  /** Enable MCP recording feature flag */
-  mcpRecording?: boolean;
+  /** Enable tool call recording feature flag */
+  toolCallRecording?: boolean;
   /** Disable navigation screenshots */
   noNavigationScreenshots?: boolean;
   /** Skip screenshots and back stack during waitFor polling to reduce ADB overhead */

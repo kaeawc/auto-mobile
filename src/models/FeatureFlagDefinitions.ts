@@ -10,7 +10,7 @@ export type FeatureFlagKey =
   | "screen-reader-navigation"
   | "raw-element-search"
   | "ai-recovery"
-  | "mcp-recording"
+  | "tool-call-recording"
   | "navigation-screenshots"
   | "observe-settled-screenshot"
   | "observe-result-include-elements"
@@ -134,10 +134,10 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     },
   },
   {
-    key: "mcp-recording",
-    label: "MCP call recording",
+    key: "tool-call-recording",
+    label: "Tool call recording",
     description:
-      "Enable the recordSteps tool to capture MCP tool calls as replayable YAML test plans.",
+      "Enable the recordToolCalls tool to capture MCP tool calls as replayable YAML test plans.",
     defaultValue: false,
   },
   {

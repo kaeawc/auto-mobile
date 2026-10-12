@@ -55,7 +55,7 @@ describe("stripToolResultStructuredContent", () => {
   });
 
   test("EC-D: strips regardless of payload shape (covers plain-registered tools)", () => {
-    // e.g. exportPlan/recordSteps: declare an outputSchema, bypass finalizeToolResponse.
+    // e.g. exportPlan/recordToolCalls: declare an outputSchema, bypass finalizeToolResponse.
     const response = stripToolResultStructuredContent(
       createStructuredToolResponse({ success: true, plan: "steps:\n  - tapOn: {}" }),
       "flag",

@@ -46,8 +46,8 @@ export class DefaultFeatureFlagApplier implements FeatureFlagApplier {
       case "raw-element-search":
         serverConfig.setRawElementSearchEnabled(enabled);
         break;
-      case "mcp-recording":
-        serverConfig.setMcpRecordingEnabled(enabled);
+      case "tool-call-recording":
+        serverConfig.setToolCallRecordingEnabled(enabled);
         break;
       case "navigation-screenshots":
         serverConfig.setNavigationScreenshotsEnabled(enabled);

@@ -51,9 +51,9 @@ isolateToolRegistry();
  * End-to-end proof that the `--tool-results-no-structured-content` strip runs at
  * the real MCP CallTool boundary (`src/server/index.ts`). Uses a plain
  * `ToolRegistry.register()` probe — the same non-device registration path as
- * `exportPlan`/`recordSteps` — so this also covers the tools that bypass
+ * `exportPlan`/`recordToolCalls` — so this also covers the tools that bypass
  * `finalizeToolResponse`. The probe declares an `outputSchema` (like
- * `exportPlan`/`recordSteps`) so its `structuredContent` survives the gate-off
+ * `exportPlan`/`recordToolCalls`) so its `structuredContent` survives the gate-off
  * case; the no-schema unconditional strip (#2759) is covered separately in
  * `structuredContentGating.test.ts`.
  */

@@ -14,12 +14,12 @@ import { DaemonState } from "../daemon/daemonState";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { isOwnerWithinBase } from "../db/videoRecordingRepository";
 
-/** Device gesture recordings observe on-device input; recordSteps records AutoMobile tool calls. */
+/** Device gesture recordings observe on-device input; recordToolCalls records AutoMobile tool calls. */
 export const DEVICE_GESTURE_RECORDING_CAPTURE_SCOPE = "user-input" as const;
 export const NO_USER_INPUT_CAPTURED_REASON = "no_user_input_captured" as const;
 export const DEVICE_GESTURE_RECORDING_USER_INPUT_ONLY_NOTICE: string =
   "Device gesture recordings capture input made on the device itself (touches on its touch screen or emulator window, and text changes in input fields). " +
-  "Taps, swipes and other gestures sent through AutoMobile tools (tapAt, tapOn, swipeOn, etc.) or adb shell input are injected and are not recorded by design; use recordSteps to record tool calls.";
+  "Taps, swipes and other gestures sent through AutoMobile tools (tapAt, tapOn, swipeOn, etc.) or adb shell input are injected and are not recorded by design; use recordToolCalls to record tool calls.";
 
 /** Plain empty capture, distinct from touch-track and recorder-stop failures. */
 export class NoUserInputCapturedError extends ActionableError {
@@ -60,7 +60,7 @@ export interface DeviceGestureRecordingStatus {
   startedAt: string;
   eventCount: number;
   durationMs: number;
-  /** On-device user-input capture; tool calls belong to recordSteps. */
+  /** On-device user-input capture; tool calls belong to recordToolCalls. */
   captureScope: typeof DEVICE_GESTURE_RECORDING_CAPTURE_SCOPE;
   /** Explains an empty capture; omitted once at least one step exists. */
   notice?: string;

@@ -1,21 +1,17 @@
-import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { BootedDevice } from "../models";
-import { logger } from "../utils/logger";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { Platform } from "../models";
-import { addSessionUuidToSchema, DEVICE_LABEL_DESCRIPTION } from "./toolSchemaHelpers";
+import { DEVICE_LABEL_DESCRIPTION } from "./toolSchemaHelpers";
 import { registerDeviceGestureRecordingTools } from "./deviceGestureRecordingTools";
-import { startMcpRecording, stopMcpRecording, getMcpRecordingStatus } from "./mcpRecordingManager";
-import { serverConfig } from "../utils/ServerConfig";
+import { registerToolCallRecordingTools } from "./toolCallRecordingTools";
 import { PlanExecutionOrchestrator, PlanExecutionRequest } from "./planExecutionOrchestrator";
 import { failedPlanSessionHoldable, planLifecycleSessionUuid } from "./deviceLabelMapping";
 import type { ExecutePlanResult } from "../models/ExecutePlanResult";
 import { runWithToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { planCallerContext } from "./planCallerIdentity";
 import {
-  INTERNAL_MCP_SESSION_PARAM,
   INTERNAL_MCP_REQUEST_DEADLINE_PARAM,
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
@@ -281,111 +277,6 @@ const executePlanTool = async (
   return withIsErrorOnFailure(createStructuredToolResponse(reported), reported.success);
 };
 
-// ============================================================================
-// MCP Call Recording — "recordSteps" tool
-// begin/end are gated by the "mcp-recording" feature flag.
-// status bypasses the flag so agents can always probe recording state
-// (e.g., after context compaction when the agent may have lost awareness).
-// ============================================================================
-
-const recordStepsSchema = addSessionUuidToSchema(
-  z
-    .object({
-      action: z.enum(["begin", "end", "status"]),
-      planName: z.string().optional().describe("Plan name for action=end"),
-    })
-    .strict(),
-);
-
-const recordStepsResultSchema = z.object({
-  success: z.boolean(),
-  action: z.enum(["begin", "end", "status"]).optional(),
-  recording: z.boolean().optional(),
-  startedAt: z.string().optional(),
-  alreadyActive: z.boolean().optional(),
-  currentStepCount: z.number().optional(),
-  planName: z.string().optional(),
-  planContent: z.string().optional(),
-  stepCount: z.number().optional(),
-  durationMs: z.number().optional(),
-  warnings: z
-    .array(z.string())
-    .optional()
-    .describe(
-      "action=end only, present when non-empty: calls that were skipped (host-file sourcePath, oversized param) or recorded in a weakened form (resetKeychain with confirm:false), each with the reason",
-    ),
-  error: z.string().optional(),
-});
-
-const recordStepsTool = async (params: {
-  action: "begin" | "end" | "status";
-  planName?: string;
-  [INTERNAL_MCP_SESSION_PARAM]?: string;
-}): Promise<any> => {
-  const connectionId = params[INTERNAL_MCP_SESSION_PARAM];
-  // Status is always allowed — lets agents probe recording state even when the flag is off.
-  if (params.action === "status") {
-    const status = getMcpRecordingStatus({ connectionId });
-    return createStructuredToolResponse({
-      success: true,
-      action: "status",
-      recording: status?.recording ?? false,
-      ...(status && {
-        startedAt: status.startedAt,
-        stepCount: status.stepCount,
-        durationMs: status.durationMs,
-      }),
-    });
-  }
-
-  if (!serverConfig.isMcpRecordingEnabled()) {
-    return withIsErrorOnFailure(
-      createStructuredToolResponse({
-        success: false,
-        error: "MCP recording is disabled. Enable the 'mcp-recording' feature flag first.",
-      }),
-      false,
-    );
-  }
-
-  try {
-    if (params.action === "begin") {
-      const result = startMcpRecording({ connectionId });
-      return createStructuredToolResponse({
-        success: true,
-        action: "begin",
-        recording: result.recording,
-        startedAt: result.startedAt,
-        ...(result.alreadyActive && {
-          alreadyActive: true,
-          currentStepCount: result.currentStepCount,
-        }),
-      });
-    }
-
-    const result = stopMcpRecording({ connectionId, planName: params.planName });
-    return createStructuredToolResponse({
-      success: true,
-      action: "end",
-      planName: result.planName,
-      planContent: result.planContent,
-      stepCount: result.stepCount,
-      durationMs: result.durationMs,
-      ...(result.warnings.length > 0 && { warnings: result.warnings }),
-    });
-  } catch (error) {
-    logger.error(`[recordSteps] Failed: ${errorMessage(error)}`);
-    return withIsErrorOnFailure(
-      createStructuredToolResponse({
-        success: false,
-        action: params.action,
-        error: errorMessage(error),
-      }),
-      false,
-    );
-  }
-};
-
 // Register plan tools for daemon-backed MCP servers and CLI usage.
 export const registerPlanTools = () => {
   ToolRegistry.registerDeviceAware(
@@ -398,17 +289,5 @@ export const registerPlanTools = () => {
 
   registerDeviceGestureRecordingTools();
 
-  // MCP call recording — begin/end gated by "mcp-recording" feature flag; status always available.
-  ToolRegistry.register(
-    "recordSteps",
-    "Record MCP tool calls to YAML. begin/end require mcp-recording; status always works.",
-    recordStepsSchema,
-    recordStepsTool,
-    {
-      defaultEnabled: false,
-      outputSchema: recordStepsResultSchema,
-      // `status` only reports the recording; begin/end change it (#11107).
-      readOnly: (args: { action?: unknown }) => args?.action === "status",
-    },
-  );
+  registerToolCallRecordingTools();
 };

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { createTapAt, observation } from "../../helpers/tapAtCoordinate";
-import { McpCallRecorder } from "../../../src/features/record/McpCallRecorder";
+import { ToolCallRecorder } from "../../../src/features/record/ToolCallRecorder";
 import { YamlPlanSerializer } from "../../../src/utils/plan/PlanSerializer";
 import * as yaml from "js-yaml";
 
@@ -12,7 +12,7 @@ for (const platform of ["android", "ios"] as const) {
     const context = {};
     const first = createTapAt(device);
     await first.tapAt.execute(point, undefined, undefined, context);
-    const recorder = new McpCallRecorder();
+    const recorder = new ToolCallRecorder();
     recorder.start();
     recorder.record("tapAt", {
       ...point,
@@ -96,7 +96,7 @@ test("recording persists resolved native pixels instead of image or normalized i
   const context = {};
   const input = { x: 0.25, y: 0.5, coordinateSpace: "normalized" as const };
   await fake.tapAt.execute(input, undefined, undefined, context);
-  const recorder = new McpCallRecorder();
+  const recorder = new ToolCallRecorder();
   recorder.start();
   recorder.record("tapAt", { ...input, snapshotId: "ephemeral", __tapAtRecordingContext: context });
   const [step] = recorder.stop();
@@ -112,7 +112,7 @@ test("missing rotation evidence records a legacy tap with an actionable warning"
   fake.observeScreen.setObserveResult(before);
   const context = {};
   await fake.tapAt.execute({ x: 2, y: 3 }, undefined, undefined, context);
-  const recorder = new McpCallRecorder();
+  const recorder = new ToolCallRecorder();
   recorder.start();
   recorder.record("tapAt", { x: 2, y: 3, __tapAtRecordingContext: context });
   const result = recorder.stopWithWarnings();

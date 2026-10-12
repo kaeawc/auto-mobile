@@ -1694,8 +1694,8 @@ export class DaemonManager implements DaemonManagerLike {
     if (options.skipCtrlProxyDownload) {
       args.push("--skip-ctrl-proxy-download");
     }
-    if (options.mcpRecording) {
-      args.push("--mcp-recording");
+    if (options.toolCallRecording) {
+      args.push("--tool-call-recording");
     }
     // Output-reduction flags (issue #2756): serialized off the shared specs so
     // they can't drift from the daemon-side parse in parseDaemonArgs.

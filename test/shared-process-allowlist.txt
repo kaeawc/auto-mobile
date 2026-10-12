@@ -653,8 +653,8 @@ test/features/prototype/prototypeScrimRole.test.ts
 test/features/prototype/prototypeSelectionControls.test.ts
 test/features/prototype/prototypeSetStateBinding.test.ts
 test/features/prototype/prototypeThemeModes.test.ts
-test/features/record/McpCallRecorder.test.ts
-test/features/record/McpCallRecorderCoverage.test.ts
+test/features/record/ToolCallRecorder.test.ts
+test/features/record/ToolCallRecorderCoverage.test.ts
 test/features/record/android/GestureClassifier.characterization.test.ts
 test/features/record/android/GestureClassifier.property.test.ts
 test/features/record/android/GestureClassifier.test.ts

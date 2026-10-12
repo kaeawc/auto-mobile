@@ -165,7 +165,7 @@ internal class JsonDaemonPidFileReader(
     booleanOption("predictiveUi", "--predictive-ui")
     booleanOption("rawElementSearch", "--raw-element-search")
     booleanOption("skipCtrlProxyDownload", "--skip-ctrl-proxy-download")
-    booleanOption("mcpRecording", "--mcp-recording")
+    booleanOption("toolCallRecording", "--tool-call-recording")
     booleanOption("noNavigationScreenshots", "--no-navigation-screenshots")
     booleanOption("noWaitForPollingOverhead", "--no-waitfor-polling-overhead")
     booleanOption("noA11yIncludeNotImportantViews", "--no-include-not-important-views")

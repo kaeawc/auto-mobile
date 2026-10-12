@@ -90,7 +90,7 @@ enable/disable state. Persisted session choices take precedence over CLI values,
 which take precedence over environment values and built-in defaults.
 
 Some tools also require a process option such as `--debug`, `--embedded-sdk`,
-or `--mcp-recording`. Plan-only tools are never shown in public discovery.
+or `--tool-call-recording`. Plan-only tools are never shown in public discovery.
 
 If a tool is missing, check its exact name and required process options, then
 refresh discovery after the `notifications/tools/list_changed` notification.

@@ -162,7 +162,12 @@ describe("Plan execution lock", () => {
         expect(
           lock.evaluate({ toolName: "hitTest", sessionUuid: "session-a:phone", readOnly: true }),
         ).toEqual({ blocked: false, scope });
-        for (const toolName of ["tapOn", "executePlan", "recordDeviceGestures", "recordSteps"]) {
+        for (const toolName of [
+          "tapOn",
+          "executePlan",
+          "recordDeviceGestures",
+          "recordToolCalls",
+        ]) {
           expect(lock.evaluate({ toolName, sessionUuid: "session-a:phone" })).toEqual({
             blocked: true,
             scope,

@@ -280,7 +280,7 @@ async function main() {
       dismissKeyboardAfterInput,
       eventAllMarkers,
       eventAllMarkersCliOverride,
-      mcpRecording,
+      toolCallRecording,
       navigationScreenshots,
       noWaitForPollingOverhead,
       noProxy,
@@ -447,7 +447,7 @@ async function main() {
       ["accessibility-audit", a11yAuditMode, "--accessibility-audit", accessibilityConfig],
       ["predictive-ui", predictiveUi, "--predictive/--predictive-ui"],
       ["raw-element-search", rawElementSearch, "--raw-element-search"],
-      ["mcp-recording", mcpRecording, "--mcp-recording"],
+      ["tool-call-recording", toolCallRecording, "--tool-call-recording"],
       ...persistedOutputReductionOverrides(outputReduction).map(
         ({ key, label }): CliFeatureFlagOverride => [key, true, label, undefined],
       ),
@@ -457,7 +457,7 @@ async function main() {
     // reads AND the CLI-override setFlag() writes. In --daemon-mode this runs
     // inside the circuit breaker (below) so a startup DB failure anywhere here —
     // including a write that fails on a read-only/full DB launched with --debug,
-    // --mcp-recording, --no-navigation-screenshots — funnels through the same
+    // --tool-call-recording, --no-navigation-screenshots — funnels through the same
     // classify/record/backoff/rethrow path instead of escaping to main().catch
     // and tight-respawning (issue #2784).
     const applyFeatureFlagStartup = async (): Promise<void> => {
@@ -604,7 +604,7 @@ async function main() {
         predictiveUi,
         rawElementSearch,
         skipCtrlProxyDownload,
-        mcpRecording,
+        toolCallRecording,
         noNavigationScreenshots: !navigationScreenshots,
         noWaitForPollingOverhead,
         noA11yIncludeNotImportantViews,
@@ -656,7 +656,7 @@ async function main() {
       ...(debugPerf ? { debugPerf: true } : {}),
       ...(planExecutionLockScopeExplicit ? { planExecutionLockScope } : {}),
       ...(runnerReadinessTimeoutMs !== undefined ? { runnerReadinessTimeoutMs } : {}),
-      ...(mcpRecording ? { mcpRecording: true } : {}),
+      ...(toolCallRecording ? { toolCallRecording: true } : {}),
       videoQualityPreset: videoRecordingDefaults.qualityPreset,
       videoTargetBitrateKbps: videoRecordingDefaults.targetBitrateKbps,
       videoMaxThroughputMbps: videoRecordingDefaults.maxThroughputMbps,

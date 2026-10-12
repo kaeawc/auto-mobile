@@ -111,7 +111,7 @@ import { isDebugModeEnabled } from "../utils/debug";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
-import { getMcpRecorder } from "./mcpRecordingManager";
+import { getToolCallRecorder } from "./toolCallRecordingManager";
 import { formatToolResultLog } from "./toolResultLog";
 import { formatStructuredToolError } from "../utils/formatStructuredToolError";
 import { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
@@ -1300,7 +1300,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
 
     // Extract internal routing params from args.
     // If you add new injected params here, also update INTERNAL_PARAMS in
-    // src/features/record/McpCallRecorder.ts so they are stripped from recordings.
+    // src/features/record/ToolCallRecorder.ts so they are stripped from recordings.
     let providedDeviceId = args.deviceId;
     const baseSessionUuid = args.sessionUuid;
     const deviceLabel = typeof args.device === "string" ? args.device : undefined;
@@ -2323,7 +2323,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     });
 
     if (toolSuccess) {
-      getMcpRecorder({ connectionId: args[INTERNAL_MCP_SESSION_PARAM] })?.record(name, args);
+      getToolCallRecorder({ connectionId: args[INTERNAL_MCP_SESSION_PARAM] })?.record(name, args);
     }
 
     return {

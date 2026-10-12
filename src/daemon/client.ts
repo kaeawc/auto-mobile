@@ -83,7 +83,7 @@ export const daemonOptionsSchema = z.object({
   predictiveUi: z.boolean().optional(),
   rawElementSearch: z.boolean().optional(),
   skipCtrlProxyDownload: z.boolean().optional(),
-  mcpRecording: z.boolean().optional(),
+  toolCallRecording: z.boolean().optional(),
   noNavigationScreenshots: z.boolean().optional(),
   noWaitForPollingOverhead: z.boolean().optional(),
   noA11yIncludeNotImportantViews: z.boolean().optional(),

@@ -3,17 +3,17 @@ import { Plan } from "../models";
 import { logger } from "../utils/logger";
 import { getMcpServerVersion, releaseVersion } from "../utils/mcpVersion";
 import { PlanValidator } from "../utils/plan/PlanValidator";
-import { McpCallRecorder } from "../features/record/McpCallRecorder";
+import { ToolCallRecorder } from "../features/record/ToolCallRecorder";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 
-export interface McpRecordingStartResult {
+export interface ToolCallRecordingStartResult {
   recording: boolean;
   startedAt: string;
   alreadyActive?: boolean;
   currentStepCount?: number;
 }
 
-export interface McpRecordingStopResult {
+export interface ToolCallRecordingStopResult {
   planName: string;
   planContent: string;
   stepCount: number;
@@ -24,40 +24,42 @@ export interface McpRecordingStopResult {
   warnings: string[];
 }
 
-export interface McpRecordingStatus {
+export interface ToolCallRecordingStatus {
   recording: boolean;
   startedAt: string;
   stepCount: number;
   durationMs: number;
 }
 
-interface McpRecordingSession {
-  recorder: McpCallRecorder;
+interface ToolCallRecordingSession {
+  recorder: ToolCallRecorder;
   startedAt: number;
 }
 
-export interface McpRecordingOptions {
+export interface ToolCallRecordingOptions {
   connectionId?: string;
   timer?: Timer;
 }
 
 // A symbol keeps anonymous callers together without colliding with a transport id.
 const DEFAULT_CONNECTION_KEY = Symbol("anonymous MCP connection");
-const activeSessions = new Map<string | symbol, McpRecordingSession>();
+const activeSessions = new Map<string | symbol, ToolCallRecordingSession>();
 
 /** Reset module state — test-only. */
-export function resetMcpRecordingState(): void {
+export function resetToolCallRecordingState(): void {
   activeSessions.clear();
 }
 
-export function getMcpRecorder({ connectionId }: McpRecordingOptions = {}): McpCallRecorder | null {
+export function getToolCallRecorder({
+  connectionId,
+}: ToolCallRecordingOptions = {}): ToolCallRecorder | null {
   return activeSessions.get(connectionId ?? DEFAULT_CONNECTION_KEY)?.recorder ?? null;
 }
 
-export function getMcpRecordingStatus({
+export function getToolCallRecordingStatus({
   connectionId,
   timer = defaultTimer,
-}: McpRecordingOptions = {}): McpRecordingStatus | null {
+}: ToolCallRecordingOptions = {}): ToolCallRecordingStatus | null {
   const activeSession = activeSessions.get(connectionId ?? DEFAULT_CONNECTION_KEY);
   if (!activeSession) {
     return null;
@@ -70,14 +72,14 @@ export function getMcpRecordingStatus({
   };
 }
 
-export function startMcpRecording({
+export function startToolCallRecording({
   connectionId,
   timer = defaultTimer,
-}: McpRecordingOptions = {}): McpRecordingStartResult {
+}: ToolCallRecordingOptions = {}): ToolCallRecordingStartResult {
   const connectionKey = connectionId ?? DEFAULT_CONNECTION_KEY;
   const activeSession = activeSessions.get(connectionKey);
   if (activeSession) {
-    logger.info("[McpRecording] Recording already active, returning existing session");
+    logger.info("[ToolCallRecording] Recording already active, returning existing session");
     return {
       recording: true,
       startedAt: new Date(activeSession.startedAt).toISOString(),
@@ -86,13 +88,13 @@ export function startMcpRecording({
     };
   }
 
-  const recorder = new McpCallRecorder();
+  const recorder = new ToolCallRecorder();
   recorder.start();
 
   const session = { recorder, startedAt: timer.now() };
   activeSessions.set(connectionKey, session);
 
-  logger.info("[McpRecording] Started MCP call recording");
+  logger.info("[ToolCallRecording] Started tool call recording");
 
   return {
     recording: true,
@@ -108,15 +110,15 @@ const formatPlanName = (planName?: string, timer: Timer = defaultTimer): string 
   return `mcp-recorded-plan-${timestamp}`;
 };
 
-export function stopMcpRecording({
+export function stopToolCallRecording({
   connectionId,
   planName,
   timer = defaultTimer,
-}: McpRecordingOptions & { planName?: string } = {}): McpRecordingStopResult {
+}: ToolCallRecordingOptions & { planName?: string } = {}): ToolCallRecordingStopResult {
   const connectionKey = connectionId ?? DEFAULT_CONNECTION_KEY;
   const session = activeSessions.get(connectionKey);
   if (!session) {
-    throw new Error("No active MCP recording. Call startMcpRecording first.");
+    throw new Error("No active tool call recording. Call startToolCallRecording first.");
   }
 
   try {
@@ -131,7 +133,7 @@ export function stopMcpRecording({
           : " Ensure plan-relevant tools were called during the recording.";
       throw new Error(
         `No MCP tool calls were recorded.${skipped} ` +
-          'Call recordSteps with action: "begin" to start a new session.',
+          'Call recordToolCalls with action: "begin" to start a new session.',
       );
     }
 
@@ -162,7 +164,7 @@ export function stopMcpRecording({
       noRefs: true,
     });
 
-    logger.info(`[McpRecording] Stopped recording with ${steps.length} steps`);
+    logger.info(`[ToolCallRecording] Stopped recording with ${steps.length} steps`);
 
     return {
       planName: resolvedName,
@@ -179,7 +181,7 @@ export function stopMcpRecording({
 }
 
 /** Discard an MCP connection's recording on disconnect, without producing a plan. */
-export function dropMcpRecording(connectionId?: string): void {
+export function dropToolCallRecording(connectionId?: string): void {
   const connectionKey = connectionId ?? DEFAULT_CONNECTION_KEY;
   activeSessions.get(connectionKey)?.recorder.stop();
   activeSessions.delete(connectionKey);

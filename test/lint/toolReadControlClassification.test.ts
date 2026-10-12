@@ -148,7 +148,7 @@ const CLASSIFICATION: Classification = {
 const PLAIN_CLASSIFICATION: Classification = {
   read: ["doctor", "getIosSimulatorCapabilities", "listDeviceImages", "listDevices"],
   perArgs: {
-    recordSteps: {
+    recordToolCalls: {
       reads: [{ action: "status" }],
       controls: [{ action: "begin" }, { action: "end", planName: "p" }],
     },

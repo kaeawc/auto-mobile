@@ -24,7 +24,7 @@ import {
   StreamableHTTPError,
   type StreamableHTTPReconnectionOptions,
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { dropMcpRecording } from "../server/mcpRecordingManager";
+import { dropToolCallRecording } from "../server/toolCallRecordingManager";
 import { isToolUnavailableWireError } from "../server/toolUnavailableError";
 import { logger } from "../utils/logger";
 import type { RefusedOwnedSessionRestore } from "./devicePool";
@@ -1242,7 +1242,7 @@ export class UnixSocketServer {
   ) => this.createMcpClient(sessionUuid, toolSelectionProfileUuid, releasedSessionUuid);
 
   /** Connection recording teardown seam, like the injectable factories below. */
-  releaseMcpRecording: (connectionId: string) => void = dropMcpRecording;
+  releaseToolCallRecording: (connectionId: string) => void = dropToolCallRecording;
 
   /**
    * Factory for the Android append-text helper behind `input/typeText mode:"append"`.
@@ -1879,7 +1879,7 @@ export class UnixSocketServer {
     this.clearBoundMcpClientKey(sessionId);
     this.releaseDevicePoolMcpSessionBindings(sessionId);
     this.daemonState.getManagedConnectionScopes?.().unbind(sessionId);
-    this.releaseMcpRecording(sessionId);
+    this.releaseToolCallRecording(sessionId);
     // Lift any streamed gesture this socket left open on the device (issue: streaming gesture
     // input). Tracked so daemon shutdown drains it rather than a fire-and-forget floating promise.
     this.trackRequestHandler(this.ownedGestures.cancelAllFor(sessionId));

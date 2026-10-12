@@ -35,7 +35,7 @@ import { withForeignOwnedSessionMeta } from "./routedSessionMeta";
 import { combineRequestAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
-import { dropMcpRecording } from "./mcpRecordingManager";
+import { dropToolCallRecording } from "./toolCallRecordingManager";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { DaemonSessionCreationRejectedError, TerminalSessionError } from "../daemon/sessionManager";
 import { isDeviceInventoryTool } from "../daemon/daemonMcpProxy";
@@ -654,8 +654,8 @@ export function registerMcpTools(daemonMode: boolean): void {
   registerDeepLinkTools();
   registerNavigationTools();
   registerNotificationTools();
-  // Plan tools (executePlan, recordSteps, recordDeviceGestures, exportPlan)
-  // registered outside the daemonMode gate so MCP recording works in stdio mode
+  // Plan tools (executePlan, recordToolCalls, recordDeviceGestures, exportPlan)
+  // registered outside the daemonMode gate so tool call recording works in stdio mode
   // (the standard MCP transport agents use). executePlan multi-device allocation
   // still requires daemon and throws a clear error without it.
   // Critical section tools remain daemon-only (DaemonState lock manager).
@@ -839,7 +839,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     unregisterSessionBindingRelease();
     unsubscribeSessionReleaseBroadcast();
     if (!daemonMode) {
-      dropMcpRecording(options.sessionContext?.sessionId);
+      dropToolCallRecording(options.sessionContext?.sessionId);
     }
     existingServerOnClose?.();
   };
@@ -1352,7 +1352,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       (isDeviceInventoryTool(name) || tool.isDeviceReadOnlyCall?.(parsedParams) === true);
     // #11344: a control call never runs on a session another connected client owns. Refused
     // before the execution starts, so naming the session neither extends nor binds it. A plain
-    // control tool (killDevice, recordSteps) is admitted on the session it names, so it is judged
+    // control tool (killDevice, recordToolCalls) is admitted on the session it names, so it is judged
     // like a device call (#11542); nested internal calls are judged by the same predicate (#11555).
     if (daemonMode && isControlCallOnNamedSession(tool, parsedParams)) {
       // The session the call names, and the one a `device` label resolves to, which is the one

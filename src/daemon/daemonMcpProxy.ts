@@ -132,6 +132,10 @@ import {
 } from "./buildIdentity";
 import { ActionableError, toActionableError } from "../models";
 import { MANAGED_EXECUTION_RELEASE_TIMEOUT_MS } from "./managedExecutionLiveness";
+import {
+  TimerManagedConnectionRebind,
+  type ManagedConnectionRebind,
+} from "./managedSlots/managedConnectionRebind";
 import { acquireManagedSlotsThroughDaemon } from "./managedSlotProxyAcquisition";
 import type { ManagedSlotConfig } from "../models/managedSlotConfig";
 import { managedSlotForSession, type ManagedSlotsResult } from "../models/managedSlotsResult";
@@ -1616,6 +1620,7 @@ export class DaemonMcpProxy {
   private readonly managedExecutionSessions = new Set<string>();
   /** The managed slot acquisition's result, once it ran (#11173). */
   private managedSlotsResult: ManagedSlotsResult | undefined;
+  private managedConnectionRebind: ManagedConnectionRebind | undefined;
   /** Aborts an in-flight managed slot acquisition when the proxy closes (EOF, SIGTERM, owner loss). */
   private managedSlotsAcquisitionAbort: AbortController | undefined;
   /**
@@ -1915,25 +1920,45 @@ export class DaemonMcpProxy {
   /**
    * Re-bind a reconnected socket to this proxy's managed slot sessions through
    * `daemon/registerSession` (#11178), proven by the owner token the sessions were claimed for.
-   * Best effort like the token resume: a refusal is logged, and the slot devices stay protected
-   * from every other caller by the generic managed-slot exclusion.
+   * The first attempt is awaited; transient refusals retry in the background on the same socket.
+   * The daemon confines refused registrations until their held sessions can be proven.
    */
   private async rebindManagedConnection(client: DaemonClientLike): Promise<void> {
-    const binding = this.heldManagedSlotBinding();
-    if (!binding || this.closing || this.client !== client) {
-      return;
-    }
-    try {
+    const currentBinding = () => {
+      const binding = this.heldManagedSlotBinding();
+      if (!binding) {
+        return undefined;
+      }
+      // The execution set also retains ended UUIDs for shutdown reporting; only live holds rebind.
+      const sessionUuids = binding.sessionUuids.filter(
+        (uuid) =>
+          this.isHeldSession(uuid) ||
+          (this.claimableSessions.has(uuid) && this.stallHandovers.has(uuid)),
+      );
+      return sessionUuids.length > 0 ? { ...binding, sessionUuids } : undefined;
+    };
+    const stillWanted = () =>
+      !this.closing && this.client === client && currentBinding() !== undefined;
+    const attempt = async () => {
+      const binding = currentBinding();
+      if (!binding || !stillWanted()) {
+        return;
+      }
       await client.callDaemonMethod(DAEMON_REGISTER_SESSION_METHOD, {
         sessionId: binding.sessionUuids[0],
         clientName: MANAGED_SLOT_PROXY_CLIENT_NAME,
         managedSlots: { ...binding, livenessOwnerToken: this.livenessOwnerToken },
       });
+    };
+    if (!stillWanted()) {
+      return;
+    }
+    this.managedConnectionRebind ??= new TimerManagedConnectionRebind(this.timer);
+    try {
+      await attempt();
     } catch (error) {
-      logger.warn(
-        `[DaemonMcpProxy] Re-binding the managed slot connection failed: ${errorMessage(error)}`,
-        error,
-      );
+      // Establishment stays available; retry only while this socket still holds the execution.
+      this.managedConnectionRebind.start({ attempt, stillWanted }, error);
     }
   }
 
@@ -4000,6 +4025,7 @@ export class DaemonMcpProxy {
   private async resetConnection(): Promise<void> {
     const shutdownDisconnectResolve = this.resolveDaemonShutdownDisconnect;
     const staleClient = this.client;
+    this.managedConnectionRebind?.cancel();
     this.resourceSubscriptionSync = Promise.resolve();
     this.connected = false;
     this.client = null;
@@ -8531,6 +8557,7 @@ export class DaemonMcpProxy {
     this.completeDaemonShutdownDisconnect();
     this.cancelBackgroundConnectRetry();
     this.cancelConnectedFallbackReconcile();
+    this.managedConnectionRebind?.cancel();
     this.connectionCloseReject?.(new DaemonUnavailableError("MCP proxy is closing"));
     // Before the keeper stops, so the lease stays live until the release lands (#11176).
     await Promise.all([

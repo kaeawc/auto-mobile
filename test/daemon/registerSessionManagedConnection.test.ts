@@ -5,7 +5,10 @@ import {
   type DaemonStateAccess,
 } from "../../src/daemon/daemonRequestHandlers";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
-import { ManagedConnectionScopes } from "../../src/daemon/managedSlots/managedConnectionScope";
+import {
+  managedConnectionControlRefusal,
+  ManagedConnectionScopes,
+} from "../../src/daemon/managedSlots/managedConnectionScope";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -118,6 +121,7 @@ describe("daemon/registerSession on managed connections", () => {
       expect(response).toMatchObject({
         success: false,
         code: "managed_slot_registration_refused",
+        retryable: false,
       });
     }
     // A refused re-bind binds fail-closed with zero sessions (#11399), never a generic socket.
@@ -141,8 +145,96 @@ describe("daemon/registerSession on managed connections", () => {
       expect(response).toMatchObject({
         success: false,
         code: "managed_slot_registration_refused",
+        retryable: false,
       });
     }
     expect(scopes.get("socket-3")?.scopeKey).toBe("scope-b");
+  });
+  test("an unknown session retries on the same fail-closed socket after it appears", async () => {
+    const late = "00000000-0000-4000-8000-000000000004";
+    const refused = await register(rebind([late]), "late-socket");
+    expect(refused).toMatchObject({
+      success: false,
+      code: "managed_slot_registration_refused",
+      retryable: true,
+      retryAfterMs: 500,
+    });
+    expect(scopes.get("late-socket")?.sessionUuids.size).toBe(0);
+    const control = () =>
+      managedConnectionControlRefusal({
+        binding: scopes.get("late-socket"),
+        action: "tapOn",
+        deviceId: "emulator-5560",
+        requesterSessionUuid: late,
+        slotDeviceOf: (uuid) => sessionManager.getSession(uuid)?.assignedDevice,
+      });
+    expect(control()?.code).toBe("device_outside_managed_slots");
+    await managedSession(late, "emulator-5560", TOKEN);
+    expect(await register(rebind([late]), "late-socket")).toMatchObject({ success: true });
+    expect([...scopes.get("late-socket")!.sessionUuids]).toEqual([late]);
+    expect(control()).toBeUndefined();
+  });
+
+  test("a placeholder cannot register without managedSlots or change its scope", async () => {
+    scopes.bind("placeholder", { scopeKey: SCOPE, sessionUuids: [] });
+    expect(
+      await register({ sessionId: SLOT_SESSION, clientName: "plain" }, "placeholder"),
+    ).toMatchObject({ success: false, code: "device_outside_managed_slots" });
+    expect(
+      await register(
+        {
+          ...rebind([SLOT_SESSION]),
+          managedSlots: {
+            scopeKey: "other-scope",
+            sessionUuids: [SLOT_SESSION],
+            livenessOwnerToken: TOKEN,
+          },
+        },
+        "placeholder",
+      ),
+    ).toMatchObject({ success: false });
+    expect(scopes.get("placeholder")?.scopeKey).toBe(SCOPE);
+    expect(scopes.get("placeholder")?.sessionUuids.size).toBe(0);
+  });
+
+  test("a non-empty binding refuses a presented session held by another token unchanged", async () => {
+    scopes.bind("bound", { scopeKey: SCOPE, sessionUuids: [SLOT_SESSION] });
+    expect([...scopes.get("bound")!.sessionUuids]).toEqual([SLOT_SESSION]);
+    // sessionId is already bound: every presented session must still prove this token's ownership.
+    expect(await register(rebind([SLOT_SESSION, OTHER_SESSION]), "bound")).toMatchObject({
+      success: false,
+      code: "managed_slot_registration_refused",
+      retryable: false,
+    });
+    expect([...scopes.get("bound")!.sessionUuids]).toEqual([SLOT_SESSION]);
+    expect(reowned).toEqual([]);
+  });
+
+  test("a non-empty binding still replaces its set with all sessions the token holds", async () => {
+    const extra = "00000000-0000-4000-8000-000000000004";
+    await managedSession(extra, "emulator-5560", TOKEN);
+    scopes.bind("bound", { scopeKey: SCOPE, sessionUuids: [SLOT_SESSION] });
+    expect(await register(rebind([SLOT_SESSION, extra]), "bound")).toMatchObject({ success: true });
+    expect([...scopes.get("bound")!.sessionUuids]).toEqual([SLOT_SESSION, extra]);
+    expect(await register(rebind([extra]), "bound")).toMatchObject({ success: true });
+    expect([...scopes.get("bound")!.sessionUuids]).toEqual([extra]);
+  });
+
+  test("a same-scope placeholder upgrades after all ownership proofs pass", async () => {
+    scopes.bind("placeholder", { scopeKey: SCOPE, sessionUuids: [] });
+    expect(await register(rebind([SLOT_SESSION]), "placeholder")).toMatchObject({ success: true });
+    expect([...scopes.get("placeholder")!.sessionUuids]).toEqual([SLOT_SESSION]);
+    expect(reowned).toEqual([[SLOT_SESSION]]);
+  });
+
+  test("terminally released or present foreign sessions are not retryable", async () => {
+    await sessionManager.releaseSession(SLOT_SESSION, "cli-idle-timeout");
+    for (const uuid of [SLOT_SESSION, OTHER_SESSION, PLAIN_SESSION]) {
+      expect(await register(rebind([uuid]), `socket-${uuid}`)).toMatchObject({
+        success: false,
+        code: "managed_slot_registration_refused",
+        retryable: false,
+      });
+    }
   });
 });

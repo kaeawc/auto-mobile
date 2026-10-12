@@ -96,6 +96,7 @@ import {
   managedConnectionHostMutationRefusal,
   managedConnectionScopeResetRefusal,
   type ManagedConnectionScopes,
+  type ManagedConnectionBinding,
 } from "./managedSlots/managedConnectionScope";
 import {
   DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
@@ -280,6 +281,8 @@ export type DaemonMethodResult = {
   idle?: true;
   /** With a typed refusal `code`: whether retrying the same request can succeed. */
   retryable?: boolean;
+  /** Minimum backoff before retrying a transient refusal. */
+  retryAfterMs?: number;
   /** With a typed refusal `code`: what to do instead of retrying. */
   nextAction?: typeof ACQUIRE_NEW_SESSION_NEXT_ACTION;
   /** With a typed refusal `code`: its structured evidence. */
@@ -326,6 +329,8 @@ const registerSessionParams = z.object({
     .optional(),
 });
 
+const MANAGED_CONNECTION_REGISTRATION_RETRY_AFTER_MS = 500;
+
 type ManagedSlotsRegistration = NonNullable<z.infer<typeof registerSessionParams>["managedSlots"]>;
 
 /**
@@ -343,28 +348,25 @@ function managedConnectionRegistrationRefusal(
 ): DaemonMethodResult | undefined {
   const scopes = state.getManagedConnectionScopes?.();
   const binding = scopes?.get(socketSessionId);
-  if (binding && !binding.sessionUuids.has(sessionId)) {
-    const refusal = new DeviceOutsideManagedSlotsError(
-      DAEMON_REGISTER_SESSION_METHOD,
-      "session",
-      binding.scopeKey,
-      { sessionUuid: sessionId },
-    );
-    return { success: false, code: refusal.code, error: refusal.message };
+  const outside = managedConnectionSessionRegistrationRefusal(binding, sessionId, managedSlots);
+  if (outside) {
+    return outside;
   }
   if (!managedSlots) {
     return undefined;
   }
-  const refuse = (reason: string): DaemonMethodResult => {
-    // The connection declared itself managed, so a refusal must not leave it generic: the slot
-    // set is fixed for its lifetime. Bind an unbound socket fail-closed with zero sessions, so
-    // device acquisition and lifecycle stay refused while reads remain open (#11399).
+  const refuse = (reason: string, retryable = false): DaemonMethodResult => {
+    // The connection declared itself managed, so a refusal must not leave it generic. Bind an
+    // unbound socket fail-closed with zero sessions until it proves its holds; device acquisition
+    // and lifecycle stay refused while reads remain open (#11399).
     if (scopes && socketSessionId !== undefined && !binding) {
       scopes.bind(socketSessionId, { scopeKey: managedSlots.scopeKey, sessionUuids: [] });
     }
     return {
       success: false,
       code: DAEMON_MANAGED_SLOT_REGISTRATION_REFUSED_CODE,
+      retryable,
+      ...(retryable ? { retryAfterMs: MANAGED_CONNECTION_REGISTRATION_RETRY_AFTER_MS } : {}),
       error: `Managed slot registration refused: ${reason}`,
     };
   };
@@ -386,12 +388,47 @@ function managedConnectionRegistrationRefusal(
     );
   });
   if (foreign !== undefined) {
-    return refuse(`session ${foreign} is not a managed execution held by this owner token.`);
+    return refuse(
+      `session ${foreign} is not a managed execution held by this owner token.`,
+      managedRegistrationSessionIsUnknown(manager, foreign),
+    );
   }
   scopes.bind(socketSessionId, {
     scopeKey: managedSlots.scopeKey,
     sessionUuids: managedSlots.sessionUuids,
   });
+  return undefined;
+}
+
+/** Only an unrehydrated UUID, without a terminal in-memory release, can become a held session. */
+function managedRegistrationSessionIsUnknown(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+): boolean {
+  return (
+    !sessionForIngress(manager, sessionId) && !inMemorySessionRelease(manager, sessionId)?.terminal
+  );
+}
+
+/** A same-scope managed placeholder may prove its holds; other bindings keep session confinement. */
+function managedConnectionSessionRegistrationRefusal(
+  binding: ManagedConnectionBinding | undefined,
+  sessionId: string,
+  managedSlots: ManagedSlotsRegistration | undefined,
+): DaemonMethodResult | undefined {
+  const retryingPlaceholder =
+    managedSlots !== undefined &&
+    binding?.scopeKey === managedSlots.scopeKey &&
+    binding.sessionUuids.size === 0;
+  if (binding && !retryingPlaceholder && !binding.sessionUuids.has(sessionId)) {
+    const refusal = new DeviceOutsideManagedSlotsError(
+      DAEMON_REGISTER_SESSION_METHOD,
+      "session",
+      binding.scopeKey,
+      { sessionUuid: sessionId },
+    );
+    return { success: false, code: refusal.code, error: refusal.message };
+  }
   return undefined;
 }
 

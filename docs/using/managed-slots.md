@@ -196,7 +196,10 @@ connection used for tools and resources:
    holds (`managed_slot_registration_refused`, a protocol answer rather than a
    device-tool refusal). A daemon restart does not end the execution: its session
    is rehydrated, the proxy re-binds, and the restarted daemon records itself as
-   the slot's owner. While the daemon is away, tool calls answer `daemon_stalled`
+   the slot's owner. If registration arrives before the session is rehydrated, the
+   proxy retries on the same confined socket with backoff until it binds or the
+   execution ends; permanent refusals are not retried. While the daemon is away,
+   tool calls answer `daemon_stalled`
    after automatic recovery is exhausted. Its message names the affected sessions
    and attempt count, with `recovery.action: "wait_for_managed_reclaim"`: the proxy
    keeps probing every heartbeat interval, however long the daemon was away, and

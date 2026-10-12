@@ -832,6 +832,71 @@ describe("HomeScreen", () => {
     });
 
     describe("simulator launch budget regression", () => {
+      test("returns a typed timeout when a successful retry uses the whole Home budget", async () => {
+        const timeouts: number[] = [];
+        const { action, client } = createIosHomeScreen({
+          simulator: true,
+          simctl: {
+            executeCommandArgs: async (_args, timeoutMs = 0) => {
+              timeouts.push(timeoutMs);
+              await fakeTimer.sleep(timeoutMs);
+              if (timeouts.length === 1) {
+                throw new SimctlCommandTimeoutError("busy host launch timed out");
+              }
+              return { stdout: "", stderr: "" };
+            },
+          },
+        });
+        client.setHierarchyData(iosHierarchy("com.apple.springboard"));
+
+        const error = await action.executeIosHomeNavigation().then(
+          () => undefined,
+          (failure: unknown) => failure,
+        );
+        expect(timeouts).toEqual([2500, 2400]);
+        expect(fakeTimer.getSleepHistory()).toEqual([2500, 100, 2400]);
+        expect(fakeTimer.now()).toBe(5000);
+        expect(client.getHierarchyRequestCount()).toBe(0);
+        expect(error).not.toHaveProperty(
+          "message",
+          expect.stringContaining("foreground verification failed"),
+        );
+        expect(error).toBeInstanceOf(IosHomeLaunchTimeoutError);
+        expect(error).toMatchObject({ code: "timeout", retryable: true });
+        expect(error).toHaveProperty("message", expect.stringContaining("2 attempt(s) (5000ms)"));
+        expect(error).toHaveProperty("message", expect.stringContaining("whole Home budget"));
+        expect(error).toHaveProperty(
+          "message",
+          expect.stringContaining("foreground could not be verified"),
+        );
+        expect(error).toHaveProperty("message", expect.stringContaining("host may be busy"));
+        expect(error).toHaveProperty("message", expect.stringContaining("retried"));
+      }, 15);
+
+      test("verifies SpringBoard when a successful retry leaves 1ms of Home budget", async () => {
+        const timeouts: number[] = [];
+        const { action, client } = createIosHomeScreen({
+          simulator: true,
+          simctl: {
+            executeCommandArgs: async (_args, timeoutMs = 0) => {
+              timeouts.push(timeoutMs);
+              await fakeTimer.sleep(timeouts.length === 1 ? timeoutMs : timeoutMs - 1);
+              if (timeouts.length === 1) {
+                throw new SimctlCommandTimeoutError("busy host launch timed out");
+              }
+              return { stdout: "", stderr: "" };
+            },
+          },
+        });
+        client.setHierarchyData(iosHierarchy("com.apple.springboard"));
+
+        await expect(action.executeIosHomeNavigation()).resolves.toBeUndefined();
+        expect(timeouts).toEqual([2500, 2400]);
+        expect(fakeTimer.getSleepHistory()).toEqual([2500, 100, 2399]);
+        expect(fakeTimer.now()).toBe(4999);
+        expect(client.getHierarchyRequestCount()).toBeGreaterThanOrEqual(1);
+      }, 15);
+
       test("retries a busy host timeout with one dispatch and a short backoff", async () => {
         const timeouts: number[] = [];
         let dispatches = 0;

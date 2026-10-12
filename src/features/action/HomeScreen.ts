@@ -337,7 +337,19 @@ export class HomeScreen extends BaseVisualChange {
 
     const budgetMs = timeoutMs ?? 5000;
     const deadline = this.timer.now() + budgetMs;
-    await this.launchIosSpringboard(backend, deadline, budgetMs, signal, onDispatch);
+    const attempts = await this.launchIosSpringboard(
+      backend,
+      deadline,
+      budgetMs,
+      signal,
+      onDispatch,
+    );
+    throwIfAborted(signal);
+    if (deadline - this.timer.now() <= 0) {
+      throw new IosHomeLaunchTimeoutError(
+        `SpringBoard launch used the whole Home budget after ${attempts} attempt(s) (${budgetMs}ms), so the foreground could not be verified. The simulator host may be busy; the call can be retried.`,
+      );
+    }
 
     try {
       const client = IOSCtrlProxyClient.getInstance(this.device);
@@ -364,7 +376,7 @@ export class HomeScreen extends BaseVisualChange {
     budgetMs: number,
     signal?: AbortSignal,
     onDispatch?: () => void,
-  ): Promise<void> {
+  ): Promise<number> {
     const backoff = sequenceBackoff(HomeScreen.IOS_SIMCTL_LAUNCH_RETRY_DELAYS_MS);
     let attempts = 0;
     let lastTimeout: SimctlCommandTimeoutError | undefined;
@@ -390,7 +402,7 @@ export class HomeScreen extends BaseVisualChange {
           signal,
         );
         throwIfAborted(signal);
-        return;
+        return attempts;
       } catch (error) {
         throwIfAborted(signal);
         if (!(error instanceof SimctlCommandTimeoutError)) {

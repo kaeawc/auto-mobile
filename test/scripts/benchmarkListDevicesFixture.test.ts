@@ -1,12 +1,15 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { registerDeviceTools } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import {
   installListDevicesFixture,
   type ListDevicesFixture,
 } from "../../scripts/benchmark-listdevices-fixture";
 
 type ListedDevice = { runtime: { deviceId: string; poolStatus: string | null; heldBy?: string } };
+
+isolateToolRegistry();
 
 describe("listDevices benchmark fixture (#11332)", () => {
   let fixture: ListDevicesFixture | undefined;

@@ -1,3 +1,4 @@
+import { defaultLockOwnerGenerationProbe } from "../daemon/lockOwnerGeneration";
 import { errorMessage } from "../utils/describeUnknownError";
 import { existsSync, realpathSync } from "fs";
 import { basename, dirname, join } from "path";
@@ -6,7 +7,11 @@ import { logger } from "../utils/logger";
 import { readOptionalEnvPositiveInteger } from "../utils/envNumbers";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
-import { releaseExclusiveLock, tryAcquireExclusiveLock } from "../utils/fileLock";
+import {
+  releaseExclusiveLock,
+  tryAcquireExclusiveLock,
+  type LockOwnerGenerationProbe,
+} from "../utils/fileLock";
 import { defaultIdGenerator } from "../utils/IdGenerator";
 
 /**
@@ -70,6 +75,7 @@ export interface FileMigrationLockOptions {
   timeoutMs?: number;
   /** Injectable liveness check for stale-lock reclaim (defaults to `process.kill(pid, 0)`). */
   isProcessRunning?: (pid: number) => boolean;
+  ownerGeneration?: LockOwnerGenerationProbe;
   /** Owner pid written into the lock file (injectable for tests). */
   pid?: number;
   /**
@@ -98,6 +104,7 @@ export class FileMigrationLock implements MigrationLock {
   private readonly pollIntervalMs: number;
   private readonly timeoutMs: number;
   private readonly isProcessRunning: ((pid: number) => boolean) | undefined;
+  private readonly ownerGeneration: LockOwnerGenerationProbe | undefined;
   private readonly pid: number;
   private readonly ownerToken: string;
 
@@ -111,6 +118,7 @@ export class FileMigrationLock implements MigrationLock {
     this.pollIntervalMs = Math.max(1, options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
     this.timeoutMs = options.timeoutMs ?? DEFAULT_MIGRATION_LOCK_TIMEOUT_MS;
     this.isProcessRunning = options.isProcessRunning;
+    this.ownerGeneration = options.ownerGeneration;
     this.pid = options.pid ?? process.pid;
     this.ownerToken = options.ownerToken ?? PROCESS_MIGRATION_TOKEN;
   }
@@ -149,6 +157,7 @@ export class FileMigrationLock implements MigrationLock {
     return tryAcquireExclusiveLock(this.lockFilePath, {
       pid: this.pid,
       isProcessRunning: this.isProcessRunning,
+      ownerGeneration: this.ownerGeneration,
       // A lock file bearing our own PID is normally a stale leak from a crashed
       // prior incarnation whose PID the OS recycled — reclaim it rather than hang
       // for the full timeout. But an in-process same-path reopen while a prior
@@ -277,5 +286,8 @@ export function createFileMigrationLock(dbPath: string): MigrationLock {
   const timeoutMs = resolveMigrationLockTimeoutMs();
 
   logger.debug(`Migration lock keyed to ${lockFilePath}`);
-  return new FileMigrationLock(lockFilePath, timeoutMs !== undefined ? { timeoutMs } : {});
+  return new FileMigrationLock(lockFilePath, {
+    timeoutMs,
+    ownerGeneration: defaultLockOwnerGenerationProbe,
+  });
 }

@@ -168,6 +168,9 @@ hold a held device runs on that device's read lane (`device:<id>:read`) instead,
 never waits behind the holder's in-flight control call (#10969). Reads serialize among
 themselves; control calls, the holder's own reads and reads of a free device (which may run
 readiness) stay on the control lane.
+A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
+See [the ownership contract and per-tool readiness table](../../docs/using/device-ownership.md#which-read-tools-ready-an-unheld-device)
+for the owner decision 2026-10-12 (#11964).
 A `deviceReadOnly` call whose `sessionUuid` names no device session this
 daemon issued (the IDE injects its observer session UUID into every call) is
 handled as sessionless rather than refused as unissued (#10968). Reads also treat device-restart recovery reservations as held: running devices remain readable,

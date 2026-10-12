@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   INTERNAL_EXECUTION_ID_PARAM,
   INTERNAL_EXECUTION_START_TIME_PARAM,
@@ -109,6 +111,7 @@ function harness(
   capacity = false,
   incomplete = false,
   shaped = false,
+  notReady = false,
 ) {
   const device = deviceFor(platform);
   if (shaped && platform === "ios") {
@@ -143,11 +146,15 @@ function harness(
   const iosClient = new FakeIOSCtrlProxy();
   const androidManager = new FakeCtrlProxyManager();
   const androidClient = new FakeCtrlProxy();
-  androidClient.setConnected(true);
-  iosClient.setConnected(true);
-  iosManager.setInstalled(true);
-  iosManager.setRunning(true);
-  iosManager.setAvailable(true);
+  androidClient.setConnected(!notReady);
+  iosClient.setConnected(!notReady);
+  iosManager.setInstalled(!notReady);
+  iosManager.setRunning(!notReady);
+  iosManager.setAvailable(!notReady);
+  if (notReady) {
+    // The cold runner setup succeeds, then the fake connection succeeds without a retry sleep.
+    iosClient.setConnectWithoutSetupResult(true);
+  }
   const manager = DeviceSessionManager.createInstance(
     new FakeDeviceClientProvider(adb, discovery, simctl as unknown as SimCtlClient, {
       window,
@@ -410,6 +417,180 @@ test("production read-tool enumeration is pinned (including the three issue tool
   }
 });
 
+// Characterize registry readiness with real registration options and stubbed tool bodies.
+// observe's separate hierarchy-service start is tested by ObservationReadServiceStart tests.
+const READS_THAT_READY_UNHELD = {
+  android: [
+    "accessibility",
+    "clipboard",
+    "displayConfig",
+    "getAppPermissions",
+    "getDataStore",
+    "getDeepLinks",
+    "getDeviceState",
+    "getNavigationGraph",
+    "getNetworkGraph",
+    "getNotificationPolicy",
+    "getPreference",
+    "hitTest",
+    "identifyInteractions",
+    "keyboard",
+    "listDataStores",
+    "prototype",
+    "snapshotOf",
+    "sqlQuery",
+  ],
+  ios: [
+    "accessibility",
+    "clipboard",
+    "displayConfig",
+    "getAppPermissions",
+    "getDataStore",
+    "getDeepLinks",
+    "getDeviceState",
+    "getNavigationGraph",
+    "getNetworkGraph",
+    "getNotificationPolicy",
+    "getPreference",
+    "hitTest",
+    "identifyInteractions",
+    "keyboard",
+    "listDataStores",
+    "prototype",
+    "snapshotOf",
+    "sqlQuery",
+  ],
+};
+const READS_WITHOUT_UNHELD_READINESS = {
+  android: [
+    "inspectPackageSigning", // Declares booted readiness; no CtrlProxy setup.
+    "listApps", // Declares booted readiness; no CtrlProxy setup.
+    "observe", // Explicit deviceId uses the observer path; no ensureDeviceReady.
+  ],
+  ios: [
+    "inspectPackageSigning", // Declares booted readiness; no runner setup.
+    "listApps", // Declares booted readiness; no runner setup.
+    "observe", // Explicit deviceId uses the observer path; no ensureDeviceReady.
+  ],
+};
+const observedReadiness = new Map<Platform, Map<string, boolean>>();
+
+test("documented unheld registry readiness matches literal classifications", () => {
+  const lines = readFileSync(
+    join(import.meta.dir, "../../docs/using/device-ownership.md"),
+    "utf8",
+  ).split(/\r?\n/);
+  const start = lines.indexOf("### Which read tools ready an unheld device");
+  expect(start).toBeGreaterThanOrEqual(0);
+  const section = lines.slice(start + 1);
+  const end = section.findIndex((line) => /^#{1,3} /.test(line));
+  const rows = (end === -1 ? section : section.slice(0, end)).flatMap((line) => {
+    const row = /^\|\s*`([^`]+)`\s*\|\s*([^|]+)\|\s*([^|]+)\|\s*$/.exec(line);
+    return row ? [{ name: row[1], android: row[2].trim(), ios: row[3].trim() }] : [];
+  });
+  expect(rows.map(({ name }) => name)).toEqual(EXPECTED);
+  for (const platform of ["android", "ios"] as const) {
+    for (const row of rows) {
+      expect(row[platform].startsWith("Yes"), `${platform} ${row.name}`).toBe(
+        READS_THAT_READY_UNHELD[platform].includes(row.name),
+      );
+    }
+  }
+});
+
+test("unheld readiness literal lists partition all 21 production reads", () => {
+  for (const platform of ["android", "ios"] as const) {
+    const classified = [
+      ...READS_THAT_READY_UNHELD[platform],
+      ...READS_WITHOUT_UNHELD_READINESS[platform],
+    ];
+    expect(classified.sort()).toEqual(EXPECTED);
+    expect(new Set(classified).size).toBe(EXPECTED.length);
+    expect(tools).toEqual(EXPECTED);
+  }
+});
+
+for (const platform of ["android", "ios"] as const) {
+  for (const name of EXPECTED) {
+    test(`${platform} unheld running not ready: ${name}`, async () => {
+      h = harness(platform, true, false, false, false, true);
+      Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+      const daemon = unheld.get(platform)!;
+      DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
+      const execution = executionTracker.startExecution(name);
+      try {
+        const response = await runWithToolSelectionContext(
+          { explicitObserveDeviceRead: name === "observe" },
+          () =>
+            ToolRegistry.getTool(name)!.handler({
+              platform,
+              deviceId: h!.device.deviceId,
+              ...readArgs[name],
+              [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
+              [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
+            }),
+        );
+        expect(response).toMatchObject({ success: true });
+      } finally {
+        executionTracker.endExecution(execution.id);
+      }
+      expect(h.handledDevices).toEqual([h.device]);
+      expect(h.runs).toHaveLength(1);
+      expect(h.runs[0].sessionUuid).toBeUndefined();
+      const operations = (
+        platform === "android" ? h.androidManager : h.iosManager
+      ).getExecutedOperations();
+      const mutated = operations.some((operation) =>
+        platform === "android"
+          ? operation.startsWith("setup:") ||
+            operation.startsWith("install:") ||
+            operation === "enable"
+          : operation.startsWith("setup:") || operation === "start",
+      );
+      const readIntent = h.ensure.mock.calls.some((call) => call[2]?.intent === "read");
+      const ran = readIntent && mutated;
+      const expected = READS_THAT_READY_UNHELD[platform].includes(name);
+      expect(ran).toBe(expected);
+      // Pin both halves independently: readiness cannot silently switch to control intent.
+      expect(mutated).toBe(expected);
+      if (name === "observe") {
+        expect(h.ensure).not.toHaveBeenCalled();
+      } else {
+        expect(readIntent).toBe(true);
+      }
+      const observed = observedReadiness.get(platform) ?? new Map<string, boolean>();
+      observed.set(name, ran);
+      observedReadiness.set(platform, observed);
+      expect(daemon.sessions.getAllSessions()).toEqual([]);
+      expect(h.manager.getCurrentDevice()).toBeUndefined();
+      expect(h.manager.getCurrentPlatform()).toBeUndefined();
+      expect(h.manager.getExplicitDevicePin()).toBeUndefined();
+      expect(h.apply).not.toHaveBeenCalled();
+      expect(h.getConfig).not.toHaveBeenCalled();
+      expect(
+        h.adb.getExecutedCommands().filter((command) => command.includes("cmd uimode")),
+      ).toEqual([]);
+    });
+  }
+  test(`${platform} unheld running not ready: observed sets equal literal classifications`, () => {
+    const observed = observedReadiness.get(platform) ?? new Map<string, boolean>();
+    if (observed.size === EXPECTED.length) {
+      expect([...observed.keys()].sort()).toEqual(EXPECTED);
+      expect([...observed].filter(([, ran]) => ran).map(([name]) => name)).toEqual(
+        READS_THAT_READY_UNHELD[platform],
+      );
+      expect([...observed].filter(([, ran]) => !ran).map(([name]) => name)).toEqual(
+        READS_WITHOUT_UNHELD_READINESS[platform],
+      );
+    } else {
+      for (const [name, ran] of observed) {
+        expect(EXPECTED).toContain(name);
+        expect(ran).toBe(READS_THAT_READY_UNHELD[platform].includes(name));
+      }
+    }
+  });
+}
+
 type Column =
   | "reserved-stopped"
   | "reserved-running"
@@ -459,8 +640,13 @@ const columns: Column[] = [
   "failed-other-running-name",
   "failed-other-reserved",
 ];
+const notReadyColumns: Column[] = ["held-id", "held-name", "held-slot-name", "reserved-running"];
 for (const platform of ["android", "ios"] as const) {
-  for (const column of columns) {
+  for (const { column, notReady } of [
+    ...columns.map((column) => ({ column, notReady: false })),
+    ...notReadyColumns.map((column) => ({ column, notReady: true })),
+  ]) {
+    const columnLabel = `${column}${notReady ? " not ready" : ""}`;
     if (
       (column === "stopped-serial" && platform !== "android") ||
       (column === "stopped-name" && platform !== "ios") ||
@@ -477,7 +663,7 @@ for (const platform of ["android", "ios"] as const) {
         ? [undefined, "either"]
         : [platform]) as readonly (Platform | "either" | undefined)[]) {
       for (const name of EXPECTED.filter((name) => !exactRunningPin || name !== "observe")) {
-        test(`${platform} ${column}, platform=${requested ?? "absent"}: ${name}`, async () => {
+        test(`${platform} ${columnLabel}, platform=${requested ?? "absent"}: ${name}`, async () => {
           const failedOther = column.startsWith("failed-other");
           if (failedOther || exactRunningPin) {
             useFakeReadRetryTimer();
@@ -495,6 +681,7 @@ for (const platform of ["android", "ios"] as const) {
             column === "capacity",
             column === "incomplete",
             column.startsWith("failed-other-shaped") || exactRunningPin,
+            notReady,
           );
           const other = platform === "android" ? "ios" : "android";
           if (failedOther) {
@@ -647,7 +834,7 @@ for (const platform of ["android", "ios"] as const) {
           } finally {
             executionTracker.endExecution(execution.id);
           }
-          const key = `${platform}:${column}:${requested ?? "absent"}`;
+          const key = `${platform}:${columnLabel}:${requested ?? "absent"}`;
           const row = decisions.get(key) ?? new Map<string, string>();
           row.set(name, decision);
           decisions.set(key, row);
@@ -751,9 +938,9 @@ for (const platform of ["android", "ios"] as const) {
           }
         });
       }
-      test(`${platform} ${column}, platform=${requested ?? "absent"}: every tool reaches an identical decision`, () => {
+      test(`${platform} ${columnLabel}, platform=${requested ?? "absent"}: every tool reaches an identical decision`, () => {
         const row =
-          decisions.get(`${platform}:${column}:${requested ?? "absent"}`) ??
+          decisions.get(`${platform}:${columnLabel}:${requested ?? "absent"}`) ??
           new Map<string, string>();
         // Filtered runs may execute only part of the table (or just this equality pin).
         expect(new Set(row.values()).size).toBe(row.size ? 1 : 0);

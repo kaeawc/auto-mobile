@@ -388,6 +388,12 @@ distinguished by the result type (`AppendTextFailureSource`), never by inspectin
     `ide/setSessionToolEnabled`. A read never needs a session and never counts
     as activity (#10964); on a held device it is connect-only, on its own lane
     (#10969). Streams need only an observer registration, which is not a session.
+    A read never writes settings on a device it does not hold, with one exception: readiness needed to answer the read.
+    A sessionless read that names a running device nobody holds may ready it in order to answer: on Android it may
+    install the CtrlProxy APK, write the accessibility settings, and force-stop and rebind the service; on an iOS
+    simulator it may install and launch the runner. The exception never applies to a device held, slot-assigned or
+    reserved by another session: those reads use what is already installed and never run readiness.
+    (Owner decision 2026-10-12, #11964.) Reads skip appearance sync and current-device pins.
     A recording stops and finalizes on its session's release, about 120 s at most
     (#10957), owner-less ones on acquisition (#10961), artifacts stay fetchable
     by id (#10958). Retryable acquisition refusals are typed:

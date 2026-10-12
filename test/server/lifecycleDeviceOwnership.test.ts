@@ -430,7 +430,7 @@ describe("already-dead Android shutdown ownership", () => {
     expect(DaemonState.getInstance().isInitialized()).toBe(false);
   });
 
-  async function arrange() {
+  async function arrange(beforeHolderCheck?: () => void) {
     const timer = new FakeTimer();
     const manager = new FakeDeviceUtils();
     const order: string[] = [];
@@ -478,6 +478,7 @@ describe("already-dead Android shutdown ownership", () => {
           client,
           () => {
             order.push("holder-check");
+            beforeHolderCheck?.();
             expect(assertHolder).toBeDefined();
             assertHolder!();
           },
@@ -529,6 +530,32 @@ describe("already-dead Android shutdown ownership", () => {
       expect(h.pool.getDevice(device.deviceId)).toBeDefined();
       expect(h.pool.isUnderShutdownReservation(device.deviceId)).toBe(false);
     } finally {
+      h.reserveSpy.mockRestore();
+      h.releaseSpy.mockRestore();
+      h.retirementSpy.mockRestore();
+    }
+  });
+
+  test("a holder replaced after entry is refused under the shutdown reservation", async () => {
+    let holder = "holder";
+    const h = await arrange(() => {
+      holder = "new-holder";
+      h.pool.getDevice(device.deviceId)!.sessionId = holder;
+    });
+    const ownerSpy = spyOn(sessions!, "getSessionForDevice").mockImplementation(() => holder);
+    try {
+      await expect(
+        ToolRegistry.getTool("killDevice")!.handler({ device, sessionUuid: "holder" }),
+      ).rejects.toMatchObject({ code: "device_owned_by_other_session" });
+      expect(h.order).toEqual(["holder-check"]);
+      expect(h.reserveSpy).toHaveBeenCalledTimes(1);
+      expect(h.releaseSpy).not.toHaveBeenCalled();
+      expect(h.retirementSpy).not.toHaveBeenCalled();
+      expect(sessions?.getSession("holder")?.assignedDevice).toBe(device.deviceId);
+      expect(h.pool.getDevice(device.deviceId)?.sessionId).toBe("new-holder");
+      expect(h.pool.isUnderShutdownReservation(device.deviceId)).toBe(false);
+    } finally {
+      ownerSpy.mockRestore();
       h.reserveSpy.mockRestore();
       h.releaseSpy.mockRestore();
       h.retirementSpy.mockRestore();

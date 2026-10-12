@@ -133,7 +133,14 @@ test.each(["missing-device", device.deviceId])(
       }),
     );
     DaemonState.getInstance().initialize(sessions, pool);
-    const handler = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+    const handler = createSetActiveDeviceHandler({
+      resumeCtrlProxy: async () => {},
+      transportWait: {
+        timer: new FakeTimer(),
+        probe: async () => new Map(),
+        invalidateDeviceList: () => {},
+      },
+    });
     if (deviceId === device.deviceId) {
       expect(getStructuredPayload(await handler({ deviceId, sessionUuid: "one" }))).toMatchObject({
         deviceId,
@@ -155,7 +162,14 @@ test("setActiveDevice caps a multi-line refresh failure at its first line", asyn
     failure,
   });
   try {
-    const handler = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+    const handler = createSetActiveDeviceHandler({
+      resumeCtrlProxy: async () => {},
+      transportWait: {
+        timer: new FakeTimer(),
+        probe: async () => new Map(),
+        invalidateDeviceList: () => {},
+      },
+    });
     await expect(handler({ deviceId: "missing-device", sessionUuid: "one" })).rejects.toMatchObject(
       {
         message: `Could not refresh device list: ${"x".repeat(256)}. Resolve the cause and retry.`,
@@ -170,7 +184,14 @@ test("setActiveDevice caps a multi-line refresh failure at its first line", asyn
 test("pin: setActiveDevice does not refresh when the requested device is already pooled", async () => {
   const refresh = spyOn(pool, "refreshDevicesWithOutcome");
   try {
-    const handler = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+    const handler = createSetActiveDeviceHandler({
+      resumeCtrlProxy: async () => {},
+      transportWait: {
+        timer: new FakeTimer(),
+        probe: async () => new Map(),
+        invalidateDeviceList: () => {},
+      },
+    });
     await handler({ deviceId: device.deviceId, sessionUuid: "one" });
     expect(refresh).not.toHaveBeenCalled();
   } finally {
@@ -184,7 +205,14 @@ test("setActiveDevice reports device not found after a successful empty refresh"
     createDevicePoolDependencies(sessions, "empty-refresh", { timer, deviceManager: utils }),
   );
   DaemonState.getInstance().initialize(sessions, pool);
-  const handler = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+  const handler = createSetActiveDeviceHandler({
+    resumeCtrlProxy: async () => {},
+    transportWait: {
+      timer: new FakeTimer(),
+      probe: async () => new Map(),
+      invalidateDeviceList: () => {},
+    },
+  });
   await expect(handler({ deviceId: "missing-device", sessionUuid: "one" })).rejects.toThrow(
     "Device 'missing-device' not found in device pool",
   );

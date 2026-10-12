@@ -38,6 +38,7 @@ function arrange(
   states: (string | undefined)[],
   failures: number,
   error = new ActionableError("not found"),
+  onAttempt?: () => void,
 ) {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
@@ -49,6 +50,7 @@ function arrange(
     getCurrentPlatform: () => undefined,
     ensureDeviceReady: async () => {
       calls.push("ready");
+      onAttempt?.();
       if (++attempts <= failures) {
         throw error;
       }
@@ -65,6 +67,9 @@ function arrange(
     },
     transportWait: {
       timer,
+      invalidateDeviceList: () => {
+        calls.push("invalidate");
+      },
       probe: async () => {
         const state = states[Math.min(probes++, states.length - 1)];
         return state === undefined ? new Map() : new Map([[device.deviceId, state]]);
@@ -83,15 +88,72 @@ test("legacy readiness verification retries offline and succeeds through absence
     ),
   );
   await h.select({ deviceId: device.deviceId });
-  expect(h.calls).toEqual(["ready", "ready", "resume", "pin"]);
+  expect(h.calls).toEqual(["ready", "invalidate", "ready", "resume", "pin"]);
   expect(h.probes()).toBe(1);
 });
 
 test("legacy not-found retries offline then not listed then ready", async () => {
   const h = arrange(["offline", undefined, "device"], 2);
   await h.select({ deviceId: device.deviceId });
-  expect(h.calls).toEqual(["ready", "ready", "ready", "resume", "pin"]);
+  expect(h.calls).toEqual(["ready", "invalidate", "ready", "invalidate", "ready", "resume", "pin"]);
   expect(h.timer.now()).toBe(300);
+});
+
+test("fresh readiness retries recover offline then absent then ready at 700ms", async () => {
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const order: string[] = [];
+  const currentState = () =>
+    timer.now() < 300 ? "offline" : timer.now() < 700 ? undefined : "device";
+  let cached: { state: string | undefined; expires: number } | undefined;
+  const legacy: LegacyDeviceSelection = {
+    getCurrentDevice: () => undefined,
+    getCurrentPlatform: () => undefined,
+    ensureDeviceReady: async () => {
+      order.push(`attempt:${timer.now()}`);
+      if (!cached || timer.now() >= cached.expires) {
+        cached = { state: currentState(), expires: timer.now() + 5000 };
+      }
+      if (cached.state !== "device") {
+        throw new ActionableError("not found");
+      }
+      return device;
+    },
+    setExplicitDevicePin: () => {
+      order.push("pin");
+    },
+  };
+  const select = createSetActiveDeviceHandler({
+    legacyDeviceSelection: () => legacy,
+    resumeCtrlProxy: async () => {
+      order.push("resume");
+    },
+    transportWait: {
+      timer,
+      invalidateDeviceList: () => {
+        order.push(`invalidate:${timer.now()}`);
+        cached = undefined;
+      },
+      probe: async () => {
+        const state = currentState();
+        return state === undefined ? new Map() : new Map([[device.deviceId, state]]);
+      },
+    },
+  });
+  await select({ deviceId: device.deviceId });
+  expect(order).toEqual([
+    "attempt:0",
+    "invalidate:100",
+    "attempt:100",
+    "invalidate:300",
+    "attempt:300",
+    "invalidate:700",
+    "attempt:700",
+    "resume",
+    "pin",
+  ]);
+  expect(timer.now()).toBe(700);
+  expect(timer.getPendingTimeoutCount()).toBe(0);
 });
 
 test("legacy persistent offline returns the typed wire refusal within five seconds", async () => {
@@ -133,15 +195,37 @@ for (const original of [
   });
 }
 
-test("an aborted request propagates cancellation without probing", async () => {
+test("an aborted selection preserves main's actionable attempt error without probing or waiting", async () => {
   const controller = new AbortController();
   const reason = new DOMException("cancelled selection", "AbortError");
-  const h = arrange(["offline"], Infinity, new ActionableError(reason.message));
+  // Main calls readiness even when already aborted and preserves its actionable error.
+  const original = new ActionableError("readiness failed during cancellation");
+  const h = arrange(["offline"], Infinity, original);
   controller.abort(reason);
   await expect(h.select({ deviceId: device.deviceId }, undefined, controller.signal)).rejects.toBe(
-    reason,
+    original,
   );
   expect(h.probes()).toBe(0);
+  expect(h.calls).toEqual(["ready"]);
+  expect(h.timer.now()).toBe(0);
+  expect(h.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("an attempt error racing cancellation keeps main's wrapper and cause", async () => {
+  const controller = new AbortController();
+  const original = new Error("readiness failed");
+  const h = arrange(["offline"], Infinity, original, () => controller.abort("cancelled"));
+  const error = await h
+    .select({ deviceId: device.deviceId }, undefined, controller.signal)
+    .catch((caught: unknown) => caught);
+  expect(error).toBeInstanceOf(ActionableError);
+  expect(error).toMatchObject({
+    message: "Failed to set active device: readiness failed",
+    cause: original,
+  });
+  expect(h.probes()).toBe(0);
+  expect(h.calls).toEqual(["ready"]);
+  expect(h.timer.now()).toBe(0);
   expect(h.timer.getPendingTimeoutCount()).toBe(0);
 });
 
@@ -180,6 +264,7 @@ async function arrangePool(returns: boolean) {
     resumeCtrlProxy: async () => {},
     transportWait: {
       timer,
+      invalidateDeviceList: () => {},
       probe: async () => {
         probes++;
         if (returns) {

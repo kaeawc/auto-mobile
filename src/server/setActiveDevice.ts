@@ -1,19 +1,19 @@
-import { isTypedToolRefusal } from "./shapeToolCallError";
-import { TransitionalAdbBindWait } from "../daemon/transitionalAdbBindWait";
-import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
-import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import type { AcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import { DaemonState } from "../daemon/daemonState";
 import type { DevicePool, PooledDevice } from "../daemon/devicePool";
 import type { SessionManager } from "../daemon/sessionManager";
+import { TransitionalAdbBindWait } from "../daemon/transitionalAdbBindWait";
 import type { DisplayInventoryProvider } from "../devices/DisplayInventoryProvider";
+import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import type { BootedDevice, Platform, SomePlatform } from "../models";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { DisplayPinNeedsSessionError } from "../models/PinnedDisplayError";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { DeviceSessionManager, type DeviceReadyOptions } from "../devices/DeviceSessionManager";
 import { logger } from "../utils/logger";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
+import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import {
   AndroidBootedDeviceDiscoveryIncompleteError,
   BootedDeviceDiscoveryIncompleteError,
@@ -33,6 +33,7 @@ import {
 import { prepareSessionDisplayPin } from "./sessionDisplayPin";
 import { deviceAssignedToOtherSessionError } from "../daemon/inputDeviceOwnership";
 import { executionTracker } from "./executionTracker";
+import { isTypedToolRefusal } from "./shapeToolCallError";
 import { isClientCancelled } from "../utils/AbortContext";
 import { acquireUndoneIfUndelivered } from "./undeliveredAcquisition";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
@@ -70,6 +71,7 @@ interface SetActiveDeviceDependencies {
     timer: Timer;
     probe?: PlatformDeviceManager["getAndroidListedDeviceStates"];
     probeTimeoutMs?: number;
+    invalidateDeviceList?: () => void;
   };
   resumeCtrlProxy: ResumeCtrlProxy;
   /** Defaults to the process-wide DeviceSessionManager. */
@@ -101,12 +103,11 @@ function transitionalTransportAttempt(
   });
   return async (attempt) => {
     for (;;) {
-      signal?.throwIfAborted();
       try {
         return await attempt();
       } catch (error) {
-        signal?.throwIfAborted();
         if (
+          signal?.aborted ||
           args.platform === "ios" ||
           isIosUdid(args.deviceId) ||
           isTypedToolRefusal(error) ||
@@ -115,6 +116,8 @@ function transitionalTransportAttempt(
         ) {
           throw error;
         }
+        // Readiness uses the cached adb list; the recovered transport needs a fresh retry.
+        (ports?.invalidateDeviceList ?? resetAdbDeviceListCache)();
       }
     }
   };
@@ -546,7 +549,6 @@ export function createSetActiveDeviceHandler(dependencies: SetActiveDeviceDepend
         restorePriorDisplayPin(prior);
       }
       logger.error("Failed to set active device:", error);
-      signal?.throwIfAborted();
       throw toActionableError(error, "Failed to set active device");
     }
   };

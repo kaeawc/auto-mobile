@@ -57,6 +57,7 @@ function service(
     | "lifecycleLease"
     | "onAndroidColdBootTrackingChanged"
     | "onIdentityResolved"
+    | "invalidateAndroidDeviceList"
   >,
   displayInventory?: FakeDisplayInventoryProvider,
 ): DeviceBootService {
@@ -74,6 +75,7 @@ function service(
     timer: timer ?? new FakeTimer(),
     lifecycleCoordinator,
     displayInventory,
+    invalidateAndroidDeviceList: () => {},
     ...lifecycleOptions,
   });
 }
@@ -500,7 +502,17 @@ describe("DeviceBootService", () => {
 
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const pending = service(devices, matcher, undefined, timer).boot({ platform: "android" });
+    const order: string[] = [];
+    const list = devices.listDeviceImages.bind(devices);
+    devices.listDeviceImages = async (platform, signal) => {
+      order.push("list");
+      return list(platform, signal);
+    };
+    const pending = service(devices, matcher, undefined, timer, undefined, {
+      invalidateAndroidDeviceList: () => {
+        order.push("invalidate");
+      },
+    }).boot({ platform: "android" });
     await expect(pending).rejects.toMatchObject({ code: "discovery_incomplete", retryable: true });
     await expect(pending).rejects.toBeInstanceOf(AndroidBootedDeviceDiscoveryIncompleteError);
     await expect(pending).rejects.toThrow(
@@ -510,6 +522,10 @@ describe("DeviceBootService", () => {
     expect(timer.now()).toBe(5000);
     expect(timer.getPendingTimeoutCount()).toBe(0);
     expect(devices.getListDeviceImagesCalls()).toHaveLength(9);
+    expect(order).toEqual([
+      "list",
+      ...Array.from({ length: 8 }, () => ["invalidate", "list"]).flat(),
+    ]);
     expect(devices.wasMethodCalled("startDevice")).toBe(false);
     expect(devices.getExecutedOperations()).not.toContain("startDevice:Pixel_9_API_35:180000");
   });
@@ -3388,17 +3404,27 @@ describe("DeviceBootService", () => {
 });
 
 describe("transitional Android image discovery", () => {
-  function arrange(timeoutMs = 180000) {
+  function arrange(timeoutMs = 180000, known = false) {
     const devices = new FakeDeviceUtils();
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const unknown = { ...image, isRunningStateKnown: false };
+    const unknown = { ...image, isRunningStateKnown: known };
     devices.setDeviceImages("android", [unknown]);
     const matcher = new FakeDeviceMatcher();
     matcher.setImageResult(unknown);
+    const order: string[] = [];
+    const list = devices.listDeviceImages.bind(devices);
+    devices.listDeviceImages = async (platform, signal) => {
+      order.push("list");
+      return list(platform, signal);
+    };
     const boot = () =>
-      service(devices, matcher, undefined, timer).boot({ platform: "android", timeoutMs });
-    return { devices, timer, boot };
+      service(devices, matcher, undefined, timer, undefined, {
+        invalidateAndroidDeviceList: () => {
+          order.push("invalidate");
+        },
+      }).boot({ platform: "android", timeoutMs });
+    return { devices, timer, boot, order };
   }
 
   it("re-lists unknown state before cold-booting exactly once with the refreshed image", async () => {
@@ -3406,7 +3432,8 @@ describe("transitional Android image discovery", () => {
     const refreshed = { ...image, isRunningStateKnown: true, osVersion: "36" };
     const list = h.devices.listDeviceImages.bind(h.devices);
     h.devices.listDeviceImages = async (platform, signal) => {
-      if (h.devices.getListDeviceImagesCalls().length === 1) {
+      // Model a cached overlay: only an invalidated read can observe the recovered row.
+      if (h.order.at(-1) === "invalidate" && h.timer.now() >= 300) {
         h.devices.setDeviceImages("android", [refreshed]);
       }
       return list(platform, signal);
@@ -3418,9 +3445,11 @@ describe("transitional Android image discovery", () => {
       "getBootedDevices:android",
       "getBootedDevices:android",
       "listDeviceImages:android",
-      "startDevice:Pixel_9_API_35:179900",
-      "waitForDeviceReady:Pixel_9_API_35:179900",
+      "listDeviceImages:android",
+      "startDevice:Pixel_9_API_35:179700",
+      "waitForDeviceReady:Pixel_9_API_35:179700",
     ]);
+    expect(h.order).toEqual(["list", "invalidate", "list", "invalidate", "list"]);
     expect(h.devices.getListDeviceImagesCalls()[1].signal).toBeInstanceOf(AbortSignal);
   });
 
@@ -3447,6 +3476,20 @@ describe("transitional Android image discovery", () => {
     expect(h.timer.now()).toBe(350);
     expect(h.devices.wasMethodCalled("startDevice")).toBe(false);
     expect(h.timer.getPendingTimeoutCount()).toBe(0);
+    expect(h.order).toEqual(["list", "invalidate", "list", "invalidate", "list"]);
+  });
+
+  it("does not invalidate or re-list an image whose state is known on the first read", async () => {
+    const h = arrange(180000, true);
+    await h.boot();
+    expect(h.order).toEqual(["list"]);
+    expect(h.devices.getExecutedOperations()).toEqual([
+      "listDeviceImages:android",
+      "getBootedDevices:android",
+      "getBootedDevices:android",
+      "startDevice:Pixel_9_API_35:180000",
+      "waitForDeviceReady:Pixel_9_API_35:180000",
+    ]);
   });
 
   it("refuses an AVD that disappears during the discovery wait", async () => {

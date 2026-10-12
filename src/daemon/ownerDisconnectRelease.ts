@@ -10,11 +10,12 @@ import type { SessionReleaseReason } from "./releaseReasons";
  * (#10051): a proxy whose socket merely dropped reconnects and heartbeats well
  * inside it, which cancels the release.
  *
- * A release the pool defers because the session still has work in flight is
+ * A release the pool defers because the session still has a control call in flight is
  * re-armed, not dropped (#10663): it is retried when the vetoing call ends
  * ({@link OwnerDisconnectRelease.executionsEnded}, #10712), and in any case once
  * the veto's bound passes, so an execution that never settles keeps the session
- * only as long as the shared unsettled-execution veto policy allows.
+ * only as long as the shared unsettled-execution veto policy allows. A read in flight never
+ * defers release and is cut with the typed terminal refusal (#11381).
  */
 
 import type { Timer } from "../utils/SystemTimer";
@@ -42,12 +43,12 @@ export const OWNER_DISCONNECTED_RELEASE_REASON =
 export const OWNER_DISCONNECT_GRACE_MS = DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS + SUSPECT_GRACE_MS;
 
 /**
- * Longest an active execution may keep a session whose owner disconnected (#10663): the same
+ * Longest an active control call may keep a session whose owner disconnected (#10663): the same
  * bound the heartbeat monitor applies, from the shared policy in `./unsettledExecutionVeto`.
  */
 export const OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS = UNSETTLED_EXECUTION_VETO_CEILING_MS;
 
-/** A release the pool deferred because in-flight work vetoed it. */
+/** A release the pool deferred because an in-flight control call vetoed it. */
 export interface OwnerDisconnectReleaseDeferral {
   /**
    * When the veto stops holding, on the release's clock (the session clock, #11162); the release
@@ -62,7 +63,7 @@ export interface OwnerDisconnectReleasePort {
   /** Whether a still-connected client owns the session. */
   hasConnectedOwner(sessionId: string): boolean;
   /**
-   * Release exactly this session incarnation, or defer it while in-flight work vetoes it. A
+   * Release exactly this session incarnation, or defer it while an in-flight control call vetoes it. A
    * deferred release is retried when one of the session's executions ends, or at
    * `deferredUntil`. Resolving with no deferral while the session is still held leaves the
    * session to its heartbeat lease.
@@ -127,8 +128,8 @@ function ownerHeartbeatSince(session: OwnerSession): number {
 }
 
 /**
- * Bounds how long active executions may veto the owner-disconnect release of a session
- * (#10663). The #5343 "never reap mid-call" rule holds while the shared unsettled-execution veto
+ * Bounds how long active control calls may veto the owner-disconnect release of a session
+ * (#10663). The #5343 "never reap mid-control-call" rule holds while the shared unsettled-execution veto
  * policy allows; past its bound the session is released anyway.
  */
 export class OwnerDisconnectExecutionVeto {

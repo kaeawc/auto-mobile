@@ -3523,7 +3523,7 @@ export class SessionManager {
       return persisted;
     }
     if (persisted && persistedSessionExpiryReason(persisted, now) === "restart-recovery-timeout") {
-      return this.terminalizeRestartRecoveryTimeout(persisted, onlyIfOwnedByDaemon);
+      return this.terminalizeRestartRecoveryHandoff(persisted, onlyIfOwnedByDaemon);
     }
     if (
       !persisted ||
@@ -3559,10 +3559,43 @@ export class SessionManager {
     return current;
   }
 
+  /** Terminalize only this daemon's still-recoverable handoff after a confirmed sessionless stop. */
+  async terminalizeDeviceRestartHandoffForStop(sessionId: string): Promise<boolean> {
+    const persisted = await this.readPersistedSession(sessionId);
+    if (
+      !persisted ||
+      !isDeviceRestartReleasedRow(persisted) ||
+      this.sessions.has(sessionId) ||
+      this.isSessionBeingRecreated(sessionId) ||
+      this.daemonSessionId === undefined ||
+      persisted.daemon_session_id !== this.daemonSessionId
+    ) {
+      logger.warn(
+        `[SessionManager] Cannot terminalize stopped restart holder ${sessionId}: row is no longer this daemon's handoff`,
+      );
+      return false;
+    }
+    const current = await this.terminalizeRestartRecoveryHandoff(
+      { ...persisted },
+      this.daemonSessionId,
+      "device-killed",
+    );
+    const confirmed =
+      current?.release_reason === "device-killed" &&
+      current.stable_identity_generation === persisted.stable_identity_generation;
+    if (!confirmed) {
+      logger.warn(
+        `[SessionManager] Stopped restart holder ${sessionId} terminal row write was not confirmed`,
+      );
+    }
+    return confirmed;
+  }
+
   /** A conditional handoff expiry uses the terminal journal, but fences only a confirmed row. */
-  private async terminalizeRestartRecoveryTimeout(
+  private async terminalizeRestartRecoveryHandoff(
     persisted: DeviceSession,
     onlyIfOwnedByDaemon?: string,
+    reason: "restart-recovery-timeout" | "device-killed" = "restart-recovery-timeout",
   ): Promise<DeviceSession | undefined> {
     let livePeerDaemonSessionIds: string[];
     try {
@@ -3576,12 +3609,9 @@ export class SessionManager {
       // Refuse from the row as read, without a write, journal intent, fence or release notice.
       return persisted;
     }
-    const snapshot = this.releaseSnapshotFromPersisted(
-      persisted.session_uuid,
-      persisted,
-      "restart-recovery-timeout",
-    );
+    const snapshot = this.releaseSnapshotFromPersisted(persisted.session_uuid, persisted, reason);
     snapshot.releasedAtMs = this.sessionNow();
+    const recoveryWindowMs = reason === "device-killed" ? 0 : DEVICE_RESTART_RECOVERY_WINDOW_MS;
     await this.persistSessionRelease(snapshot, false, {
       expectedRowGeneration: persisted.stable_identity_generation ?? 0,
       onlyIfRecoverable: true,
@@ -3591,14 +3621,12 @@ export class SessionManager {
         reportRefusal: true,
       },
       onlyIfRestartRecoveryHandoff: {
-        releasedAtOrBeforeMs: this.sessionClockToWall(
-          snapshot.releasedAtMs - DEVICE_RESTART_RECOVERY_WINDOW_MS,
-        ),
-        recoveryWindowMs: DEVICE_RESTART_RECOVERY_WINDOW_MS,
+        releasedAtOrBeforeMs: this.sessionClockToWall(snapshot.releasedAtMs - recoveryWindowMs),
+        recoveryWindowMs,
       },
     });
     const current = await this.readPersistedSession(persisted.session_uuid);
-    this.confirmPersistedExpiry(persisted, current, "restart-recovery-timeout");
+    this.confirmPersistedExpiry(persisted, current, reason);
     return current;
   }
 
@@ -3606,7 +3634,7 @@ export class SessionManager {
   private confirmPersistedExpiry(
     persisted: DeviceSession,
     current: DeviceSession | undefined,
-    reason: "expired" | "restart-recovery-timeout",
+    reason: "expired" | "restart-recovery-timeout" | "device-killed",
   ): void {
     if (
       this.terminalReleaseSnapshots.has(persisted.session_uuid) ||

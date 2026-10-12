@@ -471,6 +471,58 @@ coordinate fallback.
 IDs: the AccessibilityService client receives `AccessibilityNodeInfo`, not live
 Views, so those View tags are never serialized into the observed hierarchy.
 
+### Observation and screenshot resource failures
+
+The observation resources are:
+
+- `automobile:observation/latest`
+- `automobile:observation/latest/screenshot`
+- `automobile:observation/{deviceId}/{observationId}/screenshot`
+- `automobile:observation/session/{sessionUuid}/latest`
+- `automobile:observation/session/{sessionUuid}/latest/screenshot`
+- `automobile:device-session/{sessionUuid}/screenshot`
+
+An image response has an `image/*` MIME type and a base64 `blob`, with no `text`;
+its PNG, JPEG, or WebP bytes and actual MIME type are preserved. A failure has
+`mimeType: "application/json"`, a JSON `text` body containing `code`, `retryable`,
+and `error`, and no `blob`. Successful JSON observations remain JSON observations,
+without a failure `code`.
+
+`retryable` means reading the **same URI** again can succeed. Pending captures
+also provide the positive integer `retryAfterMs` (currently 1000 ms). Cached
+failures do not start another capture. Observation-scoped URIs identify an
+immutable device observation: they never substitute a newer observation's image
+or another device's image. A superseded or evicted observation requires a new
+`observe` call and its new screenshot URI.
+
+| Code                                          | Retryable                                                      | Remedy                                                                                        |
+| --------------------------------------------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `INVALID_REQUEST`                             | false                                                          | Correct the malformed percent-encoded URI segment.                                            |
+| `OBSERVATION_NOT_RETAINED`                    | false                                                          | Call `observe` again and read the new observation URI.                                        |
+| `SCREENSHOT_NOT_READY`                        | true                                                           | Wait `retryAfterMs`, then read the same URI again.                                            |
+| `SCREENSHOT_CAPTURE_FAILED`                   | false for cached resources; true for fresh-session screenshots | Call `observe` again for a new cached capture; retry the same fresh-session URI to recapture. |
+| `SCREENSHOT_CAPTURE_CANCELLED`                | false                                                          | Start a new capture using `observe`, or request a new fresh-session capture.                  |
+| `SCREENSHOT_CAPTURE_SUPERSEDED`               | false                                                          | Call `observe` again and use the new observation URI.                                         |
+| `SCREENSHOT_NOT_CAPTURED`                     | false                                                          | Call `observe` with screenshot capture enabled.                                               |
+| `SCREENSHOT_FILE_UNAVAILABLE`                 | false                                                          | Call `observe` again to obtain a new retained file.                                           |
+| `SCREENSHOT_ACCESS_DENIED`                    | false                                                          | Use the owning session or restore screenshot file access, then obtain a new capture.          |
+| `SCREENSHOT_READ_FAILED`                      | false                                                          | Resolve the file/protection failure, then obtain a new capture.                               |
+| `OBSERVATION_NOT_AVAILABLE`                   | false                                                          | Call `observe` first, then read its resources.                                                |
+| `OBSERVATION_READ_FAILED`                     | false                                                          | Resolve the observation read failure, then call `observe` again.                              |
+| `SESSION_NOT_BOUND`                           | false                                                          | Read through the bound/owning device session.                                                 |
+| `SESSION_NOT_ACTIVE`                          | false                                                          | Bind an active device session and use its URI.                                                |
+| `SESSION_OWNERSHIP_LOST` (fresh-session only) | false                                                          | Bind an active device session and request a new capture.                                      |
+
+When known, cached-resource failures include `deviceId`, `observationId`, and/or
+`sessionUuid`; unknown or empty identifiers are omitted. Unauthorized session
+reads include only the session identity and never reveal device data. Fields are
+additive: consumers should tolerate additional fields and use `code` for
+classification rather than parsing `error`. Stored cancellation/supersession
+reasons are classified by exact recorder constants; retained-file failures use
+errno codes (`ENOENT`/`ENOTDIR` versus `EACCES`/`EPERM`), independently of image MIME.
+Fresh-session failure bodies retain their existing `{ code, retryable, error }`
+shape and classification.
+
 ### Cropping an observe screenshot
 
 `observe({ crop: { element: { text: "Gmail" } } })` saves a PNG of one exposed

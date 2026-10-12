@@ -162,7 +162,7 @@ liveness policy (heartbeat, one-shot CLI or managed execution; owner decision
 | `heartbeat-timeout`, `missing-first-heartbeat`                                                          | Yes        | `session_ownership_lost`, with the heartbeat age and limit in the message.                                                                                                                                                                                          |
 | `rehydration-owner-timeout`                                                                             | Yes        | `session_ownership_lost`: a rehydrated session's owner never reclaimed it.                                                                                                                                                                                          |
 | `owner-disconnected`                                                                                    | Yes        | `session_ownership_lost`: the owning connection closed and no other client owns the session.                                                                                                                                                                        |
-| `device-killed`                                                                                         | Yes        | `session_terminal_release_in_progress` while the kill runs, then `session_ownership_lost`.                                                                                                                                                                          |
+| `device-killed` (also a sessionless stop of the device a handed-off session was waiting for)            | Yes        | `session_terminal_release_in_progress` while the kill runs, then `session_ownership_lost`.                                                                                                                                                                          |
 | `device-disconnected:<device>`                                                                          | Yes        | `session_ownership_lost`: the device was lost.                                                                                                                                                                                                                      |
 | `identity-recovery-<reason>`                                                                            | Yes        | `session_ownership_lost` with `recoveryReason` and `deviceId` (and `ownerPid` when another daemon holds the device): restart recovery could not prove the device's identity (#11414).                                                                               |
 | `session-creation-cancelled`                                                                            | Yes        | `session_ownership_lost`: the creation was cancelled before the session was handed out.                                                                                                                                                                             |
@@ -174,9 +174,13 @@ liveness policy (heartbeat, one-shot CLI or managed execution; owner decision
 | `session-creation-timeout`, `allocation-rollback`, `device-disconnected-during-session-create:<device>` | No         | The session was never handed out; the UUID may be created again.                                                                                                                                                                                                    |
 | `expired`                                                                                               | No         | A non-terminal row past its idle deadline: a control call naming it is refused with `session_ownership_lost`, reason `expired` and `idle: true`; heartbeat and `daemon/sessionInfo` answer `daemon_session_not_found`, `releaseReason: "expired"` and `idle: true`. |
 
-`idle` sits beside the reason it qualifies: `error.reason`/`error.idle` in an MCP envelope,
+`idle` sits beside the reason it qualifies: `error.reason`/`error.idle` in an MCP envelope
+(including `no_active_device_session` and `managed_execution_ended`),
 `details.reason`/`details.idle` in a typed failure frame, or top-level `releaseReason`/`idle`
-on a not-found answer. It is only ever `true` and is absent otherwise; a heartbeat lapse
+on a not-found answer. It also sits beside `executionEnded.reason` as `executionEnded.idle`
+in the managed-slots resource, beside `boundSessionLoss.reason` as `boundSessionLoss.idle`
+in a failed daemon-socket response, and beside `reason` as `idle` in the
+`notifications/session/released` push. It is only ever `true` and is absent otherwise; a heartbeat lapse
 (`heartbeat-timeout`, `missing-first-heartbeat`) never carries `idle`. For `expired`, `idle: true`
 means the row's idle deadline passed with no daemon holding the session: time the daemon was
 down counts toward the window, and no heartbeat was judged during it.
@@ -308,13 +312,14 @@ acquisitions as anonymous (#11096):
 - A call naming a session that is gone for good (`session_ownership_lost`,
   `no_active_device_session`) is refused with `retryable: false` and
   `nextAction: "acquire_new_session"` (`ACQUIRE_NEW_SESSION_NEXT_ACTION` in
-  `src/models/deviceSessionRecovery.ts`, #11098). Acquire a new session with
+  `src/models/deviceSessionRecovery.ts`, #11098), with `idle: true` beside the
+  release reason after an idle release. Acquire a new session with
   `getAndroid` or `getApple`; retrying the same UUID cannot succeed.
 - A managed connection (a proxy launched with `--managed-slot-config`) never
   acquires devices, so after its execution's session is released it answers
   `managed_execution_ended` instead: `retryable: false`,
-  `nextAction: "relaunch_execution"`, the release `reason`, and the slot's
-  `slotIndex` and `assignmentGeneration`. It names no recovery tools; the
+  `nextAction: "relaunch_execution"`, the release `reason`, `idle: true` after an idle release,
+  and the slot's `slotIndex` and `assignmentGeneration`. It names no recovery tools; the
   runner decides whether to relaunch the execution (#11341).
 - Booted-device discovery that did not complete (adb or simctl failed, or a
   running emulator's AVD identity has not resolved) is refused with the retryable
@@ -440,19 +445,33 @@ with `restart-recovery-timeout`, even if its idle deadline is later. Heartbeat a
 deadline determines the reason even if the daemon was down through both deadlines.
 Tool activity extends only the idle deadline;
 the hold never outlasts the fixed three-minute window from device loss. A call in flight
-can retain the hold only within that window. `killDevice` and `deleteDevice`
-drop the device-restart hold only after a successful stop (including an already-stopped
-outcome), for their admitted routing session on Android and iOS. A call naming that
-holder and carrying an MCP connection identity must come from a connection that owned
-it at handoff; another connection cannot name the holder to drop its hold, even with `force: true`. Calls without
-a connection identity, or holds without recorded owner connections, keep the session-only rule.
-A failed, cancelled, or unconfirmed stop keeps the hold and its original deadline.
-Another session's stop (even with `force: true`) or a sessionless stop leaves it in place.
-A base/label match requires live label state, so a label requester whose base was handed
-off leaves the hold to recovery, terminal release, idle expiry, or the window.
-An intentional stop never ends the daemon-restart source; its batch still releases it.
-Concurrent daemon-restart and device-restart holds end independently while the session
-remains recoverable. A terminal release, including `restart-recovery-timeout`, ends both. Managed slots still
+can retain the hold only within that window. An owner's `killDevice` or `deleteDevice`
+drops the device-restart hold after a confirmed stop (including an already-stopped outcome),
+or after successfully destroying a stopped image. The session remains resumable. Ownership
+comes from the routing session, including labels resolved through live base state, or the
+connection that owned the session at handoff. Naming the holder from another recorded
+connection is refused even with `force: true`; the existing session-only rule applies when
+no connection identity or owner snapshot is available.
+
+Stop protection and sessionless completion match restart reservations by daemon-confirmed identity (the runtime AVD name or iOS UDID); a caller-supplied name is never trusted. `force: true` never skips this confirmation. If identity cannot be confirmed and the target might be reserved (its serial or supplied label matches a restart hold), the stop returns retryable `discovery_incomplete` without touching the device or reservation, except for the owner acting on its own hold.
+A different session's stop or destroy is refused with `device_owned_by_other_session`,
+`retryable: true` and `retryAfterMs` equal to the remaining recovery hold. `force: true` does
+not override it. A label whose handed-off base no longer has live label state counts as a
+different session. A connection holding another live device session also counts as a
+different session, even when the call carries no routing session.
+
+A sessionless caller, including a CLI call or an MCP connection that holds no device session
+and names none, may stop or destroy the reserved device. Once confirmed, the reservation
+ends and its waiting session ends terminally with `device-killed`; heartbeat and
+`daemon/sessionInfo` report that release reason, and calls naming the session receive
+`session_ownership_lost`. The terminal row write is awaited and conditional on the handoff's
+generation and daemon owner. If persistence fails or the row has moved on, the stop succeeds,
+a warning is logged and the captured hold is dropped without overwriting the newer row.
+Failed, cancelled or unconfirmed stops retain the hold, timer, deadline and persisted row.
+
+An owner's stop ends only the device-restart source; the daemon-restart batch releases its
+own source independently. A terminal release, including a sessionless confirmed stop or
+`restart-recovery-timeout`, ends both sources. Managed slots still
 win, and the reservation does not extend the owner's heartbeat lease. A wiped or
 re-imaged device returning under the same AVD name or UDID remains an identity gap.
 
@@ -495,13 +514,13 @@ session and does not change the default. A control call with only `platform`,
 a `deviceId` that no surviving session holds (or that the proxy cannot match to
 exactly one surviving session), or no selector is refused with
 `no_active_device_session`, `nextAction: "acquire_new_session"` and the release
-reason. To continue without naming the surviving session or its device each
-time, call `setActiveDevice` for that device or acquire a new session with
+reason (`idle: true` beside it after an idle release). To continue without naming
+the surviving session or its device each time, call `setActiveDevice` for that device or acquire a new session with
 `getAndroid` or `getApple`.
 
 ## Stopping a held device: `killDevice` and `deleteDevice`
 
-Both stop a running device, so the same rule applies: only the holder (or the
+Both use the same ownership policy for stop and destroy, including stopped reserved images. For a live-held device, only the holder (or the
 MCP connection that owns an autolocked device) may stop it. A booted device
 another session holds is refused with `device_owned_by_other_session` unless the
 call passes `force: true`, which overrides the refusal and logs a warning naming
@@ -521,10 +540,25 @@ the other daemon cannot bind it mid-kill.
 
 `force` keeps its older meaning too: for a wedged Android emulator it also skips
 the AVD-name comparison. Use it only when the device really should be stopped
-out from under its holder. Deleting a stopped image is not affected, since no
-session can hold it. A refused `deleteDevice` carries the same typed fields as a
+out from under its holder. Deleting a stopped reserved image follows the reservation
+policy below. A refused `deleteDevice` carries the same typed fields as a
 refused `killDevice` (`code`, `retryable` and the rest of the refusal's evidence,
 #11419).
+
+| Device state                       | owner                                                                                                                                                             | different session                                                                                                                                                                                          | sessionless                                                                                                                                                                |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unheld, unreserved                 | n/a                                                                                                                                                               | stops                                                                                                                                                                                                      | stops                                                                                                                                                                      |
+| Held by me (live)                  | stops; session released `device-killed`                                                                                                                           | n/a                                                                                                                                                                                                        | n/a                                                                                                                                                                        |
+| Held by another live session       | n/a                                                                                                                                                               | refused `device_owned_by_other_session`, `retryable: false`; `force: true` stops and releases the holder `device-killed`. Naming the holder from a non-owning connection is refused with or without force. | refused `device_owned_by_other_session`, `retryable: false`; `force: true` stops and releases the holder `device-killed`                                                   |
+| Reserved for me (restart recovery) | stops; confirmed stop drops the hold and keeps the session resumable. Naming R from a connection that did not own it at handoff is refused with or without force. | n/a                                                                                                                                                                                                        | n/a                                                                                                                                                                        |
+| Reserved for another session R     | n/a                                                                                                                                                               | refused `device_owned_by_other_session`, message names R, `retryable: true`, `retryAfterMs` = remaining hold; force never overrides. Device, hold, timer and row stay untouched.                           | stops with or without force; confirmed stop or destroy drops R's reservation and ends R terminally `device-killed`. Failed, cancelled or unconfirmed stops change nothing. |
+| Managed slot's device              | the slot's execution only                                                                                                                                         | refused `device_assigned_to_managed_slot`; force never overrides                                                                                                                                           | same refusal                                                                                                                                                               |
+
+`force: true` overrides another live holder's refusal, but never the connection fence
+on naming a holder, another session's restart reservation, or a managed slot assignment.
+An unheld device and an owner's or sessionless caller's reserved-device stop need no force;
+their outcomes are the same with or without it. Its separate Android identity escape
+still skips the AVD-name comparison while retaining shutdown confirmation.
 
 ## Ownership is cooperative
 

@@ -1,7 +1,8 @@
+import { OPT_IN_PATH_VARIABLES } from "./productPathEnv";
 import { isAbsolute } from "node:path";
 import { isDaemonNamespaceIsolated } from "../../src/daemon/sharedNamespaceGuard";
 import {
-  DERIVED_PATH_VARIABLES,
+  STATE_PATH_VARIABLES,
   isInheritedPathOverride,
   privatePathRefusal,
   type HostDefaults,
@@ -20,7 +21,10 @@ export function privateHarnessEnvRefusal(
   if (!env.MT_SERVER?.trim()) {
     return "Private harness env requires MT_SERVER; source the private daemon env first.";
   }
-  for (const key of DERIVED_PATH_VARIABLES) {
+  for (const key of [
+    ...STATE_PATH_VARIABLES,
+    ...OPT_IN_PATH_VARIABLES.filter((name) => env[name] !== undefined),
+  ]) {
     const value = env[key]?.trim();
     if (!value || !isAbsolute(value) || value.includes("\0")) {
       return `Private harness env requires absolute ${key}; source the private daemon env first.`;
@@ -28,6 +32,9 @@ export function privateHarnessEnvRefusal(
     const refusal = privatePathRefusal(value, host);
     if (refusal) {
       return refusal;
+    }
+    if (!isAbsolute(env[key]!)) {
+      return `Private harness env requires absolute ${key} without surrounding whitespace.`;
     }
   }
   if (!isDaemonNamespaceIsolated(env)) {

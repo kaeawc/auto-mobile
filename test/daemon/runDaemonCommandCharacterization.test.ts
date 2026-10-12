@@ -54,6 +54,11 @@ describe("daemon command characterization with fake I/O", () => {
           ["stdout", "  active-sessions       List held sessions and why each holds its device"],
           ["stdout", "  session-info <id>     Get information about a session"],
           ["stdout", "  release-session <id>  Release a session and free its device"],
+          ["stdout", "  session-request-status <request-id> --liveness-owner-token <token> --json"],
+          [
+            "stdout",
+            "  release-broker-session <session-uuid> --liveness-owner-token <token> --json",
+          ],
           [
             "stdout",
             "  (status, available-devices, active-sessions, session-info and release-session accept --json)",

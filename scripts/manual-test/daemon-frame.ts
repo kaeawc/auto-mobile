@@ -611,10 +611,17 @@ async function managedKeeper(
       rpc.assertOpen();
     },
     callDaemonMethod: (method, params, requestOptions) => rpc.call(method, params, requestOptions),
+    trackAcquiredSessions: (sessionIds) => {
+      for (const sessionId of sessionIds) {
+        if (!held.has(sessionId)) {
+          held.set(sessionId, undefined);
+        }
+      }
+    },
     livenessOwnerToken: token,
     timer: deps.timer,
     releaseHeldSessions: release,
-    holdSession: async (sessionId) => {
+    holdSession: async (sessionId, signal) => {
       const params = {
         sessionId,
         livenessPolicy: HEARTBEAT_SESSION_LIVENESS_POLICY,
@@ -624,12 +631,12 @@ async function managedKeeper(
       };
       // The proxy does NOT send livenessOwnerKind; it sends the heartbeat policy,
       // which the daemon preserves as managed-execution for slot sessions.
-      held.set(sessionId, undefined);
       await rpc.call(
         DAEMON_HEARTBEAT_METHOD,
         { ...params, claimLivenessOwnership: true },
         { timeoutMs: heartbeatTimeoutMs },
       );
+      signal.throwIfAborted();
       let inFlight = false;
       const handle = deps.timer.setInterval(() => {
         if (inFlight) {

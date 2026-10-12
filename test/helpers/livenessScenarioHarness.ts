@@ -76,6 +76,12 @@ import {
   type WireEnvelope,
 } from "./inMemoryDaemonWire";
 import { drainMicrotasks } from "./fakeTimerStepping";
+import { getDeviceSessionIdFromResult } from "../../src/server/deviceSessionResult";
+import {
+  registerDeviceTools,
+  setDeviceToolsDependencies,
+  resetDeviceToolsDependencies,
+} from "../../src/server/deviceTools";
 import { RealToolCallPath, type DeviceToolRun } from "./realToolCallPath";
 
 // Two-sided liveness scenario harness (#10667, umbrella #10655).
@@ -159,6 +165,10 @@ export const SCENARIO_DAEMON_PID = 1111;
 export const PEER_DAEMON_PID = 2222;
 
 export interface LivenessScenarioOptions {
+  /** Match production: every accepted socket gets a fresh connection identity. */
+  freshConnectionIdPerDial?: boolean;
+  /** Use registered acquisition handlers, faking only the device boundary. */
+  realStartAdmission?: boolean;
   /**
    * Give the daemon's pool a claim store shared with a peer daemon (device id -> owning PID, see
    * {@link LivenessScenario.deviceClaims}) instead of the process-wide claim files, so a scenario
@@ -434,6 +444,9 @@ export class LivenessScenario {
   proxy!: DaemonMcpProxy;
   private readonly deviceNames: Record<string, string>;
   private readonly autolock: boolean;
+  private readonly freshConnectionIdPerDial: boolean;
+  private readonly realStartAdmission: boolean;
+  private readonly connectionIds = new Map<string, string>();
   private readonly sharedDeviceClaims: boolean;
   private readonly discovery = new FakeDeviceUtils();
   private tools!: RealToolCallPath;
@@ -460,6 +473,8 @@ export class LivenessScenario {
     this.deviceIds = options.devices ?? ["emulator-5554"];
     this.deviceNames = options.deviceNames ?? {};
     this.autolock = options.autolock ?? false;
+    this.freshConnectionIdPerDial = options.freshConnectionIdPerDial ?? false;
+    this.realStartAdmission = options.realStartAdmission ?? false;
     this.sharedDeviceClaims = options.sharedDeviceClaims ?? false;
     this.managedSlotsEnabled = options.managedSlots ?? false;
   }
@@ -522,6 +537,25 @@ export class LivenessScenario {
       this.releaseBroadcasts.push({ at: this.timer.now(), sessionId, reason: reason ?? "" });
     });
     this.daemon = await this.createDaemonSide();
+    if (this.realStartAdmission) {
+      this.discovery.setDeviceImages(
+        PLATFORM,
+        this.deviceIds.map((id) => ({ ...this.device(id), source: "local", isRunning: true })),
+      );
+      for (const id of this.deviceIds) {
+        this.discovery.setMockChildProcess(this.device(id).name, null);
+      }
+      setDeviceToolsDependencies({
+        timer: this.timer,
+        idGenerator: new FakeIdGenerator(["scenario-acquired-session"]),
+        deviceManagerFactory: () => this.discovery,
+        ensureCtrlProxyReady: async () => {},
+        notifyResourcesChanged: async () => {},
+        notifyDeviceInventoryResourcesChanged: async () => {},
+        syncInstalledAppResourceRegistry: async () => false,
+      });
+      registerDeviceTools();
+    }
     this.proxy = this.createProxy();
   }
 
@@ -782,7 +816,11 @@ export class LivenessScenario {
     // The daemon keys a socket by its connection, so a dial while the name's socket is still open
     // (a recovery probe, a reconnect before the old socket is gone) is a new connection of its own.
     const open = this.dialed.get(connection);
-    const name = open && !open.destroyed ? `${connection}#${++this.redials}` : connection;
+    const name =
+      this.freshConnectionIdPerDial || (open && !open.destroyed)
+        ? `${connection}#${++this.redials}`
+        : connection;
+    this.connectionIds.set(connection, name);
     const socket = this.daemon.socket.connect(name);
     if (socket && name === connection) {
       this.dialed.set(connection, socket);
@@ -884,6 +922,15 @@ export class LivenessScenario {
   ): Promise<unknown> {
     const { manager, pool } = this.daemon;
     const connection = String(args.__mcpSessionId);
+    if (tool === "getAndroid" && this.realStartAdmission) {
+      try {
+        const result = await this.tools.call(tool, args, requestSignal);
+        this.minted = getDeviceSessionIdFromResult(result);
+        return result;
+      } catch (error) {
+        return toolErrorResult(error, tool);
+      }
+    }
     if (tool === "getAndroid" || tool === "provisionDevice") {
       const deviceId = typeof args.deviceId === "string" ? args.deviceId : this.deviceIds[0]!;
       if (this.autolock && tool === "getAndroid") {
@@ -975,6 +1022,41 @@ export class LivenessScenario {
       throw new ToolCallRefused(errorResultText(envelope.result), envelope.result);
     }
     return envelope.result;
+  }
+
+  /** The accepted socket identity of the primary proxy. */
+  proxyConnectionId(): string | undefined {
+    return this.connectionIds.get(CONNECTION);
+  }
+
+  /** Fake device boots performed by the real acquisition handler. */
+  deviceBootCount(): number {
+    return this.discovery.getCallCount("startDevice");
+  }
+
+  /** Device-loss handoff, followed by discovery forgetting the stopped emulator. */
+  async loseDevice(sessionId: string, deviceId = this.deviceIds[0]!): Promise<void> {
+    const pool = this.daemon.pool;
+    const release = pool as unknown as {
+      releaseDisconnectedRecoverySessionWithRetry(
+        id: string,
+        deviceId: string,
+        reason: `device-restart:${string}`,
+      ): Promise<void>;
+    };
+    await release.releaseDisconnectedRecoverySessionWithRetry(
+      sessionId,
+      deviceId,
+      `device-restart:${this.device(deviceId).name}`,
+    );
+    await pool.releaseDevice(deviceId, sessionId);
+    this.discovery.setBootedDevices(PLATFORM, []);
+    this.discovery.setDeviceImages(
+      PLATFORM,
+      this.deviceIds.map((id) => ({ ...this.device(id), source: "local", isRunning: false })),
+    );
+    await pool.removeDevice(deviceId, true, pool.getDevice(deviceId));
+    await drainMicrotasks(TURNS_PER_EVENT);
   }
 
   // ---- events -------------------------------------------------------------------------------
@@ -1571,6 +1653,9 @@ export class LivenessScenario {
     this.killDaemonSide(this.daemon);
     await this.managedSlots?.close();
     this.tools.uninstall();
+    if (this.realStartAdmission) {
+      resetDeviceToolsDependencies();
+    }
     PlatformDeviceManagerFactory.reset();
     this.restoreRecordingDeps?.();
     this.restoreAppearanceDeps?.();

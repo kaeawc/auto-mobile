@@ -6,7 +6,11 @@ import { harnessChildEnvironment, type HarnessLogSinkOverride } from "./harnessL
 import { execFile, spawn } from "node:child_process";
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { Socket } from "node:net";
-import { encodeAdbHostRequest, decodeAdbHostResponse, type AdbHostResponse } from "./adbHostQuery";
+import {
+  encodeAdbHostRequest,
+  AdbHostResponseAccumulator,
+  type AdbHostResponse,
+} from "./adbHostQuery";
 import { homedir, userInfo } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -560,7 +564,7 @@ export async function main(): Promise<number> {
     queryAdbHost: (host, port, request, timeoutMs) =>
       new Promise((done, reject) => {
         const socket = new Socket();
-        let bytes = Buffer.alloc(0);
+        const response = new AdbHostResponseAccumulator();
         let settled = false;
         const finish = (result: AdbHostResponse): void => {
           if (settled) {
@@ -589,18 +593,15 @@ export async function main(): Promise<number> {
           }
         });
         socket.on("data", (chunk) => {
-          bytes = Buffer.concat([bytes, chunk]);
-          const result = decodeAdbHostResponse(bytes);
-          if (
-            result.ok ||
-            result.reason !== "Incomplete ADB host response" ||
-            (bytes.length >= 8 &&
-              bytes.length === 8 + Number.parseInt(bytes.toString("utf8", 4, 8), 16))
-          ) {
+          if (settled) {
+            return;
+          }
+          const result = response.push(chunk);
+          if (result !== undefined) {
             finish(result);
           }
         });
-        socket.once("end", () => finish(decodeAdbHostResponse(bytes)));
+        socket.once("end", () => finish(response.finish()));
         socket.once("close", () =>
           finish({ ok: false, reason: "ADB host socket closed without a response" }),
         );

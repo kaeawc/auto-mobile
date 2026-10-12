@@ -101,3 +101,29 @@ test("late connection after deadline ends without writing", async () => {
   expect(f.connection.ended).toBe(true);
   expect(f.connection.frames).toEqual([]);
 });
+
+test("oversized probe answer returns a bounded diagnostic failure", async () => {
+  const f = fixture();
+  f.connection.silent = true;
+  const pending = probeControlSocket("/fake/socket", f.deps, { maxFrameBytes: 32 });
+  await drainUntilQuiescent(f.timer);
+  f.connection.data(Buffer.from("x".repeat(33)));
+  expect(f.connection.ended).toBe(true);
+  expect(await pending).toEqual({
+    alive: false,
+    reason: "Control probe response frame exceeds 32 bytes",
+  });
+  expect(f.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("matching response before overflow in the same chunk proves the daemon alive", async () => {
+  const f = fixture();
+  f.connection.silent = true;
+  const pending = probeControlSocket("/fake/socket", f.deps, { maxFrameBytes: 64 });
+  await drainUntilQuiescent(f.timer);
+  const line = JSON.stringify({ id: f.connection.frames[0].id, success: true, result: {} });
+  f.connection.data(Buffer.from(line + "\n" + "x".repeat(65)));
+  expect(await pending).toEqual({ alive: true, result: {} });
+  expect(f.connection.ended).toBe(true);
+  expect(f.timer.getPendingTimeoutCount()).toBe(0);
+});

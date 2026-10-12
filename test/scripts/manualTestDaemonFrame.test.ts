@@ -1,6 +1,7 @@
 import { expect, spyOn, test } from "bun:test";
 import { resolve } from "node:path";
 import {
+  FrameRpc,
   parseDaemonFrameArgs,
   runDaemonFrame,
   type DaemonFrameCommand,
@@ -994,4 +995,46 @@ posixTest("keep-open summary remains final after managed cleanup", async () => {
   expect(f.connection.writes.at(-1)?.method).toBe("daemon/releaseExecution");
   expect(f.connection.ended).toBe(true);
   expect(f.connection.destroyed).toBe(false);
+});
+
+test("oversized control line fails every waiter and destroys the connection", async () => {
+  const f = fixture();
+  f.connection.silent = true;
+  const rpc = new FrameRpc(f.connection, f.deps, 32);
+  const pending = rpc.request("daemon/capabilities", {}, 100).catch((error: unknown) => error);
+  const pause = rpc.pause(100).catch((error: unknown) => error);
+  f.connection.data(Buffer.from("x".repeat(33)));
+  expect(f.connection.destroyed).toBe(true);
+  expect(((await pending) as Error).message).toBe("Control response frame exceeds 32 bytes");
+  expect(((await pause) as Error).message).toBe("Control response frame exceeds 32 bytes");
+  expect(() => rpc.assertOpen()).toThrow("exceeds 32 bytes");
+  expect(f.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("valid lines after invalid control JSON are still echoed with elapsed time", () => {
+  const f = fixture();
+  const rpc = new FrameRpc(f.connection, f.deps, 64);
+  f.connection.data(Buffer.from("invalid JSON\n"));
+  expect(() => rpc.assertOpen()).toThrow("Invalid control JSON");
+  f.timer.advanceTime(7);
+  const line = '{"type":"mcp_response","id":"later","success":true}';
+  f.connection.data(Buffer.from(line + "\n"));
+  expect(f.out).toEqual(["[0ms] invalid JSON", `[7ms] ${line}`]);
+});
+test("response before overflow resolves and echoes before other waiters fail", async () => {
+  const f = fixture();
+  f.connection.silent = true;
+  const rpc = new FrameRpc(f.connection, f.deps, 64);
+  const first = rpc.beginRequest("daemon/capabilities", {}, 100);
+  const answer = first.answer.catch((error: unknown) => error);
+  const other = rpc.request("ide/status", {}, 100).catch((error: unknown) => error);
+  const line = JSON.stringify({ type: "mcp_response", id: first.id, success: true });
+  f.connection.data(Buffer.from(line + "\n" + "x".repeat(65)));
+  expect(await answer).toEqual({ type: "mcp_response", id: first.id, success: true });
+  expect(f.out).toEqual([`[0ms] ${line}`]);
+  expect(((await other) as Error).message).toBe("Control response frame exceeds 64 bytes");
+  expect(f.connection.destroyed).toBe(true);
+  expect(f.timer.getPendingTimeoutCount()).toBe(0);
+  f.connection.data(Buffer.from(line + "\n"));
+  expect(f.out).toHaveLength(1);
 });

@@ -1,3 +1,4 @@
+import { SessionOutsideBoundSessionError } from "../../src/server/deviceOutsideBoundSessionRefusal";
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import {
@@ -5495,35 +5496,46 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
-    test("does not let a bound connection retarget a different device session", async () => {
+    test("types a refused control route without refreshing replay; forwards foreign reads", async () => {
       const fakeClient = new FakeDaemonClient({
         toolResult: { content: [{ type: "text", text: "ok" }] },
       });
-      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const timer = new FakeTimer();
       const proxy = new DaemonMcpProxy({
         initialSessionUuid: "session-a",
+        timer,
         clientFactory: () => fakeClient,
+        daemonAvailabilityProbe: async () => true,
         daemonManager: matchingDaemonManager(),
         autoStartDaemon: false,
       });
 
       try {
-        await expect(
-          proxy.callTool("observe", { sessionUuid: "session-b", deviceId: "device-b" }),
-        ).rejects.toThrow("MCP connection is bound to device session session-a");
-        await proxy.callTool("observe", { deviceId: "device-a" });
-
-        expect(fakeClient.callToolCalls).toEqual([
-          {
-            toolName: "observe",
-            params: withProxyOwnerToken({
-              deviceId: "device-a",
-              sessionUuid: "session-a",
-            }),
-          },
+        const before = Reflect.get(proxy, "boundSessionUuidAt");
+        expect(before).toBe(timer.now());
+        timer.advanceTime(1_000);
+        const error = await proxy.callTool("tapAt", { sessionUuid: "session-b", x: 1, y: 1 }).then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+        expect(error).toBeInstanceOf(SessionOutsideBoundSessionError);
+        expect(error).toMatchObject({
+          name: "SessionOutsideBoundSessionError",
+          code: "device_outside_bound_session",
+          retryable: false,
+          boundSessionUuid: "session-a",
+          requestedSessionUuid: "session-b",
+        });
+        expect(Reflect.get(proxy, "boundSessionUuidAt")).toBe(before);
+        expect(fakeClient.callToolCalls).toHaveLength(0);
+        await proxy.callTool("observe", { sessionUuid: "session-b", deviceId: "device-b" });
+        expect(Reflect.get(proxy, "boundSessionUuid")).toBe("session-a");
+        await proxy.callTool("tapAt", { sessionUuid: "session-a", x: 2, y: 2 });
+        expect(fakeClient.callToolCalls.map((call) => call.params.sessionUuid)).toEqual([
+          "session-b",
+          "session-a",
         ]);
       } finally {
-        isAvailableSpy.mockRestore();
         await proxy.close();
       }
     });

@@ -1,6 +1,18 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
+import { parseSync, Visitor, type ClassDeclaration, type ClassExpression } from "oxc-parser";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { createProxyMcpServer } from "../../src/server/proxyServer";
+import {
+  handleDaemonRequest,
+  type DaemonStateAccess,
+} from "../../src/daemon/daemonRequestHandlers";
+import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
+import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { logger } from "../../src/utils/logger";
 import * as hostBootRegistry from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
 import * as downloadsRefusals from "../../src/server/downloadsFixtureService";
 import * as adbHealth from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
@@ -74,7 +86,7 @@ import {
 /**
  * Hand-maintained modules declaring exported Error subclasses with a wire code anywhere: own
  * code, failure.code, data.code, details.code, or inherited. Runtime exports extend coverage
- * within these modules; a coded class in an unlisted module is not seen.
+ * within these modules; the AST inventory below guards newly introduced modules.
  */
 const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
   "features/bootAdmission/HostBootAdmissionRegistry": hostBootRegistry,
@@ -111,6 +123,189 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "server/toolUnavailableError": toolUnavailable,
   "server/deviceTools": deviceTools,
 };
+
+/** Only non-wire codes may bypass the module map; the inventory rejects stale exemptions. */
+const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {};
+
+interface CodedErrorModule {
+  module: string;
+  classes: string[];
+}
+
+interface ScannedClass {
+  module: string;
+  name: string;
+  parentName: string | undefined;
+  declaresCode: boolean;
+  exported: boolean;
+}
+
+type ScannedClassNode = ClassDeclaration | ClassExpression;
+
+function declaresCode(node: ScannedClassNode): boolean {
+  return node.body.body.some((member) => {
+    if (member.type === "PropertyDefinition") {
+      return (
+        !member.computed &&
+        ((member.key.type === "Identifier" && member.key.name === "code") ||
+          (member.key.type === "Literal" && member.key.value === "code"))
+      );
+    }
+    return (
+      member.type === "MethodDefinition" &&
+      member.kind === "constructor" &&
+      member.value.params.some((parameter) => {
+        if (parameter.type !== "TSParameterProperty") {
+          return false;
+        }
+        const property =
+          parameter.parameter.type === "AssignmentPattern"
+            ? parameter.parameter.left
+            : parameter.parameter;
+        return property.type === "Identifier" && property.name === "code";
+      })
+    );
+  });
+}
+
+/** Pure parser: collect local bases too, including variable-bound class expressions. */
+function scanClasses(module: string, source: string): ScannedClass[] {
+  const { program, errors } = parseSync(`${module}.ts`, source);
+  if (errors.length > 0) {
+    throw new Error(`${module}: ${errors[0].message}`);
+  }
+  const exported = new Set<ScannedClassNode>();
+  const exportedNames = new Set<string>();
+  const classes: { node: ScannedClassNode; name: string }[] = [];
+  new Visitor({
+    ExportNamedDeclaration(node) {
+      if (node.declaration?.type === "ClassDeclaration") {
+        exported.add(node.declaration);
+      }
+      if (node.declaration?.type === "VariableDeclaration") {
+        for (const declaration of node.declaration.declarations) {
+          if (declaration.id.type === "Identifier") {
+            exportedNames.add(declaration.id.name);
+          }
+        }
+      }
+      if (!node.source && node.exportKind !== "type") {
+        for (const specifier of node.specifiers) {
+          exportedNames.add(specifier.local.name);
+        }
+      }
+    },
+    ExportDefaultDeclaration(node) {
+      if (node.declaration.type === "ClassDeclaration") {
+        exported.add(node.declaration);
+      }
+      if (node.declaration.type === "Identifier") {
+        exportedNames.add(node.declaration.name);
+      }
+    },
+    ClassDeclaration(node) {
+      classes.push({ node, name: node.id?.name ?? "default" });
+    },
+    VariableDeclarator(node) {
+      if (node.id.type === "Identifier" && node.init?.type === "ClassExpression") {
+        classes.push({ node: node.init, name: node.id.name });
+      }
+    },
+  }).visit(program);
+  return classes.map(({ node, name }) => {
+    const parent = node.superClass;
+    const parentName =
+      parent?.type === "Identifier"
+        ? parent.name
+        : parent?.type === "MemberExpression" &&
+            !parent.computed &&
+            parent.property.type === "Identifier"
+          ? parent.property.name
+          : undefined;
+    return {
+      module,
+      name,
+      parentName,
+      declaresCode: declaresCode(node),
+      exported: exported.has(node) || exportedNames.has(name),
+    };
+  });
+}
+
+/**
+ * Resolve both Error ancestry and inherited codes across the whole scan by class name.
+ * Name collisions across modules and codes assigned via Object.assign are not resolved.
+ */
+function codedErrorModules(
+  sources: readonly { module: string; source: string }[],
+): CodedErrorModule[] {
+  const classes = sources.flatMap(({ module, source }) => scanClasses(module, source));
+  const errors = new Set(["Error", "ActionableError"]);
+  const coded = new Set(classes.filter((entry) => entry.declaresCode).map((entry) => entry.name));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const entry of classes) {
+      if (!entry.parentName) {
+        continue;
+      }
+      for (const names of [errors, coded]) {
+        if (names.has(entry.parentName) && !names.has(entry.name)) {
+          names.add(entry.name);
+          changed = true;
+        }
+      }
+    }
+  }
+  const modules = new Map<string, string[]>();
+  for (const entry of classes) {
+    if (entry.exported && errors.has(entry.name) && coded.has(entry.name)) {
+      const names = modules.get(entry.module) ?? [];
+      names.push(entry.name);
+      modules.set(entry.module, names);
+    }
+  }
+  return [...modules].map(([module, names]) => ({ module, classes: names }));
+}
+
+function codedErrorModule(module: string, source: string): CodedErrorModule[] {
+  return codedErrorModules([{ module, source }]);
+}
+
+function unlistedCodedErrorModules(
+  inventory: readonly CodedErrorModule[],
+  listed: ReadonlySet<string>,
+  exempt: Readonly<Record<string, string>>,
+): string[] {
+  return inventory
+    .filter(({ module }) => !listed.has(module) && !exempt[module]?.trim())
+    .map(({ module, classes }) => `${module}: ${classes.join(", ")}`);
+}
+
+function staleCodedErrorModuleExemptions(
+  inventory: readonly CodedErrorModule[],
+  exempt: Readonly<Record<string, string>>,
+): string[] {
+  const found = new Set(inventory.map(({ module }) => module));
+  return Object.keys(exempt).filter((module) => !found.has(module));
+}
+
+let codedErrorInventory: readonly CodedErrorModule[] = [];
+beforeAll(() => {
+  const root = join(import.meta.dir, "..", "..", "src");
+  codedErrorInventory = Object.freeze(
+    codedErrorModules(
+      readdirSync(root, { recursive: true })
+        .filter((file) => file.endsWith(".ts"))
+        .map((file) => ({
+          module: file.split(sep).join("/").slice(0, -3),
+          source: readFileSync(join(root, file), "utf8"),
+        }))
+        // Inherited codes need no local code token. Declarations are parsed structurally.
+        .filter(({ source }) => source.includes("extends")),
+    ),
+  );
+});
 
 function exportedErrorClasses(modules: typeof refusalErrorModules) {
   return Object.entries(modules).flatMap(([module, exports]) =>
@@ -261,7 +456,8 @@ function exportedCodeConstants(): Map<string, string> {
   return found;
 }
 
-interface SurfaceFields extends RefusalFields {
+interface SurfaceFields extends Omit<RefusalFields, "retryable"> {
+  retryable?: boolean;
   /** The evidence the refusal carries beside its typed fields. */
   details?: Record<string, unknown>;
   /** A managed slot failure's boot-capacity object. */
@@ -286,6 +482,34 @@ function surfaceTyped(fixture: RefusalSurfaceFixture): {
   capacity?: Record<string, unknown>;
 } {
   const payload = fixture.payload as Record<string, unknown>;
+  if (
+    [
+      "device-loss-outcome",
+      "device-session-error-fields",
+      "request-failure-fields",
+      "managed-slots-response",
+    ].includes(fixture.surface)
+  ) {
+    return { typed: payload as TypedFields };
+  }
+  if (fixture.surface === "recording-start-result") {
+    const result = fixture.payload as RefusalWireResult;
+    return { typed: JSON.parse(result.content[0].text) as TypedFields };
+  }
+  if (fixture.surface === "proxy-tool-result") {
+    const result = fixture.payload as RefusalWireResult;
+    const body = JSON.parse(result.content[0].text) as { error: TypedFields };
+    return { typed: body.error };
+  }
+  if (fixture.surface === "provision-envelope") {
+    return { typed: payload.error as TypedFields };
+  }
+  if (fixture.surface === "liveness-handover") {
+    return { typed: payload.error as TypedFields };
+  }
+  if (fixture.surface === "aux-socket-response") {
+    return { typed: payload as TypedFields, details: { deviceId: payload.deviceId } };
+  }
   if (fixture.surface === "socket-frame") {
     return { typed: payload as TypedFields, details: payload.details as Record<string, unknown> };
   }
@@ -302,9 +526,9 @@ function surfaceTyped(fixture: RefusalSurfaceFixture): {
     };
   }
   if (fixture.surface === "webrtc-stream-response") {
-    // The aux-socket response carries no retryable field; absent on the wire means not retryable.
+    // Preserve absence of retry intent rather than inventing a boolean on this wire.
     expect(Object.hasOwn(payload, "retryable"), fixture.name).toBe(false);
-    return { typed: { code: String(payload.errorCode), retryable: false } };
+    return { typed: { code: String(payload.errorCode) } };
   }
   if (fixture.surface === "delete-device") {
     const text = (payload as unknown as RefusalWireResult).content[0].text;
@@ -325,7 +549,7 @@ function surfaceFields(fixture: RefusalSurfaceFixture): SurfaceFields {
   const { typed, details, capacity } = surfaceTyped(fixture);
   return {
     code: typed.code,
-    retryable: typed.retryable === true,
+    ...(typeof typed.retryable === "boolean" ? { retryable: typed.retryable } : {}),
     acquireNewSession: typed.nextAction === "acquire_new_session",
     ...(typeof typed.retryAfterMs === "number" && typed.retryAfterMs > 0
       ? { retryAfterMs: typed.retryAfterMs }
@@ -336,7 +560,9 @@ function surfaceFields(fixture: RefusalSurfaceFixture): SurfaceFields {
 }
 
 const surfaceFixtures = buildRefusalSurfaceFixtures();
-const capturedSurfaceFixtures = EXTERNALLY_CAPTURED_SURFACE_FIXTURES.map(
+const capturedSurfaceFixtures = EXTERNALLY_CAPTURED_SURFACE_FIXTURES.filter(
+  (fixture) => fixture.testFile !== "test/daemon/refusalWireContract.test.ts",
+).map(
   (fixture) =>
     JSON.parse(
       readFileSync(join(REFUSAL_SURFACES_DIR, `${surfaceFixtureStem(fixture)}.json`), "utf8"),
@@ -345,12 +571,174 @@ const capturedSurfaceFixtures = EXTERNALLY_CAPTURED_SURFACE_FIXTURES.map(
 const allSurfaceFixtures = [...surfaceFixtures, ...capturedSurfaceFixtures];
 const coveredWireCodes = new Set([
   ...fixtureCodes.map((code) => expectedWireCodes(code)[0]),
-  ...allSurfaceFixtures.flatMap((fixture) => expectedWireCodes(fixture.name)),
+  ...surfaceFixtures.flatMap((fixture) => expectedWireCodes(fixture.name)),
+  ...EXTERNALLY_CAPTURED_SURFACE_FIXTURES.flatMap((fixture) => expectedWireCodes(fixture.name)),
 ]);
 const drivenErrorClasses = fixtureDrivenErrorClasses();
 const surfaceExpectations = JSON.parse(
   readFileSync(join(REFUSAL_SURFACES_DIR, "expectations.json"), "utf8"),
 ) as SurfaceExpectations;
+
+// Capture private production builders through their registered public handlers, using only fakes.
+const ownedSurfaceFixtures: RefusalSurfaceFixture[] = [];
+beforeAll(async () => {
+  const registration = spyOn(Server.prototype, "setRequestHandler");
+  let harness: ReturnType<typeof createProxyMcpServer>;
+  let registrations: typeof registration.mock.calls;
+  try {
+    harness = createProxyMcpServer({
+      proxyConfig: {
+        timer: new FakeTimer(),
+        clientFactory: () => new FakeDaemonClient(),
+        daemonManager: new FakeDaemonManager(),
+        daemonAvailabilityProbe: async () => true,
+        autoStartDaemon: false,
+      },
+    });
+    registrations = [...registration.mock.calls];
+  } finally {
+    registration.mockRestore();
+  }
+  const handler = registrations.find(([schema]) => schema === CallToolRequestSchema)?.[1];
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    if (!handler) {
+      throw new Error("Missing tools/call handler");
+    }
+    const cases = [
+      [
+        "session_ownership_lost.expired",
+        new daemonProxy.DaemonBoundSessionExpiredError(
+          "11111111-2222-4333-8444-555555555555",
+          "explicit-release",
+        ),
+      ],
+      ["daemon_shutting_down", new daemonClient.DaemonShuttingDownError()],
+    ] as const;
+    for (const [name, error] of cases) {
+      const call = spyOn(harness.proxy, "callTool").mockRejectedValue(error);
+      try {
+        ownedSurfaceFixtures.push({
+          surface: "proxy-tool-result",
+          name,
+          builder: "createProxyMcpServer tools/call via resolveCallToolErrorResult",
+          payload: await handler(
+            { method: "tools/call", params: { name: "tapOn" } },
+            {
+              signal: new AbortController().signal,
+              requestId: 1,
+              sendNotification: async () => {},
+              sendRequest: async () => {
+                throw new Error("Unexpected request");
+              },
+            },
+          ),
+        });
+      } finally {
+        call.mockRestore();
+      }
+    }
+    const sessionUuid = "11111111-2222-4333-8444-555555555555";
+    const loss = new daemonClient.DaemonBoundSessionLostError({
+      code: "bound_session_lost",
+      sessionUuid,
+      reason: "daemon-shutdown",
+    });
+    const lossClient = new FakeDaemonClient({
+      onCallTool: () => {
+        throw loss;
+      },
+    });
+    const manager = new FakeDaemonManager();
+    manager.statusResult = { ...manager.statusResult, version: daemonConstants.DAEMON_VERSION };
+    const lossHarness = createProxyMcpServer({
+      proxyConfig: {
+        initialSessionUuid: sessionUuid,
+        timer: new FakeTimer(),
+        clientFactory: () => lossClient,
+        daemonManager: manager,
+        daemonAvailabilityProbe: async () => true,
+        autoStartDaemon: false,
+        buildIdentity: { entryScript: "", buildId: "fixture-build" },
+      },
+    });
+    // Reuse the same registered server boundary while the real proxy fences the bound loss.
+    const forward = spyOn(harness.proxy, "callTool").mockImplementation((name, args, options) =>
+      lossHarness.proxy.callTool(name, args, options),
+    );
+    try {
+      const payload = await handler(
+        {
+          method: "tools/call",
+          params: { name: "observe", arguments: { deviceId: "emulator-5554" } },
+        },
+        {
+          signal: new AbortController().signal,
+          requestId: 1,
+          sendNotification: async () => {},
+          sendRequest: async () => {
+            throw new Error("Unexpected request");
+          },
+        },
+      );
+      expect(lossClient.callToolCalls).toHaveLength(1);
+      ownedSurfaceFixtures.push({
+        surface: "proxy-tool-result",
+        name: "session_ownership_lost.bound_loss",
+        builder: "DaemonMcpProxy bound loss via createProxyMcpServer tools/call",
+        payload,
+      });
+    } finally {
+      forward.mockRestore();
+      await lossHarness.server.close();
+      await lossHarness.proxy.close();
+    }
+    const state: DaemonStateAccess = {
+      isInitialized: () => true,
+      getSessionManager: () => {
+        throw new Error("Invalid config must not access sessions");
+      },
+      getDevicePool: () => {
+        throw new Error("Invalid config must not access devices");
+      },
+      getDeviceSessionRegistry: () => {
+        throw new Error("Invalid config must not access registry");
+      },
+      getManagedSlotAcquisition: () => ({
+        acquire: async () => {
+          throw new Error("Invalid config must not acquire");
+        },
+      }),
+    };
+    ownedSurfaceFixtures.push({
+      surface: "managed-slots-response",
+      name: "managed_slot_config_invalid",
+      builder: "handleDaemonRequest via handleAcquireManagedSlots",
+      payload: await handleDaemonRequest(
+        {
+          id: "invalid-config",
+          type: "mcp_request",
+          method: "daemon/acquireManagedSlots",
+          params: { config: { contractVersion: 1 }, livenessOwnerToken: "fixture-owner" },
+        },
+        state,
+      ),
+    });
+  } finally {
+    warn.mockRestore();
+    await harness.server.close();
+    await harness.proxy.close();
+  }
+  for (const fixture of ownedSurfaceFixtures) {
+    if (process.env.UPDATE_CAPTURED_FIXTURES === "1") {
+      writeFileSync(
+        join(REFUSAL_SURFACES_DIR, `${surfaceFixtureStem(fixture)}.json`),
+        serializeRefusalSurfaceFixture(fixture),
+      );
+    }
+    allSurfaceFixtures.push(fixture);
+  }
+});
 
 describe("refusal wire contract", () => {
   test("platform ambiguity names the held sessions without retry or recovery guidance", () => {
@@ -425,6 +813,109 @@ describe("refusal wire contract", () => {
     expect(rows.some((fields) => fields.retryAfterMs !== undefined)).toBe(true);
     expect(rows.some((fields) => fields.externalDevices !== undefined)).toBe(true);
     expect(rows.some((fields) => fields.acquireNewSession)).toBe(true);
+  });
+
+  test("every source module declaring an exported coded Error class is classified", () => {
+    expect(
+      unlistedCodedErrorModules(
+        codedErrorInventory,
+        new Set(Object.keys(refusalErrorModules)),
+        EXEMPT_CODED_ERROR_MODULES,
+      ),
+    ).toEqual([]);
+  });
+
+  test("coded module exemptions have reasons and never outlive their declarations", () => {
+    expect(
+      staleCodedErrorModuleExemptions(codedErrorInventory, EXEMPT_CODED_ERROR_MODULES),
+    ).toEqual([]);
+    expect(
+      Object.entries(EXEMPT_CODED_ERROR_MODULES).filter(
+        ([module, reason]) => !reason.trim() || Object.hasOwn(refusalErrorModules, module),
+      ),
+    ).toEqual([]);
+  });
+
+  test("the module checker detects a new coded refusal and a stale exemption", () => {
+    const inventory = codedErrorModule(
+      "new/refusal",
+      `export class NewRefusal extends ActionableError {
+      constructor(public readonly code: string = "new_refusal") { super(code); }
+    }`,
+    );
+    expect(
+      unlistedCodedErrorModules(inventory, new Set(Object.keys(refusalErrorModules)), {}),
+    ).toEqual(["new/refusal: NewRefusal"]);
+    expect(unlistedCodedErrorModules(inventory, new Set(["new/refusal"]), {})).toEqual([]);
+    expect(unlistedCodedErrorModules(inventory, new Set(), { "new/refusal": "" })).toEqual([
+      "new/refusal: NewRefusal",
+    ]);
+    expect(
+      unlistedCodedErrorModules(inventory, new Set(), { "new/refusal": "non-wire code" }),
+    ).toEqual([]);
+    expect(staleCodedErrorModuleExemptions(inventory, { removed: "process exit code" })).toEqual([
+      "removed",
+    ]);
+    expect(
+      staleCodedErrorModuleExemptions(
+        codedErrorModule("new/refusal", "export class NewRefusal extends Error {}"),
+        { "new/refusal": "process exit code" },
+      ),
+    ).toEqual(["new/refusal"]);
+  });
+
+  test.each([
+    {
+      name: "a coded superclass in another module",
+      source: "export class MutInherited extends InputDeviceOwnedError {}",
+      className: "MutInherited",
+    },
+    {
+      name: "a transitive local superclass without an Error suffix",
+      source:
+        "class LocalBase extends InputDeviceOwnedError {} export class MutLocal extends LocalBase {}",
+      className: "MutLocal",
+    },
+    {
+      name: "an exported class expression",
+      source: 'export const X = class extends ActionableError { readonly code = "x"; };',
+      className: "X",
+    },
+  ])("the module checker detects $name", ({ source, className }) => {
+    const inventory = codedErrorModules([
+      { module: "mutation", source },
+      {
+        module: "daemon/inputDeviceOwnership",
+        source:
+          'export class InputDeviceOwnedError extends ActionableError { readonly code = "owned"; }',
+      },
+      { module: "negative", source: 'export class NotAnError { readonly code = "ordinary"; }' },
+    ]);
+    expect(
+      unlistedCodedErrorModules(inventory, new Set(Object.keys(refusalErrorModules)), {}),
+    ).toEqual([`mutation: ${className}`]);
+  });
+
+  test("the module scanner covers properties, parameter properties and exported aliases", () => {
+    expect(
+      codedErrorModule(
+        "variants",
+        `
+      export class Own extends Error { readonly code = "own"; }
+      export class Parameter extends ActionableError { constructor(readonly code: string) { super(code); } }
+      class Alias extends Error { "code" = "alias"; } export { Alias as Refusal };
+      export default class extends ns.Error { code = "default"; }
+      class Local extends Error { code = "local"; }
+      export class Uncoded extends Error { constructor(code: string) { super(code); } }
+      export class Other extends Object { code = "other"; }
+      // export class Comment extends Error { code = "comment"; }
+      const text = 'export class Text extends Error { code = "text"; }';
+    `,
+      ),
+    ).toEqual([{ module: "variants", classes: ["Own", "Parameter", "Alias", "default"] }]);
+    expect(() => codedErrorModule("broken", "export class Broken extends Error { code =")).toThrow(
+      "broken:",
+    );
   });
 
   test("every exported error class is driven by a fixture or exempted with a reason", () => {
@@ -583,18 +1074,45 @@ describe("refusal wire contract", () => {
     test("committed surface fixtures equal what the real serializers emit", () => {
       if (process.env.UPDATE_CAPTURED_FIXTURES === "1") {
         mkdirSync(REFUSAL_SURFACES_DIR, { recursive: true });
-        for (const fixture of surfaceFixtures) {
+        for (const fixture of [...surfaceFixtures, ...ownedSurfaceFixtures]) {
           writeFileSync(
             join(REFUSAL_SURFACES_DIR, `${surfaceFixtureStem(fixture)}.json`),
             serializeRefusalSurfaceFixture(fixture),
           );
         }
       }
-      for (const fixture of surfaceFixtures) {
+      for (const fixture of [...surfaceFixtures, ...ownedSurfaceFixtures]) {
         const path = join(REFUSAL_SURFACES_DIR, `${surfaceFixtureStem(fixture)}.json`);
         expect(existsSync(path), `${path}; regenerate with UPDATE_CAPTURED_FIXTURES=1`).toBe(true);
         expect(readFileSync(path, "utf8")).toBe(serializeRefusalSurfaceFixture(fixture));
       }
+    });
+
+    test("new surfaces carry their named code without inventing retry intent", () => {
+      const addedSurfaces = new Set([
+        "device-loss-outcome",
+        "device-session-error-fields",
+        "recording-start-result",
+        "proxy-tool-result",
+        "request-failure-fields",
+        "liveness-handover",
+        "managed-slots-response",
+        "provision-envelope",
+      ]);
+      for (const fixture of allSurfaceFixtures.filter((fixture) =>
+        addedSurfaces.has(fixture.surface),
+      )) {
+        expect([surfaceTyped(fixture).typed.code], surfaceFixtureStem(fixture)).toEqual(
+          expectedWireCodes(fixture.name),
+        );
+      }
+      expect(ownedSurfaceFixtures.map(surfaceFixtureStem).sort()).toEqual(
+        EXTERNALLY_CAPTURED_SURFACE_FIXTURES.filter(
+          (fixture) => fixture.testFile === "test/daemon/refusalWireContract.test.ts",
+        )
+          .map(surfaceFixtureStem)
+          .sort(),
+      );
     });
 
     test("no stray surface fixture exists without a builder", () => {
@@ -614,7 +1132,7 @@ describe("refusal wire contract", () => {
         expect(row.expected, stem).toBe(
           dispositionOf(
             fields.code ?? "",
-            fields.retryable,
+            fields.retryable === true,
             fields.acquireNewSession ? "acquire_new_session" : undefined,
           ),
         );

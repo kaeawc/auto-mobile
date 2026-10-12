@@ -1,3 +1,8 @@
+import {
+  devicePreparedForOtherRequestError,
+  InputDeviceOwnedError,
+} from "../../src/daemon/inputDeviceOwnership";
+import { SessionNoLongerOwnsDeviceError } from "../../src/daemon/sessionNoLongerOwnsDevice";
 import { ObserverAdmittingStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
 import { ObserverSessionRegistry } from "../../src/daemon/observerSessionRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -5,6 +10,7 @@ import { describe, expect, test } from "bun:test";
 import {
   SessionScopedStreamAuthenticator,
   STREAM_SOCKET_AUTH_ENV,
+  streamAuthRefusalFields,
   type StreamAuthSessionManager,
 } from "../../src/daemon/streamSocketAuth";
 import { releasingSessionHarness } from "../helpers/releasingSessionHarness";
@@ -30,6 +36,31 @@ function authenticator(
 }
 
 describe("SessionScopedStreamAuthenticator", () => {
+  test.each([false, true])(
+    "ownership refusal is typed (unowned=%s) with unchanged wording",
+    (unowned) => {
+      const auth = authenticator(
+        sessionManager({ getSessionForDevice: () => (unowned ? null : "other") }),
+      );
+      const attempt = () =>
+        auth.authorize({ sessionUuid: "live", deviceId: "emu", requireOwnership: unowned });
+      expect(attempt).toThrow(unowned ? SessionNoLongerOwnsDeviceError : InputDeviceOwnedError);
+      try {
+        attempt();
+      } catch (error) {
+        expect(error).toMatchObject({
+          code: unowned ? "session_no_longer_owns_device" : "device_owned_by_other_session",
+          retryable: false,
+          deviceId: "emu",
+          message: unowned
+            ? "test op rejected: device emu is no longer owned by session live."
+            : "test op rejected: device emu is bound to a different daemon session; a subscriber cannot attach to another session's capture without authorization.",
+        });
+        expect(error).not.toHaveProperty("retryAfterMs");
+      }
+    },
+  );
+
   test("rejects a missing sessionUuid", () => {
     expect(() => authenticator(sessionManager()).authorize({})).toThrow(ActionableError);
     expect(() => authenticator(sessionManager()).authorize({ sessionUuid: "  " })).toThrow(
@@ -423,4 +454,36 @@ describe("observer session admission is opt-in", () => {
     });
     expect(() => auth.authorize({ sessionUuid: "observer" })).toThrow(/Register a session/);
   });
+});
+
+test("aux authorization fields retain a preparation refusal's retry bound", () => {
+  expect(streamAuthRefusalFields(devicePreparedForOtherRequestError("emu"))).toEqual({
+    code: "device_owned_by_other_session",
+    retryable: true,
+    deviceId: "emu",
+    retryAfterMs: 2_000,
+  });
+});
+
+test("aux authorization fields expose only the two stream ownership classes", () => {
+  expect(streamAuthRefusalFields(new InputDeviceOwnedError("stream", "emu", "live"))).toEqual({
+    code: "device_owned_by_other_session",
+    retryable: false,
+    deviceId: "emu",
+  });
+  expect(streamAuthRefusalFields(new SessionNoLongerOwnsDeviceError("live", "emu"))).toEqual({
+    code: "session_no_longer_owns_device",
+    retryable: false,
+    deviceId: "emu",
+  });
+  expect(
+    streamAuthRefusalFields(
+      Object.assign(new ActionableError("other refusal"), {
+        code: "timeout",
+        retryable: true,
+        deviceId: "emu",
+      }),
+    ),
+  ).toEqual({});
+  expect(streamAuthRefusalFields(new Error("untyped"))).toEqual({});
 });

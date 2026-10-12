@@ -536,6 +536,9 @@ for path in "${changed_files[@]}"; do
     scripts/shellcheck/sete-baseline.txt)
       add_check "shell-sete"
       ;;
+    scripts/manual-test/python/*|scripts/validate_manual_test_python.sh)
+      add_check "manual-test-python"
+      ;;
     scripts/github/uv.lock|scripts/github/pyproject.toml)
       add_check "github-python-lock"
       add_check "docs-github-markdown"

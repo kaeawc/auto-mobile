@@ -264,13 +264,18 @@ export function sessionLeaseSnapshot(
 export function sessionOwnerLeaseSnapshot(
   session: LeaseSession,
   now: number,
+  ownerCallInFlight = false,
 ): LivenessOwnerLeaseSnapshot {
   const mintBoundLease = hasMintBoundClaimLease(session);
   return {
     ...sessionLeaseSnapshot(session, now),
     // Mint forgiveness shifts this claim-only clock directly; stallForgivenAt may come from
     // tool activity, so it cannot defend a silent minter's claim hold.
-    lastHeartbeat: mintBoundLease ? session.livenessOwnerBoundAt : ownerLeaseHeartbeat(session),
+    lastHeartbeat: mintBoundLease
+      ? ownerCallInFlight
+        ? now
+        : session.livenessOwnerBoundAt
+      : ownerLeaseHeartbeat(session),
     graceMs:
       mintBoundLease &&
       holdsOwnerHeartbeatLease(session.livenessPolicy) &&

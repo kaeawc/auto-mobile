@@ -1,0 +1,12 @@
+{
+  "surface": "aux-socket-response",
+  "name": "device_owned_by_other_session",
+  "builder": "DeviceGestureRecordingSocketServer.processLine",
+  "payload": {
+    "success": false,
+    "error": "deviceGestureRecording rejected: device emu-held is bound to a different daemon session; a subscriber cannot attach to another session's capture without authorization.",
+    "code": "device_owned_by_other_session",
+    "retryable": false,
+    "deviceId": "emu-held"
+  }
+}

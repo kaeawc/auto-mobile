@@ -1,0 +1,2 @@
+# Regenerate: uv pip compile --universal --generate-hashes --python-version 3.11 requirements.in -o requirements.txt
+mcp==2.3.0

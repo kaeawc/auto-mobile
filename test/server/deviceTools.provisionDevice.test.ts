@@ -1,3 +1,13 @@
+import * as buildIdentity from "../../src/daemon/buildIdentity";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+  REFUSAL_SURFACES_DIR,
+  serializeRefusalSurfaceFixture,
+  surfaceFixtureStem,
+  type RefusalSurfaceFixture,
+  type RefusalWireResult,
+} from "../helpers/refusalWireFixtures";
 import { AvdCreateInterruptedError } from "../../src/utils/android-cmdline-tools/AvdManagerClient";
 import { provisionCancellationOutcomes } from "../../src/server/provisionCancellationOutcomes";
 import {
@@ -75,6 +85,22 @@ import {
   setVideoRecordingManagerDependencies,
 } from "../../src/server/videoRecordingManager";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
+
+/** Exact provision response body from the registered production handler, with deterministic dependencies. */
+function assertProvisionSurface(name: string, payload: unknown): void {
+  const fixture: RefusalSurfaceFixture = {
+    surface: "provision-envelope",
+    name,
+    builder: "registered provisionDevice handler via provisionDeviceErrorResponse",
+    payload,
+  };
+  const path = join(REFUSAL_SURFACES_DIR, `${surfaceFixtureStem(fixture)}.json`);
+  const bytes = serializeRefusalSurfaceFixture(fixture);
+  if (process.env.UPDATE_CAPTURED_FIXTURES === "1") {
+    writeFileSync(path, bytes);
+  }
+  expect(readFileSync(path, "utf8")).toBe(bytes);
+}
 
 isolateToolRegistry();
 
@@ -332,6 +358,7 @@ describe("provisionDevice handler", () => {
   let deviceManager: FakeDeviceUtils;
   let resourceObserver: FakeDeviceResourceObserver;
   let exactProvisioner: FakeExactDeviceProvisioner;
+  let fixtureBuildSpy: ReturnType<typeof spyOn> | undefined;
   let restorePipelineOverrides: (() => void) | undefined;
 
   const setup = async () => {
@@ -372,6 +399,8 @@ describe("provisionDevice handler", () => {
   };
 
   const cleanup = () => {
+    fixtureBuildSpy?.mockRestore();
+    fixtureBuildSpy = undefined;
     restorePipelineOverrides?.();
     restorePipelineOverrides = undefined;
     resetDeviceToolsDependencies();
@@ -453,6 +482,14 @@ describe("provisionDevice handler", () => {
   );
 
   test("rejects adoption when distinct running emulators claim the exact AVD name", async () => {
+    fixtureBuildSpy = spyOn(buildIdentity, "getCurrentBuildIdentity").mockReturnValue({
+      entryScript: "",
+      buildId: "fixture-build",
+    });
+    setDeviceToolsDependencies({
+      timer: new FakeTimer(),
+      idGenerator: new FakeIdGenerator(["identity-fixture"]),
+    });
     exactProvisioner.provision = async () => provisionedTestDevice("android", false);
     deviceManager.setBootedDevices("android", [
       { name: "phone-api-36-a", platform: "android", deviceId: "emulator-5554" },
@@ -463,6 +500,10 @@ describe("provisionDevice handler", () => {
       provisionTestArgs("android"),
     );
 
+    assertProvisionSurface(
+      "identity_conflict.adoption",
+      JSON.parse((response as RefusalWireResult).content[0].text),
+    );
     expect((response as any).isError).toBe(true);
     expect(JSON.stringify(response)).toContain("identity_conflict");
     expect(JSON.stringify(response)).toContain("emulator-5554");
@@ -4399,6 +4440,10 @@ describe("provisionDevice handler", () => {
   test.each(["device_lost", "device_offline"] as const)(
     "classifies a real runner readiness %s failure as retryable",
     async (code) => {
+      fixtureBuildSpy = spyOn(buildIdentity, "getCurrentBuildIdentity").mockReturnValue({
+        entryScript: "",
+        buildId: "fixture-build",
+      });
       const timer = new FakeTimer();
       const failure =
         code === "device_lost"
@@ -4438,10 +4483,14 @@ describe("provisionDevice handler", () => {
       });
       setDeviceToolsDependencies({
         timer,
+        idGenerator: new FakeIdGenerator(["readiness-fixture"]),
         ensureCtrlProxyReady: (request) => service.ensureReady(request),
       });
 
       const response = JSON.parse(await provisionResponseText(provisionTestArgs("android")));
+      if (code === "device_offline") {
+        assertProvisionSurface("device_offline.readiness", response);
+      }
       expect(response).toMatchObject({
         error: {
           code,
@@ -4713,6 +4762,14 @@ describe("provisionDevice handler", () => {
   });
 
   test("makes a timeout non-retryable when rollback fails", async () => {
+    fixtureBuildSpy = spyOn(buildIdentity, "getCurrentBuildIdentity").mockReturnValue({
+      entryScript: "",
+      buildId: "fixture-build",
+    });
+    setDeviceToolsDependencies({
+      timer: new FakeTimer(),
+      idGenerator: new FakeIdGenerator(["rollback-fixture"]),
+    });
     const created = provisionedTestDevice("android", true);
     configureProvisionBootAndTeardown(deviceManager, "android");
     exactProvisioner.provision = async (request) => {
@@ -4732,6 +4789,7 @@ describe("provisionDevice handler", () => {
       ).content[0].text,
     );
 
+    assertProvisionSurface("cleanup_failed.rollback", response);
     expect(response).toMatchObject({
       success: false,
       error: { code: "cleanup_failed", retryable: false },

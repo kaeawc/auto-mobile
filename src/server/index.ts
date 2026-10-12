@@ -1,3 +1,4 @@
+import { SessionOutsideBoundSessionError } from "./deviceOutsideBoundSessionRefusal";
 import { managedConnectionPlatformRefusal } from "../daemon/managedSlots/managedConnectionScope";
 import {
   getLiveDeadlineMs,
@@ -32,6 +33,7 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { executionTracker, sessionExecutionMetadataOf } from "./executionTracker";
 import { withAdmittedSessionEcho } from "./routedSessionEcho";
 import { withForeignOwnedSessionMeta } from "./routedSessionMeta";
+import { holdsOwnerHeartbeatLease } from "../daemon/managedExecutionLiveness";
 import { combineRequestAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
@@ -988,8 +990,14 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const implicitAutolockMcpSessionId =
       requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);
     let routingSessionUuid: string | undefined;
+    let readOutsideBoundSession = false;
     try {
-      routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams);
+      routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams, {
+        readOnly: ToolRegistry.getTool(name)?.isDeviceReadOnlyCall?.(toolParams) === true,
+        onReadOutsideBoundSession: () => {
+          readOutsideBoundSession = true;
+        },
+      });
     } catch (error) {
       // Match the existing tool-error boundary below: the SDK handler alias
       // is narrower than the protocol's text-only tool error result.
@@ -1146,6 +1154,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
               (daemonMode &&
                 daemonState.isInitialized() &&
                 daemonState.getManagedConnectionScopes().get(requestMcpSessionId) !== undefined)),
+          tool.isDeviceReadOnlyCall?.(toolParams) === true,
         );
       }
     }
@@ -1154,10 +1163,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // connection already holds an active device session — whether seeded at
     // construction or acquired mid-connection via getAndroid/getApple (recorded
     // by `bind()`), or held in the pool by this client through autolock (#6729)
-    // — a device tool that names a DIFFERENT `sessionUuid` must be
-    // rejected, not routed. Without this, a later call carrying a fabricated,
-    // typo'd, or stale id on a connection that already owns a device was handed
-    // off to session admission/creation and auto-assigned a SECOND, foreign
+    // — a control tool that names a DIFFERENT `sessionUuid` must be
+    // rejected. Reads pass read-only without changing the binding. Without this,
+    // a later call carrying a fabricated, typo'd, or stale id on a connection that
+    // already owns a device was handed off to session admission/creation and auto-assigned a SECOND, foreign
     // device (the residual #6019/#6045 bypass behind an active-session
     // precondition). This is scoped to `requiresDevice` tools on purpose:
     // `effectiveSessionUuid`'s own cross-routing throw fires for every tool and
@@ -1188,10 +1197,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         // rule's question below.
         !namesLiveSessionOfBoundPlan(explicitSessionUuid, boundDeviceSessionUuid)
       ) {
-        throw new ActionableError(
-          `MCP connection is bound to device session ${boundDeviceSessionUuid}; ` +
-            `cannot route this call to ${explicitSessionUuid} until the binding is released.`,
-        );
+        if (tool.isDeviceReadOnlyCall?.(toolParams) === true) {
+          readOutsideBoundSession = true;
+        } else {
+          throw new SessionOutsideBoundSessionError(boundDeviceSessionUuid, explicitSessionUuid);
+        }
       }
     }
     // An omitted selection target always belongs to an independent
@@ -1428,14 +1438,28 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // on or off. Naming a UUID is not proof of ownership (#11164): a read may still watch that
     // session, but this connection must never bind it for later sessionless calls. Decided
     // before any bind, and read at bind time so an ownership change during the handler is honored.
-    const foreignOwnedExplicitSessionUuid = (): string | undefined =>
-      providedSessionUuid &&
-      DaemonState.getInstance().isInitialized() &&
-      DaemonState.getInstance()
-        .getDevicePool()
-        .isSessionOwnedByOtherConnection(providedSessionUuid, implicitAutolockMcpSessionId)
+    const foreignOwnedExplicitSessionUuid = (): string | undefined => {
+      const state = DaemonState.getInstance();
+      if (!providedSessionUuid || !state.isInitialized()) {
+        return undefined;
+      }
+      const pool = state.getDevicePool();
+      if (pool.isSessionOwnedByOtherConnection(providedSessionUuid, implicitAutolockMcpSessionId)) {
+        return providedSessionUuid;
+      }
+      // A read never adopts an ownerless session or starts the proxy's owner heartbeat (#11557).
+      const session =
+        daemonMode &&
+        tool.isDeviceReadOnlyCall?.(parsedParams) === true &&
+        implicitAutolockMcpSessionId
+          ? state.getSessionManager().getSession(providedSessionUuid)
+          : undefined;
+      return session &&
+        holdsOwnerHeartbeatLease(session.livenessPolicy) &&
+        !pool.isSessionOwnedByConnection(providedSessionUuid, implicitAutolockMcpSessionId)
         ? providedSessionUuid
         : undefined;
+    };
     // The proxy learns from the marker not to remember a foreign-owned session it named.
     const withRoutedSession = <T>(result: T): T =>
       daemonMode
@@ -1514,6 +1538,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const endExplicitSessionBindClaim =
       providedSessionUuid &&
       tool.requiresDevice &&
+      tool.isDeviceReadOnlyCall?.(parsedParams) !== true &&
       implicitAutolockMcpSessionId &&
       DaemonState.getInstance().isInitialized()
         ? DaemonState.getInstance().getDevicePool().beginMcpBind(implicitAutolockMcpSessionId)
@@ -1729,9 +1754,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       const daemonSessionManager = DaemonState.getInstance().isInitialized()
         ? DaemonState.getInstance().getSessionManager()
         : undefined;
+      // Reads exempted from either bound-session routing refusal never bind or adopt.
       const sessionForBinding =
         daemonSessionManager &&
         providedSessionUuid &&
+        !readOutsideBoundSession &&
         !isRecordingIdCleanup &&
         !isDeviceInventoryTool(name)
           ? daemonSessionManager.getSessionForNewExecution(
@@ -1743,10 +1770,14 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         !isDeviceSessionAcquisitionTool(name) &&
         !isDeviceInventoryTool(name) &&
         name !== SET_TOOL_ENABLED_TOOL_NAME &&
+        !readOutsideBoundSession &&
         !result?.isError &&
         providedSessionUuid &&
         // Ownership first (#11235): a foreign-owned session never binds this connection.
-        foreignOwnedExplicitSessionUuid() === undefined &&
+        (!daemonSessionManager ||
+          !DaemonState.getInstance()
+            .getDevicePool()
+            .isSessionOwnedByOtherConnection(providedSessionUuid, implicitAutolockMcpSessionId)) &&
         !isRecordingIdCleanup &&
         (daemonSessionManager
           ? sessionForBinding !== null &&
@@ -1757,7 +1788,12 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         if (sessionToolBinding.bind(sessionId, providedSessionUuid)) {
           ToolRegistry.notifyToolListChanged();
         }
-        if (tool.requiresDevice && daemonSessionManager && implicitAutolockMcpSessionId) {
+        if (
+          tool.requiresDevice &&
+          tool.isDeviceReadOnlyCall?.(parsedParams) !== true &&
+          daemonSessionManager &&
+          implicitAutolockMcpSessionId
+        ) {
           await DaemonState.getInstance()
             .getDevicePool()
             .attachExplicitSessionUuidCall(providedSessionUuid, implicitAutolockMcpSessionId);

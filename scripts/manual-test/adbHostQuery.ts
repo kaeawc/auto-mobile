@@ -33,3 +33,55 @@ export function decodeAdbHostResponse(bytes: Uint8Array): AdbHostResponse {
   const payload = buffer.toString("utf8", 8);
   return status === "OKAY" ? { ok: true, payload } : { ok: false, reason: payload };
 }
+
+export const ADB_HOST_MAX_RESPONSE_BYTES = 8 + 0xffff;
+
+/**
+ * ADB uses status + four hex length digits, not newline framing, so LineFramer
+ * does not apply. Keep chunks and a byte count up to 8 + 0xffff bytes; join only
+ * on completion/end. The small header is copied once as its bytes arrive.
+ */
+export class AdbHostResponseAccumulator {
+  private chunks: Buffer[] = [];
+  private byteCount = 0;
+  private readonly header = Buffer.alloc(8);
+  private overflowed = false;
+
+  push(chunk: Buffer): AdbHostResponse | undefined {
+    if (this.overflowed) {
+      return this.finish();
+    }
+    if (this.byteCount + chunk.length > ADB_HOST_MAX_RESPONSE_BYTES) {
+      this.overflowed = true;
+      this.chunks = [];
+      return this.finish();
+    }
+    if (this.byteCount < 8) {
+      chunk.copy(this.header, this.byteCount, 0, Math.min(chunk.length, 8 - this.byteCount));
+    }
+    this.byteCount += chunk.length;
+    if (chunk.length) {
+      this.chunks.push(chunk);
+    }
+    // Reuse the decoder's status/length validation rather than a second protocol parser.
+    const headerResult = decodeAdbHostResponse(
+      this.header.subarray(0, Math.min(8, this.byteCount)),
+    );
+    if (!headerResult.ok && headerResult.reason !== "Incomplete ADB host response") {
+      return this.finish();
+    }
+    if (
+      this.byteCount >= 8 &&
+      this.byteCount >= 8 + Number.parseInt(this.header.toString("utf8", 4, 8), 16)
+    ) {
+      return this.finish();
+    }
+    return undefined;
+  }
+
+  finish(): AdbHostResponse {
+    return this.overflowed
+      ? { ok: false, reason: `ADB host response exceeds ${ADB_HOST_MAX_RESPONSE_BYTES} bytes` }
+      : decodeAdbHostResponse(Buffer.concat(this.chunks, this.byteCount));
+  }
+}

@@ -4920,6 +4920,7 @@ export class DaemonMcpProxy {
         routingArgs,
         usesDeviceSelector || isSessionAcquisition,
         this.namesOwnedSession(callerArgs),
+        isSessionAcquisition,
       ),
     );
     return {
@@ -5007,6 +5008,7 @@ export class DaemonMcpProxy {
     args: Record<string, unknown>,
     restore: boolean,
     namesOwnedSession = false,
+    isSessionAcquisition = false,
   ): Record<string, unknown> {
     if (!namesOwnedSession && (!restore || this.sessionUuidFromArgs(args))) {
       return args;
@@ -5014,7 +5016,11 @@ export class DaemonMcpProxy {
     const retained = [...this.ownedDeviceSessions].filter(
       (id) => id !== this.terminalBoundSession?.sessionUuid && id !== this.boundSessionUuid,
     );
-    if (this.boundSessionUuid && this.boundSessionUuid !== this.recoverableBoundSessionHandoff) {
+    if (
+      this.boundSessionUuid &&
+      this.boundSessionUuid !== this.terminalBoundSession?.sessionUuid &&
+      (isSessionAcquisition || this.boundSessionUuid !== this.recoverableBoundSessionHandoff)
+    ) {
       // Restoration uses the first "if-absent" attachment as the fresh socket's
       // default, so the current binding must precede older owned sessions.
       retained.unshift(this.boundSessionUuid);

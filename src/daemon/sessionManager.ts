@@ -6604,11 +6604,26 @@ export class SessionManager {
 
       this.notifySessionRelease(releaseSnapshot, options);
       enter("finalize-persist");
-      return await this.finishCommittedRelease(
+      let persistedSnapshot: SessionReleaseSnapshot;
+      try {
+        persistedSnapshot = await this.completeReleasePersistence(
+          releaseSnapshot,
+          reason,
+          session,
+          terminalPersisted,
+        );
+      } catch (error) {
+        // Removal committed before persistence. Retain its identity and reason
+        // while the pending release snapshot is retried by the recovery owner.
+        reason.finalizedSnapshot ??= releaseSnapshot;
+        this.recordFinalizedSessionRelease(session, reason);
+        throw toActionableError(error, `Failed to finalize session ${sessionId} release`);
+      }
+      return this.finishCommittedRelease(
         session,
         reason,
         releaseSnapshot,
-        terminalPersisted,
+        persistedSnapshot,
         options,
         pendingCleanup,
       );
@@ -6618,30 +6633,15 @@ export class SessionManager {
   }
 
   /** Persistence after removal cannot undo a committed release or re-run its listeners. */
-  private async finishCommittedRelease(
+  private finishCommittedRelease(
     session: Session,
     reason: ReleaseReasonState,
     releaseSnapshot: SessionReleaseSnapshot,
-    terminalPersisted: boolean,
+    persistedSnapshot: SessionReleaseSnapshot,
     options: SessionReleaseOptions,
     pendingCleanup: readonly Promise<void>[],
-  ): Promise<string> {
+  ): string {
     const { sessionId, deviceId } = releaseSnapshot;
-    let persistedSnapshot: SessionReleaseSnapshot;
-    try {
-      persistedSnapshot = await this.completeReleasePersistence(
-        releaseSnapshot,
-        reason,
-        session,
-        terminalPersisted,
-      );
-    } catch (error) {
-      // Removal committed before persistence. Retain its identity and reason
-      // while the pending release snapshot is retried by the recovery owner.
-      reason.finalizedSnapshot ??= releaseSnapshot;
-      this.recordFinalizedSessionRelease(session, reason);
-      throw toActionableError(error, `Failed to finalize session ${sessionId} release`);
-    }
     this.recordFinalizedSessionRelease(session, reason);
     if (persistedSnapshot !== releaseSnapshot) {
       // A terminal reason upgraded this release while it persisted. Its cleanup already ran on

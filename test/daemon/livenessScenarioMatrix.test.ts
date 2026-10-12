@@ -24,6 +24,10 @@ import {
   UNSETTLED_EXECUTION_DEADLINE_GRACE_MS,
   UNSETTLED_EXECUTION_VETO_CEILING_MS,
 } from "../../src/daemon/unsettledExecutionVeto";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
+import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
+import { DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS } from "../../src/daemon/sessionLivenessWindows";
 import { OWNER_DISCONNECT_GRACE_MS } from "../../src/daemon/ownerDisconnectRelease";
 import { DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS } from "../../src/daemon/sessionLivenessWindows";
 import { AppearanceSyncScheduler } from "../../src/daemon/AppearanceSyncScheduler";
@@ -2082,4 +2086,79 @@ describe("start wiring a daemon only has once started (#11444, #11441)", () => {
       sessionUuid: session,
     });
   });
+});
+
+test("a connected suspect holder has a truthful bind retry that disappears after its owner heartbeats", async () => {
+  scenario = await LivenessScenario.start();
+  const holder = await scenario.acquire();
+  const state = DaemonState.getInstance();
+  const pool = state.getDevicePool();
+  const session = state.getSessionManager().getSession(holder)!;
+  scenario.dropHeartbeats = true;
+  await scenario.idle(DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS + 1_000);
+  const remaining = state.getSessionManager().getOwnerLeaseHold(holder)!.remainingMs;
+  const clocks = [session.lastUsedAt, session.lastHeartbeat, session.lastOwnerHeartbeat];
+  const bind = () =>
+    pool.bindOrReuseDeviceSession(
+      "rival",
+      DEVICE_A,
+      "android",
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      "rival-connection",
+    );
+  const refused = await bind().catch((error: unknown) => error);
+  expect(refused).toBeInstanceOf(InputDeviceOwnedError);
+  if (!(refused instanceof InputDeviceOwnedError)) {
+    throw new Error("expected typed refusal");
+  }
+  expect(refused.toPayload()).toEqual({
+    code: "device_owned_by_other_session",
+    deviceId: DEVICE_A,
+    retryable: true,
+    retryAfterMs: remaining,
+  });
+  expect([session.lastUsedAt, session.lastHeartbeat, session.lastOwnerHeartbeat]).toEqual(clocks);
+  scenario.dropHeartbeats = false;
+  await scenario.idle(KEEPER_INTERVAL_MS);
+  const restored = await bind().catch((error: unknown) => error);
+  expect(restored).toBeInstanceOf(InputDeviceOwnedError);
+  if (!(restored instanceof InputDeviceOwnedError)) {
+    throw new Error("expected typed refusal");
+  }
+  expect(restored.toPayload()).toEqual({
+    code: "device_owned_by_other_session",
+    deviceId: DEVICE_A,
+    retryable: false,
+  });
+});
+
+test("setActiveDevice naming a foreign-owned suspect session stays non-retryable", async () => {
+  scenario = await LivenessScenario.start({ autolock: true });
+  const holder = await scenario.acquire();
+  const manager = DaemonState.getInstance().getSessionManager();
+  const session = manager.getSession(holder)!;
+  scenario.dropHeartbeats = true;
+  await scenario.idle(DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS + 1_000);
+  expect(manager.getSessionLeaseState(holder)?.phase).toBe("suspect");
+  const clocks = [session.lastUsedAt, session.lastHeartbeat, session.lastOwnerHeartbeat];
+  const select = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
+  const refused = await select({ deviceId: DEVICE_A, sessionUuid: holder }).catch(
+    (error: unknown) => error,
+  );
+  expect(refused).toBeInstanceOf(InputDeviceOwnedError);
+  if (!(refused instanceof InputDeviceOwnedError)) {
+    throw new Error("expected typed refusal");
+  }
+  expect(refused.toPayload()).toEqual({
+    code: "device_owned_by_other_session",
+    deviceId: DEVICE_A,
+    retryable: false,
+  });
+  expect([session.lastUsedAt, session.lastHeartbeat, session.lastOwnerHeartbeat]).toEqual(clocks);
 });

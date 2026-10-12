@@ -31,7 +31,10 @@ import {
   resolveDirectSessionDevice,
 } from "./directSessionDeviceRegistry";
 import { prepareSessionDisplayPin } from "./sessionDisplayPin";
-import { deviceAssignedToOtherSessionError } from "../daemon/inputDeviceOwnership";
+import {
+  deviceAssignedToOtherSessionError,
+  heldDeviceBindRefusal,
+} from "../daemon/inputDeviceOwnership";
 import { executionTracker } from "./executionTracker";
 import { isTypedToolRefusal } from "./shapeToolCallError";
 import { isClientCancelled } from "../utils/AbortContext";
@@ -253,14 +256,15 @@ function assertDeviceOwner(input: {
   device: PooledDevice;
   sessionUuid: string;
   sessions: SessionManager;
+  pool: object;
 }): void {
-  const { device, sessionUuid, sessions } = input;
+  const { device, sessionUuid, sessions, pool } = input;
   if (
     device.sessionId &&
     device.sessionId !== sessionUuid &&
     sessions.getSession(device.sessionId)
   ) {
-    throw deviceAssignedToOtherSessionError(device.id, device.sessionId, sessionUuid);
+    throw heldDeviceBindRefusal(pool, device.id, device.sessionId, sessionUuid);
   }
 }
 
@@ -320,7 +324,7 @@ async function bindRequestedDevice(input: {
     true,
   );
   if (boundSession !== args.sessionUuid) {
-    throw deviceAssignedToOtherSessionError(args.deviceId, boundSession, args.sessionUuid);
+    throw heldDeviceBindRefusal(pool, args.deviceId, boundSession, args.sessionUuid);
   }
   sessions.setDeviceReadiness(args.sessionUuid, "booted");
 }
@@ -375,10 +379,10 @@ async function selectSessionDevice(input: {
   // Refused before the resume: resuming re-arms the device's CtrlProxy restart budget and drops
   // its admitted attempt, which a caller that does not hold the device must not do (#11651).
   pool.assertNotPreparedForOtherRequest(args.deviceId);
-  assertDeviceOwner({ device, sessionUuid: args.sessionUuid, sessions });
+  assertDeviceOwner({ device, sessionUuid: args.sessionUuid, sessions, pool });
   await dependencies.resumeCtrlProxy(args.deviceId, device.platform);
   // Checked again: another session may have bound the device while the resume listed devices.
-  assertDeviceOwner({ device, sessionUuid: args.sessionUuid, sessions });
+  assertDeviceOwner({ device, sessionUuid: args.sessionUuid, sessions, pool });
   // A request cancelled before the bind changes nothing.
   signal?.throwIfAborted();
   await bindRequestedDevice({ args, device, pool, sessions, receipt, rememberPrior });
@@ -421,7 +425,7 @@ function admitSessionlessSelection(args: HandlerArgs): void {
       // A display pin needs a session regardless of who holds the device.
       throw new DisplayPinNeedsSessionError();
     }
-    throw deviceAssignedToOtherSessionError(args.deviceId, liveHolder, undefined);
+    throw heldDeviceBindRefusal(pool, args.deviceId, liveHolder, undefined);
   }
   // No session holds it yet, but another request is preparing it and will bind it (#11651).
   pool.assertNotPreparedForOtherRequest(args.deviceId);

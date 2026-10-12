@@ -155,6 +155,7 @@ export interface DaemonStateAccess {
     /** Admission/liveness judgement; never starts lazy release. */
     peekSession?(sessionId: string): Session | null;
     getReleasingSession?(sessionId: string): Session | null;
+    getSessionLivenessOwnerToken?(sessionId: string): string | undefined;
     waitForSessionReleaseWithin?(sessionId: string, timeoutMs: number): Promise<boolean>;
     getAllSessions?(): Session[];
     /** Reverse-map holders, including sessions awaiting or completing release. */
@@ -1399,7 +1400,9 @@ async function handleReleaseSession(
   executions?: ReleaseCutExecutions,
   context: DaemonRequestContext = {},
 ): Promise<DaemonMethodResult> {
-  const params = request.params as { sessionId?: string; requireKnown?: boolean } | undefined;
+  const params = request.params as
+    | { sessionId?: string; requireKnown?: boolean; livenessOwnerToken?: string }
+    | undefined;
   const sessionId = params?.sessionId;
   if (!sessionId) {
     return {
@@ -1414,6 +1417,10 @@ async function handleReleaseSession(
     return refusal;
   }
   const manager = state.getSessionManager();
+  const ownerRefusal = releaseSessionOwnerRefusal(manager, sessionId, params?.livenessOwnerToken);
+  if (ownerRefusal) {
+    return ownerRefusal;
+  }
   const session = manager.getSession(sessionId) ?? manager.getReleasingSession?.(sessionId);
   if (!session && !manager.hasSession(sessionId)) {
     return await releaseSessionWithoutDevice(
@@ -1424,6 +1431,32 @@ async function handleReleaseSession(
     );
   }
   return releaseBoundSession(state, manager, sessionId, session, executions);
+}
+
+/** An owner-scoped release is refused before any lookup that can stamp clocks or expire a session. */
+function releaseSessionOwnerRefusal(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+  token: string | undefined,
+): DaemonMethodResult | undefined {
+  if (typeof token !== "string" || token.length === 0) {
+    return undefined;
+  }
+  if (!manager.hasSession(sessionId) && !manager.getReleasingSession?.(sessionId)) {
+    return undefined;
+  }
+  const owner = manager.getSessionLivenessOwnerToken
+    ? manager.getSessionLivenessOwnerToken(sessionId)
+    : (manager.getSession(sessionId) ?? manager.getReleasingSession?.(sessionId))
+        ?.livenessOwnerToken;
+  if (owner === token) {
+    return undefined;
+  }
+  return {
+    success: false,
+    code: DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE,
+    error: `Session ${sessionId} can only be released by its current liveness owner; nothing changed.`,
+  };
 }
 
 /** Release an id with no device session behind it: an observer session, or an unknown id. */

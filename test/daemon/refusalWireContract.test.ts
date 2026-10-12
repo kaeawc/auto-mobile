@@ -32,6 +32,10 @@ import * as daemonConstants from "../../src/daemon/constants";
 import * as mcpTimeouts from "../../src/daemon/McpTimeoutError";
 import * as sessionReleasedDuringCall from "../../src/daemon/sessionReleasedDuringCall";
 import * as appNotRunning from "../../src/models/AppNotRunningError";
+import * as daemonClient from "../../src/daemon/client";
+import * as controlTransport from "../../src/daemon/deviceControlTransportFailure";
+import * as toolUnavailable from "../../src/server/toolUnavailableError";
+import * as deviceTools from "../../src/server/deviceTools";
 import * as sessionRecovery from "../../src/models/deviceSessionRecovery";
 import type { ManagedSlotsResult } from "../../src/models/managedSlotsResult";
 import { DEFAULT_PROVISION_DEVICE_RETRYABILITY } from "../../src/devices/exactDeviceProvisioning";
@@ -66,7 +70,11 @@ import {
   type RefusalDisposition,
 } from "../helpers/refusalWireFixtures";
 
-/** Runtime exports, not source text: adding an Error subclass to these modules extends coverage. */
+/**
+ * Hand-maintained modules declaring exported Error subclasses with a wire code anywhere: own
+ * code, failure.code, data.code, details.code, or inherited. Runtime exports extend coverage
+ * within these modules; a coded class in an unlisted module is not seen.
+ */
 const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unknown>>>> = {
   "features/bootAdmission/HostBootAdmissionRegistry": hostBootRegistry,
   "server/downloadsFixtureService": downloadsRefusals,
@@ -96,6 +104,10 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "daemon/McpTimeoutError": mcpTimeouts,
   "daemon/sessionReleasedDuringCall": sessionReleasedDuringCall,
   "models/AppNotRunningError": appNotRunning,
+  "daemon/client": daemonClient,
+  "daemon/deviceControlTransportFailure": controlTransport,
+  "server/toolUnavailableError": toolUnavailable,
+  "server/deviceTools": deviceTools,
 };
 
 function exportedErrorClasses(modules: typeof refusalErrorModules) {
@@ -288,6 +300,8 @@ function surfaceTyped(fixture: RefusalSurfaceFixture): {
     };
   }
   if (fixture.surface === "webrtc-stream-response") {
+    // The aux-socket response carries no retryable field; absent on the wire means not retryable.
+    expect(Object.hasOwn(payload, "retryable"), fixture.name).toBe(false);
     return { typed: { code: String(payload.errorCode), retryable: false } };
   }
   if (fixture.surface === "delete-device") {

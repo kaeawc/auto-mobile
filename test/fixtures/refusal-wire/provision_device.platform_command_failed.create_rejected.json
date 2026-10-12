@@ -1,0 +1,13 @@
+{
+  "code": "provision_device.platform_command_failed.create_rejected",
+  "builder": "ProvisionDeviceCreateRejectedError via createToolErrorResponse",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"message\":\"Platform rejected creation\",\"error\":{\"code\":\"platform_command_failed\",\"message\":\"Platform rejected creation\",\"retryable\":false}}"
+      }
+    ]
+  }
+}

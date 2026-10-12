@@ -1,12 +1,12 @@
 {
   "code": "daemon_overloaded",
-  "builder": "McpOverloadError constructed from the private forward-budget throw site's literal via mcpRequestFailureDetails -> daemonResponseError -> mcpOverloadResult",
+  "builder": "McpOverloadError literal pinned to the real throw site by socketServerForwardBudgetTimeoutVsOverload.test.ts; mcpRequestFailureDetails -> daemonResponseError -> mcpOverloadResult",
   "result": {
     "isError": true,
     "content": [
       {
         "type": "text",
-        "text": "{\"error\":{\"code\":\"daemon_overloaded\",\"message\":\"Daemon overloaded while handling observe: spent 750ms queueing, leaving 250ms of the 1000ms deadline. Retry after 250ms.\",\"retryable\":true,\"retryAfterMs\":250,\"queueWaitMs\":750,\"remainingTimeoutMs\":250}}"
+        "text": "{\"error\":{\"code\":\"daemon_overloaded\",\"message\":\"Daemon overloaded while handling observe: spent 950ms waiting in queue, leaving 50ms of the 1000ms deadline. Retry after 250ms.\",\"retryable\":true,\"retryAfterMs\":250,\"queueWaitMs\":950,\"remainingTimeoutMs\":50}}"
       }
     ]
   }

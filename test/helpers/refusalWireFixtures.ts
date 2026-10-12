@@ -40,7 +40,19 @@ import {
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { mcpRequestFailureDetails, strokeAdmissionEndedError } from "../../src/daemon/socketServer";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
-import { daemonResponseError } from "../../src/daemon/client";
+import {
+  daemonResponseError,
+  DaemonHandshakeMismatchError,
+  DaemonBoundSessionLostError,
+  DaemonShuttingDownError,
+  DaemonUnavailableError,
+  DaemonRequestNotDeliveredError,
+} from "../../src/daemon/client";
+import {
+  DeviceControlTransportError,
+  LoopbackMcpConnectionError,
+} from "../../src/daemon/deviceControlTransportFailure";
+import { ToolUnavailableError } from "../../src/server/toolUnavailableError";
 import type { DaemonResponse } from "../../src/daemon/types";
 import { ViewerReadOnlyError } from "../../src/daemon/streamSubscriptionPolicy";
 import {
@@ -87,7 +99,11 @@ import {
 } from "../../src/daemon/managedSlots/managedSlotRefusal";
 import { DeviceOutsideBoundSessionError } from "../../src/server/deviceOutsideBoundSessionRefusal";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/devices/deviceBootService";
-import { createToolErrorResponse } from "../../src/server/deviceTools";
+import {
+  createToolErrorResponse,
+  PooledAvdIdentityError,
+  ProvisionDeviceRollbackError,
+} from "../../src/server/deviceTools";
 import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
 import {
   mcpOverloadResult,
@@ -269,17 +285,17 @@ const CUT_RELEASE_REASONS: readonly (readonly [string, SessionReleaseReason])[] 
   ["explicit_release", "explicit-release"],
 ];
 
-/** Exact literal from requireRemainingMcpForwardBudget; the private throw site needs a cast. */
-function overloadError(): McpOverloadError {
+/** Pinned to requireRemainingMcpForwardBudget by socketServerForwardBudgetTimeoutVsOverload.test.ts. */
+export function overloadRefusalError(): McpOverloadError {
   return new McpOverloadError(
-    "Daemon overloaded while handling observe: spent 750ms queueing, leaving 250ms of the 1000ms deadline. Retry after 250ms.",
+    "Daemon overloaded while handling observe: spent 950ms waiting in queue, leaving 50ms of the 1000ms deadline. Retry after 250ms.",
     {
       code: "daemon_overloaded",
       retryable: true,
       retryAfterMs: 250,
       reason: "insufficient_forward_budget",
-      queueWaitMs: 750,
-      remainingTimeoutMs: 250,
+      queueWaitMs: 950,
+      remainingTimeoutMs: 50,
     },
   );
 }
@@ -287,12 +303,17 @@ function overloadError(): McpOverloadError {
 /** One entry per wire code, each produced by the builder the daemon itself calls. */
 const BUILDERS: readonly FixtureEntry[] = [
   [
+    "provision_device.platform_command_failed.create_rejected",
+    "ProvisionDeviceCreateRejectedError via createToolErrorResponse",
+    () => provisionEnvelope(new ProvisionDeviceCreateRejectedError("Platform rejected creation")),
+  ],
+  [
     "daemon_overloaded",
-    "McpOverloadError constructed from the private forward-budget throw site's literal via mcpRequestFailureDetails -> daemonResponseError -> mcpOverloadResult",
+    "McpOverloadError literal pinned to the real throw site by socketServerForwardBudgetTimeoutVsOverload.test.ts; mcpRequestFailureDetails -> daemonResponseError -> mcpOverloadResult",
     () => {
       const error = daemonResponseError({
         id: "overload-fixture",
-        ...socketFrame(overloadError()),
+        ...socketFrame(overloadRefusalError()),
       });
       if (!(error instanceof McpOverloadError)) {
         throw new Error("daemonResponseError did not preserve McpOverloadError");
@@ -805,6 +826,21 @@ function terminalAtAdmission(releaseReason: SessionReleaseReason): TerminalSessi
 }
 
 const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
+  [
+    "discovery_incomplete.android",
+    () =>
+      new AndroidBootedDeviceDiscoveryIncompleteError({
+        code: "failed",
+        message: "adb devices failed",
+        retryable: true,
+      }),
+  ],
+  ["timeout.shutdown", () => new DeviceShutdownTimeoutError("Device shutdown deadline exhausted")],
+  ["timeout.boot", () => new DeviceBootTimeoutError("boot", "readiness", 1_000, 1_000, DEVICE)],
+  [
+    "daemon_handoff_interrupted",
+    () => new DaemonHandoffInterruptionError("Daemon handoff interrupted the in-flight request"),
+  ],
   // shapeToolCallError returns plain Error: text; no top-level JSON refusal. Inline
   // deleteDevice/provisionDevice target_identity_unresolved literals have no shared capture builder.
   [
@@ -866,7 +902,7 @@ export function buildRefusalSurfaceFixtures(): RefusalSurfaceFixture[] {
       surface: "overload-frame",
       name: "daemon_overloaded",
       builder: "mcpRequestFailureDetails",
-      payload: socketFrame(overloadError()),
+      payload: socketFrame(overloadRefusalError()),
     },
     ...SOCKET_FRAME_ERRORS.map(([name, error]): RefusalSurfaceFixture => ({
       surface: "socket-frame",
@@ -946,27 +982,19 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
   ],
   [
     StageSessionDownloadsRefusal,
-    "no wire code: shapeToolCallError returns plain 'Error: ...' text for this Downloads-staging refusal",
+    "uppercase code but no retryable field: shapeToolCallError returns plain 'Error: ...' text for this Downloads-staging refusal",
   ],
   [
     AdbDeviceOfflineError,
-    "GAP: readiness cause maps to ProvisionDeviceError device_offline with diagnostics; capturing that real mapping needs the readiness path beyond the three added rows",
+    "GAP: provision readiness maps this cause to device_offline with diagnostics in the ProvisionDeviceError envelope; no fixture captures this class yet (#11351)",
   ],
   [
     DeviceLostError,
-    "GAP: device-loss cancellation has its own outcome serializer and provision readiness mapping; neither is captured by this three-row corpus lane",
+    "GAP: deviceLossOutcomeFromError emits device_lost and provision readiness maps this cause to a device_lost envelope with diagnostics; no fixture captures this class yet (#11351)",
   ],
   [
     ManagedSlotConfigError,
-    "GAP: daemon/acquireManagedSlots returns its code beside error with no retryable flag; needs a protocol-response surface outside the three added rows",
-  ],
-  [
-    AndroidBootedDeviceDiscoveryIncompleteError,
-    "GAP: typed discovery_incomplete subclass; the existing base-class fixture does not drive this constructor and an additional capture is outside the file allowlist",
-  ],
-  [
-    DeviceShutdownTimeoutError,
-    "GAP: typed retryable timeout; a shutdown-class capture is outside the three added rows",
+    "GAP: daemon/acquireManagedSlots returns this class's code beside error without retryable; no fixture captures this class yet (#11351)",
   ],
   [
     SharedDaemonNamespaceError,
@@ -974,15 +1002,11 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
   ],
   [
     DeviceSessionSupersededByRestoreError,
-    "GAP: device-data aux-socket refusal uses deviceSessionErrorFields; needs its own response surface outside the three added rows",
+    "GAP: deviceSessionErrorFields puts DEVICE_SESSION_SUPERSEDED_BY_RESTORE beside error on the device-data aux socket; no fixture captures this class yet (#11351)",
   ],
   [
     TestRecordingStartUnheldError,
-    "GAP: typed no_active_device_session recording-start payload; an additional class capture is outside the file allowlist",
-  ],
-  [
-    DaemonHandoffInterruptionError,
-    "GAP: typed retryable daemon_handoff_interrupted on the socket and provisionDevice; an additional capture is outside the file allowlist",
+    "GAP: toPayload supplies the typed no_active_device_session recording-start fields to the MCP result and socket frame; no fixture captures this class yet (#11351)",
   ],
   [
     DaemonAssetVersionMismatchError,
@@ -990,7 +1014,7 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
   ],
   [
     DaemonBoundSessionExpiredError,
-    "GAP: proxyServer privately maps it to session_ownership_lost or managed_execution_ended; current fixtures build the payload directly without this constructor",
+    "GAP: proxyServer maps this class to session_ownership_lost or managed_execution_ended; no fixture captures this class yet (#11351)",
   ],
   [
     DaemonBuildMismatchError,
@@ -998,7 +1022,7 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
   ],
   [
     DaemonSessionStalledError,
-    "GAP: proxyServer maps its liveness handover to daemon_stalled/proxy_stalled or a managed stall loss; needs a separate handover capture outside the three added rows",
+    "GAP: proxyServer maps this class's liveness handover to daemon_stalled/proxy_stalled or managed_execution_ended; no fixture captures this class yet (#11351)",
   ],
   [
     DaemonToolOutcomeUnknownError,
@@ -1034,16 +1058,48 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
   ],
   [DaemonCommandRefusal, "daemon CLI refusal wrapper, never crosses the MCP/socket wire"],
   [
-    ProvisionDeviceCreateRejectedError,
-    "GAP: typed platform_command_failed subclass; the existing ProvisionDeviceError fixture does not drive it and an additional capture is outside the file allowlist",
-  ],
-  [
     AndroidAvdIdentityConflictError,
-    "GAP: knownProvisionDeviceError maps it to typed identity_conflict; the current provision fixture constructs the wrapper directly without driving this class",
+    "GAP: knownProvisionDeviceError maps this class to identity_conflict in the provision envelope; no fixture captures this class yet (#11351)",
   ],
   [
-    DeviceBootTimeoutError,
-    "GAP: typed retryable timeout; a boot-class capture is outside the three added rows",
+    DaemonHandshakeMismatchError,
+    "GAP: daemonResponseError preserves handshakeFailure.code and the proxy uses this class for pre-dispatch recovery; no fixture captures this class yet (#11351)",
+  ],
+  [
+    DaemonBoundSessionLostError,
+    "GAP: daemonResponseError preserves boundSessionLoss.code and the proxy maps this class to session_ownership_lost or managed_execution_ended; no fixture captures this class yet (#11351)",
+  ],
+  [
+    DaemonShuttingDownError,
+    "GAP: daemonResponseError copies the shutdown frame's code onto this class and proxyServer emits the daemon_shutting_down MCP envelope; no fixture captures this class yet (#11351)",
+  ],
+  [
+    DaemonUnavailableError,
+    "uncoded daemon transport failure used for proxy reconnect; shapeToolCallError returns plain 'Error: ...' text",
+  ],
+  [
+    DaemonRequestNotDeliveredError,
+    "uncoded pre-dispatch transport failure used for safe proxy replay; shapeToolCallError returns plain 'Error: ...' text",
+  ],
+  [
+    DeviceControlTransportError,
+    "GAP: socketServer carries failure under transportFailure and proxyServer's deviceControlTransportFailureResult emits it under error; no fixture captures this class yet (#11351)",
+  ],
+  [
+    LoopbackMcpConnectionError,
+    "uncoded loopback fetch cause; socketServer normalizes it into DeviceControlTransportError before the wire",
+  ],
+  [
+    ToolUnavailableError,
+    "GAP: the MCP SDK carries data.code on the JSON-RPC error and mcpRequestFailureDetails lifts it to socket-frame code without retryable; no fixture captures this class yet (#11351)",
+  ],
+  [
+    PooledAvdIdentityError,
+    "uncoded pooled-identity failure; deviceToolsLifecycle maps it to target_identity_unresolved in a tool error response",
+  ],
+  [
+    ProvisionDeviceRollbackError,
+    "GAP: deviceToolsProvisioning emits the inherited code and retryable under error with provisionFailure and cleanup beside it; no fixture captures this class yet (#11351)",
   ],
   [
     RetryableDeviceAcquisitionError,

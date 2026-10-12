@@ -322,8 +322,8 @@
         "acquireNewSession": false,
         "retryAfterMs": 250,
         "details": {
-          "queueWaitMs": 750,
-          "remainingTimeoutMs": 250,
+          "queueWaitMs": 950,
+          "remainingTimeoutMs": 50,
           "reason": "insufficient_forward_budget"
         }
       }
@@ -341,6 +341,38 @@
       "fields": {
         "code": "viewer_read_only",
         "retryable": false,
+        "acquireNewSession": false
+      }
+    },
+    "socket-frame.discovery_incomplete.android": {
+      "expected": "wait",
+      "fields": {
+        "code": "discovery_incomplete",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "socket-frame.timeout.shutdown": {
+      "expected": "retry",
+      "fields": {
+        "code": "timeout",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "socket-frame.timeout.boot": {
+      "expected": "retry",
+      "fields": {
+        "code": "timeout",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "socket-frame.daemon_handoff_interrupted": {
+      "expected": "retry",
+      "fields": {
+        "code": "daemon_handoff_interrupted",
+        "retryable": true,
         "acquireNewSession": false
       }
     }

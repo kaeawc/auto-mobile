@@ -1,15 +1,5 @@
-import {
-  closeSync,
-  existsSync,
-  linkSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from "fs";
+import { createHash } from "node:crypto";
+import { nodeLockFileSystem, type LockFileSystem } from "./lockFileSystem";
 import { dirname } from "path";
 import { isProcessRunning as defaultIsProcessRunning } from "./processLiveness";
 import { errorMessage } from "./describeUnknownError";
@@ -31,7 +21,7 @@ export interface LockOwnerGenerationProbe {
 /**
  * The canonical cross-process file-lock primitive (issue #2794).
  *
- * A lock file created atomically via `O_CREAT | O_EXCL` (`wx`) holding the owner
+ * A fully written lock file published atomically via an exclusive hard link holding the owner
  * PID. Two racers can't both win — the atomic create decides — and a lock left
  * by a dead holder is reclaimed via PID liveness or a provably different OS
  * generation. Line 2 is the owner token, line 3 metadata, and line 4 the optional
@@ -43,13 +33,13 @@ export interface LockOwnerGenerationProbe {
  * `O_EXCL` + stale-reclaim logic.
  */
 
-// Generation is read BEFORE the `wx` create (#12001), so create + PID write is one
-// synchronous burst with no await (microseconds). Ten seconds covers scheduler stalls
-// or slow disks by orders of magnitude and stays below the 15 s admission-lock wait:
-// the first waiter heals an ownerless lock instead of timing out.
+// Legacy/corrupt ownerless files are reclaimable only after this grace period.
+// Atomic publication never exposes an empty lock; the fallback retains the old window.
 export const OWNERLESS_LOCK_RECLAIM_AGE_MS = 10_000;
 
 export interface ExclusiveLockOptions {
+  /** Optional synchronous filesystem seam; defaults to node fs. */
+  fileSystem?: LockFileSystem;
   /** Clock for ownerless-lock age checks (defaults to Date.now). */
   now?: () => number;
   /** Reclaim ownerless locks strictly older than this bound; defaults to 10 seconds. */
@@ -195,116 +185,112 @@ export function tryAcquireExclusiveLock(
   lockFilePath: string,
   options: ExclusiveLockOptions = {},
 ): boolean {
-  const pid = options.pid ?? process.pid;
-  const isProcessRunning = options.isProcessRunning ?? isProcessRunningWithDebug;
-  const reclaimOwnPid = options.reclaimOwnPid ?? false;
-  const ownerToken = options.ownerToken;
+  return finishLockSteps(acquireExclusiveLockSteps(lockFilePath, options));
+}
 
-  if (writeExclusiveLockFile(lockFilePath, pid, options)) {
+export interface LockStep {
+  op: keyof LockFileSystem;
+  path: string;
+}
+
+type Steps<T> = Generator<LockStep, T, void>;
+
+function finishLockSteps<T>(steps: Steps<T>): T {
+  let result = steps.next();
+  while (!result.done) {
+    result = steps.next();
+  }
+  return result.value;
+}
+
+/** Test scheduling seam: yields BEFORE every fs operation. Production must drive it synchronously. */
+export function* acquireExclusiveLockSteps(
+  lockFilePath: string,
+  options: ExclusiveLockOptions = {},
+): Steps<boolean> {
+  const pid = options.pid ?? process.pid;
+  if (yield* writeExclusiveLockFile(lockFilePath, pid, options)) {
     return true;
   }
-
-  const content = readContendedLockContent(lockFilePath);
-  if (content === undefined) {
+  const observed = yield* sampleLock(lockFilePath, options.fileSystem ?? nodeLockFileSystem);
+  if (!observed || !isReclaimable(observed, options)) {
     return false;
   }
-
-  // `parseLockContent` reads the PID on line 1, owner token on line 2, metadata
-  // on line 3, and OS generation token on line 4, keeping the positional contract
-  // in one place (#3006, #11812).
-  const observedOwner = parseLockContent(content);
-  const { pid: ownerPid, token: tokenLine, generation } = observedOwner;
-  if (Number.isNaN(ownerPid)) {
-    // A writer may still be filling it in; only an old, verified ownerless file is reclaimable.
-    return reclaimOwnerlessLock(lockFilePath, options);
-  }
-
-  const isOwnStaleLeak = isOwnStaleLock(ownerPid, tokenLine, pid, ownerToken, reclaimOwnPid);
-  if (
-    !isOwnStaleLeak &&
-    isProcessRunning(ownerPid) &&
-    compareLockOwnerGeneration(options.ownerGeneration, ownerPid, generation) !== "different"
-  ) {
-    return false;
-  }
-
-  return reclaimExclusiveLock(lockFilePath, options, observedOwner);
+  return yield* reclaimExclusiveLock(lockFilePath, options, observed);
 }
 
-function readContendedLockContent(lockFilePath: string): string | undefined {
-  let content: string;
-  try {
-    content = readFileSync(lockFilePath, "utf-8").trim();
-  } catch (error) {
-    // The lock file vanished between the failed `wx` create and this read (holder
-    // released it); treat as still-held so the caller retries rather than racing.
-    logger.debug(`src/utils/fileLock.ts fallback failed: ${error}`, error);
-    return undefined;
-  }
-
-  return content;
-}
-
-interface OwnerlessLockSample {
+interface LockSample {
   ino: number;
   mtimeMs: number;
   raw: string;
 }
 
-function sampleOldOwnerlessLock(
-  path: string,
-  options: ExclusiveLockOptions,
-): OwnerlessLockSample | undefined {
+function* sampleLock(path: string, fileSystem: LockFileSystem): Steps<LockSample | undefined> {
   try {
-    const { ino, mtimeMs } = statSync(path);
-    const raw = readFileSync(path, "utf-8");
-    const age = (options.now ?? Date.now)() - mtimeMs;
-    if (
-      age < 0 ||
-      !(age > (options.ownerlessReclaimAgeMs ?? OWNERLESS_LOCK_RECLAIM_AGE_MS)) ||
-      !Number.isNaN(parseLockContent(raw.trim()).pid)
-    ) {
-      return undefined;
-    }
+    yield { op: "stat", path };
+    const { ino, mtimeMs } = fileSystem.stat(path);
+    yield { op: "readText", path };
+    const raw = fileSystem.readText(path);
     return { ino, mtimeMs, raw };
   } catch (error) {
-    // Sampling races or unreadable files cannot prove ownership; back off without stealing.
-    logger.debug(`Ownerless lock sample failed at ${path}: ${errorMessage(error)}`, error);
+    // Missing/unreadable samples cannot prove staleness; backing off retains ownership.
+    logger.debug(`Lock sample failed at ${path}: ${errorMessage(error)}`, error);
     return undefined;
   }
 }
 
-function reclaimOwnerlessLock(lockFilePath: string, options: ExclusiveLockOptions): boolean {
-  const observed = sampleOldOwnerlessLock(lockFilePath, options);
-  if (!observed) {
-    return false;
+function isReclaimable(observed: LockSample, options: ExclusiveLockOptions): boolean {
+  const owner = parseLockContent(observed.raw.trim());
+  if (Number.isNaN(owner.pid)) {
+    const age = (options.now ?? Date.now)() - observed.mtimeMs;
+    return age >= 0 && age > (options.ownerlessReclaimAgeMs ?? OWNERLESS_LOCK_RECLAIM_AGE_MS);
   }
-  const pid = options.pid ?? process.pid;
-  const reclaimMarker = `${lockFilePath}.${pid}.reclaim`;
-  if (!claimLockMarker(lockFilePath, reclaimMarker)) {
-    return false;
-  }
-  const claimed = sampleOldOwnerlessLock(reclaimMarker, options);
-  if (
-    !claimed ||
-    claimed.ino !== observed.ino ||
-    claimed.mtimeMs !== observed.mtimeMs ||
-    claimed.raw !== observed.raw
-  ) {
-    restoreDisplacedLock(lockFilePath, reclaimMarker);
-    return false;
-  }
-  removeStaleLockMarker(reclaimMarker);
-  return writeExclusiveLockFile(lockFilePath, pid, options);
+  return (
+    isOwnStaleLock(
+      owner.pid,
+      owner.token,
+      options.pid ?? process.pid,
+      options.ownerToken,
+      options.reclaimOwnPid ?? false,
+    ) ||
+    !(options.isProcessRunning ?? isProcessRunningWithDebug)(owner.pid) ||
+    compareLockOwnerGeneration(options.ownerGeneration, owner.pid, owner.generation) === "different"
+  );
 }
 
-function claimLockMarker(lockFilePath: string, reclaimMarker: string): boolean {
+function sameSample(left: LockSample | undefined, right: LockSample): boolean {
+  return left?.ino === right.ino && left.mtimeMs === right.mtimeMs && left.raw === right.raw;
+}
+
+function guardPrefix(path: string, sample: LockSample): string {
+  const hash = createHash("sha256").update(sample.raw).digest("hex").slice(0, 32);
+  // Numeric/hash suffixes never end in .lock/.pid/.sock/.json/.forward; directory scans ignore them.
+  return `${path}.reclaim.${sample.ino}.${sample.mtimeMs}.${hash}`;
+}
+
+function* readText(path: string, fileSystem: LockFileSystem): Steps<string | undefined> {
   try {
-    renameSync(lockFilePath, reclaimMarker);
+    yield { op: "readText", path };
+    return fileSystem.readText(path);
+  } catch (error) {
+    // A vanished/unreadable file proves no ownership; callers conservatively back off.
+    logger.debug(`Lock read failed at ${path}: ${errorMessage(error)}`, error);
+    return undefined;
+  }
+}
+
+function* claimLockMarker(
+  path: string,
+  marker: string,
+  fileSystem: LockFileSystem,
+): Steps<boolean> {
+  try {
+    yield { op: "rename", path };
+    fileSystem.rename(path, marker);
     return true;
   } catch (error) {
-    // A racing opener may already have claimed the file; losing the race means retrying.
-    logger.debug(`src/utils/fileLock.ts fallback failed: ${error}`, error);
+    // A concurrent release may have removed the instance; a failed claim means retrying.
+    logger.debug(`Lock rename failed at ${path}: ${errorMessage(error)}`, error);
     return false;
   }
 }
@@ -328,76 +314,135 @@ function isOwnStaleLock(
   );
 }
 
-function reclaimExclusiveLock(
+function* claimReclaimGuard(
+  prefix: string,
+  options: ExclusiveLockOptions,
+): Steps<number | undefined> {
+  const fileSystem = options.fileSystem ?? nodeLockFileSystem;
+  const pid = options.pid ?? process.pid;
+  const content = formatLockContent(
+    pid,
+    options.ownerToken,
+    undefined,
+    captureLockOwnerGeneration(options.ownerGeneration, pid),
+  );
+  for (let k = 0; k < 16; k++) {
+    const path = `${prefix}.${k}`;
+    const published = yield* publishFile(path, content, pid, fileSystem);
+    if (published === "created") {
+      return k;
+    }
+    if (published === "unsupported") {
+      return undefined; // No unguarded fallback, even on filesystems without hard links.
+    }
+    const raw = yield* readText(path, fileSystem);
+    if (raw === undefined || isGuardLive(raw, options)) {
+      return undefined;
+    }
+  }
+  logger.warn(`Reclaim guard chain exhausted at ${prefix}`);
+  return undefined;
+}
+
+function isGuardLive(raw: string, options: ExclusiveLockOptions): boolean {
+  const owner = parseLockContent(raw.trim());
+  if (Number.isNaN(owner.pid)) {
+    return true;
+  }
+  // A guard owned by this process is live unless generation evidence disproves it.
+  return (
+    (owner.pid === (options.pid ?? process.pid) ||
+      (options.isProcessRunning ?? isProcessRunningWithDebug)(owner.pid)) &&
+    compareLockOwnerGeneration(options.ownerGeneration, owner.pid, owner.generation) !== "different"
+  );
+}
+
+function* reclaimExclusiveLock(
   lockFilePath: string,
   options: ExclusiveLockOptions,
-  observedOwner: LockContent,
-): boolean {
+  observed: LockSample,
+): Steps<boolean> {
+  const fileSystem = options.fileSystem ?? nodeLockFileSystem;
   const pid = options.pid ?? process.pid;
-  // Dead holder (or our own recycled PID under reclaimOwnPid) — reclaim it.
-  //
-  // Do NOT unlink-by-path here: two openers can both read the same stale PID, and
-  // an unlink-by-path would let each delete the OTHER's freshly recreated lock and
-  // then both `wx`-create — so both would "own" it and enter migrateToLatest()
-  // concurrently, reintroducing the PRIMARY KEY collision this lock prevents.
-  //
-  // Rename the path to a per-PID marker, then re-read the marker's PID, token, and generation.
-  // A competing opener may have replaced the stale path before our rename, so the
-  // rename alone does not prove that we claimed the instance we judged stale.
-  // The final `wx` create still arbitrates with a third opener after reclaim.
-  const reclaimMarker = `${lockFilePath}.${pid}.reclaim`;
-  if (!claimLockMarker(lockFilePath, reclaimMarker)) {
+  const prefix = guardPrefix(lockFilePath, observed);
+  const k = yield* claimReclaimGuard(prefix, options);
+  if (k === undefined) {
     return false;
   }
-  let claimedContent: string | undefined;
   try {
-    claimedContent = readFileSync(reclaimMarker, "utf-8").trim();
-  } catch (error) {
-    logger.warn(`src/utils/fileLock.ts: reclaimed marker unreadable at ${reclaimMarker}: ${error}`);
+    // The guard excludes other removers of THIS instance; an outdated sample never renames a winner.
+    if (!sameSample(yield* sampleLock(lockFilePath, fileSystem), observed)) {
+      return false;
+    }
+    const marker = `${lockFilePath}.${pid}.reclaim`;
+    if (!(yield* claimLockMarker(lockFilePath, marker, fileSystem))) {
+      return false;
+    }
+    if (!sameSample(yield* sampleLock(marker, fileSystem), observed)) {
+      // R1: legacy/fallback writers stalled beyond the ownerless age can still write
+      // through an old fd. Restore without clobbering; atomic publishers exclude this actor.
+      yield* restoreDisplacedLock(lockFilePath, marker, fileSystem);
+      return false;
+    }
+    yield* removeStaleLockMarker(marker, fileSystem);
+    for (let lower = 0; lower < k; lower++) {
+      // Once removed, this fingerprint cannot pass the path check again.
+      yield* cleanupFile(`${prefix}.${lower}`, fileSystem);
+    }
+    return yield* writeExclusiveLockFile(lockFilePath, pid, options);
+  } finally {
+    yield* cleanupFile(`${prefix}.${k}`, fileSystem);
   }
-  const claimedOwner = claimedContent === undefined ? undefined : parseLockContent(claimedContent);
-  if (
-    claimedOwner?.pid !== observedOwner.pid ||
-    claimedOwner?.token !== observedOwner.token ||
-    claimedOwner?.generation !== observedOwner.generation
-  ) {
-    restoreDisplacedLock(lockFilePath, reclaimMarker);
-    return false;
-  }
-  removeStaleLockMarker(reclaimMarker);
-  return writeExclusiveLockFile(lockFilePath, pid, options);
 }
 
-function restoreDisplacedLock(lockFilePath: string, reclaimMarker: string): void {
-  // Hard-linking restores the displaced lock only if the destination is free;
-  // unlike rename-over-existing, it cannot clobber a third opener's fresh lock.
+function* restoreDisplacedLock(
+  path: string,
+  marker: string,
+  fileSystem: LockFileSystem,
+): Steps<void> {
+  // An exclusive hard link restores only into a free path, never over a fresh owner.
   try {
-    linkSync(reclaimMarker, lockFilePath);
+    yield { op: "link", path };
+    fileSystem.link(marker, path);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST" && !existsSync(lockFilePath)) {
-      throw toActionableError(error, `Failed to restore displaced lock at ${lockFilePath}`);
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      yield { op: "exists", path };
+      if (!fileSystem.exists(path)) {
+        throw toActionableError(error, `Failed to restore displaced lock at ${path}`);
+      }
     }
-    // EEXIST proves occupation even if the path disappears; other occupied-path errors (Windows EPERM) also back off.
+    // EEXIST proves occupation even if the destination subsequently disappears.
     logger.debug(
-      `src/utils/fileLock.ts: restore destination occupied at ${lockFilePath}: ${error}`,
+      `src/utils/fileLock.ts: restore destination occupied at ${path}: ${errorMessage(error)}`,
     );
   }
+  yield* cleanupFile(marker, fileSystem);
+}
+
+function* cleanupFile(path: string, fileSystem: LockFileSystem): Steps<void> {
   try {
-    unlinkSync(reclaimMarker);
+    yield { op: "unlink", path };
+    fileSystem.unlink(path);
   } catch (error) {
-    logger.warn(`src/utils/fileLock.ts: reclaim marker cleanup failed: ${error}`);
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      // Missing tmp/guard/marker is already clean.
+      logger.debug(`Lock cleanup already complete at ${path}: ${errorMessage(error)}`);
+    } else {
+      logger.warn(`Lock cleanup failed at ${path}: ${errorMessage(error)}`, error);
+    }
   }
 }
 
-function removeStaleLockMarker(reclaimMarker: string): void {
+function* removeStaleLockMarker(path: string, fileSystem: LockFileSystem): Steps<void> {
   try {
-    unlinkSync(reclaimMarker);
+    yield { op: "unlink", path };
+    fileSystem.unlink(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw toActionableError(error, `Failed to remove stale lock marker at ${reclaimMarker}`);
+      throw toActionableError(error, `Failed to remove stale lock marker at ${path}`);
     }
-    // Concurrent cleanup already removed the stale marker; final `wx` still arbitrates.
-    logger.debug(`src/utils/fileLock.ts: stale marker cleanup failed: ${error}`);
+    // Another cleanup already removed this stale instance; exclusive publication still arbitrates.
+    logger.debug(`Stale marker already removed at ${path}: ${errorMessage(error)}`);
   }
 }
 
@@ -413,10 +458,11 @@ export function readLockOwnerPid(
   lockFilePath: string,
   isProcessRunning: (pid: number) => boolean = isProcessRunningWithDebug,
   ownerGeneration?: LockOwnerGenerationProbe,
+  fileSystem: LockFileSystem = nodeLockFileSystem,
 ): number | undefined {
   let content: string;
   try {
-    content = readFileSync(lockFilePath, "utf-8").trim();
+    content = fileSystem.readText(lockFilePath).trim();
   } catch (error) {
     logger.debug(`src/utils/fileLock.ts readLockOwnerPid: lock unreadable: ${error}`, error);
     return undefined;
@@ -439,8 +485,11 @@ export function readLockOwnerPid(
  * Read and parse an exclusive lock file without acquiring or reclaiming it.
  * Returns `undefined` when the file is missing, unreadable, or empty.
  */
-export function readExclusiveLockContent(lockFilePath: string): LockContent | undefined {
-  const content = readContendedLockContent(lockFilePath);
+export function readExclusiveLockContent(
+  lockFilePath: string,
+  fileSystem: LockFileSystem = nodeLockFileSystem,
+): LockContent | undefined {
+  const content = finishLockSteps(readText(lockFilePath, fileSystem))?.trim();
   if (content === undefined || content.length === 0) {
     return undefined;
   }
@@ -451,20 +500,35 @@ export function readExclusiveLockContent(lockFilePath: string): LockContent | un
  * Take over a lock held by a LIVE owner the caller has judged stale by some
  * out-of-band evidence (issue #10497: the owner reported no live session, or
  * its control socket is unreachable). The takeover only succeeds when the lock
- * still holds exactly the observed owner's PID and token, using the same
- * rename-then-verify claim as dead-owner reclaim, so a concurrent fresh owner
- * is never displaced. Returns true when the lock is now held by `options.pid`.
+ * still holds exactly the observed owner's PID and token. Removal is guarded by
+ * the sampled file identity just like dead-owner reclaim. R2: a live owner's own
+ * release racing takeover retains the residual window documented in release.
  */
 export function takeOverExclusiveLock(
   lockFilePath: string,
   observedOwner: Pick<LockContent, "pid" | "token">,
-  options: Pick<ExclusiveLockOptions, "pid" | "ownerToken" | "metadata" | "ownerGeneration"> = {},
+  options: Pick<
+    ExclusiveLockOptions,
+    "pid" | "ownerToken" | "metadata" | "ownerGeneration" | "fileSystem" | "isProcessRunning"
+  > = {},
 ): boolean {
-  const current = readExclusiveLockContent(lockFilePath);
-  if (current?.pid !== observedOwner.pid || current.token !== observedOwner.token) {
+  return finishLockSteps(takeOverLockSteps(lockFilePath, observedOwner, options));
+}
+
+function* takeOverLockSteps(
+  path: string,
+  owner: Pick<LockContent, "pid" | "token">,
+  options: ExclusiveLockOptions,
+): Steps<boolean> {
+  const sample = yield* sampleLock(path, options.fileSystem ?? nodeLockFileSystem);
+  if (!sample) {
     return false;
   }
-  return reclaimExclusiveLock(lockFilePath, options, current);
+  const current = parseLockContent(sample.raw.trim());
+  if (current.pid !== owner.pid || current.token !== owner.token) {
+    return false;
+  }
+  return yield* reclaimExclusiveLock(path, options, sample);
 }
 
 /**
@@ -486,10 +550,22 @@ export function releaseExclusiveLock(
   lockFilePath: string,
   pid: number = process.pid,
   ownerToken?: string,
+  fileSystem: LockFileSystem = nodeLockFileSystem,
 ): void {
+  finishLockSteps(releaseExclusiveLockSteps(lockFilePath, pid, ownerToken, fileSystem));
+}
+
+/** Test scheduling seam: yields BEFORE every fs operation. Production must drive it synchronously. */
+export function* releaseExclusiveLockSteps(
+  lockFilePath: string,
+  pid: number = process.pid,
+  ownerToken?: string,
+  fileSystem: LockFileSystem = nodeLockFileSystem,
+): Steps<void> {
   let content: string;
   try {
-    content = readFileSync(lockFilePath, "utf-8").trim();
+    yield { op: "readText", path: lockFilePath };
+    content = fileSystem.readText(lockFilePath).trim();
   } catch (error) {
     // Lock file is already gone (released concurrently, or never existed); there is
     // nothing left to release, so returning is a no-op, not a failure.
@@ -509,13 +585,14 @@ export function releaseExclusiveLock(
   // only then delete it; a displaced foreign lock is restored instead.
   // POSIX has no compare-and-unlink, so a residual window remains: a releaser
   // whose read predates a completed takeover can rename the taker's lock away
-  // and a third `wx` acquirer can win before the restore. Forwarding-lease
+  // and a third fresh acquirer can win before the restore. Forwarding-lease
   // owners that answer their socket therefore release on request instead of
   // being taken over (#10506 review); only an unreachable or orphaned owner is
   // taken over while live.
   const releaseMarker = `${lockFilePath}.${pid}.release.${++releaseMarkerCounter}`;
   try {
-    renameSync(lockFilePath, releaseMarker);
+    yield { op: "rename", path: lockFilePath };
+    fileSystem.rename(lockFilePath, releaseMarker);
   } catch (error) {
     // Already gone (released or taken over and removed); nothing of ours remains.
     logger.debug(`src/utils/fileLock.ts: release rename found no lock: ${error}`);
@@ -523,16 +600,18 @@ export function releaseExclusiveLock(
   }
   let claimed: LockContent | undefined;
   try {
-    claimed = parseLockContent(readFileSync(releaseMarker, "utf-8").trim());
+    yield { op: "readText", path: releaseMarker };
+    claimed = parseLockContent(fileSystem.readText(releaseMarker).trim());
   } catch (error) {
     logger.warn(`src/utils/fileLock.ts: release marker unreadable at ${releaseMarker}: ${error}`);
   }
   if (claimed === undefined || !isOwnLockContent(claimed, pid, ownerToken)) {
-    restoreDisplacedLock(lockFilePath, releaseMarker);
+    yield* restoreDisplacedLock(lockFilePath, releaseMarker, fileSystem);
     return;
   }
   try {
-    unlinkSync(releaseMarker);
+    yield { op: "unlink", path: releaseMarker };
+    fileSystem.unlink(releaseMarker);
   } catch (error) {
     logger.warn(
       `src/utils/fileLock.ts: failed to release exclusive lock at ${lockFilePath}: ${errorMessage(error)}`,
@@ -540,7 +619,8 @@ export function releaseExclusiveLock(
     // The lock could not be deleted, so put it back rather than strand it under
     // the marker name; linking never clobbers a lock someone took meanwhile.
     try {
-      linkSync(releaseMarker, lockFilePath);
+      yield { op: "link", path: lockFilePath };
+      fileSystem.link(releaseMarker, lockFilePath);
     } catch (restoreError) {
       logger.warn(`src/utils/fileLock.ts: could not restore unreleased lock: ${restoreError}`);
     }
@@ -563,38 +643,84 @@ function isOwnLockContent(
   return ownerToken === undefined || content.token === undefined || content.token === ownerToken;
 }
 
-/**
- * Atomically create the lock file with `pid` via `O_CREAT | O_EXCL` (`wx`).
- * Returns true on success, false if the file already exists. When `ownerToken` is
- * given it is written on a second line below the PID so a same-PID reader can tell
- * this process instance's live lock from a recycled-PID leak (#2947); the PID
- * stays on the first line so `parseInt`-based readers are unaffected.
- */
-function writeExclusiveLockFile(
-  lockFilePath: string,
+type Publication = "created" | "contended" | "unsupported";
+let publicationCounter = 0;
+
+/** One publication protocol for locks and guards: complete private bytes, then exclusive link. */
+function* publishFile(
+  path: string,
+  content: string,
   pid: number,
-  options: ExclusiveLockOptions,
-): boolean {
+  fileSystem: LockFileSystem,
+): Steps<Publication> {
+  const tmp = `${path}.${pid}.${++publicationCounter}.tmp`;
   try {
-    mkdirSync(dirname(lockFilePath), { recursive: true });
-    const generation = captureLockOwnerGeneration(options.ownerGeneration, pid);
-    const fd = openSync(lockFilePath, "wx", 0o600);
-    writeFileSync(fd, formatLockContent(pid, options.ownerToken, options.metadata, generation));
-    closeSync(fd);
-    return true;
+    yield { op: "writeFile", path: tmp };
+    fileSystem.writeFile(tmp, content);
+    yield { op: "link", path };
+    fileSystem.link(tmp, path);
+    return "created";
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-      // Expected contention: `wx` create fails when the lock file already exists
-      // (another holder got there first). false tells the caller to fall through to
-      // the read/reclaim path.
-      logger.debug(`src/utils/fileLock.ts: lock already held at ${lockFilePath}: ${error}`);
-      return false;
+      // Exclusive link/create contention is expected and never overwrites an owner.
+      logger.debug(`Lock publication contended at ${path}: ${errorMessage(error)}`);
+      return "contended";
     }
-    // A genuine IO error (EACCES/ENOSPC/EROFS/ENOTDIR/…) is NOT lock contention.
-    // Returning false would disguise a permissions/disk failure as "another process
-    // holds the lock" and let the caller busy-wait to a misleading migration-lock
-    // timeout. Surface the real cause instead (#3623).
-    throw toActionableError(error, `Failed to create exclusive lock file at ${lockFilePath}`);
+    logger.warn(`Atomic lock publication failed at ${path}: ${errorMessage(error)}`, error);
+    return "unsupported";
+  } finally {
+    yield* cleanupFile(tmp, fileSystem);
+  }
+}
+
+function* writeExclusiveLockFile(
+  path: string,
+  pid: number,
+  options: ExclusiveLockOptions,
+): Steps<boolean> {
+  const fileSystem = options.fileSystem ?? nodeLockFileSystem;
+  try {
+    yield { op: "mkdir", path: dirname(path) };
+    fileSystem.mkdir(dirname(path));
+    const generation = captureLockOwnerGeneration(options.ownerGeneration, pid);
+    const content = formatLockContent(pid, options.ownerToken, options.metadata, generation);
+    const publication = yield* publishFile(path, content, pid, fileSystem);
+    if (publication !== "unsupported") {
+      return publication === "created";
+    }
+    return yield* writeLegacyLock(path, content, fileSystem);
+  } catch (error) {
+    // Genuine IO failures are not contention (#3623).
+    throw toActionableError(error, `Failed to create exclusive lock file at ${path}`);
+  }
+}
+
+function* writeLegacyLock(
+  path: string,
+  content: string,
+  fileSystem: LockFileSystem,
+): Steps<boolean> {
+  // R1: without hard links (or during upgrades), a wx creator stalled beyond the
+  // ownerless grace age may be displaced. This legacy actor is outside the atomic invariant.
+  let fd: number;
+  try {
+    yield { op: "openExclusive", path };
+    fd = fileSystem.openExclusive(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      throw toActionableError(error, `Failed to create exclusive lock file at ${path}`);
+    }
+    // Expected legacy contention; the existing lock remains untouched.
+    logger.debug(`Legacy lock already held at ${path}: ${errorMessage(error)}`);
+    return false;
+  }
+  try {
+    yield { op: "write", path };
+    fileSystem.write(fd, content);
+    return true;
+  } finally {
+    yield { op: "close", path };
+    fileSystem.close(fd);
   }
 }
 

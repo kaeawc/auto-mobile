@@ -34,8 +34,12 @@ import { FakeTimer } from "../fakes/FakeTimer";
 //                 window belongs to a HANDOFF, never to a connection. A handoff is identified by
 //                 the recoverable release reason the daemon names, or, for an answer with no
 //                 reason that is the session's first on a just-established connection, by the one
-//                 identity "unrehydrated" (a not-found answer names no daemon instance, so every
-//                 such answer is the same handoff until the daemon acknowledges the session).
+//                 identity "unrehydrated", also when an answer reports a different daemon
+//                 instance. Distinct instances never create distinct handoff identities.
+//   answeredBy    the last reported daemon instance for THIS session, ack or not-found.
+//                 Missing and same-instance reports leave connection inference unchanged.
+//                 Stopped/dropped sessions retain this and their handoffs until ack, admitted
+//                 use, termination or close.
 //   ended         the reason it ended for good, once the proxy was told (never leaves this state).
 //
 // EVENTS and what each does to the session it is about:
@@ -294,6 +298,7 @@ interface SessionModel {
   /** The reason the daemon gives once the session is gone for good. */
   endedAs: string;
   heartbeats: number;
+  lastClaim?: boolean;
   /**
    * When the session's not-found window opened: with a recoverable reason (#11461), or with any
    * answer that does not end it on a connection the proxy had just made while holding it
@@ -303,6 +308,7 @@ interface SessionModel {
   windowSince?: number;
   /** The handoffs it has had a window for since the daemon last acknowledged it. */
   handoffs: Set<string>;
+  answeredBy?: string;
   /** I6: not-found answers that did not end it since the daemon last acknowledged it ... */
   unacknowledged: number;
   /** ... the handoffs the daemon actually told the proxy of in them ... */
@@ -402,6 +408,9 @@ class World {
   private reachable = true;
   private commandsApplied = 0;
   private nextSession = 0;
+  private daemonInstance = 1;
+  private successorOnReset = false;
+  private nextBinding: string | undefined;
   private client = this.newClient();
   readonly proxy: DaemonMcpProxy;
 
@@ -426,6 +435,7 @@ class World {
   }
 
   private newClient(): FakeDaemonClient {
+    const instance = `daemon-${this.daemonInstance}`;
     const created = new FakeDaemonClient({
       onCallDaemonMethod: (method, params) => {
         if (method !== "daemon/heartbeat" || typeof params.sessionId !== "string") {
@@ -435,12 +445,11 @@ class World {
         const askedDuring = this.commandsApplied;
         this.heartbeatsAsked += 1;
         if (this.timer.now() >= this.pausedUntil) {
-          this.answerHeartbeat(sessionUuid, askedDuring);
-          return undefined;
+          return this.answerHeartbeat(sessionUuid, askedDuring, params, instance);
         }
         return this.timer
           .sleep(this.pausedUntil - this.timer.now())
-          .then(() => this.answerHeartbeat(sessionUuid, askedDuring));
+          .then(() => this.answerHeartbeat(sessionUuid, askedDuring, params, instance));
       },
       onCallTool: (name, params) => {
         if (params.text === SESSIONLESS_TEXT) {
@@ -488,6 +497,17 @@ class World {
         this.ownResets += this.handoffAnnounced ? 0 : 1;
         this.handoffAnnounced = false;
         this.ownReset = this.askAgain ?? "other";
+        if (this.successorOnReset) {
+          this.successorOnReset = false;
+          this.daemonInstance += 1;
+          this.client = this.newClient();
+          for (const session of this.sessions.values()) {
+            if (session.daemon === "live") {
+              session.daemon = "unknown";
+            }
+          }
+          this.mustBeat.clear();
+        }
       }
       await close();
     };
@@ -517,6 +537,15 @@ class World {
   }
 
   private mintSession(): { content: Array<{ type: string; text: string }> } {
+    if (this.nextBinding !== undefined) {
+      const sessionUuid = this.nextBinding;
+      this.nextBinding = undefined;
+      return {
+        content: [
+          { type: "text", text: JSON.stringify({ runtime: { session: { sessionUuid } } }) },
+        ],
+      };
+    }
     const sessionUuid = `session-${this.nextSession}`;
     this.nextSession += 1;
     this.sessions.set(sessionUuid, {
@@ -550,13 +579,27 @@ class World {
     };
   }
 
-  private answerHeartbeat(sessionUuid: string, askedDuring: number): void {
+  private answerHeartbeat(
+    sessionUuid: string,
+    askedDuring: number,
+    params: Record<string, unknown>,
+    instance: string,
+  ): unknown {
     const session = this.sessions.get(sessionUuid);
     if (!session) {
       this.violations.push(`heartbeat for ${sessionUuid}, which the daemon never minted`);
       return;
     }
     session.heartbeats += 1;
+    const report = params.reportDaemonInstance === true ? { daemonInstance: instance } : {};
+    const otherDaemon =
+      report.daemonInstance !== undefined &&
+      session.answeredBy !== undefined &&
+      session.answeredBy !== instance;
+    if (report.daemonInstance !== undefined) {
+      session.answeredBy = instance;
+    }
+    session.lastClaim = params.claimLivenessOwnership === true;
     const first = !this.answeredOnConnection.has(sessionUuid);
     this.answeredOnConnection.add(sessionUuid);
     const reestablishes = this.reestablishing.delete(sessionUuid);
@@ -568,7 +611,7 @@ class World {
     if (session.daemon === "live") {
       // An acknowledgement ends the window: the daemon knows the session.
       this.acknowledged(session);
-      return;
+      return report;
     }
     if (session.daemon === "terminal") {
       // I4. A heartbeat asked before the proxy learned of it may be answered later.
@@ -579,13 +622,19 @@ class World {
     }
     if (session.daemon !== "terminal") {
       this.countUnacknowledged(sessionUuid, session, first);
-      session.told = !this.awaitedAfterNotFound(sessionUuid, session, reestablishes, first);
+      session.told = !this.awaitedAfterNotFound(
+        sessionUuid,
+        session,
+        reestablishes || otherDaemon,
+        first,
+      );
       if (session.told) {
         this.held.delete(sessionUuid);
       }
     }
     throw Object.assign(new Error(`Session not found: ${sessionUuid}`), {
       code: DAEMON_SESSION_NOT_FOUND_CODE,
+      ...report,
       ...(session.daemon === "terminal" ? { releaseReason: session.endedAs } : {}),
       ...(session.daemon === "recoverable" ? { releaseReason: RECOVERABLE_REASON } : {}),
     });
@@ -979,6 +1028,22 @@ class World {
     return siblings.length === 0 ? undefined : siblings[index % siblings.length];
   }
 
+  /** Gap 4: A answered before; B replaces it only when the proxy re-asks. */
+  succeedOnReask(): void {
+    this.successorOnReset = true;
+  }
+
+  /** A binding result names an existing session, without an admitted call or an ack. */
+  async rebind(sessionUuid: string): Promise<void> {
+    this.nextBinding = sessionUuid;
+    await this.whileTimePasses(this.proxy.callTool("getAndroid", {}));
+    this.latest = sessionUuid;
+    this.latestCertain = true;
+    this.fenced = undefined;
+    this.held.add(sessionUuid);
+    this.reholdPreviousBinding();
+  }
+
   async restartDaemon(gapMs: number): Promise<void> {
     for (const session of this.sessions.values()) {
       if (session.daemon === "live") {
@@ -992,6 +1057,7 @@ class World {
       session.excused += 3;
     }
     const previous = this.client;
+    this.daemonInstance += 1;
     this.client = this.newClient();
     this.reachable = gapMs === 0;
     previous.emitConnectionClosed();
@@ -2103,6 +2169,85 @@ const REGRESSIONS: ReadonlyArray<readonly [string, readonly Command[]]> = [
     ],
   ],
 ];
+
+describe("not-found peer and retained handoff regressions", () => {
+  const cases = [
+    "successor re-ask keeps latest and held claiming",
+    "same daemon re-ask stops without a window",
+    "dropped held session keeps its handoff",
+    "ack clears a dropped held session handoff",
+    "admitted call clears a dropped held session handoff",
+  ] as const;
+  const results = new Map<string, string[]>();
+  beforeAll(async () => {
+    for (const name of cases) {
+      const world = new World();
+      try {
+        await world.acquire("lives");
+        await world.acquire("lives");
+        await world.tick();
+        const held = world.sessionAt(0)!;
+        const latest = world.sessionAt(1)!;
+        if (name.includes("re-ask")) {
+          if (name.startsWith("successor")) {
+            world.succeedOnReask();
+          }
+          world.release(latest, "unknown", false);
+          await world.tick();
+          await world.tick();
+          const expectedWindow = name.startsWith("successor");
+          for (const id of expectedWindow ? [latest, held] : [latest]) {
+            const session = world.sessions.get(id)!;
+            if (
+              (session.windowSince !== undefined) !== expectedWindow ||
+              session.told === expectedWindow
+            ) {
+              world.violations.push(
+                `${id}: expected ${expectedWindow ? "one window" : "stopped without a window"}`,
+              );
+            }
+          }
+          await world.tick();
+          if (expectedWindow) {
+            for (const id of [latest, held]) {
+              if (!world.sessions.get(id)!.lastClaim) {
+                world.violations.push(`in-window session ${id} was heartbeated without claiming`);
+              }
+            }
+          }
+        } else {
+          world.release(held, "recoverable", false);
+          await world.tick();
+          await world.apply({ kind: "ticks", count: WINDOW_TICKS + 2 });
+          await world.rebind(held);
+          await world.rebind(latest);
+          await world.tick();
+          await world.tick();
+          if (name.startsWith("ack")) {
+            await world.call(held, true); // admitted, rejected: no echo; the next heartbeat acknowledges
+            await world.tick();
+          } else if (name.startsWith("admitted")) {
+            await world.call(held, false);
+          }
+          if (!name.startsWith("dropped")) {
+            world.release(held, "recoverable", false);
+            await world.tick();
+            await world.tick();
+            if (world.sessions.get(held)!.told) {
+              world.violations.push("cleared handoff did not earn a new window");
+            }
+          }
+        }
+      } finally {
+        await world.close();
+      }
+      results.set(name, world.violations);
+    }
+  });
+  test.each(cases)("%s", (name) => {
+    expect(results.get(name)).toEqual([]);
+  });
+});
 
 describe("proxy heartbeat state machine (property-based)", () => {
   test.each(REGRESSIONS)("%s", async (_name, history) => {

@@ -264,6 +264,8 @@ export type DaemonMethodResult = {
   error?: string;
   /** With a session-not-found `code`: why a session the daemon knows is released was released. */
   releaseReason?: string;
+  /** With a session-not-found heartbeat answer that asked for it: this daemon process instance. */
+  daemonInstance?: string;
   /** With `releaseReason`: an idle-window release (#10832). */
   idle?: true;
   /** With a typed refusal `code`: whether retrying the same request can succeed. */
@@ -750,6 +752,7 @@ export function isTokenOwnedOrClaimPending(session: {
 async function sessionNotFoundResult(
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
   sessionId: string,
+  daemonInstance?: string,
 ): Promise<DaemonMethodResult> {
   const releaseReason = await lookupReleasedSessionReason(manager, sessionId);
   return {
@@ -757,6 +760,7 @@ async function sessionNotFoundResult(
     error: `Session not found: ${sessionId}`,
     code: DAEMON_SESSION_NOT_FOUND_CODE,
     ...releasedSessionNotFoundFields(releaseReason),
+    ...(daemonInstance !== undefined ? { daemonInstance } : {}),
   };
 }
 
@@ -822,7 +826,7 @@ async function handleHeartbeat(
     ) {
       return { success: true, result: { sessionId } };
     }
-    return sessionNotFoundResult(manager, sessionId);
+    return sessionNotFoundResult(manager, sessionId, ackReport.daemonInstance);
   }
   const keeperRefusal = refuseCliKeeperOnProxySession(heartbeatParams?.livenessOwnerKind, session);
   if (keeperRefusal) {
@@ -869,7 +873,7 @@ async function handleHeartbeat(
     if (rejection?.code === DAEMON_SESSION_NOT_FOUND_CODE) {
       // The release that ended the session while the claim was resolving is named like on every
       // other not-found answer (#11646); the lookup changes nothing and nothing is recorded after.
-      return sessionNotFoundResult(manager, sessionId);
+      return sessionNotFoundResult(manager, sessionId, ackReport.daemonInstance);
     }
     if (rejection) {
       // A concurrent `--cli` call can move the session onto the cli-idle policy (claiming it

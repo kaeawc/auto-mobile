@@ -52,6 +52,7 @@ import {
   DAEMON_INSTANCE_CHANGED_CODE,
   DAEMON_SESSION_NOT_FOUND_CODE,
   releaseReasonFromError,
+  daemonInstanceFromError,
   DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
   DAEMON_TOOL_UNAVAILABLE_CODE,
   isGatedToolErrorCode,
@@ -541,6 +542,8 @@ export interface NotFoundAnswerFacts {
    * it: the daemon behind it may have restarted and not rehydrated the session yet.
    */
   establishes: boolean;
+  /** Positive evidence: this session last heard a different reported daemon process instance. */
+  answeredByOtherDaemon: boolean;
   /** When the session's latest window opened, while it has had one (open or expired). */
   windowSince: number | undefined;
   /**
@@ -570,8 +573,8 @@ function isRecoverableHandoffOfOwnedSession(
  *
  * A window belongs to a HANDOFF, never to a connection. A handoff is identified by the
  * recoverable release reason the daemon names (#11461), or, for an answer with no reason that is
- * the session's first on a just-established connection, by {@link UNREHYDRATED_HANDOFF} (#11529,
- * #11557). The first answer of a handoff opens one window of
+ * the session's first on a just-established connection or reports another daemon instance, by
+ * {@link UNREHYDRATED_HANDOFF} (#11529, #11557). The first answer of a handoff opens one window of
  * {@link RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS}; no later answer of the same handoff opens or
  * extends one, whatever connection it arrives on (a reconnect by liveness recovery or to ask
  * again reaches the same daemon as far as the answer can tell). So a session that is not
@@ -581,7 +584,8 @@ function isRecoverableHandoffOfOwnedSession(
  * has had no window at all, or when the answer names a handoff it has had no window for yet.
  */
 export function decideNotFoundAnswer(facts: NotFoundAnswerFacts): NotFoundAnswerOutcome {
-  const { releaseReason, owned, establishes, windowSince, now } = facts;
+  const { releaseReason, owned, windowSince, now } = facts;
+  const establishes = notFoundAnswerEstablishes(facts);
   const recoverable = isRecoverableHandoffOfOwnedSession(releaseReason, owned);
   if (releaseReason !== undefined && !recoverable) {
     return { kind: "ended", reason: releaseReason };
@@ -604,17 +608,23 @@ export function decideNotFoundAnswer(facts: NotFoundAnswerFacts): NotFoundAnswer
     : { kind: "stopped" };
 }
 
+/** Both the connection and a changed process instance provide positive establishment evidence. */
+function notFoundAnswerEstablishes(facts: NotFoundAnswerFacts): boolean {
+  return facts.establishes || facts.answeredByOtherDaemon;
+}
+
 /**
  * The handoff a not-found answer that does not end its session tells of, when the session has
  * had no window for it yet: the recoverable release the daemon names, or, with no reason, the
  * one {@link UNREHYDRATED_HANDOFF} when the answer is the session's first on a connection just
- * established. Undefined for an answer of a handoff it already had its window for, and for an
- * answer with no reason on a connection that had answered before, which tells of none.
+ * established or it reports another daemon instance. Undefined for a handoff it already had its
+ * window for, and for an answer with no reason on a connection that had answered before and no
+ * evidence of another daemon, which tells of none.
  */
 function newHandoffOf(facts: NotFoundAnswerFacts, recoverable: boolean): string | undefined {
   const handoff = recoverable
     ? `release:${facts.releaseReason}`
-    : facts.owned && facts.establishes
+    : facts.owned && notFoundAnswerEstablishes(facts)
       ? UNREHYDRATED_HANDOFF
       : undefined;
   return handoff === undefined || facts.handoffs.has(handoff) ? undefined : handoff;
@@ -1365,6 +1375,8 @@ export class DaemonMcpProxy {
    * session re-arms its heartbeat, and the daemon may still hand it back (#11400).
    */
   private readonly notFoundStopped = new Set<string>();
+  /** Last reported heartbeat answer per tracked session, including a stopped held session. */
+  private readonly sessionDaemonInstances = new Map<string, string>();
   /**
    * The connection that was established with sessions already held, and the sessions the daemon
    * has not yet answered a heartbeat for on it: the latest binding (#11529) and every session held
@@ -2700,7 +2712,7 @@ export class DaemonMcpProxy {
     // (issue #5663).
     this.ownedDeviceSessions.delete(releasedSessionUuid);
     this.claimableSessions.delete(releasedSessionUuid);
-    this.notFoundStopped.delete(releasedSessionUuid);
+    this.clearNotFoundHistory(releasedSessionUuid);
     this.dropHeldSession(releasedSessionUuid);
     if (
       releasedSessionUuid === this.boundSessionUuid ||
@@ -5145,11 +5157,30 @@ export class DaemonMcpProxy {
     );
   }
 
+  /** Record reported heartbeat evidence only while tracking the session; absence proves nothing. */
+  private noteHeartbeatDaemonInstance(
+    sessionUuid: string,
+    daemonInstance: string | undefined,
+  ): boolean {
+    if (daemonInstance === undefined || !this.isHeldSession(sessionUuid)) {
+      return false;
+    }
+    const previousInstance = this.sessionDaemonInstances.get(sessionUuid);
+    this.sessionDaemonInstances.set(sessionUuid, daemonInstance);
+    return previousInstance !== undefined && previousInstance !== daemonInstance;
+  }
+
   /** Keep the idle deadline the daemon reported in a heartbeat ack (#10823). */
   private noteDaemonIdleEvidence(sessionUuid: string, ack: unknown): void {
+    // An ack can arrive after a held session was dropped. End its retained history without
+    // creating process evidence for a session that is no longer heartbeated.
+    if (!this.isHeldSession(sessionUuid)) {
+      this.clearNotFoundHistory(sessionUuid);
+    }
     const daemonInstance = ackDaemonInstance(ack);
     if (daemonInstance !== undefined) {
       this.ackedDaemonInstance = daemonInstance;
+      this.noteHeartbeatDaemonInstance(sessionUuid, daemonInstance);
     }
     const releaseAt = (ack as { idleReleaseAt?: unknown } | null | undefined)?.idleReleaseAt;
     if (typeof releaseAt === "number" && Number.isFinite(releaseAt)) {
@@ -5260,7 +5291,7 @@ export class DaemonMcpProxy {
 
   private clearBoundSessionUuid(): void {
     if (this.boundSessionUuid !== undefined) {
-      this.notFoundStopped.delete(this.boundSessionUuid);
+      this.clearNotFoundHistory(this.boundSessionUuid);
     }
     this.boundSessionUuid = undefined;
     this.boundSessionUuidAt = undefined;
@@ -5668,7 +5699,12 @@ export class DaemonMcpProxy {
         throw this.isDaemonSessionNotFoundError(error)
           ? new HeldSessionNotFoundError(
               sessionUuid,
-              this.noteNotFoundAnswer(sessionUuid, null, releaseReasonFromError(error)),
+              this.noteNotFoundAnswer(
+                sessionUuid,
+                null,
+                releaseReasonFromError(error),
+                daemonInstanceFromError(error),
+              ),
             )
           : error;
       }
@@ -5794,9 +5830,15 @@ export class DaemonMcpProxy {
         // session fences it. With no reason the daemon may not have rehydrated it yet (#11570).
         this.applyNotFoundOutcome(
           sessionUuid,
-          this.noteNotFoundAnswer(sessionUuid, null, releaseReasonFromError(error), {
-            establishes: true,
-          }),
+          this.noteNotFoundAnswer(
+            sessionUuid,
+            null,
+            releaseReasonFromError(error),
+            daemonInstanceFromError(error),
+            {
+              establishes: true,
+            },
+          ),
         );
         return;
       }
@@ -6132,7 +6174,12 @@ export class DaemonMcpProxy {
       // this proxy just connected to gets that session's first answer on the connection (#11570).
       this.recoveryNotFoundOutcomes.set(
         sessionUuid,
-        this.noteNotFoundAnswer(sessionUuid, attemptedClient, releaseReasonFromError(error)),
+        this.noteNotFoundAnswer(
+          sessionUuid,
+          attemptedClient,
+          releaseReasonFromError(error),
+          daemonInstanceFromError(error),
+        ),
       );
       return "session-gone";
     }
@@ -6723,6 +6770,7 @@ export class DaemonMcpProxy {
       held.conflict = undefined;
     }
     this.notFoundWindows.delete(sessionUuid);
+    this.notFoundStopped.delete(sessionUuid);
     this.livenessAcks.set(sessionUuid, this.timer.now());
     this.livenessConflictLogged.delete(sessionUuid);
   }
@@ -6810,17 +6858,30 @@ export class DaemonMcpProxy {
     );
   }
 
+  private clearNotFoundHistory(sessionUuid: string): void {
+    this.notFoundWindows.delete(sessionUuid);
+    this.notFoundStopped.delete(sessionUuid);
+    this.sessionDaemonInstances.delete(sessionUuid);
+  }
+
   /**
    * Forget what the proxy tracks per session for liveness once it stops heartbeating it. A
    * session handed over for a stall stays resumable by UUID, so its device and the pending
-   * handover are kept for the harness's next call.
+   * handover are kept for the harness's next call. A not-found stop also keeps its handoff and
+   * process evidence with stopped membership until acknowledgement, admitted use or termination.
    */
-  private forgetSessionLivenessState(sessionUuid: string, keepHandover = false): void {
+  private forgetSessionLivenessState(
+    sessionUuid: string,
+    keepHandover = false,
+    keepNotFoundHistory = false,
+  ): void {
     this.livenessAcks.delete(sessionUuid);
     this.daemonIdleReports.delete(sessionUuid);
     this.livenessConflictLogged.delete(sessionUuid);
     this.recoveryNotFoundOutcomes.delete(sessionUuid);
-    this.notFoundWindows.delete(sessionUuid);
+    if (!keepNotFoundHistory) {
+      this.clearNotFoundHistory(sessionUuid);
+    }
     // Held again later on this connection, its next heartbeat is not the connection's first.
     this.ownershipReestablishment?.sessionUuids.delete(sessionUuid);
     if (!keepHandover) {
@@ -6831,11 +6892,15 @@ export class DaemonMcpProxy {
   }
 
   /** Stop heartbeating a held session; idle the keeper once nothing remains to heartbeat. */
-  private dropHeldSession(sessionUuid: string, keepHandover = false): void {
+  private dropHeldSession(
+    sessionUuid: string,
+    keepHandover = false,
+    keepNotFoundHistory = false,
+  ): void {
     if (!this.otherHeldSessions.delete(sessionUuid)) {
       return;
     }
-    this.forgetSessionLivenessState(sessionUuid, keepHandover);
+    this.forgetSessionLivenessState(sessionUuid, keepHandover, keepNotFoundHistory);
     this.syncHeartbeatKeeper();
   }
 
@@ -6935,6 +7000,7 @@ export class DaemonMcpProxy {
             sessionUuid,
             client,
             releaseReasonFromError(error),
+            daemonInstanceFromError(error),
             { mayAskAgain: asked?.notFound === false },
           );
           if (asked !== undefined) {
@@ -6984,7 +7050,12 @@ export class DaemonMcpProxy {
         // The answer to ask again could not be asked (the proxy is closing): decided as it stands.
         this.applyNotFoundOutcome(
           sessionUuid,
-          this.noteNotFoundAnswer(sessionUuid, null, releaseReasonFromError(error)),
+          this.noteNotFoundAnswer(
+            sessionUuid,
+            null,
+            releaseReasonFromError(error),
+            daemonInstanceFromError(error),
+          ),
         );
         return;
       }
@@ -7028,12 +7099,15 @@ export class DaemonMcpProxy {
     sessionUuid: string,
     client: DaemonClientLike | null,
     releaseReason: string | undefined,
+    daemonInstance: string | undefined,
     options: { establishes?: boolean; mayAskAgain?: boolean } = {},
   ): NotFoundAnswerOutcome {
+    const answeredByOtherDaemon = this.noteHeartbeatDaemonInstance(sessionUuid, daemonInstance);
     const firstOnConnection = this.answersOwnershipReestablishment(client, sessionUuid);
     const window = this.notFoundWindows.get(sessionUuid);
     const outcome = decideNotFoundAnswer({
       releaseReason,
+      answeredByOtherDaemon,
       owned: this.ownedDeviceSessions.has(sessionUuid),
       establishes: firstOnConnection || options.establishes === true,
       windowSince: window?.since,
@@ -7099,7 +7173,7 @@ export class DaemonMcpProxy {
       logger.warn(
         `[DaemonMcpProxy] Held session ${sessionUuid} is gone, no longer heartbeating it`,
       );
-      this.dropHeldSession(sessionUuid);
+      this.dropHeldSession(sessionUuid, false, outcome.kind !== "ended");
     } else if (!this.notFoundStopped.has(sessionUuid)) {
       logger.info(
         `[DaemonMcpProxy] The daemon no longer knows session ${sessionUuid}; no longer heartbeating it`,
@@ -7119,8 +7193,9 @@ export class DaemonMcpProxy {
    * or a sessionless call names no admitted use, and never holds a session.
    */
   private noteSessionRestoredByCall(sessionUuid: string): void {
-    this.notFoundWindows.delete(sessionUuid);
-    if (!this.notFoundStopped.delete(sessionUuid) || this.closing) {
+    const stopped = this.notFoundStopped.has(sessionUuid);
+    this.clearNotFoundHistory(sessionUuid);
+    if (!stopped || this.closing) {
       return;
     }
     if (
@@ -7231,6 +7306,7 @@ export class DaemonMcpProxy {
     this.livenessConflictLogged.delete(sessionUuid);
     this.latestBindingConflict = undefined;
     this.notFoundWindows.delete(sessionUuid);
+    this.notFoundStopped.delete(sessionUuid);
     // Only a forwarded call refreshes the replay lease (`boundSessionUuidAt`); an ack proves the
     // daemon still holds the session, not that the agent is using it (#10656).
     this.livenessAcks.set(sessionUuid, this.timer.now());
@@ -8119,6 +8195,7 @@ export class DaemonMcpProxy {
     // Every not-found window ends with the proxy: nothing is heartbeated or asked again (#11570).
     this.notFoundWindows.clear();
     this.notFoundStopped.clear();
+    this.sessionDaemonInstances.clear();
     this.recoveryNotFoundOutcomes.clear();
     this.ownershipReestablishment = undefined;
     this.latestHeartbeatAsked = undefined;

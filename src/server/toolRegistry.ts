@@ -2720,23 +2720,38 @@ async function unidentifiedToolTargetRow(
   if (cachedRow) {
     return cachedRow;
   }
-  try {
-    const listing = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(
-      "android",
-      { signal },
-    );
-    return (
-      listing.devices.find(
-        (row) => row.platform === "android" && row.deviceId === input.deviceId,
-      ) ?? synthetic
-    );
-  } catch (error) {
-    // Missing discovery evidence is safe: the shared rule conservatively checks every possible hold.
-    logger.debug(
-      `[ToolRegistry] Identity listing unavailable for ${input.deviceId}: ${errorMessage(error)}`,
-    );
+  return reconciledUnidentifiedToolTargetRow(pool, synthetic, signal);
+}
+
+/** Cached alias mapping adds no probes; completed listings reconcile before the identity verdict. */
+async function reconciledUnidentifiedToolTargetRow(
+  pool: DevicePool,
+  synthetic: BootedDevice,
+  signal?: AbortSignal,
+): Promise<BootedDevice> {
+  const listing = await PlatformDeviceManagerFactory.getInstance()
+    .getBootedDevicesDetailed("android", { signal })
+    .catch((error: unknown) => {
+      // Missing discovery evidence is safe: the shared rule conservatively checks every possible hold.
+      logger.debug(
+        `[ToolRegistry] Identity listing unavailable for ${synthetic.deviceId}: ${errorMessage(error)}`,
+      );
+      return undefined;
+    });
+  if (!listing || !didSourceSucceedForDevice(listing, "android", undefined)) {
     return synthetic;
   }
+  const rows = pool.mapAndroidDiscovery(listing.devices);
+  try {
+    // FUNNEL 1: the held-alias rule reads pooled identity only after this observation (#6863).
+    await reconcileDiscoveryObservation(rows, "tools/call:identity-gate", { signal });
+  } catch (error) {
+    throw toActionableError(
+      error,
+      `Failed to reconcile identity listing for ${synthetic.deviceId}`,
+    );
+  }
+  return rows.find((row) => row.deviceId === synthetic.deviceId) ?? synthetic;
 }
 
 /** Async identity gate beside managed-slot checks; the synchronous holder/mark turn stays intact. */

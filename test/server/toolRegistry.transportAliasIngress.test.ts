@@ -2,6 +2,7 @@ import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE } from "../../src/daemon/managedSlots/managedSlotRefusal";
+import { ActionableError } from "../../src/models/ActionableError";
 import type { BootedDevice } from "../../src/models";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
@@ -331,11 +332,14 @@ describe("a transport the pool has not folded yet (#11618)", () => {
     "an ordinary control id %s costs no raw listing or adb call",
     async (deviceId) => {
       const h = await harness({ pooledRows: [booted(deviceId)] });
+      const reconcile = spyOn(h.pool, "reconcileDiscoveryObservation");
+      cleanups.push(() => reconcile.mockRestore());
       const probes = h.adbFactory.getCallCount();
       const scans = h.rawScans();
       expect(await h.outcome("controlProbe", { platform: "android", deviceId })).toBe("ran");
       expect(h.adbFactory.getCallCount()).toBe(probes);
       expect(h.rawScans()).toBe(scans);
+      expect(reconcile).not.toHaveBeenCalled();
     },
   );
 
@@ -379,6 +383,150 @@ describe("a transport the pool has not folded yet (#11618)", () => {
 });
 
 describe("unidentified transports use the held-alias rule (#11596)", () => {
+  test.each([undefined, "0123456789abcdef"])(
+    "a listed unidentified control target reconciles before the held-alias verdict (holder %s)",
+    async (held) => {
+      const generic = "0123456789abcdef";
+      const rows = [booted(generic), booted(WIRELESS)];
+      const h = await harness({ pooledRows: rows, serial: generic, held });
+      const mapped = h.pool.mapAndroidDiscovery(rows);
+      const events: string[] = [];
+      const reconcileObservation = h.pool.reconcileDiscoveryObservation.bind(h.pool);
+      const mayAlias = h.pool.androidTransportMayAliasDevice.bind(h.pool);
+      const reconcile = spyOn(h.pool, "reconcileDiscoveryObservation").mockImplementation(
+        async (devices, source, options) => {
+          await reconcileObservation(devices, source, options);
+          if (source === "tools/call:identity-gate") {
+            events.push("reconciled");
+          }
+        },
+      );
+      cleanups.push(() => reconcile.mockRestore());
+      const identity = spyOn(h.pool, "androidTransportMayAliasDevice").mockImplementation(
+        (device, deviceId) => {
+          events.push("identity");
+          return mayAlias(device, deviceId);
+        },
+      );
+      cleanups.push(() => identity.mockRestore());
+
+      expect(await h.outcome("controlProbe", { platform: "android", deviceId: WIRELESS })).toBe(
+        held ? DEVICE_OWNED_BY_OTHER_SESSION_CODE : "ran",
+      );
+
+      expect(reconcile).toHaveBeenCalledWith(mapped, "tools/call:identity-gate", {
+        signal: expect.any(AbortSignal),
+      });
+      expect(events).toEqual(held ? ["reconciled", "identity"] : ["reconciled"]);
+    },
+  );
+
+  test.each(["incomplete", "throws"])(
+    "an identity listing that %s reconciles nothing and uses a conservative synthetic row",
+    async (failure) => {
+      const generic = "0123456789abcdef";
+      const h = await harness({
+        pooledRows: [booted(generic), booted(WIRELESS)],
+        serial: generic,
+        held: generic,
+      });
+      const list = h.discovery.getBootedDevicesDetailed.bind(h.discovery);
+      const listing = spyOn(h.discovery, "getBootedDevicesDetailed").mockImplementation(
+        async (platform, options = {}) => {
+          if (options.bypassAndroidDeviceListCache) {
+            return list(platform, options);
+          }
+          if (failure === "throws") {
+            throw new Error("identity listing failed");
+          }
+          return { ...(await list(platform, options)), succeededSources: new Set() };
+        },
+      );
+      cleanups.push(() => listing.mockRestore());
+      const reconcile = spyOn(h.pool, "reconcileDiscoveryObservation");
+      cleanups.push(() => reconcile.mockRestore());
+      const identity = spyOn(h.pool, "androidTransportMayAliasDevice");
+      cleanups.push(() => identity.mockRestore());
+
+      expect(await h.outcome("controlProbe", { platform: "android", deviceId: WIRELESS })).toBe(
+        DEVICE_OWNED_BY_OTHER_SESSION_CODE,
+      );
+
+      expect(
+        reconcile.mock.calls.filter(([, source]) => source === "tools/call:identity-gate"),
+      ).toEqual([]);
+      expect(identity.mock.calls.at(-1)?.[0]).toEqual({
+        deviceId: WIRELESS,
+        name: WIRELESS,
+        platform: "android",
+      });
+      expect(h.tools.runs).toEqual([]);
+    },
+  );
+
+  test.each([false, true])(
+    "an identity reconcile failure stops control before readiness (already actionable %s)",
+    async (actionable) => {
+      const h = await harness({ pooledRows: [booted(WIRELESS)], serial: "unknown" });
+      const failure = actionable
+        ? new ActionableError("identity reconcile failed")
+        : new Error("identity reconcile failed");
+      const reconcileObservation = h.pool.reconcileDiscoveryObservation.bind(h.pool);
+      const reconcile = spyOn(h.pool, "reconcileDiscoveryObservation").mockImplementation(
+        async (devices, source, options) => {
+          if (source === "tools/call:identity-gate") {
+            throw failure;
+          }
+          await reconcileObservation(devices, source, options);
+        },
+      );
+      cleanups.push(() => reconcile.mockRestore());
+
+      const result = await h.tools
+        .call("controlProbe", {
+          platform: "android",
+          deviceId: WIRELESS,
+        })
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+      expect(result).toBeInstanceOf(ActionableError);
+      if (actionable) {
+        expect(result).toBe(failure);
+      } else {
+        expect(result).toMatchObject({
+          cause: failure,
+          message: `Failed to reconcile identity listing for ${WIRELESS}: identity reconcile failed`,
+        });
+      }
+      expect(h.tools.runs).toEqual([]);
+      expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    },
+  );
+
+  test("an identity reconcile failure keeps a sessionless read read-only", async () => {
+    const h = await harness({ pooledRows: [booted(WIRELESS)], serial: "unknown" });
+    const reconcileObservation = h.pool.reconcileDiscoveryObservation.bind(h.pool);
+    const reconcile = spyOn(h.pool, "reconcileDiscoveryObservation").mockImplementation(
+      async (devices, source, options) => {
+        if (source === "tools/call:identity-gate") {
+          throw new Error("identity reconcile failed");
+        }
+        await reconcileObservation(devices, source, options);
+      },
+    );
+    cleanups.push(() => reconcile.mockRestore());
+
+    expect(await h.outcome("readProbe", { platform: "android", deviceId: WIRELESS })).toBe("ran");
+    expect(reconcile.mock.calls.some(([, source]) => source === "tools/call:identity-gate")).toBe(
+      true,
+    );
+    expect(h.reads).toEqual([WIRELESS]);
+    expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+  });
+
   test("a control call on a wireless phone with a generic serial is allowed, as before", async () => {
     // A generic factory serial proves nothing, so the pool neither pools nor aliases the row.
     const h = await harness({ pooledRows: [booted(WIRELESS)], serial: "unknown" });
@@ -488,13 +636,17 @@ describe("unidentified transports use the held-alias rule (#11596)", () => {
     });
     const identity = spyOn(h.pool, "androidTransportMayAliasDevice");
     cleanups.push(() => identity.mockRestore());
+    const mapping = spyOn(h.pool, "mapAndroidDiscovery");
+    cleanups.push(() => mapping.mockRestore());
     const listingsBefore = h.rawScans();
 
     expect(await h.outcome("readProbe", { platform: "android", deviceId: WIRELESS })).toBe("ran");
 
     expect(h.rawScans() - listingsBefore).toBe(2);
     expect(identity).toHaveBeenCalledWith(listed, generic);
-    expect(identity.mock.calls.at(-1)?.[0]).toBe(listed);
+    expect(identity.mock.calls.at(-1)?.[0]).toBe(
+      mapping.mock.results.at(-1)?.value.find((row) => row.deviceId === WIRELESS),
+    );
     expect(h.reads).toEqual([WIRELESS]);
     expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
   });

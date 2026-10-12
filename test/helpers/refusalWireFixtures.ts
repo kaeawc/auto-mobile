@@ -101,7 +101,10 @@ import {
   DeviceOutsideManagedSlotsError,
   ManagedSlotDiscoveryIncompleteError,
 } from "../../src/daemon/managedSlots/managedSlotRefusal";
-import { DeviceOutsideBoundSessionError } from "../../src/server/deviceOutsideBoundSessionRefusal";
+import {
+  DeviceOutsideBoundSessionError,
+  SessionOutsideBoundSessionError,
+} from "../../src/server/deviceOutsideBoundSessionRefusal";
 import { BootedDeviceDiscoveryIncompleteError } from "../../src/devices/deviceBootService";
 import {
   createToolErrorResponse,
@@ -537,6 +540,11 @@ const BUILDERS: readonly FixtureEntry[] = [
           { deviceId: DEVICE },
         ),
       ),
+  ],
+  [
+    "device_outside_bound_session.other_session",
+    "SessionOutsideBoundSessionError via shapeToolCallError",
+    () => shaped(new SessionOutsideBoundSessionError(SESSION, "other-session")),
   ],
   [
     "daemon_shutting_down",

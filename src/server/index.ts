@@ -1,3 +1,4 @@
+import { SessionOutsideBoundSessionError } from "./deviceOutsideBoundSessionRefusal";
 import { managedConnectionPlatformRefusal } from "../daemon/managedSlots/managedConnectionScope";
 import {
   getLiveDeadlineMs,
@@ -988,8 +989,14 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const implicitAutolockMcpSessionId =
       requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);
     let routingSessionUuid: string | undefined;
+    let readOutsideBoundSession = false;
     try {
-      routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams);
+      routingSessionUuid = sessionToolBinding.effectiveSessionUuid(sessionId, toolParams, {
+        readOnly: ToolRegistry.getTool(name)?.isDeviceReadOnlyCall?.(toolParams) === true,
+        onReadOutsideBoundSession: () => {
+          readOutsideBoundSession = true;
+        },
+      });
     } catch (error) {
       // Match the existing tool-error boundary below: the SDK handler alias
       // is narrower than the protocol's text-only tool error result.
@@ -1146,6 +1153,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
               (daemonMode &&
                 daemonState.isInitialized() &&
                 daemonState.getManagedConnectionScopes().get(requestMcpSessionId) !== undefined)),
+          tool.isDeviceReadOnlyCall?.(toolParams) === true,
         );
       }
     }
@@ -1154,10 +1162,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // connection already holds an active device session — whether seeded at
     // construction or acquired mid-connection via getAndroid/getApple (recorded
     // by `bind()`), or held in the pool by this client through autolock (#6729)
-    // — a device tool that names a DIFFERENT `sessionUuid` must be
-    // rejected, not routed. Without this, a later call carrying a fabricated,
-    // typo'd, or stale id on a connection that already owns a device was handed
-    // off to session admission/creation and auto-assigned a SECOND, foreign
+    // — a control tool that names a DIFFERENT `sessionUuid` must be
+    // rejected. Reads pass read-only without changing the binding. Without this,
+    // a later call carrying a fabricated, typo'd, or stale id on a connection that
+    // already owns a device was handed off to session admission/creation and auto-assigned a SECOND, foreign
     // device (the residual #6019/#6045 bypass behind an active-session
     // precondition). This is scoped to `requiresDevice` tools on purpose:
     // `effectiveSessionUuid`'s own cross-routing throw fires for every tool and
@@ -1188,10 +1196,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         // rule's question below.
         !namesLiveSessionOfBoundPlan(explicitSessionUuid, boundDeviceSessionUuid)
       ) {
-        throw new ActionableError(
-          `MCP connection is bound to device session ${boundDeviceSessionUuid}; ` +
-            `cannot route this call to ${explicitSessionUuid} until the binding is released.`,
-        );
+        if (tool.isDeviceReadOnlyCall?.(toolParams) === true) {
+          readOutsideBoundSession = true;
+        } else {
+          throw new SessionOutsideBoundSessionError(boundDeviceSessionUuid, explicitSessionUuid);
+        }
       }
     }
     // An omitted selection target always belongs to an independent
@@ -1729,9 +1738,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       const daemonSessionManager = DaemonState.getInstance().isInitialized()
         ? DaemonState.getInstance().getSessionManager()
         : undefined;
+      // Reads exempted from either bound-session routing refusal never bind or adopt.
       const sessionForBinding =
         daemonSessionManager &&
         providedSessionUuid &&
+        !readOutsideBoundSession &&
         !isRecordingIdCleanup &&
         !isDeviceInventoryTool(name)
           ? daemonSessionManager.getSessionForNewExecution(
@@ -1743,6 +1754,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         !isDeviceSessionAcquisitionTool(name) &&
         !isDeviceInventoryTool(name) &&
         name !== SET_TOOL_ENABLED_TOOL_NAME &&
+        !readOutsideBoundSession &&
         !result?.isError &&
         providedSessionUuid &&
         // Ownership first (#11235): a foreign-owned session never binds this connection.

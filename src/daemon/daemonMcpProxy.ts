@@ -1,3 +1,4 @@
+import { SessionOutsideBoundSessionError } from "../server/deviceOutsideBoundSessionRefusal";
 import { isMcpQueueTimeoutError } from "./McpTimeoutError";
 import { assertDaemonNamespaceMatchesState } from "./sharedNamespaceGuard";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -5157,15 +5158,15 @@ export class DaemonMcpProxy {
     if (!this.boundSessionUuid || explicitSessionUuid === this.boundSessionUuid) {
       return normalizedArgs;
     }
+    const enforcesStartupBinding = () =>
+      this.initialSessionBindingConfigured &&
+      (toolName === undefined || !this.isDeviceReadOnlyTool(toolName));
     if (
       explicitSessionUuid &&
-      this.initialSessionBindingConfigured &&
+      enforcesStartupBinding() &&
       !this.routableBesideStartupBinding(explicitSessionUuid)
     ) {
-      throw new Error(
-        `MCP connection is bound to device session ${this.boundSessionUuid}; ` +
-          `cannot route this call to ${explicitSessionUuid} until the binding is released.`,
-      );
+      throw new SessionOutsideBoundSessionError(this.boundSessionUuid, explicitSessionUuid);
     }
     if (explicitSessionUuid) {
       // The call targets the named session only. Carrying the binding beside it tells the daemon

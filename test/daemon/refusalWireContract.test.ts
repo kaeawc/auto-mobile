@@ -235,6 +235,24 @@ const surfaceExpectations = JSON.parse(
 ) as SurfaceExpectations;
 
 describe("refusal wire contract", () => {
+  test("platform ambiguity names the held sessions without retry or recovery guidance", () => {
+    const fixture = fixtures.find((fixture) => fixture.code === "ambiguous_session_selector")!;
+    expect(fixture.result.isError).toBe(true);
+    expect(fixture.result.content).toHaveLength(1);
+    const payload = JSON.parse(fixture.result.content[0].text);
+    expect(payload.error).toEqual({
+      code: "ambiguous_session_selector",
+      message: expect.stringContaining("Name one with sessionUuid or deviceId."),
+      platform: "android",
+      candidates: [
+        { sessionUuid: "11111111-2222-4333-8444-555555555555", deviceId: "emulator-5554" },
+        { sessionUuid: "second-android-session", deviceId: "emulator-5556" },
+      ],
+      retryable: false,
+    });
+    expect(deriveDisposition(payload)).toBe("fail");
+  });
+
   test("committed fixtures equal what the real TypeScript builders emit", () => {
     for (const fixture of fixtures) {
       const path = join(REFUSAL_FIXTURES_DIR, `${fixture.code}.json`);

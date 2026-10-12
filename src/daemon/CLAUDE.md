@@ -226,6 +226,8 @@ device-not-actionable gate (`refuseControlCallBeforeAdmission`) run before
 admission, and admission's own refusals (suspect, lapsed owner lease, idle
 expiry) stamp nothing. A call that is admitted and then fails while the daemon
 sets its device up is use (#10824).
+Ambiguous platform-only control gets `ambiguous_session_selector` without refreshing clocks;
+read-only tools and device-binding calls (such as `setActiveDevice`) keep their usual routing.
 `test/server/namedForeignSessionActivity.test.ts` has one row per refusal.
 Desktop input is use. The desktop and IDE clients register an observer session
 that allocates nothing, allocate a device with `setActiveDevice` on the first

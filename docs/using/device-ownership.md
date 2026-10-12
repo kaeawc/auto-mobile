@@ -88,6 +88,11 @@ session's device (`device_outside_bound_session`), or whose device cannot be
 driven (lost, recovering, shutting down), leaves the idle window where it was
 (#11558).
 
+When a platform-only control call matches several known sessions this MCP
+connection holds, `ambiguous_session_selector` lists those sessions and asks for
+`sessionUuid` or `deviceId`. This non-retryable refusal leaves their idle windows
+unchanged; read-only tools and device-binding calls (such as `setActiveDevice`) keep their usual routing.
+
 ## When a session is released
 
 A session is released by an explicit release, a lost owner heartbeat, or the idle

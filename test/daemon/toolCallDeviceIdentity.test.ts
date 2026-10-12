@@ -1,10 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { assertFrameTargetIdentityProven } from "../../src/daemon/frameDeviceIdentity";
 import {
-  assertToolTargetIdentityProven,
   canonicalControlCallDeviceId,
   canonicalizeToolCallDeviceIds,
-  mayControlUnheldUnidentifiedTransport,
   resolveToolCallDeviceIds,
   toolCallNamesDeviceId,
   UNPROVEN_TRANSPORT_PROBE_RETRY_MS,
@@ -299,11 +296,11 @@ describe("canonicalControlCallDeviceId", () => {
       expect(await resolve(pool, WIRELESS, scan, 1_002)).toBe(USB);
     });
 
-    test("is not the open owner decision: a LISTED transport the pool cannot identify stays allowed", async () => {
+    test("a LISTED unidentifiable transport returns its id for the shared held-alias gate", async () => {
       const pool = fakePool({ folded: false });
       const scan = scanOf([android(USB), android(WIRELESS)]);
 
-      // The listing completed and the identity probe proved nothing (#11596): as before.
+      // The shared target gate judges held aliases after this identity resolution.
       expect(await resolve(pool, WIRELESS, scan)).toBe(WIRELESS);
       expect(pool.probes).toBe(1);
     });
@@ -322,7 +319,7 @@ describe("canonicalControlCallDeviceId", () => {
 });
 
 describe("resolveToolCallDeviceIds", () => {
-  test("a read resolves from the cached fold and never lists or probes", () => {
+  test("without a probe, forward-key resolution uses only the cached fold", () => {
     const pool = fakePool({ folded: false, provable: true });
     const folded = fakePool({ folded: true });
     const args = { deviceId: WIRELESS };
@@ -388,21 +385,41 @@ describe("resolveToolCallDeviceIds", () => {
   });
 });
 
-describe("the open owner decision for an unidentified, unheld transport", () => {
-  test("tool calls are allowed today where a direct frame's rule would refuse", async () => {
+describe("read transport probe", () => {
+  test("a read returns its id on an incomplete listing, while control refuses", async () => {
     const pool = fakePool({ folded: false });
-    // The direct frames' rule refuses this transport while another session holds a device it
-    // could alias (#11596).
-    await expect(
-      assertFrameTargetIdentityProven(pool, android(OTHER_WIRELESS), "tapOn", false, {
-        sessions: [{ sessionId: "holder", assignedDevice: USB, platform: "android" }],
-        requesterSessionUuid: "other",
-      }),
-    ).rejects.toMatchObject({ code: "device_owned_by_other_session" });
+    const scan = scanOf([]);
+    scan.failure = "adb devices failed";
+    const input = { ...probeOf(scan), pool, deviceId: WIRELESS };
+    expect(await outcomeOf(canonicalControlCallDeviceId({ ...input, refuseUnplaced: false }))).toBe(
+      WIRELESS,
+    );
+    expect(
+      await outcomeOf(canonicalControlCallDeviceId({ ...input, refuseUnplaced: true })),
+    ).toEqual(DISCOVERY_INCOMPLETE);
+    expect(pool.probes).toBe(0);
+    expect(scan.reconciled).toEqual([]);
+  });
 
-    expect(mayControlUnheldUnidentifiedTransport()).toBe(true);
-    expect(() =>
-      assertToolTargetIdentityProven(pool, OTHER_WIRELESS, "tapOn", false),
-    ).not.toThrow();
+  test("reads share the additive fold and unproven memo with controls", async () => {
+    const scan = scanOf([android(USB), android(WIRELESS)]);
+    const pool = fakePool({ folded: false, provable: true });
+    expect(
+      await resolveToolCallDeviceIds(
+        pool,
+        { deviceId: WIRELESS },
+        { ...probeOf(scan), refuseUnplaced: false },
+      ),
+    ).toEqual({ deviceId: USB });
+    expect(scan.reconciled).toEqual([[USB]]);
+    const unproven = fakePool({ folded: false });
+    const before = scan.calls;
+    await resolveToolCallDeviceIds(
+      unproven,
+      { deviceId: WIRELESS },
+      { ...probeOf(scan), refuseUnplaced: false },
+    );
+    await resolveToolCallDeviceIds(unproven, { deviceId: WIRELESS }, probeOf(scan));
+    expect(scan.calls).toBe(before + 1);
   });
 });

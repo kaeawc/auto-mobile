@@ -3,6 +3,8 @@ import {
   assertFrameTargetIdentityProven,
   canonicalFrameDeviceId,
   canonicalizeFrameDiscovery,
+  frameHeldSessionsFrom,
+  heldDevicesUnidentifiedTransportCouldAlias,
   type FrameDeviceIdentityPool,
 } from "../../src/daemon/frameDeviceIdentity";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
@@ -221,5 +223,89 @@ describe("assertFrameTargetIdentityProven", () => {
     await expect(check(pool, ios(WIRELESS))).resolves.toBeUndefined();
     await expect(check({}, android(WIRELESS))).resolves.toBeUndefined();
     await expect(check(undefined, android(WIRELESS))).resolves.toBeUndefined();
+  });
+});
+
+describe("shared non-throwing held-alias verdict", () => {
+  const held = {
+    sessionId: "holder",
+    assignedDevice: USB,
+    stableDeviceId: "stable-phone",
+    platform: "android",
+  };
+  const pool: FrameDeviceIdentityPool = { isAndroidTransportAssignable: () => false };
+
+  test("returns only possible Android holders, without refusing the read", async () => {
+    const sessions = [held, { ...held, sessionId: "ios-holder", platform: "ios" }];
+    expect(
+      await heldDevicesUnidentifiedTransportCouldAlias(pool, android(WIRELESS), false, sessions),
+    ).toEqual({ sessions: [held], managed: undefined });
+    expect(
+      await heldDevicesUnidentifiedTransportCouldAlias(
+        { ...pool, androidTransportMayAliasDevice: () => false },
+        android(WIRELESS),
+        false,
+        sessions,
+      ),
+    ).toBeUndefined();
+    expect(
+      await heldDevicesUnidentifiedTransportCouldAlias(pool, android(WIRELESS), false, []),
+    ).toBeUndefined();
+  });
+
+  test("shares unknown managed holds and passes represented transport and stable ids", async () => {
+    const seen: string[][] = [];
+    const managedPool = {
+      ...pool,
+      androidManagedSlotHold: async (ids: readonly string[]) => {
+        seen.push([...ids]);
+        return {};
+      },
+    };
+    expect(
+      await heldDevicesUnidentifiedTransportCouldAlias(managedPool, android(WIRELESS), false, [
+        held,
+      ]),
+    ).toEqual({ sessions: [held], managed: {} });
+    expect(seen).toEqual([[USB, "stable-phone"]]);
+  });
+
+  test.each([
+    [undefined, android(WIRELESS), false],
+    [{}, android(WIRELESS), false],
+    [{ isAndroidTransportAssignable: () => true }, android(WIRELESS), false],
+    [pool, ios(WIRELESS), false],
+    [pool, android(WIRELESS), true],
+  ] as const)(
+    "early out %j %j held=%s never reads managed holds",
+    async (gate, device, heldBySession) => {
+      const guarded = gate && {
+        ...gate,
+        androidManagedSlotHold: async () => {
+          throw new Error("unexpected snapshot");
+        },
+      };
+      expect(
+        await heldDevicesUnidentifiedTransportCouldAlias(guarded, device, heldBySession, [held]),
+      ).toBeUndefined();
+    },
+  );
+
+  test("the shared snapshot uses reverse-map holders, with the existing legacy fallback", () => {
+    expect(
+      frameHeldSessionsFrom({
+        getHeldDeviceSessions: () => [
+          {
+            deviceId: USB,
+            sessionId: "releasing",
+            platform: "android",
+            stableDeviceId: "stable-phone",
+          },
+        ],
+        getAllSessions: () => [],
+      }),
+    ).toEqual([{ ...held, sessionId: "releasing" }]);
+    expect(frameHeldSessionsFrom({ getAllSessions: () => [held] })).toEqual([held]);
+    expect(frameHeldSessionsFrom({})).toEqual([]);
   });
 });

@@ -1,5 +1,5 @@
 import type { DeviceDiscoveryError } from "../devices/deviceUtils";
-import { ActionableError, type BootedDevice } from "../models";
+import type { BootedDevice } from "../models";
 import { AndroidBootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import { isAndroidTransportAddressSerial } from "../utils/androidSerial";
 import {
@@ -32,7 +32,7 @@ const unprovenTransportProbes = new WeakMap<object, Map<string, number>>();
  * fold only (no device I/O): the top-level `deviceId` every device tool, `setActiveDevice` and
  * `startDevice` take, and `killDevice`'s `device.deviceId`. Returns `args` itself when nothing
  * changes; never mutates it. Identity for iOS ids, for ids the pool has not folded, and with no
- * pool (direct mode). The read half of {@link resolveToolCallDeviceIds}; called on its own only
+ * pool (direct mode). The cached half of {@link resolveToolCallDeviceIds}; called on its own only
  * where nothing may wait (the socket server's forward key).
  */
 export function canonicalizeToolCallDeviceIds<T>(
@@ -93,8 +93,10 @@ export interface RawAndroidListing {
   error?: DeviceDiscoveryError;
 }
 
-/** What a control call may do to place a transport address the pool has never folded. */
+/** What a tool call may do to place a transport address the pool has never folded. */
 export interface ToolCallDeviceIdProbe {
+  /** Controls refuse an incomplete listing by default; reads always keep the id as sent. */
+  refuseUnplaced?: boolean;
   /**
    * A fresh `adb devices` listing as RAW rows: each transport under its own serial, carrying its
    * own adb transport id. Never rows already mapped onto pooled ids (a readiness scan): a mapped
@@ -130,10 +132,10 @@ export interface ControlCallDeviceIdentityInput extends ToolCallDeviceIdProbe {
  * queue decision reads it: the MCP ingress, an internal call (plan step, nested tool) and the
  * execution-target resolver.
  *
- * With a `probe` (a CONTROL call) an address the pool has never folded is placed first
- * ({@link canonicalControlCallDeviceId}); without one (a read) only the pool's cached fold
- * answers, and nothing is ever refused. Returns `args` itself, synchronously, when nothing changes
- * and nothing needs a probe; never mutates it. Identity with no pool (direct mode).
+ * With a `probe`, an address the pool has never folded is placed first
+ * ({@link canonicalControlCallDeviceId}); reads set `refuseUnplaced: false` and are never refused.
+ * Without a probe only the cached fold answers (the socket forward key). Returns `args` itself,
+ * synchronously, when nothing changes and nothing needs a probe; never mutates it. Identity with no pool (direct mode).
  */
 export function resolveToolCallDeviceIds<T>(
   pool: ToolCallDeviceIdentityPool | undefined,
@@ -159,24 +161,25 @@ export function resolveToolCallDeviceIds<T>(
 }
 
 /**
- * A CONTROL call's `deviceId` as the pool's canonical id, including a transport the pool has not
+ * A tool call's `deviceId` as the pool's canonical id, including a transport the pool has not
  * folded yet: a wireless id first named by a tool call, before any pool refresh saw it. Such an
  * address proves nothing about which handset answers on it, so it is probed and folded additively
  * (`canonicalizeFrameDiscovery`, as a direct frame does) before the holder check reads it.
  *
- * A FAILED listing never fails open. When `adb devices` does not complete, the address cannot be
- * placed; if the pool tracks an Android device it may be a second route to, the call is refused
+ * A FAILED listing never fails open for control calls. When `adb devices` does not complete, the
+ * address cannot be placed; if the pool tracks an Android device it may be a second route to, the call is refused
  * typed and retryable (`discovery_incomplete`) instead of being judged as an unheld device. A
  * call naming a device by the id the pool holds it under never comes this far, so a holder is
  * never locked out of its own device by an adb failure. A transport that IS listed and whose
- * identity the pool cannot prove is a different question, and stays allowed
- * ({@link mayControlUnheldUnidentifiedTransport}).
+ * identity the pool cannot prove uses the shared held-alias rule: control is refused only
+ * while it could alias a session or managed hold (#11596). Reads are never refused.
  *
  * Cost: an id the pool already holds or has folded, an emulator or USB serial and an iOS id are
  * answered from the pool's cached fold with no device I/O. Only an unfolded transport ADDRESS is
  * probed, and one the probe could not identify is not probed again for
  * {@link UNPROVEN_TRANSPORT_PROBE_RETRY_MS}; the pool's own refresh keeps retrying it meanwhile.
- * Reads never come here: they hold nothing, so they resolve from the cached fold alone.
+ * Reads share this probe, but keep the id as sent on an incomplete listing. The probe only
+ * reads discovery/identity and updates the fold; it never readies a device.
  *
  * Returns the id synchronously whenever no probe is needed, so an ordinary call gains no extra
  * turn at the ingress; a promise only for a first-seen transport.
@@ -233,14 +236,14 @@ async function foldFirstSeenTransport(
 }
 
 /**
- * The answer for an address a failed listing said nothing about: refused while the pool tracks an
- * Android device it may reach, the id as sent otherwise.
+ * The answer for an address a failed listing said nothing about: controls refuse while the pool
+ * tracks an Android device it may reach; reads always keep the id as sent.
  */
 function unlistedTransportOutcome(
   input: ControlCallDeviceIdentityInput,
   discoveryError: DeviceDiscoveryError | undefined,
 ): string {
-  if (!input.tracksAndroidDevice()) {
+  if (input.refuseUnplaced === false || !input.tracksAndroidDevice()) {
     return input.deviceId;
   }
   const error = discoveryError ?? {
@@ -262,50 +265,4 @@ function isUnfoldedTransportAddress(pool: ToolCallDeviceIdentityPool, deviceId: 
     isAndroidTransportAddressSerial(deviceId) &&
     !(pool.getAllDevices?.() ?? []).some((device) => device.id === deviceId)
   );
-}
-
-/**
- * OPEN OWNER DECISION for TOOL CALLS (#11618): may a control tool call drive an UNHELD device on
- * an Android transport the pool cannot identify (an emulator on a non-loopback `adb connect`
- * address; a wireless phone reporting a generic serial)? The pool cannot prove such a transport is
- * NOT a second route to a device a session holds, and it cannot prove it is one either.
- *
- * Today the MCP ingress allows it, as it always has; a transport the pool CAN prove is an alias of
- * a held device never reaches this question (it was resolved to the held id and refused by the
- * holder check). Direct frames were decided in #11596: `assertFrameTargetIdentityProven` refuses
- * such a transport only while it could alias a device a session or managed slot holds
- * (`aliasableHeldAndroidDevices`). That rule awaits a managed-slot snapshot and needs the held
- * sessions, while the tool holder check runs in one synchronous turn, so the tool path has NOT
- * adopted it: the two paths differ exactly when an unidentifiable transport is named while a
- * session or slot holds an Android device it could alias (frames refuse, tools allow). This
- * predicate is the one place the tool-call answer lives.
- */
-export function mayControlUnheldUnidentifiedTransport(): boolean {
-  return true;
-}
-
-/**
- * The tool-call gate behind {@link mayControlUnheldUnidentifiedTransport}; a no-op while it
- * allows. Were it to refuse, this fails closed on every unheld transport the pool cannot identify
- * (stricter than the direct frames' held-alias rule) until the tool path adopts
- * `aliasableHeldAndroidDevices`.
- */
-export function assertToolTargetIdentityProven(
-  pool: ToolCallDeviceIdentityPool | undefined,
-  deviceId: string,
-  toolName: string,
-  heldBySession: boolean,
-): void {
-  if (mayControlUnheldUnidentifiedTransport() || !isAndroidTransportAddressSerial(deviceId)) {
-    return;
-  }
-  const device: BootedDevice = { deviceId, name: deviceId, platform: "android" };
-  if (!heldBySession && pool?.isAndroidTransportAssignable?.(device) === false) {
-    throw new ActionableError(
-      `${toolName} refused: Android transport '${deviceId}' has no proven identity, so it ` +
-        "cannot be told apart from a device another session holds; nothing was sent. The device " +
-        "itself is not held under this id: address it by the id its hardware serial or console " +
-        "can be read (its USB serial or emulator-NNNN id), or reconnect it and refresh devices.",
-    );
-  }
 }

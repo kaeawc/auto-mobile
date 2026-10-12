@@ -47,11 +47,12 @@ import { UnissuedSessionError, type Session, type SessionManager } from "../daem
 import { DaemonState } from "../daemon/daemonState";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
+import { resolveToolCallDeviceIds, toolCallNamesDeviceId } from "../daemon/toolCallDeviceIdentity";
 import {
-  assertToolTargetIdentityProven,
-  resolveToolCallDeviceIds,
-  toolCallNamesDeviceId,
-} from "../daemon/toolCallDeviceIdentity";
+  assertFrameTargetIdentityProven,
+  frameHeldSessionsFrom,
+  heldDevicesUnidentifiedTransportCouldAlias,
+} from "../daemon/frameDeviceIdentity";
 import { didSourceSucceedForDevice } from "../utils/discoverySource";
 import {
   managedConnectionControlRefusal,
@@ -814,6 +815,7 @@ async function isSessionlessReadTargetHeld(
   toolName: string,
   deviceId: string,
   requestedPlatform: unknown,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   const daemonState = DaemonState.getInstance();
   if (!daemonState.isInitialized()) {
@@ -824,6 +826,21 @@ async function isSessionlessReadTargetHeld(
   }
   const pool = daemonState.getDevicePool();
   try {
+    const unidentified = await unidentifiedToolTargetRow(
+      { deviceId, platform: requestedPlatform },
+      signal,
+    );
+    if (
+      unidentified &&
+      (await heldDevicesUnidentifiedTransportCouldAlias(
+        pool,
+        unidentified,
+        false,
+        frameHeldSessionsFrom(daemonState.getSessionManager()),
+      ))
+    ) {
+      return true;
+    }
     for (const platform of managedSlotPlatformsFor(
       pool.getDevice(deviceId)?.platform,
       requestedPlatform,
@@ -930,10 +947,11 @@ function isDeviceHeld(deviceId: string): boolean {
  * the one pooled device it is on every path. A handset on USB and wireless debugging is one
  * pooled device held under one id, and a call may name it by either.
  *
- * A read resolves from the pool's cached fold. A control call also places a transport the pool
- * has not seen yet, so a wireless id first named here cannot slip past the holder of the handset
- * it reaches; when the adb listing fails while the pool tracks an Android device, it is refused
- * (`discovery_incomplete`) rather than judged as an unheld device. Synchronous, and `args` itself,
+ * Reads and controls place a transport the pool has not seen yet, so a wireless id first named
+ * here resolves to the canonical handset before either readiness or ownership is judged. An
+ * incomplete listing refuses only controls (`discovery_incomplete`); reads keep the id as sent
+ * and use the shared held-alias verdict to avoid readiness on a possible held device (#11596).
+ * Synchronous, and `args` itself,
  * whenever nothing changes and nothing is probed.
  */
 function resolveCallerDeviceIds<T extends Record<string, unknown>>(
@@ -945,11 +963,17 @@ function resolveCallerDeviceIds<T extends Record<string, unknown>>(
     return args;
   }
   const pool = daemonState.getDevicePool();
-  if (!request.control) {
+  if (
+    args.platform === "ios" ||
+    (typeof args.device === "object" &&
+      args.device !== null &&
+      Reflect.get(args.device, "platform") === "ios")
+  ) {
     return resolveToolCallDeviceIds(pool, args, undefined);
   }
   const { signal } = request;
   return resolveToolCallDeviceIds(pool, args, {
+    refuseUnplaced: request.control,
     now: (request.timer ?? defaultTimer).now(),
     tracksAndroidDevice: () => pool.getAllDevices().some((device) => device.platform === "android"),
     // RAW adb rows, as the pool's own refresh folds them. The session manager's scan is already
@@ -993,7 +1017,7 @@ function canonicalizeCallDeviceId(input: ExecutionTargetInput): Promise<void> | 
   }
   const resolvesDevice = options.shouldEnsureDevice ? options.shouldEnsureDevice(args) : true;
   const resolved = resolveCallerDeviceIds(
-    { deviceId: args.deviceId as string },
+    { deviceId: args.deviceId as string, platform: args.platform },
     {
       control: !isDeviceReadOnlyCall(options, args) && resolvesDevice && args.platform !== "ios",
       signal: input.signal,
@@ -1287,6 +1311,10 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     };
     options.assertHeldDeviceStart?.(providedDeviceId, sessionUuid, false);
     await assertManagedSlotControlAccess({ ...managedSlotAccess, deviceId: providedDeviceId });
+    await assertToolControlTargetIdentity(
+      { ...managedSlotAccess, deviceId: providedDeviceId },
+      signal,
+    );
     assertToolCallerHoldsDevice(name, readOnly, providedDeviceId, sessionUuid, autolockEnabled);
     if (providedDeviceId && !sessionUuid) {
       options.assertHeldDeviceStart?.(providedDeviceId, sessionUuid);
@@ -1464,7 +1492,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
           readOnly &&
           !sessionUuid &&
           readinessTarget &&
-          (await isSessionlessReadTargetHeld(name, readinessTarget, args.platform))
+          (await isSessionlessReadTargetHeld(name, readinessTarget, args.platform, signal))
         ) {
           return resolveSessionlessDeviceRead(
             input,
@@ -1478,6 +1506,10 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         if (readinessTarget !== providedDeviceId) {
           options.assertHeldDeviceStart?.(readinessTarget, sessionUuid, false);
           await assertManagedSlotControlAccess({ ...managedSlotAccess, deviceId: readinessTarget });
+          await assertToolControlTargetIdentity(
+            { ...managedSlotAccess, deviceId: readinessTarget },
+            signal,
+          );
         }
         assertToolCallerHoldsDevice(name, readOnly, readinessTarget, sessionUuid, autolockEnabled);
         options.assertHeldDeviceStart?.(readinessTarget, sessionUuid);
@@ -1520,6 +1552,10 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         deviceId: device.deviceId,
         platform: device.platform,
       });
+      await assertToolControlTargetIdentity(
+        { ...managedSlotAccess, deviceId: device.deviceId, platform: device.platform, device },
+        signal,
+      );
     }
     assertToolCallerHoldsDevice(name, readOnly, device?.deviceId, sessionUuid, autolockEnabled);
     if (device) {
@@ -2624,6 +2660,87 @@ function refuseControlCallBeforeAdmission(
   DaemonState.getInstance().getDevicePool().assertSessionReadyForAutomation(sessionUuid);
 }
 
+interface ToolTargetIdentityInput {
+  deviceId: string | undefined;
+  platform: unknown;
+  device?: BootedDevice;
+}
+
+/**
+ * Only an unassignable Android transport needs discovery. Its raw adb transport id carries the
+ * pool's distinguishing evidence; a synthetic row must never replace an available real row.
+ * The cached listing matches direct input frames; an unavailable row stays conservative.
+ */
+async function unidentifiedToolTargetRow(
+  input: ToolTargetIdentityInput,
+  signal?: AbortSignal,
+): Promise<BootedDevice | undefined> {
+  const daemonState = DaemonState.getInstance();
+  if (!input.deviceId || !daemonState.isInitialized()) {
+    return undefined;
+  }
+  const pool = daemonState.getDevicePool();
+  const knownDevice = input.device ?? pool.getDevice(input.deviceId);
+  if (input.platform === "ios" || knownDevice?.platform === "ios") {
+    return undefined;
+  }
+  const synthetic: BootedDevice = {
+    deviceId: input.deviceId,
+    name: input.deviceId,
+    platform: "android",
+  };
+  if (pool.isAndroidTransportAssignable?.(synthetic) !== false) {
+    return undefined;
+  }
+  if (input.device) {
+    return input.device;
+  }
+  try {
+    const listing = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed(
+      "android",
+      { signal },
+    );
+    return (
+      listing.devices.find(
+        (row) => row.platform === "android" && row.deviceId === input.deviceId,
+      ) ?? synthetic
+    );
+  } catch (error) {
+    // Missing discovery evidence is safe: the shared rule conservatively checks every possible hold.
+    logger.debug(
+      `[ToolRegistry] Identity listing unavailable for ${input.deviceId}: ${errorMessage(error)}`,
+    );
+    return synthetic;
+  }
+}
+
+/** Async identity gate beside managed-slot checks; the synchronous holder/mark turn stays intact. */
+async function assertToolControlTargetIdentity(
+  input: ToolTargetIdentityInput & { toolName: string; readOnly: boolean; sessionUuid?: string },
+  signal?: AbortSignal,
+): Promise<void> {
+  if (input.readOnly) {
+    return;
+  }
+  const device = await unidentifiedToolTargetRow(input, signal);
+  if (!device) {
+    return;
+  }
+  const daemonState = DaemonState.getInstance();
+  const sessionManager = daemonState.getSessionManager();
+  await assertFrameTargetIdentityProven(
+    daemonState.getDevicePool(),
+    device,
+    input.toolName,
+    Boolean(sessionManager.getSessionForDevice(device.deviceId)),
+    {
+      sessions: frameHeldSessionsFrom(sessionManager),
+      requesterSessionUuid: input.sessionUuid,
+      sessionManager,
+    },
+  );
+}
+
 /**
  * Device ownership for tool calls (#10698, #10730), matching `input/*`: a device another live
  * session holds runs device-aware tools only for its holder (a derived `${base}:${label}` session
@@ -2652,8 +2769,6 @@ function assertToolCallerHoldsDevice(
   }
   const sessionManager = DaemonState.getInstance().getSessionManager();
   const ownerSessionUuid = sessionManager.getSessionForDevice(deviceId) ?? undefined;
-  // The open owner decision for a transport the pool cannot identify lives behind this call.
-  assertToolTargetIdentityProven(devicePool, deviceId, toolName, ownerSessionUuid !== undefined);
   assertInputRequesterHoldsDevice({
     action: toolName,
     deviceId,

@@ -315,13 +315,13 @@ When one handset is reachable over both USB and Wi-Fi, the pool treats the
 endpoints as aliases of one device only when `ro.serialno` and boot identity prove
 it, and two emulators that merely share an AVD name are never merged.
 
-For direct `input/*` and device-mutating `ide/*` frames, an Android transport the
-pool cannot identify (`isAndroidTransportAssignable` is false) is refused only
+For direct `input/*`, device-mutating `ide/*` frames and device-aware control tools,
+an Android transport the pool cannot identify (`isAndroidTransportAssignable` is false) is refused only
 while a held Android device could be its alias. Held devices are every
 Android device still in the session holder map, including expired sessions and
 releases in progress until their ownership is removed, plus one unknown hold if
 the fresh managed-slot snapshot contains Android stable ids not represented by
-those sessions. Control frames reuse that snapshot for at most one second.
+those sessions. Control frames and tools reuse that snapshot for at most one second.
 
 The pool can positively distinguish the target from a held device only when its
 current folded alias group identifies another canonical device, its proven
@@ -333,9 +333,9 @@ serials or alias-group keys still could alias. A loopback port cannot distinguis
 a phone or an unknown device; an unknown managed-slot hold could alias unless
 the target's current folded group identifies another device.
 
-If no held device could alias the transport, the frame is allowed. If every
+If no held device could alias the transport, control is allowed. If every
 possible alias belongs to the requester's own session (including derived label
-sessions), the frame keeps the untyped “no proven identity” refusal. Otherwise
+sessions), control keeps the untyped “no proven identity” refusal. Otherwise
 it fails with `device_owned_by_other_session` and `retryable: false`, naming the
 transport the caller targeted; an unknown managed-slot hold uses
 `device_assigned_to_managed_slot` when its registry entry is available. Address
@@ -344,7 +344,7 @@ not restart a holder's idle window. A target already held under its very id goes
 through the normal holder check. Identifiable Android targets and iOS targets
 keep their existing behavior; screenshot, hierarchy and observe reads never
 pass this control check. A managed connection still controls only its own slot
-devices, after the identity check and before the existing ownership checks.
+devices; the existing connection and ownership checks still apply.
 
 A tool call may name such a device by either endpoint (#11618). The `deviceId` is
 resolved to the pool's one id for the device before any ownership, managed-slot
@@ -354,9 +354,10 @@ and the tool sees the pool's id. The same holds for an emulator's loopback adb
 address (`localhost:5555` for `emulator-5554`), and for every tool that takes a
 device id on every path: `setActiveDevice`, `killDevice`'s `device.deviceId`, a
 `getAndroid`, `getApple` or `startDevice` `deviceId`, plan steps, and a client
-that calls the daemon's MCP endpoint directly. A wireless id a control call names
-before the pool has seen it is identified first (one adb probe, not repeated per
-call); reads use only what the pool already knows.
+that calls the daemon's MCP endpoint directly. A wireless id a read or control
+call names before the pool has seen it is identified first (one adb probe, not repeated per
+call). The probe only reads discovery and identity and updates the pool fold; it
+never readies the device. Already folded aliases need no probe.
 
 A failed `adb devices` listing is never read as "no such device". If the listing
 fails while the pool tracks an Android device, a control call naming a wireless
@@ -369,8 +370,11 @@ pool tracks no Android device is refused nothing.
 
 An Android transport the pool cannot identify at all (a wireless phone
 reporting a generic serial, an emulator on a non-loopback `adb connect` address)
-is not an alias of anything: if no session holds it, tool calls on it are allowed
-as before.
+uses the same could-alias-a-held-device rule for device-aware control tools and
+direct frames. A sessionless read that could alias a held device stays on the
+read-only path without readiness; a proven alias reads the canonical device,
+and an unproven or unplaced transport reads the id as sent. Reads never refuse
+identity or ownership and never hold, bind or extend a session.
 
 ## Daemon restart
 

@@ -379,12 +379,12 @@ describe("every tool that takes a device id decides the same for any id of the d
       const args = (deviceId: string) => ({ ...namesDeviceId(deviceId, shape), ...identity });
       if (tool.isDeviceReadOnlyCall?.(args(USB)) === true) {
         // A read's body is real device code here; its id is resolved by the same entry point,
-        // from the pool's cached fold alone: never refused, never probed.
+        // a folded alias stays synchronous; a first-seen address is probed, never refused.
         const listings = d.listings();
         const unseen = neverSeenAlias();
         expect(ToolRegistry.resolveToolCallDeviceIds(tool, args(KNOWN_ALIAS))).toEqual(args(USB));
-        expect(ToolRegistry.resolveToolCallDeviceIds(tool, args(unseen))).toEqual(args(unseen));
-        expect(d.listings()).toBe(listings);
+        expect(await ToolRegistry.resolveToolCallDeviceIds(tool, args(unseen))).toEqual(args(USB));
+        expect(d.listings()).toBe(listings + 1);
         return;
       }
 
@@ -490,7 +490,7 @@ describe("a failed adb listing never fails open (#11618)", () => {
     expect(refusal).toMatchObject({ code: "discovery_incomplete", retryable: true });
   });
 
-  test("the holder keeps its phone by the pool's id while adb fails, and reads still answer", async () => {
+  test("the holder keeps its phone while an unplaced read stays read-only", async () => {
     d = await heldPhoneWhileAdbFails();
 
     const holder = await d.call("controlProbe", {
@@ -499,10 +499,14 @@ describe("a failed adb listing never fails open (#11618)", () => {
     });
     const read = await d.call("readProbe", { platform: "android", deviceId: UNSEEN });
 
-    expect([holder, read]).toEqual(["ran", "ran"]);
-    expect(d.tools.runs.map((run) => run.name)).toEqual(["controlProbe", "readProbe"]);
-    // Neither asked adb for a listing: a canonical id and a read never depend on the probe.
-    expect(d.listings()).toBe(0);
+    expect(holder).toBe("ran");
+    expect(read).toContain("Expected one booted device");
+    expect(read).not.toBe("discovery_incomplete");
+    expect(d.tools.runs.map((run) => run.name)).toEqual(["controlProbe"]);
+    expect(d.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    // Failed listings are not memoized: ingress and resolver each attempt placement, then
+    // the shared held-alias gate asks the cached listing for the real transport row.
+    expect(d.listings()).toBe(3);
   });
 
   test("the refusal is not remembered: the first call after adb recovers is judged as the phone", async () => {
@@ -541,7 +545,7 @@ describe("a control call naming a transport address the pool has never seen (#11
     d = undefined;
   });
 
-  test("an address a completed listing does not contain is not refused, and folds nothing", async () => {
+  test("an absent address could alias a holder: control is refused and folds nothing", async () => {
     d = await daemon({ pooledRows: [booted(USB)], held: USB });
 
     const outcome = await d.call("controlProbe", {
@@ -550,7 +554,8 @@ describe("a control call naming a transport address the pool has never seen (#11
     });
 
     expect(outcome).not.toBe("discovery_incomplete");
-    expect(outcome).not.toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+    expect(outcome).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+    expect(d.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
     expect(d.pool.getAndroidTransportAliases(USB)).toEqual([]);
   });
 

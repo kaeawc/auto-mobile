@@ -1,3 +1,9 @@
+import {
+  DEFAULT_STALL_MARGIN_MS,
+  MAX_CREDIBLE_DAEMON_STALL_MS,
+  splitScheduleGap,
+} from "./timerLateness";
+export { DEFAULT_STALL_MARGIN_MS, MAX_CREDIBLE_DAEMON_STALL_MS } from "./timerLateness";
 import { Timer, defaultTimer, monotonicClockSemanticsDrift } from "../utils/SystemTimer";
 import { readOptionalEnvPositiveInteger } from "../utils/envNumbers";
 import { logger } from "../utils/logger";
@@ -148,17 +154,6 @@ export interface SessionHeartbeatMonitorConfig {
    */
   forceStuckRelease?: (sessionId: string) => Promise<void>;
 }
-
-/**
- * The longest gap a monotonic clock that runs through host sleep may show and still be forgiven
- * as a stall of the daemon itself (#10962, owner decision 2026-10-09). Fixed rather than the idle
- * window: with a 2-minute window a 90 s laptop sleep was forgiven, contradicting "host sleep
- * counts toward idle", and a 60 s autolock window could be extended by up to 120 s.
- */
-export const MAX_CREDIBLE_DAEMON_STALL_MS = 30_000;
-
-/** Timer jitter tolerated before a late scan is treated as a stall of the daemon itself. */
-export const DEFAULT_STALL_MARGIN_MS = 2_000;
 
 /** Shared with the owner-disconnect release; see `./unsettledExecutionVeto` (#10712). */
 export { UNSETTLED_EXECUTION_VETO_CEILING_MS };
@@ -373,17 +368,15 @@ export class SessionHeartbeatMonitor {
     if (this.lastScanSettledAt === undefined || this.lastScanSettledMonotonic === undefined) {
       return undefined;
     }
-    const wallMs = now - this.lastScanSettledAt;
-    const awakeMs = Math.min(wallMs, monotonic - this.lastScanSettledMonotonic);
-    const lateMs = awakeMs - this.checkIntervalMs;
-    const sleptMs = wallMs - awakeMs;
+    const gap = splitScheduleGap({
+      wallElapsedMs: now - this.lastScanSettledAt,
+      monotonicElapsedMs: monotonic - this.lastScanSettledMonotonic,
+      scheduledMs: this.checkIntervalMs,
+      monotonicIncludesHostSleep: this.timer.monotonicIncludesHostSleep,
+      maxCredibleStallMs: this.maxCredibleStallMs,
+    });
     this.checkRawWallLead(monotonic);
-    // A clock that ran through host sleep reports sleep as lateness. Rather than forgive a laptop
-    // sleep of any length as a daemon stall, lateness past the longest credible stall is sleep.
-    if (this.timer.monotonicIncludesHostSleep === true && lateMs > this.maxCredibleStallMs) {
-      return { lateMs: 0, sleptMs: sleptMs + lateMs };
-    }
-    return { lateMs, sleptMs };
+    return gap;
   }
 
   /**

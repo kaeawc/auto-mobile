@@ -58,6 +58,7 @@ import {
   subscribeToolCallEndActivity,
 } from "./toolCallActivity";
 import { createDefaultStreamSocketAuthenticator } from "./streamSocketAuth";
+import { DatabaseHealthLateness } from "./databaseHealthLateness";
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy";
 import { SingleFlightInterval } from "./SingleFlightInterval";
@@ -3280,6 +3281,7 @@ export class Daemon {
   private startHealthCheckTimer(): void {
     const HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
     const MAX_FAILED_CHECKS = 3; // Allow 3 consecutive failures before taking action
+    const lateness = new DatabaseHealthLateness(this.timer, HEALTH_CHECK_INTERVAL);
     let failedCheckCount = 0;
     let lastFailureKind: HealthFailureKind = "unknown";
     const recordHealthCheckFailure = (failureKind: HealthFailureKind): void => {
@@ -3296,19 +3298,33 @@ export class Daemon {
       lastFailureKind = "unknown";
     };
 
+    const checkDatabaseHealth = async (
+      tickGap: ReturnType<DatabaseHealthLateness["tick"]>,
+    ): Promise<boolean> => {
+      const timeoutIsInconclusive = lateness.beginProbe(tickGap);
+      try {
+        await this.databaseHealthProbe.check();
+        this.lastDatabaseHealthFailure = undefined;
+        // Health check passed
+        resetHealthCheckFailures();
+        logger.debug("Health check passed");
+      } catch (error) {
+        if (timeoutIsInconclusive(error, failedCheckCount)) {
+          return false;
+        }
+        this.lastDatabaseHealthFailure = errorMessage(error);
+        logger.warn(`Health check failed: Database probe failed: ${error}`);
+        recordHealthCheckFailure("database");
+      }
+      return true;
+    };
+
     const checkHealth = async (): Promise<void> => {
+      const tickGap = lateness.tick();
       try {
         if (this.checkHealthListeners(recordHealthCheckFailure)) {
-          try {
-            await this.databaseHealthProbe.check();
-            this.lastDatabaseHealthFailure = undefined;
-            // Health check passed
-            resetHealthCheckFailures();
-            logger.debug("Health check passed");
-          } catch (error) {
-            this.lastDatabaseHealthFailure = errorMessage(error);
-            logger.warn(`Health check failed: Database probe failed: ${error}`);
-            recordHealthCheckFailure("database");
+          if (!(await checkDatabaseHealth(tickGap))) {
+            return;
           }
         }
 

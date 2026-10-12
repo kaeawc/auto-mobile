@@ -1,5 +1,6 @@
-import { describe, expect } from "bun:test";
+import { describe, expect, spyOn } from "bun:test";
 import { z } from "zod";
+import { McpSessionRecoveryInProgressError } from "../../src/daemon/deviceAutolockManager";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
@@ -312,6 +313,42 @@ describe("start admission and owner resume for restart reservations", () => {
       mcp_session_id: "owner-conn",
     });
     expect(f.autolockWrites).toEqual([{ sessionId: HOLDER, mcpSessionId: "owner-conn" }]);
+  });
+
+  test("autolock adoption refusal after resume never leaves R bound to a rolled-back boot", async () => {
+    const f = await fixture({ autolock: true, connection: "owner-conn" });
+    const adopt = f.pool.adoptResumedAutolockSession.bind(f.pool);
+    const adoption = spyOn(f.pool, "adoptResumedAutolockSession").mockImplementation(
+      async (...args) => {
+        expect(f.sessions.getSession(HOLDER)?.assignedDevice).toBe(f.device.deviceId);
+        const leases = Reflect.get(f.pool, "mcpSessionRecoveryDevices") as Map<string, unknown>;
+        leases.set("owner-conn", {
+          device: { ...f.pool.getDevice(f.device.deviceId)!, deviceId: "other" },
+          token: Symbol("adoption-refusal"),
+        });
+        try {
+          return await adopt(...args);
+        } finally {
+          leases.clear();
+          expect(leases.size).toBe(0);
+        }
+      },
+    );
+    cleanups.push(() => adoption.mockRestore());
+    const error = await f
+      .start({ avdName: f.device.name, __mcpSessionId: "owner-conn" })
+      .catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(McpSessionRecoveryInProgressError);
+    expect((Reflect.get(f.persistence, "rows") as Map<string, unknown>).size).toBe(1);
+    expect(f.autolockWrites).toEqual([]);
+    expect(f.pool.captureAutolockSessionForMcpSession("owner-conn")).toBeUndefined();
+    expect(f.sessions.getAllSessions().map((s) => s.sessionId)).toEqual([HOLDER]);
+    expect(f.sessions.getSession(HOLDER)?.assignedDevice).toBe(f.device.deviceId);
+    expect(f.internals.rehydrationReservations.has(HOLDER)).toBe(false);
+    expect(f.manager.getCallCount("killDevice")).toBe(0);
+    expect(await f.manager.getBootedDevices("android")).toEqual([
+      expect.objectContaining({ deviceId: f.device.deviceId }),
+    ]);
   });
 
   test("autolock resumed owner closed during boot is neither routed nor persisted", async () => {

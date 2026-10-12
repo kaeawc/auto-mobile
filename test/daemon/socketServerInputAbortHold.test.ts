@@ -533,11 +533,16 @@ class FakeFrameSocket extends EventEmitter implements FrameSocket {
   }
 }
 interface SocketHarness extends Harness {
+  handleRequest(
+    sessionId: string,
+    socket: Socket,
+    request: DaemonRequest,
+  ): Promise<DaemonResponse | undefined>;
   acceptingRequests: boolean;
   handleConnection(socket: Socket): void;
   activeRequestHandlers: Set<Promise<void>>;
 }
-test("client cancel wire answer waits for dispatched text and reports indeterminate", async () => {
+function socketHarness() {
   const { timer, stamps, handler: admission } = harness();
   const server = new UnixSocketServer(
     "unused",
@@ -546,15 +551,216 @@ test("client cancel wire answer waits for dispatched text and reports indetermin
     timer,
   ) as unknown as SocketHarness;
   server.acceptingRequests = true;
-  server.clearMcpClientIdleTimer = () => {};
-  server.scheduleMcpClientIdleClose = () => {};
-  server.resolveInputTargetDevice = admission.resolveInputTargetDevice;
-  server.requireCurrentFrameContext = () => {};
   server.clearMcpClientIdleTimer = admission.clearMcpClientIdleTimer;
   server.scheduleMcpClientIdleClose = admission.scheduleMcpClientIdleClose;
+  server.resolveInputTargetDevice = admission.resolveInputTargetDevice;
+  server.requireCurrentFrameContext = () => {};
   server.runTrackedDeviceInput = admission.runTrackedDeviceInput;
   const client = Object.create(AndroidCtrlProxyClient.prototype) as AndroidCtrlProxyClient;
   spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
+  const socket = new FakeFrameSocket();
+  const other = new FakeFrameSocket();
+  server.handleConnection(socket as unknown as Socket);
+  server.handleConnection(other as unknown as Socket);
+  return { server, timer, stamps, client, socket, other };
+}
+function cancel(socket: FakeFrameSocket, requestId: string) {
+  socket.send({
+    id: "cancel",
+    type: "daemon_request",
+    method: "daemon/cancelRequest",
+    params: { requestId },
+  });
+}
+async function finishSockets(f: ReturnType<typeof socketHarness>) {
+  f.socket.destroy();
+  f.other.destroy();
+  await drainMicrotasks(100);
+  await Promise.all([...f.server.activeRequestHandlers]);
+  expect(f.server.activeRequestHandlers.size).toBe(0);
+  expect(f.server.mcpForwardTails.size).toBe(0);
+  expect(f.timer.getPendingTimeoutCount()).toBe(0);
+}
+test.each(["cancel", "close"] as const)(
+  "parked text %s releases socket admission without sending or stamping",
+  async (mode) => {
+    const f = socketHarness();
+    const first = runner();
+    const sends: string[] = [];
+    spyOn(f.client, "requestSetText").mockImplementation((text, options) => {
+      sends.push(text);
+      if (text === "holder") {
+        return first.send(options?.abortSignal, options?.onDispatch);
+      }
+      options?.onDispatch?.();
+      return Promise.resolve({ success: true, totalTimeMs: 0 });
+    });
+    f.other.send({
+      ...frame("android"),
+      id: "holder",
+      params: { platform: "android", deviceId: "A", text: "holder" },
+    });
+    await drainUntil(() => first.dispatched, { description: "holder dispatch" });
+    const requests = spyOn(f.server, "handleRequest");
+    f.socket.send({ ...frame("android"), id: "parked" });
+    await drainMicrotasks(100);
+    expect(f.server.mcpForwardTails.size).toBe(1);
+    const parked = requests.mock.results.at(-1)!;
+    expect(parked.type).toBe("return");
+    let answered = false;
+    if (parked.type === "return") {
+      void parked.value.then(
+        () => {
+          answered = true;
+        },
+        () => {
+          answered = true;
+        },
+      );
+    }
+    if (mode === "cancel") {
+      cancel(f.socket, "parked");
+    } else {
+      f.socket.destroy();
+    }
+    f.socket.send({ ...frame("android", "other"), id: "next" });
+    await drainMicrotasks(100);
+    try {
+      if (mode === "cancel") {
+        expect(f.socket.responses.find((r) => r.id === "parked")).toMatchObject({
+          success: false,
+          error: expect.stringContaining("cancel"),
+        });
+        expect(f.socket.responses.find((r) => r.id === "next")).toMatchObject({ success: true });
+        expect(f.stamps).toEqual(["A", "other"]);
+      } else {
+        expect(answered).toBe(true);
+        expect(f.stamps).toEqual(["A"]);
+      }
+    } finally {
+      first.reply();
+      await finishSockets(f);
+      requests.mockRestore();
+    }
+    expect(sends).toEqual(mode === "cancel" ? ["holder", "a"] : ["holder"]);
+  },
+);
+test("text socket close while queued settles the undispatched frame before its holder", async () => {
+  const f = socketHarness();
+  const first = runner();
+  let sends = 0;
+  spyOn(f.client, "requestSetText").mockImplementation((_text, options) => {
+    sends++;
+    return first.send(options?.abortSignal, options?.onDispatch);
+  });
+  f.socket.send({ ...frame("android"), id: "holder" });
+  await drainUntil(() => first.dispatched, { description: "same socket holder dispatch" });
+  const requests = spyOn(f.server, "handleRequest");
+  f.socket.send({ ...frame("android"), id: "queued" });
+  const queued = requests.mock.results.at(-1)!;
+  expect(queued.type).toBe("return");
+  let answered = false;
+  if (queued.type === "return") {
+    void queued.value.then(
+      () => {
+        answered = true;
+      },
+      () => {
+        answered = true;
+      },
+    );
+  }
+  f.socket.destroy();
+  await drainMicrotasks(100);
+  try {
+    expect(answered).toBe(true);
+    expect(sends).toBe(1);
+    expect(f.stamps).toEqual(["A"]);
+    expect(first.inFlight).toBe(true);
+  } finally {
+    first.reply();
+    await finishSockets(f);
+    requests.mockRestore();
+  }
+  expect(sends).toBe(1);
+});
+test("text cancelled during target resolution answers and admits another device immediately", async () => {
+  const f = socketHarness();
+  const target = Promise.withResolvers<BootedDevice>();
+  let resolving = false;
+  const resolve = f.server.resolveInputTargetDevice;
+  f.server.resolveInputTargetDevice = (platform, id) => {
+    if (id === "A") {
+      resolving = true;
+      return target.promise;
+    }
+    return resolve(platform, id);
+  };
+  let sent = 0;
+  spyOn(f.client, "requestSetText").mockImplementation(async (_text, options) => {
+    options?.onDispatch?.();
+    sent++;
+    return { success: true, totalTimeMs: 0 };
+  });
+  f.socket.send(frame("android"));
+  await drainUntil(() => resolving, { description: "target resolution" });
+  cancel(f.socket, "A");
+  f.socket.send(frame("android", "other"));
+  await drainMicrotasks(100);
+  try {
+    expect(f.socket.responses.find((r) => r.id === "A")).toMatchObject({ success: false });
+    expect(f.socket.responses.find((r) => r.id === "other")).toMatchObject({ success: true });
+    expect(sent).toBe(1);
+    expect(f.stamps).toEqual(["other"]);
+  } finally {
+    target.resolve({ platform: "android", deviceId: "A", name: "Fake" });
+    await finishSockets(f);
+  }
+  expect(sent).toBe(1);
+  expect(f.stamps).toEqual(["other"]);
+});
+test.each(["before", "after"] as const)(
+  "wire cancellation %s the synchronous dispatch latch cannot answer cancelled and send",
+  async (order) => {
+    const f = socketHarness();
+    const first = runner();
+    spyOn(f.client, "requestSetText").mockImplementation((_text, options) => {
+      if (order === "before") {
+        cancel(f.socket, "A");
+      }
+      options?.abortSignal?.throwIfAborted();
+      const pending = first.send(options?.abortSignal, options?.onDispatch);
+      if (order === "after") {
+        cancel(f.socket, "A");
+      }
+      return pending;
+    });
+    f.socket.send(frame("android"));
+    await drainMicrotasks(100);
+    try {
+      if (order === "before") {
+        expect(f.socket.responses.find((r) => r.id === "A")).toMatchObject({ success: false });
+        expect(first.dispatched).toBe(false);
+        expect(f.stamps).toEqual([]);
+      } else {
+        expect(first.dispatched).toBe(true);
+        expect(f.socket.responses.find((r) => r.id === "A")).toBeUndefined();
+      }
+    } finally {
+      first.reply();
+      await drainMicrotasks(100);
+      await finishSockets(f);
+    }
+    if (order === "after") {
+      expect(f.socket.responses.find((r) => r.id === "A")?.error).toContain(
+        "outcome is indeterminate",
+      );
+    }
+  },
+);
+test("client cancel wire answer waits for dispatched text and reports indeterminate", async () => {
+  const f = socketHarness();
+  const { stamps, client, socket, other } = f;
   const first = runner();
   let calls = 0;
   spyOn(client, "requestSetText").mockImplementation((_text, options) => {
@@ -565,10 +771,6 @@ test("client cancel wire answer waits for dispatched text and reports indetermin
     options?.onDispatch?.();
     return Promise.resolve({ success: true, totalTimeMs: 0 });
   });
-  const socket = new FakeFrameSocket();
-  const other = new FakeFrameSocket();
-  server.handleConnection(socket as unknown as Socket);
-  server.handleConnection(other as unknown as Socket);
   socket.send(frame("android"));
   await drainUntil(() => first.dispatched, { description: "wire dispatch" });
   other.send({ ...frame("android"), id: "B" });
@@ -593,12 +795,7 @@ test("client cancel wire answer waits for dispatched text and reports indetermin
     success: false,
     error: expect.stringContaining("Text input outcome is indeterminate"),
   });
-  socket.destroy();
-  other.destroy();
-  await drainMicrotasks(100);
-  await Promise.all([...server.activeRequestHandlers]);
-  expect(server.mcpForwardTails.size).toBe(0);
-  expect(timer.getPendingTimeoutCount()).toBe(0);
+  await finishSockets(f);
 });
 
 test("abort during submit holds only the remaining caller budget", async () => {

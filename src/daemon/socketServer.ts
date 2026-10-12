@@ -256,6 +256,7 @@ import {
 import { CONTROL_SOCKET_MAX_FRAME_BYTES, LineFramer } from "./socketServer/LineFramer";
 import {
   SESSION_OWNERSHIP_LOST_CODE,
+  SessionReleasedDuringCallError,
   sessionReleaseThatCancelledCall,
 } from "./sessionReleasedDuringCall";
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
@@ -949,6 +950,8 @@ function assertSocketInputNotAborted(signal?: AbortSignal): void {
 
 /** Owner context the socket path hands to an `input/*` handler (#10006). */
 interface InputRequestContext {
+  /** Synchronously ends the admission cancellation race at this frame's first send. */
+  onDispatch?: () => void;
   /** Aborts on socket close and on `daemon/cancelRequest` for this frame. */
   signal?: AbortSignal;
   /** When the frame was received; the whole budget, socket queue wait included, runs from here. */
@@ -2280,6 +2283,13 @@ export class UnixSocketServer {
     let activeRequestSignal: AbortSignal | undefined;
     const cancellation = this.registerRequestCancellation(session, request.id);
 
+    const admissionCancellation = this.socketAdmissionCancellation(
+      request,
+      sessionId,
+      ownerSocket,
+      cancellation.signal,
+    );
+    let onTextDispatch: (() => void) | undefined;
     const handler = async (): Promise<DaemonResponse | undefined> => {
       try {
         if (request.method.startsWith("daemon/")) {
@@ -2310,8 +2320,11 @@ export class UnixSocketServer {
           ownerSocket,
           cancellation.signal,
           receivedAtMs,
-          (signal) => {
-            activeRequestSignal = signal;
+          {
+            onOwnerSignal: (signal) => {
+              activeRequestSignal = signal;
+            },
+            onTextDispatch: () => onTextDispatch?.(),
           },
         );
         if (localResult !== undefined) {
@@ -2450,8 +2463,8 @@ export class UnixSocketServer {
           // typed cancellation result), not by this race, which would reply at once (#11074).
           // provisionDevice is a barrier, so a cancel must release it at once: its typed
           // cancellation reply is awaited outside the barrier below (#11092).
-          // Text cancellation is answered by its handler too: after dispatch it
-          // must await the bounded request hold and return an indeterminate error.
+          // Text releases admission immediately if cancelled before its first send;
+          // after that synchronous latch its handler answers after the bounded hold.
           return this.isProvisionDeviceCall(request)
             ? this.runProvisionBarrier(handler, cancellation.signal, () =>
                 this.mcpForwardFailureResponse({
@@ -2463,13 +2476,16 @@ export class UnixSocketServer {
                 }),
               )
             : request.method === "input/typeText"
-              ? handler()
+              ? this.runCancellableTextHandler((onDispatch) => {
+                  onTextDispatch = onDispatch;
+                  return handler();
+                }, admissionCancellation.signal)
               : this.runCancellableQueuedHandler(handler, cancellation.signal);
         },
         {
           timer: this.timer,
           deadlineMs: deadline.value,
-          signal: cancellation.signal,
+          signal: admissionCancellation.signal,
           timeoutError: (sameLaneWait) =>
             new McpTimeoutError({
               toolName:
@@ -2494,7 +2510,10 @@ export class UnixSocketServer {
             )) ?? response)
           : response,
       )
-      .finally(cancellation.dispose);
+      .finally(() => {
+        admissionCancellation.dispose();
+        cancellation.dispose();
+      });
   }
 
   /**
@@ -5269,7 +5288,13 @@ export class UnixSocketServer {
     ownerSocket: Socket,
     cancelSignal: AbortSignal,
     receivedAtMs: number,
-    onOwnerSignal: (signal: AbortSignal) => void,
+    {
+      onOwnerSignal,
+      onTextDispatch,
+    }: {
+      onOwnerSignal: (signal: AbortSignal) => void;
+      onTextDispatch?: () => void;
+    },
   ): Promise<unknown> {
     if (!request.method.startsWith("input/") && !IDE_DEVICE_MUTATION_METHODS.has(request.method)) {
       return await this.handleLocalSocketRequest(request, sessionId);
@@ -5277,7 +5302,13 @@ export class UnixSocketServer {
     const owner = this.mcpRequestSignal(sessionId, ownerSocket, cancelSignal);
     onOwnerSignal(owner.signal);
     try {
-      return await this.handleLocalSocketRequest(request, sessionId, owner.signal, receivedAtMs);
+      return await this.handleLocalSocketRequest(
+        request,
+        sessionId,
+        owner.signal,
+        receivedAtMs,
+        onTextDispatch,
+      );
     } finally {
       owner.dispose();
     }
@@ -5288,6 +5319,7 @@ export class UnixSocketServer {
     socketSessionId?: string,
     signal?: AbortSignal,
     receivedAtMs?: number,
+    onTextDispatch?: () => void,
   ): Promise<any | undefined> {
     if (request.method.startsWith("input/")) {
       // A frame whose socket closed or whose client cancelled it while it sat in the socket
@@ -5295,6 +5327,7 @@ export class UnixSocketServer {
       signal?.throwIfAborted();
     }
     const input: InputRequestContext = {
+      onDispatch: onTextDispatch,
       signal,
       receivedAtMs,
       requester: request.method.startsWith("input/")
@@ -6858,6 +6891,7 @@ export class UnixSocketServer {
         const imeAction: ImeAction | undefined = args.submit ? "done" : undefined;
         let dispatched = false;
         const onDispatch = () => {
+          input?.onDispatch?.();
           dispatched = true;
           dispatching?.();
         };
@@ -8217,6 +8251,17 @@ export class UnixSocketServer {
         // or in flight cancels it (#10829).
         executionTracker.markSessionlessDeviceUse(execution.id, targetDevice.deviceId);
       }
+      const runOperation = (fenced?: AbortSignal) =>
+        toolName === "input/typeText"
+          ? this.runCancellableTextHandler(
+              (onDispatch) =>
+                operation(fenced, () => {
+                  onDispatch();
+                  dispatching();
+                }),
+              fenced,
+            )
+          : operation(fenced, dispatching);
       return await this.answeringSessionRelease(execution, () =>
         runWithToolSelectionContext(
           {
@@ -8228,10 +8273,7 @@ export class UnixSocketServer {
               },
             },
           },
-          () =>
-            this.runFencedInputOperation(signal, ownerSignal, (fenced) =>
-              operation(fenced, dispatching),
-            ),
+          () => this.runFencedInputOperation(signal, ownerSignal, runOperation),
         ),
       );
     } finally {
@@ -8276,15 +8318,23 @@ export class UnixSocketServer {
     try {
       return await run();
     } catch (error) {
-      // A dispatched text write cannot be represented as an undispatched release refusal.
+      const released = sessionReleaseThatCancelledCall(execution.cancelReason);
       if (
+        released &&
         error instanceof Error &&
         "requestDispatched" in error &&
         error.requestDispatched === true
       ) {
-        throw error;
+        // A release error can cancel several calls. Keep its class and wire fields without
+        // mutating the shared reason (a concurrent tap must not inherit the text's send note).
+        const textRelease = new SessionReleasedDuringCallError(
+          released.sessionUuid,
+          released.releaseReason,
+        );
+        textRelease.message = `${released.message} the text request had been dispatched; its outcome is indeterminate.`;
+        throw textRelease;
       }
-      throw sessionReleaseThatCancelledCall(execution.cancelReason) ?? error;
+      throw released ?? error;
     }
   }
 
@@ -8883,6 +8933,52 @@ export class UnixSocketServer {
     const created = this.appendTextFactory(device);
     this.appendTextInputs.set(device.deviceId, { input: created, incarnationToken });
     return { input: created, fromCache: false };
+  }
+
+  /** Text must observe socket close even before its handler enters device resolution. */
+  private socketAdmissionCancellation(
+    request: DaemonRequest,
+    sessionId: string,
+    ownerSocket: Socket,
+    cancelSignal: AbortSignal,
+  ): { signal: AbortSignal; dispose: () => void } {
+    if (request.method !== "input/typeText") {
+      return { signal: cancelSignal, dispose: () => {} };
+    }
+    return this.mcpRequestSignal(sessionId, ownerSocket, cancelSignal);
+  }
+
+  /** Race cancellation only until the text frame synchronously latches its first send. */
+  private async runCancellableTextHandler<T>(
+    handler: (onDispatch: () => void) => Promise<T>,
+    cancelSignal: AbortSignal | undefined,
+  ): Promise<T> {
+    const beforeDispatch = new AbortController();
+    let dispatched = false;
+    const onAbort = () => {
+      if (!dispatched) {
+        beforeDispatch.abort(cancelSignal?.reason);
+      }
+    };
+    cancelSignal?.addEventListener("abort", onAbort, { once: true });
+    if (cancelSignal?.aborted) {
+      onAbort();
+    }
+    try {
+      return await this.runCancellableQueuedHandler(
+        () =>
+          handler(() => {
+            // This flag and the abort listener decide synchronously: a cancelled answer
+            // can never precede a later send, even when cancellation lands at the latch.
+            beforeDispatch.signal.throwIfAborted();
+            dispatched = true;
+            cancelSignal?.removeEventListener("abort", onAbort);
+          }),
+        beforeDispatch.signal,
+      );
+    } finally {
+      cancelSignal?.removeEventListener("abort", onAbort);
+    }
   }
 
   /**

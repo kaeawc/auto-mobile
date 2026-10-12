@@ -1,5 +1,6 @@
 import { describe, expect, spyOn } from "bun:test";
 import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
+import { assertLifecycleCallerHoldsDevice } from "../../src/server/lifecycleDeviceOwnership";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
 import { drainUntil, drainMicrotasks, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 import { IOSCtrlProxyManager } from "../../src/ctrlProxy/IOSCtrlProxyManager";
@@ -260,6 +261,24 @@ describe("lifecycle stops drop only the requester's device-restart hold", () => 
     expect(replacement.restartHandoff).toBe(true);
   });
 
+  test.each(["videoRecording", "exportPlan"] as const)(
+    "%s retains the original holder guard for a rival naming reserved R",
+    async (toolName) => {
+      const f = await fixture("android");
+      const hold = f.internals.rehydrationReservations.get(BASE);
+      expect(f.sessions.getSession(BASE)).toBeNull();
+      expect(() =>
+        assertLifecycleCallerHoldsDevice({
+          toolName,
+          device: f.device,
+          requester: { sessionUuid: BASE, mcpSessionId: "rival-conn" },
+          force: false,
+        }),
+      ).not.toThrow();
+      expect(f.internals.rehydrationReservations.get(BASE)).toBe(hold);
+      expect(f.manager.killed).toEqual([]);
+    },
+  );
   for (const platform of ["android", "ios"] as const) {
     test(`${platform}: successful commit keeps a replacement reservation object`, async () => {
       const f = await fixture(platform);
@@ -437,11 +456,22 @@ describe("lifecycle stops drop only the requester's device-restart hold", () => 
               (error: unknown) => error,
             );
             expect(error).toBeInstanceOf(InputDeviceOwnedError);
-            expect(error).toMatchObject({ code: "device_owned_by_other_session" });
+            expect(error).toMatchObject({
+              code: "device_owned_by_other_session",
+              retryable: false,
+            });
+            expect((error as Error).message).toBe(
+              `killDevice refused: device '${f.device.deviceId}' is reserved for session ${BASE}'s device-restart recovery, and this connection did not own that session when the device restarted. Call from the owning connection, or wait for the recovery window to end. force: true does not override naming another client's session.`,
+            );
           } else {
             expect(JSON.parse((await pending).content[0].text)).toMatchObject({
               success: false,
-              failure: { code: "device_owned_by_other_session", phase: "precondition" },
+              failure: {
+                code: "device_owned_by_other_session",
+                phase: "precondition",
+                retryable: false,
+                message: `deleteDevice refused: device '${f.device.deviceId}' is reserved for session ${BASE}'s device-restart recovery, and this connection did not own that session when the device restarted. Call from the owning connection, or wait for the recovery window to end. force: true does not override naming another client's session.`,
+              },
             });
           }
           expect(f.manager.killed).toEqual([]);

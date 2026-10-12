@@ -59,6 +59,8 @@ export function assertLifecycleCallerHoldsDevice(input: {
   force: boolean;
   /** Extra stable identities of the target (an AVD name the caller resolved). */
   stableIds?: ReadonlyArray<string | undefined>;
+  /** Stop tools also fence a restart hold's original connection, even with force. */
+  checkRestartHold?: boolean;
 }): void {
   const { toolName, device, requester, force } = input;
   const daemonState = DaemonState.getInstance();
@@ -113,19 +115,25 @@ function assertLifecycleRequesterOwnsRestartHold(
     toolName,
     device,
     requester,
+    checkRestartHold,
   }: Pick<
     Parameters<typeof assertLifecycleCallerHoldsDevice>[0],
-    "toolName" | "device" | "requester"
+    "toolName" | "device" | "requester" | "checkRestartHold"
   >,
 ): void {
+  if (!checkRestartHold) {
+    return;
+  }
   if (pool.isRestartReservationOwnedByOtherConnection?.(device.deviceId, requester)) {
     throw new InputDeviceOwnedError(
       toolName,
       device.deviceId,
       requester.sessionUuid,
-      "Call from the connection that owned the session at device-restart handoff, or leave " +
-        "sessionUuid out to stop without dropping its hold. force: true does not override " +
-        "naming another client's session.",
+      undefined,
+      `${toolName} refused: device '${device.deviceId}' is reserved for session ` +
+        `${requester.sessionUuid}'s device-restart recovery, and this connection did not own ` +
+        "that session when the device restarted. Call from the owning connection, or wait for " +
+        "the recovery window to end. force: true does not override naming another client's session.",
     );
   }
 }

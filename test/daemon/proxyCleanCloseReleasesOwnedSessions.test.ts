@@ -357,3 +357,12 @@ test("managed sessions use only releaseExecution even without a stable owner tok
     drain.close();
   }
 });
+
+test("one-shot CLI sessions survive close before liveness is declared", async () => {
+  const rig = setup({ oneShotCli: true });
+  await rig.proxy.callTool("getAndroid", { deviceId: "undeclared-cli" });
+  expect(rig.sessions.getSession("undeclared-cli")?.livenessPolicy).toBe("heartbeat");
+  await rig.proxy.close();
+  expect(releases(rig)).toEqual([]);
+  expect(rig.sessions.hasSession("undeclared-cli")).toBe(true);
+});

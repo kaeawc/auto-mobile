@@ -243,12 +243,19 @@ export class OwnerDisconnectRelease {
   /** Time until the armed attempt; an attempt in flight has only a bounded poll hint. Pure read. */
   remainingMs(sessionId: string): number | undefined {
     const pending = this.pending.get(sessionId);
-    if (!pending) {
+    if (
+      !pending ||
+      this.port.hasConnectedOwner(sessionId) ||
+      ownerDisconnectReleaseBlocker(pending.session, pending.closedAt) !== undefined
+    ) {
       return undefined;
     }
-    return pending.handle === undefined
-      ? DEVICE_PREPARED_FOR_OTHER_REQUEST_RETRY_AFTER_MS
-      : Math.max(0, pending.dueAt - this.now());
+    // The pool's getSession probes stalls and expires sessions; judge the pending object only.
+    if (pending.handle === undefined) {
+      return DEVICE_PREPARED_FOR_OTHER_REQUEST_RETRY_AFTER_MS;
+    }
+    const remainingMs = pending.dueAt - this.now();
+    return remainingMs > this.graceMs ? undefined : Math.max(0, remainingMs);
   }
 
   isPending(sessionId: string): boolean {

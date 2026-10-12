@@ -11,11 +11,16 @@ async function setup() {
   const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
   const session = await manager.createSession("holder", "device", "android");
   let calls = 0;
+  let connected = false;
+  let reads = 0;
   let finish: ((result: { deferredUntil: number } | void) => void) | undefined;
   const release = new OwnerDisconnectRelease(
     {
-      getSession: () => session,
-      hasConnectedOwner: () => false,
+      getSession: () => {
+        reads++;
+        return session;
+      },
+      hasConnectedOwner: () => connected,
       release: async () => {
         calls++;
         return await new Promise<{ deferredUntil: number } | void>((resolve) => {
@@ -30,7 +35,12 @@ async function setup() {
   return {
     timer,
     manager,
+    session,
     release,
+    reads: () => reads,
+    connect: () => {
+      connected = true;
+    },
     calls: () => calls,
     finish: (due?: number) => finish?.(due === undefined ? undefined : { deferredUntil: due }),
   };
@@ -93,6 +103,60 @@ test("an overdue scheduled attempt never reports a negative remaining time", asy
     rig.finish();
     await drainMicrotasks(32);
   } finally {
+    rig.manager.stopCleanupTimer();
+  }
+});
+
+for (const blocker of ["heartbeat", "connected-owner"] as const) {
+  test(`remaining time excludes a pending release blocked by ${blocker} without reading the pool`, async () => {
+    const rig = await setup();
+    try {
+      rig.release.ownerDisconnected("holder", "owner");
+      const reads = rig.reads();
+      rig.timer.advanceTime(1_000);
+      if (blocker === "heartbeat") {
+        rig.session.lastOwnerHeartbeat = rig.timer.now() + 100;
+      } else {
+        rig.connect();
+      }
+      for (const elapsed of [0, 2_000, 2_000, 2_000, 999]) {
+        rig.timer.advanceTime(elapsed);
+        expect(rig.release.remainingMs("holder")).toBeUndefined();
+        expect(rig.release.isPending("holder")).toBe(true);
+        expect(rig.reads()).toBe(reads);
+      }
+      rig.timer.advanceTime(2);
+      expect(rig.calls()).toBe(0);
+      expect(rig.release.isPending("holder")).toBe(false);
+    } finally {
+      rig.release.cancel("holder");
+      rig.manager.stopCleanupTimer();
+    }
+  });
+}
+
+test("a release deferred beyond grace has no hint until executions end and rearm it", async () => {
+  const rig = await setup();
+  try {
+    rig.release.ownerDisconnected("holder", "owner");
+    rig.timer.advanceTime(8_000);
+    expect(rig.calls()).toBe(1);
+    rig.finish(608_100);
+    await drainMicrotasks(32);
+    expect(rig.release.remainingMs("holder")).toBeUndefined();
+    expect(rig.release.isPending("holder")).toBe(true);
+    rig.release.executionsEnded(["holder"]);
+    expect(rig.release.remainingMs("holder")).toBe(0);
+    rig.timer.advanceTime(0);
+    expect(rig.calls()).toBe(2);
+    expect(rig.release.remainingMs("holder")).toBe(
+      DEVICE_PREPARED_FOR_OTHER_REQUEST_RETRY_AFTER_MS,
+    );
+    rig.finish();
+    await drainMicrotasks(32);
+    expect(rig.release.isPending("holder")).toBe(false);
+  } finally {
+    rig.release.cancel("holder");
     rig.manager.stopCleanupTimer();
   }
 });

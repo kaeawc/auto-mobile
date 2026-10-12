@@ -1973,7 +1973,12 @@ export class DaemonMcpProxy {
 
   /** Release only this process's ordinary heartbeat holds; harness and CLI holds survive exit. */
   private async releaseOwnedSessions(client: DaemonClientLike | null): Promise<void> {
-    if (!client || stableLivenessOwnerToken(this.config) || this.cliSessionLivenessDeclared) {
+    if (
+      !client ||
+      stableLivenessOwnerToken(this.config) ||
+      this.config.oneShotCli ||
+      this.cliSessionLivenessDeclared
+    ) {
       return;
     }
     const sessions = this.heldSessionUuids().filter(
@@ -1998,6 +2003,7 @@ export class DaemonMcpProxy {
               label: `Release owned session ${sessionId}`,
             },
           );
+          // DaemonClientLike permits arbitrary results; injected clients can resolve refusal envelopes.
           if (result && typeof result === "object" && Reflect.get(result, "success") === false) {
             throw Object.assign(new ActionableError(String(Reflect.get(result, "error"))), {
               code: Reflect.get(result, "code"),

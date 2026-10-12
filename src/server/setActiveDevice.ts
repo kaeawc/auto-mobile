@@ -26,7 +26,10 @@ import {
   resolveDirectSessionDevice,
 } from "./directSessionDeviceRegistry";
 import { prepareSessionDisplayPin } from "./sessionDisplayPin";
-import { heldDeviceBindRefusal } from "../daemon/inputDeviceOwnership";
+import {
+  deviceAssignedToOtherSessionError,
+  heldDeviceBindRefusal,
+} from "../daemon/inputDeviceOwnership";
 import { executionTracker } from "./executionTracker";
 import { isClientCancelled } from "../utils/AbortContext";
 import { acquireUndoneIfUndelivered } from "./undeliveredAcquisition";
@@ -112,8 +115,7 @@ function refuseForeignOwnedSession(args: HandlerArgs): void {
     const sessionDevice = daemonState
       .getSessionManager()
       .getSession(args.sessionUuid)?.assignedDevice;
-    throw heldDeviceBindRefusal(
-      daemonState.getDevicePool(),
+    throw deviceAssignedToOtherSessionError(
       sessionDevice ?? "unknown",
       args.sessionUuid,
       undefined,

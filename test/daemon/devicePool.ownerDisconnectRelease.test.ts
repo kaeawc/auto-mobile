@@ -205,7 +205,31 @@ describe("DevicePool owner-disconnect release (#10503)", () => {
     fakeTimer.advanceTime(1_000);
     sessionManager.recordHeartbeat(OWNER_SESSION);
 
-    fakeTimer.advanceTime(OWNER_DISCONNECT_GRACE_MS);
+    for (const elapsed of [0, 2_000, 2_000, 2_000, 999]) {
+      fakeTimer.advanceTime(elapsed);
+      sessionManager.recordHeartbeat(OWNER_SESSION);
+      const clocks = [
+        ownerSession().lastUsedAt,
+        ownerSession().lastHeartbeat,
+        ownerSession().lastOwnerHeartbeat,
+      ];
+      const error = await bind("rival", NEW_CONNECTION).catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(InputDeviceOwnedError);
+      if (!(error instanceof InputDeviceOwnedError)) {
+        throw new Error("expected typed refusal");
+      }
+      expect(error.toPayload()).toEqual({
+        code: "device_owned_by_other_session",
+        deviceId: DEVICE.deviceId,
+        retryable: false,
+      });
+      expect([
+        ownerSession().lastUsedAt,
+        ownerSession().lastHeartbeat,
+        ownerSession().lastOwnerHeartbeat,
+      ]).toEqual(clocks);
+    }
+    fakeTimer.advanceTime(2);
     await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
 
     expect(sessionManager.getSession(OWNER_SESSION)).not.toBeNull();

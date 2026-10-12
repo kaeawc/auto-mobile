@@ -8,11 +8,12 @@
 #                 device past the idle window.
 #   no-heartbeat  When the proxy's heartbeats stop (the process is suspended
 #                 with SIGSTOP, so its socket stays open), the device is
-#                 released about 10 s later.
+#                 released about 10 s later, with a heartbeat-loss reason and no idle field.
 #   idle          A proxy that keeps heartbeating but makes no tool calls holds
 #                 the device until the idle window ends, and then loses it. The
 #                 connection binding and released UUID must refuse further control
 #                 calls with acquire_new_session, without re-acquiring the device.
+#                 The daemon records cleanup-expired with idle: true.
 #   stdin-eof     A proxy whose stdin closes (the MCP host went away) exits on its
 #                 own and its device is released within the no-heartbeat budget.
 #   selector      Control calls that name only `deviceId` (no sessionUuid) are
@@ -21,14 +22,16 @@
 #                 each call.
 #   observe-only  No read counts as activity, not even the owner's own (#10964):
 #                 an owner that only observes by deviceId loses the device at the
-#                 idle window, and lastToolActivityAt never moves.
+#                 idle window, and lastToolActivityAt never moves; cleanup-expired carries idle: true.
 #   two-devices   One proxy holds two emulators (needs --second-serial). Using
-#                 only B lets A go at its own idle deadline while B stays held.
+#                 only B lets A go at its own idle deadline while B stays held;
+#                 A's cleanup-expired release carries idle: true.
 #   stream        An owner's observation-stream subscriber (nc -U on the aux socket)
 #                 receives a terminal SESSION_ENDED frame at the idle release (every
 #                 idle release is terminal for the session) and no device_session_ended
 #                 frame (the device epoch outlives the agent session). The frames are
-#                 kept as evidence.
+#                 kept as evidence; the stream neither holds nor extends the session,
+#                 whose cleanup-expired release carries idle: true.
 #   provision     Like selector, for a session minted by provisionDevice
 #                 (#10821). Opt-in only: provisionDevice is not enabled everywhere,
 #                 so it is not part of `all`.
@@ -72,6 +75,8 @@ NC="${AUTOMOBILE_IDLE_CHECK_NC:-nc}"
 # owner's heartbeat, not the idle window, and no longer widen this bound.
 MONITOR_SCAN_MS=2000
 NO_HEARTBEAT_BUDGET_MS=10000
+# Release teardown runs device cleanup after active-sessions stops listing the session.
+RELEASE_REASON_WAIT_S=30
 # Only control calls are activity (#10964); a read such as observe never extends the idle window.
 CONTROL_TOOL=homeScreen
 
@@ -105,6 +110,7 @@ current_scenario=""
 # query can never be mistaken for an empty (released) answer inside $(...).
 entry=""
 released_at=""
+release_reply=""
 
 usage() {
   cat <<'EOF'
@@ -418,6 +424,58 @@ active_sessions_json() {
   printf '%s\n' "${output}" | tail -n 1
 }
 
+# Query the private socket directly: session-info refuses launch flags, and a released
+# session deliberately exits 1 while still printing its structured release evidence.
+query_release_info() {
+  local session="$1" output timestamp deadline
+  timestamp="$(now_ms)" || die "could not read the clock"
+  deadline=$((timestamp + RELEASE_REASON_WAIT_S * 1000))
+  while true; do
+    output="$("${BUN}" "${server}" --daemon session-info "${session}" --json \
+      2>> "${work_dir}/daemon-cli.log")" || true
+    release_reply="$(printf '%s\n' "${output}" | tail -n 1)" || die "could not read the session-info reply"
+    timestamp="$(now_ms)" || die "could not read the clock"
+    printf '%s %s\n' "${timestamp}" "${release_reply}" >> "${evidence_dir}/${current_scenario}.release.log" ||
+      die "could not save the session-info reply"
+    if jq -e 'try (type == "object" and (.releaseReason | type == "string")) catch false' \
+      <<< "${release_reply}" > /dev/null 2>&1; then
+      return 0
+    fi
+    if ((timestamp >= deadline)); then
+      break
+    fi
+    "${SLEEP_CMD}" 1 || die "could not wait for the session-info release reason"
+  done
+  if jq -e 'try (type == "object" and has("sessionId")) catch false' \
+    <<< "${release_reply}" > /dev/null 2>&1; then
+    die "session-info still reports session ${session} live ${RELEASE_REASON_WAIT_S} s after active-sessions stopped listing it; reply: '${release_reply:0:300}'"
+  fi
+  die "session-info named no releaseReason for session ${session} within ${RELEASE_REASON_WAIT_S} s of its release; reply: '${release_reply:0:300}'"
+}
+
+assert_release_reason() {
+  local mode="$1" session="$2" reason
+  query_release_info "${session}"
+  reason="$(jq -r '.releaseReason' <<< "${release_reply}")" || die "could not read the releaseReason"
+  case "${mode}" in
+    idle)
+      [[ "${reason}" == cleanup-expired ]] ||
+        die "the idle release was recorded as '${reason}'; an idle end must carry reason cleanup-expired"
+      jq -e '.idle == true' <<< "${release_reply}" > /dev/null ||
+        die "the idle release (cleanup-expired) does not carry idle: true"
+      log "${current_scenario}: daemon recorded the release as ${reason} (idle: true)"
+      ;;
+    heartbeat)
+      [[ "${reason}" == heartbeat-timeout || "${reason}" == missing-first-heartbeat ]] ||
+        die "the heartbeat-loss release was recorded as '${reason}'; expected heartbeat-timeout or missing-first-heartbeat"
+      jq -e 'has("idle") | not' <<< "${release_reply}" > /dev/null ||
+        die "the heartbeat-loss release carries an idle field; only an idle end may"
+      log "${current_scenario}: daemon recorded the release as ${reason} (no idle field)"
+      ;;
+    *) die "unknown release assertion mode '${mode}'" ;;
+  esac
+}
+
 # Set entry to the active-sessions entry holding the emulator (default: --serial), or to ""
 # when none does.
 query_device_entry() {
@@ -433,11 +491,10 @@ entry_field() {
   jq -r --arg field "$2" '.[$field] | if . == null then "null" else tostring end' <<< "$1"
 }
 
-# The daemon re-derives a fixed activity instant against a wall clock on every query, so one
-# unmoved instant reads back a few milliseconds apart (measured offsets 0 to -2 ms, #11368).
-# TIMESTAMP_JITTER_MS bounds that conversion error. It is far below the smallest real step (a
-# heartbeat or control call is at least a call interval away), so a genuine credit still fails the
-# comparison. "null" only matches "null".
+# The daemon reports instants through a stable wall anchor (SteadyWallClock.toWall, #11368),
+# so an unmoved instant normally reads back identical. The 5 ms bound is a backstop, still far
+# below the smallest real credit (a heartbeat or control call is at least a call interval away),
+# so a genuine credit still fails the comparison. "null" only matches "null".
 TIMESTAMP_JITTER_MS=5
 same_instant() {
   local a="$1" b="$2" delta
@@ -643,6 +700,7 @@ scenario_no_heartbeat() {
   stopped="$(now_ms)"
   wait_for_release $((stopped + NO_HEARTBEAT_BUDGET_MS + slack_ms)) ||
     die "${serial} still held $((NO_HEARTBEAT_BUDGET_MS + slack_ms)) ms after heartbeats stopped"
+  assert_release_reason heartbeat "${session_id}"
   log "no-heartbeat: released $((released_at - stopped)) ms after heartbeats stopped (budget ${NO_HEARTBEAT_BUDGET_MS} ms)"
   stop_proxy
   finish_scenario
@@ -652,6 +710,7 @@ scenario_no_heartbeat() {
 # Check deviceId first, then the released UUID, through that same live proxy.
 assert_release_is_terminal() {
   local selector value expected call_status device_code=""
+  local refusal reason reasons=""
   for selector in deviceId sessionUuid; do
     if [[ "${selector}" == deviceId ]]; then
       value="${serial}"
@@ -674,6 +733,20 @@ assert_release_is_terminal() {
       ("${selector}" == sessionUuid || "${last_response}" != *no_active_device_session*)) ]]; then
       die "${selector} refusal expected ${expected}; reply: '${last_response:0:300}'"
     fi
+    refusal="$(jq -c 'try ((
+      if (.result.content[0].text | type) == "string" then .result.content[0].text | fromjson
+      elif (.error.data | type) == "object" then .error.data
+      elif (.error.data | type) == "string" then .error.data | fromjson
+      else null end
+      ) | .error // .) catch null' \
+      <<< "${last_response}")" ||
+      die "${selector} refusal after the idle release does not carry idle: true; reply: '${last_response:0:300}'"
+    jq -e '.idle == true' <<< "${refusal}" > /dev/null 2>&1 ||
+      die "${selector} refusal after the idle release does not carry idle: true; reply: '${last_response:0:300}'"
+    reason="$(jq -r '.reason' <<< "${refusal}")" || die "could not read the refusal reason"
+    [[ "${reason}" == cleanup-expired || "${reason}" == replay-lease-expired ]] ||
+      die "${selector} refusal after the idle release names reason '${reason}'; expected cleanup-expired (or the proxy-local replay-lease-expired)"
+    reasons+="${reasons:+; }${selector} reason: ${reason}"
     if [[ "${selector}" == deviceId ]]; then
       device_code=no_active_device_session
       [[ "${last_response}" != *session_ownership_lost* ]] || device_code=session_ownership_lost
@@ -683,7 +756,7 @@ assert_release_is_terminal() {
     [[ -z "${entry}" ]] || die "a refused call re-acquired ${serial} after its idle release"
     proxy_alive || die "the proxy exited after the terminal release refusal"
   done
-  log "idle: terminal release refused control calls with ${device_code} and session_ownership_lost (acquire_new_session)"
+  log "idle: terminal release refused control calls with ${device_code} and session_ownership_lost (acquire_new_session; ${reasons})"
 }
 
 scenario_idle() {
@@ -723,6 +796,7 @@ scenario_idle() {
 
   wait_for_release $((acquired + idle_timeout_ms + MONITOR_SCAN_MS + slack_ms)) ||
     die "${serial} still held after the ${idle_timeout_ms} ms idle window"
+  assert_release_reason idle "${session_id}"
   proxy_alive || die "the proxy exited before the release, so this was not an idle release"
   log "idle: released $((released_at - acquired)) ms after the last tool call (idle window ${idle_timeout_ms} ms)"
   assert_release_is_terminal
@@ -793,6 +867,7 @@ scenario_observe_only() {
       sleep_ms "${call_interval_ms}"
     fi
   done
+  assert_release_reason idle "${session_id}"
   if ((released_at - acquired < idle_timeout_ms - slack_ms)); then
     die "${serial} was released only $((released_at - acquired)) ms after acquisition, before its ${idle_timeout_ms} ms idle window"
   fi
@@ -898,6 +973,7 @@ scenario_two_devices() {
       sleep_ms "${call_interval_ms}"
     fi
   done
+  assert_release_reason idle "${session_a}"
   if ((released_a - acquired_a < idle_timeout_ms - slack_ms)); then
     die "${serial} was released only $((released_a - acquired_a)) ms after its last use, before its ${idle_timeout_ms} ms idle window"
   fi
@@ -973,6 +1049,7 @@ scenario_stream() {
     die "the observation stream refused the subscription: $(head -c 300 "${frames}")"
   wait_for_release $((acquired + idle_timeout_ms + MONITOR_SCAN_MS + slack_ms)) ||
     die "${serial} still held after the ${idle_timeout_ms} ms idle window"
+  assert_release_reason idle "${session_id}"
   # The terminal frame is pushed on release; give it time to arrive before judging the stream.
   attempts=0
   while ! stream_has_session_ended "${frames}" && ((attempts < 5)); do
@@ -984,7 +1061,7 @@ scenario_stream() {
   if grep -q '"device_session_ended"' "${frames}"; then
     die "the idle release pushed device_session_ended; the device epoch must outlive the agent session"
   fi
-  log "stream: subscription ended with SESSION_ENDED at the idle release; frames in ${frames}"
+  log "stream: subscription neither held nor extended the session and ended with SESSION_ENDED at the idle release; frames in ${frames}"
   stop_stream_subscriber
   stop_proxy
   finish_scenario

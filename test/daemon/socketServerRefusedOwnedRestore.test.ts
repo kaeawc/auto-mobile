@@ -129,28 +129,49 @@ describe("refused owned-session restore", () => {
         getDevicePool: () => pool,
       } as unknown as DaemonStateAccess,
       new FakeTimer(),
-    ) as unknown as RestoreSeam;
-    for (const args of [
-      undefined,
-      null,
-      [],
-      {},
-      { [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: " " },
-    ]) {
-      await server.restoreSelectorSessions(args, "client");
+    );
+    server["acceptingRequests"] = true;
+    const socket = new FakeSocket();
+    server["handleConnection"](socket);
+    const socketId = [...server["sessions"].keys()][0]!;
+    const seam = server as unknown as RestoreSeam;
+    try {
+      for (const args of [
+        undefined,
+        null,
+        [],
+        {},
+        { [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: " " },
+      ]) {
+        await seam.restoreSelectorSessions(args, socketId);
+      }
+      expect(events).toEqual([]);
+      await seam.restoreSelectorSessions(
+        { [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: "owner" },
+        socketId,
+      );
+      expect(events).toEqual([`${socketId}:owner`]);
+      events.length = 0;
+      const ownedArgs = {
+        [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: "owner",
+        [DAEMON_OWNED_SESSIONS_PARAM]: [MINE],
+      };
+      await seam.restoreSelectorSessions(ownedArgs, socketId);
+      expect(events).toEqual([`${socketId}:owner`, "restore"]);
+
+      socket.destroy();
+      expect(server["clientSockets"].has(socketId)).toBe(false);
+      events.length = 0;
+      await seam.restoreSelectorSessions(
+        { [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: "owner" },
+        socketId,
+      );
+      expect(events).toEqual([]);
+      await seam.restoreSelectorSessions(ownedArgs, socketId);
+      expect(events).toEqual(["restore"]);
+    } finally {
+      socket.destroy();
     }
-    expect(events).toEqual([]);
-    await server.restoreSelectorSessions(
-      { [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: "owner" },
-      "client",
-    );
-    expect(events).toEqual(["client:owner"]);
-    events.length = 0;
-    await server.restoreSelectorSessions(
-      { [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: "owner", [DAEMON_OWNED_SESSIONS_PARAM]: [MINE] },
-      "client",
-    );
-    expect(events).toEqual(["client:owner", "restore"]);
   });
 
   test("does not fail a call that targets a different device", async () => {

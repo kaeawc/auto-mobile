@@ -25,8 +25,12 @@ import type { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createDeviceRestoreEpochHarness } from "../helpers/deviceRestoreEpochHarness";
 import { useSessionIdleWindowForSuite } from "../helpers/sessionIdleWindowEnv";
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 
-afterEach(() => DaemonState.getInstance().reset());
+afterEach(() => {
+  DaemonState.getInstance().reset();
+  expect(DaemonState.getInstance().isInitialized()).toBe(false);
+});
 
 // These tests exercise the three-minute restart recovery window, which the idle deadline caps.
 useSessionIdleWindowForSuite();
@@ -100,10 +104,11 @@ async function boundRecoveryHarness() {
     },
   });
   await incidents.completeRecovery(incident.id, "not-attempted");
+  const deviceManager = new FakeDeviceManager();
   const pool = new DevicePool(
     createDevicePoolDependencies(manager, "test-daemon", {
       timer,
-      deviceManager: new FakeDeviceManager(),
+      deviceManager,
       installedAppsRepository: new FakeInstalledAppsRepository(),
       emulatorLossIncidentStore: incidents,
     }),
@@ -184,6 +189,8 @@ async function boundRecoveryHarness() {
     timer,
     persistence,
     manager,
+    pool,
+    deviceManager,
     server,
     socketId,
     forwarded,
@@ -612,13 +619,17 @@ test("a failed token declaration is logged and does not stop owned-session resto
     { isInitialized: () => true, getDevicePool: () => pool },
     new FakeTimer(),
   );
+  const socket = new FakeSocket();
+  server["acceptingRequests"] = true;
+  server["handleConnection"](socket);
+  const connectionId = [...server["sessions"].keys()][0]!;
   try {
     await server["restoreSelectorSessions"](
       {
         [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: "owner",
         [DAEMON_OWNED_SESSIONS_PARAM]: ["owned"],
       },
-      "client",
+      connectionId,
     );
     expect(events).toEqual(["restore"]);
     expect(warn).toHaveBeenCalledWith(
@@ -627,5 +638,59 @@ test("a failed token declaration is logged and does not stop owned-session resto
     );
   } finally {
     warn.mockRestore();
+    socket.destroy();
+  }
+});
+
+test("a token declaration after socket close leaves no inert identity or later mint token (#11999)", async () => {
+  const h = await boundRecoveryHarness();
+  const other = h.connect();
+  const entered = Promise.withResolvers<void>();
+  const proceed = Promise.withResolvers<void>();
+  const startup = spyOn(h.server, "waitForStartup").mockImplementation(async () => {
+    entered.resolve();
+    await proceed.promise;
+  });
+  try {
+    const request = h.server["handleRequest"](other.id, other.socket, {
+      id: "late-token",
+      type: "mcp_request",
+      method: "tools/call",
+      params: {
+        name: "getAndroid",
+        arguments: { [DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM]: "closed-token" },
+      },
+    });
+    await entered.promise;
+    other.socket.destroy();
+    expect(h.pool["mcpSessionLivenessOwnerTokens"].has(other.id)).toBe(false);
+    proceed.resolve();
+    await request;
+    await drainMicrotasks(16);
+    expect(h.pool["mcpSessionLivenessOwnerTokens"].has(other.id)).toBe(false);
+    await h.manager.releaseSession("bound", "explicit-release");
+    h.deviceManager.bootedDevices = [
+      { name: "Pixel", deviceId: "emulator-5554", platform: "android" },
+    ];
+    await h.pool.initializeWithDevices(h.deviceManager.bootedDevices);
+    await h.pool.bindOrReuseDeviceSession(
+      "later-mint",
+      "emulator-5554",
+      "android",
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      "different-connection",
+    );
+    expect(h.manager.getSession("later-mint")?.livenessOwnerToken).toBeUndefined();
+  } finally {
+    proceed.resolve();
+    startup.mockRestore();
+    other.socket.destroy();
+    h.close();
   }
 });

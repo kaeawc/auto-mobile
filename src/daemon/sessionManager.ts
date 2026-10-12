@@ -3791,11 +3791,15 @@ export class SessionManager {
       return null;
     }
     const startedExecution = execution && this.executionOnSessionClock(execution);
-    if (
-      expireDespiteActiveExecution &&
-      this.isLateExecutionWhileEarlierWorkIsActive(session, startedExecution)
-    ) {
-      return session;
+    if (expireDespiteActiveExecution) {
+      if (this.isLateExecutionWhileEarlierWorkIsActive(session, startedExecution, true)) {
+        return session;
+      }
+      if (this.isLateExecutionWhileEarlierWorkIsActive(session, startedExecution)) {
+        throw new Error(
+          `Session ${sessionId} expired before this execution began while earlier work is still active.`,
+        );
+      }
     }
     if (this.shouldExpireSession(session, expireDespiteActiveExecution, startedExecution)) {
       if (!releaseExpired) {
@@ -3847,10 +3851,10 @@ export class SessionManager {
 
   /**
    * The live session a read is admitted under, releasing nothing. A read that arrives after the
-   * idle deadline while a timely control call still holds the session (#11361) is not admitted
-   * under it: this returns null, read-only admission resolves undefined, and the caller runs the
-   * read without a session on the device {@link deviceHeldForLateRead} names. Any other read past
-   * the deadline also gets null here.
+   * idle deadline while any control call or recovery still holds the session (#11361) is not
+   * admitted under it: this returns null, read-only admission resolves undefined, and the caller
+   * runs the read without a session on the device {@link deviceHeldForLateRead} names. Any other
+   * read past the deadline also gets null here.
    */
   private observeSessionForRead(
     sessionId: string,
@@ -3864,8 +3868,8 @@ export class SessionManager {
 
   /**
    * The device of the live session a read named but arrived too late to be admitted under: past
-   * the idle deadline, with a timely control call still holding the session (#11361). The read runs
-   * sessionless against this device, the one it asked about, rather than whatever device a
+   * the idle deadline, with any control call or recovery still holding the session (#11361).
+   * The read runs sessionless against this device, the one it asked about, rather than whatever device a
    * sessionless call would otherwise select. Undefined in every other case. Reads no device and
    * changes nothing: no release, no refresh, no idle credit.
    */
@@ -11919,9 +11923,14 @@ export class SessionManager {
     return execution.sessionClockStartTime > idleDeadline;
   }
 
+  /**
+   * A late call while other control work or recovery holds the session. Only a timely control
+   * call admits new control work; the unbounded check preserves the hold without admission.
+   */
   private isLateExecutionWhileEarlierWorkIsActive(
     session: Session,
     execution: SessionClockExecution | undefined,
+    timelyControlOnly = false,
   ): boolean {
     const idleDeadline = sessionIdleDeadline(session);
     return (
@@ -11929,7 +11938,7 @@ export class SessionManager {
       this.sessionNow() > idleDeadline &&
       execution.sessionClockStartTime > idleDeadline &&
       this.activeSessionExecutionChecker(session.sessionId, {
-        sessionClockStartedAtOrBefore: idleDeadline,
+        ...(timelyControlOnly ? { sessionClockStartedAtOrBefore: idleDeadline } : {}),
         excludeExecutionId: execution.executionId,
         excludeReads: true,
       })

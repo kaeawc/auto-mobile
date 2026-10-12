@@ -436,7 +436,14 @@ async function terminalSessionRegistrationRefusal(
   sessionId: string,
 ): Promise<DaemonMethodResult | undefined> {
   const snapshot = manager.getTerminalReleaseSnapshot?.(sessionId);
-  const expired = snapshot ? undefined : await manager.getExpiredReleaseSnapshot?.(sessionId);
+  let expired: SessionReleaseSnapshot | undefined;
+  if (!snapshot) {
+    try {
+      expired = await manager.getExpiredReleaseSnapshot?.(sessionId);
+    } catch (error) {
+      logger.warn(`Expired snapshot lookup failed for ${sessionId}: ${errorMessage(error)}`, error);
+    }
+  }
   const release = snapshot ?? expired ?? (await persistedTerminalRelease(manager, sessionId));
   if (
     !release?.terminal ||

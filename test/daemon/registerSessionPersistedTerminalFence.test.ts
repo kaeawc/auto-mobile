@@ -181,6 +181,34 @@ describe("registerSession after a daemon restart (#11367)", () => {
     expect(registry.list().map((entry) => entry.sessionId)).toEqual([fresh]);
   });
 
+  for (const known of [false, true]) {
+    test(`an expired snapshot read failure falls back to the persisted reason for a ${known ? "terminal" : "never-seen"} UUID`, async () => {
+      const { manager, registry, state } = await restartedAfterRelease("cleanup-expired");
+      manager.getExpiredReleaseSnapshot = async () => {
+        throw new Error("snapshot repository read failed");
+      };
+      const sessionId = known ? SESSION : "00000000-0000-4000-8000-000000000002";
+
+      const result = await register(state, sessionId);
+
+      if (known) {
+        expect(result).toMatchObject({
+          success: false,
+          code: SESSION_OWNERSHIP_LOST_CODE,
+          retryable: false,
+          nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION,
+          details: { sessionUuid: SESSION, reason: "cleanup-expired", idle: true },
+          releaseReason: "cleanup-expired",
+          idle: true,
+        });
+        expect(registry.list()).toEqual([]);
+      } else {
+        expect(result).toEqual(accepted);
+        expect(registry.list().map((entry) => entry.sessionId)).toEqual([sessionId]);
+      }
+    });
+  }
+
   test("a session issued while the persisted row is read answers as itself, not an observer", async () => {
     const { manager, registry, state } = daemon("daemon-b");
     const reading = Promise.withResolvers<void>();

@@ -109,16 +109,17 @@ below are the defaults; the constants live in
   `daemon_session_suspect` refusal instead: retry it now.
 - **Reads and a lapsing session.** A read is never refused, not even in the
   suspect window, and it never holds a session: for a lost heartbeat, a missing
-  first heartbeat or a one-shot CLI idle release, a read in flight cannot keep the
-  session past its release (#11372). The same release cuts a read still running
-  and answers it with the typed terminal refusal (#11384).
+  first heartbeat, any idle release or an owner-disconnect release, a read in flight
+  neither holds nor extends the release (#11372, #11381). The same release cuts
+  a read still running and answers it with the typed terminal refusal (#11384).
 - **Idle.** `DEFAULT_SESSION_IDLE_TIMEOUT_MS` (2 min) after the last control tool
   call ends. An idle release is terminal: the session UUID ends with it. The
   grace does not stretch it: a heartbeating session is released at the idle
   deadline. Heartbeats and reads (`observe`, `listDevices`, `doctor`,
-  `recordSteps` status and the other reads listed above) never extend it. A call
-  still in flight holds the release, up to a bounded ceiling (a one-shot CLI
-  session's idle release is the exception for reads: see above).
+  `recordSteps` status and the other reads listed above) never extend it. Only a control
+  call still in flight holds the release, until its request deadline plus 10 s
+  (or the 30 min ceiling without a deadline). A read in flight never holds it;
+  the release cuts the read with the typed terminal refusal `session_ownership_lost`.
 - **`idleReleaseAt`** is the idle deadline as wall-clock epoch milliseconds. The
   daemon computes it (session-clock instants are converted to wall time at the
   daemon boundary), reports it in the session hold diagnostics and the heartbeat

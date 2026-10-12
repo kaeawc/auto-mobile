@@ -12,7 +12,7 @@ export type ToolCallActivitySessionManager = ToolSelectionSessionManager &
   Pick<SessionManager, "recordToolCallEnded">;
 
 /**
- * Idleness counts from the END of the last tool call (owner decision 2026-10-08), and a call's
+ * Idleness counts from the END of the last control call (owner decision 2026-10-08), and a call's
  * end re-arms the owner-disconnect releases it deferred (#10712). `daemon.ts` subscribes this
  * from `start()`; harnesses that drive the daemon's tool path call the same function rather than
  * re-wiring the tracker themselves (#10839). Returns the unsubscribe.
@@ -39,7 +39,8 @@ export function subscribeToolCallEndActivity(
 /**
  * Whether a session has work in flight: a tracked tool call under its id (or its base session's,
  * for a derived `${base}:${label}` session), or a session-preserving recovery. The daemon's
- * session manager and release vetoes ask this; a call in flight is never released.
+ * session manager and release vetoes ask this. With `excludeReads`, only control calls hold
+ * liveness releases, within the unsettled-execution bound; reads are cut by the release.
  */
 export function hasActiveSessionExecution(
   tracker: Pick<
@@ -96,9 +97,9 @@ export function latestSessionExecutionDeadlineMs(
  * latest request deadline among them, which bounds the veto (#10712). The veto judges on the
  * session clock, so the deadlines are converted onto it (#11162).
  *
- * `excludeReads` is the heartbeat monitor's view (#11322): a read is answered whatever the owner
- * lease says, but it is watching, not use and not the owner's liveness, so it never keeps a
- * session whose owner stopped heartbeating. Only control calls do (#5343).
+ * `excludeReads` is the heartbeat monitor, owner-disconnect and idle release view (#11381):
+ * a read is watching, not use or owner liveness, and never holds or extends these releases.
+ * Only control calls veto within the bound (#5343); a cut read gets the typed terminal refusal.
  */
 export function sessionExecutionProbe(
   tracker: Pick<

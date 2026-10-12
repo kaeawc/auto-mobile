@@ -221,12 +221,13 @@ even the owner's own (owner decision 2026-10-09, #10964): `observe` and the othe
 read-only tools never extend the idle window, so an agent that only observes its
 device for longer than the window loses it. Read-only access never requires a
 session (#10965); see [device ownership](device-ownership.md) for which tools and
-argument forms are reads. A tool call in flight is
-activity, so the idle window does not release a session mid-call, and it
-restarts when the call ends (#10694). That hold is bounded: it lasts until the
-latest in-flight call's request deadline plus 10 s, or 30 minutes after it began
-when an in-flight call has no deadline, so a call that never settles cannot hold
-a device forever. An agent that
+argument forms are reads. Only a control call in flight holds the idle release,
+and the idle window restarts when that control call ends (#10694). That hold is
+bounded: it lasts until the latest in-flight control call's request deadline plus
+10 s, or the 30 min ceiling when a control call has no deadline, so a call that
+never settles cannot hold a device forever. A read in flight never holds or extends
+an idle or owner-disconnect release; the release cuts it with the typed terminal
+refusal `session_ownership_lost` (#11381). An agent that
 acquires a device and then makes no tool calls for 2 minutes loses the session
 and its device even while its proxy stays open and keeps heartbeating; the
 release reason is `cleanup-expired` (or `lazy-expiry`), not `heartbeat-timeout`.
@@ -411,7 +412,7 @@ To tell an idle holder from an active one, `session-info` also prints:
 | `lastOwnerHeartbeatAt` | The owner's last heartbeat, or `null` before the first.                        |
 | `idleReleaseAt`        | When idle release is due; the next monitor scan after it releases the session. |
 | `holderKind`           | `stdio-proxy`, `desktop`, `ide`, `cli`, `junit` or `unknown`.                  |
-| `activeExecutions`     | Tool calls in flight on the session. Idle release waits for them to finish.    |
+| `activeExecutions`     | Calls in flight, reads included. Only a control call holds the idle release.   |
 
 `holderKind` comes from the session's liveness policy (`cli` for a one-shot
 `--cli` owner), the client name a client sent to `daemon/registerSession`, and

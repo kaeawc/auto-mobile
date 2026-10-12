@@ -316,6 +316,7 @@ const ends: string[] = [
   "explicit-release",
   "daemon-shutdown",
   "owner-disconnected",
+  "managed-slot-ownership-lost",
   "session-not-found",
   "unknown",
 ];

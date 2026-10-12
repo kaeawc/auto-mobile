@@ -975,6 +975,10 @@ export class Daemon {
       timer: this.timer,
       settler: this.managedSlotJournalOwner(),
       isExecOwnerLive: this.managedSlotOwnerLiveness(),
+      ownership: {
+        isReleaseHeld: (id) => this.managedExecutionReowner?.isReleaseHeld(id) ?? false,
+        confirmOwnership: (id) => this.managedExecutionReowner?.confirmOwnership(id),
+      },
     });
     this.managedExecutionRelease = release;
     this.sessionManager.onSessionRelease((_sessionId, _deviceId, _reason, snapshot, options) =>
@@ -1110,6 +1114,23 @@ export class Daemon {
       owner: () => this.managedSlotJournalOwner(),
       timer: this.timer,
       isSessionHeld: (id) => this.sessionManager.isLiveManagedExecutionSession(id),
+      deviceOf: (id) =>
+        this.sessionManager.getHeldDeviceSessions().find((session) => session.sessionId === id)
+          ?.deviceId ?? null,
+      onOwnershipLost: (id) => {
+        void this.cancelAndReleaseSession(
+          id,
+          "managed-slot-ownership-lost",
+          false,
+          undefined,
+          undefined,
+          {
+            cutCallsLearnRelease: true,
+          },
+        ).catch((error: unknown) => {
+          logger.warn(`[Daemon] Lost managed execution ${id} release failed`, error);
+        });
+      },
       onOwnershipConfirmed: (id) => {
         void this.warmConfirmedManagedExecution(id).catch((error: unknown) => {
           logger.warn(`[Daemon] Confirmed managed execution ${id} iOS warm-up failed`, error);
@@ -1117,6 +1138,9 @@ export class Daemon {
       },
     });
     DaemonState.getInstance().setManagedExecutionReowner(this.managedExecutionReowner);
+    this.sessionManager.setReleaseDeviceHold((id) =>
+      this.managedExecutionReowner?.releaseDeviceHold(id),
+    );
     // Interrupted journaled work (#11179) is redriven in the background. The loop starts when this
     // daemon first opens the registry (#11338), so a fresh host that creates it on its first
     // acquisition is covered; an existing registry is opened now so leftovers redrive at startup.

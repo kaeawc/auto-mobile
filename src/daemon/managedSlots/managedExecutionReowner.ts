@@ -21,7 +21,9 @@ import {
   ManagedSlotOwnershipUnconfirmedError,
 } from "./managedSlotRefusal";
 import { DefaultRetryExecutor } from "../../utils/retry/RetryExecutor";
-import type { Timer } from "../../utils/SystemTimer";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import type { ReleaseDeviceHold } from "../sessionManager";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { MANAGED_EXECUTION_REGISTRY_RETRY_BACKOFF } from "./managedExecutionRelease";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -52,6 +54,18 @@ export interface ManagedExecutionReownerDependencies {
   /** Absent: keep marked sessions. */
   isSessionHeld?: (sessionUuid: string) => boolean;
   onOwnershipConfirmed?: (sessionUuid: string) => void;
+  onOwnershipLost?: (sessionUuid: string) => void;
+  /** Captured before release hides the session, for an unknown-ownership state-drop diagnostic. */
+  deviceOf?: (sessionUuid: string) => string | null;
+}
+
+export const MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS = 10_000;
+type HoldOutcome = "teardown" | "skip-device-writes";
+interface ReleaseHold {
+  settled: Promise<HoldOutcome>;
+  resolve: (outcome: HoldOutcome) => void;
+  timeout: NodeJS.Timeout;
+  device: string;
 }
 
 type OwnershipState = "unconfirmed" | "lost";
@@ -68,6 +82,12 @@ export class ManagedExecutionReowner {
   private readonly attempts = new Map<string, Promise<ReownAttempt>>();
   private readonly background = new Map<string, Promise<void>>();
   private readonly closing = new AbortController();
+  private readonly releaseHolds = new Map<string, ReleaseHold>();
+  private readonly resolvedSessions = new Set<string>();
+  private readonly episodes = new Map<
+    string,
+    { attempts: number; warned: boolean; stop: AbortController }
+  >();
   private readonly retry: DefaultRetryExecutor;
   private readonly backoff: BackoffPolicy;
   private closed = false;
@@ -104,6 +124,7 @@ export class ManagedExecutionReowner {
     if (this.closed || this.deps.registryExists?.() === false || this.recovering.has(sessionUuid)) {
       return;
     }
+    this.isHeld(sessionUuid);
     this.recovering.set(sessionUuid, recovered);
     this.recoveredSessions.add(sessionUuid);
     this.ownership.set(sessionUuid, "unconfirmed");
@@ -129,9 +150,93 @@ export class ManagedExecutionReowner {
       : undefined;
   }
 
+  /** Keep re-owning a releasing session until host-visible ownership is known or the cap passes. */
+  releaseDeviceHold(sessionUuid: string): ReleaseDeviceHold | undefined {
+    // The manager has validated this release's identity. A reap may already hide its live lease.
+    const state = this.ownership.get(sessionUuid);
+    if (state === "lost") {
+      return { skipDeviceWrites: true };
+    }
+    if (state !== "unconfirmed") {
+      return undefined;
+    }
+    if (this.closed) {
+      this.warnDroppedState(sessionUuid, this.deps.deviceOf?.(sessionUuid) ?? "unknown device");
+      return { skipDeviceWrites: true };
+    }
+    let hold = this.releaseHolds.get(sessionUuid);
+    if (!hold) {
+      const settled = Promise.withResolvers<HoldOutcome>();
+      const timer = this.deps.timer ?? defaultTimer;
+      hold = {
+        settled: settled.promise,
+        resolve: settled.resolve,
+        device: this.deps.deviceOf?.(sessionUuid) ?? "unknown device",
+        timeout: timer.setTimeout(
+          () => this.resolveUnknownHold(sessionUuid),
+          MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS,
+        ),
+      };
+      this.releaseHolds.set(sessionUuid, hold);
+    }
+    return { settled: hold.settled, capMs: MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS };
+  }
+
+  isReleaseHeld(sessionUuid: string): boolean {
+    return this.releaseHolds.has(sessionUuid);
+  }
+
+  /** A drain's landed owner stamp or settling fence is the same ownership proof as re-owning. */
+  confirmOwnership(sessionUuid: string): void {
+    this.settleOwnership(sessionUuid, "confirmed");
+  }
+
+  private resolveHold(id: string, outcome: HoldOutcome): void {
+    const hold = this.releaseHolds.get(id);
+    if (!hold) {
+      return;
+    }
+    (this.deps.timer ?? defaultTimer).clearTimeout(hold.timeout);
+    this.releaseHolds.delete(id);
+    this.resolvedSessions.add(id);
+    this.episodes.get(id)?.stop.abort();
+    hold.resolve(outcome);
+  }
+
+  private resolveUnknownHold(id: string): void {
+    const hold = this.releaseHolds.get(id);
+    if (!hold) {
+      return;
+    }
+    this.warnDroppedState(id, hold.device);
+    this.resolveHold(id, "skip-device-writes");
+  }
+
+  private warnDroppedState(id: string, device: string): void {
+    logger.warn(
+      `[ManagedSlots] Session ${id} on device ${device}: saved device state was dropped because ownership could not be confirmed.`,
+    );
+  }
+
+  private episode(id: string) {
+    let episode = this.episodes.get(id);
+    if (!episode) {
+      episode = { attempts: 0, warned: false, stop: new AbortController() };
+      this.episodes.set(id, episode);
+    }
+    return episode;
+  }
+
+  private logUnconfirmed(id: string, message: string, error?: unknown): void {
+    const episode = this.episode(id);
+    const log = episode.warned ? logger.debug : logger.warn;
+    episode.warned = true;
+    log(message, error);
+  }
+
   private markUnconfirmed(ids: readonly string[]): void {
     for (const id of ids) {
-      if (this.isHeld(id) && !this.ownership.has(id)) {
+      if (!this.resolvedSessions.has(id) && this.isHeld(id) && !this.ownership.has(id)) {
         this.ownership.set(id, "unconfirmed");
       }
     }
@@ -149,12 +254,16 @@ export class ManagedExecutionReowner {
       }
       return attempt.assignments;
     } catch (error) {
-      if (this.closed) {
-        // Shutdown has stopped registry work and retained the gate, so this late failure is safe to swallow.
-        logger.debug(`[ManagedSlots] Re-owning managed execution ${id} failed after close`, error);
+      if (!this.canAttempt(id)) {
+        // A closed or resolved episode cannot act on a late registry result.
+        logger.debug(
+          `[ManagedSlots] Re-owning managed execution ${id} failed after resolution or close`,
+          error,
+        );
         return [];
       }
-      logger.warn(
+      this.logUnconfirmed(
+        id,
         `[ManagedSlots] Re-owning managed execution ${id} failed: ${errorMessage(error)}`,
         error,
       );
@@ -164,7 +273,9 @@ export class ManagedExecutionReowner {
   }
 
   private canAttempt(id: string): boolean {
-    return !this.closed && !this.recovering.has(id) && this.isHeld(id);
+    return (
+      !this.closed && !this.resolvedSessions.has(id) && !this.recovering.has(id) && this.isHeld(id)
+    );
   }
 
   /** Synchronous O(1) automation admission for sessions marked by rehydration or foreign-owner evidence. */
@@ -182,54 +293,92 @@ export class ManagedExecutionReowner {
   /** Stop registry work and abort waits, retaining the gate while this process still holds it. */
   close(): void {
     this.closed = true;
+    for (const id of this.releaseHolds.keys()) {
+      this.resolveUnknownHold(id);
+    }
+    for (const episode of this.episodes.values()) {
+      episode.stop.abort();
+    }
     this.closing.abort();
   }
 
   async whenIdle(): Promise<void> {
-    while (this.background.size > 0 || this.attempts.size > 0) {
-      await Promise.allSettled([...this.background.values(), ...this.attempts.values()]);
+    while (this.background.size > 0 || this.attempts.size > 0 || this.releaseHolds.size > 0) {
+      await Promise.allSettled([
+        ...this.background.values(),
+        ...this.attempts.values(),
+        ...Array.from(this.releaseHolds.values(), (hold) => hold.settled),
+      ]);
     }
   }
 
   private isHeld(id: string): boolean {
-    if (this.deps.isSessionHeld?.(id) !== false) {
+    if (this.releaseHolds.has(id) || this.deps.isSessionHeld?.(id) !== false) {
       return true;
     }
     if (!this.recovering.has(id)) {
       this.ownership.delete(id);
       this.recoveredSessions.delete(id);
+      this.resolvedSessions.delete(id);
+      this.episodes.get(id)?.stop.abort();
+      this.episodes.delete(id);
     }
     return false;
   }
 
   private pruneReleasedSessions(): void {
-    for (const id of new Set([...this.ownership.keys(), ...this.recoveredSessions])) {
+    for (const id of new Set([
+      ...this.ownership.keys(),
+      ...this.recoveredSessions,
+      ...this.resolvedSessions,
+      ...this.episodes.keys(),
+    ])) {
       this.isHeld(id);
     }
   }
 
   private settleOwnership(id: string, outcome: ReownAttempt["outcome"]): void {
-    if (this.closed || !this.isHeld(id) || this.ownership.get(id) !== "unconfirmed") {
+    if (
+      this.closed ||
+      this.resolvedSessions.has(id) ||
+      !this.isHeld(id) ||
+      this.ownership.get(id) !== "unconfirmed"
+    ) {
       return;
     }
     if (outcome === "confirmed") {
       this.ownership.delete(id);
-      try {
-        this.deps.onOwnershipConfirmed?.(id);
-      } catch (error) {
-        logger.warn(`[ManagedSlots] Ownership-confirmed hook failed for ${id}`, error);
-      }
+      logger.info(
+        `[ManagedSlots] Session ${id} ownership confirmed after ${this.episode(id).attempts} attempts; re-owned by daemon ${this.deps.owner().daemonId}.`,
+      );
+      this.resolveHold(id, "teardown");
+      this.resolvedSessions.add(id);
+      this.episodes.get(id)?.stop.abort();
+      this.notifyOwnership(id, "confirmed");
     }
     if (outcome === "lost") {
       this.ownership.set(id, "lost");
       logger.warn(
         `[ManagedSlots] Session '${id}' no longer owns its managed slot; acquire a new session.`,
       );
+      this.resolveHold(id, "skip-device-writes");
+      this.episodes.get(id)?.stop.abort();
+      this.notifyOwnership(id, "lost");
+    }
+  }
+
+  private notifyOwnership(id: string, outcome: "confirmed" | "lost"): void {
+    const hook =
+      outcome === "confirmed" ? this.deps.onOwnershipConfirmed : this.deps.onOwnershipLost;
+    try {
+      hook?.(id);
+    } catch (error) {
+      logger.warn(`[ManagedSlots] Ownership-${outcome} hook failed for ${id}`, error);
     }
   }
 
   private needsRetry(id: string): boolean {
-    return !this.closed && this.isHeld(id) && this.ownership.get(id) === "unconfirmed";
+    return this.canAttempt(id) && this.ownership.get(id) === "unconfirmed";
   }
 
   private retryInBackground(id: string, initialFailure: unknown): void {
@@ -254,12 +403,13 @@ export class ManagedExecutionReowner {
         },
         {
           maxAttempts: Number.MAX_SAFE_INTEGER,
-          signal: this.closing.signal,
+          signal: AbortSignal.any([this.closing.signal, this.episode(id).stop.signal]),
           shouldRetry: () => this.needsRetry(id),
           delays: this.backoff,
           onRetry: (error, attempt) => {
             if (attempt > 1 && !this.closed) {
-              logger.warn(
+              this.logUnconfirmed(
+                id,
                 `[ManagedSlots] Re-owning managed execution ${id} failed; retrying: ${error.message}`,
                 error,
               );
@@ -284,7 +434,13 @@ export class ManagedExecutionReowner {
     if (pending) {
       return pending;
     }
-    const work = this.reownSession(id).finally(() => {
+    const episode = this.episode(id);
+    episode.attempts++;
+    const work = raceWithDeadline(this.reownSession(id), {
+      timer: this.deps.timer ?? defaultTimer,
+      signal: AbortSignal.any([this.closing.signal, episode.stop.signal]),
+      label: `Re-owning session ${id}`,
+    }).finally(() => {
       this.attempts.delete(id);
     });
     this.attempts.set(id, work);
@@ -329,10 +485,6 @@ export class ManagedExecutionReowner {
         break;
       }
       if (claimed.kind === "claimed") {
-        logger.info(
-          `[ManagedSlots] Slot ${assignment.slotIndex} of ${assignment.scopeKey} re-owned by daemon ` +
-            `${owner.daemonId} (pid ${owner.pid}) for live session ${sessionUuid}`,
-        );
         result.assignments.push(claimed.assignment);
       } else {
         this.markUnconfirmed([sessionUuid]);
@@ -358,7 +510,8 @@ export class ManagedExecutionReowner {
     if (kind !== "slot_in_use" && result.outcome !== "lost") {
       result.outcome = "retry";
     }
-    logger.warn(
+    this.logUnconfirmed(
+      sessionUuid,
       `[ManagedSlots] Slot ${assignment.slotIndex} of ${assignment.scopeKey} was not re-owned ` +
         `for session ${sessionUuid}: ${kind}`,
     );

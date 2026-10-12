@@ -232,6 +232,8 @@ describe("rehydrated managed execution peer claim fence", () => {
       expect(
         warn.mock.calls.filter(([message]) => String(message).includes("no longer owns")),
       ).toHaveLength(1);
+      expect(warn.mock.calls).toHaveLength(2);
+      expect(info.mock.calls).toHaveLength(0);
       expect(await registry.getAssignment(key)).toMatchObject({
         execOwner: { sessionUuid: `${S2}-${PEERS[0]}` },
         generation: 1,
@@ -263,6 +265,9 @@ describe("rehydrated managed execution peer claim fence", () => {
       for (const pid of PEERS) {
         expect((await claimAs(pid)).kind).toBe("slot_in_use");
       }
+      expect(warn.mock.calls).toHaveLength(1);
+      expect(info.mock.calls).toHaveLength(1);
+      expect(info.mock.calls[0][0]).toContain("4 attempts");
     },
   );
 
@@ -763,6 +768,7 @@ describe("rehydrated managed execution peer claim fence", () => {
     async () => {
       reowner.close();
       const confirmed: string[] = [];
+      const lost: string[] = [];
       reowner = new ManagedExecutionReowner({
         registry: async () => faults.faulty,
         owner: () => OWNER,
@@ -771,13 +777,21 @@ describe("rehydrated managed execution peer claim fence", () => {
         onOwnershipConfirmed: (id) => {
           confirmed.push(id);
         },
+        onOwnershipLost: (id) => {
+          lost.push(id);
+        },
       });
       await reowner.reown([S], { rehydrated: true });
       await reowner.reown([S]);
       expect(confirmed).toEqual([S]);
+      expect(warn.mock.calls).toHaveLength(0);
+      expect(info.mock.calls).toHaveLength(1);
       await reowner.reown(["missing"], { rehydrated: true });
       expect(confirmed).toEqual([S]);
       expect(reowner.ownershipState("missing")).toBe("lost");
+      expect(lost).toEqual(["missing"]);
+      expect(warn.mock.calls).toHaveLength(1);
+      expect(info.mock.calls).toHaveLength(1);
     },
   );
 });

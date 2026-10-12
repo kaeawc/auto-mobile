@@ -39,6 +39,8 @@ describe("managed execution recovery is gated before publication", () => {
       restore();
     }
     DaemonState.getInstance().reset();
+    expect(DaemonState.getInstance().getManagedExecutionReowner()).toBeUndefined();
+    expect(executionTracker.getActiveExecutionCount()).toBe(0);
     Reflect.set(executionTracker, "sessionClockOffsetProvider", trackerClock);
     Reflect.set(executionTracker, "autolockSessionResolver", trackerResolver);
     resetDbWriteBarrier();
@@ -50,6 +52,19 @@ describe("managed execution recovery is gated before publication", () => {
     managers.push(sessions);
     return sessions;
   }
+
+  test("ordinary creation starts persistence in the calling turn", async () => {
+    const sessions = manager(new FakeTimer(), new FakeDeviceSessionPersistence());
+    const original = Reflect.get(sessions, "persistAndPublishSession");
+    let started = false;
+    Reflect.set(sessions, "persistAndPublishSession", (...args: unknown[]) => {
+      started = true;
+      return Reflect.apply(original, sessions, args);
+    });
+    const creation = sessions.createSession("ordinary", "fake-device", "android");
+    expect(started).toBe(true);
+    await creation;
+  });
 
   function assigner(sessions: SessionManager): SessionDeviceAssigner {
     return {
@@ -247,6 +262,54 @@ describe("managed execution recovery is gated before publication", () => {
     });
     await drainMicrotasks(80);
     await reowner.whenIdle();
+  });
+
+  test("daemon loss uses the typed cancellation funnel and terminally releases without device writes", async () => {
+    const { timer, sessions } = await persisted();
+    const daemon = new Daemon(
+      {},
+      new FakeInstalledAppsRepository(),
+      timer,
+      new FakeDeviceSessionRepository(),
+    );
+    const original = daemon.getSessionManager();
+    managers.push(original);
+    sessions.setManagedExecutionRecoveryListener(
+      Reflect.get(original, "managedExecutionRecoveryListener"),
+    );
+    sessions.setReleaseDeviceHold(Reflect.get(original, "releaseDeviceHold"));
+    Reflect.set(daemon, "sessionManager", sessions);
+    const registryWait = Promise.withResolvers<ManagedExecutionReownRegistry>();
+    Reflect.set(daemon, "managedSlotRegistry", registryWait.promise);
+    const reowner = DaemonState.getInstance().getManagedExecutionReowner()!;
+    reowners.push(reowner);
+    const originalRelease = Reflect.get(daemon, "cancelAndReleaseSession");
+    const calls: unknown[][] = [];
+    Reflect.set(daemon, "cancelAndReleaseSession", (...args: unknown[]) => {
+      calls.push(args);
+      return Reflect.apply(originalRelease, daemon, args);
+    });
+    const poolReturn = spyOn(daemon.getDevicePool(), "releaseDevice").mockImplementation(
+      async () => {},
+    );
+    restores.push(() => poolReturn.mockRestore());
+    await sessions.getOrCreateSession(ID, assigner(sessions), "ios", undefined, true);
+    registryWait.resolve({
+      findExecutionAssignments: async () => [],
+      claimExecution: async () => {
+        throw new Error("must not claim");
+      },
+    });
+    await drainMicrotasks(100);
+    await reowner.whenIdle();
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toBe("managed-slot-ownership-lost");
+    expect(calls[0][5]).toEqual({ cutCallsLearnRelease: true });
+    expect(sessions.hasSession(ID)).toBe(false);
+    expect(sessions.getTerminalReleaseSnapshot(ID)?.releaseReason).toBe(
+      "managed-slot-ownership-lost",
+    );
+    expect(sessions.hasDeviceCleanupInProgress(DEVICE)).toBe(false);
   });
 
   test.each(["confirmed", "lost", "released", "moved", "shutdown"] as const)(

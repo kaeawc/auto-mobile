@@ -783,7 +783,7 @@ export class DaemonSessionCreationRejectedError extends ActionableError {
 
 /** Idle expiry has no caller to return the device; its diagnostic may name a heartbeat timeout. */
 export interface SessionReleaseOptions {
-  /** The serial no longer runs this session's device: drop saved state without device-side restores. */
+  /** The serial was replaced or this daemon no longer holds it: drop state without device writes. */
   deviceIdentityReplaced?: boolean;
   /** Device-restart release persistence, including a retry after a failed write. */
   releasePersisted?: Promise<void>;
@@ -806,6 +806,9 @@ export type SessionReleaseCallback = (
   options: SessionReleaseOptions,
 ) => void;
 export type SessionCreatedCallback = (session: Session) => void;
+export type ReleaseDeviceHold =
+  | { skipDeviceWrites: true }
+  | { settled: Promise<"teardown" | "skip-device-writes">; capMs: number };
 export interface SessionExecutionMetadata {
   executionId: string;
   /** When the call started, on the wall clock of the tracker that stamped it. */
@@ -941,6 +944,8 @@ interface SessionReleaseOperation extends PendingSessionRelease {
   commitFenced?: boolean;
   /** When the release started; bounds the retry hint for a bind it refuses (#10960). */
   startedAtMs?: number;
+  /** Ownership holds bound teardown from their cap while waiting, and from their end once settled. */
+  teardownStartsByMs?: number;
   /** Set for an idle release the manager started itself (#11481): see `getIdleReleasesInProgress`. */
   expiryOrigin?: SessionReleaseOptions["expiryOrigin"];
   /** The release's current stage, named when it is reported stuck (#10963). */
@@ -962,6 +967,7 @@ function releaseWasForced(operation: SessionReleaseOperation | undefined): boole
 /** Where an in-flight release is, for a stuck-release report (#10963). */
 export type SessionReleaseStage =
   | "awaiting-rebind"
+  | "awaiting-ownership"
   | "teardown"
   | "terminal-persist"
   | "finalize-persist";
@@ -2644,7 +2650,7 @@ export class SessionManager {
       .filter((release) => !release.forced && release.session.assignedDevice === deviceId)
       .map(
         (release) =>
-          (release.startedAtMs ?? now) +
+          (release.teardownStartsByMs ?? release.startedAtMs ?? now) +
           SESSION_RELEASE_TEARDOWN_CAP_MS +
           SESSION_RELEASE_PERSIST_TIMEOUT_MS,
       );
@@ -3117,20 +3123,29 @@ export class SessionManager {
     };
 
     const creation: PendingSessionCreation = { promise: Promise.resolve(session) };
-    // Queue publication so the synchronous recovery hook receives the actual creation promise.
-    creation.promise = Promise.resolve().then(() =>
-      this.persistAndPublishSession(session, creation, this.claimedIncarnation(persistedRecovery)),
-    );
-    (() => {
-      if (!persistedRecovery || session.livenessPolicy !== MANAGED_EXECUTION_LIVENESS_POLICY) {
-        return;
-      }
+    // Only recovery needs a separate signal, so ordinary creation keeps its synchronous start.
+    let recovered: ReturnType<typeof Promise.withResolvers<void>> | undefined;
+    if (persistedRecovery && session.livenessPolicy === MANAGED_EXECUTION_LIVENESS_POLICY) {
+      recovered = Promise.withResolvers<void>();
+      // A listener may throw or be absent; creation failure must still be handled on this signal.
+      void recovered.promise.catch((error: unknown) => {
+        logger.debug(`[SessionManager] Managed recovery ${sessionId} did not publish`, error);
+      });
       try {
-        this.managedExecutionRecoveryListener?.(sessionId, creation.promise);
+        this.managedExecutionRecoveryListener?.(sessionId, recovered.promise);
       } catch (error) {
         logger.warn(`[SessionManager] Managed recovery hook failed for ${sessionId}`, error);
       }
-    })();
+    }
+    creation.promise = this.persistAndPublishSession(
+      session,
+      creation,
+      this.claimedIncarnation(persistedRecovery),
+    );
+    if (recovered) {
+      const { resolve, reject } = recovered;
+      void creation.promise.then(() => resolve(), reject);
+    }
     this.pendingSessionCreations.set(sessionId, creation);
     try {
       const created = await this.withinCreateDeadline(
@@ -6026,6 +6041,13 @@ export class SessionManager {
     return await attempt();
   }
 
+  private releaseDeviceHold?: (sessionId: string) => ReleaseDeviceHold | undefined;
+
+  /** Resolve ownership once per new release, before teardown or device-side release listeners. */
+  setReleaseDeviceHold(resolver: (sessionId: string) => ReleaseDeviceHold | undefined): void {
+    this.releaseDeviceHold = resolver;
+  }
+
   private async releaseSessionAttempt(
     sessionId: string,
     releaseReason: string,
@@ -6049,6 +6071,7 @@ export class SessionManager {
       return await inFlightRelease.promise;
     }
 
+    const hold = this.releaseDeviceHold?.(sessionId);
     this.releasingSessions.add(session);
     const pendingRebind = this.pendingSessionRebinds.get(sessionId);
     const reason = this.createReleaseReasonState(sessionId, releaseReason);
@@ -6064,6 +6087,9 @@ export class SessionManager {
       expiryOrigin: options.expiryOrigin,
       forcedAbort: new AbortController(),
     };
+    if (hold && "skipDeviceWrites" in hold) {
+      release.options.deviceIdentityReplaced = true;
+    }
     this.markIdentityReplacedRelease(release);
     const run = () => {
       this.flushDeferredRebindCleanups({ sessionId });
@@ -6079,7 +6105,29 @@ export class SessionManager {
           );
     };
     try {
-      if (pendingRebind?.session === session) {
+      if (hold && "settled" in hold) {
+        release.stage = "awaiting-ownership";
+        release.teardownStartsByMs = this.sessionNow() + hold.capMs;
+        const apply = (outcome: unknown) => {
+          release.teardownStartsByMs = this.sessionNow();
+          if (outcome !== "teardown") {
+            release.options.deviceIdentityReplaced = true;
+            this.markIdentityReplacedRelease(release);
+          }
+        };
+        release.promise = hold.settled
+          .then(apply, (error: unknown) => {
+            logger.warn(`[SessionManager] Release ownership hold failed for ${sessionId}`, error);
+            apply("skip-device-writes");
+          })
+          .then(() => {
+            if (pendingRebind?.session === session) {
+              release.stage = "awaiting-rebind";
+              return pendingRebind.promise.then(run, run);
+            }
+            return run();
+          });
+      } else if (pendingRebind?.session === session) {
         release.stage = "awaiting-rebind";
         release.promise = pendingRebind.promise.then(run, run);
       } else {

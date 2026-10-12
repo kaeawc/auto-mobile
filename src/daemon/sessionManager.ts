@@ -137,6 +137,7 @@ import {
   releasedRowStatus,
   shouldJudgeOwnerLeaseForRelease,
   type SessionReleaseReason,
+  sessionReleaseReasonTraits,
 } from "./releaseReasons";
 import { SessionReleasedDuringCallError } from "./sessionReleasedDuringCall";
 import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery";
@@ -3702,20 +3703,20 @@ export class SessionManager {
     onlyIfOwnedByDaemon?: string,
   ): Promise<DeviceSession | undefined> {
     const now = this.sessionNow();
-    if (
-      persisted &&
-      hasLapsedRestartRecoveryWindow(persisted, now) &&
-      this.isRowOwnedByLivePeer(persisted)
-    ) {
+    if (!persisted) {
       return persisted;
     }
-    if (persisted && persistedSessionExpiryReason(persisted, now) === "restart-recovery-timeout") {
+    if (hasLapsedRestartRecoveryWindow(persisted, now) && this.isRowOwnedByLivePeer(persisted)) {
+      return persisted;
+    }
+    if (persistedSessionExpiryReason(persisted, now) === "restart-recovery-timeout") {
       return this.terminalizeRestartRecoveryHandoff(persisted, onlyIfOwnedByDaemon);
     }
     if (
-      !persisted ||
       persisted.expires_at_ms > now ||
-      (persisted.release_reason && isTerminalReleaseReason(persisted.release_reason))
+      (persisted.release_reason &&
+        (isTerminalReleaseReason(persisted.release_reason) ||
+          sessionReleaseReasonTraits(persisted.release_reason).releasedBeforeHandout))
     ) {
       return persisted;
     }
@@ -3878,7 +3879,11 @@ export class SessionManager {
     sessionId: string,
     persisted: DeviceSession,
   ): SessionReleaseSnapshot | undefined {
-    if (persisted.release_reason && isTerminalReleaseReason(persisted.release_reason)) {
+    if (
+      persisted.release_reason &&
+      (isTerminalReleaseReason(persisted.release_reason) ||
+        sessionReleaseReasonTraits(persisted.release_reason).releasedBeforeHandout)
+    ) {
       return undefined;
     }
     const reason = this.isRowOwnedByLivePeer(persisted)

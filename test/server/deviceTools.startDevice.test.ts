@@ -3586,7 +3586,7 @@ describe("startDevice handler", () => {
     );
   });
 
-  it("rejects stale pooled platform metadata before session binding", async () => {
+  it("settles stale pooled platform metadata before session binding", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
@@ -3606,16 +3606,18 @@ describe("startDevice handler", () => {
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     fakeMatcher.setBootedResult(androidDevice);
 
-    await expect(
-      callStartDevice({
-        platform: "android",
-        deviceId: androidDevice.deviceId,
-      }),
-    ).rejects.toThrow(/phase=pool-match.*stale pool identity conflicts/);
-    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBeNull();
+    const result = await callStartDevice({
+      platform: "android",
+      deviceId: androidDevice.deviceId,
+    });
+    expect(result.runtime.deviceId).toBe(androidDevice.deviceId);
+    expect(pool.getDevice(androidDevice.deviceId)?.name).toBe(androidDevice.name);
+    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe(
+      result.runtime.session.sessionUuid,
+    );
   });
 
-  it("rejects a stale same-platform pool identity before session reuse", async () => {
+  it("retires a stale held identity before binding a different session", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
@@ -3642,14 +3644,67 @@ describe("startDevice handler", () => {
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     fakeMatcher.setBootedResult(androidDevice);
 
-    await expect(
-      callStartDevice({
+    const result = await callStartDevice({
+      platform: "android",
+      deviceId: androidDevice.deviceId,
+    });
+    expect(result.runtime.deviceId).toBe(androidDevice.deviceId);
+    expect(pool.getDevice(androidDevice.deviceId)?.name).toBe(androidDevice.name);
+    expect(result.runtime.session.sessionUuid).not.toBe("stale-session");
+    expect(daemonSessionManager.getSession("stale-session")).toBeNull();
+  });
+
+  for (const unresolved of [false, true]) {
+    it(`stale unheld AVD ${unresolved ? "refuses unreadable discovery retryably then settles" : "settles in the same start call"}`, async () => {
+      const timer = new FakeTimer();
+      daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      const pool = new DevicePool(
+        createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+          env: autolockEnv,
+          timer,
+          deviceManager: fakeDeviceUtils,
+        }),
+      );
+      const stale = { ...androidDevice, name: "Old_Pixel_AVD" };
+      await pool.initializeWithDevices([stale]);
+      const entry = pool.getDevice(androidDevice.deviceId)!;
+      DaemonState.getInstance().initialize(daemonSessionManager, pool);
+      fakeMatcher.setBootedResult(androidDevice);
+      fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+      if (unresolved) {
+        const ready = fakeDeviceUtils.waitForDeviceReady.bind(fakeDeviceUtils);
+        const readiness = spyOn(fakeDeviceUtils, "waitForDeviceReady").mockImplementation(
+          async (...args) => {
+            const resolved = await ready(...args);
+            fakeDeviceUtils.setBootedDevices("android", [
+              { ...androidDevice, name: `Unknown (${androidDevice.deviceId})` },
+            ]);
+            return resolved;
+          },
+        );
+        await expect(
+          callStartDevice({ platform: "android", deviceId: androidDevice.deviceId }),
+        ).rejects.toMatchObject({
+          code: "discovery_incomplete",
+          retryable: true,
+          message: expect.stringContaining("phase=pool-match"),
+        });
+        expect(pool.getDevice(androidDevice.deviceId)).toBe(entry);
+        readiness.mockRestore();
+        fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+      }
+      const result = await callStartDevice({
         platform: "android",
         deviceId: androidDevice.deviceId,
-      }),
-    ).rejects.toThrow(/phase=pool-match.*stale pool identity conflicts/);
-    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe("stale-session");
-  });
+      });
+      expect(result.runtime.deviceId).toBe(androidDevice.deviceId);
+      expect(pool.getDevice(androidDevice.deviceId)).not.toBe(entry);
+      expect(pool.getDevice(androidDevice.deviceId)).toMatchObject({
+        name: androidDevice.name,
+        sessionId: result.runtime.session.sessionUuid,
+      });
+    });
+  }
 
   // #10603: an emulator discovered while its console could not answer `avd name`
   // is pooled as `Unknown (<serial>)` with no avdName. A later boot resolution
@@ -3685,7 +3740,7 @@ describe("startDevice handler", () => {
     });
   });
 
-  it("still rejects a resolved name that contradicts the AVD the pool started", async () => {
+  it("replaces an unheld identity contradicting the AVD the pool started", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
@@ -3707,16 +3762,15 @@ describe("startDevice handler", () => {
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     fakeMatcher.setBootedResult(androidDevice);
 
-    await expect(
-      callStartDevice({
-        platform: "android",
-        deviceId: androidDevice.deviceId,
-      }),
-    ).rejects.toThrow(/phase=pool-match.*stale pool identity conflicts/);
+    const result = await callStartDevice({
+      platform: "android",
+      deviceId: androidDevice.deviceId,
+    });
+    expect(result.runtime.deviceId).toBe(androidDevice.deviceId);
+    expect(pool.getDevice(androidDevice.deviceId)?.name).toBe(androidDevice.name);
     expect(pool.getDevice(androidDevice.deviceId)).toMatchObject({
-      name: placeholder.name,
-      avdName: "Other_AVD",
-      sessionId: null,
+      name: androidDevice.name,
+      sessionId: result.runtime.session.sessionUuid,
     });
   });
 
@@ -3761,9 +3815,9 @@ describe("startDevice handler", () => {
     expect(pool.getDevice(physicalIphone.deviceId)?.sessionId).toBe("owner-session");
   });
 
-  it("still reports a stale pool identity when a renamed iOS simulator is re-resolved", async () => {
+  it("retires a stale iOS simulator identity before binding the resolved runtime", async () => {
     // Simulators are deliberately outside the rename tolerance: simctl publishes
-    // one authoritative name with no fallback chain, so this stays a hard error.
+    // one authoritative name with no fallback chain, so the old session is retired.
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
@@ -3786,12 +3840,10 @@ describe("startDevice handler", () => {
     fakeDeviceUtils.setBootedDevices("ios", [{ ...simulator, name: "iPhone 16" }]);
     fakeMatcher.setBootedResult({ ...simulator, name: "iPhone 16" });
 
-    await expect(
-      callStartDevice({
-        platform: "ios",
-        deviceId: simulator.deviceId,
-      }),
-    ).rejects.toThrow(/phase=pool-match.*stale pool identity conflicts/);
+    const result = await callStartDevice({ platform: "ios", deviceId: simulator.deviceId });
+    expect(result.runtime.session.sessionUuid).not.toBe("stale-session");
+    expect(daemonSessionManager.getSession("stale-session")).toBeNull();
+    expect(pool.getDevice(simulator.deviceId)?.name).toBe("iPhone 16");
   });
 
   it("reuses the returned sessionId for repeated startDevice calls when autolock is disabled", async () => {

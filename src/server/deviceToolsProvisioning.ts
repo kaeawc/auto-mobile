@@ -1871,6 +1871,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
   ): Promise<ProvisionBootResult> {
     const requestedIdentity = `platform=${args.device.platform} name=${args.device.name}`;
     const operationSignal = combineAbortSignals(signal, lifecycleLease.signal)!;
+    const mappingOptions = { signal: operationSignal, totalDeadlineMs };
     const bootService = createProvisionBootService(
       deps,
       deviceManager,
@@ -1945,7 +1946,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
       });
       perf.endOperation("bootDevice");
       assertProvisionIosBootIdentity(args, provisioned, boot);
-      validatePooledDeviceMapping(boot.device, requestedIdentity);
+      await validatePooledDeviceMapping(boot.device, requestedIdentity, mappingOptions);
       onBooted(boot.device);
       readinessReservation = await runProvisionDeviceWithinDeadline(
         deps.timer,
@@ -1982,7 +1983,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
             signal: operationSignal,
           });
           operationSignal.throwIfAborted();
-          validatePooledDeviceMapping(boot!.device, requestedIdentity);
+          await validatePooledDeviceMapping(boot!.device, requestedIdentity, mappingOptions);
           publishWarmDeviceReady(boot!.source, boot!.device.deviceId);
           return await bindProvisionedDeviceSession(args, boot!, provisioned.device, {
             timer: deps.timer,

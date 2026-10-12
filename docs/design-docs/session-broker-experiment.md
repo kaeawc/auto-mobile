@@ -130,9 +130,12 @@ The daemon protocol is:
   {requestId, livenessOwnerToken}}`.
 
 The token and complete request configuration define operation identity.
-After an ambiguous reply, query the same identity. Replaying an admitted
-request returns its durable receipt, including a terminal receipt; it never
-allocates a replacement session. A new execution attempt needs a new request ID.
+After an ambiguous reply, query the same identity. Replaying a request returns
+its durable receipt, including refusals before admission when catalog or default
+resolution fails; it never allocates a replacement session. A concurrent caller
+cannot replace a previously committed receipt with its own preparation failure.
+If receipt persistence fails, the RPC fails without claiming a terminal result.
+A new execution attempt needs a new request ID.
 Release reports either confirmed release or cleanup still pending. A later
 recovery pass owns pending cleanup independently of the client connection.
 

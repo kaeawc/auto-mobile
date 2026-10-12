@@ -289,6 +289,65 @@ describe("session-only broker lifecycle", () => {
     expect(devices.sessions.has(first)).toBe(true);
   });
 
+  test("catalog failure remains terminal after the host catalog becomes available", async () => {
+    options.catalog = async () => {
+      throw new Error("Catalog temporarily unavailable");
+    };
+    const failed = await broker.prepare(config("catalog-failure"), "owner-token");
+    expect(failed).toMatchObject({
+      outcome: "failed",
+      failure: { message: "Catalog temporarily unavailable" },
+      cleanupPending: false,
+    });
+    expect(await broker.ownedStatus("catalog-failure", "owner-token")).toEqual(failed);
+    expect(await options.store.listResources()).toHaveLength(0);
+    options.catalog = async () => iosCatalog();
+    expect(await broker.prepare(config("catalog-failure"), "owner-token")).toEqual(failed);
+    expect(devices.prepared).toHaveLength(0);
+    await ready("new-attempt");
+  });
+
+  test("a concurrent catalog failure cannot overwrite an admitted sibling request", async () => {
+    const failingReadStarted = Promise.withResolvers<void>();
+    const failRead = Promise.withResolvers<void>();
+    let reads = 0;
+    options.catalog = async () => {
+      if (++reads === 1) {
+        failingReadStarted.resolve();
+        await failRead.promise;
+        throw new Error("First catalog read failed");
+      }
+      return iosCatalog();
+    };
+    const pending = broker.prepare(config("same-request"), "owner-token");
+    await failingReadStarted.promise;
+    const successful = await broker
+      .prepare(config("same-request"), "owner-token")
+      .finally(() => failRead.resolve());
+    expect(await pending).toEqual(successful);
+    expect(successful.outcome).toBe("ready");
+    expect(devices.prepared).toHaveLength(1);
+    expect(await options.store.listResources()).toHaveLength(1);
+  });
+
+  test("failure to persist a refusal is an error, not an unrecorded terminal receipt", async () => {
+    options.catalog = async () => {
+      throw new Error("Catalog temporarily unavailable");
+    };
+    const persist = spyOn(options.store, "recordPreAdmissionFailure").mockRejectedValue(
+      new Error("Receipt storage unavailable"),
+    );
+    try {
+      await expect(broker.prepare(config("unrecorded"), "owner-token")).rejects.toThrow(
+        "Receipt storage unavailable",
+      );
+      expect(await broker.status("unrecorded")).toBeUndefined();
+      expect(devices.prepared).toHaveLength(0);
+    } finally {
+      persist.mockRestore();
+    }
+  });
+
   test("Duo refusal happens before capacity and never evicts a device", async () => {
     await ready("first");
     const request = config("duo");
@@ -299,7 +358,11 @@ describe("session-only broker lifecycle", () => {
     });
     expect(devices.prepared).toHaveLength(1);
     expect(devices.destroyed).toHaveLength(0);
-    expect(await options.store.getRequest("duo")).toBeUndefined();
+    expect(await options.store.getRequest("duo")).toMatchObject({
+      state: "failed",
+      errorCode: "capability_disabled",
+      resourceId: null,
+    });
   });
 
   test("acquisition failure after a native claim drains it and never exposes a ready session", async () => {

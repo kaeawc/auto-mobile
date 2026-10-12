@@ -2595,7 +2595,12 @@ export class DevicePool {
     return ++this.deviceIncarnationCounter;
   }
 
-  markIntentionalShutdown(deviceId: string): void {
+  /**
+   * Mark the stop and end only a reserving session's own device-restart handoff. Callers without
+   * its session id leave the hold to resume, terminal release, idle expiry or the 180 s window;
+   * an intentional stop never ends the daemon-restart batch's source.
+   */
+  markIntentionalShutdown(deviceId: string, stoppingSessionId?: string): void {
     const resetReservation = Array.from(this.adbServerResetRecoveryReservations.values()).find(
       (reservation) => reservation.deviceId === deviceId,
     );
@@ -2603,11 +2608,19 @@ export class DevicePool {
       // Resolve reset-cohort ownership before consulting the current serial. A
       // prior recovery may already have reused this serial for a different AVD.
       resetReservation.cancelled = true;
-      this.dropStoppedDeviceRestartReservations(deviceId, resetReservation.image.name);
+      this.dropStoppedDeviceRestartReservations(
+        deviceId,
+        resetReservation.image.name,
+        stoppingSessionId,
+      );
       return;
     }
     const device = this.devices.get(deviceId);
-    this.dropStoppedDeviceRestartReservations(deviceId, device && this.stableDeviceIdFor(device));
+    this.dropStoppedDeviceRestartReservations(
+      deviceId,
+      device && this.stableDeviceIdFor(device),
+      stoppingSessionId,
+    );
     if (device) {
       // Tie the marker to the incarnation present now, so a later same-serial
       // replacement is not treated as intentionally stopped.
@@ -2622,14 +2635,19 @@ export class DevicePool {
     }
   }
 
-  private dropStoppedDeviceRestartReservations(deviceId: string, stableDeviceId?: string): void {
+  private dropStoppedDeviceRestartReservations(
+    deviceId: string,
+    stableDeviceId?: string,
+    stoppingSessionId?: string,
+  ): void {
     for (const [sessionId, target] of this.rehydrationReservations) {
       if (
+        sessionId === stoppingSessionId &&
         target.restartHandoff &&
         target.deviceId === deviceId &&
         (stableDeviceId === undefined || target.stableDeviceId === stableDeviceId)
       ) {
-        this.releaseRehydrationReservation(sessionId, true);
+        this.releaseDeviceRestartReservation(sessionId);
       }
     }
   }
@@ -8028,7 +8046,7 @@ export class DevicePool {
     }
   }
 
-  /** End the daemon batch's hold; terminal releases and shutdown end both sources (#11294). */
+  /** End the daemon batch's hold; terminal releases and daemon/pool shutdown end both sources (#11294). */
   releaseRehydrationReservation(sessionId: string, terminal = false): void {
     const target = this.rehydrationReservations.get(sessionId);
     if (!target) {

@@ -15,6 +15,7 @@ import {
 import { ActionableError, type BootedDevice } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import { FakeAndroidCapacitySource } from "../fakes/FakeAndroidCapacitySource";
+import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
@@ -25,6 +26,8 @@ import { drainMicrotasks, drainUntil, settleByFakeEvents } from "../helpers/fake
 const SIM: BootedDevice = { deviceId: "restart-sim", name: "restart-sim", platform: "ios" };
 const SPARE: BootedDevice = { deviceId: "spare-sim", name: "spare-sim", platform: "ios" };
 const HOLDER = "restart-holder";
+const DAEMON_A = "restart-daemon-a";
+const DAEMON_B = "restart-daemon-b";
 interface ReservationInternals {
   releaseDisconnectedRecoverySessionWithRetry(
     sessionId: string,
@@ -33,7 +36,15 @@ interface ReservationInternals {
     attempt?: () => Promise<void>,
   ): Promise<void>;
   notifyRehydrationReservationChanged(target: RehydrationDeviceReservation["target"]): void;
-  rehydrationReservations: Map<string, RehydrationDeviceReservation["target"]>;
+  rehydrationReservations: Map<
+    string,
+    RehydrationDeviceReservation["target"] & {
+      restartHandoff?: boolean;
+      daemonRehydration?: boolean;
+      expiryTimer?: ReturnType<FakeTimer["setTimeout"]>;
+      releasePersistence?: Promise<void>;
+    }
+  >;
 }
 
 describe("device restart reserves the entire recovery window", () => {
@@ -47,6 +58,8 @@ describe("device restart reserves the entire recovery window", () => {
   let managed: boolean;
   let refreshFails: boolean;
   let fixtureInitialized: boolean;
+  let keepAwakeGate: PromiseWithResolvers<void>;
+  let keepAwakeStarted: boolean;
   const slots: ManagedSlotExclusion = {
     refresh: async () => {
       if (refreshFails) {
@@ -71,7 +84,20 @@ describe("device restart reserves the entire recovery window", () => {
     timer = new FakeTimer();
     timer.setCurrentTime(1_000);
     persistence = new FakeDeviceSessionPersistence();
-    sessions = new SessionManager(timer, persistence);
+    keepAwakeGate = Promise.withResolvers<void>();
+    keepAwakeStarted = false;
+    sessions = new SessionManager(
+      timer,
+      persistence,
+      () => new FakeDbWriteBarrier(),
+      () => ({
+        restore: () => {
+          keepAwakeStarted = true;
+          return keepAwakeGate.promise;
+        },
+      }),
+    );
+    sessions.attachDaemonSessionId(DAEMON_A);
     sessions.stopCleanupTimer();
     manager = new FakeDeviceManager();
     managed = false;
@@ -93,7 +119,18 @@ describe("device restart reserves the entire recovery window", () => {
       pool.releaseDeviceClaimsForShutdown();
       sessions.stopCleanupTimer();
       persistence = new FakeDeviceSessionPersistence();
-      sessions = new SessionManager(timer, persistence);
+      sessions = new SessionManager(
+        timer,
+        persistence,
+        () => new FakeDbWriteBarrier(),
+        () => ({
+          restore: () => {
+            keepAwakeStarted = true;
+            return keepAwakeGate.promise;
+          },
+        }),
+      );
+      sessions.attachDaemonSessionId(DAEMON_A);
       sessions.stopCleanupTimer();
       manager = new FakeDeviceManager();
     }
@@ -265,6 +302,7 @@ describe("device restart reserves the entire recovery window", () => {
     await setup();
     await handoff();
     const row = await persistence.getSession(HOLDER);
+    expect(row?.daemon_session_id).toBe(DAEMON_A);
     expect(row?.expires_at_ms).toBe(timer.now() + 120_000);
     let expiryNotices = 0;
     sessions.onSessionRelease((_id, _device, reason) => {
@@ -289,6 +327,127 @@ describe("device restart reserves the entire recovery window", () => {
     await advance(60_000);
     expect(expiryNotices).toBe(1);
     expect(notifications).toBe(1);
+  });
+  for (const livePeer of [true, false]) {
+    test(`a peer claim before idle expiry is preserved, live peer: ${livePeer}`, async () => {
+      sessions.attachLiveDaemonSessionIds(
+        () => new Set(livePeer ? [DAEMON_A, DAEMON_B] : [DAEMON_A]),
+      );
+      await handoff();
+      const row = (await persistence.getSession(HOLDER))!;
+      const previousGeneration = row.stable_identity_generation!;
+      const claimedGeneration = await persistence.claimRecoverableSession(
+        HOLDER,
+        { rowGeneration: previousGeneration, daemonSessionId: DAEMON_A },
+        DAEMON_B,
+      );
+      expect(claimedGeneration).toBe(previousGeneration + 1);
+      let terminalNotices = 0;
+      sessions.onSessionRelease((_id, _device, _reason, snapshot) => {
+        if (snapshot.terminal) {
+          terminalNotices++;
+        }
+      });
+      await advance(120_000);
+      expect(await persistence.getSession(HOLDER)).toMatchObject({
+        release_reason: `device-restart:${SIM.name}`,
+        daemon_session_id: DAEMON_B,
+        stable_identity_generation: claimedGeneration,
+      });
+      expect(terminalNotices).toBe(0);
+      expect(pool.genericAvailability(SIM.deviceId)).toBe(livePeer ? "reserved" : "free");
+      await advance(59_999);
+      expect(pool.genericAvailability(SIM.deviceId)).toBe(livePeer ? "reserved" : "free");
+      await advance(1);
+      expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
+      expect((await persistence.getSession(HOLDER))?.release_reason).toBe(
+        `device-restart:${SIM.name}`,
+      );
+      expect(terminalNotices).toBe(0);
+    });
+  }
+  test("a peer claim racing the expiry write keeps the live peer's hold without a terminal notice", async () => {
+    sessions.attachLiveDaemonSessionIds(() => new Set([DAEMON_A, DAEMON_B]));
+    await handoff();
+    let terminalNotices = 0;
+    sessions.onSessionRelease((_id, _device, _reason, snapshot) => {
+      if (snapshot.terminal) {
+        terminalNotices++;
+      }
+    });
+    const markReleased = persistence.markReleased.bind(persistence);
+    let expiryOptions: Parameters<typeof markReleased>[4];
+    let claimedGeneration: number | undefined;
+    persistence.markReleased = async (...args) => {
+      if (args[3] === "expired") {
+        expiryOptions = args[4];
+        const row = (await persistence.getSession(HOLDER))!;
+        claimedGeneration = await persistence.claimRecoverableSession(
+          HOLDER,
+          { rowGeneration: row.stable_identity_generation!, daemonSessionId: DAEMON_A },
+          DAEMON_B,
+        );
+      }
+      await markReleased(...args);
+    };
+    await advance(120_000);
+    expect(await persistence.getSession(HOLDER)).toMatchObject({
+      release_reason: `device-restart:${SIM.name}`,
+      daemon_session_id: DAEMON_B,
+      stable_identity_generation: claimedGeneration,
+    });
+    expect(terminalNotices).toBe(0);
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("reserved");
+    expect(expiryOptions?.onlyIfOwnedByDaemon).toBe(DAEMON_A);
+    await advance(60_000);
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
+    expect((await persistence.getSession(HOLDER))?.release_reason).toBe(
+      `device-restart:${SIM.name}`,
+    );
+    expect(terminalNotices).toBe(0);
+  });
+  test("a forced restart release resolves its notified persistence promise and expires at idle", async () => {
+    const android: BootedDevice = {
+      deviceId: "emulator-5554",
+      name: "restart-avd",
+      platform: "android",
+    };
+    await setup([android]);
+    sessions.setKeepScreenAwake(HOLDER, { applied: true, method: "settings" });
+    let releasePersisted: Promise<void> | undefined;
+    let persisted = false;
+    sessions.onSessionRelease((_id, _device, reason, _snapshot, options) => {
+      if (reason.startsWith("device-restart:")) {
+        releasePersisted = options.releasePersisted;
+        void releasePersisted?.then(() => {
+          persisted = true;
+        });
+      }
+    });
+    const releasing = internals.releaseDisconnectedRecoverySessionWithRetry(
+      HOLDER,
+      android.deviceId,
+      `device-restart:${android.name}`,
+    );
+    try {
+      await drainUntil(() => keepAwakeStarted, {
+        description: "parked restart teardown",
+      });
+      expect(sessions.forceStuckRelease(HOLDER)?.stage).toBe("teardown");
+      await drainMicrotasks(40);
+      expect((await persistence.getSession(HOLDER))?.release_reason).toBe(
+        `device-restart:${android.name}`,
+      );
+      expect(releasePersisted).toBeDefined();
+      expect(persisted).toBe(true);
+      expect(internals.rehydrationReservations.get(HOLDER)?.releasePersistence).toBeUndefined();
+      await advance(120_000);
+      expect(internals.rehydrationReservations.has(HOLDER)).toBe(false);
+      expect((await persistence.getSession(HOLDER))?.release_reason).toBe("expired");
+    } finally {
+      keepAwakeGate.resolve();
+      await releasing;
+    }
   });
   test("tool activity during recovery extends the idle hold", async () => {
     await setup();
@@ -478,10 +637,56 @@ describe("device restart reserves the entire recovery window", () => {
       ).resolves.toBe("newcomer");
     });
   }
-  test("an intentional stop drops an existing recovery hold immediately", async () => {
+  test("an intentional stop without a session id preserves both reservation sources", async () => {
+    await handoff();
+    await pool.reserveDevicesForRehydration([
+      {
+        sessionId: HOLDER,
+        target: { platform: "ios", stableDeviceId: SIM.deviceId, deviceId: SIM.deviceId },
+      },
+    ]);
+    pool.markIntentionalShutdown(SIM.deviceId);
+    expect(internals.rehydrationReservations.get(HOLDER)).toMatchObject({
+      restartHandoff: true,
+      daemonRehydration: true,
+    });
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("reserved");
+  });
+  test("another session's intentional stop preserves the handoff hold", async () => {
+    await handoff();
+    pool.markIntentionalShutdown(SIM.deviceId, "someone-else");
+    expect(internals.rehydrationReservations.get(HOLDER)?.restartHandoff).toBe(true);
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("reserved");
+  });
+  test("a holder's intentional stop ends only its handoff source and timer", async () => {
+    await handoff();
+    await pool.reserveDevicesForRehydration([
+      {
+        sessionId: HOLDER,
+        target: { platform: "ios", stableDeviceId: SIM.deviceId, deviceId: SIM.deviceId },
+      },
+    ]);
+    expect(internals.rehydrationReservations.get(HOLDER)?.expiryTimer).toBeDefined();
+    pool.markIntentionalShutdown(SIM.deviceId, HOLDER);
+    expect(internals.rehydrationReservations.get(HOLDER)).toMatchObject({
+      restartHandoff: false,
+      daemonRehydration: true,
+    });
+    expect(internals.rehydrationReservations.get(HOLDER)?.expiryTimer).toBeUndefined();
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("reserved");
+    await advance(180_000);
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("reserved");
+    pool.releaseRehydrationReservation(HOLDER);
+    expect(internals.rehydrationReservations.has(HOLDER)).toBe(false);
+    // The intentional-shutdown fence remains until the platform stop settles.
+    pool.clearIntentionalShutdown(SIM.deviceId);
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("free");
+    expect(notifications).toBe(1);
+  });
+  test("a holder's intentional stop drops an existing recovery hold immediately", async () => {
     await setup();
     await handoff();
-    pool.markIntentionalShutdown(SIM.deviceId);
+    pool.markIntentionalShutdown(SIM.deviceId, HOLDER);
     expect(internals.rehydrationReservations.has(HOLDER)).toBe(false);
     await sessions.releaseSession(HOLDER, "explicit-release");
     // The platform shutdown marker is a separate fence until the stop completes.

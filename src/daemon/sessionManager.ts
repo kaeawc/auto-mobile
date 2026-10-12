@@ -2575,7 +2575,15 @@ export class SessionManager {
     if (this.removeSession(sessionId, session)) {
       // The stuck release never reached its own notification: announce the release now so
       // proxies and stream servers stop treating the session as live.
-      this.notifySessionRelease({ ...fence, ...managedExecutionReleaseMarker(session) });
+      const snapshot = { ...fence, ...managedExecutionReleaseMarker(session) };
+      if (isDeviceRestartReleaseReason(fence.releaseReason)) {
+        // The callback's copy and the persisted fence must confirm the same row write.
+        const persistence =
+          this.restartReleasePersistence.get(fence) ?? Promise.withResolvers<void>();
+        this.restartReleasePersistence.set(fence, persistence);
+        this.restartReleasePersistence.set(snapshot, persistence);
+      }
+      this.notifySessionRelease(snapshot);
     }
     // The stuck release may never reach its own write: persist the release now (#11058), or a
     // restart would admit a terminally released UUID again.
@@ -3218,11 +3226,25 @@ export class SessionManager {
     return deadline !== undefined && this.sessionNow() < deadline;
   }
 
-  /** Recheck a pool hold at its idle deadline; active recovery calls retain the cold-boot window. */
+  /**
+   * Recheck a pool hold at its idle deadline. Local recovery calls and live peer claims retain
+   * the cold-boot window; foreign-owned rows are never terminalized here. Expiry of our row is
+   * guarded against an owner or generation change between this read and its write.
+   */
   async expireRestartRecoveryReservation(sessionId: string): Promise<number | undefined> {
     const persisted = await this.readPersistedSession(sessionId);
     if (!persisted || !isDeviceRestartReleasedRow(persisted)) {
       return undefined;
+    }
+    const hasForeignOwner = (row: DeviceSession) =>
+      this.daemonSessionId !== undefined &&
+      (row.daemon_session_id ?? this.daemonSessionId) !== this.daemonSessionId;
+    const livePeerDeadline = (row: DeviceSession) => {
+      const deadline = restartRecoveryDeadlineFromPersisted(row, true)!;
+      return this.isRowOwnedByLivePeer(row) && this.sessionNow() < deadline ? deadline : undefined;
+    };
+    if (hasForeignOwner(persisted)) {
+      return livePeerDeadline(persisted);
     }
     const callerInFlight =
       this.isSessionBeingRecreated(sessionId) || this.activeSessionExecutionChecker(sessionId);
@@ -3231,9 +3253,15 @@ export class SessionManager {
       return deadline;
     }
     if (!callerInFlight) {
-      const current = await this.terminalizeExpiredPersistedSession(persisted);
-      // The conditional expiry write may lose to activity extending the same row.
+      const current = await this.terminalizeExpiredPersistedSession(
+        persisted,
+        persisted.daemon_session_id === this.daemonSessionId ? this.daemonSessionId : undefined,
+      );
+      // The conditional expiry write may lose to activity or a peer claiming the row.
       if (current && isDeviceRestartReleasedRow(current)) {
+        if (hasForeignOwner(current)) {
+          return livePeerDeadline(current);
+        }
         const extendedDeadline = restartRecoveryDeadlineFromPersisted(current)!;
         if (this.sessionNow() < extendedDeadline) {
           return extendedDeadline;
@@ -3308,6 +3336,7 @@ export class SessionManager {
    */
   private async terminalizeExpiredPersistedSession(
     persisted: DeviceSession | undefined,
+    onlyIfOwnedByDaemon?: string,
   ): Promise<DeviceSession | undefined> {
     const now = this.sessionNow();
     if (
@@ -3333,6 +3362,7 @@ export class SessionManager {
         // so after a wall step the statement can disagree with that judgement by the step; then
         // nothing is written and the row is still answered as it reads below.
         onlyIfExpiredAtMs: this.sessionClockToWall(now),
+        onlyIfOwnedByDaemon,
       },
     );
     const current = await this.readPersistedSession(persisted.session_uuid);

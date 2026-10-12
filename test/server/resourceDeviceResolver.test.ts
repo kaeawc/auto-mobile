@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import * as resourceRead from "../../src/server/resourceDeviceResolver";
+import { defaultDeviceObservationAccess } from "../../src/server/deviceObservationAccess";
 import { listBootedDevicesForResource } from "../../src/server/resourceDeviceResolver";
 import type { BootedDevice } from "../../src/models";
 import type { PlatformDeviceManager } from "../../src/devices/deviceUtils";
@@ -145,5 +147,77 @@ describe("listBootedDevicesForResource rechecks cancellation after reconciliatio
     // The observation itself was still folded in: the reconcile ran to the
     // quarantine before the abort was honoured.
     expect(pool.isPooledIdentityUnresolved(QUARANTINE_POOL_SERIAL)).toBe(true);
+  });
+});
+
+describe("read listing status preserves incomplete discovery", () => {
+  const saved = new Map<string, unknown>();
+  beforeEach(() => {
+    for (const field of ["instance", "injectedManager"]) {
+      saved.set(field, Reflect.get(PlatformDeviceManagerFactory, field));
+    }
+  });
+  afterEach(() => {
+    for (const [field, value] of saved) {
+      Reflect.set(PlatformDeviceManagerFactory, field, value);
+      expect(Reflect.get(PlatformDeviceManagerFactory, field)).toBe(value);
+    }
+    saved.clear();
+  });
+  test("failed discovery is reported, while legacy callers still get an empty list", async () => {
+    const manager = {
+      getBootedDevices: async () => {
+        throw new Error("listing failed");
+      },
+      getBootedDevicesDetailed: async () => {
+        throw new Error("listing failed");
+      },
+    };
+    PlatformDeviceManagerFactory.setInstance(manager as unknown as PlatformDeviceManager);
+    expect(await listBootedDevicesForResource("android", "test")).toEqual([]);
+    expect(await resourceRead.listBootedDevicesForReadWithStatus("android", "test")).toMatchObject({
+      devices: [],
+      scanned: { android: false, ios: false },
+      discoveryErrors: { android: { code: "failed", message: "listing failed" } },
+    });
+  });
+  test("partial discovery reaches default read access with the healthy platform's fresh device", async () => {
+    const error = { code: "failed" as const, message: "simctl unavailable" };
+    const manager = {
+      getBootedDevicesDetailed: async (
+        _platform: string,
+        options?: { bypassAndroidDeviceListCache?: boolean; bypassIosDeviceListCache?: boolean },
+      ) => {
+        expect(options).toMatchObject({
+          bypassAndroidDeviceListCache: true,
+          bypassIosDeviceListCache: true,
+        });
+        return {
+          devices: [device, { ...device, platform: "ios", deviceId: "stale-ios" }],
+          succeededPlatforms: new Set(["android"]),
+          discoveryErrors: { ios: error },
+        };
+      },
+    };
+    PlatformDeviceManagerFactory.setInstance(manager as unknown as PlatformDeviceManager);
+    expect(await defaultDeviceObservationAccess.listBootedWithStatus!(undefined)).toEqual({
+      devices: [device],
+      scanned: { android: true, ios: false },
+      discoveryErrors: { ios: error },
+    });
+  });
+  test("a successful empty listing is authoritative and source-compatible legacy access stays available", async () => {
+    const manager = {
+      getBootedDevicesDetailed: async () => ({
+        devices: [],
+        succeededPlatforms: new Set(["android", "ios"]),
+      }),
+    };
+    PlatformDeviceManagerFactory.setInstance(manager as unknown as PlatformDeviceManager);
+    expect(await resourceRead.listBootedDevicesForReadWithStatus("either", "test")).toMatchObject({
+      devices: [],
+      scanned: { android: true, ios: true },
+    });
+    expect(await defaultDeviceObservationAccess.listBooted(undefined)).toEqual([]);
   });
 });

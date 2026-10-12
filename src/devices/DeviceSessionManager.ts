@@ -391,6 +391,8 @@ export interface DeviceReadyOptions {
    * explicit IDs. Session-bound calls keep control readiness (toolRegistry does not mark them read).
    */
   intent?: "read" | "control";
+  /** Last read ownership check after image discovery, before any lifecycle or boot work. */
+  beforeReadBoot?: (image: DeviceInfo) => Promise<void>;
   skipCtrlProxyDownload?: boolean;
   signal?: AbortSignal;
   /** Reuses device discovery already started by the current target resolution. */
@@ -1163,8 +1165,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
           `Cannot safely cold-boot Android AVD '${image.name}': its running state is unknown.`,
         );
       }
+      await options.beforeReadBoot?.(image);
       return await this.bootAndroidReadinessImage(image, options);
     }
+    await options.beforeReadBoot?.(image);
     return await this.bootIosReadinessImage(image, options);
   }
 

@@ -1,4 +1,4 @@
-import { matchRunningReadTarget } from "../devices/runningReadTarget";
+import { matchRunningReadTarget, isProvidedReadTargetNotFound } from "../devices/runningReadTarget";
 import { DUMPSYS_MAX_BUFFER } from "../utils/android-cmdline-tools/dumpsysLimits";
 import {
   runWithPostActionCaptureScope,
@@ -23,8 +23,15 @@ import {
   type ConnectedPlatformScan,
   isScanAuthoritativeFor,
   type DeviceReadinessLevel,
+  type DeviceReadyOptions,
 } from "../devices/DeviceSessionManager";
-import { ActionableError, BootedDevice, SomePlatform, type ViewHierarchyResult } from "../models";
+import {
+  ActionableError,
+  BootedDevice,
+  SomePlatform,
+  type DeviceInfo,
+  type ViewHierarchyResult,
+} from "../models";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { UIStateExtractor } from "../features/navigation/UIStateExtractor";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
@@ -74,6 +81,7 @@ import {
   assertControlNotOnForeignDaemonDevice,
   assertInputRequesterHoldsDevice,
   TOOL_CALL_REMEDY,
+  deviceReservedForRestartRecoveryError,
 } from "../daemon/inputDeviceOwnership";
 import {
   defaultDeviceObservationAccess,
@@ -772,8 +780,7 @@ async function resolveSessionlessDeviceRead(
 ): Promise<ExecutionTargetContext> {
   const { args, signal } = input;
   signal?.throwIfAborted();
-  const device =
-    resolvedDevice ?? (await read.resolve(deviceId, signal, args.platform || "either"));
+  const device = resolvedDevice ?? (await resolveStoppedReservedRead(input, read, deviceId));
   if (resolvedDevice) {
     read.assertAuthorized(device);
   }
@@ -791,6 +798,123 @@ async function resolveSessionlessDeviceRead(
     shouldResolveDevice: true,
     deviceRead: read,
   };
+}
+
+/** A restart reservation forbids read booting even for the reservation's owner. */
+function readRestartReservation(deviceIds: readonly string[], platform: unknown) {
+  const state = DaemonState.getInstance();
+  if (!state.isInitialized()) {
+    return undefined;
+  }
+  const pool = state.getDevicePool();
+  for (const p of managedSlotPlatformsFor(undefined, platform)) {
+    const reservation = pool.restartReservationForStart?.(p, deviceIds, {});
+    if (reservation) {
+      return reservation;
+    }
+  }
+  return undefined;
+}
+
+async function resolveStoppedReservedRead(
+  input: ExecutionTargetInput,
+  read: SessionlessDeviceRead,
+  deviceId: string,
+): Promise<BootedDevice> {
+  try {
+    return await read.resolve(deviceId, input.signal, input.args.platform || "either");
+  } catch (error) {
+    if (isProvidedReadTargetNotFound(error)) {
+      const reservation = readRestartReservation([deviceId], input.args.platform);
+      if (reservation) {
+        throw deviceReservedForRestartRecoveryError(
+          reservation.deviceId,
+          reservation.sessionUuid,
+          reservation.retryAfterMs,
+        );
+      }
+    }
+    // Preserve typed discovery failure, cancellation and authorization errors unchanged.
+    throw error;
+  }
+}
+
+class ReadTargetBecameHeld extends Error {
+  constructor(readonly deviceId: string) {
+    super("read target became held before boot");
+  }
+}
+
+async function findHeldReadIdentity(
+  input: ExecutionTargetInput,
+  identities: readonly string[],
+  platform: unknown,
+): Promise<string | undefined> {
+  for (const deviceId of new Set(identities)) {
+    if (
+      await isSessionlessReadTargetHeld(
+        input.name,
+        {
+          deviceId,
+          platform,
+          now: (input.timer ?? defaultTimer).now(),
+        },
+        input.signal,
+      )
+    ) {
+      return deviceId;
+    }
+  }
+  return undefined;
+}
+
+async function recheckReadBootTarget(
+  input: ExecutionTargetInput,
+  image: DeviceInfo,
+): Promise<void> {
+  const identities = [input.args.deviceId, image.name, image.deviceId].filter(
+    (id): id is string => typeof id === "string" && !!id,
+  );
+  const held = await findHeldReadIdentity(input, identities, image.platform);
+  if (held) {
+    throw new ReadTargetBecameHeld(held);
+  }
+  input.signal?.throwIfAborted();
+}
+
+/** Unmark readiness before taking a late read-only exit; no boot has happened at this seam. */
+async function ensureReadTargetOrWatch(
+  input: ExecutionTargetInput,
+  platform: SomePlatform,
+  providedDeviceId: string | undefined,
+  options: DeviceReadyOptions,
+  read: SessionlessDeviceRead,
+  readinessTarget: string | undefined,
+): Promise<
+  | { device: BootedDevice; watched?: undefined }
+  | { watched: ExecutionTargetContext; device?: undefined }
+> {
+  try {
+    return {
+      device: await input.deviceSessionManager.ensureDeviceReady(platform, providedDeviceId, {
+        ...options,
+        beforeReadBoot:
+          options.intent === "read" && providedDeviceId
+            ? (image) => recheckReadBootTarget(input, image)
+            : undefined,
+      }),
+    };
+  } catch (error) {
+    if (!(error instanceof ReadTargetBecameHeld)) {
+      throw error;
+    }
+    // Expected late ownership verdict: turn readiness into a read-only lookup.
+    const executionId = input.args.__executionId;
+    if (typeof executionId === "string" && readinessTarget) {
+      executionTracker.unmarkSessionlessDeviceUse(executionId, readinessTarget);
+    }
+    return { watched: await resolveSessionlessDeviceRead(input, read, error.deviceId) };
+  }
 }
 
 function isDeviceReadOnlyCall(options: DeviceAwareToolOptions, args: unknown): boolean {
@@ -836,7 +960,7 @@ async function isSessionlessReadTargetHeld(
   if (!daemonState.isInitialized()) {
     return false;
   }
-  if (isDeviceHeld(deviceId)) {
+  if (readRestartReservation([deviceId], requestedPlatform) || isDeviceHeld(deviceId)) {
     return true;
   }
   const pool = daemonState.getDevicePool();
@@ -1542,23 +1666,20 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
               )
             : undefined;
         readinessTarget = runningReadTarget?.deviceId ?? readinessTarget;
-        // Discovery awaits: recheck even an unchanged id in case it was acquired meanwhile.
-        if (
-          runningReadTarget &&
-          (await isSessionlessReadTargetHeld(
-            name,
-            {
-              deviceId: runningReadTarget.deviceId,
-              platform: args.platform,
-              now: (input.timer ?? defaultTimer).now(),
-            },
-            signal,
-          ))
-        ) {
+        // Discovery awaits: recheck the given identity and any running alias, even on absence.
+        const lateHeldReadTarget =
+          readOnly && !sessionUuid && providedDeviceId
+            ? await findHeldReadIdentity(
+                input,
+                [providedDeviceId, readinessTarget ?? providedDeviceId],
+                args.platform,
+              )
+            : undefined;
+        if (lateHeldReadTarget) {
           return resolveSessionlessDeviceRead(
             input,
             options.sessionlessDeviceRead ?? this.defaultDeviceRead,
-            runningReadTarget.deviceId,
+            lateHeldReadTarget,
           );
         }
         // Check and mark in one turn, before readiness: a session acquiring the target while
@@ -1580,17 +1701,28 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         logger.info(
           `[ToolRegistry] ${name}: Resolving device for platform=${platform}, providedDeviceId=${providedDeviceId}`,
         );
-        device = await deviceSessionManager.ensureDeviceReady(platform, providedDeviceId, {
-          sessionId: sessionUuid,
-          intent: readOnly && !sessionUuid ? "read" : undefined,
-          skipCtrlProxyDownload: serverConfig.isSkipCtrlProxyDownloadEnabled(),
-          readiness:
-            typeof options.deviceReadiness === "function"
-              ? options.deviceReadiness(args)
-              : options.deviceReadiness,
-          signal,
-          getConnectedPlatforms,
-        });
+        const readinessResult = await ensureReadTargetOrWatch(
+          input,
+          platform,
+          providedDeviceId,
+          {
+            sessionId: sessionUuid,
+            intent: readOnly && !sessionUuid ? "read" : undefined,
+            skipCtrlProxyDownload: serverConfig.isSkipCtrlProxyDownloadEnabled(),
+            readiness:
+              typeof options.deviceReadiness === "function"
+                ? options.deviceReadiness(args)
+                : options.deviceReadiness,
+            signal,
+            getConnectedPlatforms,
+          },
+          options.sessionlessDeviceRead ?? this.defaultDeviceRead,
+          readinessTarget,
+        );
+        if (readinessResult.watched) {
+          return readinessResult.watched;
+        }
+        device = readinessResult.device;
         if (readinessTarget && execution && (readOnly || readinessTarget !== device.deviceId)) {
           // Readiness settled elsewhere: the post-resolution check below marks that device. A read
           // is unmarked once ready: watching is allowed on a held device.

@@ -694,3 +694,36 @@ describe("read boots only an explicitly named stopped device", () => {
     }
   }
 });
+
+for (const platform of ["android", "ios"] as const) {
+  for (const refuses of [true, false]) {
+    test(`${platform}: pre-read-boot callback ${refuses ? "refuses before lifecycle" : "admits the found image"}`, async () => {
+      const h = harness(platform, true);
+      const refusal = new ActionableError("late holder");
+      const seen: DeviceInfo[] = [];
+      const options = {
+        ...h.options,
+        beforeReadBoot: async (image: DeviceInfo) => {
+          seen.push(image);
+          if (refuses) {
+            throw refusal;
+          }
+        },
+      };
+      const result = await h.manager
+        .ensureDeviceReady(platform, h.id, options)
+        .catch((error: unknown) => error);
+      expect(seen).toEqual([h.image]);
+      if (refuses) {
+        expect(result).toBe(refusal);
+        h.assertNoBoot();
+        expect(h.lifecycle.reservations).toEqual([]);
+      } else {
+        expect(result).toMatchObject({ deviceId: h.device.deviceId });
+        expect(h.startCalls.length + h.simctl.getMethodCalls("bootSimulator").length).toBe(1);
+      }
+      expect(h.lifecycle.isReserved({ kind: "stable", platform, stableId: h.id })).toBe(false);
+      h.assertNoReadWrites();
+    });
+  }
+}

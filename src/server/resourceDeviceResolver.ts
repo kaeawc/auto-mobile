@@ -5,7 +5,9 @@ import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceM
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { logger } from "../utils/logger";
 import type { BootedDevice, SomePlatform } from "../models";
-import type { BootedDeviceDiscovery } from "../devices/deviceUtils";
+import { errorMessage } from "../utils/describeUnknownError";
+import type { Platform } from "../models";
+import type { DeviceDiscoveryError, BootedDeviceDiscovery } from "../devices/deviceUtils";
 
 function freshDevices(discovery: BootedDeviceDiscovery): BootedDevice[] {
   return discovery.devices.filter(
@@ -15,9 +17,18 @@ function freshDevices(discovery: BootedDeviceDiscovery): BootedDevice[] {
   );
 }
 
+/** Keep the existing discovery path's optional status reporting separate from selection. */
+function reportResourceReadDiscovery(
+  discovery: BootedDeviceDiscovery,
+  onDiscovery?: (discovery: BootedDeviceDiscovery) => void,
+): void {
+  onDiscovery?.(discovery);
+}
+
 async function discoverForResource(
   platform: SomePlatform,
   options?: { signal?: AbortSignal; requireFresh?: boolean },
+  onDiscovery?: (discovery: BootedDeviceDiscovery) => void,
 ): Promise<BootedDevice[]> {
   const manager = PlatformDeviceManagerFactory.getInstance();
   if (!options?.signal && !options?.requireFresh) {
@@ -29,6 +40,7 @@ async function discoverForResource(
     bypassIosDeviceListCache: options?.requireFresh,
   });
   options?.signal?.throwIfAborted();
+  reportResourceReadDiscovery(discovery, onDiscovery);
   return options?.requireFresh ? freshDevices(discovery) : discovery.devices;
 }
 
@@ -98,5 +110,58 @@ export async function listBootedDevicesForResource(
     }
     logger.warn(`[${source}] Failed to list booted ${platform} devices: ${error}`, error);
     return [];
+  }
+}
+
+/** Fresh read inventory, preserving failures so absence cannot accidentally authorize a boot. */
+export interface BootedResourceReadListing {
+  devices: BootedDevice[];
+  scanned: Record<Platform, boolean>;
+  discoveryErrors?: Partial<Record<Platform, DeviceDiscoveryError>>;
+}
+
+export async function listBootedDevicesForReadWithStatus(
+  platform: SomePlatform,
+  source: string,
+  signal?: AbortSignal,
+): Promise<BootedResourceReadListing> {
+  try {
+    let status: Omit<BootedResourceReadListing, "devices"> = {
+      scanned: { android: false, ios: false },
+    };
+    const rawDevices = await discoverForResource(
+      platform,
+      { signal, requireFresh: true },
+      (discovery) => {
+        status = {
+          scanned: {
+            android: discovery.succeededPlatforms.has("android"),
+            ios: discovery.succeededPlatforms.has("ios"),
+          },
+          discoveryErrors: discovery.discoveryErrors,
+        };
+      },
+    );
+    const state = DaemonState.getInstance();
+    const aliases = new AndroidTransportAliases(androidTransportIdentityAdbFactory);
+    const devices =
+      platform === "ios"
+        ? rawDevices
+        : state.isInitialized()
+          ? state.getDevicePool().mapAndroidDiscovery(rawDevices)
+          : aliases.fold(rawDevices, await aliases.prepare(rawDevices), new Set());
+    await reconcileDiscoveryObservation(devices, source, { signal });
+    signal?.throwIfAborted();
+    return { devices, ...status };
+  } catch (error) {
+    signal?.throwIfAborted();
+    logger.warn(`[${source}] Failed read discovery for ${platform}: ${errorMessage(error)}`, error);
+    const failure: DeviceDiscoveryError = { code: "failed", message: errorMessage(error) };
+    return {
+      devices: [],
+      scanned: { android: false, ios: false },
+      discoveryErrors:
+        platform === "either" ? { android: failure, ios: failure } : { [platform]: failure },
+    };
   }
 }

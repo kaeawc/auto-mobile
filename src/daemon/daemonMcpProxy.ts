@@ -144,6 +144,7 @@ import { DaemonRestartDeferredError } from "./daemonRestartAdmission";
 import {
   isRecoverableDaemonReleaseReason,
   isRecoverableDaemonHandoffReason,
+  sessionReleaseReasonFamily,
   SESSION_NOT_FOUND_REASON,
 } from "./releaseReasons";
 import { daemonProcessOptions, daemonReuseOptions } from "./daemonOptionScopes";
@@ -1635,6 +1636,8 @@ export class DaemonMcpProxy {
     | undefined;
   /** A recoverable daemon release needs a replacement transport, not a UUID fence. */
   private recoverableBoundSessionHandoff: string | undefined;
+  /** Only a device-restart handoff presents the binding on a fresh acquisition. */
+  private recoverableBoundSessionHandoffIsDeviceRestart = false;
   // Startup bindings remain authoritative until the daemon signals release.
   // Replay expiration only protects bindings inferred from ordinary calls.
   private initialSessionBindingConfigured = false;
@@ -2797,6 +2800,8 @@ export class DaemonMcpProxy {
       // The replacement daemon rehydrates this UUID as awaiting-owner. Preserve
       // the binding so the next call/heartbeat can reclaim it after reconnecting.
       this.recoverableBoundSessionHandoff = releasedSessionUuid;
+      this.recoverableBoundSessionHandoffIsDeviceRestart =
+        sessionReleaseReasonFamily(notification.reason ?? "") === "device-restart:";
       this.livenessOwnershipClaimSent = false;
       const heldHandoff = this.otherHeldSessions.get(releasedSessionUuid);
       if (heldHandoff) {
@@ -3549,6 +3554,7 @@ export class DaemonMcpProxy {
       // asynchronous tick can enter withRecoverableReconnect and reset the new
       // transport beneath the operation that is reclaiming this UUID.
       this.recoverableBoundSessionHandoff = undefined;
+      this.recoverableBoundSessionHandoffIsDeviceRestart = false;
     }
     let established = false;
 
@@ -5008,7 +5014,7 @@ export class DaemonMcpProxy {
     args: Record<string, unknown>,
     restore: boolean,
     namesOwnedSession = false,
-    isSessionAcquisition = false,
+    isSessionAcquisition: boolean,
   ): Record<string, unknown> {
     if (!namesOwnedSession && (!restore || this.sessionUuidFromArgs(args))) {
       return args;
@@ -5019,7 +5025,8 @@ export class DaemonMcpProxy {
     if (
       this.boundSessionUuid &&
       this.boundSessionUuid !== this.terminalBoundSession?.sessionUuid &&
-      (isSessionAcquisition || this.boundSessionUuid !== this.recoverableBoundSessionHandoff)
+      ((isSessionAcquisition && this.recoverableBoundSessionHandoffIsDeviceRestart) ||
+        this.boundSessionUuid !== this.recoverableBoundSessionHandoff)
     ) {
       // Restoration uses the first "if-absent" attachment as the fresh socket's
       // default, so the current binding must precede older owned sessions.
@@ -5468,6 +5475,7 @@ export class DaemonMcpProxy {
     this.livenessOwnershipClaimSent = false;
     this.latestBindingConflict = undefined;
     this.recoverableBoundSessionHandoff = undefined;
+    this.recoverableBoundSessionHandoffIsDeviceRestart = false;
   }
 
   private fenceBoundSessionUuid(

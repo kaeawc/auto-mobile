@@ -55,6 +55,55 @@ export function estimatePerDeviceBytes(
   return Math.min(policy.maxBytes, Math.max(policy.minBytes, average));
 }
 
+/** One sampled emulator process, with identities when the source can provide them. */
+export interface EmulatorMemoryRow {
+  rssBytes: number;
+  pid?: number;
+  ppid?: number;
+}
+
+/** A boot counted as in flight by the same sample's admission ledger or host registry. */
+export interface InFlightBootMemory {
+  processId?: number;
+  handedOff: boolean;
+}
+
+/**
+ * Size from settled emulators only, charging each in-flight boot at least the policy default.
+ * Match every row by pid or parent pid. For handed-off boots whose process cannot be identified,
+ * discard the smallest remaining rows, retaining the largest and flooring at the default when
+ * all remaining rows could belong to those boots. An unavailable table keeps the default.
+ */
+export function estimateSettledPerDeviceBytes(
+  rows: readonly EmulatorMemoryRow[] | undefined,
+  inFlight: readonly InFlightBootMemory[],
+  policy: PerDeviceMemoryPolicy,
+): number {
+  if (rows === undefined) {
+    return policy.defaultBytes;
+  }
+  const processIds = new Set(inFlight.map((boot) => boot.processId));
+  processIds.delete(undefined);
+  const remaining = rows
+    .filter((row) => !processIds.has(row.pid) && !processIds.has(row.ppid))
+    .map((row) => row.rssBytes)
+    .sort((a, b) => a - b);
+  if (remaining.length === 0) {
+    return policy.defaultBytes;
+  }
+  const hasProcessIds = rows.some((row) => row.pid !== undefined || row.ppid !== undefined);
+  const unmatchable = inFlight.filter(
+    (boot) => boot.handedOff && (boot.processId === undefined || !hasProcessIds),
+  ).length;
+  const settled = remaining.slice(Math.min(unmatchable, remaining.length - 1));
+  const sum = settled.reduce((total, bytes) => total + bytes, 0);
+  const average = sum / settled.length;
+  const charged =
+    (sum + inFlight.length * policy.defaultBytes) / (settled.length + inFlight.length);
+  const floor = unmatchable >= remaining.length ? policy.defaultBytes : policy.minBytes;
+  return Math.min(policy.maxBytes, Math.max(policy.minBytes, floor, average, charged));
+}
+
 /**
  * Max concurrently booted devices: the smaller of the memory budget and the
  * core budget (at least 1), unless `envName` supplies a positive integer.

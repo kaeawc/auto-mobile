@@ -833,6 +833,7 @@ type McpForwardAttempt<T> =
 /** Recovery lookup is optional only for older socket-state fakes. */
 interface SocketDaemonStateAccess extends DaemonStateAccess {
   getSessionManager(): ReturnType<DaemonStateAccess["getSessionManager"]> & {
+    ownershipSessionUuid?(sessionId: string): string;
     isReleasedSessionInRestartRecoveryWindow?(sessionId: string): Promise<boolean>;
     getExpiredReleaseSnapshot?(sessionId: string): Promise<BoundSessionLoss["release"]>;
   };
@@ -3348,13 +3349,16 @@ export class UnixSocketServer {
     socketSessionId: string,
     toolName?: unknown,
   ): McpForwardRoute | Promise<McpForwardRoute> {
-    return this.withAdmittedBoundSession(args, (recoverableSessionUuid) =>
-      this.getAdmittedToolsCallForwardRoute(
-        args,
-        socketSessionId,
-        toolName,
-        recoverableSessionUuid,
-      ),
+    return this.withAdmittedBoundSession(
+      args,
+      (recoverableSessionUuid) =>
+        this.getAdmittedToolsCallForwardRoute(
+          args,
+          socketSessionId,
+          toolName,
+          recoverableSessionUuid,
+        ),
+      socketSessionId,
     );
   }
 
@@ -3631,7 +3635,7 @@ export class UnixSocketServer {
       return;
     }
     if (
-      this.isReleasedBoundSession(request.params?.arguments) &&
+      this.isReleasedBoundSession(request.params?.arguments, socketSessionId) &&
       this.isRetryableSessionRecoveryResult(response, sessionUuid)
     ) {
       // Recovery is still using the admitted identity; keep its transport binding.
@@ -3656,6 +3660,31 @@ export class UnixSocketServer {
       this.daemonState
         .getDevicePool()
         .isSessionOwnedByOtherConnection?.(sessionUuid, socketSessionId) === true
+    );
+  }
+
+  /** A foreign connected owner's binding requires its recorded token (#11555 item 3). */
+  private honoursBoundSessionMarker(
+    args: Record<string, unknown>,
+    socketSessionId?: string,
+  ): boolean {
+    const sessionUuid = this.getSessionUuid(args);
+    if (args[DAEMON_BOUND_SESSION_PARAM] !== sessionUuid) {
+      return false;
+    }
+    if (sessionUuid === undefined || !socketSessionId || !this.daemonState.isInitialized()) {
+      return true;
+    }
+    // The token read is a peek. Only a recorded token can reach the connection fence's
+    // ownership question below, which may lazily expire the session.
+    // Older socket-state fakes lack these readers and retain the tokenless marker behaviour.
+    const sessions = this.daemonState.getSessionManager();
+    const ownershipSessionUuid = sessions.ownershipSessionUuid?.(sessionUuid) ?? sessionUuid;
+    const ownerToken = sessions.peekSession?.(ownershipSessionUuid)?.livenessOwnerToken;
+    return (
+      !ownerToken ||
+      this.ownedSessionsOwnerToken(args) === ownerToken ||
+      !this.isSessionOwnedByOtherConnection(sessionUuid, socketSessionId)
     );
   }
 
@@ -3686,7 +3715,7 @@ export class UnixSocketServer {
     toolName: unknown,
     args: unknown,
   ): void {
-    if (this.isReleasedBoundSession(args)) {
+    if (this.isReleasedBoundSession(args, socketSessionId)) {
       this.clearBoundMcpClientKey(socketSessionId);
       return;
     }
@@ -4688,7 +4717,7 @@ export class UnixSocketServer {
     return isNonBlankSessionUuid(sessionUuid) ? sessionUuid : undefined;
   }
 
-  private isReleasedBoundSession(args: unknown): boolean {
+  private isReleasedBoundSession(args: unknown, socketSessionId?: string): boolean {
     if (
       !args ||
       typeof args !== "object" ||
@@ -4701,7 +4730,7 @@ export class UnixSocketServer {
     const sessionUuid = this.getSessionUuid(record);
     return (
       sessionUuid !== undefined &&
-      record[DAEMON_BOUND_SESSION_PARAM] === sessionUuid &&
+      this.honoursBoundSessionMarker(record, socketSessionId) &&
       !this.hasActiveDaemonSession(sessionUuid)
     );
   }
@@ -4719,8 +4748,9 @@ export class UnixSocketServer {
   private withAdmittedBoundSession<T>(
     args: unknown,
     forward: (recoverableSessionUuid?: string) => T,
+    socketSessionId?: string,
   ): T | Promise<T> {
-    if (!this.isReleasedBoundSession(args)) {
+    if (!this.isReleasedBoundSession(args, socketSessionId)) {
       // Keep healthy routing and forwarding synchronous up to the existing I/O.
       return forward();
     }
@@ -8657,23 +8687,27 @@ export class UnixSocketServer {
         }
 
         try {
-          return await this.withAdmittedBoundSession(request.params.arguments, () => {
-            const forwardedArguments = this.withSocketSessionAutolockKey(
-              request.params.arguments,
-              socketSessionId,
-              timeoutMs,
-            );
-            return this.traceCallTool(request, () =>
-              mcpClient.callTool(
-                {
-                  name: request.params.name,
-                  arguments: this.withLiveDeadlineKey(forwardedArguments, liveDeadlineKey),
-                },
-                undefined,
-                callOptions,
-              ),
-            );
-          }).catch((error: unknown) =>
+          return await this.withAdmittedBoundSession(
+            request.params.arguments,
+            () => {
+              const forwardedArguments = this.withSocketSessionAutolockKey(
+                request.params.arguments,
+                socketSessionId,
+                timeoutMs,
+              );
+              return this.traceCallTool(request, () =>
+                mcpClient.callTool(
+                  {
+                    name: request.params.name,
+                    arguments: this.withLiveDeadlineKey(forwardedArguments, liveDeadlineKey),
+                  },
+                  undefined,
+                  callOptions,
+                ),
+              );
+            },
+            socketSessionId,
+          ).catch((error: unknown) =>
             this.textForwardFailure(liveDeadlineKey, request.params.name, error),
           );
         } finally {
@@ -8781,14 +8815,13 @@ export class UnixSocketServer {
     }
 
     const forwardedArgs = { ...args } as Record<string, unknown>;
+    const usesBoundSession = this.honoursBoundSessionMarker(forwardedArgs, socketSessionId);
     delete forwardedArgs[DAEMON_TOOL_SELECTION_PROFILE_PARAM];
     delete forwardedArgs[DAEMON_OWNED_SESSIONS_PARAM];
     delete forwardedArgs[DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM];
     this.recordOneShotCliConnection(socketSessionId, forwardedArgs);
     // Only the daemon asserts the loopback marker, from the connection's own declaration.
     delete forwardedArgs[INTERNAL_ONE_SHOT_CLI_PARAM];
-    const boundSessionUuid = this.getSessionUuid(forwardedArgs);
-    const usesBoundSession = forwardedArgs[DAEMON_BOUND_SESSION_PARAM] === boundSessionUuid;
     delete forwardedArgs[DAEMON_BOUND_SESSION_PARAM];
     delete forwardedArgs[DAEMON_RELEASED_SESSION_PARAM];
     // Connection-bound sessions are carried by the loopback transport header.

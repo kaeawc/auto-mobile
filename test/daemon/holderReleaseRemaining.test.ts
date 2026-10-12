@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { holderReleaseRemainingMs } from "../../src/daemon/holderReleaseRemaining";
+import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/sessionLivenessWindows";
 import {
   heldDeviceBindRefusal,
   DEVICE_PREPARED_FOR_OTHER_REQUEST_RETRY_AFTER_MS,
@@ -7,6 +8,28 @@ import {
 
 const query = (disconnectRemainingMs?: number, releasing = false) =>
   holderReleaseRemainingMs({ disconnectRemainingMs, releasing, ownerLease: undefined });
+
+test("a lapsed owner awaiting reap stays retryable for at most one scan", () => {
+  for (const ownerLeaseAwaitsReap of [true, false]) {
+    const hint = holderReleaseRemainingMs({
+      disconnectRemainingMs: undefined,
+      releasing: false,
+      ownerLease: { phase: "lapsed", remainingMs: 0 },
+      ownerLeaseAwaitsReap,
+    });
+    expect(hint).toBe(
+      ownerLeaseAwaitsReap ? DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS : undefined,
+    );
+  }
+  expect(
+    holderReleaseRemainingMs({
+      disconnectRemainingMs: 20,
+      releasing: false,
+      ownerLease: undefined,
+      ownerLeaseAwaitsReap: true,
+    }),
+  ).toBe(20);
+});
 
 test("release hints take the minimum existing bound, round up and stay within the lease contract", () => {
   expect(query()).toBeUndefined();

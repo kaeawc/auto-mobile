@@ -25,6 +25,13 @@ const SQLITE_PROBE_WORKER_SOURCE = `
   });
 `;
 
+export class DatabaseHealthProbeTimeoutError extends Error {
+  constructor(readonly timeoutMs: number) {
+    super(`Database health probe timed out after ${timeoutMs}ms`);
+    this.name = "DatabaseHealthProbeTimeoutError";
+  }
+}
+
 export interface DatabaseHealthProbe {
   check(): Promise<void>;
   dispose?(): Promise<void>;
@@ -106,7 +113,7 @@ export class DefaultDatabaseHealthProbe implements DatabaseHealthProbe {
       timeoutMs: this.timeoutMs,
       unref: true,
       label: "Database health probe",
-      timeoutError: () => new Error(`Database health probe timed out after ${this.timeoutMs}ms`),
+      timeoutError: () => new DatabaseHealthProbeTimeoutError(this.timeoutMs),
       onTimeout: () => this.abandonPendingWorkerRequest(),
     });
   }

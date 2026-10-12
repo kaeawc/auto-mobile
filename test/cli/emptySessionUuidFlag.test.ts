@@ -7,6 +7,10 @@ import {
 } from "../../src/cli";
 import { isolateCliDataDir, type IsolatedCliDataDir } from "../helpers/cliDataDirIsolation";
 
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
+
 /**
  * `--session-uuid "$SESSION"` with an unset/empty variable names no session. The flag was given
  * explicitly, so the call must be refused rather than silently run sessionless: a sessionless

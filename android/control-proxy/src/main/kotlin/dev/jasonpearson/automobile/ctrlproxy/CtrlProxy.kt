@@ -2902,6 +2902,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   ) {
     rememberedInsert = null
     val start = System.currentTimeMillis()
+    val requestDeadlineMs =
+      timeoutMs?.let { android.os.SystemClock.uptimeMillis() + it.coerceAtLeast(0) }
+        ?: Long.MAX_VALUE
     val state = requestId?.let { imeCommitStates.computeIfAbsent(it) { ImeCommitState() } }
     if (state?.cancelled?.get() == true) {
       launchRequestScope(requestId) {
@@ -2919,9 +2922,20 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val ime =
         awaitImeServiceReady(
           nowMs = android.os.SystemClock::uptimeMillis,
-          delayMs = { kotlinx.coroutines.delay(it) },
-          probe = { CtrlProxyIme.current() },
-          isCancelled = { state?.cancelled?.get() == true },
+          delayMs = {
+            kotlinx.coroutines.delay(
+              minOf(it, requestDeadlineMs - android.os.SystemClock.uptimeMillis()).coerceAtLeast(0),
+            )
+          },
+          probe = {
+            CtrlProxyIme.current()?.takeIf {
+              android.os.SystemClock.uptimeMillis() < requestDeadlineMs
+            }
+          },
+          isCancelled = {
+            state?.cancelled?.get() == true ||
+              android.os.SystemClock.uptimeMillis() >= requestDeadlineMs
+          },
         )
       if (state?.cancelled?.get() == true) {
         finish(ImeCommitResult(success = false, error = null))
@@ -2945,8 +2959,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         )
         return@launchRequestScope
       }
-      ime.commitText(text, priorImeId, { state?.cancelled?.get() == true }, delivery, timeoutMs) {
-        result ->
+      ime.commitText(
+        text,
+        priorImeId,
+        { state?.cancelled?.get() == true },
+        delivery,
+        timeoutMs,
+        requestDeadlineMs,
+      ) { result ->
         finish(result)
         launchRequestScope(requestId) {
           broadcastCommitTextResult(
@@ -2956,6 +2976,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             System.currentTimeMillis() - start,
             result.partialApplication,
             result.committedUnits,
+            result.insertedText,
           )
         }
       }
@@ -7649,6 +7670,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     totalTimeMs: Long,
     partialApplication: Boolean,
     committedUnits: Int = 0,
+    insertedText: String? = null,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping commit text result broadcast")
@@ -7662,6 +7684,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           put("totalTimeMs", totalTimeMs)
           if (partialApplication) put("partialApplication", true)
           if (committedUnits > 0) put("committedUnits", committedUnits)
+          if (insertedText != null) put("insertedText", insertedText)
           if (error != null) {
             put("error", error)
           }

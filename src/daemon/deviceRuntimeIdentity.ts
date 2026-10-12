@@ -126,8 +126,9 @@ export class DeviceRuntimeIdentity {
    *
    * What it deliberately does NOT do is change pool MEMBERSHIP. Installing a
    * replacement evicts an incarnation and retires its session, and that belongs to
-   * the paths that own allocation (the refresh sweep and the assignment-time
-   * liveness check), not to a resource read or a stream request. A disagreement
+   * the paths that own allocation (the refresh sweep, assignment-time liveness,
+   * and explicit start / disconnect-monitor membership settlement), not to a
+   * resource read or a stream request. A disagreement
    * reaching this funnel is therefore quarantined and left for those paths to
    * settle — which is the same conservative rule the sweep already applies when
    * its own replacement is deferred behind a shutdown reservation. Quarantining

@@ -29,6 +29,68 @@ class CtrlProxyImeTest {
   }
 
   @Test
+  fun `input generation and identity track start restart and finish`() {
+    val service = Robolectric.buildService(CtrlProxyIme::class.java).create().get()
+    val info =
+      EditorInfo().apply {
+        packageName = "app"
+        fieldId = 7
+        inputType = 1
+        hintText = "Notes"
+      }
+    assertEquals(0L, service.inputConnectionGeneration)
+    service.onStartInput(info, false)
+    val identity = service.inputEditorIdentity
+    assertEquals(1L, service.inputConnectionGeneration)
+    assertFalse(service.inputStartedByRestart)
+    service.onStartInput(info, true)
+    assertEquals(2L, service.inputConnectionGeneration)
+    assertEquals(identity, service.inputEditorIdentity)
+    assertTrue(service.inputStartedByRestart)
+    service.onFinishInput()
+    assertEquals(3L, service.inputConnectionGeneration)
+    assertEquals(null, service.inputEditorIdentity)
+    info.fieldId = 8
+    service.onStartInput(info, false)
+    assertTrue(identity != service.inputEditorIdentity)
+  }
+
+  @Test
+  fun `finish during active commit neither cancels nor restores but idle finish restores`() {
+    val service = Robolectric.buildService(CtrlProxyIme::class.java).create().get()
+    val sink = ImeCommitDriverTest.FakeImeCommitSink(1)
+    val driver = ImeCommitDriver(sink) { listOf(it) }
+    var cancellations = 0
+    fun set(name: String, value: Any?) {
+      CtrlProxyIme::class
+        .java
+        .getDeclaredField(name)
+        .apply { isAccessible = true }
+        .set(service, value)
+    }
+    set("lastDriver", driver)
+    set("lastPriorImeId", "prior")
+    set("cancelActiveCommit", { _: String -> cancellations++ })
+    service.onStartInput(EditorInfo(), false)
+    service.onFinishInput()
+    assertEquals(0, cancellations)
+    assertTrue(sink.switchedImeIds.isEmpty())
+    set("cancelActiveCommit", null)
+    service.onFinishInput()
+    assertEquals(listOf("prior"), sink.switchedImeIds)
+  }
+
+  @Test
+  fun `request deadline bounds connection wait and reserves sync including tiny budgets`() {
+    assertEquals(900L, CtrlProxyIme.connectionDeadlineMs(100L, 900L))
+    assertEquals(2_100L, CtrlProxyIme.connectionDeadlineMs(100L, Long.MAX_VALUE))
+    assertEquals(7_500L, CtrlProxyIme.driverDeadlineMs(100L, 10_000L))
+    assertEquals(101L, CtrlProxyIme.driverDeadlineMs(100L, 500L))
+    assertEquals(100L, CtrlProxyIme.driverDeadlineMs(100L, 100L))
+    assertEquals(Long.MAX_VALUE, CtrlProxyIme.driverDeadlineMs(100L, Long.MAX_VALUE))
+  }
+
+  @Test
   fun `editor sync distinguishes throwing read from completed empty and populated reads`() {
     val service = InputMethodService()
     fun connection(read: () -> CharSequence?) =

@@ -6,6 +6,7 @@ import {
 import {
   DeviceSessionNotActiveError,
   DeviceSessionRowChangedError,
+  DeviceSessionRowNotRewritableError,
   DeviceSessionTerminallyReleasedError,
   isDeviceRestartReleaseReason,
   isRecoverableDaemonReleaseReason,
@@ -88,7 +89,7 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
         existing.daemon_session_id !== null &&
         rewrite.livePeerDaemonSessionIds.includes(existing.daemon_session_id);
       if (terminal || peerOwned) {
-        throw new DeviceSessionTerminallyReleasedError(record.sessionUuid);
+        throw new DeviceSessionRowNotRewritableError(record.sessionUuid);
       }
     }
     // Like the repository's conflict guard: a terminally released row is never made active again.

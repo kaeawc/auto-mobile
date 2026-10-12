@@ -1528,6 +1528,8 @@ export class SessionManager {
    * release captures it so its write cannot land on a row a later incarnation re-upserted.
    */
   private readonly persistedRowGenerations = new WeakMap<Session, number>();
+  /** Own superseded releases can land late for this incarnation's entire lifetime (#11557). */
+  private readonly supersededReleaseReasons = new WeakMap<Session, Set<string>>();
   /** The row generation a non-terminal release snapshot may overwrite (#11129). */
   private readonly releaseRowGenerations = new WeakMap<SessionReleaseSnapshot, number>();
   /** Latest finalized incarnation, weakly retained until a same-UUID replacement publishes. */
@@ -6448,6 +6450,7 @@ export class SessionManager {
     session: Session,
     supersededReasons: readonly string[],
   ): Promise<boolean> {
+    supersededReasons = this.rememberSupersededReleaseReasons(session, supersededReasons);
     if (!this.isCurrentSession(session)) {
       return false;
     }
@@ -6496,6 +6499,19 @@ export class SessionManager {
     this.settleOwedSupersededRowReassert(session);
     await this.restoreReleasedRowAfterReassert(session);
     return this.isCurrentSession(session);
+  }
+
+  /** Keep reasons beyond an owed entry's lifetime, without lending them to a same-UUID session. */
+  private rememberSupersededReleaseReasons(
+    session: Session,
+    reasons: readonly string[],
+  ): readonly string[] {
+    const remembered = this.supersededReleaseReasons.get(session) ?? new Set<string>();
+    for (const reason of reasons) {
+      remembered.add(reason);
+    }
+    this.supersededReleaseReasons.set(session, remembered);
+    return [...remembered];
   }
 
   /** Snapshot the attached liveness provider for the rewrite's statement guard (#11557). */
@@ -6659,6 +6675,7 @@ export class SessionManager {
     superseded: Session,
     supersededReasons: readonly string[],
   ): Promise<void> {
+    supersededReasons = this.rememberSupersededReleaseReasons(superseded, supersededReasons);
     const sessionId = superseded.sessionId;
     let session = superseded;
     const settle = this.expectSupersededRowReassert(sessionId, supersededReasons);
@@ -6668,6 +6685,9 @@ export class SessionManager {
       // The name may have been issued and released again since: the row is then written as its
       // last incarnation held it.
       session = this.latestFinalizedSessionIdentities.get(sessionId)?.deref() ?? superseded;
+      supersededReasons = [
+        ...new Set([...supersededReasons, ...(this.supersededReleaseReasons.get(session) ?? [])]),
+      ];
       const ended = this.releaseThatEnded(session);
       if (
         !ended ||
@@ -6716,6 +6736,9 @@ export class SessionManager {
     session: Session,
     supersededReasons: readonly string[],
   ): Promise<boolean> {
+    supersededReasons = [
+      ...new Set([...supersededReasons, ...(this.supersededReleaseReasons.get(session) ?? [])]),
+    ];
     const row = await this.deviceSessionRepository.getSession?.(session.sessionId);
     if (
       !row?.release_reason ||
@@ -6807,6 +6830,7 @@ export class SessionManager {
 
   /** Record a failed rewrite as owed and arm its next retry, while any are left (#11557). */
   private oweSupersededRowReassert(session: Session, supersededReasons: readonly string[]): void {
+    supersededReasons = this.rememberSupersededReleaseReasons(session, supersededReasons);
     const sessionId = session.sessionId;
     const owed = this.owedSupersededRowReasserts.get(sessionId);
     const previous = owed?.session === session ? owed : undefined;
@@ -6863,7 +6887,7 @@ export class SessionManager {
     }
     let persisted: DeviceSession | undefined;
     try {
-      persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+      persisted = await this.readPersistedSession(sessionId);
     } catch (error) {
       logger.warn(
         `[SessionManager] Failed to read the row of live session ${sessionId} before ` +
@@ -6910,7 +6934,8 @@ export class SessionManager {
       return true;
     }
     const release = this.terminalReleaseFromPersisted(entry.session.sessionId, persisted);
-    return release !== undefined && !entry.reasons.has(release.releaseReason);
+    const reasons = this.rememberSupersededReleaseReasons(entry.session, [...entry.reasons]);
+    return release !== undefined && !reasons.includes(release.releaseReason);
   }
 
   /** An attempt that could not issue its write counts as a failed one. */

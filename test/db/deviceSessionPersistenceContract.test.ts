@@ -7,6 +7,7 @@ import {
 } from "../../src/daemon/releaseReasons";
 import {
   DeviceSessionRepository,
+  DeviceSessionRowNotRewritableError,
   DeviceSessionTerminallyReleasedError,
   type DeviceSessionPersistence,
   type DeviceSessionRecord,
@@ -258,7 +259,8 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
           stable_identity_generation: (before?.stable_identity_generation ?? 0) + 1,
         });
       } else {
-        expect(result).toBeInstanceOf(DeviceSessionTerminallyReleasedError);
+        expect(result).toHaveProperty("name", "DeviceSessionRowNotRewritableError");
+        expect(result).toBeInstanceOf(DeviceSessionRowNotRewritableError);
         expect(await rowOf(persistence)).toEqual(before);
       }
     });
@@ -295,7 +297,8 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
             (error: unknown) => error,
           );
         if (reason === "explicit-release") {
-          expect(result).toBeInstanceOf(DeviceSessionTerminallyReleasedError);
+          expect(result).toHaveProperty("name", "DeviceSessionRowNotRewritableError");
+          expect(result).toBeInstanceOf(DeviceSessionRowNotRewritableError);
           expect(await rowOf(persistence)).toEqual(before);
         } else {
           expect(result).toBe("written");

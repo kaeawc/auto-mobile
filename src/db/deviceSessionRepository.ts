@@ -149,6 +149,17 @@ export class DeviceSessionTerminallyReleasedError extends ActionableError {
   }
 }
 
+/** A superseded-release rewrite found another terminal release or a live peer's row (#11557). */
+export class DeviceSessionRowNotRewritableError extends ActionableError {
+  constructor(readonly sessionUuid: string) {
+    super(
+      `Device session ${sessionUuid} was not rewritten: its row holds another terminal release ` +
+        "or a live peer daemon owns it.",
+    );
+    this.name = "DeviceSessionRowNotRewritableError";
+  }
+}
+
 /** Options for {@link DeviceSessionPersistence.upsertActiveSession}. */
 export interface UpsertActiveSessionOptions {
   /**
@@ -170,7 +181,7 @@ export interface UpsertActiveSessionOptions {
    * Rewrite only a non-terminal row or this superseded release's row, and never a live peer's
    * row (#11557). Both guards run in the conflict-update statement; a missing row is inserted.
    * Empty reasons behave like `unlessTerminal`; empty peers add no owner guard. Not combined
-   * with `claimedRow`. A refusal rejects with {@link DeviceSessionTerminallyReleasedError}.
+   * with `claimedRow`. A refusal rejects with {@link DeviceSessionRowNotRewritableError}.
    */
   rewriteOverSupersededRelease?: {
     supersededReasons: readonly string[];
@@ -571,8 +582,11 @@ export class DeviceSessionRepository {
     }
     if (!written) {
       // The row's precondition failed: an expected race outcome, not a storage failure.
-      throw claimedRow
-        ? new DeviceSessionRowChangedError(record.sessionUuid)
+      if (claimedRow) {
+        throw new DeviceSessionRowChangedError(record.sessionUuid);
+      }
+      throw rewriteOverSupersededRelease
+        ? new DeviceSessionRowNotRewritableError(record.sessionUuid)
         : new DeviceSessionTerminallyReleasedError(record.sessionUuid);
     }
     return written.stable_identity_generation ?? 0;

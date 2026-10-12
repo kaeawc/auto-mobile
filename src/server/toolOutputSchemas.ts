@@ -134,6 +134,7 @@ export const sendKeysResultSchema = z
                 verifiedGraphemes: z.number().int().nonnegative().optional(),
               })
               .optional(),
+            imeTrace: z.array(z.string()).optional(),
             backend: z.literal("autoMobileIme").optional(),
             capability: z.literal("semanticText").optional(),
             keyboard: keyboardIdentitySchema.optional(),

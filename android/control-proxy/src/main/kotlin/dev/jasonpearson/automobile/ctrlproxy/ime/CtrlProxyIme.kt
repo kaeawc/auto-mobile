@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
+import android.util.Log
 import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.View
@@ -67,6 +68,68 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
   private var activeDriver: ImeCommitDriver? = null
   private var cancelActiveCommit: ((String) -> Unit)? = null
   private var lastPriorImeId: String? = null
+  private val traceRecorder =
+    ImeTraceRecorder(
+      elapsedRealtimeMs = SystemClock::elapsedRealtime,
+      emit = { Log.i(ImeTraceRecorder.TAG, it) },
+    )
+  private var tracedConnectionIdentity: Int? = null
+
+  internal fun traceSnapshot(): List<String> = traceRecorder.snapshot()
+
+  private fun recordTrace(event: String, vararg fields: Pair<String, Any?>) {
+    runCatching {
+      traceRecorder.record(
+        event,
+        "gen" to inputConnectionGeneration,
+        "commitActive" to (activeDriver != null),
+        "commit" to if (activeDriver != null) commitGeneration else null,
+        *fields,
+      )
+    }
+  }
+
+  private fun traceCallback(
+    event: String,
+    vararg fields: Pair<String, Any?>,
+    editorInfo: EditorInfo? = null,
+  ) {
+    runCatching {
+      val connection = currentInputConnection
+      val identity = connection?.let(System::identityHashCode)
+      if (identity != tracedConnectionIdentity) {
+        recordTrace(
+          "connectionReplaced",
+          "hadConnection" to (tracedConnectionIdentity != null),
+          "hasConnection" to (connection != null),
+        )
+        tracedConnectionIdentity = identity
+      }
+      when {
+        event == "onStartInput" || event == "onStartInputView" ->
+          recordTrace(event, *fields, *editorFields(editorInfo))
+        event == "onUpdateSelection" &&
+          ImeCommitDriver.isPasswordInput(currentInputEditorInfo?.inputType) ->
+          recordTrace(event, "secure" to true)
+        else -> recordTrace(event, *fields)
+      }
+    }
+  }
+
+  private fun editorFields(info: EditorInfo?): Array<Pair<String, Any?>> =
+    if (info == null) arrayOf("editor" to "none")
+    else editorTraceFields(info.packageName, info.fieldId, info.inputType, info.imeOptions)
+
+  override fun onBindInput() {
+    super.onBindInput()
+    traceCallback("onBindInput")
+  }
+
+  override fun onUnbindInput() {
+    super.onUnbindInput()
+    traceCallback("onUnbindInput")
+  }
+
   private var commitGeneration = 0L
   internal var inputConnectionGeneration = 0L
     private set
@@ -126,11 +189,13 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
   override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
     super.onStartInputView(info, restarting)
     moveLifecycleTo(Lifecycle.State.RESUMED)
+    traceCallback("onStartInputView", "restarting" to restarting, editorInfo = info)
   }
 
   override fun onFinishInputView(finishingInput: Boolean) {
     moveLifecycleTo(Lifecycle.State.STARTED)
     super.onFinishInputView(finishingInput)
+    traceCallback("onFinishInputView", "finishingInput" to finishingInput)
   }
 
   override fun onEvaluateFullscreenMode(): Boolean = false
@@ -150,6 +215,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
         )
         .joinToString("") { value -> if (value == null) "-1:" else "${value.length}:$value" }
     }
+    traceCallback("onStartInput", "restarting" to restarting, editorInfo = attribute)
     isInputStarted = true
     if (attribute != null) {
       uiState =
@@ -186,6 +252,17 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
       connectionAdapter(),
     )
     uiState = session.uiState()
+    if (activeDriver != null) {
+      traceCallback(
+        "onUpdateSelection",
+        "oldSelStart" to oldSelStart,
+        "oldSelEnd" to oldSelEnd,
+        "newSelStart" to newSelStart,
+        "newSelEnd" to newSelEnd,
+        "candidatesStart" to candidatesStart,
+        "candidatesEnd" to candidatesEnd,
+      )
+    }
   }
 
   override fun onFinishInput() {
@@ -195,6 +272,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     session.onFinishInput(connectionAdapter())
     super.onFinishInput()
     if (cancelActiveCommit == null) restoreLastIme()
+    traceCallback("onFinishInput")
   }
 
   /** Null means no active editor connection; false means the editor rejected the action. */
@@ -220,6 +298,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     delivery: ImeTextDelivery = ImeTextDelivery.COMMIT,
     timeoutMs: Long? = null,
     requestDeadlineMs: Long = Long.MAX_VALUE,
+    trace: Boolean = false,
     onResult: (ImeCommitResult) -> Unit,
   ) {
     mainHandler.post {
@@ -232,19 +311,43 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
       cancelActiveCommit?.invoke("IME commit superseded by another request")
       commitGeneration++
       val generation = commitGeneration
-      val driver = ImeCommitDriver(createSink())
+      val driver =
+        ImeCommitDriver(
+          createSink(),
+          trace =
+            object : ImeDriverTrace {
+              override fun record(event: String, fields: Array<out Pair<String, Any?>>) {
+                recordTrace(event, *fields)
+              }
+            },
+        )
       activeDriver = driver
+      val secureInput = ImeCommitDriver.isPasswordInput(currentInputEditorInfo?.inputType)
+      recordTrace(
+        "commitStart",
+        "delivery" to delivery.name,
+        "textLength" to if (secureInput) null else text.length,
+        "secure" to if (secureInput) true else null,
+      )
       val restoreId = priorImeId?.takeUnless { it == ownImeId() }
       rememberRestore(driver, restoreId)
       var finished = false
       fun finish(result: ImeCommitResult) {
         if (finished) return
         finished = true
+        recordTrace(
+          "commitFinish",
+          "success" to result.success,
+          "partial" to result.partialApplication,
+          "committedUnits" to result.committedUnits,
+          "insertedLength" to result.insertedText?.length,
+        )
+        val tracedResult = if (trace) result.copy(trace = traceRecorder.snapshot()) else result
         if (activeDriver === driver) {
           activeDriver = null
           cancelActiveCommit = null
         }
-        onResult(result)
+        onResult(tracedResult)
       }
       cancelActiveCommit = { reason ->
         driver.cancel(reason)

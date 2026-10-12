@@ -1,5 +1,6 @@
+import { typeScriptFiles, relativePosix } from "./astGuard";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { scanRecordHeartbeatCalls } from "./recordHeartbeatCallers";
@@ -12,20 +13,6 @@ const BASELINE_CEILING = 35;
 // Parsing every test file can exceed Bun's default hook limit on loaded CI runners.
 const TREE_SCAN_HOOK_TIMEOUT_MS = 30_000;
 const HARNESS_FILE = "test/helpers/livenessScenarioHarness.ts";
-
-function typeScriptFiles(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const file = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      return entry.name === "node_modules" ? [] : typeScriptFiles(file);
-    }
-    return entry.name.endsWith(".ts") ? [file] : [];
-  });
-}
-
-function relativePosix(file: string): string {
-  return path.relative(REPO_ROOT, file).split(path.sep).join("/");
-}
 
 describe("scanRecordHeartbeatCalls", () => {
   test.each([
@@ -112,7 +99,7 @@ describe("direct recordHeartbeat callers stay within the baseline", () => {
 
   beforeAll(() => {
     callSites = typeScriptFiles(TEST_DIR).flatMap((file) => {
-      const relative = relativePosix(file);
+      const relative = relativePosix(REPO_ROOT, file);
       return scanRecordHeartbeatCalls(relative, readFileSync(file, "utf8")).map((finding) => ({
         file: relative,
         line: finding.line,

@@ -1552,7 +1552,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     });
     if (safe.coveredBy) {
       throw new TapTargetUnavailableError(
-        iosTapOwnershipErrorMessage(target, safe.coveredBy),
+        iosTapOwnershipErrorMessage(target, safe.coveredBy, safe.ownerInsideScrollContainer),
         "no-visible-tap-area",
       );
     }

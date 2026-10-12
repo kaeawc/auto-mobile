@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   drainViolations,
   installRealDeviceToolSpawnGuard,
+  parseHostSpawnAllowList,
   testFileFromStack,
   type Violation,
 } from "./realDeviceToolSpawnGuard";
@@ -71,20 +72,20 @@ if (process.platform !== "win32") {
         });
       }
     },
-    loadAllowList: () =>
-      new Set(
-        readFileSync(
-          process.env.AUTOMOBILE_SPAWN_GUARD_ALLOWLIST ??
-            new URL("../../scripts/unit-test-device-spawn-allowlist.txt", import.meta.url),
-          "utf8",
-        )
-          .split(/\r?\n/)
-          .filter((line) => line && !line.startsWith("#")),
-      ),
+    loadAllowList: () => {
+      const path =
+        process.env.AUTOMOBILE_SPAWN_GUARD_ALLOWLIST ??
+        new URL("../../scripts/unit-test-host-spawn-allowlist.txt", import.meta.url);
+      // A refused line is dropped here and reported by test/lint/unitTestHostSpawnAllowlist.test.ts.
+      return parseHostSpawnAllowList(readFileSync(path, "utf8")).allowList;
+    },
     mode: censusFile ? "census" : "enforce",
     record: censusFile
-      ? (tool, argv, testFile) =>
-          appendFileSync(censusFile, `${testFile}\t${tool}\t${JSON.stringify(argv)}\n`)
+      ? (tool, argv, testFile, forbidden) =>
+          appendFileSync(
+            censusFile,
+            `${testFile}\t${tool}\t${forbidden ? "refused" : "ran"}\t${JSON.stringify(argv)}\n`,
+          )
       : undefined,
     report,
   });

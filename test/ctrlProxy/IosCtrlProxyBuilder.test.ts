@@ -14,10 +14,10 @@ import {
 } from "../../src/constants/release";
 import { FakeIOSCtrlProxyBundleDownloader } from "../fakes/FakeIOSCtrlProxyBundleDownloader";
 import { FakeCtrlProxyCodesignVerifier } from "../fakes/FakeCtrlProxyCodesignVerifier";
+import { useScratchRoot } from "../helpers/scratchRoot";
 import { getSharedAutoMobileDir, getTempDir } from "../../src/utils/tempDir";
 import * as fs from "fs/promises";
 import * as path from "path";
-import os from "os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { parsePlist } from "../../src/utils/ios-cmdline-tools/XctestrunPlist";
 import { logger } from "../../src/utils/logger";
@@ -34,6 +34,7 @@ describe("IosCtrlProxyBuilder", function () {
   let originalRunnerSha256: string | undefined;
   let originalRunnerSha256Target: string | undefined;
   let tempDir: string;
+  const scratch = useScratchRoot("ctrl-proxy-ios-builder-test-");
 
   test("finds legacy fixture bundles and prefers the renamed product", async () => {
     const builder = IosCtrlProxyBuilder.getInstance();
@@ -207,7 +208,7 @@ describe("IosCtrlProxyBuilder", function () {
     originalRunnerSha256Target = process.env[IOS_CTRL_PROXY_RUNNER_SHA256_TARGET_ENV];
 
     // Create temp directory for tests
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ctrl-proxy-ios-builder-test-"));
+    tempDir = scratch.next();
 
     // Reset singleton instances
     IosCtrlProxyBuilder.resetInstances();
@@ -280,13 +281,6 @@ describe("IosCtrlProxyBuilder", function () {
 
     // Reset singleton instances
     IosCtrlProxyBuilder.resetInstances();
-
-    // Clean up temp directory
-    try {
-      await fs.rm(tempDir, { recursive: true, force: true });
-    } catch {
-      // Ignore cleanup errors
-    }
   });
 
   describe("getInstance", function () {

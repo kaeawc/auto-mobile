@@ -803,7 +803,7 @@ type SessionClockExecution = SessionExecutionMetadata & { sessionClockStartTime:
 export interface ActiveSessionExecutionQuery {
   startedAtOrBefore?: number;
   excludeExecutionId?: string;
-  /** Count control calls only: a read never counts as its session owner's liveness (#11322). */
+  /** Count control calls only: reads never hold idle or owner-disconnect release (#11381). */
   excludeReads?: boolean;
 }
 
@@ -1528,6 +1528,8 @@ export class SessionManager {
    * release captures it so its write cannot land on a row a later incarnation re-upserted.
    */
   private readonly persistedRowGenerations = new WeakMap<Session, number>();
+  /** Own superseded releases can land late for this incarnation's entire lifetime (#11557). */
+  private readonly supersededReleaseReasons = new WeakMap<Session, Set<string>>();
   /** The row generation a non-terminal release snapshot may overwrite (#11129). */
   private readonly releaseRowGenerations = new WeakMap<SessionReleaseSnapshot, number>();
   /** Latest finalized incarnation, weakly retained until a same-UUID replacement publishes. */
@@ -2605,7 +2607,15 @@ export class SessionManager {
     if (this.removeSession(sessionId, session)) {
       // The stuck release never reached its own notification: announce the release now so
       // proxies and stream servers stop treating the session as live.
-      this.notifySessionRelease({ ...fence, ...managedExecutionReleaseMarker(session) });
+      const snapshot = { ...fence, ...managedExecutionReleaseMarker(session) };
+      if (isDeviceRestartReleaseReason(fence.releaseReason)) {
+        // The callback's copy and the persisted fence must confirm the same row write.
+        const persistence =
+          this.restartReleasePersistence.get(fence) ?? Promise.withResolvers<void>();
+        this.restartReleasePersistence.set(fence, persistence);
+        this.restartReleasePersistence.set(snapshot, persistence);
+      }
+      this.notifySessionRelease(snapshot);
     }
     // The stuck release may never reach its own write: persist the release now (#11058), or a
     // restart would admit a terminally released UUID again.
@@ -2691,7 +2701,7 @@ export class SessionManager {
    * Write a forced release's row in the background, tracked by the shutdown drain. A terminal
    * write that fails falls back to the terminal-write retry (#10959); one that times out is
    * already retried by the late-write tracker if it then fails. A non-terminal write that fails
-   * is kept as a pending non-terminal release by {@link persistSessionRelease}.
+   * stays pending in {@link persistSessionRelease} and is handed to the existing row retry.
    */
   private persistForcedReleaseFence(fence: SessionReleaseSnapshot): void {
     const write = this.persistSessionRelease(fence).then(
@@ -2703,6 +2713,8 @@ export class SessionManager {
         );
         if (fence.terminal && !(error instanceof SessionReleasePersistTimeoutError)) {
           this.scheduleTerminalReleaseRetry(fence);
+        } else if (!fence.terminal && !(error instanceof SessionReleasePersistTimeoutError)) {
+          this.trackReleaseDrainWrite(this.retryNonTerminalRowAfterRelease(fence));
         }
       },
     );
@@ -3248,11 +3260,25 @@ export class SessionManager {
     return deadline !== undefined && this.sessionNow() < deadline;
   }
 
-  /** Recheck a pool hold at its idle deadline; active recovery calls retain the cold-boot window. */
+  /**
+   * Recheck a pool hold at its idle deadline. Local recovery calls and live peer claims retain
+   * the cold-boot window; foreign-owned rows are never terminalized here. Expiry of our row is
+   * guarded against an owner or generation change between this read and its write.
+   */
   async expireRestartRecoveryReservation(sessionId: string): Promise<number | undefined> {
     const persisted = await this.readPersistedSession(sessionId);
     if (!persisted || !isDeviceRestartReleasedRow(persisted)) {
       return undefined;
+    }
+    const hasForeignOwner = (row: DeviceSession) =>
+      this.daemonSessionId !== undefined &&
+      (row.daemon_session_id ?? this.daemonSessionId) !== this.daemonSessionId;
+    const livePeerDeadline = (row: DeviceSession) => {
+      const deadline = restartRecoveryDeadlineFromPersisted(row, true)!;
+      return this.isRowOwnedByLivePeer(row) && this.sessionNow() < deadline ? deadline : undefined;
+    };
+    if (hasForeignOwner(persisted)) {
+      return livePeerDeadline(persisted);
     }
     const callerInFlight =
       this.isSessionBeingRecreated(sessionId) || this.activeSessionExecutionChecker(sessionId);
@@ -3261,9 +3287,15 @@ export class SessionManager {
       return deadline;
     }
     if (!callerInFlight) {
-      const current = await this.terminalizeExpiredPersistedSession(persisted);
-      // The conditional expiry write may lose to activity extending the same row.
+      const current = await this.terminalizeExpiredPersistedSession(
+        persisted,
+        persisted.daemon_session_id === this.daemonSessionId ? this.daemonSessionId : undefined,
+      );
+      // The conditional expiry write may lose to activity or a peer claiming the row.
       if (current && isDeviceRestartReleasedRow(current)) {
+        if (hasForeignOwner(current)) {
+          return livePeerDeadline(current);
+        }
         const extendedDeadline = restartRecoveryDeadlineFromPersisted(current)!;
         if (this.sessionNow() < extendedDeadline) {
           return extendedDeadline;
@@ -3338,6 +3370,7 @@ export class SessionManager {
    */
   private async terminalizeExpiredPersistedSession(
     persisted: DeviceSession | undefined,
+    onlyIfOwnedByDaemon?: string,
   ): Promise<DeviceSession | undefined> {
     const now = this.sessionNow();
     if (
@@ -3363,6 +3396,7 @@ export class SessionManager {
         // so after a wall step the statement can disagree with that judgement by the step; then
         // nothing is written and the row is still answered as it reads below.
         onlyIfExpiredAtMs: this.sessionClockToWall(now),
+        onlyIfOwnedByDaemon,
       },
     );
     const current = await this.readPersistedSession(persisted.session_uuid);
@@ -3572,8 +3606,8 @@ export class SessionManager {
 
   /**
    * The live session a read is admitted under, releasing nothing. A read that arrives after the
-   * idle deadline while earlier work still holds the session (#11361) is not admitted under it and
-   * does not get the untyped refusal a late control call gets: this returns null, read-only
+   * idle deadline while an earlier control call still holds the session (#11361) is not admitted
+   * under it and does not get the untyped refusal a late control call gets: this returns null, read-only
    * admission resolves undefined, and the caller runs the read without a session on the device
    * {@link deviceHeldForLateRead} names. Any other read past the deadline also gets null here.
    */
@@ -3589,7 +3623,7 @@ export class SessionManager {
 
   /**
    * The device of the live session a read named but arrived too late to be admitted under: past
-   * the idle deadline, with earlier work still holding the session (#11361). The read runs
+   * the idle deadline, with an earlier control call still holding the session (#11361). The read runs
    * sessionless against this device, the one it asked about, rather than whatever device a
    * sessionless call would otherwise select. Undefined in every other case. Reads no device and
    * changes nothing: no release, no refresh, no idle credit.
@@ -6448,6 +6482,7 @@ export class SessionManager {
     session: Session,
     supersededReasons: readonly string[],
   ): Promise<boolean> {
+    supersededReasons = this.rememberSupersededReleaseReasons(session, supersededReasons);
     if (!this.isCurrentSession(session)) {
       return false;
     }
@@ -6460,10 +6495,11 @@ export class SessionManager {
     const writtenDevice = session.assignedDevice;
     const settle = this.expectSupersededRowReassert(session.sessionId, supersededReasons);
     try {
-      // With no superseded release to replace, a terminal row is not this session's to rewrite.
-      await this.persistSession(session, session, {
-        unlessTerminal: supersededReasons.length === 0,
-      });
+      await this.persistSession(
+        session,
+        session,
+        this.supersededRowRewriteOptions(supersededReasons),
+      );
     } catch (error) {
       logger.warn(
         `[SessionManager] Failed to re-persist live session ${session.sessionId} after its ` +
@@ -6495,6 +6531,37 @@ export class SessionManager {
     this.settleOwedSupersededRowReassert(session);
     await this.restoreReleasedRowAfterReassert(session);
     return this.isCurrentSession(session);
+  }
+
+  /** Keep reasons beyond an owed entry's lifetime, without lending them to a same-UUID session. */
+  private rememberSupersededReleaseReasons(
+    session: Session,
+    reasons: readonly string[],
+  ): readonly string[] {
+    const remembered = this.supersededReleaseReasons.get(session) ?? new Set<string>();
+    for (const reason of reasons) {
+      remembered.add(reason);
+    }
+    this.supersededReleaseReasons.set(session, remembered);
+    return [...remembered];
+  }
+
+  /** Snapshot the attached liveness provider for the rewrite's statement guard (#11557). */
+  private supersededRowRewriteOptions(
+    supersededReasons: readonly string[],
+  ): UpsertActiveSessionOptions {
+    let livePeerDaemonSessionIds: string[] = [];
+    try {
+      livePeerDaemonSessionIds = Array.from(this.liveDaemonSessionIds?.() ?? []).filter(
+        (id) => id !== this.daemonSessionId,
+      );
+    } catch (error) {
+      logger.warn(
+        `[SessionManager] Cannot list live daemons for a superseded row rewrite: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    return { rewriteOverSupersededRelease: { supersededReasons, livePeerDaemonSessionIds } };
   }
 
   private isRebindUnderWay(session: Session): boolean {
@@ -6640,6 +6707,7 @@ export class SessionManager {
     superseded: Session,
     supersededReasons: readonly string[],
   ): Promise<void> {
+    supersededReasons = this.rememberSupersededReleaseReasons(superseded, supersededReasons);
     const sessionId = superseded.sessionId;
     let session = superseded;
     const settle = this.expectSupersededRowReassert(sessionId, supersededReasons);
@@ -6649,6 +6717,9 @@ export class SessionManager {
       // The name may have been issued and released again since: the row is then written as its
       // last incarnation held it.
       session = this.latestFinalizedSessionIdentities.get(sessionId)?.deref() ?? superseded;
+      supersededReasons = [
+        ...new Set([...supersededReasons, ...(this.supersededReleaseReasons.get(session) ?? [])]),
+      ];
       const ended = this.releaseThatEnded(session);
       if (
         !ended ||
@@ -6697,6 +6768,9 @@ export class SessionManager {
     session: Session,
     supersededReasons: readonly string[],
   ): Promise<boolean> {
+    supersededReasons = [
+      ...new Set([...supersededReasons, ...(this.supersededReleaseReasons.get(session) ?? [])]),
+    ];
     const row = await this.deviceSessionRepository.getSession?.(session.sessionId);
     if (
       !row?.release_reason ||
@@ -6705,7 +6779,11 @@ export class SessionManager {
     ) {
       return false;
     }
-    await this.persistSession(session, session);
+    await this.persistSession(
+      session,
+      session,
+      this.supersededRowRewriteOptions(supersededReasons),
+    );
     return true;
   }
 
@@ -6784,6 +6862,7 @@ export class SessionManager {
 
   /** Record a failed rewrite as owed and arm its next retry, while any are left (#11557). */
   private oweSupersededRowReassert(session: Session, supersededReasons: readonly string[]): void {
+    supersededReasons = this.rememberSupersededReleaseReasons(session, supersededReasons);
     const sessionId = session.sessionId;
     const owed = this.owedSupersededRowReasserts.get(sessionId);
     const previous = owed?.session === session ? owed : undefined;
@@ -6838,9 +6917,9 @@ export class SessionManager {
       this.dropOwedSupersededRowReassert(entry);
       return false;
     }
-    let persistedRelease: SessionReleaseSnapshot | undefined;
+    let persisted: DeviceSession | undefined;
     try {
-      persistedRelease = await this.getPersistedTerminalRelease(sessionId);
+      persisted = await this.readPersistedSession(sessionId);
     } catch (error) {
       logger.warn(
         `[SessionManager] Failed to read the row of live session ${sessionId} before ` +
@@ -6857,7 +6936,8 @@ export class SessionManager {
       this.dropOwedSupersededRowReassert(entry);
       return false;
     }
-    if (persistedRelease && !entry.reasons.has(persistedRelease.releaseReason)) {
+    if (this.supersededRowReassertMustStop(entry, persisted)) {
+      // Peer ownership alone does not end the held session; that is an owner decision.
       this.dropOwedSupersededRowReassert(entry);
       return false;
     }
@@ -6868,6 +6948,26 @@ export class SessionManager {
       return false;
     }
     return await this.reassertSupersededLiveRow(session, [...entry.reasons]);
+  }
+
+  /** A peer's winning row is left for the activity or ownership path, without more rewrites. */
+  private supersededRowReassertMustStop(
+    entry: OwedSupersededRowReassert,
+    persisted: DeviceSession | undefined,
+  ): boolean {
+    if (!persisted) {
+      return false;
+    }
+    if (this.isRowOwnedByLivePeer(persisted)) {
+      logger.warn(
+        `[SessionManager] Dropping owed rewrite of session ${entry.session.sessionId}: live peer ` +
+          `${persisted.daemon_session_id} owns its row`,
+      );
+      return true;
+    }
+    const release = this.terminalReleaseFromPersisted(entry.session.sessionId, persisted);
+    const reasons = this.rememberSupersededReleaseReasons(entry.session, [...entry.reasons]);
+    return release !== undefined && !reasons.includes(release.releaseReason);
   }
 
   /** An attempt that could not issue its write counts as a failed one. */
@@ -11104,7 +11204,9 @@ export class SessionManager {
       return false;
     }
     return !isReleaseVetoedByExecutions({
-      hasActiveExecutions: this.activeSessionExecutionChecker(session.sessionId),
+      hasActiveExecutions: this.activeSessionExecutionChecker(session.sessionId, {
+        excludeReads: true,
+      }),
       now: this.sessionNow(),
       ...this.idleExecutionVetoBoundInput(session),
     });
@@ -11112,9 +11214,9 @@ export class SessionManager {
 
   /**
    * The facts the shared unsettled-execution policy (#10712) bounds an idle-release veto by
-   * (#10713). Every call start refreshes `expiresAt`, so the veto has held since the idle deadline
-   * passed: it lasts until the vetoing calls' request deadline plus grace, or, when some call has
-   * no deadline, the ceiling after the idle deadline — the same bound the heartbeat and
+   * (#10713). Only control calls refresh `expiresAt`, so the veto has held since the idle deadline
+   * passed: it lasts until the control calls' request deadline plus grace, or, when some control
+   * call has no deadline, the ceiling after the idle deadline — the same bound the heartbeat and
    * owner-disconnect paths apply (#10663).
    */
   private idleExecutionVetoBoundInput(session: Session): {
@@ -11123,25 +11225,25 @@ export class SessionManager {
   } {
     return {
       vetoedSince: sessionIdleDeadline(session),
-      latestDeadlineMs: this.sessionExecutionDeadlineLookup(session.sessionId),
+      latestDeadlineMs: this.sessionExecutionDeadlineLookup(session.sessionId, {
+        excludeReads: true,
+      }),
     };
   }
 
   /**
-   * What bounds an in-flight execution's idle-release veto for `sessionId`, or undefined when
-   * nothing that vetoes the release is in flight. Hold diagnostics derive `idleReleaseAt` from it with the same shared
-   * policy the idle sweep applies (#10671, #10712, #10713).
+   * What bounds an in-flight control call's idle-release veto for `sessionId`, or undefined when
+   * nothing that vetoes the release is in flight. Hold diagnostics derive `idleReleaseAt` from it
+   * with the same shared policy the idle sweep applies (#10671, #10712, #10713).
    */
   getIdleReleaseExecutionVeto(sessionId: string): { latestDeadlineMs?: number } | undefined {
     const session = this.sessions.get(sessionId);
     if (!session) {
       return undefined;
     }
-    // Report the deadline the releaser will apply (#11393). A `cli-idle` session's idle release
-    // is the heartbeat monitor's, whose veto never counts a read (#11322); every other session's
-    // is the idle sweep's, which judges with the unfiltered checker ({@link isSessionExpired}).
-    const query: Pick<ActiveSessionExecutionQuery, "excludeReads"> =
-      session.livenessPolicy === "cli-idle" ? { excludeReads: true } : {};
+    // Report the deadline the releaser applies (#11393): the heartbeat monitor and idle sweep
+    // both count only control calls, for every liveness policy (#11381).
+    const query: Pick<ActiveSessionExecutionQuery, "excludeReads"> = { excludeReads: true };
     if (!this.activeSessionExecutionChecker(sessionId, query)) {
       return undefined;
     }
@@ -11238,6 +11340,7 @@ export class SessionManager {
       execution.sessionClockStartTime > idleDeadline &&
       this.activeSessionExecutionChecker(session.sessionId, {
         excludeExecutionId: execution.executionId,
+        excludeReads: true,
       })
     );
   }
@@ -11301,12 +11404,19 @@ export class SessionManager {
         continue;
       }
       const releaseReason = this.expiredSessionReleaseReason(session, "cleanup-expired");
+      const overridesControl = this.activeSessionExecutionChecker(sessionId, {
+        excludeReads: true,
+      });
       if (this.cancelExecutionsOverriddenByExpiry(session, releaseReason)) {
-        logger.warn(
-          `Session ${sessionId} was kept past its idle deadline by executions that never ` +
-            `settled; cancelling them and releasing it past their request deadline plus grace, ` +
-            `or the unsettled-execution ceiling when a call has no deadline`,
-        );
+        if (overridesControl) {
+          logger.warn(
+            `Session ${sessionId} was kept past its idle deadline by control calls that never ` +
+              `settled; cancelling them and releasing it past their request deadline plus grace, ` +
+              `or the unsettled-execution ceiling when a control call has no deadline`,
+          );
+        } else {
+          logger.info(`Session ${sessionId} idle release cut in-flight reads`);
+        }
       }
       const release = this.releaseSession(sessionId, releaseReason, true, undefined, {
         expiryOrigin: "cleanup-expired",

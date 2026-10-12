@@ -1,3 +1,7 @@
+import { join } from "node:path";
+import { adbServerScope } from "../../daemon/foreignDeviceOwnership";
+import { getAdbServerScopedAutoMobileDir } from "../../utils/tempDir";
+import { FileHostBootAdmissionRegistry } from "./FileHostBootAdmissionRegistry";
 import { ActionableError } from "../../models/ActionableError";
 import type { Platform } from "../../models/Platform";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -90,7 +94,17 @@ export function createBootAdmissionGates(
             executor,
           ),
           timer,
-          { env },
+          {
+            env,
+            hostRegistry: new FileHostBootAdmissionRegistry({
+              timer,
+              directory: () =>
+                join(
+                  getAdbServerScopedAutoMobileDir(adbServerScope(env), "boot-admissions", env),
+                  "android",
+                ),
+            }),
+          },
         )
       : undefined,
     // simulators exist only on macOS: elsewhere there is nothing to gate or report, and

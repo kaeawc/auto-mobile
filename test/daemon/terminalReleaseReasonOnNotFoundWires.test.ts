@@ -155,6 +155,32 @@ describe("not-found answers for a session whose terminal release is still writin
     expect(await r.manager.getReleasedSessionReason(labelId)).toBe("explicit-release");
   });
 
+  test("a published plan label's own terminal fence takes precedence over its ended base", async () => {
+    rig = await setUpRig(120_000);
+    const r = rig;
+    const labelId = `${SESSION}:B`;
+    await asPlanAllocation(r.manager, SESSION, [labelId], () =>
+      r.manager.createSession(labelId, "emulator-5556", "android", 120_000),
+    );
+    r.manager.setDeviceLabels(SESSION, buildDeviceLabelMap(["A", "B"], SESSION));
+    await r.manager.releaseSession(SESSION, "explicit-release");
+    const gate = gateReleaseWrite(r);
+    const release = r.manager.releaseSession(labelId, "heartbeat-timeout");
+    try {
+      await settle();
+      expect(r.manager.hasSession(SESSION)).toBe(false);
+      expect(r.manager.hasSession(labelId)).toBe(true);
+      expect(r.manager.getTerminalReleaseSnapshot(labelId)?.releaseReason).toBe(
+        "heartbeat-timeout",
+      );
+      expect(await r.manager.getReleasedSessionReason(SESSION)).toBe("explicit-release");
+      expect(await r.manager.getReleasedSessionReason(labelId)).toBe("heartbeat-timeout");
+    } finally {
+      gate.open();
+      await release;
+    }
+  });
+
   test("a heartbeat-timeout release: heartbeat reply and session-info name the reason the tool call is refused with", async () => {
     rig = await setUpRig(120_000);
     const r = rig;

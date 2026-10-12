@@ -4,7 +4,7 @@ import { testOverrides } from "../../src/utils/testOverrides";
 import { rmSync } from "node:fs";
 import childProcess from "node:child_process";
 import { ensureAuxSocketDir } from "./auxSocketDir";
-import { spawnArgv } from "./realDeviceToolSpawnGuard";
+import { isUnitTestPath, spawnArgv } from "./realDeviceToolSpawnGuard";
 
 // Bun test exits without emitting process exit; a global preload hook runs once
 // after all files, while the exit fallback also covers other process entrypoints.
@@ -102,6 +102,12 @@ testOverrides.telemetryNoOpDefault = true;
 // adb listing and process table, and could queue a fake boot behind real
 // emulators. Gate tests construct gates over fake sources directly.
 testOverrides.bootAdmissionGatesDisabled = true;
+
+// A Daemon reads its own process generation token when it is constructed, which launches `ps` on
+// macOS. A unit test's daemon runs in the test runner's process, so there is no daemon process to
+// identify; tests of the capture itself build their own provider over fake readers. Integration
+// files keep the real capture. Bun.main is read at each call: it follows the running file.
+testOverrides.processGenerationCaptureDisabled = () => isUnitTestPath(Bun.main);
 
 // Emulator launch tests must never create real TCP probes. Individual tests
 // inject unavailable ports when exercising allocation behavior.

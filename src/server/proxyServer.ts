@@ -16,6 +16,7 @@ import {
   DaemonBoundSessionExpiredError,
   DaemonSessionStalledError,
   DaemonConnectionSessionReleasedError,
+  DaemonAmbiguousSessionSelectorError,
   DaemonMcpProxy,
   DaemonRestartDeferredError,
   type DaemonMcpProxyConfig,
@@ -255,6 +256,28 @@ export function noActiveDeviceSessionResult(
   };
 }
 
+export function ambiguousSessionSelectorResult(
+  error: DaemonAmbiguousSessionSelectorError,
+): CallToolResult {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          error: {
+            code: "ambiguous_session_selector",
+            message: error.message,
+            platform: error.platform,
+            candidates: error.candidates,
+            retryable: false,
+          },
+        }),
+      },
+    ],
+    isError: true,
+  };
+}
+
 function noActiveDeviceSessionError(
   error: DaemonConnectionSessionReleasedError,
   managedSlots?: ManagedSlotsResult,
@@ -464,6 +487,10 @@ function resolveCallToolErrorResult(
   if (error instanceof DaemonConnectionSessionReleasedError) {
     logger.warn(`[ProxyServer] No active device session (released: ${error.reason})`);
     return noActiveDeviceSessionResult(error, managedSlots);
+  }
+  if (error instanceof DaemonAmbiguousSessionSelectorError) {
+    logger.warn(`[ProxyServer] Ambiguous session selector: ${error.message}`);
+    return ambiguousSessionSelectorResult(error);
   }
   if (error instanceof DaemonShuttingDownError) {
     return daemonShuttingDownResult(hasOutputSchema, error.requestMayHaveDispatched);

@@ -38,6 +38,9 @@ const teardownsInOrder: Teardown[] = [
 ];
 
 interface FakeStdioServer {
+  /** Runs as soon as the database has closed: where an in-flight tool call resumes. */
+  onDatabaseClosed?: () => void;
+  refusalCountReads: number;
   calls: string[];
   warnings: string[];
   database: FakeShutdownDatabase;
@@ -78,11 +81,33 @@ function fakeStdioServer(
     closeDatabase: async () => {
       calls.push("closeDatabase");
       await database.close();
+      server.onDatabaseClosed?.();
+    },
+    refusedDatabaseAccessCount: async () => {
+      server.refusalCountReads++;
+      return database.refusals;
     },
     closeLogger: teardown("closeLogger"),
     warn: (message) => warnings.push(message),
   };
-  return { calls, warnings, database, dependencies };
+  const server: FakeStdioServer = {
+    calls,
+    warnings,
+    database,
+    dependencies,
+    refusalCountReads: 0,
+  };
+  return server;
+}
+
+/** What `work` threw, or undefined when it returned. */
+function captureThrown(work: () => void): unknown {
+  try {
+    work();
+    return undefined;
+  } catch (error) {
+    return error;
+  }
 }
 
 async function shutDown(server: FakeStdioServer, timer = new FakeTimer()) {
@@ -227,6 +252,35 @@ describe("stdio shutdown in direct mode (#11601)", () => {
     expect(server.database.closes).toBe(1);
     expect(server.calls.at(-1)).toBe("closeLogger");
     expect(outcome.warnings.filter((warning) => warning.startsWith("Skipping"))).toEqual([]);
+  });
+});
+
+describe("stdio direct-mode writes after the database close (#11601)", () => {
+  test("an in-flight tool call's write after the close is refused and reported with its count", async () => {
+    const server = fakeStdioServer("direct");
+    let refusal: unknown;
+    // Direct mode has no stage that owns a tool call: nothing keeps the database open for it.
+    server.onDatabaseClosed = () => {
+      refusal = captureThrown(() => server.database.write());
+    };
+
+    const outcome = await shutDown(server);
+
+    expect(refusal).toEqual(new Error("database used after close"));
+    expect(outcome.exitCode).toBe(0);
+    expect(server.calls.slice(-2)).toEqual(["closeDatabase", "closeLogger"]);
+    expect(server.warnings).toEqual([
+      "Refused 1 database access(es) issued after the shutdown database close; no abandoned shutdown stage was running (an in-flight request or a late timer callback)",
+    ]);
+  });
+
+  test("proxy mode owns no database and never asks for a refusal count", async () => {
+    const server = fakeStdioServer("proxy");
+
+    await shutDown(server);
+
+    expect(server.refusalCountReads).toBe(0);
+    expect(server.warnings).toEqual([]);
   });
 });
 

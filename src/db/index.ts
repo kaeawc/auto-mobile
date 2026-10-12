@@ -2,6 +2,8 @@
 export {
   getDatabase,
   closeDatabase,
+  DatabaseClosedForShutdownError,
+  refusedDatabaseAccessCountAfterShutdownClose,
   awaitInFlightMigrations,
   getDatabasePath,
   ensureMigrations,

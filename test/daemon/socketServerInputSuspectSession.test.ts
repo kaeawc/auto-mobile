@@ -241,7 +241,9 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
     timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     // The tracker judges on the session clock and reports in-flight calls, as in `daemon.ts`.
-    executionTracker.setSessionClockOffsetProvider(() => sessionManager.sessionNow() - Date.now());
+    executionTracker.setSessionClockOffsetProvider(
+      (wallNowMs = Date.now()) => sessionManager.sessionNow() - wallNowMs,
+    );
     sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
       hasActiveSessionExecution(executionTracker, sessionManager, pool, sessionId, query),
     );
@@ -331,20 +333,36 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
     expect(sessionManager.getSessionForDevice(DEVICE)).toBeNull();
   });
 
-  test("a tap on a session past its idle deadline is refused terminally", async () => {
-    // The owner keeps heartbeating (a live proxy with an idle agent): only the idle window ran out.
-    for (let elapsed = 0; elapsed < IDLE_MS; elapsed += 1_000) {
-      timer.advanceTime(1_000);
-      await heartbeat();
-    }
-    timer.advanceTime(1);
-    expect(sessionManager.getSessionLeaseState(SESSION)?.phase).toBe("live");
+  // The socket server's tracker runs on the wall clock. A wall tick between two of its reads once
+  // dated the tap 1 ms early, on the deadline it arrived after, and the tap was admitted (#11576:
+  // 1 Windows unit run in about 230). The second case makes every read tick.
+  test.each([
+    ["a steady wall clock", false],
+    ["a wall clock that ticks on every read", true],
+  ])(
+    "a tap on a session past its idle deadline is refused terminally (%s)",
+    async (_clock, ticking) => {
+      // The owner keeps heartbeating (a live proxy with an idle agent): only the idle window ran out.
+      for (let elapsed = 0; elapsed < IDLE_MS; elapsed += 1_000) {
+        timer.advanceTime(1_000);
+        await heartbeat();
+      }
+      timer.advanceTime(1);
+      expect(sessionManager.getSessionLeaseState(SESSION)?.phase).toBe("live");
 
-    const response = await sendTap();
+      let wall = Date.now();
+      const wallClock = ticking ? spyOn(Date, "now").mockImplementation(() => wall++) : undefined;
+      let response: DaemonResponse | undefined;
+      try {
+        response = await sendTap();
+      } finally {
+        wallClock?.mockRestore();
+      }
 
-    expect(taps).toBe(0);
-    expect(response).toMatchObject(terminalRefusal("lazy-expiry"));
-  });
+      expect(taps).toBe(0);
+      expect(response).toMatchObject(terminalRefusal("lazy-expiry"));
+    },
+  );
 
   test("an admitted tap restarts the idle window but never renews the owner lease", async () => {
     timer.advanceTime(LEASE_MS - 1);

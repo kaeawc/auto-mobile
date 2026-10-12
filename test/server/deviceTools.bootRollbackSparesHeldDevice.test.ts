@@ -26,6 +26,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { runWithToolSelectionContext } from "../../src/features/toolSelection/toolSelectionContext";
 
 isolateToolRegistry();
 
@@ -269,44 +270,62 @@ describe("a failed start does not stop the device it booted once another session
     },
   );
 
-  // A System UI ANR replacement reuses the serial of the emulator it replaces. While its handoff
-  // is unfinished the pool entry on that serial still names the session being recovered: that
-  // holder is not a holder of the replacement, which a failed recovery must still stop.
-  test("android: a failed System UI ANR recovery still stops its replacement emulator", async () => {
-    const started = await ToolRegistry.getTool("startDevice")!.handler({
-      platform: "android",
-      name: avd.name,
-      __mcpSessionId: "client-a",
-    });
-    const held = pool.getDevice(AVD_SERIAL)?.sessionId;
-    expect(started.isError).not.toBe(true);
-    expect(held).toBeString();
-    const replacement = new RecordingBootHandle(() => devices.setBootedDevices("android", []));
-    const killDevice = devices.killDevice.bind(devices);
-    devices.killDevice = async (device) => {
-      await killDevice(device);
-      devices.setBootedDevices("android", []);
-      bootHandle.kill();
-      await Promise.resolve();
-      devices.setMockChildProcess(avd.name, replacement as unknown as ChildProcess);
-    };
-    duringReadiness = async () => {
-      throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
-    };
-    const handoff = spyOn(
-      DevicePool.prototype as unknown as { cancelOldDeviceWorkForSystemUiAnr(): Promise<void> },
-      "cancelOldDeviceWorkForSystemUiAnr",
-    ).mockRejectedValue(new Error("handoff failed"));
+  // Same serial is not provenance: only a recovery of this call's cold boot owns its replacement.
+  test.each([false, true])(
+    "android: failed ANR handoff respects running-before provenance (%s)",
+    async (runningBefore) => {
+      let held = "owner-session";
+      if (runningBefore) {
+        const started = await ToolRegistry.getTool("startDevice")!.handler({
+          platform: "android",
+          name: avd.name,
+          __mcpSessionId: "client-a",
+        });
+        expect(started.isError).not.toBe(true);
+        const sessionId = pool.getDevice(AVD_SERIAL)?.sessionId;
+        expect(sessionId).toBeString();
+        held = sessionId!;
+      }
+      const replacement = new RecordingBootHandle(() => devices.setBootedDevices("android", []));
+      const killDevice = devices.killDevice.bind(devices);
+      devices.killDevice = async (device) => {
+        await killDevice(device);
+        devices.setBootedDevices("android", []);
+        bootHandle.kill();
+        await Promise.resolve();
+        devices.setMockChildProcess(avd.name, replacement as unknown as ChildProcess);
+      };
+      duringReadiness = async () => {
+        if (!runningBefore) {
+          await pool.bindOrReuseDeviceSession(held, AVD_SERIAL, "android", avd);
+        }
+        expect(pool.getDevice(AVD_SERIAL)?.sessionId).toBe(held);
+        throw new SystemUiAnrRecoveryRequiredError("System UI ANR persisted after Wait");
+      };
+      const handoff = spyOn(
+        DevicePool.prototype as unknown as { cancelOldDeviceWorkForSystemUiAnr(): Promise<void> },
+        "cancelOldDeviceWorkForSystemUiAnr",
+      ).mockRejectedValue(new Error("handoff failed"));
 
-    try {
-      const failure = await start({ platform: "android", name: avd.name, sessionUuid: held });
-      await drain();
+      try {
+        // startDevice strips sessionUuid arguments; admitted caller identity is ambient.
+        const failure = await runWithToolSelectionContext({ routingSessionUuid: held }, () =>
+          start({ platform: "android", name: avd.name }),
+        );
+        await drain();
 
-      expect(failure).toBeInstanceOf(Error);
-      expect(handoff).toHaveBeenCalled();
-      expect(replacement.killed).toBe(true);
-    } finally {
-      handoff.mockRestore();
-    }
-  });
+        expect(failure).toBeInstanceOf(Error);
+        expect(handoff).toHaveBeenCalled();
+        expect(replacement.killed).toBe(!runningBefore);
+        expect(await gates.capacity("android")).toEqual({
+          booted: runningBefore ? 1 : 0,
+          inFlight: 0,
+        });
+        expect(sessions.getSession(held)).toBeNull();
+        expect(pool.getDevice(AVD_SERIAL)).toBeNull();
+      } finally {
+        handoff.mockRestore();
+      }
+    },
+  );
 });

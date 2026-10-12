@@ -147,8 +147,10 @@ takes input only from a frame whose `sessionUuid` names its holder (typed code
 Device-aware `tools/call` follows the same rule (`assertToolCallerHoldsDevice` in
 `src/server/toolRegistry.ts`): on a held device, a call from another session or
 with no session is refused with the same code before admission or device work,
-unless the tool is registered `deviceReadOnly` (watching). A call
-without a deviceId is checked against the device readiness would select (the
+unless the tool is registered `deviceReadOnly` (watching).
+`startTestRecording` also refuses an unheld device (`no_active_device_session`) before readiness;
+a live session holding no device is refused before context creation can auto-acquire one (#11716).
+A call without a deviceId is checked against the device readiness would select (the
 `setActiveDevice` pin, the current device, or the only candidate) before
 `ensureDeviceReady` runs, so a refused call never readies, pins or configures the
 holder's device (#10828). A sessionless `deviceReadOnly` call whose target (its
@@ -224,6 +226,8 @@ device-not-actionable gate (`refuseControlCallBeforeAdmission`) run before
 admission, and admission's own refusals (suspect, lapsed owner lease, idle
 expiry) stamp nothing. A call that is admitted and then fails while the daemon
 sets its device up is use (#10824).
+Ambiguous platform-only control gets `ambiguous_session_selector` without refreshing clocks;
+read-only tools and device-binding calls (such as `setActiveDevice`) keep their usual routing.
 `test/server/namedForeignSessionActivity.test.ts` has one row per refusal.
 Desktop input is use. The desktop and IDE clients register an observer session
 that allocates nothing, allocate a device with `setActiveDevice` on the first

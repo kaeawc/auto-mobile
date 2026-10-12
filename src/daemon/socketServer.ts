@@ -153,6 +153,7 @@ import {
   assertFrameTargetIdentityProven,
   canonicalFrameDeviceId,
   canonicalizeFrameDiscovery,
+  frameHeldSessionsFrom,
   type CanonicalFrameDiscovery,
   type FrameDeviceIdentityPool,
 } from "./frameDeviceIdentity";
@@ -5937,12 +5938,7 @@ export class UnixSocketServer {
       action,
       Boolean(sessionManager.getSessionForDevice?.(device.deviceId)),
       {
-        sessions: sessionManager.getHeldDeviceSessions
-          ? sessionManager.getHeldDeviceSessions().map(({ deviceId, ...session }) => ({
-              ...session,
-              assignedDevice: deviceId,
-            }))
-          : (sessionManager.getAllSessions?.() ?? []),
+        sessions: frameHeldSessionsFrom(sessionManager),
         requester,
         sessionManager,
       },

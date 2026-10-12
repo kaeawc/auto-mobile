@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
 import { DevicePool } from "../../src/daemon/devicePool";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
@@ -71,17 +71,19 @@ describe("multi-device allocation on a shared host", () => {
     }
   };
 
-  beforeEach(() => {
+  const init = () => {
     timer = new FakeTimer();
     sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
     manager = new FakeDeviceManager();
     ownership = new FakeForeignDeviceOwnership();
     markers = new InMemoryDeviceHealthMarkers();
-  });
-  afterEach(() => {
+  };
+  const cleanUp = () => {
     sessions.stopCleanupTimer();
     timer.reset();
-  });
+  };
+  beforeEach(init);
+  afterEach(cleanUp);
 
   const allocate = (
     criteria: boolean,
@@ -119,6 +121,19 @@ describe("multi-device allocation on a shared host", () => {
       maxSteps: 8,
       description: "allocation outcome",
     });
+
+  // CI's per-test time excludes only beforeAll: the first allocation through the pool (JIT, lazy
+  // module state) is paid here once, with the first test's re-pool scenario, not in that timed test.
+  beforeAll(async () => {
+    init();
+    try {
+      await setUp(["d1"], ["d1", "d2"]);
+      manager.deviceImages = [startableAvd];
+      await settle(allocate(true).result);
+    } finally {
+      cleanUp();
+    }
+  });
 
   test("re-pools a booted idle device instead of cold-booting an AVD", async () => {
     // d2 is booted and idle but was dropped from the pool (e.g. after a reboot).

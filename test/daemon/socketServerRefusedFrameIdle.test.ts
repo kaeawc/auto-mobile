@@ -229,7 +229,9 @@ describe("a holder's control frame refused before it reaches the device", () => 
     serverTimer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     // The tracker judges on the session clock and reports call ends, as in `daemon.ts`.
-    executionTracker.setSessionClockOffsetProvider(() => sessionManager.sessionNow() - Date.now());
+    executionTracker.setSessionClockOffsetProvider(
+      (wallNowMs = Date.now()) => sessionManager.sessionNow() - wallNowMs,
+    );
     sessionManager.setActiveSessionExecutionChecker((sessionId, query) =>
       hasActiveSessionExecution(executionTracker, sessionManager, pool, sessionId, query),
     );

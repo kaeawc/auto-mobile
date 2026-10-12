@@ -59,8 +59,24 @@ STUB
 #!/usr/bin/env bash
 echo "driver $*" >> "${STUB_LOG}"
 shown_file="${STUB_STATE}/shown"
+hold_pid_file="${STUB_STATE}/hold.pid"
+# Like the real agent, the stub keeps a prototype only while a host connection is held: every
+# other command is its own short connection, and the last one closing dismisses the prototype.
+held() {
+  [[ -f ${hold_pid_file} ]] && kill -0 "$(cat "${hold_pid_file}")" 2> /dev/null
+}
+if ! held; then rm -f "${shown_file}"; fi
 case "$1" in
   launch) exit 0 ;;
+  hold)
+    if [[ ${STUB_DRIVER_MODE} == hold-fails ]]; then
+      echo "connection refused" >&2
+      exit 1
+    fi
+    echo "$$" > "${hold_pid_file}"
+    echo '{"type":"host_hold","connected":true}'
+    exec sleep 60
+    ;;
   status)
     if [[ ${STUB_DRIVER_MODE} == never-connects ]]; then
       echo "not listening" >&2
@@ -90,7 +106,7 @@ JSON
     fi
     ;;
   floating)
-    touch "${shown_file}"
+    if held; then touch "${shown_file}"; fi
     if [[ ${STUB_DRIVER_MODE} == show-fails ]]; then
       echo '{"type":"prototype_result","success":false,"error":"nope"}'
     else
@@ -137,6 +153,34 @@ STUB
   grep -q "xcrun simctl shutdown UDID-FRESH" "${STUB_LOG}"
   grep -q "xcrun simctl delete UDID-FRESH" "${STUB_LOG}"
   [ -f "${PROTOTYPE_SMOKE_LOG_DIR}/shown.png" ]
+}
+
+@test "holds one host connection from before the show until after the dismiss checks" {
+  run bash "${script}" 26
+  [ "${status}" -eq 0 ]
+  hold_line="$(grep -n '^driver hold$' "${STUB_LOG}" | cut -d: -f1)"
+  show_line="$(grep -n '^driver floating$' "${STUB_LOG}" | cut -d: -f1)"
+  [ "${hold_line}" -lt "${show_line}" ]
+  # The prototype survived the show command's own connection closing.
+  [ "$(jq -r '.status.shown' "${PROTOTYPE_SMOKE_LOG_DIR}/status-shown.json")" = true ]
+  # The held connection is released: the driver process the script started is gone.
+  ! kill -0 "$(cat "${STUB_STATE}/hold.pid")" 2> /dev/null
+}
+
+@test "fails clearly, and still deletes the simulator, when the held connection cannot start" {
+  export STUB_DRIVER_MODE=hold-fails
+  run bash "${script}" 26
+  [ "${status}" -eq 1 ]
+  [[ ${output} == *"host connection hold did not start (no output; connection refused)"* ]]
+  ! grep -q '^driver floating$' "${STUB_LOG}"
+  grep -q "xcrun simctl delete UDID-FRESH" "${STUB_LOG}"
+}
+
+@test "releases the held connection when a later check fails" {
+  export STUB_DRIVER_MODE=tap-rejected
+  run bash "${script}" 26
+  [ "${status}" -eq 1 ]
+  ! kill -0 "$(cat "${STUB_STATE}/hold.pid")" 2> /dev/null
 }
 
 @test "skips asynchronous prototype_event lines the driver prints before the dismiss reply" {

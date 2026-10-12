@@ -2668,7 +2668,7 @@ export class SessionManager {
       // returned anyway, and the release's own stage was already reported above.
       logger.debug(`[SessionManager] Forced release of ${sessionId}: ${errorMessage(error)}`);
     });
-    this.trackPendingDeviceCleanup(deviceId, [capped]);
+    this.registerPendingDeviceCleanup(deviceId, capped, SESSION_RELEASE_TEARDOWN_CAP_MS);
     logger.warn(
       `[SessionManager] Forcing the stuck release of session ${sessionId} ` +
         `(stage=${operation.stage ?? "unknown"}, reason=${fence.releaseReason}): the session ` +
@@ -9860,7 +9860,8 @@ export class SessionManager {
     logger.info(
       `Network condition TTL elapsed for session ${sessionId}; resetting device ${target.deviceId} to none`,
     );
-    this.trackPendingDeviceCleanup(target.deviceId, [
+    this.registerPendingDeviceCleanup(
+      target.deviceId,
       this.runUnderTeardownShield(async () => [
         {
           pending: this.restoreNetworkConditionOnExpiry(session, target, expectedGeneration),
@@ -9869,7 +9870,8 @@ export class SessionManager {
       ]).then(async (cleanups) => {
         await Promise.all(cleanups);
       }),
-    ]);
+      SESSION_RELEASE_TEARDOWN_CAP_MS,
+    );
   }
 
   /**

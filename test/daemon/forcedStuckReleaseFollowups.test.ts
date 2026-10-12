@@ -130,6 +130,44 @@ async function bindShapedSession(h: Awaited<ReturnType<typeof harness>>, session
 }
 
 describe("a forced stuck release stops touching the device (#11058 item 1)", () => {
+  test("a forced non-terminal persist advertises its remaining quarantine cap (#11360)", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const persistGate = Promise.withResolvers<void>();
+    try {
+      const h = await harness();
+      await h.manager.createSession("a", first.deviceId, "android");
+      h.persistence.parkRelease = persistGate.promise;
+      const release = h.manager.releaseSession("a", "daemon-shutdown");
+      await flush();
+      expect(h.persistence.releaseWrites).toEqual(["a:released:daemon-shutdown"]);
+      await h.timer.advanceTimeAsync(5_000, flush);
+
+      expect(h.manager.forceStuckRelease("a")).toEqual({
+        deviceId: first.deviceId,
+        stage: "finalize-persist",
+      });
+      expect(h.manager.hasDeviceCleanupInProgress(first.deviceId)).toBe(true);
+      expect(h.manager.getDeviceCleanupRetryAfterMs(first.deviceId)).toBe(
+        SESSION_RELEASE_TEARDOWN_CAP_MS,
+      );
+      await h.timer.advanceTimeAsync(4_000, flush);
+      expect(h.manager.hasDeviceCleanupInProgress(first.deviceId)).toBe(true);
+      expect(h.manager.getDeviceCleanupRetryAfterMs(first.deviceId)).toBe(6_000);
+      // The persist deadline can settle the release sooner; the advertised cap is an upper bound.
+      await h.timer.advanceTimeAsync(SESSION_RELEASE_TEARDOWN_CAP_MS - 4_000, flush);
+      await flush();
+      expect(h.manager.hasDeviceCleanupInProgress(first.deviceId)).toBe(false);
+
+      persistGate.resolve();
+      await release;
+      await flush();
+      expect(h.manager.hasDeviceCleanupInProgress(first.deviceId)).toBe(false);
+    } finally {
+      persistGate.resolve();
+      warn.mockRestore();
+    }
+  });
+
   test("forcing during a parked restore aborts it and starts no later restore", async () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {

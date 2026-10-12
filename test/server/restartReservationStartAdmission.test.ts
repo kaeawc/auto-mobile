@@ -87,6 +87,7 @@ describe("start admission and owner resume for restart reservations", () => {
       idleMs?: number;
       autolock?: boolean;
       ownerToken?: string;
+      serialReuse?: boolean;
     } = {},
   ) {
     const platform = options.platform ?? "android";
@@ -209,15 +210,25 @@ describe("start admission and owner resume for restart reservations", () => {
       ).toBe("claimed");
     }
     const internals = pool as unknown as Internals;
-    await internals.releaseDisconnectedRecoverySessionWithRetry(
-      holder,
-      device.deviceId,
-      `device-restart:${platform === "android" ? device.name : device.deviceId}`,
-    );
-    await pool.releaseDevice(device.deviceId, holder);
-    if (!options.running) {
-      manager.setBootedDevices(platform, []);
-      await pool.removeDevice(device.deviceId, true, pool.getDevice(device.deviceId));
+    if (options.serialReuse) {
+      const replacement = { ...device, name: "AVD-B", observedAt: timer.now() };
+      manager.setBootedDevices(platform, [replacement]);
+      expect(await pool.settlePooledRuntimeIdentity(device.deviceId)).toBe("replaced");
+      manager.setDeviceImages(platform, [
+        { ...image, deviceId: "emulator-5556" },
+        { ...image, ...replacement, isRunning: true },
+      ]);
+    } else {
+      await internals.releaseDisconnectedRecoverySessionWithRetry(
+        holder,
+        device.deviceId,
+        `device-restart:${platform === "android" ? device.name : device.deviceId}`,
+      );
+      await pool.releaseDevice(device.deviceId, holder);
+      if (!options.running) {
+        manager.setBootedDevices(platform, []);
+        await pool.removeDevice(device.deviceId, true, pool.getDevice(device.deviceId));
+      }
     }
     await drainMicrotasks();
     registerDeviceTools();
@@ -289,6 +300,74 @@ describe("start admission and owner resume for restart reservations", () => {
       await refusal(f, () => f.start(args));
     });
   }
+  test("settlement handoff refuses a rival exact-name start before boot", async () => {
+    const f = await fixture({ serialReuse: true });
+    await refusal(f, () => f.start({ avdName: f.device.name }));
+    expect(f.pool.getDevice(f.device.deviceId)).toMatchObject({ name: "AVD-B", sessionId: null });
+  });
+
+  test("settlement handoff lets a rival start the reused serial as B with a new session", async () => {
+    const f = await fixture({ serialReuse: true });
+    expect(await f.start({ deviceId: f.device.deviceId })).toMatchObject({
+      structuredContent: {
+        runtime: { deviceId: f.device.deviceId, session: { sessionUuid: "fake-1" } },
+      },
+    });
+    expect(f.pool.getDevice(f.device.deviceId)).toMatchObject({
+      name: "AVD-B",
+      sessionId: "fake-1",
+    });
+    expect(f.internals.rehydrationReservations.has(HOLDER)).toBe(true);
+    expect(f.sessions.getSession(HOLDER)).toBeNull();
+    expect(f.manager.getCallCount("startDevice")).toBe(0);
+    expect(f.manager.getCallCount("killDevice")).toBe(0);
+  });
+
+  for (const reconnect of [false, true]) {
+    test(`settlement handoff owner reconnect=${reconnect} boots A on a new serial with the same session`, async () => {
+      const f = await fixture({
+        serialReuse: true,
+        connection: CONNECTION,
+        ownerToken: "holder-token",
+      });
+      const connection = reconnect ? "reconnected" : CONNECTION;
+      if (reconnect) {
+        expect(
+          await f.pool.restoreOwnedDeviceSessionsForMcpSession(
+            [HOLDER],
+            connection,
+            "holder-token",
+          ),
+        ).toEqual([]);
+      }
+      expect(await f.start({ avdName: f.device.name, __mcpSessionId: connection })).toMatchObject({
+        structuredContent: {
+          runtime: { deviceId: "emulator-5556", session: { sessionUuid: HOLDER } },
+        },
+      });
+      expect(f.sessions.getSession(HOLDER)?.assignedDevice).toBe("emulator-5556");
+      expect(f.pool.getDevice(f.device.deviceId)).toMatchObject({ name: "AVD-B", sessionId: null });
+      expect(f.pool.getDevice("emulator-5556")).toMatchObject({
+        name: f.device.name,
+        sessionId: HOLDER,
+      });
+      expect(f.internals.rehydrationReservations.has(HOLDER)).toBe(false);
+      expect(f.pool.resolveOwnedDeviceSessionForMcpSession(connection, "emulator-5556")).toBe(
+        HOLDER,
+      );
+      expect(await f.persistence.getSession!(HOLDER)).toMatchObject({
+        status: "active",
+        device_id: "emulator-5556",
+        release_reason: null,
+      });
+      expect(f.manager.getCallCount("startDevice")).toBe(1);
+      expect(f.manager.getCallCount("killDevice")).toBe(0);
+      expect(await f.manager.getBootedDevices("android")).toContainEqual(
+        expect.objectContaining({ name: "AVD-B", deviceId: "emulator-5554" }),
+      );
+    });
+  }
+
   type Fixture = Awaited<ReturnType<typeof fixture>>;
 
   test("autolock owner connection exact start resumes R and publishes its route", async () => {

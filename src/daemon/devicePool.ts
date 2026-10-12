@@ -109,6 +109,7 @@ import {
 } from "./poolConfig";
 import {
   DeviceSessionRepository,
+  deviceRestartReleaseReason,
   isDeviceRestartReleaseReason,
 } from "../db/deviceSessionRepository";
 import { AndroidDeviceReboot, BoundedAndroidDeviceReboot } from "../devices/androidDeviceReboot";
@@ -4541,6 +4542,26 @@ export class DevicePool {
     return present && this.runtimeIdentity.isPooledDeviceIdentityAssignable(device);
   }
 
+  /** A resolved serial reuse hands the old AVD back to its owner without touching the stranger. */
+  private restartReleaseReasonForIdentityReplacement(
+    device: PooledDevice,
+    observation?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
+  ): SessionReleaseReason | undefined {
+    if (
+      !observation ||
+      !this.hasReusableSerial(device) ||
+      observation.platform !== "android" ||
+      this.runtimeIdentity.hasUnresolvedEmulatorName(observation) ||
+      this.matchesRuntimeIdentity(device, observation)
+    ) {
+      return undefined;
+    }
+    const stableDeviceId = this.stableDeviceIdFor(device);
+    return stableDeviceId !== undefined && stableDeviceId !== observation.name
+      ? deviceRestartReleaseReason(stableDeviceId)
+      : undefined;
+  }
+
   private async releaseSessionForEvictedDevice(
     device: PooledDevice,
     incidentId: string | undefined,
@@ -4568,14 +4589,31 @@ export class DevicePool {
       );
       return false;
     }
-    const released = await this.retrySessionRelease(sessionId, device.id, () =>
+    const releaseReason =
+      this.restartReleaseReasonForIdentityReplacement(device, identityObservation) ??
+      deviceLossCancellationReason(device.id, incidentId);
+    const attempt = () =>
       this.releaseSessionForDisconnectedDevice(
         sessionId,
         device.id,
-        deviceLossCancellationReason(device.id, incidentId),
+        releaseReason,
         () => !isSupersededByNewerIdentity(),
-      ),
-    );
+      );
+    let released: boolean | void = undefined;
+    if (isDeviceRestartReleaseReason(releaseReason)) {
+      // Use the existing handoff bookkeeping, including rollback when the fenced
+      // release is superseded. Recovery must never stop or boot this reused serial.
+      await this.releaseDisconnectedRecoverySessionWithRetry(
+        sessionId,
+        device.id,
+        releaseReason,
+        async () => {
+          released = await attempt();
+        },
+      );
+    } else {
+      released = await this.retrySessionRelease(sessionId, device.id, attempt);
+    }
     if (released === false) {
       logger.info(
         `[DevicePool] Aborting session release for ${device.id}: a newer identity observation ` +

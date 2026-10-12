@@ -35,7 +35,8 @@ const recordSchema = z.object({
 
 /** Final record names are atomic renames, so corrupt files cannot be writes in progress. */
 export const INVALID_ADMISSION_RECORD_MAX_AGE_MS = 10 * 60 * 1000;
-/** A legitimate lock covers just one sample, bounded to 15 seconds by the gate. */
+/** Live-owner takeover bound: a legitimate lock covers one sample, bounded to 15 seconds.
+ * Ownerless locks heal earlier through the shared primitive's 10-second bound. */
 export const ADMISSION_LOCK_MAX_AGE_MS = 60 * 1000;
 
 export interface FileHostBootAdmissionRegistryOptions {
@@ -119,6 +120,7 @@ export class FileHostBootAdmissionRegistry implements HostBootAdmissionRegistry 
     try {
       const acquired = tryAcquireExclusiveLock(path, {
         pid: this.pid,
+        now: () => this.timer.now(),
         ownerToken: token,
         isProcessRunning: this.running,
         ownerGeneration: this.options.ownerGeneration ?? defaultLockOwnerGenerationProbe,

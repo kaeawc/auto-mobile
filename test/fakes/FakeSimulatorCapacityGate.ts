@@ -13,6 +13,7 @@ export class FakeSimulatorCapacityGate implements SimulatorCapacityGate {
   admitOptions: CapacityAdmitOptions[] = [];
   /** Admissions handed out by `admitBoot` and not yet released. */
   admitted = 0;
+  releaseOutcomes: Parameters<NonNullable<CapacityAdmission["releaseAdmission"]>>[0][] = [];
   constructor(
     private readonly timer: Pick<Timer, "now"> & { advanceTime(ms: number): void },
     private decision: CapacityDecision,
@@ -38,7 +39,8 @@ export class FakeSimulatorCapacityGate implements SimulatorCapacityGate {
     let released = false;
     return {
       ...result,
-      releaseAdmission: () => {
+      releaseAdmission: (outcome) => {
+        this.releaseOutcomes.push(outcome);
         if (!released) {
           released = true;
           this.admitted -= 1;

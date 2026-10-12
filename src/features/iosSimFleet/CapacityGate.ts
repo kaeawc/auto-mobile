@@ -88,6 +88,8 @@ export class IosSimCapacityGate
   private readonly startedUdids = new Set<string>();
   /** Started UDIDs a sample has shown occupying a slot: only these can be seen leaving. */
   private readonly seenStartedUdids = new Set<string>();
+  /** Admissions and successful releases since each UDID last became ours. */
+  private readonly bootsByUdid = new Map<string, { unreleased: number; succeeded: boolean }>();
   /** Boots admitted by `admitBoot` and not yet released. */
   private readonly admittedBoots: BootAdmissionLedger;
 
@@ -174,13 +176,38 @@ export class IosSimCapacityGate
       sample: () => this.refresh({ fresh: true }),
       ledger: this.admittedBoots,
       decide: (report, window) => this.decide(report, request, "hint", options.bootUdid, window),
-      admit: () => {
-        if (options.bootUdid) {
-          this.startedUdids.add(options.bootUdid);
-        }
-        return this.admittedBoots.admit(options.bootUdid).release;
-      },
+      admit: () => this.recordAdmission(options.bootUdid),
     });
+  }
+
+  private recordAdmission(udid?: string): NonNullable<CapacityAdmission["releaseAdmission"]> {
+    const boots = udid
+      ? (this.bootsByUdid.get(udid) ?? { unreleased: 0, succeeded: false })
+      : undefined;
+    if (udid && boots) {
+      this.startedUdids.add(udid);
+      boots.unreleased += 1;
+      this.bootsByUdid.set(udid, boots);
+    }
+    const admission = this.admittedBoots.admit(udid);
+    let released = false;
+    return (outcome) => {
+      if (released) {
+        return;
+      }
+      released = true;
+      admission.release();
+      // A seen-then-gone sample may already have forgotten this admission's ownership period.
+      if (!udid || !boots || this.bootsByUdid.get(udid) !== boots) {
+        return;
+      }
+      boots.unreleased -= 1;
+      boots.succeeded ||= !outcome?.bootFailed;
+      // Forget only when every admission failed unseen; any successful boot keeps the UDID ours.
+      if (boots.unreleased === 0 && !boots.succeeded && !this.seenStartedUdids.has(udid)) {
+        this.forgetStarted(udid);
+      }
+    };
   }
 
   /**
@@ -279,9 +306,15 @@ export class IosSimCapacityGate
       if (occupied.has(udid)) {
         this.seenStartedUdids.add(udid);
       } else if (this.seenStartedUdids.delete(udid)) {
-        this.startedUdids.delete(udid);
+        this.forgetStarted(udid);
       }
     }
+  }
+
+  private forgetStarted(udid: string): void {
+    this.startedUdids.delete(udid);
+    this.seenStartedUdids.delete(udid);
+    this.bootsByUdid.delete(udid);
   }
 
   /**

@@ -161,6 +161,9 @@ export interface DaemonStateAccess {
     /** Reverse-map holders, including sessions awaiting or completing release. */
     getHeldDeviceSessions?(): readonly HeldDeviceSession[];
     getTerminalReleaseSnapshot?(sessionId: string): SessionReleaseSnapshot | undefined;
+    peekTerminalAnswerForEndedSession?(
+      sessionId: string,
+    ): { release: SessionReleaseSnapshot } | undefined;
     getExpiredReleaseSnapshot?(sessionId: string): Promise<SessionReleaseSnapshot | undefined>;
     /** Why a session this daemon released was released; undefined for a never-issued UUID. */
     getReleasedSessionReason?(sessionId: string): Promise<string | undefined>;
@@ -429,15 +432,18 @@ async function releaseDrainRefusal(
  * release reason and, for an idle-window release, `idle: true`. A never-issued UUID has no
  * snapshot and no row, and still registers as an observer.
  *
- * The in-memory snapshot is empty after a daemon restart, so a UUID without one is judged by its
- * persisted release or the same expired-row snapshot that refuses control admission. The read
- * changes nothing: a handoff or `plan-auto-release` row still inside its window keeps registering.
+ * A registration's live lookup may start lazy expiry before teardown publishes the terminal
+ * snapshot. Without that snapshot, consult the existing read-only terminal answer first, then
+ * the expired-row snapshot or persisted release (also covering daemon restarts). The read changes
+ * nothing: a handoff or `plan-auto-release` row still inside its window keeps registering.
  */
 async function terminalSessionRegistrationRefusal(
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
   sessionId: string,
 ): Promise<DaemonMethodResult | undefined> {
-  const snapshot = manager.getTerminalReleaseSnapshot?.(sessionId);
+  const snapshot =
+    manager.getTerminalReleaseSnapshot?.(sessionId) ??
+    manager.peekTerminalAnswerForEndedSession?.(sessionId)?.release;
   let expired: SessionReleaseSnapshot | undefined;
   if (!snapshot) {
     try {

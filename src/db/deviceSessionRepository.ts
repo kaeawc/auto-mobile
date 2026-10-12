@@ -125,6 +125,7 @@ function rowRewriteGuard(
   eb: ExpressionBuilder<Database, "device_sessions">,
   supersededReasons: readonly string[],
   livePeerDaemonSessionIds: readonly string[],
+  ownDaemonSessionId?: string,
 ) {
   return eb.and([
     eb.or([
@@ -135,6 +136,14 @@ function rowRewriteGuard(
         : []),
     ]),
     ...livePeerOwnerGuard(eb, livePeerDaemonSessionIds),
+    ...(ownDaemonSessionId === undefined
+      ? []
+      : [
+          eb.or([
+            eb("device_sessions.daemon_session_id", "is", null),
+            eb("device_sessions.daemon_session_id", "=", ownDaemonSessionId),
+          ]),
+        ]),
   ]);
 }
 
@@ -229,6 +238,8 @@ export interface UpsertActiveSessionOptions {
   rewriteOverSupersededRelease?: {
     supersededReasons: readonly string[];
     livePeerDaemonSessionIds: readonly string[];
+    /** First attempt needs no discovery: only an unowned row or this daemon's row is writable. */
+    ownDaemonSessionId?: string;
     /** Activity re-persistence may replace only the generation its incarnation last wrote. */
     expectedRowGeneration?: number;
   };
@@ -303,6 +314,10 @@ export interface MarkReleasedOptions {
    */
   unlessTerminalOrOwnedByLivePeer?: {
     livePeerDaemonSessionIds: readonly string[];
+    /** First attempt needs no discovery: only an unowned row or this daemon's row is writable. */
+    ownDaemonSessionId?: string;
+    /** Report every statement miss, including a generation mismatch, for two-step writers. */
+    reportRefusal?: boolean;
     supersededReasons?: readonly string[];
   };
 }
@@ -583,7 +598,12 @@ export class DeviceSessionRepository {
                 rewriteOverSupersededRelease;
               return update.where((eb) =>
                 eb.and([
-                  rowRewriteGuard(eb, supersededReasons, livePeerDaemonSessionIds),
+                  rowRewriteGuard(
+                    eb,
+                    supersededReasons,
+                    livePeerDaemonSessionIds,
+                    rewriteOverSupersededRelease.ownDaemonSessionId,
+                  ),
                   ...(expectedRowGeneration === undefined
                     ? []
                     : [
@@ -860,27 +880,48 @@ export class DeviceSessionRepository {
       const guarded = options.unlessTerminalOrOwnedByLivePeer;
       if (guarded) {
         update = update.where((eb) =>
-          rowRewriteGuard(eb, guarded.supersededReasons ?? [], guarded.livePeerDaemonSessionIds),
+          rowRewriteGuard(
+            eb,
+            guarded.supersededReasons ?? [],
+            guarded.livePeerDaemonSessionIds,
+            guarded.ownDaemonSessionId,
+          ),
         );
       }
       const result = await update.executeTakeFirst();
       if (Number(result.numUpdatedRows) === 0) {
-        if (expectedRowGeneration !== undefined) {
-          // Expected outcome of the precondition: the UUID was re-upserted (or removed) after this
-          // release was captured, so the row is not this release's to change.
-          logger.info(
-            `[DeviceSessionRepository] Skipped ${reason} release of ${sessionUuid}: the row is no ` +
-              `longer generation ${expectedRowGeneration}`,
-          );
-        } else if (guarded) {
-          throw new DeviceSessionRowNotReleasableError(sessionUuid);
-        }
+        this.reportReleaseStatementMiss(sessionUuid, reason, options);
       }
     } catch (error) {
+      if (error instanceof DeviceSessionRowNotReleasableError) {
+        // A statement refusal is an expected ownership/generation race, not a storage failure.
+        logger.debug(`[DeviceSessionRepository] Release row refused for ${sessionUuid}`);
+        throw error;
+      }
       logger.warn(
         `[DeviceSessionRepository] Failed to mark session ${sessionUuid} ${status}: ${error}`,
       );
       throw error;
+    }
+  }
+
+  private reportReleaseStatementMiss(
+    sessionUuid: string,
+    reason: string,
+    options: MarkReleasedOptions,
+  ): void {
+    const guarded = options.unlessTerminalOrOwnedByLivePeer;
+    if (guarded && (guarded.reportRefusal || guarded.ownDaemonSessionId !== undefined)) {
+      throw new DeviceSessionRowNotReleasableError(sessionUuid);
+    }
+    if (options.expectedRowGeneration !== undefined) {
+      // Legacy generation-only callers expect a silent skip; two-step writers request refusal.
+      logger.info(
+        `[DeviceSessionRepository] Skipped ${reason} release of ${sessionUuid}: the row is no ` +
+          `longer generation ${options.expectedRowGeneration}`,
+      );
+    } else if (guarded) {
+      throw new DeviceSessionRowNotReleasableError(sessionUuid);
     }
   }
 

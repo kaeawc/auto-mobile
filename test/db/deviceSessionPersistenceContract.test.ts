@@ -80,6 +80,79 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
     return await persistence.getSession?.(SESSION);
   }
 
+  test.each([null, "daemon-a", "daemon-other"])(
+    "own-or-unowned statement predicates with owner %p",
+    async (owner) => {
+      const persistence = await create();
+      await persistence.upsertActiveSession(record({ daemonSessionId: owner }));
+      const before = structuredClone(await rowOf(persistence));
+      const guard = {
+        supersededReasons: [],
+        livePeerDaemonSessionIds: [],
+        ownDaemonSessionId: "daemon-a",
+      };
+      const upsert = persistence.upsertActiveSession(
+        record({ deviceId: "new-device" }),
+        undefined,
+        {
+          rewriteOverSupersededRelease: guard,
+        },
+      );
+      if (owner === "daemon-other") {
+        await expect(upsert).rejects.toBeInstanceOf(DeviceSessionRowNotRewritableError);
+        expect(await rowOf(persistence)).toEqual(before);
+      } else {
+        await upsert;
+        expect(await rowOf(persistence)).toMatchObject({ device_id: "new-device" });
+      }
+      const release = persistence.markReleased(SESSION, "released", 3_000, "explicit-release", {
+        unlessTerminalOrOwnedByLivePeer: guard,
+      });
+      if (owner === "daemon-other") {
+        await expect(release).rejects.toBeInstanceOf(DeviceSessionRowNotReleasableError);
+        expect(await rowOf(persistence)).toEqual(before);
+      } else {
+        await release;
+        expect(await rowOf(persistence)).toMatchObject({ release_reason: "explicit-release" });
+      }
+    },
+  );
+
+  test.each([null, "daemon-a", "daemon-other"])(
+    "release own-or-unowned statement predicate with owner %p",
+    async (owner) => {
+      const persistence = await create();
+      await persistence.upsertActiveSession(record({ daemonSessionId: owner }));
+      const before = structuredClone(await rowOf(persistence));
+      const release = persistence.markReleased(SESSION, "released", 3_000, "explicit-release", {
+        unlessTerminalOrOwnedByLivePeer: {
+          livePeerDaemonSessionIds: [],
+          ownDaemonSessionId: "daemon-a",
+        },
+      });
+      if (owner === "daemon-other") {
+        await expect(release).rejects.toBeInstanceOf(DeviceSessionRowNotReleasableError);
+        expect(await rowOf(persistence)).toEqual(before);
+      } else {
+        await release;
+        expect(await rowOf(persistence)).toMatchObject({ release_reason: "explicit-release" });
+      }
+    },
+  );
+
+  test("two-step release writers receive a typed generation miss", async () => {
+    const persistence = await create();
+    const generation = await persistence.upsertActiveSession(record());
+    const before = structuredClone(await rowOf(persistence));
+    await expect(
+      persistence.markReleased(SESSION, "released", 3_000, "explicit-release", {
+        expectedRowGeneration: Number(generation) + 1,
+        unlessTerminalOrOwnedByLivePeer: { livePeerDaemonSessionIds: [], reportRefusal: true },
+      }),
+    ).rejects.toBeInstanceOf(DeviceSessionRowNotReleasableError);
+    expect(await rowOf(persistence)).toEqual(before);
+  });
+
   describe("markReleased preserving terminal releases and live peers", () => {
     test.each([
       { reason: null, owner: "daemon-a", refused: false },

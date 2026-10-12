@@ -3,6 +3,10 @@ import type {
   MarkReleasedOptions,
   UpsertActiveSessionOptions,
 } from "../../src/db/deviceSessionRepository";
+import {
+  DeviceSessionRowNotRewritableError,
+  DeviceSessionRowNotReleasableError,
+} from "../../src/db/deviceSessionRepository";
 import type { DeviceSessionStatus } from "../../src/db/types";
 import { FakeDeviceSessionPersistence } from "./FakeDeviceSessionPersistence";
 
@@ -24,6 +28,32 @@ export class BusyRewritePersistence extends FakeDeviceSessionPersistence {
   /** Runs once before an activity re-persist lands, to drive an incarnation change. */
   duringActivityUpsert: (() => Promise<void>) | undefined;
   failActivityUpserts = 0;
+  activityUpserts = 0;
+  /** A row can change after a refused statement and before the manager reads it. */
+  afterRefusedUpsert: (() => void) | undefined;
+  refuseGuardedUpserts = 0;
+  refuseGuardedReleaseWrites = 0;
+  afterRefusedRelease: (() => void) | undefined;
+
+  private async upsertWithRefusalHook(
+    record: DeviceSessionRecord,
+    nowMs: number | undefined,
+    options: UpsertActiveSessionOptions,
+  ): Promise<number> {
+    try {
+      if (options.rewriteOverSupersededRelease && this.refuseGuardedUpserts > 0) {
+        this.refuseGuardedUpserts--;
+        throw new DeviceSessionRowNotRewritableError(record.sessionUuid);
+      }
+      return await super.upsertActiveSession(record, nowMs, options);
+    } catch (error) {
+      // Expected statement refusals expose the read-after-miss interleaving to directed tests.
+      const hook = this.afterRefusedUpsert;
+      this.afterRefusedUpsert = undefined;
+      hook?.();
+      throw error;
+    }
+  }
 
   override async markReleased(
     sessionUuid: string,
@@ -37,7 +67,19 @@ export class BusyRewritePersistence extends FakeDeviceSessionPersistence {
       this.failReleaseWrites--;
       throw new Error("SQLITE_BUSY: database is locked");
     }
-    await super.markReleased(sessionUuid, status, releasedAtMs, reason, options);
+    try {
+      if (options?.unlessTerminalOrOwnedByLivePeer && this.refuseGuardedReleaseWrites > 0) {
+        this.refuseGuardedReleaseWrites--;
+        throw new DeviceSessionRowNotReleasableError(sessionUuid);
+      }
+      await super.markReleased(sessionUuid, status, releasedAtMs, reason, options);
+    } catch (error) {
+      // A refused release can be followed by an ownership hand-back before its read.
+      const hook = this.afterRefusedRelease;
+      this.afterRefusedRelease = undefined;
+      hook?.();
+      throw error;
+    }
   }
 
   override async upsertActiveSession(
@@ -54,12 +96,13 @@ export class BusyRewritePersistence extends FakeDeviceSessionPersistence {
         this.failPlainUpserts--;
         throw new Error("SQLITE_BUSY: database is locked");
       }
-      const generation = await super.upsertActiveSession(record, nowMs, options);
+      const generation = await this.upsertWithRefusalHook(record, nowMs, options);
       const landed = this.afterPlainUpsert;
       this.afterPlainUpsert = undefined;
       await landed?.();
       return generation;
     }
+    this.activityUpserts++;
     const hook = this.duringActivityUpsert;
     this.duringActivityUpsert = undefined;
     await hook?.();
@@ -67,6 +110,6 @@ export class BusyRewritePersistence extends FakeDeviceSessionPersistence {
       this.failActivityUpserts--;
       throw new Error("SQLITE_BUSY: database is locked");
     }
-    return await super.upsertActiveSession(record, nowMs, options);
+    return await this.upsertWithRefusalHook(record, nowMs, options);
   }
 }

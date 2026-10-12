@@ -89,10 +89,14 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       const peerOwned =
         existing.daemon_session_id !== null &&
         rewrite.livePeerDaemonSessionIds.includes(existing.daemon_session_id);
+      const otherOwned =
+        rewrite.ownDaemonSessionId !== undefined &&
+        existing.daemon_session_id !== null &&
+        existing.daemon_session_id !== rewrite.ownDaemonSessionId;
       const changed =
         rewrite.expectedRowGeneration !== undefined &&
         existing.stable_identity_generation !== rewrite.expectedRowGeneration;
-      if (terminal || peerOwned || changed) {
+      if (terminal || peerOwned || otherOwned || changed) {
         throw new DeviceSessionRowNotRewritableError(record.sessionUuid);
       }
     }
@@ -211,9 +215,15 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
           isTerminalReleaseReason(row.release_reason) &&
           !guarded.supersededReasons?.includes(row.release_reason)) ||
         (row.daemon_session_id !== null &&
-          guarded.livePeerDaemonSessionIds.includes(row.daemon_session_id)))
+          (guarded.livePeerDaemonSessionIds.includes(row.daemon_session_id) ||
+            (guarded.ownDaemonSessionId !== undefined &&
+              row.daemon_session_id !== guarded.ownDaemonSessionId))))
     ) {
-      if (options.expectedRowGeneration === undefined) {
+      if (
+        options.expectedRowGeneration === undefined ||
+        guarded.reportRefusal ||
+        guarded.ownDaemonSessionId !== undefined
+      ) {
         throw new DeviceSessionRowNotReleasableError(sessionUuid);
       }
       return;
@@ -233,7 +243,12 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       (options.onlyIfOwnedByDaemon !== undefined &&
         row.daemon_session_id !== options.onlyIfOwnedByDaemon)
     ) {
-      if (guarded && options.expectedRowGeneration === undefined) {
+      if (
+        guarded &&
+        (options.expectedRowGeneration === undefined ||
+          guarded.reportRefusal ||
+          guarded.ownDaemonSessionId !== undefined)
+      ) {
         throw new DeviceSessionRowNotReleasableError(sessionUuid);
       }
       return;

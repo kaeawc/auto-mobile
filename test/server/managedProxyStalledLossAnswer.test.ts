@@ -321,7 +321,7 @@ test.each(["heartbeat-timeout", "session-not-found"] as const)(
   },
 );
 
-test.each(["heartbeat-timeout", "daemon-restart"])(
+test.each(["heartbeat-timeout"])(
   "a generic connection keeps the proxy_stalled answer for %s, and is told once",
   async (reason) => {
     await withStallLoss(

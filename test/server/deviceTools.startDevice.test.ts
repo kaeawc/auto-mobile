@@ -9,6 +9,7 @@ import {
   setDeviceToolsDependencies,
   resetDeviceToolsDependencies,
   registerDeviceTools,
+  validatePooledDeviceMapping,
   startDeviceSchema,
   cancelUnownedColdBootUnlessRetryable,
 } from "../../src/server/deviceTools";
@@ -3586,7 +3587,50 @@ describe("startDevice handler", () => {
     );
   });
 
-  it("settles stale pooled platform metadata before session binding", async () => {
+  test("rejects a held physical Android handset name mismatch without releasing its holder", async () => {
+    const handset: BootedDevice = { deviceId: "R58M1234ABC", name: "Pixel 7", platform: "android" };
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      createDevicePoolDependencies(daemonSessionManager, "daemon-session", {
+        env: autolockEnv,
+        timer,
+        deviceManager: fakeDeviceUtils,
+      }),
+    );
+    fakeDeviceUtils.setBootedDevices("android", [handset]);
+    await pool.initializeWithDevices([handset]);
+    await pool.bindOrReuseDeviceSession("handset-holder", handset.deviceId, "android");
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    const entry = pool.getDevice(handset.deviceId)!;
+    const incarnation = entry.incarnation;
+    const holder = daemonSessionManager.getSession("handset-holder");
+    const resolved = { ...handset, name: handset.deviceId };
+    fakeDeviceUtils.setBootedDevices("android", [resolved]);
+    const settlement = spyOn(pool, "settlePooledRuntimeIdentity");
+    try {
+      const rejection = validatePooledDeviceMapping(resolved, handset.deviceId);
+      await expect(rejection).rejects.toBeInstanceOf(ActionableError);
+      await expect(rejection).rejects.not.toHaveProperty("code");
+      await expect(rejection).rejects.toMatchObject({
+        message:
+          `startDevice identity mismatch: requested=[${handset.deviceId}] ` +
+          `resolved=[${resolved.name} (${handset.deviceId}) platform=android] ` +
+          `pooled=[Pixel 7 (${handset.deviceId}) platform=android] ` +
+          "phase=pool-match: stale pool identity conflicts with the resolved runtime",
+      });
+      expect(settlement).not.toHaveBeenCalled();
+      expect(pool.getDevice(handset.deviceId)).toBe(entry);
+      expect(entry.incarnation).toBe(incarnation);
+      expect(entry.sessionId).toBe("handset-holder");
+      expect(daemonSessionManager.getSession("handset-holder")).toBe(holder);
+      expect(holder?.assignedDevice).toBe(handset.deviceId);
+    } finally {
+      settlement.mockRestore();
+    }
+  });
+
+  test("rejects stale pooled platform metadata before session binding", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
@@ -3606,15 +3650,13 @@ describe("startDevice handler", () => {
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     fakeMatcher.setBootedResult(androidDevice);
 
-    const result = await callStartDevice({
+    const rejection = callStartDevice({
       platform: "android",
       deviceId: androidDevice.deviceId,
     });
-    expect(result.runtime.deviceId).toBe(androidDevice.deviceId);
-    expect(pool.getDevice(androidDevice.deviceId)?.name).toBe(androidDevice.name);
-    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe(
-      result.runtime.session.sessionUuid,
-    );
+    await expect(rejection).rejects.toThrow(/phase=pool-match.*stale pool identity conflicts/);
+    await expect(rejection).rejects.not.toHaveProperty("code");
+    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBeNull();
   });
 
   it("retires a stale held identity before binding a different session", async () => {
@@ -3815,9 +3857,9 @@ describe("startDevice handler", () => {
     expect(pool.getDevice(physicalIphone.deviceId)?.sessionId).toBe("owner-session");
   });
 
-  it("retires a stale iOS simulator identity before binding the resolved runtime", async () => {
+  test("still reports a stale pool identity when a renamed iOS simulator is re-resolved", async () => {
     // Simulators are deliberately outside the rename tolerance: simctl publishes
-    // one authoritative name with no fallback chain, so the old session is retired.
+    // one authoritative name with no fallback chain, so this stays a hard error.
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
@@ -3840,10 +3882,16 @@ describe("startDevice handler", () => {
     fakeDeviceUtils.setBootedDevices("ios", [{ ...simulator, name: "iPhone 16" }]);
     fakeMatcher.setBootedResult({ ...simulator, name: "iPhone 16" });
 
-    const result = await callStartDevice({ platform: "ios", deviceId: simulator.deviceId });
-    expect(result.runtime.session.sessionUuid).not.toBe("stale-session");
-    expect(daemonSessionManager.getSession("stale-session")).toBeNull();
-    expect(pool.getDevice(simulator.deviceId)?.name).toBe("iPhone 16");
+    const rejection = callStartDevice({
+      platform: "ios",
+      deviceId: simulator.deviceId,
+    });
+    await expect(rejection).rejects.toThrow(/phase=pool-match.*stale pool identity conflicts/);
+    await expect(rejection).rejects.not.toHaveProperty("code");
+    expect(pool.getDevice(simulator.deviceId)?.sessionId).toBe("stale-session");
+    expect(daemonSessionManager.getSession("stale-session")?.assignedDevice).toBe(
+      simulator.deviceId,
+    );
   });
 
   it("reuses the returned sessionId for repeated startDevice calls when autolock is disabled", async () => {

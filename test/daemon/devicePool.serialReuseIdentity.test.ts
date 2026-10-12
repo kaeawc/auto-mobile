@@ -1,4 +1,5 @@
-import { expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { logger, LogLevel } from "../../src/utils/logger";
 import type { BootedDevice } from "../../src/models";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -9,6 +10,14 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { drainUntil } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 
+// Membership and session semantics do not need real file logging.
+let previousLogLevel: LogLevel;
+beforeEach(() => {
+  previousLogLevel = logger.getLogLevel();
+  logger.setLogLevel(LogLevel.NONE);
+});
+afterEach(() => logger.setLogLevel(previousLogLevel));
+
 const original: BootedDevice = {
   deviceId: "emulator-5554",
   name: "AVD-A",
@@ -18,10 +27,10 @@ const original: BootedDevice = {
 const replacement = { ...original, name: "AVD-B", observedAt: 10 };
 const placeholder = { ...original, name: "Unknown (emulator-5554)", observedAt: 5 };
 
-async function setup() {
+async function setup(device: BootedDevice = original) {
   const timer = new FakeTimer();
   const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
-  const manager = new FakeDeviceManager([], [original]);
+  const manager = new FakeDeviceManager([], [device]);
   const pool = new DevicePool(
     createDevicePoolDependencies(sessions, "daemon-test", {
       timer,
@@ -29,12 +38,12 @@ async function setup() {
       installedAppsRepository: new FakeInstalledAppsRepository(),
     }),
   );
-  await pool.initializeWithDevices([original]);
-  const entry = pool.getDevice(original.deviceId)!;
+  await pool.initializeWithDevices([device]);
+  const entry = pool.getDevice(device.deviceId)!;
   return { timer, sessions, manager, pool, entry };
 }
 
-test("monitor settles serial reuse after sub-threshold absence and an unreadable console", async () => {
+test("sub-threshold absence and an unreadable console preserve the pooled incarnation", async () => {
   const h = await setup();
   try {
     h.manager.bootedDevices = [];
@@ -49,6 +58,20 @@ test("monitor settles serial reuse after sub-threshold absence and an unreadable
       settleMembership: true,
     });
     expect(h.pool.getDevice(original.deviceId)).toBe(h.entry);
+    expect(h.entry.incarnation).toBe(1);
+    expect(h.entry).toMatchObject({ name: "AVD-A", sessionId: null, identityUnresolved: true });
+    expect(h.manager.startedDevices).toHaveLength(0);
+  } finally {
+    h.sessions.stopCleanupTimer();
+  }
+});
+
+test("a resolved different AVD replaces the incarnation after an unreadable console", async () => {
+  const h = await setup();
+  try {
+    await h.pool.reconcileDiscoveryObservation([placeholder], "disconnect-monitor", {
+      settleMembership: true,
+    });
     h.manager.bootedDevices = [replacement];
     await h.pool.reconcileDiscoveryObservation([replacement], "disconnect-monitor", {
       settleMembership: true,
@@ -192,6 +215,79 @@ test("fresh settlement honours cancellation before membership changes", async ()
     expect(h.pool.getDevice(original.deviceId)).toBe(h.entry);
     expect(h.timer.getPendingTimeoutCount()).toBe(0);
   } finally {
+    h.sessions.stopCleanupTimer();
+  }
+});
+
+const handset: BootedDevice = {
+  deviceId: "R58M1234ABC",
+  name: "Pixel 7",
+  platform: "android",
+  observedAt: 1,
+};
+
+for (const path of ["monitor", "fresh settlement"] as const) {
+  test(`${path} preserves a held physical Android handset across name fallback and recovery`, async () => {
+    const h = await setup(handset);
+    try {
+      await h.pool.bindOrReuseDeviceSession("handset-holder", handset.deviceId, "android");
+      const incarnation = h.entry.incarnation;
+      const holder = h.sessions.getSession("handset-holder");
+      const discovery = spyOn(h.manager, "getBootedDevicesDetailed");
+      try {
+        for (const observation of [
+          { ...handset, name: handset.deviceId, observedAt: 10 },
+          { ...handset, observedAt: 20 },
+        ]) {
+          h.manager.bootedDevices = [observation];
+          if (path === "monitor") {
+            await h.pool.reconcileDiscoveryObservation([observation], "disconnect-monitor", {
+              settleMembership: true,
+            });
+          } else {
+            expect(await h.pool.settlePooledRuntimeIdentity(handset.deviceId)).toBe("unsettled");
+          }
+          expect(h.pool.getDevice(handset.deviceId)).toBe(h.entry);
+          expect(h.entry.incarnation).toBe(incarnation);
+          expect(h.entry.sessionId).toBe("handset-holder");
+          expect(h.sessions.getSession("handset-holder")).toBe(holder);
+          expect(holder?.assignedDevice).toBe(handset.deviceId);
+        }
+        expect(discovery).not.toHaveBeenCalled();
+      } finally {
+        discovery.mockRestore();
+      }
+    } finally {
+      h.sessions.stopCleanupTimer();
+    }
+  });
+}
+
+test("fresh settlement re-checks serial reuse on the current entry after discovery", async () => {
+  const h = await setup();
+  const gate =
+    Promise.withResolvers<Awaited<ReturnType<FakeDeviceManager["getBootedDevicesDetailed"]>>>();
+  const discovery = spyOn(h.manager, "getBootedDevicesDetailed").mockImplementation(
+    () => gate.promise,
+  );
+  try {
+    const pending = h.pool.settlePooledRuntimeIdentity(original.deviceId);
+    await drainUntil(() => discovery.mock.calls.length === 1, {
+      description: "settlement discovery",
+    });
+    // Another pool update publishes non-reusable platform metadata while discovery is in flight.
+    await h.pool.initializeWithDevices([{ ...original, platform: "ios" }]);
+    const current = h.pool.getDevice(original.deviceId)!;
+    const incarnation = current.incarnation;
+    discovery.mockRestore();
+    h.manager.bootedDevices = [replacement];
+    gate.resolve(await h.manager.getBootedDevicesDetailed("android"));
+    expect(await pending).toBe("unsettled");
+    expect(h.pool.getDevice(original.deviceId)).toBe(current);
+    expect(current.incarnation).toBe(incarnation);
+    expect(current).toMatchObject({ platform: "ios", name: "AVD-A", sessionId: null });
+  } finally {
+    discovery.mockRestore();
     h.sessions.stopCleanupTimer();
   }
 });

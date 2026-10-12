@@ -133,7 +133,7 @@ export class DeviceTransportOfflineError extends RetryableDeviceAcquisitionError
       DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS,
       (state === undefined
         ? adoptedRuntime
-          ? `The previously resolved emulator '${deviceId}' is temporarily absent from adb's transport list `
+          ? `adb did not list the previously resolved emulator '${deviceId}' steadily while binding (its transport was absent or flapping) `
           : `The emulator process this request started for device '${deviceId}' is still running but adb does not list its transport yet `
         : `Device '${deviceId}' is still attached but adb lists it as ${state} `) +
         `(code ${DEVICE_OFFLINE_CODE}); it was not bound. Retry in about ` +

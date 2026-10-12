@@ -175,7 +175,9 @@ describe("exact Android binding during transitional adb presence", () => {
       retryAfterMs: 1000,
       state: undefined,
     });
-    expect(String(error)).toContain("previously resolved");
+    expect(String(error)).toContain(
+      `adb did not list the previously resolved emulator '${device.deviceId}' steadily while binding (its transport was absent or flapping)`,
+    );
     expect(String(error)).not.toContain("this request started");
     expect(h.timer.now()).toBe(5000);
     h.unchanged();

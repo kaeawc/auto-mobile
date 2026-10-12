@@ -4622,7 +4622,8 @@ export class DevicePool {
     return this.missingDeviceLiveness.shouldValidatePooledDevicePresence(device);
   }
 
-  private hasReusableSerial(device: PooledDevice): boolean {
+  /** Whether this pooled entry uses an Android emulator serial that can be reassigned. */
+  hasReusableSerial(device: PooledDevice): boolean {
     return this.missingDeviceLiveness.hasReusableSerial(device);
   }
 
@@ -9675,11 +9676,17 @@ export class DevicePool {
     options: { platform?: Platform; signal?: AbortSignal; totalDeadlineMs?: number } = {},
   ): Promise<"no-entry" | "matched" | "replaced" | "unsettled"> {
     const { signal = getAbortSignal() } = options;
-    signal?.throwIfAborted();
-    throwIfRequestAborted();
+    const assertNotAborted = () => {
+      signal?.throwIfAborted();
+      throwIfRequestAborted();
+    };
+    assertNotAborted();
     const pooled = this.devices.get(deviceId);
     if (!pooled) {
       return "no-entry";
+    }
+    if (!this.hasReusableSerial(pooled)) {
+      return "unsettled";
     }
     const platform = options.platform ?? pooled.platform;
     const deadlineMs = Math.min(
@@ -9696,13 +9703,11 @@ export class DevicePool {
         timeoutError: () => new BootedDeviceDiscoveryIncompleteError(platform, undefined),
       });
     } catch (error) {
-      signal?.throwIfAborted();
-      throwIfRequestAborted();
+      assertNotAborted();
       logger.warn(`Pooled runtime identity discovery failed for ${deviceId}`, error);
       return "unsettled";
     }
-    signal?.throwIfAborted();
-    throwIfRequestAborted();
+    assertNotAborted();
     if (!didSourceSucceedForDevice(discovery, platform, deviceId)) {
       return "unsettled";
     }
@@ -9729,6 +9734,7 @@ export class DevicePool {
       if (
         observation.platform === "android" &&
         pooled &&
+        this.hasReusableSerial(pooled) &&
         !this.runtimeIdentity.hasUnresolvedEmulatorName(observation) &&
         !this.matchesRuntimeIdentity(pooled, observation)
       ) {
@@ -9750,6 +9756,7 @@ export class DevicePool {
         return "no-entry";
       }
       if (
+        !this.hasReusableSerial(current) ||
         this.timer.now() >= deadlineMs ||
         this.runtimeIdentity.hasUnresolvedEmulatorName(observation) ||
         this.runtimeIdentity.comparePooledIdentityEvidence(current, observation) === "stale"

@@ -55,7 +55,9 @@ describe("transitional adb bind wait", () => {
         code: "device_offline",
         retryable: true,
         retryAfterMs: 1000,
-        message: expect.stringContaining("previously resolved"),
+        state: undefined,
+        name: "DeviceTransportOfflineError",
+        message: `adb did not list the previously resolved emulator '${id}' steadily while binding (its transport was absent or flapping) (code device_offline); it was not bound. Retry in about 1000ms.`,
       });
       expect(timer.getPendingTimeoutCount()).toBe(0);
     },

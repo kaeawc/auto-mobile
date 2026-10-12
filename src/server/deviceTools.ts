@@ -4107,22 +4107,28 @@ export async function validatePooledDeviceMapping(
   // mutable display name (#5690) and an emulator's `Unknown (<serial>)`
   // placeholder (#10603) are both judged exactly as the pool judges them.
   if (pooled && !devicePool.matchesRuntimeIdentity(pooled, device)) {
-    await devicePool.settlePooledRuntimeIdentity(device.deviceId, {
-      ...options,
-      platform: device.platform,
-    });
-    pooled = devicePool.getDevice(device.deviceId);
-    if (!pooled || devicePool.matchesRuntimeIdentity(pooled, device)) {
-      return;
+    if (devicePool.hasReusableSerial(pooled)) {
+      await devicePool.settlePooledRuntimeIdentity(device.deviceId, {
+        ...options,
+        platform: device.platform,
+      });
+      pooled = devicePool.getDevice(device.deviceId);
+      if (!pooled || devicePool.matchesRuntimeIdentity(pooled, device)) {
+        return;
+      }
+    }
+    const mismatch =
+      `startDevice identity mismatch: requested=[${requestedIdentity}] ` +
+      `resolved=[${device.name} (${device.deviceId}) platform=${device.platform}] ` +
+      `pooled=[${pooled.name} (${pooled.id}) platform=${pooled.platform}] ` +
+      "phase=pool-match: stale pool identity conflicts with the resolved runtime";
+    if (!devicePool.hasReusableSerial(pooled)) {
+      throw new ActionableError(mismatch);
     }
     throw new BootedDeviceDiscoveryIncompleteError(
       device.platform,
       undefined,
-      `startDevice identity mismatch: requested=[${requestedIdentity}] ` +
-        `resolved=[${device.name} (${device.deviceId}) platform=${device.platform}] ` +
-        `pooled=[${pooled.name} (${pooled.id}) platform=${pooled.platform}] ` +
-        "phase=pool-match: stale pool identity conflicts with the resolved runtime; " +
-        "a pool refresh is settling it; retry.",
+      `${mismatch}; a pool refresh is settling it; retry.`,
     );
   }
 }

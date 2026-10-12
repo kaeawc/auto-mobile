@@ -1,3 +1,4 @@
+import { ActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
 import type { BootedDevice, DeviceInfo, PlanStepLifecycleContext } from "../models";
 import {
@@ -149,6 +150,8 @@ export class AndroidSegmentedPlanVideoSession {
   /** Cancels a rotation queued after {@link abort} begins. */
   private readonly sessionAbortController = new AbortController();
 
+  private hostOnlyFinalization = false;
+  private withoutDevicePromise: Promise<SegmentedSessionResult> | undefined;
   private stopPromise: Promise<SegmentedSessionResult> | undefined;
 
   private stopping = false;
@@ -344,6 +347,9 @@ export class AndroidSegmentedPlanVideoSession {
    * waits for any in-flight rotation, then finalizes and returns every segment.
    */
   async stop(): Promise<SegmentedSessionResult> {
+    if (this.hostOnlyFinalization) {
+      return this.finalizeWithoutDevice({ hostOnly: true });
+    }
     if (this.stopPromise) {
       return this.stopPromise;
     }
@@ -363,7 +369,9 @@ export class AndroidSegmentedPlanVideoSession {
       await this.pendingRotation;
       return await this.finalizeSegments();
     } finally {
-      this.notifyFinalized();
+      if (!this.hostOnlyFinalization) {
+        this.notifyFinalized();
+      }
     }
   }
 
@@ -413,29 +421,77 @@ export class AndroidSegmentedPlanVideoSession {
    * reap, our own temp file, and our rows), and completed segments, which are already
    * on the host, are returned exactly as {@link finalize} would return them.
    */
-  async finalizeWithoutDevice(): Promise<SegmentedSessionResult> {
+  async finalizeWithoutDevice(options?: { hostOnly?: boolean }): Promise<SegmentedSessionResult> {
+    if (this.withoutDevicePromise) {
+      return this.withoutDevicePromise;
+    }
+    this.hostOnlyFinalization ||= options?.hostOnly === true;
+    this.withoutDevicePromise = this.finalizeWithoutDeviceInternal(
+      this.hostOnlyFinalization ? { hostOnly: true } : options,
+    ).catch((error: unknown) => {
+      this.withoutDevicePromise = undefined;
+      throw error;
+    });
+    return this.withoutDevicePromise;
+  }
+
+  private async finalizeWithoutDeviceInternal(options?: {
+    hostOnly?: boolean;
+  }): Promise<SegmentedSessionResult> {
     this.stopping = true;
     this.timerDriven = false;
     this.clearTimers();
     this.sessionAbortController.abort();
     this.rotationAbortController?.abort();
-    await this.pendingRotation;
+    if (!options?.hostOnly) {
+      await this.pendingRotation;
+    }
     const discardIds = Array.from(
       new Set([
         ...this.pendingStops.keys(),
         ...(this.activeRecordingId ? [this.activeRecordingId] : []),
       ]),
     ).toReversed();
+    if (options?.hostOnly && this.activeRecordingId) {
+      this.pendingStops.set(this.activeRecordingId, {
+        segmentIndex: this.segmentIndex - 1,
+        startedAtMs: this.segmentStartedAtMs,
+      });
+    }
     const results = await Promise.allSettled(
-      discardIds.map((id) => this.rollbackVideoRecordingStartFn(id, { deviceWide: false })),
+      discardIds.map((id) =>
+        this.rollbackVideoRecordingStartFn(id, {
+          deviceWide: false,
+          ...(options?.hostOnly ? { hostOnly: true } : {}),
+        }),
+      ),
     );
     results.forEach((result, index) => {
+      if (options?.hostOnly && result.status === "fulfilled") {
+        this.pendingStops.delete(discardIds[index]);
+        if (this.activeRecordingId === discardIds[index]) {
+          this.activeRecordingId = undefined;
+        }
+      }
       this.rememberWarning(
         result.status === "rejected"
           ? `Failed to discard segment ${discardIds[index]} after the device was released: ${errorMessage(result.reason)}`
-          : `Segment ${discardIds[index]} was discarded because the plan's device was released; its device-side recorder may run until its own time limit`,
+          : options?.hostOnly
+            ? `Segment ${discardIds[index]} was discarded on the host because the device identity was replaced; no commands were sent to the replacement device`
+            : `Segment ${discardIds[index]} was discarded because the plan's device was released; its device-side recorder may run until its own time limit`,
       );
     });
+    if (options?.hostOnly) {
+      const failures = results.filter(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      if (failures.length > 0) {
+        throw new AggregateError(
+          failures.map((result) => result.reason),
+          "Failed to discard host segments",
+        );
+      }
+    }
     this.activeRecordingId = undefined;
     this.pendingStops.clear();
     this.notifyFinalized();
@@ -557,7 +613,7 @@ export class AndroidSegmentedPlanVideoSession {
     metadata: VideoRecordingMetadata,
     segmentIndex: number,
   ): void {
-    if (this.completedRecordingIds.includes(recordingId)) {
+    if (this.hostOnlyFinalization || this.completedRecordingIds.includes(recordingId)) {
       return;
     }
     const insertionIndex =
@@ -644,6 +700,10 @@ export class AndroidSegmentedPlanVideoSession {
     timedOut: boolean,
     signal: AbortSignal | undefined,
   ): Promise<boolean> {
+    if (this.hostOnlyFinalization) {
+      // Host finalization already captured this id before aborting the rotation.
+      return false;
+    }
     if (
       !timedOut &&
       !signal?.aborted &&
@@ -816,12 +876,15 @@ export class AndroidSegmentedPlanVideoSession {
       ReturnType<AndroidSegmentedPlanVideoSession["recoverStoppedSegment"]>
     >,
   ): Promise<void> {
+    if (this.hostOnlyFinalization) {
+      return;
+    }
     let recovery =
       initialRecovery ?? (await this.recoverStoppedSegment(recordingId, segmentIndex, startedAtMs));
     if (recovery === "recovered") {
       return;
     }
-    if (recovery === "recording") {
+    if (recovery === "recording" && !this.hostOnlyFinalization) {
       try {
         const stopped = await raceWithDeadline(() => this.stopVideoRecordingFn(recordingId), {
           timer: this.timer,
@@ -853,16 +916,38 @@ export class AndroidSegmentedPlanVideoSession {
     );
   }
 
+  private hostOnlyResult(): Promise<SegmentedSessionResult> {
+    if (!this.withoutDevicePromise) {
+      throw new ActionableError(
+        "Host-only segment finalization failed; retry finalizing the retained session.",
+      );
+    }
+    return this.withoutDevicePromise;
+  }
+
   private async finalizeSegments(): Promise<SegmentedSessionResult> {
     for (const [id, context] of this.pendingStops) {
       await this.finalizeFailedSegment(id, context.segmentIndex, context.startedAtMs);
+    }
+    if (this.hostOnlyFinalization) {
+      return this.hostOnlyResult();
     }
     if (this.activeRecordingId) {
       const id = this.activeRecordingId;
       try {
         const stopped = await this.stopVideoRecordingFn(id);
+        if (this.hostOnlyFinalization) {
+          return this.hostOnlyResult();
+        }
         this.recordStoppedSegment(id, stopped.metadata, this.segmentIndex - 1);
       } catch (error) {
+        if (this.hostOnlyFinalization) {
+          logger.warn(
+            `[SegmentedPlanVideo] Device-bound stop settled after host finalization: ${errorMessage(error)}`,
+            error,
+          );
+          return this.hostOnlyResult();
+        }
         // Recover before warning so a genuine archived self-stop retains its normal result.
         const recovery = await this.recoverStoppedSegment(id);
         if (recovery !== "recovered") {

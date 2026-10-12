@@ -19,6 +19,7 @@ import {
   createOwnerlessRecordingAcquisitionCleanup,
   defaultRecordingSessionCleanupDeps,
   registerRecordingSessionCleanup,
+  RECORDING_TEARDOWN_RETRY_BUDGET_MS,
 } from "../../src/server/recordingSessionCleanup";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { createDeviceSettingDefaultsAcquisitionReset } from "../../src/features/utility/DeviceSettingDefaults";
@@ -80,9 +81,13 @@ function registeredRecordingCapMs(deviceId: string): number | undefined {
       ownedDeviceGestureRecordingId: () => undefined,
       stopDeviceGestureRecording: async () => {},
       activeRecordingIdsForOwner: () => [],
+      retainedCaptureIdsForOwner: () => [],
       timer: new FakeTimer(),
       finalizeCapMs: defaultRecordingSessionCleanupDeps.finalizeCapMs,
       markVideoRecordingIncomplete: async () => {},
+      teardownRetryBackoff: defaultRecordingSessionCleanupDeps.teardownRetryBackoff,
+      teardownRetryBudgetMs: RECORDING_TEARDOWN_RETRY_BUDGET_MS,
+      markDeviceNeedsRecorderRecovery: () => {},
     },
   );
   unbound.forEach((callback) => callback("session-a", deviceId));
@@ -125,6 +130,11 @@ describe("finalize wait budget shared with the runners (#11360)", () => {
     expect(Math.max(...advertised.map((capMs) => capMs ?? Infinity))).toBeLessThanOrEqual(
       waitBudgetMs,
     );
+    for (const capMs of advertised.slice(0, 2)) {
+      expect((capMs ?? Infinity) + RECORDING_TEARDOWN_RETRY_BUDGET_MS).toBeLessThanOrEqual(
+        waitBudgetMs,
+      );
+    }
   });
 
   test("the three acquisition factories register caps within the shared waitBudgetMs", async () => {

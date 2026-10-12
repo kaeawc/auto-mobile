@@ -23,7 +23,7 @@ import { parseManagedSlotConfig } from "../../../src/models/managedSlotConfig";
 import { logger } from "../../../src/utils/logger";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
+import { drainMicrotasks, drainUntil } from "../../helpers/fakeTimerStepping";
 import {
   FakeClaims,
   FakeDeleter,
@@ -438,6 +438,90 @@ describe("ManagedSlotAcquisition back-out retry", () => {
     await acquisition.whenIdle();
     expect(clearCalls.map((call) => call.at - start)).toEqual([0, 25_000]);
     expect(acquisition.pendingBackOutCleanups()).toEqual([]);
+  });
+
+  scenario("blocked group retries share quiet time across all owed cleanups", async () => {
+    busy = Infinity;
+    blockedMs = 3_300;
+    const acquisitionStartedMs = timer.now();
+    expect((await fail("group")).outcome).toBe("failed");
+    expect(clearCalls).toHaveLength(2);
+    const start = timer.now();
+    for (let event = 0; event < 100 && timer.now() - start < 60_000; event++) {
+      const delay = timer.getMsUntilNextDueEvent();
+      expect(delay).toBeDefined();
+      await tick(delay!);
+    }
+    expect(timer.now() - start).toBeGreaterThanOrEqual(60_000);
+    const retries = clearCalls.slice(2);
+    expect((retries.length * blockedMs) / (timer.now() - start)).toBeLessThanOrEqual(0.55);
+    expect(
+      (clearCalls.length * blockedMs) / (timer.now() - acquisitionStartedMs),
+    ).toBeLessThanOrEqual(0.55);
+    // Inline unwinding stays immediate; every background retry must leave shared quiet time.
+    for (let index = 2; index < clearCalls.length; index++) {
+      expect(
+        clearCalls[index]!.at - (clearCalls[index - 1]!.at + blockedMs),
+      ).toBeGreaterThanOrEqual(3_300);
+    }
+    expect(acquisition.pendingBackOutCleanups()).toHaveLength(2);
+    for (const cleanup of acquisition.pendingBackOutCleanups()) {
+      expect(cleanup.attempts).toBeGreaterThan(1);
+    }
+    busy = 0;
+    blockedMs = 0;
+    const availableAt = timer.now();
+    const before = clearCalls.length;
+    for (let event = 0; event < 20 && acquisition.pendingBackOutCleanups().length > 0; event++) {
+      const delay = timer.getMsUntilNextDueEvent();
+      if (delay === undefined) {
+        await drainUntil(() => acquisition.pendingBackOutCleanups().length === 0, {
+          description: "both group back-out cleanups landing",
+        });
+        break;
+      }
+      await tick(delay);
+    }
+    expect(acquisition.pendingBackOutCleanups()).toEqual([]);
+    await acquisition.whenIdle();
+    expect(clearCalls).toHaveLength(before + 2);
+    expect(clearCalls.at(-1)!.at - availableAt).toBeLessThanOrEqual(5_000);
+    for (const slotIndex of [0, 1]) {
+      expect(await registry.getAssignment({ ...KEY, slotIndex })).toMatchObject({
+        execOwner: null,
+        state: "ready",
+      });
+    }
+  });
+
+  scenario("close during shared group quiet time cancels all work without logging", async () => {
+    busy = Infinity;
+    blockedMs = 3_300;
+    await fail("group");
+    await tick(25);
+    expect(timer.getPendingTimeouts()).toEqual([3_275]);
+    expect(acquisition.pendingBackOutCleanups()).toHaveLength(2);
+    const cleared = clearCalls.length;
+    const released = sessions.releases.length;
+    const warned = warn.mock.calls.length;
+    const debugged = debug.mock.calls.length;
+    const informed = info.mock.calls.length;
+    const reads = spyOn(registry, "getAssignment");
+    try {
+      acquisition.close();
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(timer.getPendingSleepCount()).toBe(0);
+      await acquisition.whenIdle();
+      await tick(60_000);
+      expect(reads).not.toHaveBeenCalled();
+      expect(clearCalls).toHaveLength(cleared);
+      expect(sessions.releases).toHaveLength(released);
+      expect(warn.mock.calls).toHaveLength(warned);
+      expect(debug.mock.calls).toHaveLength(debugged);
+      expect(info.mock.calls).toHaveLength(informed);
+    } finally {
+      reads.mockRestore();
+    }
   });
 
   scenario("injected zero and negative backoff retries no sooner than 25 ms", async () => {

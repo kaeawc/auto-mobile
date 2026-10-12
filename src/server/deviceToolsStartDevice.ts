@@ -1123,7 +1123,11 @@ export function restartResumeSessionForDevice(
     [device.deviceId],
     startRequester(args),
   );
-  return reservation?.owned && reservation.restartHandoff ? reservation.sessionUuid : undefined;
+  return reservation?.owned &&
+    reservation.restartHandoff &&
+    pool.matchesRestartRecoveryTarget(device, reservation.target)
+    ? reservation.sessionUuid
+    : undefined;
 }
 
 /**

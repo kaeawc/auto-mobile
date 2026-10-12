@@ -1453,12 +1453,6 @@ async function stopVideoRecordingWithDependencies(
   if (hostOnlyRecordingTeardowns.has(resolvedId)) {
     return abandonVideoRecordingWithDependencies(resolvedId, deps);
   }
-  if (!deps.videoRecorderService.listActiveRecordingIds().includes(resolvedId)) {
-    const record = await deps.recordingRepository.getRecording(resolvedId);
-    if (record && record.status !== "recording") {
-      return { metadata: toMetadata(record), evictedRecordingIds: [] };
-    }
-  }
   const stopping = stoppingVideoRecordings.get(resolvedId);
   if (stopping) {
     return stopping;
@@ -1472,7 +1466,10 @@ async function stopVideoRecordingWithDependencies(
     if (stoppingVideoRecordings.get(resolvedId) === stop) {
       stoppingVideoRecordings.delete(resolvedId);
     }
-    if (!deps.videoRecorderService.listActiveRecordingIds().includes(resolvedId)) {
+    if (
+      hostOnlyRecordingTeardowns.has(resolvedId) &&
+      !deps.videoRecorderService.listActiveRecordingIds().includes(resolvedId)
+    ) {
       hostOnlyRecordingTeardowns.delete(resolvedId);
     }
   }

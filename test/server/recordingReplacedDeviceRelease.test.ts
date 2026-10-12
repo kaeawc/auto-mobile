@@ -1,4 +1,6 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { ToolRegistry } from "../../src/server/toolRegistry";
 import { promises as fsPromises } from "node:fs";
 import * as segmentedTools from "../../src/server/videoRecordingTools";
 import * as gestures from "../../src/server/deviceGestureRecordingManager";
@@ -22,6 +24,8 @@ import { resetSegmentedSessions } from "../../src/server/videoRecordingTools";
 import { resetStoppedDeviceGestureRecordings } from "../../src/server/deviceGestureRecordingManager";
 import { displayTransitions } from "../../src/features/observe/DisplayTransition";
 import { logger } from "../../src/utils/logger";
+
+isolateToolRegistry();
 
 const device = { deviceId: "emulator-5554", name: "AVD A", platform: "android" as const };
 type ReleaseCallback = Parameters<SessionManager["onSessionRelease"]>[0];
@@ -62,7 +66,18 @@ describe("recording release after serial identity replacement", () => {
   let timer: FakeTimer;
   const spies: Array<{ mockRestore(): void }> = [];
 
+  beforeAll(() => {
+    if (!ToolRegistry.getTool("videoRecording")) {
+      segmentedTools.registerVideoRecordingTools();
+    }
+  });
+
   beforeEach(async () => {
+    segmentedTools.setRecordingRequesterResolverForTesting({
+      baseSessionUuid: (uuid) => uuid.split(":")[0],
+      connectionOwnsDeviceSession: () => false,
+      isDeviceHeld: () => true,
+    });
     timer = new FakeTimer();
     spies.push(spyOn(fsPromises, "stat").mockRejectedValue(new Error("fake host file")));
     backend = new FakeVideoCaptureBackend();
@@ -93,6 +108,7 @@ describe("recording release after serial identity replacement", () => {
       spy.mockRestore();
     }
     manager.resetVideoRecordingManagerDependencies();
+    segmentedTools.setRecordingRequesterResolverForTesting(undefined);
     resetSegmentedSessions();
     resetStoppedDeviceGestureRecordings();
     displayTransitions.reset(device.deviceId);
@@ -102,6 +118,53 @@ describe("recording release after serial identity replacement", () => {
   async function startA() {
     return manager.startVideoRecording({ device, ownerSessionUuid: "A", maxDurationSeconds: 30 });
   }
+
+  test("manager stop after host abandon rejects without touching the backend or settled owner row", async () => {
+    const active = await startA();
+    await manager.abandonVideoRecordingOnReplacedDevice(active.recordingId);
+    const interrupted = await repository.getRecording(active.recordingId);
+    expect(interrupted).toMatchObject({ status: "interrupted", ownerSessionUuid: "A" });
+
+    await expect(manager.stopVideoRecording(active.recordingId)).rejects.toThrow(
+      "No active recording found",
+    );
+
+    expect(backend.stopCalls).toEqual([]);
+    expect(backend.forceStopCalls).toHaveLength(1);
+    expect(backend.forceStopOptionsCalls).toEqual([{ hostOnly: true }]);
+    expect(await repository.getRecording(active.recordingId)).toEqual(interrupted);
+  });
+
+  test("tool stop after host abandon returns the interrupted result only to its owner", async () => {
+    const active = await startA();
+    await manager.abandonVideoRecordingOnReplacedDevice(active.recordingId);
+    const interrupted = await repository.getRecording(active.recordingId);
+    const handler = ToolRegistry.getTool("videoRecording")!.deviceAwareHandler!;
+    const response = await handler(device, {
+      action: "stop",
+      recordingId: active.recordingId,
+      sessionUuid: "A",
+    });
+    const parsed = JSON.parse(response.content[0].text);
+    expect(parsed.alreadyStopped).toBe(true);
+    expect(parsed.recordings).toHaveLength(1);
+    expect(parsed.recordings[0]).toMatchObject({
+      recordingId: active.recordingId,
+      metadata: {
+        endedAt: interrupted?.endedAt,
+        filePath: interrupted?.filePath,
+        sizeBytes: 42,
+      },
+    });
+    expect(interrupted).toMatchObject({ status: "interrupted", ownerSessionUuid: "A" });
+
+    await expect(
+      handler(device, { action: "stop", recordingId: active.recordingId, sessionUuid: "B" }),
+    ).rejects.toThrow("No active recording found");
+    expect(backend.stopCalls).toEqual([]);
+    expect(backend.forceStopCalls).toHaveLength(1);
+    expect(await repository.getRecording(active.recordingId)).toEqual(interrupted);
+  });
 
   test("replaced release interrupts A host-only and leaves B on the reused serial untouched", async () => {
     const active = await startA();
@@ -185,11 +248,11 @@ describe("recording release after serial identity replacement", () => {
     expect(release.pending).toEqual([]);
     const interrupted = await repository.getRecording(active.recordingId);
     expect(interrupted).toMatchObject({ status: "interrupted", ownerSessionUuid: "A" });
-    expect((await manager.stopVideoRecording(active.recordingId)).metadata.recordingId).toBe(
-      active.recordingId,
-    );
     gate.resolve();
     expect(String(await rejected)).toContain("force-stopped while it was stopping");
+    await expect(manager.stopVideoRecording(active.recordingId)).rejects.toThrow(
+      "No active recording found",
+    );
     expect(await repository.getRecording(active.recordingId)).toEqual(interrupted);
     expect(backend.forceStopOptionsCalls).toEqual([{ hostOnly: true }]);
     expect(stopBackend).toHaveBeenCalledTimes(1);
@@ -321,8 +384,8 @@ describe("recording release after serial identity replacement", () => {
     expect(backend.forceStopOptionsCalls).toEqual([{ hostOnly: true }, { hostOnly: true }]);
     expect(service.listActiveRecordingIds()).toEqual([]);
     expect((await repository.getRecording(active.recordingId))?.status).toBe("interrupted");
-    expect((await manager.stopVideoRecording(active.recordingId)).metadata.recordingId).toBe(
-      active.recordingId,
+    await expect(manager.stopVideoRecording(active.recordingId)).rejects.toThrow(
+      "No active recording found",
     );
     expect(stopBackend).toHaveBeenCalledTimes(1);
     expect(timer.getPendingTimeoutCount()).toBe(0);

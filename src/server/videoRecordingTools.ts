@@ -954,7 +954,6 @@ async function stopRecordingById(
     if (finalized) {
       return finalized;
     }
-    throw new ActionableError("Failed to stop video recording: no accessible recording found.");
   } else {
     assertActiveRecordingOwner({
       recordingId,

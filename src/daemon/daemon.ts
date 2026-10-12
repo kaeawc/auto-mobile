@@ -1174,6 +1174,7 @@ export class Daemon {
       logger.warn(`[Daemon] Stopping journal redrive failed: ${errorMessage(error)}`, error);
     }
     this.managedSlotRedrive = undefined;
+    this.managedSlotAcquisition?.acquisition.close();
     this.managedSlotAcquisition = undefined;
     const registry = this.managedSlotRegistry;
     this.managedSlotRegistry = undefined;

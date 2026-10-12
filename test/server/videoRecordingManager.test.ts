@@ -190,6 +190,36 @@ describe("videoRecordingManager", () => {
     await fsPromises.rm(archiveParent, { recursive: true, force: true });
   });
 
+  test("ordinary stop reaches the service before any active-id or record lookup", async () => {
+    const active = await startVideoRecording({ device: testDevice });
+    const calls: string[] = [];
+    const stopRecording = service.stopRecording.bind(service);
+    const listActiveRecordingIds = service.listActiveRecordingIds.bind(service);
+    const getRecording = fakeRepository.getRecording.bind(fakeRepository);
+    const stopSpy = spyOn(service, "stopRecording").mockImplementation((id) => {
+      calls.push("stopRecording");
+      return stopRecording(id);
+    });
+    const listSpy = spyOn(service, "listActiveRecordingIds").mockImplementation(() => {
+      calls.push("listActiveRecordingIds");
+      return listActiveRecordingIds();
+    });
+    const recordSpy = spyOn(fakeRepository, "getRecording").mockImplementation((id) => {
+      calls.push("getRecording");
+      return getRecording(id);
+    });
+    try {
+      expect((await stopVideoRecording(active.recordingId)).metadata.recordingId).toBe(
+        active.recordingId,
+      );
+      expect(calls).toEqual(["stopRecording"]);
+    } finally {
+      stopSpy.mockRestore();
+      listSpy.mockRestore();
+      recordSpy.mockRestore();
+    }
+  });
+
   for (const finish of ["completed", "interrupted", "incomplete"] as const) {
     test(`a failed adoption write is repaired when the recording becomes ${finish}`, async () => {
       const active = await startVideoRecording({ device: testDevice });

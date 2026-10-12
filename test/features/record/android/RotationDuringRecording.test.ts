@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, mock, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -13,6 +13,7 @@ import {
   type DisplayGeometryProbe,
 } from "../../../../src/features/record/android/DisplayGeometryTracker";
 import { GetEventReader } from "../../../../src/features/record/android/GetEventReader";
+import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import {
   GEOMETRY_SETTLE_MS,
   ROTATION_UNKNOWN_CAVEAT,
@@ -57,6 +58,8 @@ const LANDSCAPE_TAP = { x: 1184, y: 162 };
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Test", platform: "android" };
 
 class FakeProbe implements DisplayGeometryProbe {
+  rotationReads = 0;
+  sizeReads = 0;
   rotation: number | null | Error = 0;
   size: DisplaySize | Error = PHYSICAL;
   /** Runs at the start of every rotation read, e.g. to deliver a push mid-stop. */
@@ -65,6 +68,7 @@ class FakeProbe implements DisplayGeometryProbe {
   sizeStalls = false;
   rotationStalls = false;
   async readRotation(): Promise<number | null> {
+    this.rotationReads++;
     this.onRotationRead?.();
     if (this.rotationStalls) {
       return new Promise<number | null>(() => {});
@@ -75,6 +79,7 @@ class FakeProbe implements DisplayGeometryProbe {
     return this.rotation;
   }
   async readPhysicalSize(): Promise<DisplaySize> {
+    this.sizeReads++;
     if (this.sizeStalls) {
       return new Promise<DisplaySize>(() => {});
     }
@@ -127,7 +132,7 @@ function rotationChange(rotation: number | undefined, displayId = 0): DisplayCha
 }
 
 /** Recorder wired like production: real GetEventReader + timeline + tracker, fake device edges. */
-async function setupTapPipeline() {
+async function setupTapPipeline(withClientNotifications = false) {
   const timer = new FakeTimer();
   timer.advanceTime(1000);
   const probe = new FakeProbe();
@@ -148,13 +153,42 @@ async function setupTapPipeline() {
     touchNode: { path: "/dev/input/event1", name: "touch", ...toNodeAxes(AXES) },
     scaler: timeline,
   });
-  const recorder = new DualTrackRecorder(device, reader, new FakeA11y(), timer, tracker, source);
+  const notificationCounts = { started: 0, stopped: 0, unsubscribed: 0 };
+  let restoreClientSpy: (() => void) | undefined;
+  let a11y: FakeA11y | undefined;
+  if (withClientNotifications) {
+    const client = {
+      ensureConnected: async () => true,
+      getSupportedCommands: async () => [],
+      notifyRecordingStarted: () => notificationCounts.started++,
+      notifyRecordingStopped: () => notificationCounts.stopped++,
+      onInteraction: () => () => notificationCounts.unsubscribed++,
+      onDisplayTransition: undefined,
+    };
+    const clientSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      client as unknown as AndroidCtrlProxyClient,
+    );
+    restoreClientSpy = () => clientSpy.mockRestore();
+  } else {
+    a11y = new FakeA11y();
+  }
+  const recorder = new DualTrackRecorder(device, reader, a11y, timer, tracker, source);
   await recorder.start();
   await Promise.resolve();
   const feed = (text: string): void => {
     proc.stdout.emit("data", Buffer.from(text));
   };
-  return { timer, probe, source, tracker, recorder, feed };
+  return {
+    timer,
+    probe,
+    source,
+    tracker,
+    recorder,
+    proc,
+    feed,
+    notificationCounts,
+    restoreClientSpy,
+  };
 }
 
 function toNodeAxes(axes: TouchAxes) {
@@ -179,6 +213,145 @@ function tap(pipeline: Awaited<ReturnType<typeof setupTapPipeline>>, holdMs = 12
 }
 
 describe("DualTrackRecorder geometry timeline (#10174)", () => {
+  test("host-only stop skips geometry confirmation and returns its existing warning", async () => {
+    const p = await setupTapPipeline(true);
+    try {
+      tap(p);
+
+      const result = await p.recorder.stop({ hostOnly: true });
+
+      expect(result.stepCount).toBe(1);
+      expect(result.geometryWarnings).toEqual([GEOMETRY_UNCONFIRMED_WARNING]);
+      expect(p.probe.rotationReads).toBe(0);
+      expect(p.probe.sizeReads).toBe(0);
+      expect(p.source.unsubscribed).toBe(1);
+      expect(p.notificationCounts.started).toBe(1);
+      expect(p.notificationCounts.stopped).toBe(0);
+      expect(p.notificationCounts.unsubscribed).toBe(1);
+      expect(p.proc.killed).toBe(true);
+    } finally {
+      p.restoreClientSpy?.();
+    }
+  });
+
+  test("normal stop notifies the accessibility service once", async () => {
+    const p = await setupTapPipeline(true);
+    try {
+      tap(p);
+
+      const result = await p.recorder.stop();
+
+      expect(result.stepCount).toBe(1);
+      expect(p.notificationCounts.started).toBe(1);
+      expect(p.notificationCounts.stopped).toBe(1);
+    } finally {
+      p.restoreClientSpy?.();
+    }
+  });
+
+  test("host-only stop does not start a queued geometry probe", async () => {
+    const p = await setupTapPipeline();
+    p.probe.sizeStalls = true;
+    rotate(p, 1);
+
+    await p.recorder.stop({ hostOnly: true });
+
+    expect(p.probe.rotationReads).toBe(0);
+    expect(p.probe.sizeReads).toBe(0);
+  });
+
+  test("host-only stop ignores an in-flight rotation and starts no size or stop-time probe", async () => {
+    const p = await setupTapPipeline();
+    const rotation = Promise.withResolvers<number | null>();
+    const read = spyOn(p.probe, "readRotation").mockReturnValue(rotation.promise);
+    try {
+      p.source.emit(rotationChange(undefined));
+      await Promise.resolve();
+      expect(read).toHaveBeenCalledTimes(1);
+
+      await p.recorder.stop({ hostOnly: true });
+      p.tracker.handleTransition(rotationChange(2));
+      await p.tracker.settle();
+      expect(await p.tracker.verifyAtStop()).toBeUndefined();
+      rotation.resolve(3);
+      await p.timer.advanceTimersByTimeAsync(0);
+
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(p.probe.sizeReads).toBe(0);
+      expect(p.tracker.timeline.currentRotation).toBe(0);
+    } finally {
+      rotation.resolve(3);
+      read.mockRestore();
+    }
+  });
+
+  test("host-only stop ignores an in-flight size and cancels the refresh queued behind it", async () => {
+    const p = await setupTapPipeline();
+    const size = Promise.withResolvers<DisplaySize>();
+    const read = spyOn(p.probe, "readPhysicalSize").mockReturnValue(size.promise);
+    try {
+      rotate(p, 1);
+      await Promise.resolve();
+      expect(read).toHaveBeenCalledTimes(1);
+      rotate(p, 2);
+
+      await p.recorder.stop({ hostOnly: true });
+      size.resolve({ width: 1840, height: 2208 });
+      await p.timer.advanceTimersByTimeAsync(0);
+      await p.tracker.settle();
+      expect(await p.tracker.verifyAtStop()).toBeUndefined();
+
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(p.probe.rotationReads).toBe(0);
+      expect(p.tracker.timeline.currentRotation).toBe(2);
+      expect(p.tracker.timeline.warningsFor(p.timer.now(), p.timer.now()).join(";")).not.toContain(
+        "display size changed",
+      );
+    } finally {
+      size.resolve(PHYSICAL);
+      read.mockRestore();
+    }
+  });
+
+  test("host-only stop ignores a stop-time verification already in flight", async () => {
+    const p = await setupTapPipeline();
+    const rotation = Promise.withResolvers<number | null>();
+    const read = spyOn(p.probe, "readRotation").mockReturnValue(rotation.promise);
+    try {
+      const verifying = p.tracker.verifyAtStop();
+      expect(read).toHaveBeenCalledTimes(1);
+      await p.recorder.stop({ hostOnly: true });
+      rotation.resolve(3);
+
+      expect(await verifying).toBeUndefined();
+      expect(await p.tracker.verifyAtStop()).toBeUndefined();
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(p.tracker.timeline.currentRotation).toBe(0);
+    } finally {
+      rotation.resolve(3);
+      read.mockRestore();
+    }
+  });
+
+  test("host-only stop ignores a failed stop-time verification already in flight", async () => {
+    const p = await setupTapPipeline();
+    const rotation = Promise.withResolvers<number | null>();
+    const read = spyOn(p.probe, "readRotation").mockReturnValue(rotation.promise);
+    try {
+      const verifying = p.tracker.verifyAtStop();
+      await p.recorder.stop({ hostOnly: true });
+      rotation.reject(new Error("old device probe failed"));
+
+      expect(await verifying).toBeUndefined();
+      expect(await p.tracker.verifyAtStop()).toBeUndefined();
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(p.tracker.timeline.currentRotation).toBe(0);
+    } finally {
+      rotation.resolve(0);
+      read.mockRestore();
+    }
+  });
+
   test("a tap after a rotation to 90 degrees maps to the landscape point", async () => {
     const p = await setupTapPipeline();
     rotate(p, 1);

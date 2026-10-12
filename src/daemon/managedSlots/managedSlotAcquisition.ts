@@ -18,7 +18,8 @@
  *
  * Any failure after a session was handed out backs that session out again (slot execution owner
  * cleared, session released, the slot keeps its device). Unfinished cleanup is retained and retried
- * in the background at 25 ms doubling to 1 s until it lands or the daemon closes; a failed
+ * in the background at 25 ms doubling to 1 s, or the previous attempt's duration (up to 5 s),
+ * until it lands or the daemon closes; a failed
  * acquisition never waits for these retries.
  */
 
@@ -135,6 +136,8 @@ type ScopeAdmission =
 
 export const MANAGED_SLOT_BACK_OUT_RETRY_INITIAL_DELAY_MS = 25;
 export const MANAGED_SLOT_BACK_OUT_RETRY_MAX_DELAY_MS = 1_000;
+/** The longest wait after an attempt that itself blocked. */
+export const MANAGED_SLOT_BACK_OUT_RETRY_MAX_BLOCKED_WAIT_MS = 5_000;
 /** A cleanup owed longer than this is warned about once: the registry has been unwritable that long. */
 export const MANAGED_SLOT_BACK_OUT_OWED_WARN_AFTER_MS = 5_000;
 
@@ -487,6 +490,7 @@ export class ManagedSlotAcquisition {
 
   /** Undo a handed-out session: clear the slot's execution owner and release the session. */
   private async backOut(registry: SlotRegistry, key: SlotKey, sessionUuid: string): Promise<void> {
+    let lastAttemptMs = 0;
     const cleanup: ManagedSlotBackOutCleanup = {
       key: { ...key },
       sessionUuid,
@@ -497,9 +501,11 @@ export class ManagedSlotAcquisition {
       sessionReleaseOwed: false,
       lastError: "",
     };
+    const ownerStartedMs = this.deps.timer.now();
     try {
       await registry.releaseExecution(key, sessionUuid);
     } catch (error) {
+      lastAttemptMs += this.deps.timer.now() - ownerStartedMs;
       cleanup.owedSinceMs = this.deps.timer.now();
       cleanup.ownerClearOwed = true;
       cleanup.lastError = errorMessage(error);
@@ -510,9 +516,11 @@ export class ManagedSlotAcquisition {
         );
       }
     }
+    const sessionStartedMs = this.deps.timer.now();
     try {
       await this.deps.sessions.releaseSession(sessionUuid);
     } catch (error) {
+      lastAttemptMs += this.deps.timer.now() - sessionStartedMs;
       if (!cleanup.ownerClearOwed) {
         cleanup.owedSinceMs = this.deps.timer.now();
       }
@@ -526,16 +534,20 @@ export class ManagedSlotAcquisition {
       }
     }
     if (cleanup.ownerClearOwed || cleanup.sessionReleaseOwed) {
-      this.retainBackOutCleanup(registry, cleanup);
+      this.retainBackOutCleanup(registry, cleanup, lastAttemptMs);
     }
   }
 
   /**
-   * Keep owed cleanup in one task, at 25 ms doubling to 1 s until landing or close.
+   * Keep owed cleanup in one task, backing off at least the previous duration, capped at 5 s.
    * A timer failure leaves an inspectable entry with no task; no acquisition re-arms it.
    * The owner row names this process and becomes dead when the process exits.
    */
-  private retainBackOutCleanup(registry: SlotRegistry, cleanup: ManagedSlotBackOutCleanup): void {
+  private retainBackOutCleanup(
+    registry: SlotRegistry,
+    cleanup: ManagedSlotBackOutCleanup,
+    lastAttemptMs: number,
+  ): void {
     const id = JSON.stringify([cleanup.key.scopeKey, cleanup.key.slotIndex, cleanup.sessionUuid]);
     if (this.closed) {
       return;
@@ -548,15 +560,16 @@ export class ManagedSlotAcquisition {
       return;
     }
     this.backOutCleanups.set(id, { registry, cleanup });
-    this.startBackOutRetry(id, registry, cleanup);
+    this.startBackOutRetry(id, registry, cleanup, lastAttemptMs);
   }
 
   private startBackOutRetry(
     id: string,
     registry: SlotRegistry,
     cleanup: ManagedSlotBackOutCleanup,
+    lastAttemptMs: number,
   ): void {
-    const round: Promise<void> = this.retryBackOutCleanup(id, registry, cleanup)
+    const round: Promise<void> = this.retryBackOutCleanup(id, registry, cleanup, lastAttemptMs)
       .catch((error: unknown) => {
         // A broken timer cannot be redriven safely; keep the row until process exit.
         if (!this.closed) {
@@ -575,14 +588,22 @@ export class ManagedSlotAcquisition {
     id: string,
     registry: SlotRegistry,
     cleanup: ManagedSlotBackOutCleanup,
+    lastAttemptMs: number,
   ): Promise<void> {
     for (let attempt = 1; !this.closed; attempt++) {
-      await this.waitForBackOutRetry(this.backOutRetryDelay(attempt));
+      const waitMs = Math.min(
+        Math.max(this.backOutRetryDelay(attempt), lastAttemptMs),
+        MANAGED_SLOT_BACK_OUT_RETRY_MAX_BLOCKED_WAIT_MS,
+      );
+      await this.waitForBackOutRetry(waitMs);
       if (this.closed) {
         return;
       }
       cleanup.attempts = attempt;
-      if (await this.retryBackOutOnce(registry, cleanup)) {
+      const startedMs = this.deps.timer.now();
+      const landed = await this.retryBackOutOnce(registry, cleanup);
+      lastAttemptMs = this.deps.timer.now() - startedMs;
+      if (landed) {
         this.backOutCleanups.delete(id);
         if (!this.closed) {
           logger.info(
@@ -603,7 +624,10 @@ export class ManagedSlotAcquisition {
       if (!Number.isFinite(delayMs)) {
         throw new Error(`Back-out backoff delay must be finite, got ${delayMs}`);
       }
-      return Math.min(delayMs, MANAGED_SLOT_BACK_OUT_RETRY_MAX_DELAY_MS);
+      return Math.min(
+        Math.max(delayMs, MANAGED_SLOT_BACK_OUT_RETRY_INITIAL_DELAY_MS),
+        MANAGED_SLOT_BACK_OUT_RETRY_MAX_DELAY_MS,
+      );
     } catch (error) {
       // The 1 s cap keeps owed cleanup moving safely even when an injected policy breaks.
       if (!this.closed) {
@@ -680,7 +704,7 @@ export class ManagedSlotAcquisition {
     ) {
       this.warnedBackOutCleanups.add(cleanup);
       logger.warn(
-        `${this.backOutCleanupLabel(cleanup)} owed for ${ageMs} ms (${cleanup.attempts} retries): ${cleanup.lastError}; retries continue every 1 s`,
+        `${this.backOutCleanupLabel(cleanup)} owed for ${ageMs} ms (${cleanup.attempts} retries): ${cleanup.lastError}; retries continue with waits capped at 5 s`,
         error,
       );
     }

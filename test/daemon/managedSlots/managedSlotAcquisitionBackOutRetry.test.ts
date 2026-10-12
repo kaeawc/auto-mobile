@@ -100,6 +100,7 @@ describe("ManagedSlotAcquisition back-out retry", () => {
   let peer: SlotExecOwnerLiveness;
   let busy: number;
   let busyUntilMs: number;
+  let blockedMs: number;
   let lostAck: boolean;
   let clearCalls: Array<{ key: SlotKey; session: string; at: number }>;
   let afterRead: (() => void) | undefined;
@@ -130,6 +131,7 @@ describe("ManagedSlotAcquisition back-out retry", () => {
     });
     busy = 0;
     busyUntilMs = 0;
+    blockedMs = 0;
     lostAck = false;
     clearCalls = [];
     afterRead = undefined;
@@ -141,6 +143,7 @@ describe("ManagedSlotAcquisition back-out retry", () => {
             clearCalls.push({ key, session, at: timer.now() });
             sessions.events.push(`owner:${session}`);
             if (busy-- > 0 || timer.now() < busyUntilMs) {
+              timer.setCurrentTime(timer.now() + blockedMs);
               if (lostAck) {
                 await target.releaseExecution(key, session);
               }
@@ -394,6 +397,68 @@ describe("ManagedSlotAcquisition back-out retry", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  scenario("blocked attempts wait their duration before each retry", async () => {
+    busy = 3;
+    blockedMs = 3_300;
+    const start = timer.now();
+    await fail("refused");
+    expect(timer.now() - start).toBe(3_300);
+    await tick(25);
+    expect(clearCalls).toHaveLength(1);
+    await tick(3_274);
+    expect(clearCalls).toHaveLength(1);
+    await tick(1);
+    expect(clearCalls.map((call) => call.at - start)).toEqual([0, 6_600]);
+    await tick(3_299);
+    expect(clearCalls).toHaveLength(2);
+    await tick(1);
+    expect(clearCalls.map((call) => call.at - start)).toEqual([0, 6_600, 13_200]);
+    // Three blocked attempts have occupied exactly half the elapsed time at convergence.
+    busy = 0;
+    blockedMs = 0;
+    await tick(3_299);
+    expect(clearCalls).toHaveLength(3);
+    await tick(1);
+    await acquisition.whenIdle();
+    expect(clearCalls.map((call) => call.at - start)).toEqual([0, 6_600, 13_200, 19_800]);
+    expect((3 * 3_300) / (timer.now() - start)).toBe(0.5);
+    expect(acquisition.pendingBackOutCleanups()).toEqual([]);
+    expect(await registry.getAssignment(KEY)).toMatchObject({ execOwner: null });
+  });
+
+  scenario("blocked attempt wait is capped at 5 s", async () => {
+    busy = 1;
+    blockedMs = 20_000;
+    const start = timer.now();
+    await fail("refused");
+    expect(timer.now() - start).toBe(20_000);
+    await tick(4_999);
+    expect(clearCalls).toHaveLength(1);
+    await tick(1);
+    await acquisition.whenIdle();
+    expect(clearCalls.map((call) => call.at - start)).toEqual([0, 25_000]);
+    expect(acquisition.pendingBackOutCleanups()).toEqual([]);
+  });
+
+  scenario("injected zero and negative backoff retries no sooner than 25 ms", async () => {
+    acquisition = new ManagedSlotAcquisition({
+      ...deps,
+      backOutRetryBackoff: { delayForAttempt: (attempt) => (attempt === 1 ? 0 : -5) },
+    });
+    busy = 2;
+    const start = timer.now();
+    await fail("refused");
+    for (const count of [1, 2]) {
+      await tick(24);
+      expect(clearCalls).toHaveLength(count);
+      await tick(1);
+      expect(clearCalls).toHaveLength(count + 1);
+    }
+    await acquisition.whenIdle();
+    expect(clearCalls.map((call) => call.at - start)).toEqual([0, 25, 50]);
+    expect(acquisition.pendingBackOutCleanups()).toEqual([]);
+  });
+
   scenario("registry busy for 3 s lands within 1 s of becoming writable", async () => {
     busyUntilMs = timer.now() + 3_000;
     await fail("refused");
@@ -443,7 +508,7 @@ describe("ManagedSlotAcquisition back-out retry", () => {
       [expect.stringContaining("5575 ms (10 retries)"), expect.any(Error)],
     ]);
     expect(String(warn.mock.calls[0]![0])).toContain("SQLITE_BUSY: database is locked");
-    expect(String(warn.mock.calls[0]![0])).toContain("retries continue every 1 s");
+    expect(String(warn.mock.calls[0]![0])).toContain("retries continue with waits capped at 5 s");
     expect(warnedAt).toEqual([start + 5_575]);
     expect(
       debug.mock.calls.filter(([message]) => String(message).includes("retry failed")),

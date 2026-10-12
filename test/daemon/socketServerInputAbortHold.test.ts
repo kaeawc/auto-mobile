@@ -1,8 +1,14 @@
-import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test";
-import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
-import { UnixSocketServer, type AppendTextInput } from "../../src/daemon/socketServer";
-import type { DaemonStateAccess } from "../../src/daemon/daemonRequestHandlers";
+import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
+import {
+  harness,
+  frame,
+  runner,
+  socketHarness,
+  cancel,
+  finishSockets,
+} from "../helpers/socketServerInputHoldHarness";
+import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test";
 import { screenshotPathProtection } from "../../src/features/observe/ScreenshotPathProtection";
 import { TakeScreenshot } from "../../src/features/observe/TakeScreenshot";
 import type { DaemonResponse } from "../../src/daemon/types";
@@ -10,135 +16,13 @@ import type { DaemonRequest } from "../../src/daemon/types";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { CtrlProxyText as IosTextDelegate } from "../../src/features/observe/ios/CtrlProxyText";
-import { InputText } from "../../src/features/action/InputText";
 import { InputKey } from "../../src/features/action/InputKey";
 import type { BootedDevice } from "../../src/models";
-import type { Timer } from "../../src/utils/SystemTimer";
 import { defaultAdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
-import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
 import { createIosDelegateHarness } from "../helpers/iosDelegateHarness";
 
-interface Harness {
-  timer: Timer;
-  mcpForwardTails: Map<string, Promise<void>>;
-  mcpForwardIdleCloseKeys: Map<string, Set<string>>;
-  appendTextInputs: Map<string, unknown>;
-  appendTextFactory: (device: BootedDevice) => AppendTextInput;
-  createSocketAppendTextInput?(device: BootedDevice): AppendTextInput;
-  clearMcpClientIdleTimer(): void;
-  scheduleMcpClientIdleClose(): void;
-  resolveInputTargetDevice(platform: string, deviceId: string): Promise<BootedDevice>;
-  requireCurrentFrameContext(): void;
-  runTrackedDeviceInput<T>(
-    method: string,
-    device: BootedDevice,
-    operation: (signal?: AbortSignal, dispatching?: () => void) => Promise<T>,
-    owner?: AbortSignal,
-  ): Promise<T>;
-  handleInputTypeText(
-    request: DaemonRequest,
-    session?: string,
-    input?: { signal?: AbortSignal; receivedAtMs?: number },
-  ): Promise<unknown>;
-  handleInputKey(
-    request: DaemonRequest,
-    session?: string,
-    input?: { signal?: AbortSignal },
-  ): Promise<unknown>;
-  handleInputPressButton(
-    request: DaemonRequest,
-    session?: string,
-    input?: { signal?: AbortSignal },
-  ): Promise<unknown>;
-}
-function harness() {
-  const handler = Object.create(UnixSocketServer.prototype) as Harness;
-  const timer = new FakeTimer();
-  const stamps: string[] = [];
-  handler.timer = timer;
-  handler.mcpForwardTails = new Map();
-  handler.mcpForwardIdleCloseKeys = new Map();
-  handler.appendTextInputs = new Map();
-  handler.clearMcpClientIdleTimer = () => {};
-  handler.scheduleMcpClientIdleClose = () => {};
-  handler.requireCurrentFrameContext = () => {};
-  handler.resolveInputTargetDevice = async (platform, deviceId) =>
-    ({ platform, deviceId, name: "Fake" }) as BootedDevice;
-  // Keep the real per-device key; replace only session admission, which needs a DB.
-  handler.runTrackedDeviceInput = async (_method, device, operation, owner) =>
-    operation(owner, () => stamps.push(device.deviceId));
-  handler.appendTextFactory = (device) =>
-    handler.createSocketAppendTextInput
-      ? handler.createSocketAppendTextInput(device)
-      : new InputText(device, defaultAdbClientFactory, undefined, timer);
-  return { handler, timer, stamps };
-}
-function frame(platform: string, deviceId = "A", append = false, submit = false): DaemonRequest {
-  return {
-    id: deviceId,
-    type: "mcp_request",
-    method: "input/typeText",
-    timeoutMs: 1000,
-    params: {
-      platform,
-      deviceId,
-      text: append ? "ab" : "a",
-      ...(append ? { mode: "append" } : {}),
-      submit,
-    },
-  };
-}
-function runner(ignoreAbort = false) {
-  let reply!: () => void;
-  let fail!: () => void;
-  let inFlight = false;
-  let dispatched = false;
-  let cancelled = false;
-  const pending = new Promise<{ success: boolean; totalTimeMs: number }>((resolve, reject) => {
-    reply = () => {
-      inFlight = false;
-      resolve({ success: true, totalTimeMs: 0 });
-    };
-    fail = () => {
-      inFlight = false;
-      reject(new Error("runner request failed"));
-    };
-  });
-  return {
-    reply: () => reply(),
-    fail: () => fail(),
-    get inFlight() {
-      return inFlight;
-    },
-    get dispatched() {
-      return dispatched;
-    },
-    get cancelled() {
-      return cancelled;
-    },
-    send(signal?: AbortSignal, onDispatch?: () => void) {
-      signal?.throwIfAborted();
-      inFlight = dispatched = true;
-      onDispatch?.();
-      return new Promise<typeof pending extends Promise<infer T> ? T : never>((resolve, reject) => {
-        pending.then(resolve, reject);
-        if (ignoreAbort) {
-          return;
-        }
-        signal?.addEventListener(
-          "abort",
-          () => {
-            cancelled = true;
-            reject(signal.reason);
-          },
-          { once: true },
-        );
-      });
-    },
-  };
-}
 beforeEach(() => {
   // InputText constructs observation services, but append never observes. Suppress
   // their filesystem/retention work so these tests use no real timers or I/O.
@@ -444,143 +328,6 @@ test("ordinary timeout still holds the key until the dispatched request settles"
   expect(timer.getPendingTimeoutCount()).toBe(0);
 });
 
-// Read-only diagnostics for adjacent handlers. These deliberately document the
-// current early-release behavior; changing their delivery policy is another lane.
-test.each(["key", "pressButton"] as const)(
-  "report-only: input/%s can release the key after dispatch cancellation",
-  async (method) => {
-    const { handler, stamps } = harness();
-    const first = runner();
-    const owner = new AbortController();
-    const adb = new FakeAdbExecutor();
-    spyOn(defaultAdbClientFactory, "create").mockReturnValue(adb);
-    spyOn(adb, "execute").mockImplementation(async (_args, options) => {
-      await options?.beforeDispatch?.(options.timeoutMs);
-      await first.send(options?.signal);
-      return { stdout: "", stderr: "" };
-    });
-    const client = Object.create(AndroidCtrlProxyClient.prototype) as AndroidCtrlProxyClient;
-    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
-    spyOn(client, "requestGlobalAction").mockImplementation(
-      (_action, _timeout, _perf, _context, signal, onDispatch) => first.send(signal, onDispatch),
-    );
-    spyOn(client, "requestSetText").mockImplementation(async (_text, options) => {
-      options?.onDispatch?.();
-      return { success: true, totalTimeMs: 0 };
-    });
-    const request: DaemonRequest = {
-      id: method,
-      type: "mcp_request",
-      method: `input/${method}`,
-      timeoutMs: 1000,
-      params: {
-        platform: "android",
-        deviceId: "A",
-        ...(method === "key" ? { key: "enter" } : { button: "back" }),
-      },
-    };
-    const a =
-      method === "key"
-        ? handler.handleInputKey(request, undefined, { signal: owner.signal })
-        : handler.handleInputPressButton(request, undefined, { signal: owner.signal });
-    void a.catch(() => {});
-    await drainUntil(() => first.dispatched, { description: "diagnostic dispatch" });
-    const b = handler.handleInputTypeText(frame("android"));
-    const reason = new Error("diagnostic cancel");
-    owner.abort(reason);
-    if (method === "key") {
-      await expect(a).rejects.toThrow("Key outcome is indeterminate");
-    } else {
-      await expect(a).rejects.toThrow("Operation cancelled");
-    }
-    await b;
-    expect(first.inFlight).toBe(true);
-    expect(stamps).toEqual(["A", "A"]);
-    first.reply();
-    await drainMicrotasks(100);
-    expect(handler.mcpForwardTails.size).toBe(0);
-  },
-);
-
-interface FrameSocket {
-  destroyed: boolean;
-  writableLength: number;
-  responses: DaemonResponse[];
-  setTimeout(): FrameSocket;
-  write(data: string, callback?: (error?: Error | null) => void): boolean;
-  destroy(): FrameSocket;
-  send(frame: DaemonRequest): void;
-}
-class FakeFrameSocket extends EventEmitter implements FrameSocket {
-  destroyed = false;
-  writableLength = 0;
-  responses: DaemonResponse[] = [];
-  setTimeout(): this {
-    return this;
-  }
-  write(data: string, callback?: (error?: Error | null) => void): boolean {
-    this.responses.push(JSON.parse(data) as DaemonResponse);
-    callback?.();
-    return true;
-  }
-  destroy(): this {
-    this.destroyed = true;
-    this.emit("close", false);
-    return this;
-  }
-  send(frame: DaemonRequest): void {
-    this.emit("data", Buffer.from(`${JSON.stringify(frame)}\n`));
-  }
-}
-interface SocketHarness extends Harness {
-  handleRequest(
-    sessionId: string,
-    socket: Socket,
-    request: DaemonRequest,
-  ): Promise<DaemonResponse | undefined>;
-  acceptingRequests: boolean;
-  handleConnection(socket: Socket): void;
-  activeRequestHandlers: Set<Promise<void>>;
-}
-function socketHarness() {
-  const { timer, stamps, handler: admission } = harness();
-  const server = new UnixSocketServer(
-    "unused",
-    "http://localhost:0/mcp",
-    { isInitialized: () => false } as DaemonStateAccess,
-    timer,
-  ) as unknown as SocketHarness;
-  server.acceptingRequests = true;
-  server.clearMcpClientIdleTimer = admission.clearMcpClientIdleTimer;
-  server.scheduleMcpClientIdleClose = admission.scheduleMcpClientIdleClose;
-  server.resolveInputTargetDevice = admission.resolveInputTargetDevice;
-  server.requireCurrentFrameContext = () => {};
-  server.runTrackedDeviceInput = admission.runTrackedDeviceInput;
-  const client = Object.create(AndroidCtrlProxyClient.prototype) as AndroidCtrlProxyClient;
-  spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
-  const socket = new FakeFrameSocket();
-  const other = new FakeFrameSocket();
-  server.handleConnection(socket as unknown as Socket);
-  server.handleConnection(other as unknown as Socket);
-  return { server, timer, stamps, client, socket, other };
-}
-function cancel(socket: FakeFrameSocket, requestId: string) {
-  socket.send({
-    id: "cancel",
-    type: "daemon_request",
-    method: "daemon/cancelRequest",
-    params: { requestId },
-  });
-}
-async function finishSockets(f: ReturnType<typeof socketHarness>) {
-  f.socket.destroy();
-  f.other.destroy();
-  await drainMicrotasks(100);
-  await Promise.all([...f.server.activeRequestHandlers]);
-  expect(f.server.activeRequestHandlers.size).toBe(0);
-  expect(f.server.mcpForwardTails.size).toBe(0);
-  expect(f.timer.getPendingTimeoutCount()).toBe(0);
-}
 test.each(["cancel", "close"] as const)(
   "parked text %s releases socket admission without sending or stamping",
   async (mode) => {
@@ -840,4 +587,81 @@ test("abort during submit holds only the remaining caller budget", async () => {
   await drainMicrotasks(100);
   expect(timer.getPendingTimeoutCount()).toBe(0);
   expect(handler.mcpForwardTails.size).toBe(0);
+});
+
+test("dispatched append session release carries confirmed charsSent without mutating the shared release reason", async () => {
+  const f = socketHarness();
+  const release = new SessionReleasedDuringCallError("held-session", "cleanup-expired");
+  const originalMessage = release.message;
+  const owner = new AbortController();
+  const first = runner();
+  let commands = 0;
+  const adb = new FakeAdbExecutor();
+  spyOn(defaultAdbClientFactory, "create").mockReturnValue(adb);
+  spyOn(adb, "execute").mockImplementation(async (_args, options) => {
+    await options?.beforeDispatch?.(options.timeoutMs);
+    commands++;
+    return { stdout: "", stderr: "" };
+  });
+  spyOn(f.client, "requestImeAction").mockImplementation(
+    (_action, _timeout, _perf, signal, dispatch) => first.send(signal, dispatch),
+  );
+  const internals = f.server as unknown as {
+    answeringSessionRelease<T>(
+      execution: { cancelReason: unknown },
+      run: () => Promise<T>,
+    ): Promise<T>;
+    mcpForwardFailureResponse(args: {
+      error: unknown;
+      request: DaemonRequest;
+      sessionId: string;
+      ownerSocket: Socket;
+    }): DaemonResponse;
+  };
+  const request = frame("android", "A", true, true);
+  const a = internals.answeringSessionRelease({ cancelReason: release }, () =>
+    f.server.handleInputTypeText(request, undefined, { signal: owner.signal }),
+  );
+  void a.catch(() => {});
+  await drainUntil(() => first.dispatched, { description: "append submit dispatch" });
+  expect(commands).toBeGreaterThan(0);
+  owner.abort(release);
+  first.reply();
+  const error: unknown = await a.catch((value) => value);
+  expect(error).toBeInstanceOf(SessionReleasedDuringCallError);
+  const response = internals.mcpForwardFailureResponse({
+    error,
+    request,
+    sessionId: "socket",
+    ownerSocket: f.socket as unknown as Socket,
+  });
+  expect(response).toMatchObject({ success: false, code: "session_ownership_lost", charsSent: 2 });
+  expect(response.error).toContain(
+    ". Cancellation arrived after the text request had been dispatched; its outcome is indeterminate.",
+  );
+  expect(release.message).toBe(originalMessage);
+  expect("charsSent" in release).toBe(false);
+  const concurrent = internals.answeringSessionRelease({ cancelReason: release }, async () => {
+    throw release;
+  });
+  await expect(concurrent).rejects.toBe(release);
+  const concurrentError: unknown = await concurrent.catch((value) => value);
+  expect(
+    internals.mcpForwardFailureResponse({
+      error: concurrentError,
+      request,
+      sessionId: "socket",
+      ownerSocket: f.socket as unknown as Socket,
+    }),
+  ).toMatchObject({ error: originalMessage });
+  expect(
+    "charsSent" in
+      internals.mcpForwardFailureResponse({
+        error: concurrentError,
+        request,
+        sessionId: "socket",
+        ownerSocket: f.socket as unknown as Socket,
+      }),
+  ).toBe(false);
+  await finishSockets(f);
 });

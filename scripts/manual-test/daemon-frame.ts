@@ -1,4 +1,8 @@
 #!/usr/bin/env bun
+import "./harnessLogSink";
+import * as daemonConstants from "../../src/daemon/constants";
+import { DAEMON_FRAME_COMMANDS, DAEMON_FRAME_FLAGS, daemonFrameHelp } from "./daemonFrameHelp";
+import { substituteFramePlaceholders, type ManagedFrameIdentity } from "./daemonFramePlaceholders";
 import { readFileSync } from "node:fs";
 import { Socket } from "node:net";
 import { homedir, userInfo } from "node:os";
@@ -10,6 +14,10 @@ import {
 } from "../../src/daemon/types";
 import {
   DAEMON_HEARTBEAT_METHOD,
+  DAEMON_CANCEL_REQUEST_METHOD,
+  CLI_SESSION_LIVENESS_POLICY,
+  CLI_KEEPER_LIVENESS_OWNER_KIND,
+  DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
   DAEMON_RELEASE_EXECUTION_METHOD,
   HEARTBEAT_SESSION_LIVENESS_POLICY,
 } from "../../src/daemon/constants";
@@ -40,118 +48,239 @@ import {
   type ConnectFrameSocket,
 } from "./frameWire";
 
-const usage = `Usage: daemon-frame send <method> ['<params json>'|@file]
-  [--socket PATH] [--type mcp_request|daemon_request] [--count N] [--timeout-ms N]
-  [--mode send|cancel|cancel-after:<ms>] [--managed-binding CONFIG] [--hold-ms N]
-  [--allow-selector] [--allow-host-mutation]
---managed-binding ACQUIRES real slots and can create/boot amslot-* devices.
-Use a runner namespace no live proxy is using. All frames use that SAME connection.
-Restart/maintenance methods require --allow-host-mutation. Cancel modes destroy the socket;
-managed sessions then end through owner loss, rather than an explicit release.
-Exit codes: 0 success/cancel, 1 typed refusal, 2 usage/guard, 3 timeout/connection error.`;
+const usage = daemonFrameHelp();
 export interface DaemonFrameCommand {
   method: string;
+  externalKeeper?: boolean;
   json?: string;
   socket?: string;
   type?: DaemonRequest["type"];
   count: number;
   timeoutMs: number;
-  mode: "send" | "cancel" | "cancel-after";
+  mode: "send" | "cancel" | "cancel-after" | "cancel-keep-open";
+  keepOpenMs: number;
+  then: { method: string; json?: string }[];
   cancelAfterMs?: number;
   managedBinding?: string;
   holdMs: number;
   allowSelector: boolean;
   allowHostMutation: boolean;
 }
-export function parseDaemonFrameArgs(argv: string[]): DaemonFrameCommand | { error: string } {
-  if (argv[0] !== "send" || !argv[1] || argv[1].startsWith("--")) {
-    return { error: usage };
+function frameHelpRequested(argv: string[]): boolean {
+  return (
+    ["--help", "-h", "help"].includes(argv[0]) ||
+    ((DAEMON_FRAME_COMMANDS as readonly string[]).includes(argv[0]) &&
+      argv.slice(1).some((arg) => arg === "--help" || arg === "-h"))
+  );
+}
+function lowerFrameConvenience(argv: string[]): string[] | { error: string } {
+  const [op, sessionId] = argv;
+  if (op !== "session-info" && op !== "heartbeat") {
+    return argv;
   }
-  const command: DaemonFrameCommand = {
-    method: argv[1],
-    count: 1,
-    timeoutMs: 30_000,
-    mode: "send",
-    holdMs: 0,
-    allowSelector: false,
-    allowHostMutation: false,
-  };
+  if (!sessionId || sessionId.startsWith("-")) {
+    return { error: `${op} requires a sessionId.` };
+  }
+  const params =
+    op === "session-info"
+      ? { sessionId }
+      : {
+          sessionId,
+          livenessPolicy: CLI_SESSION_LIVENESS_POLICY,
+          livenessOwnerKind: CLI_KEEPER_LIVENESS_OWNER_KIND,
+          idleTimeoutMs: DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
+        };
+  return [
+    "send",
+    op === "session-info" ? "daemon/sessionInfo" : DAEMON_HEARTBEAT_METHOD,
+    JSON.stringify(params),
+    ...argv.slice(2),
+  ];
+}
+function frameValueRefusal(
+  flag: string,
+  value: string | undefined,
+  duplicate: boolean,
+): string | undefined {
+  return !value || value.startsWith("--") || duplicate
+    ? `Missing/duplicate value for ${flag}.`
+    : undefined;
+}
+function parseThenFrame(value: string): { method: string; json?: string } | { error: string } {
+  const split = value.search(/\s/);
+  const method = split < 0 ? value : value.slice(0, split);
+  if (!method || method.startsWith("-")) {
+    return { error: "--then requires a method and optional params JSON." };
+  }
+  return { method, json: split < 0 ? undefined : value.slice(split).trim() || undefined };
+}
+function readFrameArguments(
+  argv: string[],
+  command: DaemonFrameCommand,
+): Record<string, string> | { error: string } {
   const values: Record<string, string> = {};
+  const booleans = {
+    "--allow-selector": "allowSelector",
+    "--allow-host-mutation": "allowHostMutation",
+  } as const;
   for (let i = 2; i < argv.length; i++) {
     const flag = argv[i];
-    if (flag === "--allow-selector" || flag === "--allow-host-mutation") {
-      if (flag === "--allow-selector") {
-        command.allowSelector = true;
-      } else {
-        command.allowHostMutation = true;
-      }
+    if (Object.hasOwn(booleans, flag)) {
+      command[booleans[flag as keyof typeof booleans]] = true;
       continue;
     }
     if (!flag.startsWith("--") && command.json === undefined) {
       command.json = flag;
       continue;
     }
-    if (
-      ![
-        "--socket",
-        "--type",
-        "--count",
-        "--timeout-ms",
-        "--mode",
-        "--managed-binding",
-        "--hold-ms",
-      ].includes(flag)
-    ) {
-      return { error: `Unknown argument ${flag}.\n${usage}` };
+    if (!(flag in DAEMON_FRAME_FLAGS) || flag === "--help") {
+      return { error: `Unknown argument ${flag}.` };
     }
     const value = argv[++i];
-    if (!value || value.startsWith("--") || values[flag] !== undefined) {
-      return { error: `Missing/duplicate value for ${flag}.` };
+    const error = frameValueRefusal(flag, value, values[flag] !== undefined && flag !== "--then");
+    if (error) {
+      return { error };
     }
-    values[flag] = value;
+    if (flag === "--then") {
+      const frame = parseThenFrame(value);
+      if ("error" in frame) {
+        return frame;
+      }
+      command.then.push(frame);
+    } else {
+      values[flag] = value;
+    }
   }
+  return values;
+}
+function frameTimerValid(value: string, minimum: number): boolean {
+  const ms = Number(value);
+  return (
+    /^\d+$/.test(value) &&
+    Number.isSafeInteger(ms) &&
+    ms >= minimum &&
+    ms <= MAX_SETTIMEOUT_DELAY_MS
+  );
+}
+function assignFrameNumbers(
+  values: Record<string, string>,
+  command: DaemonFrameCommand,
+): string | undefined {
   for (const [flag, field, minimum] of [
     ["--count", "count", 1],
     ["--timeout-ms", "timeoutMs", 1],
     ["--hold-ms", "holdMs", 0],
+    ["--cancel-after-ms", "cancelAfterMs", 0],
   ] as const) {
-    if (values[flag] !== undefined) {
-      const value = Number(values[flag]);
-      if (
-        !/^\d+$/.test(values[flag]) ||
-        !Number.isSafeInteger(value) ||
-        value < minimum ||
-        value > MAX_SETTIMEOUT_DELAY_MS
-      ) {
-        return {
-          error: `${flag} must be an integer from ${minimum} to ${MAX_SETTIMEOUT_DELAY_MS}.`,
-        };
-      }
-      command[field] = value;
+    if (values[flag] === undefined) {
+      continue;
     }
+    if (!frameTimerValid(values[flag], minimum)) {
+      return `${flag} must be an integer from ${minimum} to ${MAX_SETTIMEOUT_DELAY_MS}.`;
+    }
+    command[field] = Number(values[flag]);
+  }
+  return undefined;
+}
+function parseFrameMode(mode: string, command: DaemonFrameCommand): string | undefined {
+  if (mode === "send" || mode === "cancel") {
+    command.mode = mode;
+    return undefined;
+  }
+  const [name, raw, ...rest] = mode.split(":");
+  if (rest.length || !["cancel-after", "cancel-keep-open"].includes(name)) {
+    return "Invalid --mode.";
+  }
+  if (name === "cancel-after" && raw === undefined) {
+    return "Invalid cancellation delay/window.";
+  }
+  if (!frameTimerValid(raw ?? "5000", 0)) {
+    return "Invalid cancellation delay/window.";
+  }
+  const ms = Number(raw ?? "5000");
+  if (name === "cancel-after") {
+    command.mode = name;
+    command.cancelAfterMs = ms;
+  } else {
+    command.mode = "cancel-keep-open";
+    command.keepOpenMs = ms;
+  }
+  return undefined;
+}
+function frameTypeValid(type: string | undefined): type is DaemonRequest["type"] | undefined {
+  return type === undefined || type === "mcp_request" || type === "daemon_request";
+}
+function frameSendShapeValid(argv: string[]): boolean {
+  return argv[0] === "send" && !!argv[1] && !argv[1].startsWith("--");
+}
+function frameAssignmentsRefusal(
+  values: Record<string, string>,
+  command: DaemonFrameCommand,
+): string | undefined {
+  return (
+    assignFrameNumbers(values, command) ??
+    parseFrameMode(values["--mode"] ?? "send", command) ??
+    frameModeCombinationRefusal(command, values)
+  );
+}
+function frameModeCombinationRefusal(
+  command: DaemonFrameCommand,
+  values: Record<string, string>,
+): string | undefined {
+  if (command.then.length && command.mode !== "send") {
+    return "--then requires --mode send.";
+  }
+  if (values["--cancel-after-ms"] !== undefined && command.mode !== "cancel-keep-open") {
+    return "--cancel-after-ms requires cancel-keep-open.";
+  }
+  if (
+    command.mode === "cancel-keep-open" &&
+    (command.cancelAfterMs ?? 0) + command.keepOpenMs > MAX_SETTIMEOUT_DELAY_MS
+  ) {
+    return "Cancellation delay plus window exceeds the timer-safe maximum.";
+  }
+  return undefined;
+}
+export function parseDaemonFrameArgs(
+  argv: string[],
+): DaemonFrameCommand | { error: string } | { help: string } {
+  if (frameHelpRequested(argv)) {
+    return { help: usage };
+  }
+  const lowered = lowerFrameConvenience(argv);
+  if ("error" in lowered) {
+    return lowered;
+  }
+  if (!frameSendShapeValid(lowered)) {
+    return { error: usage };
+  }
+  const command: DaemonFrameCommand = {
+    method: lowered[1],
+    count: 1,
+    timeoutMs: 30_000,
+    mode: "send",
+    keepOpenMs: 5000,
+    then: [],
+    holdMs: 0,
+    allowSelector: false,
+    allowHostMutation: false,
+    ...(argv[0] === "heartbeat" ? { externalKeeper: true } : {}),
+  };
+  const values = readFrameArguments(lowered, command);
+  if ("error" in values) {
+    return { error: values.error };
   }
   const type = values["--type"];
-  if (type !== undefined && type !== "mcp_request" && type !== "daemon_request") {
+  if (!frameTypeValid(type)) {
     return { error: "Invalid --type." };
   }
   command.type = type;
   command.socket = values["--socket"];
   command.managedBinding = values["--managed-binding"];
-  const mode = values["--mode"] ?? "send";
-  if (mode === "send" || mode === "cancel") {
-    command.mode = mode;
-  } else if (/^cancel-after:\d+$/.test(mode)) {
-    const delay = Number(mode.slice("cancel-after:".length));
-    if (!Number.isSafeInteger(delay) || delay > MAX_SETTIMEOUT_DELAY_MS) {
-      return { error: "Invalid cancel-after delay." };
-    }
-    command.mode = "cancel-after";
-    command.cancelAfterMs = delay;
-  } else {
-    return { error: "Invalid --mode; use send, cancel or cancel-after:<ms>." };
-  }
-  return command;
+  const error = frameAssignmentsRefusal(values, command);
+  return error ? { error } : command;
 }
+
 export interface DaemonFrameDeps {
   env: Record<string, string | undefined>;
   host: HostDefaults;
@@ -166,7 +295,11 @@ export interface DaemonFrameDeps {
 export class FrameRpc {
   private pending = new Map<
     string,
-    { done(response: DaemonResponse): void; reject(error: Error): void; timeout: NodeJS.Timeout }
+    {
+      done(response: DaemonResponse | undefined): void;
+      reject(error: Error): void;
+      timeout: NodeJS.Timeout;
+    }
   >();
   private failure?: Error;
   private pauses = new Set<(error: Error) => void>();
@@ -231,25 +364,40 @@ export class FrameRpc {
       this.pauses.add(failed);
     });
   }
-  request(
+  beginRequest(
     method: string,
     params: unknown,
     timeoutMs: number,
     type?: DaemonRequest["type"],
-  ): Promise<DaemonResponse> {
+    readWindowMs = timeoutMs,
+  ): { id: string; answer: Promise<DaemonResponse | undefined> } {
     this.assertOpen();
     const id = this.deps.ids.next();
-    return new Promise((done, reject) => {
+    const answer = new Promise<DaemonResponse | undefined>((done, reject) => {
       const timeout = this.deps.timer.setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`${method} timed out after ${timeoutMs}ms.`));
-      }, timeoutMs);
+        done(undefined);
+      }, readWindowMs);
       this.pending.set(id, { done, reject, timeout });
       try {
         this.connection.write(encodeDaemonFrame({ id, method, params, timeoutMs, type }));
       } catch (error) {
         this.fail(new Error(`Control write failed: ${errorMessage(error)}`));
       }
+    });
+    return { id, answer };
+  }
+  request(
+    method: string,
+    params: unknown,
+    timeoutMs: number,
+    type?: DaemonRequest["type"],
+  ): Promise<DaemonResponse> {
+    return this.beginRequest(method, params, timeoutMs, type).answer.then((response) => {
+      if (!response) {
+        throw new Error(`${method} timed out after ${timeoutMs}ms.`);
+      }
+      return response;
     });
   }
   async call(
@@ -326,29 +474,78 @@ export const connectFrameSocket: ConnectFrameSocket = (path) =>
     });
     socket.connect(path);
   });
-function hostMaintenance(method: string): boolean {
-  // All currently registered restart/maintenance admission, commit and release routes.
-  return method.startsWith("ide/") && /restart|maintenance/i.test(method);
+export function classifyFrameMethod(
+  method: string,
+): "inventory" | "maintenance" | "mutation" | "none" {
+  if (method === "daemon/refreshDevices") {
+    return "inventory";
+  }
+  if (method.startsWith("ide/") && /restart|maintenance/i.test(method)) {
+    return "maintenance";
+  }
+  return [
+    "ide/setFeatureFlag",
+    "ide/updateService",
+    "ide/setKeyValue",
+    "ide/removeKeyValue",
+    "ide/clearKeyValueFile",
+    "ide/republishIdentity",
+  ].includes(method)
+    ? "mutation"
+    : "none";
 }
-function mutationNotice(method: string): boolean {
-  return (
-    method === "daemon/refreshDevices" ||
-    method === "ide/setFeatureFlag" ||
-    hostMaintenance(method) ||
-    [
-      "ide/updateService",
-      "ide/setKeyValue",
-      "ide/removeKeyValue",
-      "ide/clearKeyValueFile",
-      "ide/republishIdentity",
-    ].includes(method)
-  );
+// Immutable exported-method lookup: avoid re-enumerating the product module per frame.
+// sessionInfo is registered as a literal, not an exported constant; our convenience pins it.
+const knownDaemonMethods = new Set<unknown>([
+  ...Object.entries(daemonConstants)
+    .filter(([name]) => name.endsWith("_METHOD"))
+    .map(([, value]) => value),
+  "daemon/sessionInfo",
+]);
+export function daemonMethodHint(method: string): string | undefined {
+  if (!/^(daemon|ide)\/.*-/.test(method)) {
+    return undefined;
+  }
+  const camel = method.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase());
+  return knownDaemonMethods.has(camel) ? `did you mean ${camel}?` : undefined;
+}
+function frameGuard(
+  method: string,
+  params: unknown,
+  command: DaemonFrameCommand,
+): string | undefined {
+  if (method === "tools/call") {
+    const tool = params as { name?: string; arguments?: unknown } | null;
+    const refusal = deviceStartGuardRefusal(tool?.name ?? "", tool?.arguments, {
+      allowSelector: command.allowSelector,
+    });
+    if (refusal) {
+      return refusal;
+    }
+  }
+  return classifyFrameMethod(method) === "maintenance" && !command.allowHostMutation
+    ? `${method} requires --allow-host-mutation; it can disrupt other agents' private daemon.`
+    : undefined;
+}
+function frameNotice(method: string, deps: DaemonFrameDeps): void {
+  const hint = daemonMethodHint(method);
+  if (hint) {
+    deps.err(hint);
+  }
+  const kind = classifyFrameMethod(method);
+  if (kind === "inventory") {
+    deps.err(`${method}: daemon inventory refresh; no device is booted or claimed.`);
+  } else if (kind !== "none") {
+    deps.err(
+      `${method}: this frame can mutate host/device state outside a session; observing a refusal still sends it.`,
+    );
+  }
 }
 async function managedKeeper(
   config: ReturnType<typeof parseManagedSlotConfigSource>,
   rpc: FrameRpc,
   deps: DaemonFrameDeps,
-): Promise<(sendRelease?: boolean) => Promise<void>> {
+): Promise<{ release(sendRelease?: boolean): Promise<void>; identity: ManagedFrameIdentity }> {
   const token = deps.ids.next();
   const held = new Map<string, NodeJS.Timeout | undefined>();
   const options = { timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS };
@@ -384,6 +581,15 @@ async function managedKeeper(
             options,
           );
         } catch (error) {
+          // A typed missing session has already completed release; other failures remain visible.
+          if (
+            error !== null &&
+            typeof error === "object" &&
+            "code" in error &&
+            error.code === DAEMON_SESSION_NOT_FOUND_CODE
+          ) {
+            return;
+          }
           deps.err(
             `Managed release failed; owner loss will release ${sessionId}: ${errorMessage(error)}`,
           );
@@ -446,113 +652,275 @@ async function managedKeeper(
     },
   });
   deps.out(JSON.stringify(result));
-  return release;
+  const sessionIds = result.slots.flatMap((slot) => (slot.sessionUuid ? [slot.sessionUuid] : []));
+  const slots = new Map(
+    result.slots.flatMap((slot) =>
+      slot.sessionUuid ? [[slot.slotIndex, slot.sessionUuid] as const] : [],
+    ),
+  );
+  return { release, identity: { sessionIds, slots, token } };
 }
-export async function runDaemonFrame(
+interface UserFrame {
+  method: string;
+  params: unknown;
+}
+type ManagedFrameConfig = ReturnType<typeof parseManagedSlotConfigSource>;
+function userFramesRefusal(frames: UserFrame[], command: DaemonFrameCommand): string | undefined {
+  for (const frame of frames) {
+    const refusal = frameGuard(frame.method, frame.params, command);
+    if (refusal) {
+      return refusal;
+    }
+  }
+  return undefined;
+}
+function prepareUserFrames(
   command: DaemonFrameCommand,
   deps: DaemonFrameDeps,
+): { frames: UserFrame[]; config?: ManagedFrameConfig } | { error: string } {
+  try {
+    const frames = [{ method: command.method, json: command.json }, ...command.then].map(
+      (frame) => ({
+        method: frame.method,
+        params: JSON.parse(
+          frame.json?.startsWith("@") ? deps.readFile(frame.json.slice(1)) : (frame.json ?? "{}"),
+        ),
+      }),
+    );
+    if (command.externalKeeper) {
+      frames[0].params = {
+        ...(frames[0].params as Record<string, unknown>),
+        idleTimeoutMs: readEnvPositiveInteger(
+          "AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS",
+          "AUTO_MOBILE_CLI_SESSION_IDLE_TIMEOUT_MS",
+          {
+            fallback: DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
+            min: DEFAULT_CLI_SESSION_IDLE_TIMEOUT_MS,
+          },
+          deps.env,
+          { warn: deps.err },
+        ),
+      };
+    }
+    const config =
+      command.managedBinding === undefined
+        ? undefined
+        : parseManagedSlotConfigSource(command.managedBinding, deps.readFile);
+    // Validate names and requested slot indices before connecting or acquiring anything.
+    const planned = config
+      ? {
+          sessionIds: ["planned-session"],
+          slots: new Map(config.requests.map((slot) => [slot.slotIndex, "planned-session"])),
+          token: "planned-token",
+        }
+      : undefined;
+    for (const frame of frames) {
+      substituteFramePlaceholders(frame.params, planned);
+    }
+    const error = userFramesRefusal(frames, command);
+    return error ? { error } : { frames, config };
+  } catch (error) {
+    return { error: `Invalid JSON/config/placeholders: ${errorMessage(error)}` };
+  }
+}
+function resolveUserFrames(
+  frames: UserFrame[],
+  identity: ManagedFrameIdentity,
+): UserFrame[] | { error: string } {
+  try {
+    return frames.map((frame) => ({
+      ...frame,
+      params: substituteFramePlaceholders(frame.params, identity),
+    }));
+  } catch (error) {
+    // A failed acquisition may return no sessions; refuse all user frames before sending them.
+    return { error: errorMessage(error) };
+  }
+}
+async function sendUserFrames(
+  command: DaemonFrameCommand,
+  frames: UserFrame[],
+  rpc: FrameRpc,
 ): Promise<number> {
+  const first = frames[0];
+  const responses = await Promise.all(
+    Array.from({ length: command.count }, () =>
+      rpc.request(first.method, first.params, command.timeoutMs, command.type),
+    ),
+  );
+  for (const frame of frames.slice(1)) {
+    responses.push(await rpc.request(frame.method, frame.params, command.timeoutMs, command.type));
+  }
+  if (command.holdMs > 0) {
+    await rpc.pause(command.holdMs);
+  }
+  rpc.assertOpen();
+  return responses.every((response) => response.success === true) ? 0 : 1;
+}
+async function writeDestructiveFrames(
+  command: DaemonFrameCommand,
+  frame: UserFrame,
+  rpc: FrameRpc,
+  deps: DaemonFrameDeps,
+): Promise<void> {
+  for (let i = 0; i < command.count; i++) {
+    rpc.connection.write(
+      encodeDaemonFrame({
+        id: deps.ids.next(),
+        method: frame.method,
+        params: frame.params,
+        type: command.type,
+        timeoutMs: command.timeoutMs,
+      }),
+    );
+  }
+  if (command.mode === "cancel-after") {
+    await rpc.pause(command.cancelAfterMs!);
+  }
+}
+async function finishFrameRun(
+  rpc: FrameRpc | undefined,
+  release: ((sendRelease?: boolean) => Promise<void>) | undefined,
+  abrupt: boolean,
+  deps: DaemonFrameDeps,
+  cancellationSummary?: string,
+): Promise<void> {
+  if (release) {
+    await release(!abrupt);
+  }
+  if (cancellationSummary) {
+    deps.out(cancellationSummary);
+  }
+  if (rpc) {
+    rpc.fail(new Error("Frame client finished."));
+    if (!abrupt) {
+      rpc.connection.end();
+    }
+  }
+}
+function privateFrameSocket(
+  command: DaemonFrameCommand,
+  deps: DaemonFrameDeps,
+): { socket: string } | { error: string } {
   const env = privateClientEnvironment(deps.env, {});
   const socket = command.socket ?? env.AUTOMOBILE_DAEMON_SOCKET_PATH ?? "";
   const refusal =
     privateHarnessEnvRefusal(env, deps.host) ??
     privateHarnessEnvRefusal({ ...env, AUTOMOBILE_DAEMON_SOCKET_PATH: socket }, deps.host);
-  if (refusal || !isAbsolute(socket) || privatePathRefusal(socket, deps.host)) {
-    deps.err(refusal ?? "Refusing non-absolute or resident socket.");
+  return refusal || !isAbsolute(socket) || privatePathRefusal(socket, deps.host)
+    ? { error: refusal ?? "Refusing non-absolute or resident socket." }
+    : { socket };
+}
+export async function runDaemonFrame(
+  command: DaemonFrameCommand,
+  deps: DaemonFrameDeps,
+): Promise<number> {
+  const target = privateFrameSocket(command, deps);
+  if ("error" in target) {
+    deps.err(target.error);
     return 2;
   }
-  let params: unknown;
-  let config: ReturnType<typeof parseManagedSlotConfigSource> | undefined;
-  try {
-    params = JSON.parse(
-      command.json?.startsWith("@") ? deps.readFile(command.json.slice(1)) : (command.json ?? "{}"),
-    );
-    config =
-      command.managedBinding === undefined
-        ? undefined
-        : parseManagedSlotConfigSource(command.managedBinding, deps.readFile);
-  } catch (error) {
-    deps.err(`Invalid JSON/config: ${errorMessage(error)}`);
+  const prepared = prepareUserFrames(command, deps);
+  if ("error" in prepared) {
+    deps.err(prepared.error);
     return 2;
   }
-  if (command.method === "tools/call") {
-    const tool = params as { name?: string; arguments?: unknown } | null;
-    const guard = deviceStartGuardRefusal(tool?.name ?? "", tool?.arguments, {
-      allowSelector: command.allowSelector,
-    });
-    if (guard) {
-      deps.err(guard);
-      return 2;
-    }
-  }
-  if (mutationNotice(command.method)) {
-    deps.err(
-      `${command.method}: this frame can mutate host/device state outside a session; observing a refusal still sends it.`,
-    );
-  }
-  if (hostMaintenance(command.method) && !command.allowHostMutation) {
-    deps.err(
-      `${command.method} requires --allow-host-mutation; it can disrupt other agents' private daemon.`,
-    );
-    return 2;
-  }
+  let { frames } = prepared;
   let rpc: FrameRpc | undefined;
   let release: ((sendRelease?: boolean) => Promise<void>) | undefined;
   let abrupt = false;
+  let cancellationSummary: string | undefined;
   try {
     const connection = await connectWithDeadline(
       deps.connect,
-      socket,
+      target.socket,
       deps.timer,
       command.timeoutMs,
     );
     rpc = new FrameRpc(connection, deps);
-    if (config) {
-      release = await managedKeeper(config, rpc, deps);
+    if (prepared.config) {
+      const keeper = await managedKeeper(prepared.config, rpc, deps);
+      release = keeper.release;
+      const resolved = resolveUserFrames(frames, keeper.identity);
+      if ("error" in resolved) {
+        deps.err(resolved.error);
+        return 2;
+      }
+      frames = resolved;
+    }
+    const refusal = userFramesRefusal(frames, command);
+    if (refusal) {
+      deps.err(refusal);
+      return 2;
+    }
+    for (const frame of frames) {
+      frameNotice(frame.method, deps);
+    }
+    if (command.mode === "cancel-keep-open") {
+      cancellationSummary = await cancelKeepOpen(command, frames[0], rpc, deps);
+      return 0;
     }
     if (command.mode !== "send") {
-      for (let i = 0; i < command.count; i++) {
-        connection.write(
-          encodeDaemonFrame({
-            id: deps.ids.next(),
-            method: command.method,
-            params,
-            type: command.type,
-            timeoutMs: command.timeoutMs,
-          }),
-        );
-      }
-      if (command.mode === "cancel-after") {
-        await rpc.pause(command.cancelAfterMs!);
-      }
+      await writeDestructiveFrames(command, frames[0], rpc, deps);
       abrupt = true;
       connection.destroy();
       return 0;
     }
-    const responses = await Promise.all(
-      Array.from({ length: command.count }, () =>
-        rpc!.request(command.method, params, command.timeoutMs, command.type),
-      ),
-    );
-    if (command.holdMs > 0) {
-      await rpc.pause(command.holdMs);
-    }
-    rpc.assertOpen();
-    return responses.every((response) => response.success === true) ? 0 : 1;
+    return await sendUserFrames(command, frames, rpc);
   } catch (error) {
     deps.err(`Frame failed: ${errorMessage(error)}`);
     return 3;
   } finally {
-    if (release) {
-      await release(!abrupt);
-    }
-    if (rpc) {
-      rpc.fail(new Error("Frame client finished."));
-      if (!abrupt) {
-        rpc.connection.end();
-      }
-    }
+    await finishFrameRun(rpc, release, abrupt, deps, cancellationSummary);
   }
+}
+async function cancelKeepOpen(
+  command: DaemonFrameCommand,
+  frame: { method: string; params: unknown },
+  rpc: FrameRpc,
+  deps: DaemonFrameDeps,
+): Promise<string> {
+  const delay = command.cancelAfterMs ?? 0;
+  const requests = Array.from({ length: command.count }, () => {
+    const { id, answer } = rpc.beginRequest(
+      frame.method,
+      frame.params,
+      command.timeoutMs,
+      command.type,
+      delay + command.keepOpenMs,
+    );
+    // Install both handlers before constructing the next request, which may fail synchronously.
+    const observed = answer.then(
+      (response) => ({ id, response }),
+      (error: unknown) => ({ id, error }),
+    );
+    return { id, observed };
+  });
+  if (delay > 0) {
+    await rpc.pause(delay);
+  }
+  for (const { id } of requests) {
+    rpc.connection.write(
+      encodeDaemonFrame({
+        id: deps.ids.next(),
+        type: "daemon_request",
+        method: DAEMON_CANCEL_REQUEST_METHOD,
+        params: { requestId: id },
+      }),
+    );
+  }
+  const answers = await Promise.all(requests.map((request) => request.observed));
+  const cancelled = answers.map((answer) => {
+    if ("error" in answer) {
+      throw answer.error;
+    }
+    const response = answer.response;
+    return response
+      ? { id: answer.id, answered: true, success: response.success, code: response.code }
+      : { id: answer.id, answered: false };
+  });
+  rpc.assertOpen();
+  return JSON.stringify({ cancelled });
 }
 export function frameHostDefaults(): HostDefaults {
   return {
@@ -562,14 +930,14 @@ export function frameHostDefaults(): HostDefaults {
   };
 }
 export async function main(): Promise<number> {
-  if (process.argv[2] === "--help") {
-    console.log(usage);
-    return 0;
-  }
   const parsed = parseDaemonFrameArgs(process.argv.slice(2));
   if ("error" in parsed) {
-    console.error(parsed.error);
+    console.error(`${parsed.error}\nRun daemon-frame --help for usage.`);
     return 2;
+  }
+  if ("help" in parsed) {
+    console.log(parsed.help);
+    return 0;
   }
   return runDaemonFrame(parsed, {
     env: process.env,

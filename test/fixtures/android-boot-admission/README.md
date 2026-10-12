@@ -9,3 +9,9 @@ Fixtures for `src/features/bootAdmission` (#11588).
   `netsimd` helpers. Every other row of the capture was dropped. No row is synthetic. Redactions
   only: the user name in `/Users/<name>` and `/tmp/android-<name>` is `dev`, and the daemon's
   checkout path is `/Users/dev/auto-mobile`.
+
+- `proc-status-upstream-man-proc_pid_status.txt`: lines 23–54, byte-for-byte, of
+  https://git.kernel.org/pub/scm/docs/man-pages/man-pages.git/plain/man/man5/proc_pid_status.5.
+  This is UPSTREAM DOCUMENTATION, not a capture from a running host; Docker was not running on
+  the lane host. Follow-up (#11965): replace with a capture from the project's Alpine image,
+  using `cat /proc/<pid>/status` and `/proc/<pid>/cmdline` of a controlled short-lived process.

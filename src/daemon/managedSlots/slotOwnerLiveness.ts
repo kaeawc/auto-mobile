@@ -120,9 +120,9 @@ export interface LiveExecutionSessionsOptions {
  * holds a released session whose work still runs, and that session's record may still name the
  * previous daemon (a restart not re-owned yet) or another one; judging such a record by its
  * process would hand the slot out under the running work. The hold is this process's own view.
- * Other daemons read the same fact from the registry: the drain re-stamps the record with this
- * daemon before it marks the slot (`ManagedExecutionRelease`), and a record naming a running
- * daemon reads live everywhere.
+ * Other daemons need a host-visible record naming this daemon: `ManagedExecutionReowner` confirms
+ * it before resumed work is admitted, and the drain retains it until settlement is recorded.
+ * Release-time re-stamping alone cannot fence peers when the registry rejects both writes.
  */
 export function withLiveExecutionSessions(
   processLiveness: SlotExecOwnerLiveness,

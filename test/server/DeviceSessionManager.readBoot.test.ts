@@ -315,6 +315,27 @@ describe("read boots only an explicitly named stopped device", () => {
         h.assertNoBoot();
         h.assertNoReadWrites();
       });
+      test(`${lane}: a running name resolves to its serial/UDID without booting`, async () => {
+        const h = harness(platform, daemon);
+        h.setRunning([h.device]);
+        h.setImages([{ ...h.image, isRunning: true }]);
+        expect(await h.manager.ensureDeviceReady(platform, h.device.name, h.options)).toEqual(
+          h.device,
+        );
+        h.assertNoBoot();
+        h.assertNoReadWrites();
+      });
+      test(`${lane}: an ambiguous running name lists the same candidate ids`, async () => {
+        const h = harness(platform, daemon);
+        h.setRunning([h.device, { ...h.device, deviceId: "second-id" }]);
+        await expect(
+          h.manager.ensureDeviceReady(platform, h.device.name, h.options),
+        ).rejects.toThrow(
+          `Ambiguous running device name '${h.device.name}'. Candidates: ${[h.device.deviceId, "second-id"].sort().join(", ")}. Provide a deviceId.`,
+        );
+        h.assertNoBoot();
+        h.assertNoReadWrites();
+      });
       for (const requested of [platform, "either"] as const) {
         test(`${lane}: ${requested} named stopped image boots exactly once`, async () => {
           const h = harness(platform, daemon);

@@ -9,9 +9,9 @@ import {
 } from "../helpers/sessionRowInvariantHarness";
 
 // Small cases keep each test far inside the 100ms unit budget on a slow, contended CI runner.
-const SEEDS_PER_CASE = 5;
-const SWEEP_CASES = 40;
-const EXTENDED_SWEEP_CASES = 20;
+const SEEDS_PER_CASE = 2;
+const SWEEP_CASES = 100;
+const EXTENDED_SWEEP_CASES = 50;
 
 /**
  * Seeds whose interleaving left the row and the session apart before the #11557 fixes: a release
@@ -34,6 +34,11 @@ const EXTENDED_REGRESSION_SEEDS = [
   [12, 238, 333, 438, 453, 505, 715, 906],
   [189, 259, 260, 281, 393, 402, 410, 635],
   [56, 853, 1074, 3197, 4052, 2158, 3848, 5257],
+  // A parked superseded terminal write erased the peer's terminal row; a rebind revived it;
+  // a parked terminal write released the active row the peer had re-issued (#11557, case 1).
+  [27, 223, 2390],
+  // A refused rebind's terminal adoption began its release after shutdown's drain (#11557).
+  [14294],
 ];
 const EXTENDED: SessionRowRunOptions = { allowed: EXTENDED_OPERATIONS };
 
@@ -76,7 +81,7 @@ describe("the persisted session row agrees with the session after any interleavi
 
   const sweeps = Array.from({ length: SWEEP_CASES }, (_, index) => index * SEEDS_PER_CASE + 1);
 
-  test.each(sweeps)("seeds %d and the next 4", async (first) => {
+  test.each(sweeps)("seeds %d and the next 1", async (first) => {
     const seeds = Array.from({ length: SEEDS_PER_CASE }, (_, index) => first + index);
 
     expect(await violationsOf(db, seeds)).toEqual([]);
@@ -110,7 +115,7 @@ describe("the row agrees with the session across peers, re-issue, forced release
     (_, index) => index * SEEDS_PER_CASE + 1,
   );
 
-  test.each(sweeps)("seeds %d and the next 4", async (first) => {
+  test.each(sweeps)("seeds %d and the next 1", async (first) => {
     const seeds = Array.from({ length: SEEDS_PER_CASE }, (_, index) => first + index);
 
     expect(await violationsOf(db, seeds, EXTENDED)).toEqual([]);

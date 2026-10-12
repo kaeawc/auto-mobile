@@ -18,6 +18,7 @@ import {
   boundSessionLossMessage,
   sanitizeBoundSessionLoss,
   sanitizeDaemonRequestFailureCause,
+  daemonInstanceFromError,
 } from "./types";
 import type { BoundSessionLoss } from "./types";
 import {
@@ -317,6 +318,10 @@ export function daemonResponseError(response: DaemonResponse): Error {
     response.boundSessionLoss?.code,
     response.transportFailure?.code,
   ].find((value) => value !== undefined);
+  const daemonInstance = daemonInstanceFromError(response);
+  if (daemonInstance !== undefined) {
+    Object.assign(error, { daemonInstance });
+  }
   if (code === undefined) {
     return error;
   }

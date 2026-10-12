@@ -7,6 +7,7 @@ import {
   DeviceSessionNotActiveError,
   DeviceSessionRowChangedError,
   DeviceSessionRowNotRewritableError,
+  DeviceSessionRowNotReleasableError,
   DeviceSessionTerminallyReleasedError,
   isDeviceRestartReleaseReason,
   isRecoverableDaemonReleaseReason,
@@ -88,7 +89,14 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       const peerOwned =
         existing.daemon_session_id !== null &&
         rewrite.livePeerDaemonSessionIds.includes(existing.daemon_session_id);
-      if (terminal || peerOwned) {
+      const otherOwned =
+        rewrite.ownDaemonSessionId !== undefined &&
+        existing.daemon_session_id !== null &&
+        existing.daemon_session_id !== rewrite.ownDaemonSessionId;
+      const changed =
+        rewrite.expectedRowGeneration !== undefined &&
+        existing.stable_identity_generation !== rewrite.expectedRowGeneration;
+      if (terminal || peerOwned || otherOwned || changed) {
         throw new DeviceSessionRowNotRewritableError(record.sessionUuid);
       }
     }
@@ -199,6 +207,27 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       throw new Error("persist release failed");
     }
     const row = this.rows.get(sessionUuid);
+    const guarded = options.unlessTerminalOrOwnedByLivePeer;
+    if (
+      guarded &&
+      (!row ||
+        (row.release_reason !== null &&
+          isTerminalReleaseReason(row.release_reason) &&
+          !guarded.supersededReasons?.includes(row.release_reason)) ||
+        (row.daemon_session_id !== null &&
+          (guarded.livePeerDaemonSessionIds.includes(row.daemon_session_id) ||
+            (guarded.ownDaemonSessionId !== undefined &&
+              row.daemon_session_id !== guarded.ownDaemonSessionId))))
+    ) {
+      if (
+        options.expectedRowGeneration === undefined ||
+        guarded.reportRefusal ||
+        guarded.ownDaemonSessionId !== undefined
+      ) {
+        throw new DeviceSessionRowNotReleasableError(sessionUuid);
+      }
+      return;
+    }
     if (!row) {
       return;
     }
@@ -214,6 +243,14 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
       (options.onlyIfOwnedByDaemon !== undefined &&
         row.daemon_session_id !== options.onlyIfOwnedByDaemon)
     ) {
+      if (
+        guarded &&
+        (options.expectedRowGeneration === undefined ||
+          guarded.reportRefusal ||
+          guarded.ownDaemonSessionId !== undefined)
+      ) {
+        throw new DeviceSessionRowNotReleasableError(sessionUuid);
+      }
       return;
     }
     row.status = status;

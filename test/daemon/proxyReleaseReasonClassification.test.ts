@@ -1046,6 +1046,7 @@ describe("decideNotFoundAnswer", () => {
     releaseReason: undefined,
     owned: true,
     establishes: false,
+    answeredByOtherDaemon: false,
     windowSince: undefined,
     handoffs: new Set(),
     now: NOW,
@@ -1135,6 +1136,32 @@ describe("decideNotFoundAnswer", () => {
       // A session this proxy does not own is never waited for.
       expect(decideNotFoundAnswer(facts({ establishes: true, owned: false }))).toEqual(STOPPED);
     }
+  });
+
+  test("another daemon answering is positive evidence of the one unrehydrated handoff", () => {
+    const other = facts({ answeredByOtherDaemon: true });
+    expect(decideNotFoundAnswer(other)).toEqual({
+      kind: "awaited",
+      windowSince: NOW,
+      handoff: UNREHYDRATED_HANDOFF,
+    });
+    expect(
+      decideNotFoundAnswer({
+        ...other,
+        windowSince: NOW - W,
+        handoffs: new Set([UNREHYDRATED_HANDOFF]),
+      }),
+    ).toEqual(STOPPED);
+    expect(decideNotFoundAnswer({ ...other, owned: false })).toEqual(STOPPED);
+    expect(decideNotFoundAnswer({ ...other, releaseReason: "device-killed" })).toEqual({
+      kind: "ended",
+      reason: "device-killed",
+    });
+    expect(decideNotFoundAnswer(facts({ establishes: true }))).toEqual({
+      kind: "awaited",
+      windowSince: NOW,
+      handoff: UNREHYDRATED_HANDOFF,
+    });
   });
 
   test("no reason on a connection that had answered: asked again once if it never had a window, then stopped", () => {

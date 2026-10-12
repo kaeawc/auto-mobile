@@ -155,9 +155,10 @@ A call without a deviceId is checked against the device readiness would select (
 `ensureDeviceReady` runs, so a refused call never readies, pins or configures the
 holder's device (#10828). A sessionless `deviceReadOnly` call whose target (its
 deviceId, or that predicted device) is held runs on the read-only device path
-instead (#10830): the device is resolved from the booted list
-(`sessionlessDeviceReadFor`), with no readiness, current-device pin, settings,
-navigation recording or audit, and handlers see `isSessionlessDeviceRead()`
+instead (#10830): ownership is checked on the ID as given before discovery, then
+again on a running match's serial/UDID after discovery; either held verdict uses this path;
+the device is resolved from the booted list (`sessionlessDeviceReadFor`), with no
+readiness, current-device pin, settings, navigation recording or audit, and handlers see `isSessionlessDeviceRead()`
 (observe and snapshotOf then use the observer capture, connect-only on a held
 device). The observation socket's `request_observation` follows the same rule: a requester
 whose session does not hold a held device gets that connect-only observer read, never the
@@ -227,7 +228,7 @@ admission, and admission's own refusals (suspect, lapsed owner lease, idle
 expiry) stamp nothing. A call that is admitted and then fails while the daemon
 sets its device up is use (#10824).
 Ambiguous platform-only control gets `ambiguous_session_selector` without refreshing clocks;
-read-only tools and device-binding calls (such as `setActiveDevice`) keep their usual routing.
+platform-only control and read-only calls use the connection's unique held session of that platform when all held platforms are known and the default is live; ambiguous reads and device-binding calls (such as `setActiveDevice`) keep their usual routing.
 `test/server/namedForeignSessionActivity.test.ts` has one row per refusal.
 Desktop input is use. The desktop and IDE clients register an observer session
 that allocates nothing, allocate a device with `setActiveDevice` on the first

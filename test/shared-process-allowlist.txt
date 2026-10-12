@@ -766,6 +766,7 @@ test/lint/iosDeviceBackendBoundary.test.ts
 test/lint/iosDeviceKindRouting.test.ts
 test/lint/livenessActivityClockSeparation.test.ts
 test/lint/noCaughtErrorInterpolationRule.test.ts
+test/lint/noDirectBunSpawnRule.test.ts
 test/lint/noInlineErrorNormalizeRule.test.ts
 test/lint/noLegacyAutomobilePath.test.ts
 test/lint/noRawEnvNumberParseRule.test.ts
@@ -786,7 +787,7 @@ test/lint/toolDocumentationCoverage.test.ts
 test/lint/turboCachingSafety.test.ts
 test/lint/turboLintInputsCoverBaselines.test.ts
 test/lint/turboLintInputsCoverScriptChain.test.ts
-test/lint/unitTestDeviceSpawnAllowlist.test.ts
+test/lint/unitTestHostSpawnAllowlist.test.ts
 test/lint/validateMarkdownRepoPaths.test.ts
 test/metrics/downloadSnapshots.test.ts
 test/models/ActionableError.property.test.ts

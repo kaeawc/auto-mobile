@@ -81,6 +81,7 @@
         "auto-mobile/no-accumulator-foreach": "error",
         "auto-mobile/no-inline-error-normalize": "error",
         "auto-mobile/no-raw-promise-race": "error",
+        "auto-mobile/no-direct-bun-spawn": "error",
         "auto-mobile/no-caught-error-interpolation": "warn",
 
         // Ratcheted rules with pre-existing baselined violations. oxlint has no

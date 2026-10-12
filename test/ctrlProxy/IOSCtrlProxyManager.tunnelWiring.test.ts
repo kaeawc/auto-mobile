@@ -40,7 +40,14 @@ async function flush(): Promise<void> {
 function fakeFixture() {
   const timer = timerFixture();
   const fake = new FakeIosTunnelClient();
-  const manager = IOSCtrlProxyManager.createForTesting(device, timer, undefined, fake);
+  // The manager asks `idevice_id` whether the device is attached before it tunnels.
+  const manager = IOSCtrlProxyManager.createForTesting(
+    device,
+    timer,
+    undefined,
+    fake,
+    new FakeProcessExecutor(),
+  );
   manager["servicePort"] = 8765;
   return { timer, fake, manager };
 }

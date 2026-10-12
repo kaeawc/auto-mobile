@@ -59,8 +59,52 @@ commit `5b42f19fa`, build `d87070dbdd844943`, and iPhone 17 Pro / iOS 26.5:
   and boot for subsequent qualification.
 - Evidence is retained under
   `session-broker-native/reuse-2026-10-12T21-17-16.536Z`. This covers the exercised
-  contamination classes, not every OS service or app behavior. Native crash
-  recovery, mixed-profile eviction, and Android execution remain separate gates.
+  contamination classes, not every OS service or app behavior.
+
+Native interrupted-reset recovery passed with commit `2ce453401`, build
+`ac7a587ccf2ec269`, on the same host and profile:
+
+- The test terminated the exact experiment daemon after fresh native inventory
+  showed the owned simulator shut down and the durable resource still
+  `resetting`. It verified the daemon's process generation before termination.
+- Restart through the ordinary launcher recovered the unfinished reset by
+  destroying the uncertain simulator. Native inventory confirmed absence.
+  The original request remained failed with `session_owner_exited` and no
+  pending cleanup, including on exact replay.
+- A subsequent request received a new session and simulator, successfully
+  observed it, and remained usable after a delayed release of the old session.
+  The successor's explicit release completed.
+- Evidence is retained under
+  `session-broker-native/recovery-2026-10-12T21-25-07.792Z`. This exercises one
+  specific crash boundary; it does not establish every possible interruption.
+
+The successor's measured clean reset spent approximately 15 seconds stopping,
+0.3 seconds erasing, and 52 seconds booting. This reset establishes isolation by
+rebooting an erased simulator; an idle-pool hit therefore moves boot work to the
+preceding release rather than avoiding it. Retain zero pooling as the initial
+throughput baseline until a matched comparison demonstrates a reuse benefit.
+
+Native iOS mixed-profile replacement passed on the same build:
+
+- Phone → tablet → phone acquired the requested iPhone 17 Pro and iPad Pro
+  11-inch M4 profiles on iOS 26.5. All three sessions observed successfully and
+  completed their clean-idle release. Replacement used fresh execution and
+  native device identities.
+- The total and session caps were both one. Read-only registry observations
+  never counted more than one non-destroyed resource. Separately, the durable
+  native journal recorded confirmed destruction before the next create intent,
+  with gaps of 935 and 946 milliseconds in the two replacements. End-state
+  native inventory also confirmed the old UDIDs absent.
+- Final state was one clean idle phone, no execution claim, and zero active
+  sessions/executions. The three executions, including reset, took about seven
+  minutes; they were provider checks without app setup or model execution.
+- Evidence is retained under
+  `session-broker-native/profiles-2026-10-12T21-28-16.377Z`, including
+  `journal-ordering.json`. Sampling alone is not proof of every transient
+  instant; the journal ordering and native absence checks supply the separate
+  replacement evidence.
+
+Android execution remains a separate native gate.
 
 The supplied Slack bundle initially failed simulator installation with a
 copy-permission error. A staged copy with readable directories and no extended

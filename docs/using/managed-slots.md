@@ -196,7 +196,10 @@ connection used for tools and resources:
    holds (`managed_slot_registration_refused`, a protocol answer rather than a
    device-tool refusal). A daemon restart does not end the execution: its session
    is rehydrated, the proxy re-binds, and the restarted daemon records itself as
-   the slot's owner. While the daemon is away, tool calls answer `daemon_stalled`
+   the slot's owner. If registration arrives before the session is rehydrated, the
+   proxy retries on the same confined socket with backoff until it binds or the
+   execution ends; permanent refusals are not retried. While the daemon is away,
+   tool calls answer `daemon_stalled`
    after automatic recovery is exhausted. Its message names the affected sessions
    and attempt count, with `recovery.action: "wait_for_managed_reclaim"`: the proxy
    keeps probing every heartbeat interval, however long the daemon was away, and
@@ -295,7 +298,9 @@ A managed-execution session uses the `managed-execution` liveness policy:
 - **Execution owner.** The proxy checks every second that its owner (by default
   the parent process that launched it, or `executionOwnerPid`) is running and,
   for the default owner, that it has not been re-parented. Either loss shuts the
-  proxy down and releases its sessions. Stdin EOF ends the execution the same
+  proxy down and releases its sessions. The owner is identified by PID plus OS process
+  start identity where readable, so a reused PID counts as the owner having exited;
+  where that identity cannot be read, the PID alone is used. Stdin EOF ends the execution the same
   way. If the proxy is killed outright, the ~10 s no-heartbeat release applies.
   Limit: with the default owner, a launch parent pid of 1 is treated as already
   orphaned and a parent pid of 0 (for example `docker exec`) as exited. When the
@@ -563,7 +568,8 @@ slot. Only control and lifecycle calls on another slot's device are refused.
   retryable `discovery_incomplete` rather than treat unknown as free (#11410). A
   host with no registry at all has no managed slots, and devices are free. A
   registry that was read successfully once and then fails keeps its last good
-  snapshot.
+  snapshot for reads and inventory. Taking an unheld device requires a current
+  snapshot; a failed read refuses with retryable `discovery_incomplete`.
 
 ## Boot capacity
 

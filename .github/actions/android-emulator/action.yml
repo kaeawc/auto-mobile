@@ -84,8 +84,10 @@ runs:
         echo "GRADLE_USER_HOME=$gradle_home" >> $GITHUB_ENV
         echo "Using GRADLE_USER_HOME=$gradle_home"
 
+    # Same version as .github/actions/gradle-task-run, whose main-branch runs
+    # write the Gradle home cache a pull-request emulator job restores (#11578).
     - name: Setup Gradle
-      uses: gradle/actions/setup-gradle@v4
+      uses: gradle/actions/setup-gradle@v5.0.2
 
     - name: Verify Java version
       shell: ${{ inputs.shell }}
@@ -115,8 +117,10 @@ runs:
         echo "Disk space after cleanup:"
         df -h
 
+    # Restore only; "Save AVD cache" at the end of this action is the save half
+    # (#11578).
     - name: AVD cache
-      uses: actions/cache@v5
+      uses: actions/cache/restore@v5
       id: avd-cache
       with:
         path: |
@@ -261,6 +265,24 @@ runs:
           echo "✗ Emulator tests failed after retry"
           exit 1
         fi
+
+    # Pull requests never save the AVD cache (#11578). The combined cache action
+    # saved in its post-job step while the emulator was still running, so tar
+    # failed on the changing userdata image: in 30 sampled PR runs each of the 25
+    # cache misses spent ~34 s (p50) on a save that failed. A save that did
+    # succeed would be a 4.2 GB pull-request-scoped entry no other PR can read,
+    # evicting main's Gradle caches from the 10 GB repository budget. Other
+    # events keep saving on a miss, after the tests, as before.
+    - name: Save AVD cache
+      if: success() && github.event_name != 'pull_request' && steps.avd-cache.outputs.cache-hit != 'true'
+      continue-on-error: true
+      uses: actions/cache/save@v5
+      with:
+        path: |
+          ~/.android/avd/*
+          ~/.android/adb*
+          /usr/local/lib/android/sdk/system-images/*
+        key: avd-${{ runner.os }}-${{ inputs.avd-name }}-${{ inputs.profile != '' && format('{0}-', inputs.profile) || '' }}${{ inputs.api_level }}-${{ inputs.arch }}-${{ inputs.target }}
 
     - name: Upload Emulator Diagnostics
       if: always() && (steps.emulator-attempt-1.outcome == 'failure' || steps.avd-create.outcome == 'failure')

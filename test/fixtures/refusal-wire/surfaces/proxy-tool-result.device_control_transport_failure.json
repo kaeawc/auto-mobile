@@ -1,0 +1,14 @@
+{
+  "surface": "proxy-tool-result",
+  "name": "device_control_transport_failure",
+  "builder": "deviceControlTransportFailureResult",
+  "payload": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":{\"message\":\"Device control connection failed\",\"code\":\"device_control_transport_failure\",\"transport\":\"daemon_loopback_http\",\"toolName\":\"tapOn\",\"deviceId\":\"emulator-5554\",\"deviceSessionUuid\":\"11111111-2222-4333-8444-555555555555\",\"sessionUuid\":\"11111111-2222-4333-8444-555555555555\",\"sessionValid\":true,\"deviceSessionValid\":true,\"phase\":\"connect\",\"retryable\":true,\"reconnectAttempted\":true,\"replayAttempted\":false}}"
+      }
+    ],
+    "isError": true
+  }
+}

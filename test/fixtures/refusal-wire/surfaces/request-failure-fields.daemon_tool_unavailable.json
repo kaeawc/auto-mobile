@@ -1,0 +1,8 @@
+{
+  "surface": "request-failure-fields",
+  "name": "daemon_tool_unavailable",
+  "builder": "mcpRequestFailureDetails",
+  "payload": {
+    "code": "daemon_tool_unavailable"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "surface": "device-loss-outcome",
+  "name": "device_lost",
+  "builder": "deviceLossOutcomeFromError",
+  "payload": {
+    "code": "device_lost",
+    "deviceId": "emulator-5554",
+    "sessionUuid": "11111111-2222-4333-8444-555555555555",
+    "incidentId": "loss-incident",
+    "reason": "confirmed-unavailable"
+  }
+}

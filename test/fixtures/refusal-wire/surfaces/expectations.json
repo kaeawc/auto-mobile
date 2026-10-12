@@ -1,5 +1,5 @@
 {
-  "description": "Refusals that cross the wire outside an MCP tool result, which the runners' refusal classifier never reads: socket-frame (the control socket failure frame, from mcpRequestFailureDetails), delete-device (deleteDevice's failure result, fields under failure), managed-slots-result (the ManagedSlotsResult of the MCP initialize outcome and the automobile:managed-slots resource, failure on the slot), overload-frame (the control socket failure with typed fields under overloadFailure) and webrtc-stream-response (the aux-socket viewer refusal with errorCode beside error). Each file is <surface>.<name>.json, regenerated with UPDATE_CAPTURED_FIXTURES=1 bun test test/daemon/refusalWireContract.test.ts test/daemon/webrtcStreamSocketServer.viewerSubscription.test.ts. expected uses the vocabulary of ../expectations.json; fields pins the code, retryable, acquireNewSession (nextAction is acquire_new_session), a positive retryAfterMs, and the evidence (details, or capacity for a slot failure). A field absent from a row is absent on the wire.",
+  "description": "Refusals that cross the wire outside an MCP tool result, which the runners' refusal classifier never reads: socket-frame (the control socket failure frame, from mcpRequestFailureDetails), delete-device (deleteDevice's failure result, fields under failure), managed-slots-result (the ManagedSlotsResult of the MCP initialize outcome and the automobile:managed-slots resource, failure on the slot), overload-frame (the control socket failure with typed fields under overloadFailure) and webrtc-stream-response (the aux-socket viewer refusal with errorCode beside error). Each file is <surface>.<name>.json, regenerated with UPDATE_CAPTURED_FIXTURES=1 bun test test/daemon/refusalWireContract.test.ts test/daemon/webrtcStreamSocketServer.viewerSubscription.test.ts. expected uses the vocabulary of ../expectations.json; fields pins the code, retryable, acquireNewSession (nextAction is acquire_new_session), a positive retryAfterMs, and the evidence (details, or capacity for a slot failure). A field absent from a row is absent on the wire. Additional surfaces pin production refusal results (recording-start-result, proxy-tool-result, provision-envelope), device-loss-outcome and liveness-handover bodies, managed-slots-response, and the code-bearing serializer fragments device-session-error-fields and request-failure-fields. Synchronous fixtures are regenerated with bun scripts/generate-refusal-wire-fixtures.ts; asynchronous captures are checked and updated by their declared owning tests. retryable is omitted from fields when the wire carries no retry intent.",
   "fixtures": {
     "socket-frame.device_owned_by_other_session": {
       "expected": "wait",
@@ -355,7 +355,6 @@
       "expected": "fail",
       "fields": {
         "code": "viewer_read_only",
-        "retryable": false,
         "acquireNewSession": false
       }
     },
@@ -408,6 +407,106 @@
         "details": {
           "deviceId": "emu-held"
         }
+      }
+    },
+    "device-loss-outcome.device_lost": {
+      "expected": "fail",
+      "fields": {
+        "code": "device_lost",
+        "acquireNewSession": false
+      }
+    },
+    "recording-start-result.no_active_device_session": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "no_active_device_session",
+        "retryable": false,
+        "acquireNewSession": true
+      }
+    },
+    "proxy-tool-result.device_control_transport_failure": {
+      "expected": "retry",
+      "fields": {
+        "code": "device_control_transport_failure",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "request-failure-fields.daemon_tool_unavailable": {
+      "expected": "fail",
+      "fields": {
+        "code": "daemon_tool_unavailable",
+        "acquireNewSession": false
+      }
+    },
+    "liveness-handover.daemon_stalled": {
+      "expected": "retry",
+      "fields": {
+        "code": "daemon_stalled",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "provision-envelope.device_offline.readiness": {
+      "expected": "retry",
+      "fields": {
+        "code": "device_offline",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "provision-envelope.identity_conflict.adoption": {
+      "expected": "fail",
+      "fields": {
+        "code": "identity_conflict",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
+    "provision-envelope.cleanup_failed.rollback": {
+      "expected": "fail",
+      "fields": {
+        "code": "cleanup_failed",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
+    "proxy-tool-result.session_ownership_lost.expired": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true
+      }
+    },
+    "proxy-tool-result.daemon_shutting_down": {
+      "expected": "retry",
+      "fields": {
+        "code": "daemon_shutting_down",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "proxy-tool-result.session_ownership_lost.bound_loss": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true
+      }
+    },
+    "managed-slots-response.managed_slot_config_invalid": {
+      "expected": "fail",
+      "fields": {
+        "code": "managed_slot_config_invalid",
+        "acquireNewSession": false
+      }
+    },
+    "device-session-error-fields.DEVICE_SESSION_SUPERSEDED_BY_RESTORE": {
+      "expected": "fail",
+      "fields": {
+        "code": "DEVICE_SESSION_SUPERSEDED_BY_RESTORE",
+        "acquireNewSession": false
       }
     }
   }

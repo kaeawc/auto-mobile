@@ -1,0 +1,25 @@
+{
+  "surface": "provision-envelope",
+  "name": "identity_conflict.adoption",
+  "builder": "registered provisionDevice handler via provisionDeviceErrorResponse",
+  "payload": {
+    "success": false,
+    "message": "identity_conflict: Android AVD 'phone-api-36-a' is claimed by multiple running emulators: emulator-5554, emulator-5556. Pass an explicit deviceId (ADB serial) to select one.",
+    "error": {
+      "code": "identity_conflict",
+      "message": "identity_conflict: Android AVD 'phone-api-36-a' is claimed by multiple running emulators: emulator-5554, emulator-5556. Pass an explicit deviceId (ADB serial) to select one.",
+      "retryable": false,
+      "daemonBuild": "0.0.84+fixture-build"
+    },
+    "lifecycle": {
+      "state": "no_device_created",
+      "phase": "provisioning",
+      "reason": {
+        "code": "identity_conflict",
+        "message": "identity_conflict: Android AVD 'phone-api-36-a' is claimed by multiple running emulators: emulator-5554, emulator-5556. Pass an explicit deviceId (ADB serial) to select one.",
+        "retryable": false,
+        "daemonBuild": "0.0.84+fixture-build"
+      }
+    }
+  }
+}

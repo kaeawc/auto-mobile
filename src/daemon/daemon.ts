@@ -1050,7 +1050,7 @@ export class Daemon {
     const executions = rehydrated.filter((sessionUuid) =>
       this.sessionManager.isLiveManagedExecutionSession(sessionUuid),
     );
-    await this.managedExecutionReowner?.reown(executions);
+    await this.managedExecutionReowner?.reown(executions, { rehydrated: true });
   }
 
   /** A host that never served a managed slot has no registry; maintenance must not create one. */
@@ -1108,6 +1108,8 @@ export class Daemon {
       registry: () => this.openManagedSlotRegistry(),
       registryExists: () => this.managedSlotRegistryExists(),
       owner: () => this.managedSlotJournalOwner(),
+      timer: this.timer,
+      isSessionHeld: (id) => this.sessionManager.isLiveManagedExecutionSession(id),
     });
     DaemonState.getInstance().setManagedExecutionReowner(this.managedExecutionReowner);
     // Interrupted journaled work (#11179) is redriven in the background. The loop starts when this
@@ -1159,13 +1161,18 @@ export class Daemon {
   /** Stop the drain's settlement watchers and close the slot registry if this daemon opened it. */
   private async closeManagedExecutionRelease(): Promise<void> {
     this.managedExecutionRelease?.close();
+    this.managedExecutionReowner?.close();
     this.managedSlotReclaimer?.stop();
     this.managedSlotReclaimer = undefined;
     this.freeDeviceReclaimer?.stop();
     this.freeDeviceReclaimer = undefined;
-    // Signalled, not awaited: the loop may be in its inter-pass sleep, and shutdown must not wait
-    // it out. A pass still running when the registry closes fails, logs, and the loop exits.
-    void this.managedSlotRedrive?.stop();
+    // Interrupt discovery and the inter-pass wait, then join within 100ms of this stage's 200ms.
+    // Unfinished cleanup stays journaled even if an unabortable registry call outlives the join.
+    try {
+      await this.managedSlotRedrive?.stop();
+    } catch (error) {
+      logger.warn(`[Daemon] Stopping journal redrive failed: ${errorMessage(error)}`, error);
+    }
     this.managedSlotRedrive = undefined;
     this.managedSlotAcquisition?.acquisition.close();
     this.managedSlotAcquisition = undefined;
@@ -1196,6 +1203,7 @@ export class Daemon {
       daemonSessionId: this.daemonSessionId,
       timer: this.timer,
       managedSlotExclusion: this.managedSlotExclusionFactory(this.timer),
+      managedExecutionOwnership: () => this.managedExecutionReowner,
       missingDeviceMisses: this.deviceDisconnectMisses,
       installedAppsRepository: this.installedAppsRepository,
       deviceSessionRepository: this.deviceSessionRepository,
@@ -5141,7 +5149,7 @@ export class Daemon {
         // A shutdown release keeps the execution owner: the rehydrated session awaits its
         // owner (#11177).
         "managed execution release",
-        "the managed slot registry close",
+        "the journal redrive loop stop and the managed slot registry close",
         () => this.closeManagedExecutionRelease(),
       ),
       shutdownStage(

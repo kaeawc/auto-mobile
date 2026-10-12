@@ -4,6 +4,7 @@ import {
   ExecutionOwnerWatch,
   type ExecutionOwnerLossReason,
 } from "../../src/daemon/executionOwnerWatch";
+import { FakeLockOwnerGenerationProbe } from "../fakes/FakeLockOwnerGenerationProbe";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 // #11176: a managed slot proxy must not renew its sessions after its execution owner is gone.
@@ -11,7 +12,10 @@ import { FakeTimer } from "../fakes/FakeTimer";
 const PARENT = 4100;
 const SUPERVISOR = 4200;
 
-function harness(options: { ownerPid?: number; launchParentPid?: number } = {}) {
+function harness(
+  options: { ownerPid?: number; launchParentPid?: number; ownerGenerationToken?: string } = {},
+  generation?: FakeLockOwnerGenerationProbe,
+) {
   const timer = new FakeTimer();
   const running = new Set([1, PARENT, SUPERVISOR]);
   let parent = options.launchParentPid ?? PARENT;
@@ -26,6 +30,7 @@ function harness(options: { ownerPid?: number; launchParentPid?: number } = {}) 
     },
     { isProcessRunning: (pid) => running.has(pid), currentParentPid: () => parent },
     timer,
+    generation,
   );
   return {
     timer,
@@ -149,5 +154,78 @@ describe("ExecutionOwnerWatch", () => {
     expect(watch.check()).toBe("owner-exited");
     await settle();
     expect(watch.check()).toBe("owner-exited");
+  });
+});
+
+describe("ExecutionOwnerWatch process generation", () => {
+  test.each([undefined, SUPERVISOR])(
+    "a live reused PID is lost exactly once (owner %s)",
+    async (ownerPid) => {
+      const generation = new FakeLockOwnerGenerationProbe();
+      const { timer, watch, losses } = harness({ ownerPid }, generation);
+      watch.start();
+      expect(generation.currentCalls).toEqual([ownerPid ?? PARENT]);
+      expect(generation.compareCalls).toHaveLength(0);
+      generation.verdict = "different";
+      timer.advanceTime(5 * EXECUTION_OWNER_CHECK_INTERVAL_MS);
+      await settle();
+      expect(losses).toHaveLength(1);
+      expect(losses[0].reason).toBe("owner-exited");
+      expect(losses[0].at).toBeLessThanOrEqual(5 * EXECUTION_OWNER_CHECK_INTERVAL_MS);
+      timer.advanceTime(10 * EXECUTION_OWNER_CHECK_INTERVAL_MS);
+      await settle();
+      expect(losses).toHaveLength(1);
+    },
+  );
+
+  test.each(["unknown", "throws", "capture-throws", "same"])(
+    "a live PID stays trusted when generation is %s",
+    async (kind) => {
+      const generation = new FakeLockOwnerGenerationProbe();
+      if (kind === "throws") {
+        generation.compareError = new Error("unreadable");
+      }
+      if (kind === "capture-throws") {
+        generation.currentError = new Error("unreadable");
+      }
+      if (kind === "same") {
+        generation.verdict = "same";
+      }
+      const { timer, watch, losses } = harness({ ownerPid: SUPERVISOR }, generation);
+      watch.start();
+      timer.advanceTime(20 * EXECUTION_OWNER_CHECK_INTERVAL_MS);
+      await settle();
+      expect(losses).toEqual([]);
+      watch.stop();
+    },
+  );
+
+  test("compares the supplied startup token without capturing another", () => {
+    const generation = new FakeLockOwnerGenerationProbe();
+    const { timer, watch } = harness(
+      { ownerPid: SUPERVISOR, ownerGenerationToken: "startup" },
+      generation,
+    );
+    watch.start();
+    timer.advanceTime(5 * EXECUTION_OWNER_CHECK_INTERVAL_MS);
+    expect(generation.currentCalls).toEqual([]);
+    expect(generation.compareCalls).toEqual([{ pid: SUPERVISOR, recorded: "startup" }]);
+    watch.stop();
+  });
+
+  test("generation comparison costs at most one per five checks; PID death takes one interval", async () => {
+    const generation = new FakeLockOwnerGenerationProbe();
+    const { timer, watch, losses, kill } = harness({}, generation);
+    watch.start();
+    for (let check = 1; check <= 16; check++) {
+      timer.advanceTime(EXECUTION_OWNER_CHECK_INTERVAL_MS);
+      expect(generation.compareCalls).toHaveLength(Math.floor((check + 1) / 5));
+    }
+    kill(PARENT);
+    timer.advanceTime(EXECUTION_OWNER_CHECK_INTERVAL_MS);
+    await settle();
+    expect(losses).toEqual([
+      { at: 17 * EXECUTION_OWNER_CHECK_INTERVAL_MS, reason: "owner-exited" },
+    ]);
   });
 });

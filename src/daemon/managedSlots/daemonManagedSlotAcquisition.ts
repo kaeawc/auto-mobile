@@ -10,7 +10,10 @@ import {
   FileAvdConfigReader,
   type AvdConfigReader,
 } from "../../utils/android-cmdline-tools/AvdConfigReader";
-import { listInstalledSystemImages } from "../../utils/android-cmdline-tools/avdmanager";
+import {
+  listDevices,
+  listInstalledSystemImages,
+} from "../../utils/android-cmdline-tools/avdmanager";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import type { Timer } from "../../utils/SystemTimer";
 import { runAsManagedSlotReconciler } from "./managedSlotExclusion";
@@ -34,6 +37,7 @@ import {
   DefaultManagedSpecResolver,
   ManagedSlotReconciler,
   type ManagedAndroidImageCatalog,
+  type ManagedAndroidProfileCatalog,
 } from "./reconciler";
 import {
   SlotJournalRedriveLoop,
@@ -73,6 +77,7 @@ export interface DaemonManagedSlotTooling {
   deviceManager?: Pick<PlatformDeviceManager, "listDeviceImages">;
   androidConfigReader?: Pick<AvdConfigReader, "readConfig">;
   androidImageCatalog?: ManagedAndroidImageCatalog;
+  androidProfileCatalog?: ManagedAndroidProfileCatalog;
   iosRuntimeCatalog?: ExactIosRuntimeCatalog;
   /** Defaults to the process-wide boot admission gates. */
   checkBootCapacity?: ManagedSlotBootCapacityAssertion;
@@ -85,12 +90,18 @@ const sdkAndroidImageCatalog: ManagedAndroidImageCatalog = {
     ),
 };
 
+const sdkAndroidProfileCatalog: ManagedAndroidProfileCatalog = {
+  listProfileIds: async (signal) =>
+    (await listDevices(undefined, signal)).map((profile) => profile.id),
+};
+
 /** The injected tooling with the host's real tooling filled in. */
 function hostTooling(tooling: DaemonManagedSlotTooling = {}) {
   return {
     deviceManager: tooling.deviceManager ?? new MultiPlatformDeviceManager(),
     androidConfigReader: tooling.androidConfigReader ?? new FileAvdConfigReader(),
     androidImageCatalog: tooling.androidImageCatalog ?? sdkAndroidImageCatalog,
+    androidProfileCatalog: tooling.androidProfileCatalog ?? sdkAndroidProfileCatalog,
     // The simulator catalog exists only where simctl does.
     iosRuntimeCatalog:
       tooling.iosRuntimeCatalog ??
@@ -139,6 +150,7 @@ export function createDaemonManagedSlotAcquisition(
         matcher: new DefaultManagedSpecMatcher(androidConfigReader),
         resolver: new DefaultManagedSpecResolver(tooling.iosRuntimeCatalog, {
           androidImageCatalog: tooling.androidImageCatalog,
+          androidProfileCatalog: tooling.androidProfileCatalog,
         }),
         provisioner: new ToolManagedSlotProvisioner({
           invokeTool,

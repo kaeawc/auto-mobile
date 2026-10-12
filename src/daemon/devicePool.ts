@@ -8543,6 +8543,7 @@ export class DevicePool {
         sessionUuid: string;
         owned: boolean;
         restartHandoff: boolean;
+        target: RehydrationDeviceReservation["target"];
         deviceId: string;
         retryAfterMs: number;
       }
@@ -8562,6 +8563,7 @@ export class DevicePool {
         sessionUuid,
         owned: this.ownsRestartReservation(sessionUuid, requester),
         restartHandoff: target.restartHandoff === true,
+        target,
         deviceId: target.deviceId,
         retryAfterMs:
           target.scheduledDeadlineMs === undefined

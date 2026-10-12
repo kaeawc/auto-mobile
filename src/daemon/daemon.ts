@@ -3625,7 +3625,9 @@ export class Daemon {
     // Reconciliation can quarantine identity and cancel in-flight work. During
     // allocation, discovery supplies only presence evidence for miss counting.
     if (!planActive) {
-      await this.devicePool.reconcileDiscoveryObservation(discovery.devices, "disconnect-monitor");
+      await this.devicePool.reconcileDiscoveryObservation(discovery.devices, "disconnect-monitor", {
+        settleMembership: true,
+      });
     }
     return discovery;
   }

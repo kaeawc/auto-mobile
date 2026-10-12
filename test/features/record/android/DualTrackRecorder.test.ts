@@ -121,6 +121,37 @@ describe("DualTrackRecorder", () => {
     recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer);
   });
 
+  describe("tool-driven input is not recorded by design (#11919)", () => {
+    test("accessibility gesture events without kernel touch events produce no steps", async () => {
+      await recorder.start();
+      for (const type of ["tap", "longPress", "scroll", "stateChange"]) {
+        fakeA11y.emit({ type, timestamp: fakeTimer.now(), element: TAP_ELEMENT });
+      }
+      fakeTimer.advanceTime(MERGE_WINDOW_MS * 2 + 1);
+      expect(recorder.stepCount).toBe(0);
+      expect(await recorder.stop()).toEqual({ steps: [], stepCount: 0 });
+    });
+
+    test("an inputText event alone still produces one sendKeys step", async () => {
+      await recorder.start();
+      fakeA11y.emit({
+        type: "inputText",
+        timestamp: fakeTimer.now(),
+        element: TAP_ELEMENT,
+        text: "hello",
+      });
+      fakeTimer.advanceTime(MERGE_WINDOW_MS * 2 + 1);
+      const result = await recorder.stop();
+      expect(result.stepCount).toBe(1);
+      expect(result.steps).toEqual([
+        {
+          tool: "sendKeys",
+          params: { commands: [{ action: "type", text: "hello", operation: "replace" }] },
+        },
+      ]);
+    });
+  });
+
   test.each([
     { x: 280, y: 840, hit: true },
     { x: 420, y: 940, hit: true },

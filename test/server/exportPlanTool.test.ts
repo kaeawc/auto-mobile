@@ -115,18 +115,18 @@ describe("exportPlan tool", () => {
     expect(tool.outputSchema.parse(payload)).toEqual(payload);
   });
 
-  test("nothing captured is an error with the original payload", async () => {
+  test("nothing captured is a typed user-input failure", async () => {
+    const error = new realTestRecordingManager.NoUserInputCapturedError();
     mock.module("../../src/server/testRecordingManager", () => ({
-      stopTestRecording: mock(() =>
-        Promise.reject(new Error("No recorded interactions were captured.")),
-      ),
+      stopTestRecording: mock(() => Promise.reject(error)),
       getTestRecordingStatus: mockGetTestRecordingStatus,
     }));
     const response = await ToolRegistry.getTool("exportPlan")!.handler({});
-    const payload = { success: false, error: "No recorded interactions were captured." };
+    const payload = { success: false, error: error.message, reason: "no_user_input_captured" };
     expect(response.isError).toBe(true);
     expect(response.structuredContent).toEqual(payload);
     expect(JSON.parse(response.content[0].text)).toEqual(payload);
+    expect(ToolRegistry.getTool("exportPlan")!.outputSchema.parse(payload)).toEqual(payload);
   });
 
   test("returns error when no active recording", async () => {

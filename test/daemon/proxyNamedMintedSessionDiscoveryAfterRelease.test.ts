@@ -47,10 +47,19 @@ let client: FakeDaemonClient;
 let proxy: DaemonMcpProxy;
 let spies: Array<ReturnType<typeof spyOn>>;
 let timer: FakeTimer;
-let markedReadError: boolean | undefined;
+let namedReadResponse: { fail: boolean; marked: boolean } | undefined;
+
+function namedReadResult(response: { fail: boolean; marked: boolean }) {
+  // Even an admission echo cannot override the do-not-remember marker on errors.
+  const result = withRoutedSessionMeta(
+    { content: [{ type: "text", text: "read result" }], isError: response.fail },
+    response.fail ? "ownerless-session" : undefined,
+  );
+  return response.marked ? withForeignOwnedSessionMeta(result, "ownerless-session") : result;
+}
 
 const setUp = (): void => {
-  markedReadError = undefined;
+  namedReadResponse = undefined;
   timer = new FakeTimer();
   client = new FakeDaemonClient({
     daemonMethodResults: new Map<string, unknown>([
@@ -75,15 +84,8 @@ const setUp = (): void => {
                   },
                 ],
               }
-            : name === "observe" && markedReadError !== undefined
-              ? withForeignOwnedSessionMeta(
-                  // Even an admission echo cannot override the do-not-remember marker on errors.
-                  withRoutedSessionMeta(
-                    { content: [{ type: "text", text: "read result" }], isError: markedReadError },
-                    markedReadError ? "ownerless-session" : undefined,
-                  ),
-                  "ownerless-session",
-                )
+            : name === "observe" && namedReadResponse !== undefined
+              ? namedReadResult(namedReadResponse)
               : // The daemon echoes the session an admitted control call used (#10974).
                 withRoutedSessionMeta(
                   { content: [{ type: "text", text: "ok" }] },
@@ -131,14 +133,10 @@ beforeEach(setUp);
 afterEach(tearDown);
 
 test.each([false, true])(
-  "a marked named read is never remembered, bound or heartbeated (failure=%s)",
+  "a marked named read leaves the next call without the session and discovery unfenced (failure=%s)",
   async (fail) => {
-    markedReadError = fail;
+    namedReadResponse = { fail, marked: true };
     await proxy.callTool("observe", { sessionUuid: "ownerless-session" });
-    timer.advanceTime(4_000);
-    expect(
-      client.callDaemonMethodCalls.filter((call) => call.method === "daemon/heartbeat"),
-    ).toEqual([]);
     await proxy.callTool("observe", {});
     const next = client.callToolCalls.at(-1)!.params;
     expect(next.sessionUuid).toBeUndefined();
@@ -149,6 +147,17 @@ test.each([false, true])(
       "lazy-expiry",
     );
     await expect(proxy.listTools()).resolves.toEqual(TOOLS);
+  },
+);
+
+test.each([false, true])(
+  "control: the same named read without the marker binds the session carried by the next call (failure=%s)",
+  async (fail) => {
+    namedReadResponse = { fail, marked: false };
+    await proxy.callTool("observe", { sessionUuid: "ownerless-session" });
+    await proxy.callTool("observe", {});
+    const next = client.callToolCalls.at(-1)!.params;
+    expect(next.sessionUuid).toBe("ownerless-session");
   },
 );
 

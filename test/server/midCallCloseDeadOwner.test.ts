@@ -36,6 +36,7 @@ const PROBE = "slowProbe";
 const FIRST = "first-connection";
 const CLOSING = "closing-connection";
 const READ_PROBE = "ownerlessReadProbe";
+const PLAIN_READ_PROBE = "ownerlessPlainReadProbe";
 const READER = "reading-connection";
 const ELAPSED_MS = 123;
 
@@ -63,6 +64,7 @@ describe("a connection that closed while its explicit-sessionUuid call was in fl
     await setUp();
     try {
       await callRead();
+      await callPlainRead();
     } finally {
       await tearDown();
     }
@@ -136,6 +138,13 @@ describe("a connection that closed while its explicit-sessionUuid call was in fl
       },
       { deviceReadiness: "booted", deviceReadOnly: true },
     );
+    ToolRegistry.register(
+      PLAIN_READ_PROBE,
+      PLAIN_READ_PROBE,
+      z.object({ sessionUuid: z.string() }),
+      async () => ({ content: [{ type: "text", text: "plain read" }] }),
+      { readOnly: true },
+    );
     fixture = new McpTestFixture({ daemonMode: true });
     await fixture.setup();
   }
@@ -146,6 +155,7 @@ describe("a connection that closed while its explicit-sessionUuid call was in fl
     fixture = undefined;
     DaemonState.getInstance().reset();
     manager.stopCleanupTimer();
+    ToolRegistry.unregister(PLAIN_READ_PROBE);
     restoreDeviceSessionManager();
     restoreToolCallRepository();
     restoreHermeticServer();
@@ -189,6 +199,16 @@ describe("a connection that closed while its explicit-sessionUuid call was in fl
     );
   }
 
+  function callPlainRead(connection = READER) {
+    return fixture!.client.callTool({
+      name: PLAIN_READ_PROBE,
+      arguments: {
+        sessionUuid: sessionId,
+        [INTERNAL_MCP_SESSION_PARAM]: connection,
+      },
+    });
+  }
+
   async function expectDisconnectRelease(remainingMs: number) {
     timer.advanceTime(remainingMs - 1);
     await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
@@ -223,6 +243,42 @@ describe("a connection that closed while its explicit-sessionUuid call was in fl
       expect(foreignOwnedSessionUuidFromResult(result)).toBe(sessionId);
     },
   );
+
+  test("a plain read naming an ownerless session is marked without adopting it or moving its release or stamps", async () => {
+    timer.advanceTime(ELAPSED_MS);
+    const before = stamps();
+    const remaining = pool.holderReleaseRemainingMs(sessionId);
+    expect(remaining).toBe(OWNER_DISCONNECT_GRACE_MS - ELAPSED_MS);
+
+    const result = await callPlainRead();
+    expect(result.isError).not.toBe(true);
+    expect(result.content).toEqual([{ type: "text", text: "plain read" }]);
+    expect(foreignOwnedSessionUuidFromResult(result)).toBe(sessionId);
+    expect(pool.isSessionOwnedByConnection(sessionId, READER)).toBe(false);
+    expect(pool.isSessionOwnedByOtherConnection(sessionId, "an-unrelated-connection")).toBe(false);
+    expect(pool.holderReleaseRemainingMs(sessionId)).toBe(remaining);
+    expect(stamps()).toEqual(before);
+    await expectDisconnectRelease(OWNER_DISCONNECT_GRACE_MS - ELAPSED_MS);
+  });
+
+  test("the owner's own plain read keeps ownership and carries no do-not-remember marker", async () => {
+    const reclaim = callProbe(FIRST);
+    await entered.promise;
+    proceed.resolve();
+    await reclaim;
+    timer.advanceTime(ELAPSED_MS);
+    const before = stamps();
+    const remaining = pool.holderReleaseRemainingMs(sessionId);
+
+    const result = await callPlainRead(FIRST);
+    expect(result.isError).not.toBe(true);
+    expect(result.content).toEqual([{ type: "text", text: "plain read" }]);
+    expect(foreignOwnedSessionUuidFromResult(result)).toBeUndefined();
+    expect(pool.isSessionOwnedByConnection(sessionId, FIRST)).toBe(true);
+    expect(pool.resolveAutolockSessionForMcpSession(FIRST)).toBe(sessionId);
+    expect(pool.holderReleaseRemainingMs(sessionId)).toBe(remaining);
+    expect(stamps()).toEqual(before);
+  });
 
   test("the owner's own read keeps ownership and carries no do-not-remember marker", async () => {
     const reclaim = callProbe(FIRST);

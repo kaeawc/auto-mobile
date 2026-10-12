@@ -1441,7 +1441,6 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       // A read never adopts an ownerless session or starts the proxy's owner heartbeat (#11557).
       const session =
         daemonMode &&
-        tool.requiresDevice &&
         tool.isDeviceReadOnlyCall?.(parsedParams) === true &&
         implicitAutolockMcpSessionId
           ? state.getSessionManager().getSession(providedSessionUuid)

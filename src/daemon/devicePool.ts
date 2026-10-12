@@ -608,6 +608,10 @@ export interface PooledDevice {
    *   observed disappearance. A disagreement NEVER lifts the quarantine on the
    *   old entry by itself.
    *
+   * Membership is settled by the refresh sweep, assignment liveness, and the
+   * explicit single-serial start / disconnect-monitor settlement paths. FUNNEL 1
+   * itself remains membership-free so callers may hold the assignment mutex.
+   *
    * The five consumers that read this state:
    *
    * 1. **Assignment** — the shared gate
@@ -744,6 +748,7 @@ export interface TargetDeviceDiscoveryOptions {
   readinessReservationOwners?: ReadonlySet<symbol>;
   sourceImage?: DeviceInfo;
   isLaunchProcessAlive?: () => boolean;
+  expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">;
   unavailableMessage: string;
   platform: Platform;
   operation: (snapshot: TargetDeviceDiscoverySnapshot) => Promise<string | undefined>;
@@ -816,6 +821,13 @@ export interface DeviceSessionExecutionCanceller {
  * ([#6888](https://github.com/kaeawc/auto-mobile/pull/6888) review).
  */
 export interface DiscoveryReconcileOptions {
+  /**
+   * Only the disconnect-monitor tick sets this. After the membership-free FUNNEL 1
+   * pass, the pool settles membership (under the assignment mutex) for each Android
+   * observation whose RESOLVED name disagrees with the pooled entry on that serial.
+   * The caller must NOT hold the assignment mutex.
+   */
+  readonly settleMembership?: boolean;
   /** The execution that performed this discovery; exempt from quarantine cancellation. */
   readonly excludeExecutionId?: string;
   /**
@@ -4614,7 +4626,8 @@ export class DevicePool {
     return this.missingDeviceLiveness.shouldValidatePooledDevicePresence(device);
   }
 
-  private hasReusableSerial(device: PooledDevice): boolean {
+  /** Whether this pooled entry uses an Android emulator serial that can be reassigned. */
+  hasReusableSerial(device: PooledDevice): boolean {
     return this.missingDeviceLiveness.hasReusableSerial(device);
   }
 
@@ -8655,6 +8668,7 @@ export class DevicePool {
       readinessReservationOwners,
       sourceImage: verifiedAndroidAvdIdentity ?? sourceImage,
       isLaunchProcessAlive: launchProcessLiveness(childProcess),
+      expectedIdentity,
       unavailableMessage: `Device '${deviceId}' is not available in the device pool.`,
       platform,
       operation: async (snapshot) => {
@@ -9174,6 +9188,7 @@ export class DevicePool {
     readinessReservationOwners,
     sourceImage,
     isLaunchProcessAlive,
+    expectedIdentity,
     unavailableMessage,
     platform,
     operation,
@@ -9186,6 +9201,8 @@ export class DevicePool {
       probeTimeoutMs: ANDROID_OFFLINE_PROBE_TIMEOUT_MS,
       getSignal: getAbortSignal,
       isLaunchProcessAlive,
+      hasResolvedRuntime:
+        expectedIdentity?.platform === "android" && expectedIdentity.deviceId === deviceId,
     });
     while (true) {
       throwIfRequestAborted();
@@ -9680,12 +9697,121 @@ export class DevicePool {
     return runtimeReplaced;
   }
 
-  reconcileDiscoveryObservation(
+  /** Fresh, single-serial membership settlement before a start claims its runtime. */
+  async settlePooledRuntimeIdentity(
+    deviceId: string,
+    options: { platform?: Platform; signal?: AbortSignal; totalDeadlineMs?: number } = {},
+  ): Promise<"no-entry" | "matched" | "replaced" | "unsettled"> {
+    const { signal = getAbortSignal() } = options;
+    const assertNotAborted = () => {
+      signal?.throwIfAborted();
+      throwIfRequestAborted();
+    };
+    assertNotAborted();
+    const pooled = this.devices.get(deviceId);
+    if (!pooled) {
+      return "no-entry";
+    }
+    if (!this.hasReusableSerial(pooled)) {
+      return "unsettled";
+    }
+    const platform = options.platform ?? pooled.platform;
+    const deadlineMs = Math.min(
+      options.totalDeadlineMs ?? Infinity,
+      this.timer.now() + ANDROID_OFFLINE_PROBE_TIMEOUT_MS,
+    );
+    let discovery: BootedDeviceDiscovery;
+    try {
+      discovery = await raceWithDeadline(() => this.takeFreshPresenceDiscovery(platform), {
+        timer: this.timer,
+        signal,
+        timeoutMs: Math.max(0, deadlineMs - this.timer.now()),
+        label: "Pooled runtime identity discovery",
+        timeoutError: () => new BootedDeviceDiscoveryIncompleteError(platform, undefined),
+      });
+    } catch (error) {
+      assertNotAborted();
+      logger.warn(`Pooled runtime identity discovery failed for ${deviceId}`, error);
+      return "unsettled";
+    }
+    assertNotAborted();
+    if (!didSourceSucceedForDevice(discovery, platform, deviceId)) {
+      return "unsettled";
+    }
+    const observation = discovery.devices.find((device) => device.deviceId === deviceId);
+    if (!observation) {
+      return "unsettled";
+    }
+    return raceWithDeadline(
+      () => this.settleObservedPooledRuntimeIdentity(observation, signal, deadlineMs),
+      {
+        timer: this.timer,
+        signal,
+        timeoutMs: Math.max(0, deadlineMs - this.timer.now()),
+        label: "Pooled runtime identity settlement",
+        timeoutError: () => new BootedDeviceDiscoveryIncompleteError(platform, undefined),
+      },
+    );
+  }
+
+  /** Monitor-only membership pass over evidence already folded through FUNNEL 1. */
+  private async settleObservedRuntimeIdentities(devices: readonly BootedDevice[]): Promise<void> {
+    for (const observation of devices) {
+      const pooled = this.devices.get(observation.deviceId);
+      if (
+        observation.platform === "android" &&
+        pooled &&
+        this.hasReusableSerial(pooled) &&
+        !this.runtimeIdentity.hasUnresolvedEmulatorName(observation) &&
+        !this.matchesRuntimeIdentity(pooled, observation)
+      ) {
+        await this.settleObservedPooledRuntimeIdentity(observation);
+      }
+    }
+  }
+
+  private settleObservedPooledRuntimeIdentity(
+    observation: BootedDevice,
+    signal = getAbortSignal(),
+    deadlineMs = Infinity,
+  ): Promise<"no-entry" | "matched" | "replaced" | "unsettled"> {
+    return this.assignmentMutex.runExclusive(async () => {
+      signal?.throwIfAborted();
+      throwIfRequestAborted();
+      const current = this.devices.get(observation.deviceId);
+      if (!current) {
+        return "no-entry";
+      }
+      if (
+        !this.hasReusableSerial(current) ||
+        this.timer.now() >= deadlineMs ||
+        this.runtimeIdentity.hasUnresolvedEmulatorName(observation) ||
+        this.runtimeIdentity.comparePooledIdentityEvidence(current, observation) === "stale"
+      ) {
+        return "unsettled";
+      }
+      if (await this.foldObservationIntoPooledEntry(current, observation, "refresh")) {
+        return "replaced";
+      }
+      const settled = this.devices.get(observation.deviceId);
+      return !settled
+        ? "no-entry"
+        : this.matchesRuntimeIdentity(settled, observation) && !settled.identityUnresolved
+          ? "matched"
+          : "unsettled";
+    });
+  }
+
+  async reconcileDiscoveryObservation(
     devices: readonly BootedDevice[],
     source: string,
     options: DiscoveryReconcileOptions = {},
   ): Promise<void> {
-    return this.runtimeIdentity.reconcileDiscoveryObservation(devices, source, options);
+    const { settleMembership, ...identityOptions } = options;
+    await this.runtimeIdentity.reconcileDiscoveryObservation(devices, source, identityOptions);
+    if (settleMembership === true && !options.signal?.aborted) {
+      await this.settleObservedRuntimeIdentities(devices);
+    }
   }
 
   /** Explicit routing state shared with adb clients; no process-global alias cache. */

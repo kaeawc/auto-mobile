@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type {
   StreamSubscriptionKind,
   StreamSubscriptionEndReason,
@@ -67,6 +68,15 @@ export interface WebRtcStreamSocketRequest extends SocketRequest {
  * parameters differ from a viewer-created stream replaces it, ending those viewers with
  * stopped_by_owner. Parameter errors name keys only, never values or tokens.
  */
+export const webRtcStreamSocketResponseSchema = z
+  .object({
+    type: z.literal("webrtc_stream_response"),
+    success: z.boolean(),
+    id: z.string().optional(),
+    error: z.string().optional(),
+  })
+  .passthrough();
+
 export interface WebRtcStreamSocketResponse extends SocketResponse {
   type: "webrtc_stream_response";
   action?: WebRtcStreamAction;

@@ -18,18 +18,30 @@ import { toActionableError } from "../models/ActionableError";
 const isProcessRunningWithDebug = (pid: number): boolean =>
   defaultIsProcessRunning(pid, { debugLog: logger.debug });
 
+/** Verdict on whether a LIVE pid is still the process generation a lock recorded. */
+export type LockOwnerGenerationVerdict = "same" | "different" | "unknown";
+export interface LockOwnerGenerationProbe {
+  /** Token for a lock pid is taking now; undefined when unavailable. Must not throw. */
+  current(pid: number): string | undefined;
+  /** Compare a live pid with its recorded token; unknown means unreadable/incomparable. Must not throw. */
+  compare(pid: number, recorded: string): LockOwnerGenerationVerdict;
+}
+
 /**
  * The canonical cross-process file-lock primitive (issue #2794).
  *
  * A lock file created atomically via `O_CREAT | O_EXCL` (`wx`) holding the owner
  * PID. Two racers can't both win — the atomic create decides — and a lock left
- * by a dead holder is reclaimed on the next attempt via a PID liveness check.
+ * by a dead holder is reclaimed via PID liveness or a provably different OS
+ * generation. Line 2 is the owner token, line 3 metadata, and line 4 the optional
+ * OS generation token; older locks retain PID-only liveness behavior.
  *
  * Both `DaemonManager` (start/stop coordination, non-blocking single attempt)
  * and the DB `FileMigrationLock` (bounded busy-wait) build on this so there is
  * "one canonical primitive per concern" rather than two copies of the subtle
  * `O_EXCL` + stale-reclaim logic.
  */
+
 export interface ExclusiveLockOptions {
   /** Owner PID written into the lock file (defaults to `process.pid`). */
   pid?: number;
@@ -70,8 +82,8 @@ export interface ExclusiveLockOptions {
    * reclaimable leak). The PID stays on the first line so daemon liveness reads and
    * {@link releaseExclusiveLock}'s PID compare are unaffected. The positional format
    * ("line 1 = bare integer PID, line 2 = token") is centralized in the
-   * {@link formatLockContent} / {@link parseLockContent} pair, so a future third
-   * field is added there and cannot silently move the PID off line 1 (#3006).
+   * {@link formatLockContent} / {@link parseLockContent} pair, so additional
+   * fields are added there and cannot silently move the PID off line 1 (#3006).
    *
    * Must be a NON-EMPTY, single-line, whitespace-free token (a UUID satisfies
    * this). The lock body is `trim()`-ed on read to tolerate a trailing newline, so
@@ -87,6 +99,8 @@ export interface ExclusiveLockOptions {
    * encode it before passing it here.
    */
   metadata?: string;
+  /** Omitted retains PID-only behavior and writes no generation line. */
+  ownerGeneration?: LockOwnerGenerationProbe;
 }
 
 /**
@@ -96,7 +110,7 @@ export interface ExclusiveLockOptions {
  * `parseInt`-based readers (daemon liveness, and historically {@link releaseExclusiveLock})
  * stay correct; the per-process token, when present, is line 2. This helper pair
  * ({@link formatLockContent} / {@link parseLockContent}) is the single place that
- * encodes that contract, so any future third field is added HERE — line 1 stays a
+ * encodes that contract: metadata is line 3 and OS generation is line 4. Line 1 stays a
  * bare integer by construction rather than by every call site remembering to
  * (issue #3006, follow-up 2).
  */
@@ -107,15 +121,25 @@ export interface LockContent {
   token: string | undefined;
   /** Optional caller-defined metadata (line 3). */
   metadata?: string;
+  /** Optional OS process-generation token (line 4). */
+  generation?: string;
 }
 
 /**
  * Serialize a lock file body. PID on line 1 (bare integer, always), token on an
- * optional line 2, and opaque metadata on an optional line 3. Inverse of
+ * optional line 2, opaque metadata on line 3, and OS generation on line 4. Inverse of
  * {@link parseLockContent}. Centralizes the positional format so a future field
  * can't silently move the PID off line 1 (#3006).
  */
-export function formatLockContent(pid: number, ownerToken?: string, metadata?: string): string {
+export function formatLockContent(
+  pid: number,
+  ownerToken?: string,
+  metadata?: string,
+  generation?: string,
+): string {
+  if (generation !== undefined) {
+    return `${pid}\n${ownerToken ?? ""}\n${metadata ?? ""}\n${generation}`;
+  }
   if (metadata === undefined) {
     return ownerToken === undefined ? String(pid) : `${pid}\n${ownerToken}`;
   }
@@ -124,12 +148,12 @@ export function formatLockContent(pid: number, ownerToken?: string, metadata?: s
 
 /**
  * Parse a lock file body (already `trim()`-ed by the caller) into its PID and
- * optional token and metadata. Line 1 is parsed as an integer PID (`NaN` when
+ * optional token, metadata, and generation. Line 1 is parsed as an integer PID (`NaN` when
  * unreadable); line 2, if present, is the token; line 3 is caller-defined
- * metadata. Inverse of {@link formatLockContent} (#3006).
+ * metadata; line 4 is the OS generation token. Inverse of {@link formatLockContent} (#3006).
  */
 export function parseLockContent(content: string): LockContent {
-  const [pidLine, tokenLine, metadataLine] = content.split("\n", 3);
+  const [pidLine, tokenLine, metadataLine, generationLine] = content.split("\n", 4);
   const rawPid = Number.parseInt(pidLine, 10);
   // A PID <= 0 is never a real single-process owner: `process.kill(0, 0)`
   // signals the current process group and `process.kill(-1, 0)` signals
@@ -146,6 +170,9 @@ export function parseLockContent(content: string): LockContent {
   if (metadataLine) {
     parsed.metadata = metadataLine;
   }
+  if (generationLine) {
+    parsed.generation = generationLine;
+  }
   return parsed;
 }
 
@@ -161,9 +188,8 @@ export function tryAcquireExclusiveLock(
   const isProcessRunning = options.isProcessRunning ?? isProcessRunningWithDebug;
   const reclaimOwnPid = options.reclaimOwnPid ?? false;
   const ownerToken = options.ownerToken;
-  const metadata = options.metadata;
 
-  if (writeExclusiveLockFile(lockFilePath, pid, ownerToken, metadata)) {
+  if (writeExclusiveLockFile(lockFilePath, pid, options)) {
     return true;
   }
 
@@ -178,26 +204,32 @@ export function tryAcquireExclusiveLock(
     //
     // Known limitation: a crash in the microsecond window between the `wx` create
     // and the PID write leaves an empty file that is never reclaimable. This is
-    // astronomically rare (the create+write is a single synchronous burst) and is
-    // shared with the daemon lock; tracked as a follow-up, not fixed here.
+    // astronomically rare (generation is captured before create, so create+write
+    // remains a single synchronous burst) and is shared with the daemon lock;
+    // tracked as a follow-up, not fixed here.
     return false;
   }
 
-  // The PID is the first line; a per-process-instance token (if any) is the
-  // second (see `writeExclusiveLockFile`). `parseLockContent` reads only the PID
-  // off line 1, keeping the positional contract in one place (#3006).
-  const { pid: ownerPid, token: tokenLine } = parseLockContent(content);
+  // `parseLockContent` reads the PID on line 1, owner token on line 2, metadata
+  // on line 3, and OS generation token on line 4, keeping the positional contract
+  // in one place (#3006, #11812).
+  const observedOwner = parseLockContent(content);
+  const { pid: ownerPid, token: tokenLine, generation } = observedOwner;
   if (Number.isNaN(ownerPid)) {
     // Unreadable PID — a writer may still be filling it in; treat as held.
     return false;
   }
 
   const isOwnStaleLeak = isOwnStaleLock(ownerPid, tokenLine, pid, ownerToken, reclaimOwnPid);
-  if (isProcessRunning(ownerPid) && !isOwnStaleLeak) {
+  if (
+    !isOwnStaleLeak &&
+    isProcessRunning(ownerPid) &&
+    compareLockOwnerGeneration(options.ownerGeneration, ownerPid, generation) !== "different"
+  ) {
     return false;
   }
 
-  return reclaimExclusiveLock(lockFilePath, pid, ownerToken, metadata, ownerPid, tokenLine);
+  return reclaimExclusiveLock(lockFilePath, options, observedOwner);
 }
 
 function readContendedLockContent(lockFilePath: string): string | undefined {
@@ -235,12 +267,10 @@ function isOwnStaleLock(
 
 function reclaimExclusiveLock(
   lockFilePath: string,
-  pid: number,
-  ownerToken: string | undefined,
-  metadata: string | undefined,
-  ownerPid: number,
-  tokenLine: string | undefined,
+  options: ExclusiveLockOptions,
+  observedOwner: LockContent,
 ): boolean {
+  const pid = options.pid ?? process.pid;
   // Dead holder (or our own recycled PID under reclaimOwnPid) — reclaim it.
   //
   // Do NOT unlink-by-path here: two openers can both read the same stale PID, and
@@ -248,7 +278,7 @@ function reclaimExclusiveLock(
   // then both `wx`-create — so both would "own" it and enter migrateToLatest()
   // concurrently, reintroducing the PRIMARY KEY collision this lock prevents.
   //
-  // Rename the path to a per-PID marker, then re-read the marker's PID and token.
+  // Rename the path to a per-PID marker, then re-read the marker's PID, token, and generation.
   // A competing opener may have replaced the stale path before our rename, so the
   // rename alone does not prove that we claimed the instance we judged stale.
   // The final `wx` create still arbitrates with a third opener after reclaim.
@@ -268,12 +298,16 @@ function reclaimExclusiveLock(
     logger.warn(`src/utils/fileLock.ts: reclaimed marker unreadable at ${reclaimMarker}: ${error}`);
   }
   const claimedOwner = claimedContent === undefined ? undefined : parseLockContent(claimedContent);
-  if (claimedOwner?.pid !== ownerPid || claimedOwner?.token !== tokenLine) {
+  if (
+    claimedOwner?.pid !== observedOwner.pid ||
+    claimedOwner?.token !== observedOwner.token ||
+    claimedOwner?.generation !== observedOwner.generation
+  ) {
     restoreDisplacedLock(lockFilePath, reclaimMarker);
     return false;
   }
   removeStaleLockMarker(reclaimMarker);
-  return writeExclusiveLockFile(lockFilePath, pid, ownerToken, metadata);
+  return writeExclusiveLockFile(lockFilePath, pid, options);
 }
 
 function restoreDisplacedLock(lockFilePath: string, reclaimMarker: string): void {
@@ -320,6 +354,7 @@ function removeStaleLockMarker(reclaimMarker: string): void {
 export function readLockOwnerPid(
   lockFilePath: string,
   isProcessRunning: (pid: number) => boolean = isProcessRunningWithDebug,
+  ownerGeneration?: LockOwnerGenerationProbe,
 ): number | undefined {
   let content: string;
   try {
@@ -328,8 +363,15 @@ export function readLockOwnerPid(
     logger.debug(`src/utils/fileLock.ts readLockOwnerPid: lock unreadable: ${error}`, error);
     return undefined;
   }
-  const { pid } = parseLockContent(content);
+  const { pid, generation } = parseLockContent(content);
   if (Number.isNaN(pid) || !isProcessRunning(pid)) {
+    return undefined;
+  }
+  if (
+    generation !== undefined &&
+    ownerGeneration !== undefined &&
+    compareLockOwnerGeneration(ownerGeneration, pid, generation) === "different"
+  ) {
     return undefined;
   }
   return pid;
@@ -358,20 +400,13 @@ export function readExclusiveLockContent(lockFilePath: string): LockContent | un
 export function takeOverExclusiveLock(
   lockFilePath: string,
   observedOwner: Pick<LockContent, "pid" | "token">,
-  options: Pick<ExclusiveLockOptions, "pid" | "ownerToken" | "metadata"> = {},
+  options: Pick<ExclusiveLockOptions, "pid" | "ownerToken" | "metadata" | "ownerGeneration"> = {},
 ): boolean {
   const current = readExclusiveLockContent(lockFilePath);
   if (current?.pid !== observedOwner.pid || current.token !== observedOwner.token) {
     return false;
   }
-  return reclaimExclusiveLock(
-    lockFilePath,
-    options.pid ?? process.pid,
-    options.ownerToken,
-    options.metadata,
-    observedOwner.pid,
-    observedOwner.token,
-  );
+  return reclaimExclusiveLock(lockFilePath, options, current);
 }
 
 /**
@@ -480,13 +515,13 @@ function isOwnLockContent(
 function writeExclusiveLockFile(
   lockFilePath: string,
   pid: number,
-  ownerToken?: string,
-  metadata?: string,
+  options: ExclusiveLockOptions,
 ): boolean {
   try {
     mkdirSync(dirname(lockFilePath), { recursive: true });
+    const generation = captureLockOwnerGeneration(options.ownerGeneration, pid);
     const fd = openSync(lockFilePath, "wx", 0o600);
-    writeFileSync(fd, formatLockContent(pid, ownerToken, metadata));
+    writeFileSync(fd, formatLockContent(pid, options.ownerToken, options.metadata, generation));
     closeSync(fd);
     return true;
   } catch (error) {
@@ -502,5 +537,43 @@ function writeExclusiveLockFile(
     // holds the lock" and let the caller busy-wait to a misleading migration-lock
     // timeout. Surface the real cause instead (#3623).
     throw toActionableError(error, `Failed to create exclusive lock file at ${lockFilePath}`);
+  }
+}
+
+function compareLockOwnerGeneration(
+  probe: LockOwnerGenerationProbe | undefined,
+  pid: number,
+  recorded: string | undefined,
+): LockOwnerGenerationVerdict {
+  if (probe === undefined || recorded === undefined) {
+    return "unknown";
+  }
+  try {
+    return probe.compare(pid, recorded);
+  } catch (error) {
+    // An unreadable sample proves nothing, so retaining the lock is safe.
+    logger.debug(`Lock owner generation comparison unavailable: ${errorMessage(error)}`);
+    return "unknown";
+  }
+}
+
+function captureLockOwnerGeneration(
+  probe: LockOwnerGenerationProbe | undefined,
+  pid: number,
+): string | undefined {
+  try {
+    const token = probe?.current(pid);
+    if (
+      token !== undefined &&
+      (token.length === 0 || token.includes("\n") || token.includes("\r"))
+    ) {
+      logger.debug("Ignoring invalid single-line lock owner generation token");
+      return undefined;
+    }
+    return token;
+  } catch (error) {
+    // Optional capture may fail safely: a tokenless lock retains PID-only protection.
+    logger.debug(`Lock owner generation capture unavailable: ${errorMessage(error)}`);
+    return undefined;
   }
 }

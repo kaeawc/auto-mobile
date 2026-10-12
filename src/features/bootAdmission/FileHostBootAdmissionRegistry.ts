@@ -1,3 +1,4 @@
+import { defaultLockOwnerGenerationProbe } from "../../daemon/lockOwnerGeneration";
 import { readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
@@ -9,6 +10,7 @@ import {
   releaseExclusiveLock,
   takeOverExclusiveLock,
   tryAcquireExclusiveLock,
+  type LockOwnerGenerationProbe,
 } from "../../utils/fileLock";
 import { sortedReaddirSync } from "../../utils/io";
 import { logger } from "../../utils/logger";
@@ -41,6 +43,7 @@ export interface FileHostBootAdmissionRegistryOptions {
   timer?: Timer;
   pid?: number;
   isProcessRunning?: (pid: number) => boolean;
+  ownerGeneration?: LockOwnerGenerationProbe;
   idGenerator?: IdGenerator;
   lockMaxAgeMs?: number;
 }
@@ -118,6 +121,7 @@ export class FileHostBootAdmissionRegistry implements HostBootAdmissionRegistry 
         pid: this.pid,
         ownerToken: token,
         isProcessRunning: this.running,
+        ownerGeneration: this.options.ownerGeneration ?? defaultLockOwnerGenerationProbe,
       });
       if (!acquired) {
         this.checkReadableLock(path);
@@ -138,6 +142,7 @@ export class FileHostBootAdmissionRegistry implements HostBootAdmissionRegistry 
       return false;
     }
     const acquired = takeOverExclusiveLock(path, observedOwner, {
+      ownerGeneration: this.options.ownerGeneration ?? defaultLockOwnerGenerationProbe,
       pid: this.pid,
       ownerToken: token,
     });

@@ -87,6 +87,102 @@ function track<T>(promise: Promise<T>) {
 describe("exact Android binding during transitional adb presence", () => {
   const test = warmedTests(() => sessions?.stopCleanupTimer());
 
+  for (const state of [undefined, "device"] as const) {
+    test(`adopted emulator re-discovers an absent snapshot with probe ${state ?? "unlisted"}`, async () => {
+      const h = await setup(true);
+      h.manager.androidListedDeviceStates.clear();
+      if (state) {
+        h.manager.androidListedDeviceStates.set(device.deviceId, state);
+      }
+      const pending = track(
+        h.pool.bindOrReuseDeviceSession(
+          "owner",
+          device.deviceId,
+          "android",
+          image,
+          undefined,
+          device,
+        ),
+      );
+      await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {
+        description: "adopted transport wait",
+      });
+      expect(pending.settled()).toBe(false);
+      h.unchanged();
+      h.manager.bootedDevices = [device];
+      h.manager.androidListedDeviceStates.set(device.deviceId, "device");
+      h.timer.advanceTime(100);
+      expect(await pending.result).toBe("owner");
+      expect(h.timer.now()).toBe(100);
+      expect(h.pool.getDevice(device.deviceId)).toBe(h.entry);
+      h.noLossSideEffects();
+    });
+  }
+
+  test("autolock adopts a resolved idle emulator when its absent transport returns", async () => {
+    const h = await setup(true);
+    h.manager.androidListedDeviceStates.clear();
+    const discovery = spyOn(h.manager, "getBootedDevicesDetailed");
+    try {
+      const pending = track(
+        h.pool.autolockDevice(device.deviceId, "android", "client", image, undefined, device),
+      );
+      await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {
+        description: "autolock adopted transport wait",
+      });
+      expect(pending.settled()).toBe(false);
+      expect(discovery).toHaveBeenCalledTimes(1);
+      expect((await discovery.mock.results[0]!.value).devices).toEqual([]);
+      h.unchanged();
+      h.manager.bootedDevices = [device];
+      h.manager.androidListedDeviceStates.set(device.deviceId, "device");
+      h.timer.advanceTime(100);
+      const sessionId = await pending.result;
+      expect(sessionId).toEqual(expect.any(String));
+      expect(discovery).toHaveBeenCalledTimes(2);
+      expect((await discovery.mock.results[1]!.value).devices).toEqual([device]);
+      expect(h.timer.now()).toBe(100);
+      expect(h.pool.getDevice(device.deviceId)).toBe(h.entry);
+      expect(h.entry?.sessionId).toBe(sessionId);
+      h.noLossSideEffects();
+    } finally {
+      discovery.mockRestore();
+      sessions.stopCleanupTimer();
+    }
+  });
+
+  test("adopted emulator whose transport never returns refuses retryably within budget", async () => {
+    const h = await setup(true);
+    h.manager.androidListedDeviceStates.clear();
+    const error = await settleByFakeEvents(
+      h.timer,
+      track(
+        h.pool.bindOrReuseDeviceSession(
+          "owner",
+          device.deviceId,
+          "android",
+          image,
+          undefined,
+          device,
+        ),
+      ).result,
+      { description: "adopted transport budget" },
+    );
+    expect(error).toBeInstanceOf(DeviceTransportOfflineError);
+    expect(error).toMatchObject({
+      code: "device_offline",
+      retryable: true,
+      retryAfterMs: 1000,
+      state: undefined,
+    });
+    expect(String(error)).toContain(
+      `adb did not list the previously resolved emulator '${device.deviceId}' steadily while binding (its transport was absent or flapping)`,
+    );
+    expect(String(error)).not.toContain("this request started");
+    expect(h.timer.now()).toBe(5000);
+    h.unchanged();
+  });
+
   for (const autolock of [false, true]) {
     test(`${autolock ? "autolock" : "explicit bind"}: live first-boot process holds offline then absent transport until the same serial returns`, async () => {
       const h = await setup(true);

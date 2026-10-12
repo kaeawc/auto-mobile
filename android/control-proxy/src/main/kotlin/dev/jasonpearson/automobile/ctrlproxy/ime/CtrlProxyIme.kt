@@ -68,6 +68,15 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
   private var cancelActiveCommit: ((String) -> Unit)? = null
   private var lastPriorImeId: String? = null
   private var commitGeneration = 0L
+  internal var inputConnectionGeneration = 0L
+    private set
+
+  internal var inputEditorIdentity: String? = null
+    private set
+
+  internal var inputStartedByRestart = false
+    private set
+
   internal var isInputStarted = false
     private set
 
@@ -128,6 +137,19 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
 
   override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
     super.onStartInput(attribute, restarting)
+    inputConnectionGeneration++
+    inputStartedByRestart = restarting
+    inputEditorIdentity = attribute?.let { info ->
+      listOf(
+          info.packageName,
+          info.fieldId.toString(),
+          info.inputType.toString(),
+          info.imeOptions.toString(),
+          info.hintText?.toString(),
+          info.fieldName,
+        )
+        .joinToString("") { value -> if (value == null) "-1:" else "${value.length}:$value" }
+    }
     isInputStarted = true
     if (attribute != null) {
       uiState =
@@ -168,11 +190,11 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
 
   override fun onFinishInput() {
     isInputStarted = false
-    cancelActiveCommit?.invoke("Editor disconnected during IME commit")
-    commitGeneration++
+    inputConnectionGeneration++
+    inputEditorIdentity = null
     session.onFinishInput(connectionAdapter())
     super.onFinishInput()
-    restoreLastIme()
+    if (cancelActiveCommit == null) restoreLastIme()
   }
 
   /** Null means no active editor connection; false means the editor rejected the action. */
@@ -197,6 +219,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     isCancelled: () -> Boolean = { false },
     delivery: ImeTextDelivery = ImeTextDelivery.COMMIT,
     timeoutMs: Long? = null,
+    requestDeadlineMs: Long = Long.MAX_VALUE,
     onResult: (ImeCommitResult) -> Unit,
   ) {
     mainHandler.post {
@@ -231,11 +254,12 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
         text = text,
         priorImeId = restoreId,
         driver = driver,
-        deadlineMs = SystemClock.uptimeMillis() + INPUT_CONNECTION_TIMEOUT_MS,
+        deadlineMs = connectionDeadlineMs(SystemClock.uptimeMillis(), requestDeadlineMs),
         generation = generation,
         isCancelled = isCancelled,
         delivery = delivery,
         commitBudgetMs = commitTimeoutMs(timeoutMs, ImeGraphemes.split(text).size),
+        requestDeadlineMs = requestDeadlineMs,
         onResult = ::finish,
       )
     }
@@ -250,11 +274,17 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
     isCancelled: () -> Boolean,
     delivery: ImeTextDelivery,
     commitBudgetMs: Long,
+    requestDeadlineMs: Long,
     onResult: (ImeCommitResult) -> Unit,
   ) {
     if (generation != commitGeneration) return
     if (isCancelled()) {
       onResult(ImeCommitResult(success = false, error = "IME commit cancelled"))
+      return
+    }
+    if (SystemClock.uptimeMillis() >= requestDeadlineMs) {
+      driver.restoreIfNeeded(priorImeId)
+      onResult(ImeCommitResult(success = false, error = "IME commit deadline exceeded"))
       return
     }
     val connection = currentInputConnection
@@ -286,6 +316,7 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
         SystemClock.uptimeMillis() + commitBudgetMs,
         isCancelled,
         delivery,
+        hardDeadlineMs = driverDeadlineMs(SystemClock.uptimeMillis(), requestDeadlineMs),
       ) { result ->
         onResult(result)
         if (generation == commitGeneration) scheduleIdleRestore(driver, priorImeId)
@@ -311,16 +342,29 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
           isCancelled,
           delivery,
           commitBudgetMs,
+          requestDeadlineMs,
           onResult,
         )
       },
-      INPUT_CONNECTION_POLL_MS,
+      minOf(INPUT_CONNECTION_POLL_MS, deadlineMs - SystemClock.uptimeMillis()).coerceAtLeast(0),
     )
   }
 
   private fun createSink(): ImeCommitSink =
     object : ImeCommitSink {
       override fun nowMs(): Long = SystemClock.uptimeMillis()
+
+      override fun connectionGeneration(): Long = inputConnectionGeneration
+
+      override fun editorIdentity(): String? = inputEditorIdentity
+
+      override fun startedByRestart(): Boolean = inputStartedByRestart
+
+      override fun readEditorTextBeforeCursor(maxChars: Int): String? = runCatching {
+        if (isInputStarted) currentInputConnection?.getTextBeforeCursor(maxChars, 0)?.toString()
+        else null
+      }
+        .getOrNull()
 
       override fun editorInputType(): Int? =
         if (isInputStarted) currentInputEditorInfo?.inputType else null
@@ -451,6 +495,17 @@ class CtrlProxyIme : InputMethodService(), LifecycleOwner, SavedStateRegistryOwn
       if (!isActive || !isInputStarted || connection == null) return null
       return connection.performEditorAction(actionId)
     }
+
+    internal fun connectionDeadlineMs(nowMs: Long, requestDeadlineMs: Long): Long =
+      minOf(nowMs + INPUT_CONNECTION_TIMEOUT_MS, requestDeadlineMs)
+
+    internal fun driverDeadlineMs(nowMs: Long, requestDeadlineMs: Long): Long =
+      if (requestDeadlineMs == Long.MAX_VALUE) Long.MAX_VALUE
+      else
+        minOf(
+          requestDeadlineMs,
+          maxOf(nowMs + 1, requestDeadlineMs - ImeCommitDriver.SYNC_RETRY_RESERVE_MS),
+        )
 
     internal fun commitTimeoutMs(timeoutMs: Long?, unitCount: Int): Long =
       if (timeoutMs != null && timeoutMs > 0L) {

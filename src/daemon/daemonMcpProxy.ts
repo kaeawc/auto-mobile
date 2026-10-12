@@ -292,8 +292,10 @@ interface StallHandoverRecord {
    * found replaced, or when its identity was never reported (#10989).
    */
   probeDaemonInstance?: string;
-  /** First answer from a replacement daemon; managed sessions reclaim within the existing window. */
+  /** First instance-change answer; marks a managed session reclaiming without a daemon pin. */
   managedReclaimSince?: number;
+  /** First reasonless not-found in a continuous answering stretch; cleared on an unanswered probe. */
+  managedNotFoundSince?: number;
   /**
    * The daemon process that last acknowledged a heartbeat before the handover, kept even after
    * probing stops, so a resume acknowledged by another process is reported as a restart (#11018).
@@ -2673,7 +2675,18 @@ export class DaemonMcpProxy {
     if (!releasedSessionUuid) {
       return;
     }
-    this.endLostSessionHandover(releasedSessionUuid, notification.reason);
+    const handleStallHandoverRelease = (): boolean => {
+      const keepsHandover =
+        this.managedExecutionSessions.has(releasedSessionUuid) &&
+        this.stallHandovers.get(releasedSessionUuid)?.handover.code === DAEMON_STALLED_CODE &&
+        isRecoverableDaemonReleaseReason(notification.reason ?? "") &&
+        !notification.reason?.startsWith("device-restart:");
+      if (!keepsHandover) {
+        this.endLostSessionHandover(releasedSessionUuid, notification.reason);
+      }
+      return keepsHandover;
+    };
+    const preservedStallHandover = handleStallHandoverRelease();
     this.rememberFinalizedRecordings(releasedSessionUuid, notification.recordingIds);
     if (notification.reason === "daemon-shutdown") {
       this.daemonShutdownAnnouncedAt = this.timer.now();
@@ -2681,6 +2694,11 @@ export class DaemonMcpProxy {
       // this UUID belongs to an unresolved acquisition result that has not become
       // the current binding yet.
       this.waitForDaemonShutdownDisconnect();
+    }
+    if (preservedStallHandover) {
+      // The stall fence already removed the binding. Keep its restore snapshot and claims,
+      // rather than recording a loss or setting up a handoff for a binding that is absent.
+      return;
     }
     if (this.releaseKeepsBinding(releasedSessionUuid, notification.reason)) {
       // The replacement daemon rehydrates this UUID as awaiting-owner. Preserve
@@ -6366,20 +6384,26 @@ export class DaemonMcpProxy {
       if (
         record.managedReclaimSince !== undefined &&
         releaseReason === undefined &&
-        this.isDaemonSessionNotFoundError(error) &&
-        this.timer.now() - record.managedReclaimSince < RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS
+        this.isDaemonSessionNotFoundError(error)
       ) {
-        // The successor may not have rehydrated this session yet; keep the same probe cadence.
-        logger.debug(
-          `[DaemonMcpProxy] Managed session ${sessionUuid} is still awaiting rehydration`,
-        );
-        return;
+        record.managedNotFoundSince ??= this.timer.now();
+        if (
+          this.timer.now() - record.managedNotFoundSince <
+          RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS
+        ) {
+          // The successor may not have rehydrated this session yet; keep the same probe cadence.
+          logger.debug(
+            `[DaemonMcpProxy] Managed session ${sessionUuid} is still awaiting rehydration`,
+          );
+          return;
+        }
       }
       // The daemon answered that the session is gone or owned by another token: the next call
       // that reaches it reports the loss once.
       this.endLostSessionHandover(sessionUuid, releaseReason);
       return;
     }
+    record.managedNotFoundSince = undefined;
     // Expected while the daemon is still stalled; the next probe round asks again.
     logger.debug(
       `[DaemonMcpProxy] Stalled-daemon probe for session ${sessionUuid} got no answer: ${errorMessage(error)}`,

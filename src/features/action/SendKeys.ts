@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { readIosTypedTextField, verifyIosTypedText } from "./iosTypedTextVerification";
-import { verifyIosClear } from "./iosClearVerification";
+import { clearIosFieldWithVerification } from "./iosClearVerification";
 import {
   resolveTextCtrlProxyTimeoutMs,
   getTextRequestDeadlineMs,
@@ -988,18 +988,15 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     signal?.throwIfAborted();
     this.resetCaretState();
     if (this.device.platform !== "android") {
-      const result = await this.textClient.clear(
-        this.device.platform === "ios" ? signal : undefined,
-      );
-      return this.device.platform === "ios" && result.success
-        ? verifyIosClear({
+      return this.device.platform === "ios"
+        ? clearIosFieldWithVerification({
             clear: () => this.textClient.clear(signal),
             observer: this.observer,
             timer: this.timer,
             signal,
             display,
           })
-        : result;
+        : this.textClient.clear();
     }
     if (mode === "a11y") {
       return this.clearAndroidWithAccessibility(signal, display);

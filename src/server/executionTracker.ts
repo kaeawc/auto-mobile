@@ -509,6 +509,14 @@ export class ExecutionTracker {
     }
   }
 
+  /** Withdraw admission when session creation was refused before publishing a session. */
+  unmarkSessionAdmitted(executionId: string): void {
+    const execution = this.executions.get(executionId);
+    if (execution) {
+      execution.sessionAdmitted = false;
+    }
+  }
+
   /**
    * Record that a sessionless call passed the ownership check for `deviceId` while no session held
    * it, and will now drive it (#10829). Watching calls are not recorded: they stay allowed on a held

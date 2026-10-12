@@ -157,6 +157,7 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
     Reflect.set(ToolRegistry, "navigationToolCallRecorder", originalNavigationRecorder);
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
+    expect(DaemonState.getInstance().isInitialized()).toBe(false);
     sessionManager.stopCleanupTimer();
   });
 
@@ -449,12 +450,22 @@ describe("ToolRegistry device ownership for tool calls (#10698, #10730)", () => 
   test("the multiple-device ambiguity asks a read for deviceId and a control call for a session", async () => {
     const read = await refusal("observe", { platform: "android" });
     expect((read as Error).message).toBe(
-      "Multiple Android devices detected. Provide deviceId to target a specific device.",
+      "Multiple Android devices detected. Provide deviceId to target a specific device. (code ambiguous_device_target)",
     );
+    expect(read).toMatchObject({
+      code: "ambiguous_device_target",
+      retryable: false,
+      candidates: [held, free].map(({ deviceId, platform }) => ({ deviceId, platform })),
+    });
     const control = await refusal("rotate", { orientation: "landscape", platform: "android" });
     expect((control as Error).message).toBe(
-      "Multiple Android devices detected. Provide sessionUuid to target a specific device.",
+      "Multiple Android devices detected. Provide sessionUuid to target a specific device. (code ambiguous_device_target)",
     );
+    expect(control).toMatchObject({
+      code: "ambiguous_device_target",
+      retryable: false,
+      candidates: [held, free].map(({ deviceId, platform }) => ({ deviceId, platform })),
+    });
   });
 
   test("a call whose readiness settles on another device than predicted moves its mark", async () => {

@@ -6,7 +6,13 @@ import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
 import { SessionSuspectError } from "../../src/daemon/sessionManager";
-import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import { isTypedToolRefusal, shapeToolCallError } from "../../src/server/shapeToolCallError";
+import {
+  DeviceAssignedToManagedSlotError,
+  ManagedSlotDiscoveryIncompleteError,
+  ManagedSlotOwnershipUnconfirmedError,
+  ManagedSlotOwnershipLostError,
+} from "../../src/daemon/managedSlots/managedSlotRefusal";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import { logger } from "../../src/utils/logger";
 import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessService";
@@ -23,6 +29,35 @@ describe("shapeToolCallError", () => {
 
   afterEach(() => {
     errorSpy.mockRestore();
+  });
+
+  test("the managed-slot payload allowlist preserves each refusal on both tool boundaries", () => {
+    const refusals = [
+      new DeviceAssignedToManagedSlotError("tapOn", "device", {
+        platform: "android",
+        stableDeviceId: "device",
+        holder: "slot",
+        scopeKey: "scope",
+        slotIndex: 0,
+        scopeState: "valid",
+        execSessionUuid: null,
+      }),
+      new ManagedSlotDiscoveryIncompleteError("registry busy"),
+      new ManagedSlotOwnershipUnconfirmedError("session"),
+      new ManagedSlotOwnershipLostError("session"),
+    ];
+    for (const error of refusals) {
+      expect(isTypedToolRefusal(error)).toBe(true);
+      for (const source of ["MCP", "ProxyServer"] as const) {
+        expect(
+          JSON.parse(shapeToolCallError(error, { ...context, source }).content[0].text),
+        ).toEqual({
+          success: false,
+          error: error.message,
+          ...error.toPayload(),
+        });
+      }
+    }
   });
 
   test("runner-connect deadline is a typed retryable timeout on every tool boundary", () => {

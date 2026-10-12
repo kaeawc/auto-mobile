@@ -199,6 +199,11 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
       expireWithoutLookup();
       finishRead.resolve();
       const answer = await registerBeforeFence(registration);
+      // The persisted-release fallback now sees the read-only idle end before another live
+      // lookup starts teardown. Registration still refuses it without creating an observer.
+      expect(restoreStarted).toBe(false);
+      expect(manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
+      expect(await heartbeat()).toEqual(idleNotFound);
       expectPreFenceRestore();
       expect(answer).toEqual(idleRefusal);
       expect(registry.list()).toEqual([]);
@@ -238,15 +243,168 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
     }
   });
 
-  test("after registration, pre-fence heartbeat and session-info stay bare not-found", async () => {
+  test("after registration, pre-fence heartbeat and session-info name the idle end", async () => {
     expireWithoutLookup();
     await registerBeforeFence();
     expectPreFenceRestore();
 
-    expect(await heartbeat()).toEqual(bareNotFound);
-    expect(await sessionInfo()).toEqual(bareNotFound);
+    expect(await heartbeat()).toEqual(idleNotFound);
+    expect(await sessionInfo()).toEqual(idleNotFound);
     expect(registry.list()).toEqual([]);
     expectPreFenceRestore();
+  });
+
+  for (const method of ["daemon/heartbeat", "daemon/sessionInfo"]) {
+    test(`${method} names the idle end when its own lookup starts pre-fence release`, async () => {
+      expireWithoutLookup();
+      expect(await handleDaemonRequest(request(method, { sessionId: SESSION }), state)).toEqual(
+        idleNotFound,
+      );
+      expectPreFenceRestore();
+      expect(await heartbeat()).toEqual(idleNotFound);
+      expect(await sessionInfo()).toEqual(idleNotFound);
+      finishRestore();
+      await manager.waitForSessionRelease(SESSION);
+      expect(await heartbeat()).toEqual(idleNotFound);
+      expect(await sessionInfo()).toEqual(idleNotFound);
+    });
+  }
+
+  test("heartbeat and session-info name the idle end while the sweep is restoring state", async () => {
+    expireWithoutLookup();
+    const cleanup = manager.cleanupExpiredSessions();
+    try {
+      await drainUntil(() => restoreStarted, { description: "sweep keep-awake restore" });
+      expectPreFenceRestore();
+      expect(await heartbeat()).toEqual(idleNotFound);
+      expect(await sessionInfo()).toEqual(idleNotFound);
+      finishRestore();
+      await cleanup;
+      expect(await heartbeat()).toEqual(idleNotFound);
+      expect(await sessionInfo()).toEqual(idleNotFound);
+    } finally {
+      finishRestore();
+      await cleanup;
+    }
+  });
+
+  test("explicit release stays bare before the fence and names its reason after restore", async () => {
+    // An overdue session exercises session-info's not-found fallback as well as heartbeat's.
+    // The explicit terminal reason wins over the idle deadline in registration's predicate.
+    expireWithoutLookup();
+    const release = manager.releaseSession(SESSION, "explicit-release");
+    try {
+      await drainUntil(() => restoreStarted, {
+        description: "explicit-release keep-awake restore",
+      });
+      expectPreFenceRestore();
+      expect(manager.peekTerminalAnswerForEndedSession(SESSION)?.release.releaseReason).toBe(
+        "explicit-release",
+      );
+      expect(await heartbeat()).toEqual(bareNotFound);
+      expect(await sessionInfo()).toEqual(bareNotFound);
+      finishRestore();
+      await release;
+      const released = { ...bareNotFound, releaseReason: "explicit-release" };
+      expect(await heartbeat()).toEqual(released);
+      expect(await sessionInfo()).toEqual(released);
+    } finally {
+      finishRestore();
+      await release;
+    }
+  });
+
+  test("an overdue daemon-shutdown handoff stays bare before the fence and answers expired after restore", async () => {
+    expireWithoutLookup();
+    const release = manager.releaseSession(SESSION, "daemon-shutdown", true);
+    try {
+      await drainUntil(() => restoreStarted, { description: "daemon-shutdown keep-awake restore" });
+      expectPreFenceRestore();
+      expect(manager.peekTerminalAnswerForEndedSession(SESSION)?.release.releaseReason).toBe(
+        "cleanup-expired",
+      );
+      expect(await heartbeat()).toEqual(bareNotFound);
+      expect(await sessionInfo()).toEqual(bareNotFound);
+      finishRestore();
+      await release;
+      const released = { ...bareNotFound, releaseReason: "expired", idle: true };
+      expect(await heartbeat()).toEqual(released);
+      expect(await sessionInfo()).toEqual(released);
+    } finally {
+      finishRestore();
+      await release;
+    }
+  });
+
+  test("a CLI idle release names cli-idle-timeout before and after the fence", async () => {
+    expect(manager.adoptCliLivenessPolicy(SESSION, IDLE_MS)).toBe(true);
+    expireWithoutLookup();
+    const release = manager.releaseSession(SESSION, "cli-idle-timeout");
+    try {
+      await drainUntil(() => restoreStarted, { description: "CLI idle keep-awake restore" });
+      expectPreFenceRestore();
+      const released = { ...bareNotFound, releaseReason: "cli-idle-timeout", idle: true };
+      expect(await manager.getReleasedSessionReason(SESSION)).toBe("cli-idle-timeout");
+      expect(await heartbeat()).toEqual(released);
+      finishRestore();
+      await release;
+      expect(await heartbeat()).toEqual(released);
+      expect(await sessionInfo()).toEqual(released);
+    } finally {
+      finishRestore();
+      await release;
+    }
+  });
+
+  test("commit-fenced device loss stays bare during pre-fence teardown", async () => {
+    expireWithoutLookup();
+    const release = manager.releaseSessionUnlessSuperseded(
+      SESSION,
+      "device-disconnected:emulator-5554",
+      () => true,
+    );
+    try {
+      await drainUntil(() => restoreStarted, { description: "device-loss keep-awake restore" });
+      expectPreFenceRestore();
+      expect(await heartbeat()).toEqual(bareNotFound);
+      expect(await sessionInfo()).toEqual(bareNotFound);
+    } finally {
+      finishRestore();
+      await release;
+    }
+  });
+
+  test("a live unexpired session's session-info stays live", async () => {
+    expect(await sessionInfo()).toMatchObject({
+      success: true,
+      result: { sessionId: SESSION, assignedDevice: DEVICE },
+    });
+    expect(restoreStarted).toBe(false);
+    expect(manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
+  });
+
+  test("timely control work keeps both wires live past the idle deadline", async () => {
+    manager.setActiveSessionExecutionChecker(
+      (_sessionId, query) =>
+        query?.sessionClockStartedAtOrBefore === undefined ||
+        1_000 <= query.sessionClockStartedAtOrBefore,
+    );
+    expireWithoutLookup();
+    expect(manager.peekTerminalAnswerForEndedSession(SESSION)).toBeUndefined();
+    expect(await manager.getReleasedSessionReason(SESSION)).toBeUndefined();
+    expect(await heartbeat()).toMatchObject({ success: true });
+    expect(await sessionInfo()).toMatchObject({ success: true, result: { sessionId: SESSION } });
+    expect(restoreStarted).toBe(false);
+  });
+
+  test("a never-issued UUID stays bare on heartbeat and session-info", async () => {
+    const sessionId = "00000000-0000-4000-8000-0000000000a2";
+    for (const method of ["daemon/heartbeat", "daemon/sessionInfo"]) {
+      expect(await handleDaemonRequest(request(method, { sessionId }), state)).toEqual({
+        ...bareNotFound,
+        error: `Session not found: ${sessionId}`,
+      });
+    }
   });
 
   test("a second registration drains teardown then returns the idle refusal", async () => {

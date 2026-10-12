@@ -35,7 +35,8 @@ import type { SessionReleaseReason } from "../releaseReasons";
  * always names this daemon's process: the `settling` mark (this daemon as settler), or, until the
  * mark lands, the owner record. A record that still names another process (the previous daemon
  * after a restart not re-owned yet, or a second daemon) is re-stamped with this daemon before the
- * slot is marked, the same write a restart's re-own makes (`ManagedExecutionReowner`). Either one
+ * slot is marked. `ManagedExecutionReowner` must confirm host-visible ownership before resumed
+ * work is admitted; release-time re-stamping alone cannot fence peers when both writes fail. Either one
  * reads live for as long as this process runs and dead once it is gone, when its work is gone
  * too: nothing outlives the process and nothing needs an operator. The in-memory hold only covers
  * this process's own view of its own record, which it never judges by PID (#11339), and is kept,

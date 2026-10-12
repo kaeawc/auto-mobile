@@ -589,6 +589,21 @@ call's `acquisitionFailure` (#11402).
 `capacity_exhausted` applies to all boots, including a slot that must create or
 boot its device.
 
+## Total-resource capacity
+
+Boot capacity limits booted devices per platform. Total-resource capacity is a
+separate count of every distinct managed device on the host, whatever its power
+state: active, assigned idle, cached in the free pool, being prepared, being
+deleted or cleanup pending.
+
+The count comes from the host-wide slot registry, so every daemon shares it and
+its commitments survive restarts. A device stays counted until its absence is
+verified. A creation's journal entry is its reservation; the reservation becomes
+the device's charge when creation commits, without counting it twice.
+
+This count is **not enforced yet** (#12051). No total-resource limit is
+configurable, nothing is evicted, and no acquisition is refused because of it.
+
 ## Error codes
 
 | Code                                | Retryable | Meaning                                                                                                                                                                                                 |

@@ -230,7 +230,7 @@ function projectSkeletonOnto(out: ObserveResult, source: ObserveResult): void {
         elements,
         source.screenSize,
         isIosObservation(source) ? undefined : source.viewHierarchy,
-        { ios: isIosObservation(source) },
+        { ios: isIosObservation(source), iosHierarchy: source.viewHierarchy },
       )
     : { skeleton: [] as SkeletonElement[], context: [] as SkeletonElement[], keyboard: undefined };
   out.skeleton = skeleton;

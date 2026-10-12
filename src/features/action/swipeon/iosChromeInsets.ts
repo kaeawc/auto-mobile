@@ -48,7 +48,7 @@ const bottomBars = new Set([
   "XCUIElementTypeToolbar",
 ]);
 
-interface ChromeFrame {
+export interface IosChromeFrame {
   bounds: ElementBounds;
   region: "navigation bar" | "status bar" | "bottom toolbar or tab bar";
   node: SearchableEntry;
@@ -83,7 +83,7 @@ function chromeRegion(
   className: string,
   bounds: ElementBounds,
   screen: ScreenSize,
-): ChromeFrame["region"] | undefined {
+): IosChromeFrame["region"] | undefined {
   const isStatusBar =
     className.startsWith("UIStatusBar") || className === "XCUIElementTypeStatusBar";
   // Allow status-safe-area/home-indicator gaps, but reject bars in mid-screen content.
@@ -108,11 +108,16 @@ function iosChromeFrames(
   hierarchy: ViewHierarchyResult | undefined,
   screen?: ScreenSize,
   nodes = hierarchy ? new SearchableHierarchy().project(hierarchy) : [],
-): ChromeFrame[] {
-  if (!hierarchy || !screen) {
-    return [];
-  }
-  const frames: ChromeFrame[] = [];
+): IosChromeFrame[] {
+  return hierarchy && screen ? projectIosChromeFrames(nodes, screen) : [];
+}
+
+/** Collect chrome once from the same projection used for tap target ancestry. */
+export function projectIosChromeFrames(
+  nodes: readonly SearchableEntry[],
+  screen: ScreenSize,
+): IosChromeFrame[] {
+  const frames: IosChromeFrame[] = [];
   for (const node of nodes) {
     const bounds = node.bounds;
     if (!visibleChromeNode(node) || !chromeBoundsOnScreen(bounds, screen)) {
@@ -171,7 +176,7 @@ function isInsideScrollContainer(
  * bar with no scrollable ancestor is bar-level content, not an occluded row.
  */
 function isBarLevelContentOverNavigationBar(
-  frame: ChromeFrame,
+  frame: IosChromeFrame,
   target: SearchableEntry,
   nodes: readonly SearchableEntry[],
 ): boolean {
@@ -189,7 +194,7 @@ function isBarLevelContentOverNavigationBar(
 }
 
 function chromeCoversTarget(
-  frame: ChromeFrame,
+  frame: IosChromeFrame,
   target: SearchableEntry | undefined,
   nodes: readonly SearchableEntry[],
 ): boolean {
@@ -250,19 +255,45 @@ export function clipIosChromeBounds({
   hierarchy: ViewHierarchyResult;
   screen: ScreenSize;
   elements?: readonly Element[];
-  regions?: readonly ChromeFrame["region"][];
+  regions?: readonly IosChromeFrame["region"][];
   /** Opt in for elements only; viewport/container clipping keeps its existing geometry. */
   forTapTarget?: boolean;
-}): { bounds: ElementBounds | null; coveredBy?: ChromeFrame["region"] } {
+}): { bounds: ElementBounds | null; coveredBy?: IosChromeFrame["region"] } {
   const nodes = new SearchableHierarchy().project(hierarchy);
   const target = chromeTargetNode(nodes, elements);
+  return clipProjectedIosChromeBounds({
+    bounds,
+    nodes,
+    target,
+    frames: iosChromeFrames(hierarchy, screen, nodes),
+    regions,
+    forTapTarget,
+  });
+}
+
+/** Same chrome clipping for consumers with capture-scoped projected data. */
+export function clipProjectedIosChromeBounds({
+  bounds,
+  nodes,
+  target,
+  frames,
+  regions,
+  forTapTarget = false,
+}: {
+  bounds: ElementBounds;
+  nodes: readonly SearchableEntry[];
+  target: SearchableEntry | undefined;
+  frames: readonly IosChromeFrame[];
+  regions?: readonly IosChromeFrame["region"][];
+  forTapTarget?: boolean;
+}): { bounds: ElementBounds | null; coveredBy?: IosChromeFrame["region"] } {
   let visible = bounds;
-  let clippedBy: ChromeFrame["region"] | undefined;
-  const frames = iosChromeFrames(hierarchy, screen, nodes).filter(
+  let clippedBy: IosChromeFrame["region"] | undefined;
+  const coveringFrames = frames.filter(
     (frame) =>
       (!regions || regions.includes(frame.region)) && chromeCoversTarget(frame, target, nodes),
   );
-  for (const frame of frames) {
+  for (const frame of coveringFrames) {
     const bar = frame.bounds;
     const overlaps =
       bar.left < visible.right &&

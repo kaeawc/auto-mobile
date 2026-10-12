@@ -198,7 +198,8 @@ import { isSdkInjectedNode } from "../observe/android/StableNodeIdentity";
 import { compareSelectionRank } from "../utility/selectionRank";
 import { clipIosChromeBounds, isIosTapPointCoveredByChrome } from "./swipeon/iosChromeInsets";
 import {
-  clipIosTapBoundsToScrollAncestors,
+  createIosVisibleTapContext,
+  iosVisibleTapArea,
   isIosTapFrameReduced,
   iosTapOwnershipErrorMessage,
   resolveIosOwnedTapPoint,
@@ -240,12 +241,6 @@ function identifiedAncestorChain(
 function sameChain(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((id, index) => id === b[index]);
 }
-
-const IOS_STATUS_BAR_CLASSES = new Set([
-  "XCUIElementTypeStatusBar",
-  "UIStatusBar",
-  "UIStatusBarWindow",
-]);
 
 /** Internal action context; never part of the public tapOn schema. */
 type IosTapOptions = DisplayFenceOption & { signal?: AbortSignal };
@@ -1431,24 +1426,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (!visible || !isUsableScreenSize(screenSize) || this.device.platform !== "ios") {
       return visible;
     }
-    const belowChrome = clipIosChromeBounds({
-      bounds: visible,
-      hierarchy,
-      screen: screenSize,
-      elements: [matchForTap, target],
-      forTapTarget: true,
-    }).bounds;
-    const belowStatusBar =
-      belowChrome &&
-      this.clipBelowStatusBar(belowChrome, matchForTap, target, hierarchy, screenSize);
-    const belowTabBars = belowStatusBar
-      ? this.clipBelowTabBars(belowStatusBar, matchForTap, target, hierarchy, screenSize)
-      : null;
     const nodes = new SearchableHierarchy().project(hierarchy);
-    return (
-      belowTabBars &&
-      clipIosTapBoundsToScrollAncestors(nodes, findTapTargetNode(nodes, target), belowTabBars)
-    );
+    return iosVisibleTapArea({
+      bounds: visible,
+      matched: matchForTap,
+      target,
+      nodes,
+      context: createIosVisibleTapContext(nodes, screenSize, hierarchy),
+    });
   }
 
   private matchedTapElement(
@@ -1557,136 +1542,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       );
     }
     return safe.point;
-  }
-
-  private clipBelowStatusBar(
-    visible: ElementBounds,
-    matched: Element,
-    target: Element,
-    hierarchy: ViewHierarchyResult,
-    screenSize: NonNullable<ObserveResult["screenSize"]>,
-  ): ElementBounds | null {
-    const nodes = new SearchableHierarchy().project(hierarchy);
-    const isStatusBar = (node: SearchableEntry): boolean =>
-      IOS_STATUS_BAR_CLASSES.has(node.className ?? "");
-    const matchedNode = findTapTargetNode(nodes, matched);
-    const targetNode = matchedNode ?? findTapTargetNode(nodes, target);
-    // A status-bar control is itself a valid target even though app content
-    // beneath the bar must not receive a coordinate tap there.
-    if (
-      (targetNode &&
-        nodes.some(
-          (bar) => isStatusBar(bar) && this.isInsideHierarchyNode(targetNode, bar, nodes),
-        )) ||
-      [matched.class, target.class].some((className) => IOS_STATUS_BAR_CLASSES.has(className ?? ""))
-    ) {
-      return visible;
-    }
-    const top =
-      hierarchy.systemInsets?.top ??
-      nodes.find(
-        (node) =>
-          isStatusBar(node) &&
-          node.bounds &&
-          node.bounds.bottom > 0 &&
-          node.bounds.bottom < screenSize.height,
-      )?.bounds?.bottom ??
-      0;
-    return intersectTapBounds(visible, {
-      left: 0,
-      top: Math.max(0, top),
-      right: screenSize.width,
-      bottom: screenSize.height,
-    });
-  }
-
-  private clipBelowTabBars(
-    visible: ElementBounds,
-    matched: Element,
-    target: Element,
-    hierarchy: ViewHierarchyResult,
-    screenSize: NonNullable<ObserveResult["screenSize"]>,
-  ): ElementBounds | null {
-    // A tab bar is app chrome, so it need not appear in systemInsets.
-    const nodes = new SearchableHierarchy().project(hierarchy);
-    const matchedNode = findTapTargetNode(nodes, matched);
-    const targetNode = matchedNode ?? findTapTargetNode(nodes, target);
-    if (!targetNode) {
-      return visible;
-    }
-    let clipped: ElementBounds | null = visible;
-    for (const bar of nodes) {
-      if (!clipped) {
-        return null;
-      }
-      if (!this.isTabBarCovering(bar, clipped)) {
-        continue;
-      }
-      if (!this.isTabBarAboveMatch(bar, targetNode)) {
-        continue;
-      }
-      if (!this.isMatchedInsideTabBar(matchedNode, matched, bar, nodes)) {
-        clipped = intersectTapBounds(clipped, {
-          left: 0,
-          top: 0,
-          right: screenSize.width,
-          bottom: bar.bounds?.top ?? 0,
-        });
-      }
-    }
-    return clipped;
-  }
-
-  private isTabBarAboveMatch(bar: SearchableEntry, matchedNode: SearchableEntry): boolean {
-    return bar.rootGroup === matchedNode.rootGroup && bar.windowRank <= matchedNode.windowRank;
-  }
-
-  private isMatchedInsideTabBar(
-    matchedNode: SearchableEntry | undefined,
-    matched: Element,
-    bar: SearchableEntry,
-    nodes: readonly SearchableEntry[],
-  ): boolean {
-    if (matchedNode) {
-      return this.isInsideHierarchyNode(matchedNode, bar, nodes);
-    }
-    const bounds = matched.bounds;
-    const barBounds = bar.bounds;
-    return (
-      !!bounds &&
-      !!barBounds &&
-      bounds.left >= barBounds.left &&
-      bounds.top >= barBounds.top &&
-      bounds.right <= barBounds.right &&
-      bounds.bottom <= barBounds.bottom
-    );
-  }
-
-  private isTabBarCovering(bar: SearchableEntry, visible: ElementBounds): boolean {
-    const bounds = bar.bounds;
-    return (
-      (bar.className === "UITabBar" || bar.className === "XCUIElementTypeTabBar") &&
-      !!bounds &&
-      bounds.left < visible.right &&
-      bounds.right > visible.left &&
-      bounds.top < visible.bottom &&
-      bounds.bottom > visible.top
-    );
-  }
-
-  private isInsideHierarchyNode(
-    node: SearchableEntry | undefined,
-    ancestor: SearchableEntry,
-    nodes: readonly SearchableEntry[],
-  ): boolean {
-    let current = node;
-    while (current) {
-      if (current === ancestor) {
-        return true;
-      }
-      current = current.parentIndex === undefined ? undefined : nodes[current.parentIndex];
-    }
-    return false;
   }
 
   private getScreenSizeFromHierarchy(

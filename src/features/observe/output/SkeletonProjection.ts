@@ -19,7 +19,9 @@ import {
   type ApplicationWindowCoverIndex,
 } from "../ApplicationWindowCover";
 import {
-  clipIosTapBoundsToScrollAncestors,
+  createIosVisibleTapContext,
+  iosVisibleTapArea,
+  type IosVisibleTapContext,
   resolveIosOwnedTapPoint,
 } from "../../action/iosTapTargetOwnership";
 import { visibleTapBounds } from "../../utility/ElementGeometry";
@@ -1527,6 +1529,8 @@ function markAppRowsCoveredByIme(
   kept: SkeletonAccumulator[],
   occluder: ImeOccluder | undefined,
   measured?: ImeOccluder,
+  screen?: ObserveResult["screenSize"],
+  ios = false,
 ): void {
   if (!occluder) {
     return;
@@ -1539,7 +1543,8 @@ function markAppRowsCoveredByIme(
       measured && isAssistantBarMember(acc.provenance, occluder)
         ? [occluder.bounds[0], measured.bounds[1], occluder.bounds[2], occluder.bounds[3]]
         : occluder.bounds;
-    if (tapPointOutsideIme(acc.bounds, cover) !== null) {
+    const bounds = ios && screen ? clipRectToScreen(acc.bounds, screen) : acc.bounds;
+    if (bounds && tapPointOutsideIme(bounds, cover) !== null) {
       continue;
     }
     // Every advertised action on a fully covered row requires a coordinate or
@@ -1585,16 +1590,18 @@ function markAppRowsCoveredByApplicationWindow(
   }
 }
 
-/** Reuse tapOn's scroll clipping and ownership verdict for iOS app affordances. */
+/** Reuse tapOn's visible tap area and ownership verdict for iOS app affordances. */
 function markIosRowsRefusedByTap(
   kept: SkeletonAccumulator[],
   elements: ObserveElements,
   viewport: ObserveResult["screenSize"] | undefined,
+  hierarchy?: ViewHierarchyResult,
 ): void {
   const nodes = getSearchableEntries(elements);
   if (!nodes) {
     return;
   }
+  const context = createIosVisibleTapContext(nodes, viewport, hierarchy);
   const bySource = new Map(uniqueBySource(nodes).map((node) => [node.source, node]));
   for (const acc of kept) {
     if (acc.occluded || !acc.target || acc.affordances.size === 0) {
@@ -1605,7 +1612,7 @@ function markIosRowsRefusedByTap(
     if (!target || isImeKeyEntry(target) || acc.provenance?.keyboardPackage) {
       continue;
     }
-    if (iosRowRefusedByTap(acc, nodes, target, viewport)) {
+    if (iosRowRefusedByTap(acc, nodes, target, viewport, context)) {
       acc.affordances.clear();
       acc.occluded = true;
     }
@@ -1617,13 +1624,21 @@ function iosRowRefusedByTap(
   nodes: readonly SearchableEntry[],
   target: SearchableEntry,
   screen: ObserveResult["screenSize"] | undefined,
+  context: IosVisibleTapContext | undefined,
 ): boolean {
   const [left, top, right, bottom] = acc.bounds;
   const screenBounds = visibleTapBounds({ left, top, right, bottom }, screen);
   if (!screenBounds) {
-    return false;
+    return true;
   }
-  const visibleBounds = clipIosTapBoundsToScrollAncestors(nodes, target, screenBounds);
+  const visibleBounds = iosVisibleTapArea({
+    bounds: screenBounds,
+    matched: acc.target!,
+    target: acc.target!,
+    nodes,
+    context,
+    targetNode: target,
+  });
   if (!visibleBounds) {
     return true;
   }
@@ -1655,7 +1670,7 @@ export function projectSkeleton(
   elements: ObserveElements,
   viewport?: Pick<ObserveResult["screenSize"], "width" | "height">,
   androidHierarchy?: ViewHierarchyResult,
-  options?: { ios?: boolean },
+  options?: { ios?: boolean; iosHierarchy?: ViewHierarchyResult },
 ): SkeletonProjectionResult {
   const ime = detectImeWindow(elements);
   const prototypeSources = ownPrototypeNodeSources(androidHierarchy);
@@ -1673,9 +1688,15 @@ export function projectSkeleton(
   const occluder = ime ? getImeOccluder(elements) : undefined;
   // A parked iOS keyboard is neither a covering rectangle nor a reportable keyboard.
   const iosIme = resolveIosImeState(ime, occluder, viewport);
-  markAppRowsCoveredByIme(kept, coveringImeOccluder(ime, occluder, iosIme), occluder);
+  markAppRowsCoveredByIme(
+    kept,
+    coveringImeOccluder(ime, occluder, iosIme),
+    occluder,
+    viewport,
+    options?.ios,
+  );
   if (options?.ios) {
-    markIosRowsRefusedByTap(kept, elements, viewport);
+    markIosRowsRefusedByTap(kept, elements, viewport, options.iosHierarchy);
   }
   markAppRowsCoveredByApplicationWindow(kept, androidHierarchy, viewport);
   const actionable = kept.filter((acc) => acc.affordances.size > 0);

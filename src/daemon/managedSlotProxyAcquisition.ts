@@ -4,9 +4,11 @@
  *
  * One preparation deadline (`preparationTimeoutMs`, else the provision default) bounds the whole
  * thing: connecting to (or starting) the daemon, negotiating `managed-slots/v1`, and the daemon's
- * acquisition, whose own deadline is the budget left after connecting. Shutdown (stdin EOF,
- * SIGTERM, owner loss) aborts it. Every outcome is a typed {@link ManagedSlotsResult}: a launcher
- * reads failures over MCP (owner decision Q5) instead of from a crashed process.
+ * acquisition, whose own deadline is the budget left after connecting, and establishing the
+ * session hold. Settlement after a miss is bounded by the managed execution release timeout.
+ * Shutdown (stdin EOF, SIGTERM, owner loss) aborts it. Every outcome is a typed
+ * {@link ManagedSlotsResult}: a launcher reads failures over MCP (owner decision Q5) instead of
+ * from a crashed process.
  */
 
 import {
@@ -27,6 +29,7 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
 import { DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD } from "./constants";
 import { McpTimeoutError } from "./McpTimeoutError";
+import { MANAGED_EXECUTION_RELEASE_TIMEOUT_MS } from "./managedExecutionLiveness";
 
 /** Same method name the daemon serves (`daemonRequestHandlers.DAEMON_CAPABILITIES_METHOD`). */
 const DAEMON_CAPABILITIES_METHOD = "daemon/capabilities";
@@ -54,9 +57,11 @@ export interface ManagedSlotProxyAcquisitionPorts {
     params: Record<string, unknown>,
     options: { timeoutMs: number; signal?: AbortSignal },
   ): Promise<unknown>;
-  /** Bind, claim and heartbeat a slot's session for the execution (`holdManagedExecutionSession`). */
-  holdSession(sessionUuid: string): Promise<void>;
-  /** Release whatever was held after a failed hold. */
+  /** Record the daemon's grants synchronously, before attempting any hold. */
+  trackAcquiredSessions(sessionUuids: readonly string[]): void;
+  /** Bind, claim and heartbeat a slot's session; stop establishing once the signal aborts. */
+  holdSession(sessionUuid: string, signal: AbortSignal): Promise<void>;
+  /** Release every tracked session and drop the proxy's hold on them. */
   releaseHeldSessions(): Promise<void>;
   livenessOwnerToken: string;
   timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
@@ -217,35 +222,88 @@ export async function acquireManagedSlotsThroughDaemon(
     );
     return failedManagedSlotsResult(config, classified);
   }
-  return await holdReadySessions(result, ports);
+  if (result.outcome !== "ready") {
+    return result;
+  }
+  const sessionUuids = managedSlotSessions(result);
+  // No await between learning the grants and registering close's cleanup responsibility.
+  ports.trackAcquiredSessions(sessionUuids);
+  return await holdReadySessions(result, ports, sessionUuids, remaining, timeoutError, signal);
 }
 
 /** Hold every ready slot's session; a failed hold turns the result into a typed failure. */
 async function holdReadySessions(
   result: ManagedSlotsResult,
   ports: ManagedSlotProxyAcquisitionPorts,
+  sessionUuids: readonly string[],
+  remaining: () => number,
+  timeoutError: () => McpTimeoutError,
+  signal?: AbortSignal,
 ): Promise<ManagedSlotsResult> {
+  const holdAbort = new AbortController();
+  const cancelHold = () => holdAbort.abort(signal?.reason);
+  signal?.addEventListener("abort", cancelHold, { once: true });
   try {
-    for (const sessionUuid of managedSlotSessions(result)) {
-      await ports.holdSession(sessionUuid);
+    signal?.throwIfAborted();
+    const timeoutMs = remaining();
+    if (timeoutMs <= 0) {
+      throw timeoutError();
+    }
+    await raceWithDeadline(
+      async () => {
+        for (const sessionUuid of sessionUuids) {
+          holdAbort.signal.throwIfAborted();
+          await ports.holdSession(sessionUuid, holdAbort.signal);
+        }
+      },
+      {
+        timer: ports.timer,
+        timeoutMs,
+        signal,
+        label: "managed slot session hold",
+        timeoutError,
+        onTimeout: () => holdAbort.abort(timeoutError()),
+      },
+    );
+    signal?.throwIfAborted();
+    if (remaining() <= 0) {
+      throw timeoutError();
     }
     return result;
   } catch (error) {
+    holdAbort.abort(error);
     logger.warn(
       `[ManagedSlots] Holding the acquired sessions failed: ${errorMessage(error)}`,
       error,
     );
-    await ports.releaseHeldSessions();
+    try {
+      await raceWithDeadline(() => ports.releaseHeldSessions(), {
+        timer: ports.timer,
+        timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS,
+        label: "managed slot abandoned hold release",
+      });
+    } catch (releaseError) {
+      logger.warn(
+        `[ManagedSlots] Releasing the acquired sessions failed; the daemon's owner-disconnect / ` +
+          `no-heartbeat release remains responsible: ${errorMessage(releaseError)}`,
+        releaseError,
+      );
+    }
     return {
       ...result,
       outcome: "failed",
       slots: result.slots.map((slot) => ({ ...slot, sessionUuid: null })),
-      failure: failure(
-        "execution_hold_failed",
-        `The acquired session could not be held: ${errorMessage(error)}`,
-        true,
-        "Relaunch the execution; the slot keeps its device.",
-      ),
+      failure:
+        signal?.aborted || error instanceof McpTimeoutError
+          ? classifyError(error, signal)
+          : failure(
+              "execution_hold_failed",
+              `The acquired session could not be held: ${errorMessage(error)}`,
+              true,
+              "Relaunch the execution; the slot keeps its device.",
+            ),
     };
+  } finally {
+    signal?.removeEventListener("abort", cancelHold);
   }
 }

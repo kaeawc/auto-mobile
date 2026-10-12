@@ -1,5 +1,16 @@
 import type { FormFactor } from "./DeviceMatchCriteria";
 
+/** Android profile hints and geometry, shared by inventory enrichment and managed-slot matching. */
+export function androidProfileFormFactor(input: {
+  profileId?: string | null;
+  width?: number | null;
+  height?: number | null;
+  density?: number | null;
+}): FormFactor {
+  const hint = /pixel[_ ]tablet|nexus (?:9|10)/i.test(input.profileId ?? "") ? "tablet" : undefined;
+  return formFactorFrom({ ...input, hint, deviceType: input.profileId });
+}
+
 function isPositiveFiniteNumber(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }

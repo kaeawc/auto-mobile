@@ -1618,6 +1618,8 @@ export class DaemonMcpProxy {
   private readonly claimableSessions = new Set<string>();
   /** Sessions held for a managed slot execution; released promptly on close (#11176). */
   private readonly managedExecutionSessions = new Set<string>();
+  /** Slot sessions whose acquisition abandoned its hold; never resumed or re-held (#12055). */
+  private readonly abandonedManagedSessions = new Set<string>();
   /** The managed slot acquisition's result, once it ran (#11173). */
   private managedSlotsResult: ManagedSlotsResult | undefined;
   private managedConnectionRebind: ManagedConnectionRebind | undefined;
@@ -1846,14 +1848,26 @@ export class DaemonMcpProxy {
    * {@link close} (stdin EOF, owner loss, or any other shutdown) instead of waiting out the
    * daemon's no-heartbeat release. Throws when the proxy is closing, already holds a different
    * binding, or cannot reach the daemon.
+   * When `signal` aborts mid-hold, this method throws and the caller must release what it
+   * tracked — {@link acquireManagedSlots} does.
    */
-  async holdManagedExecutionSession(sessionUuid: string): Promise<void> {
+  async holdManagedExecutionSession(sessionUuid: string, signal?: AbortSignal): Promise<void> {
+    try {
+      signal?.throwIfAborted();
+    } catch (error) {
+      throw toActionableError(error, "Failed to hold managed execution session");
+    }
     const trimmed = sessionUuid.trim();
     if (trimmed.length === 0) {
       throw new ActionableError("A managed execution session UUID is required.");
     }
     if (this.closing) {
       throw new DaemonUnavailableError("MCP proxy is closing");
+    }
+    if (this.abandonedManagedSessions.has(trimmed)) {
+      throw new ActionableError(
+        `Cannot hold managed execution session ${trimmed}: this execution's acquisition abandoned it; relaunch the execution.`,
+      );
     }
     if (this.boundSessionUuid !== undefined && this.boundSessionUuid !== trimmed) {
       throw new ActionableError(
@@ -1865,10 +1879,12 @@ export class DaemonMcpProxy {
     this.managedExecutionSessions.add(trimmed);
     try {
       await this.ensureConnected();
+      signal?.throwIfAborted();
       // Already connected (the acquisition used this connection): establishment did not run for
       // this binding, so claim it and start the keeper now. A fresh connection already did, and
       // this only coalesces into the keeper's own tick.
       await this.establishBoundSessionHeartbeat();
+      signal?.throwIfAborted();
     } catch (error) {
       throw toActionableError(error, `Failed to hold managed execution session ${trimmed}`);
     }
@@ -1883,6 +1899,7 @@ export class DaemonMcpProxy {
    */
   async acquireManagedSlots(config: ManagedSlotConfig): Promise<ManagedSlotsResult> {
     const abort = new AbortController();
+    let acquiredSessions: readonly string[] = [];
     this.managedSlotsAcquisitionAbort = abort;
     try {
       const result = await acquireManagedSlotsThroughDaemon(
@@ -1891,8 +1908,15 @@ export class DaemonMcpProxy {
           ensureConnected: () => this.ensureConnected(),
           callDaemonMethod: (method, params, options) =>
             this.requireClient().callDaemonMethod(method, params, options),
-          holdSession: (sessionUuid) => this.holdManagedExecutionSession(sessionUuid),
-          releaseHeldSessions: () => this.releaseManagedExecutionSessions(),
+          trackAcquiredSessions: (sessionUuids) => {
+            acquiredSessions = sessionUuids.map((id) => id.trim()).filter((id) => id.length > 0);
+            for (const sessionUuid of acquiredSessions) {
+              this.managedExecutionSessions.add(sessionUuid);
+            }
+          },
+          holdSession: (sessionUuid, signal) =>
+            this.holdManagedExecutionSession(sessionUuid, signal),
+          releaseHeldSessions: () => this.abandonManagedExecutionSessions(acquiredSessions),
           livenessOwnerToken: this.livenessOwnerToken,
           timer: this.timer,
         },
@@ -2013,6 +2037,28 @@ export class DaemonMcpProxy {
         }
       }),
     );
+  }
+
+  /** Abandon acquired grants even when close already took their exactly-once release (#12055). */
+  private async abandonManagedExecutionSessions(sessions: readonly string[]): Promise<void> {
+    const releasedSessions = [...new Set([...sessions, ...this.managedExecutionSessions])];
+    for (const sessionUuid of releasedSessions) {
+      this.abandonedManagedSessions.add(sessionUuid);
+    }
+    const releasing = this.releaseManagedExecutionSessions();
+    // Start release first, then drop local targets before awaiting a potentially lost reply.
+    // close owns teardown when closing, including stopping the keeper after its release.
+    if (!this.closing) {
+      if (this.boundSessionUuid !== undefined && releasedSessions.includes(this.boundSessionUuid)) {
+        this.clearBoundSessionUuid();
+      }
+      for (const sessionUuid of releasedSessions) {
+        this.ownedDeviceSessions.delete(sessionUuid);
+        this.claimableSessions.delete(sessionUuid);
+      }
+      this.syncHeartbeatKeeper();
+    }
+    await releasing;
   }
 
   /** Release only this process's ordinary heartbeat holds; harness and CLI holds survive exit. */
@@ -5904,6 +5950,7 @@ export class DaemonMcpProxy {
     }
     if (
       sessionId === this.terminalBoundSession?.sessionUuid ||
+      this.abandonedManagedSessions.has(sessionId) ||
       this.otherHeldSessions.has(sessionId) ||
       this.stallHandovers.has(sessionId)
     ) {

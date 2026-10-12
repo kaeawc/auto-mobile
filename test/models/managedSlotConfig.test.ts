@@ -50,6 +50,69 @@ const neverRead = (): string => {
 };
 
 describe("parseManagedSlotConfig", () => {
+  test.each(["phone", "tablet", "foldable"])(
+    "accepts family %s with and without a model on both platforms",
+    (deviceFamily) => {
+      for (const platform of ["android", "ios"] as const) {
+        const runtime =
+          platform === "android"
+            ? androidRequest.requestedSpec.runtime
+            : "com.apple.CoreSimulator.SimRuntime.iOS-18-0";
+        const model =
+          platform === "android" ? "pixel_8" : "com.apple.CoreSimulator.SimDeviceType.iPhone-16";
+        for (const deviceType of [undefined, model]) {
+          const requestedSpec = { runtime, deviceFamily, ...(deviceType ? { deviceType } : {}) };
+          const config = parseManagedSlotConfig({
+            ...validConfig,
+            requests: [{ slotIndex: 0, role: "primary", platform, requestedSpec }],
+          });
+          expect(config.requests[0]?.requestedSpec).toEqual(requestedSpec);
+        }
+      }
+    },
+  );
+
+  test.each(["android", "ios"] as const)("%s rejects an unknown family", (platform) => {
+    const runtime =
+      platform === "android"
+        ? androidRequest.requestedSpec.runtime
+        : "com.apple.CoreSimulator.SimRuntime.iOS-18-0";
+    expect(
+      codeOf(() =>
+        parseManagedSlotConfig({
+          ...validConfig,
+          requests: [
+            {
+              slotIndex: 0,
+              role: "primary",
+              platform,
+              requestedSpec: { runtime, deviceFamily: "watch" },
+            },
+          ],
+        }),
+      ),
+    ).toBe("managed_slot_config_invalid");
+  });
+
+  test.each(["phone", "tablet", "foldable"])(
+    "provisionDevice rejects family %s even with an exact model",
+    (deviceFamily) => {
+      expect(
+        androidProvisionDeviceSpecSchema.safeParse({
+          ...androidRequest.requestedSpec,
+          deviceFamily,
+        }).success,
+      ).toBe(false);
+      expect(
+        iosProvisionDeviceSpecSchema.safeParse({
+          runtime: "com.apple.CoreSimulator.SimRuntime.iOS-18-0",
+          deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
+          deviceFamily,
+        }).success,
+      ).toBe(false);
+    },
+  );
+
   test("accepts a minimal android config", () => {
     const config = parseManagedSlotConfig(validConfig);
     expect(config.requests[0].platform).toBe("android");

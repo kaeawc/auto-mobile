@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { join, resolve } from "node:path";
 import {
   parseProxySessionArgs,
@@ -16,6 +16,9 @@ const posixTest = process.platform === "win32" ? test.skip : test;
 const dir = resolve("/session");
 function parsed(args: string[]): ProxySessionCommand {
   const result = parseProxySessionArgs(args);
+  if ("help" in result) {
+    throw new Error("Unexpected help");
+  }
   if ("error" in result) {
     throw new Error(result.error);
   }
@@ -56,6 +59,7 @@ function fixture() {
   };
   const deps: ProxySessionDeps = {
     env,
+    probeDaemonSocket: async () => ({ alive: true }),
     host: { homeDirs: ["/home/fake"], uid: 4242, canonicalize: resolve },
     pid: 1234,
     timer,
@@ -417,3 +421,86 @@ posixTest(
     }
   },
 );
+
+posixTest("live pid with dead socket refuses before spawnServe", async () => {
+  const f = fixture();
+  f.deps.probeDaemonSocket = async () => ({ alive: false, reason: "fake dead socket" });
+  f.deps.spawnServe = () => {
+    throw new Error("must not spawnServe");
+  };
+  expect(await runProxySessionCommand(parsed(["up", "--dir", dir]), f.deps)).toBe(2);
+  expect(f.calls).toEqual([]);
+  expect(f.writes).toEqual([]);
+  expect(f.logs.join(" ")).toContain("fake dead socket");
+});
+
+import { selectHarnessLogSink } from "../../scripts/manual-test/harnessLogSink";
+import {
+  PROXY_SESSION_COMMANDS,
+  PROXY_SESSION_FLAGS,
+} from "../../scripts/manual-test/proxySessionHelp";
+test("proxy help variants enumerate every parser command and flag", () => {
+  for (const args of [["--help"], ["-h"], ["help"], ["call", "--help"]]) {
+    const result = parseProxySessionArgs(args);
+    if (!("help" in result)) {
+      throw new Error("Expected help");
+    }
+    for (const name of [...PROXY_SESSION_COMMANDS, ...Object.keys(PROXY_SESSION_FLAGS)]) {
+      expect(result.help).toContain(name);
+    }
+  }
+});
+posixTest("proxy child receives undone sink override and live socket permits startup", async () => {
+  const f = fixture();
+  delete f.deps.env.AUTOMOBILE_LOG_DIR;
+  f.deps.logSinkOverride = selectHarnessLogSink(f.deps.env, [resolve("/home/fake")], {
+    realpath: resolve,
+  });
+  f.deps.env.AUTOMOBILE_LOG_DIR = "/private/logs";
+  const probes: string[] = [];
+  f.deps.probeDaemonSocket = async (path) => {
+    probes.push(path);
+    return { alive: true };
+  };
+  f.deps.spawnServe = (_command, env) => {
+    expect(env.AUTOMOBILE_LOG_SINK).toBeUndefined();
+    expect(env.AUTOMOBILE_LOG_DIR).toBe("/private/logs");
+    f.files.set(join(dir, "init.json"), '{"ok":true}');
+    return 1234;
+  };
+  expect(await runProxySessionCommand(parsed(["up", "--dir", dir]), f.deps)).toBe(0);
+  expect(probes).toEqual([f.deps.env.AUTOMOBILE_DAEMON_SOCKET_PATH!]);
+});
+posixTest("status reports answering daemon socket and serve refuses a recycled pid", async () => {
+  const f = fixture();
+  f.deps.probeDaemonSocket = async () => ({ alive: false, reason: "gone" });
+  expect(await runServe(parsed(["serve", "--dir", dir]), f.deps)).toBe(2);
+  expect(f.calls).toEqual([]);
+  expect(await runProxySessionCommand(parsed(["status", "--dir", dir]), f.deps)).toBe(0);
+  expect(JSON.parse(f.logs.at(-1)!).daemonSocketAlive).toBe(false);
+  f.deps.probeDaemonSocket = async () => ({ alive: true });
+  expect(await runProxySessionCommand(parsed(["status", "--dir", dir]), f.deps)).toBe(0);
+  expect(JSON.parse(f.logs.at(-1)!).daemonSocketAlive).toBe(true);
+});
+
+import { main as helpMain } from "../../scripts/manual-test/proxy-session";
+test("help main writes stdout and returns zero for top-level and subcommand help", async () => {
+  const argv = process.argv;
+  const out = spyOn(console, "log").mockImplementation(() => {});
+  const err = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    for (const args of [["--help"], ["-h"], ["help"], ["call", "--help"]]) {
+      process.argv = ["bun", "proxy-session.ts", ...args];
+      expect(await helpMain()).toBe(0);
+    }
+    expect(out).toHaveBeenCalledTimes(4);
+    expect(err).not.toHaveBeenCalled();
+    process.argv = ["bun", "proxy-session.ts", "invalid-command"];
+    expect(await helpMain()).toBe(2);
+    expect(err.mock.calls[0][0]).toContain("--help for usage");
+  } finally {
+    process.argv = argv;
+    out.mockRestore();
+    err.mockRestore();
+  }
+});

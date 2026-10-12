@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
 import { resolve } from "node:path";
 import {
   parseDaemonFrameArgs,
@@ -62,6 +62,9 @@ class FakeConnection implements FrameConnection {
 }
 function parsed(args: string[] = ["send", "ide/status"]): DaemonFrameCommand {
   const command = parseDaemonFrameArgs(args);
+  if ("help" in command) {
+    throw new Error("Unexpected help");
+  }
   if ("error" in command) {
     throw new Error(command.error);
   }
@@ -133,7 +136,7 @@ function managedFixture(failed = false) {
             contractVersion: 1,
             scope: { scopeKey: "scope" },
             outcome: failed ? "failed" : "ready",
-            slots: failed ? [] : [{ sessionUuid: "slot-session" }],
+            slots: failed ? [] : [{ slotIndex: 0, sessionUuid: "slot-session" }],
           }
         : {};
   return f;
@@ -169,6 +172,8 @@ test("parses every flag including explicit type, file JSON and cancellation dela
     count: 2,
     timeoutMs: 90,
     mode: "cancel-after",
+    keepOpenMs: 5000,
+    then: [],
     cancelAfterMs: 7,
     managedBinding: config,
     holdMs: 20,
@@ -583,4 +588,410 @@ posixTest("typed session-loss answer retires keeper without aborting user hold",
   expect(f.connection.writes.filter((frame) => frame.method === "daemon/heartbeat")).toHaveLength(
     2,
   );
+});
+
+posixTest("cancel keep-open prints the late answer and gracefully ends", async () => {
+  const f = fixture();
+  f.connection.silent = true;
+  const task = runDaemonFrame(
+    { ...parsed(), mode: "cancel-keep-open", cancelAfterMs: 7, keepOpenMs: 20, then: [] },
+    f.deps,
+  );
+  await drainUntilQuiescent(f.timer);
+  expect(f.connection.writes).toHaveLength(1);
+  const id = f.connection.writes[0].id;
+  f.timer.advanceTime(7);
+  await drainUntilQuiescent(f.timer);
+  expect(f.connection.writes[1]).toMatchObject({
+    method: "daemon/cancelRequest",
+    type: "daemon_request",
+    params: { requestId: id },
+  });
+  f.connection.data(
+    Buffer.from(
+      JSON.stringify({ type: "mcp_response", id, success: false, code: "outcome_indeterminate" }) +
+        "\n",
+    ),
+  );
+  expect(await task).toBe(0);
+  expect(JSON.parse(f.out.at(-1)!)).toEqual({
+    cancelled: [{ id, answered: true, success: false, code: "outcome_indeterminate" }],
+  });
+  expect(f.connection.ended).toBe(true);
+  expect(f.connection.destroyed).toBe(false);
+});
+
+import { classifyFrameMethod, daemonMethodHint } from "../../scripts/manual-test/daemon-frame";
+import {
+  DAEMON_FRAME_COMMANDS,
+  DAEMON_FRAME_FLAGS,
+} from "../../scripts/manual-test/daemonFrameHelp";
+import { substituteFramePlaceholders } from "../../scripts/manual-test/daemonFramePlaceholders";
+test("frame help variants enumerate all parser commands and flags", () => {
+  for (const args of [["--help"], ["-h"], ["help"], ["send", "--help"]]) {
+    const result = parseDaemonFrameArgs(args);
+    if (!("help" in result)) {
+      throw new Error("Expected help");
+    }
+    for (const name of [...DAEMON_FRAME_COMMANDS, ...Object.keys(DAEMON_FRAME_FLAGS)]) {
+      expect(result.help).toContain(name);
+    }
+    expect(result.help).toContain("proxy-owned session is rejected");
+  }
+});
+test("session-info and heartbeat build exact non-owning keeper frames", () => {
+  const info = parsed([
+    "session-info",
+    "S",
+    "--count",
+    "2",
+    "--timeout-ms",
+    "99",
+    "--socket",
+    "/private/sock",
+  ]);
+  expect(info.method).toBe("daemon/sessionInfo");
+  expect(JSON.parse(info.json!)).toEqual({ sessionId: "S" });
+  expect(info.count).toBe(2);
+  expect(info.timeoutMs).toBe(99);
+  const heartbeat = parsed(["heartbeat", "S"]);
+  expect(heartbeat.method).toBe("daemon/heartbeat");
+  expect(JSON.parse(heartbeat.json!)).toEqual({
+    sessionId: "S",
+    livenessPolicy: "cli",
+    livenessOwnerKind: "cli-keeper",
+    idleTimeoutMs: 120000,
+  });
+  for (const op of ["session-info", "heartbeat"]) {
+    expect(parseDaemonFrameArgs([op])).toHaveProperty("error");
+  }
+});
+posixTest("kebab-case hint preserves the requested method on the wire", async () => {
+  const f = fixture();
+  expect(
+    await runDaemonFrame(parsed(["send", "daemon/session-info", '{"sessionId":"S"}']), f.deps),
+  ).toBe(0);
+  expect(f.err).toContain("did you mean daemon/sessionInfo?");
+  expect(f.connection.writes[0].method).toBe("daemon/session-info");
+  expect(daemonMethodHint("daemon/release-execution")).toBe(
+    "did you mean daemon/releaseExecution?",
+  );
+  expect(daemonMethodHint("daemon/non-existent")).toBeUndefined();
+});
+test("every notice and maintenance route is classified alongside read routes", () => {
+  for (const method of [
+    "ide/prepareRestart",
+    "ide/prepareMaintenance",
+    "ide/completeMaintenance",
+    "ide/restartAdmitted",
+    "ide/restartAcceptanceSession",
+    "ide/commitAcceptanceRestart",
+    "ide/releaseAcceptanceRestart",
+  ]) {
+    expect(classifyFrameMethod(method)).toBe("maintenance");
+  }
+  for (const method of [
+    "ide/setFeatureFlag",
+    "ide/updateService",
+    "ide/setKeyValue",
+    "ide/removeKeyValue",
+    "ide/clearKeyValueFile",
+    "ide/republishIdentity",
+  ]) {
+    expect(classifyFrameMethod(method)).toBe("mutation");
+  }
+  for (const method of [
+    "daemon/sessionInfo",
+    "daemon/heartbeat",
+    "daemon/capabilities",
+    "daemon/availableDevices",
+    "daemon/activeSessions",
+    "ide/status",
+  ]) {
+    expect(classifyFrameMethod(method)).toBe("none");
+  }
+  expect(classifyFrameMethod("daemon/refreshDevices")).toBe("inventory");
+});
+posixTest("inventory notice names the refresh and read methods stay quiet", async () => {
+  const f = fixture();
+  expect(await runDaemonFrame(parsed(["send", "daemon/refreshDevices"]), f.deps)).toBe(0);
+  expect(f.err[0]).toContain("daemon inventory refresh; no device is booted or claimed");
+  f.err.length = 0;
+  expect(await runDaemonFrame(parsed(["session-info", "S"]), f.deps)).toBe(0);
+  expect(f.err).toEqual([]);
+});
+posixTest("cancel keep-open without an answer prints a bounded false summary", async () => {
+  const f = fixture();
+  f.connection.silent = true;
+  const task = runDaemonFrame(
+    parsed(["send", "tools/call", '{"name":"sendKeys"}', "--mode", "cancel-keep-open:20"]),
+    f.deps,
+  );
+  await drainUntilQuiescent(f.timer);
+  const id = f.connection.writes[0].id;
+  expect(f.connection.writes[1]).toMatchObject({
+    method: "daemon/cancelRequest",
+    params: { requestId: id },
+  });
+  f.timer.advanceTime(20);
+  expect(await task).toBe(0);
+  expect(JSON.parse(f.out.at(-1)!)).toEqual({ cancelled: [{ id, answered: false }] });
+  expect(f.connection.ended).toBe(true);
+  expect(f.connection.destroyed).toBe(false);
+});
+posixTest(
+  "sequential then frames resolve own identities and release without spurious failure",
+  async () => {
+    const f = managedFixture();
+    const respond = f.connection.respond;
+    let released = false;
+    f.connection.respond = (frame) => {
+      if (frame.method === "daemon/releaseExecution") {
+        const alreadyReleased = released;
+        released = true;
+        return { sessionId: "slot-session", alreadyReleased, outcome: "reusable_for_this_slot" };
+      }
+      return respond(frame);
+    };
+    const command = parsed([
+      "send",
+      "ide/status",
+      "--managed-binding",
+      config,
+      "--then",
+      'daemon/sessionInfo {"sessionId":"{{ownSessionId}}","nested":["{{ownSessionId:0}}"]}',
+      "--then",
+      'daemon/releaseExecution {"sessionId":"{{ownSessionId}}","livenessOwnerToken":"{{ownLivenessOwnerToken}}"}',
+    ]);
+    expect(await runDaemonFrame(command, f.deps)).toBe(0);
+    const user = f.connection.writes.filter((frame) =>
+      ["ide/status", "daemon/sessionInfo", "daemon/releaseExecution"].includes(frame.method),
+    );
+    expect(user.slice(0, 3).map((frame) => frame.method)).toEqual([
+      "ide/status",
+      "daemon/sessionInfo",
+      "daemon/releaseExecution",
+    ]);
+    expect(user[1].params).toEqual({ sessionId: "slot-session", nested: ["slot-session"] });
+    expect(user[2].params).toEqual({ sessionId: "slot-session", livenessOwnerToken: "fake-1" });
+    expect(f.paths).toHaveLength(1);
+    expect(f.err).toEqual([]);
+    expect(f.timer.getPendingIntervalCount()).toBe(0);
+  },
+);
+posixTest("unresolved placeholders refuse before any connection or frame", async () => {
+  for (const binding of [undefined, config]) {
+    const f = fixture();
+    const command = {
+      ...parsed([
+        "send",
+        "ide/status",
+        "--then",
+        'daemon/sessionInfo {"sessionId":"{{ownSessionId:9}}"}',
+      ]),
+      managedBinding: binding,
+    };
+    expect(await runDaemonFrame(command, f.deps)).toBe(2);
+    expect(f.connection.writes).toEqual([]);
+    expect(f.paths).toEqual([]);
+  }
+  const f = managedFixture(true);
+  expect(
+    await runDaemonFrame(
+      parsed([
+        "send",
+        "ide/status",
+        "--managed-binding",
+        config,
+        "--then",
+        'daemon/sessionInfo {"sessionId":"{{ownSessionId}}"}',
+      ]),
+      f.deps,
+    ),
+  ).toBe(2);
+  expect(f.connection.writes.some((frame) => frame.method === "ide/status")).toBe(false);
+});
+posixTest("a refused then frame exits one and later frames still run", async () => {
+  const f = fixture();
+  f.connection.respond = (frame) => {
+    f.connection.success = frame.method !== "daemon/sessionInfo";
+    return {};
+  };
+  // FakeConnection captures success before respond(), so emit the refusal explicitly instead.
+  const write = f.connection.write.bind(f.connection);
+  f.connection.write = (data) => {
+    const frame = JSON.parse(data) as FakeConnection["writes"][number];
+    f.connection.success = frame.method !== "daemon/sessionInfo";
+    write(data);
+  };
+  expect(
+    await runDaemonFrame(
+      parsed([
+        "send",
+        "ide/status",
+        "--then",
+        "daemon/sessionInfo {}",
+        "--then",
+        "daemon/capabilities {}",
+      ]),
+      f.deps,
+    ),
+  ).toBe(1);
+  expect(f.connection.writes.map((frame) => frame.method)).toEqual([
+    "ide/status",
+    "daemon/sessionInfo",
+    "daemon/capabilities",
+  ]);
+});
+posixTest("then device-start and maintenance guards apply before anything is sent", async () => {
+  for (const frame of [
+    'tools/call {"name":"startDevice","arguments":{"platform":"android"}}',
+    "ide/prepareRestart {}",
+  ]) {
+    const f = fixture();
+    expect(await runDaemonFrame(parsed(["send", "ide/status", "--then", frame]), f.deps)).toBe(2);
+    expect(f.connection.writes).toEqual([]);
+    expect(f.paths).toEqual([]);
+  }
+});
+test("placeholder values select sparse slot indices and keep object keys literal", () => {
+  const identity = {
+    sessionIds: ["first", "second"],
+    slots: new Map([[3, "second"]]),
+    token: "owner",
+  };
+  expect(
+    substituteFramePlaceholders(
+      {
+        "{{ownSessionId}}": [
+          "prefix {{ownSessionId}}",
+          "{{ownSessionId:3}}",
+          "{{ownLivenessOwnerToken}}",
+        ],
+      },
+      identity,
+    ),
+  ).toEqual({ "{{ownSessionId}}": ["prefix first", "second", "owner"] });
+  expect(() => substituteFramePlaceholders("{{ownSessionId}}", undefined)).toThrow(
+    "--managed-binding",
+  );
+});
+
+posixTest(
+  "keep-open connection failure with multiple requests leaves no unhandled rejection",
+  async () => {
+    const f = fixture();
+    f.connection.write = () => {
+      throw new Error("fake broken connection");
+    };
+    expect(
+      await runDaemonFrame(
+        parsed(["send", "ide/status", "--count", "2", "--mode", "cancel-keep-open"]),
+        f.deps,
+      ),
+    ).toBe(3);
+    expect(f.err.join(" ")).toContain("fake broken connection");
+    expect(f.connection.ended).toBe(true);
+  },
+);
+test("cancellation window and placeholder syntax refuse unresolvable input", () => {
+  expect(
+    parseDaemonFrameArgs([
+      "send",
+      "ide/status",
+      "--mode",
+      "cancel-keep-open:2147483647",
+      "--cancel-after-ms",
+      "1",
+    ]),
+  ).toHaveProperty("error");
+  for (const value of [
+    "{{ownSessionId:}}",
+    "{{ownSessionId:-1}}",
+    "{{ownSessionId:0.5}}",
+    "{{ownLivenessOwnerToken:0}}",
+  ]) {
+    expect(() =>
+      substituteFramePlaceholders(value, {
+        sessionIds: ["S"],
+        slots: new Map([[0, "S"]]),
+        token: "T",
+      }),
+    ).toThrow("Cannot resolve");
+  }
+});
+posixTest("automatic managed release treats a typed missing session as completed", async () => {
+  const f = managedFixture();
+  const write = f.connection.write.bind(f.connection);
+  f.connection.write = (data) => {
+    const frame = JSON.parse(data) as FakeConnection["writes"][number];
+    if (frame.method === "daemon/releaseExecution") {
+      f.connection.writes.push(frame);
+      f.connection.data(
+        Buffer.from(
+          JSON.stringify({
+            type: "mcp_response",
+            id: frame.id,
+            success: false,
+            code: "daemon_session_not_found",
+            error: "already gone",
+          }) + "\n",
+        ),
+      );
+    } else {
+      write(data);
+    }
+  };
+  expect(await runDaemonFrame({ ...parsed(), managedBinding: config }, f.deps)).toBe(0);
+  expect(f.err).toEqual([]);
+});
+
+import { main as helpMain } from "../../scripts/manual-test/daemon-frame";
+test("help main writes stdout and returns zero for top-level and subcommand help", async () => {
+  const argv = process.argv;
+  const out = spyOn(console, "log").mockImplementation(() => {});
+  const err = spyOn(console, "error").mockImplementation(() => {});
+  try {
+    for (const args of [["--help"], ["-h"], ["help"], ["send", "--help"]]) {
+      process.argv = ["bun", "daemon-frame.ts", ...args];
+      expect(await helpMain()).toBe(0);
+    }
+    expect(out).toHaveBeenCalledTimes(4);
+    expect(err).not.toHaveBeenCalled();
+    process.argv = ["bun", "daemon-frame.ts", "invalid-command"];
+    expect(await helpMain()).toBe(2);
+    expect(err.mock.calls[0][0]).toContain("--help for usage");
+  } finally {
+    process.argv = argv;
+    out.mockRestore();
+    err.mockRestore();
+  }
+});
+
+posixTest("heartbeat convenience honours the keeper idle timeout from injected env", async () => {
+  const f = fixture();
+  f.deps.env.AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS = "240000";
+  expect(await runDaemonFrame(parsed(["heartbeat", "S"]), f.deps)).toBe(0);
+  expect(f.connection.writes[0].params).toEqual({
+    sessionId: "S",
+    livenessPolicy: "cli",
+    livenessOwnerKind: "cli-keeper",
+    idleTimeoutMs: 240000,
+  });
+});
+
+posixTest("keep-open summary remains final after managed cleanup", async () => {
+  const f = managedFixture();
+  expect(
+    await runDaemonFrame(
+      { ...parsed(["send", "ide/status", "--mode", "cancel-keep-open"]), managedBinding: config },
+      f.deps,
+    ),
+  ).toBe(0);
+  expect(JSON.parse(f.out.at(-1)!)).toMatchObject({
+    cancelled: [{ answered: true, success: true }],
+  });
+  expect(f.connection.writes.at(-1)?.method).toBe("daemon/releaseExecution");
+  expect(f.connection.ended).toBe(true);
+  expect(f.connection.destroyed).toBe(false);
 });

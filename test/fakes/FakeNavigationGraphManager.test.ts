@@ -7,6 +7,27 @@ import { FakeNavigationGraphManager } from "./FakeNavigationGraphManager";
  * against it observe the same notification fidelity (issue #4171).
  */
 describe("FakeNavigationGraphManager graph-update listeners", () => {
+  test("returns a promise after recording the navigation state synchronously", async () => {
+    const fake = new FakeNavigationGraphManager();
+
+    const write = fake.recordNavigationEvent({
+      destination: "Home",
+      source: "test",
+      arguments: {},
+      metadata: {},
+      timestamp: 123,
+      sequenceNumber: 1,
+    });
+
+    expect(fake.getCurrentScreen()).toBe("Home");
+    expect(fake.exportGraph().nodes).toEqual([
+      { screenName: "Home", firstSeenAt: 123, lastSeenAt: 123, visitCount: 1 },
+    ]);
+    expect(write).toBeDefined();
+    expect(typeof write.then).toBe("function");
+    await write;
+  });
+
   test("notifies every registered listener on a graph update", () => {
     const fake = new FakeNavigationGraphManager();
     const calls: string[] = [];

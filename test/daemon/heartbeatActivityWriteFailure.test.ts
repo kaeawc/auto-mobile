@@ -4,9 +4,11 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { effectiveLastHeartbeat } from "../../src/daemon/livenessOwnerLease";
 import { PROXY_HEARTBEAT_INTERVAL_MS } from "../../src/daemon/sessionLivenessWindows";
 import type { DeviceSessionActivityUpdate } from "../../src/db/deviceSessionRepository";
+import { getDbWriteBarrier, InMemoryDbWriteBarrier } from "../../src/db/dbWriteBarrier";
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { drainUntil } from "../helpers/fakeTimerStepping";
 
 /**
  * #11079: a heartbeat is acknowledged before its activity write settles, so the write's outcome
@@ -38,6 +40,7 @@ class ScriptedActivityPersistence extends FakeDeviceSessionPersistence {
 describe("heartbeat activity writes (#11079)", () => {
   let timer: FakeTimer;
   let persistence: ScriptedActivityPersistence;
+  let barrier: InMemoryDbWriteBarrier;
   let manager: SessionManager;
   let monitor: SessionHeartbeatMonitor;
   let released: string[];
@@ -45,8 +48,9 @@ describe("heartbeat activity writes (#11079)", () => {
 
   beforeEach(async () => {
     timer = new FakeTimer();
+    barrier = new InMemoryDbWriteBarrier(timer);
     persistence = new ScriptedActivityPersistence();
-    manager = new SessionManager(timer, persistence);
+    manager = new SessionManager(timer, persistence, () => barrier);
     released = [];
     monitor = new SessionHeartbeatMonitor(
       manager,
@@ -95,6 +99,10 @@ describe("heartbeat activity writes (#11079)", () => {
         String(message).includes("Failed to record heartbeat activity"),
       ),
     ).toBe(true);
+    await drainUntil(() => barrier.inFlightCount() === 0, {
+      description: "rejected heartbeat activity writes to settle",
+    });
+    expect(barrier.inFlightCount()).toBe(0);
   });
 
   test("heartbeats that change no persisted field issue no DB write", async () => {
@@ -127,6 +135,7 @@ describe("heartbeat activity writes (#11079)", () => {
   });
 
   test("a write stuck behind a busy lock is not stacked by later heartbeats", async () => {
+    const sharedInFlight = getDbWriteBarrier().inFlightCount();
     persistence.mode = "hang";
     monitor.start();
 
@@ -138,5 +147,7 @@ describe("heartbeat activity writes (#11079)", () => {
     expect(persistence.writes).toHaveLength(1);
     expect(effectiveLastHeartbeat(manager.getSession(SESSION)!)).toBe(timer.now());
     expect(released).toEqual([]);
+    expect(getDbWriteBarrier().inFlightCount()).toBe(sharedInFlight);
+    expect(barrier.inFlightCount()).toBe(1);
   });
 });

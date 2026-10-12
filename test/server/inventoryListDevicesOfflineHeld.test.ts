@@ -14,6 +14,7 @@ import {
   setDeviceManager,
 } from "../../src/server/bootedDeviceResources";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import type { PlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -32,6 +33,8 @@ const android: BootedDevice = {
   name: "Pixel_9_API_36",
   deviceId: "emulator-5554",
 };
+
+isolateToolRegistry();
 
 describe("listDevices tool vs booted resource for a held, adb-offline device", () => {
   let sessions: SessionManager | undefined;

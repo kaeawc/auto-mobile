@@ -1,3 +1,4 @@
+import { defaultLockOwnerGenerationProbe } from "../../../daemon/lockOwnerGeneration";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { errorMessage } from "../../../utils/describeUnknownError";
@@ -237,10 +238,13 @@ export class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
       pid: this.pid,
       ownerToken: this.ownerToken,
       metadata: this.ownerMetadata(),
+      ownerGeneration: defaultLockOwnerGenerationProbe,
     });
     this.holders = acquired ? 1 : 0;
     this.acquiredAt = acquired ? this.timer.now() : undefined;
-    this.lastOwnerPid = acquired ? undefined : readLockOwnerPid(this.resolveLockPath());
+    this.lastOwnerPid = acquired
+      ? undefined
+      : readLockOwnerPid(this.resolveLockPath(), undefined, defaultLockOwnerGenerationProbe);
     return acquired;
   }
 
@@ -284,7 +288,12 @@ export class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
     if (this.isHeld()) {
       return { acquired: false, ...owner, reason: decision.reason };
     }
-    const claim = { pid: this.pid, ownerToken: this.ownerToken, metadata: this.ownerMetadata() };
+    const claim = {
+      pid: this.pid,
+      ownerToken: this.ownerToken,
+      metadata: this.ownerMetadata(),
+      ownerGeneration: defaultLockOwnerGenerationProbe,
+    };
     const claimed =
       decision.action === "acquire"
         ? tryAcquireExclusiveLock(lockPath, claim)

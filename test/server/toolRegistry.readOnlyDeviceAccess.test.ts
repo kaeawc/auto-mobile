@@ -204,7 +204,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     expect(recorded).toEqual(["readProbe"]);
   });
 
-  test("a sessionless read on an unheld device runs required readiness without pinning", async () => {
+  test("a sessionless read on an unheld device runs required readiness without pinning (readiness needed to answer the read, #11964)", async () => {
     await call("readProbe", { platform: "android", deviceId: free.deviceId });
 
     expect(listed).toBe(0);

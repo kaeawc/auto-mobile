@@ -8340,16 +8340,7 @@ export class DevicePool {
     }
   }
 
-  /** Assign `device` to `sessionId`, create (or restore) the session and record its owner. */
-  private async assignDeviceToBoundSession(
-    device: PooledDevice,
-    sessionId: string,
-    platform: Platform,
-    caller: AutolockClient,
-    options: ExplicitBindOptions,
-  ): Promise<void> {
-    const deviceId = device.id;
-    const { allowSessionRebind, expectedExistingSessionDeviceId } = options;
+  private assertLabelBindOwner(caller: AutolockClient, sessionId: string, deviceId: string): void {
     // A connection may not mint or rebind a label session of a base another connection owns
     // (#11586): the bind records its caller as the owner, and a label's owner is its base's.
     if (
@@ -8366,6 +8357,19 @@ export class DevicePool {
           `so device '${deviceId}' cannot be bound to it. Acquire the device under your own session.`,
       );
     }
+  }
+
+  /** Assign `device` to `sessionId`, create (or restore) the session and record its owner. */
+  private async assignDeviceToBoundSession(
+    device: PooledDevice,
+    sessionId: string,
+    platform: Platform,
+    caller: AutolockClient,
+    options: ExplicitBindOptions,
+  ): Promise<void> {
+    const deviceId = device.id;
+    const { allowSessionRebind, expectedExistingSessionDeviceId } = options;
+    this.assertLabelBindOwner(caller, sessionId, deviceId);
     const assignmentSnapshot = this.snapshotSessionAssignment(device);
     const previousSession = this.sessionManager.getSession(sessionId);
     const previousDeviceId = previousSession?.assignedDevice;

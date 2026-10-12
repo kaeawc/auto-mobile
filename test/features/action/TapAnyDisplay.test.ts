@@ -1,6 +1,7 @@
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
-import { afterEach, expect, spyOn, test } from "bun:test";
+import { expect, spyOn } from "bun:test";
+import { warmedTests } from "../../helpers/warmedTests";
 import { readFileSync } from "node:fs";
 import { TapAnyElement } from "../../../src/features/action/TapAnyElement";
 import { runWithSelectedDisplayPin } from "../../../src/features/observe/SessionDisplayContext";
@@ -37,7 +38,8 @@ const device: BootedDevice = {
   },
 };
 const restores: Array<() => void> = [];
-afterEach(() => {
+// First-use costs are paid in beforeAll (outside CI's per-test time); this resets between runs.
+const test = warmedTests(() => {
   for (const restore of restores.splice(0)) {
     restore();
   }
@@ -157,8 +159,11 @@ for (const ctrlProxy of [false, true]) {
 test("tapAny unreadable post-tap fingerprint skips second dispatch", async () => {
   const h = harness(true);
   h.onDispatch(() => {
+    // JSON.stringify throws on a BigInt, so the fingerprint is unreadable. A self-referencing node
+    // is also unreadable but walks the cycle on this path (~20 ms); that case is pinned by the
+    // hierarchyFingerprint property test.
     const node: ViewHierarchyNode = {};
-    node.node = [node];
+    (node as Record<string, unknown>).unserializable = 1n;
     h.observation.viewHierarchy!.hierarchy.node = node;
   });
   expect((await h.action.execute({ action: "tap", display: "cover" })).success).toBe(true);

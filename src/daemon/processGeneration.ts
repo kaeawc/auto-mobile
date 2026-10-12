@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { logger } from "../utils/logger";
+import { testOverrides } from "../utils/testOverrides";
 import { runDaemonProcessCommand, type DaemonProcessCommandRunner } from "./DaemonLauncher";
 import type { DaemonGenerationIdentity } from "./liveAcceptanceCapability";
 import {
@@ -209,5 +210,15 @@ export function createCurrentProcessGenerationTokenProvider(
   };
 }
 
-/** Direct, cached current-process capture used by Daemon construction. */
-export const currentDaemonProcessGenerationToken = createCurrentProcessGenerationTokenProvider();
+const readCurrentDaemonProcessGenerationToken = createCurrentProcessGenerationTokenProvider();
+
+/**
+ * Direct, cached current-process capture used by Daemon construction. Unit tests construct
+ * daemons in the test runner's own process, where the capture would launch `ps` from whichever
+ * test file built the first one; the suite preload turns it off for them, and a daemon without a
+ * token keeps legacy matching.
+ */
+export const currentDaemonProcessGenerationToken = (): string | undefined =>
+  testOverrides.processGenerationCaptureDisabled?.()
+    ? undefined
+    : readCurrentDaemonProcessGenerationToken();

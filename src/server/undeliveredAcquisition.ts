@@ -1,4 +1,8 @@
-import { runWithAcquisitionReceipt, type AcquisitionReceipt } from "../daemon/acquisitionReceipt";
+import {
+  commitAcquisition,
+  runWithAcquisitionReceipt,
+  type AcquisitionReceipt,
+} from "../daemon/acquisitionReceipt";
 import { DaemonState } from "../daemon/daemonState";
 import { ActionableError } from "../models/ActionableError";
 import { isClientCancelled, runOutsideRequestContext } from "../utils/AbortContext";
@@ -50,6 +54,7 @@ export async function undoUndeliveredAcquisition(
   }
   const heldElsewhere = sessionHeldElsewhere(receipt);
   if (heldElsewhere) {
+    commitAcquisition(receipt);
     logger.info(`[DeviceTools] Not undoing a cancelled acquisition: ${heldElsewhere}`);
     return;
   }
@@ -101,10 +106,13 @@ export async function acquireUndoneIfUndelivered<T>(
   } catch (error) {
     if (isClientCancelled(signal)) {
       await undoUndeliveredAcquisition(receipt, signal?.reason);
+    } else {
+      commitAcquisition(receipt);
     }
     throw error;
   }
   if (!isClientCancelled(signal)) {
+    commitAcquisition(receipt);
     return result;
   }
   await undoUndeliveredAcquisition(receipt, signal?.reason);

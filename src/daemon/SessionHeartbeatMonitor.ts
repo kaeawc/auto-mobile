@@ -47,6 +47,8 @@ export interface HeartbeatSessionSource {
    * clock.
    */
   sessionNow?(): number;
+  /** Lease heartbeat including a qualifying same-token base's owner proof (#11722). */
+  judgedLeaseHeartbeat?(session: Session): number;
   /** Register a detector the source runs before every expiry judgement; undefined detaches it. */
   setStallProbe?(probe: (() => void) | undefined): void;
   /**
@@ -715,9 +717,11 @@ export class SessionHeartbeatMonitor {
     // heartbeated is judged on its owner's own heartbeats: `lastHeartbeat` is also stamped by tool
     // calls from any connection, which must not keep a dead owner's lease alive (#11107). A
     // session no proxy owns keeps the activity-refreshed `lastHeartbeat` fallback.
-    const lastHeartbeat = judgedLeaseHeartbeat(session);
+    const ownHeartbeat = judgedLeaseHeartbeat(session);
+    const lastHeartbeat = this.sessions.judgedLeaseHeartbeat?.(session) ?? ownHeartbeat;
 
-    if (!session.hasReceivedHeartbeat) {
+    // A later base heartbeat is owner proof even if this label never heartbeated by name (#11722).
+    if (!session.hasReceivedHeartbeat && lastHeartbeat === ownHeartbeat) {
       if (session.heartbeatTimeoutSource === "default") {
         return now - lastHeartbeat > this.preFirstHeartbeatGraceMs
           ? "missing-first-heartbeat"

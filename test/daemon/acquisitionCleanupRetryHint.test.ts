@@ -8,6 +8,10 @@ import {
   type RecordingAcquisitionDeps,
   type RecordingSessionCleanupDeps,
 } from "../../src/server/recordingSessionCleanup";
+import { NetworkState } from "../../src/server/NetworkState";
+import { createOwnerlessNetworkStateAcquisitionCleanup } from "../../src/server/networkStateSessionCleanup";
+import { createDeviceSettingDefaultsAcquisitionReset } from "../../src/features/utility/DeviceSettingDefaults";
+import { drainUntil } from "../helpers/fakeTimerStepping";
 import { logger } from "../../src/utils/logger";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -24,7 +28,7 @@ import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies"
 //
 // #11665 replaces acquisition-time stops (#10961) with adoption by the holder, then a capped
 // finalize at release. Preserve #11616's intent: the next acquirer's hint must carry the real
-// finalize bound, never the 1 s default. Adoption persistence itself remains uncapped.
+// finalize bound, never the 1 s default. Acquisition cleanup has its own cap and advertises only its remaining time.
 
 const DEVICE = { deviceId: "emulator-5554", name: "Pixel A", platform: "android" as const };
 const FINALIZE_CAP_MS = 120_000;
@@ -119,6 +123,8 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
   afterEach(() => {
     warn.mockRestore();
     manager.stopCleanupTimer();
+    timer.reset();
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
   /** The next acquirer's bind of the device, as the refusal it gets. */
@@ -222,7 +228,7 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
     }
   });
 
-  test("unsettled adoption persistence alone keeps the default hint after release", async () => {
+  test("wedged adoption persistence advertises its remaining cap and releases quarantine", async () => {
     registerRecordingSessionCleanup(manager, recordings);
     const adoptOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(
       manager,
@@ -234,11 +240,74 @@ describe("device_cleanup_in_progress retryAfterMs for a capped recording finaliz
     adoptOwnerlessRecordings(DEVICE.deviceId, "holder");
     expect(recordings.active.get("rec-ownerless")).toBe("holder");
     expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(false);
+    await pool.bindOrReuseDeviceSession("holder", DEVICE.deviceId, "android");
     recordings.active.delete("rec-ownerless");
 
     await releaseHolder();
 
     expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(true);
-    expect((await refusedBind()).retryAfterMs).toBe(1_000);
+    expect((await refusedBind()).retryAfterMs).toBe(5_000);
+    timer.advanceTime(2_000);
+    expect((await refusedBind()).retryAfterMs).toBe(3_000);
+    timer.advanceTime(2_999);
+    expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(true);
+    expect(warn).not.toHaveBeenCalled();
+    timer.advanceTime(1);
+    await drainUntil(() => !manager.hasDeviceCleanupInProgress(DEVICE.deviceId), {
+      description: "acquisition quarantine cleared",
+    });
+    expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(false);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain("persist adopted recording ownership");
+    await pool.bindOrReuseDeviceSession("next-owner", DEVICE.deviceId, "android");
+  });
+
+  test("wedged acquisition network push advertises its cap and releases quarantine", async () => {
+    const state = new NetworkState({ timer, notifier: { notifyResourceUpdated: () => {} } });
+    state.startSimulation(DEVICE.deviceId, "timeout", 30, null);
+    const cleanup = createOwnerlessNetworkStateAcquisitionCleanup(manager, {
+      timer,
+      state: () => state,
+      pusher: { push: () => new Promise<void>(() => {}) },
+    });
+    await pool.bindOrReuseDeviceSession("holder", DEVICE.deviceId, "android");
+    cleanup(DEVICE.deviceId);
+    expect(state.getSimulation(DEVICE.deviceId)).toBeNull();
+    expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(false);
+    await pool.bindOrReuseDeviceSession("holder", DEVICE.deviceId, "android");
+    await releaseHolder();
+    expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(true);
+    expect((await refusedBind()).retryAfterMs).toBe(10_000);
+    timer.advanceTime(10_000);
+    await drainUntil(() => !manager.hasDeviceCleanupInProgress(DEVICE.deviceId), {
+      description: "acquisition quarantine cleared",
+    });
+    expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(false);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain("push cleared network state");
+    await pool.bindOrReuseDeviceSession("next-owner", DEVICE.deviceId, "android");
+  });
+
+  test("wedged acquisition settings reset advertises its cap and releases quarantine", async () => {
+    const cleanup = createDeviceSettingDefaultsAcquisitionReset(
+      manager,
+      { resetOnAcquisition: () => new Promise<void>(() => {}) },
+      timer,
+    );
+    await pool.bindOrReuseDeviceSession("holder", DEVICE.deviceId, "android");
+    cleanup(DEVICE.deviceId, "holder");
+    expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(false);
+    await pool.bindOrReuseDeviceSession("holder", DEVICE.deviceId, "android");
+    await releaseHolder();
+    expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(true);
+    expect((await refusedBind()).retryAfterMs).toBe(15_000);
+    timer.advanceTime(15_000);
+    await drainUntil(() => !manager.hasDeviceCleanupInProgress(DEVICE.deviceId), {
+      description: "acquisition quarantine cleared",
+    });
+    expect(manager.hasDeviceCleanupInProgress(DEVICE.deviceId)).toBe(false);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain("reset device setting defaults");
+    await pool.bindOrReuseDeviceSession("next-owner", DEVICE.deviceId, "android");
   });
 });

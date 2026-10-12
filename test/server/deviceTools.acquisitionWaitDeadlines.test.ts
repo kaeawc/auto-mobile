@@ -1001,7 +1001,7 @@ describe("device acquisition wait deadlines", () => {
 
   // #6034 review: System UI ANR recovery reuses the preserved session without
   // `runOperationWithinDeadline`, so binding must check cancellation itself.
-  test("a late System UI ANR recovery after the backstop binds nothing and retires the replacement", async () => {
+  test("a late System UI ANR recovery after the backstop binds nothing and leaves the replacement idle", async () => {
     const recoveryImage = {
       platform: "android" as const,
       name: android.name,
@@ -1081,15 +1081,15 @@ describe("device acquisition wait deadlines", () => {
       recoveredReadiness.resolve();
       await flushMicrotasks();
       expect(recoverySignal?.aborted).toBe(true);
-      expect(replacementProcess.killed).toBe(true);
-      expect(pool.getDevice(recoveryImage.deviceId)).toBeNull();
+      expect(replacementProcess.killed).toBe(false);
+      expect(pool.getDevice(recoveryImage.deviceId)).toMatchObject({
+        status: "idle",
+        sessionId: null,
+      });
       expect(sessionManager.getSession("owner-session")).toBeNull();
       expect(sessionManager.getDeviceReadiness("owner-session")).toBeUndefined();
       expect(notifyDeviceReady).toHaveBeenCalledTimes(readyNotifications);
-      // The AVD lease stays held until the retired replacement process exits.
-      expect(lifecycleReleases).toBe(0);
-      replacementProcess.emit("exit", null, "SIGKILL");
-      await flushMicrotasks();
+      // Cleanup releases the AVD lease without waiting for the retained process to exit.
       expect(lifecycleReleases).toBe(1);
       expect(reservations.isReservedForReadiness(recoveryImage.deviceId)).toBe(false);
     } finally {

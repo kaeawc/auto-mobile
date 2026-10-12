@@ -125,6 +125,7 @@ describe("Daemon shutdown stage budget (#11156)", () => {
     expect(timer.now()).toBe(0);
     expect(warnings).toEqual([]);
     expect(closeDatabase).toHaveBeenCalledTimes(1);
+    expect(closeDatabase).toHaveBeenCalledWith({ forShutdown: true });
     expect(cleanupDaemonFiles).toHaveBeenCalledTimes(1);
   });
 

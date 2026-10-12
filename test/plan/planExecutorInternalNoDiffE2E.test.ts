@@ -7,6 +7,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerInteractionTools } from "../../src/server/interactionTools";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { BootedDevice } from "../../src/models";
@@ -37,6 +38,7 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
   let originalDeviceSessionManager: unknown;
   let daemonSessionManager: SessionManager | undefined;
   let originalDiff: boolean;
+  let restorePipelineOverrides: () => void;
 
   function sameScreenObserve(): ObserveResult {
     return {
@@ -84,6 +86,11 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
     originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
     (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
     originalDiff = serverConfig.isActionsDiffObserveEnabled();
+    // The default provider reads the device's displays over adb, and "emulator-5554" is a real
+    // emulator on a developer's machine.
+    restorePipelineOverrides = ToolRegistry.setPipelineOverridesForTesting({
+      displayInventory: new FakeDisplayInventoryProvider(),
+    });
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     // #6227: `setupAutolockedSession` creates its session directly via
     // `DevicePool.autolockDevice` (bypassing the `deviceTools.ts` acquisition
@@ -94,6 +101,7 @@ describe("PlanExecutor → finalize internal no-diff (end-to-end, #3053)", () =>
   });
 
   afterEach(() => {
+    restorePipelineOverrides();
     (ToolRegistry as any).deviceSessionManager = originalDeviceSessionManager;
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();

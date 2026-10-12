@@ -220,6 +220,7 @@ import {
   getDatabase,
   getDatabasePath,
   getDbWriteBarrier,
+  refusedDatabaseAccessCountAfterShutdownClose,
 } from "../db";
 import { NavigationRetention } from "../db/navigationRetention";
 import { NavigationRetentionMonitor } from "./NavigationRetentionMonitor";
@@ -1156,7 +1157,7 @@ export class Daemon {
     recoveryPolicyEnvironment: NodeJS.ProcessEnv,
   ): DevicePool {
     const ownerDisconnectExecutionVeto = new OwnerDisconnectExecutionVeto(
-      this.sessionExecutionProbe(),
+      this.sessionExecutionProbe({ excludeReads: true }),
       this.timer,
       OWNER_DISCONNECT_EXECUTION_VETO_CEILING_MS,
       () => this.sessionManager.sessionNow(),
@@ -1175,14 +1176,14 @@ export class Daemon {
         }),
       ownerDisconnect: {
         release: async (session, reason) => {
-          // Never release mid-call (#5343): a deferral keeps the session, and the release is
-          // retried when the call ends or the veto's bound passes (#10663, #10712).
+          // A control call defers release (#5343); retry when it ends or the veto's bound
+          // passes (#10663, #10712). A read never defers release and is cut instead (#11381).
           const deferral = ownerDisconnectExecutionVeto.keeps(session);
           if (deferral) {
             return deferral;
           }
-          // A call the release cuts (one still running past the veto's bound) is told the session
-          // is gone, as a call arriving after the release is (#11381).
+          // A cut read or a control call past the veto's bound is told the session is gone,
+          // as a call arriving after the release is (#11381).
           await this.cancelAndReleaseSession(session.sessionId, reason, false, session, undefined, {
             cutCallsLearnRelease: true,
           });
@@ -1297,6 +1298,7 @@ export class Daemon {
     // Sessionless network mocks and simulations are cleared the same way (#11130).
     const clearOwnerlessNetworkState = createOwnerlessNetworkStateAcquisitionCleanup(
       this.sessionManager,
+      { timer: this.timer },
     );
     // Display/system settings a previous session changed are reset to the recorded device
     // defaults when a different session acquires the device (#11145).
@@ -1311,6 +1313,7 @@ export class Daemon {
     const resetSettingDefaults = createDeviceSettingDefaultsAcquisitionReset(
       this.sessionManager,
       settingDefaults,
+      this.timer,
     );
     this.sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId, sessionId) => {
       executionTracker.cancelSessionlessDeviceUse(deviceId, {
@@ -5184,7 +5187,9 @@ export class Daemon {
     // Abandoned is not cancelled: the connection stays open while an abandoned stage that may
     // write is still running, and closes late if those stragglers finish in time (#11601).
     const databaseTail = createShutdownDatabaseTail({
-      closeDatabase: () => closeDatabase(),
+      // The shutdown close: late work is refused from here on instead of reopening it.
+      closeDatabase: () => closeDatabase({ forShutdown: true }),
+      refusedAccessCount: () => refusedDatabaseAccessCountAfterShutdownClose(),
       drainWrites: (timeoutMs) => this.drainShutdownDatabaseWrites(timeoutMs),
       keepOpenReason: () =>
         this.shutdownSessionReleasesDrained

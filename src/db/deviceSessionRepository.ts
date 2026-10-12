@@ -149,6 +149,17 @@ export class DeviceSessionTerminallyReleasedError extends ActionableError {
   }
 }
 
+/** A superseded-release rewrite found another terminal release or a live peer's row (#11557). */
+export class DeviceSessionRowNotRewritableError extends ActionableError {
+  constructor(readonly sessionUuid: string) {
+    super(
+      `Device session ${sessionUuid} was not rewritten: its row holds another terminal release ` +
+        "or a live peer daemon owns it.",
+    );
+    this.name = "DeviceSessionRowNotRewritableError";
+  }
+}
+
 /** Options for {@link DeviceSessionPersistence.upsertActiveSession}. */
 export interface UpsertActiveSessionOptions {
   /**
@@ -166,6 +177,16 @@ export interface UpsertActiveSessionOptions {
    * are written as usual. A refusal rejects with {@link DeviceSessionTerminallyReleasedError}.
    */
   unlessTerminal?: boolean;
+  /**
+   * Rewrite only a non-terminal row or this superseded release's row, and never a live peer's
+   * row (#11557). Both guards run in the conflict-update statement; a missing row is inserted.
+   * Empty reasons behave like `unlessTerminal`; empty peers add no owner guard. Not combined
+   * with `claimedRow`. A refusal rejects with {@link DeviceSessionRowNotRewritableError}.
+   */
+  rewriteOverSupersededRelease?: {
+    supersededReasons: readonly string[];
+    livePeerDaemonSessionIds: readonly string[];
+  };
 }
 
 export interface DeviceSessionRecord {
@@ -464,7 +485,7 @@ export class DeviceSessionRepository {
     nowMs: number = this.timer.now(),
     options: UpsertActiveSessionOptions = {},
   ): Promise<number> {
-    const { claimedRow, unlessTerminal } = options;
+    const { claimedRow, unlessTerminal, rewriteOverSupersededRelease } = options;
     // A cheap, unconditional, indexed range
     // delete run before the write rather than gated behind amortization —
     // session starts are far less frequent than the amortized-per-insert
@@ -505,6 +526,32 @@ export class DeviceSessionRepository {
             updated_at: now,
           });
           if (!claimedRow) {
+            if (rewriteOverSupersededRelease) {
+              const { supersededReasons, livePeerDaemonSessionIds } = rewriteOverSupersededRelease;
+              return update.where((eb) =>
+                eb.and([
+                  eb.or([
+                    eb("device_sessions.release_reason", "is", null),
+                    eb.not(hasTerminalReleaseReason(eb)),
+                    ...(supersededReasons.length > 0
+                      ? [eb("device_sessions.release_reason", "in", supersededReasons)]
+                      : []),
+                  ]),
+                  ...(livePeerDaemonSessionIds.length > 0
+                    ? [
+                        eb.or([
+                          eb("device_sessions.daemon_session_id", "is", null),
+                          eb(
+                            "device_sessions.daemon_session_id",
+                            "not in",
+                            livePeerDaemonSessionIds,
+                          ),
+                        ]),
+                      ]
+                    : []),
+                ]),
+              );
+            }
             return unlessTerminal
               ? update.where((eb) =>
                   eb.or([
@@ -535,8 +582,11 @@ export class DeviceSessionRepository {
     }
     if (!written) {
       // The row's precondition failed: an expected race outcome, not a storage failure.
-      throw claimedRow
-        ? new DeviceSessionRowChangedError(record.sessionUuid)
+      if (claimedRow) {
+        throw new DeviceSessionRowChangedError(record.sessionUuid);
+      }
+      throw rewriteOverSupersededRelease
+        ? new DeviceSessionRowNotRewritableError(record.sessionUuid)
         : new DeviceSessionTerminallyReleasedError(record.sessionUuid);
     }
     return written.stable_identity_generation ?? 0;

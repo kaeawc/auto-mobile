@@ -57,13 +57,13 @@ session: a command for it without `sessionUuid`, or naming a different session,
 fails with `code` `device_owned_by_other_session`. A device no session holds
 takes input from any client.
 
-For direct `input/*` and device-mutating `ide/*` frames, an Android transport the
-pool cannot identify (`isAndroidTransportAssignable` is false) is refused only
+For direct `input/*`, device-mutating `ide/*` frames and device-aware control tools,
+an Android transport the pool cannot identify (`isAndroidTransportAssignable` is false) is refused only
 while a held Android device could be its alias. Held devices are every
 Android device still in the session holder map, including expired sessions and
 releases in progress until their ownership is removed, plus one unknown hold if
 the fresh managed-slot snapshot contains Android stable ids not represented by
-those sessions. Control frames reuse that snapshot for at most one second.
+those sessions. Control frames and tools reuse that snapshot for at most one second.
 
 The pool can positively distinguish the target from a held device only when its
 current folded alias group identifies another canonical device, its proven
@@ -75,9 +75,9 @@ serials or alias-group keys still could alias. A loopback port cannot distinguis
 a phone or an unknown device; an unknown managed-slot hold could alias unless
 the target's current folded group identifies another device.
 
-If no held device could alias the transport, the frame is allowed. If every
+If no held device could alias the transport, control is allowed. If every
 possible alias belongs to the requester's own session (including derived label
-sessions), the frame keeps the untyped “no proven identity” refusal. Otherwise
+sessions), control keeps the untyped “no proven identity” refusal. Otherwise
 it fails with `device_owned_by_other_session` and `retryable: false`, naming the
 transport the caller targeted; an unknown managed-slot hold uses
 `device_assigned_to_managed_slot` when its registry entry is available. Address
@@ -86,7 +86,7 @@ not restart a holder's idle window. A target already held under its very id goes
 through the normal holder check. Identifiable Android targets and iOS targets
 keep their existing behavior; screenshot, hierarchy and observe reads never
 pass this control check. A managed connection still controls only its own slot
-devices, after the identity check and before the existing ownership checks.
+devices; the existing connection and ownership checks still apply.
 
 A command whose session left the device (rebound or released) between being
 accepted and reaching the device fails with `code`

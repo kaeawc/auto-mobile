@@ -135,6 +135,7 @@ test/daemon/idleDeviceReaper.test.ts
 test/daemon/incumbentOwnerGuard.test.ts
 test/daemon/inputDeviceOwnership.test.ts
 test/daemon/inputHolderChangedTypedRefusal.test.ts
+test/daemon/labelLeaseSharedRule.test.ts
 test/daemon/labelOfEndedBaseRefused.test.ts
 test/daemon/lapsedOwnerShieldedByDeviceRestartHandoff.test.ts
 test/daemon/lateRehydrationOwnerToldNotFound.test.ts
@@ -252,6 +253,8 @@ test/daemon/testRecordingSocketServerReadinessSession.test.ts
 test/daemon/tokenOwnedSessionsLastUsedAt.test.ts
 test/daemon/toolCallActivityLatestDeadline.test.ts
 test/daemon/toolCallDeviceIdentity.test.ts
+test/daemon/undeliveredRebindRevertsOverrides.test.ts
+test/daemon/undeliveredRebindStrandedByOwnRestore.test.ts
 test/daemon/unsettledExecutionVeto.test.ts
 test/daemon/unsettledExecutionVetoWallClockStep.test.ts
 test/daemon/videoRecordingSocketServerAuth.test.ts
@@ -752,6 +755,7 @@ test/lint/daemonLauncherBoundary.test.ts
 test/lint/deviceDiscoveryReconcileFunnel.test.ts
 test/lint/deviceToolsKillDeviceImportCasing.test.ts
 test/lint/errorHandlingConvention.test.ts
+test/lint/expensiveHookWork.test.ts
 test/lint/fakeHygiene.test.ts
 test/lint/fastValidationRegistryCoverage.test.ts
 test/lint/gatedToolsAcceptSessionUuid.test.ts
@@ -762,14 +766,17 @@ test/lint/iosDeviceBackendBoundary.test.ts
 test/lint/iosDeviceKindRouting.test.ts
 test/lint/livenessActivityClockSeparation.test.ts
 test/lint/noCaughtErrorInterpolationRule.test.ts
+test/lint/noDirectBunSpawnRule.test.ts
 test/lint/noInlineErrorNormalizeRule.test.ts
 test/lint/noLegacyAutomobilePath.test.ts
 test/lint/noRawEnvNumberParseRule.test.ts
 test/lint/pathSeparatorAssertions.test.ts
+test/lint/posixPathLiteralExpectations.test.ts
 test/lint/processSafety.test.ts
 test/lint/rawSelectorFieldReadRule.test.ts
 test/lint/registrationTeardownGuard.test.ts
 test/lint/screenControlDocsParams.test.ts
+test/lint/sessionClockOffsetProviderSingleRead.test.ts
 test/lint/shortUnitTestTimeout.test.ts
 test/lint/simctlDevicectlBoundary.test.ts
 test/lint/sortedListingBoundary.test.ts
@@ -780,7 +787,7 @@ test/lint/toolDocumentationCoverage.test.ts
 test/lint/turboCachingSafety.test.ts
 test/lint/turboLintInputsCoverBaselines.test.ts
 test/lint/turboLintInputsCoverScriptChain.test.ts
-test/lint/unitTestDeviceSpawnAllowlist.test.ts
+test/lint/unitTestHostSpawnAllowlist.test.ts
 test/lint/validateMarkdownRepoPaths.test.ts
 test/metrics/downloadSnapshots.test.ts
 test/models/ActionableError.property.test.ts
@@ -1068,7 +1075,6 @@ test/setup/gitVersionProbe.test.ts
 test/setup/preloadDoesNotLoadCtrlProxyClients.test.ts
 test/setup/testDirectories.test.ts
 test/shutdownCleanup.test.ts
-test/shutdownLateOutcomes.test.ts
 test/stdioShutdownStages.test.ts
 test/utils/ArchiveExtractor.test.ts
 test/utils/Backoff.property.test.ts

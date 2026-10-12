@@ -212,6 +212,16 @@ export type DaemonMaintenanceAdmission =
   | "active_sessions"
   | "maintenance_pending";
 
+/**
+ * Session clock minus wall clock. An execution's start passes `wallNowMs`, the tracker's own
+ * reading of that start, so a provider can subtract it instead of reading a wall clock again.
+ * A harness that runs the session clock on a fake timer under this wall-clock tracker must: a
+ * second read can land on the next millisecond, which dates the execution 1 ms early, on or before
+ * an idle deadline the call arrived after (#11576). A deadline is stamped by its caller, so no
+ * reading is passed for it.
+ */
+export type SessionClockOffsetProvider = (wallNowMs?: number) => number;
+
 export class ExecutionTracker {
   private executions = new Map<string, ActiveExecution>();
   private sessionExecutions = new Map<string, Set<string>>();
@@ -228,7 +238,7 @@ export class ExecutionTracker {
   private daemonMaintenancePrepared = false;
   private activeProvisionDeviceQuery?: ActiveProvisionDeviceQuery;
   private autolockSessionResolver?: AutolockSessionResolver;
-  private sessionClockOffsetProvider: () => number = () => 0;
+  private sessionClockOffsetProvider: SessionClockOffsetProvider = () => 0;
 
   constructor(timer: Timer = defaultTimer, idGenerator: IdGenerator = defaultIdGenerator) {
     this.timer = timer;
@@ -239,7 +249,7 @@ export class ExecutionTracker {
    * Where the session clock stands relative to this tracker's wall clock (session minus wall),
    * read when an execution starts (#11290) and when its deadline is recorded (#11105).
    */
-  setSessionClockOffsetProvider(provider: () => number): void {
+  setSessionClockOffsetProvider(provider: SessionClockOffsetProvider): void {
     this.sessionClockOffsetProvider = provider;
   }
 
@@ -273,7 +283,7 @@ export class ExecutionTracker {
         ? this.autolockSessionResolver?.autolockSessionForMcpSession(unresolvedAutolockMcpSessionId)
         : undefined,
       startTime,
-      sessionClockStartTime: startTime + this.sessionClockOffsetProvider(),
+      sessionClockStartTime: startTime + this.sessionClockOffsetProvider(startTime),
       abortController: new AbortController(),
     };
 
@@ -606,8 +616,9 @@ export class ExecutionTracker {
     if (sessionUuids.length === 0) {
       return;
     }
-    // An inventory read's end is reported like any other call's, because a release it deferred
-    // must be retried when it ends (#11381); it is reported as not admitted, because it is not use.
+    // An inventory read's end is reported like any other call's, because a call may end before
+    // it was classified as a read, and a release deferred while it was still counted must be
+    // retried (#11381). It is reported as not admitted, because it is not use.
     const admitted = execution.sessionAdmitted === true && !execution.readOnlySessionAccess;
     for (const listener of this.sessionExecutionEndListeners) {
       try {

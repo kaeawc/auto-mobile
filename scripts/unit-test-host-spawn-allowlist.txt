@@ -1,0 +1,30 @@
+# Unit tests may not launch host processes: test/setup/realDeviceToolSpawnGuardPreload.ts throws on
+# every launch from a unit test file that is not listed here. Prefer a fake. List a launch only when
+# the test is about the real tool and the tool is local and harmless.
+#
+# One entry per line: <unit test file> <command>, sorted, under a comment saying what runs and why
+# it is harmless. The command is the executable's bare name ("Bun.$" for Bun's shell). Device,
+# simulator, host-settings and resident-daemon commands (adb, xcrun, simctl, emulator, avdmanager,
+# defaults, ...) are refused even when listed; test/lint/unitTestHostSpawnAllowlist.test.ts pins it.
+
+# Runs test/fixtures/cliBoundedTerminationChild.ts to prove a real process exits within its bound.
+test/cli/termination.test.ts bun
+# mkfifo in a fresh temp dir: the launcher must refuse a package.json that is not a regular file.
+test/daemon/DaemonLauncher.test.ts mkfifo
+# `scripts/all_fast_validate_checks.sh --list` prints the check registry and runs no check.
+test/lint/fastValidationRegistryCoverage.test.ts bash
+# `git ls-files -z`, read-only, to enumerate tracked Markdown.
+test/lint/validateMarkdownRepoPaths.test.ts git
+# `git grep -l`, read-only, over the tracked tree.
+test/package/noBundledCoordinationServer.guard.test.ts git
+# `git ls-files -z`, read-only, to enumerate integration test files.
+test/scripts/integrationSafeTier.test.ts git
+# Runs a bundle the test built in a temp dir, to prove its source map resolves at runtime.
+test/scripts/optimizedSourcemapRuntime.test.ts bun
+# Runs the workflow's own cleanup step scripts against a temp working directory.
+test/scripts/spmRootToolchainWorkflow.test.ts bash
+# Runs the generated on-device write script against a temp dir to prove its directory guard exits
+# before any move; the script only touches paths relative to that dir.
+test/server/appFileService.test.ts sh
+# Runs a nested `bun test --isolate` on a probe spec in a temp dir to prove the timing preload.
+test/setup/fileTimingProbe.test.ts bun

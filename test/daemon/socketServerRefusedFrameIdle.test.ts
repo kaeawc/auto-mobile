@@ -68,6 +68,7 @@ class FakeSocket extends EventEmitter {
 }
 
 interface Internals {
+  captureStrokeAdmission(deviceId: string, signal?: AbortSignal): unknown;
   acceptingRequests: boolean;
   handleConnection(socket: Socket): void;
   activeRequestHandlers: Set<Promise<void>>;
@@ -258,7 +259,8 @@ describe("a holder's control frame refused before it reaches the device", () => 
         requestGestureStart: record("gestureStart"),
         requestGestureMove: record("gestureMove"),
         requestGestureEnd: record("gestureEnd"),
-        requestSetText: record("setText"),
+        requestSetText: record("setText", 1),
+        requestImeAction: record("ime", 4),
         setPreference: record("setPreference", 5),
         removePreference: record("removePreference", 3),
         clearPreferenceStore: record("clearPreferenceStore", 2),
@@ -270,6 +272,9 @@ describe("a holder's control frame refused before it reaches the device", () => 
           getScreenScaleMetadata: () => ({ nativeScale: 1, pixelWidth: 100, pixelHeight: 100 }),
           requestTapCoordinates: record("tap", 7),
           requestDrag: record("swipe", 10),
+          requestSetText: record("setText", 1),
+          requestAppendText: record("appendText", 4),
+          requestImeAction: record("ime", 4),
           setPreference: record("setPreference", 5),
           removePreference: record("removePreference", 3),
           clearPreferenceStore: record("clearPreferenceStore", 2),
@@ -285,10 +290,10 @@ describe("a holder's control frame refused before it reaches the device", () => 
         }) as unknown as AndroidCtrlProxyManager,
     );
     spyOn(PressButton.prototype, "press").mockImplementation(
-      record("pressButton") as unknown as PressButton["press"],
+      record("pressButton", 4) as unknown as PressButton["press"],
     );
     spyOn(InputKey.prototype, "press").mockImplementation(
-      record("key") as unknown as InputKey["press"],
+      record("key", 4) as unknown as InputKey["press"],
     );
     const fakePool = {
       ...createFakeDaemonState().getDevicePool(),
@@ -314,6 +319,12 @@ describe("a holder's control frame refused before it reaches the device", () => 
         },
       },
     );
+    server.appendTextFactory = () => ({
+      appendText: async (...args) => ({
+        ...(await record("appendText", 4)(...args)),
+        charsSent: args[0].length,
+      }),
+    });
     internals = server as unknown as Internals;
     // Observe the route rejection even when a closed socket suppresses its response.
     spyOn(internals, "handleIdeSocketRequest");
@@ -329,6 +340,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
     await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
     await Promise.all([...internals.activeRequestHandlers]);
     spyOn(internals, "handleIdeSocketRequest").mockRestore();
+    spyOn(executionTracker, "markSessionAdmitted").mockRestore();
     unsubscribeActivity();
     executionTracker.setSessionClockOffsetProvider(() => 0);
     spyOn(AndroidCtrlProxyClient, "getInstance").mockRestore();
@@ -415,13 +427,19 @@ describe("a holder's control frame refused before it reaches the device", () => 
       [
         "input/tap",
         "input/swipe",
+        "input/key",
+        "input/pressButton",
+        "input/typeText",
         "ide/setKeyValue",
         "ide/removeKeyValue",
         "ide/clearKeyValueFile",
       ].includes(frame.method),
     );
     for (const platform of ["android", "ios"] as const) {
-      const frames = platform === "android" ? covered : [covered[0], covered[1], covered[2]];
+      const frames = [
+        ...covered.filter((frame) => platform === "android" || frame.method !== "input/key"),
+        { method: "input/typeText", params: { text: "abc", mode: "append" }, sends: "appendText" },
+      ];
       for (const outcome of ["cancel", "close", "failure", "sent"] as const) {
         test.each(frames)(
           `${platform} $method ($sends): ${outcome} while connecting`,
@@ -437,6 +455,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
             };
             const before = clock();
             timer.advanceTime(1_000);
+            const mark = spyOn(executionTracker, "markSessionAdmitted");
             const connecting = Promise.withResolvers<void>();
             let parked = false;
             let hooks = 0;
@@ -460,6 +479,8 @@ describe("a holder's control frame refused before it reaches the device", () => 
               params: { ...frame.params, platform, deviceId, sessionUuid: sessionId },
             });
             await drainUntil(() => parked, { description: "fake client connecting" });
+            const clockWhileConnecting = clock();
+            const marksWhileConnecting = mark.mock.calls.length;
             if (outcome === "cancel") {
               socket.send({
                 id: "cancel-connect",
@@ -478,10 +499,13 @@ describe("a holder's control frame refused before it reaches the device", () => 
             }
             connecting.resolve();
             await Promise.all([...internals.activeRequestHandlers]);
+            expect(clockWhileConnecting).toEqual(before);
+            expect(marksWhileConnecting).toBe(0);
             if (outcome === "sent") {
               expect(socket.responses.find((r) => r.id === "connecting")?.success).toBe(true);
               expect(sent).toEqual([frame.sends]);
               expect(hooks).toBe(1);
+              expect(mark).toHaveBeenCalledTimes(1);
               expect(clock()).toEqual({
                 lastUsedAt: before.lastUsedAt + 1_000,
                 expiresAt: before.expiresAt + 1_000,
@@ -491,11 +515,64 @@ describe("a holder's control frame refused before it reaches the device", () => 
               expect(hooks).toBe(0);
               expect(clock()).toEqual(before);
             }
+            mark.mockRestore();
           },
         );
       }
     }
   });
+
+  test("gestureStart stamps before stroke admission is captured", async () => {
+    const mark = spyOn(executionTracker, "markSessionAdmitted");
+    const capture = internals.captureStrokeAdmission.bind(internals);
+    const admission = spyOn(internals, "captureStrokeAdmission").mockImplementation((...args) => {
+      expect(mark).toHaveBeenCalledTimes(1);
+      const result = capture(...args);
+      expect(result).toMatchObject({ holderSessionId: SESSION });
+      return result;
+    });
+    try {
+      expect(
+        (await send("gesture-pin", "input/gestureStart", { gestureId: "pin", x: 1, y: 2 }))
+          ?.success,
+      ).toBe(true);
+      expect(admission).toHaveBeenCalledTimes(1);
+    } finally {
+      admission.mockRestore();
+      mark.mockRestore();
+    }
+  });
+
+  for (const platform of ["android", "ios"] as const) {
+    for (const append of [false, true]) {
+      test(`${platform} typeText append=${append} with submit marks only its first send`, async () => {
+        const deviceId = platform === "android" ? DEVICE : "idle-ios";
+        const sessionId = platform === "android" ? SESSION : "ios-holder";
+        if (platform === "ios") {
+          await sessionManager.createSession(sessionId, deviceId, "ios", IDLE_MS);
+        }
+        const mark = spyOn(executionTracker, "markSessionAdmitted");
+        try {
+          expect(
+            (
+              await send("submit", "input/typeText", {
+                text: "abc",
+                mode: append ? "append" : undefined,
+                submit: true,
+                platform,
+                deviceId,
+                sessionUuid: sessionId,
+              })
+            )?.success,
+          ).toBe(true);
+          expect(sent).toEqual([append ? "appendText" : "setText", "ime"]);
+          expect(mark).toHaveBeenCalledTimes(1);
+        } finally {
+          mark.mockRestore();
+        }
+      });
+    }
+  }
 
   describe("direct-file fallback dispatch count", () => {
     for (const sdkSent of [false, true]) {

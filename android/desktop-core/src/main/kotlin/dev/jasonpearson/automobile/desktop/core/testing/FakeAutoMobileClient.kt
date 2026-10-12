@@ -2,6 +2,8 @@ package dev.jasonpearson.automobile.desktop.core.testing
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ClearKeyValueResult
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceGestureRecordingStartResult
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceGestureRecordingStopResult
 import dev.jasonpearson.automobile.desktop.core.daemon.ExecutePlanResult
 import dev.jasonpearson.automobile.desktop.core.daemon.FeatureFlagState
 import dev.jasonpearson.automobile.desktop.core.daemon.GestureInputStream
@@ -17,8 +19,6 @@ import dev.jasonpearson.automobile.desktop.core.daemon.RemoveKeyValueResult
 import dev.jasonpearson.automobile.desktop.core.daemon.SetActiveDeviceResult
 import dev.jasonpearson.automobile.desktop.core.daemon.SetKeyValueResult
 import dev.jasonpearson.automobile.desktop.core.daemon.StartDeviceResult
-import dev.jasonpearson.automobile.desktop.core.daemon.DeviceGestureRecordingStartResult
-import dev.jasonpearson.automobile.desktop.core.daemon.DeviceGestureRecordingStopResult
 import dev.jasonpearson.automobile.desktop.core.daemon.TestRunQuery
 import dev.jasonpearson.automobile.desktop.core.daemon.TestRunSummary
 import dev.jasonpearson.automobile.desktop.core.daemon.TestTimingQuery
@@ -335,7 +335,10 @@ class FakeAutoMobileClient : AutoMobileClient {
     return startDeviceGestureRecordingResult
   }
 
-  override fun stopDeviceGestureRecording(recordingId: String?, planName: String?): DeviceGestureRecordingStopResult {
+  override fun stopDeviceGestureRecording(
+    recordingId: String?,
+    planName: String?,
+  ): DeviceGestureRecordingStopResult {
     calls.add("stopDeviceGestureRecording")
     return stopDeviceGestureRecordingResult
   }

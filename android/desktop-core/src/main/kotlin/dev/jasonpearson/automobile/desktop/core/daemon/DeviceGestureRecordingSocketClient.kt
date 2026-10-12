@@ -35,7 +35,8 @@ internal constructor(
   )
 
   override fun startDeviceGestureRecording(platform: String?): DeviceGestureRecordingStartResult {
-    val response = sendRequest(DeviceGestureRecordingSocketCommand(command = "start", platform = platform))
+    val response =
+      sendRequest(DeviceGestureRecordingSocketCommand(command = "start", platform = platform))
     ensureSuccess(response)
     return DeviceGestureRecordingStartResult(
       recordingId = response.recordingId ?: throw missingField("recordingId"),
@@ -71,7 +72,9 @@ internal constructor(
     )
   }
 
-  private fun sendRequest(request: DeviceGestureRecordingSocketCommand): DeviceGestureRecordingSocketResponse {
+  private fun sendRequest(
+    request: DeviceGestureRecordingSocketCommand,
+  ): DeviceGestureRecordingSocketResponse {
     ensureSocketExists()
 
     val line =
@@ -127,7 +130,10 @@ class FakeDeviceGestureRecordingClient(
     return response
   }
 
-  override fun stopDeviceGestureRecording(recordingId: String?, planName: String?): DeviceGestureRecordingStopResult {
+  override fun stopDeviceGestureRecording(
+    recordingId: String?,
+    planName: String?,
+  ): DeviceGestureRecordingStopResult {
     stopCalls.add(FakeDeviceGestureRecordingStopCall(recordingId, planName))
     if (stopResponses.isEmpty()) {
       throw IllegalStateException("No stop responses configured")
@@ -138,7 +144,9 @@ class FakeDeviceGestureRecordingClient(
   }
 
   companion object {
-    /** Creates a FakeDeviceGestureRecordingClient with sample responses for UI development/testing. */
+    /**
+     * Creates a FakeDeviceGestureRecordingClient with sample responses for UI development/testing.
+     */
     fun withSampleResponses(): FakeDeviceGestureRecordingClient {
       val sampleYaml =
         """

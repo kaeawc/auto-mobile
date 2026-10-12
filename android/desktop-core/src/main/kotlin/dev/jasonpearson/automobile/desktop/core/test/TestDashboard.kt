@@ -44,11 +44,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.components.Link
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceGestureRecordingClient
 import dev.jasonpearson.automobile.desktop.core.daemon.HierarchyStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.daemon.NavigationGraphStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ScreenshotStreamUpdate
-import dev.jasonpearson.automobile.desktop.core.daemon.DeviceGestureRecordingClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.formatUiNumber
@@ -79,7 +79,8 @@ fun TestDashboard(
   clientProvider: (() -> AutoMobileClient)? = null, // MCP client for real data
   observationStreamClient: ObservationStreamClient? =
     null, // Real-time stream client for hierarchy/screenshot/navigation updates
-  deviceGestureRecordingClient: DeviceGestureRecordingClient? = null, // Client for device gesture recording operations
+  deviceGestureRecordingClient: DeviceGestureRecordingClient? =
+    null, // Client for device gesture recording operations
   fileSaver: dev.jasonpearson.automobile.desktop.core.platform.FileSaver =
     dev.jasonpearson.automobile.desktop.core.platform.SwingFileSaver,
 ) {

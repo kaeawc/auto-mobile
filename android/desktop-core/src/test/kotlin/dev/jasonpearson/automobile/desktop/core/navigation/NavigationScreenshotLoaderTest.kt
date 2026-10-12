@@ -408,7 +408,8 @@ class FakeAutoMobileClient : AutoMobileClient {
 
   override fun startDeviceGestureRecording(platform: String) = notImplemented()
 
-  override fun stopDeviceGestureRecording(recordingId: String?, planName: String?) = notImplemented()
+  override fun stopDeviceGestureRecording(recordingId: String?, planName: String?) =
+    notImplemented()
 
   override fun executePlan(
     planContent: String,

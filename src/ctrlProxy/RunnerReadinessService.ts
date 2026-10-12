@@ -71,6 +71,14 @@ type RunnerReadinessPhase =
   | "runner-health";
 
 export class RunnerReadinessError extends ActionableError {
+  get code(): "timeout" | undefined {
+    return this.deadlineExhausted ? "timeout" : undefined;
+  }
+
+  get retryable(): true | undefined {
+    return this.deadlineExhausted ? true : undefined;
+  }
+
   constructor(
     message: string,
     readonly retryableAndroidFrameworkFailure = false,

@@ -399,6 +399,18 @@ export interface BootCapacitySnapshot {
   booted: number;
   /** Admitted boots not yet visible as booted. */
   inFlight: number;
+  /** Android only: this sample lacked the table, or this daemon admitted a boot on adb alone. */
+  processTable?: {
+    /** The sample behind this report lacked the table. */
+    unavailable: boolean;
+    /** The most recent failure. */
+    reason: string;
+    detail: string;
+    attempts: number;
+    /** Boots this daemon admitted on the adb-only count since it started. */
+    admissionsWithoutProcessTable: number;
+    lastAdmissionWithoutProcessTableAtMs?: number;
+  };
   /** Reported only, never a reason to refuse a boot (#11209). iOS only. */
   hostPressure?: { sustained: boolean; consecutiveSamples: number; memoryPressure: string };
 }

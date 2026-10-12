@@ -10,6 +10,7 @@ import {
   resetDeviceToolsDependencies,
   registerDeviceTools,
   startDeviceSchema,
+  cancelUnownedColdBootUnlessRetryable,
 } from "../../src/server/deviceTools";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
@@ -32,7 +33,14 @@ import {
   MAX_RUNNER_READINESS_TIMEOUT_MS,
   MIN_RUNNER_READINESS_TIMEOUT_MS,
 } from "../../src/utils/runnerReadinessConfig";
-import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/RunnerReadinessService";
+import {
+  RunnerReadinessError,
+  SystemUiAnrRecoveryRequiredError,
+} from "../../src/ctrlProxy/RunnerReadinessService";
+import { DeviceTransportOfflineError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { DeviceLostError } from "../../src/models/DeviceLostError";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import { spyOn } from "bun:test";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
 import {
   InMemoryVirtualDeviceLifecycleCoordinator,
@@ -2514,6 +2522,155 @@ describe("startDevice handler", () => {
     fakeDeviceUtils.setWaitForDeviceReadyError(new Error("readiness timeout"));
 
     await expect(callStartDevice({ platform: "android" })).rejects.toThrow("readiness timeout");
+  });
+
+  for (const kind of [
+    "bind-offline",
+    "runner-deadline",
+    "terminal-runner",
+    "device-lost",
+    "aborted",
+    "preempted",
+  ] as const) {
+    it(`first-boot failure cleanup and retry: ${kind}`, async () => {
+      const child = new FakeChildProcess(bootTimer);
+      const kill = spyOn(child, "kill").mockImplementation(() => {
+        child.exitCode = 0;
+        child.emit("exit", 0, null);
+        return true;
+      });
+      const coldImage = { ...androidImage, deviceId: androidDevice.deviceId };
+      fakeDeviceUtils.setDeviceImages("android", [coldImage]);
+      fakeDeviceUtils.setMockChildProcess(coldImage.name, child as unknown as ChildProcess);
+      fakeMatcher.setBootedResult(null);
+      fakeMatcher.setImageResult(coldImage);
+      daemonSessionManager = new SessionManager(bootTimer, new FakeDeviceSessionPersistence());
+      const pool = new DevicePool(
+        createDevicePoolDependencies(daemonSessionManager, "daemon", {
+          timer: bootTimer,
+          deviceManager: fakeDeviceUtils,
+          env: autolockEnv,
+        }),
+      );
+      DaemonState.getInstance().initialize(daemonSessionManager, pool);
+      const controller = new AbortController();
+      const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(bootTimer);
+      let teardown: Promise<VirtualDeviceLifecycleLease> | undefined;
+      const failure =
+        kind === "bind-offline"
+          ? new DeviceTransportOfflineError(androidDevice.deviceId, "offline")
+          : new RunnerReadinessError(
+              "runner failure",
+              false,
+              kind !== "terminal-runner",
+              "runner-connect",
+              42,
+              kind === "device-lost"
+                ? new DeviceLostError(androidDevice.deviceId, "device lost", "incident")
+                : undefined,
+            );
+      let readyDevice: BootedDevice | undefined;
+      let bindFailure = kind === "bind-offline";
+      const bind = pool.bindOrReuseDeviceSession.bind(pool);
+      pool.bindOrReuseDeviceSession = async (...args) => {
+        if (bindFailure) {
+          throw failure;
+        }
+        return bind(...args);
+      };
+      setDeviceToolsDependencies({
+        lifecycleCoordinator,
+        ensureCtrlProxyReady: async (request) => {
+          readyDevice = request.device;
+          fakeDeviceUtils.setBootedDevices("android", [request.device]);
+          if (kind === "aborted") {
+            controller.abort(failure);
+          }
+          if (kind === "preempted") {
+            teardown = lifecycleCoordinator.reserve(
+              { kind: "stable", platform: "android", stableId: coldImage.name },
+              { operation: "teardown", deadlineMs: bootTimer.now() + 1000 },
+            );
+            expect(controller.signal.aborted).toBe(false);
+            expect(request.signal?.aborted).toBe(true);
+          }
+          if (!bindFailure) {
+            throw failure;
+          }
+        },
+      });
+      const start = spyOn(fakeDeviceUtils, "startDevice");
+      try {
+        await expect(
+          callStartDevice({ platform: "android", avdName: coldImage.name }, controller.signal),
+        ).rejects.toBe(failure);
+        const keep = kind === "bind-offline" || kind === "runner-deadline";
+        expect(kill).toHaveBeenCalledTimes(keep ? 0 : 1);
+        expect(start).toHaveBeenCalledTimes(1);
+        expect(daemonSessionManager.getAllSessionIds()).toEqual([]);
+        if (keep) {
+          expect(readyDevice).toBeDefined();
+          fakeMatcher.setBootedResult(readyDevice!);
+          bindFailure = false;
+          setDeviceToolsDependencies({ ensureCtrlProxyReady: async () => {} });
+          const retry = await callStartDevice({ platform: "android", avdName: coldImage.name });
+          expect(retry.acquisition).toBe("already-booted");
+          expect(start).toHaveBeenCalledTimes(1);
+          expect(kill).not.toHaveBeenCalled();
+        }
+      } finally {
+        (await teardown)?.release();
+        kill.mockRestore();
+        start.mockRestore();
+      }
+    });
+  }
+
+  it("an iOS cold boot still terminates after a retryable readiness deadline", async () => {
+    const child = new FakeChildProcess(bootTimer);
+    const kill = spyOn(child, "kill").mockImplementation(() => {
+      child.exitCode = 0;
+      child.emit("exit", 0, null);
+      return true;
+    });
+    try {
+      const settlement = cancelUnownedColdBootUnlessRetryable(
+        { device: iosDevice, source: "cold-boot", processHandle: child as unknown as ChildProcess },
+        new RunnerReadinessError("readiness timeout", false, true, "runner-connect"),
+        undefined,
+      );
+      expect(settlement).toBeInstanceOf(Promise);
+      await settlement;
+      expect(kill).toHaveBeenCalledTimes(1);
+    } finally {
+      kill.mockRestore();
+    }
+  });
+
+  it("a newly provisioned cold boot still terminates after a retryable readiness deadline", async () => {
+    const child = new FakeChildProcess(bootTimer);
+    const kill = spyOn(child, "kill").mockImplementation(() => {
+      child.exitCode = 0;
+      child.emit("exit", 0, null);
+      return true;
+    });
+    try {
+      const settlement = cancelUnownedColdBootUnlessRetryable(
+        {
+          device: androidDevice,
+          source: "cold-boot",
+          provisioned: true,
+          processHandle: child as unknown as ChildProcess,
+        },
+        new RunnerReadinessError("readiness timeout", false, true, "runner-connect"),
+        undefined,
+      );
+      expect(settlement).toBeInstanceOf(Promise);
+      await settlement;
+      expect(kill).toHaveBeenCalledTimes(1);
+    } finally {
+      kill.mockRestore();
+    }
   });
 
   it("cancels an unowned cold boot when runner readiness fails", async () => {

@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, spyOn } from "bun:test";
+import type { ChildProcess } from "node:child_process";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   DeviceShuttingDownError,
@@ -64,7 +66,7 @@ async function setup(pooled: boolean) {
     }
     noLossSideEffects();
   };
-  return { timer, manager, pool, entry, bind, unchanged, noLossSideEffects };
+  return { timer, manager, pool, entry, bind, unchanged, noLossSideEffects, kill, remove };
 }
 
 function track<T>(promise: Promise<T>) {
@@ -84,6 +86,165 @@ function track<T>(promise: Promise<T>) {
 
 describe("exact Android binding during transitional adb presence", () => {
   const test = warmedTests(() => sessions?.stopCleanupTimer());
+
+  for (const autolock of [false, true]) {
+    test(`${autolock ? "autolock" : "explicit bind"}: live first-boot process holds offline then absent transport until the same serial returns`, async () => {
+      const h = await setup(true);
+      const child = new FakeChildProcess(h.timer);
+      const process = child as unknown as ChildProcess;
+      h.manager.bootedDevices = [device];
+      h.manager.androidListedDeviceStates.set(device.deviceId, "device");
+      expect(await h.manager.getBootedDevices("android")).toEqual([device]);
+      h.manager.bootedDevices = [];
+      h.manager.androidListedDeviceStates.set(device.deviceId, "offline");
+      const pending = track(
+        autolock
+          ? h.pool.autolockDevice(device.deviceId, "android", "client", image, process)
+          : h.pool.bindOrReuseDeviceSession("owner", device.deviceId, "android", image, process),
+      );
+      await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {
+        description: "first-boot offline wait",
+      });
+      expect(pending.settled()).toBe(false);
+      h.manager.androidListedDeviceStates.clear();
+      h.timer.advanceTime(100);
+      await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(200), {
+        description: "first-boot absent wait",
+      });
+      expect(pending.settled()).toBe(false);
+      h.manager.bootedDevices = [device];
+      h.manager.androidListedDeviceStates.set(device.deviceId, "device");
+      h.timer.advanceTime(200);
+      expect(await pending.result).toEqual(autolock ? expect.any(String) : "owner");
+      expect(h.pool.getDevice(device.deviceId)).toBe(h.entry);
+      expect(child.killed).toBe(false);
+      h.noLossSideEffects();
+    });
+  }
+
+  for (const live of [true, false]) {
+    test(`stale listing with ${live ? "live" : "no"} launch and device probe ${live ? "re-discovers the same serial" : "preserves absence"}`, async () => {
+      const h = await setup(true);
+      const child = new FakeChildProcess(h.timer);
+      h.manager.androidListedDeviceStates.clear();
+      const probe = spyOn(h.manager, "getAndroidListedDeviceStates").mockResolvedValue(
+        new Map([[device.deviceId, "device"]]),
+      );
+      try {
+        const pending = track(
+          h.pool.bindOrReuseDeviceSession(
+            "owner",
+            device.deviceId,
+            "android",
+            image,
+            live ? (child as unknown as ChildProcess) : undefined,
+          ),
+        );
+        await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {
+          description: "listing and probe disagreement",
+        });
+        if (live) {
+          expect(pending.settled()).toBe(false);
+          h.manager.bootedDevices = [device];
+          h.manager.androidListedDeviceStates.set(device.deviceId, "device");
+          h.timer.advanceTime(100);
+          expect(await pending.result).toBe("owner");
+          expect(h.timer.now()).toBe(100);
+          expect(h.pool.getDevice(device.deviceId)).toBe(h.entry);
+          expect(h.entry?.sessionId).toBe("owner");
+        } else {
+          const error = await pending.result;
+          expect(error).toBeInstanceOf(ActionableError);
+          expect(error).toHaveProperty(
+            "message",
+            `Device '${device.deviceId}' is not available in the device pool. It may have been shut down or disconnected.`,
+          );
+          expect(error).not.toHaveProperty("code");
+          expect(h.timer.now()).toBe(0);
+          h.unchanged();
+        }
+        expect(probe).toHaveBeenCalledTimes(1);
+        expect(child.killed).toBe(false);
+        h.noLossSideEffects();
+      } finally {
+        probe.mockRestore();
+      }
+    });
+  }
+
+  for (const exited of [false, true]) {
+    test(`first-boot offline then absent with ${exited ? "exited" : "live"} launch refuses without signalling or shutdown`, async () => {
+      const h = await setup(true);
+      const child = new FakeChildProcess(h.timer);
+      if (exited) {
+        child.exitCode = 1;
+      }
+      const shutdown = spyOn(h.pool, "markIntentionalShutdown");
+      try {
+        const pending = track(
+          h.pool.bindOrReuseDeviceSession(
+            "owner",
+            device.deviceId,
+            "android",
+            image,
+            child as unknown as ChildProcess,
+          ),
+        );
+        await drainUntil(() => pending.settled() || h.timer.getPendingTimeouts().includes(100), {
+          description: "offline wait before absence",
+        });
+        h.manager.androidListedDeviceStates.clear();
+        h.timer.advanceTime(100);
+        if (exited) {
+          // The exited fake's piped output closes after process tracking attaches its listener.
+          await drainUntil(() => h.timer.getPendingTimeouts().includes(1000), {
+            description: "exited launch output close",
+          });
+          child.emit("close", 1, null);
+          await drainUntil(pending.settled, { description: "exited launch refusal" });
+        }
+        const error = exited
+          ? await pending.result
+          : await settleByFakeEvents(h.timer, pending.result, {
+              description: "absent transport budget",
+            });
+        if (exited) {
+          expect(error).toBeInstanceOf(Error);
+          expect(error).not.toBeInstanceOf(DeviceTransportOfflineError);
+          expect(error).toHaveProperty(
+            "message",
+            `Android emulator ${device.deviceId} exited before process tracking completed (code=1, signal=none)`,
+          );
+          expect(error).not.toHaveProperty("code");
+          expect(h.timer.now()).toBe(100);
+        } else {
+          expect(error).toBeInstanceOf(DeviceTransportOfflineError);
+          expect(error).toMatchObject({
+            code: "device_offline",
+            retryable: true,
+            retryAfterMs: 1000,
+          });
+          expect(error).toHaveProperty(
+            "message",
+            expect.stringContaining("still running but adb does not list its transport yet"),
+          );
+          expect(h.timer.now()).toBe(5000);
+        }
+        expect(child.killed).toBe(false);
+        expect(shutdown).not.toHaveBeenCalled();
+        if (exited) {
+          expect(h.pool.getDevice(device.deviceId)).toBeNull();
+          expect(h.remove).toHaveBeenCalledTimes(1);
+          expect(h.kill).not.toHaveBeenCalled();
+          expect(h.manager.startedDevices).toHaveLength(1);
+        } else {
+          h.unchanged();
+        }
+      } finally {
+        shutdown.mockRestore();
+      }
+    });
+  }
 
   test("own readiness reservation waits once then binds the same pooled entry", async () => {
     const h = await setup(true);

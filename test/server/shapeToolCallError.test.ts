@@ -9,6 +9,8 @@ import { SessionSuspectError } from "../../src/daemon/sessionManager";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import { logger } from "../../src/utils/logger";
+import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessService";
+import { typedRefusalFields } from "../../src/models/typedRefusalFields";
 
 const context = { toolName: "observe", source: "MCP" } as const;
 
@@ -21,6 +23,32 @@ describe("shapeToolCallError", () => {
 
   afterEach(() => {
     errorSpy.mockRestore();
+  });
+
+  test("runner-connect deadline is a typed retryable timeout on every tool boundary", () => {
+    const error = new RunnerReadinessError(
+      "runner connect timed out",
+      false,
+      true,
+      "runner-connect",
+    );
+    expect(typedRefusalFields(error)).toEqual({ code: "timeout", retryable: true });
+    for (const source of ["MCP", "ProxyServer"] as const) {
+      expect(JSON.parse(shapeToolCallError(error, { ...context, source }).content[0].text)).toEqual(
+        {
+          success: false,
+          error: error.message,
+          code: "timeout",
+          retryable: true,
+        },
+      );
+    }
+  });
+
+  test("terminal runner readiness stays an untyped error", () => {
+    const error = new RunnerReadinessError("platform fault", false, false, "runner-setup");
+    expect(typedRefusalFields(error)).toBeUndefined();
+    expect(shapeToolCallError(error, context).content[0].text).toBe("Error: platform fault");
   });
 
   test("serializes indeterminate text as a structured non-retryable failure", () => {

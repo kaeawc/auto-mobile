@@ -2,13 +2,16 @@ import type { AdbDeviceState } from "../../utils/android-cmdline-tools/interface
 import type { HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
-import {
-  nodeHostOsInfo,
-  readHostProcessTable,
-  type HostOsInfo,
-} from "../iosSimFleet/FleetHostSource";
+import { nodeHostOsInfo, type HostOsInfo } from "../iosSimFleet/FleetHostSource";
 import type { HostProcessRow } from "../iosSimFleet/types";
+import {
+  ProcessTableReader,
+  type ProcessTableReadOptions,
+  type ProcessTableFailure,
+} from "./processTableRetry";
 import type { CapacityHostResources } from "./capacityLimits";
+
+export type { ProcessTableFailure, ProcessTableFailureReason } from "./processTableRetry";
 
 /** What the Android boot admission gate counts. Missing data is reported, never read as zero load. */
 export interface AndroidCapacitySample {
@@ -37,10 +40,12 @@ export interface AndroidCapacitySample {
    * emulator runs. With no process count either, the booted count is unknown (#11236).
    */
   serialListingFailed?: true;
+  /** Why the host process table is unavailable; absent exactly when that table was read. */
+  processTableFailure?: ProcessTableFailure;
 }
 
 export interface AndroidCapacitySource {
-  sample(options?: { signal?: AbortSignal }): Promise<AndroidCapacitySample>;
+  sample(options?: { signal?: AbortSignal; deadlineMs?: number }): Promise<AndroidCapacitySample>;
 }
 
 /** Lists the adb serials of emulators in any adb state; throws when adb is unusable. */
@@ -93,12 +98,15 @@ export function isEmulatorQemuProcess(row: Pick<HostProcessRow, "command">): boo
 
 /** Read-only source backed by the adb listing, `ps` and the `os` host totals. */
 export class CommandAndroidCapacitySource implements AndroidCapacitySource {
+  private readonly processTable: ProcessTableReader;
   constructor(
     private readonly listEmulatorSerials: EmulatorSerialLister,
-    private readonly executor: HostCommandExecutor,
+    executor: HostCommandExecutor,
     private readonly os: Pick<HostOsInfo, "totalMemoryBytes" | "cpuCount"> = nodeHostOsInfo,
-    private readonly readTimeoutMs = 5_000,
-  ) {}
+    options: ProcessTableReadOptions = {},
+  ) {
+    this.processTable = new ProcessTableReader(executor, options);
+  }
 
   /**
    * adb is read first and the process table only once that read has ended (#11588). An emulator
@@ -107,21 +115,26 @@ export class CommandAndroidCapacitySource implements AndroidCapacitySource {
    * round, or overlapping, an emulator started and listed after the table was read and another
    * one only the table shows are one row in each listing: two emulators counted as one.
    *
-   * The cost is one `ps` on top of the adb read instead of alongside it: 60 to 120 ms measured
+   * The healthy path costs one `ps` on top of the adb read instead of alongside it: 60 to 120 ms measured
    * on a loaded macOS host with 1,200 processes.
-   * Each read keeps its own timeout, and a failed adb read still leaves the table to count by.
+   * Process-table retries share the caller's sample deadline. A failed adb read still leaves
+   * the table to count by.
    */
-  async sample(options: { signal?: AbortSignal } = {}): Promise<AndroidCapacitySample> {
+  async sample(
+    options: { signal?: AbortSignal; deadlineMs?: number } = {},
+  ): Promise<AndroidCapacitySample> {
     const serials = await this.readSerials(options.signal);
-    const processes = await this.readEmulatorProcesses(options.signal);
+    const processes = await this.processTable.read(options);
+    const emulatorRows = processes.value?.filter(isEmulatorQemuProcess);
     return {
       emulatorSerials: serials.value ?? [],
-      emulatorProcessRssBytes: processes.value?.map((row) => row.rssBytes),
-      emulatorProcessIds: processes.value?.map((row) => ({ pid: row.pid, ppid: row.ppid })),
+      emulatorProcessRssBytes: emulatorRows?.map((row) => row.rssBytes),
+      emulatorProcessIds: emulatorRows?.map((row) => ({ pid: row.pid, ppid: row.ppid })),
       host: { totalMemoryBytes: this.os.totalMemoryBytes(), cpuCount: this.os.cpuCount() },
       errors: [serials.error, processes.error].filter(
         (error): error is string => error !== undefined,
       ),
+      ...(processes.failure ? { processTableFailure: processes.failure } : {}),
       ...(serials.error !== undefined ? { serialListingFailed: true as const } : {}),
     };
   }
@@ -133,23 +146,6 @@ export class CommandAndroidCapacitySource implements AndroidCapacitySource {
       signal?.throwIfAborted();
       logger.warn(`[BootAdmission] adb emulator listing failed: ${errorMessage(error)}`, error);
       return { error: `adb: ${errorMessage(error)}` };
-    }
-  }
-
-  private async readEmulatorProcesses(
-    signal?: AbortSignal,
-  ): Promise<{ value?: HostProcessRow[]; error?: string }> {
-    try {
-      const rows = await readHostProcessTable(this.executor, {
-        signal,
-        timeoutMs: this.readTimeoutMs,
-      });
-      return { value: rows.filter(isEmulatorQemuProcess) };
-    } catch (error) {
-      signal?.throwIfAborted();
-      // Optional signal: `ps` is absent on Windows, and the adb listing still counts emulators.
-      logger.debug(`[BootAdmission] emulator process snapshot failed: ${errorMessage(error)}`);
-      return { error: `ps: ${errorMessage(error)}` };
     }
   }
 }

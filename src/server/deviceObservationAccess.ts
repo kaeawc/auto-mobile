@@ -133,7 +133,7 @@ export function sessionlessDeviceReadFor(
   retry: DeviceReadRetryOptions = {},
 ): {
   resolve(deviceId: string, signal?: AbortSignal, platform?: SomePlatform): Promise<BootedDevice>;
-  findRunning?(
+  findRunning(
     deviceId: string,
     signal?: AbortSignal,
     platform?: SomePlatform,

@@ -165,6 +165,7 @@ test.each(["standalone", "batch"])(
     };
     const failure = {
       success: false,
+      partialApplication: true,
       error:
         'iOS clear could not be verified after 2 attempt(s); the focused field last held ":so" and could not be read again.',
     };
@@ -287,7 +288,7 @@ test("runner retry failure is returned without further read or mutation", async 
     h.calls.push("clear");
     return h.calls.length === 1 ? { success: true } : failure;
   };
-  expect(await h.executor.clear()).toBe(failure);
+  expect(await h.executor.clear()).toEqual({ ...failure, partialApplication: true });
   expect(h.calls).toEqual(["clear", "clear"]);
   expect(h.reads).toHaveLength(1);
 });
@@ -313,6 +314,7 @@ test("deadline that cannot cover backoff returns remaining value without sleepin
   expect(result).toEqual({
     success: false,
     error: 'iOS clear left text in the focused field after 1 attempt(s); remaining value: ":so".',
+    partialApplication: true,
   });
   expect(h.calls).toEqual(["clear"]);
   expect(h.timer.getSleepHistory()).toEqual([]);

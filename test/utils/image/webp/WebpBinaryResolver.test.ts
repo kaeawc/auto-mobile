@@ -1,5 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import * as os from "node:os";
 import * as path from "node:path";
+import { resolveAutoMobileBaseDir } from "../../../../src/utils/tempDir";
 import { ActionableError } from "../../../../src/models/ActionableError";
 import type { FileDownloader } from "../../../../src/utils/FileDownloader";
 import {
@@ -24,11 +26,13 @@ const MAC_ARM64_DWEBP = path.join(CACHE_DIR, "libwebp-1.6.0-mac-arm64", "bin", "
 /** Records downloads without touching the disk; optionally blocks on a gate. */
 class CountingFileDownloader implements FileDownloader {
   readonly downloadedUrls: string[] = [];
+  readonly destinationPaths: string[] = [];
   readonly entered = Promise.withResolvers<void>();
   gate?: Promise<void>;
 
-  async download(url: string): Promise<void> {
+  async download(url: string, destinationPath: string): Promise<void> {
     this.downloadedUrls.push(url);
+    this.destinationPaths.push(destinationPath);
     this.entered.resolve();
     await this.gate;
   }
@@ -70,7 +74,97 @@ function macArm64Options(
   };
 }
 
+async function expectDownloadCache(
+  env: NodeJS.ProcessEnv,
+  expectedCacheDir: string,
+  cacheDir?: string,
+  finalizeEnv?: () => void,
+): Promise<void> {
+  const fileSystem = new FakeWebpBinaryFileSystem();
+  const probes = spyOn(fileSystem, "isExecutableFile");
+  const downloader = new CountingFileDownloader();
+  const options = macArm64Options(fileSystem, []);
+  options.archiveExtractor.onExtract = (request) => {
+    fileSystem.addExecutable(
+      path.join(request.destinationDir, "libwebp-1.6.0-mac-arm64", "bin", "cwebp"),
+    );
+  };
+  const resolver = resolverFor(fileSystem, {
+    ...options,
+    cacheDir,
+    env,
+    fileDownloader: downloader,
+  });
+  finalizeEnv?.();
+
+  try {
+    const resolved = await resolver.resolveCwebp();
+    const archivePath = path.join(expectedCacheDir, "libwebp-1.6.0-mac-arm64.tar.gz");
+    const binaryPath = path.join(expectedCacheDir, "libwebp-1.6.0-mac-arm64", "bin", "cwebp");
+    expect(fileSystem.ensuredDirectories).toEqual([expectedCacheDir]);
+    expect(downloader.destinationPaths).toEqual([archivePath]);
+    expect(options.archiveExtractor.requests).toEqual([
+      { archivePath, destinationDir: expectedCacheDir },
+    ]);
+    expect(options.checksumCalculator.computedFiles).toEqual([archivePath]);
+    expect(fileSystem.madeExecutable).toEqual([binaryPath]);
+    expect(resolved).toBe(binaryPath);
+    const touchedPaths = [
+      ...fileSystem.ensuredDirectories,
+      ...downloader.destinationPaths,
+      ...options.archiveExtractor.requests.flatMap((request) => [
+        request.archivePath,
+        request.destinationDir,
+      ]),
+      ...options.checksumCalculator.computedFiles,
+      ...fileSystem.madeExecutable,
+      ...probes.mock.calls.map(([filePath]) => filePath),
+      resolved,
+    ];
+    const homeDefault = path.join(os.homedir(), ".auto-mobile");
+    for (const touchedPath of touchedPaths) {
+      expect(
+        touchedPath === expectedCacheDir ||
+          touchedPath.startsWith(`${expectedCacheDir}${path.sep}`),
+      ).toBe(true);
+      if (!expectedCacheDir.startsWith(homeDefault)) {
+        expect(touchedPath.startsWith(homeDefault)).toBe(false);
+      }
+    }
+  } finally {
+    probes.mockRestore();
+  }
+}
+
 describe("WebpBinaryResolver", () => {
+  test.each(["AUTOMOBILE_DATA_DIR", "AUTO_MOBILE_DATA_DIR"])(
+    "downloads under %s without touching the home cache",
+    async (variable) => {
+      const dataDir = path.resolve(ROOT, "private-data");
+      await expectDownloadCache({ PATH: "", [variable]: dataDir }, path.join(dataDir, "libwebp"));
+    },
+  );
+
+  test("resolves the default cache lazily after environment finalization", async () => {
+    const env: NodeJS.ProcessEnv = { PATH: "" };
+    const dataDir = path.resolve(ROOT, "late-data");
+    await expectDownloadCache(env, path.join(dataDir, "libwebp"), undefined, () => {
+      env.AUTOMOBILE_DATA_DIR = dataDir;
+    });
+  });
+
+  test("explicit cacheDir wins over AUTOMOBILE_DATA_DIR", async () => {
+    await expectDownloadCache(
+      { PATH: "", AUTOMOBILE_DATA_DIR: path.resolve(ROOT, "private-data") },
+      CACHE_DIR,
+      CACHE_DIR,
+    );
+  });
+
+  test("keeps the home cache default without data directory overrides", async () => {
+    await expectDownloadCache({ PATH: "" }, path.join(resolveAutoMobileBaseDir({}), "libwebp"));
+  });
+
   test("prefers cwebp and dwebp environment overrides", async () => {
     const fileSystem = new FakeWebpBinaryFileSystem();
     const cwebp = path.join(ROOT, "override", "cwebp.exe");
@@ -259,12 +353,12 @@ describe("WebpBinaryResolver", () => {
     // assuming its probes finish before a fixed download delay.
     const secondProvisionStarted = Promise.withResolvers<void>();
     const secondProvisioner = secondResolver as unknown as {
-      provisionArchiveOnce(archive: unknown): Promise<void>;
+      provisionArchiveOnce(archive: unknown, cacheDir: string): Promise<void>;
     };
     const provisionArchiveOnce = secondProvisioner.provisionArchiveOnce.bind(secondResolver);
     const provisionSpy = spyOn(secondProvisioner, "provisionArchiveOnce").mockImplementation(
-      (archive) => {
-        const provision = provisionArchiveOnce(archive);
+      (archive, cacheDir) => {
+        const provision = provisionArchiveOnce(archive, cacheDir);
         secondProvisionStarted.resolve();
         return provision;
       },

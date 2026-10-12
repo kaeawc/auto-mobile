@@ -375,7 +375,8 @@ const bootAndPrepareDevice = async (
     state.boot.device,
     state.boot.sourceImage,
   );
-  validatePooledDeviceMapping(state.boot.device, requestedIdentity);
+  const mappingOptions = { signal, totalDeadlineMs: budgets.automationDeadlineMs };
+  await validatePooledDeviceMapping(state.boot.device, requestedIdentity, mappingOptions);
   // A warm AVD has no cold-boot source image, but its explicit getAndroid
   // identifier is still the stable identity needed for later recovery.
   preparation.sourceImage =
@@ -404,7 +405,6 @@ const bootAndPrepareDevice = async (
     await waitForBootedIosRunnerCleanup(budgets, deps, options);
   }
 
-  const ctrlProxySetup = deps.ensureCtrlProxyReady ?? ensureCtrlProxyReady;
   // #6280 P2 follow-up: mark this device's readiness lock key as having an
   // acquisition in flight for the ENTIRE span from runner setup through
   // session bind/record, not just while the readiness lock itself is held.
@@ -440,7 +440,7 @@ const bootAndPrepareDevice = async (
       progress,
       perf,
       requestedIdentity,
-      ensureCtrlProxyReady: ctrlProxySetup,
+      ensureCtrlProxyReady: deps.ensureCtrlProxyReady ?? ensureCtrlProxyReady,
       releaseReadinessReservations,
       publishRecoveredReadinessMarker: (replacement) =>
         moveDeviceAcquisitionReadiness(
@@ -764,7 +764,8 @@ async function bindPreparedDevice(
     );
     // Re-check under the later binding lock because pool identity can change
     // while runner setup is in flight.
-    validatePooledDeviceMapping(state.boot.device, requestedIdentity);
+    const mappingOptions = { signal, totalDeadlineMs: budgets.automationDeadlineMs };
+    await validatePooledDeviceMapping(state.boot.device, requestedIdentity, mappingOptions);
 
     // Publish only after runner health passes. Readiness remains per-device,
     // so 20-40 concurrent emulators do not serialize on a host-wide gate.

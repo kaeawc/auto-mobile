@@ -58,6 +58,7 @@ import {
   subscribeToolCallEndActivity,
 } from "./toolCallActivity";
 import { createDefaultStreamSocketAuthenticator } from "./streamSocketAuth";
+import { DatabaseHealthLateness } from "./databaseHealthLateness";
 import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy";
 import { SingleFlightInterval } from "./SingleFlightInterval";
@@ -359,6 +360,8 @@ import {
 } from "../utils/android-cmdline-tools/AdbTransportRestartRegistry";
 import { MISSING_DEVICE_MISS_THRESHOLD } from "./missingDeviceLiveness";
 import { describeUnknownError, errorMessage } from "../utils/describeUnknownError";
+import { writeEmergencyLog } from "../utils/loggingConfig";
+import { exitAfterDatabaseHealthFailure } from "./databaseHealthExit";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import { serverConfig } from "../utils/ServerConfig";
 import { setDebugPerfEnabled } from "../utils/PerformanceTracker";
@@ -449,7 +452,7 @@ function shutdownStage(
 }
 
 type HealthFailureKind = "http" | "socket" | "database" | "unknown";
-type DatabaseHealthFailureRecovery = (code: number) => void | Promise<void>;
+type DatabaseHealthFailureRecovery = (code: number, detail?: string) => void | Promise<void>;
 type ManagedAdbServerShutdown = () => Promise<void>;
 type DeviceSessionRoutingTargets = {
   deviceDataStream: ReturnType<typeof getDeviceDataStreamServer>;
@@ -738,6 +741,7 @@ export class Daemon {
   private databaseHealthProbe: DatabaseHealthProbe;
   private startupFailureTracker: StartupFailureTracker;
   private recoverFromDatabaseHealthFailure: DatabaseHealthFailureRecovery;
+  private lastDatabaseHealthFailure: string | undefined;
   private readonly stopManagedAdbServer: ManagedAdbServerShutdown;
   private observationStreamHealth: ObservationStreamHealth;
   private readonly initialFrameCoordinators = new WeakMap<
@@ -856,14 +860,16 @@ export class Daemon {
     this.stopManagedAdbServer = managedAdbServerShutdown;
     this.recoverFromDatabaseHealthFailure =
       recoverFromDatabaseHealthFailure ??
-      (async (code) => {
-        cleanupDaemonFilesSync(this.getDaemonFileCleanupOptions());
-        try {
-          await logger.closeAfterFlush();
-        } finally {
-          process.exit(code);
-        }
-      });
+      ((code, detail) =>
+        exitAfterDatabaseHealthFailure(code, detail, {
+          now: () => this.timer.now(),
+          writeEmergency: (message) => writeEmergencyLog(message),
+          cleanupDaemonFiles: () => {
+            cleanupDaemonFilesSync(this.getDaemonFileCleanupOptions());
+          },
+          closeLogger: () => logger.closeAfterFlush(),
+          exit: (exitCode) => process.exit(exitCode),
+        }));
     this.observationStreamHealth = new DefaultObservationStreamHealth({
       getServer: getDeviceDataStreamServer,
       stopServer: stopDeviceDataStreamSocketServer,
@@ -3275,6 +3281,7 @@ export class Daemon {
   private startHealthCheckTimer(): void {
     const HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
     const MAX_FAILED_CHECKS = 3; // Allow 3 consecutive failures before taking action
+    const lateness = new DatabaseHealthLateness(this.timer, HEALTH_CHECK_INTERVAL);
     let failedCheckCount = 0;
     let lastFailureKind: HealthFailureKind = "unknown";
     const recordHealthCheckFailure = (failureKind: HealthFailureKind): void => {
@@ -3291,17 +3298,33 @@ export class Daemon {
       lastFailureKind = "unknown";
     };
 
+    const checkDatabaseHealth = async (
+      tickGap: ReturnType<DatabaseHealthLateness["tick"]>,
+    ): Promise<boolean> => {
+      const timeoutIsInconclusive = lateness.beginProbe(tickGap);
+      try {
+        await this.databaseHealthProbe.check();
+        this.lastDatabaseHealthFailure = undefined;
+        // Health check passed
+        resetHealthCheckFailures();
+        logger.debug("Health check passed");
+      } catch (error) {
+        if (timeoutIsInconclusive(error, failedCheckCount)) {
+          return false;
+        }
+        this.lastDatabaseHealthFailure = errorMessage(error);
+        logger.warn(`Health check failed: Database probe failed: ${error}`);
+        recordHealthCheckFailure("database");
+      }
+      return true;
+    };
+
     const checkHealth = async (): Promise<void> => {
+      const tickGap = lateness.tick();
       try {
         if (this.checkHealthListeners(recordHealthCheckFailure)) {
-          try {
-            await this.databaseHealthProbe.check();
-            // Health check passed
-            resetHealthCheckFailures();
-            logger.debug("Health check passed");
-          } catch (error) {
-            logger.warn(`Health check failed: Database probe failed: ${error}`);
-            recordHealthCheckFailure("database");
+          if (!(await checkDatabaseHealth(tickGap))) {
+            return;
           }
         }
 
@@ -3618,7 +3641,9 @@ export class Daemon {
     // Reconciliation can quarantine identity and cancel in-flight work. During
     // allocation, discovery supplies only presence evidence for miss counting.
     if (!planActive) {
-      await this.devicePool.reconcileDiscoveryObservation(discovery.devices, "disconnect-monitor");
+      await this.devicePool.reconcileDiscoveryObservation(discovery.devices, "disconnect-monitor", {
+        settleMembership: true,
+      });
     }
     return discovery;
   }
@@ -4720,7 +4745,7 @@ export class Daemon {
         logger.error(
           "Database health check failed repeatedly; exiting daemon for a clean restart.",
         );
-        await this.recoverFromDatabaseHealthFailure(1);
+        await this.recoverFromDatabaseHealthFailure(1, this.lastDatabaseHealthFailure);
         return;
       }
 

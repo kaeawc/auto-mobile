@@ -79,6 +79,7 @@ interface ClearTextLike {
     success: boolean;
     observation?: ObserveResult;
     error?: string;
+    warnings?: string[];
     retryable?: boolean;
   }>;
 }
@@ -126,6 +127,7 @@ interface SetUIStateDependencies {
  */
 interface InternalFieldResult extends FieldResult {
   freshObservation?: ObserveResult;
+  warnings?: string[];
 }
 
 interface FieldVerificationOutcome {
@@ -142,6 +144,7 @@ interface TextFocusRecovery {
 type FieldApplicationResult = {
   success: boolean;
   error?: string;
+  warnings?: string[];
   unclassifiable?: boolean;
   stopRetrying?: boolean;
 };
@@ -157,6 +160,7 @@ type VisibleField = { fieldSpec: FieldSpec; fieldIndex: number; element: Element
 
 type FieldLoopContext = {
   options: SetUIStateOptions;
+  warnings: Set<string>;
   fieldResults: FieldResult[];
   processed: Set<number>;
   signal?: AbortSignal;
@@ -492,8 +496,10 @@ export class SetUIState extends BaseVisualChange {
         error: `setUIState's initial observation did not settle within the result deadline (${Math.round(admissionDeadlineBudgetMsForMessage() / 1000)}s); not attempted: ${missing.join(", ")}`,
       };
     }
-    return this.runFieldLoop(scrollDirection, {
+    const warnings = new Set<string>();
+    const result = await this.runFieldLoop(scrollDirection, {
       options,
+      warnings,
       fieldResults,
       processed,
       signal,
@@ -510,6 +516,7 @@ export class SetUIState extends BaseVisualChange {
         resultBudgetSpent: false,
       },
     });
+    return { ...result, ...(warnings.size ? { warnings: [...warnings] } : {}) };
   }
 
   private async runFieldLoop(
@@ -731,7 +738,7 @@ export class SetUIState extends BaseVisualChange {
     // for reuse and then must NOT be kept alive in `fieldResults` for the
     // rest of the call, or peak memory grows to fieldCount x one full
     // hierarchy instead of staying ~one hierarchy (#6222 review).
-    fieldResults[fieldIndex] = this.toPublicFieldResult(result);
+    fieldResults[fieldIndex] = this.toPublicFieldResult(result, context.warnings);
     state.totalAttempts += result.attempts;
     // Progress clears the budget: it bounds futile searching, not successful
     // work. The next search re-arms it from scratch (#4252 review).
@@ -867,7 +874,10 @@ export class SetUIState extends BaseVisualChange {
    * hold one full hierarchy per verified field alive for the whole call
    * instead of ~one at a time (#6222 review).
    */
-  private toPublicFieldResult(result: InternalFieldResult): FieldResult {
+  private toPublicFieldResult(result: InternalFieldResult, warnings: Set<string>): FieldResult {
+    for (const warning of result.warnings ?? []) {
+      warnings.add(`${this.describeSelector(result.selector)}: ${warning}`);
+    }
     return {
       selector: result.selector,
       success: result.success,
@@ -1251,6 +1261,7 @@ export class SetUIState extends BaseVisualChange {
             verified: verification.verified,
             fieldType,
             freshObservation: verification.observation,
+            warnings: applyResult.warnings,
           };
         }
 
@@ -1723,7 +1734,11 @@ export class SetUIState extends BaseVisualChange {
       };
     }
 
-    return await this.inputFieldText(fieldSpec, selectorDesc, inputText, signal);
+    const inputResult = await this.inputFieldText(fieldSpec, selectorDesc, inputText, signal);
+    return {
+      ...inputResult,
+      warnings: clearResult.warnings,
+    };
   }
 
   private async inputFieldText(

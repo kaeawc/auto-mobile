@@ -197,6 +197,12 @@ import { getHierarchyNodeSource } from "../observe/output/elementProvenance";
 import { isSdkInjectedNode } from "../observe/android/StableNodeIdentity";
 import { compareSelectionRank } from "../utility/selectionRank";
 import { clipIosChromeBounds, isIosTapPointCoveredByChrome } from "./swipeon/iosChromeInsets";
+import {
+  clipIosTapBoundsToScrollAncestors,
+  isIosTapFrameReduced,
+  iosTapOwnershipErrorMessage,
+  resolveIosOwnedTapPoint,
+} from "./iosTapTargetOwnership";
 
 function pointInTapBounds(point: { x: number; y: number }, bounds: ElementBounds): boolean {
   return (
@@ -1435,9 +1441,14 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     const belowStatusBar =
       belowChrome &&
       this.clipBelowStatusBar(belowChrome, matchForTap, target, hierarchy, screenSize);
-    return belowStatusBar
+    const belowTabBars = belowStatusBar
       ? this.clipBelowTabBars(belowStatusBar, matchForTap, target, hierarchy, screenSize)
       : null;
+    const nodes = new SearchableHierarchy().project(hierarchy);
+    return (
+      belowTabBars &&
+      clipIosTapBoundsToScrollAncestors(nodes, findTapTargetNode(nodes, target), belowTabBars)
+    );
   }
 
   private matchedTapElement(
@@ -1502,33 +1513,50 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     if (!navClipped) {
       return null;
     }
-    const candidates = boundsEqual(navClipped, target.bounds)
-      ? [point, exposedImePoint, exposedCenter]
-      : [exposedImePoint, exposedCenter, point];
+    const nodes = new SearchableHierarchy().project(hierarchy);
+    const targetNode = findTapTargetNode(nodes, target);
+    const candidates = isIosTapFrameReduced(nodes, targetNode, target.bounds, navClipped)
+      ? [exposedImePoint, exposedCenter, point]
+      : [point, exposedImePoint, exposedCenter];
     const imeBounds = ime && {
       left: ime.bounds[0],
       top: ime.bounds[1],
       right: ime.bounds[2],
       bottom: ime.bounds[3],
     };
-    return (
-      candidates.find(
-        (candidate) =>
-          candidate !== null &&
-          Number.isInteger(candidate.x) &&
-          Number.isInteger(candidate.y) &&
-          pointInTapBounds(candidate, visibleBounds) &&
-          pointInTapBounds(candidate, target.bounds) &&
-          (!imeBounds || !pointInTapBounds(candidate, imeBounds)) &&
-          (!isUsableScreenSize(context.screenSize) ||
-            !isIosTapPointCoveredByChrome({
-              point: candidate,
-              hierarchy,
-              screen: context.screenSize,
-              elements: chromeElements,
-            })),
-      ) ?? null
-    );
+    const safe = resolveIosOwnedTapPoint({
+      nodes,
+      target: targetNode,
+      matched: chromeElements.flatMap((element) => {
+        const node = findTapTargetNode(nodes, element);
+        return node ? [node] : [];
+      }),
+      screen: context.screenSize,
+      visibleBounds,
+      candidates,
+      imeBounds,
+      isValid: (candidate): candidate is { x: number; y: number } =>
+        candidate !== null &&
+        Number.isInteger(candidate.x) &&
+        Number.isInteger(candidate.y) &&
+        pointInTapBounds(candidate, visibleBounds) &&
+        pointInTapBounds(candidate, target.bounds) &&
+        (!imeBounds || !pointInTapBounds(candidate, imeBounds)) &&
+        (!isUsableScreenSize(context.screenSize) ||
+          !isIosTapPointCoveredByChrome({
+            point: candidate,
+            hierarchy,
+            screen: context.screenSize,
+            elements: chromeElements,
+          })),
+    });
+    if (safe.coveredBy) {
+      throw new TapTargetUnavailableError(
+        iosTapOwnershipErrorMessage(target, safe.coveredBy),
+        "no-visible-tap-area",
+      );
+    }
+    return safe.point;
   }
 
   private clipBelowStatusBar(

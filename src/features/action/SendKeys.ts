@@ -408,7 +408,13 @@ export interface SendKeysCommandExecutor {
     signal?: AbortSignal,
     display?: string,
     mode?: SendKeysClearMode,
-  ): Promise<{ success: boolean; error?: string; retryable?: boolean; warning?: string }>;
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    retryable?: boolean;
+    warning?: string;
+    partialApplication?: boolean;
+  }>;
 }
 
 export interface SendKeysTargetFocuser {
@@ -466,6 +472,8 @@ interface SendKeysRouting extends SendKeysFocusOptions {
 }
 
 export type TextActionResult = {
+  /** Internal device read-back evidence; omitted from public command results. */
+  insertedText?: string;
   success: boolean;
   retryable?: boolean;
   warning?: string;
@@ -1904,7 +1912,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
                 operation === "replace" ? markPartialAfterMutation(result) : result,
                 text,
                 "commit",
-                { focusedFieldClass: routing.focusedFieldClass },
+                this.imeCommitDiagnosticContext(result, routing),
               ),
             ),
             [clearWarning],
@@ -1941,6 +1949,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         safeToRestore: progress.safeToRestore,
       };
     }
+  }
+
+  private imeCommitDiagnosticContext(result: TextActionResult, routing: ImeCommitRouting) {
+    return {
+      focusedFieldClass: routing.focusedFieldClass,
+      observedText: routing.passwordField ? undefined : result.insertedText,
+    };
   }
 
   private verifyImeCommit(
@@ -3277,6 +3292,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
             ...(result.sessionUnsafe ? { sessionUnsafe: true } : {}),
             ...(result.transportFailure ? { imeFailureStage: "transport" as const } : {}),
             ...imeCommitUnitFields(result),
+            ...(result.insertedText !== undefined ? { insertedText: result.insertedText } : {}),
           };
         },
       };
@@ -4189,6 +4205,7 @@ export class SendKeys {
           index: -1,
           action: "clear",
           success: result.success,
+          ...(result.partialApplication ? { partialApplication: true } : {}),
           ...(result.retryable === false ? { retryable: false } : {}),
           ...(result.warning === undefined ? {} : { warning: result.warning }),
           ...(result.error ? { error: result.error } : {}),

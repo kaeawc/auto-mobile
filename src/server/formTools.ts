@@ -73,6 +73,7 @@ const setUIStateResultSchema = z.object({
   success: z.boolean().describe("All fields set"),
   fields: z.array(fieldResultSchema).describe("Field results"),
   totalAttempts: z.number().describe("Total attempts"),
+  warnings: z.array(z.string()).optional().describe("Field operation warnings"),
   error: z.string().optional().describe("Error message"),
 });
 
@@ -232,6 +233,7 @@ export const setUIStateHandler = async (
     })),
     totalAttempts: result.totalAttempts,
     error: result.error,
+    ...(result.warnings?.length ? { warnings: result.warnings } : {}),
   });
   // Genuine partial success (some fields set, others failed) keeps
   // isError:false — the per-field `fields` array is the actionable status

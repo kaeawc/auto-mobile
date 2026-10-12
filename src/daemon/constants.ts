@@ -429,9 +429,10 @@ export const DAEMON_ONE_SHOT_CLI_PARAM = "__autoMobileOneShotCli";
 export const INTERNAL_ONE_SHOT_CLI_PARAM = "__oneShotCli";
 
 /**
- * The restoring proxy's liveness owner token, sent with {@link DAEMON_OWNED_SESSIONS_PARAM}: a
- * restore moves ownership off another live connection only when it matches the session's owner
- * token (#11107).
+ * The heartbeat proxy's liveness owner token, sent on every tool call so acquisition records
+ * identity before its first heartbeat. With {@link DAEMON_OWNED_SESSIONS_PARAM}, a restore moves
+ * ownership off another live connection only when it matches the session's owner token (#11107).
+ * One-shot and declared CLI proxies retain their existing owned-session wire behaviour.
  */
 export const DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM = "__autoMobileOwnedSessionsOwnerToken";
 

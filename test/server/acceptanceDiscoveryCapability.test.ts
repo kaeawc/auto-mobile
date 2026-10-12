@@ -1,3 +1,4 @@
+import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { installFakeDeviceToolProviders } from "../helpers/hermeticDeviceTools";
 import {
@@ -175,14 +176,14 @@ describe("acceptance discovery presentation capability (issue #7144)", () => {
 
       expect(daemon.callToolCalls).toContainEqual({
         toolName: "listDevices",
-        params: {
+        params: withProxyOwnerToken({
           [INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM]: "reverse",
           [INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM]: CAPABILITY,
-        },
+        }),
       });
       expect(daemon.callToolCalls).toContainEqual({
         toolName: "killDevice",
-        params: {
+        params: withProxyOwnerToken({
           device: {
             platform: "android",
             name: "acceptance-duplicate",
@@ -190,7 +191,7 @@ describe("acceptance discovery presentation capability (issue #7144)", () => {
           },
           [INTERNAL_ACCEPTANCE_DISCOVERY_ORDER_PARAM]: "reverse",
           [INTERNAL_ACCEPTANCE_DISCOVERY_CAPABILITY_PARAM]: CAPABILITY,
-        },
+        }),
       });
     } finally {
       await client.close();

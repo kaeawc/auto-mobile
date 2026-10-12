@@ -1,4 +1,5 @@
 import { getTextRequestDeadlineMs } from "./textTransportTimeout";
+import { verifyIosClear } from "./iosClearVerification";
 import { toActionableError, unsupportedPlatformError } from "../../models/ActionableError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { ANDROID_KEYCOMBINATION_MIN_API_LEVEL } from "../../utils/android-cmdline-tools/asciiKeyEvents";
@@ -503,18 +504,27 @@ export class ClearText extends BaseVisualChange {
     try {
       const client = IOSCtrlProxyClient.getInstance(this.device);
       signal?.throwIfAborted();
-      const deadlineMs = getTextRequestDeadlineMs();
-      const result = await client.requestClearText(undefined, 5000, undefined, {
-        abortSignal: signal,
-        ...(deadlineMs === undefined ? {} : { deadlineMs }),
-      });
+      const clear = () => {
+        const deadlineMs = getTextRequestDeadlineMs();
+        return client.requestClearText(undefined, 5000, undefined, {
+          abortSignal: signal,
+          ...(deadlineMs === undefined ? {} : { deadlineMs }),
+        });
+      };
+      const acknowledgement = await clear();
+      const result = acknowledgement.success
+        ? await verifyIosClear({ clear, observer: this.observeScreen, timer: this.timer, signal })
+        : acknowledgement;
       if (result.retryable !== false) {
         signal?.throwIfAborted();
       }
 
       if (result.success) {
         logger.info(`[ClearText] Cleared text via CtrlProxy iOS totalMs=${Date.now() - startMs}`);
-        return { success: true };
+        return {
+          success: true,
+          ...("warning" in result && result.warning ? { warnings: [result.warning] } : {}),
+        };
       }
 
       logger.warn(

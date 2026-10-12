@@ -96,6 +96,7 @@ import { forgivenLeaseStart, type StallForgivingLeases } from "./stallForgivenes
 import { onSessionClock } from "./sessionClockPersistence";
 import {
   judgedLeaseHeartbeat,
+  heartbeatLeasePastGrace,
   judgesOwnerHeartbeats,
   ownerLeaseLiveAt,
   livenessLeaseState,
@@ -11137,10 +11138,22 @@ export class SessionManager {
     return (
       judgesOwnerHeartbeats(session) &&
       suspectGraceMsFor(session) > 0 &&
-      livenessLeaseState({
-        ...sessionJudgedLeaseSnapshot(session, this.sessionNow()),
-        lastHeartbeat: this.judgedLeaseHeartbeat(session),
-      }).phase === "lapsed"
+      heartbeatLeasePastGrace(
+        this.sessionNow(),
+        this.judgedLeaseHeartbeat(session),
+        session.heartbeatTimeoutMs,
+        suspectGraceMsFor(session),
+      )
+    );
+  }
+
+  /** A live owner's lapsed lease awaits the next scan, unless a control call keeps it. */
+  ownerLeaseAwaitsReap(sessionId: string): boolean {
+    const session = this.peekSession(sessionId);
+    return (
+      session !== null &&
+      this.isOwnerLeaseLapsed(session) &&
+      !this.activeSessionExecutionChecker(sessionId, { excludeReads: true })
     );
   }
 
@@ -11398,11 +11411,14 @@ export class SessionManager {
       gapAgeMs: gapBeganAt === undefined ? undefined : resumedAt - gapBeganAt,
     });
     let forgiven = 0;
+    let leaseExtended = 0;
+    let idleExtended = 0;
     for (const session of this.sessions.values()) {
       if (session.livenessPolicy === "cli-idle") {
         // Shift, never reset (#10662), and never past the resume point.
         const idleStart = effectiveLastToolActivity(session);
         session.idleStallForgivenAt = Math.max(idleStart, Math.min(resumedAt, idleStart + lostMs));
+        idleExtended += Number(session.idleStallForgivenAt > idleStart);
         // A rehydrated one is judged on its owner-reconnect window alone, so that window moves
         // with the idle anchor (#11481): by the daemon's stall, never by host sleep, which counts
         // toward a CLI session's idle window.
@@ -11420,13 +11436,16 @@ export class SessionManager {
         // non-owner's tool call must not move the forgiven lease start.
         const leaseStart = judgedLeaseHeartbeat(session);
         session.stallForgivenAt = forgivenLeaseStart(leaseStart, resumedAt, leaseLostMs);
+        leaseExtended += Number(session.stallForgivenAt > leaseStart);
       }
       // Shift, never reset (#10662): a full window per late tick would let a session whose
       // owner is gone outlive its lease for as long as the ticks keep arriving late.
+      const previousExpiry = session.expiresAt;
       session.expiresAt = Math.max(
         session.expiresAt,
         Math.min(session.expiresAt + lostMs, resumedAt + session.sessionTimeoutMs),
       );
+      idleExtended += Number(session.expiresAt > previousExpiry);
       if (session.awaitingOwnerSince !== undefined) {
         session.awaitingOwnerSince = Math.max(
           session.awaitingOwnerSince,
@@ -11434,6 +11453,12 @@ export class SessionManager {
         );
       }
       forgiven++;
+    }
+    if (forgiven > 0) {
+      logger.info(
+        `Stall forgiveness: ${leaseExtended} session lease(s) extended by ${leaseLostMs}ms, ` +
+          `${idleExtended} idle deadline(s) extended by ${lostMs}ms, of ${forgiven} session(s)`,
+      );
     }
     return forgiven;
   }
@@ -11512,9 +11537,20 @@ export class SessionManager {
    */
   claimUnownedLivenessOwnership(sessionId: string, ownerToken: string): boolean {
     const session = this.unlessBaseEnded(this.getSession(sessionId));
-    if (!session) {
+    if (!session || !this.adoptUnownedLivenessOwnerToken(session, ownerToken)) {
       return false;
     }
+    session.lastOwnerHeartbeat = this.sessionNow();
+    return true;
+  }
+
+  /** Bind acquisition identity only: no heartbeat, claim history or release deadline changes. */
+  bindAcquiredLivenessOwnerToken(sessionId: string, ownerToken: string): boolean {
+    const session = this.peekSession(sessionId);
+    return session !== null && this.adoptUnownedLivenessOwnerToken(session, ownerToken);
+  }
+
+  private adoptUnownedLivenessOwnerToken(session: Session, ownerToken: string): boolean {
     const base = this.livenessBaseSession(session);
     const adopt = mayAdoptUnownedLiveness({
       claimantToken: ownerToken,
@@ -11526,7 +11562,6 @@ export class SessionManager {
       return false;
     }
     session.livenessOwnerToken = ownerToken;
-    session.lastOwnerHeartbeat = this.sessionNow();
     return true;
   }
 

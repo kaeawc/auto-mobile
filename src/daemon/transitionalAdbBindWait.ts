@@ -26,6 +26,8 @@ interface TransitionalAdbBindWaitPorts {
   backoff?: BackoffPolicy;
   holdAbsenceAfterTransitional?: boolean;
   isLaunchProcessAlive?: () => boolean;
+  /** This acquisition's boot just resolved an already-running Android runtime. */
+  hasResolvedRuntime?: boolean;
 }
 
 /** One exact discovery's wait state; each delay requires an entirely fresh pool snapshot. */
@@ -74,8 +76,9 @@ export class TransitionalAdbBindWait {
       return this.waitForAbsentTransport();
     }
     if (!isTransitionalAdbState(state)) {
-      // A live launch's transport returned after the caller captured an absent row.
-      return this.ports.isLaunchProcessAlive?.() ? await this.budget.waitForNextAttempt() : false;
+      // The transport returned after the caller captured an absent row. A boot-resolved
+      // adopted runtime deserves the same fresh snapshot as this request's live launch.
+      return this.waitForReturnedTransport();
     }
     this.observedTransitional = true;
     if (!(await this.budget.waitForNextAttempt())) {
@@ -84,10 +87,19 @@ export class TransitionalAdbBindWait {
     return true;
   }
 
+  private async waitForReturnedTransport(): Promise<boolean> {
+    return this.ports.hasResolvedRuntime
+      ? this.waitForAbsentTransport()
+      : this.ports.isLaunchProcessAlive?.()
+        ? this.budget.waitForNextAttempt()
+        : false;
+  }
+
   private async waitForAbsentTransport(): Promise<boolean> {
-    if (this.ports.isLaunchProcessAlive?.()) {
+    const launchAlive = this.ports.isLaunchProcessAlive?.() === true;
+    if (launchAlive || this.ports.hasResolvedRuntime) {
       if (!(await this.budget.waitForNextAttempt())) {
-        throw new DeviceTransportOfflineError(this.deviceId, undefined);
+        throw new DeviceTransportOfflineError(this.deviceId, undefined, !launchAlive);
       }
       return true;
     }

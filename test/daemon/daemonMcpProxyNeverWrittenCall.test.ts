@@ -1,3 +1,4 @@
+import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { describe, expect, test, spyOn } from "bun:test";
 import { DaemonMcpProxy, DaemonToolOutcomeUnknownError } from "../../src/daemon/daemonMcpProxy";
 import {
@@ -62,7 +63,7 @@ describe("DaemonMcpProxy tool call that was never written (#9996)", () => {
 
       expect(lostClient.callToolCalls).toEqual([]);
       expect(freshClient.callToolCalls).toEqual([
-        { toolName: "tapOn", params: { text: "Submit" } },
+        { toolName: "tapOn", params: withProxyOwnerToken({ text: "Submit" }) },
       ]);
     } finally {
       isAvailableSpy.mockRestore();

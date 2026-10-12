@@ -6,7 +6,7 @@ import { BootCapacityExhaustedError } from "../../models/BootCapacityExhaustedEr
 import type { Platform } from "../../models/Platform";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { Timer } from "../../utils/SystemTimer";
-import type { CapacityLimits } from "./capacityLimits";
+import type { CapacityLimits, InFlightBootMemory } from "./capacityLimits";
 
 /**
  * Platform-neutral boot admission (#11181): the ledger of admitted boots, the
@@ -211,6 +211,8 @@ interface LedgerEntry {
   processId?: number;
   /** Set once the boot was handed off: the entry ends when the device is visible or this passes. */
   handedOffUntilMs?: number;
+  /** Retained for sizing even when an older sample keeps a listed entry without its deadline. */
+  handedOff?: boolean;
 }
 
 /**
@@ -262,6 +264,11 @@ export interface InFlightBoots {
   listedWithoutProcess: number;
 }
 
+export interface InFlightBootView extends InFlightBoots {
+  /** Exactly the boots behind `count`, including entries retained by the sample window. */
+  boots: readonly InFlightBootMemory[];
+}
+
 /**
  * Boots admitted by a gate and not yet visible in the platform listing. Each
  * counts toward the limit, so concurrent callers cannot all be admitted
@@ -285,6 +292,7 @@ export class BootAdmissionLedger {
             deviceId: handedOffDeviceId ?? entry.deviceId,
             processId: processId ?? entry.processId,
             handedOffUntilMs: untilMs,
+            handedOff: true,
           });
         }
       },
@@ -304,7 +312,9 @@ export class BootAdmissionLedger {
     this.entries.delete(token);
     // A device a listing showed is running whatever its boot deadline says: an older listing
     // still open counts it until that sample decides, so the window keeps it without a deadline.
-    const kept = listed ? { deviceId: entry.deviceId, processId: entry.processId } : entry;
+    const kept = listed
+      ? { deviceId: entry.deviceId, processId: entry.processId, handedOff: entry.handedOff }
+      : entry;
     for (const window of this.openWindows) {
       window.ended.push(kept);
     }
@@ -344,13 +354,29 @@ export class BootAdmissionLedger {
     sampleWindow?: LedgerSampleWindow,
     listedProcessIds: ReadonlySet<number> = new Set(),
   ): InFlightBoots {
+    const { count, withListedProcess, listedWithoutProcess } = this.inFlightView(
+      visibleDeviceIds,
+      excludeDeviceId,
+      sampleWindow,
+      listedProcessIds,
+    );
+    return { count, withListedProcess, listedWithoutProcess };
+  }
+
+  /** Counts and boot identities from one ledger traversal, for sizing against the same view. */
+  inFlightView(
+    visibleDeviceIds: ReadonlySet<string>,
+    excludeDeviceId?: string,
+    sampleWindow?: LedgerSampleWindow,
+    listedProcessIds: ReadonlySet<number> = new Set(),
+  ): InFlightBootView {
     const now = this.timer.now();
     const hasListedProcess = (entry: LedgerEntry): boolean =>
       entry.processId !== undefined && listedProcessIds.has(entry.processId);
     const isVisible = (entry: LedgerEntry): boolean =>
       entry.deviceId !== undefined && visibleDeviceIds.has(entry.deviceId);
     const ended = this.endedDuringSample(sampleWindow, visibleDeviceIds, excludeDeviceId, now);
-    let count = ended.length;
+    const boots = [...ended];
     let withListedProcess = ended.filter(hasListedProcess).length;
     // Read before the loop below ends the listed entries into the open windows, this one included.
     const known = [...this.windowEnded(sampleWindow), ...this.entries.values()];
@@ -366,11 +392,19 @@ export class BootAdmissionLedger {
         !visible &&
         (excludeDeviceId === undefined || entry.deviceId !== excludeDeviceId)
       ) {
-        count += 1;
+        boots.push(entry);
         withListedProcess += hasListedProcess(entry) ? 1 : 0;
       }
     }
-    return { count, withListedProcess, listedWithoutProcess };
+    return {
+      count: boots.length,
+      boots: boots.map((entry) => ({
+        processId: entry.processId,
+        handedOff: entry.handedOff === true,
+      })),
+      withListedProcess,
+      listedWithoutProcess,
+    };
   }
 
   private windowEnded(window: LedgerSampleWindow | undefined): readonly LedgerEntry[] {

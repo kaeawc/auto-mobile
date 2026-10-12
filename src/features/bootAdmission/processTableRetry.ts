@@ -69,6 +69,7 @@ const TRANSIENT_REASONS = new Set<ProcessTableFailureReason>([
 ]);
 const DENIED = /operation not permitted|permission denied/i;
 const USAGE_ERROR = /illegal option|invalid option|unrecognized option|usage:/i;
+const MIN_RETRY_TIMEOUT_MS = 250;
 
 function stderrText(stderr: unknown): string {
   return Buffer.isBuffer(stderr) ? stderr.toString() : typeof stderr === "string" ? stderr : "";
@@ -237,6 +238,9 @@ export class ProcessTableReader {
           signal: options.signal,
           label: "Android process table retry backoff",
         });
+        if (endMs - this.timer.now() < MIN_RETRY_TIMEOUT_MS) {
+          return this.failed(failure, errorMessage(error));
+        }
       }
     }
   }
@@ -246,7 +250,7 @@ export class ProcessTableReader {
       return undefined;
     }
     const delay = this.backoff.delayForAttempt(failure.attempts);
-    return this.timer.now() + delay + 250 <= endMs ? delay : undefined;
+    return this.timer.now() + delay + MIN_RETRY_TIMEOUT_MS <= endMs ? delay : undefined;
   }
 
   private failed(failure: ProcessTableFailure, message = failure.detail): ProcessTableResult {

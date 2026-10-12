@@ -104,6 +104,38 @@ function execError(fields: object, message = "ps failed"): Error {
 }
 
 describe("process table retries within Android admission (#11941)", () => {
+  test.each([751, 1_000, 1_250])(
+    "late backoff waking at %ims preserves the exhausted transient failure",
+    async (wakeMs) => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
+      try {
+        const { source, executor, timer } = harness(
+          [execError({ code: "EAGAIN" }), PS],
+          undefined,
+          false,
+        );
+        const result = source.sample({ deadlineMs: 1_000 });
+        await drainUntilQuiescent(timer);
+        expect(timer.getPendingSleeps()).toEqual([100]);
+        timer.advanceTime(wakeMs);
+        const sample = await result;
+        expect(executor.calls.map((call) => call.timeoutMs)).toEqual([5_000]);
+        expect(executor.calls).toHaveLength(1);
+        expect(executor.calls.every((call) => call.timeoutMs! >= 250)).toBe(true);
+        expect(sample.processTableFailure).toEqual({
+          reason: "spawn-resources",
+          transient: true,
+          attempts: 1,
+          detail: "EAGAIN: ps failed",
+        });
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn.mock.calls[0][0]).toContain("spawn-resources, attempts=1: EAGAIN: ps failed");
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
   test.each([300, 1_000, 3_000])(
     "hung ps refuses discovery at a short %ims request timeout",
     async (timeoutMs) => {

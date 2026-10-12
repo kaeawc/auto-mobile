@@ -1370,6 +1370,7 @@ export class DevicePool {
     managedSlotExclusion,
   }: DevicePoolDependencies) {
     this.sessionManager = sessionManager;
+    this.registerMcpSessionOwnerCallReader();
     this.foreignDeviceOwnership = foreignDeviceOwnership;
     this.iosForeignDeviceOwnership = iosForeignDeviceOwnership;
     this.managedSlotExclusion = managedSlotExclusion;
@@ -9752,6 +9753,43 @@ export class DevicePool {
     this.mcpSessionLivenessOwnerTokens.set(mcpSessionId, token);
   }
 
+  private readonly mcpSessionOwnerCallsInFlight = new Map<string, Map<string, number>>();
+
+  private registerMcpSessionOwnerCallReader(): void {
+    this.sessionManager.setLivenessOwnerCallInFlightReader?.((token) => {
+      for (const calls of this.mcpSessionOwnerCallsInFlight.values()) {
+        if ((calls.get(token) ?? 0) > 0) {
+          return true;
+        }
+      }
+      return false;
+    });
+  }
+
+  /** Only a still-connected caller presenting the mint's token defends its claim lease. */
+  beginMcpSessionOwnerCall(mcpSessionId: string, token: string): () => void {
+    const calls = this.mcpSessionOwnerCallsInFlight.get(mcpSessionId) ?? new Map<string, number>();
+    calls.set(token, (calls.get(token) ?? 0) + 1);
+    this.mcpSessionOwnerCallsInFlight.set(mcpSessionId, calls);
+    let ended = false;
+    return () => {
+      if (ended || this.mcpSessionOwnerCallsInFlight.get(mcpSessionId) !== calls) {
+        return;
+      }
+      ended = true;
+      const pending = (calls.get(token) ?? 0) - 1;
+      if (pending > 0) {
+        calls.set(token, pending);
+      } else {
+        calls.delete(token);
+      }
+      if (calls.size === 0) {
+        this.mcpSessionOwnerCallsInFlight.delete(mcpSessionId);
+      }
+      this.sessionManager.restartMintBoundClaimLeases(token);
+    };
+  }
+
   /** Record a minted session's owner and its acquisition identity in one synchronous commit. */
   private recordMintedSessionOwnership(
     mcpSessionId: string | undefined,
@@ -10319,6 +10357,7 @@ export class DevicePool {
 
   /** Drop every socket-scoped route and ownership marker for a disconnected MCP client. */
   releaseMcpSessionBindings(mcpSessionId: string): void {
+    this.mcpSessionOwnerCallsInFlight.delete(mcpSessionId);
     const bindInFlight = this.mcpBindsInFlight.get(mcpSessionId);
     if (bindInFlight) {
       bindInFlight.closed = true;

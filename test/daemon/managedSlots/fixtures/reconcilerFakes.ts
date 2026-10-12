@@ -28,7 +28,14 @@ import type { DeviceInfo } from "../../../../src/models";
 export class FakeInventory implements ManagedSlotInventory {
   complete = true;
   devices: DeviceInfo[] = [];
-  async list(platform: SlotPlatform): Promise<ManagedSlotInventorySnapshot> {
+  beforeList:
+    | ((platform: SlotPlatform, options: { signal?: AbortSignal }) => Promise<void>)
+    | undefined;
+  async list(
+    platform: SlotPlatform,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<ManagedSlotInventorySnapshot> {
+    await this.beforeList?.(platform, options);
     return {
       complete: this.complete,
       devices: this.devices.filter((device) => device.platform === platform),
@@ -45,7 +52,9 @@ export class FakeInventory implements ManagedSlotInventory {
 /** iOS-style matching on listed runtime/device type; overrides force a verdict per stable id. */
 export class FakeMatcher implements ManagedSpecMatcher {
   readonly overrides = new Map<string, ManagedSpecMatch>();
+  beforeMatch: (() => Promise<void>) | undefined;
   async matches(device: DeviceInfo, spec: ManagedSlotRequestedSpec): Promise<ManagedSpecMatch> {
+    await this.beforeMatch?.();
     const override = this.overrides.get(deviceStableId(device) ?? "");
     if (override) {
       return override;

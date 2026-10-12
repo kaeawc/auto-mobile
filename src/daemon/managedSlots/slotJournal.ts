@@ -1,4 +1,5 @@
 import type { DeviceInfo } from "../../models";
+import { toActionableError } from "../../models/ActionableError";
 import {
   androidManagedSlotSpecSchema,
   iosManagedSlotSpecSchema,
@@ -11,6 +12,7 @@ import {
 } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { Timer } from "../../utils/SystemTimer";
 import type {
   ManagedSlotDeletionResult,
@@ -65,6 +67,35 @@ import {
 
 /** Delete budget for a redrive step that has no caller deadline. */
 export const SLOT_JOURNAL_STEP_BUDGET_MS = 120_000;
+export const SLOT_JOURNAL_DISCOVERY_BUDGET_MS = 30_000;
+export const SLOT_JOURNAL_CLAIM_BUDGET_MS = 10_000;
+export const SLOT_JOURNAL_MATCH_BUDGET_MS = 10_000;
+export const SLOT_JOURNAL_DELETE_GRACE_MS = 5_000;
+export const SLOT_JOURNAL_STOP_BUDGET_MS = 100;
+
+export interface SlotJournalStageBudgets {
+  discoveryMs: number;
+  claimMs: number;
+  matchMs: number;
+  deleteGraceMs: number;
+}
+
+interface DriveOptions {
+  signal?: AbortSignal;
+}
+
+/** Internal unwind: cancellation is not a failed cleanup attempt. */
+class SlotJournalDriveCancelled extends Error {
+  constructor(readonly reason: unknown) {
+    super("Journal drive cancelled");
+  }
+}
+
+function checkCancellation(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new SlotJournalDriveCancelled(signal.reason);
+  }
+}
 /** Bound on phase transitions one drive performs (each phase moves strictly forward). */
 const MAX_STEPS_PER_DRIVE = 6;
 
@@ -96,7 +127,8 @@ export interface ManagedSlotJournalDependencies {
   matcher: ManagedSpecMatcher;
   deleter: ManagedSlotDeviceDeleter;
   claims: ManagedSlotDeviceClaims;
-  timer: Pick<Timer, "now">;
+  timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
+  stageBudgets?: Partial<SlotJournalStageBudgets>;
   /** This process's identity as a journal owner. */
   owner: SlotJournalOwner;
   /** Whether another owner is still driving its entries; default: its PID is running. */
@@ -195,12 +227,20 @@ export class ManagedSlotJournal {
   private readonly isOwnerLive: SlotJournalOwnerLiveness;
   private readonly isExecOwnerLive: SlotExecOwnerLiveness;
   private readonly backoff: BackoffPolicy;
+  private readonly budgets: SlotJournalStageBudgets;
 
   constructor(private readonly deps: ManagedSlotJournalDependencies) {
     this.inFlight = deps.inFlight ?? new SlotJournalInFlight();
     this.isOwnerLive = deps.isOwnerLive ?? defaultSlotExecOwnerLiveness;
     this.isExecOwnerLive = deps.isExecOwnerLive ?? defaultSlotExecOwnerLiveness;
     this.backoff = normalizeBackoff(deps.backoff ?? DEFAULT_SLOT_JOURNAL_BACKOFF);
+    this.budgets = {
+      discoveryMs: SLOT_JOURNAL_DISCOVERY_BUDGET_MS,
+      claimMs: SLOT_JOURNAL_CLAIM_BUDGET_MS,
+      matchMs: SLOT_JOURNAL_MATCH_BUDGET_MS,
+      deleteGraceMs: SLOT_JOURNAL_DELETE_GRACE_MS,
+      ...deps.stageBudgets,
+    };
   }
 
   get owner(): SlotJournalOwner {
@@ -211,15 +251,30 @@ export class ManagedSlotJournal {
    * Redrive one slot before an acquisition reconciles it. `clear` means no unfinished journaled
    * work remains (the slot may have changed: re-read it); `blocked` names why it cannot proceed.
    */
-  async redriveSlot(key: SlotKey): Promise<SlotRedriveResult> {
+  async redriveSlot(key: SlotKey, options: DriveOptions = {}): Promise<SlotRedriveResult> {
+    try {
+      return await this.redriveSlotEntries(key, options.signal);
+    } catch (error) {
+      if (error instanceof SlotJournalDriveCancelled) {
+        // Caller cancellation leaves durable cleanup for its next owner.
+        logger.debug("[SlotJournal] acquisition redrive cancelled");
+        throw error.reason;
+      }
+      throw toActionableError(error, "Managed slot journal redrive failed");
+    }
+  }
+
+  private async redriveSlotEntries(key: SlotKey, signal?: AbortSignal): Promise<SlotRedriveResult> {
+    checkCancellation(signal);
     const redriven: SlotJournalRedriveRecord[] = [];
     let open = await this.deps.registry.listOpenSlotJournal(key);
+    checkCancellation(signal);
     if (open.length === 0) {
-      const synthesized = await this.adoptUnjournaledWork(key);
+      const synthesized = await this.adoptUnjournaledWork(key, signal);
       open = synthesized ? [synthesized] : [];
     }
     for (const entry of open) {
-      const result = await this.driveEntry(entry);
+      const result = await this.driveEntry(entry, signal);
       if (result.kind === "skipped") {
         return {
           kind: "blocked",
@@ -247,18 +302,30 @@ export class ManagedSlotJournal {
    * One fair pass over every open entry (daemon startup and the periodic owner loop): each due entry
    * whose owner is dead gets one drive; failures back off and stay open.
    */
-  async runPass(): Promise<SlotJournalPassResult> {
+  async runPass(options: DriveOptions = {}): Promise<SlotJournalPassResult> {
+    const { signal } = options;
     const pass: SlotJournalPassResult = { settled: [], blocked: [], skipped: 0 };
+    if (signal?.aborted) {
+      return pass;
+    }
     const open = await this.deps.registry.listOpenSlotJournal();
     for (const entry of open) {
+      if (signal?.aborted) {
+        break;
+      }
       try {
-        const result = await this.driveEntry(entry);
+        const result = await this.driveEntry(entry, signal);
         if (result.kind === "skipped") {
           pass.skipped += 1;
         } else {
           (result.kind === "settled" ? pass.settled : pass.blocked).push(toRecord(result));
         }
       } catch (error) {
+        if (error instanceof SlotJournalDriveCancelled) {
+          // Stop is expected; leave the entry open without counting a failed attempt.
+          logger.debug("[SlotJournal] pass cancelled");
+          break;
+        }
         // One entry's failure must not starve the others; it stays open for the next pass.
         logger.warn(
           `[SlotJournal] redrive of entry ${entry.id} failed: ${errorMessage(error)}`,
@@ -284,20 +351,23 @@ export class ManagedSlotJournal {
     entry: SlotJournalEntry,
     options: DeletionStepOptions = {},
   ): Promise<DeletionStepResult | Extract<Step, { kind: "settled" }>> {
+    const { signal } = options;
+    checkCancellation(signal);
     const oldId = entry.target.oldStableId;
     const assignment = await this.deps.registry.getAssignment(keyOf(entry));
+    checkCancellation(signal);
     if (!oldId || !assignment || !sameBinding(assignment, entry.binding)) {
       // The slot moved on: its device may now be someone else's, so delete nothing.
-      return this.close(entry, "rolled_back");
+      return this.close(entry, "rolled_back", signal);
     }
     if (assignment.execOwner && this.isExecOwnerLive(assignment.execOwner)) {
       return blocked(entry, "slot_in_use", `Slot is held by ${assignment.execOwner.sessionUuid}.`);
     }
     const located = options.device
       ? { kind: "present" as const, device: options.device }
-      : await this.locateForDeletion(entry, oldId);
+      : await this.locateForDeletion(entry, oldId, signal);
     if (located.kind === "blocked") {
-      return this.recordBlocked(entry, located.reason, located.message);
+      return this.recordBlocked(entry, located.reason, located.message, undefined, signal);
     }
     const deletion: ManagedSlotDeletionResult =
       located.kind === "present"
@@ -309,7 +379,8 @@ export class ManagedSlotJournal {
             signal: options.signal,
           })
         : { kind: "absent", evidence: { listed: false } };
-    return this.recordDeletion(entry, oldId, deletion);
+    checkCancellation(signal);
+    return this.recordDeletion(entry, oldId, deletion, signal);
   }
 
   /** Record a deletion outcome: the empty slot with `deleted`, or `cleanup_pending` and a retry. */
@@ -317,14 +388,19 @@ export class ManagedSlotJournal {
     entry: SlotJournalEntry,
     oldId: string,
     deletion: ManagedSlotDeletionResult,
+    signal?: AbortSignal,
   ): Promise<DeletionStepResult> {
     if (deletion.kind === "failed") {
-      const pending = await this.advance(entry, {
-        expectedPhase: "deleting",
-        phase: "deleting",
-        assignment: { kind: "state", expected: entry.binding, state: "cleanup_pending" },
-        attempt: this.attemptAfter(entry, deletion.message),
-      });
+      const pending = await this.advance(
+        entry,
+        {
+          expectedPhase: "deleting",
+          phase: "deleting",
+          assignment: { kind: "state", expected: entry.binding, state: "cleanup_pending" },
+          attempt: this.attemptAfter(entry, deletion.message),
+        },
+        signal,
+      );
       return {
         kind: "blocked",
         entry: pending.kind === "advanced" ? pending.entry : entry,
@@ -333,19 +409,23 @@ export class ManagedSlotJournal {
         evidence: deletion.evidence,
       };
     }
-    const emptied = await this.advance(entry, {
-      expectedPhase: "deleting",
-      phase: "deleted",
-      assignment: {
-        kind: "commit",
-        expected: entry.binding,
-        // A cross-platform replacement moves the emptied slot to the new platform (#11232).
-        next: {
-          ...emptySlotCommit(entry.target.requestedSpec),
-          platform: journalCreationPlatform(entry),
+    const emptied = await this.advance(
+      entry,
+      {
+        expectedPhase: "deleting",
+        phase: "deleted",
+        assignment: {
+          kind: "commit",
+          expected: entry.binding,
+          // A cross-platform replacement moves the emptied slot to the new platform (#11232).
+          next: {
+            ...emptySlotCommit(entry.target.requestedSpec),
+            platform: journalCreationPlatform(entry),
+          },
         },
       },
-    });
+      signal,
+    );
     if (emptied.kind !== "advanced" || !emptied.assignment) {
       return {
         kind: "blocked",
@@ -369,68 +449,91 @@ export class ManagedSlotJournal {
    */
   async settleCreation(
     entry: SlotJournalEntry,
-    options: { adopt: boolean; deadlineMs?: number } = { adopt: true },
+    options: { adopt: boolean; deadlineMs?: number; signal?: AbortSignal } = { adopt: true },
   ): Promise<Step> {
-    const located = await this.locateCreated(entry);
+    const { signal } = options;
+    checkCancellation(signal);
+    const located = await this.locateCreated(entry, signal);
     if (located.kind === "absent") {
-      return this.close(entry, "rolled_back");
+      return this.close(entry, "rolled_back", signal);
     }
     if (located.kind === "blocked") {
-      return this.recordBlocked(entry, located.reason, located.message);
+      return this.recordBlocked(entry, located.reason, located.message, undefined, signal);
     }
     const { device, stableId } = located;
     const holder = await this.deps.registry.findDeviceHolder(
       journalCreationPlatform(entry),
       stableId,
     );
+    checkCancellation(signal);
     if (holder) {
       // Bound to a slot or parked in the free pool: never ours to adopt or delete.
-      return this.close(entry, "rolled_back");
+      return this.close(entry, "rolled_back", signal);
     }
     const assignment = await this.deps.registry.getAssignment(keyOf(entry));
+    checkCancellation(signal);
     const current = assignment !== null && sameBinding(assignment, entry.binding);
     const spec = recordedSpec(entry);
     if (options.adopt && current && spec) {
-      const match = await this.deps.matcher.matches(device, spec);
+      const match = await this.boundedStage(
+        () => this.deps.matcher.matches(device, spec),
+        { label: `configuration for entry ${entry.id}`, timeoutMs: this.budgets.matchMs, signal },
+        "unknown",
+      );
       if (match === "unknown") {
         return this.recordBlocked(
           entry,
           "discovery_incomplete",
           `Configuration of '${stableId}' is unreadable.`,
+          undefined,
+          signal,
         );
       }
       if (match === "match") {
-        return this.adoptCreated(entry, device, stableId);
+        return this.adoptCreated(entry, device, stableId, signal);
       }
     }
-    return this.removeCreated(entry, device, stableId, options.deadlineMs);
+    return this.removeCreated(entry, device, stableId, options.deadlineMs, signal);
   }
 
   /** Close an entry at a terminal phase (no assignment change). */
   async close(
     entry: SlotJournalEntry,
     phase: "committed" | "rolled_back",
+    signal?: AbortSignal,
   ): Promise<Extract<Step, { kind: "settled" }>> {
-    const closed = await this.advance(entry, { expectedPhase: entry.phase, phase });
+    const closed = await this.advance(entry, { expectedPhase: entry.phase, phase }, signal);
     return { kind: "settled", entry: closed.kind === "advanced" ? closed.entry : entry };
   }
 
-  async advance(entry: SlotJournalEntry, input: Omit<AdvanceSlotJournalInput, "owner">) {
-    return this.deps.registry.advanceSlotJournal(entry.id, { ...input, owner: this.deps.owner });
+  async advance(
+    entry: SlotJournalEntry,
+    input: Omit<AdvanceSlotJournalInput, "owner">,
+    signal?: AbortSignal,
+  ) {
+    checkCancellation(signal);
+    const result = await this.deps.registry.advanceSlotJournal(entry.id, {
+      ...input,
+      owner: this.deps.owner,
+    });
+    checkCancellation(signal);
+    return result;
   }
 
   // --- driving -------------------------------------------------------------------------------
 
   private async driveEntry(
     initial: SlotJournalEntry,
+    signal?: AbortSignal,
   ): Promise<
     | Extract<Step, { kind: "settled" | "blocked" }>
     | { kind: "skipped"; entry: SlotJournalEntry; why: string }
   > {
+    checkCancellation(signal);
     if (this.inFlight.has(initial.id)) {
       return { kind: "skipped", entry: initial, why: "in progress in this process" };
     }
-    const owned = await this.takeOwnership(initial);
+    const owned = await this.takeOwnership(initial, signal);
     if (owned.kind === "skipped") {
       return owned;
     }
@@ -446,7 +549,8 @@ export class ManagedSlotJournal {
     this.inFlight.add(entry.id);
     try {
       for (let step = 0; step < MAX_STEPS_PER_DRIVE; step += 1) {
-        const result = await this.step(entry);
+        checkCancellation(signal);
+        const result = await this.step(entry, signal);
         if (result.kind !== "next") {
           return result;
         }
@@ -460,6 +564,7 @@ export class ManagedSlotJournal {
 
   private async takeOwnership(
     entry: SlotJournalEntry,
+    signal?: AbortSignal,
   ): Promise<
     | { kind: "owned"; entry: SlotJournalEntry }
     | { kind: "skipped"; entry: SlotJournalEntry; why: string }
@@ -476,6 +581,7 @@ export class ManagedSlotJournal {
       entry.owner,
       this.deps.owner,
     );
+    checkCancellation(signal);
     if (claimed.kind !== "claimed") {
       return { kind: "skipped", entry: claimed.entry ?? entry, why: "claimed by another redrive" };
     }
@@ -486,22 +592,22 @@ export class ManagedSlotJournal {
     return { kind: "owned", entry: claimed.entry };
   }
 
-  private async step(entry: SlotJournalEntry): Promise<Step> {
+  private async step(entry: SlotJournalEntry, signal?: AbortSignal): Promise<Step> {
     if (entry.kind === "release") {
-      return this.settleRelease(entry);
+      return this.settleRelease(entry, signal);
     }
     switch (entry.phase) {
       case "deleting": {
-        const result = await this.driveDeletion(entry);
+        const result = await this.driveDeletion(entry, { signal });
         return result.kind === "deleted" ? { kind: "next", entry: result.entry } : result;
       }
       case "deleted":
         // Destructive work is done; the slot is empty and its next acquisition creates.
-        return this.close(entry, "committed");
+        return this.close(entry, "committed", signal);
       case "intent":
       case "creating":
       case "created":
-        return this.settleCreation(entry);
+        return this.settleCreation(entry, { adopt: true, signal });
       default:
         return { kind: "settled", entry };
     }
@@ -509,14 +615,15 @@ export class ManagedSlotJournal {
 
   // --- release -------------------------------------------------------------------------------
 
-  private async settleRelease(entry: SlotJournalEntry): Promise<Step> {
+  private async settleRelease(entry: SlotJournalEntry, signal?: AbortSignal): Promise<Step> {
     const assignment = await this.deps.registry.getAssignment(keyOf(entry));
+    checkCancellation(signal);
     if (!assignment || !sameBinding(assignment, entry.binding)) {
-      return this.close(entry, "rolled_back");
+      return this.close(entry, "rolled_back", signal);
     }
     if (assignment.state !== "settling") {
       // Already settled (by its watcher, or by `recoverSettledSlots`).
-      return this.close(entry, "committed");
+      return this.close(entry, "committed", signal);
     }
     if (assignment.settler && this.isOwnerLive(assignment.settler)) {
       return blocked(entry, "slot_settling", "The slot's settler is still watching its work.");
@@ -526,16 +633,20 @@ export class ManagedSlotJournal {
     }
     const stableId = assignment.stableDeviceId;
     if (stableId) {
-      const free = await this.checkDeviceFree(entry, stableId);
+      const free = await this.checkDeviceFree(entry, stableId, signal);
       if (free.kind === "blocked") {
-        return this.recordBlocked(entry, free.reason, free.message);
+        return this.recordBlocked(entry, free.reason, free.message, undefined, signal);
       }
     }
-    const restored = await this.advance(entry, {
-      expectedPhase: entry.phase,
-      phase: "committed",
-      assignment: { kind: "state", expected: entry.binding, state: "ready" },
-    });
+    const restored = await this.advance(
+      entry,
+      {
+        expectedPhase: entry.phase,
+        phase: "committed",
+        assignment: { kind: "state", expected: entry.binding, state: "ready" },
+      },
+      signal,
+    );
     if (restored.kind !== "advanced") {
       return blocked(
         entry,
@@ -550,10 +661,11 @@ export class ManagedSlotJournal {
   private async checkDeviceFree(
     entry: SlotJournalEntry,
     stableId: string,
+    signal?: AbortSignal,
   ): Promise<
     { kind: "free" } | { kind: "blocked"; reason: SlotJournalBlockReason; message: string }
   > {
-    const inventory = await this.listInventory(entry);
+    const inventory = await this.listInventory(entry, entry.platform, signal);
     if (!inventory) {
       return {
         kind: "blocked",
@@ -571,7 +683,7 @@ export class ManagedSlotJournal {
             message: `Device '${stableId}' was not listed and discovery was incomplete.`,
           };
     }
-    const claim = await this.deps.claims.describe(device);
+    const claim = await this.describeClaim(entry, device, signal);
     if (claim.kind === "free") {
       return { kind: "free" };
     }
@@ -587,12 +699,13 @@ export class ManagedSlotJournal {
   private async locateForDeletion(
     entry: SlotJournalEntry,
     oldId: string,
+    signal?: AbortSignal,
   ): Promise<
     | { kind: "present"; device: DeviceInfo }
     | { kind: "absent" }
     | { kind: "blocked"; reason: SlotJournalBlockReason; message: string }
   > {
-    const inventory = await this.listInventory(entry);
+    const inventory = await this.listInventory(entry, entry.platform, signal);
     if (!inventory) {
       return {
         kind: "blocked",
@@ -611,7 +724,7 @@ export class ManagedSlotJournal {
             message: `Device '${oldId}' was not listed and discovery was incomplete.`,
           };
     }
-    const claim = await this.deps.claims.describe(device);
+    const claim = await this.describeClaim(entry, device, signal);
     if (claim.kind !== "free") {
       return {
         kind: "blocked",
@@ -620,6 +733,7 @@ export class ManagedSlotJournal {
       };
     }
     const holder = await this.deps.registry.findDeviceHolder(entry.platform, oldId);
+    checkCancellation(signal);
     if (
       holder?.kind !== "slot" ||
       holder.assignment.scopeKey !== entry.scopeKey ||
@@ -639,6 +753,7 @@ export class ManagedSlotJournal {
 
   private async locateCreated(
     entry: SlotJournalEntry,
+    signal?: AbortSignal,
   ): Promise<
     | { kind: "present"; device: DeviceInfo; stableId: string }
     | { kind: "absent" }
@@ -649,7 +764,7 @@ export class ManagedSlotJournal {
       return { kind: "absent" };
     }
     const platform = journalCreationPlatform(entry);
-    const inventory = await this.listInventory(entry, platform);
+    const inventory = await this.listInventory(entry, platform, signal);
     if (!inventory) {
       return {
         kind: "blocked",
@@ -686,26 +801,31 @@ export class ManagedSlotJournal {
     entry: SlotJournalEntry,
     device: DeviceInfo,
     stableId: string,
+    signal?: AbortSignal,
   ): Promise<Step> {
     // Readiness is unproven after an interruption: bind as `provisioning`; the acquisition's reuse
     // path re-provisions it to automation readiness before anyone may claim it.
-    const adopted = await this.advance(entry, {
-      expectedPhase: entry.phase,
-      phase: "committed",
-      target: { newStableId: stableId, newName: device.name },
-      assignment: {
-        kind: "commit",
-        expected: entry.binding,
-        next: {
-          stableDeviceId: stableId,
-          deviceName: device.name,
-          requestedSpec: entry.target.requestedSpec,
-          resolvedSpec: entry.target.resolvedSpec,
-          specFingerprint: entry.target.specFingerprint,
-          state: "provisioning",
+    const adopted = await this.advance(
+      entry,
+      {
+        expectedPhase: entry.phase,
+        phase: "committed",
+        target: { newStableId: stableId, newName: device.name },
+        assignment: {
+          kind: "commit",
+          expected: entry.binding,
+          next: {
+            stableDeviceId: stableId,
+            deviceName: device.name,
+            requestedSpec: entry.target.requestedSpec,
+            resolvedSpec: entry.target.resolvedSpec,
+            specFingerprint: entry.target.specFingerprint,
+            state: "provisioning",
+          },
         },
       },
-    });
+      signal,
+    );
     if (adopted.kind === "advanced") {
       return { kind: "settled", entry: adopted.entry };
     }
@@ -713,7 +833,7 @@ export class ManagedSlotJournal {
       return blocked(entry, "reconcile_in_progress", "The journal entry changed during adoption.");
     }
     // The slot moved on underneath: the device is now an orphan of this entry.
-    return this.removeCreated(entry, device, stableId);
+    return this.removeCreated(entry, device, stableId, undefined, signal);
   }
 
   private async removeCreated(
@@ -721,14 +841,16 @@ export class ManagedSlotJournal {
     device: DeviceInfo,
     stableId: string,
     deadlineMs?: number,
+    signal?: AbortSignal,
   ): Promise<Step> {
-    const claim = await this.deps.claims.describe(device);
+    const claim = await this.describeClaim(entry, device, signal);
     if (claim.kind !== "free") {
       return this.recordBlocked(
         entry,
         claim.kind === "held" ? "device_busy" : "discovery_incomplete",
         `Uncommitted device '${stableId}' cannot be removed: ${claim.reason}`,
         { newStableId: stableId },
+        signal,
       );
     }
     const deletion = await this.deleteDevice({
@@ -736,6 +858,7 @@ export class ManagedSlotJournal {
       stableId,
       name: device.name,
       deadlineMs: deadlineMs ?? this.deps.timer.now() + SLOT_JOURNAL_STEP_BUDGET_MS,
+      signal,
     });
     if (deletion.kind === "failed") {
       return this.recordBlocked(
@@ -743,13 +866,18 @@ export class ManagedSlotJournal {
         "cleanup_pending",
         `Removing uncommitted device '${stableId}' failed: ${deletion.message}`,
         { newStableId: stableId },
+        signal,
       );
     }
-    const closed = await this.advance(entry, {
-      expectedPhase: entry.phase,
-      phase: "rolled_back",
-      target: { newStableId: stableId },
-    });
+    const closed = await this.advance(
+      entry,
+      {
+        expectedPhase: entry.phase,
+        phase: "rolled_back",
+        target: { newStableId: stableId },
+      },
+      signal,
+    );
     return { kind: "settled", entry: closed.kind === "advanced" ? closed.entry : entry };
   }
 
@@ -760,8 +888,12 @@ export class ManagedSlotJournal {
    * before the journal existed — gets a `deleting` entry, so its accepted deletion is redriven like
    * any other. `settling` slots are recovered by their settler rule (`recoverSettledSlots`).
    */
-  private async adoptUnjournaledWork(key: SlotKey): Promise<SlotJournalEntry | null> {
+  private async adoptUnjournaledWork(
+    key: SlotKey,
+    signal?: AbortSignal,
+  ): Promise<SlotJournalEntry | null> {
     const assignment = await this.deps.registry.getAssignment(key);
+    checkCancellation(signal);
     if (
       !assignment?.stableDeviceId ||
       (assignment.state !== "replacing" && assignment.state !== "cleanup_pending") ||
@@ -788,6 +920,7 @@ export class ManagedSlotJournal {
         state: assignment.state,
       },
     });
+    checkCancellation(signal);
     if (opened.kind === "opened") {
       logger.warn(
         `[SlotJournal] slot ${key.slotIndex} was left ${assignment.state} without a journal entry; ` +
@@ -805,15 +938,20 @@ export class ManagedSlotJournal {
     reason: SlotJournalBlockReason,
     message: string,
     target?: Partial<SlotJournalEntry["target"]>,
+    signal?: AbortSignal,
   ): Promise<Extract<Step, { kind: "blocked" }>> {
     const phase: SlotJournalPhase =
       target?.newStableId && entry.phase === "creating" ? "created" : entry.phase;
-    const recorded = await this.advance(entry, {
-      expectedPhase: entry.phase,
-      phase,
-      ...(target ? { target } : {}),
-      attempt: this.attemptAfter(entry, message),
-    });
+    const recorded = await this.advance(
+      entry,
+      {
+        expectedPhase: entry.phase,
+        phase,
+        ...(target ? { target } : {}),
+        attempt: this.attemptAfter(entry, message),
+      },
+      signal,
+    );
     return blocked(recorded.kind === "advanced" ? recorded.entry : entry, reason, message);
   }
 
@@ -827,34 +965,74 @@ export class ManagedSlotJournal {
     };
   }
 
-  private async listInventory(
-    entry: SlotJournalEntry,
-    platform: SlotJournalEntry["platform"] = entry.platform,
-  ): Promise<ManagedSlotInventorySnapshot | null> {
+  private async boundedStage<T>(
+    operation: (signal: AbortSignal) => Promise<T>,
+    options: { label: string; timeoutMs: number; signal?: AbortSignal },
+    failure: T,
+  ): Promise<T> {
+    checkCancellation(options.signal);
+    const controller = new AbortController();
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, controller.signal])
+      : controller.signal;
+    const timeout = new Error(`${options.label} timed out after ${options.timeoutMs}ms`);
     try {
-      return await this.deps.inventory.list(platform, {});
+      const result = await raceWithDeadline(() => operation(signal), {
+        timer: this.deps.timer,
+        timeoutMs: Math.max(0, options.timeoutMs),
+        signal: options.signal,
+        label: options.label,
+        timeoutError: () => timeout,
+        onTimeout: () => controller.abort(timeout),
+      });
+      checkCancellation(options.signal);
+      return result;
     } catch (error) {
-      logger.warn(
-        `[SlotJournal] device discovery for entry ${entry.id} failed: ${errorMessage(error)}`,
-        error,
-      );
-      return null;
+      if (options.signal?.aborted) {
+        controller.abort(options.signal.reason);
+        throw new SlotJournalDriveCancelled(options.signal.reason);
+      }
+      // Unreadable discovery and unverified deletion are conservative failures, never absence.
+      logger.warn(`[SlotJournal] ${options.label} failed: ${errorMessage(error)}`, error);
+      return failure;
     }
   }
 
-  private async deleteDevice(
+  private listInventory(
+    entry: SlotJournalEntry,
+    platform: SlotJournalEntry["platform"] = entry.platform,
+    signal?: AbortSignal,
+  ): Promise<ManagedSlotInventorySnapshot | null> {
+    return this.boundedStage<ManagedSlotInventorySnapshot | null>(
+      (stageSignal) => this.deps.inventory.list(platform, { signal: stageSignal }),
+      { label: `discovery for entry ${entry.id}`, timeoutMs: this.budgets.discoveryMs, signal },
+      null,
+    );
+  }
+
+  private describeClaim(entry: SlotJournalEntry, device: DeviceInfo, signal?: AbortSignal) {
+    return this.boundedStage<Awaited<ReturnType<ManagedSlotDeviceClaims["describe"]>>>(
+      () => this.deps.claims.describe(device),
+      { label: `claim for entry ${entry.id}`, timeoutMs: this.budgets.claimMs, signal },
+      { kind: "unknown", reason: "Device claim could not be read." },
+    );
+  }
+
+  private deleteDevice(
     target: Parameters<ManagedSlotDeviceDeleter["deleteAndVerifyAbsence"]>[0],
   ): Promise<ManagedSlotDeletionResult> {
-    try {
-      return await this.deps.deleter.deleteAndVerifyAbsence(target);
-    } catch (error) {
-      // An unverified deletion is a failed deletion: the device may still exist.
-      logger.warn(
-        `[SlotJournal] deleting '${target.stableId}' threw: ${errorMessage(error)}`,
-        error,
-      );
-      return { kind: "failed", message: errorMessage(error) };
-    }
+    return this.boundedStage<ManagedSlotDeletionResult>(
+      (signal) => this.deps.deleter.deleteAndVerifyAbsence({ ...target, signal }),
+      {
+        label: `deleting '${target.stableId}'`,
+        timeoutMs: Math.max(
+          0,
+          target.deadlineMs + this.budgets.deleteGraceMs - this.deps.timer.now(),
+        ),
+        signal: target.signal,
+      },
+      { kind: "failed", message: "Device deletion failed to verify absence." },
+    );
   }
 }
 
@@ -923,27 +1101,63 @@ export const SLOT_JOURNAL_REDRIVE_INTERVAL_MS = 5_000;
 export class SlotJournalRedriveLoop {
   private stopped = false;
   private running: Promise<void> | undefined;
+  private stopping: Promise<"stopped" | "timed_out"> | undefined;
+  private readonly controller = new AbortController();
+  private cancelWait: (() => void) | undefined;
 
   constructor(
     private readonly journal: Pick<ManagedSlotJournal, "runPass">,
-    private readonly timer: Pick<Timer, "sleep">,
+    private readonly timer: Pick<Timer, "setTimeout" | "clearTimeout">,
     private readonly intervalMs: number = SLOT_JOURNAL_REDRIVE_INTERVAL_MS,
   ) {}
 
   start(): void {
-    this.running ??= this.loop();
+    if (!this.stopped) {
+      this.running ??= this.loop();
+    }
   }
 
-  /** Stop after the current pass; resolves once the loop has exited. */
-  async stop(): Promise<void> {
+  /** Prevent new work, interrupt waits, and join owned work within the shutdown budget. */
+  stop(budgetMs: number = SLOT_JOURNAL_STOP_BUDGET_MS): Promise<"stopped" | "timed_out"> {
     this.stopped = true;
-    await this.running;
+    this.controller.abort();
+    this.cancelWait?.();
+    this.stopping ??= this.join(budgetMs);
+    return this.stopping;
+  }
+
+  private async join(budgetMs: number): Promise<"stopped" | "timed_out"> {
+    try {
+      await raceWithDeadline(this.running ?? Promise.resolve(), {
+        timer: this.timer,
+        timeoutMs: budgetMs,
+        label: "journal redrive stop",
+      });
+      return "stopped";
+    } catch (error) {
+      logger.warn(`[SlotJournal] redrive stop failed: ${errorMessage(error)}`, error);
+      return "timed_out";
+    }
+  }
+
+  private wait(): Promise<void> {
+    return new Promise((resolve) => {
+      const handle = this.timer.setTimeout(() => {
+        this.cancelWait = undefined;
+        resolve();
+      }, this.intervalMs);
+      this.cancelWait = () => {
+        this.timer.clearTimeout(handle);
+        this.cancelWait = undefined;
+        resolve();
+      };
+    });
   }
 
   private async loop(): Promise<void> {
     while (!this.stopped) {
       try {
-        await this.journal.runPass();
+        await this.journal.runPass({ signal: this.controller.signal });
       } catch (error) {
         // The registry may be briefly unreadable; the next pass retries every open entry.
         logger.warn(`[SlotJournal] redrive pass failed: ${errorMessage(error)}`, error);
@@ -951,7 +1165,7 @@ export class SlotJournalRedriveLoop {
       if (this.stopped) {
         return;
       }
-      await this.timer.sleep(this.intervalMs);
+      await this.wait();
     }
   }
 }

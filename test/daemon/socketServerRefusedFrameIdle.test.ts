@@ -8,6 +8,7 @@ import {
 } from "../../src/daemon/daemonRequestHandlers";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../src/daemon/sessionManager";
+import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import {
   hasActiveSessionExecution,
@@ -68,6 +69,11 @@ class FakeSocket extends EventEmitter {
 }
 
 interface Internals {
+  resolveInputTargetDevice(...args: unknown[]): Promise<typeof androidDevice>;
+  answeringSessionRelease<T>(
+    execution: { cancelReason?: Error },
+    run: () => Promise<T>,
+  ): Promise<T>;
   captureStrokeAdmission(deviceId: string, signal?: AbortSignal): unknown;
   acceptingRequests: boolean;
   handleConnection(socket: Socket): void;
@@ -352,6 +358,11 @@ describe("a holder's control frame refused before it reaches the device", () => 
     spyOn(InputKey.prototype, "press").mockRestore();
     PlatformDeviceManagerFactory.reset();
     sessionManager.stopCleanupTimer();
+    expect(executionTracker.getActiveExecutionCount()).toBe(0);
+    AndroidCtrlProxyClient.clearInstanceRegistryForTesting();
+    IOSCtrlProxyClient.clearInstanceRegistryForTesting();
+    expect(AndroidCtrlProxyClient.getExistingInstance(DEVICE)).toBeNull();
+    expect(IOSCtrlProxyClient.getExistingInstance("idle-ios")).toBeNull();
   });
 
   afterAll(() => {
@@ -426,6 +437,175 @@ describe("a holder's control frame refused before it reaches the device", () => 
     expect(response?.error).toContain("frameContext is stale or unavailable");
     expect(idleClock()).toEqual(before);
   });
+
+  test.each(["client cancel", "session release"])(
+    "post-dispatch text %s retains the holder's idle stamp",
+    async (abort) => {
+      const before = idleClock();
+      const reply = Promise.withResolvers<{ success: true }>();
+      let dispatched = false;
+      const mark = spyOn(executionTracker, "markSessionAdmitted");
+      const releaseAnswer = spyOn(internals, "answeringSessionRelease");
+      deviceWork = async (onDispatch) => {
+        onDispatch?.();
+        dispatched = true;
+        return reply.promise;
+      };
+      timer.advanceTime(1_000);
+      socket.send({
+        id: "typing",
+        type: "mcp_request",
+        method: "input/typeText",
+        params: { platform: "android", deviceId: DEVICE, sessionUuid: SESSION, text: "abc" },
+      });
+      await drainUntil(() => dispatched, { description: "text dispatched" });
+      const stamped = {
+        lastUsedAt: before.lastUsedAt! + 1_000,
+        expiresAt: before.expiresAt! + 1_000,
+      };
+      expect(idleClock()).toEqual(before);
+      expect(mark).toHaveBeenCalledTimes(1);
+      const release = new SessionReleasedDuringCallError(SESSION, "explicit-release");
+      const releaseMessage = release.message;
+      if (abort === "session release") {
+        expect(await executionTracker.cancelDeviceSessionExecutions(SESSION, release)).toBe(1);
+      } else {
+        socket.send({
+          id: "cancel-typing",
+          type: "daemon_request",
+          method: "daemon/cancelRequest",
+          params: { requestId: "typing" },
+        });
+        await drainUntil(() => socket.responses.some((r) => r.id === "cancel-typing"), {
+          description: "cancel ack",
+        });
+      }
+      await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+      expect(socket.responses.some((r) => r.id === "typing")).toBe(false);
+      expect(idleClock()).toEqual(before);
+      expect(mark).toHaveBeenCalledTimes(1);
+      expect(executionTracker.getActiveExecutionCount()).toBe(1);
+      reply.resolve({ success: true });
+      await Promise.all([...internals.activeRequestHandlers]);
+      const response = socket.responses.find((r) => r.id === "typing");
+      expect(response).toMatchObject(
+        abort === "session release"
+          ? {
+              success: false,
+              error: expect.stringContaining(
+                "the text request had been dispatched; its outcome is indeterminate",
+              ),
+              code: "session_ownership_lost",
+              retryable: false,
+              nextAction: "acquire_new_session",
+              details: { sessionUuid: SESSION, reason: "explicit-release" },
+            }
+          : { success: false, error: expect.stringContaining("outcome is indeterminate") },
+      );
+      expect(Object.keys(response!).sort()).toEqual(
+        abort === "session release"
+          ? ["id", "type", "success", "error", "code", "retryable", "nextAction", "details"].sort()
+          : ["id", "type", "success", "error", "requestFailureCause"].sort(),
+      );
+      if (abort === "session release") {
+        const answer = releaseAnswer.mock.results.at(-1)!;
+        expect(answer.type).toBe("return");
+        if (answer.type === "return") {
+          await expect(answer.value).rejects.toBeInstanceOf(SessionReleasedDuringCallError);
+        }
+        expect(release.message).toBe(releaseMessage);
+        await expect(
+          internals.answeringSessionRelease({ cancelReason: release }, async () => {
+            throw new Error("tap aborted");
+          }),
+        ).rejects.toBe(release);
+      }
+      releaseAnswer.mockRestore();
+      expect(idleClock()).toEqual(stamped);
+      expect(mark).toHaveBeenCalledTimes(1);
+      mark.mockRestore();
+      expect(executionTracker.getActiveExecutionCount()).toBe(0);
+    },
+  );
+
+  test.each(["client cancel", "session release", "socket close"] as const)(
+    "pre-dispatch append resolution %s answers before resolution settles without an idle stamp",
+    async (abort) => {
+      const before = idleClock();
+      const target = Promise.withResolvers<typeof androidDevice>();
+      const resolve = internals.resolveInputTargetDevice.bind(internals);
+      let calls = 0;
+      let resolving = false;
+      const resolution = spyOn(internals, "resolveInputTargetDevice").mockImplementation(
+        (...args) => {
+          if (++calls === 2) {
+            resolving = true;
+            return target.promise;
+          }
+          return resolve(...args);
+        },
+      );
+      const releaseAnswer = spyOn(internals, "answeringSessionRelease");
+      const mark = spyOn(executionTracker, "markSessionAdmitted");
+      socket.send({
+        id: "preparing",
+        type: "mcp_request",
+        method: "input/typeText",
+        params: {
+          platform: "android",
+          deviceId: DEVICE,
+          sessionUuid: SESSION,
+          text: "abc",
+          mode: "append",
+        },
+      });
+      await drainUntil(() => resolving, { description: "tracked append target resolution" });
+      if (abort === "session release") {
+        expect(
+          await executionTracker.cancelDeviceSessionExecutions(
+            SESSION,
+            new SessionReleasedDuringCallError(SESSION, "explicit-release"),
+          ),
+        ).toBe(1);
+      } else if (abort === "socket close") {
+        socket.destroy();
+      } else {
+        socket.send({
+          id: "cancel-preparing",
+          type: "daemon_request",
+          method: "daemon/cancelRequest",
+          params: { requestId: "preparing" },
+        });
+      }
+      await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+      try {
+        if (abort !== "socket close") {
+          expect(socket.responses.find((r) => r.id === "preparing")).toMatchObject({
+            success: false,
+            ...(abort === "session release"
+              ? {
+                  code: "session_ownership_lost",
+                  details: { sessionUuid: SESSION, reason: "explicit-release" },
+                }
+              : {}),
+          });
+        }
+        expect(executionTracker.getActiveExecutionCount()).toBe(0);
+        expect(sent).toEqual([]);
+        expect(mark).not.toHaveBeenCalled();
+        expect(idleClock()).toEqual(before);
+      } finally {
+        target.resolve(androidDevice);
+        await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
+        await Promise.all([...internals.activeRequestHandlers]);
+        resolution.mockRestore();
+        releaseAnswer.mockRestore();
+        mark.mockRestore();
+      }
+      expect(sent).toEqual([]);
+      expect(idleClock()).toEqual(before);
+    },
+  );
 
   test("a client repeating a refused frame does not hold the device past the idle window", async () => {
     const releaseAt = idleClock().expiresAt!;

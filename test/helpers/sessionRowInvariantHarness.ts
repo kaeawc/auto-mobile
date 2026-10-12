@@ -78,10 +78,6 @@ class ChaoticRepository extends DeviceSessionRepository {
   releaseWritesIssued = 0;
   /** Terminal release writes issued and not yet landed or failed. */
   terminalWritesInFlight = 0;
-  /** Live-row writes issued and not yet landed or failed. */
-  upsertsInFlight = 0;
-  /** Live-row writes that landed so far. */
-  upsertsLanded = 0;
   /** Every write as it is issued, lands or fails, for the trace of a failing run. */
   readonly log: string[] = [];
 
@@ -110,21 +106,16 @@ class ChaoticRepository extends DeviceSessionRepository {
     const delayMs = this.writeDelayMs();
     const write = `upsert(${args[0].deviceId}${args[2]?.unlessTerminal ? ", unless terminal" : ""})`;
     this.log.push(`${write} issued, lands in ${delayMs}ms`);
-    this.upsertsInFlight++;
-    try {
-      await this.land(delayMs);
-      if (this.failUpserts > 0) {
-        this.failUpserts--;
-        this.log.push(`${write} failed`);
-        throw new Error("SQLITE_BUSY: database is locked");
-      }
-      const generation = await super.upsertActiveSession(...args);
-      this.upsertsLanded++;
-      this.log.push(`${write} landed as generation ${generation}`);
-      return generation;
-    } finally {
-      this.upsertsInFlight--;
+    await this.land(delayMs);
+    if (this.failUpserts > 0) {
+      this.failUpserts--;
+      this.log.push(`${write} failed`);
+      throw new Error("SQLITE_BUSY: database is locked");
     }
+    const generation = await super.upsertActiveSession(...args);
+
+    this.log.push(`${write} landed as generation ${generation}`);
+    return generation;
   }
 
   override async markReleased(
@@ -507,11 +498,6 @@ export async function runSessionRowInterleaving(
         return;
       }
       case "peer-stale-sweep":
-        if (reissuing) {
-          // An issue whose row is expired under it, between its two statements, fails and
-          // leaves that row recoverable: the creation path's to roll back, open in #11557.
-          return;
-        }
         // The peer starts up believing this daemon dead, and expires the rows it left active.
         await peer.markStaleActiveSessionsExpired(
           PEER_DAEMON,
@@ -849,6 +835,7 @@ export async function runSessionRowInterleaving(
    * terminally released.
    */
   const restart = async (): Promise<void> => {
+    const issuingAtShutdown = reissuing;
     repository.log.push("-- shutdown");
     drained = true;
     // The database answers through shutdown; what is in flight still lands when it lands.
@@ -858,8 +845,6 @@ export async function runSessionRowInterleaving(
     adoptIncarnation();
     // Held, even while a release of it is under way (which shutdown joins).
     const liveAtShutdown = manager.getAllSessionIds().includes(sessionId);
-    // An issue admitted before the fence persists its row and is handed off, or is refused.
-    const issuingAtShutdown = reissuing;
     const handoffs: Promise<unknown>[] = [];
     // As the daemon does: every id it knows, an issue or a release still in flight included.
     if (manager.getAllKnownSessionIds().includes(sessionId)) {
@@ -872,15 +857,11 @@ export async function runSessionRowInterleaving(
     }
     let drainedInTime: boolean | undefined;
     let writesAtDrain = 0;
-    let liveRowWritesUnderDrain = false;
-    const upsertsLandedAtShutdown = repository.upsertsLanded;
     background(
       "drain",
       manager.drainReleasePromises(SHUTDOWN_DRAIN_TIMEOUT_MS, handoffs).then((inTime) => {
         drainedInTime = inTime;
         writesAtDrain = repository.releaseWritesIssued;
-        liveRowWritesUnderDrain =
-          repository.upsertsInFlight > 0 || repository.upsertsLanded !== upsertsLandedAtShutdown;
       }),
     );
     await settle();
@@ -890,10 +871,7 @@ export async function runSessionRowInterleaving(
       violations.push("shutdown: the release drain did not finish");
       return;
     }
-    // A live-row write (an activity's re-persist) still parked, or landing while the drain runs,
-    // is the write barrier's to wait for, not the drain's: the release it is followed by, after
-    // the session's own, can then be issued past the drain. Open in #11557, and not judged here.
-    if (repository.releaseWritesIssued !== writesAtDrain && !liveRowWritesUnderDrain) {
+    if (repository.releaseWritesIssued !== writesAtDrain) {
       violations.push(
         "shutdown: a release write was issued after the drain, as the database closes",
       );
@@ -905,18 +883,16 @@ export async function runSessionRowInterleaving(
     const fencedAtExit =
       journal.intents.has(sessionId) ||
       (Reflect.get(manager, "terminalReleaseSnapshots") as Map<string, unknown>).has(sessionId);
+    const handedOffAfterRelease = !liveAtShutdown && lastReason === SHUTDOWN_RELEASE;
     const expected =
       !ownTerminal &&
       !fencedAtExit &&
       peerTerminal !== "decisive" &&
       !peerOwns &&
-      (liveAtShutdown || heldAtExit);
-    // A release that had already removed the session takes the handoff's reason when shutdown
-    // joins it (a non-terminal reason gives way to `daemon-shutdown`), and the row it first wrote
-    // may still be what a write in flight leaves: the session was not live, so either row stands.
-    const handedOffAfterRelease = !liveAtShutdown && lastReason === SHUTDOWN_RELEASE;
-    const eitherOutcome = !ownTerminal && (handedOffAfterRelease || issuingAtShutdown);
-    const unjudged = eitherOutcome;
+      (liveAtShutdown || heldAtExit || (handedOffAfterRelease && !issuingAtShutdown));
+    // An in-flight issue entangles its refused creation's shutdown announcement and row claim
+    // with the release upgrade; whether that run is a handoff needs an owner decision.
+    const unjudged = !ownTerminal && handedOffAfterRelease && issuingAtShutdown;
 
     repository.log.push("-- restart");
     const store = new DeviceSessionRepository(db, timer);
@@ -939,7 +915,7 @@ export async function runSessionRowInterleaving(
     const rowState = `${row?.status}/${row?.release_reason ?? "none"}/${row?.daemon_session_id}`;
     const ended = `ended as ${heldAtExit ? "live" : (lastReason ?? "nothing")}`;
     if (unjudged) {
-      // Either outcome stands, or the shape is open: see the flags above.
+      repository.log.push("restart: unjudged in-flight issue and release handoff");
     } else if (rehydrated && !expected) {
       violations.push(`restart: a ghost was rehydrated (${ended}, row ${rowState})`);
     } else if (!rehydrated && expected) {

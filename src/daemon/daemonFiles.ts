@@ -100,7 +100,7 @@ export const WEBRTC_STREAM_SOCKET_CONFIG: SocketServerConfig = {
   },
 };
 
-function resolveWebRtcStreamSocketPath(env: NodeJS.ProcessEnv = process.env): string {
+export function resolveWebRtcStreamSocketPath(env: NodeJS.ProcessEnv = process.env): string {
   const override =
     env.AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH ?? env.AUTO_MOBILE_WEBRTC_STREAM_SOCKET_PATH;
   return override

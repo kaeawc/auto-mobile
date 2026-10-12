@@ -263,6 +263,8 @@ export interface UpsertActiveSessionOptions {
     ownDaemonSessionId?: string;
     /** Activity re-persistence may replace only the generation its incarnation last wrote. */
     expectedRowGeneration?: number;
+    /** Activity repair may revive a swept row, but never a row a release statement wrote. */
+    unlessReleased?: boolean;
   };
 }
 
@@ -312,6 +314,12 @@ export interface DeviceSessionActivityUpdate {
  */
 export interface MarkReleasedOptions {
   expectedRowGeneration?: number;
+  /**
+   * Preserve a daemon-shutdown handoff in the release statement: a parked non-terminal write
+   * must not overwrite its release's shutdown upgrade. A miss rejects with
+   * DeviceSessionRowNotReleasableError; terminal and shutdown writers leave this unset.
+   */
+  unlessDaemonShutdown?: boolean;
   /**
    * Apply the release only while the row still holds a recoverable reason (single statement): a
    * sweep that terminalizes an expired recoverable row must not overwrite a release that landed
@@ -635,6 +643,9 @@ export class DeviceSessionRepository {
                     livePeerDaemonSessionIds,
                     rewriteOverSupersededRelease.ownDaemonSessionId,
                   ),
+                  ...(rewriteOverSupersededRelease.unlessReleased
+                    ? [eb("device_sessions.status", "!=", "released")]
+                    : []),
                   ...(expectedRowGeneration === undefined
                     ? []
                     : [
@@ -895,6 +906,14 @@ export class DeviceSessionRepository {
                 eb("release_reason", "is", null),
                 eb.not(holdsStrongerReleaseReason(eb, reason)),
               ]),
+        )
+        .where((eb) =>
+          options.unlessDaemonShutdown
+            ? eb.or([
+                eb("release_reason", "is", null),
+                eb("release_reason", "!=", "daemon-shutdown"),
+              ])
+            : eb.val(true),
         );
       if (expectedRowGeneration !== undefined) {
         update = update.where("stable_identity_generation", "=", expectedRowGeneration);
@@ -949,6 +968,9 @@ export class DeviceSessionRepository {
     options: MarkReleasedOptions,
   ): void {
     const guarded = options.unlessTerminalOrOwnedByLivePeer;
+    if (options.unlessDaemonShutdown) {
+      throw new DeviceSessionRowNotReleasableError(sessionUuid);
+    }
     if (guarded && (guarded.reportRefusal || guarded.ownDaemonSessionId !== undefined)) {
       throw new DeviceSessionRowNotReleasableError(sessionUuid);
     }

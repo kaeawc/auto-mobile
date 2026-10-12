@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   managedConnectionHostMutationRefusal,
+  managedConnectionPlatformRefusal,
   managedConnectionScopeResetRefusal,
 } from "../../../src/daemon/managedSlots/managedConnectionScope";
 import {
@@ -73,4 +74,23 @@ describe("managed connection host and scope decisions", () => {
       managedConnectionScopeResetRefusal({ binding, action: "daemon/resetSlotScope", identity }),
     ).toBeUndefined();
   });
+});
+
+test("a platform-only managed refusal carries the platform, scope and a sensible message", () => {
+  const input = { binding, action: "homeScreen", platform: "ios", boundPlatform: "android" };
+  const refusal = managedConnectionPlatformRefusal(input);
+  expect(refusal).toBeInstanceOf(DeviceOutsideManagedSlotsError);
+  expect(refusal?.toPayload()).toEqual({
+    code: DEVICE_OUTSIDE_MANAGED_SLOTS_CODE,
+    action: "homeScreen",
+    reason: "device",
+    platform: "ios",
+    scopeKey: binding.scopeKey,
+    retryable: false,
+  });
+  expect(refusal?.message).toContain("None of its slot devices is an ios device.");
+  expect(refusal?.message).not.toContain("undefined");
+  expect(managedConnectionPlatformRefusal({ ...input, binding: undefined })).toBeUndefined();
+  expect(managedConnectionPlatformRefusal({ ...input, platform: "android" })).toBeUndefined();
+  expect(managedConnectionPlatformRefusal({ ...input, boundPlatform: undefined })).toBeUndefined();
 });

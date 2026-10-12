@@ -1456,6 +1456,23 @@ const releaseExecutionParams = z.object({
   livenessOwnerToken: z.string().trim().min(1),
 });
 
+/** A refused rebind cannot prevent the live managed execution's proven owner from draining it. */
+function ownsLiveManagedExecution(
+  state: DaemonStateAccess,
+  sessionId: string,
+  livenessOwnerToken: string,
+): boolean {
+  const manager = state.getSessionManager();
+  const session = manager.peekSession
+    ? manager.peekSession(sessionId)
+    : manager.getSession(sessionId);
+  return (
+    session?.livenessPolicy === MANAGED_EXECUTION_LIVENESS_POLICY &&
+    !!session.livenessOwnerToken &&
+    session.livenessOwnerToken === livenessOwnerToken
+  );
+}
+
 /**
  * End a managed slot execution (#11177): drain its work, release its live control, keep its slot's
  * device assignment. Idempotent: a repeated or late call reports the current settlement.
@@ -1482,7 +1499,10 @@ async function handleReleaseExecution(
       sessionUuid: parsed.data.sessionId,
     },
   );
-  if (refusal) {
+  if (
+    refusal &&
+    !ownsLiveManagedExecution(state, parsed.data.sessionId, parsed.data.livenessOwnerToken)
+  ) {
     return refusal;
   }
   const drain = state.getManagedExecutionRelease?.();

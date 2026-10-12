@@ -1,5 +1,12 @@
+import { INTERNAL_MCP_SESSION_PARAM } from "../../src/daemon/constants";
+import { subscribeToolCallEndActivity } from "../../src/daemon/toolCallActivity";
+import { executionTracker } from "../../src/server/executionTracker";
+import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
+import { McpTestFixture } from "../fixtures/mcpTestFixture";
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { RealToolCallPath } from "../helpers/realToolCallPath";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -361,5 +368,126 @@ describe("ToolRegistry managed-slot enforcement (#11178)", () => {
         }),
       ).not.toThrow();
     });
+  });
+});
+
+// Real daemon-hosted tools/call ingress; device work is behind the existing fake pipeline.
+describe("platform-only calls on a bound daemon connection", () => {
+  const SESSION = "android-slot";
+  const CONNECTION = "managed-platform-socket";
+  const SCOPE = "platform-scope";
+  const device = { name: "Android slot", deviceId: "emulator-5554", platform: "android" as const };
+  let fixture: McpTestFixture;
+  let manager: SessionManager;
+  let timer: FakeTimer;
+  let tools: RealToolCallPath;
+  let restoreHermetic: () => void;
+  let unsubscribe: () => void;
+
+  beforeAll(async () => {
+    const restore = installHermeticServerFixture();
+    const warm = new McpTestFixture({ daemonMode: true });
+    await warm.setup();
+    await warm.teardown();
+    restore();
+  });
+
+  beforeEach(async () => {
+    restoreHermetic = installHermeticServerFixture();
+    timer = new FakeTimer();
+    manager = new SessionManager(
+      timer,
+      new FakeDeviceSessionPersistence(),
+      () => new FakeDbWriteBarrier(),
+    );
+    manager.stopCleanupTimer();
+    const discovery = new FakeDeviceUtils();
+    discovery.setBootedDevices("android", [device]);
+    discovery.setBootedDevices("ios", []);
+    const pool = new DevicePool(
+      createDevicePoolDependencies(manager, "platform-routing", {
+        timer,
+        deviceManager: discovery,
+      }),
+    );
+    await pool.initializeWithDevices([device]);
+    DaemonState.getInstance().initialize(manager, pool);
+    await pool.bindOrReuseDeviceSession(
+      SESSION,
+      device.deviceId,
+      "android",
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      CONNECTION,
+    );
+    manager.setDeviceReadiness(SESSION, "automationReady");
+    unsubscribe = subscribeToolCallEndActivity(executionTracker, manager, pool);
+    fixture = new McpTestFixture({
+      daemonMode: true,
+      sessionContext: { initialSessionToolBinding: SESSION },
+    });
+    await fixture.setup();
+    tools = new RealToolCallPath([device]).install();
+  });
+
+  afterEach(async () => {
+    await fixture.teardown();
+    unsubscribe();
+    tools.uninstall();
+    restoreHermetic();
+    manager.stopCleanupTimer();
+    DaemonState.getInstance().reset();
+    expect(DaemonState.getInstance().isInitialized()).toBe(false);
+    expect(executionTracker.getActiveExecutionCount()).toBe(0);
+  });
+
+  test.each([true, false])(
+    "a foreign platform is refused before admission; managed=%s",
+    async (managed) => {
+      if (managed) {
+        DaemonState.getInstance()
+          .getManagedConnectionScopes()
+          .bind(CONNECTION, { scopeKey: SCOPE, sessionUuids: [SESSION] });
+      }
+      const session = manager.getSession(SESSION)!;
+      const clocks = { expiresAt: session.expiresAt, lastUsedAt: session.lastUsedAt };
+      timer.advanceTime(1_000);
+      const answer = await fixture.client.callTool({
+        name: "homeScreen",
+        arguments: { platform: "ios", [INTERNAL_MCP_SESSION_PARAM]: CONNECTION },
+      });
+      expect(answer.isError).toBe(true);
+      const payload = JSON.parse((answer.content as Array<{ text: string }>)[0]!.text);
+      expect(payload).toMatchObject({
+        code: managed ? "device_outside_managed_slots" : "device_outside_bound_session",
+        platform: "ios",
+        retryable: false,
+      });
+      if (managed) {
+        expect(payload).toMatchObject({ action: "homeScreen", reason: "device", scopeKey: SCOPE });
+        expect(payload.error).toContain("None of its slot devices is an ios device.");
+      }
+      expect(tools.runs).toEqual([]);
+      expect({ expiresAt: session.expiresAt, lastUsedAt: session.lastUsedAt }).toEqual(clocks);
+    },
+  );
+
+  test("the managed connection runs a matching platform on its slot", async () => {
+    DaemonState.getInstance()
+      .getManagedConnectionScopes()
+      .bind(CONNECTION, { scopeKey: SCOPE, sessionUuids: [SESSION] });
+    const answer = await fixture.client.callTool({
+      name: "homeScreen",
+      arguments: { platform: "android", [INTERNAL_MCP_SESSION_PARAM]: CONNECTION },
+    });
+    expect(answer.isError).not.toBe(true);
+    expect(tools.runs).toEqual([
+      { name: "homeScreen", deviceId: device.deviceId, sessionUuid: SESSION },
+    ]);
   });
 });

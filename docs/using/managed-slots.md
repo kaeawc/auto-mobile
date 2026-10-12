@@ -475,7 +475,9 @@ slot. Only control and lifecycle calls on another slot's device are refused.
   control, start, provision or delete anything outside its own slot devices or
   sessions gets the non-retryable `device_outside_managed_slots`, with a reason
   of `device`, `session`, `tool`, `scope` or `host` (device-acquiring tools are left to slot
-  acquisition). Lifecycle tools (`getAndroid`, `getApple`, `startDevice`,
+  acquisition). A platform-only control call naming a platform none of its slot
+  devices holds is refused with reason `device` and the requested `platform`.
+  Lifecycle tools (`getAndroid`, `getApple`, `startDevice`,
   `provisionDevice`, `killDevice`, `deleteDevice`) are refused with reason `tool`
   even on the connection's own slot device: it could not boot the device again,
   so a stop would strand the execution. End the execution instead; the next
@@ -484,8 +486,12 @@ slot. Only control and lifecycle calls on another slot's device are refused.
   `input/*`, the device-mutating `ide/*` routes (`force` or not),
   `ide/setSessionToolEnabled`, `daemon/releaseSession` and
   `daemon/relinquishDeviceLease` are refused off-slot (#11596).
-  `daemon/releaseExecution` is confined to its own slot sessions, and
-  `daemon/resetSlotScope` to its own scope named by all three identity parts.
+  `daemon/releaseExecution` is confined to its own slot sessions unless the caller
+  presents the recorded owner token of a live managed execution. That owner may
+  release its own execution even after a refused rebind leaves the connection
+  with zero slot sessions. A foreign token, an ownerless session or a session
+  outside the binding that is not a managed execution remains refused.
+  `daemon/resetSlotScope` is confined to its own scope named by all three identity parts.
   `daemon/refreshDevices` and `ide/setFeatureFlag` are refused (#11596). An
   ordinary connection may still release any session.
 - A managed connection's multi-device plan labels are served only by its own slot

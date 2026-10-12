@@ -93,6 +93,9 @@ class WedgedRecordings implements RecordingSessionCleanupDeps, RecordingAcquisit
   activeRecordingIdsForOwner(sessionId: string | undefined): string[] {
     return [...this.active].filter(([, owner]) => owner === sessionId).map(([id]) => id);
   }
+  retainedCaptureIdsForOwner(sessionId: string | undefined): string[] {
+    return this.activeRecordingIdsForOwner(sessionId);
+  }
   finalizeCapMs(): number {
     return FINALIZE_CAP_MS;
   }

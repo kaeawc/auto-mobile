@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { promises as fsPromises } from "node:fs";
+import * as segmentedTools from "../../src/server/videoRecordingTools";
+import * as gestures from "../../src/server/deviceGestureRecordingManager";
 import * as manager from "../../src/server/videoRecordingManager";
 import {
   defaultRecordingSessionCleanupDeps,
@@ -14,7 +17,7 @@ import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeSecurePermissions } from "../fakes/FakeSecurePermissions";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { drainUntil } from "../helpers/fakeTimerStepping";
+import { drainUntil, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { resetSegmentedSessions } from "../../src/server/videoRecordingTools";
 import { resetStoppedDeviceGestureRecordings } from "../../src/server/deviceGestureRecordingManager";
 import { displayTransitions } from "../../src/features/observe/DisplayTransition";
@@ -61,6 +64,7 @@ describe("recording release after serial identity replacement", () => {
 
   beforeEach(async () => {
     timer = new FakeTimer();
+    spies.push(spyOn(fsPromises, "stat").mockRejectedValue(new Error("fake host file")));
     backend = new FakeVideoCaptureBackend();
     backend.setNowProvider(() => new Date(timer.now()));
     repository = new FakeVideoRecordingRepository();
@@ -80,6 +84,7 @@ describe("recording release after serial identity replacement", () => {
       now: () => new Date(timer.now()),
       statFileSize: async () => 42,
       resolveAndroidDisplay: async () => undefined,
+      retentionPolicy: { ttlMs: 0, sweepIntervalMs: 300_000, inProgressCheckIntervalMs: 300_000 },
     });
   });
 
@@ -155,7 +160,67 @@ describe("recording release after serial identity replacement", () => {
     expect(update.mock.calls.filter(([, patch]) => patch.status === "interrupted")).toHaveLength(1);
   });
 
-  test("a normal stop already in flight keeps its answer and finalizes once", async () => {
+  test("replaced release host-stops a wedged normal stop and preserves its interrupted row", async () => {
+    const active = await startA();
+    const gate = Promise.withResolvers<void>();
+    const original = backend.stop.bind(backend);
+    const stopBackend = spyOn(backend, "stop").mockImplementation(async (handle) => {
+      await gate.promise;
+      return original(handle);
+    });
+    const update = spyOn(repository, "updateRecording");
+    spies.push(stopBackend, update);
+    const stopping = manager.stopVideoRecording(active.recordingId);
+    const rejected = stopping.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await drainUntil(() => stopBackend.mock.calls.length === 1, { description: "wedged stop" });
+    const release = new ReleaseManager();
+    registerRecordingSessionCleanup(release, { ...defaultRecordingSessionCleanupDeps, timer });
+    release.release();
+    await drainUntilQuiescent(timer);
+    expect(backend.forceStopOptionsCalls).toEqual([{ hostOnly: true }]);
+    expect(service.listActiveRecordingIds()).toEqual([]);
+    expect(release.pending).toEqual([]);
+    const interrupted = await repository.getRecording(active.recordingId);
+    expect(interrupted).toMatchObject({ status: "interrupted", ownerSessionUuid: "A" });
+    expect((await manager.stopVideoRecording(active.recordingId)).metadata.recordingId).toBe(
+      active.recordingId,
+    );
+    gate.resolve();
+    expect(String(await rejected)).toContain("force-stopped while it was stopping");
+    expect(await repository.getRecording(active.recordingId)).toEqual(interrupted);
+    expect(backend.forceStopOptionsCalls).toEqual([{ hostOnly: true }]);
+    expect(stopBackend).toHaveBeenCalledTimes(1);
+    expect(update.mock.calls.filter(([, patch]) => patch.status !== undefined)).toHaveLength(1);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(timer.getPendingIntervalCount()).toBe(0);
+  });
+
+  test("host force-stop wins while graceful finalization is waiting for host stat", async () => {
+    const active = await startA();
+    const statGate = Promise.withResolvers<never>();
+    const stat = spyOn(fsPromises, "stat").mockImplementation(() => statGate.promise);
+    spies.push(stat);
+    const stopping = manager.stopVideoRecording(active.recordingId);
+    const rejected = stopping.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await drainUntil(() => stat.mock.calls.length === 1, {
+      description: "host stat in graceful finalization",
+    });
+    await manager.abandonVideoRecordingOnReplacedDevice(active.recordingId);
+    const interrupted = await repository.getRecording(active.recordingId);
+    expect(interrupted?.status).toBe("interrupted");
+    statGate.reject(new Error("fake host file missing"));
+    expect(String(await rejected)).toContain("force-stopped while it was stopping");
+    expect(await repository.getRecording(active.recordingId)).toEqual(interrupted);
+    expect(backend.forceStopOptionsCalls).toEqual([{ hostOnly: true }]);
+  });
+
+  test("a normal stop that wins capture teardown keeps its answer and finalizes once", async () => {
     const active = await startA();
     const gate = Promise.withResolvers<void>();
     const original = backend.stop.bind(backend);
@@ -167,8 +232,11 @@ describe("recording release after serial identity replacement", () => {
     spies.push(stopBackend, update);
     const stop = manager.stopVideoRecording(active.recordingId);
     await drainUntil(() => stopBackend.mock.calls.length === 1, { description: "normal stop" });
-    const abandon = manager.abandonVideoRecordingOnReplacedDevice(active.recordingId);
     gate.resolve();
+    await drainUntil(() => service.listActiveRecordingIds().length === 0, {
+      description: "graceful stop wins capture teardown",
+    });
+    const abandon = manager.abandonVideoRecordingOnReplacedDevice(active.recordingId);
     expect((await stop).metadata.recordingId).toBe(active.recordingId);
     await abandon;
     expect(backend.forceStopCalls).toEqual([]);
@@ -176,6 +244,32 @@ describe("recording release after serial identity replacement", () => {
       status: "completed",
     });
     expect(update.mock.calls.filter(([, patch]) => patch.status !== undefined)).toHaveLength(1);
+  });
+
+  test("a wedged segmented abandon cannot starve single-file or gesture host cleanup", async () => {
+    const active = await startA();
+    const segment = spyOn(
+      segmentedTools,
+      "finalizeSegmentedVideoRecordingsForOwnerOnReplacedDevice",
+    ).mockImplementation(() => new Promise<void>(() => {}));
+    const owned = spyOn(gestures, "ownedDeviceGestureRecordingId").mockReturnValue("gesture-A");
+    const gesture = spyOn(gestures, "stopDeviceGestureRecording").mockRejectedValue(
+      new Error("gesture host failure"),
+    );
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    spies.push(segment, owned, gesture, warn);
+    const release = new ReleaseManager();
+    registerRecordingSessionCleanup(release, { ...defaultRecordingSessionCleanupDeps, timer });
+    release.release();
+    await drainUntilQuiescent(timer);
+    expect(segment).toHaveBeenCalledWith("A", device.deviceId);
+    expect(gesture).toHaveBeenCalledWith("gesture-A", undefined, undefined, { hostOnly: true });
+    expect(backend.forceStopOptionsCalls).toEqual([{ hostOnly: true }]);
+    expect((await repository.getRecording(active.recordingId))?.status).toBe("interrupted");
+    expect(warn.mock.calls.some(([line]) => String(line).includes("gesture host failure"))).toBe(
+      true,
+    );
+    expect(release.pending).toEqual([]);
   });
 
   test("host reap failure retains ownership, active row and safety for retry", async () => {
@@ -202,6 +296,37 @@ describe("recording release after serial identity replacement", () => {
     expect(await repository.getRecording(active.recordingId)).toMatchObject({
       status: "interrupted",
     });
+  });
+
+  test("failed host reap during a wedged stop retries host-only after the original stop rejects", async () => {
+    const active = await startA();
+    const gate = Promise.withResolvers<never>();
+    const stopBackend = spyOn(backend, "stop").mockImplementation(() => gate.promise);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    spies.push(stopBackend, warn);
+    const stopping = manager
+      .stopVideoRecording(active.recordingId)
+      .catch((error: unknown) => error);
+    await drainUntil(() => stopBackend.mock.calls.length === 1, {
+      description: "wedged normal stop",
+    });
+    backend.setForceStopFailures([new Error("host reap failed")]);
+    await expect(
+      manager.abandonVideoRecordingOnReplacedDevice(active.recordingId),
+    ).rejects.toBeInstanceOf(manager.VideoRecordingTeardownUnconfirmedError);
+    gate.reject(new Error("device stop failed"));
+    await stopping;
+    timer.advanceTime(5_000);
+    await drainUntilQuiescent(timer);
+    expect(backend.forceStopOptionsCalls).toEqual([{ hostOnly: true }, { hostOnly: true }]);
+    expect(service.listActiveRecordingIds()).toEqual([]);
+    expect((await repository.getRecording(active.recordingId))?.status).toBe("interrupted");
+    expect((await manager.stopVideoRecording(active.recordingId)).metadata.recordingId).toBe(
+      active.recordingId,
+    );
+    expect(stopBackend).toHaveBeenCalledTimes(1);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(timer.getPendingIntervalCount()).toBe(0);
   });
 
   test("host-only interruption disposes an unresolved display transition without probing", async () => {

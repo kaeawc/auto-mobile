@@ -137,6 +137,7 @@ const segmentedSessions = (() => {
     string,
     { owner: string | undefined; deviceId: string; stopped: StoppedSegmentedSession }
   >();
+  const persisting = new Map<string, Promise<StoppedSegmentedSession>>();
   return {
     /** A finalized session's stop result, when `canSee` admits its owner (#11533). */
     getFinished(
@@ -202,11 +203,28 @@ const segmentedSessions = (() => {
       handle: string,
       session: AndroidSegmentedPlanVideoSession,
     ): Promise<StoppedSegmentedSession> {
-      byHandle.delete(handle);
       const result = await session.finalizeWithoutDevice({ hostOnly: true });
+      byHandle.delete(handle);
       return this.rememberFinished(handle, session, result);
     },
     async rememberFinished(
+      handle: string,
+      session: AndroidSegmentedPlanVideoSession,
+      result: SegmentedSessionResult,
+    ): Promise<StoppedSegmentedSession> {
+      const existing = finished.get(handle)?.stopped ?? persisting.get(handle);
+      if (existing) {
+        return existing;
+      }
+      const persist = this.persistFinished(handle, session, result);
+      persisting.set(handle, persist);
+      try {
+        return await persist;
+      } finally {
+        persisting.delete(handle);
+      }
+    },
+    async persistFinished(
       handle: string,
       session: AndroidSegmentedPlanVideoSession,
       result: SegmentedSessionResult,
@@ -240,6 +258,7 @@ const segmentedSessions = (() => {
       recordingDependencies = {};
       byHandle.clear();
       finished.clear();
+      persisting.clear();
     },
   };
 })();
@@ -935,6 +954,7 @@ async function stopRecordingById(
     if (finalized) {
       return finalized;
     }
+    throw new ActionableError("Failed to stop video recording: no accessible recording found.");
   } else {
     assertActiveRecordingOwner({
       recordingId,

@@ -81,6 +81,7 @@ function registeredRecordingCapMs(deviceId: string): number | undefined {
       ownedDeviceGestureRecordingId: () => undefined,
       stopDeviceGestureRecording: async () => {},
       activeRecordingIdsForOwner: () => [],
+      retainedCaptureIdsForOwner: () => [],
       timer: new FakeTimer(),
       finalizeCapMs: defaultRecordingSessionCleanupDeps.finalizeCapMs,
       markVideoRecordingIncomplete: async () => {},

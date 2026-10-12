@@ -107,6 +107,8 @@ export interface RecordingSessionCleanupDeps {
   ): string | undefined;
   /** Ids of the recordings a session owns on the device, from memory only (no DB read). */
   activeRecordingIdsForOwner(sessionId: string | undefined, deviceId: string): string[];
+  /** Capture ids still owned by the recorder or gesture service; excludes registry handles. */
+  retainedCaptureIdsForOwner(sessionId: string | undefined, deviceId: string): string[];
   /** Deadline clock for the finalize cap; a FakeTimer in tests. */
   timer: Pick<Timer, "setTimeout" | "clearTimeout">;
   /** Finalize cap for the device's platform. */
@@ -140,6 +142,13 @@ export const defaultRecordingSessionCleanupDeps: RecordingSessionCleanupDeps = {
       ...(deviceGestureRecordingId === undefined ? [] : [deviceGestureRecordingId]),
     ];
   },
+  retainedCaptureIdsForOwner: (sessionId, deviceId) => {
+    const gestureId = ownedDeviceGestureRecordingId(sessionId, deviceId);
+    return [
+      ...listActiveVideoRecordingIdsForOwner(sessionId, deviceId),
+      ...(gestureId === undefined ? [] : [gestureId]),
+    ];
+  },
   stopDeviceGestureRecording: async (recordingId) => {
     await stopDeviceGestureRecording(recordingId);
   },
@@ -163,18 +172,23 @@ async function abandonRecordingsOnReplacedDevice(
   sessionId: string,
   deviceId: string,
 ): Promise<void> {
-  await logHostOnlyAbandonFailure(() =>
-    finalizeSegmentedVideoRecordingsForOwnerOnReplacedDevice(sessionId, deviceId),
-  );
-  for (const recordingId of listActiveVideoRecordingIdsForOwner(sessionId, deviceId)) {
-    await logHostOnlyAbandonFailure(() => abandonVideoRecordingOnReplacedDevice(recordingId));
-  }
+  const recordingIds = listActiveVideoRecordingIdsForOwner(sessionId, deviceId);
   const gestureId = ownedDeviceGestureRecordingId(sessionId, deviceId);
-  if (gestureId !== undefined) {
-    await logHostOnlyAbandonFailure(() =>
-      stopDeviceGestureRecording(gestureId, undefined, undefined, { hostOnly: true }),
-    );
-  }
+  await Promise.all([
+    logHostOnlyAbandonFailure(() =>
+      finalizeSegmentedVideoRecordingsForOwnerOnReplacedDevice(sessionId, deviceId),
+    ),
+    ...recordingIds.map((recordingId) =>
+      logHostOnlyAbandonFailure(() => abandonVideoRecordingOnReplacedDevice(recordingId)),
+    ),
+    ...(gestureId === undefined
+      ? []
+      : [
+          logHostOnlyAbandonFailure(() =>
+            stopDeviceGestureRecording(gestureId, undefined, undefined, { hostOnly: true }),
+          ),
+        ]),
+  ]);
 }
 
 async function logHostOnlyAbandonFailure(abandon: () => Promise<unknown>): Promise<void> {
@@ -330,7 +344,8 @@ async function stopOwnedRecordingsWithinCap(
         onTimeout: () => {
           // Freeze eligibility in the timer callback, before the detached stage can resume.
           state.capExpired = true;
-          originalIds = [...state.stopping];
+          const active = new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId));
+          originalIds = [...state.stopping].filter((id) => active.has(id));
         },
       },
     );
@@ -367,7 +382,7 @@ function unconfirmedRecordingIds(
   deviceId: string,
   originalIds: string[],
 ): string[] {
-  const active = new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId));
+  const active = new Set(deps.retainedCaptureIdsForOwner(sessionId, deviceId));
   return originalIds.filter((id) => active.has(id));
 }
 

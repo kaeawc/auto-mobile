@@ -288,6 +288,7 @@ const highlightSessionsByDeviceId = new Map<string, string>();
  */
 const recordingOwners = new Map<string, { ownerSessionUuid?: string; deviceId: string }>();
 const stoppingVideoRecordings = new Map<string, Promise<StopVideoRecordingResult>>();
+const abandoningVideoRecordings = new Map<string, Promise<StopVideoRecordingResult>>();
 /** Retained host captures must never retry against the serial's replacement occupant. */
 const hostOnlyRecordingTeardowns = new Set<string>();
 const recordingDisplaySessions = new Map<string, RecordingDisplaySession>();
@@ -561,6 +562,7 @@ function resetVideoRecordingManagerState(): void {
   highlightSessionsByDeviceId.clear();
   stoppingVideoRecordings.clear();
   hostOnlyRecordingTeardowns.clear();
+  abandoningVideoRecordings.clear();
   for (const session of recordingDisplaySessions.values()) {
     session.unsubscribe();
   }
@@ -1448,14 +1450,21 @@ async function stopVideoRecordingWithDependencies(
   recordingId?: string,
 ): Promise<StopVideoRecordingResult> {
   const resolvedId = await resolveActiveRecordingId(deps, recordingId);
+  if (hostOnlyRecordingTeardowns.has(resolvedId)) {
+    return abandonVideoRecordingWithDependencies(resolvedId, deps);
+  }
+  if (!deps.videoRecorderService.listActiveRecordingIds().includes(resolvedId)) {
+    const record = await deps.recordingRepository.getRecording(resolvedId);
+    if (record && record.status !== "recording") {
+      return { metadata: toMetadata(record), evictedRecordingIds: [] };
+    }
+  }
   const stopping = stoppingVideoRecordings.get(resolvedId);
   if (stopping) {
     return stopping;
   }
 
-  const stop = hostOnlyRecordingTeardowns.has(resolvedId)
-    ? abandonActiveVideoRecording(resolvedId, deps)
-    : stopActiveVideoRecording(resolvedId, deps);
+  const stop = stopActiveVideoRecording(resolvedId, deps);
   stoppingVideoRecordings.set(resolvedId, stop);
   try {
     return await stop;
@@ -1463,6 +1472,18 @@ async function stopVideoRecordingWithDependencies(
     if (stoppingVideoRecordings.get(resolvedId) === stop) {
       stoppingVideoRecordings.delete(resolvedId);
     }
+    if (!deps.videoRecorderService.listActiveRecordingIds().includes(resolvedId)) {
+      hostOnlyRecordingTeardowns.delete(resolvedId);
+    }
+  }
+}
+
+async function rethrowAfterHostAbandon(recordingId: string, error: unknown): Promise<void> {
+  const abandoning = abandoningVideoRecordings.get(recordingId);
+  if (abandoning) {
+    // Host cleanup owns row settlement; the device-bound caller keeps its service failure.
+    await abandoning;
+    throw toActionableError(error, `Failed to stop video recording ${recordingId}`);
   }
 }
 
@@ -1477,6 +1498,7 @@ async function stopActiveVideoRecording(
   try {
     metadata = await videoRecorderService.stopRecording(resolvedId);
   } catch (error) {
+    await rethrowAfterHostAbandon(resolvedId, error);
     // A stop failure means one of two very different things at the service
     // layer (see VideoRecorderService.handleStopFailure), and the durable row
     // must track which one happened, not assume the worse case unconditionally
@@ -1626,25 +1648,41 @@ async function interruptVideoRecordingWithDependencies(
 /** Reap only the released owner's host capture and retain its existing host artifact. */
 export async function abandonVideoRecordingOnReplacedDevice(recordingId: string): Promise<void> {
   const deps = await getVideoRecordingDependencies();
+  await abandonVideoRecordingWithDependencies(recordingId, deps);
+}
+
+async function abandonVideoRecordingWithDependencies(
+  recordingId: string,
+  deps: VideoRecordingManagerDependencies,
+): Promise<StopVideoRecordingResult> {
+  const abandoning = abandoningVideoRecordings.get(recordingId);
+  if (abandoning) {
+    return abandoning;
+  }
   hostOnlyRecordingTeardowns.add(recordingId);
   const stopping = stoppingVideoRecordings.get(recordingId);
-  if (stopping) {
+  if (stopping && !deps.videoRecorderService.listActiveRecordingIds().includes(recordingId)) {
     try {
-      await stopping;
-    } finally {
-      if (!deps.videoRecorderService.listActiveRecordingIds().includes(recordingId)) {
-        hostOnlyRecordingTeardowns.delete(recordingId);
+      const record = await deps.recordingRepository.getRecording(recordingId);
+      if (record && record.status !== "recording") {
+        return { metadata: toMetadata(record), evictedRecordingIds: [] };
       }
+      // Capture teardown already won; only the original stop's host persistence remains.
+      return await stopping;
+    } finally {
+      hostOnlyRecordingTeardowns.delete(recordingId);
     }
-    return;
   }
   const abandon = abandonActiveVideoRecording(recordingId, deps);
-  stoppingVideoRecordings.set(recordingId, abandon);
+  abandoningVideoRecordings.set(recordingId, abandon);
   try {
-    await abandon;
+    return await abandon;
   } finally {
-    if (stoppingVideoRecordings.get(recordingId) === abandon) {
-      stoppingVideoRecordings.delete(recordingId);
+    if (abandoningVideoRecordings.get(recordingId) === abandon) {
+      abandoningVideoRecordings.delete(recordingId);
+    }
+    if (!deps.videoRecorderService.listActiveRecordingIds().includes(recordingId)) {
+      hostOnlyRecordingTeardowns.delete(recordingId);
     }
   }
 }
@@ -1674,7 +1712,6 @@ async function abandonActiveVideoRecording(
     }
   }
   await interruptVideoRecordingWithDependencies(recordingId, deps, { hostOnly: true });
-  hostOnlyRecordingTeardowns.delete(recordingId);
   const record = await deps.recordingRepository.getRecording(recordingId);
   if (!record) {
     throw new ActionableError(`No video recording found for id ${recordingId}`);

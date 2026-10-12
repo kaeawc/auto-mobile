@@ -149,6 +149,56 @@ describe("recording teardown ownership", () => {
     await drainUntilQuiescent(timer);
   };
 
+  test("a wedged segmented handle settles at the cap when its capture force-stop succeeds", async () => {
+    const active = await start();
+    registerRecordingSessionCleanup(manager, {
+      ...defaultRecordingSessionCleanupDeps,
+      timer,
+      stopSegmentedRecordings: () => new Promise<void>(() => {}),
+      activeRecordingIdsForOwner: (owner, id) => [
+        ...defaultRecordingSessionCleanupDeps.activeRecordingIdsForOwner(owner, id),
+        "segmented-handle",
+      ],
+    });
+    manager.releaseA();
+    await advance(120_000);
+    expect(service.listActiveRecordingIds()).toEqual([]);
+    expect((await repository.getRecording(active.recordingId))?.status).toBe("incomplete");
+    expect(manager.registrations).toHaveLength(1);
+    expect(manager.registrations[0].settled).toBe(true);
+    expect(recordingCleanup.recordingTeardownRecoveryNeeded(device.deviceId)).toBeUndefined();
+    expect(warn.mock.calls.some(([line]) => String(line).includes("recorder recovery"))).toBe(
+      false,
+    );
+  });
+
+  test("a retained segmented capture gives up with its capture id and recovery persists until settlement", async () => {
+    const active = await start();
+    registerRecordingSessionCleanup(manager, {
+      ...defaultRecordingSessionCleanupDeps,
+      timer,
+      stopSegmentedRecordings: () => new Promise<void>(() => {}),
+      activeRecordingIdsForOwner: (owner, id) => [
+        ...defaultRecordingSessionCleanupDeps.activeRecordingIdsForOwner(owner, id),
+        "segmented-handle",
+      ],
+      teardownRetryBackoff: sequenceBackoff([8_000]),
+      teardownRetryBudgetMs: 4_000,
+    });
+    backend.setForceStopFailures([teardownError()]);
+    manager.releaseA();
+    await advance(124_000);
+    expect(manager.registrations).toHaveLength(2);
+    expect(recordingCleanup.recordingTeardownRecoveryNeeded(device.deviceId)?.recordingIds).toEqual(
+      [active.recordingId],
+    );
+    expect(recordingCleanup.recordingTeardownRecoveryNeeded(device.deviceId)?.recordingIds).toEqual(
+      [active.recordingId],
+    );
+    await markVideoRecordingIncomplete(active.recordingId);
+    expect(recordingCleanup.recordingTeardownRecoveryNeeded(device.deviceId)).toBeUndefined();
+  });
+
   test("force-stop rejection retains the active row, safety and quarantine before registering retries", async () => {
     const active = await start();
     backend.setForceStopFailures([teardownError(), teardownError(), teardownError()]);

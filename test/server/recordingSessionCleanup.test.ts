@@ -170,6 +170,11 @@ class FakeRecordings implements RecordingSessionCleanupDeps, RecordingAcquisitio
       ? [...all, `test-${sessionId}`]
       : all;
   }
+  retainedCaptureIdsForOwner(sessionId: string | undefined, deviceId: string): string[] {
+    return this.activeRecordingIdsForOwner(sessionId, deviceId).filter(
+      (id) => !this.segmentedIds.includes(id),
+    );
+  }
   hasRecordingsToStop(sessionId: string | undefined, deviceId: string): boolean {
     return this.active.size > 0 || this.isDeviceGestureRecordingOwnedBy(sessionId, deviceId);
   }
@@ -781,17 +786,10 @@ describe("registerRecordingSessionCleanup", () => {
             markVideoRecordingIncomplete: async (id) => {
               marked.push(id);
               await markVideoRecordingIncomplete(id);
-              if (id === "seg-1") {
-                // The synthetic segment's successful teardown must release its fake handle too.
-                segmentActive = false;
-              }
             },
           });
           manager.release("session-a", device.deviceId);
           const done = manager.settle();
-          // Park in the selected wedged stage before advancing to the cap boundary.
-          await drainUntilQuiescent(timer);
-          expect(segmentActive).toBe(wedgedStage === "segmented");
           await timer.advanceTimersByTimeAsync(120_000);
           await done;
           // Preserve the all-recordings coverage, and distinguish actual test teardown from

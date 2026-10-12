@@ -429,9 +429,7 @@ export class VideoRecorderService {
     } catch (error) {
       throw await this.handleStopFailure(active, error);
     }
-    if (this.activeRecordings.get(recordingId) !== active || active.forceStopRequested) {
-      throw new Error(`Recording ${recordingId} was force-stopped while it was stopping.`);
-    }
+    this.assertGracefulStopOwnership(active);
     const endedAt = stopResult.endedAt ?? this.now().toISOString();
     const outputPath = stopResult.outputPath || active.outputPath;
     const fileName = path.basename(outputPath);
@@ -441,6 +439,8 @@ export class VideoRecorderService {
     // world-readable mode; tighten it now that capture is complete (issue #4750).
     await this.securePermissions.secureFile(outputPath);
     const fileStats = await this.safeStat(outputPath);
+    // Host finalization can yield after the first ownership check; force-stop may win there too.
+    this.assertGracefulStopOwnership(active);
     const sizeBytes = stopResult.sizeBytes ?? fileStats?.size ?? 0;
 
     const durationMs = stopResult.durationMs ?? calculateDurationMs(active.startedAt, endedAt);
@@ -468,6 +468,12 @@ export class VideoRecorderService {
     this.activeRecordings.delete(recordingId);
 
     return metadata;
+  }
+
+  private assertGracefulStopOwnership(active: ActiveRecordingState): void {
+    if (this.activeRecordings.get(active.recordingId) !== active || active.forceStopRequested) {
+      throw new Error(`Recording ${active.recordingId} was force-stopped while it was stopping.`);
+    }
   }
 
   /**

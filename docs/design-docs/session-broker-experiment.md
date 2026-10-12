@@ -104,7 +104,27 @@ Native iOS mixed-profile replacement passed on the same build:
   instant; the journal ordering and native absence checks supply the separate
   replacement evidence.
 
-Android execution remains a separate native gate.
+Native Android zero-pooling qualification passed on the same build using the
+already-installed JDK 21 and Android 15/API 35 Google APIs arm64 image:
+
+- Coarse phone and tablet requirements resolved to `medium_phone` and
+  `medium_tablet`, respectively. Both booted and observed successfully.
+- A concurrent tablet request while the phone was active received
+  `capacity_exhausted` and no tools. Exact replay after capacity was freed
+  retained that refusal.
+- Each release joined its terminal receipt. Parsed AVD inventory confirmed
+  that the exact AVD no longer existed, and fresh ADB inventory omitted its
+  former serial. Final state contained no non-destroyed broker resources and
+  no active sessions/executions; all three MCP clients closed.
+- Successive sessions had different session/resource/AVD identities while
+  Android reused `emulator-5556`. This is expected: the transport serial is not
+  a session identity.
+- Evidence is retained under
+  `session-broker-native/android-2026-10-12T21-40-00.576Z`. A preceding attempt
+  stopped before acquisition because the qualification script checked a
+  nonexistent status field; correcting that check required no provider change.
+  These checks qualify local arm64 phone/tablet lifecycle, not Android clean
+  reuse, application behavior, ADB restart recovery, or Linux/KVM deployment.
 
 The supplied Slack bundle initially failed simulator installation with a
 copy-permission error. A staged copy with readable directories and no extended

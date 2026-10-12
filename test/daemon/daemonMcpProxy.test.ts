@@ -1,3 +1,4 @@
+import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import {
   SessionRecoveryIdentityLossError,
@@ -466,13 +467,13 @@ describe("DaemonMcpProxy", () => {
         expect(firstClient.callToolCalls).toEqual([
           {
             toolName: "observe",
-            params: { deviceId: "device-a", sessionUuid: "device-session-a" },
+            params: withProxyOwnerToken({ deviceId: "device-a", sessionUuid: "device-session-a" }),
           },
         ]);
         expect(secondClient.callToolCalls).toEqual([
           {
             toolName: "observe",
-            params: { deviceId: "device-b", sessionUuid: "device-session-b" },
+            params: withProxyOwnerToken({ deviceId: "device-b", sessionUuid: "device-session-b" }),
           },
         ]);
       } finally {
@@ -716,7 +717,10 @@ describe("DaemonMcpProxy", () => {
 
         await expect(proxy.callTool("observe", {})).resolves.toBeDefined();
         expect(replacementDaemon.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "persisted-session" } },
+          {
+            toolName: "observe",
+            params: withProxyOwnerToken({ sessionUuid: "persisted-session" }),
+          },
         ]);
 
         // Once the tool materializes recovery, the same keeper resumes normally.
@@ -793,7 +797,7 @@ describe("DaemonMcpProxy", () => {
         await expect(proxy.callTool("observe", {})).resolves.toBeDefined();
         expect(freshClient.callToolCalls.at(-1)).toEqual({
           toolName: "observe",
-          params: { sessionUuid: "session-b" },
+          params: withProxyOwnerToken({ sessionUuid: "session-b" }),
         });
       } finally {
         isAvailableSpy.mockRestore();
@@ -828,7 +832,7 @@ describe("DaemonMcpProxy", () => {
         });
         expect(firstClient.callToolCalls[0]).toEqual({
           toolName: "observe",
-          params: { sessionUuid: "session-a" },
+          params: withProxyOwnerToken({ sessionUuid: "session-a" }),
         });
 
         await expect(proxy.callTool("observe", {})).rejects.toMatchObject({
@@ -1940,9 +1944,9 @@ describe("DaemonMcpProxy", () => {
             },
             {
               toolName: "listDeviceImages",
-              params: {
+              params: withProxyOwnerToken({
                 [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-structured",
-              },
+              }),
             },
           ]);
         } finally {
@@ -2835,7 +2839,7 @@ describe("DaemonMcpProxy", () => {
         expect(result).toEqual(expectedResult);
         expect(fakeClient.callToolCalls).toContainEqual({
           toolName: "tapOn",
-          params: { text: "Button" },
+          params: withProxyOwnerToken({ text: "Button" }),
         });
       } finally {
         isAvailableSpy.mockRestore();
@@ -2867,11 +2871,11 @@ describe("DaemonMcpProxy", () => {
         expect(staleClient.connectCallCount).toBe(1);
         expect(staleClient.closeCallCount).toBe(1);
         expect(staleClient.callToolCalls).toEqual([
-          { toolName: "observe", params: { deviceId: "device-1" } },
+          { toolName: "observe", params: withProxyOwnerToken({ deviceId: "device-1" }) },
         ]);
         expect(freshClient.connectCallCount).toBe(1);
         expect(freshClient.callToolCalls).toEqual([
-          { toolName: "observe", params: { deviceId: "device-1" } },
+          { toolName: "observe", params: withProxyOwnerToken({ deviceId: "device-1" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -2927,7 +2931,7 @@ describe("DaemonMcpProxy", () => {
         expect(quiescedClient.closeCallCount).toBe(1);
         expect(manager.startCalled).toBe(false);
         expect(freshClient.callToolCalls).toEqual([
-          { toolName: "tapOn", params: { text: "Button" } },
+          { toolName: "tapOn", params: withProxyOwnerToken({ text: "Button" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -2975,7 +2979,9 @@ describe("DaemonMcpProxy", () => {
             const error = await attempt;
             // The daemon's own typed answer reaches the caller, and the call is not sent again.
             expect(error).toBe(shutdownError);
-            expect(quiescedClient.callToolCalls).toEqual([{ toolName, params: {} }]);
+            expect(quiescedClient.callToolCalls).toEqual([
+              { toolName, params: withProxyOwnerToken({}) },
+            ]);
             expect(quiescedClient.closeCallCount).toBe(1);
             expect(freshClient.callToolCalls).toEqual([]);
             expect(freshClient.connectCallCount).toBe(0);
@@ -2991,7 +2997,9 @@ describe("DaemonMcpProxy", () => {
           successorAvailable = true;
           timer.advanceTime(100);
           await expect(recovery).resolves.toEqual(recoveredResult);
-          expect(freshClient.callToolCalls).toEqual([{ toolName: "observe", params: {} }]);
+          expect(freshClient.callToolCalls).toEqual([
+            { toolName: "observe", params: withProxyOwnerToken({}) },
+          ]);
           expect(manager.startCalled).toBe(false);
         } finally {
           isAvailableSpy.mockRestore();
@@ -3045,7 +3053,7 @@ describe("DaemonMcpProxy", () => {
         await expect(recovery).resolves.toEqual(recoveredResult);
         expect(manager.startCalled).toBe(false);
         expect(freshClient.callToolCalls).toEqual([
-          { toolName: "tapOn", params: { text: "Button" } },
+          { toolName: "tapOn", params: withProxyOwnerToken({ text: "Button" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -3098,7 +3106,7 @@ describe("DaemonMcpProxy", () => {
         await expect(recovery).resolves.toEqual(recoveredResult);
         expect(manager.startCalled).toBe(false);
         expect(freshClient.callToolCalls).toEqual([
-          { toolName: "tapOn", params: { text: "Button" } },
+          { toolName: "tapOn", params: withProxyOwnerToken({ text: "Button" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -3149,7 +3157,7 @@ describe("DaemonMcpProxy", () => {
         await expect(recovery).resolves.toEqual(recoveredResult);
         expect(manager.startCallCount).toBe(1);
         expect(freshClient.callToolCalls).toEqual([
-          { toolName: "tapOn", params: { text: "Button" } },
+          { toolName: "tapOn", params: withProxyOwnerToken({ text: "Button" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -3729,7 +3737,10 @@ describe("DaemonMcpProxy", () => {
         expect(staleClient.callToolCalls).toEqual([
           {
             toolName: "observe",
-            params: { deviceId: "ios-simulator-a", sessionUuid: "ios-session-a" },
+            params: withProxyOwnerToken({
+              deviceId: "ios-simulator-a",
+              sessionUuid: "ios-session-a",
+            }),
           },
         ]);
         expect(freshClient.connectCallCount).toBe(0);
@@ -3777,15 +3788,17 @@ describe("DaemonMcpProxy", () => {
         });
         // The caller's own marker is dropped; the proxy carries its binding beside the session
         // the call named, so the daemon socket keeps this connection's route (#11347).
-        expect(failedRequestParams).toEqual({
-          sessionUuid: "ios-session-b",
-          __autoMobileBoundSessionUuid: "ios-session-a",
-        });
+        expect(failedRequestParams).toEqual(
+          withProxyOwnerToken({
+            sessionUuid: "ios-session-b",
+            __autoMobileBoundSessionUuid: "ios-session-a",
+          }),
+        );
 
         await proxy.callTool("observe", {});
         expect(client.callToolCalls.at(-1)).toEqual({
           toolName: "observe",
-          params: { sessionUuid: "ios-session-a" },
+          params: withProxyOwnerToken({ sessionUuid: "ios-session-a" }),
         });
       } finally {
         isAvailableSpy.mockRestore();
@@ -3816,7 +3829,7 @@ describe("DaemonMcpProxy", () => {
         expect(staleClient.callToolCalls).toHaveLength(1);
         expect(freshClient.connectCallCount).toBe(1);
         expect(freshClient.callToolCalls).toEqual([
-          { toolName: "observe", params: { deviceId: "device-1" } },
+          { toolName: "observe", params: withProxyOwnerToken({ deviceId: "device-1" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -3844,7 +3857,7 @@ describe("DaemonMcpProxy", () => {
 
         // Forwarded exactly once; the dead transport is still reset.
         expect(staleClient.callToolCalls).toEqual([
-          { toolName: "tapOn", params: { text: "Submit" } },
+          { toolName: "tapOn", params: withProxyOwnerToken({ text: "Submit" }) },
         ]);
         expect(staleClient.closeCallCount).toBe(1);
         expect(freshClient.callToolCalls).toEqual([]);
@@ -3924,7 +3937,7 @@ describe("DaemonMcpProxy", () => {
         await expect(proxy.callTool("tapOn", { text: "Submit" })).resolves.toEqual(recoveredResult);
         expect(staleClient.closeCallCount).toBe(1);
         expect(freshClient.callToolCalls).toEqual([
-          { toolName: "tapOn", params: { text: "Submit" } },
+          { toolName: "tapOn", params: withProxyOwnerToken({ text: "Submit" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -3966,24 +3979,24 @@ describe("DaemonMcpProxy", () => {
 
         expect(result).toEqual({ content: [{ type: "text", text: "recovered" }] });
         expect(staleClient.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
           {
             toolName: "videoRecording",
-            params: {
+            params: withProxyOwnerToken({
               action: "stop",
               recordingId: "recording-a",
               sessionUuid: "session-a",
-            },
+            }),
           },
         ]);
         expect(freshClient.callToolCalls).toEqual([
           {
             toolName: "videoRecording",
-            params: {
+            params: withProxyOwnerToken({
               action: "stop",
               recordingId: "recording-a",
               sessionUuid: "session-a",
-            },
+            }),
           },
         ]);
       } finally {
@@ -4070,8 +4083,11 @@ describe("DaemonMcpProxy", () => {
         await proxy.callTool("observe", {});
 
         expect(client.callToolCalls).toEqual([
-          { toolName: "executePlan", params: { sessionUuid: "session-a", deviceId: "device-a" } },
-          { toolName: "observe", params: {} },
+          {
+            toolName: "executePlan",
+            params: withProxyOwnerToken({ sessionUuid: "session-a", deviceId: "device-a" }),
+          },
+          { toolName: "observe", params: withProxyOwnerToken({}) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -4126,8 +4142,11 @@ describe("DaemonMcpProxy", () => {
               content: [{ type: "text", text: "success" }],
             });
             expect(client.callToolCalls).toEqual([
-              { toolName: "executePlan", params: { sessionUuid: "session-a" } },
-              { toolName: "observe", params: {} },
+              {
+                toolName: "executePlan",
+                params: withProxyOwnerToken({ sessionUuid: "session-a" }),
+              },
+              { toolName: "observe", params: withProxyOwnerToken({}) },
             ]);
           }
         } finally {
@@ -4164,9 +4183,9 @@ describe("DaemonMcpProxy", () => {
         // The third call is still rewritten to session-a: the binding survived the
         // rejection because nothing proved the session was released.
         expect(client.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "executePlan", params: { sessionUuid: "session-a" } },
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "executePlan", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -4202,7 +4221,10 @@ describe("DaemonMcpProxy", () => {
         );
 
         expect(client.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          {
+            toolName: "observe",
+            params: withProxyOwnerToken({ sessionUuid: "session-a", deviceId: "device-a" }),
+          },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -4229,8 +4251,8 @@ describe("DaemonMcpProxy", () => {
         await proxy.callTool("observe", {});
 
         expect(client.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -4253,9 +4275,9 @@ describe("DaemonMcpProxy", () => {
         await proxy.callTool("observe", {});
 
         expect(client.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "observe", params: { sessionUuid: "session-b" } },
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-b" }) },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -4293,9 +4315,9 @@ describe("DaemonMcpProxy", () => {
         await proxy.callTool("tapOn", {});
 
         expect(client.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "tapOn", params: { sessionUuid: "session-a" } },
-          { toolName: "tapOn", params: { sessionUuid: "session-a" } },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "tapOn", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "tapOn", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -4332,8 +4354,8 @@ describe("DaemonMcpProxy", () => {
         });
 
         expect(client.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "tapOn", params: { sessionUuid: "session-a" } },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "tapOn", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -4376,9 +4398,9 @@ describe("DaemonMcpProxy", () => {
         await proxy.callTool("observe", {});
 
         expect(client.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "tapOn", params: { sessionUuid: "session-a" } },
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "tapOn", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -4430,9 +4452,9 @@ describe("DaemonMcpProxy", () => {
         await proxy.callTool("observe", {});
 
         expect(client.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "tapOn", params: { sessionUuid: "session-a" } },
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "tapOn", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -4477,8 +4499,8 @@ describe("DaemonMcpProxy", () => {
         await proxy.callTool("observe", {});
 
         expect(client.callToolCalls).toEqual([
-          { toolName: "tapOn", params: { sessionUuid: "session-x" } },
-          { toolName: "observe", params: {} },
+          { toolName: "tapOn", params: withProxyOwnerToken({ sessionUuid: "session-x" }) },
+          { toolName: "observe", params: withProxyOwnerToken({}) },
         ]);
         expect(
           client.callDaemonMethodCalls.filter((call) => call.method === "daemon/heartbeat"),
@@ -4521,8 +4543,8 @@ describe("DaemonMcpProxy", () => {
 
         // The dead UUID is not replayed on the next sessionless call.
         expect(client.callToolCalls).toEqual([
-          { toolName: "tapOn", params: { sessionUuid: "dead-session" } },
-          { toolName: "observe", params: {} },
+          { toolName: "tapOn", params: withProxyOwnerToken({ sessionUuid: "dead-session" }) },
+          { toolName: "observe", params: withProxyOwnerToken({}) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -4553,13 +4575,16 @@ describe("DaemonMcpProxy", () => {
         await proxy.callTool("observe", {});
 
         expect(client.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "listDevices", params: { sessionUuid: "unissued-session" } },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          {
+            toolName: "listDevices",
+            params: withProxyOwnerToken({ sessionUuid: "unissued-session" }),
+          },
           {
             toolName: "listDeviceImages",
-            params: { platform: "ios", sessionUuid: "unissued-session" },
+            params: withProxyOwnerToken({ platform: "ios", sessionUuid: "unissued-session" }),
           },
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -4593,9 +4618,9 @@ describe("DaemonMcpProxy", () => {
         await proxy.callTool("observe", {});
 
         expect(client.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "tapOn", params: { sessionUuid: "session-a" } },
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "tapOn", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -4636,7 +4661,7 @@ describe("DaemonMcpProxy", () => {
         await drainMicrotasks(32);
         expect(client.callToolCalls.at(-1)).toEqual({
           toolName: "doctor",
-          params: { sessionUuid: "session-a" },
+          params: withProxyOwnerToken({ sessionUuid: "session-a" }),
         });
 
         // A read only watches the session it names: unlike a control call in flight, it does not
@@ -4679,9 +4704,9 @@ describe("DaemonMcpProxy", () => {
         await proxy.callTool("observe", {});
 
         expect(client.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "tapOn", params: { sessionUuid: "session-b" } },
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "tapOn", params: withProxyOwnerToken({ sessionUuid: "session-b" }) },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -4716,9 +4741,9 @@ describe("DaemonMcpProxy", () => {
 
         expect(rejected.isError).toBe(true);
         expect(client.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "tapOn", params: { sessionUuid: "session-b" } },
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "tapOn", params: withProxyOwnerToken({ sessionUuid: "session-b" }) },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -4802,9 +4827,9 @@ describe("DaemonMcpProxy", () => {
         });
 
         expect(client.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -4945,7 +4970,7 @@ describe("DaemonMcpProxy", () => {
           expect(recoveredClient.callToolCalls).toEqual([
             {
               toolName: "observe",
-              params: { sessionUuid: "session-a", deviceId: "device-a" },
+              params: withProxyOwnerToken({ sessionUuid: "session-a", deviceId: "device-a" }),
             },
           ]);
         } finally {
@@ -4993,7 +5018,7 @@ describe("DaemonMcpProxy", () => {
         expect(recoveredClient.callToolCalls).toEqual([
           {
             toolName: "observe",
-            params: { sessionUuid: "session-a" },
+            params: withProxyOwnerToken({ sessionUuid: "session-a" }),
           },
         ]);
       } finally {
@@ -5122,7 +5147,7 @@ describe("DaemonMcpProxy", () => {
         expect(recoveredClient.callToolCalls).toEqual([
           {
             toolName: "observe",
-            params: { sessionUuid: "session-a" },
+            params: withProxyOwnerToken({ sessionUuid: "session-a" }),
           },
         ]);
       } finally {
@@ -5183,7 +5208,7 @@ describe("DaemonMcpProxy", () => {
         expect(recoveredConnectSpy.mock.calls.length).toBe(connectCallsAfterFirst);
         expect(recoveredClient.callToolCalls.at(-1)).toEqual({
           toolName: "observe",
-          params: { deviceId: "device-a" },
+          params: withProxyOwnerToken({ deviceId: "device-a" }),
         });
       } finally {
         isAvailableSpy.mockRestore();
@@ -5222,7 +5247,10 @@ describe("DaemonMcpProxy", () => {
         ).rejects.toThrow(/session-a.*(?:expired|released)/i);
 
         expect(fakeClient.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          {
+            toolName: "observe",
+            params: withProxyOwnerToken({ sessionUuid: "session-a", deviceId: "device-a" }),
+          },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -5387,8 +5415,8 @@ describe("DaemonMcpProxy", () => {
         await proxy.callTool("observe", {});
 
         expect(fakeClient.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -5430,8 +5458,8 @@ describe("DaemonMcpProxy", () => {
         );
 
         expect(fakeClient.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -5488,10 +5516,10 @@ describe("DaemonMcpProxy", () => {
         expect(fakeClient.callToolCalls).toEqual([
           {
             toolName: "observe",
-            params: {
+            params: withProxyOwnerToken({
               deviceId: "device-a",
               sessionUuid: "session-a",
-            },
+            }),
           },
         ]);
       } finally {
@@ -5524,8 +5552,8 @@ describe("DaemonMcpProxy", () => {
 
         // The label call targets its own session and leaves the connection's binding where it was.
         expect(fakeClient.callToolCalls.map((call) => call.params)).toEqual([
-          { sessionUuid: "session-a:B", x: 1, y: 1 },
-          { sessionUuid: "session-a", x: 2, y: 2 },
+          withProxyOwnerToken({ sessionUuid: "session-a:B", x: 1, y: 1 }),
+          withProxyOwnerToken({ sessionUuid: "session-a", x: 2, y: 2 }),
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -5568,9 +5596,9 @@ describe("DaemonMcpProxy", () => {
         await proxy.callTool("observe", {});
 
         expect(fakeClient.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "tapOn", params: { sessionUuid: "session-a" } },
-          { toolName: "observe", params: {} },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "tapOn", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "observe", params: withProxyOwnerToken({}) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -5617,8 +5645,11 @@ describe("DaemonMcpProxy", () => {
         await proxy.callTool("observe", {});
 
         expect(fakeClient.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
-          { toolName: "observe", params: {} },
+          {
+            toolName: "observe",
+            params: withProxyOwnerToken({ sessionUuid: "session-a", deviceId: "device-a" }),
+          },
+          { toolName: "observe", params: withProxyOwnerToken({}) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -5667,8 +5698,11 @@ describe("DaemonMcpProxy", () => {
         await proxy.callTool("observe", {});
 
         expect(fakeClient.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
-          { toolName: "observe", params: {} },
+          {
+            toolName: "observe",
+            params: withProxyOwnerToken({ sessionUuid: "session-a", deviceId: "device-a" }),
+          },
+          { toolName: "observe", params: withProxyOwnerToken({}) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -5730,8 +5764,8 @@ describe("DaemonMcpProxy", () => {
         });
 
         expect(fakeClient.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -5762,8 +5796,8 @@ describe("DaemonMcpProxy", () => {
         await proxy.callTool("observe", {});
 
         expect(fakeClient.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
         ]);
         expect(observed).toBe(2);
       } finally {
@@ -5795,7 +5829,10 @@ describe("DaemonMcpProxy", () => {
         );
 
         expect(fakeClient.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          {
+            toolName: "observe",
+            params: withProxyOwnerToken({ sessionUuid: "session-a", deviceId: "device-a" }),
+          },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -5878,7 +5915,10 @@ describe("DaemonMcpProxy", () => {
         await proxy.callTool("observe", { deviceId: "device-a" });
 
         expect(fakeClient.callToolCalls).toEqual([
-          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+          {
+            toolName: "observe",
+            params: withProxyOwnerToken({ deviceId: "device-a", sessionUuid: "session-a" }),
+          },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -5996,8 +6036,8 @@ describe("DaemonMcpProxy", () => {
         await proxy.callTool("observe", {});
 
         expect(fakeClient.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
-          { toolName: "observe", params: { sessionUuid: "session-a" } },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "session-a" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -6054,7 +6094,7 @@ describe("DaemonMcpProxy", () => {
           expect(await proxy.callTool("provisionDevice", {})).toEqual(result);
           expect(fakeClient.callToolCalls.at(-1)).toEqual({
             toolName: "provisionDevice",
-            params: {},
+            params: withProxyOwnerToken({}),
           });
           expect(
             fakeClient.callDaemonMethodCalls.filter((call) => call.method === "daemon/heartbeat"),
@@ -6085,7 +6125,7 @@ describe("DaemonMcpProxy", () => {
           await proxy.callTool("observe", {});
           expect(fakeClient.callToolCalls.at(-1)).toEqual({
             toolName: "observe",
-            params: { sessionUuid: "provisioned-session" },
+            params: withProxyOwnerToken({ sessionUuid: "provisioned-session" }),
           });
           await proxy.readResource("automobile:device-session/provisioned-session/screenshot");
           expect(fakeClient.readResourceParams).toEqual([{ sessionUuid: "provisioned-session" }]);
@@ -6119,7 +6159,10 @@ describe("DaemonMcpProxy", () => {
             fakeClient.callDaemonMethodCalls.filter((call) => call.method === "daemon/heartbeat"),
           ).toEqual([]);
           await proxy.callTool("observe", {});
-          expect(fakeClient.callToolCalls.at(-1)).toEqual({ toolName: "observe", params: {} });
+          expect(fakeClient.callToolCalls.at(-1)).toEqual({
+            toolName: "observe",
+            params: withProxyOwnerToken({}),
+          });
         } finally {
           isAvailableSpy.mockRestore();
           await proxy.close();
@@ -6814,8 +6857,11 @@ describe("DaemonMcpProxy", () => {
         ).rejects.toThrow('Unknown tool "inputText"');
         await proxy.callTool("observe", {});
         expect(fakeClient.callToolCalls).toEqual([
-          { toolName: "inputText", params: { sessionUuid: "rejected-session" } },
-          { toolName: "observe", params: {} },
+          {
+            toolName: "inputText",
+            params: withProxyOwnerToken({ sessionUuid: "rejected-session" }),
+          },
+          { toolName: "observe", params: withProxyOwnerToken({}) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -6885,7 +6931,7 @@ describe("DaemonMcpProxy", () => {
           'Unknown tool "debugSearch". debugSearch was removed; use observe to see elements, and the diagnostics returned by tapOn/waitFor failures',
         );
         expect(client.callToolCalls).toEqual([
-          { toolName: "debugSearch", params: { text: "Save" } },
+          { toolName: "debugSearch", params: withProxyOwnerToken({ text: "Save" }) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -7035,7 +7081,7 @@ describe("DaemonMcpProxy", () => {
         expect(staleClient.closeCallCount).toBe(1);
         expect(staleClient.callToolCalls).toHaveLength(1);
         expect(freshClient.callToolCalls).toEqual([
-          { toolName: "setPreference", params: { key: "k", value: "v" } },
+          { toolName: "setPreference", params: withProxyOwnerToken({ key: "k", value: "v" }) },
         ]);
         // Recovery invalidated the cache, so a subsequent listTools re-queries the
         // fresh (post-recovery) client instead of returning the stale tool list.
@@ -7462,14 +7508,14 @@ describe("DaemonMcpProxy", () => {
         await proxy.callTool("setToolEnabled", { toolName: "executePlan" });
 
         expect(client.callToolCalls).toEqual([
-          { toolName: "observe", params: { sessionUuid: "device-session-a" } },
-          { toolName: "setToolEnabled", params: { toolName: "clipboard" } },
+          { toolName: "observe", params: withProxyOwnerToken({ sessionUuid: "device-session-a" }) },
+          { toolName: "setToolEnabled", params: withProxyOwnerToken({ toolName: "clipboard" }) },
           {
             toolName: "setToolEnabled",
-            params: {
+            params: withProxyOwnerToken({
               toolName: "executePlan",
               [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-a",
-            },
+            }),
           },
         ]);
       } finally {
@@ -7498,9 +7544,9 @@ describe("DaemonMcpProxy", () => {
         expect(client.callToolCalls).toEqual([
           {
             toolName: "observe",
-            params: { [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-a" },
+            params: withProxyOwnerToken({ [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-a" }),
           },
-          { toolName: "observe", params: {} },
+          { toolName: "observe", params: withProxyOwnerToken({}) },
         ]);
       } finally {
         isAvailableSpy.mockRestore();
@@ -7539,14 +7585,14 @@ describe("DaemonMcpProxy", () => {
         expect(client.callToolCalls).toEqual([
           {
             toolName: "setToolEnabled",
-            params: { toolName: "executePlan" },
+            params: withProxyOwnerToken({ toolName: "executePlan" }),
           },
           {
             toolName: "executePlan",
-            params: {
+            params: withProxyOwnerToken({
               sessionUuid: "device-session-a",
               [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-a",
-            },
+            }),
           },
         ]);
         expect(client.callDaemonMethodCalls).toEqual([
@@ -7594,10 +7640,10 @@ describe("DaemonMcpProxy", () => {
 
         expect(client.callToolCalls[3]).toEqual({
           toolName: "observe",
-          params: {
+          params: withProxyOwnerToken({
             sessionUuid: "device-session-a",
             [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-a",
-          },
+          }),
         });
       } finally {
         isAvailableSpy.mockRestore();
@@ -7651,14 +7697,16 @@ describe("DaemonMcpProxy", () => {
         // The profile stays the routing session of the update; the bound device
         // session rides along so the daemon seeds the loopback with the DEVICE
         // route rather than the profile.
-        expect(rawCalls[2]).toEqual({
-          toolName: "clipboard",
-          sessionUuid: "profile-a",
-          [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-a",
-          [DAEMON_BOUND_SESSION_PARAM]: "device-session-a",
-        });
+        expect(rawCalls[2]).toEqual(
+          withProxyOwnerToken({
+            toolName: "clipboard",
+            sessionUuid: "profile-a",
+            [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-a",
+            [DAEMON_BOUND_SESSION_PARAM]: "device-session-a",
+          }),
+        );
         // The mint (no explicit sessionUuid) is untouched: it carries no device route.
-        expect(rawCalls[1]).toEqual({ toolName: "clipboard" });
+        expect(rawCalls[1]).toEqual(withProxyOwnerToken({ toolName: "clipboard" }));
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();
@@ -7682,11 +7730,13 @@ describe("DaemonMcpProxy", () => {
           sessionUuid: "profile-a",
         });
 
-        expect(rawCalls[1]).toEqual({
-          toolName: "clipboard",
-          sessionUuid: "profile-a",
-          [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-a",
-        });
+        expect(rawCalls[1]).toEqual(
+          withProxyOwnerToken({
+            toolName: "clipboard",
+            sessionUuid: "profile-a",
+            [DAEMON_TOOL_SELECTION_PROFILE_PARAM]: "profile-a",
+          }),
+        );
       } finally {
         isAvailableSpy.mockRestore();
         await proxy.close();

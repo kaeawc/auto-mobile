@@ -306,7 +306,7 @@ describe("stdio shutdown in proxy mode (#11601)", () => {
 
     expect(outcome.exitCode).toBe(1);
     expect(outcome.warnings[0]).toBe(
-      "Shutdown cleanup stage stdio proxy timed out after 4695ms waiting on the daemon releasing this proxy's managed execution sessions; continuing shutdown",
+      "Shutdown cleanup stage stdio proxy timed out after 4695ms waiting on the daemon releasing this proxy's managed execution and ordinary owned sessions; continuing shutdown",
     );
     expect(server.calls.at(-1)).toBe("closeLogger");
     expect(server.database.closes).toBe(0);

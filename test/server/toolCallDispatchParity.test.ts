@@ -1,4 +1,5 @@
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
+import { daemonLoopbackToolArgs } from "../helpers/daemonLoopbackToolArgs";
 import { afterAll, beforeEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -108,7 +109,10 @@ class ForwardingDaemonClient extends FakeDaemonClient {
     onRequestId?: (requestId: string) => void,
   ): Promise<unknown> {
     await super.callTool(toolName, params, progressToken, onRequestId);
-    return this.daemonServerClient().callTool({ name: toolName, arguments: params });
+    return this.daemonServerClient().callTool({
+      name: toolName,
+      arguments: daemonLoopbackToolArgs(params),
+    });
   }
 }
 

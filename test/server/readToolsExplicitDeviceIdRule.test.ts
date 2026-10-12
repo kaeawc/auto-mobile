@@ -25,7 +25,10 @@ import { BootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDev
 import { settleByFakeEvents, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
 import { registerMcpTools } from "../../src/server";
-import { sessionlessDeviceReadFor } from "../../src/server/deviceObservationAccess";
+import {
+  resolveDeviceForObservationRead,
+  sessionlessDeviceReadFor,
+} from "../../src/server/deviceObservationAccess";
 import {
   listBootedDevicesForReadWithStatus,
   type BootedResourceReadListing,
@@ -100,8 +103,17 @@ class ReadSimctl extends FakeSimctl {
   async presentSimulatorAfterStart(): Promise<void> {}
 }
 
-function harness(platform: Platform, running: boolean, capacity = false, incomplete = false) {
+function harness(
+  platform: Platform,
+  running: boolean,
+  capacity = false,
+  incomplete = false,
+  shaped = false,
+) {
   const device = deviceFor(platform);
+  if (shaped && platform === "ios") {
+    device.deviceId = "12345678-ABCD-ABCD-ABCD-123456789ABC";
+  }
   const image: DeviceInfo = { ...device, isRunning: running, isAvailable: true };
   const adb = new FakeAdbExecutor();
   const discovery = new FakeDeviceUtils();
@@ -413,7 +425,15 @@ type Column =
   | "stopped-name"
   | "capacity"
   | "incomplete"
-  | "ambiguous";
+  | "ambiguous"
+  | "failed-other-stopped"
+  | "failed-other-unknown"
+  | "failed-other-shaped-running"
+  | "failed-own-shaped-running"
+  | "healthy-shaped-running"
+  | "failed-other-shaped-absent"
+  | "failed-other-running-name"
+  | "failed-other-reserved";
 const columns: Column[] = [
   "reserved-stopped",
   "reserved-running",
@@ -430,6 +450,14 @@ const columns: Column[] = [
   "capacity",
   "incomplete",
   "ambiguous",
+  "failed-other-stopped",
+  "failed-other-unknown",
+  "failed-other-shaped-running",
+  "failed-own-shaped-running",
+  "healthy-shaped-running",
+  "failed-other-shaped-absent",
+  "failed-other-running-name",
+  "failed-other-reserved",
 ];
 for (const platform of ["android", "ios"] as const) {
   for (const column of columns) {
@@ -441,200 +469,301 @@ for (const platform of ["android", "ios"] as const) {
     ) {
       continue;
     }
-    for (const name of EXPECTED) {
-      test(`${platform} ${column}: ${name}`, async () => {
-        h = harness(
-          platform,
-          column.startsWith("running") ||
-            column.startsWith("held") ||
-            column === "reserved-running" ||
-            column === "ambiguous",
-          column === "capacity",
-          column === "incomplete",
-        );
-        Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
-        const held = column.startsWith("held");
-        const owner = owners.get(platform)!;
-        const holderBefore = structuredClone(owner.sessions.getSession(`holder-${platform}`));
-        const daemon =
-          column === "held-slot-name" ? slotOwner : held ? owner : unheld.get(platform)!;
-        DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
-        if (column.startsWith("reserved")) {
-          const original = daemon.pool.restartReservationForStart;
-          const reservation = spyOn(daemon.pool, "restartReservationForStart").mockImplementation(
-            (requestedPlatform, identities, requester) => {
-              expect(requester).toEqual({});
-              return requestedPlatform === platform &&
-                identities.some((id) => [h!.device.name, h!.device.deviceId].includes(id))
-                ? {
-                    deviceId: h!.device.deviceId,
-                    sessionUuid: "restart-owner",
-                    owned: true,
-                    restartHandoff: true,
-                    retryAfterMs: 500,
-                  }
-                : undefined;
-            },
-          );
-          restoreGate = () => {
-            reservation.mockRestore();
-            expect(daemon.pool.restartReservationForStart).toBe(original);
-          };
-        }
-        if (column === "held-slot-name") {
-          expect(daemon.pool.getDevice(h.device.deviceId)).toBeNull();
-          const original = daemon.pool.assertNotAssignedToManagedSlot;
-          const gate = spyOn(daemon.pool, "assertNotAssignedToManagedSlot").mockImplementation(
-            async (input) => {
-              if (input.deviceId === h!.device.name) {
-                throw new DeviceAssignedToManagedSlotError(input.action, input.deviceId, {
-                  platform: "android",
-                  stableDeviceId: h!.device.name,
-                  holder: "slot",
-                  scopeKey: "scope",
-                  slotIndex: 0,
-                  scopeState: null,
-                  execSessionUuid: "slot-exec",
-                });
-              }
-            },
-          );
-          restoreGate = () => {
-            gate.mockRestore();
-            expect(daemon.pool.assertNotAssignedToManagedSlot).toBe(original);
-          };
-        }
-        if (column === "ambiguous") {
-          h.devices.push({ ...h.device, deviceId: "second-id" });
-        }
-        const id =
-          column === "unnamed"
-            ? undefined
-            : column === "unknown"
-              ? "missing"
-              : column === "stopped-serial"
-                ? "emulator-5599"
-                : column === "stopped-name" || column.endsWith("name") || column === "ambiguous"
-                  ? h.device.name
-                  : column === "stopped" ||
-                      column === "reserved-stopped" ||
-                      column === "capacity" ||
-                      column === "incomplete"
-                    ? platform === "android"
-                      ? h.device.name
-                      : h.device.deviceId
-                    : h.device.deviceId;
-        const args = { platform, ...(id ? { deviceId: id } : {}), ...readArgs[name] };
-        const execution = executionTracker.startExecution(name);
-        let decision: string;
-        try {
-          await runWithToolSelectionContext(
-            { explicitObserveDeviceRead: name === "observe" && !!id },
-            () =>
-              ToolRegistry.getTool(name)!.handler({
-                ...args,
-                [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
-                [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
-              }),
-          );
-          decision = `device:${h.runs[0]?.deviceId};boots:${h.boots.length + h.simctl.getMethodCalls("bootSimulator").length}`;
-        } catch (error) {
-          expect(error).toBeInstanceOf(ActionableError);
-          const code: unknown = Reflect.get(error as Error, "code");
-          decision = typeof code === "string" ? code : (error as Error).message;
-          if (column === "capacity") {
-            expect(error).toBe(h.capacityError);
+    const exactRunningPin =
+      column === "failed-own-shaped-running" || column === "healthy-shaped-running";
+    for (const requested of (exactRunningPin
+      ? [undefined]
+      : column.startsWith("failed-other")
+        ? [undefined, "either"]
+        : [platform]) as readonly (Platform | "either" | undefined)[]) {
+      for (const name of EXPECTED.filter((name) => !exactRunningPin || name !== "observe")) {
+        test(`${platform} ${column}, platform=${requested ?? "absent"}: ${name}`, async () => {
+          const failedOther = column.startsWith("failed-other");
+          if (failedOther || exactRunningPin) {
+            useFakeReadRetryTimer();
           }
-        } finally {
-          executionTracker.endExecution(execution.id);
-        }
-        const key = `${platform}:${column}`;
-        const row = decisions.get(key) ?? new Map<string, string>();
-        row.set(name, decision);
-        decisions.set(key, row);
-        const label = platform === "android" ? "Android" : "iOS";
-        const expected =
-          column === "reserved-stopped"
-            ? "device_owned_by_other_session"
-            : column === "unnamed"
-              ? `No ${label} device is running, so there is nothing to read. Start one with startDevice or provisionDevice, or pass a deviceId.`
-              : column === "capacity"
-                ? "capacity_exhausted"
-                : column === "incomplete"
-                  ? "discovery_incomplete"
-                  : column === "ambiguous"
-                    ? `Ambiguous running device name '${id}'. Candidates: ${[h.device.deviceId, "second-id"].sort().join(", ")}. Provide a deviceId.`
-                    : ["unknown", "stopped-serial", "stopped-name"].includes(column)
-                      ? `Device ${id} not found on ${platform} platform. Available ${platform} devices: none`
-                      : `device:${h.device.deviceId};boots:${column === "stopped" ? 1 : 0}`;
-        expect(decision).toBe(expected);
-        expect(h.manager.getCurrentDevice()).toBeUndefined();
-        expect(h.manager.getCurrentPlatform()).toBeUndefined();
-        expect(h.manager.getExplicitDevicePin()).toBeUndefined();
-        expect(h.apply).not.toHaveBeenCalled();
-        expect(h.getConfig).not.toHaveBeenCalled();
-        expect(
-          h.adb
-            .getExecutedCommands()
-            .filter((command) => /settings (put|delete)|cmd uimode/.test(command)),
-        ).toEqual([]);
-        if (h.runs.length) {
-          expect(h.runs[0].sessionUuid).toBeUndefined();
-        }
-        if (column !== "stopped") {
-          expect(h.boots.length + h.simctl.getMethodCalls("bootSimulator").length).toBe(0);
-        }
-        if (column.startsWith("reserved")) {
-          expect(h.ensure).not.toHaveBeenCalled();
-          expect(h.verify).not.toHaveBeenCalled();
-          expect(h.adb.getExecutedCommands()).toEqual([]);
-          expect(h.androidManager.getExecutedOperations()).toEqual([]);
-          expect(h.iosManager.getExecutedOperations()).toEqual([]);
-          if (column === "reserved-running") {
-            expect(h.runs[0].readPath).toBe(true);
+          let listings = 0;
+          h = harness(
+            platform,
+            column.startsWith("running") ||
+              column.startsWith("held") ||
+              column === "reserved-running" ||
+              column === "ambiguous" ||
+              column === "failed-other-running-name" ||
+              column === "failed-other-shaped-running" ||
+              exactRunningPin,
+            column === "capacity",
+            column === "incomplete",
+            column.startsWith("failed-other-shaped") || exactRunningPin,
+          );
+          const other = platform === "android" ? "ios" : "android";
+          if (failedOther) {
+            const scanned = { android: platform === "android", ios: platform === "ios" };
+            h.detect.mockImplementation(async () => ({ devices: h!.devices, scanned }));
+            statusListing = async () => {
+              listings++;
+              return {
+                devices: h!.devices,
+                scanned,
+                discoveryErrors: { [other]: { code: "failed", message: "other listing failed" } },
+              };
+            };
           }
-        }
-        if (held) {
-          expect(h.ensure).not.toHaveBeenCalled();
-          expect(h.verify).not.toHaveBeenCalled();
-          expect(h.adb.getExecutedCommands()).toEqual([]);
-          expect(h.androidManager.getExecutedOperations()).toEqual([]);
-          expect(h.iosManager.getExecutedOperations()).toEqual([]);
-          expect(h.runs[0].readPath).toBe(true);
-          if (column === "held-id" || column === "held-slot-name") {
-            expect(h.detect).not.toHaveBeenCalled();
+          if (exactRunningPin) {
+            const failedOwn = column === "failed-own-shaped-running";
+            statusListing = async () => {
+              listings++;
+              return {
+                devices: h!.devices,
+                scanned: {
+                  android: !failedOwn || platform !== "android",
+                  ios: !failedOwn || platform !== "ios",
+                },
+                ...(failedOwn
+                  ? {
+                      discoveryErrors: {
+                        [platform]: { code: "failed", message: "own listing failed" },
+                      },
+                    }
+                  : {}),
+              };
+            };
+          }
+          Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+          const held = column.startsWith("held");
+          const owner = owners.get(platform)!;
+          const holderBefore = structuredClone(owner.sessions.getSession(`holder-${platform}`));
+          const daemon =
+            column === "held-slot-name" ? slotOwner : held ? owner : unheld.get(platform)!;
+          DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
+          if (column.startsWith("reserved") || column === "failed-other-reserved") {
+            const original = daemon.pool.restartReservationForStart;
+            const reservation = spyOn(daemon.pool, "restartReservationForStart").mockImplementation(
+              (requestedPlatform, identities, requester) => {
+                expect(requester).toEqual({});
+                return requestedPlatform === platform &&
+                  identities.some((id) => [h!.device.name, h!.device.deviceId].includes(id))
+                  ? {
+                      deviceId: h!.device.deviceId,
+                      sessionUuid: "restart-owner",
+                      owned: true,
+                      restartHandoff: true,
+                      retryAfterMs: 500,
+                    }
+                  : undefined;
+              },
+            );
+            restoreGate = () => {
+              reservation.mockRestore();
+              expect(daemon.pool.restartReservationForStart).toBe(original);
+            };
           }
           if (column === "held-slot-name") {
+            expect(daemon.pool.getDevice(h.device.deviceId)).toBeNull();
+            const original = daemon.pool.assertNotAssignedToManagedSlot;
+            const gate = spyOn(daemon.pool, "assertNotAssignedToManagedSlot").mockImplementation(
+              async (input) => {
+                if (input.deviceId === h!.device.name) {
+                  throw new DeviceAssignedToManagedSlotError(input.action, input.deviceId, {
+                    platform: "android",
+                    stableDeviceId: h!.device.name,
+                    holder: "slot",
+                    scopeKey: "scope",
+                    slotIndex: 0,
+                    scopeState: null,
+                    execSessionUuid: "slot-exec",
+                  });
+                }
+              },
+            );
+            restoreGate = () => {
+              gate.mockRestore();
+              expect(daemon.pool.assertNotAssignedToManagedSlot).toBe(original);
+            };
+          }
+          if (column === "ambiguous") {
+            h.devices.push({ ...h.device, deviceId: "second-id" });
+          }
+          const id =
+            column === "unnamed"
+              ? undefined
+              : column === "unknown" || column === "failed-other-unknown"
+                ? "missing"
+                : column === "failed-other-shaped-absent"
+                  ? platform === "android"
+                    ? "emulator-5599"
+                    : "87654321-ABCD-ABCD-ABCD-123456789ABC"
+                  : column === "stopped-serial"
+                    ? "emulator-5599"
+                    : column === "stopped-name" || column.endsWith("name") || column === "ambiguous"
+                      ? h.device.name
+                      : column === "stopped" ||
+                          column === "reserved-stopped" ||
+                          column === "capacity" ||
+                          column === "incomplete" ||
+                          column === "failed-other-stopped" ||
+                          column === "failed-other-reserved"
+                        ? platform === "android"
+                          ? h.device.name
+                          : h.device.deviceId
+                        : h.device.deviceId;
+          const args = {
+            ...(requested ? { platform: requested } : {}),
+            ...(id ? { deviceId: id } : {}),
+            ...readArgs[name],
+          };
+          const execution = executionTracker.startExecution(name);
+          let decision: string;
+          try {
+            const outcome = runWithToolSelectionContext(
+              { explicitObserveDeviceRead: name === "observe" && !!id },
+              () =>
+                ToolRegistry.getTool(name)!.handler({
+                  ...args,
+                  [INTERNAL_EXECUTION_ID_PARAM]: execution.id,
+                  [INTERNAL_EXECUTION_START_TIME_PARAM]: execution.startTime,
+                }),
+            );
+            if (failedOther || exactRunningPin) {
+              await settleByFakeEvents(retryTimer, outcome, { description: column });
+            } else {
+              await outcome;
+            }
+            decision = `device:${h.runs[0]?.deviceId};boots:${h.boots.length + h.simctl.getMethodCalls("bootSimulator").length}`;
+          } catch (error) {
+            expect(error).toBeInstanceOf(ActionableError);
+            const code: unknown = Reflect.get(error as Error, "code");
+            decision = typeof code === "string" ? code : (error as Error).message;
+            if (column === "failed-other-unknown") {
+              expect(error).toMatchObject({
+                code: "discovery_incomplete",
+                platform: other,
+                retryable: true,
+              });
+            }
+            if (column === "capacity") {
+              expect(error).toBe(h.capacityError);
+            }
+          } finally {
+            executionTracker.endExecution(execution.id);
+          }
+          const key = `${platform}:${column}:${requested ?? "absent"}`;
+          const row = decisions.get(key) ?? new Map<string, string>();
+          row.set(name, decision);
+          decisions.set(key, row);
+          const label = platform === "android" ? "Android" : "iOS";
+          const expected =
+            column === "reserved-stopped" || column === "failed-other-reserved"
+              ? "device_owned_by_other_session"
+              : column === "unnamed"
+                ? `No ${label} device is running, so there is nothing to read. Start one with startDevice or provisionDevice, or pass a deviceId.`
+                : column === "capacity"
+                  ? "capacity_exhausted"
+                  : column === "incomplete" || column === "failed-other-unknown"
+                    ? "discovery_incomplete"
+                    : column === "ambiguous"
+                      ? `Ambiguous running device name '${id}'. Candidates: ${[h.device.deviceId, "second-id"].sort().join(", ")}. Provide a deviceId.`
+                      : [
+                            "unknown",
+                            "stopped-serial",
+                            "stopped-name",
+                            "failed-other-shaped-absent",
+                          ].includes(column)
+                        ? `Device ${id} not found on ${requested ?? "either"} platform. Available ${requested ?? "either"} devices: none`
+                        : `device:${h.device.deviceId};boots:${column === "stopped" || column === "failed-other-stopped" ? 1 : 0}`;
+          expect(decision).toBe(expected);
+          if (failedOther) {
+            const retried = column === "failed-other-unknown" || column === "failed-other-reserved";
+            expect(retryTimer.now()).toBe(retried ? 1000 : 0);
+            expect(retryTimer.getSleepCallCount()).toBe(retried ? 2 : 0);
+            expect(listings).toBe(
+              column === "failed-other-shaped-running" && name !== "observe" ? 0 : retried ? 3 : 1,
+            );
+            if (column === "failed-other-unknown") {
+              expect(h.ensure).not.toHaveBeenCalled();
+              expect(h.verify).not.toHaveBeenCalled();
+              expect(h.runs).toEqual([]);
+            }
+          }
+          if (exactRunningPin) {
+            expect(listings).toBe(0);
+            expect(retryTimer.now()).toBe(0);
+            expect(retryTimer.getSleepCallCount()).toBe(0);
+            expect(h.timer.now()).toBe(0);
+            expect(h.timer.getSleepCallCount()).toBe(0);
+            expect(h.detect).toHaveBeenCalledTimes(1);
+            expect(h.handledDevices).toEqual([h.device]);
+          }
+          expect(h.manager.getCurrentDevice()).toBeUndefined();
+          expect(h.manager.getCurrentPlatform()).toBeUndefined();
+          expect(h.manager.getExplicitDevicePin()).toBeUndefined();
+          expect(h.apply).not.toHaveBeenCalled();
+          expect(h.getConfig).not.toHaveBeenCalled();
+          expect(
+            h.adb
+              .getExecutedCommands()
+              .filter((command) => /settings (put|delete)|cmd uimode/.test(command)),
+          ).toEqual([]);
+          if (h.runs.length) {
+            expect(h.runs[0].sessionUuid).toBeUndefined();
+          }
+          if (column !== "stopped" && column !== "failed-other-stopped") {
+            expect(h.boots.length + h.simctl.getMethodCalls("bootSimulator").length).toBe(0);
+          }
+          if (column.startsWith("reserved") || column === "failed-other-reserved") {
+            expect(h.ensure).not.toHaveBeenCalled();
+            expect(h.verify).not.toHaveBeenCalled();
+            expect(h.adb.getExecutedCommands()).toEqual([]);
+            expect(h.androidManager.getExecutedOperations()).toEqual([]);
+            expect(h.iosManager.getExecutedOperations()).toEqual([]);
+            if (column === "reserved-running") {
+              expect(h.runs[0].readPath).toBe(true);
+            }
+          }
+          if (held) {
+            expect(h.ensure).not.toHaveBeenCalled();
+            expect(h.verify).not.toHaveBeenCalled();
+            expect(h.adb.getExecutedCommands()).toEqual([]);
+            expect(h.androidManager.getExecutedOperations()).toEqual([]);
+            expect(h.iosManager.getExecutedOperations()).toEqual([]);
+            expect(h.runs[0].readPath).toBe(true);
+            if (column === "held-id" || column === "held-slot-name") {
+              expect(h.detect).not.toHaveBeenCalled();
+            }
+            if (column === "held-slot-name") {
+              expect(daemon.sessions.getAllSessions()).toEqual([]);
+              expect(daemon.sessions.getSessionForDevice(h.device.deviceId)).toBeNull();
+            } else {
+              expect(owner.sessions.getSession(`holder-${platform}`)).toEqual(holderBefore);
+              expect(owner.sessions.getSessionForDevice(h.device.deviceId)).toBe(
+                `holder-${platform}`,
+              );
+            }
+          } else {
             expect(daemon.sessions.getAllSessions()).toEqual([]);
             expect(daemon.sessions.getSessionForDevice(h.device.deviceId)).toBeNull();
-          } else {
-            expect(owner.sessions.getSession(`holder-${platform}`)).toEqual(holderBefore);
-            expect(owner.sessions.getSessionForDevice(h.device.deviceId)).toBe(
-              `holder-${platform}`,
-            );
           }
-        } else {
-          expect(daemon.sessions.getAllSessions()).toEqual([]);
-          expect(daemon.sessions.getSessionForDevice(h.device.deviceId)).toBeNull();
-        }
-        if (name === "observe" && column.startsWith("running")) {
-          expect(h.ensure).not.toHaveBeenCalled();
-        }
-        if (name !== "observe" && column.startsWith("running")) {
-          expect(h.detect).toHaveBeenCalledTimes(1);
+          if (name === "observe" && column.startsWith("running")) {
+            expect(h.ensure).not.toHaveBeenCalled();
+          }
+          if (name !== "observe" && column.startsWith("running")) {
+            expect(h.detect).toHaveBeenCalledTimes(1);
+          }
+        });
+      }
+      test(`${platform} ${column}, platform=${requested ?? "absent"}: every tool reaches an identical decision`, () => {
+        const row =
+          decisions.get(`${platform}:${column}:${requested ?? "absent"}`) ??
+          new Map<string, string>();
+        // Filtered runs may execute only part of the table (or just this equality pin).
+        expect(new Set(row.values()).size).toBe(row.size ? 1 : 0);
+        if (row.size === EXPECTED.length) {
+          expect([...row.keys()].sort()).toEqual(EXPECTED);
+          expect(row.get("observe")).toBe(row.get("listApps"));
+          expect(row.get("observe")).toBe(row.get("getDeviceState"));
         }
       });
     }
-    test(`${platform} ${column}: every tool reaches an identical decision`, () => {
-      const row = decisions.get(`${platform}:${column}`) ?? new Map<string, string>();
-      // Filtered runs may execute only part of the table (or just this equality pin).
-      expect(new Set(row.values()).size).toBe(row.size ? 1 : 0);
-      if (row.size === EXPECTED.length) {
-        expect([...row.keys()].sort()).toEqual(EXPECTED);
-        expect(row.get("observe")).toBe(row.get("listApps"));
-        expect(row.get("observe")).toBe(row.get("getDeviceState"));
-      }
-    });
   }
 }
 
@@ -1174,7 +1303,7 @@ function reserveReadTarget(platform: Platform, id: string): void {
 
 async function onePlatformDecision(
   platform: Platform,
-  name: "observe" | "listApps" | "getDeviceState",
+  name: string,
   scenario: "stopped" | "unknown" | "reserved" | "running",
   requested?: "either",
   failedOther = false,
@@ -1220,10 +1349,9 @@ async function onePlatformDecision(
   const result = await settleByFakeEvents(retryTimer, outcome, { description: scenario });
   expect(retryTimer.getPendingTimeoutCount()).toBe(0);
   expect(retryTimer.getPendingSleepCount()).toBe(0);
-  if (!failedOther || name === "observe" || scenario === "reserved") {
-    expect(retryTimer.now()).toBe(failedOther ? 1000 : 0);
-    expect(retryTimer.getSleepCallCount()).toBe(failedOther ? 2 : 0);
-  }
+  const retried = failedOther && (scenario === "unknown" || scenario === "reserved");
+  expect(retryTimer.now()).toBe(retried ? 1000 : 0);
+  expect(retryTimer.getSleepCallCount()).toBe(retried ? 2 : 0);
   let decision: string;
   if (scenario === "reserved") {
     expect(result).toMatchObject({ code: "device_owned_by_other_session", retryAfterMs: 500 });
@@ -1232,13 +1360,13 @@ async function onePlatformDecision(
     expect(h.boots).toEqual([]);
     expect(h.simctl.getMethodCalls("bootSimulator")).toEqual([]);
     decision = "device_owned_by_other_session";
-  } else if (scenario === "unknown" || (failedOther && name === "observe")) {
-    // The normal readiness path on main cannot prove absence on an incomplete either scan.
+  } else if (scenario === "unknown") {
+    // A failed platform cannot be ruled out for a bare name without a healthy match.
     expect(result).toMatchObject({ code: "discovery_incomplete", platform: other });
     expect(h.runs).toEqual([]);
     expect(h.boots).toEqual([]);
     expect(h.simctl.getMethodCalls("bootSimulator")).toEqual([]);
-    if (failedOther && name === "observe") {
+    if (failedOther) {
       expect(h.ensure).not.toHaveBeenCalled();
     }
     decision = "discovery_incomplete";
@@ -1260,9 +1388,7 @@ async function onePlatformDecision(
     h.adb.getExecutedCommands().filter((c) => /settings (put|delete)|cmd uimode/.test(c)),
   ).toEqual([]);
   if (failedOther) {
-    if (name === "observe" || scenario === "reserved") {
-      expect(listings).toBe(3);
-    }
+    expect(listings).toBe(retried ? 3 : 1);
     return { decision, listings };
   }
   expect(listings).toBe(
@@ -1389,5 +1515,64 @@ for (const platform of ["android", "ios"] as const) {
     expect(result).toHaveProperty("name", "AbortError");
     expect(listings).toBe(1);
     expect(retryTimer.getPendingTimeoutCount()).toBe(0);
+  });
+}
+
+// Direct shared-resolver pins: both findRunning and resolve scope shaped ids, but an
+// explicit contradictory platform still wins over the shape.
+for (const platform of ["android", "ios"] as const) {
+  const id = platform === "android" ? "emulator-5599" : "87654321-ABCD-ABCD-ABCD-123456789ABC";
+  const other = platform === "android" ? "ios" : "android";
+  for (const requested of [undefined, "either"] as const) {
+    for (const running of [false, true]) {
+      test(`${platform} shaped resolver ${running ? "running" : "absent"}, platform=${requested ?? "absent"}: no other-platform retry`, async () => {
+        const timer = new FakeTimer();
+        const device = { ...deviceFor(platform), deviceId: id };
+        const list = mock(async () => ({
+          devices: running ? [device] : [],
+          scanned: { android: platform === "android", ios: platform === "ios" },
+          discoveryErrors: { [other]: { code: "failed" as const, message: "other failed" } },
+        }));
+        const access = {
+          listBooted: async () => [],
+          listBootedWithStatus: list,
+          isAuthorized: () => true,
+        };
+        expect(
+          await sessionlessDeviceReadFor(access, { timer }).findRunning(id, undefined, requested),
+        ).toEqual(running ? device : undefined);
+        expect(list).toHaveBeenCalledTimes(1);
+        list.mockClear();
+        if (running) {
+          expect(
+            await resolveDeviceForObservationRead(id, undefined, access, requested, { timer }),
+          ).toEqual(device);
+        } else {
+          await expect(
+            resolveDeviceForObservationRead(id, undefined, access, requested, { timer }),
+          ).rejects.toThrow(`Device ${id} not found`);
+        }
+        expect(list).toHaveBeenCalledTimes(1);
+        expect(timer.now()).toBe(0);
+        expect(timer.getSleepCallCount()).toBe(0);
+      });
+    }
+  }
+  test(`${platform} shaped resolver honors a contradictory explicit platform`, async () => {
+    const timer = new FakeTimer();
+    const list = mock(async () => ({
+      devices: [{ ...deviceFor(platform), deviceId: id }],
+      scanned: { android: true, ios: true },
+    }));
+    const access = {
+      listBooted: async () => [],
+      listBootedWithStatus: list,
+      isAuthorized: () => true,
+    };
+    await expect(
+      resolveDeviceForObservationRead(id, undefined, access, other, { timer }),
+    ).rejects.toThrow(`not found on ${other} platform`);
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(timer.getSleepCallCount()).toBe(0);
   });
 }

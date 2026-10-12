@@ -277,7 +277,7 @@ export function isFullyCoveredByApplicationWindow(
   );
 }
 
-function subtractCover(bounds: ElementBounds, cover: ElementBounds): ElementBounds[] {
+export function subtractCover(bounds: ElementBounds, cover: ElementBounds): ElementBounds[] {
   const left = Math.max(bounds.left, cover.left);
   const top = Math.max(bounds.top, cover.top);
   const right = Math.min(bounds.right, cover.right);

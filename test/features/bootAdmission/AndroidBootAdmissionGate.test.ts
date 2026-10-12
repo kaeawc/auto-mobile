@@ -6,6 +6,8 @@ import {
 import { BootCapacityExhaustedError } from "../../../src/models/BootCapacityExhaustedError";
 import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { FakeAndroidCapacitySource } from "../../fakes/FakeAndroidCapacitySource";
+import { DEFAULT_SAMPLE_TIMEOUT_MS } from "../../../src/features/bootAdmission/BootAdmissionGate";
+import { drainUntilQuiescent } from "../../helpers/fakeTimerStepping";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 const GIB = 1024 ** 3;
@@ -551,3 +553,68 @@ describe("a boot adb lists whose process the process table predates still counts
     (await gate.admit({ timeoutMs: 60_000, avdName: AVD })).release();
   });
 });
+
+test.each(["assertCapacityAvailable", "describeCapacity"] as const)(
+  "%s bounds an abandoned sample, aborts it and closes its window",
+  async (method) => {
+    const { timer, source, gate } = setup();
+    const original = source.sample.bind(source);
+    let receivedSignal: AbortSignal | undefined;
+    source.sample = (options?: { signal?: AbortSignal }) => {
+      receivedSignal = options?.signal;
+      return new Promise(() => {});
+    };
+    let settled = false;
+    const pending = gate[method]().then(
+      () => {
+        settled = true;
+        return undefined;
+      },
+      (error: unknown) => {
+        settled = true;
+        return error;
+      },
+    );
+    await drainUntilQuiescent(timer);
+    await timer.advanceTimeAsync(DEFAULT_SAMPLE_TIMEOUT_MS, () => drainUntilQuiescent(timer));
+    expect(settled).toBe(true); // Fails at once before the fix; never hangs awaiting an unbounded promise.
+    expect(await pending).toMatchObject({
+      code: "discovery_incomplete",
+      retryable: true,
+      discoveryError: { code: "timeout" },
+    });
+    expect(receivedSignal?.aborted).toBe(true);
+    source.sample = original;
+    const admission = await gate.admit({ timeoutMs: 60_000, avdName: AVD });
+    admission.release();
+    expect(await gate.describeCapacity()).toEqual({ limit: 2, booted: 0, inFlight: 0 });
+  },
+);
+
+test.each(["assertCapacityAvailable", "describeCapacity"] as const)(
+  "%s preserves caller abort and aborts its sample",
+  async (method) => {
+    const { timer, source, gate } = setup();
+    let receivedSignal: AbortSignal | undefined;
+    source.sample = (options?: { signal?: AbortSignal }) => {
+      receivedSignal = options?.signal;
+      return new Promise(() => {});
+    };
+    const controller = new AbortController();
+    const reason = new Error("cancel check");
+    let settled = false;
+    const pending = gate[method]({ signal: controller.signal }).then(
+      () => undefined,
+      (error: unknown) => {
+        settled = true;
+        return error;
+      },
+    );
+    await drainUntilQuiescent(timer);
+    controller.abort(reason);
+    await drainUntilQuiescent(timer);
+    expect(settled).toBe(true);
+    expect(await pending).toBe(reason);
+    expect(receivedSignal?.aborted).toBe(true);
+  },
+);

@@ -32,7 +32,6 @@ export class TimerManagedConnectionRebind implements ManagedConnectionRebind {
     if (this.chain) {
       return;
     }
-    logger.warn(`[ManagedSlots] Connection re-bind failed: ${errorMessage(failure)}`);
     const chain: RetryChain = { attempts, nextAttempt: 1 };
     this.chain = chain;
     this.schedule(chain, failure);
@@ -50,7 +49,18 @@ export class TimerManagedConnectionRebind implements ManagedConnectionRebind {
       return;
     }
     const fields = failure !== null && typeof failure === "object" ? failure : {};
-    if (Reflect.get(fields, "retryable") === false || !chain.attempts.stillWanted()) {
+    if (!chain.attempts.stillWanted()) {
+      this.cancel();
+      return;
+    }
+    const retryable = Reflect.get(fields, "retryable");
+    if (
+      retryable === false ||
+      (typeof Reflect.get(fields, "code") === "string" && retryable !== true)
+    ) {
+      logger.warn(
+        `[ManagedSlots] Managed re-bind refused permanently; socket stays confined: ${errorMessage(failure)}`,
+      );
       this.cancel();
       return;
     }

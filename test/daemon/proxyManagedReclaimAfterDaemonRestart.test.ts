@@ -831,7 +831,7 @@ test("same-daemon not-found alternating with silence cannot extend the reclaim w
   expect(s.timer.getPendingIntervals()).toEqual([INTERVAL]);
 });
 
-test("a transient managed re-bind refusal retries and binds the same replacement socket", async () => {
+test("PIN: a transient managed re-bind refusal retries and binds the same replacement socket", async () => {
   await s.start();
   await s.stop(true);
   s.registrationSessionAvailable = false;
@@ -857,6 +857,25 @@ test("a transient managed re-bind refusal retries and binds the same replacement
   expect(s.timer.getPendingTimeoutCount()).toBe(0);
   await s.advance(INTERVAL * 3);
   expect(s.rebinds).toHaveLength(2);
+  expect(s.timer.getPendingTimeoutCount()).toBe(0);
+});
+
+test("an ended managed execution still confines a reconnected socket without retries", async () => {
+  await s.start();
+  await s.manager.releaseSession(SESSION, "cli-idle-timeout");
+  s.clients
+    .at(-1)!
+    .emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, SESSION, "cli-idle-timeout");
+  s.clients.at(-1)!.emitConnectionClosed();
+  await s.proxy.callTool("startDevice", { platform: "android" });
+  expect(s.rebinds).toHaveLength(1);
+  const registration = s.rebinds[0];
+  expect(registration.socketSessionId).toBe("socket-1");
+  expect(registration.params.managedSlots).toMatchObject({ sessionUuids: [SESSION] });
+  expect(s.scopes.get(registration.socketSessionId)?.sessionUuids.size).toBe(0);
+  expect(s.timer.getPendingTimeoutCount()).toBe(0);
+  await s.advance(5_001);
+  expect(s.rebinds).toHaveLength(1);
   expect(s.timer.getPendingTimeoutCount()).toBe(0);
 });
 

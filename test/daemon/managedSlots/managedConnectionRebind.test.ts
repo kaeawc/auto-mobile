@@ -42,7 +42,7 @@ afterEach(() => {
 });
 
 describe("managed connection re-bind retry", () => {
-  test("grows waits to the cap until success and logs first failure at warn", async () => {
+  test("grows waits to the cap until success without warning", async () => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     const debug = spyOn(logger, "debug").mockImplementation(() => {});
     logSpies = [warn, debug];
@@ -51,7 +51,7 @@ describe("managed connection re-bind retry", () => {
     await h.advance(250 + 500 + 1_000 + 2_000 + 4_000 + 5_000 + 5_000);
     expect(h.calls).toEqual([250, 750, 1_750, 3_750, 7_750, 12_750, 17_750]);
     expect(h.timer.getPendingTimeoutCount()).toBe(0);
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).not.toHaveBeenCalled();
     expect(debug).toHaveBeenCalledTimes(6);
   });
 
@@ -64,27 +64,74 @@ describe("managed connection re-bind retry", () => {
   });
 
   test.each(["initial", "retry"])("stops on a terminal %s refusal", async (phase) => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    logSpies = [warn];
     const h = harness([refusal(false)]);
     h.driver.start(h.attempts, refusal(phase === "initial" ? false : true));
     await h.advance(10_000);
     expect(h.calls).toHaveLength(phase === "initial" ? 0 : 1);
     expect(h.timer.getPendingTimeoutCount()).toBe(0);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain("refused permanently");
+    expect(warn.mock.calls[0][0]).toContain("socket stays confined");
+    expect(warn.mock.calls[0][0]).toContain("not rehydrated");
   });
 
-  test("missing retry intent (transport or older daemon) still retries", async () => {
+  test("missing code (transport or timeout) still retries", async () => {
     const h = harness([new Error("transport")]);
-    h.driver.start(h.attempts, new Error("older daemon"));
+    h.driver.start(h.attempts, new Error("timeout"));
     await h.advance(750);
     expect(h.calls).toEqual([250, 750]);
   });
 
   test("stops when the execution or socket is no longer wanted", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    logSpies = [warn];
     const h = harness();
     h.driver.start(h.attempts, refusal(true));
     h.stop();
     await h.advance(250);
     expect(h.calls).toEqual([]);
     expect(h.timer.getPendingTimeoutCount()).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  test.each(["initial", "retry"])(
+    "a coded %s refusal without retry intent stops",
+    async (phase) => {
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      logSpies = [warn];
+      const coded = Object.assign(new Error("older daemon refusal"), { code: "managed_refusal" });
+      const h = harness([coded]);
+      h.driver.start(h.attempts, phase === "initial" ? coded : refusal(true));
+      await h.advance(10_000);
+      expect(h.calls).toHaveLength(phase === "initial" ? 0 : 1);
+      expect(h.timer.getPendingTimeoutCount()).toBe(0);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toContain("refused permanently");
+      expect(warn.mock.calls[0][0]).toContain("older daemon refusal");
+    },
+  );
+
+  test("explicit retry intent on a coded refusal retries until success", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    logSpies = [warn];
+    const h = harness();
+    h.driver.start(h.attempts, Object.assign(refusal(true), { code: "managed_refusal" }));
+    await h.advance(250);
+    expect(h.calls).toEqual([250]);
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  test("a permanent failure after the socket is unwanted stops without warning", async () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    logSpies = [warn];
+    const h = harness();
+    h.stop();
+    h.driver.start(h.attempts, refusal(false));
+    expect(h.timer.getPendingTimeoutCount()).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
   });
 
   test("cancel clears the pending timer", async () => {

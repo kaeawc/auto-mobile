@@ -305,6 +305,35 @@ describe("DevicePool managed-slot exclusion", () => {
     };
   };
 
+  test("PIN: a never-read failing registry admits an existing holder and refuses an unheld target", async () => {
+    await setUp([ios("SIM-HELD"), ios("SIM-FREE")]);
+    await sessions.createSession("existing", "SIM-HELD", "ios");
+    // Seed control that predates registry discovery without taking a device through its gate.
+    const held = pool.getDevice("SIM-HELD")!;
+    held.sessionId = "existing";
+    held.status = "assigned";
+    registry.snapshotManagedDevices = async () => {
+      throw new Error("registry never readable");
+    };
+    await expect(
+      pool.assertNotAssignedToManagedSlot({
+        action: "tapOn",
+        deviceId: "SIM-HELD",
+        platform: "ios",
+        requesterSessionUuid: "existing",
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      pool.assertNotAssignedToManagedSlot({
+        action: "tapOn",
+        deviceId: "SIM-FREE",
+        platform: "ios",
+      }),
+    ).rejects.toMatchObject({ code: MANAGED_SLOT_DISCOVERY_INCOMPLETE_CODE, retryable: true });
+    expect(pool.getDevice("SIM-HELD")?.sessionId).toBe("existing");
+    expect(pool.getDevice("SIM-FREE")?.sessionId).toBeNull();
+  });
+
   test("a plain caller cannot take a device absent from the retained snapshot", async () => {
     await setUp([ios("SIM-FREE")]);
     await failAfterSnapshot();

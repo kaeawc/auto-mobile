@@ -1948,24 +1948,27 @@ export class DaemonMcpProxy {
    * The daemon confines refused registrations until their held sessions can be proven.
    */
   private async rebindManagedConnection(client: DaemonClientLike): Promise<void> {
+    const liveSessions = (sessionUuids: string[]) =>
+      sessionUuids.filter(
+        (uuid) =>
+          this.isHeldSession(uuid) ||
+          (this.claimableSessions.has(uuid) && this.stallHandovers.has(uuid)),
+      );
     const currentBinding = () => {
       const binding = this.heldManagedSlotBinding();
       if (!binding) {
         return undefined;
       }
-      // The execution set also retains ended UUIDs for shutdown reporting; only live holds rebind.
-      const sessionUuids = binding.sessionUuids.filter(
-        (uuid) =>
-          this.isHeldSession(uuid) ||
-          (this.claimableSessions.has(uuid) && this.stallHandovers.has(uuid)),
-      );
-      return sessionUuids.length > 0 ? { ...binding, sessionUuids } : undefined;
+      const sessionUuids = liveSessions(binding.sessionUuids);
+      // Even an ended execution declares the socket managed so the daemon confines its refusal.
+      return sessionUuids.length > 0 ? { ...binding, sessionUuids } : binding;
     };
+    const sameSocket = () => !this.closing && this.client === client;
     const stillWanted = () =>
-      !this.closing && this.client === client && currentBinding() !== undefined;
+      sameSocket() && liveSessions(this.heldManagedSlotBinding()?.sessionUuids ?? []).length > 0;
     const attempt = async () => {
       const binding = currentBinding();
-      if (!binding || !stillWanted()) {
+      if (!binding || !sameSocket()) {
         return;
       }
       await client.callDaemonMethod(DAEMON_REGISTER_SESSION_METHOD, {
@@ -1974,7 +1977,7 @@ export class DaemonMcpProxy {
         managedSlots: { ...binding, livenessOwnerToken: this.livenessOwnerToken },
       });
     };
-    if (!stillWanted()) {
+    if (!currentBinding() || !sameSocket()) {
       return;
     }
     this.managedConnectionRebind ??= new TimerManagedConnectionRebind(this.timer);

@@ -218,8 +218,10 @@ selection, multi-device allocation and auto-start; explicit binds, autolock,
 `killDevice`/`deleteDevice` (stopped targets included) and `input/*`/`ide/*` mutations
 refuse them with non-retryable `device_assigned_to_managed_slot` unless the caller is
 the slot's recorded execution session; `force` never overrides. Reads stay open. A
-registry never read refuses with retryable `discovery_incomplete` (an absent one means
-no managed slots); an unreadable one keeps the last good snapshot for reads and
+registry never read refuses callers taking an unheld device with retryable
+`discovery_incomplete`, while a session already holding a device in this pool retains
+control of it (an absent registry means no managed slots); an unreadable one keeps
+the last good snapshot for reads and
 inventory. Taking a device requires a current snapshot; existing holders and a known
 slot's own execution or reconciler retain control during an unreadable registry.
 

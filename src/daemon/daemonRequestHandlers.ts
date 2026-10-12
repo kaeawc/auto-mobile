@@ -340,12 +340,12 @@ type ManagedSlotsRegistration = NonNullable<z.infer<typeof registerSessionParams
  * the presented owner token, so a connection can never bind itself to another execution's slots.
  * Returns the refusal, or undefined when the registration may proceed.
  */
-function managedConnectionRegistrationRefusal(
+async function managedConnectionRegistrationRefusal(
   state: DaemonStateAccess,
   socketSessionId: string | undefined,
   sessionId: string,
   managedSlots: ManagedSlotsRegistration | undefined,
-): DaemonMethodResult | undefined {
+): Promise<DaemonMethodResult | undefined> {
   const scopes = state.getManagedConnectionScopes?.();
   const binding = scopes?.get(socketSessionId);
   const outside = managedConnectionSessionRegistrationRefusal(binding, sessionId, managedSlots);
@@ -380,18 +380,25 @@ function managedConnectionRegistrationRefusal(
     return refuse(`session ${sessionId} is not one of the registered slot sessions.`);
   }
   const manager = state.getSessionManager();
-  const foreign = managedSlots.sessionUuids.find((uuid) => {
+  const foreign = managedSlots.sessionUuids.filter((uuid) => {
     const session = sessionForIngress(manager, uuid);
     return (
       session?.livenessPolicy !== MANAGED_EXECUTION_LIVENESS_POLICY ||
       session.livenessOwnerToken !== managedSlots.livenessOwnerToken
     );
   });
-  if (foreign !== undefined) {
-    return refuse(
-      `session ${foreign} is not a managed execution held by this owner token.`,
-      managedRegistrationSessionIsUnknown(manager, foreign),
+  if (foreign.length > 0) {
+    // Confine immediately, before persisted release reads yield to other socket requests.
+    const refusal = refuse(
+      `session ${foreign[0]} is not a managed execution held by this owner token.`,
     );
+    return (await managedRegistrationSessionsAreUnknown(manager, foreign))
+      ? {
+          ...refusal,
+          retryable: true,
+          retryAfterMs: MANAGED_CONNECTION_REGISTRATION_RETRY_AFTER_MS,
+        }
+      : refusal;
   }
   scopes.bind(socketSessionId, {
     scopeKey: managedSlots.scopeKey,
@@ -400,14 +407,23 @@ function managedConnectionRegistrationRefusal(
   return undefined;
 }
 
-/** Only an unrehydrated UUID, without a terminal in-memory release, can become a held session. */
-function managedRegistrationSessionIsUnknown(
+/** Every failing proof must be unrehydrated and lack any terminal release to remain retryable. */
+async function managedRegistrationSessionsAreUnknown(
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
-  sessionId: string,
-): boolean {
-  return (
-    !sessionForIngress(manager, sessionId) && !inMemorySessionRelease(manager, sessionId)?.terminal
-  );
+  sessionIds: string[],
+): Promise<boolean> {
+  for (const sessionId of sessionIds) {
+    if (
+      sessionForIngress(manager, sessionId) ||
+      inMemorySessionRelease(manager, sessionId)?.terminal
+    ) {
+      return false;
+    }
+    if ((await persistedTerminalRelease(manager, sessionId))?.terminal) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /** A same-scope managed placeholder may prove its holds; other bindings keep session confinement. */
@@ -427,7 +443,7 @@ function managedConnectionSessionRegistrationRefusal(
       binding.scopeKey,
       { sessionUuid: sessionId },
     );
-    return { success: false, code: refusal.code, error: refusal.message };
+    return { success: false, code: refusal.code, retryable: false, error: refusal.message };
   }
   return undefined;
 }
@@ -591,7 +607,7 @@ async function handleRegisterSession(
     return { success: false, error: `Invalid registerSession parameters: ${parsed.error.message}` };
   }
   const { sessionId, clientName, managedSlots } = parsed.data;
-  const refusal = managedConnectionRegistrationRefusal(
+  const refusal = await managedConnectionRegistrationRefusal(
     state,
     context.socketSessionId,
     sessionId,

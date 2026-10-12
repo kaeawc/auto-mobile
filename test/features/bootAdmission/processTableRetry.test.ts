@@ -845,3 +845,131 @@ test("caller abort between exhausted exit samples breaks their consecutive seque
     transient: false,
   });
 });
+
+test.each(["EACCES", "EPERM"])(
+  "proc fallback retains six emulator pids when pid 1 status rejects %s",
+  async (code) => {
+    const { timer, executor } = harness([BUSYBOX_ERROR]);
+    const fs = sixProc();
+    fs.entries.unshift("1");
+    fs.onRead = async (path) => {
+      if (path === "/proc/1/status") {
+        throw { code };
+      }
+    };
+    const source = new CommandAndroidCapacitySource(async () => SERIALS, executor, HOST, {
+      timer,
+      procFs: fs,
+    });
+    const sample = await source.sample();
+    expect(sample.emulatorProcessIds?.map(({ pid }) => pid)).toEqual(
+      fs.entries.slice(1).map(Number),
+    );
+    expect(sample.processTableFailure).toBeUndefined();
+    expect(sample.errors).toEqual([]);
+    expect(executor.calls).toHaveLength(1);
+  },
+);
+
+test.each([
+  ["EACCES", "denied"],
+  ["EPERM", "denied"],
+  ["ENOENT", "unparseable"],
+  ["EIO", "unknown"],
+])("proc fallback with every pid rejecting %s reports %s", async (code, reason) => {
+  const { timer, executor } = harness([BUSYBOX_ERROR]);
+  const fs = sixProc();
+  for (const pid of fs.entries) {
+    fs.files.set(
+      `/proc/${pid}/status`,
+      execError({ code }, code === "EIO" ? "I/O failure" : "unreadable pid"),
+    );
+  }
+  const reader = new ProcessTableReader(executor, { timer, procFs: fs });
+  const result = await reader.read({});
+  expect(result.value).toBeUndefined();
+  expect(result.failure).toMatchObject({ reason, attempts: 1, transient: false });
+  if (code === "EIO") {
+    expect(result.failure?.detail).toContain("I/O");
+  }
+});
+
+test("proc fallback with an exited pid and a denied pid reports denied", async () => {
+  const { timer, executor } = harness([BUSYBOX_ERROR]);
+  const fs = new FakeProcFs();
+  fs.entries = ["1", "2"];
+  fs.files.set("/proc/2/status", execError({ code: "EACCES" }, "restricted pid"));
+  const reader = new ProcessTableReader(executor, { timer, procFs: fs });
+  expect((await reader.read({})).failure?.reason).toBe("denied");
+});
+
+test("proc timeout never silences exhausted ps WARNs and repeats at DEBUG", async () => {
+  const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
+  const debug = spyOn(logger, "debug").mockImplementation(() => undefined);
+  try {
+    const { timer, executor } = harness([BUSYBOX_ERROR], undefined, false);
+    const fs = sixProc();
+    fs.onRead = () => new Promise(() => {});
+    const reader = new ProcessTableReader(executor, {
+      timer,
+      procFs: fs,
+      attemptTimeoutMs: 1_000,
+    });
+    const first = await settleByFakeEvents(timer, reader.read({}), {
+      description: "first proc timeout",
+    });
+    expect(first.failure).toMatchObject({ reason: "timeout", attempts: 1 });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain("/proc: timed out");
+    executor.steps = ["timeout"];
+    for (let sample = 0; sample < 2; sample++) {
+      const result = await settleByFakeEvents(timer, reader.read({}), {
+        description: "exhausted ps timeout",
+      });
+      expect(result.failure).toMatchObject({ reason: "timeout", attempts: 4, transient: true });
+    }
+    expect(executor.calls).toHaveLength(9);
+    expect(warn).toHaveBeenCalledTimes(3);
+    expect(debug).not.toHaveBeenCalled();
+    executor.steps = [BUSYBOX_ERROR];
+    expect(
+      (await settleByFakeEvents(timer, reader.read({}), { description: "repeated proc timeout" }))
+        .failure?.reason,
+    ).toBe("timeout");
+    expect(warn).toHaveBeenCalledTimes(3);
+    expect(debug).toHaveBeenCalledTimes(1);
+    expect(debug.mock.calls[0][0]).toContain("/proc: timed out");
+  } finally {
+    warn.mockRestore();
+    debug.mockRestore();
+  }
+});
+
+test("ps timeout never silences the first proc timeout WARN", async () => {
+  const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
+  const debug = spyOn(logger, "debug").mockImplementation(() => undefined);
+  try {
+    const { timer, executor } = harness(["timeout"], undefined, false);
+    const fs = sixProc();
+    fs.onRead = () => new Promise(() => {});
+    const reader = new ProcessTableReader(executor, { timer, procFs: fs, attemptTimeoutMs: 1_000 });
+    expect(
+      (await settleByFakeEvents(timer, reader.read({}), { description: "initial ps timeout" }))
+        .failure?.attempts,
+    ).toBe(4);
+    executor.steps = [BUSYBOX_ERROR];
+    expect(
+      (
+        await settleByFakeEvents(timer, reader.read({}), {
+          description: "first proc timeout after ps",
+        })
+      ).failure?.reason,
+    ).toBe("timeout");
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn.mock.calls[1][0]).toContain("/proc: timed out");
+    expect(debug).not.toHaveBeenCalled();
+  } finally {
+    warn.mockRestore();
+    debug.mockRestore();
+  }
+});

@@ -177,6 +177,7 @@ export class ProcessTableReader {
   private readonly budgetMs: number;
   private readonly supported: boolean;
   private readonly warnedReasons = new Set<ProcessTableFailureReason>();
+  private readonly warnedProcReasons = new Set<ProcessTableFailureReason>();
 
   private readonly procFs: ProcFs | undefined;
   private readonly exitDeterministicAfterSamples: number;
@@ -385,8 +386,8 @@ export class ProcessTableReader {
         attempts: psFailure?.attempts ?? 0,
       };
       // A failed procfs read leaves adb's count available and is warned once per reason.
-      const result = this.failed(failure, detail);
-      this.warnedReasons.add(failure.reason);
+      const result = this.failed(failure, detail, this.warnedProcReasons);
+      this.warnedProcReasons.add(failure.reason);
       return result;
     }
   }
@@ -399,16 +400,20 @@ export class ProcessTableReader {
     return this.timer.now() + delay + MIN_RETRY_TIMEOUT_MS <= endMs ? delay : undefined;
   }
 
-  private failed(failure: ProcessTableFailure, message = failure.detail): ProcessTableResult {
+  private failed(
+    failure: ProcessTableFailure,
+    message = failure.detail,
+    warnedReasons = this.warnedReasons,
+  ): ProcessTableResult {
     const log = `[BootAdmission] emulator process snapshot unavailable: ${failure.reason}, attempts=${failure.attempts}: ${failure.detail}`;
-    if (failure.reason === "unsupported-platform" || this.warnedReasons.has(failure.reason)) {
+    if (failure.reason === "unsupported-platform" || warnedReasons.has(failure.reason)) {
       // No ps is expected on Windows; repeated deterministic failures already have a WARN trace.
       logger.debug(log);
     } else {
       logger.warn(log);
     }
     if (!failure.transient) {
-      this.warnedReasons.add(failure.reason);
+      warnedReasons.add(failure.reason);
     }
     return { failure, error: `ps: ${message}` };
   }

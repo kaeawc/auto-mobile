@@ -119,3 +119,40 @@ test.each(["EACCES", "EPERM"])("proc: propagates %s on the root", async (code) =
   fs.listError = error;
   await expect(readProcProcessTable(fs)).rejects.toBe(error);
 });
+
+test.each(["EACCES", "EPERM"])(
+  "proc: retains six readable qemu rows when pid 1 status rejects %s",
+  async (code) => {
+    const fs = populated(6);
+    fs.entries.unshift("1");
+    fs.files.set("/proc/1/status", Object.assign(new Error("restricted pid"), { code }));
+    const debug = spyOn(logger, "debug").mockImplementation(() => undefined);
+    try {
+      const rows = await readProcProcessTable(fs);
+      expect(rows.map((row) => row.pid)).toEqual([17248, 17249, 17250, 17251, 17252, 17253]);
+      expect(rows.every((row) => row.command === COMMAND)).toBe(true);
+      expect(debug.mock.calls.some(([message]) => message.includes("/proc/1"))).toBe(true);
+      expect(debug.mock.calls.some(([message]) => message.includes("skipped 1"))).toBe(true);
+    } finally {
+      debug.mockRestore();
+    }
+  },
+);
+
+test("proc: retains readable rows when a cmdline read rejects a plain EPERM object", async () => {
+  const fs = populated(2);
+  fs.onRead = async (path) => {
+    if (path === "/proc/17249/cmdline") {
+      throw { code: "EPERM" };
+    }
+  };
+  expect((await readProcProcessTable(fs)).map((row) => row.pid)).toEqual([17248]);
+});
+
+test("proc: a per-pid EIO fails the table even with six readable qemu rows", async () => {
+  const fs = populated(6);
+  fs.entries.unshift("1");
+  const error = Object.assign(new Error("I/O failure"), { code: "EIO" });
+  fs.files.set("/proc/1/status", error);
+  await expect(readProcProcessTable(fs)).rejects.toMatchObject({ cause: error });
+});

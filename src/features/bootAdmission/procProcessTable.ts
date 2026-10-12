@@ -82,18 +82,37 @@ function processExited(error: unknown): boolean {
   );
 }
 
-async function readPid(procFs: ProcFs, entry: string): Promise<AndroidProcessRow | undefined> {
+interface PidReadResult {
+  row?: AndroidProcessRow;
+  deniedError?: unknown;
+}
+
+function processReadDenied(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error.code === "EACCES" || error.code === "EPERM")
+  );
+}
+
+async function readPid(procFs: ProcFs, entry: string): Promise<PidReadResult> {
   try {
     const status = await procFs.readText(`/proc/${entry}/status`);
     const cmdline = await procFs.readText(`/proc/${entry}/cmdline`);
-    return parseRow(Number(entry), status, cmdline);
+    return { row: parseRow(Number(entry), status, cmdline) };
   } catch (error) {
+    if (processReadDenied(error)) {
+      // Restricted pid reads are expected on hidepid mounts; readable rows still give a count floor.
+      logger.debug(`[BootAdmission] skipping denied /proc/${entry}: ${errorMessage(error)}`);
+      return { deniedError: error };
+    }
     if (!processExited(error)) {
       throw toActionableError(error, `Reading /proc/${entry}`);
     }
     // A process exiting between directory enumeration and file reads is expected.
     logger.debug(`[BootAdmission] skipping exited /proc/${entry}: ${errorMessage(error)}`);
-    return undefined;
+    return {};
   }
 }
 
@@ -106,20 +125,25 @@ export async function readProcProcessTable(
   const entries = (await procFs.listEntries()).filter((entry) => /^\d+$/.test(entry));
   const rows: AndroidProcessRow[] = [];
   let skipped = 0;
+  let deniedError: unknown;
   for (let offset = 0; offset < entries.length; offset += PROC_BATCH_SIZE) {
     signal?.throwIfAborted();
     const batch = await Promise.all(
       entries.slice(offset, offset + PROC_BATCH_SIZE).map((entry) => readPid(procFs, entry)),
     );
-    const parsed = batch.filter((row): row is AndroidProcessRow => row !== undefined);
+    const parsed = batch.flatMap(({ row }) => (row ? [row] : []));
     rows.push(...parsed);
     skipped += batch.length - parsed.length;
+    deniedError ??= batch.find((result) => result.deniedError !== undefined)?.deniedError;
   }
   signal?.throwIfAborted();
   if (skipped > 0) {
-    logger.debug(`[BootAdmission] /proc skipped ${skipped} exited or unparseable rows`);
+    logger.debug(`[BootAdmission] /proc skipped ${skipped} exited, denied or unparseable rows`);
   }
   if (rows.length === 0) {
+    if (deniedError !== undefined) {
+      throw toActionableError(deniedError, "Reading /proc: no readable processes");
+    }
     throw new Error(`/proc returned no parseable processes (${skipped} unparseable rows)`);
   }
   return rows;

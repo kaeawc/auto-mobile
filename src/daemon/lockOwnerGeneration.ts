@@ -27,21 +27,22 @@ export function createLockOwnerGenerationProbe(
   deps: LockOwnerGenerationProbeDependencies = {},
 ): LockOwnerGenerationProbe {
   const platform = deps.platform ?? process.platform;
-  const reader =
-    platform === "linux"
-      ? (deps.readLinuxProcessGenerationToken ?? readLinuxProcessGenerationToken)
-      : platform === "darwin"
-        ? (deps.readDarwinProcessGenerationToken ?? readDarwinProcessGenerationToken)
-        : undefined;
   const now = deps.now ?? (() => defaultTimer.now());
   const captureDisabled =
     deps.captureDisabled ?? (() => testOverrides.processGenerationCaptureDisabled?.() ?? false);
   const ttl = deps.sameVerdictTtlMs ?? 1_000;
   const currentTokens = new Map<number, string>();
-  const sameVerdicts = new Map<number, { token: string; at: number }>();
+  const unavailableCurrent = new Map<number, number>();
+  const sameVerdicts = new Map<number, { token?: string; at: number }>();
 
   function read(pid: number): string | undefined {
     try {
+      const reader =
+        platform === "linux"
+          ? (deps.readLinuxProcessGenerationToken ?? readLinuxProcessGenerationToken)
+          : platform === "darwin"
+            ? (deps.readDarwinProcessGenerationToken ?? readDarwinProcessGenerationToken)
+            : undefined;
       return reader?.(pid);
     } catch (error) {
       // Failure to sample proves nothing; unknown preserves a possibly live owner.
@@ -55,9 +56,20 @@ export function createLockOwnerGenerationProbe(
       if (captureDisabled()) {
         return undefined;
       }
+      const at = now();
+      for (const [ownerPid, sampledAt] of unavailableCurrent) {
+        if (at - sampledAt >= ttl) {
+          unavailableCurrent.delete(ownerPid);
+        }
+      }
+      if (unavailableCurrent.has(pid)) {
+        return undefined;
+      }
       const token = currentTokens.get(pid) ?? read(pid);
       if (token !== undefined) {
         currentTokens.set(pid, token);
+      } else {
+        unavailableCurrent.set(pid, now());
       }
       return token;
     },
@@ -72,12 +84,19 @@ export function createLockOwnerGenerationProbe(
           sameVerdicts.delete(ownerPid);
         }
       }
-      if (sameVerdicts.get(pid)?.token === recorded) {
-        return "same";
+      const memo = sameVerdicts.get(pid);
+      if (memo !== undefined) {
+        if (memo.token === undefined) {
+          return "unknown";
+        }
+        if (memo.token === recorded) {
+          return "same";
+        }
       }
       sameVerdicts.delete(pid);
       const fresh = read(pid);
       if (fresh === undefined) {
+        sameVerdicts.set(pid, { at: now() });
         return "unknown";
       }
       const comparison = compareProcessGenerationTokens(recorded, fresh);

@@ -204,14 +204,15 @@ export function tryAcquireExclusiveLock(
     //
     // Known limitation: a crash in the microsecond window between the `wx` create
     // and the PID write leaves an empty file that is never reclaimable. This is
-    // astronomically rare (the create+write is a single synchronous burst) and is
-    // shared with the daemon lock; tracked as a follow-up, not fixed here.
+    // astronomically rare (generation is captured before create, so create+write
+    // remains a single synchronous burst) and is shared with the daemon lock;
+    // tracked as a follow-up, not fixed here.
     return false;
   }
 
-  // The PID is the first line; a per-process-instance token (if any) is the
-  // second (see `writeExclusiveLockFile`). `parseLockContent` reads only the PID
-  // off line 1, keeping the positional contract in one place (#3006).
+  // `parseLockContent` reads the PID on line 1, owner token on line 2, metadata
+  // on line 3, and OS generation token on line 4, keeping the positional contract
+  // in one place (#3006, #11812).
   const observedOwner = parseLockContent(content);
   const { pid: ownerPid, token: tokenLine, generation } = observedOwner;
   if (Number.isNaN(ownerPid)) {
@@ -518,16 +519,9 @@ function writeExclusiveLockFile(
 ): boolean {
   try {
     mkdirSync(dirname(lockFilePath), { recursive: true });
+    const generation = captureLockOwnerGeneration(options.ownerGeneration, pid);
     const fd = openSync(lockFilePath, "wx", 0o600);
-    writeFileSync(
-      fd,
-      formatLockContent(
-        pid,
-        options.ownerToken,
-        options.metadata,
-        captureLockOwnerGeneration(options.ownerGeneration, pid),
-      ),
-    );
+    writeFileSync(fd, formatLockContent(pid, options.ownerToken, options.metadata, generation));
     closeSync(fd);
     return true;
   } catch (error) {

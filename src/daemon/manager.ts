@@ -1948,7 +1948,7 @@ export class DaemonManager implements DaemonManagerLike {
         return;
       }
       const lockContents = readFileSync(fd, "utf8");
-      const { pid, token, metadata } = parseLockContent(lockContents.trim());
+      const { pid, token, metadata, generation } = parseLockContent(lockContents.trim());
       if (pid !== process.pid || token !== this.startupLockOwnerToken) {
         throw new ActionableError("Startup lock ownership changed before identity recovery");
       }
@@ -1956,7 +1956,7 @@ export class DaemonManager implements DaemonManagerLike {
         logPath: this.startupLockMetadata(metadata).logPath,
         recovering: true,
       });
-      const content = formatLockContent(pid, token, recoveryMetadata);
+      const content = formatLockContent(pid, token, recoveryMetadata, generation);
       // Pad shorter metadata so one write replaces the old body without a
       // write/truncate window in which followers could read trailing old bytes.
       writeSync(fd, content.padEnd(Buffer.byteLength(lockContents)), 0, "utf8");

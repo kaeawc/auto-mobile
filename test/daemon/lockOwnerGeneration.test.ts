@@ -3,6 +3,120 @@ import { createLockOwnerGenerationProbe } from "../../src/daemon/lockOwnerGenera
 import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("lock owner generation probe", () => {
+  test.each(["linux", "darwin"] as const)(
+    "resolves the %s reader dependency only when sampling",
+    (platform) => {
+      let constructing = true;
+      const reader = mock(() => "linux:boot:10");
+      const getReader = () => {
+        if (constructing) {
+          throw new Error("reader dependency touched during construction");
+        }
+        return reader;
+      };
+      const probe = createLockOwnerGenerationProbe({
+        platform,
+        get readLinuxProcessGenerationToken() {
+          return getReader();
+        },
+        get readDarwinProcessGenerationToken() {
+          return getReader();
+        },
+        captureDisabled: () => false,
+      });
+      expect(reader).not.toHaveBeenCalled();
+      constructing = false;
+      expect(probe.current(10)).toBe("linux:boot:10");
+      expect(reader.mock.calls).toEqual([[10]]);
+    },
+  );
+
+  test.each(["undefined", "throws"] as const)(
+    "compare memoises an %s sample by PID until the TTL, then reads a different generation",
+    (result) => {
+      const timer = new FakeTimer();
+      let available = false;
+      const reader = mock(() => {
+        if (available) {
+          return "linux:boot:B";
+        }
+        if (result === "throws") {
+          throw new Error("sample denied");
+        }
+        return undefined;
+      });
+      const probe = createLockOwnerGenerationProbe({
+        platform: "linux",
+        readLinuxProcessGenerationToken: reader,
+        now: () => timer.now(),
+        sameVerdictTtlMs: 20,
+        captureDisabled: () => false,
+      });
+      expect(probe.compare(10, "linux:boot:A")).toBe("unknown");
+      available = true;
+      timer.advanceTime(19);
+      expect(probe.compare(10, "linux:boot:B")).toBe("unknown");
+      expect(reader).toHaveBeenCalledTimes(1);
+      expect(probe.compare(20, "linux:boot:A")).toBe("different");
+      expect(reader).toHaveBeenCalledTimes(2);
+      timer.advanceTime(1);
+      expect(probe.compare(10, "linux:boot:A")).toBe("different");
+      expect(probe.compare(10, "linux:boot:A")).toBe("different");
+      expect(reader.mock.calls).toEqual([[10], [20], [10], [10]]);
+    },
+  );
+
+  test("a negative current memo never supplies compare and a negative compare memo never supplies current", () => {
+    let fresh: string | undefined;
+    const reader = mock(() => fresh);
+    const probe = createLockOwnerGenerationProbe({
+      platform: "linux",
+      readLinuxProcessGenerationToken: reader,
+      now: () => 0,
+      captureDisabled: () => false,
+    });
+    expect(probe.current(10)).toBeUndefined();
+    fresh = "linux:boot:B";
+    expect(probe.compare(10, "linux:boot:A")).toBe("different");
+    expect(reader).toHaveBeenCalledTimes(2);
+    expect(probe.current(10)).toBeUndefined();
+    expect(reader).toHaveBeenCalledTimes(2);
+    fresh = undefined;
+    expect(probe.compare(20, "linux:boot:A")).toBe("unknown");
+    fresh = "linux:boot:A";
+    expect(probe.current(20)).toBe(fresh);
+    expect(reader.mock.calls).toEqual([[10], [10], [20], [20]]);
+  });
+
+  test.each(["current", "compare"] as const)(
+    "%s starts the negative TTL after a slow reader returns",
+    (method) => {
+      const timer = new FakeTimer();
+      const reader = mock(() => {
+        timer.advanceTime(1_000);
+        return undefined;
+      });
+      const probe = createLockOwnerGenerationProbe({
+        platform: "linux",
+        readLinuxProcessGenerationToken: reader,
+        now: () => timer.now(),
+        sameVerdictTtlMs: 20,
+        captureDisabled: () => false,
+      });
+      const sample = () =>
+        method === "current" ? probe.current(10) : probe.compare(10, "linux:boot:A");
+      const expected = method === "current" ? undefined : "unknown";
+      expect(sample()).toBe(expected);
+      expect(sample()).toBe(expected);
+      timer.advanceTime(19);
+      expect(sample()).toBe(expected);
+      expect(reader).toHaveBeenCalledTimes(1);
+      timer.advanceTime(1);
+      expect(sample()).toBe(expected);
+      expect(reader).toHaveBeenCalledTimes(2);
+    },
+  );
+
   test.each(["linux", "darwin"] as const)("routes %s to its existing reader", (platform) => {
     const linux = mock(() => "linux:boot:10");
     const darwin = mock(() => "darwin-utc:Tue Oct 6 07:35:51 2026");
@@ -136,18 +250,26 @@ describe("lock owner generation probe", () => {
     expect(reader.mock.calls).toEqual([[10], [20]]);
   });
 
-  test("current retries undefined, caches the first defined token per PID, and never supplies compare", () => {
+  test("current retries undefined at the TTL, caches the first defined token per PID, and never supplies compare", () => {
+    const timer = new FakeTimer();
     let fresh: string | undefined;
     const reader = mock(() => fresh);
     const probe = createLockOwnerGenerationProbe({
       platform: "linux",
       readLinuxProcessGenerationToken: reader,
+      now: () => timer.now(),
+      sameVerdictTtlMs: 20,
       captureDisabled: () => false,
     });
     expect(probe.current(10)).toBeUndefined();
     fresh = "linux:boot:A";
+    timer.advanceTime(19);
+    expect(probe.current(10)).toBeUndefined();
+    expect(reader).toHaveBeenCalledTimes(1);
+    timer.advanceTime(1);
     expect(probe.current(10)).toBe(fresh);
     fresh = "linux:boot:B";
+    timer.advanceTime(20);
     expect(probe.current(10)).toBe("linux:boot:A");
     expect(reader).toHaveBeenCalledTimes(2);
     expect(probe.compare(10, "linux:boot:B")).toBe("same");

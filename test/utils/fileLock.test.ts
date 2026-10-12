@@ -30,6 +30,52 @@ describe("fileLock primitive", () => {
   });
 
   describe("OS generation ownership (#11812)", () => {
+    test("captures generation before creating a fresh lock", () => {
+      const probe = new FakeLockOwnerGenerationProbe();
+      const present: boolean[] = [];
+      probe.onCurrent = () => present.push(existsSync(lockPath));
+      expect(tryAcquireExclusiveLock(lockPath, { pid: 100, ownerGeneration: probe })).toBe(true);
+      expect(present).toEqual([false]);
+      expect(readExclusiveLockContent(lockPath)?.generation).toBe(probe.token);
+    });
+
+    test("captures generation before the final reclaim create, never during an empty lock", () => {
+      const probe = new FakeLockOwnerGenerationProbe();
+      probe.verdict = "different";
+      const old = "9999\nowner\n\nlinux:boot:old";
+      writeFileSync(lockPath, old);
+      const samples: (string | undefined)[] = [];
+      probe.onCurrent = () =>
+        samples.push(existsSync(lockPath) ? readFileSync(lockPath, "utf8") : undefined);
+      expect(
+        tryAcquireExclusiveLock(lockPath, {
+          pid: 100,
+          ownerGeneration: probe,
+          isProcessRunning: () => true,
+        }),
+      ).toBe(true);
+      expect(samples).toEqual([old, undefined]);
+      expect(readExclusiveLockContent(lockPath)?.generation).toBe(probe.token);
+    });
+
+    test("a contended same-generation attempt captures before create and preserves every byte", () => {
+      const probe = new FakeLockOwnerGenerationProbe();
+      probe.verdict = "same";
+      const body = "9999\nowner\nmetadata\nlinux:boot:old  ";
+      writeFileSync(lockPath, body);
+      const samples: string[] = [];
+      probe.onCurrent = () => samples.push(readFileSync(lockPath, "utf8"));
+      expect(
+        tryAcquireExclusiveLock(lockPath, {
+          pid: 100,
+          ownerGeneration: probe,
+          isProcessRunning: () => true,
+        }),
+      ).toBe(false);
+      expect(samples).toEqual([body]);
+      expect(readFileSync(lockPath, "utf8")).toBe(body);
+    });
+
     test.each([9999, 100])(
       "reclaims live recycled PID %d and records the new generation",
       (ownerPid) => {

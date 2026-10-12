@@ -8,11 +8,13 @@ export class FakeLockOwnerGenerationProbe implements LockOwnerGenerationProbe {
   verdict: LockOwnerGenerationVerdict = "unknown";
   currentError?: Error;
   compareError?: Error;
+  onCurrent?: (pid: number) => void;
   currentCalls: number[] = [];
   compareCalls: { pid: number; recorded: string }[] = [];
 
   current(pid: number): string | undefined {
     this.currentCalls.push(pid);
+    this.onCurrent?.(pid);
     if (this.currentError) {
       throw this.currentError;
     }

@@ -3242,7 +3242,8 @@ export class UnixSocketServer {
 
   private async restoreSelectorSessions(args: unknown, socketSessionId: string): Promise<void> {
     const token = this.ownedSessionsOwnerToken(args);
-    if (token !== undefined) {
+    // A queued call must not recreate its closed connection's identity (#11999).
+    if (token !== undefined && this.clientSockets.has(socketSessionId)) {
       try {
         if (this.daemonState.isInitialized()) {
           this.daemonState

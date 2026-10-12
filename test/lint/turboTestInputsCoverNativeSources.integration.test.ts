@@ -61,15 +61,25 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     // PinchGeometryTest.kt / PinchGeometryTests.swift (issue #2997).
     "android/control-proxy/src/test/kotlin/**",
     "ios/control-proxy/Tests/**",
+    // ownerTokenClientInventory.test.ts reads the desktop owner-token compatibility pins.
+    "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpDaemonClient.kt",
+    "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpHttpClient.kt",
+    "android/desktop-core/src/main/kotlin/dev/jasonpearson/automobile/desktop/core/daemon/McpStdioClient.kt",
     // coordinateMappingGoldenVectorParity.test.ts parses the inline golden
     // tables out of CoordinateMappingGoldenVectorTest.kt (issue #4547).
     "android/desktop-core/src/test/kotlin/**",
     // test/helpers/capturedH264Stream.ts reads the real x264 sample stream for the
     // packet-boundary tests (issue #10150).
     "android/desktop-core/src/test/resources/sample.h264",
+    // ownerTokenClientInventory.test.ts reads the JUnit socket and heartbeat owner fields.
+    "android/junit-runner/src/main/kotlin/dev/jasonpearson/automobile/junit/DaemonHeartbeat.kt",
+    "android/junit-runner/src/main/kotlin/dev/jasonpearson/automobile/junit/DaemonSocketClient.kt",
     // executePlanToolResultsCapture.test.ts / executePlanCleanupToolResults.test.ts read the
     // captured executePlan envelopes the JUnit runner contract tests also consume (#10110).
     "android/junit-runner/src/test/resources/captured/**",
+    // ownerTokenClientInventory.test.ts reads the Swift owner-token compatibility pins.
+    "ios/XCTestRunner/Sources/XCTestRunner/MCP/AutoMobileDaemonClient.swift",
+    "ios/XCTestRunner/Sources/XCTestRunner/MCP/StreamableHTTPMCPClient.swift",
     // generateMdmProfile.test.ts reads the bundle identifiers from the network-filter
     // Info.plists to pin the profile payloads to the shipped app.
     "ios/network-filter/Packaging/**",

@@ -16,6 +16,8 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.serializer
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -109,6 +111,111 @@ class DaemonSocketClientSendFailureTest {
     assertTrue(response.success)
     assertEquals(JsonObject(mapOf("ok" to JsonPrimitive(true))), response.result)
     assertEquals(0, client.pendingRequestCount())
+  }
+
+  @Test(timeout = OWNER_TEST_TIMEOUT_MS)
+  fun `tool calls replace caller owner metadata with the injected token and preserve sessions`() {
+    client.close()
+    connection.close()
+    client =
+      DaemonSocketClient(
+        tempDirectory.resolve("s").toString(),
+        clientVersion = null,
+        clientBuildId = null,
+        clientEntryScript = null,
+        livenessOwnerToken = "injected-owner",
+      )
+    connection = server.accept()
+    val request =
+      captureRequest(connection) {
+        client.callTool(
+          "x",
+          JsonObject(
+            mapOf(
+              OWNER_TOKEN_KEY to JsonPrimitive("caller-data"),
+              "sessionUuid" to JsonPrimitive("caller-session"),
+            ),
+          ),
+          OWNER_REQUEST_TIMEOUT_MS,
+        )
+      }
+    val arguments = request.params["arguments"]!!.jsonObject
+    assertEquals("tools/call", request.method)
+    assertEquals("injected-owner", arguments[OWNER_TOKEN_KEY]!!.jsonPrimitive.content)
+    assertEquals("caller-session", arguments["sessionUuid"]!!.jsonPrimitive.content)
+  }
+
+  @Test(timeout = OWNER_TEST_TIMEOUT_MS)
+  fun `default clients in one process send the same owner token`() {
+    val first =
+      captureRequest(connection) {
+        client.callTool("x", JsonObject(emptyMap()), OWNER_REQUEST_TIMEOUT_MS)
+      }
+    DaemonSocketClient(
+        tempDirectory.resolve("s").toString(),
+        clientVersion = null,
+        clientBuildId = null,
+        clientEntryScript = null,
+      )
+      .use { second ->
+        server.accept().use { secondConnection ->
+          val next =
+            captureRequest(secondConnection) {
+              second.callTool("x", JsonObject(emptyMap()), OWNER_REQUEST_TIMEOUT_MS)
+            }
+          val firstArguments = first.params["arguments"]!!.jsonObject
+          val nextArguments = next.params["arguments"]!!.jsonObject
+          assertEquals(
+            DaemonLivenessOwner.token,
+            firstArguments[OWNER_TOKEN_KEY]!!.jsonPrimitive.content,
+          )
+          assertEquals(firstArguments[OWNER_TOKEN_KEY], nextArguments[OWNER_TOKEN_KEY])
+          assertEquals(client.sessionUuid, firstArguments["sessionUuid"]!!.jsonPrimitive.content)
+          assertEquals(second.sessionUuid, nextArguments["sessionUuid"]!!.jsonPrimitive.content)
+        }
+      }
+  }
+
+  @Test(timeout = OWNER_TEST_TIMEOUT_MS)
+  fun `resource reads and daemon methods add no tool owner metadata`() {
+    val resource =
+      captureRequest(connection) { client.readResource("test://x", OWNER_REQUEST_TIMEOUT_MS) }
+    val daemon =
+      captureRequest(connection) {
+        client.callDaemonMethod("daemon/status", OWNER_REQUEST_TIMEOUT_MS)
+      }
+    assertEquals("resources/read", resource.method)
+    assertEquals("daemon/status", daemon.method)
+    assertFalse(json.encodeToString(resource).contains(OWNER_TOKEN_KEY))
+    assertFalse(json.encodeToString(daemon).contains(OWNER_TOKEN_KEY))
+  }
+
+  private fun captureRequest(socket: SocketChannel, call: () -> DaemonResponse): DaemonRequest {
+    val captured = CompletableFuture<DaemonRequest>()
+    responseThread =
+      thread(isDaemon = true, name = "daemon-test-owner-frame") {
+        try {
+          val reader = Channels.newInputStream(socket).bufferedReader(StandardCharsets.UTF_8)
+          val writer = Channels.newOutputStream(socket).bufferedWriter(StandardCharsets.UTF_8)
+          val request = json.decodeFromString(serializer<DaemonRequest>(), reader.readLine())
+          writer.write(
+            json.encodeToString(DaemonResponse(request.id, "mcp_response", success = true)),
+          )
+          writer.newLine()
+          writer.flush()
+          captured.complete(request)
+        } catch (e: Exception) {
+          captured.completeExceptionally(e)
+        }
+      }
+    assertTrue(call().success)
+    return captured.get(OWNER_TEST_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+  }
+
+  private companion object {
+    const val OWNER_TOKEN_KEY = "__autoMobileOwnedSessionsOwnerToken"
+    const val OWNER_REQUEST_TIMEOUT_MS = 1000L
+    const val OWNER_TEST_TIMEOUT_MS = 2000L
   }
 
   private fun assertSendFailure(call: () -> DaemonResponse) {

@@ -10,10 +10,14 @@ The requirement vocabulary and default resolution are documented in
 
 The first native milestone deliberately uses zero pooling. Every relinquished
 device is destroyed through the existing durable native journal, with
-authoritative absence required before its capacity is freed. The broker has
-tested clean-reset and reuse interfaces, but native reuse is rejected until
-platform contamination tests qualify an implementation. Fake reset tests are
-not evidence of native isolation.
+authoritative absence required before its capacity is freed. Native iOS clean
+reuse is an experimental opt-in, pending contamination qualification. Its reset
+drains the execution, stops the device through the ordinary lifecycle handler,
+erases it, and boots that same simulator. Fresh inventory must confirm the exact
+type, runtime, availability, and expected state; durable ownership and native
+binding checks fence every mutation. Any failure falls back to journaled
+destruction. Android still uses zero pooling. Fake reset tests are not evidence
+of native isolation.
 
 Native zero-pooling qualification passed on October 12, 2026, using broker
 commit `6fb70c201` on this macOS host with iPhone 17 Pro / iOS 26.5:

@@ -31,6 +31,7 @@ describe("session release-reason table (#11258)", () => {
       terminal: false,
       recoverable: false,
       reissuableByName: false,
+      releasedBeforeHandout: false,
     });
     expect(isTerminalReleaseReason("replay-lease-expired")).toBe(false);
     expect(releaseReasonStrength("replay-lease-expired")).toBe(0);
@@ -62,6 +63,7 @@ describe("session release-reason table (#11258)", () => {
       terminal: false,
       recoverable: false,
       reissuableByName: false,
+      releasedBeforeHandout: false,
     });
   });
 
@@ -72,6 +74,7 @@ describe("session release-reason table (#11258)", () => {
       idle: false,
       recoverable: false,
       reissuableByName: false,
+      releasedBeforeHandout: false,
     });
     expect(releaseReasonStrength("restart-recovery-timeout")).toBe(2);
     expect(releasedRowStatus("restart-recovery-timeout")).toBe("expired");
@@ -150,6 +153,24 @@ describe("session release-reason table (#11258)", () => {
     );
   });
 
+  test("releasedBeforeHandout tags exactly the failed latest-incarnation acquisitions", () => {
+    for (const [reason, traits] of Object.entries(SESSION_RELEASE_REASON_TRAITS)) {
+      expect(traits.releasedBeforeHandout).toBe(
+        reason === "allocation-rollback" || reason === "session-creation-timeout",
+      );
+    }
+    for (const [family, traits] of Object.entries(SESSION_RELEASE_REASON_FAMILY_TRAITS)) {
+      expect(traits.releasedBeforeHandout).toBe(
+        family === "device-disconnected-during-session-create:",
+      );
+      expect(sessionReleaseReasonTraits(`${family}device`).releasedBeforeHandout).toBe(
+        traits.releasedBeforeHandout,
+      );
+      expect(sessionReleaseReasonTraits(family).releasedBeforeHandout).toBe(false);
+    }
+    expect(sessionReleaseReasonTraits("unknown").releasedBeforeHandout).toBe(false);
+  });
+
   test("recoverable handoffs are never terminal", () => {
     expect(literalReleaseReasonsWhere("recoverable").sort()).toEqual([
       "daemon-restart",
@@ -184,6 +205,7 @@ describe("session release-reason table (#11258)", () => {
       terminal: false,
       recoverable: false,
       reissuableByName: false,
+      releasedBeforeHandout: false,
     });
     expect(isIdleReleaseReason("some-future-reason")).toBe(false);
     expect(isExpiryReleaseReason("some-future-reason")).toBe(false);

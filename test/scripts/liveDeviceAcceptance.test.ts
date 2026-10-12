@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { createHash, createHmac } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -6,6 +6,15 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ACCEPTANCE_DISCOVERY_CAPABILITY_ENV } from "../../src/daemon/constants";
 import { DAEMON_LIVE_ACCEPTANCE_STARTUP_SECRET_ENV } from "../../src/daemon/liveAcceptanceCapability";
+import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
+import { shapeToolCallError } from "../../src/server/shapeToolCallError";
+import {
+  getAndroidSchema,
+  getAppleSchema,
+  killDeviceSchema,
+  provisionDeviceSchema,
+  startDeviceSchema,
+} from "../../src/server/deviceTools";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
   assertMode,
@@ -688,10 +697,7 @@ function createHarness(
       }
       if (name === "tapAt") {
         if (arguments_.sessionUuid === undefined) {
-          return {
-            isError: true,
-            structuredContent: { error: ambiguityDiagnostic(matrixPlatform) },
-          };
+          return ambiguityRefusal(matrixPlatform);
         }
         const sessionUuid = String(arguments_.sessionUuid);
         requireMintedSessionCapability(sessionUuid, "tapAt");
@@ -945,6 +951,29 @@ function assertReadinessImmediatelyFollowsSuccess(harness: Harness, sessionUuid:
 }
 
 describe("live device acceptance harness", () => {
+  beforeAll(() => {
+    // Compile shared immutable schemas, including nested objects/arrays, outside test timing.
+    const acquisition = { deviceId: "schema-warmup", enableTools: [...ENABLED_ACCEPTANCE_TOOLS] };
+    for (const schema of [getAndroidSchema, getAppleSchema, startDeviceSchema]) {
+      schema.safeParse(acquisition);
+    }
+    killDeviceSchema.safeParse({
+      device: { platform: "android", name: "schema-warmup", deviceId: "schema-warmup" },
+    });
+    provisionDeviceSchema.safeParse({
+      device: {
+        platform: "android",
+        name: "schema-warmup",
+        spec: {
+          runtime: "35",
+          deviceType: "pixel_8",
+          configuration: { memoryMb: 4096, cpuCores: 4 },
+        },
+      },
+      enableTools: [...ENABLED_ACCEPTANCE_TOOLS],
+    });
+  });
+
   test("restarts a reachable stale daemon and logs the previous-run diagnosis", async () => {
     const commands: string[][] = [];
     const errors: string[] = [];
@@ -2524,10 +2553,19 @@ function bootedDeviceFixture(platform: "android" | "ios", deviceId: string) {
   });
 }
 
-function ambiguityDiagnostic(platform: "android" | "ios"): string {
-  return platform === "ios"
-    ? "Multiple iOS simulators detected. Provide sessionUuid to target a specific simulator."
-    : "Multiple Android devices detected. Provide sessionUuid to target a specific device.";
+function ambiguityRefusal(platform: "android" | "ios") {
+  return shapeToolCallError(
+    new AmbiguousDeviceTargetError(
+      platform === "ios"
+        ? "Multiple iOS simulators detected. Provide sessionUuid to target a specific simulator."
+        : "Multiple Android devices detected. Provide sessionUuid to target a specific device.",
+      [
+        { deviceId: `${platform}-device`, platform },
+        { deviceId: `${platform}-sibling`, platform },
+      ],
+    ),
+    { toolName: "tapAt", source: "MCP" },
+  );
 }
 
 describe("additive absolute-coordinate live-device acceptance gates", () => {
@@ -2818,10 +2856,7 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
             return success({ screenSize: { width: 1080, height: 2400 } });
           }
           if (name === "tapAt" && arguments_.sessionUuid === undefined) {
-            return {
-              isError: true,
-              structuredContent: { error: ambiguityDiagnostic(platform) },
-            };
+            return ambiguityRefusal(platform);
           }
           if (name === "tapAt") {
             return success({
@@ -2836,15 +2871,135 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
         async close() {},
       };
 
-      await expect(
-        runTapAtMultiDeviceRefusalCheck(coordinateArgs(platform), coordinateDependencies(client)),
-      ).resolves.toEqual({
+      const result = await runTapAtMultiDeviceRefusalCheck(
+        coordinateArgs(platform),
+        coordinateDependencies(client),
+      );
+      expect(result).toEqual({
         platform,
         bootedDeviceCount: 2,
         targetedDeviceId: `${platform}-device`,
       });
     }
   });
+
+  test.each([
+    "old text-only",
+    "wrong code",
+    "retryable",
+    "one candidate",
+    "wrong platform",
+    "missing deviceId",
+    "non-error envelope",
+  ])("rejects %s platform ambiguity evidence", async (kind) => {
+    const refusal = ambiguityRefusal("android");
+    const payload = JSON.parse(refusal.content[0].text) as Record<string, unknown>;
+    if (kind === "wrong code") {
+      payload.code = "unrelated_error";
+    }
+    if (kind === "retryable") {
+      payload.retryable = true;
+    }
+    if (kind === "one candidate") {
+      payload.candidates = [{ deviceId: "android-device", platform: "android" }];
+    }
+    if (kind === "wrong platform") {
+      payload.candidates = [
+        { deviceId: "ios-device", platform: "ios" },
+        { deviceId: "ios-sibling", platform: "ios" },
+      ];
+    }
+    if (kind === "missing deviceId") {
+      payload.candidates = [{ platform: "android" }, { platform: "android" }];
+    }
+    const client: McpSessionClient = {
+      async callTool(name, arguments_) {
+        if (name === "listDevices") {
+          return success({
+            devices: [
+              bootedDeviceFixture("android", "android-device"),
+              bootedDeviceFixture("android", "android-sibling"),
+            ],
+          });
+        }
+        if (name === "observe") {
+          return success({ screenSize: { width: 1080, height: 2400 } });
+        }
+        if (name === "tapAt" && arguments_.sessionUuid !== undefined) {
+          return staticTapSuccess(arguments_, "android");
+        }
+        if (name === "tapAt") {
+          return {
+            isError: kind !== "non-error envelope",
+            content: [
+              {
+                type: "text",
+                text:
+                  kind === "old text-only"
+                    ? "Multiple Android devices detected. Provide sessionUuid to target a specific device."
+                    : JSON.stringify(payload),
+              },
+            ],
+          };
+        }
+        throw new Error(`Unexpected tool ${name}`);
+      },
+      async close() {},
+    };
+    await expect(
+      runTapAtMultiDeviceRefusalCheck(coordinateArgs("android"), coordinateDependencies(client)),
+    ).rejects.toThrow("tapAt bare ambiguity returned an unexpected diagnostic");
+  });
+
+  test.each([false, true])(
+    "accepts mixed-platform bare ambiguity transportWrapped=%s",
+    async (wrapped) => {
+      const client: McpSessionClient = {
+        async callTool(name, arguments_) {
+          if (name === "listDevices") {
+            return success({
+              devices: [
+                bootedDeviceFixture("android", "android-device"),
+                bootedDeviceFixture("android", "android-sibling"),
+                bootedDeviceFixture("ios", "ios-device"),
+              ],
+            });
+          }
+          if (name === "observe") {
+            return success({ screenSize: { width: 1080, height: 2400 } });
+          }
+          if (
+            name === "tapAt" &&
+            arguments_.platform === undefined &&
+            arguments_.sessionUuid === undefined
+          ) {
+            const diagnostic =
+              "Both Android and iOS devices are connected. For a device tool call, pass sessionUuid";
+            return {
+              isError: true,
+              content: [
+                {
+                  type: "text",
+                  text: wrapped ? `Error: MCP error -32603: ${diagnostic}` : diagnostic,
+                },
+              ],
+            };
+          }
+          if (name === "tapAt" && arguments_.sessionUuid === undefined) {
+            return ambiguityRefusal("android");
+          }
+          if (name === "tapAt") {
+            return staticTapSuccess(arguments_, "android");
+          }
+          throw new Error(`Unexpected tool ${name}`);
+        },
+        async close() {},
+      };
+      await expect(
+        runTapAtMultiDeviceRefusalCheck(coordinateArgs("android"), coordinateDependencies(client)),
+      ).resolves.toMatchObject({ bootedDeviceCount: 3, targetedDeviceId: "android-device" });
+    },
+  );
 
   test("fails a targeted multi-device result that omits deviceId", async () => {
     const client: McpSessionClient = {
@@ -2861,10 +3016,7 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
           return success({ screenSize: { width: 1080, height: 2400 } });
         }
         if (name === "tapAt" && arguments_.sessionUuid === undefined) {
-          return {
-            isError: true,
-            structuredContent: { error: ambiguityDiagnostic("android") },
-          };
+          return ambiguityRefusal("android");
         }
         if (name === "tapAt") {
           return success({ x: arguments_.x, y: arguments_.y });
@@ -2894,10 +3046,7 @@ describe("additive absolute-coordinate live-device acceptance gates", () => {
           return success({ screenSize: { width: 1080, height: 2400 } });
         }
         if (name === "tapAt" && arguments_.platform === undefined) {
-          return {
-            isError: true,
-            structuredContent: { error: ambiguityDiagnostic("android") },
-          };
+          return ambiguityRefusal("android");
         }
         if (name === "tapAt" && arguments_.sessionUuid === undefined) {
           return success({

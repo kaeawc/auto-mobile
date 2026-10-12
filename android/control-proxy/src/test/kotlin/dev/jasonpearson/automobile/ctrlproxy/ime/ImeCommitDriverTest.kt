@@ -777,24 +777,68 @@ class ImeCommitDriverTest {
   }
 
   @Test
-  fun `restart during word run reconciles lost units without duplicate application`() {
-    val sink = restartingSink("existing:", true)
-    val text = "line one\nline two\nline three"
-    val result = commit(sink, text, PRIOR_IME_ID)
-    assertTrue(result.success)
-    assertEquals("existing:" + text, sink.editorText)
-    assertEquals(text, result.insertedText)
-    assertEquals(text, sink.appliedChars.joinToString(""))
-    assertEquals(28, result.committedUnits)
+  fun `pure reconciliation distinguishes phase restart and visible prefix`() {
+    val units = listOf("a", "b")
+    for (postDispatch in listOf(false, true)) {
+      assertEquals(
+        ImeCommitDriver.Reconciliation.Resume(1),
+        ImeCommitDriver.reconcileDecision(postDispatch, false, "", "a", units),
+      )
+      assertEquals(
+        if (postDispatch) ImeCommitDriver.Reconciliation.Succeed("")
+        else ImeCommitDriver.Reconciliation.Fail(NONE_APPLIED_ERROR, ""),
+        ImeCommitDriver.reconcileDecision(postDispatch, true, "", "", units),
+      )
+      assertEquals(
+        if (postDispatch) ImeCommitDriver.Reconciliation.Succeed("ab")
+        else ImeCommitDriver.Reconciliation.Continue,
+        ImeCommitDriver.reconcileDecision(postDispatch, false, "", "ab", units),
+      )
+    }
+    for (restart in listOf(false, true)) {
+      assertEquals(
+        if (restart) ImeCommitDriver.Reconciliation.Continue
+        else ImeCommitDriver.Reconciliation.Fail("Editor disconnected during IME commit", null),
+        ImeCommitDriver.reconcileDecision(false, restart, null, null, units),
+      )
+      assertEquals(
+        if (restart) ImeCommitDriver.Reconciliation.Continue
+        else ImeCommitDriver.Reconciliation.Fail("Editor disconnected during IME commit", "AB"),
+        ImeCommitDriver.reconcileDecision(false, restart, "", "AB", units),
+      )
+    }
+    assertEquals(
+      ImeCommitDriver.Reconciliation.Succeed(null),
+      ImeCommitDriver.reconcileDecision(true, false, null, null, units),
+    )
+    assertEquals(
+      ImeCommitDriver.Reconciliation.Succeed("AB"),
+      ImeCommitDriver.reconcileDecision(true, false, "", "AB", units),
+    )
   }
 
   @Test
-  fun `finish and same editor non restart resumes after lost first five units`() {
+  fun `restart during word run reconciles four captured loss points without duplicate application`() {
+    for (lostAt in listOf(7, 5, 10, 16)) {
+      val sink = restartingSink("existing:", true, lostAt)
+      val text = "line one\nline two\nline three"
+      val result = commit(sink, text, PRIOR_IME_ID)
+      assertTrue(result.success)
+      assertEquals("existing:" + text, sink.editorText)
+      assertEquals(text, result.insertedText)
+      assertEquals(text, sink.appliedChars.joinToString(""))
+      assertEquals(28, result.committedUnits)
+    }
+  }
+
+  @Test
+  fun `finish and same editor non restart with no applied units never resends`() {
     val sink = restartingSink("existing:", false)
     val result = commit(sink, "line one", PRIOR_IME_ID)
-    assertTrue(result.success)
-    assertEquals("existing:line one", sink.editorText)
-    assertEquals("line one", result.insertedText)
+    assertEquals(NONE_APPLIED_ERROR, result.error)
+    assertEquals("existing:", sink.editorText)
+    assertEquals("", result.insertedText)
+    assertEquals(5, sink.committedChars.size)
   }
 
   @Test
@@ -826,39 +870,135 @@ class ImeCommitDriverTest {
   }
 
   @Test
-  fun `non restart empty baseline with no applied units is ambiguous`() {
+  fun `non restart empty baseline with no applied units never resends`() {
     val sink = restartingSink("", false)
     val result = commit(sink, "line one", PRIOR_IME_ID)
-    assertEquals("Editor disconnected during IME commit", result.error)
+    assertEquals(NONE_APPLIED_ERROR, result.error)
     assertEquals(5, sink.committedChars.size)
     assertEquals("", result.insertedText)
   }
 
   @Test
-  fun `hole in restarted editor is a typed failure carrying its delta`() {
-    val sink = restartingSink("existing:", true)
-    sink.beforeContinuation = {
-      sink.generation = 1
-      sink.stale = false
-      sink.editorText = "existing:lie "
+  fun `autoformat restart continues without resend but non restart disconnects`() {
+    for (restart in listOf(true, false)) {
+      val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
+      sink.editorText = ""
+      sink.restarting = restart
+      sink.afterCommit = { sink.editorText = sink.editorText?.uppercase() }
+      sink.beforeContinuation = { if (sink.generation == 0L) sink.generation++ }
+      val result = commit(sink, "ab cd", PRIOR_IME_ID)
+      assertEquals(restart, result.success)
+      assertEquals(if (restart) "AB CD" else "AB ", result.insertedText)
+      assertEquals(if (restart) "ab cd" else "ab ", sink.committedChars.joinToString(""))
+      if (!restart) assertEquals("Editor disconnected during IME commit", result.error)
     }
-    val result = commit(sink, "line one", PRIOR_IME_ID)
-    assertEquals(
-      "Editor restarted its input connection during IME commit; the editor text does not match the dispatched units",
-      result.error,
-    )
-    assertEquals("lie ", result.insertedText)
-    assertTrue(result.partialApplication)
   }
 
   @Test
-  fun `restart after last unit is detected during final verification`() {
-    val sink = restartingSink("existing:", true)
+  fun `late restart after more than six final polls resumes a visible prefix`() {
+    val sink = restartingSink("existing:", true, 2)
+    sink.advanceClockOnDrain = true
+    sink.beforeContinuation = {
+      if (sink.clockMs > 240L && sink.stale) {
+        sink.generation++
+        sink.stale = false
+      }
+    }
     val result = commit(sink, "hello", PRIOR_IME_ID)
     assertTrue(result.success)
     assertEquals("existing:hello", sink.editorText)
     assertEquals("hello", result.insertedText)
     assertEquals("hello", sink.appliedChars.joinToString(""))
+    assertTrue(sink.clockMs > 240L)
+  }
+
+  @Test
+  fun `final null forever waits through reconnect window then succeeds unverifiably`() {
+    val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
+    sink.editorText = ""
+    sink.afterCommit = { sink.stale = true }
+    sink.advanceClockOnDrain = true
+    val result = commit(sink, "hello", PRIOR_IME_ID)
+    assertTrue(result.success)
+    assertNull(result.insertedText)
+    assertEquals(CtrlProxyIme.INPUT_CONNECTION_TIMEOUT_MS, sink.clockMs)
+    assertEquals("hello", sink.committedChars.joinToString(""))
+  }
+
+  @Test
+  fun `consume on space fails without ever resending consumed units`() {
+    val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
+    sink.editorText = ""
+    sink.afterCommit = {
+      if (sink.committedChars.last() == " ") {
+        sink.editorText = ""
+        sink.generation++
+      }
+    }
+    val result = commit(sink, "ab cd", PRIOR_IME_ID)
+    assertEquals(NONE_APPLIED_ERROR, result.error)
+    assertFalse(result.success)
+    assertTrue(result.partialApplication)
+    assertEquals("", result.insertedText)
+    assertEquals("ab ", sink.committedChars.joinToString(""))
+  }
+
+  @Test
+  fun `send on final newline succeeds with empty delta and no resend`() {
+    val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
+    sink.editorText = ""
+    sink.afterCommit = {
+      if (sink.committedChars.last() == "\n") {
+        sink.editorText = ""
+        sink.generation++
+      }
+    }
+    val result = commit(sink, "hello\n", PRIOR_IME_ID)
+    assertTrue(result.success)
+    assertEquals("", result.insertedText)
+    assertEquals("hello\n", sink.committedChars.joinToString(""))
+  }
+
+  @Test
+  fun `auto submit after final unit succeeds without reading or typing a new editor`() {
+    for (newIdentity in listOf(null, "different-editor")) {
+      val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
+      sink.editorText = ""
+      sink.advanceClockOnDrain = true
+      sink.afterCommit = {
+        if (sink.committedChars.size == 4) {
+          sink.generation++
+          sink.identity = newIdentity
+          sink.editorText = "new editor content"
+        }
+      }
+      val result = commit(sink, "1234", PRIOR_IME_ID)
+      assertTrue(result.success)
+      assertNull(result.insertedText)
+      assertEquals("1234", sink.committedChars.joinToString(""))
+      assertEquals(1, sink.editorReads)
+      assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
+      assertTrue(sink.clockMs <= 240L)
+    }
+  }
+
+  @Test
+  fun `password restart resends only missing visible prefix units without reporting text`() {
+    val sink =
+      FakeImeCommitSink(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD)
+    sink.editorText = ""
+    sink.beforeCommit = { if (it == 2) sink.stale = true }
+    sink.beforeContinuation = {
+      if (sink.stale) {
+        sink.generation++
+        sink.stale = false
+      }
+    }
+    val result = commit(sink, "hunter2", PRIOR_IME_ID)
+    assertTrue(result.success)
+    assertEquals("hunter2", sink.editorText)
+    assertEquals("hunter2", sink.appliedChars.joinToString(""))
+    assertNull(result.insertedText)
   }
 
   @Test
@@ -885,7 +1025,7 @@ class ImeCommitDriverTest {
         val sink = FakeImeCommitSink(inputType, failAtCommitIndex = failAt)
         sink.editorText = ""
         assertNull(commit(sink, "secret", PRIOR_IME_ID).insertedText)
-        assertEquals(0, sink.editorReads)
+        assertTrue(sink.editorReads > 0)
       }
     }
   }
@@ -905,40 +1045,40 @@ class ImeCommitDriverTest {
   }
 
   @Test
-  fun `unreadable baseline refuses generation changes`() {
-    val sink = restartingSink("existing:", true)
-    sink.editorText = null
-    val result = commit(sink, "line one", PRIOR_IME_ID)
-    assertEquals(
-      "Editor restarted its input connection during IME commit; the applied text could not be read back",
-      result.error,
-    )
-    assertNull(result.insertedText)
-    assertEquals(5, sink.committedChars.size)
+  fun `unreadable baseline restart continues but non restart disconnects`() {
+    for (restart in listOf(true, false)) {
+      val sink = restartingSink("existing:", restart)
+      sink.editorText = null
+      sink.advanceClockOnDrain = true
+      val result = commit(sink, "line one", PRIOR_IME_ID)
+      assertEquals(restart, result.success)
+      if (!restart) assertEquals("Editor disconnected during IME commit", result.error)
+      assertNull(result.insertedText)
+      assertEquals(if (restart) 8 else 5, sink.committedChars.size)
+    }
   }
 
   @Test
-  fun `unreadable reconnect polls only to its bounded window`() {
-    val sink = restartingSink("existing:", true)
+  fun `unreadable reconnect waits its bounded window then continues on restart`() {
+    val sink = restartingSink("existing:", true, 2)
     sink.advanceClockOnDrain = true
     sink.beforeContinuation = {
       sink.generation = 1
       sink.stale = true
     }
     val result = commit(sink, "line one", PRIOR_IME_ID)
-    assertEquals(
-      "Editor restarted its input connection during IME commit; the applied text could not be read back",
-      result.error,
-    )
-    assertTrue(sink.clockMs <= 2_045L)
-    assertEquals(5, sink.committedChars.size)
+    assertTrue(result.success)
+    assertNull(result.insertedText)
+    assertEquals(8, sink.committedChars.size)
+    assertTrue(sink.clockMs >= 2_045L)
+    assertTrue(sink.clockMs <= 4_085L)
   }
 
   @Test
-  fun `reconnect cannot resume more than three times`() {
+  fun `reconnect cannot resend a strict prefix more than three times`() {
     val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
     sink.editorText = "baseline:"
-    sink.beforeCommit = { sink.stale = true }
+    sink.beforeCommit = { if (it >= 1) sink.stale = true }
     sink.beforeContinuation = {
       sink.generation++
       sink.stale = false
@@ -946,8 +1086,8 @@ class ImeCommitDriverTest {
     val result = commit(sink, "a b", PRIOR_IME_ID)
     assertFalse(result.success)
     assertTrue(requireNotNull(result.error).contains("resume limit exceeded"))
-    assertEquals(8, sink.committedChars.size)
-    assertEquals("baseline:", sink.editorText)
+    assertEquals(5, sink.committedChars.size)
+    assertEquals("baseline:a", sink.editorText)
   }
 
   @Test
@@ -967,11 +1107,12 @@ class ImeCommitDriverTest {
   }
 
   @Test
-  fun `baseline at read cap is unavailable and rewritten baseline cannot reconcile`() {
+  fun `capped baseline and rewritten baseline continue on restart without resend`() {
     val capped = restartingSink("x".repeat(20_000), true)
     val cappedResult = commit(capped, "line one", PRIOR_IME_ID)
-    assertTrue(requireNotNull(cappedResult.error).contains("could not be read back"))
+    assertTrue(cappedResult.success)
     assertNull(cappedResult.insertedText)
+    assertEquals(8, capped.committedChars.size)
     val rewritten = restartingSink("existing:", true)
     rewritten.beforeContinuation = {
       rewritten.generation = 1
@@ -979,7 +1120,8 @@ class ImeCommitDriverTest {
       rewritten.editorText = "changed"
     }
     val result = commit(rewritten, "line one", PRIOR_IME_ID)
-    assertTrue(requireNotNull(result.error).contains("does not match the dispatched units"))
+    assertTrue(result.success)
+    assertEquals(8, rewritten.committedChars.size)
     assertNull(result.insertedText)
   }
 
@@ -1017,12 +1159,17 @@ class ImeCommitDriverTest {
     assertEquals(listOf(PRIOR_IME_ID), sink.switchedImeIds)
   }
 
-  private fun restartingSink(baseline: String, restart: Boolean): FakeImeCommitSink {
+  private fun restartingSink(
+    baseline: String,
+    restart: Boolean,
+    lostAt: Int = 0,
+  ): FakeImeCommitSink {
     val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
     sink.editorText = baseline
     sink.restarting = restart
-    sink.beforeCommit = { index -> if (index == 0) sink.stale = true }
-    sink.beforeContinuation = {
+    sink.beforeCommit = { index -> if (index == lostAt) sink.stale = true }
+    sink.beforeContinuation = continuation@{
+      if (!sink.stale) return@continuation
       if (!restart && sink.generation == 0L) {
         sink.generation = 1
         sink.identity = null
@@ -1195,6 +1342,8 @@ class ImeCommitDriverTest {
   }
 
   companion object {
+    private const val NONE_APPLIED_ERROR =
+      "Editor restarted its input connection during IME commit; none of the dispatched text is in the editor"
     private const val PRIOR_IME_ID = "dev.example/.PreviousIme"
   }
 }

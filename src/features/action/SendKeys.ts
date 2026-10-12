@@ -61,7 +61,6 @@ import {
   passwordTextPlaceholder,
   redactPasswordImeFailure,
   verifyImeCommitResult,
-  verifyImeInsertedText,
   confirmImeCommitAfterSyncLoss,
   withImeFailure,
   type ImeFailureDiagnostic,
@@ -1868,13 +1867,12 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         };
       }
       const clearWarning = cleared.warning;
-      const deviceResult = await this.textClient.commitViaIme(
+      const result = await this.textClient.commitViaIme(
         text,
         this.imeSpan ? null : prior,
         signal,
         mode === "imeKeyEvents" ? "keyEvents" : "commit",
       );
-      const result = this.verifyImeDeviceResult(deviceResult, text, routing, mode);
       progress.safeToRestore = this.canRestoreAfterImeCommit(result, prior, priorSubtype);
       progress.result = result;
       const syncConfirmed = await this.confirmImeCommitAfterSyncLoss(
@@ -1945,15 +1943,6 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         safeToRestore: progress.safeToRestore,
       };
     }
-  }
-
-  private verifyImeDeviceResult(
-    result: TextActionResult,
-    text: string,
-    routing: ImeCommitRouting,
-    mode: "ime" | "imeKeyEvents",
-  ): TextActionResult {
-    return result.success && mode === "ime" ? verifyImeInsertedText(result, text, routing) : result;
   }
 
   private imeCommitDiagnosticContext(result: TextActionResult, routing: ImeCommitRouting) {

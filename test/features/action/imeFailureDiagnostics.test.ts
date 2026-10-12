@@ -563,7 +563,7 @@ describe("IME inserted delta verification", () => {
     "line one\nltwo\nline three",
     "line one\nline twline three",
     "",
-  ])("rejects dropped units before hierarchy read-back: %j", async (insertedText) => {
+  ])("rejects dropped units after one readable observation: %j", async (insertedText) => {
     const h = harness(text + insertedText);
     let readsAtCommit = 0;
     h.client.commitViaIme = async () => {
@@ -577,7 +577,8 @@ describe("IME inserted delta verification", () => {
       imeFailure: { stage: "verification", observedText: insertedText },
     });
     expect(result.error).toContain(`the editor inserted ${JSON.stringify(insertedText)}`);
-    expect(h.observationReads).toBe(readsAtCommit);
+    expect(h.observationReads).toBe(readsAtCommit + 1);
+    expect(h.timer.getSleepHistory()).toEqual([]);
   });
 
   test.each([
@@ -636,17 +637,109 @@ describe("IME inserted delta verification", () => {
     expect((await h.executor.type({ action: "type", text, mode: "ime" })).success).toBe(true);
   });
 
-  test("password delta mismatch redacts both values", async () => {
+  test("password masked delta mismatch stays unverifiable without naming values", async () => {
     const h = harness("", passwordField());
     h.client.supportsImePasswordCommit = async () => true;
     h.client.commitViaIme = async () => ({ success: true, insertedText: "other-secret" });
     const result = await h.action.execute([{ action: "type", text: "hunter2" }]);
+    expect(result.success).toBe(true);
+    expect(result.commands[0]).not.toHaveProperty("imeFailure");
+    expect(JSON.stringify(result.commands)).not.toMatch(/hunter2|other-secret/);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("consumed text and lost focus after auto pre-check stay successful", async () => {
+    const observation = field("");
+    const h = harness("", observation);
+    h.client.commitViaIme = async () => {
+      observation.viewHierarchy = {
+        hierarchy: { node: { $: { class: "android.widget.TextView", focused: "false" } } },
+      };
+      return { success: true, insertedText: "" };
+    };
+    const result = await h.executor.type({ action: "type", text: "hello\n" });
+    expect(result.success).toBe(true);
+    expect(result).not.toHaveProperty("imeFailure");
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("delta mismatch with an unreadable focused editor stays successful", async () => {
+    const observation = field("");
+    observation.viewHierarchy = {
+      hierarchy: { node: { $: { class: "android.widget.EditText", focused: "true" } } },
+    };
+    const h = harness("", observation);
+    h.client.commitViaIme = async () => ({ success: true, insertedText: "" });
+    const result = await h.executor.type({ action: "type", text, mode: "ime" });
+    expect(result.success).toBe(true);
+    expect(result).not.toHaveProperty("imeFailure");
+    expect(h.observationReads).toBe(1);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("delta mismatch with explicit missing focus keeps the focus failure", async () => {
+    const observation = field("");
+    observation.viewHierarchy = {
+      hierarchy: { node: { $: { class: "android.widget.TextView", focused: "false" } } },
+    };
+    const h = harness("", observation);
+    h.client.commitViaIme = async () => ({ success: true, insertedText: "" });
+    const result = await h.executor.type({ action: "type", text, mode: "ime" });
     expect(result.success).toBe(false);
-    expect(result.commands[0]?.imeFailure).toMatchObject({
+    expect(result.error).toContain("focused");
+    expect(result.error).not.toContain("IME partial commit");
+    expect(result.imeFailure?.stage).toBe("verification");
+    expect(h.observationReads).toBe(1);
+    expect(h.timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("readable delta mismatch uses password routing redaction", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const result = await verifyImeCommitResult(
+      { success: true, insertedText: "other-secret" },
+      "hunter2",
+      {
+        timer,
+        settleMs: 1,
+        observe: async () => field("other"),
+        checkAbort: () => {},
+        lacksRequiredFocus: () => false,
+        focusedText: () => "other",
+        focusError: "unfocused",
+        passwordField: true,
+      },
+    );
+    expect(result.success).toBe(false);
+    expect(result.imeFailure).toMatchObject({
       expectedText: "<password, 7 characters>",
       observedText: null,
     });
-    expect(JSON.stringify(result.commands)).not.toMatch(/hunter2|other-secret/);
+    expect(JSON.stringify({ error: result.error, imeFailure: result.imeFailure })).not.toMatch(
+      /hunter2|other-secret/,
+    );
+    expect(timer.getSleepHistory()).toEqual([]);
+  });
+
+  test("delta mismatch with an observation error keeps the device acknowledgement", async () => {
+    const timer = new FakeTimer();
+    const deviceResult = { success: true, insertedText: "" };
+    let observations = 0;
+    const result = await verifyImeCommitResult(deviceResult, text, {
+      timer,
+      settleMs: 1,
+      observe: async () => {
+        observations++;
+        throw new Error("fake hierarchy unavailable");
+      },
+      checkAbort: () => {},
+      lacksRequiredFocus: () => false,
+      focusedText: () => "",
+      focusError: "unfocused",
+    });
+    expect(result).toBe(deviceResult);
+    expect(observations).toBe(1);
+    expect(timer.getSleepHistory()).toEqual([]);
   });
 
   test("the public command result omits insertedText", async () => {

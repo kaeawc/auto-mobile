@@ -222,7 +222,7 @@ export function imeCommitExceptionResult(
   };
 }
 
-/** Verify only the inserted delta, so old field content cannot hide dropped units. */
+/** Called only after a focused, readable editor confirms that delta verification is possible. */
 export function verifyImeInsertedText(
   result: TextActionResult,
   text: string,
@@ -385,6 +385,13 @@ async function verifyImeCommitReadBack(
       }
       if (observedText === undefined) {
         return result;
+      }
+      const deltaVerified = verifyImeInsertedText(result, text, {
+        focusedFieldClass: context.focusedFieldClass,
+        passwordField: verification.passwordField,
+      });
+      if (deltaVerified !== result) {
+        return deltaVerified;
       }
       const suffixMatches = imeCommitSuffixMatches(observedText, text);
       // Editors can consume markers or add prefixes across multiple segments.

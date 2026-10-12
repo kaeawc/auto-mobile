@@ -1,7 +1,10 @@
 import { DaemonState } from "../daemon/daemonState";
 import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
 import { INTERNAL_MCP_SESSION_PARAM } from "../daemon/constants";
-import { assertInputRequesterHoldsDevice } from "../daemon/inputDeviceOwnership";
+import {
+  assertInputRequesterHoldsDevice,
+  InputDeviceOwnedError,
+} from "../daemon/inputDeviceOwnership";
 import { getToolSelectionContext } from "../features/toolSelection/toolSelectionContext";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import type { Platform } from "../models";
@@ -65,6 +68,8 @@ export function assertLifecycleCallerHoldsDevice(input: {
   const sessionManager = daemonState.getSessionManager();
   const base = (uuid: string) => resolveToolSelectionBaseSessionUuid(uuid, sessionManager) ?? uuid;
   assertNotForeignManagedSlotFromSnapshot(daemonState, input);
+  const pool = daemonState.getDevicePool();
+  assertLifecycleRequesterOwnsRestartHold(pool, input);
   const owner = sessionManager.getSessionForDevice(device.deviceId) ?? undefined;
   if (!owner) {
     return;
@@ -72,7 +77,6 @@ export function assertLifecycleCallerHoldsDevice(input: {
   if (requester.sessionUuid && base(requester.sessionUuid) === base(owner)) {
     return;
   }
-  const pool = daemonState.getDevicePool();
   if (
     requester.mcpSessionId &&
     pool.getDevice(device.deviceId)?.autolockSessionId === owner &&
@@ -100,6 +104,30 @@ export function assertLifecycleCallerHoldsDevice(input: {
     sessionManager,
     remedy: LIFECYCLE_TOOL_REMEDY,
   });
+}
+
+/** Naming a handed-off holder remains connection-owned even while no live session exists. */
+function assertLifecycleRequesterOwnsRestartHold(
+  pool: ReturnType<DaemonState["getDevicePool"]>,
+  {
+    toolName,
+    device,
+    requester,
+  }: Pick<
+    Parameters<typeof assertLifecycleCallerHoldsDevice>[0],
+    "toolName" | "device" | "requester"
+  >,
+): void {
+  if (pool.isRestartReservationOwnedByOtherConnection?.(device.deviceId, requester)) {
+    throw new InputDeviceOwnedError(
+      toolName,
+      device.deviceId,
+      requester.sessionUuid,
+      "Call from the connection that owned the session at device-restart handoff, or leave " +
+        "sessionUuid out to stop without dropping its hold. force: true does not override " +
+        "naming another client's session.",
+    );
+  }
 }
 
 /** Remedy text for a lifecycle call refused because another live daemon holds the device. */

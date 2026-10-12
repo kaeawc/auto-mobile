@@ -429,8 +429,13 @@ deadline determines the reason even if the daemon was down through both deadline
 Tool activity extends only the idle deadline;
 the hold never outlasts the fixed three-minute window from device loss. A call in flight
 can retain the hold only within that window. `killDevice` and `deleteDevice`
-drop the device-restart hold only for their admitted routing session on Android and iOS;
-another session's stop (even with `force: true`) or a sessionless stop leaves it in place.
+drop the device-restart hold only after a successful stop (including an already-stopped
+outcome), for their admitted routing session on Android and iOS. A call naming that
+holder and carrying an MCP connection identity must come from a connection that owned
+it at handoff; another connection cannot name the holder to drop its hold, even with `force: true`. Calls without
+a connection identity, or holds without recorded owner connections, keep the session-only rule.
+A failed, cancelled, or unconfirmed stop keeps the hold and its original deadline.
+Another session's stop (even with `force: true`) or a sessionless stop leaves it in place.
 A base/label match requires live label state, so a label requester whose base was handed
 off leaves the hold to recovery, terminal release, idle expiry, or the window.
 An intentional stop never ends the daemon-restart source; its batch still releases it.

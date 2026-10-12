@@ -1515,13 +1515,17 @@ async function killProcessAndRetireOwnership(
   } = options;
   const shutdownDeadlineMs = context.deadlineMs;
   const deviceManager = dependencies.deviceManagerFactory();
-  if (device.platform === "android") {
-    devicePool?.markIntentionalShutdown(device.deviceId, options.stoppingSessionUuid);
-  } else if (device.platform === "ios") {
-    devicePool?.releaseDeviceRestartReservationForStop(
-      device.deviceId,
-      options.stoppingSessionUuid,
-    );
+  // A failed/cancelled/timed-out call never commits, including a late platform settlement:
+  // the unchanged restart hold remains governed by its original recovery window.
+  let commitRestartHoldStop: (() => void) | undefined;
+  if (devicePool) {
+    commitRestartHoldStop =
+      device.platform === "android"
+        ? devicePool.markIntentionalShutdown(device.deviceId, options.stoppingSessionUuid)
+        : devicePool.releaseDeviceRestartReservationForStop(
+            device.deviceId,
+            options.stoppingSessionUuid,
+          );
   }
 
   let shutdownDevice = device;
@@ -1584,6 +1588,7 @@ async function killProcessAndRetireOwnership(
   perf.endOperation("killProcess");
 
   if (alreadyStoppedMessage !== undefined) {
+    commitRestartHoldStop?.();
     return alreadyStoppedMessage;
   }
 
@@ -1609,6 +1614,7 @@ async function killProcessAndRetireOwnership(
         );
     perf.endOperation("waitForShutdown");
     shutdownWasConfirmed = true;
+    commitRestartHoldStop?.();
 
     perf.startOperation("retireOwnership");
     await retireShutdownOwnership(

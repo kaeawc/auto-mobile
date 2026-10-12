@@ -515,8 +515,9 @@ Owner decisions 2026-10-09 (#10982):
   Android AVD name or available iOS simulator UDID, never by an emulator serial
   or stopped iOS simulator name. It boots only that image and never creates a
   simulator. Existing boot capacity and admission rules apply. Unknown IDs get
-  the same not-found answer from every read tool. Running names resolve to the
-  device's serial/UDID before checking whether a session or another owner holds it.
+  the same not-found answer from every read tool. Ownership is checked on the ID
+  as given before discovery, then again on a running match's serial/UDID after
+  discovery. If either is held, the read uses the read-only device path.
 - A read without `deviceId` uses an already-running device and never boots or
   creates one. A `platform` argument alone is not an explicit ID. A stopped
   device selected earlier with `setActiveDevice`, or cached as the current device,

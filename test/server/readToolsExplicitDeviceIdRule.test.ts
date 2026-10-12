@@ -7,6 +7,7 @@ import { matchRunningReadTarget } from "../../src/devices/runningReadTarget";
 import { afterAll, afterEach, beforeAll, expect, mock, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
+import { DeviceAssignedToManagedSlotError } from "../../src/daemon/managedSlots/managedSlotRefusal";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
 import type { IosBootInstrumentation } from "../../src/features/iosSimFleet/IosBootInstrumentation";
@@ -210,6 +211,8 @@ let debugBefore: boolean;
 let registeredBefore: ReturnType<typeof ToolRegistry.getEveryRegisteredTool>;
 const owners = new Map<Platform, { pool: DevicePool; sessions: SessionManager }>();
 const unheld = new Map<Platform, { pool: DevicePool; sessions: SessionManager }>();
+let slotOwner: { pool: DevicePool; sessions: SessionManager };
+let restoreGate: (() => void) | undefined;
 const decisions = new Map<string, Map<string, string>>();
 const access = { listBooted: async () => h!.devices, isAuthorized: () => true };
 
@@ -298,8 +301,21 @@ beforeAll(async () => {
       (held ? owners : unheld).set(platform, { pool, sessions });
     }
   }
+  const timer = new FakeTimer();
+  const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+  sessions.stopCleanupTimer();
+  const pool = new DevicePool(
+    createDevicePoolDependencies(sessions, "read-rule-slot", {
+      timer,
+      deviceManager: new FakeDeviceUtils(),
+    }),
+  );
+  await pool.initializeWithDevices([]);
+  slotOwner = { pool, sessions };
 });
 afterEach(() => {
+  restoreGate?.();
+  restoreGate = undefined;
   h?.detect.mockRestore();
   h?.ensure.mockRestore();
   h?.verify.mockRestore();
@@ -321,6 +337,7 @@ afterAll(() => {
   for (const { sessions } of [...owners.values(), ...unheld.values()]) {
     sessions.stopCleanupTimer();
   }
+  slotOwner.sessions.stopCleanupTimer();
   serverConfig.setEmbeddedSdkEnabled(embeddedBefore);
   restoreFixture();
   expect(ToolRegistry.getEveryRegisteredTool()).toEqual(registeredBefore);
@@ -343,6 +360,7 @@ type Column =
   | "running-name"
   | "held-id"
   | "held-name"
+  | "held-slot-name"
   | "unknown"
   | "stopped-serial"
   | "stopped-name"
@@ -356,6 +374,7 @@ const columns: Column[] = [
   "running-name",
   "held-id",
   "held-name",
+  "held-slot-name",
   "unknown",
   "stopped-serial",
   "stopped-name",
@@ -367,7 +386,9 @@ for (const platform of ["android", "ios"] as const) {
   for (const column of columns) {
     if (
       (column === "stopped-serial" && platform !== "android") ||
-      (column === "stopped-name" && platform !== "ios")
+      (column === "stopped-name" && platform !== "ios") ||
+      // Managed Android slots identify their AVD by name; iOS has no AVD-name holder form.
+      (column === "held-slot-name" && platform !== "android")
     ) {
       continue;
     }
@@ -383,8 +404,32 @@ for (const platform of ["android", "ios"] as const) {
         const held = column.startsWith("held");
         const owner = owners.get(platform)!;
         const holderBefore = structuredClone(owner.sessions.getSession(`holder-${platform}`));
-        const daemon = held ? owner : unheld.get(platform)!;
+        const daemon =
+          column === "held-slot-name" ? slotOwner : held ? owner : unheld.get(platform)!;
         DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
+        if (column === "held-slot-name") {
+          expect(daemon.pool.getDevice(h.device.deviceId)).toBeNull();
+          const original = daemon.pool.assertNotAssignedToManagedSlot;
+          const gate = spyOn(daemon.pool, "assertNotAssignedToManagedSlot").mockImplementation(
+            async (input) => {
+              if (input.deviceId === h!.device.name) {
+                throw new DeviceAssignedToManagedSlotError(input.action, input.deviceId, {
+                  platform: "android",
+                  stableDeviceId: h!.device.name,
+                  holder: "slot",
+                  scopeKey: "scope",
+                  slotIndex: 0,
+                  scopeState: null,
+                  execSessionUuid: "slot-exec",
+                });
+              }
+            },
+          );
+          restoreGate = () => {
+            gate.mockRestore();
+            expect(daemon.pool.assertNotAssignedToManagedSlot).toBe(original);
+          };
+        }
         if (column === "ambiguous") {
           h.devices.push({ ...h.device, deviceId: "second-id" });
         }
@@ -467,8 +512,18 @@ for (const platform of ["android", "ios"] as const) {
           expect(h.androidManager.getExecutedOperations()).toEqual([]);
           expect(h.iosManager.getExecutedOperations()).toEqual([]);
           expect(h.runs[0].readPath).toBe(true);
-          expect(owner.sessions.getSession(`holder-${platform}`)).toEqual(holderBefore);
-          expect(owner.sessions.getSessionForDevice(h.device.deviceId)).toBe(`holder-${platform}`);
+          if (column === "held-id" || column === "held-slot-name") {
+            expect(h.detect).not.toHaveBeenCalled();
+          }
+          if (column === "held-slot-name") {
+            expect(daemon.sessions.getAllSessions()).toEqual([]);
+            expect(daemon.sessions.getSessionForDevice(h.device.deviceId)).toBeNull();
+          } else {
+            expect(owner.sessions.getSession(`holder-${platform}`)).toEqual(holderBefore);
+            expect(owner.sessions.getSessionForDevice(h.device.deviceId)).toBe(
+              `holder-${platform}`,
+            );
+          }
         } else {
           expect(daemon.sessions.getAllSessions()).toEqual([]);
           expect(daemon.sessions.getSessionForDevice(h.device.deviceId)).toBeNull();
@@ -482,14 +537,71 @@ for (const platform of ["android", "ios"] as const) {
       });
     }
     test(`${platform} ${column}: every tool reaches an identical decision`, () => {
-      const row = decisions.get(`${platform}:${column}`)!;
-      expect([...row.keys()].sort()).toEqual(EXPECTED);
-      expect(new Set(row.values()).size).toBe(1);
-      expect(row.get("observe")).toBe(row.get("listApps"));
-      expect(row.get("observe")).toBe(row.get("getDeviceState"));
+      const row = decisions.get(`${platform}:${column}`) ?? new Map<string, string>();
+      // Filtered runs may execute only part of the table (or just this equality pin).
+      expect(new Set(row.values()).size).toBe(row.size ? 1 : 0);
+      if (row.size === EXPECTED.length) {
+        expect([...row.keys()].sort()).toEqual(EXPECTED);
+        expect(row.get("observe")).toBe(row.get("listApps"));
+        expect(row.get("observe")).toBe(row.get("getDeviceState"));
+      }
     });
   }
 }
+
+test("a serial acquired during discovery is rechecked before readiness", async () => {
+  h = harness("android", true);
+  Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+  DaemonState.getInstance().initialize(slotOwner.sessions, slotOwner.pool);
+  let acquired = false;
+  h.detect.mockImplementation(async () => {
+    acquired = true;
+    return { devices: h!.devices, scanned: { android: true, ios: true } };
+  });
+  const original = slotOwner.sessions.getSessionForDevice;
+  const holder = spyOn(slotOwner.sessions, "getSessionForDevice").mockImplementation((deviceId) =>
+    acquired && deviceId === h!.device.deviceId ? "late-holder" : null,
+  );
+  try {
+    await ToolRegistry.getTool("listApps")!.handler({
+      platform: "android",
+      deviceId: h.device.deviceId,
+    });
+    expect(h.runs).toEqual([
+      { deviceId: h.device.deviceId, sessionUuid: undefined, readPath: true },
+    ]);
+    expect(h.detect).toHaveBeenCalledTimes(1);
+    expect(h.ensure).not.toHaveBeenCalled();
+    expect(h.verify).not.toHaveBeenCalled();
+    expect(h.adb.getExecutedCommands()).toEqual([]);
+  } finally {
+    holder.mockRestore();
+    expect(slotOwner.sessions.getSessionForDevice).toBe(original);
+  }
+});
+
+test("control naming a stopped AVD keeps the provided-device not-found outcome", async () => {
+  h = harness("android", false);
+  Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+  const daemon = unheld.get("android")!;
+  DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
+  // Control bypasses resolveReadinessReadTarget's read boot; requireProvidedReadinessDevice rejects.
+  await expect(
+    ToolRegistry.getTool("tapOn")!.handler({ platform: "android", deviceId: h.device.name }),
+  ).rejects.toThrow(
+    `Device ${h.device.name} not found on android platform. Available android devices: none`,
+  );
+  expect(h.ensure).toHaveBeenCalledTimes(1);
+  expect(h.ensure.mock.calls[0][2]?.intent).toBeUndefined();
+  expect(h.boots).toEqual([]);
+  expect(h.simctl.getMethodCalls("bootSimulator")).toEqual([]);
+  expect(h.verify).not.toHaveBeenCalled();
+  expect(h.runs).toEqual([]);
+  expect(h.adb.getExecutedCommands()).toEqual([]);
+});
+
+// The session-bound read mismatch text is pinned by observeDeviceRead.test.ts:
+// "mismatching session deviceId identifies the supplied and bound devices".
 
 test("shared running matcher: exact id wins, one/none/ambiguous, and platform filter", () => {
   const android = deviceFor("android");

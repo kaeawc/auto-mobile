@@ -1508,19 +1508,11 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
             getConnectedPlatforms,
           );
         }
-        if (readOnly && !sessionUuid && providedDeviceId) {
-          const runningReadTarget = matchRunningReadTarget(
-            (await getConnectedPlatforms()).devices,
-            providedDeviceId,
-            platform,
-          );
-          readinessTarget = runningReadTarget?.deviceId ?? readinessTarget;
-        }
         // A sessionless read that would land on a held device (its explicit deviceId, or the device
         // readiness would select) watches it through the read-only path: no readiness, pin or
         // settings work on the holder's device (#10830, #10970). The holder may also be a managed
-        // slot or another daemon (#11641). This is the only such check; the holder checks before
-        // it exempt reads.
+        // slot or another daemon (#11641). Check the raw id before discovery: a slot may know
+        // only the AVD name, and a held serial needs no discovery scan.
         if (
           readOnly &&
           !sessionUuid &&
@@ -1539,6 +1531,34 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
             input,
             options.sessionlessDeviceRead ?? this.defaultDeviceRead,
             readinessTarget,
+          );
+        }
+        const runningReadTarget =
+          readOnly && !sessionUuid && providedDeviceId
+            ? matchRunningReadTarget(
+                (await getConnectedPlatforms()).devices,
+                providedDeviceId,
+                platform,
+              )
+            : undefined;
+        readinessTarget = runningReadTarget?.deviceId ?? readinessTarget;
+        // Discovery awaits: recheck even an unchanged id in case it was acquired meanwhile.
+        if (
+          runningReadTarget &&
+          (await isSessionlessReadTargetHeld(
+            name,
+            {
+              deviceId: runningReadTarget.deviceId,
+              platform: args.platform,
+              now: (input.timer ?? defaultTimer).now(),
+            },
+            signal,
+          ))
+        ) {
+          return resolveSessionlessDeviceRead(
+            input,
+            options.sessionlessDeviceRead ?? this.defaultDeviceRead,
+            runningReadTarget.deviceId,
           );
         }
         // Check and mark in one turn, before readiness: a session acquiring the target while

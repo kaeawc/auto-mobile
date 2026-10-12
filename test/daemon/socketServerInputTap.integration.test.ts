@@ -1,3 +1,9 @@
+import { spyOn } from "bun:test";
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+import {
+  createFakeDaemonState as createDrainDaemonState,
+  createFakeSession as createDrainSession,
+} from "./helpers/inputSocketHarness";
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -52,6 +58,11 @@ describe("UnixSocketServer input/tap", () => {
     AndroidCtrlProxyClient.resetInstances();
     IOSCtrlProxyClient.resetInstances();
     executionTracker.clearDaemonRestartPreparation();
+    mock.restore();
+    AndroidCtrlProxyClient.clearInstanceRegistryForTesting();
+    IOSCtrlProxyClient.clearInstanceRegistryForTesting();
+    executionTracker.clearDaemonRestartPreparation();
+    executionTracker.clearDaemonMaintenancePreparation();
   });
 
   test("routes Android coordinate taps without forwarding through tools/call", async () => {
@@ -949,5 +960,124 @@ describe("UnixSocketServer input/tap", () => {
       target.parseInputKeyParams({ platform: "android", key: "enter", frameContext: "frame-A" })
         .frameContext,
     ).toBe("frame-A");
+  });
+  test("tracks direct input until a session-loss drain can safely finish", async () => {
+    const operationStarted = Promise.withResolvers<void>();
+    const releaseOperation = Promise.withResolvers<void>();
+    let sent = false;
+    const client = Object.create(AndroidCtrlProxyClient.prototype) as AndroidCtrlProxyClient;
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
+    spyOn(client, "getScreenScaleMetadata").mockReturnValue(null);
+    const deviceRequest = spyOn(client, "requestTapCoordinates").mockImplementation(
+      async (...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>) => {
+        args[7]?.throwIfAborted();
+        args[6]?.();
+        sent = true;
+        operationStarted.resolve();
+        await releaseOperation.promise;
+        return { success: true, totalTimeMs: 1 };
+      },
+    );
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    const sessionId = "direct-tap-after-dispatch-session";
+    const sessions = new Map([
+      [sessionId, createDrainSession(sessionId, androidDevice.deviceId, "android")],
+    ]);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createDrainDaemonState(sessions),
+      fakeTimer,
+    );
+    await server.start();
+    const response = sendRequest(socketPath, "input/tap", {
+      platform: "android",
+      deviceId: androidDevice.deviceId,
+      x: 1,
+      y: 2,
+      sessionUuid: sessionId,
+    });
+    await operationStarted.promise;
+    expect(executionTracker.hasActiveSessionUuidExecutions(sessionId)).toBe(true);
+    expect(await executionTracker.cancelDeviceSessionExecutions(sessionId, "test recovery")).toBe(
+      1,
+    );
+    let drained = false;
+    const drain = executionTracker
+      .waitForDeviceSessionExecutionsToEnd(sessionId, 1_000)
+      .then((result) => {
+        drained = result;
+        return result;
+      });
+    await drainMicrotasks(100);
+    // Dispatch is latched exactly as in the real client; drain waits for its runner reply.
+    expect(drained).toBe(false);
+    releaseOperation.resolve();
+    expect(await drain).toBe(true);
+    const failure = await response;
+    expect(failure.success).toBe(false);
+    expect(failure.error).toContain("indeterminate");
+    expect(sent).toBe(true);
+    await deviceRequest.mock.results[0]!.value;
+    expect(executionTracker.hasActiveSessionUuidExecutions(sessionId)).toBe(false);
+  });
+
+  test("a direct input cancelled before dispatch lets a session-loss drain finish at once and is never sent", async () => {
+    const operationStarted = Promise.withResolvers<void>();
+    const releaseOperation = Promise.withResolvers<void>();
+    let sent = false;
+    const client = Object.create(AndroidCtrlProxyClient.prototype) as AndroidCtrlProxyClient;
+    spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
+    spyOn(client, "getScreenScaleMetadata").mockReturnValue(null);
+    const deviceRequest = spyOn(client, "requestTapCoordinates").mockImplementation(
+      async (...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>) => {
+        operationStarted.resolve();
+        await releaseOperation.promise;
+        args[7]?.throwIfAborted();
+        args[6]?.();
+        sent = true;
+        return { success: true, totalTimeMs: 1 };
+      },
+    );
+    PlatformDeviceManagerFactory.setInstance(createFakeDeviceManager([androidDevice]));
+    const sessionId = "direct-tap-before-dispatch-session";
+    const sessions = new Map([
+      [sessionId, createDrainSession(sessionId, androidDevice.deviceId, "android")],
+    ]);
+    server = new UnixSocketServer(
+      socketPath,
+      "http://localhost:0/mcp",
+      createDrainDaemonState(sessions),
+      fakeTimer,
+    );
+    await server.start();
+    const response = sendRequest(socketPath, "input/tap", {
+      platform: "android",
+      deviceId: androidDevice.deviceId,
+      x: 1,
+      y: 2,
+      sessionUuid: sessionId,
+    });
+    await operationStarted.promise;
+    expect(executionTracker.hasActiveSessionUuidExecutions(sessionId)).toBe(true);
+    expect(await executionTracker.cancelDeviceSessionExecutions(sessionId, "test recovery")).toBe(
+      1,
+    );
+    let drained = false;
+    const drain = executionTracker
+      .waitForDeviceSessionExecutionsToEnd(sessionId, 1_000)
+      .then((result) => {
+        drained = result;
+        return result;
+      });
+    await drainMicrotasks(100);
+    expect(drained).toBe(true);
+    expect(await drain).toBe(true);
+    expect((await response).success).toBe(false);
+    releaseOperation.resolve();
+    await expect(deviceRequest.mock.results[0]!.value).rejects.toThrow();
+    await drainMicrotasks(100);
+    expect(sent).toBe(false);
+    expect(executionTracker.hasActiveSessionUuidExecutions(sessionId)).toBe(false);
   });
 });

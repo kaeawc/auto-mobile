@@ -137,6 +137,7 @@ warmedTest("fresh settlement replaces a resolved unheld identity", async () => {
     expect(current.incarnation).not.toBe(h.entry.incarnation);
     expect(current.name).toBe("AVD-B");
     expect(current.sessionId).toBeNull();
+    expect(await h.incidents.list()).toEqual([]);
     expect(
       h.pool.restartReservationForStart("android", ["AVD-A"], { sessionUuid: "rival" }),
     ).toBeUndefined();
@@ -221,6 +222,15 @@ for (const [path, knownAvd] of [
         expect(
           h.pool.restartReservationForStart("android", ["AVD-A"], { sessionUuid: "holder" })?.owned,
         ).toBe(true);
+        const losses = await h.incidents.list();
+        expect(losses).toHaveLength(1);
+        expect(losses[0]).toMatchObject({
+          deviceId: original.deviceId,
+          avdName: "AVD-A",
+          detectionPath: "serial-reuse",
+          session: { sessionUuid: "holder", state: "awaiting-device" },
+          recovery: { outcome: "not-attempted", attempts: [] },
+        });
         expect(h.manager.startedDevices).toHaveLength(0);
         expect(kill).not.toHaveBeenCalled();
       } finally {
@@ -318,6 +328,15 @@ warmedTest(
         h.pool.restartReservationForStart("android", ["AVD-A"], { sessionUuid: "holder" }),
       ).toBeUndefined();
       expect((await h.persistence.getSession!("holder"))?.status).toBe("active");
+      const [incident] = await h.incidents.list();
+      expect(incident).toMatchObject({
+        recovery: { outcome: "not-attempted" },
+        session: { state: "active" },
+      });
+      expect(await h.pool.waitForEmulatorLossIncident(incident.id, 0)).toEqual(incident);
+      expect(
+        await h.sessions.getOrCreateSession("holder", h.pool, undefined, undefined, true),
+      ).toBe(live);
       expect(inFlightHold).toMatchObject({ owned: true, restartHandoff: true });
     } finally {
       gate.resolve();
@@ -482,6 +501,7 @@ test("fresh settlement re-checks serial reuse on the current entry after discove
 
 for (const pin of [
   "ios",
+  "handset",
   "platform mismatch",
   "unresolved observation",
   "unresolved pooled identity",
@@ -492,9 +512,11 @@ for (const pin of [
       const device =
         pin === "ios"
           ? { ...original, platform: "ios" as const }
-          : pin === "unresolved pooled identity"
-            ? placeholder
-            : original;
+          : pin === "handset"
+            ? { ...original, deviceId: "physical-phone" }
+            : pin === "unresolved pooled identity"
+              ? placeholder
+              : original;
       const h = await setup(device);
       try {
         if (pin === "unresolved pooled identity") {
@@ -516,7 +538,7 @@ for (const pin of [
             ? placeholder
             : pin === "platform mismatch"
               ? { ...replacement, platform: "ios" as const }
-              : { ...replacement, platform: device.platform };
+              : { ...replacement, deviceId: device.deviceId, platform: device.platform };
         h.manager.bootedDevices = [observation];
         if (pin === "platform mismatch") {
           await h.pool.refreshDevices();
@@ -525,6 +547,7 @@ for (const pin of [
             settleMembership: true,
           });
         }
+        expect(await h.incidents.list()).toEqual([]);
         const terminal = pin === "platform mismatch";
         if (terminal) {
           expect(h.sessions.getSession("holder")).toBeNull();
@@ -612,6 +635,7 @@ warmedTest("newer A confirmation during cancellation aborts handoff before reser
     gate.resolve(0);
     expect(await pending).toBe("unsettled");
     expect(h.sessions.getSession("holder")?.assignedDevice).toBe(original.deviceId);
+    expect(await h.incidents.list()).toEqual([]);
     expect(h.pool.getDevice(original.deviceId)).toBe(h.entry);
     expect(
       h.pool.restartReservationForStart("android", ["AVD-A"], { sessionUuid: "holder" }),
@@ -644,6 +668,9 @@ warmedTest(
       await h.pool.reconcileDiscoveryObservation([replacement], "disconnect-monitor", {
         settleMembership: true,
       });
+      expect(
+        (await h.incidents.list()).filter((incident) => incident.detectionPath === "serial-reuse"),
+      ).toEqual([]);
       expect(h.sessions.getSession("holder")).toBeNull();
       expect((await h.persistence.getSession!("holder"))?.release_reason).toBe(
         "device-disconnected:emulator-5554",
@@ -678,21 +705,31 @@ for (const reused of [false, true]) {
           h.manager.bootedDevices = [];
           await h.pool.removeDevice(original.deviceId, true, h.pool.getDevice(original.deviceId));
         }
-        const incident = await h.incidents.open({
-          deviceId: original.deviceId,
-          avdName: original.name,
-          detectionPath: "watched-process-exit",
-          session: { sessionUuid: "holder", state: "awaiting-device" },
-          recoveryPolicy: { onLoss: false, maxAttempts: 1 },
-        });
-        await h.incidents.completeRecovery(incident.id, "not-attempted");
+        const [incident] = await h.incidents.list();
         h.timer.advanceTime(500);
-        const error = await h.sessions
+        let answered = false;
+        let error: unknown;
+        const recovery = h.sessions
           .getOrCreateSession("holder", h.pool, undefined, undefined, true)
-          .catch((error: unknown) => error);
+          .then(
+            (value) => {
+              answered = true;
+              error = value;
+            },
+            (failure: unknown) => {
+              answered = true;
+              error = failure;
+            },
+          );
+        await drainMicrotasks(80);
+        expect(answered).toBe(true);
+        await recovery;
         expect(error).toBeInstanceOf(SessionRecoveryAssignmentError);
         expect(error).toMatchObject({
           details: {
+            incidentId: incident?.id,
+            detectionPath: "serial-reuse",
+            recoveryOutcome: "not-attempted",
             code: "session_recovery_pending",
             retryable: true,
             sessionUuid: "holder",
@@ -713,8 +750,13 @@ for (const reused of [false, true]) {
           });
         }
         h.timer.advanceTime(179_500);
+        // A caller can arrive before the expiry callback has drained.
+        await expect(
+          h.sessions.getOrCreateSession("holder", h.pool, undefined, undefined, true),
+        ).rejects.toBeDefined();
         await drainMicrotasks(40);
         expect(row.release_reason).toBe("restart-recovery-timeout");
+        expect(sessionReleaseReasonTraits(row.release_reason!).idle).toBe(false);
         expect(
           h.pool.restartReservationForStart("android", ["AVD-A"], { sessionUuid: "holder" }),
         ).toBeUndefined();
@@ -728,7 +770,7 @@ for (const reused of [false, true]) {
 }
 
 for (const pin of ["no deadline", "duplicate exact matches", "deadline reached"] as const) {
-  warmedTest(`PIN recovery ${pin} remains identity-continuity-lost`, async () => {
+  warmedTest(`recovery ${pin} yields the absent-target contract when restart expires`, async () => {
     const h = await setup(replacement);
     try {
       if (pin === "duplicate exact matches") {
@@ -749,7 +791,7 @@ for (const pin of ["no deadline", "duplicate exact matches", "deadline reached"]
       await expect(h.pool.assignDeviceToSession("holder", "android", target)).rejects.toMatchObject(
         {
           name: SessionRecoveryIdentityLossError.name,
-          reason: "identity-continuity-lost",
+          reason: pin === "deadline reached" ? "target-absent" : "identity-continuity-lost",
         },
       );
       expect(h.pool.getDevice(original.deviceId)?.sessionId).toBeNull();
@@ -831,6 +873,7 @@ warmedTest(
       expect(
         h.pool.restartReservationForStart("android", ["AVD-A"], { sessionUuid: "holder" }),
       ).toBeUndefined();
+      expect(await h.incidents.list()).toEqual([]);
       expect(h.pool.getDevice(original.deviceId)).toMatchObject({ name: "AVD-B", sessionId: null });
       gate.resolve();
       await recovery;
@@ -843,3 +886,64 @@ warmedTest(
     }
   },
 );
+
+for (const path of ["monitor", "fresh settlement", "refresh"] as const) {
+  warmedTest(`${path}: shutdown-deferred quarantine cancels before publishing B`, async () => {
+    const calls: Array<{
+      sessionId: string;
+      reason: string;
+      name?: string;
+      options?: { excludeExecutionId?: string };
+    }> = [];
+    const h = await setup(
+      original,
+      false,
+      async (sessionId, reason, options) => {
+        calls.push({ sessionId, reason, name: h.pool.getDevice(original.deviceId)?.name, options });
+        return 0;
+      },
+      { ambientExecutionIdReader: { getExecutionId: () => "settling-execution" } },
+    );
+    let reservation: Awaited<ReturnType<DevicePool["reserveDeviceForShutdown"]>>;
+    try {
+      await h.pool.bindOrReuseDeviceSession("holder", original.deviceId, "android");
+      reservation = await h.pool.reserveDeviceForShutdown(original.deviceId);
+      expect(reservation).toBeDefined();
+      h.manager.bootedDevices = [replacement];
+      await h.pool.reconcileDiscoveryObservation([replacement], "disconnect-monitor", {
+        settleMembership: true,
+      });
+      expect(h.entry.identityUnresolved).toBe(true);
+      expect(h.sessions.getSession("holder")).not.toBeNull();
+      expect(calls).toEqual([]);
+      expect(await h.incidents.list()).toEqual([]);
+      await reservation?.release();
+      reservation?.releaseRecoveryRouteLease();
+      if (path === "monitor") {
+        await h.pool.reconcileDiscoveryObservation([replacement], "disconnect-monitor", {
+          settleMembership: true,
+        });
+      } else if (path === "refresh") {
+        await h.pool.refreshDevices();
+      } else {
+        expect(await h.pool.settlePooledRuntimeIdentity(original.deviceId)).toBe("replaced");
+      }
+      expect(calls).toEqual([
+        {
+          sessionId: "holder",
+          reason: "device-disconnected:emulator-5554",
+          name: "AVD-A",
+          options: { excludeExecutionId: "settling-execution" },
+        },
+      ]);
+      expect(h.pool.getDevice(original.deviceId)).toMatchObject({ name: "AVD-B", sessionId: null });
+      expect(await h.incidents.list()).toHaveLength(1);
+    } finally {
+      await reservation?.release();
+      reservation?.releaseRecoveryRouteLease();
+      h.pool.releaseDeviceClaimsForShutdown();
+      h.sessions.stopCleanupTimer();
+      h.timer.reset();
+    }
+  });
+}

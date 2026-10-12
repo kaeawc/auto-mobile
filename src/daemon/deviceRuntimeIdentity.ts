@@ -787,6 +787,11 @@ export class DeviceRuntimeIdentity {
     await this.cancelQuarantinedDeviceExecutions(pooled, options);
   }
 
+  /** A shutdown reservation may have withheld the quarantine's execution drain. */
+  hasDeferredQuarantineCancellation(pooled: PooledDevice): boolean {
+    return this.deferredQuarantineCancellations.has(pooled);
+  }
+
   private async cancelQuarantinedDeviceExecutions(
     pooled: PooledDevice,
     options: DiscoveryReconcileOptions,

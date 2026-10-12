@@ -218,14 +218,6 @@ describe("start admission and owner resume for restart reservations", () => {
       const replacement = { ...device, name: "AVD-B", observedAt: timer.now() };
       manager.setBootedDevices(platform, [replacement]);
       expect(await pool.settlePooledRuntimeIdentity(device.deviceId)).toBe("replaced");
-      const incident = await incidents.open({
-        deviceId: device.deviceId,
-        avdName: device.name,
-        detectionPath: "watched-process-exit",
-        session: { sessionUuid: holder, state: "awaiting-device" },
-        recoveryPolicy: { onLoss: false, maxAttempts: 1 },
-      });
-      await incidents.completeRecovery(incident.id, "not-attempted");
       manager.setDeviceImages(platform, [
         { ...image, deviceId: "emulator-5556" },
         { ...image, ...replacement, isRunning: true },
@@ -343,13 +335,29 @@ describe("start admission and owner resume for restart reservations", () => {
         ownerToken: "holder-token",
       });
       f.timer.advanceTime(500);
-      const pending = await f.sessions
+      let answered = false;
+      let pending: unknown;
+      const recovery = f.sessions
         .getOrCreateSession(HOLDER, f.pool, undefined, undefined, true)
-        .catch((error: unknown) => error);
+        .then(
+          (value) => {
+            answered = true;
+            pending = value;
+          },
+          (error: unknown) => {
+            answered = true;
+            pending = error;
+          },
+        );
+      await drainMicrotasks(80);
+      expect(answered).toBe(true);
+      await recovery;
       expect(pending).toBeInstanceOf(SessionRecoveryAssignmentError);
       expect(pending).toMatchObject({
         details: {
           code: "session_recovery_pending",
+          detectionPath: "serial-reuse",
+          recoveryOutcome: "not-attempted",
           retryable: true,
           recoveryWindowRemainingMs: 179_500,
         },

@@ -11,7 +11,8 @@ export type EmulatorLossDetectionPath =
   | "watched-process-exit"
   | "device-discovery-miss"
   | "adb-transport-failure"
-  | "adb-server-reset";
+  | "adb-server-reset"
+  | "serial-reuse";
 
 export type EmulatorRecoveryOutcome = "recovered" | "exhausted" | "not-attempted";
 export type EmulatorLossSessionState = "recovering" | "active" | "awaiting-device" | "released";

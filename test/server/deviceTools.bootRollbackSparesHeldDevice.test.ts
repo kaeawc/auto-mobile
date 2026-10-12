@@ -11,7 +11,6 @@ import {
 } from "../../src/server/deviceTools";
 import { setDeviceManager } from "../../src/server/bootedDeviceResources";
 import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
-import { createSetActiveDeviceHandler } from "../../src/server/setActiveDevice";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { SystemUiAnrRecoveryRequiredError } from "../../src/ctrlProxy/RunnerReadinessService";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -31,9 +30,9 @@ import { FakeTimer } from "../fakes/FakeTimer";
 isolateToolRegistry();
 
 /**
- * A start's readiness reservation keeps its device out of general allocation only; an exact bind
- * (setActiveDevice) by another session is admitted while the booting call is still preparing the
- * runner. When the booting call then fails (runner readiness fails, or its own bind is refused
+ * setActiveDevice refuses another request's live readiness reservation. An internal binder can
+ * still take the device through the permissive pool entry while the booting call prepares the
+ * runner, so the cleanup safety net remains necessary. When that call fails (readiness or bind
  * because the other session now holds the device), its cleanup must not stop the device it
  * booted: lifecycle on a device another live session holds is refused (#11651). With no such
  * holder the device is stopped as before, so nothing this call booted is left running unheld.
@@ -173,9 +172,11 @@ describe("a failed start does not stop the device it booted once another session
   };
 
   /** Another session selects the freshly booted device by id while the boot's caller prepares it. */
-  const otherSessionSelects = async (deviceId: string): Promise<void> => {
-    const select = createSetActiveDeviceHandler({ resumeCtrlProxy: async () => {} });
-    await select({ deviceId, sessionUuid: "other-session", __mcpSessionId: "client-b" });
+  const otherSessionSelects = async (
+    deviceId: string,
+    platform: "android" | "ios",
+  ): Promise<void> => {
+    await pool.bindOrReuseDeviceSession("other-session", deviceId, platform);
     expect(pool.getDevice(deviceId)?.sessionId).toBe("other-session");
   };
 
@@ -222,7 +223,7 @@ describe("a failed start does not stop the device it booted once another session
     "$platform: runner readiness fails after another session selected the device",
     async ({ platform, args, deviceId }) => {
       duringReadiness = async () => {
-        await otherSessionSelects(deviceId);
+        await otherSessionSelects(deviceId, platform);
         throw new Error("automation runner did not become ready");
       };
 
@@ -238,7 +239,7 @@ describe("a failed start does not stop the device it booted once another session
   test.each(TARGETS)(
     "$platform: the booting call loses its bind to another session's selection",
     async ({ platform, args, deviceId }) => {
-      duringReadiness = async () => await otherSessionSelects(deviceId);
+      duringReadiness = async () => await otherSessionSelects(deviceId, platform);
 
       const failure = await start(args);
       await drain();
@@ -252,7 +253,7 @@ describe("a failed start does not stop the device it booted once another session
     "$platform: a device the other session let go again is stopped with the failed start",
     async ({ platform, args, deviceId }) => {
       duringReadiness = async () => {
-        await otherSessionSelects(deviceId);
+        await otherSessionSelects(deviceId, platform);
         await sessions.releaseSession("other-session");
         await pool.releaseDevice(deviceId, "other-session");
         throw new Error("automation runner did not become ready");

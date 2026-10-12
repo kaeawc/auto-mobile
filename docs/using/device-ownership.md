@@ -567,6 +567,17 @@ deadline of its own, so there is no remaining time to report. The test runners
 wait `max(30 s, min(waited + retryAfterMs, 150 s))` in total, so a hint without a
 bound gets their 30 s floor, which is one shutdown step's own timeout.
 
+A `setActiveDevice` on a device another request is still preparing (booted or
+picked, runner not ready, no session bound yet) is refused with
+`device_owned_by_other_session`, `retryable: true` and `retryAfterMs: 2000`
+(#11651, owner decision 2026-10-11). It clears when that request binds (then the
+device is held and the same code is `retryable: false`) or fails. `retryAfterMs`
+is a poll interval, not a bound: the reservation lasts through that request's
+preparation and cleanup, which can be long when a failed boot's emulator cannot
+be stopped. A second `startDevice`/`provisionDevice` for the same device waits on
+the device's lifecycle lease instead. Reads (`listDevices`, observation) are
+never refused.
+
 A session UUID whose device is being killed is refused with
 `session_terminal_release_in_progress`, `retryable: false` and `nextAction:
 "acquire_new_session"` (#11189, #11231): the UUID ends with that release, so

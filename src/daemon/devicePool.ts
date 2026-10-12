@@ -57,6 +57,7 @@ import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
 import {
   deviceAlreadyAssignedToAnotherSessionError,
   deviceAssignedToOtherSessionError,
+  devicePreparedForOtherRequestError,
   InputDeviceOwnedError,
   MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
 } from "./inputDeviceOwnership";
@@ -227,6 +228,8 @@ interface ExplicitBindOptions {
   oneShotCli: boolean;
   /** Records the session this call mints: the only thing a failed or undelivered bind takes back. */
   receipt: AcquisitionReceipt;
+  /** A selection by a request that prepared nothing: see {@link DevicePool.assertNotPreparedForOtherRequest}. */
+  refusePreparedForOtherRequest: boolean;
 }
 
 interface McpSessionRecoveryLease {
@@ -7650,8 +7653,31 @@ export class DevicePool {
    * Whether some acquisition is preparing this device right now and has not bound it yet.
    * Synchronous (no assignment lock): a selector start reads it to prefer another match (#11651).
    */
-  isReservedForReadiness(deviceId: string): boolean {
-    return this.shutdownReservationCoordinator.isReservedForReadiness(deviceId);
+  isReservedForReadiness(deviceId: string, exceptOwners?: ReadonlySet<symbol>): boolean {
+    return this.shutdownReservationCoordinator.isReservedForReadiness(deviceId, exceptOwners);
+  }
+
+  /**
+   * Refuse to select a device another request is still preparing: it holds a live readiness
+   * reservation and no session has been bound yet (#11651, owner decision 2026-10-11). Typed
+   * `device_owned_by_other_session`, retryable: it ends when that request binds (a held device,
+   * with the usual rules) or releases its reservation on failure or cancellation. A device a live
+   * session already holds is left to those rules, so its holder re-selecting it while its own
+   * start refreshes readiness is not refused. Synchronous, so a caller can also ask before its
+   * first side effect; the bind asks again under the assignment mutex. Virtual-device starts
+   * are serialised by the lifecycle lease. Physical Android devices have no lease identity,
+   * so their starts still race at the bind as before. Internal acquisitions keep the permissive
+   * bind default; an opt-in caller may exclude its own reservation owners.
+   */
+  assertNotPreparedForOtherRequest(deviceId: string, ownReservations?: ReadonlySet<symbol>): void {
+    if (!this.isReservedForReadiness(deviceId, ownReservations)) {
+      return;
+    }
+    const holder = this.devices.get(deviceId)?.sessionId;
+    if (holder && this.sessionManager.getSession(holder)) {
+      return;
+    }
+    throw devicePreparedForOtherRequestError(deviceId);
   }
 
   private hasReadinessNameReservation(
@@ -8110,6 +8136,7 @@ export class DevicePool {
     mcpSessionId?: string,
     oneShotCli = false,
     receipt?: AcquisitionReceipt,
+    refusePreparedForOtherRequest = false,
   ): Promise<string> {
     // Registered before the first await so a close racing the whole bind is seen (#11146).
     const endBind = this.beginMcpBind(mcpSessionId);
@@ -8125,6 +8152,7 @@ export class DevicePool {
         mcpSessionId,
         oneShotCli,
         receipt: receipt ?? {},
+        refusePreparedForOtherRequest,
       });
     } finally {
       endBind();
@@ -8177,8 +8205,7 @@ export class DevicePool {
           throw new ActionableError(`Device '${deviceId}' is not available in the device pool.`);
         }
         this.runtimeIdentity.assertRuntimeIdentity(device, expectedIdentity);
-        this.assertNotReservedForShutdown(device, "and cannot be assigned");
-        this.assertNotReservedForOtherRehydration(device, sessionId);
+        this.assertExplicitBindReservations(device, sessionId, options);
         if (alreadyPooled) {
           this.recordSourceAndroidAvd(deviceId, androidAvdIdentity);
           this.notifyTargetDeviceReady({ device, snapshot });
@@ -8273,6 +8300,19 @@ export class DevicePool {
       );
     }
     return boundSessionId;
+  }
+
+  /** Called under the assignment mutex every readiness reservation takes, before bind side effects. */
+  private assertExplicitBindReservations(
+    device: PooledDevice,
+    sessionId: string,
+    options: ExplicitBindOptions,
+  ): void {
+    this.assertNotReservedForShutdown(device, "and cannot be assigned");
+    this.assertNotReservedForOtherRehydration(device, sessionId);
+    if (options.refusePreparedForOtherRequest) {
+      this.assertNotPreparedForOtherRequest(device.id, options.readinessReservationOwners);
+    }
   }
 
   /** Assign `device` to `sessionId`, create (or restore) the session and record its owner. */

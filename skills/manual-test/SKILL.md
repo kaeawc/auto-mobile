@@ -42,17 +42,19 @@ environment, MCP stdio loop or socket client.
 
 The harness path registry (`scripts/manual-test/productPathEnv.ts`) uses this policy:
 
-| Kind     | Destinations                                                                                                                      | Handling                                                                                                                                |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `state`  | Data, logs, DB directory, coordination, shared ADB registry, aux/control sockets, PID/lock/launch log, iOS cache and derived data | Required isolated defaults. Defaults relocate state without enabling a feature.                                                         |
-| `opt-in` | `AUTOMOBILE_IOS_CTRLPROXY_RECORD_DIR`, `AUTOMOBILE_PLAN_HEALTH_DIR`, `AUTOMOBILE_TOOL_OUTPUTS_DIR`                                | Unset by default; both inherited spellings stripped. Explicit private absolute paths through `--env`/`--daemon-env` enable the feature. |
-| `unset`  | `AUTOMOBILE_DB_PATH`, `AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH`                                                                      | Strip competing overrides in both spellings.                                                                                            |
-| `input`  | APK/IPA/bundle, codec/encoder/helper, project/migration/signing inputs, explicit benchmark/test markers and config sources        | Caller-selected inputs, no harness defaults; inherited managed-slot config is stripped.                                                 |
+| Kind     | Destinations                                                                                                                              | Handling                                                                                                                                |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `state`  | Data, logs, DB directory, coordination, shared ADB registry, aux/control sockets, PID/lock/launch log, iOS cache and derived data         | Required isolated defaults. Defaults relocate state without enabling a feature.                                                         |
+| `opt-in` | `AUTOMOBILE_IOS_CTRLPROXY_RECORD_DIR`, `AUTOMOBILE_PLAN_HEALTH_DIR`, `AUTOMOBILE_TOOL_OUTPUTS_DIR`, `AUTOMOBILE_STARTUP_BENCHMARK_OUTPUT` | Unset by default; both inherited spellings stripped. Explicit private absolute paths through `--env`/`--daemon-env` enable the feature. |
+| `unset`  | `AUTOMOBILE_DB_PATH`, `AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH`                                                                              | Strip competing overrides in both spellings.                                                                                            |
+| `input`  | APK/IPA/bundle, codec/encoder/helper, project/migration/signing inputs, test markers and config sources                                   | Caller-selected inputs, no harness defaults; inherited managed-slot config is stripped.                                                 |
 
 The linked harness guide lists every variable. `env.sh` unsets absent opt-ins;
-client gates validate them only when present. The entry scripts select stderr
-before product imports when no explicit sink/private log dir exists, and undo
-that selection in child environments. Known uncovered product path:
+client gates validate them only when present. Before product imports, entry
+scripts preserve explicit stderr sinks and permit file logging only with an
+explicit absolute log directory outside both home defaults (lexical and
+ancestor-realpath checks). They force stderr otherwise, including invalid sinks
+and data-dir-only environments, and restore all overrides in child environments. Known uncovered product path:
 `~/.auto-mobile/libwebp` has no override
 (`src/utils/image/webp/WebpBinaryResolver.ts:94`). A private daemon needing a
 libwebp download would write there; set `AUTOMOBILE_CWEBP_PATH` and
@@ -63,13 +65,16 @@ one daemon. Record argv tokens with `--daemon-arg`, for example
 `--daemon-arg --plan-execution-lock-scope --daemon-arg session --daemon-arg
 --tool-call-recording`; `N:token` selects a daemon. Restarts reuse these env/args.
 `start -- …` adds one-off argv. Use generated `<batch>/bin/amN|proxyN|frameN|auxN`
-wrappers; `amN cli …` is the one-shot CLI. `in-daemon-env.sh --cd` is an explicit
-cwd change; its `cli` shorthand matches `amN cli`.
+wrappers; `amN cli …` runs the one-shot CLI with `--cli`. It finds the private
+daemon through the socket and PID path env sourced from `env.sh`.
+`in-daemon-env.sh --cd` is an explicit cwd change; its `cli` shorthand matches `amN cli`.
 
 `pid.txt` is mirrored after successful start and removed after successful stop.
 `status` reports PID agreement/socket state; `status --devices` also returns
 host inventories and `daemonDevicesMethod: "daemon/availableDevices"`. It is
 read-only except for the daemon's own inventory ownership/discovery refresh.
+Android inventory reads the local ADB server socket without launching `adb`,
+so it can neither start nor restart a server.
 `wrappers` regenerates wrappers alone. Control sockets are at the short aux
 root (`/tmp/am-mt-<hash>/<N>/d.sock`), not under the batch directory. Redirect
 stdin with `< /dev/null` on harness calls made through an agent tool call.

@@ -182,7 +182,7 @@ export interface ProxySessionClient {
 }
 export interface ProxySessionDeps {
   env: Record<string, string | undefined>;
-  logSinkOverride?: HarnessLogSinkOverride;
+  logSinkOverride?: readonly HarnessLogSinkOverride[];
   probeDaemonSocket(socketPath: string): Promise<{ alive: boolean; reason?: string }>;
   host: HostDefaults;
   pid: number;

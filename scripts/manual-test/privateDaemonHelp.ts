@@ -45,6 +45,7 @@ Opt-in paths (unset by default; inherited values stripped; --env/--daemon-env re
 ${PRODUCT_PATH_ENV_VARIABLES.filter((row) => row.kind === "opt-in")
   .map((row) => `  ${row.name}`)
   .join("\n")}
+Android inventory reads the local ADB server socket without launching adb; it can neither start nor restart a server.
 Other derived env: MT_BATCH, MT_DAEMON, MT_SERVER, MT_PORT; AUTOMOBILE_APPEARANCE_SYNC=off; AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS=0 unless configured.
 Examples:
   private-daemon init --batch-dir /private/batch --count 2 --base-port 3160 --daemon-arg --plan-execution-lock-scope --daemon-arg session --daemon-arg --tool-call-recording --daemon-env 2:AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=/private/prebuilt

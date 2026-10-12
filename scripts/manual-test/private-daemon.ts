@@ -6,6 +6,7 @@ import { harnessChildEnvironment, type HarnessLogSinkOverride } from "./harnessL
 import { execFile, spawn } from "node:child_process";
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { Socket } from "node:net";
+import { encodeAdbHostRequest, decodeAdbHostResponse, type AdbHostResponse } from "./adbHostQuery";
 import { homedir, userInfo } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -274,7 +275,7 @@ export interface PrivateDaemonCliDeps {
     path: string,
     options?: { method?: string; timeoutMs?: number },
   ): Promise<ControlSocketProbeResult>;
-  isTcpPortListening(host: string, port: number, timeoutMs: number): Promise<boolean>;
+  queryAdbHost(host: string, port: number, request: string, timeoutMs: number): Promise<string>;
   runCommand(
     command: string,
     args: string[],
@@ -288,7 +289,7 @@ export interface PrivateDaemonCliDeps {
   host: HostDefaults;
   log(message: string): void;
   env: Record<string, string | undefined>;
-  logSinkOverride?: HarnessLogSinkOverride;
+  logSinkOverride?: readonly HarnessLogSinkOverride[];
 }
 function pidRecord(path: string, deps: PrivateDaemonCliDeps): Pick<PidFileData, "pid"> | undefined {
   if (!deps.exists(path)) {
@@ -556,17 +557,54 @@ export async function main(): Promise<number> {
           },
         );
       }),
-    isTcpPortListening: (host, port, timeoutMs) =>
-      new Promise((done) => {
+    queryAdbHost: (host, port, request, timeoutMs) =>
+      new Promise((done, reject) => {
         const socket = new Socket();
-        const finish = (alive: boolean): void => {
+        let bytes = Buffer.alloc(0);
+        let settled = false;
+        const finish = (result: AdbHostResponse): void => {
+          if (settled) {
+            return;
+          }
+          settled = true;
           defaultTimer.clearTimeout(deadline);
           socket.destroy();
-          done(alive);
+          if (result.ok) {
+            done(result.payload);
+          } else {
+            reject(new Error(result.reason));
+          }
         };
-        const deadline = defaultTimer.setTimeout(() => finish(false), timeoutMs);
-        socket.once("error", () => finish(false));
-        socket.connect(port, host, () => finish(true));
+        const deadline = defaultTimer.setTimeout(
+          () => finish({ ok: false, reason: "ADB host query timed out" }),
+          timeoutMs,
+        );
+        socket.once("error", (error) => {
+          // Preserve ECONNREFUSED so status can distinguish an absent server.
+          if (!settled) {
+            settled = true;
+            defaultTimer.clearTimeout(deadline);
+            socket.destroy();
+            reject(error);
+          }
+        });
+        socket.on("data", (chunk) => {
+          bytes = Buffer.concat([bytes, chunk]);
+          const result = decodeAdbHostResponse(bytes);
+          if (
+            result.ok ||
+            result.reason !== "Incomplete ADB host response" ||
+            (bytes.length >= 8 &&
+              bytes.length === 8 + Number.parseInt(bytes.toString("utf8", 4, 8), 16))
+          ) {
+            finish(result);
+          }
+        });
+        socket.once("end", () => finish(decodeAdbHostResponse(bytes)));
+        socket.once("close", () =>
+          finish({ ok: false, reason: "ADB host socket closed without a response" }),
+        );
+        socket.connect(port, host, () => socket.write(encodeAdbHostRequest(request)));
       }),
     runCommand: async (command, args, env) => {
       const child = spawn(command, args, { env, stdio: "inherit" });

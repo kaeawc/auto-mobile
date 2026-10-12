@@ -491,6 +491,10 @@ posixTest("unsafe global state override is refused even if every daemon shadows 
 
 posixTest("opt-in paths stay unset, strip inheritance and require private explicit paths", () => {
   const env = derivePrivateDaemonBatch(options)[0].env;
+  expect(
+    PRODUCT_PATH_ENV_VARIABLES.find((row) => row.name === "AUTOMOBILE_STARTUP_BENCHMARK_OUTPUT")
+      ?.kind,
+  ).toBe("opt-in");
   for (const row of PRODUCT_PATH_ENV_VARIABLES.filter((row) => row.kind === "opt-in")) {
     const legacy = row.name.replace("AUTOMOBILE_", "AUTO_MOBILE_");
     expect(env[row.name]).toBeUndefined();

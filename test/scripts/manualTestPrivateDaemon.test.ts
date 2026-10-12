@@ -56,15 +56,14 @@ function fixture() {
       captures.push({ command, args, env, timeoutMs });
       return {
         exitCode: 0,
-        stdout:
-          command === "adb"
-            ? "List of devices attached\nemu1 device model:fake\n"
-            : '{"devices":{"runtime":[{"udid":"sim1","name":"fake","state":"Booted"}]}}',
+        stdout: '{"devices":{"runtime":[{"udid":"sim1","name":"fake","state":"Booted"}]}}',
         stderr: "",
       };
     },
     probeSocket: async () => ({ alive: false, reason: "not running" }),
-    isTcpPortListening: async () => false,
+    queryAdbHost: async () => {
+      throw Object.assign(new Error("refused"), { code: "ECONNREFUSED" });
+    },
     host: { homeDirs: [resolve("/home/fake")], uid: 4242, canonicalize: resolve },
     env: {
       AUTOMOBILE_MANAGED_SLOT_CONFIG: "inherited",
@@ -425,9 +424,9 @@ posixTest(
     await runPrivateDaemonCommand({ op: "init", options }, f.deps);
     f.writes.length = 0;
     f.dirs.length = 0;
-    f.deps.isTcpPortListening = async (host, port, timeout) => {
-      expect([host, port, timeout]).toEqual(["127.0.0.1", 5037, 2000]);
-      return true;
+    f.deps.queryAdbHost = async (host, port, request, timeout) => {
+      expect([host, port, request, timeout]).toEqual(["127.0.0.1", 5037, "host:devices-l", 2000]);
+      return "emu1 device model:fake\n";
     };
     f.deps.probeSocket = async (path, probe) =>
       path === derivePrivateDaemonBatch(options)[1].socketPath
@@ -444,11 +443,15 @@ posixTest(
     expect(inventory.hostDevices.android[0].deviceId).toBe("emu1");
     expect(inventory.hostDevices.ios[0].udid).toBe("sim1");
     expect(inventory.daemonDevices).toEqual({ P1: [{ deviceId: "emu1" }], P2: { error: "dead" } });
+    expect(f.captures.some((call) => call.command === "adb")).toBe(false);
     expect(f.captures.map((call) => [call.command, call.args, call.timeoutMs])).toEqual([
-      ["adb", ["devices", "-l"], 2000],
       ["xcrun", ["simctl", "list", "devices", "booted", "--json"], 2000],
     ]);
-    expect(f.captures[0].env.ADB_SERVER_SOCKET).toBe("tcp:127.0.0.1:5037");
+    expect(inventory.hostDevices.android[0]).toEqual({
+      deviceId: "emu1",
+      state: "device",
+      details: ["model:fake"],
+    });
     expect(f.writes).toEqual([]);
     expect(f.dirs).toEqual([]);
     expect(f.removes).toEqual([]);
@@ -571,9 +574,9 @@ posixTest("status contains captured simctl failure and probes configured adb por
   await runPrivateDaemonCommand({ op: "init", options }, f.deps);
   f.deps.env.ANDROID_ADB_SERVER_PORT = "5555";
   const ports: number[] = [];
-  f.deps.isTcpPortListening = async (_host, port) => {
+  f.deps.queryAdbHost = async (_host, port) => {
     ports.push(port);
-    return false;
+    throw Object.assign(new Error("refused"), { code: "ECONNREFUSED" });
   };
   f.deps.runCapture = async () => ({ exitCode: 1, stdout: "", stderr: "simctl failed" });
   expect(
@@ -589,7 +592,9 @@ posixTest("status contains captured simctl failure and probes configured adb por
 import { selectHarnessLogSink } from "../../scripts/manual-test/harnessLogSink";
 posixTest("launcher removes its sink override before handing env to runCommand", async () => {
   const f = fixture();
-  f.deps.logSinkOverride = selectHarnessLogSink(f.deps.env);
+  f.deps.logSinkOverride = selectHarnessLogSink(f.deps.env, [resolve("/home/fake")], {
+    realpath: resolve,
+  });
   expect(f.deps.env.AUTOMOBILE_LOG_SINK).toBe("stderr");
   await runPrivateDaemonCommand({ op: "init", options }, f.deps);
   expect(
@@ -621,3 +626,19 @@ posixTest(
     expect(help.help).toContain("Opt-in paths");
   },
 );
+
+posixTest("ADB host FAIL returns the server message without invoking adb", async () => {
+  const f = fixture();
+  await runPrivateDaemonCommand({ op: "init", options }, f.deps);
+  f.deps.queryAdbHost = async () => {
+    throw new Error("server denied inventory");
+  };
+  await runPrivateDaemonCommand(
+    parsed(["status", "--batch-dir", options.batchDir, "--devices"]),
+    f.deps,
+  );
+  expect(JSON.parse(f.logs.at(-1)!).hostDevices.android).toEqual({
+    skipped: "server denied inventory",
+  });
+  expect(f.captures.map((call) => call.command)).toEqual(["xcrun"]);
+});

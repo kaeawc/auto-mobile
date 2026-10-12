@@ -453,7 +453,9 @@ test("proxy help variants enumerate every parser command and flag", () => {
 posixTest("proxy child receives undone sink override and live socket permits startup", async () => {
   const f = fixture();
   delete f.deps.env.AUTOMOBILE_LOG_DIR;
-  f.deps.logSinkOverride = selectHarnessLogSink(f.deps.env);
+  f.deps.logSinkOverride = selectHarnessLogSink(f.deps.env, [resolve("/home/fake")], {
+    realpath: resolve,
+  });
   f.deps.env.AUTOMOBILE_LOG_DIR = "/private/logs";
   const probes: string[] = [];
   f.deps.probeDaemonSocket = async (path) => {

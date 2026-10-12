@@ -69,20 +69,22 @@ async function androidDevices(deps: PrivateDaemonCliDeps): Promise<DeviceSection
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     return { skipped: "invalid ANDROID_ADB_SERVER_PORT" };
   }
-  if (!(await deps.isTcpPortListening("127.0.0.1", port, TIMEOUT_MS))) {
-    return { skipped: "no adb server listening" };
+  let payload: string;
+  try {
+    payload = await deps.queryAdbHost("127.0.0.1", port, "host:devices-l", TIMEOUT_MS);
+  } catch (error) {
+    // A refused connection means inventory is unavailable; never start an adb server.
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ECONNREFUSED"
+    ) {
+      return { skipped: "no adb server listening" };
+    }
+    return { skipped: errorMessage(error) };
   }
-  // Force the checked local endpoint, even if inherited ADB_SERVER_SOCKET points elsewhere.
-  const env = {
-    ...deps.env,
-    ADB_SERVER_SOCKET: `tcp:127.0.0.1:${port}`,
-    ANDROID_ADB_SERVER_PORT: String(port),
-  };
-  const result = await deps.runCapture("adb", ["devices", "-l"], definedEnv(env), TIMEOUT_MS);
-  if (result.exitCode !== 0) {
-    return { skipped: result.stderr || `adb exited ${result.exitCode}` };
-  }
-  return result.stdout
+  return payload
     .split("\n")
     .filter((line) => line.trim() && !line.startsWith("List of devices") && !line.startsWith("*"))
     .map((line) => {

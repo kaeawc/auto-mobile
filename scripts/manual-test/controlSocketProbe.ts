@@ -1,3 +1,4 @@
+// Harness scripts deliberately never import the product logger (harnessLogSink.ts explains why); the returned reason is the trace.
 import { z } from "zod";
 import type { Timer } from "../../src/utils/SystemTimer";
 import type { IdGenerator } from "../../src/utils/IdGenerator";

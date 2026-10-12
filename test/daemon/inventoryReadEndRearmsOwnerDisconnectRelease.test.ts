@@ -21,16 +21,9 @@ import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerSte
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 
 /**
- * #11381 item 5, through the wiring instead of a copy of it: an inventory read naming a session
- * runs through the real `tools/call` entry (which classifies it as a plain read), under the
- * process execution tracker, against a real `Daemon`'s session manager, pool, owner-disconnect
- * port and tool-call-end subscription. When that read is the session's last call in flight, its
- * end retries the owner-disconnect release it deferred at once, on every way out of the call,
- * and is never use of the session.
- *
- * Whether a read should defer that release at all is an open owner question (#11381 item 1), so
- * nothing here asserts that the session is held while the read runs: only that the release is not
- * left waiting past the read's end.
+ * #11381: an inventory read through the real tools/call entry never defers the real Daemon's
+ * owner-disconnect release. The read remains in flight when the grace runs out and the pool
+ * frees the device. Each exit reports its end exactly once, never as use or another release.
  */
 const DEVICE: BootedDevice = {
   name: "Pixel_8_API_35",
@@ -47,7 +40,7 @@ interface DaemonToolCallEndWiring {
   stopSessionTimers(): void;
 }
 
-describe("an inventory read is the last call in flight when its owner disconnects (#11381)", () => {
+describe("an in-flight inventory read never holds owner-disconnect release (#11381)", () => {
   let restoreHermeticServer: () => void;
   let fixture: McpTestFixture;
   let timer: FakeTimer;
@@ -172,24 +165,34 @@ describe("an inventory read is the last call in flight when its owner disconnect
   ];
 
   test.each(exits)(
-    "the read %s: the release is retried at once, and the end is not use",
+    "the read %s after release: its end is reported once, never as use",
     async (_name, endTheRead) => {
       const { call } = await readInFlightPastTheDisconnectGrace();
-      const idleDeadline = daemon.getSessionManager().getSession(SESSION)?.expiresAt;
-      const endedAt = timer.now();
+      try {
+        expect(executionTracker.hasActiveSessionUuidExecutions(SESSION)).toBe(true);
+        expect(ends).toEqual([]);
+        expect(releaseReasons).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
+        expect(daemon.getDevicePool().getDevice(DEVICE.deviceId)?.sessionId).toBeNull();
+        const endedAt = timer.now();
 
-      await endTheRead();
-      await call;
+        await endTheRead();
+        await call;
 
-      // Reported exactly once, and not as an admitted call: a read never extends its session.
-      expect(ends).toEqual([{ uuids: [SESSION], admitted: false }]);
-      expect(daemon.getSessionManager().getSession(SESSION)?.expiresAt).toBe(idleDeadline);
+        // Reported exactly once, and not as an admitted call: a read never extends its session.
+        expect(ends).toEqual([{ uuids: [SESSION], admitted: false }]);
+        expect(daemon.getSessionManager().getSession(SESSION)).toBeNull();
 
-      // No time passes: the release does not wait for the veto's bound or a heartbeat scan.
-      await settle(0);
-      expect(timer.now()).toBe(endedAt);
-      expect(releaseReasons).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
-      expect(daemon.getDevicePool().getDevice(DEVICE.deviceId)?.sessionId).toBeNull();
+        // The already released session gains no activity and no additional release.
+        await settle(0);
+        expect(timer.now()).toBe(endedAt);
+        expect(releaseReasons).toEqual([OWNER_DISCONNECTED_RELEASE_REASON]);
+        expect(daemon.getDevicePool().getDevice(DEVICE.deviceId)?.sessionId).toBeNull();
+      } finally {
+        // Settle the body even when an assertion fails, so the global tracker cannot leak work.
+        outcome.resolve({ success: true });
+        await call;
+        await settle(0);
+      }
     },
   );
 });

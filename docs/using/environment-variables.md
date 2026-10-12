@@ -281,7 +281,10 @@ A session held from the CLI keeps its own 2-minute default idle window
 (`AUTOMOBILE_CLI_SESSION_IDLE_TIMEOUT_MS`); the owner chose not to raise it
 (2026-10-09, #10982), and `--cli help` prints the same value.
 `session-info` reports `lastUsedAt` as the last tool activity
-and `expiresAt` as the idle deadline. When a session's device restarts, the daemon
+and `expiresAt` as the stored idle deadline. Managed executions report
+`idleReleaseAt: null` while their owner lease is live or suspect: neither that stored
+deadline nor the proxy's local idle window ends them. `idleTimeoutMs` stays validated
+and reported, but a hung living owner with heartbeats may hold indefinitely. When a session's device restarts, the daemon
 waits up to three minutes for it to come back. Tool calls that start, wait on, or
 fail because of that recovery count as activity, so the idle window only ends the
 recovery once the client has made no calls for the whole window. A call waiting
@@ -292,7 +295,9 @@ is recreated with `lastUsedAt` set to the restart time and its deadline one idle
 window later, because the persisted `last_used_at_ms` is not restored. This is
 intended, so an idle session that outlives a restart can hold its device for up
 to one more window. A persisted session whose deadline had already passed when
-the daemon restarted is not rehydrated.
+the daemon restarted is not rehydrated, except a `managed-execution` row: its idle
+deadline is ignored on recovery, and the existing awaiting-owner timeout bounds
+a proxy that never returns. Terminal reasons and fixed restart windows still apply.
 
 A rejected claim returns
 `{ success: false, code: "liveness_owner_conflict", error: "..." }` naming the
@@ -310,7 +315,8 @@ owner token before the daemon connection closes. Releases run in parallel with
 a 1.5 s bound; failure leaves the existing disconnect/heartbeat fallback. A
 configured `--initial-session-uuid`, a harness-supplied stable owner token and
 CLI-owned sessions retain their existing resume/idle behavior; managed executions
-use their separate release path. A predecessor cannot release a session whose
+use their separate release path and end on owner exit, heartbeat loss or explicit
+release. Plain heartbeat and CLI sessions retain their idle rules. A predecessor cannot release a session whose
 liveness ownership was handed off (#11920).
 
 A stdio/HTTP proxy claims and heartbeats only the sessions it acquired itself
@@ -437,13 +443,13 @@ left on the lease or grace window, or zero once lapsed.
 
 To tell an idle holder from an active one, `session-info` also prints:
 
-| Field                  | Meaning                                                                        |
-| ---------------------- | ------------------------------------------------------------------------------ |
-| `lastToolActivityAt`   | Start or end of the session's last tool call; heartbeats never move it.        |
-| `lastOwnerHeartbeatAt` | The owner's last heartbeat, or `null` before the first.                        |
-| `idleReleaseAt`        | When idle release is due; the next monitor scan after it releases the session. |
-| `holderKind`           | `stdio-proxy`, `desktop`, `ide`, `cli`, `junit` or `unknown`.                  |
-| `activeExecutions`     | Calls in flight, reads included. Only a control call holds the idle release.   |
+| Field                  | Meaning                                                                      |
+| ---------------------- | ---------------------------------------------------------------------------- |
+| `lastToolActivityAt`   | Start or end of the session's last tool call; heartbeats never move it.      |
+| `lastOwnerHeartbeatAt` | The owner's last heartbeat, or `null` before the first.                      |
+| `idleReleaseAt`        | When idle release is due, or null for an idle-exempt managed execution.      |
+| `holderKind`           | `stdio-proxy`, `desktop`, `ide`, `cli`, `junit` or `unknown`.                |
+| `activeExecutions`     | Calls in flight, reads included. Only a control call holds the idle release. |
 
 `holderKind` comes from the session's liveness policy (`cli` for a one-shot
 `--cli` owner), the client name a client sent to `daemon/registerSession`, and

@@ -160,7 +160,7 @@ class IdleWorld {
   }
 
   /** What the client is told, on the session clock. */
-  private reported(): number {
+  private reported(): number | null {
     return idleReleaseAt(this.session);
   }
 
@@ -175,6 +175,12 @@ class IdleWorld {
    */
   private checkReportedAgainstModel(): void {
     const reported = this.reported();
+    if (reported === null) {
+      if (this.session.livenessPolicy !== "managed-execution") {
+        this.fail("unexpected idle exemption");
+      }
+      return;
+    }
     const earliest = this.anchor + IDLE_MS + this.stalledMs - this.stallCount * SCAN_MS;
     const latest = this.anchor + IDLE_MS + this.stalledMs;
     if (reported < earliest || reported > latest) {
@@ -191,6 +197,12 @@ class IdleWorld {
     await drainMicrotasks(20);
     const now = this.manager.sessionNow();
     const reported = this.reported();
+    if (reported === null) {
+      if (!this.held) {
+        this.fail(`exempt session released: ${this.released.join(",")}`);
+      }
+      return;
+    }
     const expectedReason =
       this.session.livenessPolicy === "cli-idle" ? "cli-idle-timeout" : "cleanup-expired";
     if (this.released.some((reason) => reason !== expectedReason)) {
@@ -230,10 +242,10 @@ class IdleWorld {
         (error: Error) => error.constructor.name,
       );
     await drainMicrotasks(20);
-    const expected = now <= reported ? "admitted" : "TerminalSessionError";
+    const expected = reported === null || now <= reported ? "admitted" : "TerminalSessionError";
     if (outcome !== expected) {
       this.fail(
-        `a control call ${now - reported}ms past the reported idleReleaseAt was ${outcome}; ` +
+        `a control call ${now - (reported ?? now)}ms past the reported idleReleaseAt was ${outcome}; ` +
           `expected ${expected}`,
       );
     }
@@ -355,7 +367,9 @@ describe("the scan, a late call's admission and idleReleaseAt give one idle dead
     ]) {
       test(`${kind.name}: seeded schedules ${seeds.join(", ")}`, async () => {
         for (const seed of seeds) {
-          expect(await runSchedule(kind, seed)).toEqual({ idleReleased: true });
+          expect(await runSchedule(kind, seed)).toEqual({
+            idleReleased: kind.name !== "managed execution",
+          });
         }
       });
     }

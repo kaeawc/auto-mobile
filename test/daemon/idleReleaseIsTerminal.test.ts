@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import {
   SessionManager,
   TerminalSessionError,
@@ -35,6 +35,21 @@ class RecordingJournal implements TerminalReleaseJournal {
   }
   resolve(): void {}
 }
+
+beforeAll(async () => {
+  // Pay the release path's one-time initialization outside the assertion budget.
+  const timer = new FakeTimer();
+  const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+  manager.attachTerminalReleaseJournal(new RecordingJournal());
+  try {
+    const session = await manager.createSession("warm-idle-release", DEVICE, "android");
+    timer.setCurrentTime(session.expiresAt + 1);
+    manager.cleanupExpiredSessions();
+    await manager.waitForSessionRelease(session.sessionId);
+  } finally {
+    manager.stopCleanupTimer();
+  }
+});
 
 describe("an idle release is terminal (#11258)", () => {
   let timer: FakeTimer;
@@ -81,69 +96,90 @@ describe("an idle release is terminal (#11258)", () => {
     ["lookup", "heartbeat"],
     ["sweep", "managed-execution"],
     ["lookup", "managed-execution"],
-  ] as const)("an idle %s release of %s has one reason on every surface", async (path, policy) => {
-    if (policy === "managed-execution") {
-      await manager.adoptManagedExecutionLivenessPolicy(SESSION);
-    }
-    const origins: unknown[] = [];
-    manager.onSessionRelease((_id, _device, _reason, _snapshot, options) => {
-      origins.push(options.expiryOrigin);
-    });
-    timer.setCurrentTime(manager.getAllSessions()[0]!.expiresAt + 1);
-    if (path === "sweep") {
-      manager.cleanupExpiredSessions();
-    } else {
-      expect(manager.getSession(SESSION)).toBeNull();
-    }
-    await manager.waitForSessionRelease(SESSION);
-    const reason = "cleanup-expired";
-    expect(origins).toEqual([path === "sweep" ? "cleanup-expired" : "lazy-expiry"]);
-    expect(manager.getTerminalReleaseSnapshot(SESSION)).toMatchObject({ releaseReason: reason });
-    expect(releasedSessionNotFoundFields(await manager.getReleasedSessionReason(SESSION))).toEqual({
-      releaseReason: reason,
-      idle: true,
-    });
-    const registration = await handleDaemonRequest(
-      {
-        id: "late",
-        type: "daemon_request",
-        method: "daemon/registerSession",
-        params: { sessionId: SESSION, clientName: "late-client" },
-      },
-      { isInitialized: () => true, getSessionManager: () => manager } as DaemonStateAccess,
-    );
-    expect(registration).toMatchObject({ success: false, details: { reason, idle: true } });
-
-    expect(journal.recorded.map((intent) => [intent.sessionId, intent.reason])).toEqual([
-      [SESSION, reason],
-    ]);
-    expect(await persistence.getSession!(SESSION)).toMatchObject({
-      status: "expired",
-      release_reason: reason,
-    });
-
-    const refusal = await refusalOf(manager.getOrCreateSession(SESSION, pool));
-    expect(refusal).toBeInstanceOf(TerminalSessionError);
-    const error = refusal as TerminalSessionError;
-    expect(error.release).toMatchObject({ releaseReason: reason, terminal: true });
-    expect(
-      sessionOwnershipLostPayload({
-        message: error.message,
-        sessionUuid: error.sessionUuid,
-        reason: error.release.releaseReason,
-        release: error.release,
-      }),
-    ).toMatchObject({
-      error: {
-        code: "session_ownership_lost",
-        reason,
+  ] as const)(
+    "an idle %s judgement of %s agrees with its policy on every surface",
+    async (path, policy) => {
+      if (policy === "managed-execution") {
+        await manager.adoptManagedExecutionLivenessPolicy(SESSION);
+      }
+      const origins: unknown[] = [];
+      manager.onSessionRelease((_id, _device, _reason, _snapshot, options) => {
+        origins.push(options.expiryOrigin);
+      });
+      timer.setCurrentTime(manager.getAllSessions()[0]!.expiresAt + 1);
+      if (policy === "managed-execution") {
+        await handleDaemonRequest(
+          {
+            id: "hb",
+            type: "daemon_request",
+            method: "daemon/heartbeat",
+            params: { sessionId: SESSION },
+          },
+          { isInitialized: () => true, getSessionManager: () => manager } as DaemonStateAccess,
+        );
+        manager.cleanupExpiredSessions();
+        expect(manager.getSession(SESSION)).not.toBeNull();
+        expect(journal.recorded).toEqual([]);
+        expect((await persistence.getSession!(SESSION))?.release_reason).toBeNull();
+        return;
+      }
+      if (path === "sweep") {
+        manager.cleanupExpiredSessions();
+      } else {
+        expect(manager.getSession(SESSION)).toBeNull();
+      }
+      await manager.waitForSessionRelease(SESSION);
+      const reason = "cleanup-expired";
+      expect(origins).toEqual([path === "sweep" ? "cleanup-expired" : "lazy-expiry"]);
+      expect(manager.getTerminalReleaseSnapshot(SESSION)).toMatchObject({ releaseReason: reason });
+      expect(
+        releasedSessionNotFoundFields(await manager.getReleasedSessionReason(SESSION)),
+      ).toEqual({
+        releaseReason: reason,
         idle: true,
-        retryable: false,
-        nextAction: "acquire_new_session",
-      },
-    });
-    expect(assignments).toEqual([]);
-  });
+      });
+      const registration = await handleDaemonRequest(
+        {
+          id: "late",
+          type: "daemon_request",
+          method: "daemon/registerSession",
+          params: { sessionId: SESSION, clientName: "late-client" },
+        },
+        { isInitialized: () => true, getSessionManager: () => manager } as DaemonStateAccess,
+      );
+      expect(registration).toMatchObject({ success: false, details: { reason, idle: true } });
+
+      expect(journal.recorded.map((intent) => [intent.sessionId, intent.reason])).toEqual([
+        [SESSION, reason],
+      ]);
+      expect(await persistence.getSession!(SESSION)).toMatchObject({
+        status: "expired",
+        release_reason: reason,
+      });
+
+      const refusal = await refusalOf(manager.getOrCreateSession(SESSION, pool));
+      expect(refusal).toBeInstanceOf(TerminalSessionError);
+      const error = refusal as TerminalSessionError;
+      expect(error.release).toMatchObject({ releaseReason: reason, terminal: true });
+      expect(
+        sessionOwnershipLostPayload({
+          message: error.message,
+          sessionUuid: error.sessionUuid,
+          reason: error.release.releaseReason,
+          release: error.release,
+        }),
+      ).toMatchObject({
+        error: {
+          code: "session_ownership_lost",
+          reason,
+          idle: true,
+          retryable: false,
+          nextAction: "acquire_new_session",
+        },
+      });
+      expect(assignments).toEqual([]);
+    },
+  );
 
   test("a restarted daemon refuses the idle-released UUID instead of rehydrating it", async () => {
     timer.setCurrentTime(manager.getAllSessions()[0]!.expiresAt + 1);

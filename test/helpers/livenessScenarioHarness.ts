@@ -1547,12 +1547,12 @@ export class LivenessScenario {
    * running daemon as the slot's execution owner. The reconciler's device work is the device
    * boundary; the registry writes are the ones the acquisition makes. Needs `managedSlots`.
    */
-  async holdAsManagedExecution(sessionId: string): Promise<void> {
+  async holdAsManagedExecution(sessionId: string, idleTimeoutMs?: number): Promise<void> {
     const registry = this.managedSlots;
     if (!registry) {
       throw new Error("LivenessScenario: start the scenario with `managedSlots`");
     }
-    await this.daemon.manager.adoptManagedExecutionLivenessPolicy(sessionId);
+    await this.daemon.manager.adoptManagedExecutionLivenessPolicy(sessionId, { idleTimeoutMs });
     const scope = await registry.ensureScope({
       managedHostScope: "scenario-host",
       runnerNamespace: "scenario-runner",

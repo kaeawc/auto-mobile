@@ -98,7 +98,7 @@ export interface ManagedSlotsResult {
     revived?: boolean;
   };
   outcome: ManagedSlotsOutcome;
-  /** The idle window the slot sessions are held with (2-minute default or the config override). */
+  /** The stored idle window (2-minute default or override); live-owned executions are idle-exempt. */
   idleTimeoutMs?: number;
   slots: ManagedSlotResultEntry[];
   /** Scope- or transport-level failure; per-slot failures sit on the slot entry. */

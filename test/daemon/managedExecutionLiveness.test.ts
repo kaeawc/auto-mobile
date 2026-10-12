@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
 import {
   handleDaemonRequest,
@@ -15,7 +15,6 @@ import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
   NO_HEARTBEAT_RELEASE_BUDGET_MS,
-  PROXY_HEARTBEAT_INTERVAL_MS,
 } from "../../src/daemon/sessionLivenessWindows";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { CLI_SESSION_LIVENESS_POLICY } from "../../src/daemon/constants";
@@ -26,17 +25,14 @@ import {
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-// #11176: a managed slot execution's session keeps the owner-heartbeat lease and the idle rule
-// (measured from the end of the last tool call; reads never count). Its idle window is the
-// launcher-trusted override bounded to 2–60 minutes, or the 2-minute default (owner decision
-// 2026-10-09, Q1: configurable, never exempt).
+// #11340: managed executions stay held while their owner lease is non-lapsed.
+// The configured idle window stays stored; heartbeats and reads never move activity clocks.
 
 const SESSION = "managed-execution-session";
 const DEVICE = "emulator-5554";
 const OWNER = "managed-proxy-token";
 const MINUTE = 60_000;
 /** Idle expiry is released by whichever sweep sees it first: a lookup or the periodic cleanup. */
-const IDLE_EXPIRY_REASONS = ["cleanup-expired"];
 
 describe("managed-execution idle window resolution", () => {
   test("defaults to the 2-minute idle window", () => {
@@ -107,16 +103,19 @@ describe("managed-execution session liveness", () => {
     await Promise.resolve();
   };
 
-  /** Advance `ms` with the proxy keeper heartbeating on its cadence, sweeping as the daemon does. */
-  const heartbeatThrough = async (ms: number): Promise<void> => {
-    for (let elapsed = 0; elapsed < ms; elapsed += PROXY_HEARTBEAT_INTERVAL_MS) {
-      timer.advanceTime(Math.min(PROXY_HEARTBEAT_INTERVAL_MS, ms - elapsed));
-      if (manager.hasSession(SESSION)) {
-        await heartbeat();
-      }
-      await sweep();
+  beforeAll(async () => {
+    // Warm first-use policy/heartbeat setup; each test still gets fresh fakes below.
+    timer = new FakeTimer();
+    persistence = new FakeDeviceSessionPersistence();
+    manager = new SessionManager(timer, persistence);
+    try {
+      await manager.createSession(SESSION, DEVICE, "android");
+      await heartbeat({ claimLivenessOwnership: true });
+      await manager.adoptManagedExecutionLivenessPolicy(SESSION);
+    } finally {
+      manager.stopCleanupTimer();
     }
-  };
+  });
 
   beforeEach(async () => {
     timer = new FakeTimer();
@@ -135,7 +134,14 @@ describe("managed-execution session liveness", () => {
       },
       timer,
     );
-    await manager.createSession(SESSION, DEVICE, "android");
+    await manager.createSession(
+      SESSION,
+      DEVICE,
+      "android",
+      undefined,
+      undefined,
+      "Pixel_managed_execution",
+    );
     expect(await heartbeat({ claimLivenessOwnership: true })).toMatchObject({ success: true });
   });
 
@@ -155,22 +161,26 @@ describe("managed-execution session liveness", () => {
     expect(row?.session_timeout_ms).toBe(DEFAULT_SESSION_IDLE_TIMEOUT_MS);
   });
 
-  test("default: a heartbeating session with no tool call is idle-released after 2 minutes", async () => {
+  test("default: a heartbeating managed execution is held after 30 minutes without use", async () => {
     await manager.adoptManagedExecutionLivenessPolicy(SESSION);
     const lastToolActivity = manager.getSession(SESSION)!.lastUsedAt;
 
-    await heartbeatThrough(DEFAULT_SESSION_IDLE_TIMEOUT_MS);
+    timer.setCurrentTime(lastToolActivity + 30 * MINUTE);
+    await heartbeat();
+    await sweep();
+    expect(manager.getAllSessions().map((session) => session.sessionId)).toContain(SESSION);
+    expect(manager.getSession(SESSION)?.lastUsedAt).toBe(lastToolActivity);
+    expect(releases).toEqual([]);
+    const ack = await heartbeat({ reportIdleRelease: true });
+    expect(ack).toMatchObject({ success: true, result: { idleReleaseAt: null } });
+    await manager.getOrCreateSession(SESSION, undefined, undefined, {
+      executionId: "late-control",
+      startTime: timer.now(),
+    });
     expect(manager.hasSession(SESSION)).toBe(true);
-
-    await heartbeatThrough(PROXY_HEARTBEAT_INTERVAL_MS);
-    expect(manager.hasSession(SESSION)).toBe(false);
-    expect(releases.map((release) => release.at)).toEqual([
-      lastToolActivity + DEFAULT_SESSION_IDLE_TIMEOUT_MS + PROXY_HEARTBEAT_INTERVAL_MS,
-    ]);
-    expect(IDLE_EXPIRY_REASONS).toContain(releases[0]!.reason);
   });
 
-  test("override: a 10-minute window survives tool-free reasoning past 2 minutes, then releases", async () => {
+  test("override: the stored 10-minute window does not release a live owner", async () => {
     await manager.adoptManagedExecutionLivenessPolicy(SESSION, { idleTimeoutMs: 10 * MINUTE });
     const lastToolActivity = manager.getSession(SESSION)!.lastUsedAt;
 
@@ -184,8 +194,8 @@ describe("managed-execution session liveness", () => {
     timer.setCurrentTime(lastToolActivity + 10 * MINUTE + 1);
     await heartbeat();
     await sweep();
-    expect(releases).toHaveLength(1);
-    expect(IDLE_EXPIRY_REASONS).toContain(releases[0]!.reason);
+    expect(manager.hasSession(SESSION)).toBe(true);
+    expect(releases).toEqual([]);
   });
 
   test("the idle window restarts from the end of a tool call, not from a heartbeat", async () => {
@@ -212,6 +222,35 @@ describe("managed-execution session liveness", () => {
     const after = manager.getSession(SESSION)!;
     expect(after.lastUsedAt).toBe(before.lastUsedAt);
     expect(after.expiresAt).toBe(before.expiresAt);
+  });
+
+  test("session-info and heartbeat reporting use the judged live, suspect and lapsed lease", async () => {
+    await manager.adoptManagedExecutionLivenessPolicy(SESSION);
+    const info = () =>
+      handleDaemonRequest(
+        {
+          id: "info",
+          type: "daemon_request",
+          method: "daemon/sessionInfo",
+          params: { sessionId: SESSION },
+        },
+        state(),
+      );
+    expect(await info()).toMatchObject({ success: true, result: { idleReleaseAt: null } });
+    expect(await heartbeat({ reportIdleRelease: true })).toMatchObject({
+      success: true,
+      result: { idleReleaseAt: null },
+    });
+    timer.advanceTime(5_000);
+    expect(await info()).toMatchObject({
+      success: true,
+      result: { idleReleaseAt: null, liveness: { state: "suspect" } },
+    });
+    timer.advanceTime(3_001);
+    expect(await info()).toMatchObject({
+      success: true,
+      result: { idleReleaseAt: DEFAULT_SESSION_IDLE_TIMEOUT_MS, liveness: { state: "lapsed" } },
+    });
   });
 
   test("adopting the policy is not use: the deadline is anchored on the last tool activity", async () => {
@@ -242,7 +281,9 @@ describe("managed-execution session liveness", () => {
   });
 
   test("heartbeat loss releases the session within 10 s, after the suspect grace", async () => {
-    await manager.adoptManagedExecutionLivenessPolicy(SESSION, { idleTimeoutMs: 60 * MINUTE });
+    await manager.adoptManagedExecutionLivenessPolicy(SESSION);
+    timer.setCurrentTime(30 * MINUTE);
+    await heartbeat();
     const lastBeat = timer.now();
 
     for (let elapsed = 0; elapsed < NO_HEARTBEAT_RELEASE_BUDGET_MS;) {
@@ -257,6 +298,20 @@ describe("managed-execution session liveness", () => {
 
     expect(releases).toEqual([{ at: lastBeat + 10_000, reason: "heartbeat-timeout" }]);
     expect(NO_HEARTBEAT_RELEASE_BUDGET_MS).toBe(10_000);
+    expect(await persistence.getSession!(SESSION)).toMatchObject({
+      release_reason: "heartbeat-timeout",
+    });
+    const info = await handleDaemonRequest(
+      {
+        id: "info",
+        type: "daemon_request",
+        method: "daemon/sessionInfo",
+        params: { sessionId: SESSION },
+      },
+      state(),
+    );
+    expect(info).toMatchObject({ success: false, releaseReason: "heartbeat-timeout" });
+    expect(info).not.toHaveProperty("idle");
   });
 
   test("a one-shot CLI declaration cannot move the session onto cli-idle", async () => {
@@ -303,6 +358,51 @@ describe("managed-execution session liveness", () => {
     expect(liveness.livenessPolicy).toBe(MANAGED_EXECUTION_LIVENESS_POLICY);
     expect(liveness.sessionTimeoutMs).toBe(30 * MINUTE);
   });
+
+  test.each(["managed-execution", "heartbeat"] as const)(
+    "restart past the persisted idle deadline preserves %s policy semantics",
+    async (policy) => {
+      if (policy === "managed-execution") {
+        await manager.adoptManagedExecutionLivenessPolicy(SESSION);
+      }
+      manager.stopCleanupTimer();
+      await persistence.markReleased(SESSION, "released", timer.now(), "daemon-restart");
+      timer.setCurrentTime(30 * MINUTE);
+      manager = new SessionManager(timer, persistence);
+      await manager.rehydratePersistedSessions({
+        async assignDeviceToSession(sessionId, _platform, target) {
+          const session = await manager.createSession(
+            sessionId,
+            target?.deviceId ?? DEVICE,
+            "android",
+            target?.liveness?.sessionTimeoutMs,
+            target?.liveness?.heartbeatTimeoutMs,
+            target?.stableDeviceId,
+            target?.liveness,
+            target?.initialOwnership,
+          );
+          return session.assignedDevice;
+        },
+      });
+      if (policy === "managed-execution") {
+        expect(manager.getSession(SESSION)?.ownership).toBe("awaiting-owner");
+        expect(await heartbeat()).toMatchObject({ success: true });
+        await manager.getOrCreateSession(SESSION, undefined, undefined, {
+          executionId: "restart-control",
+          startTime: timer.now(),
+        });
+        expect((await persistence.getSession!(SESSION))?.release_reason).toBeNull();
+      } else {
+        expect(manager.hasSession(SESSION)).toBe(false);
+        expect((await persistence.getSession!(SESSION))?.release_reason).toBe("expired");
+        expect(await heartbeat()).toMatchObject({
+          success: false,
+          releaseReason: "expired",
+          idle: true,
+        });
+      }
+    },
+  );
 
   describe("#11162 session-clock interplay", () => {
     test("a non-owner's tool calls do not keep a dead owner's lease alive across a stall", async () => {

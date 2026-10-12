@@ -291,8 +291,8 @@ function isSuspectRefusalRetryable(
 /** A `daemon_stalled` / `proxy_stalled` handover recorded for one session (#10053). */
 /** The daemon's idle-release instant for a session, as one heartbeat ack reported it (#10823). */
 interface DaemonIdleReport {
-  /** Epoch-ms instant the daemon would idle-release the session. */
-  releaseAt: number;
+  /** Epoch-ms idle deadline, or null when the daemon explicitly exempts idle release. */
+  releaseAt: number | null;
   /** Proxy-clock time the ack carrying it arrived. */
   reportedAt: number;
 }
@@ -5357,7 +5357,7 @@ export class DaemonMcpProxy {
     return previousInstance !== undefined && previousInstance !== daemonInstance;
   }
 
-  /** Keep the idle deadline the daemon reported in a heartbeat ack (#10823). */
+  /** Keep the daemon's idle deadline or explicit exemption; absence alone permits fallback. */
   private noteDaemonIdleEvidence(sessionUuid: string, ack: unknown): void {
     // An ack can arrive after a held session was dropped. End its retained history without
     // creating process evidence for a session that is no longer heartbeated.
@@ -5371,7 +5371,7 @@ export class DaemonMcpProxy {
       this.noteHeartbeatDaemonInstance(sessionUuid, daemonInstance);
     }
     const releaseAt = (ack as { idleReleaseAt?: unknown } | null | undefined)?.idleReleaseAt;
-    if (typeof releaseAt === "number" && Number.isFinite(releaseAt)) {
+    if (releaseAt === null || (typeof releaseAt === "number" && Number.isFinite(releaseAt))) {
       this.daemonIdleReports.set(sessionUuid, { releaseAt, reportedAt: this.timer.now() });
     } else {
       this.daemonIdleReports.delete(sessionUuid);
@@ -5381,7 +5381,8 @@ export class DaemonMcpProxy {
   /**
    * The daemon is authoritative for idle release (#10823, #10972): the proxy's own idle clock (its
    * environment, its call bookkeeping) only stands in for a daemon that reports nothing. Once the
-   * daemon has reported an idle-release instant, the local window never retires the session on its
+   * daemon has reported null, idleness never retires it locally. Once it reports an instant,
+   * the local window never retires the session on its
    * own. It is kept:
    * - while liveness recovery runs for it: a missed ack is not evidence of idleness;
    * - while the reported instant is in the future, however long ago the last ack arrived;
@@ -5397,7 +5398,11 @@ export class DaemonMcpProxy {
     if (report === undefined) {
       return false;
     }
-    return this.timer.now() < report.releaseAt || report.reportedAt < report.releaseAt;
+    return (
+      report.releaseAt === null ||
+      this.timer.now() < report.releaseAt ||
+      report.reportedAt < report.releaseAt
+    );
   }
 
   private hasSessionCallInFlight(sessionUuid: string): boolean {

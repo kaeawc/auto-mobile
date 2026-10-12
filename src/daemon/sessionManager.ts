@@ -1,3 +1,4 @@
+import { ignoresManagedExecutionIdleDeadline } from "./managedExecutionLiveness";
 import type { DeferredRebindCleanup } from "./acquisitionReceipt";
 import type { TimingData } from "../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
@@ -1451,7 +1452,9 @@ function restartRecoveryDeadlineFromPersisted(
     return undefined;
   }
   const restartWindowEnd = persisted.released_at_ms + DEVICE_RESTART_RECOVERY_WINDOW_MS;
-  return callerInFlight ? restartWindowEnd : Math.min(persisted.expires_at_ms, restartWindowEnd);
+  return callerInFlight || ignoresManagedExecutionIdleDeadline(persisted.liveness_policy)
+    ? restartWindowEnd
+    : Math.min(persisted.expires_at_ms, restartWindowEnd);
 }
 
 /** The persisted handoff's fixed window; idle activity never moves this deadline. */
@@ -3714,7 +3717,7 @@ export class SessionManager {
     }
     if (
       !persisted ||
-      persisted.expires_at_ms > now ||
+      persistedSessionExpiryReason(persisted, now) === undefined ||
       (persisted.release_reason && isTerminalReleaseReason(persisted.release_reason))
     ) {
       return persisted;
@@ -3882,7 +3885,8 @@ export class SessionManager {
       return undefined;
     }
     const reason = this.isRowOwnedByLivePeer(persisted)
-      ? persisted.expires_at_ms <= this.sessionNow()
+      ? !ignoresManagedExecutionIdleDeadline(persisted.liveness_policy) &&
+        persisted.expires_at_ms <= this.sessionNow()
         ? "expired"
         : undefined
       : persistedSessionExpiryReason(persisted, this.sessionNow());
@@ -12303,6 +12307,10 @@ export class SessionManager {
    * Check if session is expired
    */
   private isSessionExpired(session: Session): boolean {
+    // Owner loss, including a lapsed lease, belongs to the heartbeat monitor.
+    if (ignoresManagedExecutionIdleDeadline(session.livenessPolicy)) {
+      return false;
+    }
     // A CLI-owned session (#6870) is governed solely by the wall-clock idle
     // policy `SessionHeartbeatMonitor` applies, which releases it as
     // `cli-idle-timeout`. The ordinary expiry deadline must not release it
@@ -12424,6 +12432,9 @@ export class SessionManager {
     session: Session,
     execution?: SessionClockExecution,
   ): boolean {
+    if (ignoresManagedExecutionIdleDeadline(session.livenessPolicy)) {
+      return false;
+    }
     // A lookup that carries no execution (routing resolution: autolock, setActiveDevice, the
     // lifecycle ownership check) is not a call that arrived after the deadline; it only asks who
     // holds the device. It must respect the unsettled-execution veto exactly as the idle sweep
@@ -12449,6 +12460,9 @@ export class SessionManager {
     execution: SessionClockExecution | undefined,
     timelyControlOnly = false,
   ): boolean {
+    if (ignoresManagedExecutionIdleDeadline(session.livenessPolicy)) {
+      return false;
+    }
     const idleDeadline = sessionIdleDeadline(session);
     return (
       execution !== undefined &&

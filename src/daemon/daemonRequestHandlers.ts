@@ -1041,8 +1041,8 @@ function refuseOtherDaemonInstance(
  * when the heartbeat asks (`reportIdleRelease`, so other clients' wire fixtures stay as they are)
  * (`idleReleaseAt`, an epoch-ms instant from the daemon's own idle window, veto included, the same
  * value `session-info` reports). It reports without extending anything: the proxy judges idleness
- * by the daemon's clock instead of its own (#10823). The value only moves when a tool call does,
- * so consecutive acks of an idle session are identical.
+ * by the daemon's clock instead of its own (#10823). A numerical idle deadline moves only with
+ * tool activity; a managed execution reports null while its judged owner lease is non-lapsed.
  */
 function heartbeatAck(
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
@@ -1053,13 +1053,18 @@ function heartbeatAck(
   const session = sessionForIngress(manager, sessionId);
   const instance =
     report.daemonInstance === undefined ? {} : { daemonInstance: report.daemonInstance };
+  const idleDeadline =
+    report.idleRelease && session
+      ? vetoedIdleReleaseAt(
+          session,
+          manager.getIdleReleaseExecutionVeto?.(sessionId),
+          manager.getSessionLeaseState?.(sessionId)?.phase,
+        )
+      : null;
   const idle =
     report.idleRelease && session
       ? {
-          idleReleaseAt: reportedWallClock(
-            manager,
-            vetoedIdleReleaseAt(session, manager.getIdleReleaseExecutionVeto?.(sessionId)),
-          ),
+          idleReleaseAt: idleDeadline === null ? null : reportedWallClock(manager, idleDeadline),
         }
       : {};
   return { success: true, result: { sessionId, ...extra, ...idle, ...instance } };
@@ -1356,6 +1361,7 @@ export async function handleSessionInfo(
         executions.getActiveDeviceSessionExecutionCount(sessionId),
         manager.getIdleReleaseExecutionVeto?.(sessionId),
         (ms) => reportedWallClock(manager, ms),
+        manager.getSessionLeaseState?.(sessionId)?.phase,
       ),
       ...livenessInfo(manager.getSessionLeaseState?.(sessionId)),
       ...(isSessionReleasing(manager, sessionId, session) ? { releasing: true } : {}),
@@ -1405,6 +1411,7 @@ export async function handleActiveSessions(
                 executions.getActiveDeviceSessionExecutionCount(session.sessionId),
                 manager.getIdleReleaseExecutionVeto?.(session.sessionId),
                 (ms) => reportedWallClock(manager, ms),
+                manager.getSessionLeaseState?.(session.sessionId)?.phase,
               ),
               ...(isSessionReleasing(manager, session.sessionId, session)
                 ? { releasing: true }

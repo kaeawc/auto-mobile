@@ -87,6 +87,18 @@ describe("classifySessionHolderKind", () => {
 });
 
 describe("idleReleaseAt", () => {
+  test.each(["live", "suspect", "lapsed"] as const)(
+    "managed %s lease reports its exemption honestly",
+    (phase) => {
+      const session = snapshot({ livenessPolicy: "managed-execution" });
+      const expected = phase === "lapsed" ? 121_000 : null;
+      expect(idleReleaseAt(session, phase)).toBe(expected);
+      expect(vetoedIdleReleaseAt(session, undefined, phase)).toBe(expected);
+      expect(sessionHoldDiagnostics(session, 0, undefined, (ms) => ms, phase).idleReleaseAt).toBe(
+        expected,
+      );
+    },
+  );
   test("a heartbeating owner is released exactly at expiresAt: no suspect grace on idleness (#11107)", () => {
     expect(idleReleaseAt(snapshot())).toBe(121_000);
   });

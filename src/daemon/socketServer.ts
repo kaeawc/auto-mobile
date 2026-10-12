@@ -1,3 +1,4 @@
+import { defaultLockOwnerGenerationProbe } from "./lockOwnerGeneration";
 import { throwIfAborted } from "../utils/toolUtils";
 import { holdDispatchedRequest } from "./dispatchedRequestHold";
 import { idleReleaseField } from "./releaseReasons";
@@ -643,7 +644,11 @@ export interface SocketReclaimLock {
 function defaultSocketReclaimLock(socketPath: string, ownerToken: string): SocketReclaimLock {
   const lockFilePath = `${socketPath}.bind.lock`;
   return {
-    acquire: () => tryAcquireExclusiveLock(lockFilePath, { ownerToken }),
+    acquire: () =>
+      tryAcquireExclusiveLock(lockFilePath, {
+        ownerToken,
+        ownerGeneration: defaultLockOwnerGenerationProbe,
+      }),
     release: () => releaseExclusiveLock(lockFilePath, process.pid, ownerToken),
   };
 }

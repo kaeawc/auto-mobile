@@ -1,3 +1,4 @@
+import { defaultLockOwnerGenerationProbe } from "./lockOwnerGeneration";
 import {
   isCompleteRecoveryRecord,
   recoveryOwnerSchema,
@@ -676,6 +677,7 @@ export class DaemonManager implements DaemonManagerLike {
     const logPath = this.daemonLaunchLogPath();
     const acquired = tryAcquireExclusiveLock(this.lockFilePath, {
       isProcessRunning: (pid) => this.isProcessRunning(pid),
+      ownerGeneration: defaultLockOwnerGenerationProbe,
       // Written on line 2 so a follower can tell a replacement holder apart from
       // the one it was already waiting on even under PID reuse (issue #5904).
       // `reclaimOwnPid` stays false (the daemon's documented same-process contract),

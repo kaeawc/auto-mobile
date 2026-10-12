@@ -8,10 +8,12 @@ import {
   formatLockContent,
   parseLockContent,
   readExclusiveLockContent,
+  readLockOwnerPid,
   releaseExclusiveLock,
   takeOverExclusiveLock,
   tryAcquireExclusiveLock,
 } from "../../src/utils/fileLock";
+import { FakeLockOwnerGenerationProbe } from "../fakes/FakeLockOwnerGenerationProbe";
 import { logger } from "../../src/utils/logger";
 
 describe("fileLock primitive", () => {
@@ -25,6 +27,188 @@ describe("fileLock primitive", () => {
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  describe("OS generation ownership (#11812)", () => {
+    test.each([9999, 100])(
+      "reclaims live recycled PID %d and records the new generation",
+      (ownerPid) => {
+        const probe = new FakeLockOwnerGenerationProbe();
+        probe.verdict = "different";
+        writeFileSync(lockPath, `${ownerPid}\nold\n\nlinux:boot:old`);
+        expect(
+          tryAcquireExclusiveLock(lockPath, {
+            pid: 100,
+            ownerToken: "new",
+            isProcessRunning: () => true,
+            ownerGeneration: probe,
+          }),
+        ).toBe(true);
+        expect(readExclusiveLockContent(lockPath)).toEqual({
+          pid: 100,
+          token: "new",
+          generation: probe.token,
+        });
+        expect(probe.compareCalls).toEqual([{ pid: ownerPid, recorded: "linux:boot:old" }]);
+      },
+    );
+
+    test.each(["same", "unknown", "throws"] as const)(
+      "keeps a live owner's lock on %s",
+      (verdict) => {
+        const probe = new FakeLockOwnerGenerationProbe();
+        if (verdict === "throws") {
+          probe.compareError = new Error("unreadable");
+        } else {
+          probe.verdict = verdict;
+        }
+        const body = "100\nold\n\nlinux:boot:old";
+        writeFileSync(lockPath, body);
+        expect(
+          tryAcquireExclusiveLock(lockPath, {
+            pid: 100,
+            isProcessRunning: () => true,
+            ownerGeneration: probe,
+          }),
+        ).toBe(false);
+        expect(readFileSync(lockPath, "utf-8")).toBe(body);
+      },
+    );
+
+    test("legacy locks never compare and omitted probes retain PID-only behavior", () => {
+      const probe = new FakeLockOwnerGenerationProbe();
+      probe.verdict = "different";
+      writeFileSync(lockPath, "9999\nold");
+      expect(
+        tryAcquireExclusiveLock(lockPath, {
+          pid: 100,
+          isProcessRunning: () => true,
+          ownerGeneration: probe,
+        }),
+      ).toBe(false);
+      expect(probe.compareCalls).toEqual([]);
+      expect(readFileSync(lockPath, "utf-8")).toBe("9999\nold");
+      writeFileSync(lockPath, "9999\nold\n\nlinux:boot:old");
+      expect(tryAcquireExclusiveLock(lockPath, { pid: 100, isProcessRunning: () => true })).toBe(
+        false,
+      );
+    });
+
+    test("dead owners reclaim without comparing generations", () => {
+      const probe = new FakeLockOwnerGenerationProbe();
+      writeFileSync(lockPath, "9999\nold\n\nlinux:boot:old");
+      expect(
+        tryAcquireExclusiveLock(lockPath, {
+          pid: 100,
+          isProcessRunning: () => false,
+          ownerGeneration: probe,
+        }),
+      ).toBe(true);
+      expect(probe.compareCalls).toEqual([]);
+      expect(readExclusiveLockContent(lockPath)?.generation).toBe(probe.token);
+    });
+
+    test.each([undefined, "", "bad\nline", "bad\rline", "throws"])(
+      "omits unavailable or invalid current token %j",
+      (token) => {
+        const probe = new FakeLockOwnerGenerationProbe();
+        probe.token = token;
+        if (token === "throws") {
+          probe.currentError = new Error("unreadable");
+        }
+        expect(tryAcquireExclusiveLock(lockPath, { pid: 100, ownerGeneration: probe })).toBe(true);
+        expect(readFileSync(lockPath, "utf-8")).toBe("100");
+      },
+    );
+
+    test("restores a fresh same-PID owner replaced after the generation judgement", () => {
+      const probe = new FakeLockOwnerGenerationProbe();
+      probe.verdict = "different";
+      writeFileSync(lockPath, "9999\nowner\nmeta\nlinux:boot:old");
+      const fresh = "9999\nowner\nmeta\nlinux:boot:fresh";
+      const realRename = fs.renameSync;
+      const renameSpy = spyOn(fs, "renameSync").mockImplementation((from, to) => {
+        if (from === lockPath) {
+          writeFileSync(lockPath, fresh);
+        }
+        realRename(from, to);
+      });
+      try {
+        expect(
+          tryAcquireExclusiveLock(lockPath, {
+            pid: 100,
+            isProcessRunning: () => true,
+            ownerGeneration: probe,
+          }),
+        ).toBe(false);
+      } finally {
+        renameSpy.mockRestore();
+      }
+      expect(readFileSync(lockPath, "utf-8")).toBe(fresh);
+      expect(readdirSync(dir)).toEqual([basename(lockPath)]);
+    });
+
+    test.each(["same", "unknown", "different", "throws"] as const)(
+      "reads a live owner with generation verdict %s",
+      (verdict) => {
+        const probe = new FakeLockOwnerGenerationProbe();
+        if (verdict === "throws") {
+          probe.compareError = new Error("unreadable");
+        } else {
+          probe.verdict = verdict;
+        }
+        writeFileSync(lockPath, "9999\nowner\n\nlinux:boot:old");
+        expect(readLockOwnerPid(lockPath, () => true, probe)).toBe(
+          verdict === "different" ? undefined : 9999,
+        );
+      },
+    );
+
+    test("takeover records the taker's generation and release deletes its four-line lock", () => {
+      const probe = new FakeLockOwnerGenerationProbe();
+      writeFileSync(lockPath, "9999\nowner\n\nlinux:boot:old");
+      expect(
+        takeOverExclusiveLock(
+          lockPath,
+          { pid: 9999, token: "owner" },
+          { pid: 100, ownerToken: "new", ownerGeneration: probe },
+        ),
+      ).toBe(true);
+      expect(readExclusiveLockContent(lockPath)?.generation).toBe(probe.token);
+      releaseExclusiveLock(lockPath, 100, "new");
+      expect(existsSync(lockPath)).toBe(false);
+    });
+
+    test.each(Array.from({ length: 8 }, (_, mask) => mask))(
+      "round trips positional fields (presence mask %d)",
+      (mask) => {
+        const token = mask & 1 ? "owner" : undefined;
+        const metadata = mask & 2 ? "meta" : undefined;
+        const generation = mask & 4 ? "darwin-utc:Tue Oct 6 07:35:51 2026" : undefined;
+        const body = formatLockContent(100, token, metadata, generation);
+        const legacy =
+          metadata === undefined
+            ? token === undefined
+              ? "100"
+              : `100\n${token}`
+            : `100\n${token ?? ""}\n${metadata}`;
+        expect(body).toBe(
+          generation === undefined
+            ? legacy
+            : `100\n${token ?? ""}\n${metadata ?? ""}\n${generation}`,
+        );
+        expect(body.split("\n")[0]).toBe("100");
+        if (generation !== undefined) {
+          expect(body.split("\n", 3)).toEqual(["100", token ?? "", metadata ?? ""]);
+        }
+        expect(parseLockContent(body.trim())).toEqual({
+          pid: 100,
+          token,
+          ...(metadata === undefined ? {} : { metadata }),
+          ...(generation === undefined ? {} : { generation }),
+        });
+      },
+    );
   });
 
   test("takes over a live owner's lock only while it still holds the observed instance (#10497)", () => {

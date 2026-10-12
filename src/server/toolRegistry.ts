@@ -1,3 +1,4 @@
+import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import { matchRunningReadTarget, isProvidedReadTargetNotFound } from "../devices/runningReadTarget";
 import { DUMPSYS_MAX_BUFFER } from "../utils/android-cmdline-tools/dumpsysLimits";
 import {
@@ -816,15 +817,18 @@ function readRestartReservation(deviceIds: readonly string[], platform: unknown)
   return undefined;
 }
 
-async function resolveStoppedReservedRead(
+async function withReadRestartReservation<T>(
   input: ExecutionTargetInput,
-  read: SessionlessDeviceRead,
   deviceId: string,
-): Promise<BootedDevice> {
+  resolve: () => Promise<T>,
+): Promise<T> {
   try {
-    return await read.resolve(deviceId, input.signal, input.args.platform || "either");
+    return await resolve();
   } catch (error) {
-    if (isProvidedReadTargetNotFound(error)) {
+    if (
+      isProvidedReadTargetNotFound(error) ||
+      error instanceof BootedDeviceDiscoveryIncompleteError
+    ) {
       const reservation = readRestartReservation([deviceId], input.args.platform);
       if (reservation) {
         throw deviceReservedForRestartRecoveryError(
@@ -834,9 +838,19 @@ async function resolveStoppedReservedRead(
         );
       }
     }
-    // Preserve typed discovery failure, cancellation and authorization errors unchanged.
+    // Preserve discovery failure, cancellation and authorization errors without a reservation.
     throw error;
   }
+}
+
+async function resolveStoppedReservedRead(
+  input: ExecutionTargetInput,
+  read: SessionlessDeviceRead,
+  deviceId: string,
+): Promise<BootedDevice> {
+  return withReadRestartReservation(input, deviceId, () =>
+    read.resolve(deviceId, input.signal, input.args.platform || "either"),
+  );
 }
 
 class ReadTargetBecameHeld extends Error {
@@ -1244,9 +1258,11 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       !input.args.sessionUuid
     ) {
       const read = input.options.sessionlessDeviceRead;
-      const running = read.findRunning
-        ? await read.findRunning(input.args.deviceId, input.signal, input.args.platform || "either")
-        : await read.resolve(input.args.deviceId, input.signal);
+      const running = await withReadRestartReservation(input, input.args.deviceId, () =>
+        read.findRunning
+          ? read.findRunning(input.args.deviceId, input.signal, input.args.platform || "either")
+          : read.resolve(input.args.deviceId, input.signal),
+      );
       if (running) {
         // A running explicit observe keeps its lightweight handler readiness.
         return resolveSessionlessDeviceRead(input, read, running.deviceId, running);

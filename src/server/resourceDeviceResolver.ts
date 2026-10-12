@@ -17,31 +17,47 @@ function freshDevices(discovery: BootedDeviceDiscovery): BootedDevice[] {
   );
 }
 
-/** Keep the existing discovery path's optional status reporting separate from selection. */
-function reportResourceReadDiscovery(
-  discovery: BootedDeviceDiscovery,
-  onDiscovery?: (discovery: BootedDeviceDiscovery) => void,
-): void {
-  onDiscovery?.(discovery);
-}
-
 async function discoverForResource(
   platform: SomePlatform,
-  options?: { signal?: AbortSignal; requireFresh?: boolean },
+  { signal, requireFresh }: { signal?: AbortSignal; requireFresh?: boolean } = {},
   onDiscovery?: (discovery: BootedDeviceDiscovery) => void,
 ): Promise<BootedDevice[]> {
   const manager = PlatformDeviceManagerFactory.getInstance();
-  if (!options?.signal && !options?.requireFresh) {
+  if (!signal && !requireFresh) {
     return manager.getBootedDevices(platform);
   }
   const discovery = await manager.getBootedDevicesDetailed(platform, {
-    signal: options?.signal,
-    bypassAndroidDeviceListCache: options?.requireFresh,
-    bypassIosDeviceListCache: options?.requireFresh,
+    signal,
+    bypassAndroidDeviceListCache: requireFresh,
+    bypassIosDeviceListCache: requireFresh,
   });
-  options?.signal?.throwIfAborted();
-  reportResourceReadDiscovery(discovery, onDiscovery);
-  return options?.requireFresh ? freshDevices(discovery) : discovery.devices;
+  signal?.throwIfAborted();
+  onDiscovery?.(discovery);
+  return requireFresh ? freshDevices(discovery) : discovery.devices;
+}
+
+async function foldResourceDiscovery(
+  rawDevices: BootedDevice[],
+  platform: SomePlatform,
+  source: string,
+  signal?: AbortSignal,
+): Promise<BootedDevice[]> {
+  const state = DaemonState.getInstance();
+  const aliases = new AndroidTransportAliases(androidTransportIdentityAdbFactory);
+  const devices =
+    platform === "ios"
+      ? rawDevices
+      : state.isInitialized()
+        ? state.getDevicePool().mapAndroidDiscovery(rawDevices)
+        : aliases.fold(rawDevices, await aliases.prepare(rawDevices), new Set());
+  // FUNNEL 1. In daemon mode this can await the identity quarantine, which
+  // cancels and drains the owning session's executions — so a cancellation
+  // that lands here is rechecked AFTER the wait, or a cancelled read would go
+  // on to act on the device it resolved (#7002). The signal also lets the
+  // pool stop walking the observation once this caller has settled.
+  await reconcileDiscoveryObservation(devices, source, { signal });
+  signal?.throwIfAborted();
+  return devices;
 }
 
 /**
@@ -88,22 +104,7 @@ export async function listBootedDevicesForResource(
 ): Promise<BootedDevice[]> {
   try {
     const rawDevices = await discoverForResource(platform, options);
-    const state = DaemonState.getInstance();
-    const aliases = new AndroidTransportAliases(androidTransportIdentityAdbFactory);
-    const devices =
-      platform === "ios"
-        ? rawDevices
-        : state.isInitialized()
-          ? state.getDevicePool().mapAndroidDiscovery(rawDevices)
-          : aliases.fold(rawDevices, await aliases.prepare(rawDevices), new Set());
-    // FUNNEL 1. In daemon mode this can await the identity quarantine, which
-    // cancels and drains the owning session's executions — so a cancellation
-    // that lands here is rechecked AFTER the wait, or a cancelled read would go
-    // on to act on the device it resolved (#7002). The signal also lets the
-    // pool stop walking the observation once this caller has settled.
-    await reconcileDiscoveryObservation(devices, source, { signal: options?.signal });
-    options?.signal?.throwIfAborted();
-    return devices;
+    return await foldResourceDiscovery(rawDevices, platform, source, options?.signal);
   } catch (error) {
     if (options?.signal?.aborted) {
       throw error;
@@ -142,16 +143,7 @@ export async function listBootedDevicesForReadWithStatus(
         };
       },
     );
-    const state = DaemonState.getInstance();
-    const aliases = new AndroidTransportAliases(androidTransportIdentityAdbFactory);
-    const devices =
-      platform === "ios"
-        ? rawDevices
-        : state.isInitialized()
-          ? state.getDevicePool().mapAndroidDiscovery(rawDevices)
-          : aliases.fold(rawDevices, await aliases.prepare(rawDevices), new Set());
-    await reconcileDiscoveryObservation(devices, source, { signal });
-    signal?.throwIfAborted();
+    const devices = await foldResourceDiscovery(rawDevices, platform, source, signal);
     return { devices, ...status };
   } catch (error) {
     signal?.throwIfAborted();

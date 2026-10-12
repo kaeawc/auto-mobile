@@ -30,6 +30,22 @@ export interface DeviceReadRetryOptions {
   backoff?: BackoffInput;
 }
 
+function incompleteReadPlatform(listing: BootedResourceReadListing, platform: SomePlatform) {
+  return (["android", "ios"] as const).find(
+    (p) =>
+      (platform === "either" || platform === p) &&
+      !listing.scanned[p] &&
+      (platform !== "either" || listing.discoveryErrors?.[p]?.code !== "unavailable"),
+  );
+}
+
+function retryableReadDiscovery(error: unknown): boolean {
+  return (
+    error instanceof BootedDeviceDiscoveryIncompleteError &&
+    error.discoveryError?.code !== "unavailable"
+  );
+}
+
 /** Retry only unproven absence; a fresh match on a healthy platform answers immediately. */
 async function findObservationReadTarget(
   deviceId: string,
@@ -38,39 +54,43 @@ async function findObservationReadTarget(
   platform: SomePlatform,
   retry: DeviceReadRetryOptions,
 ): Promise<{ device: BootedDevice | undefined; devices: BootedDevice[] }> {
-  return new DefaultRetryExecutor(retry.timer).executeOrThrow(
-    async () => {
-      signal?.throwIfAborted();
-      const listing = access.listBootedWithStatus
-        ? await access.listBootedWithStatus(signal)
-        : { devices: await access.listBooted(signal), scanned: { android: true, ios: true } };
-      signal?.throwIfAborted();
-      const fresh = listing.devices.filter((device) => listing.scanned[device.platform]);
-      const device = matchRunningReadTarget(fresh, deviceId, platform);
-      if (!device) {
-        const failedPlatform = (["android", "ios"] as const).find(
-          (p) => (platform === "either" || platform === p) && !listing.scanned[p],
-        );
-        if (failedPlatform) {
-          throw new BootedDeviceDiscoveryIncompleteError(
-            failedPlatform,
-            listing.discoveryErrors?.[failedPlatform],
-          );
+  try {
+    return await new DefaultRetryExecutor(retry.timer).executeOrThrow(
+      async () => {
+        signal?.throwIfAborted();
+        const listing = access.listBootedWithStatus
+          ? await access.listBootedWithStatus(signal)
+          : { devices: await access.listBooted(signal), scanned: { android: true, ios: true } };
+        signal?.throwIfAborted();
+        const fresh = listing.devices.filter((device) => listing.scanned[device.platform]);
+        const device = matchRunningReadTarget(fresh, deviceId, platform);
+        if (!device) {
+          const failedPlatform = incompleteReadPlatform(listing, platform);
+          if (failedPlatform) {
+            throw new BootedDeviceDiscoveryIncompleteError(
+              failedPlatform,
+              listing.discoveryErrors?.[failedPlatform],
+            );
+          }
         }
-      }
-      return { device, devices: fresh };
-    },
-    {
-      maxAttempts: 3,
-      delays: retry.backoff ?? sequenceBackoff([250, 750]),
-      signal,
-      shouldRetry: (error) => error instanceof BootedDeviceDiscoveryIncompleteError,
-      expectedFailure: {
-        reason: "read discovery remains incomplete",
-        matches: (error) => error instanceof BootedDeviceDiscoveryIncompleteError,
+        return { device, devices: fresh };
       },
-    },
-  );
+      {
+        maxAttempts: 3,
+        delays: retry.backoff ?? sequenceBackoff([250, 750]),
+        signal,
+        shouldRetry: retryableReadDiscovery,
+        expectedFailure: {
+          reason: "read discovery remains incomplete",
+          matches: (error) => error instanceof BootedDeviceDiscoveryIncompleteError,
+        },
+      },
+    );
+  } catch (error) {
+    // Cancellation preserves the caller's exact reason, including a bare abort's DOMException.
+    signal?.throwIfAborted();
+    throw error;
+  }
 }
 
 /** Resolve a read-only target without session creation or device-pool ownership changes. */

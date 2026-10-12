@@ -545,7 +545,7 @@ Owner decisions 2026-10-09 (#10982):
   discovery, then again after image listing immediately before a read boot. If held or
   reserved for device-restart recovery, a running target uses the read-only path; a stopped
   reserved target answers retryable `device_owned_by_other_session`, even to its owner.
-  An incomplete read listing retries briefly, then answers retryable `discovery_incomplete`
+  A transient failure in read listing retries briefly, then answers retryable `discovery_incomplete`
   instead of not-found or readiness work (#11918).
 - A read without `deviceId` uses an already-running device and never boots or
   creates one. A `platform` argument alone is not an explicit ID. A stopped

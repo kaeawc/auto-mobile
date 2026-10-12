@@ -26,6 +26,7 @@ import { settleByFakeEvents, drainUntilQuiescent } from "../helpers/fakeTimerSte
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
 import { registerMcpTools } from "../../src/server";
 import { sessionlessDeviceReadFor } from "../../src/server/deviceObservationAccess";
+import type { BootedResourceReadListing } from "../../src/server/resourceDeviceResolver";
 import { executionTracker } from "../../src/server/executionTracker";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { serverConfig } from "../../src/utils/ServerConfig";
@@ -41,6 +42,7 @@ import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
 import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeSimctl } from "../fakes/FakeSimctl";
+import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDeviceLifecycleCoordinator";
 import { FakeWindow } from "../fakes/FakeWindow";
@@ -155,6 +157,9 @@ function harness(platform: Platform, running: boolean, capacity = false, incompl
       ios: !incomplete || platform !== "ios",
     },
   };
+  const originalDetect = manager.detectConnectedPlatformsWithStatus;
+  const originalEnsure = manager.ensureDeviceReady;
+  const originalVerify = manager.verifyDevice;
   const detect = spyOn(manager, "detectConnectedPlatformsWithStatus").mockImplementation(
     async () => scan,
   );
@@ -184,6 +189,14 @@ function harness(platform: Platform, running: boolean, capacity = false, incompl
   const ensure = spyOn(manager, "ensureDeviceReady");
   const verify = spyOn(manager, "verifyDevice");
   return {
+    restoreSpies: () => {
+      detect.mockRestore();
+      ensure.mockRestore();
+      verify.mockRestore();
+      expect(manager.detectConnectedPlatformsWithStatus).toBe(originalDetect);
+      expect(manager.ensureDeviceReady).toBe(originalEnsure);
+      expect(manager.verifyDevice).toBe(originalVerify);
+    },
     manager,
     discovery,
     device,
@@ -215,12 +228,11 @@ let registeredBefore: ReturnType<typeof ToolRegistry.getEveryRegisteredTool>;
 const owners = new Map<Platform, { pool: DevicePool; sessions: SessionManager }>();
 const unheld = new Map<Platform, { pool: DevicePool; sessions: SessionManager }>();
 let slotOwner: { pool: DevicePool; sessions: SessionManager };
+let restoreReadTimer: (() => void) | undefined;
 let restoreGate: (() => void) | undefined;
 const decisions = new Map<string, Map<string, string>>();
 const retryTimer = new FakeTimer();
-let statusListing:
-  | (() => Promise<{ devices: BootedDevice[]; scanned: Record<Platform, boolean> }>)
-  | undefined;
+let statusListing: (() => Promise<BootedResourceReadListing>) | undefined;
 const access = {
   listBooted: async () => h!.devices,
   listBootedWithStatus: async () =>
@@ -332,9 +344,9 @@ afterEach(() => {
   retryTimer.reset();
   restoreGate?.();
   restoreGate = undefined;
-  h?.detect.mockRestore();
-  h?.ensure.mockRestore();
-  h?.verify.mockRestore();
+  restoreReadTimer?.();
+  restoreReadTimer = undefined;
+  h?.restoreSpies();
   h = undefined;
   Reflect.set(ToolRegistry, "deviceSessionManager", originals.get("deviceSessionManager"));
   expect(Reflect.get(ToolRegistry, "deviceSessionManager")).toBe(
@@ -898,4 +910,227 @@ for (const platform of ["android", "ios"] as const) {
       });
     }
   }
+}
+
+function useFakeReadRetryTimer(): void {
+  if (restoreReadTimer) {
+    return;
+  }
+  const original = {
+    now: defaultTimer.now,
+    setTimeout: defaultTimer.setTimeout,
+    clearTimeout: defaultTimer.clearTimeout,
+    sleep: defaultTimer.sleep,
+  };
+  const sleep = spyOn(defaultTimer, "sleep").mockImplementation((ms) => retryTimer.sleep(ms));
+  const now = spyOn(defaultTimer, "now").mockImplementation(() => retryTimer.now());
+  const set = spyOn(defaultTimer, "setTimeout").mockImplementation((callback, ms) =>
+    retryTimer.setTimeout(callback, ms),
+  );
+  const clear = spyOn(defaultTimer, "clearTimeout").mockImplementation((handle) =>
+    retryTimer.clearTimeout(handle),
+  );
+  restoreReadTimer = () => {
+    now.mockRestore();
+    set.mockRestore();
+    clear.mockRestore();
+    sleep.mockRestore();
+    expect(defaultTimer.sleep).toBe(original.sleep);
+    expect(defaultTimer.now).toBe(original.now);
+    expect(defaultTimer.setTimeout).toBe(original.setTimeout);
+    expect(defaultTimer.clearTimeout).toBe(original.clearTimeout);
+  };
+}
+
+function reserveReadTarget(platform: Platform, id: string): void {
+  const pool = unheld.get(platform)!.pool;
+  const original = pool.restartReservationForStart;
+  const reservation = spyOn(pool, "restartReservationForStart").mockImplementation(
+    (p, identities, requester) => {
+      expect(requester).toEqual({});
+      return p === platform && identities.includes(id)
+        ? {
+            deviceId: h!.device.deviceId,
+            sessionUuid: "restart-owner",
+            owned: true,
+            restartHandoff: true,
+            retryAfterMs: 500,
+          }
+        : undefined;
+    },
+  );
+  restoreGate = () => {
+    reservation.mockRestore();
+    expect(pool.restartReservationForStart).toBe(original);
+  };
+}
+
+async function onePlatformDecision(
+  platform: Platform,
+  name: "observe" | "listApps",
+  scenario: "stopped" | "unknown" | "reserved" | "running",
+  requested?: "either",
+): Promise<{ decision: string; listings: number }> {
+  useFakeReadRetryTimer();
+  h = harness(platform, scenario === "running");
+  Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+  const daemon = unheld.get(platform)!;
+  DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
+  const other = platform === "android" ? "ios" : "android";
+  const scanned = { android: platform === "android", ios: platform === "ios" };
+  h.detect.mockImplementation(async () => ({ devices: h!.devices, scanned }));
+  let listings = 0;
+  statusListing = async () => {
+    listings++;
+    return {
+      devices: h!.devices,
+      scanned,
+      discoveryErrors: { [other]: { code: "unavailable", message: "tooling absent" } },
+    };
+  };
+  const id =
+    scenario === "unknown"
+      ? "unknown-id"
+      : platform === "android"
+        ? h.device.name
+        : h.device.deviceId;
+  if (scenario === "reserved") {
+    reserveReadTarget(platform, id);
+  }
+  const outcome = runWithToolSelectionContext(
+    { explicitObserveDeviceRead: name === "observe" },
+    () =>
+      ToolRegistry.getTool(name)!.handler({
+        deviceId: id,
+        ...(requested ? { platform: requested } : {}),
+      }),
+  ).catch((error: unknown) => error);
+  const result = await settleByFakeEvents(retryTimer, outcome, { description: scenario });
+  let decision: string;
+  if (scenario === "reserved") {
+    expect(result).toMatchObject({ code: "device_owned_by_other_session", retryAfterMs: 500 });
+    expect(h.ensure).not.toHaveBeenCalled();
+    expect(h.verify).not.toHaveBeenCalled();
+    expect(h.boots).toEqual([]);
+    expect(h.simctl.getMethodCalls("bootSimulator")).toEqual([]);
+    decision = "device_owned_by_other_session";
+  } else if (scenario === "unknown") {
+    // The normal readiness path on main cannot prove absence on an incomplete either scan.
+    expect(result).toMatchObject({ code: "discovery_incomplete", platform: other });
+    decision = "discovery_incomplete";
+  } else {
+    expect(h.runs).toHaveLength(1);
+    decision = `device:${h.runs[0].deviceId};boots:${h.boots.length + h.simctl.getMethodCalls("bootSimulator").length}`;
+    expect(decision).toBe(`device:${h.device.deviceId};boots:${scenario === "stopped" ? 1 : 0}`);
+  }
+  expect(retryTimer.now()).toBe(0);
+  expect(retryTimer.getPendingTimeoutCount()).toBe(0);
+  expect(retryTimer.getPendingSleepCount()).toBe(0);
+  expect(retryTimer.getSleepCallCount()).toBe(0);
+  expect(listings).toBe(
+    scenario === "reserved" ? (name === "observe" ? 2 : 1) : name === "observe" ? 1 : 0,
+  );
+  return { decision, listings };
+}
+
+for (const platform of ["android", "ios"] as const) {
+  for (const requested of [undefined, "either"] as const) {
+    for (const scenario of ["stopped", "unknown", "reserved", "running"] as const) {
+      test(`${platform} one-platform ${scenario}, platform=${requested ?? "absent"}: observe agrees with listApps`, async () => {
+        const normal = await onePlatformDecision(platform, "listApps", scenario, requested);
+        // Restore the first harness's spies before replacing it in the same test.
+        restoreGate?.();
+        restoreGate = undefined;
+        h!.restoreSpies();
+        const explicit = await onePlatformDecision(platform, "observe", scenario, requested);
+        expect(explicit.decision).toBe(normal.decision);
+      });
+    }
+  }
+  for (const name of ["observe", "listApps"] as const) {
+    test(`${platform} reserved ${name} overrides failed discovery`, async () => {
+      useFakeReadRetryTimer();
+      h = harness(platform, false);
+      Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+      const daemon = unheld.get(platform)!;
+      DaemonState.getInstance().initialize(daemon.sessions, daemon.pool);
+      const id = h.device.deviceId;
+      reserveReadTarget(platform, id);
+      let listings = 0;
+      statusListing = async () => {
+        listings++;
+        return {
+          devices: [],
+          scanned: { android: false, ios: false },
+          discoveryErrors: { [platform]: { code: "failed", message: "listing blipped" } },
+        };
+      };
+      const result = await settleByFakeEvents(
+        retryTimer,
+        runWithToolSelectionContext({ explicitObserveDeviceRead: name === "observe" }, () =>
+          ToolRegistry.getTool(name)!.handler({ deviceId: id, platform }),
+        ).catch((error: unknown) => error),
+        { description: "reserved listing failed" },
+      );
+      expect(result).toMatchObject({ code: "device_owned_by_other_session", retryAfterMs: 500 });
+      expect(listings).toBe(3);
+      expect(retryTimer.now()).toBe(1000);
+      expect(h.ensure).not.toHaveBeenCalled();
+      expect(h.verify).not.toHaveBeenCalled();
+      expect(h.boots).toEqual([]);
+      expect(h.simctl.getMethodCalls("bootSimulator")).toEqual([]);
+    });
+  }
+  test(`${platform} explicitly unavailable platform does not retry`, async () => {
+    h = harness(platform, false);
+    Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+    let listings = 0;
+    statusListing = async () => {
+      listings++;
+      return {
+        devices: [],
+        scanned: { android: false, ios: false },
+        discoveryErrors: { [platform]: { code: "unavailable", message: "tooling absent" } },
+      };
+    };
+    const result = await settleByFakeEvents(
+      retryTimer,
+      runWithToolSelectionContext({ explicitObserveDeviceRead: true }, () =>
+        ToolRegistry.getTool("observe")!.handler({ deviceId: h!.device.deviceId, platform }),
+      ).catch((error: unknown) => error),
+      { description: "unavailable platform" },
+    );
+    expect(result).toMatchObject({ code: "discovery_incomplete", platform });
+    expect(listings).toBe(1);
+    expect(retryTimer.now()).toBe(0);
+    expect(h.ensure).not.toHaveBeenCalled();
+    expect(h.verify).not.toHaveBeenCalled();
+  });
+  test(`${platform} abort without reason during read backoff preserves signal reason`, async () => {
+    h = harness(platform, false);
+    Reflect.set(ToolRegistry, "deviceSessionManager", h.manager);
+    let listings = 0;
+    statusListing = async () => {
+      listings++;
+      return { devices: [], scanned: { android: false, ios: false } };
+    };
+    const controller = new AbortController();
+    const outcome = runWithToolSelectionContext({ explicitObserveDeviceRead: true }, () =>
+      ToolRegistry.getTool("observe")!.handler(
+        { deviceId: h!.device.deviceId, platform },
+        undefined,
+        controller.signal,
+      ),
+    ).catch((error: unknown) => error);
+    await drainUntilQuiescent(retryTimer);
+    expect(listings).toBe(1);
+    expect(retryTimer.getPendingTimeoutCount()).toBe(1);
+    controller.abort();
+    const result = await outcome;
+    expect(result).toBe(controller.signal.reason);
+    expect(result).toBeInstanceOf(DOMException);
+    expect(result).toHaveProperty("name", "AbortError");
+    expect(listings).toBe(1);
+    expect(retryTimer.getPendingTimeoutCount()).toBe(0);
+  });
 }

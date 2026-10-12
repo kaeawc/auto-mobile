@@ -206,6 +206,22 @@ describe("read listing status preserves incomplete discovery", () => {
       discoveryErrors: { ios: error },
     });
   });
+  test("unavailable platform keeps its discovery error code", async () => {
+    const error = { code: "unavailable" as const, message: "iOS tooling absent" };
+    const manager = {
+      getBootedDevicesDetailed: async () => ({
+        devices: [],
+        succeededPlatforms: new Set(["android"]),
+        discoveryErrors: { ios: error },
+      }),
+    };
+    PlatformDeviceManagerFactory.setInstance(manager as unknown as PlatformDeviceManager);
+    expect(await resourceRead.listBootedDevicesForReadWithStatus("either", "test")).toEqual({
+      devices: [],
+      scanned: { android: true, ios: false },
+      discoveryErrors: { ios: error },
+    });
+  });
   test("a successful empty listing is authoritative and source-compatible legacy access stays available", async () => {
     const manager = {
       getBootedDevicesDetailed: async () => ({

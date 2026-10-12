@@ -2097,6 +2097,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
       { platform: "android", stableId: deviceImage.name },
       options,
       async (signal, hold) => {
+        if (options?.beforeReadBoot) {
+          await options.beforeReadBoot(deviceImage);
+          signal.throwIfAborted();
+        }
         perf.startOperation("startDevice");
         const childProcess = await runWithAbortSignal(
           signal,
@@ -2422,6 +2426,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
       { platform: "ios", stableId: deviceId },
       options,
       async (signal) => {
+        if (options?.beforeReadBoot) {
+          await options.beforeReadBoot(device);
+          signal.throwIfAborted();
+        }
         perf.startOperation("bootSimulator");
         const bootedDevice = await this.bootIosSimulatorAdmitted(
           this.simctl!,

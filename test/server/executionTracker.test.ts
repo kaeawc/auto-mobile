@@ -848,3 +848,24 @@ describe("ExecutionTracker session execution deadlines (#10712)", () => {
     );
   });
 });
+
+describe("ExecutionTracker session-clock offset (#11576)", () => {
+  /** A wall clock that moves 1 ms on every read, as it does when a tick lands between two reads. */
+  class TickingTimer extends FakeTimer {
+    override now(): number {
+      this.setCurrentTime(super.now() + 1);
+      return super.now();
+    }
+  }
+
+  test("an execution's session-clock start is exact when the wall clock ticks between reads", () => {
+    const sessionNow = 5_000_000;
+    const tracker = new ExecutionTracker(new TickingTimer(), new FakeIdGenerator(["call"]));
+    // The provider converts the tracker's own reading; it never reads a clock a second time.
+    tracker.setSessionClockOffsetProvider((wallNowMs = 0) => sessionNow - wallNowMs);
+
+    const call = tracker.startExecution("tapOn", undefined, "session-a");
+
+    expect(tracker.getSessionClockStartTime(call.id)).toBe(sessionNow);
+  });
+});

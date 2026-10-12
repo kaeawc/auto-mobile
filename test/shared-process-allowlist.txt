@@ -135,6 +135,7 @@ test/daemon/idleDeviceReaper.test.ts
 test/daemon/incumbentOwnerGuard.test.ts
 test/daemon/inputDeviceOwnership.test.ts
 test/daemon/inputHolderChangedTypedRefusal.test.ts
+test/daemon/labelLeaseSharedRule.test.ts
 test/daemon/labelOfEndedBaseRefused.test.ts
 test/daemon/lapsedOwnerShieldedByDeviceRestartHandoff.test.ts
 test/daemon/lateRehydrationOwnerToldNotFound.test.ts
@@ -754,6 +755,7 @@ test/lint/daemonLauncherBoundary.test.ts
 test/lint/deviceDiscoveryReconcileFunnel.test.ts
 test/lint/deviceToolsKillDeviceImportCasing.test.ts
 test/lint/errorHandlingConvention.test.ts
+test/lint/expensiveHookWork.test.ts
 test/lint/fakeHygiene.test.ts
 test/lint/fastValidationRegistryCoverage.test.ts
 test/lint/gatedToolsAcceptSessionUuid.test.ts
@@ -768,10 +770,12 @@ test/lint/noInlineErrorNormalizeRule.test.ts
 test/lint/noLegacyAutomobilePath.test.ts
 test/lint/noRawEnvNumberParseRule.test.ts
 test/lint/pathSeparatorAssertions.test.ts
+test/lint/posixPathLiteralExpectations.test.ts
 test/lint/processSafety.test.ts
 test/lint/rawSelectorFieldReadRule.test.ts
 test/lint/registrationTeardownGuard.test.ts
 test/lint/screenControlDocsParams.test.ts
+test/lint/sessionClockOffsetProviderSingleRead.test.ts
 test/lint/shortUnitTestTimeout.test.ts
 test/lint/simctlDevicectlBoundary.test.ts
 test/lint/sortedListingBoundary.test.ts

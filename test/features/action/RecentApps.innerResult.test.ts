@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { RecentApps } from "../../../src/features/action/RecentApps";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
@@ -63,7 +63,7 @@ describe("RecentApps inner result", () => {
   let instanceSpy: ReturnType<typeof spyOn> | undefined;
   let globalActionSpy: ReturnType<typeof spyOn> | undefined;
 
-  beforeEach(() => {
+  function setUp(): void {
     adb = new FakeAdbExecutor();
     timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -96,12 +96,27 @@ describe("RecentApps inner result", () => {
       error: "Global action failed",
     });
     instanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
-  });
+  }
 
-  afterEach(() => {
+  function tearDown(): void {
     instanceSpy?.mockRestore();
     globalActionSpy?.mockRestore();
+  }
+
+  // CI's per-test time excludes only beforeAll: the first execute() through the real recents
+  // path (JIT, lazy module state) is paid here once instead of inside the first timed test.
+  beforeAll(async () => {
+    setUp();
+    try {
+      observe.setObserveResult(() => recentsObservation());
+      await recentApps.execute();
+    } finally {
+      tearDown();
+    }
   });
+
+  beforeEach(setUp);
+  afterEach(tearDown);
 
   const recentsObservation = (): ObserveResult => ({
     ...capturedRecents,

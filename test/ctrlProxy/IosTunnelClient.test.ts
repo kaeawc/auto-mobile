@@ -276,6 +276,8 @@ describe("IosTunnelClient", () => {
       timer,
       undefined,
       fake,
+      // The manager asks `idevice_id` whether the device is attached before it tunnels.
+      executor,
     );
     await manager["startIproxyTunnel"]();
     expect(fake.starts[0].localPort).toBe(manager.getServicePort());

@@ -1,77 +1,23 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
-import { DaemonState } from "../../src/daemon/daemonState";
-import { DevicePool } from "../../src/daemon/devicePool";
-import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
-import { RegistryManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
 import { DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE } from "../../src/daemon/managedSlots/managedSlotRefusal";
-import { SessionManager } from "../../src/daemon/sessionManager";
-import { mayControlUnheldUnidentifiedTransport } from "../../src/daemon/toolCallDeviceIdentity";
+import { ActionableError } from "../../src/models/ActionableError";
 import type { BootedDevice } from "../../src/models";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { withAndroidTransportId } from "../../src/utils/androidSerial";
-import { createExecResult } from "../../src/utils/execResult";
-import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
-import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtures";
-import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
-import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
-import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
-import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
-import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
-import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
-import { FakeTimer } from "../fakes/FakeTimer";
-import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { RealToolCallPath } from "../helpers/realToolCallPath";
-
-/**
- * #11618: one handset on USB and wireless debugging is ONE pooled device held under its USB
- * serial. A tool call naming it by the wireless id is the same call as one naming the USB serial:
- * the MCP ingress resolves the id to the pool's canonical id before any holder, managed-slot,
- * routing or admission decision. Real `ToolRegistry` ingress, real `DevicePool` and its real alias
- * fold; only adb, discovery and the device boundary are fakes.
- */
-
-const USB = "R5CT1234ABC";
-const WIRELESS = "adb-R5CT1234ABC-AbCdEf._adb-tls-connect._tcp";
-const EMULATOR = "emulator-5554";
-const EMULATOR_TCP = "localhost:5555";
-const HOLDER = "holder-session";
-const HOLDER_CONNECTION = "holder-connection";
-const STRANGER_CONNECTION = "stranger-connection";
-
-const booted = (deviceId: string, name = deviceId): BootedDevice =>
-  withAndroidTransportId({ deviceId, name, platform: "android" }, `transport-${deviceId}`);
-
-interface HarnessOptions {
-  /** The rows discovery lists when the pool first refreshes. */
-  pooledRows: BootedDevice[];
-  /** `ro.serialno` every transport answers with. */
-  serial?: string;
-  /** Set for an emulator: `ro.boot.qemu.avd_name`. */
-  avd?: string;
-  /** The device HOLDER acquires from HOLDER_CONNECTION; none when omitted. */
-  held?: string;
-  /** An idle managed slot is assigned this stable id. */
-  managedSlotStableId?: string;
-  iosRows?: BootedDevice[];
-}
-
-interface Harness {
-  timer: FakeTimer;
-  sessions: SessionManager;
-  pool: DevicePool;
-  tools: RealToolCallPath;
-  adbFactory: FakeAdbClientFactory;
-  /** Raw `adb devices` listings the ingress asked for (the first-sighting probe's scan). */
-  rawScans(): number;
-  /** Devices the read probe's body ran on. */
-  reads: string[];
-  /** Discovery starts listing `rows`, as when wireless debugging is switched on. */
-  connect(rows: BootedDevice[]): void;
-  outcome(name: string, args: Record<string, unknown>): Promise<string>;
-}
+import {
+  transportAliasHarness,
+  describeOutcome,
+  booted,
+  USB,
+  WIRELESS,
+  EMULATOR,
+  EMULATOR_TCP,
+  HOLDER,
+  HOLDER_CONNECTION,
+  STRANGER_CONNECTION,
+  type HarnessOptions,
+} from "../helpers/transportAliasHarness";
 
 const cleanups: Array<() => void> = [];
 afterEach(() => {
@@ -79,122 +25,8 @@ afterEach(() => {
     cleanup();
   }
 });
-
-/** The typed refusal code, the error text, or "ran". */
-function describeOutcome(result: unknown): string {
-  if (result instanceof Error) {
-    const code: unknown = Reflect.get(result, "code");
-    return typeof code === "string" ? code : result.message;
-  }
-  return "ran";
-}
-
-async function harness(options: HarnessOptions): Promise<Harness> {
-  const timer = new FakeTimer();
-  const discovery = new FakeDeviceUtils();
-  discovery.setBootedDevices("android", options.pooledRows);
-  discovery.setBootedDevices("ios", options.iosRows ?? []);
-  const adb = new FakeAdbExecutor();
-  adb.setCommandResponse("getprop ro.serialno", createExecResult(options.serial ?? USB, ""));
-  adb.setCommandResponse("boot_id", createExecResult("phone-boot", ""));
-  adb.setCommandResponse("getprop ro.kernel.qemu", createExecResult(options.avd ? "1" : "0", ""));
-  if (options.avd) {
-    adb.setCommandResponse("getprop ro.boot.qemu.avd_name", createExecResult(options.avd, ""));
-  }
-  const adbFactory = new FakeAdbClientFactory(adb);
-  // The ingress lists raw adb rows through the process-wide device manager, as the daemon does.
-  PlatformDeviceManagerFactory.setInstance(discovery);
-  const sessions = new SessionManager(
-    timer,
-    new FakeDeviceSessionPersistence(),
-    () => new FakeDbWriteBarrier(),
-  );
-  sessions.stopCleanupTimer();
-  const registry = new FakeSlotRegistry(timer);
-  if (options.managedSlotStableId) {
-    await assignManagedSlotDevice(registry, "android", options.managedSlotStableId, "runner-b");
-  }
-  const pool = new DevicePool(
-    createDevicePoolDependencies(sessions, "transport-alias-ingress", {
-      timer,
-      deviceManager: discovery,
-      installedAppsRepository: new FakeInstalledAppsRepository(),
-      androidAdbFactory: adbFactory,
-      ...(options.managedSlotStableId
-        ? { managedSlotExclusion: new RegistryManagedSlotExclusion(async () => registry, timer) }
-        : {}),
-    }),
-  );
-  await pool.refreshDevices();
-  DaemonState.getInstance().initialize(sessions, pool, new DeviceSessionRegistry(timer));
-  const tools = new RealToolCallPath([...options.pooledRows, ...(options.iosRows ?? [])]).install();
-  // The real session manager's scan is already mapped onto pooled ids by the pool (#11133).
-  const readinessScan = (rows: BootedDevice[]) =>
-    tools.deviceSessionManager.setConnectedDevices([
-      ...pool.mapAndroidReadinessDiscovery(rows),
-      ...(options.iosRows ?? []),
-    ]);
-  readinessScan(options.pooledRows);
-  const reads: string[] = [];
-  ToolRegistry.registerDeviceAware(
-    "controlProbe",
-    "Control probe",
-    z.object({}).passthrough(),
-    async () => ({ success: true }),
-  );
-  ToolRegistry.registerDeviceAware(
-    "readProbe",
-    "Read probe",
-    z.object({}).passthrough(),
-    async (device: BootedDevice) => {
-      reads.push(device.deviceId);
-      return { success: true };
-    },
-    { deviceReadOnly: true },
-  );
-  cleanups.push(() => {
-    PlatformDeviceManagerFactory.setInstance(null);
-    tools.uninstall();
-    DaemonState.getInstance().reset();
-    sessions.stopCleanupTimer();
-    timer.reset();
-  });
-  if (options.held) {
-    await pool.bindOrReuseDeviceSession(
-      HOLDER,
-      options.held,
-      "android",
-      undefined,
-      undefined,
-      undefined,
-      false,
-      undefined,
-      undefined,
-      undefined,
-      HOLDER_CONNECTION,
-    );
-    sessions.setDeviceReadiness(HOLDER, "automationReady");
-    // Keep-awake is device work behind its own adb seam; mark it settled for this session.
-    sessions.getSession(HOLDER)!.cacheData.keepScreenAwake = {
-      applied: false,
-      skipReason: "failed",
-    };
-  }
-  return {
-    timer,
-    sessions,
-    pool,
-    tools,
-    adbFactory,
-    rawScans: () => discovery.getBootedDevicesDetailedCalls().length,
-    reads,
-    connect(rows) {
-      discovery.setBootedDevices("android", rows);
-      readinessScan(rows);
-    },
-    outcome: (name, args) =>
-      tools.call(name, args).then(describeOutcome, (error: unknown) => describeOutcome(error)),
-  };
+async function harness(options: HarnessOptions) {
+  return transportAliasHarness(options, cleanups);
 }
 
 const phone = () => harness({ pooledRows: [booted(USB), booted(WIRELESS)], held: USB });
@@ -273,26 +105,49 @@ describe("a tool call naming a held handset by either transport id (#11618)", ()
       expect(h.tools.runs).toEqual([{ name: "controlProbe", deviceId: USB, sessionUuid: HOLDER }]);
     });
 
-    test("a read works, reads the pooled device, and holds, binds and extends nothing", async () => {
+    test.each([undefined, STRANGER_CONNECTION])(
+      "a read works, reads the pooled device, and holds, binds and extends nothing (%s)",
+      async (connection) => {
+        const h = await phone();
+        const before = { ...h.sessions.getSession(HOLDER)! };
+        const sessionsBefore = h.sessions.getAllSessions().map((session) => session.sessionId);
+        h.timer.advanceTime(5_000);
+
+        const outcome = await h.outcome("readProbe", {
+          platform: "android",
+          deviceId,
+          __mcpSessionId: connection,
+        });
+
+        expect(outcome).toBe("ran");
+        expect(h.reads).toEqual([USB]);
+        expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+        expect(h.sessions.getSession(HOLDER)!.lastUsedAt).toBe(before.lastUsedAt);
+        expect(h.sessions.getSession(HOLDER)!.expiresAt).toBe(before.expiresAt);
+        expect(h.sessions.getAllSessions().map((session) => session.sessionId)).toEqual(
+          sessionsBefore,
+        );
+        expect(h.sessions.getSessionForDevice(USB)).toBe(HOLDER);
+      },
+    );
+
+    test("a read under another session watches the canonical phone without extending either session", async () => {
       const h = await phone();
-      const before = { ...h.sessions.getSession(HOLDER)! };
-      const sessionsBefore = h.sessions.getAllSessions().map((session) => session.sessionId);
-      h.timer.advanceTime(5_000);
-
-      const outcome = await h.outcome("readProbe", {
-        platform: "android",
-        deviceId,
-        __mcpSessionId: STRANGER_CONNECTION,
-      });
-
-      expect(outcome).toBe("ran");
+      await h.sessions.createSession("other-session", "OTHER-DEVICE", "android");
+      const before = h.sessions
+        .getAllSessions()
+        .map((s) => ({ sessionId: s.sessionId, lastUsedAt: s.lastUsedAt, expiresAt: s.expiresAt }));
+      h.timer.advanceTime(1000);
+      expect(await h.outcome("readProbe", { sessionUuid: "other-session", deviceId })).toBe("ran");
       expect(h.reads).toEqual([USB]);
-      expect(h.sessions.getSession(HOLDER)!.lastUsedAt).toBe(before.lastUsedAt);
-      expect(h.sessions.getSession(HOLDER)!.expiresAt).toBe(before.expiresAt);
-      expect(h.sessions.getAllSessions().map((session) => session.sessionId)).toEqual(
-        sessionsBefore,
-      );
-      expect(h.sessions.getSessionForDevice(USB)).toBe(HOLDER);
+      expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+      expect(
+        h.sessions.getAllSessions().map((s) => ({
+          sessionId: s.sessionId,
+          lastUsedAt: s.lastUsedAt,
+          expiresAt: s.expiresAt,
+        })),
+      ).toEqual(before);
     });
 
     test("a plan step (callInternal) is refused for a stranger and runs for the holder", async () => {
@@ -421,16 +276,72 @@ describe("a transport the pool has not folded yet (#11618)", () => {
     expect(h.tools.runs).toEqual([{ name: "controlProbe", deviceId: USB, sessionUuid: HOLDER }]);
   });
 
-  test("a read by an unfolded wireless id probes nothing", async () => {
-    const h = await harness({ pooledRows: [booted(USB)], held: USB });
-    h.connect([booted(USB), booted(WIRELESS)]);
+  test.each([undefined, STRANGER_CONNECTION])(
+    "a first-seen read folds a held phone, without readiness (%s)",
+    async (connection) => {
+      const h = await harness({ pooledRows: [booted(USB)], held: USB });
+      h.connect([booted(USB), booted(WIRELESS)]);
+      const before = { ...h.sessions.getSession(HOLDER)! };
+      const sessionsBefore = h.sessions.getAllSessions().map((s) => s.sessionId);
+      h.timer.advanceTime(1000);
+      const args = { platform: "android", deviceId: WIRELESS, __mcpSessionId: connection };
+
+      expect(await h.outcome("readProbe", args)).toBe("ran");
+      expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+      expect(h.reads).toEqual([USB]);
+      expect(await h.outcome("observe", args)).toBe("ran");
+      expect(h.tools.watcherReads).toEqual([USB]);
+      expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+      expect(h.tools.runs).toEqual([]);
+      expect(h.pool.getAndroidTransportAliases(USB)).toEqual([WIRELESS]);
+      expect(h.sessions.getSession(HOLDER)!.lastUsedAt).toBe(before.lastUsedAt);
+      expect(h.sessions.getSession(HOLDER)!.expiresAt).toBe(before.expiresAt);
+      expect(h.sessions.getAllSessions().map((s) => s.sessionId)).toEqual(sessionsBefore);
+    },
+  );
+
+  test.each([undefined, STRANGER_CONNECTION])(
+    "a failed listing leaves an unfolded read read-only (%s)",
+    async (connection) => {
+      const h = await harness({ pooledRows: [booted(USB)], held: USB });
+      h.connect([booted(USB), booted(WIRELESS)]);
+      h.discovery.setAndroidDiscoveryIncomplete("adb devices timed out");
+      const outcome = await h.outcome("readProbe", {
+        platform: "android",
+        deviceId: WIRELESS,
+        __mcpSessionId: connection,
+      });
+      expect(outcome).not.toBe("discovery_incomplete");
+      expect(outcome).not.toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+      expect(outcome).not.toBe(DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE);
+      expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+      expect(h.tools.runs).toEqual([]);
+    },
+  );
+
+  test("a folded read costs no raw listing or adb call", async () => {
+    const h = await phone();
     const probes = h.adbFactory.getCallCount();
-
-    await h.outcome("readProbe", { platform: "android", deviceId: WIRELESS });
-
+    const scans = h.rawScans();
+    expect(await h.outcome("readProbe", { platform: "android", deviceId: WIRELESS })).toBe("ran");
     expect(h.adbFactory.getCallCount()).toBe(probes);
-    expect(h.pool.getAndroidTransportAliases(USB)).toEqual([]);
+    expect(h.rawScans()).toBe(scans);
   });
+
+  test.each([USB, EMULATOR, "OTHER-USB"])(
+    "an ordinary control id %s costs no raw listing or adb call",
+    async (deviceId) => {
+      const h = await harness({ pooledRows: [booted(deviceId)] });
+      const reconcile = spyOn(h.pool, "reconcileDiscoveryObservation");
+      cleanups.push(() => reconcile.mockRestore());
+      const probes = h.adbFactory.getCallCount();
+      const scans = h.rawScans();
+      expect(await h.outcome("controlProbe", { platform: "android", deviceId })).toBe("ran");
+      expect(h.adbFactory.getCallCount()).toBe(probes);
+      expect(h.rawScans()).toBe(scans);
+      expect(reconcile).not.toHaveBeenCalled();
+    },
+  );
 
   test("a folded alias costs no adb call per tool call", async () => {
     const h = await phone();
@@ -471,9 +382,149 @@ describe("a transport the pool has not folded yet (#11618)", () => {
   });
 });
 
-describe("an unheld device on a transport the pool cannot identify (open owner decision)", () => {
-  test("the predicate that carries the decision allows it today", () => {
-    expect(mayControlUnheldUnidentifiedTransport()).toBe(true);
+describe("unidentified transports use the held-alias rule (#11596)", () => {
+  test.each([undefined, "0123456789abcdef"])(
+    "a listed unidentified control target reconciles before the held-alias verdict (holder %s)",
+    async (held) => {
+      const generic = "0123456789abcdef";
+      const rows = [booted(generic), booted(WIRELESS)];
+      const h = await harness({ pooledRows: rows, serial: generic, held });
+      const mapped = h.pool.mapAndroidDiscovery(rows);
+      const events: string[] = [];
+      const reconcileObservation = h.pool.reconcileDiscoveryObservation.bind(h.pool);
+      const mayAlias = h.pool.androidTransportMayAliasDevice.bind(h.pool);
+      const reconcile = spyOn(h.pool, "reconcileDiscoveryObservation").mockImplementation(
+        async (devices, source, options) => {
+          await reconcileObservation(devices, source, options);
+          if (source === "tools/call:identity-gate") {
+            events.push("reconciled");
+          }
+        },
+      );
+      cleanups.push(() => reconcile.mockRestore());
+      const identity = spyOn(h.pool, "androidTransportMayAliasDevice").mockImplementation(
+        (device, deviceId) => {
+          events.push("identity");
+          return mayAlias(device, deviceId);
+        },
+      );
+      cleanups.push(() => identity.mockRestore());
+
+      expect(await h.outcome("controlProbe", { platform: "android", deviceId: WIRELESS })).toBe(
+        held ? DEVICE_OWNED_BY_OTHER_SESSION_CODE : "ran",
+      );
+
+      expect(reconcile).toHaveBeenCalledWith(mapped, "tools/call:identity-gate", {
+        signal: expect.any(AbortSignal),
+      });
+      expect(events).toEqual(held ? ["reconciled", "identity"] : ["reconciled"]);
+    },
+  );
+
+  test.each(["incomplete", "throws"])(
+    "an identity listing that %s reconciles nothing and uses a conservative synthetic row",
+    async (failure) => {
+      const generic = "0123456789abcdef";
+      const h = await harness({
+        pooledRows: [booted(generic), booted(WIRELESS)],
+        serial: generic,
+        held: generic,
+      });
+      const list = h.discovery.getBootedDevicesDetailed.bind(h.discovery);
+      const listing = spyOn(h.discovery, "getBootedDevicesDetailed").mockImplementation(
+        async (platform, options = {}) => {
+          if (options.bypassAndroidDeviceListCache) {
+            return list(platform, options);
+          }
+          if (failure === "throws") {
+            throw new Error("identity listing failed");
+          }
+          return { ...(await list(platform, options)), succeededSources: new Set() };
+        },
+      );
+      cleanups.push(() => listing.mockRestore());
+      const reconcile = spyOn(h.pool, "reconcileDiscoveryObservation");
+      cleanups.push(() => reconcile.mockRestore());
+      const identity = spyOn(h.pool, "androidTransportMayAliasDevice");
+      cleanups.push(() => identity.mockRestore());
+
+      expect(await h.outcome("controlProbe", { platform: "android", deviceId: WIRELESS })).toBe(
+        DEVICE_OWNED_BY_OTHER_SESSION_CODE,
+      );
+
+      expect(
+        reconcile.mock.calls.filter(([, source]) => source === "tools/call:identity-gate"),
+      ).toEqual([]);
+      expect(identity.mock.calls.at(-1)?.[0]).toEqual({
+        deviceId: WIRELESS,
+        name: WIRELESS,
+        platform: "android",
+      });
+      expect(h.tools.runs).toEqual([]);
+    },
+  );
+
+  test.each([false, true])(
+    "an identity reconcile failure stops control before readiness (already actionable %s)",
+    async (actionable) => {
+      const h = await harness({ pooledRows: [booted(WIRELESS)], serial: "unknown" });
+      const failure = actionable
+        ? new ActionableError("identity reconcile failed")
+        : new Error("identity reconcile failed");
+      const reconcileObservation = h.pool.reconcileDiscoveryObservation.bind(h.pool);
+      const reconcile = spyOn(h.pool, "reconcileDiscoveryObservation").mockImplementation(
+        async (devices, source, options) => {
+          if (source === "tools/call:identity-gate") {
+            throw failure;
+          }
+          await reconcileObservation(devices, source, options);
+        },
+      );
+      cleanups.push(() => reconcile.mockRestore());
+
+      const result = await h.tools
+        .call("controlProbe", {
+          platform: "android",
+          deviceId: WIRELESS,
+        })
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+
+      expect(result).toBeInstanceOf(ActionableError);
+      if (actionable) {
+        expect(result).toBe(failure);
+      } else {
+        expect(result).toMatchObject({
+          cause: failure,
+          message: `Failed to reconcile identity listing for ${WIRELESS}: identity reconcile failed`,
+        });
+      }
+      expect(h.tools.runs).toEqual([]);
+      expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    },
+  );
+
+  test("an identity reconcile failure keeps a sessionless read read-only", async () => {
+    const h = await harness({ pooledRows: [booted(WIRELESS)], serial: "unknown" });
+    const reconcileObservation = h.pool.reconcileDiscoveryObservation.bind(h.pool);
+    const reconcile = spyOn(h.pool, "reconcileDiscoveryObservation").mockImplementation(
+      async (devices, source, options) => {
+        if (source === "tools/call:identity-gate") {
+          throw new Error("identity reconcile failed");
+        }
+        await reconcileObservation(devices, source, options);
+      },
+    );
+    cleanups.push(() => reconcile.mockRestore());
+
+    expect(await h.outcome("readProbe", { platform: "android", deviceId: WIRELESS })).toBe("ran");
+    expect(reconcile.mock.calls.some(([, source]) => source === "tools/call:identity-gate")).toBe(
+      true,
+    );
+    expect(h.reads).toEqual([WIRELESS]);
+    expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 
   test("a control call on a wireless phone with a generic serial is allowed, as before", async () => {
@@ -505,28 +556,106 @@ describe("an unheld device on a transport the pool cannot identify (open owner d
     expect(h.tools.runs).toHaveLength(3);
   });
 
-  test("two phones reporting the same generic serial are never folded into one", async () => {
+  test("two phones reporting the same generic serial are not folded, and ambiguous control is refused", async () => {
     const generic = "0123456789abcdef";
     const h = await harness({
       pooledRows: [booted(generic), booted(WIRELESS)],
       serial: generic,
       held: generic,
     });
-    expect(h.pool.getAllDevices().map((device) => device.id)).toEqual([generic]);
-
-    const onOtherPhone = await h.outcome("controlProbe", {
-      platform: "android",
-      deviceId: WIRELESS,
-    });
-    const onHeldPhone = await h.outcome("controlProbe", { platform: "android", deviceId: generic });
-
-    // The wireless phone is not provably the held one: today's behaviour, behind the predicate.
-    expect(onOtherPhone).toBe("ran");
-    expect(h.tools.runs).toEqual([
-      { name: "controlProbe", deviceId: WIRELESS, sessionUuid: undefined },
-    ]);
-    expect(onHeldPhone).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+    expect(h.pool.isAndroidTransportAssignable(booted(WIRELESS))).toBe(false);
+    expect(h.pool.androidTransportMayAliasDevice(booted(WIRELESS), generic)).toBe(true);
+    const before = { ...h.sessions.getSession(HOLDER)! };
+    h.timer.advanceTime(1000);
+    expect(await h.outcome("controlProbe", { platform: "android", deviceId: WIRELESS })).toBe(
+      DEVICE_OWNED_BY_OTHER_SESSION_CODE,
+    );
+    expect(h.tools.runs).toEqual([]);
+    expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+    expect(h.sessions.getSession(HOLDER)!.lastUsedAt).toBe(before.lastUsedAt);
+    expect(h.sessions.getSession(HOLDER)!.expiresAt).toBe(before.expiresAt);
     expect(h.pool.getAndroidTransportAliases(generic)).toEqual([]);
+    expect(await h.outcome("controlProbe", { sessionUuid: HOLDER, deviceId: generic })).toBe("ran");
+    expect(h.tools.runs).toEqual([
+      { name: "controlProbe", deviceId: generic, sessionUuid: HOLDER },
+    ]);
+  });
+
+  test("an ambiguous callInternal plan step is refused before readiness", async () => {
+    const generic = "0123456789abcdef";
+    const h = await harness({
+      pooledRows: [booted(generic), booted(WIRELESS)],
+      serial: generic,
+      held: generic,
+    });
+    expect(
+      await ToolRegistry.callInternal("controlProbe", {
+        platform: "android",
+        deviceId: WIRELESS,
+      }).then(describeOutcome, describeOutcome),
+    ).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+    expect(h.tools.runs).toEqual([]);
+    expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+  });
+
+  test.each([undefined, STRANGER_CONNECTION])(
+    "an unidentified read that could alias a holder never readies (%s)",
+    async (connection) => {
+      const generic = "0123456789abcdef";
+      const h = await harness({
+        pooledRows: [booted(generic), booted(WIRELESS)],
+        serial: generic,
+        held: generic,
+      });
+      const before = { ...h.sessions.getSession(HOLDER)! };
+      const sessionsBefore = h.sessions.getAllSessions().map((s) => s.sessionId);
+      h.timer.advanceTime(1000);
+      expect(
+        await h.outcome("readProbe", {
+          platform: "android",
+          deviceId: WIRELESS,
+          __mcpSessionId: connection,
+        }),
+      ).toBe("ran");
+      expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+      expect(h.reads).toEqual([WIRELESS]);
+      expect(h.tools.runs).toEqual([]);
+      expect(h.sessions.getSession(HOLDER)!.lastUsedAt).toBe(before.lastUsedAt);
+      expect(h.sessions.getSession(HOLDER)!.expiresAt).toBe(before.expiresAt);
+      expect(h.sessions.getAllSessions().map((s) => s.sessionId)).toEqual(sessionsBefore);
+    },
+  );
+
+  test("a healthy listing gives an unidentified read the real transport row", async () => {
+    const generic = "0123456789abcdef";
+    const listed = booted(WIRELESS);
+    const h = await harness({
+      pooledRows: [booted(generic), listed],
+      serial: generic,
+      held: generic,
+    });
+    const identity = spyOn(h.pool, "androidTransportMayAliasDevice");
+    cleanups.push(() => identity.mockRestore());
+    const mapping = spyOn(h.pool, "mapAndroidDiscovery");
+    cleanups.push(() => mapping.mockRestore());
+    const listingsBefore = h.rawScans();
+
+    expect(await h.outcome("readProbe", { platform: "android", deviceId: WIRELESS })).toBe("ran");
+
+    expect(h.rawScans() - listingsBefore).toBe(2);
+    expect(identity).toHaveBeenCalledWith(listed, generic);
+    expect(identity.mock.calls.at(-1)?.[0]).toBe(
+      mapping.mock.results.at(-1)?.value.find((row) => row.deviceId === WIRELESS),
+    );
+    expect(h.reads).toEqual([WIRELESS]);
+    expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+  });
+
+  test("an unidentified read with nothing held keeps read readiness", async () => {
+    const h = await harness({ pooledRows: [booted(WIRELESS)], serial: "unknown" });
+    expect(await h.outcome("readProbe", { platform: "android", deviceId: WIRELESS })).toBe("ran");
+    expect(h.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
+    expect(h.tools.deviceSessionManager.getLastOptions()?.intent).toBe("read");
   });
 });
 
@@ -565,6 +694,7 @@ describe("devices the alias fold does not concern (#11618)", () => {
     const simulator: BootedDevice = { deviceId: "IOS-UDID-1", name: "iPhone", platform: "ios" };
     const h = await harness({ pooledRows: [booted(USB)], iosRows: [simulator] });
     const probes = h.adbFactory.getCallCount();
+    const scans = h.rawScans();
 
     const outcome = await h.outcome("controlProbe", { platform: "ios", deviceId: "IOS-UDID-1" });
     const untyped = await h.outcome("controlProbe", { deviceId: "IOS-UDID-1" });
@@ -572,5 +702,6 @@ describe("devices the alias fold does not concern (#11618)", () => {
     expect([outcome, untyped]).toEqual(["ran", "ran"]);
     expect(h.tools.runs.map((run) => run.deviceId)).toEqual(["IOS-UDID-1", "IOS-UDID-1"]);
     expect(h.adbFactory.getCallCount()).toBe(probes);
+    expect(h.rawScans()).toBe(scans);
   });
 });

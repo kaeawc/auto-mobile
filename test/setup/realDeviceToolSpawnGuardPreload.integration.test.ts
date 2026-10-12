@@ -213,7 +213,7 @@ guardedTest(
 );
 
 guardedTest(
-  "shared census attributes each unit file and allow-list override applies to the actual file",
+  "shared census attributes each unit file, and a listed device tool is still refused",
   () => {
     const names = ["census-a.test.ts", "census-b.test.ts"];
     const files = Object.fromEntries(
@@ -223,7 +223,7 @@ guardedTest(
     const allowList = join(fixtureDir, "allowlist.txt");
     writeFileSync(
       allowList,
-      names.map((name) => join(fixtureDir, name).slice(root.length)).join("\n"),
+      names.map((name) => `${join(fixtureDir, name).slice(root.length)} adb`).join("\n"),
     );
     for (const isolate of [false, true]) {
       writeFileSync(census, "");
@@ -243,18 +243,52 @@ guardedTest(
         ).toBe(true);
       }
     }
-    // A fake executable named adb proves exact pass-through without touching a device.
-    const fakeTool = join(fixtureDir, "adb");
-    writeFileSync(fakeTool, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-    const allowed = runFiles(files, {
+    // An inert executable named adb: if the list let it through, both files would pass.
+    writeFileSync(join(fixtureDir, "adb"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const listed = runFiles(files, {
       env: {
         AUTOMOBILE_SPAWN_GUARD_ALLOWLIST: allowList,
         PATH: `${fixtureDir}:${process.env.PATH ?? ""}`,
       },
     });
-    expect(allowed.exitCode).toBe(0);
+    expect(listed.exitCode).not.toBe(0);
+    expect(listed.stdout.toString() + listed.stderr.toString()).toContain(
+      "real device tool spawned",
+    );
   },
 );
+
+guardedTest("a harmless command runs only from the unit file that lists it", () => {
+  // Launches use only this inert executable.
+  writeFileSync(join(fixtureDir, "harmless-tool"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+  const launch = `import { test, expect } from "bun:test";
+    test("launch", () => expect(Bun.spawnSync(["harmless-tool"]).exitCode).toBe(0));`;
+  const relative = (name: string) => join(fixtureDir, name).slice(root.length);
+  const allowList = join(fixtureDir, "host-allowlist.txt");
+  writeFileSync(allowList, `# fixture\n${relative("listed.test.ts")} harmless-tool\n`);
+  for (const isolate of [false, true]) {
+    const result = runFiles(
+      { "listed.test.ts": launch, "unlisted.test.ts": launch },
+      {
+        isolate,
+        env: {
+          AUTOMOBILE_SPAWN_GUARD_ALLOWLIST: allowList,
+          PATH: `${fixtureDir}:${process.env.PATH ?? ""}`,
+        },
+      },
+    );
+    const output = result.stdout.toString() + result.stderr.toString();
+    expect(result.exitCode).not.toBe(0);
+    expect(output).toContain("1 pass");
+    expect(output).toContain("1 fail");
+    expect(output).toContain(
+      `host command spawned by a unit test: ${relative("unlisted.test.ts")}: harmless-tool`,
+    );
+    expect(output).not.toContain(
+      `host command spawned by a unit test: ${relative("listed.test.ts")}`,
+    );
+  }
+});
 
 guardedTest("later suite teardown is reported once after an earlier clean drain", () => {
   const result = runFiles({

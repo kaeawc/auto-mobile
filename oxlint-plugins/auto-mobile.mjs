@@ -587,6 +587,94 @@ const noRawPromiseRaceRule = {
   },
 };
 
+// Production code launches host processes through the exec seam
+// (src/utils/HostCommandExecutor.ts) so tests can inject a fake. `node:child_process`
+// imports are held to the seam modules by scripts/check-child-process-import-boundary.ts;
+// this rule closes the other door, Bun's own launchers, which need no import.
+const BUN_PROCESS_LAUNCHERS = new Set(["spawn", "spawnSync", "$"]);
+const isBunObject = (node) =>
+  (node?.type === "Identifier" && node.name === "Bun") ||
+  (node?.type === "MemberExpression" && propertyName(node.property) === "Bun");
+const noDirectBunSpawnRule = {
+  meta: {
+    type: "problem",
+    messages: {
+      directSpawn:
+        "Do not launch a process with Bun.spawn, Bun.spawnSync or Bun.$ in src/. Go through HostCommandExecutor (src/utils/HostCommandExecutor.ts) or the consumer's injected executor, so unit tests can fake the launch.",
+    },
+  },
+  create(context) {
+    const report = (node) => context.report({ node, messageId: "directSpawn" });
+    return {
+      MemberExpression(node) {
+        if (isBunObject(node.object) && BUN_PROCESS_LAUNCHERS.has(propertyName(node.property))) {
+          report(node);
+        }
+      },
+      // const { spawn } = Bun;
+      VariableDeclarator(node) {
+        if (isBunObject(node.init) && node.id?.type === "ObjectPattern") {
+          for (const property of node.id.properties ?? []) {
+            if (
+              property.type !== "Property" ||
+              BUN_PROCESS_LAUNCHERS.has(propertyName(property.key))
+            ) {
+              report(property);
+            }
+          }
+        }
+      },
+      // import { spawn, $ } from "bun"; a default or namespace import renames the whole object.
+      ImportDeclaration(node) {
+        if (node.source?.value !== "bun" || node.importKind === "type") {
+          return;
+        }
+        for (const specifier of node.specifiers ?? []) {
+          if (
+            specifier.type !== "ImportSpecifier" ||
+            (specifier.importKind !== "type" &&
+              BUN_PROCESS_LAUNCHERS.has(propertyName(specifier.imported)))
+          ) {
+            report(specifier);
+          }
+        }
+      },
+      // export { spawn } from "bun"; export * from "bun";
+      ExportNamedDeclaration(node) {
+        if (node.source?.value !== "bun" || node.exportKind === "type") {
+          return;
+        }
+        for (const specifier of node.specifiers ?? []) {
+          if (BUN_PROCESS_LAUNCHERS.has(propertyName(specifier.local))) {
+            report(specifier);
+          }
+        }
+      },
+      ExportAllDeclaration(node) {
+        if (node.source?.value === "bun" && node.exportKind !== "type") {
+          report(node);
+        }
+      },
+      // require("bun") and import("bun") hand over the whole object.
+      CallExpression(node) {
+        if (
+          node.callee?.type === "Identifier" &&
+          node.callee.name === "require" &&
+          node.arguments?.[0]?.type === "Literal" &&
+          node.arguments[0].value === "bun"
+        ) {
+          report(node);
+        }
+      },
+      ImportExpression(node) {
+        if (node.source?.type === "Literal" && node.source.value === "bun") {
+          report(node);
+        }
+      },
+    };
+  },
+};
+
 // Bans reading a field off an MCP envelope's `structuredContent` directly (the
 // #2907 dead-read foot-gun: only success/error are hoisted, so a missing field
 // is a silent undefined). Matches any MemberExpression whose object is itself a
@@ -1636,6 +1724,7 @@ const plugin = {
     "stress-explicit-timeout": stressExplicitTimeoutRule,
     "no-extension-import": noExtensionImportRule,
     "no-raw-promise-race": noRawPromiseRaceRule,
+    "no-direct-bun-spawn": noDirectBunSpawnRule,
     "no-raw-timer": noRawTimerRule,
     "no-raw-selector-field-read": noRawSelectorFieldReadRule,
     "no-structured-content-read": noStructuredContentReadRule,

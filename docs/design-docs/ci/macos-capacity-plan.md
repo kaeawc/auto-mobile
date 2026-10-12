@@ -96,11 +96,13 @@ The owner's Mac (ARM64, 16 cores: 12 performance + 4 efficiency, 128 GiB) runs
 two runner pools for owner-authored same-repository PRs. Fork PRs always use
 hosted `macos-26` / `macos-latest`. Routing is the existing expression
 (`github.event.pull_request.user.login == 'kaeawc'` and same repository), plus a
-rollout switch, the repository variable `AUTOMOBILE_MAC_POOLS_ENABLED`, on the
-jobs this change moved. Until the owner registers the runners and sets it to
-`true`, those jobs keep running on hosted `macos-26`. Without the switch, a job
-labelled `automobile-mac-heavy` would queue forever with no runner, and the
-required `iOS Build` gate with it.
+rollout switch, the repository variable `AUTOMOBILE_MAC_POOLS_ENABLED`, on every
+self-hosted Mac job (the four that were on the Mac before the pools gained it in
+#11580). Unless it is `true`, those jobs run on hosted `macos-26` /
+`macos-latest`. Without the switch, a job labelled for a pool with no online
+runner queues forever, and its required check with it: on 2026-10-10 no runner
+took a job between 18:25 and 20:02 UTC and one PR's seven Mac jobs waited 19–64
+minutes until they were cancelled (#11580).
 
 | Pool                   | Jobs                                                                                                                                       |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -110,6 +112,11 @@ required `iOS Build` gate with it.
 - The heavy pool has exactly one runner process, so xcodebuild and simulator
   jobs never overlap, and each job owns the simulators it creates. Heavy jobs
   have tight `timeout-minutes` (25, or 30 for the Playground fallback).
+- Build Xcode Projects is one job that builds Playground and then CtrlProxy in
+  separate named steps (#11580). As two matrix legs they ran one after the other
+  on the heavy runner anyway and repeated the setup. Prototype Simulator `needs`
+  that job, so the runner serves the build behind the required `iOS Build` gate
+  first; it still runs whatever the build's result.
 - The PR-time XcodeGen drift check (#10939) is the `Check XcodeGen Project
   Drift` step of Build Xcode Projects, so it runs on the heavy lane.
 - Every moved job isolates `HOME`, `TMPDIR`, the XDG dirs and
@@ -267,7 +274,10 @@ the Mac as the user that owns `~/actions-runner`:
    `automobile-mac-heavy`, all `online`.
 
 6. Turn the routing on: `gh variable set AUTOMOBILE_MAC_POOLS_ENABLED --body true`.
-   To fall back to hosted runners, set it to anything else.
+   To fall back to hosted runners, set it to anything else
+   (`gh variable set AUTOMOBILE_MAC_POOLS_ENABLED --body false`). Runs created
+   after that use hosted runners for every Mac job. Jobs already queued for the
+   Mac stay there until their run is cancelled, for example by a new push.
 
 ### Namespace macOS
 

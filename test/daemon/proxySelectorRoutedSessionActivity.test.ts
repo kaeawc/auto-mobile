@@ -355,45 +355,52 @@ describe("#10692: a selector-routed call keeps the session it reached in use", (
     // The idle clock as a property: over any history of reads and control calls, in every form a
     // call can name a session, the binding is kept until one window after the last control call
     // (the acquisition when there was none) and not a keeper tick longer.
-    test("only control calls move the idle clock, in any order and form", async () => {
-      const selector = fc.constantFrom<Record<string, unknown>>(
-        {},
-        { sessionUuid: ANDROID.sessionUuid },
-        { deviceId: ANDROID.deviceId },
-        { platform: "android" },
-      );
-      const step = fc.record({
-        control: fc.boolean(),
-        args: selector,
-        gapMs: fc.integer({ min: 1, max: 20 }).map((ticks) => ticks * INTERVAL_MS),
-      });
-      await fc.assert(
-        fc.asyncProperty(fc.array(step, { maxLength: 8 }), async (steps) => {
-          await proxy.close();
-          startProxy();
-          await proxy.callTool("getAndroid", {});
-          let lastUsedAt = timer.now();
-          for (const { control, args, gapMs } of steps) {
-            if (timer.now() + gapMs - lastUsedAt > IDLE_WINDOW_MS - INTERVAL_MS * 4) {
-              break;
+    // 25 generated histories, split over five tests (seeds 11_348..11_352) so each stays well inside
+    // the 100 ms per-test budget on a loaded runner: one 25-run property was ~120 ms isolated there.
+    test.each([0, 1, 2, 3, 4])(
+      "only control calls move the idle clock, in any order and form (slice %d)",
+      async (slice) => {
+        const selector = fc.constantFrom<Record<string, unknown>>(
+          {},
+          { sessionUuid: ANDROID.sessionUuid },
+          { deviceId: ANDROID.deviceId },
+          { platform: "android" },
+        );
+        const step = fc.record({
+          control: fc.boolean(),
+          args: selector,
+          gapMs: fc.integer({ min: 1, max: 20 }).map((ticks) => ticks * INTERVAL_MS),
+        });
+        await fc.assert(
+          fc.asyncProperty(fc.array(step, { maxLength: 8 }), async (steps) => {
+            await proxy.close();
+            startProxy();
+            await proxy.callTool("getAndroid", {});
+            let lastUsedAt = timer.now();
+            for (const { control, args, gapMs } of steps) {
+              if (timer.now() + gapMs - lastUsedAt > IDLE_WINDOW_MS - INTERVAL_MS * 4) {
+                break;
+              }
+              await timer.advanceTimeAsync(gapMs);
+              if (control) {
+                await proxy.callTool(CONTROL, { ...CONTROL_ARGS, ...args });
+                lastUsedAt = timer.now();
+              } else {
+                await proxy.callTool("observe", args);
+              }
             }
-            await timer.advanceTimeAsync(gapMs);
-            if (control) {
-              await proxy.callTool(CONTROL, { ...CONTROL_ARGS, ...args });
-              lastUsedAt = timer.now();
-            } else {
-              await proxy.callTool("observe", args);
-            }
-          }
-          await timer.advanceTimeAsync(lastUsedAt + IDLE_WINDOW_MS - INTERVAL_MS * 4 - timer.now());
-          expect(await nextTicksHeartbeat()).toEqual([ANDROID.sessionUuid]);
-          await timer.advanceTimeAsync(INTERVAL_MS * 2);
-          expect(await nextTicksHeartbeat()).toEqual([]);
-        }),
-        // See test/utils/Backoff.property.test.ts for the pinned-seed rationale.
-        { seed: 11_348, numRuns: 25 },
-      );
-    });
+            await timer.advanceTimeAsync(
+              lastUsedAt + IDLE_WINDOW_MS - INTERVAL_MS * 4 - timer.now(),
+            );
+            expect(await nextTicksHeartbeat()).toEqual([ANDROID.sessionUuid]);
+            await timer.advanceTimeAsync(INTERVAL_MS * 2);
+            expect(await nextTicksHeartbeat()).toEqual([]);
+          }),
+          // See test/utils/Backoff.property.test.ts for the pinned-seed rationale.
+          { seed: 11_348 + slice, numRuns: 5 },
+        );
+      },
+    );
 
     test("a result without an echo credits nothing, whatever session the call named", async () => {
       withoutEcho = true;

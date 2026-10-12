@@ -362,70 +362,86 @@ Root-level validation scripts:
 
 Run `scripts/<category>/validate_*.sh` for validation or `scripts/<category>/apply_*.sh` for auto-formatting.
 
-#### Unit-test device-spawn guard
+#### Unit-test host-spawn guard
 
-Unit tests must inject process/device fakes instead of spawning real `adb`,
-`xcrun`, `xcodebuild`, `simctl`, `devicectl`, `emulator`, `avdmanager`,
-`sdkmanager`, `ffmpeg`, or `curl`. The Bun preload guards `Bun.spawn` and
-`Bun.spawnSync`, including `node:child_process` APIs on Bun 1.3.14, tool lookups,
-and simple shell commands (including `;`, `&&`, `||`, and `|` segments).
-The guard unwraps `sh`/`bash`/`zsh`/`dash -c`, `cmd /c`, `env`, `exec`,
-`command`, `timeout`, `nice`, `nohup`, and leading `NAME=VALUE` assignments;
-shell tokenization preserves single/double quotes and backslash escapes, including
-quoted assignment values. `env` short clusters honor operand-taking options,
-including attached/separate `-S` split strings. Unbalanced quotes or command
-substitutions use a conservative scan for exact guarded executable tokens:
-`echo "adb"` is allowed, but `echo "$(adb devices)"` and `echo "unbalanced adb`
-are blocked. This fallback can reject inert arguments in unsupported syntax;
-it does not block substrings such as `myadb`.
-`which`/`where` lookups also detect guarded tools. It does not unwrap `stdbuf`,
-`setsid`, or `sudo`. `xcrun` is blocked directly. Swallowed
-errors during a test still fail that test via a scoped `afterEach` drain.
-Import/setup/late launches receive one synthetic `afterAll` failure per offending
-file; their reports do not fail subsequent tests. The allow-list in
-`scripts/unit-test-device-spawn-allowlist.txt` may only shrink; listed tests keep
-their existing process behavior. The list loads only on a blocked-tool hit.
+A unit test may not launch a host process. The Bun preload
+(`test/setup/realDeviceToolSpawnGuardPreload.ts`, listed in `bunfig.toml`) replaces
+`Bun.spawn`, `Bun.spawnSync` and `Bun.$`; on Bun 1.3.14 every `node:child_process`
+launcher (`spawn`, `spawnSync`, `exec`, `execSync`, `execFile`, `execFileSync`,
+`fork`) reads those two properties at each call, including through bindings
+imported before the preload ran, so they are covered without a patch of their own.
+A launch from a unit test file throws an error naming the file, the command line
+and the frames that launched it, unless
+`scripts/unit-test-host-spawn-allowlist.txt` lists that file with that command.
+
+Inject a fake first (`FakeProcessExecutor`, a fake adb executor,
+`FakeDisplayInventoryProvider`, `PlatformDeviceManagerFactory.setInstance`). List
+a launch only when the test is about the real tool and the tool is local and
+harmless (`git ls-files`, a script under `scripts/`, a fixture run with `bun`).
+Each entry is `<unit test file> <command>` under a comment saying why;
+`test/lint/unitTestHostSpawnAllowlist.test.ts` checks the file.
+
+Never allow-listable, refused even when listed: `adb`, `xcrun`, `xcodebuild`,
+`simctl`, `devicectl`, `emulator`, `avdmanager`, `sdkmanager`, `ffmpeg`, `curl`,
+`defaults`, `gsettings`, `auto-mobile`, and any launch whose arguments name the
+resident daemon's `/tmp/auto-mobile-daemon-<uid>.{sock,pid,lock}` files. So are the
+wrappers the guard cannot see through (`sudo`, `doas`, `xargs`, `script`,
+`osascript`, `stdbuf`, `setsid`, `eval`, `open`). These are found by executable
+name (any directory, `.exe`/`.cmd`/`.bat` stripped, any letter case), in
+`which`/`where` lookups, and inside simple shell commands
+(including `;`, `&&`, `||`, and `|` segments). The guard unwraps
+`sh`/`bash`/`zsh`/`dash -c`, `cmd /c`, `env`, `exec`, `command`, `timeout`, `nice`,
+`nohup`, and leading `NAME=VALUE` assignments; shell tokenization preserves
+single/double quotes and backslash escapes, including quoted assignment values.
+`env` short clusters honor operand-taking options, including attached/separate
+`-S` split strings. Unbalanced quotes or command substitutions use a conservative
+scan for exact guarded executable tokens: `echo "adb"` is allowed, but
+`echo "$(adb devices)"` and `echo "unbalanced adb` are blocked. This fallback can
+reject inert arguments in unsupported syntax; it does not block substrings such as
+`myadb`. Inside a shell string it does not look behind `eval`, `xargs`, or reserved
+words such as `if`, `then`, `do`, `!` and `{`: treat a listed `sh` or `bash` as
+trusted text and read what the test passes to it.
+
+Swallowed errors during a test still fail that test via a scoped `afterEach`
+drain. Import/setup/late launches receive one synthetic `afterAll` failure per
+offending file; their reports do not fail subsequent tests.
 
 Shared-process runs (for example, `bun test test/server`) attribute each launch
 using a retained test-file stack frame, falling back to `Bun.main` read at launch
-time (Bun 1.3.14 updates it per file; `process.argv[1]` stays fixed). Isolation is
-still useful for unrelated singleton/module state and remains the CI default.
-Detached work with no retained test frame can only be attributed to the current
-runtime file; swallowed runtime-only violations use the once-per-file backstop
-rather than failing every subsequent test. Tests must await their work and
-install hermetic fixtures.
-Integration and stress files are classified per launch and exempt; Windows
-interception remains disabled until that process boundary is verified. `Bun.$`,
-functions captured from `Bun` before patching, grandchildren, shell syntax beyond
-the bounded tokenizer above, and uppercase executable names are outside this guard. Windows `cmd`
-classification is unit-tested but actual Windows process interception is unverified.
+time (Bun 1.3.14 updates it per file; `process.argv[1]` stays fixed). Detached
+work with no retained test frame can only be attributed to the current runtime
+file; swallowed runtime-only violations use the once-per-file backstop rather than
+failing every subsequent test. A launch behind a process-wide cache is attributed
+to whichever file reaches it first, so it cannot be allow-listed per file: give it
+a suite-wide default in `test/setup/testPreload.ts` instead (as the daemon's
+process generation token has).
 
-```bash
-# Check existing exceptions; --update removes files that no longer spawn.
-bash scripts/prune-unit-test-device-spawn-allowlist.sh
-bash scripts/prune-unit-test-device-spawn-allowlist.sh --update
-# Initial census only: two sequential passes over all unit files, unioned.
-bash scripts/prune-unit-test-device-spawn-allowlist.sh --update --allow-grow
-# Preview or restrict a run; restricted updates preserve unscanned entries.
-bash scripts/prune-unit-test-device-spawn-allowlist.sh --dry-run
-bash scripts/prune-unit-test-device-spawn-allowlist.sh --file-list scratch/unit-files.txt --repeat 2 --batch-log-dir scratch/spawn-census
-```
+Outside this guard:
 
-Census records TSV and blocks launches with an ENOENT-coded error, even for
-allow-listed files. Batches contain at most 20 files, run with `bun test --isolate
---timeout 20000`, and use the portable 300-second timeout helper. Failed batches
-are rerun one file per process. Logs, exit statuses, and per-file/tool counts stay
-in the batch log directory (`AUTOMOBILE_SPAWN_GUARD_BATCH_LOG_DIR` also supported).
-For isolated script tests, `AUTOMOBILE_SPAWN_GUARD_ALLOWLIST` overrides the
-allow-list path and `AUTOMOBILE_SPAWN_GUARD_TEST_RUNNER` selects one executable
-path (no command-string evaluation). That executable receives only the selected
-repo-relative file arguments and the census-file environment variable. Defaults
-remain the checked-in allow-list and `bun test --isolate --timeout 20000`.
-A failed single-file run without a recorded hit makes the census incomplete and
-prevents rewriting the list. This script is not part of prepush; never inject
-preloads through `BUN_OPTIONS` or route this census through `test-ts.sh`. After an
-initial census, the maintainer runs the normal full unit gate in enforce mode to
-catch files whose later spawns were unreachable during census.
+- Integration (`*.integration.test.ts`) and stress files, classified per launch.
+- Windows: interception stays disabled until that process boundary is verified
+  (`cmd` classification is unit-tested).
+- What an allowed child does: a listed `bash script.sh` or `bun fixture.ts` runs
+  unguarded, and so do its own children. Review an entry as if it were the script.
+- `new Bun.$.Shell()`: Bun defines `$.Shell` non-configurable and non-writable, so
+  it cannot be replaced. Nothing in the repository uses it.
+- Functions captured from `Bun` before the preload ran, `Worker` threads (they do
+  not load the test preloads), `bun:ffi`, and shell syntax beyond the bounded
+  tokenizer above.
+- A daemon socket handed to a child through its environment instead of its
+  arguments.
+- Anything that is not a process launch: a test can still open a TCP connection to
+  the adb server or a socket to a daemon. `test/helpers/inMemoryDaemonWire.ts`
+  (`assertNotHostDaemonPath`) and the fixed-port fetch guard cover those paths.
+
+To take an inventory, set `AUTOMOBILE_SPAWN_GUARD_CENSUS_FILE=<path>` on a
+`bun test <explicit files>` run: every launch from a unit test is appended as
+`<file>\t<command>\t<ran|refused>\t<argv JSON>`. Listable commands run; the
+never-allow-listable ones are refused with an ENOENT-coded error instead of a
+violation. Run it with `--isolate` (in chunks of files, not one long process) to
+see the launches a shared process hides behind caches.
+`AUTOMOBILE_SPAWN_GUARD_ALLOWLIST` overrides the allow-list path for fixture runs.
+Never inject preloads through `BUN_OPTIONS` or route a census through `test-ts.sh`.
 
 ### iOS Video Recording Integration
 

@@ -6,21 +6,12 @@ import {
 import { executionTracker } from "../../src/server/executionTracker";
 import { LivenessScenario } from "../helpers/livenessScenarioHarness";
 
-// #11381 item 6, on the liveness scenario harness: a real started Daemon (its own tool-call-end
-// subscription, owner-disconnect port and veto, heartbeat monitor), the real stdio proxy and the
-// real ToolRegistry device-call path. The session's last call in flight ends after its owner's
-// connection closed and the disconnect grace ran out; the release that call deferred must be
-// retried at that instant, for a device read exactly as for a control call. This covers the
-// daemon's wiring of a call's end; the inventory read of item 5, which the MCP entry classifies,
-// is driven in inventoryReadEndRearmsOwnerDisconnectRelease.test.ts.
-//
-// Whether a read should defer the owner-disconnect release at all is an open owner question
-// (#11381 item 1), so no row asserts that the session is held while the read runs: only that the
-// release is not left waiting past the read's end. Today the read does defer it, and without the
-// end event the session would instead wait for the heartbeat monitor's next scan and be released
-// as a heartbeat timeout.
+// #11381: through the real Daemon and device-tool path, control calls defer owner-disconnect
+// release and re-arm it at their end. A wedged device read is cut at the disconnect grace instead,
+// with its execution still in flight; settling it afterward never credits use or releases again.
 
 let scenario: LivenessScenario | undefined;
+let longCall: ReturnType<LivenessScenario["startLongCall"]> | undefined;
 
 // The first scenario pays for module-level one-time costs, outside the per-test budget.
 beforeAll(async () => {
@@ -34,6 +25,8 @@ beforeAll(async () => {
 });
 
 afterEach(async () => {
+  await longCall?.settle();
+  longCall = undefined;
   await scenario?.stop();
   scenario = undefined;
 });
@@ -47,61 +40,70 @@ async function untilAtTheDevice(running: LivenessScenario): Promise<void> {
 }
 
 describe("the owner's connection closes with the session's last call in flight (#11381)", () => {
-  const calls = [
-    { kind: "a device read", tool: "observe", read: true },
-    { kind: "a control call", tool: "homeScreen", read: false },
-  ];
+  test("a control call ending after the disconnect grace retries the deferred release at once", async () => {
+    const running = (scenario = await LivenessScenario.start());
+    const session = await running.acquire();
+    const call = (longCall = running.startLongCall(session, "homeScreen", { wedged: true }));
+    await untilAtTheDevice(running);
+    expect(executionTracker.hasActiveSessionUuidExecutions(session, { excludeReads: true })).toBe(
+      true,
+    );
+    const closedAt = running.timer.now();
+    await running.closeTransport();
+    await running.idle(OWNER_DISCONNECT_GRACE_MS);
+    expect(running.releases).toEqual([]);
+    expect(running.poolState().sessionId).toBe(session);
 
-  test.each(calls)(
-    "$kind ending after the disconnect grace: the release it deferred is retried at once",
-    async ({ tool, read }) => {
-      const running = (scenario = await LivenessScenario.start());
-      const session = await running.acquire();
-      // The device command outlives its caller: it ends only when the scenario settles it.
-      const call = running.startLongCall(session, tool, { wedged: true });
-      await untilAtTheDevice(running);
-      // The real ToolRegistry path classified the call: a read is not counted as a control call.
-      expect(executionTracker.hasActiveSessionUuidExecutions(session)).toBe(true);
-      expect(executionTracker.hasActiveSessionUuidExecutions(session, { excludeReads: true })).toBe(
-        !read,
-      );
-
-      const closedAt = running.timer.now();
-      // No time has passed since the owner's lease began, so the heartbeat monitor (which leaves
-      // reads out) cannot reap before the disconnect grace runs out: its lease is as long.
-      const leaseStart = running.daemon.manager.getSession(session)?.lastOwnerHeartbeat;
-      expect(leaseStart ?? closedAt).toBe(closedAt);
-      await running.closeTransport();
-      await running.idle(OWNER_DISCONNECT_GRACE_MS);
-      const idleDeadline = running.daemon.manager.getSession(session)?.expiresAt;
-
-      await call.settle();
-      if (read) {
-        // A read's end is reported so the release is retried, but it is not use of the session.
-        expect(running.daemon.manager.getSession(session)?.expiresAt).toBe(idleDeadline);
-      }
+    await call.settle();
+    await running.idle(0);
+    for (let turn = 0; turn < 20 && running.poolState().status !== "idle"; turn++) {
       await running.idle(0);
+    }
+    expectReleased(running, session, closedAt);
+  });
 
-      // Released by the owner-disconnect release, in the instant the call ended: not at the
-      // veto's bound, and not by the heartbeat monitor's later scan.
-      expect(running.releases).toEqual([
-        {
-          at: closedAt + OWNER_DISCONNECT_GRACE_MS,
-          sessionId: session,
-          deviceId: running.deviceIds[0]!,
-          reason: OWNER_DISCONNECTED_RELEASE_REASON,
-        },
-      ]);
-      // The device is freed by the same release once its teardown has run, still in that instant.
-      for (let turn = 0; turn < 20 && running.poolState().status !== "idle"; turn++) {
-        await running.idle(0);
-      }
-      expect(running.timer.now()).toBe(closedAt + OWNER_DISCONNECT_GRACE_MS);
-      expect(running.poolState()).toEqual({
-        status: "idle",
-        sessionId: null,
-        autolockSessionId: undefined,
-      });
-    },
-  );
+  test("a wedged device read is released at the disconnect grace before it settles", async () => {
+    const running = (scenario = await LivenessScenario.start());
+    const session = await running.acquire();
+    const held = running.daemon.manager.getSession(session)!;
+    const idleDeadline = held.expiresAt;
+    const call = (longCall = running.startLongCall(session, "observe", { wedged: true }));
+    await untilAtTheDevice(running);
+    expect(executionTracker.hasActiveSessionUuidExecutions(session)).toBe(true);
+    expect(executionTracker.hasActiveSessionUuidExecutions(session, { excludeReads: true })).toBe(
+      false,
+    );
+    const closedAt = running.timer.now();
+    expect(held.lastOwnerHeartbeat ?? closedAt).toBe(closedAt);
+    await running.closeTransport();
+    await running.idle(OWNER_DISCONNECT_GRACE_MS);
+    expect(executionTracker.hasActiveSessionUuidExecutions(session)).toBe(true);
+    for (let turn = 0; turn < 20 && running.poolState().status !== "idle"; turn++) {
+      await running.idle(0);
+    }
+    expectReleased(running, session, closedAt);
+
+    await call.settle();
+    await running.idle(0);
+    expect(held.expiresAt).toBe(idleDeadline);
+    expect(running.daemon.manager.getSession(session)).toBeNull();
+    expectReleased(running, session, closedAt);
+  });
+
+  function expectReleased(running: LivenessScenario, session: string, closedAt: number): void {
+    expect(running.releases).toEqual([
+      {
+        at: closedAt + OWNER_DISCONNECT_GRACE_MS,
+        sessionId: session,
+        deviceId: running.deviceIds[0]!,
+        reason: OWNER_DISCONNECTED_RELEASE_REASON,
+      },
+    ]);
+    expect(running.timer.now()).toBe(closedAt + OWNER_DISCONNECT_GRACE_MS);
+    expect(running.poolState()).toEqual({
+      status: "idle",
+      sessionId: null,
+      autolockSessionId: undefined,
+    });
+  }
 });

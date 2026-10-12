@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { Daemon } from "../../src/daemon/daemon";
 import { DaemonState } from "../../src/daemon/daemonState";
 import {
@@ -60,14 +60,28 @@ async function rehydratedDaemon() {
   return { timer, sessionManager, released, stop };
 }
 
+function resetSharedState(): void {
+  SessionReleaseBroadcaster.clearForTesting();
+  if (DaemonState.getInstance().isInitialized()) {
+    DaemonState.getInstance().reset();
+  }
+  NavigationGraphManager.resetInstance();
+}
+
 describe("rehydrated owner reconnect window", () => {
-  afterEach(() => {
-    SessionReleaseBroadcaster.clearForTesting();
-    if (DaemonState.getInstance().isInitialized()) {
-      DaemonState.getInstance().reset();
+  // beforeAll is outside the per-test budget: one full scenario pays the daemon, in-memory
+  // database and monitor first-use cost that the first timed test would otherwise carry.
+  beforeAll(async () => {
+    const { timer, stop } = await rehydratedDaemon();
+    try {
+      await timer.advanceTimeAsync(OWNER_WINDOW_MS + DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS);
+    } finally {
+      stop();
+      resetSharedState();
     }
-    NavigationGraphManager.resetInstance();
   });
+
+  afterEach(resetSharedState);
 
   test("an owner reconnecting late in the window keeps its session", async () => {
     const { timer, sessionManager, released, stop } = await rehydratedDaemon();

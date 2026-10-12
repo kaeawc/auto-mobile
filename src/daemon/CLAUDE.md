@@ -147,8 +147,10 @@ takes input only from a frame whose `sessionUuid` names its holder (typed code
 Device-aware `tools/call` follows the same rule (`assertToolCallerHoldsDevice` in
 `src/server/toolRegistry.ts`): on a held device, a call from another session or
 with no session is refused with the same code before admission or device work,
-unless the tool is registered `deviceReadOnly` (watching). A call
-without a deviceId is checked against the device readiness would select (the
+unless the tool is registered `deviceReadOnly` (watching).
+`startTestRecording` also refuses an unheld device (`no_active_device_session`) before readiness;
+a live session holding no device is refused before context creation can auto-acquire one (#11716).
+A call without a deviceId is checked against the device readiness would select (the
 `setActiveDevice` pin, the current device, or the only candidate) before
 `ensureDeviceReady` runs, so a refused call never readies, pins or configures the
 holder's device (#10828). A sessionless `deviceReadOnly` call whose target (its

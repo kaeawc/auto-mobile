@@ -50,7 +50,7 @@ test/features/observe/windowDumps/*.txt text eol=lf
 scripts/utils-import-direction-baseline.txt text eol=lf
 # Generated MDM profile asserted byte-for-byte against its generator (#10595).
 docs/assets/mdm/*.mobileconfig text eol=lf
-scripts/unit-test-device-spawn-allowlist.txt text eol=lf
+scripts/unit-test-host-spawn-allowlist.txt text eol=lf
 test/fixtures/android-fold-displays/*.txt text eol=lf
 # Captured executePlan response (issue #10090): asserted byte-for-byte by a TS test and parsed by the junit-runner.
 android/junit-runner/src/test/resources/captured/*.json text eol=lf

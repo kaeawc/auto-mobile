@@ -1,5 +1,4 @@
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   assertBootCapacityGranted,
   atCapacityDecision,
@@ -94,9 +93,8 @@ export interface RefusalWireFixture {
   result: RefusalWireResult;
 }
 
-export const REFUSAL_FIXTURES_DIR = fileURLToPath(
-  new URL("../fixtures/refusal-wire/", import.meta.url),
-);
+// import.meta.dir, not fileURLToPath(new URL(...)): the latter yields "\\D:\\a\\..." on Windows Bun.
+export const REFUSAL_FIXTURES_DIR = join(import.meta.dir, "..", "fixtures", "refusal-wire");
 
 const SESSION = "11111111-2222-4333-8444-555555555555";
 const DEVICE = "emulator-5554";

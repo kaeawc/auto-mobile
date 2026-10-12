@@ -32,6 +32,8 @@ export const testOverrides: {
   auxSocketDir: string | undefined;
   /** Keeps the shared boot admission gates from sampling the real host (adb, ps, simctl). */
   bootAdmissionGatesDisabled: boolean;
+  /** True while the daemon must not read its own process generation token (`ps` on macOS). */
+  processGenerationCaptureDisabled: (() => boolean) | undefined;
 } = {
   gitMetadataClient: undefined,
   hostPortAvailabilityChecker: undefined,
@@ -39,4 +41,5 @@ export const testOverrides: {
   telemetryNoOpDefault: false,
   auxSocketDir: undefined,
   bootAdmissionGatesDisabled: false,
+  processGenerationCaptureDisabled: undefined,
 };

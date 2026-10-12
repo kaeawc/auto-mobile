@@ -120,9 +120,9 @@ export class RealBootGatesOverFakeFleet {
       const observed = this.observe("ios", releaseAdmission);
       return {
         ...admission,
-        releaseAdmission: () => {
+        releaseAdmission: (outcome) => {
           observed.releaseCalls++;
-          releaseAdmission();
+          releaseAdmission(outcome);
         },
       };
     };

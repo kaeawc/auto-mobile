@@ -57,9 +57,10 @@ export interface BootAdmissionResult<D> {
   /**
    * Present when the boot was admitted a boot: it counts toward the limit until
    * released, so concurrent callers cannot all be admitted against one free
-   * slot before the first boot shows up in the platform's listing.
+   * slot before the first boot shows up in the platform's listing. A failed boot
+   * reports `bootFailed` so an unobserved target can be forgotten; omission means success.
    */
-  releaseAdmission?: () => void;
+  releaseAdmission?: (outcome?: { bootFailed?: boolean }) => void;
 }
 
 /** The at-capacity refusal, or undefined when one more boot fits. */

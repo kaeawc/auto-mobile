@@ -105,6 +105,7 @@ describe("FleetBootInstrumentation", () => {
     );
     expect(gate!.admitOptions[0]).toMatchObject({ signal: controller.signal, bootUdid: UDID });
     expect(admittedDuringBoot).toBe(1);
+    expect(gate!.releaseOutcomes).toEqual([undefined]);
     expect(gate!.admitted).toBe(0);
   });
 
@@ -115,6 +116,7 @@ describe("FleetBootInstrumentation", () => {
         throw new Error("boot failed");
       }),
     ).rejects.toThrow("boot failed");
+    expect(gate!.releaseOutcomes).toEqual([{ bootFailed: true }]);
     expect(gate!.admitted).toBe(0);
   });
 

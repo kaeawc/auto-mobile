@@ -147,7 +147,7 @@ function managedConnectionRefusalDetail(
       return "It changes state shared by every connection of this daemon.";
     case "device":
       return target.deviceId === undefined && target.platform !== undefined
-        ? `None of its slot devices is an ${target.platform} device.`
+        ? `None of its slot devices is an ${target.platform} device; name a device by deviceId to read one outside its slots.`
         : `Device '${target.deviceId}' is not one of its slot devices.`;
     case "session":
       return `Session ${target.sessionUuid} is not one of its slot sessions.`;

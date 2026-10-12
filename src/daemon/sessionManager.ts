@@ -11704,7 +11704,7 @@ export class SessionManager {
     ) {
       return "heartbeat-timeout";
     }
-    return IDLE_WINDOW_RELEASE_REASON;
+    return session.livenessPolicy === "cli-idle" ? "cli-idle-timeout" : IDLE_WINDOW_RELEASE_REASON;
   }
 
   private isSessionExpiredForNewExecution(

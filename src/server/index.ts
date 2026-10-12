@@ -1103,22 +1103,22 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           daemonMode && daemonState.isInitialized()
             ? daemonState.getManagedConnectionScopes().get(requestMcpSessionId)
             : undefined;
-        const boundUuid =
-          managedBinding && !rawArgs.deviceId && !rawArgs.device && !rawArgs.sessionUuid
-            ? sessionToolBinding.boundDeviceSessionUuid(sessionId)
-            : undefined;
-        const bound = boundUuid ? daemonState.getSessionManager().peekSession(boundUuid) : null;
-        const boundDevice = bound?.assignedDevice
-          ? daemonState.getDevicePool().getDevice(bound.assignedDevice)
-          : undefined;
         const refusal = managedConnectionPlatformRefusal({
-          binding: boundUuid ? managedBinding : undefined,
+          binding:
+            !rawArgs.deviceId && !rawArgs.device && !rawArgs.sessionUuid
+              ? managedBinding
+              : undefined,
           action: name,
           platform:
             rawArgs.platform === "android" || rawArgs.platform === "ios"
               ? rawArgs.platform
               : undefined,
-          boundPlatform: boundDevice?.platform,
+          slotPlatformOf: (sessionUuid) => {
+            const session = daemonState.getSessionManager().peekSession(sessionUuid);
+            return session?.assignedDevice
+              ? daemonState.getDevicePool().getDevice(session.assignedDevice)?.platform
+              : undefined;
+          },
         });
         if (refusal) {
           throw refusal;

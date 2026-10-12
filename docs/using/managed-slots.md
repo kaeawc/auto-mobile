@@ -475,8 +475,9 @@ slot. Only control and lifecycle calls on another slot's device are refused.
   control, start, provision or delete anything outside its own slot devices or
   sessions gets the non-retryable `device_outside_managed_slots`, with a reason
   of `device`, `session`, `tool`, `scope` or `host` (device-acquiring tools are left to slot
-  acquisition). A platform-only control call naming a platform none of its slot
-  devices holds is refused with reason `device` and the requested `platform`.
+  acquisition). A platform-only call (control or read) naming a platform none of its slot
+  devices holds is refused with reason `device` and the requested `platform`; a read may
+  name a device outside the slots by `deviceId`.
   Lifecycle tools (`getAndroid`, `getApple`, `startDevice`,
   `provisionDevice`, `killDevice`, `deleteDevice`) are refused with reason `tool`
   even on the connection's own slot device: it could not boot the device again,

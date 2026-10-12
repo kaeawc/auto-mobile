@@ -377,6 +377,8 @@ describe("platform-only calls on a bound daemon connection", () => {
   const CONNECTION = "managed-platform-socket";
   const SCOPE = "platform-scope";
   const device = { name: "Android slot", deviceId: "emulator-5554", platform: "android" as const };
+  const iosDevice = { name: "iOS slot", deviceId: "IOS-SLOT", platform: "ios" as const };
+  const IOS_SESSION = "ios-slot";
   let fixture: McpTestFixture;
   let manager: SessionManager;
   let timer: FakeTimer;
@@ -403,14 +405,14 @@ describe("platform-only calls on a bound daemon connection", () => {
     manager.stopCleanupTimer();
     const discovery = new FakeDeviceUtils();
     discovery.setBootedDevices("android", [device]);
-    discovery.setBootedDevices("ios", []);
+    discovery.setBootedDevices("ios", [iosDevice]);
     const pool = new DevicePool(
       createDevicePoolDependencies(manager, "platform-routing", {
         timer,
         deviceManager: discovery,
       }),
     );
-    await pool.initializeWithDevices([device]);
+    await pool.initializeWithDevices([device, iosDevice]);
     DaemonState.getInstance().initialize(manager, pool);
     await pool.bindOrReuseDeviceSession(
       SESSION,
@@ -432,7 +434,7 @@ describe("platform-only calls on a bound daemon connection", () => {
       sessionContext: { initialSessionToolBinding: SESSION },
     });
     await fixture.setup();
-    tools = new RealToolCallPath([device]).install();
+    tools = new RealToolCallPath([device, iosDevice]).install();
   });
 
   afterEach(async () => {
@@ -443,39 +445,93 @@ describe("platform-only calls on a bound daemon connection", () => {
     manager.stopCleanupTimer();
     DaemonState.getInstance().reset();
     expect(DaemonState.getInstance().isInitialized()).toBe(false);
+    expect(DaemonState.getInstance().getManagedConnectionScopes().get(CONNECTION)).toBeUndefined();
     expect(executionTracker.getActiveExecutionCount()).toBe(0);
   });
 
-  test.each([true, false])(
-    "a foreign platform is refused before admission; managed=%s",
-    async (managed) => {
-      if (managed) {
-        DaemonState.getInstance()
-          .getManagedConnectionScopes()
-          .bind(CONNECTION, { scopeKey: SCOPE, sessionUuids: [SESSION] });
-      }
-      const session = manager.getSession(SESSION)!;
-      const clocks = { expiresAt: session.expiresAt, lastUsedAt: session.lastUsedAt };
-      timer.advanceTime(1_000);
-      const answer = await fixture.client.callTool({
-        name: "homeScreen",
-        arguments: { platform: "ios", [INTERNAL_MCP_SESSION_PARAM]: CONNECTION },
-      });
-      expect(answer.isError).toBe(true);
-      const payload = JSON.parse((answer.content as Array<{ text: string }>)[0]!.text);
-      expect(payload).toMatchObject({
-        code: managed ? "device_outside_managed_slots" : "device_outside_bound_session",
-        platform: "ios",
-        retryable: false,
-      });
-      if (managed) {
-        expect(payload).toMatchObject({ action: "homeScreen", reason: "device", scopeKey: SCOPE });
-        expect(payload.error).toContain("None of its slot devices is an ios device.");
-      }
-      expect(tools.runs).toEqual([]);
-      expect({ expiresAt: session.expiresAt, lastUsedAt: session.lastUsedAt }).toEqual(clocks);
-    },
-  );
+  test.each([
+    { name: "managed", managed: true },
+    { name: "unmanaged", managed: false },
+  ])("a foreign platform is refused before admission; $name", async ({ managed }) => {
+    if (managed) {
+      DaemonState.getInstance()
+        .getManagedConnectionScopes()
+        .bind(CONNECTION, { scopeKey: SCOPE, sessionUuids: [SESSION] });
+    }
+    const session = manager.getSession(SESSION)!;
+    const clocks = { expiresAt: session.expiresAt, lastUsedAt: session.lastUsedAt };
+    timer.advanceTime(1_000);
+    const answer = await fixture.client.callTool({
+      name: "homeScreen",
+      arguments: { platform: "ios", [INTERNAL_MCP_SESSION_PARAM]: CONNECTION },
+    });
+    expect(answer.isError).toBe(true);
+    const payload = JSON.parse((answer.content as Array<{ text: string }>)[0]!.text);
+    expect(payload).toMatchObject({
+      code: managed ? "device_outside_managed_slots" : "device_outside_bound_session",
+      platform: "ios",
+      retryable: false,
+    });
+    if (managed) {
+      expect(payload).toMatchObject({ action: "homeScreen", reason: "device", scopeKey: SCOPE });
+      expect(payload.error).toContain(
+        "None of its slot devices is an ios device; name a device by deviceId to read one outside its slots.",
+      );
+    }
+    expect(tools.runs).toEqual([]);
+    expect({ expiresAt: session.expiresAt, lastUsedAt: session.lastUsedAt }).toEqual(clocks);
+  });
+
+  test("mixed managed slots preserve the bound-session platform refusal", async () => {
+    await manager.createSession(IOS_SESSION, iosDevice.deviceId, "ios");
+    manager.setDeviceReadiness(IOS_SESSION, "automationReady");
+    DaemonState.getInstance()
+      .getManagedConnectionScopes()
+      .bind(CONNECTION, { scopeKey: SCOPE, sessionUuids: [SESSION, IOS_SESSION] });
+    const sessions = [manager.peekSession(SESSION)!, manager.peekSession(IOS_SESSION)!];
+    const clocks = sessions.map(({ expiresAt, lastUsedAt }) => ({ expiresAt, lastUsedAt }));
+    timer.advanceTime(1_000);
+    const answer = await fixture.client.callTool({
+      name: "homeScreen",
+      arguments: { platform: "ios", [INTERNAL_MCP_SESSION_PARAM]: CONNECTION },
+    });
+    expect(answer.isError).toBe(true);
+    const payload = JSON.parse((answer.content as Array<{ text: string }>)[0]!.text);
+    expect(payload).toMatchObject({ code: "device_outside_bound_session", platform: "ios" });
+    expect(payload.error).not.toContain("None of its slot devices");
+    expect(tools.runs).toEqual([]);
+    expect(sessions.map(({ expiresAt, lastUsedAt }) => ({ expiresAt, lastUsedAt }))).toEqual(
+      clocks,
+    );
+  });
+
+  test("a platform-only read outside managed slots explains deviceId access", async () => {
+    DaemonState.getInstance()
+      .getManagedConnectionScopes()
+      .bind(CONNECTION, { scopeKey: SCOPE, sessionUuids: [SESSION] });
+    const session = manager.peekSession(SESSION)!;
+    const clocks = { expiresAt: session.expiresAt, lastUsedAt: session.lastUsedAt };
+    timer.advanceTime(1_000);
+    const answer = await fixture.client.callTool({
+      name: "observe",
+      arguments: { platform: "ios", [INTERNAL_MCP_SESSION_PARAM]: CONNECTION },
+    });
+    expect(answer.isError).toBe(true);
+    const payload = JSON.parse((answer.content as Array<{ text: string }>)[0]!.text);
+    expect(payload).toMatchObject({
+      code: "device_outside_managed_slots",
+      reason: "device",
+      platform: "ios",
+      action: "observe",
+      scopeKey: SCOPE,
+    });
+    expect(payload.error).toContain(
+      "None of its slot devices is an ios device; name a device by deviceId to read one outside its slots.",
+    );
+    expect(tools.runs).toEqual([]);
+    expect(tools.watcherReads).toEqual([]);
+    expect({ expiresAt: session.expiresAt, lastUsedAt: session.lastUsedAt }).toEqual(clocks);
+  });
 
   test("the managed connection runs a matching platform on its slot", async () => {
     DaemonState.getInstance()

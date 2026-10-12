@@ -118,20 +118,24 @@ export function managedConnectionControlRefusal(input: {
   return new DeviceOutsideManagedSlotsError(action, "device", binding.scopeKey, { deviceId });
 }
 
-/** A platform-only selector must match the connection's bound slot device before admission. */
+/** Refuse a platform-only selector only when every slot's known platform differs. */
 export function managedConnectionPlatformRefusal(input: {
   binding: ManagedConnectionBinding | undefined;
   action: string;
   platform?: string;
-  boundPlatform?: string;
+  slotPlatformOf: (sessionUuid: string) => string | undefined;
 }): DeviceOutsideManagedSlotsError | undefined {
-  const { binding, action, platform, boundPlatform } = input;
-  return binding &&
-    platform !== undefined &&
-    boundPlatform !== undefined &&
-    platform !== boundPlatform
-    ? new DeviceOutsideManagedSlotsError(action, "device", binding.scopeKey, { platform })
-    : undefined;
+  const { binding, action, platform } = input;
+  if (!binding || platform === undefined || binding.sessionUuids.size === 0) {
+    return undefined;
+  }
+  for (const sessionUuid of binding.sessionUuids) {
+    const slotPlatform = input.slotPlatformOf(sessionUuid);
+    if (slotPlatform === undefined || slotPlatform === platform) {
+      return undefined;
+    }
+  }
+  return new DeviceOutsideManagedSlotsError(action, "device", binding.scopeKey, { platform });
 }
 
 /** Host-wide mutations cannot be confined to a bound connection's slots. */

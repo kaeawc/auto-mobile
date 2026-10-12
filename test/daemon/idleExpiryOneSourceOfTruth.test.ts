@@ -27,8 +27,6 @@ const SESSION = "idle-one-source";
 const DEVICE = "emulator-5554";
 const SCAN_MS = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
 const IDLE_MS = DEFAULT_SESSION_IDLE_TIMEOUT_MS;
-/** Every release reason that means "idle past the window", whichever path noticed first. */
-const IDLE_RELEASE_REASONS = ["cli-idle-timeout", "cleanup-expired"];
 /** Stalls well past the monitor's lateness margin, so each one is forgiven. */
 const STALLS_MS = [10_000, 40_000, 90_000, 130_000];
 const QUIET_MS = [2_000, 6_000, 20_000, 50_000, 70_000, 110_000];
@@ -193,8 +191,10 @@ class IdleWorld {
     await drainMicrotasks(20);
     const now = this.manager.sessionNow();
     const reported = this.reported();
-    if (this.released.some((reason) => !IDLE_RELEASE_REASONS.includes(reason))) {
-      this.fail(`released as ${this.released.join(",")}, which is not an idle release`);
+    const expectedReason =
+      this.session.livenessPolicy === "cli-idle" ? "cli-idle-timeout" : "cleanup-expired";
+    if (this.released.some((reason) => reason !== expectedReason)) {
+      this.fail(`released as ${this.released.join(",")}; expected ${expectedReason}`);
     }
     if (this.held !== now <= reported) {
       this.fail(
@@ -238,7 +238,9 @@ class IdleWorld {
       );
     }
     if (outcome !== "admitted") {
-      if (this.released.some((reason) => !IDLE_RELEASE_REASONS.includes(reason))) {
+      const expectedReason =
+        this.session.livenessPolicy === "cli-idle" ? "cli-idle-timeout" : "cleanup-expired";
+      if (this.released.some((reason) => reason !== expectedReason)) {
         this.fail(`the late call released the session as ${this.released.join(",")}`);
       }
       return;
@@ -330,6 +332,20 @@ async function runSchedule(kind: SessionKind, seed: number): Promise<{ idleRelea
 }
 
 describe("the scan, a late call's admission and idleReleaseAt give one idle deadline (#11558)", () => {
+  test.each([
+    { name: "late call", callFirst: true },
+    { name: "monitor", callFirst: false },
+  ])("cli-idle idle end noticed by $name", async ({ callFirst }) => {
+    const world = new IdleWorld(SESSION_KINDS[0]!);
+    await world.start();
+    try {
+      await world.apply({ kind: "sleep", ms: IDLE_MS + 1, callFirst });
+      expect(world.released).toEqual(["cli-idle-timeout"]);
+    } finally {
+      await world.stop();
+    }
+  });
+
   for (const kind of SESSION_KINDS) {
     for (const seeds of [
       [1, 2, 3],

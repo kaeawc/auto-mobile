@@ -21,6 +21,8 @@ IOS_DIR="${PROJECT_ROOT}/ios"
 
 # shellcheck source=scripts/ios/swift_test_counts.sh disable=SC1091
 source "${SCRIPT_DIR}/swift_test_counts.sh"
+# shellcheck source=scripts/ios/xctestrunner_test_filter.sh disable=SC1091
+source "${SCRIPT_DIR}/xctestrunner_test_filter.sh"
 
 echo -e "${CYAN}========================================${NC}"
 echo -e "${CYAN}  Swift Package Tests${NC}"
@@ -94,10 +96,37 @@ for package in "${TESTABLE_PACKAGES[@]}"; do
 
         # Check if the package has test targets
         if grep -q "testTarget" "${PACKAGE_DIR}/Package.swift"; then
+            test_args=(-Xswiftc -warnings-as-errors)
+            if [ "${package}" = "XCTestRunner" ]; then
+                # This script is simulator-free, but RemindersAddPlanTests only
+                # skips itself when no simulator is booted and no daemon answers.
+                # A hosted runner has neither; a self-hosted Mac has both, so the
+                # test drove the machine's resident daemon and someone else's
+                # simulator (#11626). Run the same simulator-free class list as
+                # prepush-ios.sh and the Thread Sanitizer job; the excluded class
+                # is run on a simulator by xctestrunner-integration-tests.sh.
+                if list_output="$(cd "${PACKAGE_DIR}" && swift test list "${test_args[@]}" 2>&1)"; then
+                    list_rc=0
+                else
+                    list_rc=$?
+                fi
+                if [ "${list_rc}" -ne 0 ]; then
+                    echo "${list_output}"
+                    print_status 1 "${package} simulator-free test discovery failed"
+                    FAILED_PACKAGES+=("${package} (test discovery failed)")
+                    continue
+                fi
+                # A bare call on purpose: a list with no simulator-free class
+                # means the denylist or the listing is broken, and set -e must
+                # end the run rather than fall back to the unfiltered suite.
+                xctestrunner_build_test_filter "${list_output}" swift-test.sh
+                test_args+=(--filter "${XCTESTRUNNER_TEST_FILTER}")
+            fi
+
             # Assign inside the `if` condition: under set -e a bare
             # test_output="$(failing-cmd)" aborts the whole script, so a package
             # that genuinely fails would kill the run instead of being recorded.
-            if test_output="$(cd "${PACKAGE_DIR}" && swift test -Xswiftc -warnings-as-errors 2>&1)"; then
+            if test_output="$(cd "${PACKAGE_DIR}" && swift test "${test_args[@]}" 2>&1)"; then
                 test_rc=0
             else
                 test_rc=$?

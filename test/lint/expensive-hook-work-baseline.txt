@@ -44,8 +44,6 @@ test/daemon/manager.test.ts	recursive-rm
 test/daemon/manager.test.ts	temp-dir
 test/daemon/ownerDisconnectReleaseRearm.test.ts	heavy-harness
 test/daemon/perSourceIosLiveness.test.ts	heavy-harness
-test/daemon/privateDaemonOrphanExitRecord.test.ts	recursive-rm
-test/daemon/privateDaemonOrphanExitRecord.test.ts	temp-dir
 test/daemon/rehydrationReservationAutolock.test.ts	heavy-harness
 test/daemon/socketServerDirectFrameTransportAlias.test.ts	heavy-harness
 test/daemon/socketServerFramerInteractions.test.ts	recursive-rm

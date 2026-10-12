@@ -118,6 +118,7 @@ describe("the liveness harness never reaches the host's daemon", () => {
       await expect(scenario.daemon.daemon.start()).rejects.toThrow(
         "Daemon.enterDaemonProcess() would touch the host",
       );
+      expect(scenario.daemon.exitFiles.files.size).toBe(0);
       const daemon = scenario.daemon.daemon;
       expect(() => daemon.stop()).toThrow("Daemon.stop() would touch the host");
     },

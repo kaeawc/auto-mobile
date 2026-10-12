@@ -2,6 +2,27 @@ import type { ChildProcess } from "node:child_process";
 import { DaemonManager } from "../../src/daemon/manager";
 import { FakeDaemonSpawner } from "./FakeDaemonSpawner";
 import { FakeTimer } from "./FakeTimer";
+import type { DaemonExitRecordFileSystem } from "../../src/daemon/daemonExitRecord";
+
+export class FakeDaemonExitRecordFileSystem implements DaemonExitRecordFileSystem {
+  readonly files = new Map<string, string>();
+
+  readFileSync(path: string, _encoding: "utf8"): string {
+    const data = this.files.get(path);
+    if (data === undefined) {
+      throw new Error("No daemon exit record");
+    }
+    return data;
+  }
+
+  writeFileSync(path: string, data: string): void {
+    this.files.set(path, data);
+  }
+
+  rmSync(path: string, _options: { force: true }): void {
+    this.files.delete(path);
+  }
+}
 
 /** Real manager behavior, with fake process I/O as the unit-test default. */
 export class SafeDaemonManager extends DaemonManager {
@@ -28,6 +49,7 @@ export class SafeDaemonManager extends DaemonManager {
       },
     };
     super(...args);
+    this.exitRecordFileSystem = new FakeDaemonExitRecordFileSystem();
     this.defaultSpawner = spawner;
     this.defaultSignals = signals;
   }

@@ -8464,14 +8464,10 @@ export class DaemonMcpProxy {
   }
 
   /**
-   * Close the connection to daemon.
-   *
-   * A process stopped by a signal closes the proxy with the MCP server still open, so nothing has
-   * cancelled the calls in flight (stdin EOF aborts them first). They are cancelled here, before the
-   * managed execution release: the daemon admits `daemon/releaseExecution` in arrival order on this
-   * proxy's socket, behind any call still running there, and the release would otherwise time out
-   * unadmitted and leave the session to the owner-disconnect release (#11642). Each caller is
-   * answered with a typed `DaemonUnavailableError`, never left waiting.
+   * Close the daemon connection, aborting in-flight calls here for stdin EOF and signals alike
+   * before releasing sessions or managed executions on the daemon socket (#11642).
+   * Callers receive a typed `DaemonUnavailableError`; after the stdio client closes, the output
+   * gate drops their answers while daemon-side release still completes.
    */
   close(): Promise<void> {
     // EOF and signal/transport shutdown may overlap: keep the socket until the same release settles.

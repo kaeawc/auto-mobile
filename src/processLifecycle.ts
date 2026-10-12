@@ -149,13 +149,18 @@ export class ProcessLifecycleHandlers {
     });
   }
 
-  installStdinShutdownHandlers(stdin: StdinShutdownSource): void {
+  installStdinShutdownHandlers(stdin: StdinShutdownSource, onClientGone?: () => void): void {
     if (this.stdinShutdownHandlersInstalled) {
       return;
     }
     this.stdinShutdownHandlersInstalled = true;
 
     const shutdownOnStdinClose = () => {
+      try {
+        onClientGone?.();
+      } catch (error) {
+        writeEmergencyLog("Error in stdin client-gone callback", error);
+      }
       void this.shutdown("stdin");
     };
     stdin.on("end", shutdownOnStdinClose);
@@ -163,12 +168,17 @@ export class ProcessLifecycleHandlers {
     stdin.on("close", shutdownOnStdinClose);
   }
 
-  installStdoutShutdownHandler(stdout: StdioWriteErrorSource): void {
+  installStdoutShutdownHandler(stdout: StdioWriteErrorSource, onClientGone?: () => void): void {
     if (this.stdoutShutdownHandlerInstalled) {
       return;
     }
     this.stdoutShutdownHandlerInstalled = true;
     stdout.on("error", () => {
+      try {
+        onClientGone?.();
+      } catch (error) {
+        writeEmergencyLog("Error in stdout client-gone callback", error);
+      }
       void this.shutdown("stdout");
     });
   }
@@ -292,12 +302,18 @@ export function installHangupShutdownHandler(): void {
   processLifecycleHandlers.installHangupShutdownHandler();
 }
 
-export function installStdinShutdownHandlers(stdin: StdinShutdownSource = process.stdin): void {
-  processLifecycleHandlers.installStdinShutdownHandlers(stdin);
+export function installStdinShutdownHandlers(
+  stdin: StdinShutdownSource = process.stdin,
+  onClientGone?: () => void,
+): void {
+  processLifecycleHandlers.installStdinShutdownHandlers(stdin, onClientGone);
 }
 
-export function installStdoutShutdownHandler(stdout: StdioWriteErrorSource = process.stdout): void {
-  processLifecycleHandlers.installStdoutShutdownHandler(stdout);
+export function installStdoutShutdownHandler(
+  stdout: StdioWriteErrorSource = process.stdout,
+  onClientGone?: () => void,
+): void {
+  processLifecycleHandlers.installStdoutShutdownHandler(stdout, onClientGone);
 }
 
 export function installStderrErrorGuard(stderr: StdioWriteErrorSource = process.stderr): void {

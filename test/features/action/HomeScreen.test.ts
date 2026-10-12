@@ -667,7 +667,7 @@ describe("HomeScreen", () => {
       );
     });
 
-    test("an iOS SpringBoard fallback does not establish that Home was already foreground", async () => {
+    test("an unchanged iOS SpringBoard fallback succeeds after Home is verified", async () => {
       const observation = createObserveResult();
       observation.viewHierarchy = {
         packageName: "com.apple.springboard",
@@ -679,10 +679,54 @@ describe("HomeScreen", () => {
       client.setHierarchyData(iosHierarchy("com.apple.springboard"));
 
       const result = await action.execute();
-      expect(result.success).toBe(false);
-      expect(result.error).toBe("No visual change observed");
-      expect(result.message).toBeUndefined();
+      expect(result.success).toBe(true);
+      expect(result.error).toBeUndefined();
+      expect(result.message).toBe("Already on the home screen");
     });
+
+    test("a changed iOS SpringBoard fallback succeeds without an already-home message", async () => {
+      const before = createObserveResult();
+      before.viewHierarchy = {
+        packageName: "com.apple.springboard",
+        fallbackToSpringboard: true,
+        hierarchy: { node: { $: { class: "Home", text: "before" } } },
+      };
+      const after = {
+        ...before,
+        viewHierarchy: { ...before.viewHierarchy, hierarchy: { node: { $: { class: "Home" } } } },
+      };
+      fakeObserveScreen.setObserveSequence([before, after]);
+      const { action, client } = createIosHomeScreen();
+      client.setHierarchyData(iosHierarchy("com.apple.springboard"));
+
+      const result = await action.execute();
+      expect(result.success).toBe(true);
+      expect(result.error).toBeUndefined();
+      expect(result).not.toHaveProperty("message");
+    });
+
+    test.each(["app", "SpringBoard hierarchy error"] as const)(
+      "iOS still requires visual change with a pre-dispatch %s",
+      async (initial) => {
+        const observation = createObserveResult();
+        observation.viewHierarchy = {
+          packageName: initial === "app" ? "com.apple.Maps" : "com.apple.springboard",
+          fallbackToSpringboard: initial !== "app",
+          hierarchy: {
+            node: { $: { class: "Home" } },
+            ...(initial === "app" ? {} : { error: "Hierarchy unavailable" }),
+          },
+        };
+        fakeObserveScreen.setObserveResult(observation);
+        const { action, client } = createIosHomeScreen();
+        client.setHierarchyData(iosHierarchy("com.apple.springboard"));
+
+        const result = await action.execute();
+        expect(result.success).toBe(false);
+        expect(result.error).toBe("No visual change observed");
+        expect(result).not.toHaveProperty("message");
+      },
+    );
 
     test("should execute hardware navigation using keyevent 3", async () => {
       fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });

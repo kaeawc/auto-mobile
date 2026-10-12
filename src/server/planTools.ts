@@ -13,6 +13,7 @@ import {
   stopTestRecording,
   getTestRecordingStatus,
   type TestRecordingStatus,
+  NoUserInputCapturedError,
 } from "./testRecordingManager";
 import {
   assertLifecycleCallerHoldsDevice,
@@ -362,6 +363,7 @@ const exportPlanResultSchema = z.object({
   stepCount: z.number().int().optional(),
   durationMs: z.number().int().optional(),
   error: z.string().optional(),
+  reason: z.string().optional(),
 });
 
 /**
@@ -453,6 +455,15 @@ const exportPlanTool = async (params: {
   planName?: string;
   sessionUuid?: string;
 }): Promise<any> => {
+  const failedResponse = (error: unknown) =>
+    withIsErrorOnFailure(
+      createStructuredToolResponse({
+        success: false,
+        error: errorMessage(error),
+        ...(error instanceof NoUserInputCapturedError ? { reason: error.reason } : {}),
+      }),
+      false,
+    );
   // An announced id may still be finalizing after its owner's session ended.
   try {
     if (params.recordingId) {
@@ -463,10 +474,7 @@ const exportPlanTool = async (params: {
     }
   } catch (error) {
     logger.error(`[exportPlan] Failed to join recording stop: ${errorMessage(error)}`, error);
-    return withIsErrorOnFailure(
-      createStructuredToolResponse({ success: false, error: errorMessage(error) }),
-      false,
-    );
+    return failedResponse(error);
   }
   // Outside the try: a holder refusal reaches the client typed, never as a generic failure.
   const status = await activeRecordingForExport(params);
@@ -506,13 +514,7 @@ const exportPlanTool = async (params: {
     return exportedTestRecordingResponse(result);
   } catch (error) {
     logger.error(`[exportPlan] Failed to export plan: ${error}`);
-    return withIsErrorOnFailure(
-      createStructuredToolResponse({
-        success: false,
-        error: errorMessage(error),
-      }),
-      false,
-    );
+    return failedResponse(error);
   }
 };
 
@@ -633,7 +635,7 @@ export const registerPlanTools = () => {
 
   ToolRegistry.registerDeviceAware(
     "startTestRecording",
-    "Start recording user interactions for exportPlan.",
+    "Start recording on-device user input (not tool calls) for exportPlan.",
     startTestRecordingSchema,
     startTestRecordingTool,
     {

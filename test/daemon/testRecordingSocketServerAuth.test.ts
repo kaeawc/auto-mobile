@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { TestRecordingSocketServer } from "../../src/daemon/testRecordingSocketServer";
 import {
   SessionScopedStreamAuthenticator,
@@ -12,10 +12,12 @@ import {
   getTestRecordingStatus,
   startTestRecording,
   stopTestRecording,
+  resetStoppedTestRecordings,
+  TEST_RECORDING_USER_INPUT_ONLY_NOTICE,
 } from "../../src/server/testRecordingManager";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { BootedDevice } from "../../src/models";
+import type { BootedDevice, PlanStep } from "../../src/models";
 
 /**
  * The socket server's handleRequest is protected; a thin subclass exposes it so
@@ -27,6 +29,119 @@ class TestableServer extends TestRecordingSocketServer {
     return this.handleRequest(request);
   }
 }
+
+describe("TestRecordingSocketServer user-input capture contract (#11919)", () => {
+  const timer = new FakeTimer();
+  const server = new TestableServer(
+    undefined,
+    timer,
+    { authorize: () => {} },
+    { assertDeviceActionable: () => {} },
+    undefined,
+    async () => {},
+  );
+  let drainInFlightStop: (() => Promise<void>) | undefined;
+
+  afterEach(async () => {
+    await drainInFlightStop?.();
+    drainInFlightStop = undefined;
+    if (getTestRecordingStatus(timer)) {
+      await stopTestRecording(undefined, "cleanup", timer).catch(() => undefined);
+    }
+    resetStoppedTestRecordings();
+  });
+
+  test.each([
+    { outcome: "return the typed zero-step failure", stopError: undefined },
+    { outcome: "propagate other errors unchanged", stopError: new ActionableError("stop failed") },
+  ])("concurrent owned stops $outcome", async ({ stopError }) => {
+    const stopStarted = Promise.withResolvers<void>();
+    const stopGate = Promise.withResolvers<{ steps: PlanStep[]; stepCount: number }>();
+    const stops: ReturnType<typeof server.invoke>[] = [];
+    drainInFlightStop = async () => {
+      stopGate.resolve({ steps: [], stepCount: 0 });
+      await Promise.allSettled(stops);
+    };
+    const sessionUuid = "recording-owner";
+    const active = await startTestRecording(
+      { deviceId: "fake-recording", name: "Fake", platform: "android" },
+      timer,
+      new CountingIdGenerator(),
+      () => ({
+        start: async () => {},
+        stop: () => {
+          stopStarted.resolve();
+          return stopGate.promise;
+        },
+        stepCount: 0,
+      }),
+      sessionUuid,
+      (uuid) => uuid.split(":")[0],
+    );
+    const request = { command: "stop", recordingId: active.recordingId, sessionUuid } as const;
+    stops.push(server.invoke(request));
+    await stopStarted.promise;
+    stops.push(server.invoke(request));
+    const results = Promise.allSettled(stops);
+    if (stopError) {
+      stopGate.reject(stopError);
+    } else {
+      stopGate.resolve({ steps: [], stepCount: 0 });
+    }
+    const expected = stopError
+      ? { status: "rejected", reason: stopError }
+      : {
+          status: "fulfilled",
+          value: {
+            success: false,
+            reason: "no_user_input_captured",
+            error:
+              "No recorded interactions were captured. " + TEST_RECORDING_USER_INPUT_ONLY_NOTICE,
+          },
+        };
+    const outcomes = await results;
+    expect(outcomes).toEqual([expected, expected]);
+    if (stopError) {
+      for (const outcome of outcomes) {
+        expect(outcome.status).toBe("rejected");
+        if (outcome.status === "rejected") {
+          expect(outcome.reason).toBe(stopError);
+        }
+      }
+    }
+    expect(getTestRecordingStatus(timer)).toBeNull();
+  });
+
+  test.each(["status", "stop"] as const)(
+    "%s explains the user-input-only capture scope",
+    async (command) => {
+      const active = await startTestRecording(
+        { deviceId: "fake-recording", name: "Fake", platform: "android" },
+        timer,
+        new CountingIdGenerator(),
+        () => ({
+          start: async () => {},
+          stop: async () => ({ steps: [], stepCount: 0 }),
+          stepCount: 0,
+        }),
+      );
+      const response = await server.invoke({ command, recordingId: active.recordingId });
+      if (command === "status") {
+        expect(response.recording).toMatchObject({
+          captureScope: "user-input",
+          notice: TEST_RECORDING_USER_INPUT_ONLY_NOTICE,
+          eventCount: 0,
+        });
+      } else {
+        expect(response).toEqual({
+          success: false,
+          reason: "no_user_input_captured",
+          error: "No recorded interactions were captured. " + TEST_RECORDING_USER_INPUT_ONLY_NOTICE,
+        });
+      }
+    },
+  );
+});
 
 function recordingAuthenticator(
   calls: Array<{ sessionUuid?: string; deviceId?: string }>,

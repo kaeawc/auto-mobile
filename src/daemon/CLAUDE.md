@@ -195,7 +195,10 @@ own refusal. Plain lifecycle tools that stop a running device (`killDevice`, and
 `deleteDevice` on a booted target) never reach that resolver, so they apply the
 same code through `assertLifecycleCallerHoldsDevice`
 (`src/server/lifecycleDeviceOwnership.ts`); the autolocking MCP connection counts
-as the holder, and the user's `force: true` overrides with a logged warning.
+as the holder, and the user's `force: true` overrides live-held refusals with a logged warning.
+Restart reservations also protect stopped images: different sessions are refused with a retry
+hint even with force, while a confirmed sessionless stop ends the waiting session as `device-killed`.
+Stop protection and sessionless completion match restart reservations by daemon-confirmed identity (the runtime AVD name or iOS UDID); a caller-supplied name is never trusted. `force: true` never skips this confirmation. If identity cannot be confirmed and the target might be reserved (its serial or supplied label matches a restart hold), the stop returns retryable `discovery_incomplete` without touching the device or reservation, except for the owner acting on its own hold.
 A device another live daemon holds is refused with `device_owned_by_other_daemon`
 (`assertLifecycleTargetNotHeldByOtherDaemon`), and the stop publishes this daemon's
 allocation claim under its shutdown reservation (reported as an active execution by

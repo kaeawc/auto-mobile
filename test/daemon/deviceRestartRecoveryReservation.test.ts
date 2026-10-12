@@ -1047,7 +1047,7 @@ describe("device restart reserves the entire recovery window", () => {
     await pool.releaseDevice(SIM.deviceId, `${base}:phone`);
     expect(sessions.getDeviceLabels(base)).toEqual({ phone: `${base}:phone` });
     expect(internals.rehydrationReservations.get(`${base}:phone`)?.restartHandoff).toBe(true);
-    pool.markIntentionalShutdown(SIM.deviceId, base)();
+    await pool.markIntentionalShutdown(SIM.deviceId, base)();
     expect(internals.rehydrationReservations.has(`${base}:phone`)).toBe(false);
   });
   test("a handed-off base's label requester leaves its unresolved hold intact", async () => {
@@ -1067,7 +1067,7 @@ describe("device restart reserves the entire recovery window", () => {
       },
     ]);
     expect(internals.rehydrationReservations.get(HOLDER)?.expiryTimer).toBeDefined();
-    pool.markIntentionalShutdown(SIM.deviceId, HOLDER)();
+    await pool.markIntentionalShutdown(SIM.deviceId, HOLDER)();
     expect(internals.rehydrationReservations.get(HOLDER)).toMatchObject({
       restartHandoff: false,
       daemonRehydration: true,
@@ -1086,7 +1086,7 @@ describe("device restart reserves the entire recovery window", () => {
   test("a holder's confirmed intentional stop drops its captured recovery hold", async () => {
     await setup();
     await handoff();
-    pool.markIntentionalShutdown(SIM.deviceId, HOLDER)();
+    await pool.markIntentionalShutdown(SIM.deviceId, HOLDER)();
     expect(internals.rehydrationReservations.has(HOLDER)).toBe(false);
     await sessions.releaseSession(HOLDER, "explicit-release");
     // The platform shutdown marker is a separate fence until the stop completes.

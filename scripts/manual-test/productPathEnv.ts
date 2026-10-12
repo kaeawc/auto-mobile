@@ -1,7 +1,7 @@
 /** Product path reads audited against the AST conformance scanner. */
 export interface ProductPathEnvVariable {
   name: string;
-  kind: "state" | "unset" | "input";
+  kind: "state" | "opt-in" | "unset" | "input";
   owner?: "harness";
   scope?: "daemon" | "batch";
   subpath?: string;
@@ -37,12 +37,20 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
   },
   {
     name: "AUTOMOBILE_IOS_CTRLPROXY_RECORD_DIR",
-    kind: "state",
+    kind: "opt-in",
     scope: "daemon",
-    subpath: "recordings",
+    reason: "Opt-in iOS exchange capture; setting this path enables recording.",
   },
-  { name: "AUTOMOBILE_PLAN_HEALTH_DIR", kind: "state", scope: "daemon", subpath: "plan-health" },
-  { name: "AUTOMOBILE_TOOL_OUTPUTS_DIR", kind: "state", scope: "daemon", subpath: "tool-outputs" },
+  {
+    name: "AUTOMOBILE_PLAN_HEALTH_DIR",
+    kind: "opt-in",
+    reason: "Opt-in plan health summary results and files.",
+  },
+  {
+    name: "AUTOMOBILE_TOOL_OUTPUTS_DIR",
+    kind: "opt-in",
+    reason: "Opt-in persistent tool-output artifacts.",
+  },
   {
     name: "AUTOMOBILE_DB_PATH",
     kind: "unset",
@@ -119,4 +127,8 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
 ];
 export const STATE_PATH_VARIABLES = PRODUCT_PATH_ENV_VARIABLES.filter(
   (row) => row.kind === "state",
+).map((row) => row.name);
+
+export const OPT_IN_PATH_VARIABLES = PRODUCT_PATH_ENV_VARIABLES.filter(
+  (row) => row.kind === "opt-in",
 ).map((row) => row.name);

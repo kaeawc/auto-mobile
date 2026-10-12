@@ -1,6 +1,7 @@
 import {
   PRODUCT_PATH_ENV_VARIABLES,
   STATE_PATH_VARIABLES,
+  OPT_IN_PATH_VARIABLES,
   type ProductPathEnvVariable,
 } from "./productPathEnv";
 export { STATE_PATH_VARIABLES } from "./productPathEnv";
@@ -68,6 +69,7 @@ export const DERIVED_PATH_VARIABLES: readonly string[] = [
 ];
 const INHERITED_PATH_OVERRIDES = ["AUTOMOBILE_DB_PATH", "AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH"];
 export const INHERITED_ENV_VARIABLES: readonly string[] = [
+  ...OPT_IN_PATH_VARIABLES.map((key) => key.replace("AUTOMOBILE_", "AUTO_MOBILE_")),
   ...STATE_PATH_VARIABLES.map((key) => key.replace("AUTOMOBILE_", "AUTO_MOBILE_")),
   ...INHERITED_PATH_OVERRIDES,
   ...INHERITED_PATH_OVERRIDES.map((key) => key.replace("AUTOMOBILE_", "AUTO_MOBILE_")),
@@ -93,7 +95,12 @@ export function privateClientEnvironment(
 ): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(inherited)) {
-    if (value !== undefined && key !== MANAGED_SLOT_CONFIG_ENV && !isInheritedPathOverride(key)) {
+    if (
+      value !== undefined &&
+      key !== MANAGED_SLOT_CONFIG_ENV &&
+      !isInheritedPathOverride(key) &&
+      !OPT_IN_PATH_VARIABLES.includes(key)
+    ) {
       env[key] = value;
     }
   }
@@ -407,7 +414,9 @@ function stateOverridesRefusal(
 ): string | undefined {
   const overrides = [options.extraEnv ?? {}, ...Object.values(options.daemonEnv ?? {})];
   for (const env of overrides) {
-    for (const key of STATE_PATH_VARIABLES.filter((name) => name in env)) {
+    for (const key of [...STATE_PATH_VARIABLES, ...OPT_IN_PATH_VARIABLES].filter(
+      (name) => name in env,
+    )) {
       const refusal = privatePathRefusal(env[key], host);
       if (refusal) {
         return refusal;
@@ -453,6 +462,11 @@ export function renderEnvFile(spec: PrivateDaemonSpec, options: PrivateDaemonBat
       .map(([key, value]) => `export ${key}=${shellQuote(value)}`)
       .join("\n") +
     "\n" +
-    INHERITED_ENV_VARIABLES.map((key) => `unset ${key}\n`).join("")
+    [
+      ...INHERITED_ENV_VARIABLES,
+      ...OPT_IN_PATH_VARIABLES.filter((key) => spec.env[key] === undefined),
+    ]
+      .map((key) => `unset ${key}\n`)
+      .join("")
   );
 }

@@ -2,7 +2,6 @@ import { z } from "zod";
 import type { Timer } from "../../src/utils/SystemTimer";
 import type { IdGenerator } from "../../src/utils/IdGenerator";
 import { errorMessage } from "../../src/utils/describeUnknownError";
-import { logger } from "../../src/utils/logger";
 import {
   encodeDaemonFrame,
   LineDecoder,
@@ -67,7 +66,6 @@ export async function probeControlSocket(
               }
             } catch (error) {
               // Non-JSON lines cannot prove a matching daemon response.
-              logger.debug(`Ignoring control probe line: ${errorMessage(error)}`);
             }
           }
         });
@@ -76,7 +74,6 @@ export async function probeControlSocket(
         );
       } catch (error) {
         // Connection refusal is an expected diagnostic outcome.
-        logger.debug(`Control probe failed: ${errorMessage(error)}`);
         finish({ alive: false, reason: errorMessage(error) });
       }
     };
@@ -88,13 +85,11 @@ function closeConnection(connection: FrameConnection): void {
     connection.end();
   } catch (error) {
     // Graceful close can fail when the diagnostic socket has already gone away.
-    logger.debug(`Control probe close failed: ${errorMessage(error)}`);
   }
   try {
     // End alone half-closes a net.Socket; destroy bounds cleanup even if its peer never closes.
     connection.destroy();
   } catch (error) {
     // Transport cleanup failure must not throw out of a status probe.
-    logger.debug(`Control probe destroy failed: ${errorMessage(error)}`);
   }
 }

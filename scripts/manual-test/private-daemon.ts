@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+import "./harnessLogSink";
+import { harnessChildEnvironment, type HarnessLogSinkOverride } from "./harnessLogSink";
 /** Private manual-test launcher. Never signals processes or deletes directories, devices, AVDs
  * or simulators. Stop delegates only to the explicitly isolated daemon's CLI. */
 import { execFile, spawn } from "node:child_process";
@@ -286,6 +288,7 @@ export interface PrivateDaemonCliDeps {
   host: HostDefaults;
   log(message: string): void;
   env: Record<string, string | undefined>;
+  logSinkOverride?: HarnessLogSinkOverride;
 }
 function pidRecord(path: string, deps: PrivateDaemonCliDeps): Pick<PidFileData, "pid"> | undefined {
   if (!deps.exists(path)) {
@@ -416,7 +419,7 @@ async function runLifecycle(
   const result = await deps.runCommand(
     deps.runtimePath,
     args,
-    privateClientEnvironment(deps.env, spec.env),
+    privateClientEnvironment(harnessChildEnvironment(deps.env, deps.logSinkOverride), spec.env),
   );
   if (result.exitCode !== 0) {
     return result.exitCode;
@@ -585,7 +588,7 @@ export async function main(): Promise<number> {
       canonicalize: canonicalizeHostPath,
     },
     log: console.log,
-    env: process.env,
+    env: harnessChildEnvironment(process.env),
   });
 }
 if (import.meta.main) {

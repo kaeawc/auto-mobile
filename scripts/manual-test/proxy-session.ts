@@ -1,4 +1,9 @@
 #!/usr/bin/env bun
+import "./harnessLogSink";
+import { harnessChildEnvironment, type HarnessLogSinkOverride } from "./harnessLogSink";
+import { probeControlSocket } from "./controlSocketProbe";
+import { connectFrameSocket } from "./daemon-frame";
+import { PROXY_SESSION_COMMANDS, PROXY_SESSION_FLAGS, proxySessionHelp } from "./proxySessionHelp";
 /** Persistent manual-test MCP session. Serve remains the stdio proxy's parent and execution
  * owner. Requests are atomically published in in/, responses in out/; no daemon flags are
  * passed to the proxy. This driver never directly signals a process or deletes a directory/device. */
@@ -52,17 +57,19 @@ export interface ProxySessionCommand {
   json?: string;
   uri?: string;
 }
-export function parseProxySessionArgs(argv: string[]): ProxySessionCommand | { error: string } {
-  const [op, ...args] = argv;
+export function parseProxySessionArgs(
+  argv: string[],
+): ProxySessionCommand | { error: string } | { help: string } {
   if (
-    !["up", "serve", "call", "read", "tools", "resources", "subscribe", "status", "close"].includes(
-      op,
-    )
+    ["--help", "-h", "help"].includes(argv[0]) ||
+    ((PROXY_SESSION_COMMANDS as readonly string[]).includes(argv[0]) &&
+      argv.slice(1).some((arg) => arg === "--help" || arg === "-h"))
   ) {
-    return {
-      error:
-        "Usage: proxy-session <up|serve|call|read|tools|resources|subscribe|status|close> --dir D ...",
-    };
+    return { help: proxySessionHelp() };
+  }
+  const [op, ...args] = argv;
+  if (!(PROXY_SESSION_COMMANDS as readonly string[]).includes(op)) {
+    return { error: proxySessionHelp() };
   }
   const command: ProxySessionCommand = {
     op: op as ProxySessionCommand["op"],
@@ -81,19 +88,17 @@ export function parseProxySessionArgs(argv: string[]): ProxySessionCommand | { e
       positional.push(flag);
       continue;
     }
-    if (flag === "--full" && !["up", "serve", "status"].includes(op)) {
+    if (flag === "--full" && PROXY_SESSION_FLAGS[flag].ops.includes(op)) {
       command.full = true;
       continue;
     }
-    if (flag === "--allow-selector" && op === "call") {
+    if (flag === "--allow-selector" && PROXY_SESSION_FLAGS[flag].ops.includes(op)) {
       command.allowSelector = true;
       continue;
     }
-    const allowed = [
-      "--dir",
-      ...(["up", "serve"].includes(op) ? ["--config", "--env", "--init-timeout-ms"] : []),
-      ...(op === "call" ? ["--timeout-ms"] : []),
-    ];
+    const allowed = Object.keys(PROXY_SESSION_FLAGS).filter((flag) =>
+      PROXY_SESSION_FLAGS[flag].ops.includes(op),
+    );
     if (!allowed.includes(flag)) {
       return { error: `Unknown flag ${flag} for ${op}.` };
     }
@@ -177,6 +182,8 @@ export interface ProxySessionClient {
 }
 export interface ProxySessionDeps {
   env: Record<string, string | undefined>;
+  logSinkOverride?: HarnessLogSinkOverride;
+  probeDaemonSocket(socketPath: string): Promise<{ alive: boolean; reason?: string }>;
   host: HostDefaults;
   pid: number;
   timer: Timer;
@@ -197,7 +204,7 @@ export interface ProxySessionDeps {
     onClose(): void;
     onNotification(notification: unknown): void;
   }): ProxySessionClient;
-  spawnServe(command: ProxySessionCommand): number;
+  spawnServe(command: ProxySessionCommand, env: Record<string, string>): number;
   log(text: string): void;
   flush(text: string): Promise<void>;
   exit(code: number): void;
@@ -220,9 +227,15 @@ function readJson(path: string, deps: ProxySessionDeps): Record<string, unknown>
   return deps.exists(path) ? record(JSON.parse(deps.readFile(path))) : undefined;
 }
 function privateEnv(command: ProxySessionCommand, deps: ProxySessionDeps): Record<string, string> {
-  return privateClientEnvironment(deps.env, command.env);
+  return privateClientEnvironment(
+    harnessChildEnvironment(deps.env, deps.logSinkOverride),
+    command.env,
+  );
 }
-function startupRefusal(command: ProxySessionCommand, deps: ProxySessionDeps): string | undefined {
+async function startupRefusal(
+  command: ProxySessionCommand,
+  deps: ProxySessionDeps,
+): Promise<string | undefined> {
   const env = privateEnv(command, deps);
   const refusal = extraEnvRefusal(command.env) ?? privateHarnessEnvRefusal(env, deps.host);
   if (refusal || (command.op !== "up" && command.op !== "serve")) {
@@ -245,7 +258,10 @@ function startupRefusal(command: ProxySessionCommand, deps: ProxySessionDeps): s
     deps.log(`Private daemon pid file is invalid: ${errorMessage(error)}`);
     return startFirst;
   }
-  return undefined;
+  const probe = await deps.probeDaemonSocket(env.AUTOMOBILE_DAEMON_SOCKET_PATH);
+  return probe.alive
+    ? undefined
+    : `${startFirst} ${probe.reason ?? "Control socket did not answer."}`;
 }
 function validateConfig(command: ProxySessionCommand, deps: ProxySessionDeps): void {
   if (command.config !== undefined) {
@@ -281,7 +297,7 @@ export async function runServe(
   command: ProxySessionCommand,
   deps: ProxySessionDeps,
 ): Promise<number> {
-  const refusal = startupRefusal(command, deps);
+  const refusal = await startupRefusal(command, deps);
   if (refusal) {
     deps.log(refusal);
     return 2;
@@ -527,7 +543,7 @@ export async function runProxySessionCommand(
   deps: ProxySessionDeps,
 ): Promise<number> {
   try {
-    const refusal = startupRefusal(command, deps);
+    const refusal = await startupRefusal(command, deps);
     if (refusal) {
       deps.log(refusal);
       return 2;
@@ -545,7 +561,7 @@ export async function runProxySessionCommand(
         }
       }
       deps.mkdir(dir);
-      const pid = deps.spawnServe(command);
+      const pid = deps.spawnServe(command, privateEnv(command, deps));
       const deadline = deps.timer.now() + command.initTimeoutMs + 5000;
       while (deps.timer.now() < deadline) {
         const init = readJson(join(dir, "init.json"), deps);
@@ -565,12 +581,15 @@ export async function runProxySessionCommand(
       return 2;
     }
     if (command.op === "status") {
+      const daemonSocket = await deps.probeDaemonSocket(
+        privateEnv(command, deps).AUTOMOBILE_DAEMON_SOCKET_PATH,
+      );
       const pid = (name: string): number | undefined =>
         deps.exists(join(dir, name)) ? Number(deps.readFile(join(dir, name)).trim()) : undefined;
       const proxyPid = pid("proxy.pid"),
         driverPid = pid("driver.pid");
       await deps.flush(
-        `${JSON.stringify({ dir, proxyPid, proxyAlive: !!proxyPid && deps.isPidAlive(proxyPid), driverPid, driverAlive: !!driverPid && deps.isPidAlive(driverPid), init: readJson(join(dir, "init.json"), deps), closed: readJson(join(dir, "closed.json"), deps) ?? null }, null, 2)}\n`,
+        `${JSON.stringify({ dir, daemonSocketAlive: daemonSocket.alive, proxyPid, proxyAlive: !!proxyPid && deps.isPidAlive(proxyPid), driverPid, driverAlive: !!driverPid && deps.isPidAlive(driverPid), init: readJson(join(dir, "init.json"), deps), closed: readJson(join(dir, "closed.json"), deps) ?? null }, null, 2)}\n`,
       );
       return 0;
     }
@@ -644,7 +663,13 @@ function realDeps(): ProxySessionDeps {
       process.stdout.write(text, (error) => (error ? reject(error) : done()));
     });
   return {
-    env: process.env,
+    env: harnessChildEnvironment(process.env),
+    probeDaemonSocket: (path) =>
+      probeControlSocket(path, {
+        connect: connectFrameSocket,
+        timer: defaultTimer,
+        ids: defaultIdGenerator,
+      }),
     host: {
       homeDirs: [homedir(), userInfo().homedir],
       uid: process.getuid?.() ?? userInfo().username,
@@ -710,7 +735,7 @@ function realDeps(): ProxySessionDeps {
           client.subscribeResource({ uri }, requestOptions(timeout)),
       };
     },
-    spawnServe: (command) => {
+    spawnServe: (command, env) => {
       const args = [
         fileURLToPath(import.meta.url),
         "serve",
@@ -730,7 +755,7 @@ function realDeps(): ProxySessionDeps {
         const child = spawn(process.execPath, args, {
           detached: true,
           stdio: ["ignore", fd, fd],
-          env: process.env,
+          env,
         });
         child.on("error", (error) => {
           console.error(`Serve launch failed: ${errorMessage(error)}`);
@@ -753,8 +778,12 @@ function realDeps(): ProxySessionDeps {
 export async function main(): Promise<number> {
   const parsed = parseProxySessionArgs(process.argv.slice(2));
   if ("error" in parsed) {
-    console.error(parsed.error);
+    console.error(`${parsed.error}\nRun proxy-session --help for usage.`);
     return 2;
+  }
+  if ("help" in parsed) {
+    console.log(parsed.help);
+    return 0;
   }
   return runProxySessionCommand(parsed, realDeps());
 }

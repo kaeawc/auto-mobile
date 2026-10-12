@@ -3,7 +3,6 @@ import { z } from "zod";
 import type { PrivateDaemonCliDeps } from "./private-daemon";
 import type { PrivateDaemonSpec } from "./privateDaemonEnv";
 import { errorMessage } from "../../src/utils/describeUnknownError";
-import { logger } from "../../src/utils/logger";
 
 export const DAEMON_DEVICES_METHOD = "daemon/availableDevices";
 const TIMEOUT_MS = 2000;
@@ -23,6 +22,7 @@ export async function privateDaemonStatus(
   let txt: number | undefined;
   let hasTxt = false;
   let alive = false;
+  let pidReason: string | undefined;
   try {
     const hasJson = deps.exists(spec.pidFilePath);
     if (hasJson) {
@@ -36,7 +36,7 @@ export async function privateDaemonStatus(
     alive = pid !== undefined && deps.isPidAlive(pid);
   } catch (error) {
     // Malformed/unreadable pid evidence must not prevent the remaining diagnostic sections.
-    logger.debug(`Status pid read failed: ${errorMessage(error)}`);
+    pidReason = errorMessage(error);
   }
   const socket = await diagnostic(
     async () => deps.probeSocket(spec.socketPath),
@@ -44,6 +44,7 @@ export async function privateDaemonStatus(
   );
   return {
     name: spec.name,
+    ...(pidReason ? { pidReason } : {}),
     port: spec.port,
     pid,
     alive,
@@ -51,6 +52,7 @@ export async function privateDaemonStatus(
     envFile: join(spec.dir, "env.sh"),
     pidTxt: !hasTxt ? "missing" : txt !== undefined && txt === pid && alive ? "ok" : "stale",
     socketAlive: socket.alive,
+    ...(!socket.alive ? { socketReason: socket.reason } : {}),
   };
 }
 async function diagnostic<T>(run: () => Promise<T>, failure: (reason: string) => T): Promise<T> {
@@ -58,7 +60,6 @@ async function diagnostic<T>(run: () => Promise<T>, failure: (reason: string) =>
     return await run();
   } catch (error) {
     // Status is best-effort: preserve a typed failure and continue other sections.
-    logger.debug(`Status section failed: ${errorMessage(error)}`);
     return failure(errorMessage(error));
   }
 }
@@ -153,5 +154,9 @@ export async function privateDaemonDeviceStatus(
       (error) => ({ error }),
     );
   }
-  return { hostDevices: { android, ios }, daemonDevices: devices };
+  return {
+    daemonDevicesMethod: DAEMON_DEVICES_METHOD,
+    hostDevices: { android, ios },
+    daemonDevices: devices,
+  };
 }

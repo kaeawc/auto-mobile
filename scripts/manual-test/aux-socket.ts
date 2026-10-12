@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import "./harnessLogSink";
 import { basename, join, isAbsolute } from "node:path";
 import {
   DEVICE_GESTURE_RECORDING_SOCKET_CONFIG,
@@ -43,13 +44,15 @@ import {
   type FrameConnection,
 } from "./frameWire";
 
-const usage = `Usage: aux-socket recording <start|stop|status> [--device-id D] [--platform android|ios] [--recording-id R] [--plan-name N]
-  aux-socket video '<subscribe json>' [--hold-ms N]
-  aux-socket webrtc <start|stop|status|list|await> ['<request json>'] [--timeout-ms N]
-Common: [--session-uuid U | --observer] [--observer-name N] [--heartbeat-ms N]
-Requires the private harness env. Observer sessions register and heartbeat on its control socket,
-then release on exit. Video reports bytes only (the product exports no packet decoder).
-Exit codes: 0 success, 1 typed refusal, 2 usage/guard, 3 timeout/connection error.`;
+import {
+  AUX_SOCKET_COMMANDS,
+  AUX_SOCKET_ACTIONS,
+  AUX_SOCKET_FLAGS,
+  RECORDING_SESSION_GUIDANCE,
+  auxSocketHelp,
+} from "./auxSocketHelp";
+
+const usage = auxSocketHelp();
 export interface AuxSocketCommand {
   kind: "recording" | "video" | "webrtc";
   request: DeviceGestureRecordingCommand | VideoStreamSocketRequest | WebRtcStreamSocketRequest;
@@ -66,7 +69,16 @@ function jsonRequest(value: string): Record<string, unknown> {
   }
   return parsed as Record<string, unknown>;
 }
-export function parseAuxSocketArgs(argv: string[]): AuxSocketCommand | { error: string } {
+export function parseAuxSocketArgs(
+  argv: string[],
+): AuxSocketCommand | { error: string } | { help: string } {
+  if (
+    ["--help", "-h", "help"].includes(argv[0]) ||
+    (AUX_SOCKET_COMMANDS.includes(argv[0] as AuxSocketCommand["kind"]) &&
+      argv.slice(1).some((arg) => arg === "--help" || arg === "-h"))
+  ) {
+    return { help: usage };
+  }
   const [kind, action] = argv;
   if (kind !== "recording" && kind !== "video" && kind !== "webrtc") {
     return { error: usage };
@@ -81,18 +93,12 @@ export function parseAuxSocketArgs(argv: string[]): AuxSocketCommand | { error: 
       }
       request = value as unknown as VideoStreamSocketRequest;
     } else if (kind === "recording") {
-      if (action !== "start" && action !== "stop" && action !== "status") {
+      if (!(AUX_SOCKET_ACTIONS.recording as readonly string[]).includes(action)) {
         return { error: usage };
       }
       request = { command: action };
     } else {
-      if (
-        action !== "start" &&
-        action !== "stop" &&
-        action !== "status" &&
-        action !== "list" &&
-        action !== "await"
-      ) {
+      if (!(AUX_SOCKET_ACTIONS.webrtc as readonly string[]).includes(action)) {
         return { error: usage };
       }
       const value = argv[index] && !argv[index].startsWith("--") ? jsonRequest(argv[index++]) : {};
@@ -117,15 +123,9 @@ export function parseAuxSocketArgs(argv: string[]): AuxSocketCommand | { error: 
     holdMs: 5000,
     timeoutMs: 45_000,
   };
-  const common = ["--session-uuid", "--observer-name", "--heartbeat-ms"];
-  const allowed = [
-    ...common,
-    ...(kind === "recording"
-      ? ["--device-id", "--platform", "--recording-id", "--plan-name"]
-      : kind === "video"
-        ? ["--hold-ms"]
-        : ["--timeout-ms"]),
-  ];
+  const allowed = Object.keys(AUX_SOCKET_FLAGS).filter((flag) =>
+    AUX_SOCKET_FLAGS[flag].kinds.includes(kind),
+  );
   for (let i = index; i < argv.length; i++) {
     const flag = argv[i];
     if (flag === "--observer") {
@@ -140,6 +140,9 @@ export function parseAuxSocketArgs(argv: string[]): AuxSocketCommand | { error: 
       return { error: `Missing/duplicate value for ${flag}.` };
     }
     values[flag] = value;
+  }
+  if (kind === "recording" && (command.observer || !values["--session-uuid"]?.trim())) {
+    return { error: RECORDING_SESSION_GUIDANCE };
   }
   if (
     command.observer &&
@@ -323,6 +326,10 @@ export async function runAuxSocket(
   command: AuxSocketCommand,
   deps: AuxSocketDeps,
 ): Promise<number> {
+  if (command.kind === "recording" && (command.observer || !command.request.sessionUuid?.trim())) {
+    deps.err(RECORDING_SESSION_GUIDANCE);
+    return 2;
+  }
   // Match the proxy's sanitized client environment (inherited WebRTC path overrides are cleared).
   const env = privateClientEnvironment(deps.env, {});
   const refusal = privateHarnessEnvRefusal(env, deps.host);
@@ -458,14 +465,14 @@ export async function runAuxSocket(
   }
 }
 export async function main(): Promise<number> {
-  if (process.argv[2] === "--help") {
-    console.log(usage);
-    return 0;
-  }
   const parsed = parseAuxSocketArgs(process.argv.slice(2));
   if ("error" in parsed) {
-    console.error(parsed.error);
+    console.error(`${parsed.error}\nRun aux-socket --help for usage.`);
     return 2;
+  }
+  if ("help" in parsed) {
+    console.log(parsed.help);
+    return 0;
   }
   return runAuxSocket(parsed, {
     env: process.env,

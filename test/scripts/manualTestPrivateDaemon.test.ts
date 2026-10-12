@@ -585,3 +585,39 @@ posixTest("status contains captured simctl failure and probes configured adb por
   expect(ports).toEqual([5555]);
   expect(JSON.parse(f.logs.at(-1)!).hostDevices.ios).toEqual({ skipped: "simctl failed" });
 });
+
+import { selectHarnessLogSink } from "../../scripts/manual-test/harnessLogSink";
+posixTest("launcher removes its sink override before handing env to runCommand", async () => {
+  const f = fixture();
+  f.deps.logSinkOverride = selectHarnessLogSink(f.deps.env);
+  expect(f.deps.env.AUTOMOBILE_LOG_SINK).toBe("stderr");
+  await runPrivateDaemonCommand({ op: "init", options }, f.deps);
+  expect(
+    await runPrivateDaemonCommand(
+      parsed(["start", "--batch-dir", options.batchDir, "--daemon", "1"]),
+      f.deps,
+    ),
+  ).toBe(0);
+  expect(f.launches[0].env.AUTOMOBILE_LOG_SINK).toBeUndefined();
+  expect(f.launches[0].env.AUTOMOBILE_LOG_DIR).toContain("daemon1");
+});
+posixTest(
+  "status devices exposes the daemon inventory method and help says it refreshes",
+  async () => {
+    const f = fixture();
+    await runPrivateDaemonCommand({ op: "init", options }, f.deps);
+    expect(
+      await runPrivateDaemonCommand(
+        parsed(["status", "--batch-dir", options.batchDir, "--devices"]),
+        f.deps,
+      ),
+    ).toBe(0);
+    expect(JSON.parse(f.logs.at(-1)!).daemonDevicesMethod).toBe("daemon/availableDevices");
+    const help = parsePrivateDaemonArgs(["--help"]);
+    if (!("help" in help)) {
+      throw new Error("Expected help");
+    }
+    expect(help.help).toContain("refreshing ownership and discovery");
+    expect(help.help).toContain("Opt-in paths");
+  },
+);

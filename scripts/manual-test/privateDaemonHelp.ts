@@ -19,7 +19,8 @@ export const PRIVATE_DAEMON_FLAGS: Record<string, string> = {
   "--daemon-arg": "Repeatable verbatim token or N:token; also --daemon-arg=token (default: none).",
   "--split-adb-coordination": "Separate ADB coordination (default: batch shared/adb-servers).",
   "--daemon": "Select daemon N (default: all; required for stop/env).",
-  "--devices": "Append host and daemon device inventories to status (default: off).",
+  "--devices":
+    "Append inventories using daemon/availableDevices, refreshing ownership and discovery (default: off).",
   "--": "Append one-off daemon argv to start (default: none).",
   "--help": "Show this help, also -h or help (default: run command).",
 };
@@ -39,6 +40,10 @@ ${Object.entries(PRIVATE_DAEMON_FLAGS)
 Derived state env (existing namespace paths are harness-owned; new defaults may be privately overridden):
 ${PRODUCT_PATH_ENV_VARIABLES.filter((row) => row.kind === "state")
   .map((row) => `  ${row.name} (${row.owner ?? "default"}, ${row.scope})`)
+  .join("\n")}
+Opt-in paths (unset by default; inherited values stripped; --env/--daemon-env require private absolute paths):
+${PRODUCT_PATH_ENV_VARIABLES.filter((row) => row.kind === "opt-in")
+  .map((row) => `  ${row.name}`)
   .join("\n")}
 Other derived env: MT_BATCH, MT_DAEMON, MT_SERVER, MT_PORT; AUTOMOBILE_APPEARANCE_SYNC=off; AUTOMOBILE_PRIVATE_DAEMON_ORPHAN_IDLE_MS=0 unless configured.
 Examples:

@@ -117,6 +117,34 @@ test("#12023: replacement fails when two acknowledged clears remove nothing", as
   expect(h.timer.getSleepHistory()).toEqual([100]);
 });
 
+test.each(["batch", "replace"])(
+  "#12023: restored pre-clear value stops %s typing after three clears",
+  async (mode) => {
+    const h = harness("old");
+    h.client.clear = async () => {
+      h.calls.push("clear");
+      h.value = h.calls.length === 1 ? "ol" : "old";
+      return { success: true };
+    };
+    const result = await h.action.execute(
+      mode === "batch"
+        ? [{ action: "clear" }, { action: "type", text: "new" }]
+        : [{ action: "type", text: "new", operation: "replace" }],
+    );
+    expect(result.success).toBe(false);
+    expect(result.failedIndex).toBe(0);
+    expect(result.commands).toHaveLength(1);
+    expect(result.commands[0]?.success).toBe(false);
+    expect(result.commands[0]?.error).toContain('remaining value: "old"');
+    expect(result.commands[0]?.error).toContain("removed nothing");
+    expect(result.commands[0]?.error).toContain("after 3 attempt(s)");
+    expect(result.commands[0]).not.toHaveProperty("partialApplication");
+    expect(h.calls).toEqual(["clear", "clear", "clear"]);
+    expect(h.value).toBe("old");
+    expect(h.timer.getSleepHistory()).toEqual([100, 200]);
+  },
+);
+
 test.each([
   { initial: "old value", text: "new" },
   { initial: ":son", text: ":sonr" },
@@ -479,6 +507,22 @@ test("unchanged mask settles after one retry with remaining-value evidence", asy
   expect(result.warning).toContain('The field still holds "$0.00"');
   expect(result.warning).toContain("mask or permanent prefix");
   expect(h.calls).toEqual(["clear", "clear"]);
+});
+
+test("#12023: a changed mask settles on the third clear with a warning", async () => {
+  const h = harness("$5.00");
+  h.client.clear = async () => {
+    h.calls.push("clear");
+    h.value = h.calls.length === 1 ? "$0.0" : "$0.00";
+    return { success: true };
+  };
+  const result = await h.executor.clear();
+  expect(result.success).toBe(true);
+  expect(result.warning).toContain('The field still holds "$0.00"');
+  expect(result.warning).toContain("mask or permanent prefix");
+  expect(h.calls).toEqual(["clear", "clear", "clear"]);
+  expect(h.value).toBe("$0.00");
+  expect(h.timer.getSleepHistory()).toEqual([100, 200]);
 });
 
 test("secure clear skips verification without reading or exposing its value", async () => {

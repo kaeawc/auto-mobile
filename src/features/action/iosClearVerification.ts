@@ -34,10 +34,10 @@ function classifyClearField(
     };
   }
   if (field.value === lastValue) {
-    if (attempts === 2 && field.value === preClearValue) {
+    if (field.value !== "" && field.value === preClearValue) {
       return {
         success: false,
-        error: `iOS clear removed nothing: the runner acknowledged the clear and one retry, but the focused field still holds its pre-clear value; remaining value: ${JSON.stringify(field.value)}.`,
+        error: `iOS clear removed nothing after ${attempts} attempt(s): the runner acknowledged each clear, but the focused field still holds its pre-clear value; remaining value: ${JSON.stringify(field.value)}.`,
       };
     }
     return {

@@ -78,6 +78,26 @@ describe("typed refusals thrown before executeToolCall's try (#11292)", () => {
     });
   });
 
+  test("a seeded connection refusing another session returns the typed routing payload", async () => {
+    fixture = new McpTestFixture({ sessionContext: { initialSessionToolBinding: BOUND_SESSION } });
+    await fixture.setup();
+
+    const result = await fixture.client.callTool({
+      name: "tapOn",
+      arguments: { sessionUuid: "other-session", text: "x" },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(wire(result)).toEqual({
+      success: false,
+      error: expect.stringMatching(/MCP connection is bound to device session/),
+      code: DEVICE_OUTSIDE_BOUND_SESSION_CODE,
+      boundSessionUuid: BOUND_SESSION,
+      requestedSessionUuid: "other-session",
+      retryable: false,
+    });
+  });
+
   test("device_outside_managed_slots arrives as a typed result", async () => {
     const timer = new FakeTimer();
     const sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());

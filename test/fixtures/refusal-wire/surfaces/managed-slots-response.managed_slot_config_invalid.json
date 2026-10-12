@@ -1,0 +1,10 @@
+{
+  "surface": "managed-slots-response",
+  "name": "managed_slot_config_invalid",
+  "builder": "handleDaemonRequest via handleAcquireManagedSlots",
+  "payload": {
+    "success": false,
+    "code": "managed_slot_config_invalid",
+    "error": "managed_slot_config_invalid: managedHostScope: Invalid input: expected string, received undefined; runnerNamespace: Invalid input: expected string, received undefined; runnerIncarnation: Invalid input: expected string, received undefined; localSlotCapacity: Invalid input: expected number, received undefined; requests: Invalid input: expected array, received undefined"
+  }
+}

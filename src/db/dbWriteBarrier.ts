@@ -141,12 +141,15 @@ export class InMemoryDbWriteBarrier implements DbWriteBarrier {
   }
 
   trackExisting<T>(work: Promise<T>): Promise<T | undefined> {
+    // Normalize before counting: a misbehaving fake may return a non-thenable.
+    // Native promises retain identity, preserving the original settle timing.
+    const normalized = Promise.resolve(work);
     if (this.#draining) {
       // The write already started and cannot be un-started; it is simply not
       // counted toward the drain (Part 1's reject-on-closed covers the race,
       // issue #2792). Resolve `undefined` and never reject — safe to `void`.
       logger.debug("[DbWriteBarrier] Not tracking an in-flight DB write during shutdown drain");
-      return work.then(
+      return normalized.then(
         () => undefined,
         () => undefined,
       );
@@ -157,7 +160,7 @@ export class InMemoryDbWriteBarrier implements DbWriteBarrier {
     // awaiting `work` directly with unchanged timing. The derived promise
     // swallows rejection to `undefined` so a fire-and-forget `void` of it never
     // surfaces an unhandled rejection — the caller's own await owns `work`'s error.
-    return work.then(
+    return normalized.then(
       (value) => {
         this.#leave();
         return value as T | undefined;

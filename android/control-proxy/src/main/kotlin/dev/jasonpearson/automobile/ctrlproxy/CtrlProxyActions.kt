@@ -274,6 +274,15 @@ interface CtrlProxyActions {
     timeoutMs: Long?,
   ) = requestCommitText(requestId, text, priorImeId, delivery)
 
+  fun requestCommitText(
+    requestId: String?,
+    text: String,
+    priorImeId: String?,
+    delivery: ImeTextDelivery,
+    timeoutMs: Long?,
+    trace: Boolean,
+  ) = requestCommitText(requestId, text, priorImeId, delivery, timeoutMs)
+
   fun requestCancelImeCommit(requestId: String?, targetRequestId: String) {}
 
   fun requestSetKeyboardProfile(requestId: String?, profileId: String)

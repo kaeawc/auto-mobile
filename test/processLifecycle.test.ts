@@ -743,3 +743,101 @@ describe("process lifecycle handlers", () => {
     }
   });
 });
+
+describe("stdin answer wait (#12049)", () => {
+  function waiting() {
+    const timer = new FakeTimer();
+    const fakeProcess = new FakeProcess();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess, timer);
+    const stdin = new FakeStdin();
+    const answer = Promise.withResolvers<void>();
+    const shutdowns: string[] = [];
+    let callbacks = 0;
+    lifecycle.install();
+    lifecycle.setShutdownHandler((reason) => {
+      shutdowns.push(reason);
+    });
+    lifecycle.installStdinShutdownHandlers(
+      stdin,
+      () => {
+        callbacks++;
+        return answer.promise;
+      },
+      50,
+    );
+    return { timer, fakeProcess, lifecycle, stdin, answer, shutdowns, callbacks: () => callbacks };
+  }
+
+  test("awaits answers before starting shutdown, runs callback once for end/error/close", async () => {
+    const rig = waiting();
+    rig.stdin.emit("end");
+    rig.stdin.emit("error", new Error("closed"));
+    rig.stdin.emit("close");
+    expect(rig.callbacks()).toBe(1);
+    await flushMicrotasks();
+    expect(rig.shutdowns).toEqual([]);
+    expect(rig.fakeProcess.exitCodes).toEqual([]);
+    rig.answer.resolve();
+    await flushUntilExit(rig.fakeProcess);
+    expect(rig.shutdowns).toEqual(["stdin"]);
+    expect(rig.fakeProcess.exitCodes).toEqual([0]);
+    expect(rig.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test.each(["timeout", "rejection"])("%s logs and still shuts down cleanly", async (mode) => {
+    const rig = waiting();
+    const emergencyLog = spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      rig.stdin.emit("end");
+      await flushMicrotasks();
+      expect(rig.shutdowns).toEqual([]);
+      if (mode === "timeout") {
+        rig.timer.advanceTime(49);
+        await flushMicrotasks();
+        expect(rig.shutdowns).toEqual([]);
+        rig.timer.advanceTime(1);
+      } else {
+        rig.answer.reject(new Error("answer rejected"));
+      }
+      await flushUntilExit(rig.fakeProcess);
+      expect(rig.shutdowns).toEqual(["stdin"]);
+      expect(rig.fakeProcess.exitCodes).toEqual([0]);
+      expect(
+        emergencyLog.mock.calls.some(([message]) => String(message).includes("stdin answer wait")),
+      ).toBe(true);
+      expect(rig.timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      emergencyLog.mockRestore();
+    }
+  });
+
+  test("SIGTERM during the wait immediately shuts down once and clears the wait deadline", async () => {
+    const rig = waiting();
+    rig.stdin.emit("end");
+    expect(rig.timer.getPendingTimeoutCount()).toBe(1);
+    rig.fakeProcess.emit("SIGTERM");
+    await flushUntilExit(rig.fakeProcess);
+    expect(rig.shutdowns).toEqual(["SIGTERM"]);
+    expect(rig.fakeProcess.exitCodes).toEqual([0]);
+    expect(rig.timer.getPendingTimeoutCount()).toBe(0);
+    rig.answer.resolve();
+    await flushMicrotasks();
+    expect(rig.fakeProcess.exitCodes).toEqual([0]);
+  });
+
+  test("EOF during an existing shutdown invokes callback but arms no wait deadline", async () => {
+    const rig = waiting();
+    const cleanup = Promise.withResolvers<void>();
+    rig.lifecycle.setShutdownHandler(() => cleanup.promise);
+    rig.fakeProcess.emit("SIGTERM");
+    const pending = rig.timer.getPendingTimeoutCount();
+    rig.stdin.emit("end");
+    expect(rig.callbacks()).toBe(1);
+    expect(rig.timer.getPendingTimeoutCount()).toBe(pending);
+    cleanup.resolve();
+    await flushUntilExit(rig.fakeProcess);
+    expect(rig.fakeProcess.exitCodes).toEqual([0]);
+    expect(rig.timer.getPendingTimeoutCount()).toBe(0);
+    rig.answer.resolve();
+  });
+});

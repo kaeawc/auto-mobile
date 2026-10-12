@@ -206,7 +206,6 @@ test/daemon/proxySessionEventLeavesSiblingCallInFlight.test.ts
 test/daemon/proxySignalStopReleasesExecution.test.ts
 test/daemon/readEndReleaseRearmScenario.test.ts
 test/daemon/recycledProcessGeneration.test.ts
-test/daemon/refusalWireContract.test.ts
 test/daemon/refusedRoutingCallExtendsIdle.test.ts
 test/daemon/registerSessionManagedConnection.test.ts
 test/daemon/rehydratedLegacyLivenessDefaults.test.ts
@@ -244,6 +243,7 @@ test/daemon/socketServerSessionIdGenerator.test.ts
 test/daemon/socketServerToolCallTransportAlias.test.ts
 test/daemon/socketServerToolUnavailableCode.test.ts
 test/daemon/socketServerTypedRefusal.test.ts
+test/daemon/startupLockHolderGeneration.test.ts
 test/daemon/startupPrologue.test.ts
 test/daemon/streamSocketAuth.test.ts
 test/daemon/streamSubscriptionPolicy.test.ts
@@ -270,6 +270,7 @@ test/db/bunfigPreload.test.ts
 test/db/classifySqliteError.test.ts
 test/db/databaseFailureClassification.property.test.ts
 test/db/databaseFailureClassification.test.ts
+test/db/dbWriteBarrierTrackExistingNonPromise.test.ts
 test/db/dropDeviceTeardownOperationsMigration.test.ts
 test/db/dropProvisionDeviceOperationsMigration.test.ts
 test/db/kyselySqliteAdapterContract.test.ts
@@ -745,6 +746,7 @@ test/helpers/captureStageBaseline.test.ts
 test/helpers/captureStageTimeline.test.ts
 test/helpers/fastCheckConfig.test.ts
 test/helpers/iosVideoRecordingSessionCleanup.test.ts
+test/helpers/isolateEmptyToolRegistry.test.ts
 test/helpers/sessionOwnershipHeartbeat.test.ts
 test/helpers/warmedTests.test.ts
 test/helpers/webrtcDeviceCaptureHelpers.test.ts
@@ -759,6 +761,7 @@ test/lint/daemonLauncherBoundary.test.ts
 test/lint/deviceDiscoveryReconcileFunnel.test.ts
 test/lint/deviceToolsKillDeviceImportCasing.test.ts
 test/lint/errorHandlingConvention.test.ts
+test/lint/exclusiveLockGenerationProbe.test.ts
 test/lint/expensiveHookWork.test.ts
 test/lint/fakeHygiene.test.ts
 test/lint/fastValidationRegistryCoverage.test.ts
@@ -788,6 +791,7 @@ test/lint/staleRepoPathReferences.test.ts
 test/lint/stressExplicitTimeoutRule.test.ts
 test/lint/testGuardedDocsWorkflow.test.ts
 test/lint/toolDocumentationCoverage.test.ts
+test/lint/toolRegistryIsolation.test.ts
 test/lint/turboCachingSafety.test.ts
 test/lint/turboLintInputsCoverBaselines.test.ts
 test/lint/turboLintInputsCoverScriptChain.test.ts

@@ -1,0 +1,13 @@
+{
+  "code": "device_outside_bound_session.other_session",
+  "builder": "SessionOutsideBoundSessionError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"MCP connection is bound to device session 11111111-2222-4333-8444-555555555555; cannot route this call to other-session until the binding is released.\",\"code\":\"device_outside_bound_session\",\"boundSessionUuid\":\"11111111-2222-4333-8444-555555555555\",\"requestedSessionUuid\":\"other-session\",\"retryable\":false}"
+      }
+    ],
+    "isError": true
+  }
+}

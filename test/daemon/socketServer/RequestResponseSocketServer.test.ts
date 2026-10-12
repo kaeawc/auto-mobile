@@ -1,3 +1,5 @@
+import { InputDeviceOwnedError } from "../../../src/daemon/inputDeviceOwnership";
+import { SessionNoLongerOwnsDeviceError } from "../../../src/daemon/sessionNoLongerOwnsDevice";
 import { describe, it, expect, beforeEach } from "bun:test";
 import { Socket } from "node:net";
 import { RequestResponseSocketServer } from "../../../src/daemon/socketServer/RequestResponseSocketServer";
@@ -278,4 +280,24 @@ describe("RequestResponseSocketServer", () => {
     // No messages should be written (socket was destroyed)
     expect(socket.getWrittenData()).toHaveLength(0);
   });
+});
+
+it.each([
+  new InputDeviceOwnedError("capture", "emu", "live"),
+  new SessionNoLongerOwnsDeviceError("live", "emu"),
+  new Error("ordinary error"),
+])("preserves only stream ownership refusal fields on response frames: %s", async (error) => {
+  const server = new TestableRequestResponseServer(new FakeTimer());
+  server.shouldThrow = true;
+  server.throwError = error;
+  const socket = new FakeSocket();
+  await server.simulateLine(socket, JSON.stringify({ id: "ownership", action: "echo" }));
+  const response = socket.getWrittenMessages()[0];
+  expect(response).toMatchObject({ success: false, error: error.message });
+  if (error instanceof InputDeviceOwnedError || error instanceof SessionNoLongerOwnsDeviceError) {
+    expect(response).toMatchObject({ code: error.code, retryable: false, deviceId: "emu" });
+  } else {
+    expect(response).not.toHaveProperty("code");
+    expect(response).not.toHaveProperty("retryable");
+  }
 });

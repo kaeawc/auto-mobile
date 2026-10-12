@@ -17,6 +17,8 @@ import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
 
 type Message = Parameters<Transport["send"]>[0];
 
+const ANSWER_WAIT_MS = 50;
+
 function createHarness() {
   const timer = new FakeTimer();
   const fakeProcess = new FakeProcess();
@@ -31,7 +33,9 @@ function createHarness() {
   const release = Promise.withResolvers<unknown>();
   let holdRelease = false;
   let holdTool = false;
-  const resource = Promise.withResolvers<never>();
+  const resource = Promise.withResolvers<{ contents: Array<{ uri: string; text: string }> }>();
+  const tools: Array<ReturnType<typeof Promise.withResolvers<void>>> = [];
+  const completedToolAborts: boolean[] = [];
   const client = new FakeDaemonClient({
     toolResultFor: (name) =>
       name === "getAndroid"
@@ -44,8 +48,15 @@ function createHarness() {
             ],
           }
         : undefined,
-    onCallTool: (name) =>
-      name === "observe" && holdTool ? new Promise<never>(() => {}) : undefined,
+    onCallTool: async (name) => {
+      if (name === "observe" && holdTool) {
+        const tool = Promise.withResolvers<void>();
+        tools.push(tool);
+        const signal = client.callToolSignals.at(-1);
+        await tool.promise;
+        completedToolAborts.push(signal?.aborted ?? false);
+      }
+    },
     resourceResult: resource.promise,
     onCallDaemonMethod: (method) =>
       method === DAEMON_RELEASE_SESSION_METHOD && holdRelease ? release.promise : undefined,
@@ -65,7 +76,11 @@ function createHarness() {
   const lifecycle = new ProcessLifecycleHandlers(fakeProcess, timer);
   const shutdowns: ShutdownSignal[] = [];
   lifecycle.install();
-  lifecycle.installStdinShutdownHandlers(stdin, () => gate.stopSending("stdin closed"));
+  lifecycle.installStdinShutdownHandlers(
+    stdin,
+    () => gate.answerReceivedThenStop("stdin closed"),
+    ANSWER_WAIT_MS,
+  );
   lifecycle.installStdoutShutdownHandler(stdout, () => gate.stopSending("stdout write failed"));
   lifecycle.setShutdownHandler(async (reason) => {
     shutdowns.push(reason);
@@ -104,6 +119,10 @@ function createHarness() {
       holdTool = true;
     },
     finishRelease: () => release.resolve({ released: true }),
+    finishTool: (index = 0) => tools[index]?.resolve(),
+    finishResource: () =>
+      resource.resolve({ contents: [{ uri: "automobile:test", text: "answer" }] }),
+    completedToolAborts,
   };
 }
 
@@ -191,7 +210,7 @@ beforeAll(async () => {
   for (const pendingRequest of [pendingTool, pendingResource]) {
     const rig = await connect();
     await pendingRequest(rig);
-    await eof(rig);
+    rig.fakeProcess.emit("SIGTERM");
     await exited(rig);
     await rig.server.close();
     rig.stdin.destroy();
@@ -201,24 +220,54 @@ beforeAll(async () => {
 });
 
 describe("stdio client-gone silence (#11951)", () => {
-  test("1: EOF drops the aborted in-flight tool result and still releases the session", async () => {
+  test("1: EOF waits for two calls and closes the proxy only after both answers", async () => {
     const rig = await connect();
     await pendingTool(rig);
-    const bytes = await eof(rig);
+    rig.request({
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "observe", arguments: {} },
+    });
+    await drainUntil(
+      () => rig.client.callToolCalls.filter(({ toolName }) => toolName === "observe").length === 2,
+      { description: "second pending call" },
+    );
+    await eof(rig);
+    expect(rig.shutdowns).toEqual([]);
+    expect(rig.client.callToolSignals.slice(-2).every((signal) => !signal?.aborted)).toBe(true);
+    rig.finishTool(0);
+    await drainUntil(() => rig.messages().some((message) => "id" in message && message.id === 2), {
+      description: "first answer",
+    });
+    expect(rig.shutdowns).toEqual([]);
+    expect(rig.client.isConnected()).toBe(true);
+    expect(rig.releases()).toEqual([]);
+    expect(rig.client.callToolSignals.at(-1)?.aborted).toBe(false);
+    rig.finishTool(1);
     await exited(rig);
-    expect(rig.byteCount()).toBe(bytes);
-    expect(rig.logs).toContain("[OutputGatedTransport] Dropped response: stdin closed");
-    expect(rig.client.callToolSignals.at(-1)?.reason).toBeInstanceOf(DaemonUnavailableError);
+    for (const id of [2, 3]) {
+      expect(rig.messages().find((message) => "id" in message && message.id === id)).toMatchObject({
+        result: { content: [{ text: "success" }] },
+      });
+    }
+    expect(rig.completedToolAborts).toEqual([false, false]);
+    expect(rig.shutdowns).toEqual(["stdin"]);
+    expect(rig.timer.getPendingTimeoutCount()).toBe(0);
   });
 
-  test("2: EOF drops the aborted in-flight resource error and still releases the session", async () => {
+  test("2: EOF waits for a held resource read and writes its answer", async () => {
     const rig = await connect();
     await pendingResource(rig);
-    const bytes = await eof(rig);
+    await eof(rig);
+    expect(rig.shutdowns).toEqual([]);
+    expect(rig.client.readResourceSignals[0]?.aborted).toBe(false);
+    rig.finishResource();
     await exited(rig);
-    expect(rig.byteCount()).toBe(bytes);
-    expect(rig.logs).toContain("[OutputGatedTransport] Dropped response: stdin closed");
-    expect(rig.client.readResourceSignals[0]?.reason).toBeInstanceOf(DaemonUnavailableError);
+    expect(rig.messages().find((message) => "id" in message && message.id === 2)).toMatchObject({
+      result: { contents: [{ text: "answer" }] },
+    });
+    expect(rig.shutdowns).toEqual(["stdin"]);
   });
 
   test("3: EOF drops both list-changed notifications during pending session release", async () => {
@@ -338,5 +387,172 @@ describe("stdio client-gone silence (#11951)", () => {
     expect(writes).toBe(0);
     expect(rig.shutdowns).toEqual(["stdout"]);
     expect(rig.timer.now()).toBe(0);
+    expect(rig.timer.getPendingTimeoutCount()).toBe(0);
+  });
+});
+
+describe("stdio received answers after EOF (#12049)", () => {
+  test("piped initialize and tools/call receive both answers and release once", async () => {
+    const rig = createHarness();
+    rigs.push(rig);
+    await rig.server.connect(rig.gate);
+    const ended = once(rig.stdin, "end");
+    rig.stdin.end(
+      [
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-03-26",
+            capabilities: {},
+            clientInfo: { name: "one-shot", version: "1" },
+          },
+        }),
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: { name: "getAndroid", arguments: {} },
+        }),
+        "",
+      ].join("\n"),
+    );
+    // Deliver EOF before the async SDK handlers settle; the stream's later end is a no-op.
+    expect(rig.byteCount()).toBe(0);
+    rig.stdin.emit("end");
+    expect(rig.byteCount()).toBe(0);
+    expect(rig.shutdowns).toEqual([]);
+    await ended;
+    await exited(rig);
+    const answers = rig.messages().filter((message) => !("method" in message) && "id" in message);
+    expect(answers.map((message) => ("id" in message ? message.id : undefined)).sort()).toEqual([
+      1, 2,
+    ]);
+    expect(answers.find((message) => "id" in message && message.id === 1)).toMatchObject({
+      result: { protocolVersion: "2025-03-26" },
+    });
+    expect(answers.find((message) => "id" in message && message.id === 2)).toMatchObject({
+      result: {
+        content: [{ text: JSON.stringify({ runtime: { session: { sessionUuid: "owned" } } }) }],
+      },
+    });
+    expect(rig.shutdowns).toEqual(["stdin"]);
+  });
+
+  test("unsolicited notifications and progress drop while the received call still answers", async () => {
+    const rig = await connect();
+    await pendingTool(rig);
+    const bytes = await eof(rig);
+    rig.client.emitNotification("notifications/tools/list_changed");
+    rig.client.emitNotification("notifications/resources/list_changed");
+    // FakeDaemonClient's notification shape cannot carry progress fields; use the server seam.
+    await rig.server.server.notification({
+      method: "notifications/progress",
+      params: { progressToken: "held", progress: 1 },
+    });
+    await rig.server.server.notification({
+      method: "notifications/resources/updated",
+      params: { uri: "automobile:test" },
+    });
+    await rig.server.server.notification({
+      method: "notifications/message",
+      params: { level: "info", data: "held" },
+    });
+    await drainMicrotasks(64);
+    expect(rig.byteCount()).toBe(bytes);
+    for (const method of [
+      "notifications/tools/list_changed",
+      "notifications/resources/list_changed",
+      "notifications/progress",
+      "notifications/resources/updated",
+      "notifications/message",
+    ]) {
+      expect(rig.logs).toContain(`[OutputGatedTransport] Dropped ${method}: stdin closed`);
+    }
+    rig.finishTool();
+    await exited(rig);
+    expect(rig.messages().find((message) => "id" in message && message.id === 2)).toMatchObject({
+      result: { content: [{ text: "success" }] },
+    });
+  });
+
+  test("hard bound shuts down and writes the typed closing error for the received call", async () => {
+    const rig = await connect();
+    await pendingTool(rig);
+    await eof(rig);
+    await drainMicrotasks(64);
+    expect(rig.shutdowns).toEqual([]);
+    expect(rig.fakeProcess.exitCodes).toEqual([]);
+    rig.timer.advanceTime(ANSWER_WAIT_MS - 1);
+    await drainMicrotasks(64);
+    expect(rig.shutdowns).toEqual([]);
+    expect(rig.fakeProcess.exitCodes).toEqual([]);
+    rig.timer.advanceTime(1);
+    await exited(rig);
+    const answer = rig.messages().find((message) => "id" in message && message.id === 2);
+    expect(answer).toMatchObject({ result: { isError: true } });
+    expect(JSON.stringify(answer)).toContain("MCP proxy is closing");
+    expect(rig.client.callToolSignals.at(-1)?.reason).toBeInstanceOf(DaemonUnavailableError);
+    expect(rig.shutdowns).toEqual(["stdin"]);
+    expect(rig.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("EPIPE during the answer wait stops writes and aborts immediately without a pending timer", async () => {
+    const rig = await connect();
+    await pendingTool(rig);
+    const bytes = await eof(rig);
+    rig.stdout.emit("error", Object.assign(new Error("broken pipe"), { code: "EPIPE" }));
+    rig.client.emitNotification("notifications/tools/list_changed");
+    await exited(rig);
+    expect(rig.byteCount()).toBe(bytes);
+    expect(rig.client.callToolSignals.at(-1)?.reason).toBeInstanceOf(DaemonUnavailableError);
+    expect(rig.shutdowns).toEqual(["stdout"]);
+    expect(rig.timer.now()).toBe(0);
+    expect(rig.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("a request delivered in the same chunk as EOF is answered", async () => {
+    const rig = await connect();
+    const ended = once(rig.stdin, "end");
+    rig.stdin.end(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "observe", arguments: {} },
+      })}\n`,
+    );
+    await ended;
+    await exited(rig);
+    expect(rig.messages().find((message) => "id" in message && message.id === 2)).toMatchObject({
+      result: { content: [{ text: "success" }] },
+    });
+  });
+
+  test("inbound cancellation before EOF removes the unanswered id without holding exit", async () => {
+    const rig = await connect();
+    await pendingTool(rig);
+    rig.request({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: 2 } });
+    const bytes = await eof(rig);
+    await exited(rig);
+    expect(rig.byteCount()).toBe(bytes);
+    expect(rig.shutdowns).toEqual(["stdin"]);
+    expect(rig.timer.now()).toBe(0);
+    expect(rig.timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("SIGTERM during EOF wait aborts the call, answers it and exits once without a wait timer", async () => {
+    const rig = await connect();
+    await pendingTool(rig);
+    await eof(rig);
+    rig.fakeProcess.emit("SIGTERM");
+    await exited(rig);
+    expect(rig.shutdowns).toEqual(["SIGTERM"]);
+    expect(
+      JSON.stringify(rig.messages().find((message) => "id" in message && message.id === 2)),
+    ).toContain("MCP proxy is closing");
+    expect(rig.fakeProcess.exitCodes).toEqual([0]);
+    expect(rig.timer.getPendingTimeoutCount()).toBe(0);
   });
 });

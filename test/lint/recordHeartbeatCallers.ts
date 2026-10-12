@@ -1,19 +1,5 @@
-import { parseSync, Visitor, type Expression } from "oxc-parser";
-
-/** Transparent syntax preserves the callee; a sequence calls its last expression. */
-function unwrapCallee(callee: Expression): Expression {
-  switch (callee.type) {
-    case "ParenthesizedExpression":
-    case "TSAsExpression":
-    case "TSNonNullExpression":
-    case "TSSatisfiesExpression":
-      return unwrapCallee(callee.expression);
-    case "SequenceExpression":
-      return unwrapCallee(callee.expressions[callee.expressions.length - 1]);
-    default:
-      return callee;
-  }
-}
+import { parseGuardSource, unwrapCallee } from "./astGuard";
+import { Visitor, type Expression } from "oxc-parser";
 
 /** `foo`, `x.foo`, `x["foo"]` and a static template key name the same callee. */
 function calleeName(callee: Expression): string | undefined {
@@ -38,10 +24,7 @@ function calleeName(callee: Expression): string | undefined {
 
 /** Scan source only. Syntax errors fail the inventory instead of silently skipping a file. */
 export function scanRecordHeartbeatCalls(file: string, source: string): { line: number }[] {
-  const { program, errors } = parseSync(file, source);
-  if (errors.length > 0) {
-    throw new Error(`${file}: ${errors[0].message}`);
-  }
+  const program = parseGuardSource(file, source);
   const findings: { line: number }[] = [];
   new Visitor({
     CallExpression(node) {

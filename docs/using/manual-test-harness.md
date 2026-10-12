@@ -537,29 +537,39 @@ reaping. A correct client keeps contexts in one task and closes them LIFO.
 For the 1.x transport bug, upgrade to 2.x or catch the exception group at
 `stdio_client` exit; client ordering alone cannot fix a server's post-EOF writes.
 
-Where auto-mobile's stdio server falls. Before #11951 it was in the
-post-EOF-write row for 1.x Python clients: stdin EOF started the bounded shutdown
-(`src/processLifecycle.ts`, `src/shutdownCleanup.ts`) but never closed the MCP
-server or its `StdioServerTransport`, so stdout stayed writable until
-`process.exit`. A tool call or resource read aborted by `DaemonMcpProxy.close()`
-had its structured error written within milliseconds of EOF, and a
-tools/list_changed or resources/list_changed notification arriving while the
-session release was awaited (up to 1500 ms) was still forwarded.
+Where auto-mobile's stdio server falls. #11951 introduced `OutputGatedTransport`
+(`src/server/outputGatedTransport.ts`) to drop writes after the client closes.
+#12049 refines that contract: after stdin `end`/`close`/`error`, the server runs
+requests it already received to completion and writes their results or errors,
+in direct (`--no-proxy`) and proxy mode. Everything unsolicited is dropped,
+including list-changed, resource-updated, logging and progress notifications
+(even progress for a received request), and server-to-client requests. The gate
+closes fully after the last answer's write settles, then normal shutdown releases
+sessions and exits 0. Idle EOF closes the gate synchronously.
 
-Since #11951 the stdio transport is wrapped in `OutputGatedTransport`
-(`src/server/outputGatedTransport.ts`). The stdin `end`/`close`/`error` listeners
-and the stdout `error` listener close the gate synchronously, before shutdown
-starts and also when a signal shutdown is already running; every later result,
-error and notification is dropped with a debug log. In-flight calls are still
-aborted and sessions are still released on the daemon socket. A SIGTERM or SIGINT
-shutdown with stdin still open answers in-flight calls as before, because that
-client is still reading. `test/server/stdioClientGoneSilence.test.ts` pins each
-ordering with fake streams; it has **not yet been observed against a live
-daemon**.
+Each call retains its own deadline (120 s by default via
+`AUTOMOBILE_DAEMON_TIMEOUT_MS`). The overall EOF answer wait is capped at
+`MAX_CALLER_MCP_REQUEST_TIMEOUT_MS` (30 min), before the normal 9 s shutdown
+bound and 100 ms finalization. At that hard bound the gate stays answers-only
+while shutdown starts: the proxy aborts a remaining call and its typed
+"MCP proxy is closing" answer is still written. A stdout error (EPIPE) closes
+the gate fully at once and starts shutdown immediately. SIGTERM/SIGINT also
+start shutdown immediately, including during the EOF wait; their typed errors
+are still written while the gate allows received answers. EOF before managed
+slot acquisition finishes still shuts down immediately and aborts acquisition
+(#11173). `test/server/stdioClientGoneSilence.test.ts` pins these orderings with
+fake streams; they have **not yet been observed against a live daemon**.
+
+The remaining 1.x Python `mcp` SDK race is a client closing while its **own
+request is still in flight**: that response can land in its close window and
+raise `anyio.BrokenResourceError`. This is the `late-response-after-leave` row;
+answering a received request after EOF is intentional. A client closing idle
+gets `CLOSE_OK`; unsolicited post-EOF output is dropped.
 
 To confirm on devices, use the 1.30.0 venv (the line that raises) against a
 private daemon built from the commit under test, two clients on two emulators,
-ten lifetimes each. Every `close` record must be `CLOSE_OK`, each client's
+ten lifetimes each, closing idle after their requests finish. Every `close` record
+must be `CLOSE_OK`, each client's
 session must be gone from the daemon within about 2 s of its close, and no
 stdio server process may remain:
 
@@ -577,8 +587,19 @@ for ORDER in a-first simultaneous; do
 done
 ```
 
-Then repeat the single-client loop above with `--close-mode mid-call` on the same
-venv: before the fix that mode raised `anyio.BrokenResourceError` at
-`stdio_client` exit whenever the aborted call's error reached stdout.
+A piped one-shot run must print both answers and exit 0. Check both proxy mode
+and direct mode (`--no-proxy`) using the server built from the commit under test:
+
+```bash
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"one-shot","version":"1"}}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"listDevices","arguments":{}}}' \
+  | "$B/bin/am1" bun "$PWD/dist/src/index.js"
+printf 'exit=%s\n' "$?"
+```
+
+The single-client `--close-mode mid-call` check on the same 1.30.0 venv can
+still raise `anyio.BrokenResourceError` when its own answer reaches the close
+window. It is not an idle-close confirmation.
 
 The Python check uses python3 >=3.11, falling back to a uv-managed interpreter (finding an existing one or installing 3.11), and runs when `scripts/manual-test/python/` or the validator changes (path-selected in `scripts/prepush-shell.sh`) and locally via `bash scripts/all_fast_validate_checks.sh --only manual-test-python`.

@@ -274,6 +274,46 @@ function parsed(result: unknown): Array<{
   );
 }
 
+async function withManagedServer(
+  body: (assertLoss: (reason: string) => Promise<void>) => Promise<void>,
+): Promise<void> {
+  const registration = spyOn(Server.prototype, "setRequestHandler");
+  const { server } = createProxyMcpServer({
+    proxy: s.proxy,
+    managedSlots: readyManagedSlotsResult(SESSION),
+  });
+  const call = registration.mock.calls.find(([schema]) => schema === CallToolRequestSchema)![1];
+  const read = registration.mock.calls.find(([schema]) => schema === ReadResourceRequestSchema)![1];
+  registration.mockRestore();
+  const logged = spyOn(Server.prototype, "sendLoggingMessage").mockResolvedValue(undefined);
+  spies.push(logged);
+  try {
+    await body(async (reason) => {
+      for (const name of ["observe", "tapOn"]) {
+        expect(
+          parsed(await call({ method: "tools/call", params: { name, arguments: {} } }, extra))[0]
+            .error,
+        ).toMatchObject({ code: "managed_execution_ended", reason });
+      }
+      expect(s.proxy.getTerminalSessionRelease()).toEqual({ sessionUuid: SESSION, reason });
+      const resource = await read(
+        { method: "resources/read", params: { uri: "automobile:managed-slots" } },
+        extra,
+      );
+      expect(JSON.parse(resource.contents[0].text).slots[0].executionEnded.reason).toBe(reason);
+      const losses = logged.mock.calls
+        .map(([params]) => params.data)
+        .filter(
+          (data) => (data as { error: { code: string } }).error.code === "managed_execution_ended",
+        );
+      expect(losses).toHaveLength(1);
+      expect(losses[0]).toMatchObject({ error: { reason } });
+    });
+  } finally {
+    await server.close();
+  }
+}
+
 async function handedOver(clean = true): Promise<void> {
   await s.start();
   await s.stop(clean);
@@ -521,38 +561,129 @@ test("PIN: device-restart release ends a handed-over managed execution", async (
     "daemon_stalled",
     "proxy_stalled",
   ]);
-  expect(s.handovers[1].handover.releaseReason).toBe(reason);
+  expect(s.handovers[1].handover.releaseReasons?.[SESSION]).toBe(reason);
   expect(s.proxy.getTerminalSessionRelease()?.reason).toBe(reason);
   const count = s.heartbeats.length;
   await s.advance(INTERVAL * 2);
   expect(s.heartbeats).toHaveLength(count);
   await expect(s.proxy.callTool("observe", {})).rejects.toMatchObject({
-    handover: { code: "proxy_stalled", releaseReason: reason },
+    handover: { code: "proxy_stalled", releaseReasons: { [SESSION]: reason } },
   });
 });
 
 test("reasonless not-found stops reclaiming at the existing window and delivers one loss", async () => {
+  await withManagedServer(async (assertLoss) => {
+    await handedOver();
+    await s.restart(false);
+    const returnedAt = s.timer.now();
+    await s.advance(INTERVAL);
+    const firstAnswerAt = s.heartbeats.find(({ at }) => at >= returnedAt)!.at;
+    await s.advance(RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS - 1);
+    expect(s.handovers.map(({ handover }) => handover.code)).toEqual(["daemon_stalled"]);
+    await s.advance(INTERVAL + 1);
+    expect(s.handovers.map(({ handover }) => handover.code)).toEqual([
+      "daemon_stalled",
+      "proxy_stalled",
+    ]);
+    expect(s.handovers[1].at - firstAnswerAt).toBeGreaterThanOrEqual(
+      RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
+    );
+    const count = s.heartbeats.length;
+    await s.advance(INTERVAL * 4);
+    expect(s.heartbeats).toHaveLength(count);
+    expect(s.timer.getPendingIntervals()).toEqual([INTERVAL]); // Only the daemon monitor remains.
+    await expect(s.proxy.callTool("observe", {})).rejects.toMatchObject({
+      handover: { code: "proxy_stalled" },
+    });
+    expect(s.proxy.getTerminalSessionRelease()?.reason).toBe("session-not-found");
+    await assertLoss("session-not-found");
+  });
+});
+
+test.each(["daemon-shutdown", "daemon-restart"] as const)(
+  "%s not-found during reclaim waits for rehydration",
+  async (reason) => {
+    await handedOver();
+    await s.restart();
+    await s.manager.releaseSession(SESSION, reason);
+    await s.advance(INTERVAL * 2);
+    expect(s.handovers.map(({ handover }) => handover.code)).toEqual(["daemon_stalled"]);
+    expect(s.proxy.getTerminalSessionRelease()).toBeUndefined();
+    await s.rehydrate();
+    await s.advance(INTERVAL);
+    expect(s.manager.getSession(SESSION)?.livenessOwnerToken).toBe(TOKEN);
+    expect(s.manager.getSession(SESSION)?.ownership).toBe("owned");
+    const result = parsed(await s.proxy.callTool("observe", {}));
+    expect(result[0].observed).toBe(SESSION);
+    expect(result.filter((entry) => entry.warning).map((entry) => entry.warning!.code)).toEqual([
+      "daemon_restart_resumed",
+    ]);
+    expect(parsed(await s.proxy.callTool("observe", {})).filter((entry) => entry.warning)).toEqual(
+      [],
+    );
+    expect(s.proxy.getTerminalSessionRelease()).toBeUndefined();
+  },
+);
+
+test.each(["daemon-shutdown", "daemon-restart"] as const)(
+  "%s not-found ends once at the reclaim window under its daemon reason",
+  async (reason) => {
+    await withManagedServer(async (assertLoss) => {
+      await handedOver();
+      await s.restart();
+      await s.manager.releaseSession(SESSION, reason);
+      await s.advance(INTERVAL);
+      await s.advance(RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS - 1);
+      expect(s.handovers.map(({ handover }) => handover.code)).toEqual(["daemon_stalled"]);
+      await s.advance(INTERVAL + 1);
+      await assertLoss(reason);
+      const count = s.heartbeats.length;
+      await s.advance(INTERVAL * 2);
+      expect(s.heartbeats).toHaveLength(count);
+      expect(s.timer.getPendingIntervals()).toEqual([INTERVAL]);
+    });
+  },
+);
+
+test.each(["device-restart:emulator-5554", "heartbeat-timeout"] as const)(
+  "PIN: %s not-found ends reclaim on that probe on every surface",
+  async (reason) => {
+    await withManagedServer(async (assertLoss) => {
+      await handedOver();
+      await s.restart();
+      await s.manager.releaseSession(SESSION, reason);
+      await s.advance(INTERVAL);
+      await assertLoss(reason);
+      const count = s.heartbeats.length;
+      await s.advance(INTERVAL * 2);
+      expect(s.heartbeats).toHaveLength(count);
+    });
+  },
+);
+
+test("same-daemon not-found alternating with silence cannot extend the reclaim window", async () => {
   await handedOver();
   await s.restart(false);
   const returnedAt = s.timer.now();
   await s.advance(INTERVAL);
   const firstAnswerAt = s.heartbeats.find(({ at }) => at >= returnedAt)!.at;
-  await s.advance(RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS - 1);
-  expect(s.handovers.map(({ handover }) => handover.code)).toEqual(["daemon_stalled"]);
-  await s.advance(INTERVAL + 1);
+  for (
+    let round = 0;
+    s.timer.now() < firstAnswerAt + RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS + INTERVAL;
+    round++
+  ) {
+    s.heartbeatUnavailable = round % 2 === 1;
+    await s.advance(INTERVAL);
+  }
   expect(s.handovers.map(({ handover }) => handover.code)).toEqual([
     "daemon_stalled",
     "proxy_stalled",
   ]);
-  expect(s.handovers[1].at - firstAnswerAt).toBeGreaterThanOrEqual(
-    RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
+  expect(s.handovers[1].at - firstAnswerAt).toBeLessThanOrEqual(
+    RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS + INTERVAL,
   );
   const count = s.heartbeats.length;
   await s.advance(INTERVAL * 4);
   expect(s.heartbeats).toHaveLength(count);
-  expect(s.timer.getPendingIntervals()).toEqual([INTERVAL]); // Only the daemon monitor remains.
-  await expect(s.proxy.callTool("observe", {})).rejects.toMatchObject({
-    handover: { code: "proxy_stalled" },
-  });
-  expect(s.proxy.getTerminalSessionRelease()?.reason).toBe("session-not-found");
+  expect(s.timer.getPendingIntervals()).toEqual([INTERVAL]);
 });

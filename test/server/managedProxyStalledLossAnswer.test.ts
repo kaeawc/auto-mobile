@@ -91,9 +91,11 @@ let sessionManager: SessionManager;
 let proxy: DaemonMcpProxy;
 let handovers: LivenessHandover[];
 let clients: FakeDaemonClient[];
+let stripReleaseReason = false;
 let spies: Array<ReturnType<typeof spyOn>>;
 
 const setUp = async (): Promise<void> => {
+  stripReleaseReason = false;
   baseTimer = new LivenessTimer();
   timer = new StallableTimer(baseTimer);
   sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -130,7 +132,11 @@ const setUp = async (): Promise<void> => {
             state,
           );
           if (!response.success) {
-            throw Object.assign(new Error(response.error), { code: response.code });
+            const refusal = { ...response };
+            if (stripReleaseReason) {
+              delete refusal.releaseReason;
+            }
+            throw Object.assign(new Error(response.error), refusal);
           }
           return response.result;
         },
@@ -241,30 +247,36 @@ async function expectNextReadForwardedSessionless(
   expect(forwarded()).toEqual([{ toolName: "observe", params: { deviceId: "emulator-5554" } }]);
 }
 
-test("a managed connection answers a session lost during a proxy stall with managed_execution_ended, not proxy_stalled reacquire advice", async () => {
-  await withStallLoss(readyManagedSlotsResult(SESSION), async (callTool, pushed) => {
-    const result = await callTool("tapOn", { text: "OK" });
-    const text = result.content[0].text;
-    const error = JSON.parse(text).error;
+test.each(["heartbeat-timeout", "session-not-found"] as const)(
+  "a managed proxy stall reports %s on every call and notification",
+  async (reason) => {
+    stripReleaseReason = reason === "session-not-found";
+    await withStallLoss(readyManagedSlotsResult(SESSION), async (callTool, pushed) => {
+      const result = await callTool("tapOn", { text: "OK" });
+      const text = result.content[0].text;
+      const error = JSON.parse(text).error;
 
-    expect(result.isError).toBe(true);
-    expect(error).toMatchObject({
-      code: "managed_execution_ended",
-      retryable: false,
-      nextAction: "relaunch_execution",
-      sessionUuid: SESSION,
+      expect(result.isError).toBe(true);
+      expect(error).toMatchObject({
+        code: "managed_execution_ended",
+        retryable: false,
+        nextAction: "relaunch_execution",
+        sessionUuid: SESSION,
+        reason,
+      });
+      expect(text).not.toContain("getAndroid");
+      expect(text).not.toContain("getApple");
+      expect(error).not.toHaveProperty("recovery");
+
+      // The pushed logging notification carries the same answer, not the reacquire advice.
+      expect(pushed()).toEqual([{ error }]);
+
+      expect(proxy.getTerminalSessionRelease()).toEqual({ sessionUuid: SESSION, reason });
+      const later = await callTool("tapOn", { text: "OK" });
+      expect(JSON.parse(later.content[0].text).error).toEqual(error);
     });
-    expect(text).not.toContain("getAndroid");
-    expect(text).not.toContain("getApple");
-    expect(error).not.toHaveProperty("recovery");
-
-    // The pushed logging notification carries the same answer, not the reacquire advice.
-    expect(pushed()).toEqual([{ error }]);
-
-    // That answer told the caller once: it is not refused a second time before reads go through.
-    await expectNextReadForwardedSessionless(callTool);
-  });
-});
+  },
+);
 
 test("a generic connection keeps the proxy_stalled answer for the same loss, and is told once", async () => {
   await withStallLoss(undefined, async (callTool, pushed) => {

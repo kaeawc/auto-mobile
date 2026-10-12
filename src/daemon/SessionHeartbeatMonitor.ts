@@ -431,7 +431,7 @@ export class SessionHeartbeatMonitor {
   /**
    * A tick that fires later than scheduled by more than the margin means the daemon's own event
    * loop stalled, so the owners' heartbeats could not have reached it for that long. Never reap
-   * on the strength of that: every session's lease is moved forward by exactly the lateness.
+   * on the strength of that alone: the source applies its lease forgiveness rules.
    */
   private forgiveOwnStall(): void {
     this.forgiveStallIfLate();
@@ -443,14 +443,14 @@ export class SessionHeartbeatMonitor {
    * overdue tick measures only what is still unaccounted for and nothing is forgiven twice.
    *
    * Sleep and stall are told apart by the wall clock running ahead of the monotonic one (#10699),
-   * not by length: a daemon stall of any length is forgiven in full (owners kept heartbeating and
-   * the daemon could not hear them), while host sleep of any length counts toward the idle
+   * not by length: a daemon stall of any length is forgiven in full for owners live at its start
+   * (the daemon could not hear them), while host sleep of any length counts toward the idle
    * deadline (owner policy) and only excuses the heartbeat lease, since no owner on a sleeping
    * host could heartbeat either. Where the monotonic clock runs through sleep (Windows, Linux) the
    * two cannot be told apart and length decides instead (`maxCredibleStallMs`).
    *
-   * The gap is forgiven narrowly (#11080): the source excuses a session's lease only when the gap
-   * began within one lease of that owner's last heartbeat, i.e. while the owner was still live.
+   * Full lease forgiveness requires an owner live at the gap start (#11080). The session source
+   * also grants capped awake-stall credit to an owner connected at that instant (#11992).
    * The gap is taken to begin as early as it can have: when the previous scan settled.
    */
   private forgiveStallIfLate(): void {

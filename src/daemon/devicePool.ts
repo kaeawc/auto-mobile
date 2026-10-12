@@ -1,3 +1,4 @@
+import { OwnerConnectionIntervals } from "./connectedOwnerStallExcuse";
 import { holderReleaseRemainingMs } from "./holderReleaseRemaining";
 import {
   mintedSession,
@@ -9757,8 +9758,16 @@ export class DevicePool {
   }
 
   private readonly mcpSessionOwnerCallsInFlight = new Map<string, Map<string, number>>();
+  private readonly ownerConnectionIntervals = new OwnerConnectionIntervals();
 
   private registerMcpSessionOwnerCallReader(): void {
+    this.sessionManager.setOwnerConnectedAtReader?.((session, at) => {
+      const ownerId = this.ownershipSessionId(session.sessionId);
+      const owner =
+        ownerId === session.sessionId ? session : this.sessionManager.peekSession(ownerId);
+      // Autolock-only ownership records no acquisition interval: conservatively not connected.
+      return owner !== null && this.ownerConnectionIntervals.connectedAt(owner, at);
+    });
     this.sessionManager.setLivenessOwnerCallInFlightReader?.((token) => {
       for (const calls of this.mcpSessionOwnerCallsInFlight.values()) {
         if ((calls.get(token) ?? 0) > 0) {
@@ -9843,6 +9852,10 @@ export class DevicePool {
     const acquired = this.mcpSessionAcquiredDeviceSessions.get(mcpSessionId) ?? new Set<string>();
     acquired.add(sessionId);
     this.mcpSessionAcquiredDeviceSessions.set(mcpSessionId, acquired);
+    const session = this.sessionManager.peekSession(sessionId);
+    if (session) {
+      this.ownerConnectionIntervals.connected(session, this.sessionManager.sessionNow());
+    }
   }
 
   /**
@@ -10374,6 +10387,10 @@ export class DevicePool {
     this.mcpSessionRecoveryDevices.delete(mcpSessionId);
     for (const sessionId of acquired ?? []) {
       if (!this.hasConnectedMcpSessionOwner(sessionId)) {
+        const session = this.sessionManager.peekSession(sessionId);
+        if (session) {
+          this.ownerConnectionIntervals.disconnected(session, this.sessionManager.sessionNow());
+        }
         this.ownerDisconnectRelease.ownerDisconnected(
           sessionId,
           mcpSessionId,

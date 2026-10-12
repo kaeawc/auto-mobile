@@ -3,6 +3,7 @@ import {
   journalOwnersEqual,
   journalTargetEntries,
   sameBinding,
+  scopeAcceptsSameSessionClaim,
   scopeAcceptsSlotChange,
   SLOT_JOURNAL_TERMINAL_RETENTION_MS,
   type AdvanceSlotJournalInput,
@@ -278,7 +279,7 @@ export class FakeSlotRegistry implements SlotRegistry {
     owner: SlotExecOwner,
     options: ClaimExecutionOptions = {},
   ): Promise<ClaimExecutionResult> {
-    const checked = this.checkBinding(key, expected);
+    const checked = this.checkBinding(key, expected, false, owner.sessionUuid);
     if ("kind" in checked) {
       return checked;
     }
@@ -768,13 +769,20 @@ export class FakeSlotRegistry implements SlotRegistry {
     key: SlotKey,
     expected: SlotBindingExpectation,
     journaled = false,
+    claimingSessionUuid?: string,
   ): SlotAssignmentRecord | SlotCasFailure {
     assertValidSlotKey(key);
     const scope = this.scopes.get(key.scopeKey);
-    if (!scopeAcceptsSlotChange(scope ?? null, journaled)) {
+    const current = this.assignments.get(slotId(key));
+    if (
+      !scopeAcceptsSlotChange(scope ?? null, journaled) &&
+      !(
+        claimingSessionUuid !== undefined &&
+        scopeAcceptsSameSessionClaim(scope ?? null, current ?? null, claimingSessionUuid)
+      )
+    ) {
       return { kind: "scope_not_valid", scope: scope ? { ...scope } : null };
     }
-    const current = this.assignments.get(slotId(key));
     if (!current) {
       return { kind: "slot_missing" };
     }

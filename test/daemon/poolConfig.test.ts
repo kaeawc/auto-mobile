@@ -85,19 +85,19 @@ describe("poolConfig timeout", () => {
     expect(getDevicePoolTimeoutMs()).toBe(60_000);
   });
 
-  // Boundary rows for the base-10 integer parse (PARAM-4). getDevicePoolTimeoutMs
-  // uses Number.parseInt(override, 10), which reads a leading integer and stops at
-  // the first non-digit — so "1e10" is 1 (not 1e10), " 1 " is 1, and "1.9" is 1.
+  // Boundary rows for the strict integer parse (PARAM-4, #11612). getDevicePoolTimeoutMs accepts
+  // plain base-10 digits only (surrounding whitespace trimmed): a numeric prefix such as "30abc",
+  // "1.9" or "1e10" is a typo, not 30, 1 or 1, so it falls back to the 60 s default.
   const timeoutBoundaryRows: Array<{ value: string; expected: number }> = [
-    { value: "1e10", expected: 1_000 },
+    { value: "1e10", expected: 60_000 },
     { value: " 1 ", expected: 1_000 },
-    { value: "1.9", expected: 1_000 },
-    { value: "30abc", expected: 30_000 },
+    { value: "1.9", expected: 60_000 },
+    { value: "30abc", expected: 60_000 },
     { value: "030", expected: 30_000 },
   ];
 
   for (const row of timeoutBoundaryRows) {
-    it(`getDevicePoolTimeoutMs parses ${JSON.stringify(row.value)} as a leading base-10 integer`, () => {
+    it(`getDevicePoolTimeoutMs reads ${JSON.stringify(row.value)} strictly`, () => {
       process.env.AUTOMOBILE_DEVICE_POOL_TIMEOUT = row.value;
       expect(getDevicePoolTimeoutMs()).toBe(row.expected);
     });

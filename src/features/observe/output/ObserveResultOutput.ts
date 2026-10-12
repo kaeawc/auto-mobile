@@ -17,7 +17,7 @@ import { selectableCandidates } from "../../utility/selectionRank";
 import { capLayoutWarnings } from "../audits/SafeAreaAuditor";
 import { captureFidelityTruncationReasons, collectWindowTruncations } from "../truncationReasons";
 import { normalizeQuotes } from "../../utility/TextMatcher";
-import { GENERATED_VIEW_ID_PATTERN } from "../android/StableNodeIdentity";
+import { GENERATED_VIEW_ID_PATTERN, STABLE_VIEW_ID_PREFIX } from "../android/StableNodeIdentity";
 import { isIosKeyboardClass, isIosKeyboardVisible } from "../ios/IosScreenIdentity";
 
 /**
@@ -1401,11 +1401,22 @@ function layoutWarningsEqual(a: unknown, b: unknown): boolean {
   return valuesEqual(withoutDerivedConfidence(a), withoutDerivedConfidence(b));
 }
 
+/**
+ * A capture-derived `s2-…` view id is regenerated whenever a neighbouring
+ * subtree changes, so it is not part of a warning's identity (#11637): the
+ * status bar's gesture-region warning would otherwise read as removed+added on
+ * every tap. Real view ids and resource ids are kept.
+ */
+function stableWarningViewId(warning: LayoutWarning): string | undefined {
+  const viewId = warning.element.viewId;
+  return viewId?.startsWith(STABLE_VIEW_ID_PREFIX) ? undefined : viewId;
+}
+
 /** Layout-warning identity is stable across bounds and confidence churn. */
 function layoutWarningIdentity(warning: LayoutWarning): string {
   return [
     warning.type,
-    warning.element.viewId ?? warning.element.resourceId ?? "",
+    stableWarningViewId(warning) ?? warning.element.resourceId ?? "",
     warning.element.contentDesc ?? warning.element.text ?? "",
   ].join("\0");
 }
@@ -1414,7 +1425,7 @@ function layoutWarningWithoutConfidence(warning: LayoutWarning): Omit<LayoutWarn
   return {
     type: warning.type,
     severity: warning.severity,
-    element: warning.element,
+    element: { ...warning.element, viewId: stableWarningViewId(warning) },
     categories: warning.categories,
     insetTypes: warning.insetTypes,
     sides: warning.sides,
@@ -1550,6 +1561,26 @@ function contentIdentityKey(attrs: Record<string, unknown>): string | null {
   return [resourceId, viewId, contentDesc, text].join("\0");
 }
 
+/** Attributes whose flip a client reads as "this control was toggled". */
+const DIFF_STATE_ATTRS: readonly string[] = ["checked", "selected", "state-description"];
+
+/**
+ * A control that carries no label of its own (no text, no content-desc) is
+ * identified only by a resource id that sibling rows share (`switchWidget`), so
+ * a leftover pair keyed by it may be two different controls — the previous
+ * screen's Airplane switch and the new screen's Wi-Fi switch. Reporting that
+ * pair as one switch whose state flipped asserts a toggle that never happened
+ * (#11638); leave it as removed + added instead.
+ */
+function isUnlabelledStateFlip(
+  attributes: Record<string, unknown>,
+  attrChanges: Record<string, unknown>,
+): boolean {
+  const labelled =
+    String(attributes["text"] ?? "") !== "" || String(attributes["content-desc"] ?? "") !== "";
+  return !labelled && DIFF_STATE_ATTRS.some((attr) => attr in attrChanges);
+}
+
 /** Index leftover diff nodes by their content-identity key, dropping keyless nodes. */
 function indexByContentKey(nodes: ObserveDiffNode[]): Map<string, number[]> {
   const byKey = new Map<string, number[]>();
@@ -1599,19 +1630,26 @@ function repairByContentIdentity(
     }
     const addedNode = added[addedIndices[0]];
     const removedNode = removed[removedIndices[0]];
+    const attrChanges = diffAttributes(removedNode.attributes, addedNode.attributes);
+    if (isUnlabelledStateFlip(addedNode.attributes, attrChanges)) {
+      continue;
+    }
     consumedAdded.add(addedIndices[0]);
     consumedRemoved.add(removedIndices[0]);
-    const attrChanges = diffAttributes(removedNode.attributes, addedNode.attributes);
     if (Object.keys(attrChanges).length > 0) {
       // `key` is the post-move (added-side) key; `fromKey` carries the pre-move
       // (removed-side) key so a consumer can locate the node in the baseline
       // (#3088 limitation 2, #3107). Emitted only on re-paired entries.
-      changed.push({
-        key: addedNode.key,
-        fromKey: removedNode.key,
-        selector: selectorForNode(addedNode),
-        changes: attrChanges,
-      });
+      recordChange(
+        changed,
+        {
+          key: addedNode.key,
+          fromKey: removedNode.key,
+          selector: selectorForNode(addedNode),
+          changes: attrChanges,
+        },
+        addedNode.attributes,
+      );
     }
   }
 
@@ -1808,12 +1846,16 @@ function repairByIosStableIdentity(
     consumedRemoved.add(removedIndices[0]);
     const attrChanges = diffAttributes(removedNode.attributes, addedNode.attributes);
     if (Object.keys(attrChanges).length > 0) {
-      changed.push({
-        key: addedNode.key,
-        fromKey: removedNode.key,
-        selector: selectorForNode(addedNode),
-        changes: attrChanges,
-      });
+      recordChange(
+        changed,
+        {
+          key: addedNode.key,
+          fromKey: removedNode.key,
+          selector: selectorForNode(addedNode),
+          changes: attrChanges,
+        },
+        addedNode.attributes,
+      );
     }
   }
 
@@ -1999,13 +2041,50 @@ export function diffObserveResult(
     removed: finalRemoved
       .map((node) => toObserveDiffNode(node, cfg?.projectAddedRemoved === true))
       .filter((node): node is ObserveDiffNode => node !== undefined),
-    changed,
+    changed:
+      cfg?.projectAddedRemoved === true
+        ? changed.filter((c) => !isNonActionableRelayout(c))
+        : changed,
   };
   appendDisplayChange(diff, baseline, next);
 
   appendFieldChanges(diff, baseline, next, cfg);
 
   return diff;
+}
+
+/**
+ * Next-side attributes of each emitted `changed` entry, so the skeleton
+ * projection can tell an actionable change from a container relayout without
+ * widening the wire shape (`changed` entries carry only the delta).
+ */
+const changeTargets = new WeakMap<ObserveDiffNodeChange, Record<string, unknown>>();
+
+function recordChange(
+  changed: ObserveDiffNodeChange[],
+  entry: ObserveDiffNodeChange,
+  nextAttributes: Record<string, unknown>,
+): void {
+  changeTargets.set(entry, nextAttributes);
+  changed.push(entry);
+}
+
+/**
+ * Whether a skeleton-projected diff should omit this change: a bounds-only move
+ * of a node with no affordance is a relayout the client cannot act on (#11637),
+ * the same node class `toObserveDiffNode` already drops from added/removed.
+ */
+function isNonActionableRelayout(entry: ObserveDiffNodeChange): boolean {
+  const attributes = changeTargets.get(entry);
+  if (!attributes) {
+    return false;
+  }
+  const changedKeys = Object.keys(entry.changes);
+  if (changedKeys.length !== 1 || changedKeys[0] !== "bounds") {
+    return false;
+  }
+  const skeleton = projectSkeletonElement(attributes as Element);
+  return !skeleton || skeleton.affordances.length === 0;
 }
 
 function collectPositionalNodeDiffs({
@@ -2030,11 +2109,15 @@ function collectPositionalNodeDiffs({
     for (let i = 0; i < paired; i++) {
       const attrChanges = diffAttributes(baseNodes[i].attributes, nextNodes[i].attributes);
       if (Object.keys(attrChanges).length > 0) {
-        changed.push({
-          key: nextNodes[i].key,
-          selector: selectorForNode(nextNodes[i]),
-          changes: attrChanges,
-        });
+        recordChange(
+          changed,
+          {
+            key: nextNodes[i].key,
+            selector: selectorForNode(nextNodes[i]),
+            changes: attrChanges,
+          },
+          nextNodes[i].attributes,
+        );
       }
     }
     for (let i = paired; i < nextNodes.length; i++) {

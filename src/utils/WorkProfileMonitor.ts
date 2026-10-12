@@ -1,5 +1,6 @@
 import { Timer, defaultTimer } from "./SystemTimer";
 import { logger } from "./logger";
+import { readEnvPositiveInteger } from "./envNumbers";
 import { errorMessage } from "./describeUnknownError";
 import { toActionableError } from "../models/ActionableError";
 import { SingleFlightInterval } from "./SingleFlightInterval";
@@ -69,6 +70,24 @@ interface WorkProfileMonitorOptions {
   installedAppsStore: InstalledAppsStore;
   timer?: Timer;
   pollIntervalMs?: number;
+  /** The environment the poll interval override is read from; defaults to `process.env`. */
+  env?: NodeJS.ProcessEnv;
+}
+
+/** An explicit option wins; otherwise `AUTOMOBILE_WORK_PROFILE_POLL_INTERVAL_MS`, strictly parsed. */
+export function resolveWorkProfilePollIntervalMs(
+  explicit: number | undefined,
+  env?: NodeJS.ProcessEnv,
+): number {
+  return (
+    explicit ??
+    readEnvPositiveInteger(
+      "AUTOMOBILE_WORK_PROFILE_POLL_INTERVAL_MS",
+      undefined,
+      { fallback: DEFAULT_POLL_INTERVAL_MS },
+      env,
+    )
+  );
 }
 
 /**
@@ -91,11 +110,7 @@ export class DefaultWorkProfileMonitor implements WorkProfileMonitor {
     this.installedAppsStore = options.installedAppsStore;
     this.timer = options.timer ?? defaultTimer;
 
-    // Allow override via environment variable
-    const envInterval = process.env.AUTOMOBILE_WORK_PROFILE_POLL_INTERVAL_MS;
-    this.pollIntervalMs =
-      options.pollIntervalMs ??
-      (envInterval ? parseInt(envInterval, 10) : DEFAULT_POLL_INTERVAL_MS);
+    this.pollIntervalMs = resolveWorkProfilePollIntervalMs(options.pollIntervalMs, options.env);
     this.interval = new SingleFlightInterval(
       this.timer,
       this.pollIntervalMs,

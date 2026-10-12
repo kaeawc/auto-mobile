@@ -37,6 +37,15 @@ import { FakeTimer } from "../../fakes/FakeTimer";
  * From the spawn on the boot is one admission and at most one counted process, and must count
  * once: not twice once its qemu process shows, and not zero times beside an external emulator
  * while only the launcher runs.
+ *
+ * #11588: a capacity sample is two reads, the adb listing and the process table, taken at
+ * different moments in either order. The "split" shapes take each read as a step of its own, so
+ * a boot can spawn and be listed between them: the process table then predates the boot's process
+ * while the adb listing already shows the boot, and the external emulator is in the table only.
+ * The gate's count holds for either order of the reads there. It cannot for two external
+ * emulators, one only in an older process table and one only in a newer adb listing: no
+ * admission tells them apart. The source therefore reads adb first ("adbFirst"): an emulator adb
+ * lists already has a process, so the later process table shows it too.
  */
 
 const GIB = 1024 ** 3;
@@ -63,6 +72,20 @@ interface Shape {
    * own. "none" keeps a larger shape fast.
    */
   startup: "none" | "launcher" | "validation" | "all";
+  /**
+   * How a capacity sample reads adb and the process table (Android). Left out, both are read as
+   * the sample starts. "split": each is read in a step of its own, in either order, with any
+   * other step in between, and the sample ends in a later step still. "adbFirst": the same,
+   * with the adb read always the earlier one, as `CommandAndroidCapacitySource` takes them.
+   */
+  reads?: "split" | "adbFirst";
+  /**
+   * A second emulator nobody admitted starts and is listed by adb in one step, at any point, and
+   * keeps running (Android).
+   */
+  secondExternal?: boolean;
+  /** Steps every order starts with: the fleet the walk begins from, which keeps the walk small. */
+  prefix?: string[];
 }
 
 /** Let queued promise continuations run; no timer involved. */
@@ -170,10 +193,10 @@ class Actors {
   readonly admittedPastLimit: string[] = [];
   readonly needlessRefusals: string[] = [];
   readStarted: boolean;
-  /** The external emulator's process runs; a capacity sample starting now shows it. */
-  externalRunning = false;
-  /** Per admitter: the external emulator ran when its capacity sample started. */
-  private readonly sampledExternal: boolean[] = [];
+  /** Serials of the external emulators whose process runs; a read taken now shows them. */
+  readonly externalsRunning = new Set<string>();
+  /** Per admitter: the external emulators its capacity sample showed, in either of its reads. */
+  private readonly sampledExternals = new Map<number, Set<string>>();
   /**
    * Per admitter: the admitted boots that held a slot at any point of its capacity sample. One
    * that exited since still counts for that decision: nothing tells the gate whether the listing
@@ -209,7 +232,6 @@ class Actors {
 
   track(index: number, decision: Promise<"admitted" | "refused">): void {
     this.outcomes[index] = "pending";
-    this.sampledExternal[index] = this.externalRunning;
     this.sampledBoots[index] = new Set(this.holders());
     decision.then(
       (outcome) => {
@@ -223,16 +245,23 @@ class Actors {
     );
   }
 
+  /** A read of this admitter's capacity sample showed this external emulator. */
+  showedExternal(index: number, serial: string): void {
+    this.sampledExternals.set(index, new Set(this.sampledExternals.get(index)).add(serial));
+  }
+
   /**
-   * The sample showed the external emulator's process exactly when it ran as the sample started.
-   * An admission beside it is over the limit unless it has exited since; a refusal needs it, the
-   * admitted boots, or a boot that held a slot during the sample and has exited since, to fill
-   * the limit.
+   * The sample showed an external emulator when a read found its process or its adb row.
+   * An admission beside it is over the limit unless it has exited since; a refusal needs the
+   * external emulators shown, the admitted boots, or a boot that held a slot during the sample
+   * and has exited since, to fill the limit.
    */
   private judge(index: number, outcome: "admitted" | "refused"): void {
-    const sampled = this.sampledExternal[index] ? 1 : 0;
+    const shown = [...(this.sampledExternals.get(index) ?? [])];
+    const sampled = shown.length;
+    const stillRunning = shown.filter((serial) => this.externalsRunning.has(serial)).length;
     const { limit } = this.shape;
-    if (outcome === "admitted" && this.admitted() + (this.externalRunning ? sampled : 0) > limit) {
+    if (outcome === "admitted" && this.admitted() + stillRunning > limit) {
       this.admittedPastLimit.push(`admitter ${index}`);
     }
     if (outcome === "admitted") {
@@ -304,7 +333,7 @@ function iosScenario(shape: Shape): Scenario {
           return admission.decision.outcome === "refuse" ? "refused" : "admitted";
         }),
       ),
-    // A reader's listing is one an admission must not rest on if it began before its window.
+    // A reader samples in its own ledger window, on a listing begun no earlier than that window.
     read: () => actors.trackRead(gate.describeCapacity()),
     end: (id) => listings.end(id),
     // The simulator is Booted from here on; a listing already running still shows it Shutdown.
@@ -347,21 +376,84 @@ function androidScenario(shape: Shape): Scenario {
   const listed = new Set<string>();
   /** Serials whose qemu process runs: in the process table from spawn, before adb lists them. */
   const processes = new Map<string, number>();
-  const listings = new HeldListings<AndroidCapacitySample>();
+  const EXTERNAL_SERIAL = "emulator-5580";
+  const SECOND_EXTERNAL_SERIAL = "emulator-5582";
+  const EXTERNAL_SERIALS = [EXTERNAL_SERIAL, SECOND_EXTERNAL_SERIAL];
+  const actors = new Actors(shape);
+  /** The admitter whose `start` step is running: the next sample is its own. */
+  let sampler: number | undefined;
+  /** Samples held open: what each read found, once it was taken, and who decides on it. */
+  const samples = new Map<
+    number,
+    { owner?: number; serials?: string[]; pids?: number[]; end: () => void }
+  >();
+  let sampleCount = 0;
+  const readAdb = (id: number): void => {
+    const sample = samples.get(id);
+    if (sample) {
+      sample.serials = [...listed];
+      const { owner } = sample;
+      if (owner !== undefined) {
+        EXTERNAL_SERIALS.filter((external) => listed.has(external)).forEach((external) =>
+          actors.showedExternal(owner, external),
+        );
+      }
+    }
+  };
+  const readPs = (id: number): void => {
+    const sample = samples.get(id);
+    if (sample) {
+      sample.pids = [...processes.values()];
+      const { owner } = sample;
+      if (owner !== undefined) {
+        EXTERNAL_SERIALS.filter((external) => processes.has(external)).forEach((external) =>
+          actors.showedExternal(owner, external),
+        );
+      }
+    }
+  };
   const source: AndroidCapacitySource = {
     sample: () =>
-      listings.start({
-        emulatorSerials: [...listed],
-        emulatorProcessRssBytes: [...processes].map(() => 3 * GIB),
-        emulatorProcessIds: [...processes.values()].map((pid) => ({ pid, ppid: 1 })),
-        host: { totalMemoryBytes: 64 * GIB, cpuCount: 16 },
-        errors: [],
+      new Promise<AndroidCapacitySample>((resolve) => {
+        const id = sampleCount++;
+        const sample = {
+          owner: sampler,
+          serials: undefined as string[] | undefined,
+          pids: undefined as number[] | undefined,
+          end: () => {
+            samples.delete(id);
+            const pids = sample.pids ?? [];
+            resolve({
+              emulatorSerials: sample.serials ?? [],
+              emulatorProcessRssBytes: pids.map(() => 3 * GIB),
+              emulatorProcessIds: pids.map((pid) => ({ pid, ppid: 1 })),
+              host: { totalMemoryBytes: 64 * GIB, cpuCount: 16 },
+              errors: [],
+            });
+          },
+        };
+        samples.set(id, sample);
+        if (shape.reads === undefined) {
+          readAdb(id);
+          readPs(id);
+        }
       }),
   };
+  /** A sample's reads still to take, then its end: a read never follows the sample's end. */
+  const sampleActions = (): string[] =>
+    [...samples].flatMap(([id, sample]) => {
+      const reads = [
+        ...(sample.serials === undefined ? [`adb:${id}`] : []),
+        ...(sample.pids === undefined ? [`ps:${id}`] : []),
+      ];
+      if (reads.length === 0) {
+        return [`end:${id}`];
+      }
+      return shape.reads === "adbFirst" ? reads.slice(0, 1) : reads;
+    });
   const gate = new AndroidBootAdmissionGate(source, timer, {
     env: { [ANDROID_MAX_BOOTED_ENV]: String(shape.limit) },
   });
-  const actors = new Actors(shape);
   const admissions: Array<BootAdmission | undefined> = [];
   /** Spawned emulators whose startup validation is still running. */
   const validating = new Map<number, { child: EventEmitter; settle: (alive: boolean) => void }>();
@@ -388,7 +480,6 @@ function androidScenario(shape: Shape): Scenario {
     // An early exit rejects the launch; the scenario's `exit` step is that failure.
     launch.catch(() => undefined);
   };
-  const EXTERNAL_SERIAL = "emulator-5580";
   let externalStarted = false;
   const externalActions = (): string[] => {
     if (!shape.external) {
@@ -397,7 +488,7 @@ function androidScenario(shape: Shape): Scenario {
     if (!externalStarted) {
       return ["externalStart"];
     }
-    if (!actors.externalRunning) {
+    if (!actors.externalsRunning.has(EXTERNAL_SERIAL)) {
       return [];
     }
     const lists = shape.external === "lists" || shape.external === "any";
@@ -409,7 +500,8 @@ function androidScenario(shape: Shape): Scenario {
   };
 
   const actions: Record<string, (index: number) => void> = {
-    start: (index) =>
+    start: (index) => {
+      sampler = index;
       actors.track(
         index,
         gate.admit({ timeoutMs: 60_000, avdName: `avd-${index}` }).then(
@@ -424,10 +516,18 @@ function androidScenario(shape: Shape): Scenario {
             throw error;
           },
         ),
-      ),
+      );
+    },
     // A reader's count drops a handed-off boot it sees listed; an older open sample does not see it.
-    read: () => actors.trackRead(gate.describeCapacity()),
-    end: (id) => listings.end(id),
+    read: () => {
+      sampler = undefined;
+      actors.trackRead(gate.describeCapacity());
+    },
+    // The sample's adb listing is read now: it shows the emulators adb lists at this step.
+    adb: readAdb,
+    // The sample's process table is read now: it shows the qemu processes running at this step.
+    ps: readPs,
+    end: (id) => samples.get(id)?.end(),
     // The emulator process was spawned and its serial is reserved; adb does not list it yet.
     spawn: (index) => {
       const admission = admissions[index];
@@ -467,15 +567,21 @@ function androidScenario(shape: Shape): Scenario {
     // Someone else's emulator: a qemu process from here on, in no admission and not in adb yet.
     externalStart: () => {
       externalStarted = true;
-      actors.externalRunning = true;
+      actors.externalsRunning.add(EXTERNAL_SERIAL);
       processes.set(EXTERNAL_SERIAL, 2_000);
+    },
+    // Another emulator nobody admitted: a qemu process and an adb row at once, from here on.
+    secondExternal: () => {
+      actors.externalsRunning.add(SECOND_EXTERNAL_SERIAL);
+      processes.set(SECOND_EXTERNAL_SERIAL, 2_001);
+      listed.add(SECOND_EXTERNAL_SERIAL);
     },
     externalList: () => {
       listed.add(EXTERNAL_SERIAL);
     },
     // Gone from the process table and from adb; a listing already running still shows it.
     externalExit: () => {
-      actors.externalRunning = false;
+      actors.externalsRunning.delete(EXTERNAL_SERIAL);
       processes.delete(EXTERNAL_SERIAL);
       listed.delete(EXTERNAL_SERIAL);
     },
@@ -494,7 +600,10 @@ function androidScenario(shape: Shape): Scenario {
     enabled: () => [
       ...actors.startActions(),
       ...externalActions(),
-      ...listings.openIds().map((id) => `end:${id}`),
+      ...(shape.secondExternal && !actors.externalsRunning.has(SECOND_EXTERNAL_SERIAL)
+        ? ["secondExternal"]
+        : []),
+      ...sampleActions(),
       ...actors.outcomes.flatMap((outcome, index) => {
         if (outcome !== "admitted" || listed.has(serial(index)) || actors.exited.has(index)) {
           return [];
@@ -538,13 +647,117 @@ const STARTUP_SHAPES: Array<[Shape, number]> = [
   [{ limit: 1, admitters: 2, earlyExit: true, startup: "validation" }, 1056],
 ];
 
+/** `count` boots are admitted and none has spawned, beside an unlisted external emulator if any. */
+function admittedBoots(count: number, external: "external" | "alone"): string[] {
+  return [
+    ...(external === "external" ? ["externalStart"] : []),
+    ...Array.from({ length: count }, (_, index) => [
+      `start:${index}`,
+      `ps:${index}`,
+      `adb:${index}`,
+      `end:${index}`,
+    ]).flat(),
+  ];
+}
+
+/** A split-read shape that starts with boots already admitted beside a running external emulator. */
+function besideExternal(
+  limit: number,
+  shape: Partial<Shape> & Pick<Shape, "external" | "startup">,
+): Shape {
+  return {
+    limit,
+    admitters: limit,
+    noReader: true,
+    reads: "split",
+    prefix: admittedBoots(limit - 1, "external"),
+    ...shape,
+  };
+}
+
+/**
+ * Shapes whose samples read adb and the process table in separate steps (#11588), with the
+ * orders each one walks. Larger ones hold too (checked by hand) and take too long to keep: one
+ * admission, a reader and an external emulator ("any") against a limit of one (158,380 orders),
+ * the hole's shape beside a reader (12,600), two admissions with no external emulator from an
+ * empty fleet against a limit of two (6,864), the hole's shape with every startup step, early
+ * exits and the external emulator's whole life (41,216), and a limit of three with launcher
+ * steps and the external emulator being listed (92,400).
+ */
+const SPLIT_READ_SHAPES: Array<[Shape, number]> = [
+  [
+    { limit: 1, admitters: 1, external: "any", noReader: true, startup: "none", reads: "split" },
+    155,
+  ],
+  [{ limit: 1, admitters: 2, noReader: true, startup: "none", reads: "split" }, 700],
+  // The smallest shape with the hole: the external emulator and one admitted boot fill a limit of
+  // two, the boot spawns and is listed between the second sample's two reads, and the second
+  // admission has to be refused.
+  [besideExternal(2, { external: "stays", startup: "none" }), 30],
+  // The boot's process may also show, or exit, between the two reads.
+  [besideExternal(2, { external: "stays", earlyExit: true, startup: "launcher" }), 102],
+  // The external emulator may be listed, or exit and free its slot, between the reads too.
+  [besideExternal(2, { external: "lists", startup: "none" }), 210],
+  [besideExternal(2, { external: "exits", startup: "none" }), 285],
+  // The same hole one slot up: two admitted boots and the external emulator fill a limit of three.
+  [besideExternal(3, { external: "stays", startup: "none" }), 840],
+  // No external emulator: a boot whose process shows, or that is listed, between the reads counts
+  // once, and the free slot is granted.
+  [
+    {
+      limit: 2,
+      admitters: 2,
+      noReader: true,
+      startup: "validation",
+      reads: "split",
+      prefix: admittedBoots(1, "alone"),
+    },
+    240,
+  ],
+];
+
+/**
+ * Two external emulators, the second one started and listed at any point (#11588). The first
+ * runs unlisted from the start, so a process table read before the second started and an adb
+ * listing read after it show one emulator each.
+ */
+function twoExternals(shape: Pick<Shape, "limit" | "admitters" | "reads">): Shape {
+  return {
+    external: "stays",
+    secondExternal: true,
+    noReader: true,
+    startup: "none",
+    prefix: ["externalStart"],
+    ...shape,
+  };
+}
+
+/** Two admissions from only the first external emulator against a limit of three hold too (4,200 orders, checked by hand). */
+const TWO_EXTERNAL_SHAPES: Array<[Shape, number]> = [
+  // The smallest shape: both external emulators fill a limit of two and the boot is refused.
+  [twoExternals({ limit: 2, admitters: 1, reads: "adbFirst" }), 7],
+  // One slot up, beside a boot admitted before the second external emulator starts.
+  [
+    {
+      ...twoExternals({ limit: 3, admitters: 2, reads: "adbFirst" }),
+      prefix: admittedBoots(1, "external"),
+    },
+    207,
+  ],
+];
+
 function describeShape(shape: Shape): string {
+  const alreadyAdmitted = (shape.prefix ?? []).filter((step) => step.startsWith("start:")).length;
   const parts = [
     `${shape.admitters} admission(s)`,
     ...(shape.noReader ? [] : ["a reader"]),
     ...(shape.external ? [`an external emulator (${shape.external})`] : []),
     ...(shape.earlyExit ? ["emulators that may exit during startup"] : []),
     ...(shape.startup === "none" ? [] : [`startup steps (${shape.startup})`]),
+    ...(shape.secondExternal ? ["a second external emulator"] : []),
+    ...(shape.reads === "split" ? ["adb and ps read in separate steps"] : []),
+    ...(shape.reads === "adbFirst" ? ["adb read in a step before ps"] : []),
+    ...(alreadyAdmitted > 0 ? [`${alreadyAdmitted} already admitted`] : []),
   ];
   return `Android: ${parts.join(", ")} against a limit of ${shape.limit}`;
 }
@@ -553,8 +766,9 @@ async function expectEveryOrderHolds(
   create: () => Scenario,
   limit: number,
   orders: number,
+  prefix: string[] = [],
 ): Promise<void> {
-  const result = await exploreEveryOrder(create, limit);
+  const result = await exploreEveryOrder(create, limit, prefix);
 
   // The first few orders are enough to reproduce; hundreds would drown the report.
   expect(result.overLimit.slice(0, 5)).toEqual([]);
@@ -569,7 +783,7 @@ describe("boot capacity gates never admit past the limit in any interleaving (#1
   // checked by hand), but take seconds; this shape already contains every failing order found.
   const shape: Shape = { limit: 1, admitters: 2, startup: "validation" };
   for (const [platform, create, orders] of [
-    ["iOS", iosScenario, 218],
+    ["iOS", iosScenario, 336],
     ["Android", androidScenario, 648],
   ] as const) {
     test(`${platform}: two admissions and a reader against a limit of one`, async () => {
@@ -594,4 +808,32 @@ describe("a spawned emulator still validating its startup takes one slot in any 
       await expectEveryOrderHolds(() => androidScenario(shape), shape.limit, orders);
     });
   }
+});
+
+describe("a boot listed after the process table was read still counts beside an external emulator (#11588)", () => {
+  for (const [shape, orders] of SPLIT_READ_SHAPES) {
+    test(describeShape(shape), async () => {
+      await expectEveryOrderHolds(() => androidScenario(shape), shape.limit, orders, shape.prefix);
+    });
+  }
+});
+
+describe("two external emulators, one in each read, are two when adb is read first (#11588)", () => {
+  for (const [shape, orders] of TWO_EXTERNAL_SHAPES) {
+    test(describeShape(shape), async () => {
+      await expectEveryOrderHolds(() => androidScenario(shape), shape.limit, orders, shape.prefix);
+    });
+  }
+
+  // Why the source orders its reads: with the process table read first, no count over the two
+  // listings can tell one emulator seen twice from two emulators seen once each.
+  test("the same fleet is admitted past the limit when the process table may be read first", async () => {
+    const shape = twoExternals({ limit: 2, admitters: 1, reads: "split" });
+
+    const result = await exploreEveryOrder(() => androidScenario(shape), shape.limit, shape.prefix);
+
+    expect(result.overLimit).toContain(
+      "externalStart > start:0 > ps:0 > secondExternal > adb:0 > end:0",
+    );
+  });
 });

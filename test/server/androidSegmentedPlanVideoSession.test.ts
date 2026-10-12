@@ -1502,3 +1502,61 @@ describe("degraded segmented session cleanup", () => {
     expect(finalized).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("AndroidSegmentedPlanVideoSession ownerless adoption", () => {
+  test("adoption is guarded, keeps capture running, and later segments use the holder", async () => {
+    const timer = new FakeTimer();
+    const owners: Array<string | undefined> = [];
+    const stopped: string[] = [];
+    const session = new AndroidSegmentedPlanVideoSession({
+      device: androidDevice,
+      outputNamePrefix: "adopt",
+      timer,
+      segmentRotateAfterMs: 1_000,
+      startVideoRecording: async (request) => {
+        owners.push(request.ownerSessionUuid);
+        return makeActiveRecording(`segment-${owners.length}`, `/tmp/segment-${owners.length}.mp4`);
+      },
+      stopVideoRecording: async (id) => {
+        stopped.push(id!);
+        return { metadata: makeStopMetadata(id!, `/tmp/${id}.mp4`), evictedRecordingIds: [] };
+      },
+      getVideoRecordingStatus: async () => undefined,
+      getVideoRecordingMetadata: async () => null,
+      rollbackVideoRecordingStart: async () => {},
+    });
+    await session.startFirstSegment();
+    expect(session.adoptOwnerSession("holder")).toBe(true);
+    expect(session.adoptOwnerSession("loser")).toBe(false);
+    expect(session.ownerSession).toBe("holder");
+    expect(session.isOwnedBy(undefined, androidDevice.deviceId)).toBe(false);
+    expect(stopped).toEqual([]);
+    timer.advanceTime(1_000);
+    await session.onBeforePlanStep();
+    expect(owners).toEqual([undefined, "holder"]);
+    await session.stop();
+    expect(session.adoptOwnerSession("next")).toBe(false);
+  });
+
+  test("an ownerless capture tearing down is still adopted until finalization completes", async () => {
+    const { session, pendingStop } = makePendingStopSession();
+    await session.startFirstSegment();
+    const stopping = session.stop();
+    expect(session.adoptOwnerSession("holder")).toBe(true);
+    expect(session.isOwnedBy("holder", androidDevice.deviceId)).toBe(true);
+    expect(session.adoptOwnerSession("next")).toBe(false);
+    pendingStop.resolve({
+      metadata: makeStopMetadata("id-bounded", "/tmp/id-bounded.mp4"),
+      evictedRecordingIds: [],
+    });
+    await stopping;
+    expect(session.ownerSession).toBe("holder");
+  });
+
+  test("finished ownerless sessions cannot be adopted", async () => {
+    const { session } = makePendingStopSession();
+    await session.stop();
+    expect(session.adoptOwnerSession("holder")).toBe(false);
+    expect(session.ownerSession).toBeUndefined();
+  });
+});

@@ -23,6 +23,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeSlotRegistry } from "../fakes/FakeSlotRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDeviceLifecycleCoordinator";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtures";
 
@@ -61,6 +62,8 @@ describe("startDevice by name with a managed-slot device matching the same name"
   let sessions: SessionManager;
   let devices: FakeDeviceUtils;
   let registry: FakeSlotRegistry;
+  let pool: DevicePool;
+  let lifecycleCoordinator: FakeVirtualDeviceLifecycleCoordinator;
 
   beforeEach(() => {
     resetDeviceToolsDependencies();
@@ -70,6 +73,7 @@ describe("startDevice by name with a managed-slot device matching the same name"
     devices = new FakeDeviceUtils();
     registry = new FakeSlotRegistry(timer);
     const idGenerator = new CountingIdGenerator("name-start");
+    lifecycleCoordinator = new FakeVirtualDeviceLifecycleCoordinator();
     setDeviceToolsDependencies({
       env: { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: "0" },
       deviceManagerFactory: () => devices,
@@ -80,11 +84,12 @@ describe("startDevice by name with a managed-slot device matching the same name"
       ensureCtrlProxyReady: async () => {},
       timer,
       idGenerator,
+      lifecycleCoordinator,
     });
     PlatformDeviceManagerFactory.setInstance(devices);
     setDeviceManager(devices);
     sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
-    const pool = new DevicePool(
+    pool = new DevicePool(
       createDevicePoolDependencies(sessions, "name-start-daemon", {
         timer,
         idGenerator,
@@ -194,6 +199,88 @@ describe("startDevice by name with a managed-slot device matching the same name"
     );
 
     expect(outcome).toMatchObject({ code: DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE });
+    expect(bootedNames()).toEqual([]);
+  });
+  async function creatingSlot(name: string) {
+    const scope = await registry.ensureScope({
+      managedHostScope: "host",
+      runnerNamespace: "creating",
+      runnerIncarnation: "boot-1",
+    });
+    if (scope.kind !== "ready") {
+      throw new Error(`scope not ready: ${scope.kind}`);
+    }
+    const key = { scopeKey: scope.scope.scopeKey, slotIndex: 0 };
+    await registry.initSlot(key, { role: "app", platform: "ios", requestedSpec: {} });
+    expect(
+      await registry.openSlotJournal(key, {
+        kind: "create",
+        phase: "creating",
+        owner: { daemonId: "creator", pid: 1, processGenerationToken: "fake" },
+        target: {
+          oldStableId: null,
+          oldName: null,
+          newStableId: null,
+          newName: name,
+          requestedSpec: {},
+          resolvedSpec: null,
+          specFingerprint: "fp",
+        },
+        assignment: {
+          kind: "state",
+          expected: { generation: 0, stableDeviceId: null },
+          state: "provisioning",
+        },
+      }),
+    ).toMatchObject({ kind: "opened" });
+  }
+
+  test("both lifecycle matching and boot selection skip the name-held simulator", async () => {
+    const name = "amslot-12345678-0-g1-attempt";
+    await creatingSlot(name);
+    devices.setBootedDevices("ios", []);
+    devices.setDeviceImages("ios", [
+      { ...simulator(SLOT_UDID, "18.2"), name },
+      { ...simulator(FREE_UDID, "18.0"), name: `${name}-user` },
+    ]);
+
+    const result = await start({ platform: "ios", name: "amslot-" });
+
+    expect(result.runtime.deviceId).toBe(FREE_UDID);
+    expect(bootedNames()).toEqual([expect.stringContaining(`startDevice:${name}-user:`)]);
+  });
+
+  test("a running name-held simulator is never selected or deferred to as an idle match", async () => {
+    const name = "amslot-12345678-0-g1-attempt";
+    await creatingSlot(name);
+    const booted = [{ name, deviceId: SLOT_UDID, platform: "ios" as const }];
+    devices.setBootedDevices("ios", booted);
+    await pool.initializeWithDevices(booted);
+    devices.setDeviceImages("ios", [
+      { ...simulator(SLOT_UDID, "18.2"), name, isRunning: true },
+      { ...simulator(FREE_UDID, "18.0"), name: `${name}-user` },
+    ]);
+
+    const result = await start({ platform: "ios", name: "amslot-" });
+
+    expect(result.runtime.deviceId).toBe(FREE_UDID);
+    expect(pool.getDevice(SLOT_UDID)?.sessionId).toBeNull();
+    expect(bootedNames()).toEqual([expect.stringContaining(`startDevice:${name}-user:`)]);
+  });
+
+  test("an unpooled name-held simulator is refused before taking its lifecycle lease", async () => {
+    const name = "amslot-12345678-0-g1-attempt";
+    await creatingSlot(name);
+    devices.setBootedDevices("ios", []);
+    devices.setDeviceImages("ios", [{ ...simulator(SLOT_UDID, "18.2"), name }]);
+
+    const outcome = await start({ platform: "ios", name, createIfMissing: false }).catch(
+      (error: unknown) => error,
+    );
+
+    expect(outcome).toMatchObject({ code: DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE });
+    expect((outcome as Error).message).toStartWith("startDevice refused:");
+    expect(lifecycleCoordinator.reservations).toEqual([]);
     expect(bootedNames()).toEqual([]);
   });
 });

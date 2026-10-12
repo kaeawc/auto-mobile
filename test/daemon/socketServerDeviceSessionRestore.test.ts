@@ -270,6 +270,42 @@ test.each(["explicit-release", "heartbeat-timeout", "superseded", "device-killed
   },
 );
 
+// #11361: a bound session whose row ran out its idle window with nobody holding it has ended. Its
+// owner is told so with the recorded reason, as an unbound call naming it is, not "not found".
+test.each([undefined, "device-restart:Pixel", "daemon-shutdown"])(
+  "bound call names expired for a row past its idle deadline (handoff %s)",
+  async (handoff) => {
+    const h = await boundRecoveryHarness();
+    try {
+      if (handoff) {
+        await h.manager.releaseSession("bound", handoff);
+      }
+      const row = await h.persistence.getSession("bound");
+      // The daemon that held the session is gone; the one answering never had it in memory.
+      const restarted = new SessionManager(h.timer, h.persistence);
+      restarted.stopCleanupTimer();
+      h.server["daemonState"].getSessionManager = () => restarted;
+      h.timer.setCurrentTime(row!.expires_at_ms + 1);
+
+      const response = await h.call();
+      expect(response).toMatchObject({
+        success: false,
+        boundSessionLoss: {
+          code: "bound_session_lost",
+          sessionUuid: "bound",
+          reason: "expired",
+          release: { sessionId: "bound", releaseReason: "expired", terminal: true },
+        },
+      });
+      expect(h.forwarded).toHaveLength(1);
+      // The answer is a read: the row keeps what it stored.
+      expect((await h.persistence.getSession("bound"))?.release_reason ?? undefined).toBe(handoff);
+    } finally {
+      h.close();
+    }
+  },
+);
+
 test.each(["expired", "no-row", "query-failure"])(
   "bound call fails closed for %s",
   async (failure) => {

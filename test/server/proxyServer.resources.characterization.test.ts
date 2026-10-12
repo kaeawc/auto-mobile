@@ -128,6 +128,29 @@ test.each([
   }
 });
 
+test("a control call the daemon answered daemon_shutting_down is told typed, retryable and maybe-dispatched", async () => {
+  const { server, proxy, registrations } = createHarness();
+  const call = spyOn(proxy, "callTool").mockRejectedValue(new DaemonShuttingDownError(true));
+  try {
+    const handler = registrations.find(([schema]) => schema === CallToolRequestSchema)?.[1];
+    if (!handler) {
+      throw new Error("Missing handler");
+    }
+    const result = await handler({ method: "tools/call", params: { name: "tapOn" } }, extra);
+    expect(result.isError).toBe(true);
+    const told = JSON.parse(result.content[0].text) as { error: Record<string, unknown> };
+    expect(told.error).toMatchObject({
+      code: "daemon_shutting_down",
+      retryable: true,
+      requestMayHaveDispatched: true,
+    });
+  } finally {
+    call.mockRestore();
+    await server.close();
+    await proxy.close();
+  }
+});
+
 test.each(requests)(
   "resource handler %s preserves generic failures",
   async (schema, method, delegate, message) => {

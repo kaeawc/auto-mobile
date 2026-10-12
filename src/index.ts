@@ -48,6 +48,7 @@ import {
 import {
   installProcessLifecycleHandlers,
   installStdinShutdownHandlers,
+  installStdoutShutdownHandler,
   requestProcessShutdown,
   setFatalProcessHandler,
   setProcessShutdownHandler,
@@ -58,7 +59,8 @@ import {
   type ManagedSlotConfig,
 } from "./models/managedSlotConfig";
 import type { ManagedSlotsResult } from "./models/managedSlotsResult";
-import { runShutdownCleanupStages } from "./shutdownCleanup";
+import { createStdioShutdownStages, runShutdownCleanupStages } from "./shutdownCleanup";
+import { defaultTimer } from "./utils/SystemTimer";
 import { startStartupMaintenance } from "./utils/startupMaintenance";
 import { daemonCommandSkipsServerBootstrap } from "./daemon/cli/daemonCommandRouting";
 
@@ -180,46 +182,52 @@ async function main() {
     async (signal) => {
       shutdownCleanupFailed = false;
       logger.info(`Received ${signal} signal, shutting down`);
+      // Every stage draws a deadline from STDIO_SHUTDOWN_STAGES, as the daemon's stages do from
+      // theirs: a wedged capture, adb or simulator teardown is abandoned with a warning instead
+      // of holding the process to its limit, and the database closes only once nothing that may
+      // still write is running (#11601).
       await runShutdownCleanupStages(
-        [
-          {
-            name: "direct-mode capture and iOS CtrlProxy children",
-            run: async () => {
-              if (directModeActive) {
-                await cleanupDaemonChildProcesses();
-              }
-            },
+        createStdioShutdownStages({
+          directModeActive: () => directModeActive,
+          cleanupChildProcesses: () => cleanupDaemonChildProcesses(),
+          stopManagedAdbServer: () => stopManagedAdbServer(),
+          stopVideoRecordingSocketServer: () => stopVideoRecordingSocketServer(),
+          stopTestRecordingSocketServer: () => stopTestRecordingSocketServer(),
+          stopDeviceSnapshotSocketServer: () => stopDeviceSnapshotSocketServer(),
+          stopAppearanceSocketServer: () => stopAppearanceSocketServer(),
+          stopWebRtcStreamSocketServer: () => stopWebRtcStreamSocketServer(),
+          stopAppearanceSyncScheduler: () => stopAppearanceSyncScheduler(),
+          cleanupPrefetchedApk: () => AndroidCtrlProxyManager.cleanupPrefetchedApk(),
+          closeStdioProxy: () => stdioProxy?.close(),
+          // The database modules are loaded only in direct mode, which is the only caller.
+          drainDatabaseWrites: async (timeoutMs) => {
+            const { getDbWriteBarrier } = await import("./db/dbWriteBarrier");
+            if (!(await getDbWriteBarrier().drain(timeoutMs))) {
+              logger.warn(
+                `Timed out after ${timeoutMs}ms draining in-flight DB writes; closing database anyway`,
+              );
+            }
           },
-          {
-            name: "direct-mode managed ADB server",
-            run: async () => {
-              if (directModeActive) {
-                await stopManagedAdbServer();
-              }
-            },
+          settleMigrations: async (timeoutMs) => {
+            const { awaitInFlightMigrations } = await import("./db/database");
+            if (!(await awaitInFlightMigrations(timeoutMs))) {
+              logger.warn(
+                `Timed out after ${timeoutMs}ms awaiting in-flight startup migration; closing database anyway`,
+              );
+            }
           },
-          { name: "video recording socket server", run: stopVideoRecordingSocketServer },
-          { name: "test recording socket server", run: stopTestRecordingSocketServer },
-          { name: "device snapshot socket server", run: stopDeviceSnapshotSocketServer },
-          { name: "appearance socket server", run: stopAppearanceSocketServer },
-          { name: "WebRTC stream socket server", run: stopWebRtcStreamSocketServer },
-          { name: "appearance sync scheduler", run: stopAppearanceSyncScheduler },
-          {
-            name: "prefetched Android CtrlProxy APK",
-            run: AndroidCtrlProxyManager.cleanupPrefetchedApk,
+          closeDatabase: async () => {
+            const { closeDatabase } = await import("./db/database");
+            await closeDatabase();
           },
-          { name: "stdio proxy", run: async () => await stdioProxy?.close() },
-          {
-            name: "logger",
-            run: async () => {
-              await logger.closeAfterFlush();
-            },
-          },
-        ],
+          closeLogger: () => logger.closeAfterFlush(),
+          warn: (message) => logger.warn(message),
+        }),
         (message, error) => {
           shutdownCleanupFailed = true;
           logger.warn(message, error);
         },
+        { timer: defaultTimer },
       );
     },
     async () => {
@@ -730,9 +738,10 @@ async function main() {
         });
       }
 
-      // Detect when the MCP client disconnects (stdin closes / pipe breaks).
+      // Detect when the MCP client disconnects (stdin closes / stdout writes fail).
       // This uses the shared lifecycle handler so resources close before exit.
       installStdinShutdownHandlers();
+      installStdoutShutdownHandler();
 
       // Run as MCP server with STDIO transport
       const stdioTransport = new StdioServerTransport();

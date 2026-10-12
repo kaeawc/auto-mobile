@@ -1,8 +1,8 @@
 /**
  * The managed-slot acquisition result (epic #11172, #11173 part b): what `daemon/acquireManagedSlots`
- * returns, and what the stdio proxy exposes verbatim in
- * `InitializeResult.capabilities.experimental["automobile/managedSlots"]` and as the proxy-local
- * resource {@link MANAGED_SLOTS_RESOURCE_URI}.
+ * returns, and what the stdio proxy exposes as a snapshot in
+ * `InitializeResult.capabilities.experimental["automobile/managedSlots"]`. The proxy-local
+ * resource {@link MANAGED_SLOTS_RESOURCE_URI} may annotate terminally released sessions.
  *
  * Plain data only, shared by the daemon and the proxy, so neither imports the other's machinery.
  */
@@ -71,6 +71,8 @@ export interface ManagedSlotResultEntry {
   device: ManagedSlotDeviceEvidence | null;
   /** The fresh session this execution holds on the slot's device (null when the slot failed). */
   sessionUuid: string | null;
+  /** Set by the proxy's resource once this slot's session was terminally released (#11712). */
+  executionEnded?: { reason: string; nextAction: "relaunch_execution" };
   requestedSpec: unknown;
   resolvedSpec: unknown;
   specFingerprint: { version: number; hash: string } | null;

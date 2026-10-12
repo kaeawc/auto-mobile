@@ -1,5 +1,6 @@
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
+import { parseStrictPositiveInteger } from "../utils/envNumbers";
 
 /** What the watchdog observes about this daemon process. */
 export interface PrivateDaemonOrphanPort {
@@ -36,6 +37,7 @@ const INIT_PID = 1;
 /** Idle timeout for an orphaned private daemon; 0 disables the watchdog. */
 export function resolvePrivateDaemonOrphanIdleMs(env: NodeJS.ProcessEnv = process.env): number {
   const raw = env[PRIVATE_DAEMON_ORPHAN_IDLE_MS_ENV];
+  // oxlint-disable-next-line auto-mobile/no-raw-env-number-parse -- 0 is meaningful here (it disables the watchdog), so the positive-integer helper does not fit.
   const parsed = raw === undefined ? Number.NaN : Number(raw);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_PRIVATE_DAEMON_ORPHAN_IDLE_MS;
 }
@@ -53,8 +55,8 @@ export function resolveLauncherPid(
   env: NodeJS.ProcessEnv = process.env,
 ): number {
   const raw = env[DAEMON_LAUNCHER_PID_ENV]?.trim() ?? "";
-  const parsed = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
-  return Number.isSafeInteger(parsed) && parsed > 1 ? parsed : entryParentPid;
+  const parsed = parseStrictPositiveInteger(raw);
+  return parsed !== undefined && parsed > 1 ? parsed : entryParentPid;
 }
 
 /** Explicit harness marker: `1` arms the orphan watchdog, `0` opts a daemon out of it. */

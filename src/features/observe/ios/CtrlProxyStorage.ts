@@ -6,6 +6,7 @@
  * Uses the same wire protocol message types as the Android delegate.
  */
 
+import { getAbortSignal } from "../../../utils/AbortContext";
 import { logger } from "../../../utils/logger";
 import { mapStorageSdkError } from "../../../server/storageSdkErrors";
 import { ActionableError } from "../../../models/ActionableError";
@@ -236,6 +237,7 @@ export class CtrlProxyStorage {
       throw new Error("Failed to connect to CtrlProxy");
     }
 
+    getAbortSignal()?.throwIfAborted();
     const sessionId = this.sessionId?.();
     const mutationToken = this.mutationToken?.(packageName);
     const requestId = this.context.requestManager.generateId("set_preference");
@@ -300,6 +302,7 @@ export class CtrlProxyStorage {
       throw new Error("Failed to connect to CtrlProxy");
     }
 
+    getAbortSignal()?.throwIfAborted();
     const sessionId = this.sessionId?.();
     const mutationToken = this.mutationToken?.(packageName);
     const requestId = this.context.requestManager.generateId("remove_preference");
@@ -356,6 +359,7 @@ export class CtrlProxyStorage {
       throw new Error("Failed to connect to CtrlProxy");
     }
 
+    getAbortSignal()?.throwIfAborted();
     const sessionId = this.sessionId?.();
     const mutationToken = this.mutationToken?.(packageName);
     const requestId = this.context.requestManager.generateId("clear_preferences");

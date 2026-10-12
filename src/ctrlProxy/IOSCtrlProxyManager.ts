@@ -11,6 +11,7 @@ import { createDoctorDeadline, remainingDoctorProbe, awaitDoctorProbe } from "..
 import { errorMessage } from "../utils/describeUnknownError";
 import { trackAmbient } from "../utils/PerfContext";
 import { logger } from "../utils/logger";
+import { readEnvPositiveInteger } from "../utils/envNumbers";
 import { BootedDevice } from "../models";
 import { requireBootedDevice } from "../devices/requireBootedDevice";
 import {
@@ -2972,18 +2973,13 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * Resolve the health-poll attempt budget. Env-overridable so CI (where XCUITest
    * cold-start routinely exceeds the default) can extend it without a code change.
    */
-  private static resolveHealthPollMaxAttempts(): number {
-    const raw =
-      process.env.AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS ??
-      process.env.AUTO_MOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS;
-    let configuredAttempts = IOSCtrlProxyManager.DEFAULT_HEALTH_POLL_MAX_ATTEMPTS;
-    if (raw !== undefined) {
-      const parsed = Number.parseInt(raw, 10);
-      if (Number.isFinite(parsed) && parsed > 0) {
-        configuredAttempts = parsed;
-      }
-    }
-    return configuredAttempts;
+  static resolveHealthPollMaxAttempts(env: NodeJS.ProcessEnv = process.env): number {
+    return readEnvPositiveInteger(
+      "AUTOMOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS",
+      "AUTO_MOBILE_CTRL_PROXY_HEALTH_MAX_ATTEMPTS",
+      { fallback: IOSCtrlProxyManager.DEFAULT_HEALTH_POLL_MAX_ATTEMPTS },
+      env,
+    );
   }
 
   private extendHealthPollDeadline(

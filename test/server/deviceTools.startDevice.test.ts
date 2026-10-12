@@ -2,7 +2,7 @@ import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDeviceOwnership";
 import { warmedTests } from "../helpers/warmedTests";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterAll, describe, expect, beforeEach, afterEach } from "bun:test";
+import { afterAll, describe, expect, beforeEach, afterEach, test } from "bun:test";
 import type { ChildProcess } from "child_process";
 import { EventEmitter } from "node:events";
 import {
@@ -22,6 +22,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
+import { setDebugPerfEnabled } from "../../src/utils/PerformanceTracker";
 import {
   clearDirectSessionDevices,
   resolveDirectSessionDevice,
@@ -652,6 +653,31 @@ describe("startDevice handler", () => {
     expect(fakeDeviceUtils.getExecutedOperations()).toContain(
       "waitForDeviceReady:Pixel_7_API_34:42000",
     );
+  });
+
+  it("omits the internal timing tree from a success response unless debug-perf is on (#11636)", async () => {
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+
+    const result = await callStartDevice({ platform: "android" });
+
+    expect(result.acquisition).toBe("already-booted");
+    expect(result.readiness).toBeDefined();
+    expect("timing" in result).toBe(false);
+  });
+
+  it("keeps the timing tree on a success response behind debug-perf (#11636)", async () => {
+    setDebugPerfEnabled(true);
+    try {
+      fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+      fakeMatcher.setBootedResult(androidDevice);
+
+      const result = await callStartDevice({ platform: "android" });
+
+      expect(result.timing).toBeDefined();
+    } finally {
+      setDebugPerfEnabled(false);
+    }
   });
 
   it("falls through to image when no booted device matches", async () => {
@@ -1575,7 +1601,7 @@ describe("startDevice handler", () => {
     });
   });
 
-  it("retires an adopted replacement when its second readiness check fails", async () => {
+  test("keeps an adopted running-before replacement idle when its second readiness check fails", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
@@ -1628,18 +1654,18 @@ describe("startDevice handler", () => {
       "System UI ANR persisted after Wait",
     );
 
-    expect(replacementProcess.killed).toBe(true);
+    expect(replacementProcess.killed).toBe(false);
     expect(pool.getDevice(pooledAnrDevice.deviceId)).toBeNull();
-    expect(pool.getDevice(recoveryImage.deviceId!)).toBeNull();
-    expect(pool.getIdleDevices()).toEqual([]);
+    expect(pool.getDevice(recoveryImage.deviceId!)).toMatchObject({
+      status: "idle",
+      sessionId: null,
+    });
+    expect(pool.getIdleDevices()).toHaveLength(1);
     expect(daemonSessionManager.getSession("owner-session")).toBeNull();
   });
 
-  // Mirrors "retains a preempted cold boot lease until its emulator process
-  // exits": the recovery path signals the retired replacement but must not hand
-  // the AVD's stable lifecycle key to the next request until it has exited, or a
-  // second instance of the same AVD can be cold-booted over a live qemu process.
-  it("holds the AVD lifecycle lease until the retired ANR replacement process exits", async () => {
+  // The replacement of a previously running AVD stays alive after failed readiness.
+  test("releases the AVD lifecycle lease while keeping the running-before ANR replacement alive", async () => {
     const timer = new FakeTimer();
     const lifecycleCoordinator = new InMemoryVirtualDeviceLifecycleCoordinator(timer);
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -1694,8 +1720,8 @@ describe("startDevice handler", () => {
       "System UI ANR persisted after Wait",
     );
 
-    // The replacement emulator was signalled but has not exited yet.
-    expect(replacementProcess.killed).toBe(true);
+    // The replacement remains alive; failed acquisition no longer owns its process.
+    expect(replacementProcess.killed).toBe(false);
 
     const nextLease = lifecycleCoordinator.reserve(
       { kind: "stable", platform: "android", stableId: androidImage.name },
@@ -1708,13 +1734,11 @@ describe("startDevice handler", () => {
     for (let attempt = 0; attempt < 50; attempt++) {
       await Promise.resolve();
     }
-    expect(acquired).toBe(false);
-
-    replacementProcess.emit("exit", 0, null);
+    expect(acquired).toBe(true);
     (await nextLease).release();
   });
 
-  it("retires an adopted replacement when its recovered readiness reservation fails", async () => {
+  test("keeps an adopted running-before replacement idle when its recovered readiness reservation fails", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
@@ -1780,14 +1804,17 @@ describe("startDevice handler", () => {
       "recovered reservation identity changed",
     );
 
-    expect(replacementProcess.killed).toBe(true);
+    expect(replacementProcess.killed).toBe(false);
     expect(pool.getDevice(pooledAnrDevice.deviceId)).toBeNull();
-    expect(pool.getDevice(recoveryImage.deviceId!)).toBeNull();
-    expect(pool.getIdleDevices()).toEqual([]);
+    expect(pool.getDevice(recoveryImage.deviceId!)).toMatchObject({
+      status: "idle",
+      sessionId: null,
+    });
+    expect(pool.getIdleDevices()).toHaveLength(1);
     expect(daemonSessionManager.getSession("owner-session")).toBeNull();
   });
 
-  it("preserves the second readiness error when recovery cleanup fails", async () => {
+  test("preserves the second readiness error when recovery cleanup fails", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -1797,9 +1824,6 @@ describe("startDevice handler", () => {
         timer: timer,
         deviceManager: fakeDeviceUtils,
         retryExecutor: new DefaultRetryExecutor(timer),
-        releaseSessionForDisconnectedDevice: async () => {
-          throw new Error("cleanup persistence failed");
-        },
       }),
     );
     const recoveryImage = {
@@ -1820,6 +1844,9 @@ describe("startDevice handler", () => {
       "android",
       recoveryImage,
     );
+    daemonSessionManager.releaseSessionIfOwned = async () => {
+      throw new Error("cleanup persistence failed");
+    };
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     fakeDeviceUtils.setDeviceImages("android", [recoveryImage]);
     fakeDeviceUtils.setMockChildProcess(
@@ -1849,12 +1876,15 @@ describe("startDevice handler", () => {
     await expect(callStartDevice({ platform: "android" })).rejects.toThrow(
       "replacement runner unavailable",
     );
-    expect(replacementProcess.killed).toBe(true);
-    expect(pool.getDevice(recoveryImage.deviceId!)).toBeNull();
+    expect(replacementProcess.killed).toBe(false);
+    expect(pool.getDevice(recoveryImage.deviceId!)).toMatchObject({
+      status: "busy",
+      sessionId: "owner-session",
+    });
     expect(pool.getIdleDevices()).toEqual([]);
   });
 
-  it("fails rather than returning a System UI recovery session released during readiness", async () => {
+  test("fails rather than returning a System UI recovery session released during readiness", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const pool = new DevicePool(
@@ -1923,8 +1953,11 @@ describe("startDevice handler", () => {
     finishSecondReadiness();
 
     await expect(start).rejects.toThrow("was released while System UI recovery was becoming ready");
-    expect(replacementProcess.killed).toBe(true);
-    expect(pool.getDevice(recoveryImage.deviceId!)).toBeNull();
+    expect(replacementProcess.killed).toBe(false);
+    expect(pool.getDevice(recoveryImage.deviceId!)).toMatchObject({
+      status: "idle",
+      sessionId: null,
+    });
     expect(daemonSessionManager.getSession("owner-session")).toBeNull();
   });
 
@@ -1973,7 +2006,7 @@ describe("startDevice handler", () => {
     );
   });
 
-  it.each([
+  test.each([
     "before-call",
     "during-discovery",
     "orphaned-command",
@@ -2071,59 +2104,42 @@ describe("startDevice handler", () => {
       await expect(outcome).rejects.toThrow(
         deadline ? "Timed out waiting for" : "cancelled before emulator kill dispatch",
       );
-      const retainsMarker = abortAt !== "before-call" && !deadline;
-      // A kill command that itself rejected never stopped the emulator, so once it
-      // settles a later fresh observation lifts the retained marker (#9626). An
-      // accepted kill (the abort hit the wait) stays fenced: the emulator is dying.
-      const liftsAfterRejectedCommand =
-        abortAt === "during-discovery" || abortAt === "orphaned-command";
-      const staysFenced = retainsMarker && !liftsAfterRejectedCommand;
+      const backgroundPending = !deadline && (pendingCommand || accepted);
       expect(killCalls).toBe(abortAt === "before-call" ? 0 : 1);
-      expect(await pool.isShutdownReservationHeld(androidDevice.deviceId)).toBe(false);
-      expect(await pool.isShutdownReserved(androidDevice.deviceId)).toBe(retainsMarker);
-
-      // Even a still-pending kill must not retain the AVD lifecycle lease.
+      // Cancellation after dispatch returns before the detached command/wait settles.
+      expect(await pool.isShutdownReservationHeld(androidDevice.deviceId)).toBe(backgroundPending);
+      expect(await pool.isShutdownReserved(androidDevice.deviceId)).toBe(backgroundPending);
       const nextLease = lifecycleCoordinator.reserve(
         { kind: "stable", platform: "android", stableId: androidImage.name },
-        { operation: "teardown", deadlineMs: timer.now() + 1_000 },
+        { operation: "teardown", deadlineMs: timer.now() + 100_000 },
       );
       let acquired = false;
       void nextLease.then(() => {
         acquired = true;
       });
-      for (let attempt = 0; attempt < 30; attempt++) {
+      for (let turn = 0; turn < 100; turn++) {
         await Promise.resolve();
       }
+      expect(acquired).toBe(!backgroundPending);
+      if (pendingCommand) {
+        rejectKill(new Error("late discovery cancellation"));
+      } else if (backgroundPending) {
+        // An accepted shutdown whose discovery never settles is bounded by the restart deadline.
+        timer.advanceTime(90_000);
+      }
+      for (let turn = 0; turn < 200; turn++) {
+        await Promise.resolve();
+      }
+      expect(await pool.isShutdownReservationHeld(androidDevice.deviceId)).toBe(false);
+      expect(await pool.isShutdownReserved(androidDevice.deviceId)).toBe(false);
       expect(acquired).toBe(true);
       (await nextLease).release();
       fakeDeviceUtils.getBootedDevicesDetailed = discover;
-      if (abortAt === "during-discovery") {
-        // The rejected command settled before any refresh generation observed the
-        // device, so the marker is retained until a later fresh observation.
-        expect(await pool.isShutdownReserved(androidDevice.deviceId)).toBe(true);
-      }
-      if (pendingCommand) {
-        await pool.refreshDevices();
-        // Still pending (or timed out): a fresh observation must not lift the fence.
-        expect(await pool.isShutdownReserved(androidDevice.deviceId)).toBe(retainsMarker);
-        rejectKill(new Error("late discovery cancellation"));
-        for (let attempt = 0; attempt < 30; attempt++) {
-          await Promise.resolve();
-        }
-        expect(await pool.isShutdownReservationHeld(androidDevice.deviceId)).toBe(false);
-        if (retainsMarker) {
-          // The settlement alone never lifts the fence; only a later refresh does.
-          expect(await pool.isShutdownReserved(androidDevice.deviceId)).toBe(true);
-        }
-      }
       await pool.refreshDevices();
-      expect(await pool.isShutdownReserved(androidDevice.deviceId)).toBe(staysFenced);
+      expect(await pool.isShutdownReserved(androidDevice.deviceId)).toBe(false);
       expect(daemonSessionManager.getSession("owner-session")?.assignedDevice).toBe(
         androidDevice.deviceId,
       );
-      if (staysFenced) {
-        return;
-      }
       expect(() => pool.assertSessionReadyForAutomation("owner-session")).not.toThrow();
       await pool.releaseDevice(androidDevice.deviceId, "owner-session");
       expect(pool.getAvailableDeviceCount()).toBe(1);
@@ -2135,7 +2151,7 @@ describe("startDevice handler", () => {
     },
   );
 
-  it("leaves no marker or reservation when System UI recovery is cancelled between kill and relaunch", async () => {
+  test("finishes System UI recovery in the background when cancelled during relaunch", async () => {
     const timer = new FakeTimer();
     const controller = new AbortController();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -2163,9 +2179,13 @@ describe("startDevice handler", () => {
       await originalKillDevice(device, options);
       fakeDeviceUtils.setBootedDevices("android", []);
     };
-    fakeDeviceUtils.startDevice = async () => {
-      controller.abort(new Error("cancelled before AVD relaunch"));
-      throw controller.signal.reason;
+    const relaunch = Promise.withResolvers<void>();
+    const beganRelaunch = Promise.withResolvers<void>();
+    const start = fakeDeviceUtils.startDevice.bind(fakeDeviceUtils);
+    fakeDeviceUtils.startDevice = async (...args) => {
+      beganRelaunch.resolve();
+      await relaunch.promise;
+      return await start(...args);
     };
     setDeviceToolsDependencies({
       timer,
@@ -2175,19 +2195,28 @@ describe("startDevice handler", () => {
     });
     registerDeviceTools();
 
-    await expect(callStartDevice({ platform: "android" }, controller.signal)).rejects.toThrow(
-      "cancelled before AVD relaunch",
-    );
-
-    // The emulator was confirmed stopped: nothing stays pooled, fenced or reserved.
-    expect(pool.getDevice(androidDevice.deviceId)).toBeNull();
-    expect(pool.getIdleDevices()).toEqual([]);
+    const outcome = callStartDevice({ platform: "android" }, controller.signal);
+    await beganRelaunch.promise;
+    controller.abort(new Error("cancelled during AVD relaunch"));
+    await expect(outcome).rejects.toThrow("cancelled during AVD relaunch");
+    // The call settled before the deferred launch; the restart still owns its fences.
+    expect(await pool.isShutdownReservationHeld(androidDevice.deviceId)).toBe(true);
+    expect(daemonSessionManager.getSession("owner-session")).not.toBeNull();
+    relaunch.resolve();
+    for (let turn = 0; turn < 200; turn++) {
+      await Promise.resolve();
+    }
+    expect(pool.getDevice(`mock-${androidImage.name}`)).toMatchObject({
+      status: "idle",
+      sessionId: null,
+    });
+    expect(pool.getIdleDevices()).toHaveLength(1);
     expect(await pool.isShutdownReserved(androidDevice.deviceId)).toBe(false);
     expect(await pool.isShutdownReservationHeld(androidDevice.deviceId)).toBe(false);
     expect(daemonSessionManager.getSession("owner-session")).toBeNull();
   });
 
-  it("retires the replacement and leaves no marker when System UI recovery is cancelled after relaunch", async () => {
+  test("keeps the replacement running and unheld when System UI recovery is cancelled after relaunch", async () => {
     const timer = new FakeTimer();
     const controller = new AbortController();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -2243,10 +2272,14 @@ describe("startDevice handler", () => {
       "cancelled after AVD relaunch",
     );
 
-    expect(replacementProcess.killed).toBe(true);
-    expect(pool.getDevice(recoveryImage.deviceId!)).toBeNull();
+    expect(replacementProcess.killed).toBe(false);
+    expect(pool.getDevice(recoveryImage.deviceId!)).toMatchObject({
+      status: "idle",
+      sessionId: null,
+    });
     expect(pool.getDevice(pooledAnrDevice.deviceId)).toBeNull();
-    expect(pool.getIdleDevices()).toEqual([]);
+    expect(pool.getIdleDevices()).toHaveLength(1);
+    expect(daemonSessionManager.getSession("owner-session")).toBeNull();
     for (const serial of [recoveryImage.deviceId!, pooledAnrDevice.deviceId]) {
       expect(await pool.isShutdownReserved(serial)).toBe(false);
       expect(await pool.isShutdownReservationHeld(serial)).toBe(false);

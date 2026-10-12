@@ -71,6 +71,34 @@ describe("session-scoped tool discovery", () => {
     ).toThrow(/cannot route this call to device-session-x/);
   });
 
+  test("a seeded connection names a live session of its own plan, and only that (#11602)", () => {
+    const asked: Array<[string, string]> = [];
+    const binding = new SessionToolBinding("base", undefined, undefined, undefined, (...pair) => {
+      asked.push(pair);
+      return pair[0] === "base:B";
+    });
+
+    expect(binding.effectiveSessionUuid("transport", { sessionUuid: "base:B" })).toBe("base:B");
+    expect(() => binding.effectiveSessionUuid("transport", { sessionUuid: "base:Z" })).toThrow(
+      /bound to device session base; cannot route this call to base:Z/,
+    );
+    // Its own session is never a question, and the seeded binding does not move.
+    expect(binding.effectiveSessionUuid("transport", { sessionUuid: "base" })).toBe("base");
+    expect(binding.effectiveSessionUuid("transport", {})).toBe("base");
+    expect(asked).toEqual([
+      ["base:B", "base"],
+      ["base:Z", "base"],
+    ]);
+  });
+
+  test("a seeded connection given no plan lookup refuses every other session", () => {
+    const binding = new SessionToolBinding("base");
+
+    expect(() => binding.effectiveSessionUuid("transport", { sessionUuid: "base:B" })).toThrow(
+      /cannot route this call to base:B/,
+    );
+  });
+
   test("exposes a session acquired mid-connection as the bound device session (#6069)", () => {
     // The connection is NOT seeded with an initial session; it acquires one
     // mid-flight (getAndroid, or a device tool with a valid sessionUuid) which

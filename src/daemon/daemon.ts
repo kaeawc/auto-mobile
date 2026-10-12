@@ -385,11 +385,13 @@ import { onAdbMissingDevice } from "../utils/android-cmdline-tools/AdbDeviceHeal
 import { stopManagedAdbServer } from "../utils/android-cmdline-tools/AdbServerLifecycle";
 import { iosSimulatorCaptureHelperPool } from "../features/screen-stream";
 import {
-  DAEMON_SHUTDOWN_STAGE_BUDGET_MS,
+  DAEMON_SHUTDOWN_STAGES,
+  boundWithinStage,
+  createShutdownDatabaseTail,
   runShutdownCleanupStages,
+  shutdownStageFrom,
   type DaemonShutdownStageName,
   type ShutdownCleanupStage,
-  type ShutdownCleanupStageContext,
 } from "../shutdownCleanup";
 import { cleanupDaemonChildProcesses } from "./childProcessCleanup";
 import {
@@ -436,33 +438,13 @@ const CTRL_PROXY_FORWARD_RELEASE_SHUTDOWN_TIMEOUT_MS = 3_000;
 // cannot itself hang shutdown — the timeout wins and shutdown proceeds anyway.
 const MIGRATION_SETTLE_TIMEOUT_MS = 5_000;
 
-// A stage's own bounded wait ends this long before the stage deadline, so the stage's fallback
-// (its warning, a force-release, the "database stays open" flag) runs instead of the stage being
-// abandoned mid-wait.
-const SHUTDOWN_STAGE_INNER_MARGIN_MS = 50;
-
-// Stages whose abandoned work is device or child-process I/O only (encoder and capture-helper
-// teardown, adb) and never reaches the database: one of these still running does not keep the
-// database open. Every other abandoned stage does.
-const DATABASE_FREE_SHUTDOWN_STAGES: ReadonlySet<string> = new Set<DaemonShutdownStageName>([
-  "WebRTC stream socket server",
-  "video stream socket server",
-  "iOS simulator capture helper pool",
-  "managed ADB server",
-]);
-
-/** A `Daemon.stop()` stage with its deadline drawn from the shutdown budget table. */
+/** A `Daemon.stop()` stage with its deadline and database flag drawn from the stage table. */
 function shutdownStage(
   name: DaemonShutdownStageName,
   waitingOn: string,
   run: ShutdownCleanupStage["run"],
 ): ShutdownCleanupStage {
-  return { name, waitingOn, budgetMs: DAEMON_SHUTDOWN_STAGE_BUDGET_MS[name], run };
-}
-
-/** The stage's own wait: its usual bound, shortened to end before the stage deadline. */
-function boundWithinStage(stage: ShutdownCleanupStageContext, usualBoundMs: number): number {
-  return Math.max(0, Math.min(usualBoundMs, stage.remainingMs() - SHUTDOWN_STAGE_INNER_MARGIN_MS));
+  return shutdownStageFrom(DAEMON_SHUTDOWN_STAGES, name, waitingOn, run);
 }
 
 type HealthFailureKind = "http" | "socket" | "database" | "unknown";
@@ -1308,11 +1290,14 @@ export class Daemon {
     );
     // A sessionless call admitted while the device was free must not keep driving it for the new
     // holder (#10829). The call performing the acquisition is spared.
-    // A sessionless recording on the device is stopped and finalized the same way (#10961).
-    const stopOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(this.sessionManager);
+    // The acquiring holder adopts active sessionless recordings without stopping them (#11665).
+    const adoptOwnerlessRecordings = createOwnerlessRecordingAcquisitionCleanup(
+      this.sessionManager,
+    );
     // Sessionless network mocks and simulations are cleared the same way (#11130).
     const clearOwnerlessNetworkState = createOwnerlessNetworkStateAcquisitionCleanup(
       this.sessionManager,
+      { timer: this.timer },
     );
     // Display/system settings a previous session changed are reset to the recorded device
     // defaults when a different session acquires the device (#11145).
@@ -1327,6 +1312,7 @@ export class Daemon {
     const resetSettingDefaults = createDeviceSettingDefaultsAcquisitionReset(
       this.sessionManager,
       settingDefaults,
+      this.timer,
     );
     this.sessionManager.setDeviceAcquisitionExecutionCanceller((deviceId, sessionId) => {
       executionTracker.cancelSessionlessDeviceUse(deviceId, {
@@ -1334,7 +1320,7 @@ export class Daemon {
       });
       // A sessionless stroke parked on the device with no frame in flight is lifted too (#11541).
       this.socketServer?.liftSessionlessStrokesOn(deviceId);
-      stopOwnerlessRecordings(deviceId);
+      adoptOwnerlessRecordings(deviceId, sessionId);
       clearOwnerlessNetworkState(deviceId);
       resetSettingDefaults(deviceId, sessionId);
     });
@@ -1390,6 +1376,7 @@ export class Daemon {
     // A rebind keeps the session live, but its navigation state was collected on
     // the old device and must not follow it to the new one.
     this.sessionManager.onSessionDeviceUnbound((sessionId, deviceId) => {
+      this.socketServer?.liftStrokesHeldByOn(sessionId, deviceId);
       DeviceSessionManager.getInstance().clearExplicitDevicePin(deviceId);
       const previousNavigationManager = NavigationGraphManager.getInstanceForSession(sessionId);
       NavigationGraphManager.resetSession(sessionId);
@@ -5005,7 +4992,7 @@ export class Daemon {
   async stop(): Promise<void> {
     this.shutdownInProgress = true;
     logger.info("Stopping daemon...");
-    // Every stage draws its deadline from DAEMON_SHUTDOWN_STAGE_BUDGET_MS, which sums to less
+    // Every stage draws its deadline from DAEMON_SHUTDOWN_STAGES, whose budgets sum to less
     // than the process limit: a wedged stage is abandoned with a warning and the stages that
     // protect user state (session release and its daemon-shutdown notification, the database
     // close, the pid/socket file removal) still run (#11601). The order is unchanged.
@@ -5196,6 +5183,17 @@ export class Daemon {
    * files. These protect user state; the budget table keeps their share whatever came before.
    */
   private shutdownSessionAndStateStages(): ShutdownCleanupStage[] {
+    // Abandoned is not cancelled: the connection stays open while an abandoned stage that may
+    // write is still running, and closes late if those stragglers finish in time (#11601).
+    const databaseTail = createShutdownDatabaseTail({
+      closeDatabase: () => closeDatabase(),
+      drainWrites: (timeoutMs) => this.drainShutdownDatabaseWrites(timeoutMs),
+      keepOpenReason: () =>
+        this.shutdownSessionReleasesDrained
+          ? undefined
+          : "a session terminal write is still in flight",
+      warn: (message) => logger.warn(message),
+    });
     return [
       shutdownStage(
         "active device sessions",
@@ -5246,14 +5244,7 @@ export class Daemon {
         // the budget before the database closes and the process exits.
         "abandoned stage settle",
         "earlier stages that passed their deadline",
-        async (stage) => {
-          const waitMs = boundWithinStage(stage, Number.POSITIVE_INFINITY);
-          if (!(await stage.waitForUnsettledStages(waitMs))) {
-            logger.warn(
-              `Shutdown stage(s) still running ${waitMs}ms after being abandoned: ${stage.unsettledStages().join(", ")}`,
-            );
-          }
-        },
+        (stage) => databaseTail.settle(stage),
       ),
       shutdownStage("database write drain", "in-flight best-effort database writes", (stage) =>
         this.drainShutdownDatabaseWrites(boundWithinStage(stage, DB_WRITE_DRAIN_TIMEOUT_MS)),
@@ -5261,28 +5252,16 @@ export class Daemon {
       shutdownStage("in-flight migrations", "a cold-start migration still running", (stage) =>
         this.settleShutdownMigrations(boundWithinStage(stage, MIGRATION_SETTLE_TIMEOUT_MS)),
       ),
-      shutdownStage("database", "the database connection closing", async (stage) => {
-        if (!this.shutdownSessionReleasesDrained) {
-          logger.warn(
-            "Skipping database close because a session terminal write is still in flight",
-          );
-          return;
-        }
-        // A stage abandoned at its deadline is not cancelled: its work is still running and
-        // may still write (a session release, a recording finalizer persisting its archive
-        // row). Leave the connection open for it rather than close it mid-write; committed
-        // rows are durable either way and the process is about to exit (#11601).
-        const stillWriting = stage
-          .unsettledStages()
-          .filter((name) => !DATABASE_FREE_SHUTDOWN_STAGES.has(name));
-        if (stillWriting.length > 0) {
-          logger.warn(
-            `Skipping database close because abandoned shutdown stage(s) are still running: ${stillWriting.join(", ")}`,
-          );
-          return;
-        }
-        await closeDatabase();
-      }),
+      shutdownStage("database", "the database connection closing", (stage) =>
+        databaseTail.close(stage),
+      ),
+      shutdownStage(
+        // The three database stages above rarely use their share. Hand it to any stage still
+        // running, so a shutdown that finishes all its work inside the limit is a clean one.
+        "late abandoned stage settle",
+        "earlier stages that passed their deadline",
+        (stage) => databaseTail.lateSettle(stage),
+      ),
       shutdownStage("logger", "the log file flush", async () => {
         logger.info("Daemon stopped");
         await logger.closeAfterFlush();

@@ -165,6 +165,11 @@ export function sessionReleaseReasonFamily(reason: string): SessionReleaseReason
   );
 }
 
+/** Only plan cleanup and device restart judge the owner's lease before handing off the UUID. */
+export function shouldJudgeOwnerLeaseForRelease(reason: string): boolean {
+  return reason === "plan-auto-release" || sessionReleaseReasonFamily(reason) === "device-restart:";
+}
+
 /**
  * The tags of a release reason. Accepts any string, because persisted rows and wire payloads may
  * carry reasons an older or newer daemon wrote; an unknown reason is ordinary and non-terminal.
@@ -179,8 +184,11 @@ export function sessionReleaseReasonTraits(reason: string): SessionReleaseReason
     : SESSION_RELEASE_REASON_FAMILY_TRAITS[family];
 }
 
-/** Whether the UUID ends with this release (see {@link SessionReleaseReasonTraits.terminal}). */
-export function isTerminalReleaseReason(reason: string): boolean {
+/**
+ * Whether the UUID ends with this release (see {@link SessionReleaseReasonTraits.terminal}). Only
+ * tagged reasons carry the tag, so a match is a {@link SessionReleaseReason}.
+ */
+export function isTerminalReleaseReason(reason: string): reason is SessionReleaseReason {
   return sessionReleaseReasonTraits(reason).terminal;
 }
 

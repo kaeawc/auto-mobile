@@ -60,6 +60,7 @@ import {
   managedSlotForSession,
   type ManagedSlotsResult,
 } from "../models/managedSlotsResult";
+import { SESSION_NOT_FOUND_REASON } from "../daemon/releaseReasons";
 
 const LIVE_ACCEPTANCE_ENV = "AUTOMOBILE_ACCEPTANCE_LIVE";
 const ACCEPTANCE_DISCOVERY_ORDER_ENV = "AUTOMOBILE_ACCEPTANCE_DISCOVERY_ORDER";
@@ -143,7 +144,11 @@ function managedStallLossPayload(
   handover: LivenessHandover,
 ) {
   return handover.code === PROXY_STALLED_CODE
-    ? managedEndedPayload(managedSlots, sessionUuid, handover.releaseReason ?? handover.code)
+    ? managedEndedPayload(
+        managedSlots,
+        sessionUuid,
+        handover.releaseReasons?.[sessionUuid] ?? SESSION_NOT_FOUND_REASON,
+      )
     : undefined;
 }
 

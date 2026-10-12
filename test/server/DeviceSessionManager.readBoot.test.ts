@@ -26,7 +26,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeWindow } from "../fakes/FakeWindow";
 import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDeviceLifecycleCoordinator";
-import { settleByFakeEvents } from "../helpers/fakeTimerStepping";
+import { drainUntil, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 
 class FakeReadSimctl extends FakeSimctl {
   readonly presentations: string[] = [];
@@ -694,3 +694,77 @@ describe("read boots only an explicitly named stopped device", () => {
     }
   }
 });
+
+for (const platform of ["android", "ios"] as const) {
+  for (const refuses of [true, false]) {
+    test(`${platform}: pre-read-boot callback ${refuses ? "refuses before lifecycle" : "admits the found image"}`, async () => {
+      const h = harness(platform, true);
+      const refusal = new ActionableError("late holder");
+      const seen: DeviceInfo[] = [];
+      const options = {
+        ...h.options,
+        beforeReadBoot: async (image: DeviceInfo) => {
+          seen.push(image);
+          if (refuses) {
+            throw refusal;
+          }
+        },
+      };
+      const result = await h.manager
+        .ensureDeviceReady(platform, h.id, options)
+        .catch((error: unknown) => error);
+      expect(seen).toEqual(refuses ? [h.image] : [h.image, h.image]);
+      if (refuses) {
+        expect(result).toBe(refusal);
+        h.assertNoBoot();
+        expect(h.lifecycle.reservations).toEqual([]);
+      } else {
+        expect(result).toMatchObject({ deviceId: h.device.deviceId });
+        expect(h.startCalls.length + h.simctl.getMethodCalls("bootSimulator").length).toBe(1);
+      }
+      expect(h.lifecycle.isReserved({ kind: "stable", platform, stableId: h.id })).toBe(false);
+      h.assertNoReadWrites();
+    });
+  }
+}
+
+for (const platform of ["android", "ios"] as const) {
+  test(`${platform}: rechecks read ownership inside lifecycle lease and releases on refusal`, async () => {
+    const h = harness(platform, true);
+    const identity = { kind: "stable" as const, platform, stableId: h.id };
+    const blocker = await h.lifecycle.reserve(identity, {
+      operation: "start",
+      deadlineMs: 300_000,
+    });
+    let calls = 0;
+    const refused = new ActionableError("holder appeared during lease wait");
+    const beforeReadBoot = mock(async () => {
+      calls++;
+      expect(h.lifecycle.isReserved(identity)).toBe(true);
+      if (calls === 2) {
+        throw refused;
+      }
+    });
+    const outcome = h.manager
+      .ensureDeviceReady(platform, h.id, { ...h.options, beforeReadBoot })
+      .catch((error: unknown) => error);
+    await drainUntil(() => h.lifecycle.reservations.length === 2, {
+      description: "read waits for lease",
+    });
+    expect(calls).toBe(1);
+    h.assertNoBoot();
+    blocker.release();
+    expect(await outcome).toBe(refused);
+    expect(calls).toBe(2);
+    h.assertNoBoot();
+    expect(h.lifecycle.isReserved(identity)).toBe(false);
+    expect(
+      await h.manager.ensureDeviceReady(platform, h.id, {
+        ...h.options,
+        beforeReadBoot: async () => {},
+      }),
+    ).toMatchObject({ deviceId: h.device.deviceId });
+    expect(h.lifecycle.isReserved(identity)).toBe(false);
+    h.assertNoReadWrites();
+  });
+}

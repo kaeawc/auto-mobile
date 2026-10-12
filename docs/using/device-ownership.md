@@ -542,7 +542,11 @@ Owner decisions 2026-10-09 (#10982):
   simulator. Existing boot capacity and admission rules apply. Unknown IDs get
   the same not-found answer from every read tool. Ownership is checked on the ID
   as given before discovery, then again on a running match's serial/UDID after
-  discovery. If either is held, the read uses the read-only device path.
+  discovery, then again after image listing immediately before a read boot. If held or
+  reserved for device-restart recovery, a running target uses the read-only path; a stopped
+  reserved target answers retryable `device_owned_by_other_session`, even to its owner.
+  A transient failure in read listing retries briefly, then answers retryable `discovery_incomplete`
+  instead of not-found or readiness work (#11918).
 - A read without `deviceId` uses an already-running device and never boots or
   creates one. A `platform` argument alone is not an explicit ID. A stopped
   device selected earlier with `setActiveDevice`, or cached as the current device,

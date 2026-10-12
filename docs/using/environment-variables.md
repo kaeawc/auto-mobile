@@ -551,6 +551,13 @@ the handover and the no-start fence; the harness must restart it. Recovery canno
 connection allowed to start or restart the daemon. Healthy proxies and proxies
 without device sessions retain normal auto-start and skew reconciliation.
 
+Managed reclaim awaits reasonless not-found and recoverable daemon handoff answers
+(`daemon-shutdown` or `daemon-restart`) for one existing rehydration window per
+answering daemon process; silence does not reset it, and only an answer naming a
+different daemon instance opens a new window.
+A managed execution's terminal answers, notification and slot resource all name
+the daemon's release reason, falling back to `session-not-found` when none was named.
+
 A claim the daemon refuses with `liveness_owner_conflict` keeps being retried for
 the other owner's lease plus its grace window (plus one heartbeat interval), so a
 restarted proxy can win a session whose previous owner has gone.

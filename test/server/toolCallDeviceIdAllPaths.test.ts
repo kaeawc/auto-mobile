@@ -500,7 +500,7 @@ describe("a failed adb listing never fails open (#11618)", () => {
     const read = await d.call("readProbe", { platform: "android", deviceId: UNSEEN });
 
     expect(holder).toBe("ran");
-    expect(read).toContain("Expected one booted device");
+    expect(read).toContain(`Device ${UNSEEN} not found on android platform.`);
     expect(read).not.toBe("discovery_incomplete");
     expect(d.tools.runs.map((run) => run.name)).toEqual(["controlProbe"]);
     expect(d.tools.deviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
@@ -523,7 +523,7 @@ describe("a failed adb listing never fails open (#11618)", () => {
     );
     const read = () => d!.call("readProbe", { platform: "android", deviceId: UNSEEN });
 
-    expect(await read()).toContain("Expected one booted device");
+    expect(await read()).toContain(`Device ${UNSEEN} not found on android platform.`);
     expect(d.listings()).toBe(1);
     d.discovery.failedPlatforms.delete("android");
     d.timer.advanceTime(15_001);
@@ -541,7 +541,9 @@ describe("a failed adb listing never fails open (#11618)", () => {
     d = await heldPhoneWhileAdbFails();
     const args = { platform: "android", deviceId: UNSEEN };
 
-    expect(await d.call("readProbe", args)).toContain("Expected one booted device");
+    expect(await d.call("readProbe", args)).toContain(
+      `Device ${UNSEEN} not found on android platform.`,
+    );
     expect(d.listings()).toBe(1);
     expect(await d.call("controlProbe", args)).toBe("discovery_incomplete");
     expect(d.listings()).toBe(2);

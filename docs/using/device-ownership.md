@@ -514,9 +514,17 @@ Owner decisions 2026-10-09 (#10982):
   performs those steps. A sessionless read on a held device runs no readiness,
   pinning or settings work at all; it uses the read-only path.
 - A sessionless read boots a stopped device only when the call explicitly passes
-  its `deviceId` (owner decision 2026-10-11, follow-up to #11641). The ID names an
-  Android AVD image or an available iOS simulator; it boots only that image and
-  never creates a simulator. Existing boot capacity and admission rules apply.
+  its `deviceId` (owner decision 2026-10-11, follow-up to #11641). Every device-aware
+  read tool, including `observe`, accepts a running device's serial or iOS UDID,
+  or its exact AVD/simulator name. An exact device ID wins over a name; a name
+  matching multiple running devices is ambiguous and lists their IDs. The requested
+  platform, if supplied, limits the match. A stopped device is named only by its
+  Android AVD name or available iOS simulator UDID, never by an emulator serial
+  or stopped iOS simulator name. It boots only that image and never creates a
+  simulator. Existing boot capacity and admission rules apply. Unknown IDs get
+  the same not-found answer from every read tool. Ownership is checked on the ID
+  as given before discovery, then again on a running match's serial/UDID after
+  discovery. If either is held, the read uses the read-only device path.
 - A read without `deviceId` uses an already-running device and never boots or
   creates one. A `platform` argument alone is not an explicit ID. A stopped
   device selected earlier with `setActiveDevice`, or cached as the current device,

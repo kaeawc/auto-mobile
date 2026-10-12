@@ -1,3 +1,8 @@
+import {
+  describeDevices,
+  matchRunningReadTarget,
+  providedReadTargetNotFound,
+} from "./runningReadTarget";
 import { isDeviceIdentityQuarantinedError } from "../models/DeviceIdentityQuarantinedError";
 import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../daemon/deviceAdmissionGate";
 import {
@@ -96,31 +101,6 @@ import {
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { throwIfProvisionedDeviceTransportRetired } from "../utils/provisionedDeviceTransportFence";
 import { deviceReadinessLockKey, withDeviceReadinessLock } from "../utils/deviceReadinessLock";
-
-/**
- * Render a device list for a "not found" error.
- *
- * These messages exist to tell the caller which identifier to use instead, so
- * they must print the identifiers rather than the objects: `BootedDevice[].join()`
- * stringifies each element to "[object Object]" and destroys the only actionable
- * part of the message (#4227).
- *
- * Both identifiers are shown because callers reason in either — a user reads
- * "Pixel_9_Pro" in a device picker but must pass the id. Android currently sets
- * `name === deviceId` (AdbClient.getBootedAndroidDevices), so the redundant
- * "x (x)" form is collapsed to a single value.
- */
-function describeDevices(devices: BootedDevice[]): string {
-  return (
-    devices
-      .map((device) =>
-        device.name && device.name !== device.deviceId
-          ? `${device.name} (${device.deviceId})`
-          : device.deviceId,
-      )
-      .join(", ") || "none"
-  );
-}
 
 function lifecycleIdentityForDevice(
   device: BootedDevice,
@@ -791,22 +771,24 @@ export class DeviceSessionManager implements DeviceSessionManager {
     const iosDevices = connectedPlatforms.filter((device) => device.platform === "ios");
     logger.info(`Found ${iosDevices.length} ios devices`);
 
-    const readDevice = await this.resolveReadinessReadTarget(
+    const readTarget = await this.resolveReadinessReadTarget(
       platform,
       providedDeviceId,
       scan,
       options,
     );
-    if (readDevice) {
+    if (readTarget.bootedDevice) {
       return await this.finishReadinessSelection(
-        readDevice,
-        readDevice.platform,
+        readTarget.bootedDevice,
+        readTarget.bootedDevice.platform,
         "provided",
         scan,
         options,
       );
     }
 
+    // A running read name is judged and verified by its serial/UDID from here on.
+    providedDeviceId = readTarget.providedDeviceId;
     const { platformDevices, resolvedPlatform } = this.resolveReadinessPlatform(
       platform,
       androidDevices,
@@ -970,10 +952,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
   ): BootedDevice {
     const providedDevice = platformDevices.find((device) => device.deviceId === providedDeviceId);
     if (!providedDevice) {
-      throw new ActionableError(
-        `Device ${providedDeviceId} not found on ${platform} platform. ` +
-          `Available ${platform} devices: ${describeDevices(platformDevices)}`,
-      );
+      throw providedReadTargetNotFound(providedDeviceId, platform, platformDevices);
     }
     return providedDevice;
   }
@@ -995,26 +974,29 @@ export class DeviceSessionManager implements DeviceSessionManager {
     providedDeviceId: string | undefined,
     scan: ConnectedPlatformScan,
     options?: DeviceReadyOptions,
-  ): Promise<BootedDevice | undefined> {
+  ): Promise<{ providedDeviceId: string | undefined; bootedDevice?: BootedDevice }> {
     if (options?.intent !== "read") {
-      return undefined;
+      return { providedDeviceId };
     }
     if (!providedDeviceId) {
       // Stop before current-device verification can reserve a lifecycle lease for a stale target.
       this.requireRunningReadinessDevice(platform, scan);
-      return undefined;
+      return { providedDeviceId };
     }
-    if (
-      scan.devices.some(
-        (device) =>
-          device.deviceId === providedDeviceId &&
-          (platform === "either" || device.platform === platform),
-      )
-    ) {
-      return undefined;
+    const running = matchRunningReadTarget(scan.devices, providedDeviceId, platform);
+    if (running) {
+      return { providedDeviceId: running.deviceId };
     }
     // Resolve a stopped image before mixed-platform ambiguity: the call names its own platform.
-    return await this.bootProvidedReadinessImage(platform, providedDeviceId, scan, options);
+    return {
+      providedDeviceId,
+      bootedDevice: await this.bootProvidedReadinessImage(
+        platform,
+        providedDeviceId,
+        scan,
+        options,
+      ),
+    };
   }
 
   private requireRunningReadinessDevice(

@@ -8,6 +8,10 @@ import {
 import { formatToolParamError } from "../../src/server/index";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
+
 describe("preference tools", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();

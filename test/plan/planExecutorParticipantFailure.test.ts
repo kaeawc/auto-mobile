@@ -52,9 +52,8 @@ describe("finish-current-step participant failure at a barrier (#10025)", () => 
   let workGates: Map<string, Gate>;
 
   beforeAll(() => {
-    if (!ToolRegistry.getToolForPlan("barrier")) {
-      registerBarrierTools();
-    }
+    ToolRegistry.clearTools();
+    registerBarrierTools();
   });
 
   beforeEach(() => {

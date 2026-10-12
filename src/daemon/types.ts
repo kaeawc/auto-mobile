@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
   idleReleaseField,
   isIdleReleaseReason,
@@ -50,6 +51,15 @@ export interface DaemonRequest {
 /**
  * Response sent from daemon to CLI client
  */
+export const daemonResponseSchema = z
+  .object({
+    type: z.literal("mcp_response"),
+    id: z.string().nullable(),
+    success: z.boolean(),
+    error: z.string().optional(),
+  })
+  .passthrough();
+
 export interface DaemonResponse {
   /** Request ID this response corresponds to */
   id: string | null;
@@ -366,6 +376,13 @@ export const RESOURCE_UNSUBSCRIBE_METHOD = "resources/unsubscribe";
  * Only sent to sessions that opted in via `daemon/subscribe-notifications`, so
  * legacy/Kotlin/Swift clients never see an unexpected frame shape.
  */
+export const daemonNotificationSchema = z
+  .object({
+    type: z.literal("daemon_notification"),
+    method: z.string(),
+  })
+  .passthrough();
+
 export interface DaemonNotification {
   type: "daemon_notification";
   /** MCP notification method, e.g. "notifications/tools/list_changed". */

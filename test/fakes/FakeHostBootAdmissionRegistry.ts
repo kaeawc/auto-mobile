@@ -7,7 +7,7 @@ import {
   type PublishedBootAdmission,
 } from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
 
-export class FakeBootAdmissionHost {
+export class SharedBootAdmissionHostState {
   readonly records = new Map<string, HostBootAdmissionRecord>();
   locked = false;
   nextId = 0;
@@ -23,7 +23,7 @@ export class FakeHostBootAdmissionRegistry implements HostBootAdmissionRegistry 
   lockHeldForever = false;
 
   constructor(
-    readonly host: FakeBootAdmissionHost,
+    readonly host: SharedBootAdmissionHostState,
     readonly pid: number,
     private readonly timer: Timer,
   ) {}

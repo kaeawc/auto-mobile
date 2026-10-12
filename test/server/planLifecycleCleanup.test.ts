@@ -129,13 +129,13 @@ describe("executePlan cleans every acquired device before release", () => {
     const releaseSession = sessionManager.releaseSession.bind(sessionManager);
     releaseFaults = new Map();
     const release = spyOn(sessionManager, "releaseSession").mockImplementation(
-      async (id, reason) => {
+      async (id, reason, ...options) => {
         events.push(`session-release:${id}`);
         const fault = releaseFaults.get(id);
         if (fault === "before-removal") {
           throw new Error(`injected release failure for ${id}`);
         }
-        const result = await releaseSession(id, reason);
+        const result = await releaseSession(id, reason, ...options);
         if (fault === "after-removal") {
           throw new Error(`injected post-removal release failure for ${id}`);
         }
@@ -365,6 +365,16 @@ describe("executePlan cleans every acquired device before release", () => {
           "cleanup-start:device-A",
           "cleanup-end:device-A",
         ]);
+        expect(sessionManager.hasDeviceCleanupInProgress("device-A")).toBe(false);
+      });
+      test("identity replacement drops deferred app cleanup without commands or quarantine", async () => {
+        await acquire([devices[0]], false);
+        await lifecycle.afterExecution(holdWithCleanup());
+        await sessionManager.releaseSession("base", "client-release", false, undefined, {
+          deviceIdentityReplaced: true,
+        });
+        await flush();
+        expect(cleanup.calls).toEqual([]);
         expect(sessionManager.hasDeviceCleanupInProgress("device-A")).toBe(false);
       });
       test("skips a device the held session left and another session now owns (#11164)", async () => {

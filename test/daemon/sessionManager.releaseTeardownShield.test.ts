@@ -51,11 +51,13 @@ class SignalAwareDevice {
   hang: RestoreKind | undefined;
   /** When true, every restore fails as a device-side error under a live signal. */
   deviceFails = false;
+  /** A command already sent can acknowledge successfully after its caller's signal aborts. */
+  ignoreAbort = false;
 
   restorer(kind: RestoreKind): () => Promise<void> {
     return async () => {
       const signal = getAbortSignal();
-      if (signal?.aborted) {
+      if (signal?.aborted && !this.ignoreAbort) {
         throw signal.reason ?? new Error("aborted before dispatch");
       }
       if (this.hang === kind) {
@@ -235,6 +237,35 @@ describe("session release teardown is shielded from the caller's signal (#10198)
   });
 
   describe("the teardown cap", () => {
+    test.each(["keep-awake", "biometric", "network"] as const)(
+      "an ordinary %s restore succeeding after the teardown cap is sent once",
+      async (kind) => {
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        const gate = Promise.withResolvers<void>();
+        try {
+          const h = await harness();
+          await ownDevice(h, [kind]);
+          h.fake.gate = gate.promise;
+          h.fake.ignoreAbort = true;
+          const release = h.manager.releaseSession("old", "explicit-release");
+          await flush();
+          h.timer.advanceTime(SESSION_RELEASE_TEARDOWN_CAP_MS + 1);
+          gate.resolve();
+          await flush();
+          await release;
+          // Allow any erroneously armed retries to dispatch, as well as a recovery's backoff.
+          for (const delay of [250, 250, 1000, 2000]) {
+            await h.timer.advanceTimeAsync(delay);
+            await flush();
+          }
+          expect(h.fake.reached).toEqual([kind]);
+        } finally {
+          gate.resolve();
+          warn.mockRestore();
+        }
+      },
+    );
+
     test("a restore that outlives the cap is aborted, recorded as abandoned, and the device is released", async () => {
       const warn = spyOn(logger, "warn").mockImplementation(() => {});
       try {

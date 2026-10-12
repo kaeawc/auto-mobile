@@ -1,3 +1,5 @@
+import { PlanExecutionInProgressError } from "./planExecutionInProgressRefusal";
+import { SessionReleasedDuringCreationError } from "../daemon/deviceAcquisitionRefusals";
 import { SessionOutsideBoundSessionError } from "./deviceOutsideBoundSessionRefusal";
 import { managedConnectionPlatformRefusal } from "../daemon/managedSlots/managedConnectionScope";
 import {
@@ -1328,7 +1330,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       logger.warn(
         `[MCP] Rejecting tool ${name} due to active executePlan (scope=${decision.scope}, sessionId=${sessionId ?? "none"}, sessionUuid=${routingSessionUuid ?? "none"})`,
       );
-      throw new ActionableError(decision.reason ?? "plan execution in progress");
+      throw new PlanExecutionInProgressError(decision.scope, decision.reason);
     }
 
     // Parse and validate the parameters
@@ -1874,6 +1876,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
           content: [{ type: "text" as const, text: JSON.stringify(sessionOwnershipLost) }],
           isError: true,
         };
+      }
+      if (error instanceof SessionReleasedDuringCreationError) {
+        // Creation never published a session: the admission mark is not session use (#11351).
+        executionTracker.unmarkSessionAdmitted(execution.id);
+        return shapeToolCallError(error, { toolName: name, source: "MCP" }) as McpToolCallResult;
       }
       // The heartbeat monitor released this call's session under it and cancelled the call
       // (#11322): the same terminal refusal a call arriving after the release gets.

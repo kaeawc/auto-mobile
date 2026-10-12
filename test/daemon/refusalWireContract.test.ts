@@ -1,3 +1,5 @@
+import * as planLockRefusal from "../../src/server/planExecutionInProgressRefusal";
+import * as ambiguousTargetRefusal from "../../src/server/ambiguousDeviceTargetRefusal";
 import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
@@ -115,6 +117,8 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "daemon/managedSlots/managedSlotRefusal": managedSlotRefusals,
   "models/BootCapacityExhaustedError": bootCapacity,
   "server/deviceOutsideBoundSessionRefusal": boundSessionRefusal,
+  "server/planExecutionInProgressRefusal": planLockRefusal,
+  "server/ambiguousDeviceTargetRefusal": ambiguousTargetRefusal,
   "daemon/McpTimeoutError": mcpTimeouts,
   "daemon/sessionReleasedDuringCall": sessionReleasedDuringCall,
   "models/AppNotRunningError": appNotRunning,
@@ -1007,6 +1011,30 @@ describe("refusal wire contract", () => {
       string | undefined,
     ])[] = [
       [
+        "plan lock",
+        () => new planLockRefusal.PlanExecutionInProgressError("session"),
+        "plan_execution_in_progress",
+        true,
+        undefined,
+      ],
+      [
+        "device ambiguity",
+        () =>
+          new ambiguousTargetRefusal.AmbiguousDeviceTargetError("Choose a device.", [
+            { deviceId: "ios-a", platform: "ios" },
+          ]),
+        "ambiguous_device_target",
+        false,
+        undefined,
+      ],
+      [
+        "creation release",
+        () => new acquisitionRefusals.SessionReleasedDuringCreationError(SESSION),
+        "session_released_during_creation",
+        false,
+        "acquire_new_session",
+      ],
+      [
         "idle release cut a call",
         () => new SessionReleasedDuringCallError(SESSION, "cli-idle-timeout"),
         "session_ownership_lost",
@@ -1056,6 +1084,52 @@ describe("refusal wire contract", () => {
         nextAction,
       ]);
       expect([plan.code, plan.retryable, plan.nextAction]).toEqual([code, retryable, nextAction]);
+    });
+
+    test("plan lock has no invented holder or retry deadline on any wire", () => {
+      const error = new planLockRefusal.PlanExecutionInProgressError("global");
+      expect(error).not.toHaveProperty("retryAfterMs");
+      expect(error.toPayload()).toEqual({
+        code: "plan_execution_in_progress",
+        retryable: true,
+        scope: "global",
+      });
+      expect(new planLockRefusal.PlanExecutionInProgressError().toPayload()).toEqual({
+        code: "plan_execution_in_progress",
+        retryable: true,
+      });
+      expect(mcpRequestFailureDetails(error, undefined)).toMatchObject({
+        code: error.code,
+        retryable: true,
+        details: { scope: "global" },
+      });
+      expect(mcpRequestFailureDetails(error, undefined)).not.toHaveProperty("retryAfterMs");
+      expect(planRefusalFields(error)).toEqual({
+        code: error.code,
+        retryable: true,
+        scope: "global",
+      });
+    });
+
+    test("candidate evidence crosses all three wires without device names or session ids", () => {
+      const candidates = [
+        { deviceId: "ios-a", platform: "ios", name: "private name", sessionUuid: "other-holder" },
+      ];
+      const error = new ambiguousTargetRefusal.AmbiguousDeviceTargetError(
+        "Choose a device.",
+        candidates,
+      );
+      const payload = {
+        code: "ambiguous_device_target",
+        retryable: false,
+        candidates: [{ deviceId: "ios-a", platform: "ios" }],
+      };
+      expect(error.toPayload()).toEqual(payload);
+      expect(JSON.parse(shapedRefusalResult(error).content[0].text)).toMatchObject(payload);
+      expect(mcpRequestFailureDetails(error, undefined).details).toEqual({
+        candidates: payload.candidates,
+      });
+      expect(planRefusalFields(error)).toEqual(payload);
     });
 
     test("session_recovery_pending keeps its nested details for current readers", () => {

@@ -1,3 +1,4 @@
+import { AmbiguousDeviceTargetError } from "./ambiguousDeviceTargetRefusal";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import {
   explicitReadTargetPlatform,
@@ -1096,12 +1097,14 @@ function isReadOnlyCall(
 function multipleDevicesError(
   platform: BootedDevice["platform"],
   readOnly: boolean,
-): ActionableError {
+  candidates: readonly BootedDevice[],
+): AmbiguousDeviceTargetError {
   const selector = readOnly ? "deviceId" : "sessionUuid";
-  return new ActionableError(
+  return new AmbiguousDeviceTargetError(
     platform === "ios"
       ? `Multiple iOS simulators detected. Provide ${selector} to target a specific simulator.`
       : `Multiple Android devices detected. Provide ${selector} to target a specific device.`,
+    candidates,
   );
 }
 
@@ -2003,7 +2006,11 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       return;
     }
 
-    throw multipleDevicesError(candidatePlatform, input.readOnly);
+    throw multipleDevicesError(
+      candidatePlatform,
+      input.readOnly,
+      connectedPlatforms.filter((device) => device.platform === candidatePlatform),
+    );
   }
 
   private hasActiveDeviceForNamedPlatform(
@@ -2116,14 +2123,16 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
 
     // A read never requires a session (#10970, #11351): it is asked for a deviceId only.
     if (readOnly) {
-      throw new ActionableError(
+      throw new AmbiguousDeviceTargetError(
         "Device pool autolock is enabled and multiple devices are available. " +
           "Provide a deviceId to target a specific device.",
+        candidates,
       );
     }
-    throw new ActionableError(
+    throw new AmbiguousDeviceTargetError(
       "Device pool autolock is enabled and multiple devices are available. " +
         "Call getAndroid or getApple first from this MCP session, or provide the returned sessionUuid (or a deviceId) to target a specific device.",
+      candidates,
     );
   }
 }

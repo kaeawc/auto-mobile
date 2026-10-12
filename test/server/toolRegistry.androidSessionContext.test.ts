@@ -1,3 +1,5 @@
+import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
+import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import type { BootedDevice } from "../../src/models";
@@ -67,9 +69,21 @@ describe("ToolRegistry Android session context", () => {
     fakeDeviceSessionManager.setConnectedDevices([androidDeviceA, androidDeviceB]);
     const tool = registerTool("androidSessionRequiredTool");
 
-    await expect(tool.handler({ platform: "android" })).rejects.toThrow(
+    const error = await tool.handler({ platform: "android" }).catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(AmbiguousDeviceTargetError);
+    expect((error as Error).message).toContain(
       "Multiple Android devices detected. Provide sessionUuid to target a specific device.",
     );
+    expect(
+      JSON.parse(shapeToolCallError(error, { toolName: tool.name, source: "MCP" }).content[0].text),
+    ).toMatchObject({
+      code: "ambiguous_device_target",
+      retryable: false,
+      candidates: [
+        { deviceId: androidDeviceA.deviceId, platform: "android" },
+        { deviceId: androidDeviceB.deviceId, platform: "android" },
+      ],
+    });
     expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 

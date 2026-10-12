@@ -1,3 +1,5 @@
+import { PlanExecutionInProgressError } from "../../src/server/planExecutionInProgressRefusal";
+import { AmbiguousDeviceTargetError } from "../../src/server/ambiguousDeviceTargetRefusal";
 import { HostBootAdmissionRegistryError } from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
 import { StageSessionDownloadsRefusal } from "../../src/server/downloadsFixtureService";
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
@@ -315,6 +317,31 @@ export function overloadRefusalError(): McpOverloadError {
 
 /** One entry per wire code, each produced by the builder the daemon itself calls. */
 const BUILDERS: readonly FixtureEntry[] = [
+  [
+    "plan_execution_in_progress",
+    "PlanExecutionInProgressError via shapeToolCallError",
+    () => shaped(new PlanExecutionInProgressError("session")),
+  ],
+  [
+    "ambiguous_device_target",
+    "AmbiguousDeviceTargetError via shapeToolCallError",
+    () =>
+      shaped(
+        new AmbiguousDeviceTargetError(
+          "Device pool autolock is enabled and multiple devices are available. " +
+            "Call getAndroid or getApple first from this MCP session, or provide the returned sessionUuid (or a deviceId) to target a specific device.",
+          [
+            { deviceId: DEVICE, platform: "android" },
+            { deviceId: "emulator-5556", platform: "android" },
+          ],
+        ),
+      ),
+  ],
+  [
+    "session_released_during_creation",
+    "SessionReleasedDuringCreationError via shapeToolCallError",
+    () => shaped(new SessionReleasedDuringCreationError(SESSION)),
+  ],
   [
     "timeout.iosHomeLaunch",
     "IosHomeLaunchTimeoutError via shapeToolCallError",
@@ -1243,16 +1270,10 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
     RetryableDeviceAcquisitionError,
     "base class instantiated only through its concrete acquisition subclasses, which the fixtures drive",
   ],
-  [
-    SessionReleasedDuringCreationError,
-    "untyped on the wire today; issue #11351 row g awaits an owner decision",
-  ],
 ]);
 
 /** Codes that exist as named constants but never reach a client as a typed JSON refusal. */
 export const UNFIXTURED_REFUSAL_CODES: Readonly<Record<string, string>> = {
-  session_released_during_creation:
-    "SessionReleasedDuringCreationError is not typed by shapeToolCallError: clients get plain 'Error: ...' text with no code",
   daemon_session_not_found:
     "a daemon socket response field (`code` beside `error`) for an unknown session, not an MCP tool result body",
   bound_session_lost:

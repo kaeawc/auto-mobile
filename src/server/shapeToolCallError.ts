@@ -1,3 +1,5 @@
+import { PlanExecutionInProgressError } from "./planExecutionInProgressRefusal";
+import { AmbiguousDeviceTargetError } from "./ambiguousDeviceTargetRefusal";
 import { ActionableError } from "../models/ActionableError";
 import { TextIndeterminateError } from "../features/action/textTransportTimeout";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
@@ -42,6 +44,7 @@ import {
   RetryableDeviceAcquisitionError,
   SESSION_NO_LONGER_OWNS_DEVICE_CODE,
   SESSION_REBINDING_CODE,
+  SESSION_RELEASED_DURING_CREATION_CODE,
   SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
 } from "../daemon/deviceAcquisitionRefusals";
 
@@ -149,6 +152,8 @@ function toolCallErrorText(error: unknown, message: string): string {
 function hasSelfDescribedRefusalPayload(
   error: unknown,
 ): error is
+  | PlanExecutionInProgressError
+  | AmbiguousDeviceTargetError
   | DeviceAssignedToManagedSlotError
   | DeviceOutsideManagedSlotsError
   | DeviceOutsideBoundSessionError
@@ -158,6 +163,8 @@ function hasSelfDescribedRefusalPayload(
   | AppNotRunningError
   | ManagedSlotDiscoveryIncompleteError {
   return (
+    error instanceof PlanExecutionInProgressError ||
+    error instanceof AmbiguousDeviceTargetError ||
     error instanceof DeviceAssignedToManagedSlotError ||
     error instanceof DeviceOutsideManagedSlotsError ||
     error instanceof DeviceOutsideBoundSessionError ||
@@ -234,6 +241,7 @@ const TYPED_SESSION_REFUSAL_CODES: ReadonlySet<unknown> = new Set([
   SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
   SESSION_NO_LONGER_OWNS_DEVICE_CODE,
   SESSION_REBINDING_CODE,
+  SESSION_RELEASED_DURING_CREATION_CODE,
 ]);
 
 /**

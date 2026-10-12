@@ -644,6 +644,30 @@
         "retryable": true,
         "acquireNewSession": false
       }
+    },
+    "plan_execution_in_progress": {
+      "expected": "retry",
+      "fields": {
+        "code": "plan_execution_in_progress",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "ambiguous_device_target": {
+      "expected": "fail",
+      "fields": {
+        "code": "ambiguous_device_target",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
+    "session_released_during_creation": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_released_during_creation",
+        "retryable": false,
+        "acquireNewSession": true
+      }
     }
   }
 }

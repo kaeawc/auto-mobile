@@ -58,6 +58,48 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     );
   }
 
+  test("successful own-row release and guarded rebind use the unguarded microtask budget", async () => {
+    manager.attachDaemonSessionId("daemon-1");
+    const unguarded = new SessionManager(timer, store, () => new FakeDbWriteBarrier());
+    unguarded.stopCleanupTimer();
+    try {
+      await manager.createSession(SESSION, DEVICE, "android", IDLE_WINDOW_MS);
+      await unguarded.createSession("unguarded", DEVICE, "android", IDLE_WINDOW_MS);
+      for (const operation of ["rebind", "release"] as const) {
+        let turn = 0;
+        let guardedTurn: number | undefined;
+        let unguardedTurn: number | undefined;
+        const guardedWrite =
+          operation === "release"
+            ? manager.releaseSession(SESSION, "plan-auto-release")
+            : manager.rebindSession(SESSION, "emulator-5556", "android");
+        const unguardedWrite =
+          operation === "release"
+            ? unguarded.releaseSession("unguarded", "plan-auto-release")
+            : unguarded.rebindSession("unguarded", "emulator-5556", "android");
+        const writes = [
+          guardedWrite.then(() => {
+            guardedTurn = turn;
+          }),
+          unguardedWrite.then(() => {
+            unguardedTurn = turn;
+          }),
+        ];
+        // A ceiling prevents a hung write from spinning; the expected budget is comparative.
+        while ((guardedTurn === undefined || unguardedTurn === undefined) && turn < 200) {
+          await Promise.resolve();
+          turn++;
+        }
+        expect(guardedTurn).toBeDefined();
+        expect(unguardedTurn).toBeDefined();
+        expect({ operation, turn: guardedTurn }).toEqual({ operation, turn: unguardedTurn });
+        await Promise.all(writes);
+      }
+    } finally {
+      unguarded.stopCleanupTimer();
+    }
+  });
+
   test.each(["release", "rebind", "activity"])(
     "an own-row %s never discovers live daemons",
     async (write) => {

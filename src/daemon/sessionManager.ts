@@ -6460,10 +6460,11 @@ export class SessionManager {
     const writtenDevice = session.assignedDevice;
     const settle = this.expectSupersededRowReassert(session.sessionId, supersededReasons);
     try {
-      // With no superseded release to replace, a terminal row is not this session's to rewrite.
-      await this.persistSession(session, session, {
-        unlessTerminal: supersededReasons.length === 0,
-      });
+      await this.persistSession(
+        session,
+        session,
+        this.supersededRowRewriteOptions(supersededReasons),
+      );
     } catch (error) {
       logger.warn(
         `[SessionManager] Failed to re-persist live session ${session.sessionId} after its ` +
@@ -6495,6 +6496,24 @@ export class SessionManager {
     this.settleOwedSupersededRowReassert(session);
     await this.restoreReleasedRowAfterReassert(session);
     return this.isCurrentSession(session);
+  }
+
+  /** Snapshot the attached liveness provider for the rewrite's statement guard (#11557). */
+  private supersededRowRewriteOptions(
+    supersededReasons: readonly string[],
+  ): UpsertActiveSessionOptions {
+    let livePeerDaemonSessionIds: string[] = [];
+    try {
+      livePeerDaemonSessionIds = Array.from(this.liveDaemonSessionIds?.() ?? []).filter(
+        (id) => id !== this.daemonSessionId,
+      );
+    } catch (error) {
+      logger.warn(
+        `[SessionManager] Cannot list live daemons for a superseded row rewrite: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    return { rewriteOverSupersededRelease: { supersededReasons, livePeerDaemonSessionIds } };
   }
 
   private isRebindUnderWay(session: Session): boolean {
@@ -6705,7 +6724,11 @@ export class SessionManager {
     ) {
       return false;
     }
-    await this.persistSession(session, session);
+    await this.persistSession(
+      session,
+      session,
+      this.supersededRowRewriteOptions(supersededReasons),
+    );
     return true;
   }
 
@@ -6838,9 +6861,9 @@ export class SessionManager {
       this.dropOwedSupersededRowReassert(entry);
       return false;
     }
-    let persistedRelease: SessionReleaseSnapshot | undefined;
+    let persisted: DeviceSession | undefined;
     try {
-      persistedRelease = await this.getPersistedTerminalRelease(sessionId);
+      persisted = await this.deviceSessionRepository.getSession?.(sessionId);
     } catch (error) {
       logger.warn(
         `[SessionManager] Failed to read the row of live session ${sessionId} before ` +
@@ -6857,7 +6880,8 @@ export class SessionManager {
       this.dropOwedSupersededRowReassert(entry);
       return false;
     }
-    if (persistedRelease && !entry.reasons.has(persistedRelease.releaseReason)) {
+    if (this.supersededRowReassertMustStop(entry, persisted)) {
+      // Peer ownership alone does not end the held session; that is an owner decision.
       this.dropOwedSupersededRowReassert(entry);
       return false;
     }
@@ -6868,6 +6892,25 @@ export class SessionManager {
       return false;
     }
     return await this.reassertSupersededLiveRow(session, [...entry.reasons]);
+  }
+
+  /** A peer's winning row is left for the activity or ownership path, without more rewrites. */
+  private supersededRowReassertMustStop(
+    entry: OwedSupersededRowReassert,
+    persisted: DeviceSession | undefined,
+  ): boolean {
+    if (!persisted) {
+      return false;
+    }
+    if (this.isRowOwnedByLivePeer(persisted)) {
+      logger.warn(
+        `[SessionManager] Dropping owed rewrite of session ${entry.session.sessionId}: live peer ` +
+          `${persisted.daemon_session_id} owns its row`,
+      );
+      return true;
+    }
+    const release = this.terminalReleaseFromPersisted(entry.session.sessionId, persisted);
+    return release !== undefined && !entry.reasons.has(release.releaseReason);
   }
 
   /** An attempt that could not issue its write counts as a failed one. */

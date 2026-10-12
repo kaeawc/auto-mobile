@@ -103,6 +103,86 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     expect(releases).toEqual([]);
   });
 
+  test.each(["first", "retry"])(
+    "a peer's terminal row landing during the %s rewrite is left for the next activity write",
+    async (attempt) => {
+      let landReleaseWrite: (() => void) | undefined;
+      if (attempt === "first") {
+        landReleaseWrite = await supersededReleaseWithParkedWrite();
+      } else {
+        await supersededReleaseWithFailingRewrite(1);
+      }
+      store.duringPlainUpsert = async () => {
+        const row = (await store.getSession?.(SESSION))!;
+        store.seed({ ...row, status: "released", release_reason: "explicit-release" });
+      };
+
+      landReleaseWrite?.();
+      if (attempt === "retry") {
+        await timer.advanceTimeAsync(RETRY_DELAY_MS);
+      }
+      await settleMicrotasks();
+
+      expect(store.plainUpserts).toBe(attempt === "first" ? 1 : 2);
+      expect(await store.getSession?.(SESSION)).toMatchObject({
+        status: "released",
+        release_reason: "explicit-release",
+      });
+      timer.advanceTime(1);
+      expect(await refresh()).toBe("TerminalSessionError");
+      expect(manager.getSession(SESSION)).toBeNull();
+      expect(releases).toEqual(["explicit-release"]);
+      await timer.advanceTimeAsync(RETRY_DELAY_MS * 4);
+      await settleMicrotasks();
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(releases).toEqual(["explicit-release"]);
+    },
+  );
+
+  test.each(["daemon-peer", "daemon-dead"])(
+    "the first rewrite preserves a live peer's row and replaces a dead owner's row: %s",
+    async (owner) => {
+      manager.attachDaemonSessionId("daemon-1");
+      manager.attachLiveDaemonSessionIds(() => new Set(["daemon-1", "daemon-peer"]));
+      const landReleaseWrite = await supersededReleaseWithParkedWrite();
+      let peerRow: Awaited<ReturnType<NonNullable<typeof store.getSession>>>;
+      store.duringPlainUpsert = async () => {
+        const row = (await store.getSession?.(SESSION))!;
+        peerRow = {
+          ...row,
+          status: "active",
+          release_reason: null,
+          daemon_session_id: owner,
+          device_id: "peer-device",
+        };
+        store.seed(peerRow);
+      };
+
+      landReleaseWrite();
+      await settleMicrotasks();
+
+      if (owner === "daemon-peer") {
+        expect(await store.getSession?.(SESSION)).toEqual(peerRow!);
+      } else {
+        expect(await store.getSession?.(SESSION)).toMatchObject({
+          status: "active",
+          release_reason: null,
+          daemon_session_id: "daemon-1",
+          device_id: DEVICE,
+        });
+      }
+      await timer.advanceTimeAsync(RETRY_DELAY_MS * 4);
+      await settleMicrotasks();
+      expect(store.plainUpserts).toBe(1);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(manager.getSession(SESSION)).not.toBeNull();
+      expect(releases).toEqual([]);
+      if (owner === "daemon-peer") {
+        expect(await store.getSession?.(SESSION)).toEqual(peerRow!);
+      }
+    },
+  );
+
   test("the retries are bounded, and an exhausted rewrite fails activity writes without a release", async () => {
     await supersededReleaseWithFailingRewrite(Number.POSITIVE_INFINITY);
 
@@ -364,13 +444,13 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     });
   });
 
-  test("a terminal row whose re-write after the rewrite fails is retried with the terminal release backoff", async () => {
+  test("a terminal release landing during a rewrite refuses it without needing a terminal re-write", async () => {
     await supersededReleaseWithFailingRewrite(1);
     let released: Promise<unknown> | undefined;
     store.duringPlainUpsert = async () => {
       released = manager.releaseSession(SESSION, "explicit-release");
       await settleMicrotasks(100);
-      // The release's own terminal write has landed; the re-write over the rewrite fails once.
+      // The release's own terminal write has landed; any unnecessary re-write would fail.
       store.failReleaseWrites = 1;
     };
 
@@ -379,12 +459,15 @@ describe("a failed rewrite of a live row over its superseded release's terminal 
     await released;
     await settleMicrotasks();
 
-    // The scenario was driven: the rewrite landed over the terminal row and the re-write failed.
+    // The guarded rewrite wrote nothing, so the terminal row needs no repair or retry.
     expect(store.plainUpserts).toBe(2);
-    expect(store.failReleaseWrites).toBe(0);
+    expect(store.failReleaseWrites).toBe(1);
     expect(manager.getSession(SESSION)).toBeNull();
-    expect(await store.getSession?.(SESSION)).toMatchObject({ status: "active" });
-    expect(timer.getPendingTimeouts()).toEqual([TERMINAL_RETRY_DELAY_MS]);
+    expect(await store.getSession?.(SESSION)).toMatchObject({
+      status: "released",
+      release_reason: "explicit-release",
+    });
+    expect(timer.getPendingTimeoutCount()).toBe(0);
 
     await timer.advanceTimeAsync(TERMINAL_RETRY_DELAY_MS);
     await settleMicrotasks();

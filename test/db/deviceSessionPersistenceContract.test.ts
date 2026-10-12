@@ -212,4 +212,99 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
       expect(await rowOf(persistence)).toMatchObject({ status: "active", release_reason: null });
     });
   });
+
+  describe("upsertActiveSession with rewriteOverSupersededRelease", () => {
+    const cases = [
+      { reason: "device-disconnected:emulator-5554", owner: "daemon-a", replaced: true },
+      { reason: "explicit-release", owner: "daemon-a", replaced: false },
+      { reason: "plan-auto-release", owner: "daemon-a", replaced: true },
+      { reason: null, owner: "daemon-a", replaced: true },
+      { reason: null, owner: "daemon-peer", replaced: false },
+      { reason: "plan-auto-release", owner: "daemon-peer", replaced: false },
+      { reason: "device-disconnected:emulator-5554", owner: "daemon-peer", replaced: false },
+      { reason: null, owner: null, replaced: true },
+      { reason: "device-disconnected:emulator-5554", owner: null, replaced: true },
+      { reason: null, owner: "daemon-dead", replaced: true },
+      { reason: "plan-auto-release", owner: "daemon-dead", replaced: true },
+    ];
+
+    test.each(cases)("conditions replacement on the reason and owner: %p", async (scenario) => {
+      const persistence = await create();
+      await persistence.upsertActiveSession(record({ daemonSessionId: scenario.owner }));
+      if (scenario.reason) {
+        await persistence.markReleased(SESSION, "released", 2_000, scenario.reason);
+      }
+      const before = structuredClone(await rowOf(persistence));
+
+      const result = await persistence
+        .upsertActiveSession(record({ deviceId: "replacement", lastUsedAtMs: 3_000 }), 3_000, {
+          rewriteOverSupersededRelease: {
+            supersededReasons: ["device-disconnected:emulator-5554"],
+            livePeerDaemonSessionIds: ["daemon-peer"],
+          },
+        })
+        .then(
+          () => "written",
+          (error: unknown) => error,
+        );
+
+      if (scenario.replaced) {
+        expect(result).toBe("written");
+        expect(await rowOf(persistence)).toMatchObject({
+          status: "active",
+          release_reason: null,
+          device_id: "replacement",
+          daemon_session_id: "daemon-a",
+          stable_identity_generation: (before?.stable_identity_generation ?? 0) + 1,
+        });
+      } else {
+        expect(result).toBeInstanceOf(DeviceSessionTerminallyReleasedError);
+        expect(await rowOf(persistence)).toEqual(before);
+      }
+    });
+
+    test("inserts a missing row with the rewrite guard", async () => {
+      const persistence = await create();
+      await persistence.upsertActiveSession(record(), 1_000, {
+        rewriteOverSupersededRelease: {
+          supersededReasons: [],
+          livePeerDaemonSessionIds: ["daemon-peer"],
+        },
+      });
+      expect(await rowOf(persistence)).toMatchObject({ status: "active", release_reason: null });
+    });
+
+    test.each([null, "plan-auto-release", "explicit-release"])(
+      "empty lists behave like unlessTerminal for reason %p, with no owner guard",
+      async (reason) => {
+        const persistence = await create();
+        await persistence.upsertActiveSession(record({ daemonSessionId: "daemon-peer" }));
+        if (reason) {
+          await persistence.markReleased(SESSION, "released", 2_000, reason);
+        }
+        const before = structuredClone(await rowOf(persistence));
+        const result = await persistence
+          .upsertActiveSession(record({ lastUsedAtMs: 3_000 }), 3_000, {
+            rewriteOverSupersededRelease: {
+              supersededReasons: [],
+              livePeerDaemonSessionIds: [],
+            },
+          })
+          .then(
+            () => "written",
+            (error: unknown) => error,
+          );
+        if (reason === "explicit-release") {
+          expect(result).toBeInstanceOf(DeviceSessionTerminallyReleasedError);
+          expect(await rowOf(persistence)).toEqual(before);
+        } else {
+          expect(result).toBe("written");
+          expect(await rowOf(persistence)).toMatchObject({
+            status: "active",
+            release_reason: null,
+          });
+        }
+      },
+    );
+  });
 });

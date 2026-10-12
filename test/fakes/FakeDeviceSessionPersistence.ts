@@ -78,9 +78,23 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
     if (options.claimedRow && !this.matchesIncarnation(existing, options.claimedRow)) {
       throw new DeviceSessionRowChangedError(record.sessionUuid);
     }
+    const rewrite = options.rewriteOverSupersededRelease;
+    if (rewrite && !options.claimedRow && existing) {
+      const terminal =
+        existing.release_reason !== null &&
+        isTerminalReleaseReason(existing.release_reason) &&
+        !rewrite.supersededReasons.includes(existing.release_reason);
+      const peerOwned =
+        existing.daemon_session_id !== null &&
+        rewrite.livePeerDaemonSessionIds.includes(existing.daemon_session_id);
+      if (terminal || peerOwned) {
+        throw new DeviceSessionTerminallyReleasedError(record.sessionUuid);
+      }
+    }
     // Like the repository's conflict guard: a terminally released row is never made active again.
     if (
       options.unlessTerminal &&
+      !rewrite &&
       !options.claimedRow &&
       existing?.release_reason &&
       isTerminalReleaseReason(existing.release_reason)

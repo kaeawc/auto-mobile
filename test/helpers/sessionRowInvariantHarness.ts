@@ -471,11 +471,7 @@ export async function runSessionRowInterleaving(
 
   /** A write of this daemon is under way that would replace a peer's terminal row unread. */
   const unconditionedWriteUnderWay = (): boolean =>
-    rebinding ||
-    deviceLossReleasesInFlight > 0 ||
-    repository.terminalWritesInFlight > 0 ||
-    (Reflect.get(manager, "pendingSupersededRowReasserts") as Map<string, number>).has(sessionId) ||
-    (Reflect.get(manager, "owedSupersededRowReasserts") as Map<string, unknown>).has(sessionId);
+    rebinding || deviceLossReleasesInFlight > 0 || repository.terminalWritesInFlight > 0;
 
   const releaseOrRecordFailure = async (reason: ReleaseReason): Promise<void> => {
     const mine = current;

@@ -1932,10 +1932,14 @@ describe("SessionManager", () => {
       expect(retrieved).toBeNull();
     });
 
-    test("refuses a request that arrives after its deadline while earlier work holds the veto, without releasing (#10956)", async () => {
+    test("admits a request after its deadline while timely control work holds the session (#11361)", async () => {
       const released: string[] = [];
-      // Earlier work stays in flight, whichever execution a query excludes.
-      sessionManager.setActiveSessionExecutionChecker(() => true);
+      sessionManager.setActiveSessionExecutionChecker(
+        (_sessionId, query) =>
+          query?.excludeExecutionId !== "earlier" &&
+          (query?.sessionClockStartedAtOrBefore === undefined ||
+            0 <= query.sessionClockStartedAtOrBefore),
+      );
       sessionManager.onSessionRelease((sessionId) => released.push(sessionId));
       await sessionManager.createSession("session-1", "emulator-5554", "android", 1000);
       fakeTimer.advanceTime(1001);
@@ -1944,14 +1948,13 @@ describe("SessionManager", () => {
       // execution respects that veto rather than releasing under the running call.
       expect(sessionManager.getSession("session-1")).not.toBeNull();
       expect(sessionManager.getSessionForNewExecution("session-1")).not.toBeNull();
-      // A new request that began after the deadline is refused; it does not revive the session
-      // and does not release it under the earlier work either.
+      // The timely control call keeps this session in use; acquisition restarts its idle window.
       await expect(
         sessionManager.getOrCreateSession("session-1", undefined, undefined, {
           executionId: "late",
           startTime: fakeTimer.now(),
         }),
-      ).rejects.toThrow("expired before this execution began while earlier work is still active");
+      ).resolves.toMatchObject({ sessionId: "session-1", expiresAt: 2001 });
 
       expect(released).toEqual([]);
       expect(sessionManager.getActiveSessionCount()).toBe(1);
@@ -2147,9 +2150,12 @@ describe("SessionManager", () => {
       expect(sessionManager.getActiveSessionCount()).toBe(1);
     });
 
-    test("rejects a late execution while earlier work keeps the expired session assigned", async () => {
+    test("admits a late execution while timely control work keeps the session assigned", async () => {
       sessionManager.setActiveSessionExecutionChecker(
-        (_sessionId, query) => query?.excludeExecutionId === "late",
+        (_sessionId, query) =>
+          query?.excludeExecutionId !== "earlier" &&
+          (query?.sessionClockStartedAtOrBefore === undefined ||
+            0 <= query.sessionClockStartedAtOrBefore),
       );
       await sessionManager.createSession("session-1", "emulator-5554", "android", 1000);
       fakeTimer.advanceTime(1001);
@@ -2159,7 +2165,7 @@ describe("SessionManager", () => {
           executionId: "late",
           startTime: 1001,
         }),
-      ).rejects.toThrow("earlier work is still active");
+      ).resolves.toMatchObject({ sessionId: "session-1", expiresAt: 2001 });
 
       expect(sessionManager.getActiveSessionCount()).toBe(1);
     });

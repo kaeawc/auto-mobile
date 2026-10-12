@@ -482,6 +482,52 @@ describe("ExecutionTracker", function () {
     expect(tracker.hasActiveSessionExecutions("session-id", { startedAtOrBefore: 5 })).toBe(false);
   });
 
+  test.each(["explicit", "resolved", "provisional"] as const)(
+    "session-clock start queries filter %s membership across a wall step",
+    (membership) => {
+      const timer = new FakeTimer();
+      const tracker = new ExecutionTracker(timer, new FakeIdGenerator());
+      tracker.setSessionClockOffsetProvider(
+        (wallNow = timer.now()) => timer.monotonicNow() - wallNow,
+      );
+      tracker.setAutolockSessionResolver({ autolockSessionForMcpSession: () => "holder" });
+      const start = () => {
+        const call = tracker.startExecution(
+          "tapOn",
+          undefined,
+          membership === "explicit" ? "holder" : undefined,
+          undefined,
+          membership === "provisional" ? "holder" : undefined,
+        );
+        if (membership === "resolved") {
+          tracker.setResolvedAutolockSessionUuid(call.id, "holder");
+        }
+        return call;
+      };
+      timer.advanceTime(5);
+      const timely = start();
+      timer.stepWallClock(-3_600_000);
+      timer.advanceTime(1);
+      const late = start();
+      const active = (excludeExecutionId?: string) =>
+        membership === "explicit"
+          ? tracker.hasActiveSessionUuidExecutions("holder", {
+              sessionClockStartedAtOrBefore: 5,
+              excludeExecutionId,
+              excludeReads: true,
+            })
+          : tracker.hasActiveAutolockSessionExecutions("holder", {
+              sessionClockStartedAtOrBefore: 5,
+              excludeExecutionId,
+              excludeReads: true,
+            });
+      expect(active(late.id)).toBe(true);
+      expect(active(timely.id)).toBe(false);
+      tracker.markDeviceReadCall(timely.id, timely.toolName);
+      expect(active()).toBe(false);
+    },
+  );
+
   test("tracks an implicit execution under its resolved autolock session", function () {
     const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["execution-1"]));
     const execution = tracker.startExecution("tapOn", "mcp-session");

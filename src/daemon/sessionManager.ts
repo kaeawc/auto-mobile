@@ -815,6 +815,8 @@ type SessionClockExecution = SessionExecutionMetadata & { sessionClockStartTime:
 
 export interface ActiveSessionExecutionQuery {
   startedAtOrBefore?: number;
+  /** Compare the start captured on the session clock, immune to wall-clock steps (#11290). */
+  sessionClockStartedAtOrBefore?: number;
   excludeExecutionId?: string;
   /** Count control calls only: reads never hold idle or owner-disconnect release (#11381). */
   excludeReads?: boolean;
@@ -3770,9 +3772,9 @@ export class SessionManager {
   }
 
   /**
-   * Resolve a session before a new tool execution is accepted. Existing work may
-   * defer expiry cleanup, but it must not let a request that arrived after the
-   * deadline revive an expired session.
+   * Resolve a session before a new tool execution is accepted. A timely control call still in
+   * flight keeps the session in use, so another control call may join it after the idle deadline.
+   * Calls that all began late cannot revive the session by counting each other.
    */
   getSessionForNewExecution(
     sessionId: string,
@@ -3796,13 +3798,15 @@ export class SessionManager {
       return null;
     }
     const startedExecution = execution && this.executionOnSessionClock(execution);
-    if (
-      expireDespiteActiveExecution &&
-      this.isLateExecutionWhileEarlierWorkIsActive(session, startedExecution)
-    ) {
-      throw new Error(
-        `Session ${sessionId} expired before this execution began while earlier work is still active.`,
-      );
+    if (expireDespiteActiveExecution) {
+      if (this.isLateExecutionWhileEarlierWorkIsActive(session, startedExecution, true)) {
+        return session;
+      }
+      if (this.isLateExecutionWhileEarlierWorkIsActive(session, startedExecution)) {
+        throw new Error(
+          `Session ${sessionId} expired before this execution began while earlier work is still active.`,
+        );
+      }
     }
     if (this.shouldExpireSession(session, expireDespiteActiveExecution, startedExecution)) {
       if (!releaseExpired) {
@@ -3854,10 +3858,10 @@ export class SessionManager {
 
   /**
    * The live session a read is admitted under, releasing nothing. A read that arrives after the
-   * idle deadline while an earlier control call still holds the session (#11361) is not admitted
-   * under it and does not get the untyped refusal a late control call gets: this returns null, read-only
-   * admission resolves undefined, and the caller runs the read without a session on the device
-   * {@link deviceHeldForLateRead} names. Any other read past the deadline also gets null here.
+   * idle deadline while any control call or recovery still holds the session (#11361) is not
+   * admitted under it: this returns null, read-only admission resolves undefined, and the caller
+   * runs the read without a session on the device {@link deviceHeldForLateRead} names. Any other
+   * read past the deadline also gets null here.
    */
   private observeSessionForRead(
     sessionId: string,
@@ -3871,8 +3875,8 @@ export class SessionManager {
 
   /**
    * The device of the live session a read named but arrived too late to be admitted under: past
-   * the idle deadline, with an earlier control call still holding the session (#11361). The read runs
-   * sessionless against this device, the one it asked about, rather than whatever device a
+   * the idle deadline, with any control call or recovery still holding the session (#11361).
+   * The read runs sessionless against this device, the one it asked about, rather than whatever device a
    * sessionless call would otherwise select. Undefined in every other case. Reads no device and
    * changes nothing: no release, no refresh, no idle credit.
    */
@@ -11971,9 +11975,14 @@ export class SessionManager {
     return execution.sessionClockStartTime > idleDeadline;
   }
 
+  /**
+   * A late call while other control work or recovery holds the session. Only a timely control
+   * call admits new control work; the unbounded check preserves the hold without admission.
+   */
   private isLateExecutionWhileEarlierWorkIsActive(
     session: Session,
     execution: SessionClockExecution | undefined,
+    timelyControlOnly = false,
   ): boolean {
     const idleDeadline = sessionIdleDeadline(session);
     return (
@@ -11981,6 +11990,7 @@ export class SessionManager {
       this.sessionNow() > idleDeadline &&
       execution.sessionClockStartTime > idleDeadline &&
       this.activeSessionExecutionChecker(session.sessionId, {
+        ...(timelyControlOnly ? { sessionClockStartedAtOrBefore: idleDeadline } : {}),
         excludeExecutionId: execution.executionId,
         excludeReads: true,
       })

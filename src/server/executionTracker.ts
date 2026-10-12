@@ -150,6 +150,8 @@ export type ExecutionCancellationReason = string | Error;
 export interface ActiveExecutionQuery {
   onlyToolName?: string;
   startedAtOrBefore?: number;
+  /** Bound the captured session-clock start rather than its wall-clock counterpart (#11290). */
+  sessionClockStartedAtOrBefore?: number;
   excludeExecutionId?: string;
   /** Same session filter as {@link ExecutionCancellationOptions.onlySessionUuid}. */
   onlySessionUuid?: string;
@@ -177,13 +179,20 @@ function executionDeadlineMs(execution: ActiveExecution, onSessionClock?: boolea
   return onSessionClock ? wallDeadline + (execution.sessionClockOffsetMs ?? 0) : wallDeadline;
 }
 
-/** Whether `query` leaves this execution out by id or as a read ({@link ActiveExecutionQuery}). */
+/** Whether `query` leaves this execution out by id, session-clock start or as a read. */
 function isExcludedByQuery(
   executionId: string,
   execution: ActiveExecution | undefined,
   query: ActiveExecutionQuery | undefined,
 ): boolean {
   if (executionId === query?.excludeExecutionId) {
+    return true;
+  }
+  if (
+    query?.sessionClockStartedAtOrBefore !== undefined &&
+    (execution === undefined ||
+      execution.sessionClockStartTime > query.sessionClockStartedAtOrBefore)
+  ) {
     return true;
   }
   return query?.excludeReads === true && execution !== undefined && isReadExecution(execution);
@@ -193,6 +202,7 @@ function isExcludedByQuery(
 function isUnfilteredQuery(query: ActiveExecutionQuery | undefined): boolean {
   return (
     query?.startedAtOrBefore === undefined &&
+    query?.sessionClockStartedAtOrBefore === undefined &&
     query?.excludeExecutionId === undefined &&
     query?.onlyToolName === undefined &&
     query?.onlySessionUuid === undefined &&

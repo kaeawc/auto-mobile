@@ -1,3 +1,4 @@
+import { logger } from "../utils/logger";
 import type { SessionManager } from "../daemon/sessionManager";
 
 /** The slice of the session manager a deferred plan app cleanup needs. */
@@ -33,6 +34,13 @@ function deferredFor(host: HeldPlanAppCleanupHost): Map<string, DeferredPlanAppC
   // before the cleanup settles; `run` bounds itself to `capMs`.
   host.onSessionRelease((sessionId, deviceId, _reason, _snapshot, options) => {
     if (options?.upgradeOnly) {
+      return;
+    }
+    if (options?.deviceIdentityReplaced) {
+      deferred.delete(sessionId);
+      logger.debug(
+        `Held app cleanup for session ${sessionId} on replaced serial ${deviceId}: skipped app termination and data clearing`,
+      );
       return;
     }
     const entry = deferred.get(sessionId);

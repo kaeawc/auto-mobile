@@ -12,6 +12,20 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
+import { defaultDeviceClockRestoreRegistry } from "../../src/features/utility/DeviceClock";
+import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
+import { fixedBackoff } from "../../src/utils/Backoff";
+import { getAbortSignal } from "../../src/utils/AbortContext";
+import { registerNetworkStateSessionCleanup } from "../../src/server/networkStateSessionCleanup";
+import { NetworkState } from "../../src/server/NetworkState";
+import {
+  registerLocationRouteSessionCleanup,
+  LocationRouteRegistry,
+} from "../../src/features/utility/LocationRoutePlayer";
+import {
+  deferHeldPlanAppCleanup,
+  takeHeldPlanAppCleanup,
+} from "../../src/server/heldPlanAppCleanup";
 import { warmedTests } from "../helpers/warmedTests";
 
 // Harness follows test/daemon/devicePool.serialReuseIdentity.test.ts.
@@ -40,11 +54,22 @@ async function setup(saved = true) {
   const persistence = new FakeDeviceSessionPersistence();
   /** Every device-state write the holder's release teardown sends, by serial. */
   const restores: string[] = [];
-  const behavior = { rotationFails: false };
+  const behavior: {
+    rotationFails: boolean;
+    failingKind: string;
+    parkedKind: string;
+    gate?: Promise<void>;
+    started: boolean;
+  } = { rotationFails: false, failingKind: "", parkedKind: "", started: false };
   const record = (kind: string) => (device: BootedDevice) => ({
-    restore: async () => {
+    restore: async (_state: unknown, signal = getAbortSignal()) => {
+      if (kind === behavior.parkedKind) {
+        behavior.started = true;
+        await behavior.gate;
+        signal?.throwIfAborted();
+      }
       restores.push(`${kind}:${device.deviceId}`);
-      if (kind === "rotation" && behavior.rotationFails) {
+      if ((kind === "rotation" && behavior.rotationFails) || kind === behavior.failingKind) {
         throw new Error("restore not confirmed");
       }
     },
@@ -95,6 +120,7 @@ async function setup(saved = true) {
     pool.releaseDeviceClaimsForShutdown();
     sessions.stopCleanupTimer();
     timer.reset();
+    defaultDeviceClockRestoreRegistry.retire(original.deviceId);
     warn.mockRestore();
     forget.mockRestore();
   };
@@ -211,9 +237,25 @@ for (const path of ["fresh settlement", "monitor", "refresh"] as const) {
         }
         await h.pool.bindOrReuseDeviceSession("next", original.deviceId, "android");
         expect(h.pool.getDevice(original.deviceId)?.sessionId).toBe("next");
+        expect(h.restores).toEqual([]);
+        // The fence retires A's work, while B's own later release still restores its baseline.
+        const next = h.sessions.getSession("next")!;
+        h.sessions.setKeepScreenAwake("next", { applied: true, method: "settings" });
+        h.sessions.setBiometricEnrollment("next", { initialEnrollment: "not_enrolled" });
+        h.sessions.setNetworkCondition("next", { initialProfile: "none" });
+        h.sessions.setClock(next, {
+          initialAutomaticTime: 1,
+          clockChangedByUs: true,
+          rootedByUs: true,
+        });
+        h.sessions.setRotation(next, { accelerometerRotation: 1, userRotation: 0 });
+        h.sessions.setScreenReader(next, { platform: "android", previousEnabled: false });
+        await h.sessions.releaseSession("next", "explicit-release");
+        await drainMicrotasks(80);
+        expect(h.restores).toEqual(allRestores);
         h.timer.advanceTime(240_000);
         await drainMicrotasks(80);
-        expect(h.restores).toEqual([]);
+        expect(h.restores).toEqual(allRestores);
       } finally {
         h.cleanup();
       }
@@ -356,3 +398,353 @@ warmedTest(
     }
   },
 );
+
+const retryKinds = ["clock", "rotation", "screen-reader"] as const;
+const savedKeys = [
+  "keepScreenAwake",
+  "biometricEnrollment",
+  "networkCondition",
+  "clock",
+  "rotation",
+  "screenReader",
+] as const;
+
+for (const key of savedKeys) {
+  warmedTest(`joined release skips ${key} after identity replacement`, async () => {
+    const h = await setup();
+    const gate = Promise.withResolvers<void>();
+    try {
+      for (const other of savedKeys) {
+        if (other !== key) {
+          delete h.holder.cacheData[other];
+        }
+      }
+      const tracked = h.sessions.trackSessionSetup(h.holder, () => gate.promise);
+      const release = h.sessions.releaseSession("holder", "explicit-release");
+      await drainMicrotasks(40);
+      h.manager.bootedDevices = [stranger];
+      const settlement = h.pool.settlePooledRuntimeIdentity(original.deviceId);
+      await drainMicrotasks(80);
+      gate.resolve();
+      await tracked;
+      await release;
+      expect(await settlement).toBe("replaced");
+      expect(h.restores).toEqual([]);
+      expect(h.holder.cacheData[key]).toBeUndefined();
+      expect(h.releases).toEqual([{ reason: "explicit-release", identityReplaced: true }]);
+      expect(
+        h.warn.mock.calls.filter(([message]) =>
+          String(message).startsWith("Dropped restore state"),
+        ),
+      ).toHaveLength(1);
+      await h.pool.bindOrReuseDeviceSession("next", original.deviceId, "android");
+      h.timer.advanceTime(240_000);
+      await drainMicrotasks(80);
+      expect(h.restores).toEqual([]);
+    } finally {
+      gate.resolve();
+      h.cleanup();
+    }
+  });
+}
+
+function startRetry(h: Awaited<ReturnType<typeof setup>>, kind: (typeof retryKinds)[number]) {
+  if (kind === "clock") {
+    return h.sessions["getPendingClockRestoration"](h.holder, null);
+  }
+  if (kind === "rotation") {
+    return h.sessions["getPendingRotationRestoration"](h.holder, null);
+  }
+  return h.sessions["getPendingScreenReaderRestoration"](h.holder, null);
+}
+
+for (const kind of retryKinds) {
+  for (const outcome of ["commit", "supersede", "control"] as const) {
+    warmedTest(`${kind} scheduled retry: ${outcome} fences the handoff window`, async () => {
+      const h = await setup();
+      const gate = Promise.withResolvers<void>();
+      try {
+        const key = kind === "screen-reader" ? "screenReader" : kind;
+        for (const other of savedKeys) {
+          if (other !== key) {
+            delete h.holder.cacheData[other];
+          }
+        }
+        h.behavior.failingKind = kind;
+        const retry = await startRetry(h, kind);
+        expect(h.restores).toEqual([`${kind}:${original.deviceId}`]);
+        h.restores.length = 0;
+        h.behavior.failingKind = "";
+        if (outcome === "control") {
+          h.timer.advanceTime(1000);
+          await drainMicrotasks(100);
+          await retry.pending;
+          expect(h.restores).toEqual([`${kind}:${original.deviceId}`]);
+          return;
+        }
+        const tracked = h.sessions.trackSessionSetup(h.holder, () => gate.promise);
+        h.manager.bootedDevices = [stranger];
+        const settlement = h.pool.settlePooledRuntimeIdentity(original.deviceId);
+        await drainMicrotasks(80);
+        h.timer.advanceTime(300);
+        await drainMicrotasks(100);
+        expect(h.releases).toEqual([]);
+        expect(h.restores).toEqual([]);
+        if (outcome === "supersede") {
+          const newer = { ...original, observedAt: 20 };
+          h.manager.bootedDevices = [newer];
+          await h.pool.reconcileDiscoveryObservation([newer], "newer-A");
+        }
+        gate.resolve();
+        await tracked;
+        expect(await settlement).toBe(outcome === "commit" ? "replaced" : "unsettled");
+        await drainMicrotasks(100);
+        if (outcome === "supersede") {
+          await h.sessions.releaseSession("holder", "explicit-release");
+          await retry.pending;
+          expect(h.restores).toEqual([`${kind}:${original.deviceId}`]);
+        } else {
+          h.timer.advanceTime(240_000);
+          await drainMicrotasks(100);
+          await retry.pending;
+          expect(h.restores).toEqual([]);
+          expect(h.holder.cacheData[key]).toBeUndefined();
+          await h.pool.bindOrReuseDeviceSession("next", original.deviceId, "android");
+        }
+      } finally {
+        gate.resolve();
+        h.cleanup();
+      }
+    });
+  }
+}
+
+for (const kind of ["keep-awake", "biometric", "network", ...retryKinds]) {
+  for (const replaced of [true, false]) {
+    warmedTest(`parked ${kind} dispatch with joined identity replacement=${replaced}`, async () => {
+      const h = await setup();
+      const gate = Promise.withResolvers<void>();
+      try {
+        h.behavior.parkedKind = kind;
+        h.behavior.gate = gate.promise;
+        const release = h.sessions.releaseSession("holder", "explicit-release");
+        await drainMicrotasks(80);
+        expect(h.behavior.started).toBe(true);
+        const beforeJoin = [...h.restores];
+        let settlement: Promise<unknown> | undefined;
+        if (replaced) {
+          h.manager.bootedDevices = [stranger];
+          settlement = h.pool.settlePooledRuntimeIdentity(original.deviceId);
+          await drainMicrotasks(80);
+        }
+        gate.resolve();
+        await release;
+        if (settlement) {
+          expect(await settlement).toBe("replaced");
+        }
+        await drainMicrotasks(80);
+        expect(h.restores).toEqual(replaced ? beforeJoin : allRestores);
+        expect(h.releases).toEqual([{ reason: "explicit-release", identityReplaced: replaced }]);
+        if (replaced) {
+          expect(savedKeys.every((key) => h.holder.cacheData[key] === undefined)).toBe(true);
+          await h.pool.bindOrReuseDeviceSession("next", original.deviceId, "android");
+          h.timer.advanceTime(240_000);
+          await drainMicrotasks(100);
+          expect(h.restores).toEqual(beforeJoin);
+        }
+      } finally {
+        gate.resolve();
+        h.cleanup();
+      }
+    });
+  }
+}
+
+warmedTest(
+  "settlement runs real listener host cleanup and immediately binds the stranger",
+  async () => {
+    const h = await setup();
+    try {
+      const state = new NetworkState({
+        timer: h.timer,
+        notifier: { notifyResourceUpdated: () => {} },
+      });
+      state.startSimulation(original.deviceId, "timeout", 30, null, "holder");
+      registerNetworkStateSessionCleanup(h.sessions, {
+        state: () => state,
+        pusher: {
+          push: async (serial) => {
+            h.restores.push(`network-push:${serial}`);
+          },
+        },
+      });
+      const registry = new LocationRouteRegistry(h.timer);
+      registerLocationRouteSessionCleanup(h.sessions, {
+        registry,
+        mockLocationClears: {
+          markSet: () => {},
+          clearLateSet: () => null,
+          retireDevice: () => {},
+          clearAfter: (_owner, serial) => {
+            h.restores.push(`location-clear:${serial}`);
+            return Promise.resolve();
+          },
+        },
+      });
+      registry.start(
+        original.deviceId,
+        [
+          { latitude: 0, longitude: 0 },
+          { latitude: 0, longitude: 1 },
+        ],
+        1000,
+        500,
+        true,
+        async () => {
+          h.restores.push(`location-fix:${original.deviceId}`);
+        },
+      );
+      deferHeldPlanAppCleanup(
+        h.sessions,
+        "holder",
+        async () => {
+          h.restores.push(`app-cleanup:${original.deviceId}`);
+        },
+        1000,
+      );
+      h.manager.bootedDevices = [stranger];
+      expect(await h.pool.settlePooledRuntimeIdentity(original.deviceId)).toBe("replaced");
+      expect(h.restores).toEqual([]);
+      expect(state.getSimulation(original.deviceId)).toBeNull();
+      expect(registry.isActive(original.deviceId)).toBe(false);
+      expect(takeHeldPlanAppCleanup(h.sessions, "holder")).toBeUndefined();
+      expect(h.sessions.hasDeviceCleanupInProgress(original.deviceId)).toBe(false);
+      await h.pool.bindOrReuseDeviceSession("next", original.deviceId, "android");
+      h.timer.advanceTime(240_000);
+      await drainMicrotasks(100);
+      expect(h.restores).toEqual([]);
+    } finally {
+      h.cleanup();
+    }
+  },
+);
+
+for (const kind of ["rotation", "screen-reader"] as const) {
+  for (const outcome of ["commit", "supersede", "control"] as const) {
+    warmedTest(`queued abandoned ${kind} retry: ${outcome}`, async () => {
+      const h = await setup();
+      const own = Promise.withResolvers<void>();
+      const gate = Promise.withResolvers<void>();
+      try {
+        h.behavior.failingKind = kind;
+        await startRetry(h, kind);
+        for (const delay of [250, 500, 1000, 2000, 2000]) {
+          h.timer.advanceTime(delay);
+          await drainMicrotasks(80);
+        }
+        expect(h.restores).toHaveLength(kind === "rotation" ? 6 : 3);
+        const abandoned =
+          kind === "rotation"
+            ? h.sessions["abandonedRotations"]
+            : h.sessions["abandonedScreenReaders"];
+        expect(abandoned.has(original.deviceId)).toBe(true);
+        h.behavior.failingKind = "";
+        h.restores.length = 0;
+        const retry =
+          kind === "rotation"
+            ? h.sessions["retryAbandonedRotationAfter"](original.deviceId, own.promise)
+            : h.sessions["retryAbandonedScreenReaderAfter"](original.deviceId, own.promise);
+        if (outcome === "control") {
+          own.resolve();
+          await retry;
+          expect(h.restores).toEqual([`${kind}:${original.deviceId}`]);
+          return;
+        }
+        const tracked = h.sessions.trackSessionSetup(h.holder, () => gate.promise);
+        h.manager.bootedDevices = [stranger];
+        const settlement = h.pool.settlePooledRuntimeIdentity(original.deviceId);
+        await drainMicrotasks(80);
+        own.resolve();
+        h.timer.advanceTime(300);
+        await drainMicrotasks(100);
+        expect(h.releases).toEqual([]);
+        expect(h.restores).toEqual([]);
+        expect(abandoned.has(original.deviceId)).toBe(true);
+        if (outcome === "supersede") {
+          const newer = { ...original, observedAt: h.timer.now() + 20 };
+          h.manager.bootedDevices = [newer];
+          await h.pool.reconcileDiscoveryObservation([newer], "newer-A");
+        }
+        gate.resolve();
+        await tracked;
+        expect(await settlement).toBe(outcome === "commit" ? "replaced" : "unsettled");
+        await retry;
+        expect(h.restores).toEqual(outcome === "commit" ? [] : [`${kind}:${original.deviceId}`]);
+        if (outcome === "commit") {
+          h.timer.advanceTime(240_000);
+          await drainMicrotasks(100);
+          expect(h.restores).toEqual([]);
+          expect(abandoned.has(original.deviceId)).toBe(false);
+          await h.pool.bindOrReuseDeviceSession("next", original.deviceId, "android");
+        }
+      } finally {
+        own.resolve();
+        gate.resolve();
+        h.cleanup();
+      }
+    });
+  }
+}
+
+for (const reason of ["keep-screen-awake", "biometric-enrollment", "network-condition"] as const) {
+  for (const outcome of ["commit", "supersede", "control"] as const) {
+    warmedTest(`${reason} health recovery: ${outcome} preserves the serial fence`, async () => {
+      const h = await setup(false);
+      const gate = Promise.withResolvers<void>();
+      try {
+        const markers = new InMemoryDeviceHealthMarkers(h.timer);
+        h.sessions.setDeviceHealthMarkers(
+          markers,
+          () => 1,
+          () => true,
+          fixedBackoff(250),
+        );
+        h.sessions["abandonRestore"](
+          { deviceId: original.deviceId, incarnation: 1 },
+          reason,
+          async () => {
+            h.restores.push(`${reason}:${original.deviceId}`);
+          },
+        );
+        if (outcome === "control") {
+          h.timer.advanceTime(300);
+          await drainMicrotasks(100);
+          expect(h.restores).toEqual([`${reason}:${original.deviceId}`]);
+          return;
+        }
+        const tracked = h.sessions.trackSessionSetup(h.holder, () => gate.promise);
+        h.manager.bootedDevices = [stranger];
+        const settlement = h.pool.settlePooledRuntimeIdentity(original.deviceId);
+        await drainMicrotasks(80);
+        h.timer.advanceTime(300);
+        await drainMicrotasks(100);
+        expect(h.releases).toEqual([]);
+        expect(h.restores).toEqual([]);
+        if (outcome === "supersede") {
+          const newer = { ...original, observedAt: 20 };
+          h.manager.bootedDevices = [newer];
+          await h.pool.reconcileDiscoveryObservation([newer], "newer-A");
+        }
+        gate.resolve();
+        await tracked;
+        expect(await settlement).toBe(outcome === "commit" ? "replaced" : "unsettled");
+        h.timer.advanceTime(240_000);
+        await drainMicrotasks(100);
+        expect(h.restores).toEqual(outcome === "commit" ? [] : [`${reason}:${original.deviceId}`]);
+      } finally {
+        gate.resolve();
+        h.cleanup();
+      }
+    });
+  }
+}

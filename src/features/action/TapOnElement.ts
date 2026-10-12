@@ -1802,29 +1802,6 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     }
   }
 
-  private resolveRetryTapPoint(
-    tapPoint: { x: number; y: number },
-    target: Element,
-    hierarchy: ViewHierarchyResult,
-    bounds: ElementBounds,
-    context: TapPointContext,
-  ): { x: number; y: number } | null {
-    try {
-      return pointInTapBounds(tapPoint, bounds)
-        ? tapPoint
-        : this.resolveVisibleTapPoint(target, hierarchy, bounds, context);
-    } catch (error) {
-      if (!(error instanceof TapTargetUnavailableError)) {
-        throw error;
-      }
-      logger.warn(
-        "[TapOnElement][retryIfNoChange] Refreshed target is covered; skipping retry",
-        error,
-      );
-      return null;
-    }
-  }
-
   /** @internal Test seam for pre-tap stability tests (#7992); not part of the public API. */
   async prepareSelectionCapture(
     action: string,
@@ -5381,13 +5358,12 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       );
       return;
     }
-    const retryPoint = this.resolveRetryTapPoint(
-      tapPoint,
-      retryTarget,
-      probe.hierarchy,
-      retryBounds,
-      { options, screenSize: retryScreenSize },
-    );
+    const retryPoint = pointInTapBounds(tapPoint, retryBounds)
+      ? tapPoint
+      : this.resolveVisibleTapPoint(retryTarget, probe.hierarchy, retryBounds, {
+          options,
+          screenSize: retryScreenSize,
+        });
     if (!retryPoint) {
       logger.warn(
         "[TapOnElement][retryIfNoChange] Refreshed target has no unobstructed tap point; skipping retry",

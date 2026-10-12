@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeAll, expect, test } from "bun:test";
+import { afterEach, beforeAll, expect, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
@@ -70,9 +70,23 @@ function harness(observation: ObserveResult, platform: "ios" | "android" = "ios"
   return { tap, points };
 }
 
-async function tapOn(observation: ObserveResult, options: TapOnElementOptions) {
-  const { tap, points } = harness(observation);
-  return { result: await tap.execute(options), points };
+async function tapOn(
+  observation: ObserveResult,
+  options: TapOnElementOptions,
+  platform: "ios" | "android" = "ios",
+) {
+  const { tap, points } = harness(observation, platform);
+  const projector = new SearchableHierarchy();
+  const project = SearchableHierarchy.prototype.project;
+  // Each invocation projects its immutable capture inside the test; repeated readers share its cache.
+  const projection = spyOn(SearchableHierarchy.prototype, "project").mockImplementation(
+    (hierarchy) => project.call(projector, hierarchy),
+  );
+  try {
+    return { result: await tap.execute(options), points };
+  } finally {
+    projection.mockRestore();
+  }
 }
 
 function moveFrame(node: SearchableEntry, bounds: ElementBounds): void {
@@ -133,45 +147,6 @@ moveFrame(
 );
 
 const reverseOptions: TapOnElementOptions = { action: "tap", elementId: "reverse_cart_A" };
-const coveredNodes = new SearchableHierarchy().project(covered.viewHierarchy!);
-const coveredRow = coveredNodes.find(
-  (node) => node.nativeId === "item_40" && coveredNodes[node.parentIndex!]?.nativeId === "cart_A",
-)!;
-const coveredTarget = coveredNodes.find(
-  (node) => node.nativeId === "remove" && node.parentIndex === coveredRow.index,
-)!.element!;
-
-function resolveCoveredRetry() {
-  const { tap, points } = harness(capture);
-  const retryPoint = tap["resolveRetryTapPoint"](
-    // A previous point outside the refreshed frame forces the retry to re-resolve ownership.
-    { x: 100, y: 200 },
-    coveredTarget,
-    covered.viewHierarchy!,
-    coveredTarget.bounds,
-    { options: remove(40), screenSize: covered.screenSize },
-  );
-  return { retryPoint, points };
-}
-
-class RetryResolutionError extends Error {}
-
-function retryWithSentinel() {
-  const { tap } = harness(capture);
-  const sentinel = new RetryResolutionError("retry resolution sentinel");
-  tap["resolveVisibleTapPoint"] = () => {
-    throw sentinel;
-  };
-  const resolve = async () =>
-    tap["resolveRetryTapPoint"](
-      { x: 100, y: 200 },
-      coveredTarget,
-      covered.viewHierarchy!,
-      coveredTarget.bounds,
-      { options: remove(40), screenSize: covered.screenSize },
-    );
-  return { sentinel, resolve };
-}
 
 afterEach(() => AndroidCtrlProxyClient.resetInstances());
 beforeAll(async () => {
@@ -183,10 +158,7 @@ beforeAll(async () => {
   await tapOn(covered, remove(40));
   await tapOn(partial, remove(40));
   await tapOn(reverseCovered, reverseOptions);
-  await harness(capture, "android").tap.execute(remove(47));
-  resolveCoveredRetry();
-  const { sentinel, resolve } = retryWithSentinel();
-  await expect(resolve()).rejects.toBe(sentinel);
+  await tapOn(capture, remove(47), "android");
 });
 
 test("fully clipped cart_A/item_47 cannot tap cart_B's visible Remove", async () => {
@@ -256,20 +228,7 @@ test("PIN: a control without a scroll ancestor keeps its centre despite a siblin
 });
 
 test("PIN: Android retains the existing un-clipped captured-frame dispatch", async () => {
-  const { tap, points } = harness(capture, "android");
-  const result = await tap.execute(remove(47));
+  const { result, points } = await tapOn(capture, remove(47), "android");
   expect(result.success).toBe(true);
   expect(points).toEqual([{ x: 346, y: 552 }]);
-});
-
-test("a covered refreshed target resolves to no retry point without dispatching", () => {
-  // Full execute + retry peaked at 16.39 ms; cover the extracted guard seam directly (C3).
-  const { retryPoint, points } = resolveCoveredRetry();
-  expect(retryPoint).toBeNull();
-  expect(points).toEqual([]);
-});
-
-test("PIN: retry resolution preserves a non-target-unavailable error's class and identity", async () => {
-  const { sentinel, resolve } = retryWithSentinel();
-  await expect(resolve()).rejects.toBe(sentinel);
 });

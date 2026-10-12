@@ -156,6 +156,7 @@ function overlaysFor(
 }
 
 function exclusivePoint(query: OwnershipQuery, covers: readonly ElementBounds[]): TapPoint | null {
+  // A caller's key-row-derived IME cover can leave the frame strip above the first row eligible (#11947 follow-ups).
   const regions = covers.reduce(
     (exposed, cover) => exposed.flatMap((region) => subtractCover(region, cover)),
     [query.visibleBounds],

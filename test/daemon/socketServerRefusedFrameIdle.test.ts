@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import {
   handleDaemonRequest,
@@ -14,6 +14,11 @@ import {
   subscribeToolCallEndActivity,
 } from "../../src/daemon/toolCallActivity";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+import { runWithAbortSignal } from "../../src/utils/AbortContext";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import type { StorageWriteOptions } from "../../src/features/storage/storageTypes";
+import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
+import { drainUntil, drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerStepping";
 import { InputKey } from "../../src/features/action/InputKey";
 import { PressButton } from "../../src/features/action/PressButton";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
@@ -66,6 +71,17 @@ interface Internals {
   acceptingRequests: boolean;
   handleConnection(socket: Socket): void;
   activeRequestHandlers: Set<Promise<void>>;
+  runIdeKeyValueMutation(
+    platform: "android",
+    device: typeof androidDevice,
+    appId: string,
+    fileName: string,
+    mutation: {
+      dispatching: () => void;
+      viaSdk: (onDispatch: () => void) => Promise<void>;
+      viaDirectFile: () => Promise<void>;
+    },
+  ): Promise<{ usedDirectFileFallback: boolean }>;
   handleIdeSocketRequest(request: DaemonRequest): Promise<unknown>;
 }
 
@@ -131,6 +147,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
   let screenGeometry: { pixelWidth: number; pixelHeight: number } | null;
   let toolsEnabled: boolean;
   let beforeDeviceWork: (() => void) | undefined;
+  let deviceWork: ((onDispatch?: () => void) => Promise<{ success: true }>) | undefined;
   let duringOwnershipGate: (() => void) | undefined;
   const pool = { isSessionRecoveryInFlight: () => false, sessionExecutionsEnded: () => {} };
 
@@ -174,9 +191,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
       method,
       params: { platform: "android", deviceId: DEVICE, sessionUuid: SESSION, ...params },
     });
-    for (let i = 0; i < 6; i++) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
+    await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
     await Promise.all([...internals.activeRequestHandlers]);
     return socket.responses.find((frame) => frame.id === id);
   }
@@ -186,10 +201,21 @@ describe("a holder's control frame refused before it reaches the device", () => 
     return { lastUsedAt: session?.lastUsedAt, expiresAt: session?.expiresAt };
   };
 
-  const record = (call: string) => async (): Promise<{ success: true }> => {
-    sent.push(call);
-    return { success: true };
-  };
+  const record =
+    (call: string, hookIndex?: number) =>
+    async (...args: unknown[]): Promise<{ success: true }> => {
+      const hook = hookIndex === undefined ? undefined : args[hookIndex];
+      const onDispatch =
+        typeof hook === "function"
+          ? (hook as () => void)
+          : (hook as StorageWriteOptions | undefined)?.onDispatch;
+      if (deviceWork) {
+        return deviceWork(onDispatch);
+      }
+      onDispatch?.();
+      sent.push(call);
+      return { success: true };
+    };
 
   beforeEach(async () => {
     sent = [];
@@ -198,6 +224,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
     toolsEnabled = true;
     beforeDeviceWork = undefined;
     duringOwnershipGate = undefined;
+    deviceWork = undefined;
     timer = new FakeTimer();
     serverTimer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -215,7 +242,10 @@ describe("a holder's control frame refused before it reaches the device", () => 
     PlatformDeviceManagerFactory.setInstance({
       getBootedDevicesDetailed: async () => {
         serverTimer.advanceTime(discoveryTakesMs);
-        return { devices: [androidDevice], succeededPlatforms: new Set(["android", "ios"]) };
+        return {
+          devices: [androidDevice, { ...androidDevice, deviceId: "idle-ios", platform: "ios" }],
+          succeededPlatforms: new Set(["android", "ios"]),
+        };
       },
     } as unknown as ReturnType<typeof PlatformDeviceManagerFactory.getInstance>);
     spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(() => {
@@ -223,17 +253,28 @@ describe("a holder's control frame refused before it reaches the device", () => 
       beforeDeviceWork?.();
       return {
         getScreenScaleMetadata: () => screenGeometry,
-        requestTapCoordinates: record("tap"),
-        requestSwipe: record("swipe"),
+        requestTapCoordinates: record("tap", 6),
+        requestSwipe: record("swipe", 8),
         requestGestureStart: record("gestureStart"),
         requestGestureMove: record("gestureMove"),
         requestGestureEnd: record("gestureEnd"),
         requestSetText: record("setText"),
-        setPreference: record("setPreference"),
-        removePreference: record("removePreference"),
-        clearPreferenceStore: record("clearPreferenceStore"),
+        setPreference: record("setPreference", 5),
+        removePreference: record("removePreference", 3),
+        clearPreferenceStore: record("clearPreferenceStore", 2),
       } as unknown as AndroidCtrlProxyClient;
     });
+    spyOn(IOSCtrlProxyClient, "getInstance").mockImplementation(
+      () =>
+        ({
+          getScreenScaleMetadata: () => ({ nativeScale: 1, pixelWidth: 100, pixelHeight: 100 }),
+          requestTapCoordinates: record("tap", 7),
+          requestDrag: record("swipe", 10),
+          setPreference: record("setPreference", 5),
+          removePreference: record("removePreference", 3),
+          clearPreferenceStore: record("clearPreferenceStore", 2),
+        }) as unknown as IOSCtrlProxyClient,
+    );
     spyOn(AndroidCtrlProxyManager, "getInstance").mockImplementation(
       () =>
         ({
@@ -266,6 +307,7 @@ describe("a holder's control frame refused before it reaches the device", () => 
       serverTimer,
       null,
       {
+        adbClientFactory: new FakeAdbClientFactory(),
         sessionToolSelectionService: {
           isEnabled: async () => toolsEnabled,
           setEnabled: async () => {},
@@ -284,19 +326,23 @@ describe("a holder's control frame refused before it reaches the device", () => 
     // Closing the socket lifts any stroke it still owns, through the fake client: settle that
     // before the fakes are restored.
     socket.destroy();
-    for (let i = 0; i < 4; i++) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
+    await drainMicrotasks(FAKE_TIMER_QUIET_TURNS);
     await Promise.all([...internals.activeRequestHandlers]);
     spyOn(internals, "handleIdeSocketRequest").mockRestore();
     unsubscribeActivity();
     executionTracker.setSessionClockOffsetProvider(() => 0);
     spyOn(AndroidCtrlProxyClient, "getInstance").mockRestore();
+    spyOn(IOSCtrlProxyClient, "getInstance").mockRestore();
     spyOn(AndroidCtrlProxyManager, "getInstance").mockRestore();
     spyOn(PressButton.prototype, "press").mockRestore();
     spyOn(InputKey.prototype, "press").mockRestore();
     PlatformDeviceManagerFactory.reset();
     sessionManager.stopCleanupTimer();
+  });
+
+  afterAll(() => {
+    expect((IOSCtrlProxyClient.getInstance as { mock?: unknown }).mock).toBeUndefined();
+    expect((AndroidCtrlProxyClient.getInstance as { mock?: unknown }).mock).toBeUndefined();
   });
 
   test("control: a tap that runs restarts the idle window", async () => {
@@ -362,6 +408,129 @@ describe("a holder's control frame refused before it reaches the device", () => 
 
     expect(sent).toEqual([]);
     expect(idleClock().expiresAt).toBe(releaseAt);
+  });
+
+  describe("connection is not session use (#11750)", () => {
+    const covered = FRAMES.filter((frame) =>
+      [
+        "input/tap",
+        "input/swipe",
+        "ide/setKeyValue",
+        "ide/removeKeyValue",
+        "ide/clearKeyValueFile",
+      ].includes(frame.method),
+    );
+    for (const platform of ["android", "ios"] as const) {
+      const frames = platform === "android" ? covered : [covered[0], covered[1], covered[2]];
+      for (const outcome of ["cancel", "close", "failure", "sent"] as const) {
+        test.each(frames)(
+          `${platform} $method ($sends): ${outcome} while connecting`,
+          async (frame) => {
+            const deviceId = platform === "android" ? DEVICE : "idle-ios";
+            if (platform === "ios") {
+              await sessionManager.createSession("ios-holder", deviceId, "ios", IDLE_MS);
+            }
+            const sessionId = platform === "android" ? SESSION : "ios-holder";
+            const clock = () => {
+              const session = sessionManager.getSession(sessionId)!;
+              return { lastUsedAt: session.lastUsedAt, expiresAt: session.expiresAt };
+            };
+            const before = clock();
+            timer.advanceTime(1_000);
+            const connecting = Promise.withResolvers<void>();
+            let parked = false;
+            let hooks = 0;
+            deviceWork = async (onDispatch) => {
+              parked = true;
+              await connecting.promise;
+              if (outcome !== "sent") {
+                throw new Error("failed to connect");
+              }
+              if (typeof onDispatch === "function") {
+                onDispatch();
+                hooks++;
+              }
+              sent.push(frame.sends);
+              return { success: true };
+            };
+            socket.send({
+              id: "connecting",
+              type: "mcp_request",
+              method: frame.method,
+              params: { ...frame.params, platform, deviceId, sessionUuid: sessionId },
+            });
+            await drainUntil(() => parked, { description: "fake client connecting" });
+            if (outcome === "cancel") {
+              socket.send({
+                id: "cancel-connect",
+                type: "daemon_request",
+                method: "daemon/cancelRequest",
+                params: { requestId: "connecting" },
+              });
+              await drainUntil(() => socket.responses.some((r) => r.id === "cancel-connect"), {
+                description: "cancel acknowledged",
+              });
+              expect(socket.responses.find((r) => r.id === "cancel-connect")?.result).toMatchObject(
+                { cancelled: true },
+              );
+            } else if (outcome === "close") {
+              socket.destroy();
+            }
+            connecting.resolve();
+            await Promise.all([...internals.activeRequestHandlers]);
+            if (outcome === "sent") {
+              expect(socket.responses.find((r) => r.id === "connecting")?.success).toBe(true);
+              expect(sent).toEqual([frame.sends]);
+              expect(hooks).toBe(1);
+              expect(clock()).toEqual({
+                lastUsedAt: before.lastUsedAt + 1_000,
+                expiresAt: before.expiresAt + 1_000,
+              });
+            } else {
+              expect(sent).toEqual([]);
+              expect(hooks).toBe(0);
+              expect(clock()).toEqual(before);
+            }
+          },
+        );
+      }
+    }
+  });
+
+  describe("direct-file fallback dispatch count", () => {
+    for (const sdkSent of [false, true]) {
+      for (const cancelled of [false, true]) {
+        test(`SDK sent=${sdkSent}, fallback cancelled=${cancelled}`, async () => {
+          let stamps = 0;
+          let directWrites = 0;
+          const call = new AbortController();
+          const pending = runWithAbortSignal(call.signal, () =>
+            internals.runIdeKeyValueMutation("android", androidDevice, "com.example", "prefs", {
+              dispatching: () => stamps++,
+              viaSdk: async (onDispatch) => {
+                if (sdkSent) {
+                  onDispatch?.();
+                }
+                if (cancelled) {
+                  call.abort(new Error("cancel before fallback"));
+                }
+                throw new Error("SharedPreferences inspection is disabled");
+              },
+              viaDirectFile: async () => {
+                directWrites++;
+              },
+            }),
+          );
+          if (cancelled) {
+            await expect(pending).rejects.toThrow("cancel before fallback");
+          } else {
+            expect(await pending).toEqual({ usedDirectFileFallback: true, resolution: undefined });
+          }
+          expect(directWrites).toBe(cancelled ? 0 : 1);
+          expect(stamps).toBe(cancelled ? Number(sdkSent) : 1);
+        });
+      }
+    }
   });
 
   describe("every control frame", () => {

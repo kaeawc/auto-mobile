@@ -51,7 +51,12 @@ describe("UnixSocketServer input/swipe", () => {
   });
 
   test("routes Android coordinate swipes without forwarding through tools/call", async () => {
-    const requestSwipe = mock(async () => ({ success: true }));
+    const requestSwipe = mock(
+      async (...args: Parameters<AndroidCtrlProxyClient["requestSwipe"]>) => {
+        args[8]?.();
+        return { success: true };
+      },
+    );
     const createMcpClient = mock(async () => {
       throw new Error("input/swipe should not create an MCP client");
     });
@@ -109,7 +114,10 @@ describe("UnixSocketServer input/swipe", () => {
   });
 
   test("LEGACY iOS swipe (no runner scale metadata) passes coordinates through unchanged", async () => {
-    const requestDrag = mock(async () => ({ success: true }));
+    const requestDrag = mock(async (...args: Parameters<IOSCtrlProxyClient["requestDrag"]>) => {
+      args[10]?.();
+      return { success: true };
+    });
     const fetchHierarchy = mock(async () => ({ hierarchy: {} })); // success, no metadata => legacy
     IOSCtrlProxyClient.getInstance = mock(() => ({
       requestDrag,
@@ -145,12 +153,27 @@ describe("UnixSocketServer input/swipe", () => {
       end: { x: 80, y: 90 },
       durationMs: 750,
     });
-    expect(requestDrag).toHaveBeenCalledWith(20, 30, 80, 90, 0, 750, 0, 30_000);
+    expect(requestDrag).toHaveBeenCalledWith(
+      20,
+      30,
+      80,
+      90,
+      0,
+      750,
+      0,
+      30_000,
+      undefined,
+      undefined,
+      expect.any(Function),
+    );
   });
 
   test("canonical-pixel iOS swipe divides each endpoint by nativeScale before dispatch", async () => {
     // px frame (#4549): endpoints arrive in pixels, divided by nativeScale=3 to runner points.
-    const requestDrag = mock(async () => ({ success: true }));
+    const requestDrag = mock(async (...args: Parameters<IOSCtrlProxyClient["requestDrag"]>) => {
+      args[10]?.();
+      return { success: true };
+    });
     IOSCtrlProxyClient.getInstance = mock(() => ({
       requestDrag,
       getScreenScaleMetadata: () => ({ nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 }),
@@ -177,11 +200,28 @@ describe("UnixSocketServer input/swipe", () => {
     expect(response.success).toBe(true);
     // Echoed endpoints stay in the client's px space; only the runner dispatch is converted.
     expect(response.result).toMatchObject({ start: { x: 300, y: 600 }, end: { x: 900, y: 1500 } });
-    expect(requestDrag).toHaveBeenCalledWith(100, 200, 300, 500, 0, 750, 0, 30_000);
+    expect(requestDrag).toHaveBeenCalledWith(
+      100,
+      200,
+      300,
+      500,
+      0,
+      750,
+      0,
+      30_000,
+      undefined,
+      undefined,
+      expect.any(Function),
+    );
   });
 
   test("uses the socket autolock device when deviceId is omitted", async () => {
-    const requestSwipe = mock(async () => ({ success: true }));
+    const requestSwipe = mock(
+      async (...args: Parameters<AndroidCtrlProxyClient["requestSwipe"]>) => {
+        args[8]?.();
+        return { success: true };
+      },
+    );
     AndroidCtrlProxyClient.getInstance = mock(() => ({
       requestSwipe,
     })) as unknown as typeof AndroidCtrlProxyClient.getInstance;

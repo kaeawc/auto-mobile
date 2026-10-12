@@ -3767,26 +3767,26 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     key: string,
     value: string | null,
     type: KeyValueType,
-    timeoutMs?: number,
+    timeoutMsOrOptions?: number | import("../../storage/storageTypes").StorageWriteOptions,
   ): Promise<void> {
-    return this.storage.setPreference(packageName, fileName, key, value, type, timeoutMs);
+    return this.storage.setPreference(packageName, fileName, key, value, type, timeoutMsOrOptions);
   }
 
   async removePreference(
     packageName: string,
     fileName: string,
     key: string,
-    timeoutMs?: number,
+    timeoutMsOrOptions?: number | import("../../storage/storageTypes").StorageWriteOptions,
   ): Promise<void> {
-    return this.storage.removePreference(packageName, fileName, key, timeoutMs);
+    return this.storage.removePreference(packageName, fileName, key, timeoutMsOrOptions);
   }
 
   async clearPreferenceStore(
     packageName: string,
     fileName: string,
-    timeoutMs?: number,
+    timeoutMsOrOptions?: number | import("../../storage/storageTypes").StorageWriteOptions,
   ): Promise<void> {
-    return this.storage.clearPreferenceStore(packageName, fileName, timeoutMs);
+    return this.storage.clearPreferenceStore(packageName, fileName, timeoutMsOrOptions);
   }
 
   async subscribeStorage(

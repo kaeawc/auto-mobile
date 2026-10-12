@@ -90,7 +90,10 @@ async function drain(): Promise<void> {
   await Promise.all([...internals.activeRequestHandlers]);
 }
 
-const ack = async () => ({ success: true });
+const ack = async (onDispatch?: () => void) => {
+  onDispatch?.();
+  return { success: true };
+};
 
 beforeEach(() => {
   sockets = [];
@@ -100,8 +103,10 @@ beforeEach(() => {
     () =>
       ({
         getScreenScaleMetadata: () => null,
-        requestTapCoordinates: ack,
-        requestSwipe: ack,
+        requestTapCoordinates: (
+          ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
+        ) => ack(args[6]),
+        requestSwipe: (...args: Parameters<AndroidCtrlProxyClient["requestSwipe"]>) => ack(args[8]),
       }) as unknown as AndroidCtrlProxyClient,
   );
   unsubscribe = executionTracker.onSessionExecutionEnded((uuids) => {

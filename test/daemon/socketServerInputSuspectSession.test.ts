@@ -262,7 +262,10 @@ describe("input/* is a control call on the holder's session (#11417)", () => {
       () =>
         ({
           getScreenScaleMetadata: () => null,
-          requestTapCoordinates: async () => {
+          requestTapCoordinates: async (
+            ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
+          ) => {
+            args[6]?.();
             taps++;
             tapEntered.resolve();
             return (await tapOnDevice?.promise) ?? { success: true };

@@ -115,11 +115,17 @@ describe("a direct frame naming a held handset by its other transport id", () =>
       (device) =>
         ({
           getScreenScaleMetadata: () => null,
-          requestTapCoordinates: async () => {
+          requestTapCoordinates: async (
+            ...args: Parameters<AndroidCtrlProxyClient["requestTapCoordinates"]>
+          ) => {
+            args[6]?.();
             driven.push(`tap:${device.deviceId}`);
             return { success: true };
           },
-          setPreference: async () => {
+          setPreference: async (...args: Parameters<AndroidCtrlProxyClient["setPreference"]>) => {
+            if (typeof args[5] === "object") {
+              args[5].onDispatch?.();
+            }
             driven.push(`setPreference:${device.deviceId}`);
           },
         }) as unknown as AndroidCtrlProxyClient,
@@ -128,11 +134,17 @@ describe("a direct frame naming a held handset by its other transport id", () =>
       (device) =>
         ({
           getScreenScaleMetadata: () => ({ nativeScale: 1, pixelWidth: 100, pixelHeight: 100 }),
-          requestTapCoordinates: async () => {
+          requestTapCoordinates: async (
+            ...args: Parameters<IOSCtrlProxyClient["requestTapCoordinates"]>
+          ) => {
+            args[7]?.();
             driven.push(`ios-tap:${device.deviceId}`);
             return { success: true };
           },
-          setPreference: async () => {
+          setPreference: async (...args: Parameters<IOSCtrlProxyClient["setPreference"]>) => {
+            if (typeof args[5] === "object") {
+              args[5].onDispatch?.();
+            }
             driven.push(`ios-setPreference:${device.deviceId}`);
           },
         }) as unknown as IOSCtrlProxyClient,

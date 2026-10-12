@@ -17,6 +17,10 @@ import type {
 } from "../../../src/utils/HostCommandExecutor";
 import { logger } from "../../../src/utils/logger";
 import { raceWithDeadline } from "../../../src/utils/raceWithDeadline";
+import { FakeProcFs } from "../../fakes/FakeProcFs";
+import { parsePsSnapshot } from "../../../src/features/iosSimFleet/psSnapshot";
+import { ProcessTableReader } from "../../../src/features/bootAdmission/processTableRetry";
+import type { ExecResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
   FakeHostBootAdmissionRegistry,
@@ -566,5 +570,278 @@ describe("process table retries within Android admission (#11941)", () => {
     expect(executor.calls[0].signal).toBeInstanceOf(AbortSignal);
     expect(executor.calls[0].signal?.aborted).toBe(false);
     expect(timer.getSleepHistory()).toEqual([]);
+  });
+});
+
+const PROC_STATUS = readFileSync(
+  new URL(
+    "../../fixtures/android-boot-admission/proc-status-upstream-man-proc_pid_status.txt",
+    import.meta.url,
+  ),
+  "utf8",
+);
+// Source, not a capture: musl getopt.c and BusyBox procps/ps.c:
+// https://git.musl-libc.org/cgit/musl/tree/src/misc/getopt.c
+// https://git.busybox.net/busybox/tree/procps/ps.c
+const BUSYBOX_ERROR = execError({ code: 1, stderr: "ps: unrecognized option: x" });
+
+function sixProc(): FakeProcFs {
+  const fs = new FakeProcFs();
+  const qemu = parsePsSnapshot(PS).rows.find((row) => row.command.includes("qemu-system-"))!;
+  fs.entries = Array.from({ length: 6 }, (_, i) => String(qemu.pid + i));
+  for (const pid of fs.entries) {
+    // Structured edits of the upstream status; argv from the captured qemu row.
+    const status = PROC_STATUS.split("\n")
+      .map((line) => {
+        const key = line.slice(0, line.indexOf(":"));
+        if (key === "Pid") {
+          return `Pid:\t${pid}`;
+        }
+        if (key === "PPid") {
+          return `PPid:\t${qemu.ppid}`;
+        }
+        return line;
+      })
+      .join("\n");
+    fs.files.set(`/proc/${pid}/status`, status);
+    fs.files.set(`/proc/${pid}/cmdline`, qemu.command.split(" ").join("\0") + "\0");
+  }
+  return fs;
+}
+
+class NeverReportingPs implements HostCommandExecutor {
+  readonly calls: HostCommandOptions[] = [];
+  async executeCommand(
+    _command: string,
+    _args: string[] = [],
+    options: HostCommandOptions = {},
+  ): Promise<ExecResult> {
+    this.calls.push(options);
+    return new Promise(() => {}); // Models exec whose kill/callback never arrives, even after abort.
+  }
+}
+
+test("proc fallback counts six emulators, refuses the sixth slot and latches without another ps", async () => {
+  const info = spyOn(logger, "info").mockImplementation(() => undefined);
+  try {
+    const { timer, executor } = harness([BUSYBOX_ERROR]);
+    const source = new CommandAndroidCapacitySource(async () => SERIALS, executor, HOST, {
+      timer,
+      procFs: sixProc(),
+    });
+    const sample = await source.sample();
+    expect(sample.emulatorProcessIds).toHaveLength(6);
+    expect(sample.emulatorProcessRssBytes).toEqual(Array(6).fill(13484 * 1024));
+    expect(sample.processTableFailure).toBeUndefined();
+    expect(sample.errors).toEqual([]);
+    const gate = new AndroidBootAdmissionGate(source, timer, {
+      env: { [ANDROID_MAX_BOOTED_ENV]: "6" },
+    });
+    expect(await caught(gate.admit({ avdName: "sixth", timeoutMs: 60_000 }))).toMatchObject({
+      details: { code: "capacity_exhausted", booted: 6 },
+    });
+    expect(executor.calls).toHaveLength(1);
+    expect(info).toHaveBeenCalledTimes(1);
+    expect(info.mock.calls[0][0]).toContain("unsupported-flags");
+    expect(info.mock.calls[0][0]).toContain("ps: unrecognized option: x");
+    expect(info.mock.calls[0][0]).toContain("/proc");
+  } finally {
+    info.mockRestore();
+  }
+});
+
+test.each(["EACCES", "EPERM", "empty"])(
+  "proc fallback failure %s stays adb-only, warns once and does not latch",
+  async (code) => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
+    try {
+      const { timer, executor } = harness([BUSYBOX_ERROR]);
+      const fs = new FakeProcFs();
+      if (code !== "empty") {
+        fs.listError = execError({ code }, "denied");
+      }
+      const source = new CommandAndroidCapacitySource(async () => SERIALS, executor, HOST, {
+        timer,
+        procFs: fs,
+      });
+      const sample = await source.sample();
+      expect(sample.processTableFailure).toMatchObject({
+        reason: code === "empty" ? "unparseable" : "denied",
+        attempts: 1,
+      });
+      expect(sample.processTableFailure?.detail).toStartWith("/proc: ");
+      expect(sample.processTableFailure?.detail).toContain("unsupported-flags");
+      expect(sample.processTableFailure!.detail.length).toBeLessThanOrEqual(200);
+      await source.sample();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(executor.calls).toHaveLength(2);
+      const gate = new AndroidBootAdmissionGate(source, timer, {
+        env: { [ANDROID_MAX_BOOTED_ENV]: "6" },
+      });
+      (await gate.admit({ avdName: "sixth", timeoutMs: 60_000 })).release();
+    } finally {
+      warn.mockRestore();
+    }
+  },
+);
+
+test("reader timer ends never-reporting ps attempts before the gate race", async () => {
+  const timer = new FakeTimer();
+  const executor = new NeverReportingPs();
+  const source = new CommandAndroidCapacitySource(async () => SERIALS, executor, HOST, { timer });
+  const gate = new AndroidBootAdmissionGate(source, timer, {
+    env: { [ANDROID_MAX_BOOTED_ENV]: "6" },
+  });
+  const result = await settleByFakeEvents(
+    timer,
+    gate.admit({ avdName: "sixth", timeoutMs: 60_000 }).then(
+      (admission) => admission,
+      (error: unknown) => error,
+    ),
+    { description: "timer-decided ps deadline" },
+  );
+  expect(result).toMatchObject({ release: expect.any(Function) });
+  expect(executor.calls.map((call) => call.timeoutMs)).toEqual([5_000, 5_000, 4_200]);
+  expect(executor.calls.every((call) => call.signal?.aborted)).toBe(true);
+  const report = await settleByFakeEvents(timer, gate.describeCapacity(), {
+    description: "timer-decided report",
+  });
+  expect(report.processTable).toMatchObject({
+    reason: "timeout",
+    admissionsWithoutProcessTable: 1,
+  });
+});
+
+test("proc fallback uses the reader deadline and preserves caller abort", async () => {
+  const { timer, executor } = harness([BUSYBOX_ERROR], undefined, false);
+  const fs = sixProc();
+  fs.onRead = () => new Promise(() => {});
+  const reader = new ProcessTableReader(executor, { timer, procFs: fs, attemptTimeoutMs: 1_000 });
+  const result = await settleByFakeEvents(timer, reader.read({}), { description: "proc deadline" });
+  expect(result.failure).toMatchObject({
+    reason: "timeout",
+    detail: expect.stringContaining("/proc: timed out after 1000ms"),
+  });
+  const controller = new AbortController();
+  const reason = new Error("caller cancelled proc");
+  const pending = caught(reader.read({ signal: controller.signal }));
+  await drainUntilQuiescent(timer);
+  controller.abort(reason);
+  expect(await pending).toBe(reason);
+});
+
+test("unknown exit latches after three exhausted samples and success resets retries", async () => {
+  const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
+  const debug = spyOn(logger, "debug").mockImplementation(() => undefined);
+  try {
+    const { timer, executor } = harness([execError({ code: 2, stderr: "ps: something odd" })]);
+    const reader = new ProcessTableReader(executor, { timer });
+    for (let sample = 1; sample <= 3; sample++) {
+      expect((await reader.read({})).failure).toMatchObject({
+        reason: "exit",
+        transient: true,
+        attempts: 4,
+      });
+      expect(executor.calls).toHaveLength(sample * 4);
+    }
+    expect((await reader.read({})).failure).toMatchObject({
+      reason: "exit",
+      transient: false,
+      attempts: 1,
+    });
+    expect(executor.calls).toHaveLength(13);
+    expect(warn.mock.calls.filter(([message]) => message.includes("retries stop"))).toHaveLength(1);
+    expect(debug.mock.calls.some(([message]) => message.includes("exit"))).toBe(true);
+    executor.steps = [PS];
+    expect((await reader.read({})).failure).toBeUndefined();
+    executor.steps = [execError({ code: 2, stderr: "ps: something odd" })];
+    expect((await reader.read({})).failure).toMatchObject({
+      reason: "exit",
+      transient: true,
+      attempts: 4,
+    });
+    for (let i = 0; i < 2; i++) {
+      await reader.read({});
+    }
+    expect(warn.mock.calls.filter(([message]) => message.includes("retries stop"))).toHaveLength(2);
+  } finally {
+    warn.mockRestore();
+    debug.mockRestore();
+  }
+});
+
+test("a different final reason resets consecutive exit samples", async () => {
+  const { timer, executor } = harness([execError({ code: 2, stderr: "ps: something odd" })]);
+  const reader = new ProcessTableReader(executor, { timer });
+  await reader.read({});
+  await reader.read({});
+  executor.steps = [execError({ code: "ENOENT" })];
+  expect((await reader.read({})).failure?.reason).toBe("not-found");
+  executor.steps = [execError({ code: 2, stderr: "ps: something odd" })];
+  for (let i = 0; i < 3; i++) {
+    expect((await reader.read({})).failure?.attempts).toBe(4);
+  }
+  expect((await reader.read({})).failure).toMatchObject({ attempts: 1, transient: false });
+});
+
+test("deterministic exit latch enables proc fallback on the next sample", async () => {
+  const { timer, executor } = harness([execError({ code: 2, stderr: "ps: something odd" })]);
+  const reader = new ProcessTableReader(executor, { timer, procFs: sixProc() });
+  for (let i = 0; i < 3; i++) {
+    expect((await reader.read({})).failure?.attempts).toBe(4);
+  }
+  expect((await reader.read({})).value).toHaveLength(6);
+  expect(executor.calls).toHaveLength(13);
+  expect((await reader.read({})).value).toHaveLength(6);
+  expect(executor.calls).toHaveLength(13);
+});
+
+test("exit latch threshold is configurable", async () => {
+  const { timer, executor } = harness([execError({ code: 2, stderr: "ps: something odd" })]);
+  const reader = new ProcessTableReader(executor, { timer, exitDeterministicAfterSamples: 1 });
+  expect((await reader.read({})).failure).toMatchObject({
+    reason: "exit",
+    attempts: 4,
+    transient: true,
+  });
+  expect((await reader.read({})).failure).toMatchObject({
+    reason: "exit",
+    attempts: 1,
+    transient: false,
+  });
+});
+
+test("long proc failure retains the ps reason within its one-line detail bound", async () => {
+  const { timer, executor } = harness([BUSYBOX_ERROR]);
+  const fs = new FakeProcFs();
+  fs.listError = execError({ code: "EACCES" }, "x".repeat(300) + "\nsecond line");
+  const reader = new ProcessTableReader(executor, { timer, procFs: fs });
+  const result = await reader.read({});
+  expect(result.failure?.detail).toStartWith("/proc: ");
+  expect(result.failure?.detail).toContain("ps unsupported-flags");
+  expect(result.failure!.detail.length).toBeLessThanOrEqual(200);
+  expect(result.failure?.detail).not.toContain("\n");
+});
+
+test("caller abort between exhausted exit samples breaks their consecutive sequence", async () => {
+  const { timer, executor } = harness([execError({ code: 2, stderr: "ps: something odd" })]);
+  const reader = new ProcessTableReader(executor, { timer });
+  await reader.read({});
+  await reader.read({});
+  const controller = new AbortController();
+  const reason = new Error("cancel intervening sample");
+  controller.abort(reason);
+  expect(await caught(reader.read({ signal: controller.signal }))).toBe(reason);
+  for (let i = 0; i < 3; i++) {
+    expect((await reader.read({})).failure).toMatchObject({
+      reason: "exit",
+      attempts: 4,
+      transient: true,
+    });
+  }
+  expect((await reader.read({})).failure).toMatchObject({
+    reason: "exit",
+    attempts: 1,
+    transient: false,
   });
 });

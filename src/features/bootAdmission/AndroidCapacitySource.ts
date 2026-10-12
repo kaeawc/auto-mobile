@@ -3,7 +3,7 @@ import type { HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { nodeHostOsInfo, type HostOsInfo } from "../iosSimFleet/FleetHostSource";
-import type { HostProcessRow } from "../iosSimFleet/types";
+import type { AndroidProcessRow } from "./procProcessTable";
 import {
   ProcessTableReader,
   type ProcessTableReadOptions,
@@ -90,7 +90,7 @@ const SDK_QEMU_EXECUTABLE = /\/qemu\/[^/\s]+\/qemu-system-[^/\s]*(?:\s|$)/;
  * count (#11588), so a command naming the SDK's qemu executable counts wherever its path was cut.
  * A wrong guess that way round counts a process that is not an emulator: fail closed.
  */
-export function isEmulatorQemuProcess(row: Pick<HostProcessRow, "command">): boolean {
+export function isEmulatorQemuProcess(row: Pick<AndroidProcessRow, "command">): boolean {
   const executable = row.command.split(" -")[0] ?? "";
   const name = executable.slice(executable.lastIndexOf("/") + 1).trim();
   return name.startsWith("qemu-system-") || SDK_QEMU_EXECUTABLE.test(row.command);

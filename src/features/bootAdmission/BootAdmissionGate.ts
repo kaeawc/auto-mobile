@@ -167,7 +167,7 @@ async function sampleWithin<S, D extends { outcome: string }>(
  * An unfinished sample leaves the booted count unknown, which never fails open: retryable
  * `discovery_incomplete`, as for a failed listing.
  */
-function sampleTimeoutError(
+export function sampleTimeoutError(
   platform: Platform,
   timeoutMs: number,
   label: string,

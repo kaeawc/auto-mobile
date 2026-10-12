@@ -149,3 +149,5 @@ test/fixtures/refusal-wire/*.json text eol=lf
 test/fixtures/refusal-wire/surfaces/*.json text eol=lf
 test/fixtures/refusal-wire-hints/*.json text eol=lf
 test/lint/*-baseline.txt text eol=lf
+
+test/fixtures/android-boot-admission/README.md text eol=lf

@@ -323,31 +323,6 @@ const rows = surfaces
   .flatMap((surface) => (surface.ends ?? ends).map((reason) => ({ ...surface, reason })))
   .concat([{ ...surfaces[0], reason: "device_not_held" }]);
 
-test("every wire builder is driven by a surface row with idle and non-idle ends", () => {
-  const builders = new Set(surfaces.flatMap((surface) => surface.builders));
-  expect(
-    [...builders].sort(),
-    "Every wire builder needs a surface table row; rows must name only listed builders",
-  ).toEqual([...RELEASE_REASON_WIRE_BUILDERS].sort());
-  const invalidRows = surfaces.flatMap((surface) => {
-    const reasons = surface.ends ?? ends;
-    return [
-      ...(reasons.some(isIdleReleaseReason) ? [] : [`${surface.name} needs an idle end`]),
-      ...(reasons.some((reason) => !isIdleReleaseReason(reason))
-        ? []
-        : [`${surface.name} needs a non-idle end`]),
-      ...(reasons.every((reason) => ends.includes(reason))
-        ? []
-        : [`${surface.name} ends must be a shared-list subset`]),
-      ...(surface.builders.length > 0 ? [] : [`${surface.name} must drive a builder`]),
-    ];
-  });
-  expect(
-    invalidRows,
-    "Every surface row must drive a builder and admit idle and non-idle ends",
-  ).toEqual([]);
-});
-
 test.each(rows)("$name / $reason", async ({ holder, reasonKey, reason }) => {
   const fields = await holder(reason);
   expect(fields[reasonKey]).toBe(reason);
@@ -400,4 +375,39 @@ test("every refusal fixture qualifies each idle reason beside that reason", () =
     visit(fixture);
   }
   expect(idleObjects).toBeGreaterThan(0);
+});
+
+test("every wire builder is driven by a surface row with idle and non-idle ends", () => {
+  const builders = new Set(surfaces.flatMap((surface) => surface.builders));
+  expect(
+    [...builders].sort(),
+    "Every wire builder needs a surface table row; rows must name only listed builders",
+  ).toEqual([...RELEASE_REASON_WIRE_BUILDERS].sort());
+  const invalidRows = surfaces.flatMap((surface) => {
+    const reasons = surface.ends ?? ends;
+    return [
+      ...(reasons.some(isIdleReleaseReason) ? [] : [`${surface.name} needs an idle end`]),
+      ...(reasons.some((reason) => !isIdleReleaseReason(reason))
+        ? []
+        : [`${surface.name} needs a non-idle end`]),
+      ...(reasons.every((reason) => ends.includes(reason))
+        ? []
+        : [`${surface.name} ends must be a shared-list subset`]),
+      ...(surface.builders.length > 0 ? [] : [`${surface.name} must drive a builder`]),
+    ];
+  });
+  expect(
+    invalidRows,
+    "Every surface row must drive a builder and admit idle and non-idle ends",
+  ).toEqual([]);
+});
+
+test("shared surface ends pin the idle release reasons independently", () => {
+  expect(ends.filter(isIdleReleaseReason)).toEqual([
+    "cleanup-expired",
+    "replay-lease-expired",
+    "cli-idle-timeout",
+    "lazy-expiry",
+    "expired",
+  ]);
 });

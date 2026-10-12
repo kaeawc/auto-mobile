@@ -31,6 +31,26 @@ export const RELEASE_REASON_WIRE_BUILDERS: readonly string[] = [
 ];
 export const EXEMPT_RELEASE_REASON_HOLDERS: ReadonlyArray<readonly [string, string]> = [
   [
+    "src/server/proxyServer.ts#managedEndedPayload",
+    "Passes sessionUuid and reason into managedExecutionEndedPayload, which builds the wire envelope.",
+  ],
+  [
+    "src/server/proxyServer.ts#boundSessionOwnershipLostPayload",
+    "Passes the bound-session error reason into sessionOwnershipLostPayload, which builds the wire envelope.",
+  ],
+  [
+    "src/server/deviceSessionResult.ts#recoveryIdentityLoss",
+    "Parses a typed upstream recovery-identity error into in-memory evidence consumed by the guarded loss builders.",
+  ],
+  [
+    "src/server/deviceSessionResult.ts#recoveryIdentityLossPayload",
+    "Passes recovery loss evidence into sessionOwnershipLostPayload and recoveryIdentityLossDetails, which build the wire fields.",
+  ],
+  [
+    "src/daemon/socketServer.ts#UnixSocketServer.rejectOnHandshakeMismatch",
+    "Serializes a client version/build handshake mismatch reason, not a session release reason.",
+  ],
+  [
     "src/server/index.ts#executeToolCallBody",
     "Passes the release reason into sessionOwnershipLostPayload, which builds the wire envelope.",
   ],
@@ -144,6 +164,7 @@ function releaseValue(expression: Expression, imports: ReadonlySet<string>): boo
 export function scanReleaseReasonSerialisations(
   file: string,
   source: string,
+  options: { hostsWireBuilder: boolean } = { hostsWireBuilder: false },
 ): ReleaseReasonSerialisation[] {
   const { program, errors } = parseSync(file, source);
   if (errors.length > 0) {
@@ -285,7 +306,24 @@ export function scanReleaseReasonSerialisations(
         if ((key !== "reason" && key !== "releaseReason") || zodValue(property.value)) {
           continue;
         }
-        if (key !== "releaseReason" && !hasIdle && !releaseValue(property.value, imports)) {
+        const value = unwrap(property.value);
+        const literal =
+          branchObjects.find((branch) => branch.properties.includes(property)) ?? object;
+        const structuralReason =
+          options.hostsWireBuilder &&
+          !(value.type === "Literal" && typeof value.value === "string") &&
+          value.type !== "TemplateLiteral" &&
+          literal.properties.some(
+            (sibling) =>
+              sibling.type === "Property" &&
+              ["code", "sessionUuid", "sessionId", "nextAction"].includes(keyName(sibling) ?? ""),
+          );
+        if (
+          key !== "releaseReason" &&
+          !hasIdle &&
+          !releaseValue(property.value, imports) &&
+          !structuralReason
+        ) {
           continue;
         }
         const guarded = adjacentIdle || reasons.get(property.start)?.guarded === true;

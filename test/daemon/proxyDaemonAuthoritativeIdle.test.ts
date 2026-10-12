@@ -126,37 +126,6 @@ describe("#10823: the daemon is authoritative for idle release", () => {
     infoSpy.mockRestore();
   });
 
-  test.each([false, true])(
-    "daemon-confirmed idle retirement reports cleanup-expired (named=%p)",
-    async (named) => {
-      daemonWindowMs = PROXY_WINDOW_MS;
-      await proxy.callTool("getAndroid", {});
-      await advance(PROXY_WINDOW_MS + INTERVAL_MS * 2);
-      const error = await proxy
-        .callTool(
-          "pressButton",
-          named ? { sessionUuid: SESSION, button: "back" } : { button: "back" },
-        )
-        .catch((error: unknown) => error);
-      if (named) {
-        expect(error).toBeInstanceOf(DaemonBoundSessionExpiredError);
-        expect((error as DaemonBoundSessionExpiredError).reason).toBe("cleanup-expired");
-      } else {
-        expect(error).toBeInstanceOf(DaemonConnectionSessionReleasedError);
-        expect((error as DaemonConnectionSessionReleasedError).reason).toBe("cleanup-expired");
-        const content = noActiveDeviceSessionResult(error as DaemonConnectionSessionReleasedError)
-          .content[0];
-        if (content.type !== "text") {
-          throw new Error("Expected refusal text");
-        }
-        const fields = JSON.parse(content.text).error;
-        expect(fields.reason).toBe("cleanup-expired");
-        expect(fields.idle).toBe(true);
-        expect(Object.keys(fields)[Object.keys(fields).indexOf("reason") + 1]).toBe("idle");
-      }
-    },
-  );
-
   test("proxy-only idle retirement is idle until the daemon replaces its reason", async () => {
     daemonReportsIdleRelease = false;
     await proxy.callTool("getAndroid", {});
@@ -291,4 +260,34 @@ describe("#10823: the daemon is authoritative for idle release", () => {
     await advance(INTERVAL_MS * 3);
     expect(heartbeatCount()).toBeGreaterThan(before);
   });
+  test.each([false, true])(
+    "daemon-confirmed idle retirement reports cleanup-expired (named=%p)",
+    async (named) => {
+      daemonWindowMs = PROXY_WINDOW_MS;
+      await proxy.callTool("getAndroid", {});
+      await advance(PROXY_WINDOW_MS + INTERVAL_MS * 2);
+      const error = await proxy
+        .callTool(
+          "pressButton",
+          named ? { sessionUuid: SESSION, button: "back" } : { button: "back" },
+        )
+        .catch((error: unknown) => error);
+      if (named) {
+        expect(error).toBeInstanceOf(DaemonBoundSessionExpiredError);
+        expect((error as DaemonBoundSessionExpiredError).reason).toBe("cleanup-expired");
+      } else {
+        expect(error).toBeInstanceOf(DaemonConnectionSessionReleasedError);
+        expect((error as DaemonConnectionSessionReleasedError).reason).toBe("cleanup-expired");
+        const content = noActiveDeviceSessionResult(error as DaemonConnectionSessionReleasedError)
+          .content[0];
+        if (content.type !== "text") {
+          throw new Error("Expected refusal text");
+        }
+        const fields = JSON.parse(content.text).error;
+        expect(fields.reason).toBe("cleanup-expired");
+        expect(fields.idle).toBe(true);
+        expect(Object.keys(fields)[Object.keys(fields).indexOf("reason") + 1]).toBe("idle");
+      }
+    },
+  );
 });

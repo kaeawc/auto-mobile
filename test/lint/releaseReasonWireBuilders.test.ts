@@ -8,13 +8,16 @@ import {
 } from "./releaseReasonWireBuilders";
 
 const root = join(import.meta.dir, "..", "..");
+const builderFiles = new Set(RELEASE_REASON_WIRE_BUILDERS.map((owner) => owner.split("#")[0]));
 // Parse each src file exactly once, outside timed test bodies; all rules share this inventory.
 const inventory = Object.freeze(
   readdirSync(join(root, "src"), { recursive: true })
     .filter((file) => file.endsWith(".ts"))
     .flatMap((file) => {
       const relative = `src/${file.split(sep).join("/")}`;
-      return scanReleaseReasonSerialisations(relative, readFileSync(join(root, relative), "utf8"));
+      return scanReleaseReasonSerialisations(relative, readFileSync(join(root, relative), "utf8"), {
+        hostsWireBuilder: builderFiles.has(relative),
+      });
     }),
 );
 const ownerKey = (finding: (typeof inventory)[number]): string =>
@@ -56,7 +59,7 @@ test("builder and exemption inventories contain no stale or duplicate entries", 
   ];
   expect(
     stale,
-    "Stale release-reason inventory entry: remove it or scan its real producer",
+    "Listed owner has no release-reason serialisation left. If a builder stopped spreading idleReleaseField beside its reason, restore the spread; if the producer is gone, remove the entry (and its surface row)",
   ).toEqual([]);
   expect(builderSet.size).toBe(RELEASE_REASON_WIRE_BUILDERS.length);
   expect(exemptionSet.size).toBe(EXEMPT_RELEASE_REASON_HOLDERS.length);
@@ -96,6 +99,35 @@ test.each([
   "// const value = { releaseReason };",
 ])("scanner ignores unrelated reasons and schemas: %s", (source) => {
   expect(scanReleaseReasonSerialisations("fixture.ts", source)).toEqual([]);
+});
+
+test.each([
+  ['code: "x", reason: error.reason', true, false],
+  ["sessionUuid, reason", true, false],
+  ["sessionId, reason", true, false],
+  ["nextAction, reason", true, false],
+  ['code: "x", reason: "literal"', false, false],
+  ['code: "x", reason: `template ${reason}`', false, false],
+  ['code: "x", reason: z.string()', false, false],
+  ["sessionUuid: { reason }", false, false],
+  ['code: "x", reason, ...idleReleaseField(reason)', true, true],
+])("scanner recognizes hosting-file wire shapes: %s", (properties, detected, guarded) => {
+  const findings = scanReleaseReasonSerialisations(
+    "fixture.ts",
+    `function build() { return { ${properties} }; }`,
+    { hostsWireBuilder: true },
+  ).filter((finding) => finding.key !== "idleReleaseField");
+  expect(findings).toEqual(
+    detected ? [{ file: "fixture.ts", line: 1, owner: "build", key: "reason", guarded }] : [],
+  );
+});
+
+test("scanner does not widen wire shapes outside builder-hosting files by default", () => {
+  const source = 'function build() { return { code: "x", reason: error.reason }; }';
+  expect(scanReleaseReasonSerialisations("fixture.ts", source)).toEqual([]);
+  expect(
+    scanReleaseReasonSerialisations("fixture.ts", source, { hostsWireBuilder: false }),
+  ).toEqual([]);
 });
 
 test("scanner follows releaseReasons imports, including aliases", () => {

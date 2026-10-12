@@ -2037,8 +2037,8 @@ describe("MCP Booted Device Resources", () => {
         ios: {
           observationComplete: false,
           discoveryError: {
-            code: "unavailable",
-            message: "iOS booted-device discovery is unavailable.",
+            code: "failed",
+            message: "iOS booted-device discovery failed.",
           },
         },
       });
@@ -2049,6 +2049,8 @@ describe("MCP Booted Device Resources", () => {
         error: 0,
         total: 1,
         recoveryPolicy: { onLoss: false, maxAttempts: 2 },
+        // Whether the pooled iOS device is still there is unknown, as pool stats answer (#11643).
+        countUnknown: { code: "discovery_incomplete", platforms: ["ios"] },
       });
 
       sessionManager.stopCleanupTimer();

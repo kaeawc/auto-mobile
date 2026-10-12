@@ -17,10 +17,10 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // release, and tools/list_changed prompts the re-list).
 //
 // The binding can return to an earlier minted session without an acquisition: setActiveDevice
-// selects it, or a call names it once the latest binding is gone. That move used to mark the
-// binding "client-declared", so the fence for its release carried fromResultMint=false and
-// discovery failed with session_ownership_lost on every request. Naming a held session beside a
-// live binding no longer moves the binding at all (#11347).
+// selects it. That move used to mark the binding "client-declared", so the fence for its release
+// carried fromResultMint=false and discovery failed with session_ownership_lost on every request.
+// Naming a held session never moves the binding (#11347), nor replaces one that was released
+// (#11656): the connection stays unbound until setActiveDevice or an acquisition.
 
 const ANDROID = { sessionUuid: "android-session", deviceId: "emulator-5554", platform: "android" };
 const IOS = { sessionUuid: "ios-session", deviceId: "SIM-UDID-1", platform: "ios" };
@@ -159,17 +159,21 @@ test("discovery keeps working after a minted session selected with setActiveDevi
   await expectDiscoveryAfterRelease(listChanged);
 });
 
-test("discovery keeps working after a minted session named once the latest binding was gone is released", async () => {
+test("a held minted session named once the latest binding was gone stays unbound: its own release leaves discovery on the unbound surface", async () => {
   await acquireBoth();
   client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, IOS.sessionUuid, "lazy-expiry");
-  // With no binding left, the connection adopts the surviving session the agent names.
+  // The call runs on the surviving session; a named call never becomes the binding (#11656).
   await proxy.callTool("tapOn", { text: "OK", sessionUuid: ANDROID.sessionUuid });
   const listChanged: string[] = [];
   proxy.onListChanged((kind) => listChanged.push(kind));
 
   client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, ANDROID.sessionUuid, "lazy-expiry");
 
-  await expectDiscoveryAfterRelease(listChanged);
+  await expect(proxy.listTools()).resolves.toEqual(TOOLS);
+  await expect(proxy.listResources()).resolves.toEqual([]);
+  await expect(proxy.listResourceTemplates()).resolves.toEqual([]);
+  // The connection was unbound already (the client was prompted when iOS went): nothing to re-list.
+  expect(listChanged).toEqual([]);
 });
 
 test("a session only named by the caller keeps the client-declared fence", async () => {

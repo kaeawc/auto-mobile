@@ -18,13 +18,15 @@ function start(signal?: AbortSignal, undoOutcome: () => Promise<void> = async ()
   const timer = new FakeTimer();
   const gate = Promise.withResolvers<string>();
   const undone: string[] = [];
+  const delivered: string[] = [];
   const orphans: Promise<unknown>[] = [];
   const caller = runOperationWithinDeadline<string>(
     timer,
     timer.now() + 1_000,
     signal,
     timeoutError,
-    async (_signal, undoIfUndelivered) => {
+    async (_signal, undoIfUndelivered, onDelivered) => {
+      onDelivered(() => delivered.push("session"));
       undoIfUndelivered(async (result) => {
         undone.push(result);
         await undoOutcome();
@@ -36,25 +38,26 @@ function start(signal?: AbortSignal, undoOutcome: () => Promise<void> = async ()
     (result) => ({ result }),
     (error: unknown) => ({ error }),
   );
-  return { timer, gate, undone, orphans, caller };
+  return { timer, gate, undone, delivered, orphans, caller };
 }
 
 describe("runOperationWithinDeadline undelivered results", () => {
   test("a delivered result is never undone", async () => {
-    const { gate, undone, orphans, caller } = start(new AbortController().signal);
+    const { gate, undone, delivered, orphans, caller } = start(new AbortController().signal);
 
     gate.resolve("session");
 
     expect(await caller).toEqual({ result: "session" });
     await spin();
     expect(undone).toEqual([]);
+    expect(delivered).toEqual(["session"]);
     expect(orphans).toEqual([]);
   });
 
   test("a result produced after the request was cancelled is undone once", async () => {
     const controller = new AbortController();
     const cancelled = new Error("client cancelled");
-    const { gate, undone, orphans, caller } = start(controller.signal);
+    const { gate, undone, delivered, orphans, caller } = start(controller.signal);
 
     controller.abort(cancelled);
     expect(await caller).toEqual({ error: cancelled });
@@ -63,6 +66,7 @@ describe("runOperationWithinDeadline undelivered results", () => {
     await spin();
 
     expect(undone).toEqual(["session"]);
+    expect(delivered).toEqual([]);
     expect(orphans.length).toBe(1);
   });
 

@@ -140,6 +140,23 @@ describe("a record this daemon wrote is judged by session, never by PID (#11339)
     expect(otherDead(other)).toBe(false);
   });
 
+  test("a session this daemon holds in flight is live whichever process its record names", () => {
+    // The drain holds a released session whose work still runs; its record may still name the
+    // previous daemon, which is gone.
+    const previous: SlotExecOwner = { daemonId: "previous", pid: 99, sessionUuid: "S1" };
+    const previousIsGone = withLiveExecutionSessions(() => false, sessions, {
+      thisProcess: { pid: SELF_PID },
+      reservations: { has: (id) => reservations.has(id) },
+    });
+    expect(previousIsGone(previous)).toBe(false);
+
+    reservations.add("S1");
+    expect(previousIsGone(previous)).toBe(true);
+
+    reservations.delete("S1");
+    expect(previousIsGone(previous)).toBe(false);
+  });
+
   test("a settler of this process (no session) is judged by its process", () => {
     expect(liveness({ daemonId: "pid-4242", pid: SELF_PID })).toBe(true);
   });

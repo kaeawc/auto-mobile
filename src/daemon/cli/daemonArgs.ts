@@ -1,3 +1,9 @@
+import {
+  END_OF_OPTIONS,
+  parseBooleanFlagValue,
+  readValueOperand,
+  splitFlagToken,
+} from "../../utils/flagTokens";
 import { parsePort, parsePositiveNumber, type ParseLogger } from "../../cli/numericValidators";
 import { logger } from "../../utils/logger";
 import {
@@ -121,7 +127,7 @@ function hasDaemonFlagValue(value: string | undefined): value is string {
 }
 
 function setDaemonHost(options: DaemonOptions, value: string | undefined): boolean {
-  if (!value || value.startsWith("--")) {
+  if (!value) {
     return false;
   }
   options.host = value;
@@ -146,7 +152,7 @@ function setDaemonReadinessTimeout(options: DaemonOptions, value: string | undef
 }
 
 function setDaemonToolOutputsDir(options: DaemonOptions, value: string | undefined): boolean {
-  if (!value || value.startsWith("--")) {
+  if (!value) {
     return false;
   }
   options.toolOutputsDir = value;
@@ -158,7 +164,7 @@ function appendDaemonTool(
   value: string | undefined,
   field: "enabledTools" | "disabledTools",
 ): boolean {
-  if (!value || value.startsWith("--")) {
+  if (!value) {
     return false;
   }
   options[field] = [...(options[field] ?? []), value];
@@ -177,12 +183,25 @@ const valueFlags: Partial<
   "--disable-tool": (options, value) => appendDaemonTool(options, value, "disabledTools"),
 };
 
-function consumeDaemonFlag(
+interface DaemonFlagOperand {
+  value: string | undefined;
+  inline: boolean;
+}
+
+/** Whether the operand is a value for its flag (an inline one always is). */
+function operandHasValue({ value, inline }: DaemonFlagOperand): boolean {
+  return value !== undefined && (inline || hasDaemonFlagValue(value));
+}
+
+/** The numeric, string and port flags; undefined when `flag` is none of them. */
+function consumeDaemonScalarFlag(
   flag: string,
-  value: string | undefined,
+  operand: DaemonFlagOperand,
   options: DaemonOptions,
   log: ParseLogger,
-): boolean {
+): boolean | undefined {
+  const { value } = operand;
+  const hasValue = operandHasValue(operand);
   const numericFlag = Object.hasOwn(numericFlags, flag) ? numericFlags[flag] : undefined;
   if (numericFlag) {
     options[numericFlag.field] = parsePositiveNumber(
@@ -191,29 +210,81 @@ function consumeDaemonFlag(
       numericFlag.allowFloat,
       log,
     );
-    return hasDaemonFlagValue(value);
+    return hasValue;
   }
   const stringField = Object.hasOwn(stringFlags, flag) ? stringFlags[flag] : undefined;
   if (stringField) {
-    if (!hasDaemonFlagValue(value)) {
-      return false;
+    if (hasValue) {
+      options[stringField] = value;
     }
-    options[stringField] = value;
-    return true;
+    return hasValue;
   }
   if (flag === "--port") {
     options.port = parsePort(value, log);
-    return hasDaemonFlagValue(value);
+    return hasValue;
+  }
+  return undefined;
+}
+
+/** The table-driven value flags; undefined when `flag` is not one of them. */
+function consumeDaemonValueFlag(
+  flag: string,
+  operand: DaemonFlagOperand,
+  options: DaemonOptions,
+  log: ParseLogger,
+): boolean | undefined {
+  const scalar = consumeDaemonScalarFlag(flag, operand, options, log);
+  if (scalar !== undefined) {
+    return scalar;
   }
   const valueFlag = Object.hasOwn(valueFlags, flag) ? valueFlags[flag] : undefined;
-  if (valueFlag) {
-    return valueFlag(options, value);
+  if (!valueFlag) {
+    return undefined;
+  }
+  const { value } = operand;
+  const hasValue = operandHasValue(operand);
+  const applied = valueFlag(options, hasValue ? value : undefined);
+  if (!applied && hasValue) {
+    log.warn(`Ignoring invalid value for ${flag}: ${value}`);
+  }
+  return applied;
+}
+
+/**
+ * Apply one flag to `options`. An `inline` (`--flag=value`) operand is always a value, a
+ * separate one is only a value when it is not itself a flag. Returns whether a separate
+ * following token was consumed as the value.
+ */
+function consumeDaemonFlag(
+  flag: string,
+  operand: DaemonFlagOperand,
+  options: DaemonOptions,
+  log: ParseLogger,
+): boolean {
+  const consumed = consumeDaemonValueFlag(flag, operand, options, log);
+  if (consumed !== undefined) {
+    return consumed;
   }
   const booleanField = Object.hasOwn(booleanFlags, flag) ? booleanFlags[flag] : undefined;
   if (booleanField) {
-    options[booleanField] = true;
+    const enabled = parseBooleanFlagValue(operand.inline ? operand.value : undefined);
+    if (enabled === undefined) {
+      log.warn(`Invalid value for ${flag}: ${operand.value}; expected true or false`);
+    } else {
+      options[booleanField] = enabled;
+    }
   }
   return false;
+}
+
+/** Apply every flag token before a bare `--`, in either `--flag value` or `--flag=value` form. */
+function applyDaemonFlagTokens(args: string[], options: DaemonOptions, log: ParseLogger): void {
+  for (let i = 0; i < args.length && args[i] !== END_OF_OPTIONS; i++) {
+    const operand = readValueOperand(args, i);
+    if (consumeDaemonFlag(operand.flag, operand, options, log)) {
+      i = operand.last;
+    }
+  }
 }
 
 export function parseDaemonArgs(
@@ -247,11 +318,7 @@ export function parseDaemonArgs(
   }
   // --daemon-socket-path=<encoded path> is a discovery marker, intentionally
   // ignored here: the manager forwards the authoritative namespace through ENV.
-  for (let i = 0; i < args.length; i++) {
-    if (consumeDaemonFlag(args[i], args[i + 1], options, log)) {
-      i++;
-    }
-  }
+  applyDaemonFlagTokens(args, options, log);
   return options;
 }
 
@@ -275,7 +342,7 @@ const SHARED_LAUNCH_BOOLEAN_FLAGS = [
   ),
 ];
 
-const DAEMON_LAUNCH_VALUE_FLAGS: ReadonlySet<string> = new Set([
+export const DAEMON_LAUNCH_VALUE_FLAGS: ReadonlySet<string> = new Set([
   "--port",
   ...Object.keys(numericFlags),
   ...Object.keys(stringFlags),
@@ -283,7 +350,7 @@ const DAEMON_LAUNCH_VALUE_FLAGS: ReadonlySet<string> = new Set([
   ...SHARED_LAUNCH_VALUE_FLAGS,
 ]);
 
-const DAEMON_LAUNCH_BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
+export const DAEMON_LAUNCH_BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   ...Object.keys(booleanFlags),
   ...SHARED_LAUNCH_BOOLEAN_FLAGS,
 ]);
@@ -294,18 +361,36 @@ export interface DaemonCommandFlagSpec {
   launchFlags: boolean;
   valueFlags?: readonly string[];
   booleanFlags?: readonly string[];
+  /** How many positional words the command takes (default 0). */
+  positionals?: number;
 }
 
-/** Why a daemon command's argument tail is invalid: a stray word or an unknown option. */
+/** Why a daemon command's argument tail is invalid: a stray word, an unknown option or a bad value. */
 export type InvalidDaemonArgument =
   | { kind: "positional"; argument: string }
-  | { kind: "option"; argument: string };
+  | { kind: "option"; argument: string }
+  | { kind: "value"; argument: string };
+
+function invalidBooleanOrUnknownOption(
+  arg: string,
+  isBooleanFlag: (flag: string) => boolean,
+): InvalidDaemonArgument | undefined {
+  const { flag, inlineValue } = splitFlagToken(arg);
+  if (!isBooleanFlag(flag)) {
+    return { kind: "option", argument: arg };
+  }
+  return parseBooleanFlagValue(inlineValue) === undefined
+    ? { kind: "value", argument: arg }
+    : undefined;
+}
 
 /**
- * The first argument a daemon command that takes no positional arguments cannot accept (#11252):
- * a stray word (`--daemon stop <sessionId>` would otherwise stop the whole daemon) or an unknown
- * option (`restart --stict-port` would otherwise drop the flag silently). A word right after a
- * value-taking flag is that flag's value; `--flag=value` names `--flag`.
+ * The first argument a daemon command cannot accept (#11252): a stray word (`--daemon stop
+ * <sessionId>` would otherwise stop the whole daemon), an unknown option (`restart --stict-port`
+ * would otherwise drop the flag silently), or a boolean flag given a value other than
+ * true/false. A word right after a value-taking flag is that flag's value; `--flag=value` is that
+ * same flag (both forms go through the tokenizer in `utils/flagTokens`, which the readers use too).
+ * A bare `--` ends the options. At most `spec.positionals` (default 0) words are accepted.
  */
 export function invalidDaemonCommandArgument(
   args: string[],
@@ -317,24 +402,28 @@ export function invalidDaemonCommandArgument(
   const isBooleanFlag = (flag: string) =>
     (spec.launchFlags && DAEMON_LAUNCH_BOOLEAN_FLAGS.has(flag)) ||
     (spec.booleanFlags?.includes(flag) ?? false);
+  const maxPositionals = spec.positionals ?? 0;
+  let positionals = 0;
+  let optionsEnded = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "") {
       continue;
     }
-    if (!arg.startsWith("-")) {
-      return { kind: "positional", argument: arg };
-    }
-    const equals = arg.indexOf("=");
-    const flag = equals === -1 ? arg : arg.slice(0, equals);
-    if (isValueFlag(flag)) {
-      if (equals === -1 && hasDaemonFlagValue(args[i + 1])) {
-        i++;
+    if (arg === END_OF_OPTIONS && !optionsEnded) {
+      optionsEnded = true;
+    } else if (optionsEnded || !arg.startsWith("-")) {
+      positionals++;
+      if (positionals > maxPositionals) {
+        return { kind: "positional", argument: arg };
       }
-      continue;
-    }
-    if (!isBooleanFlag(flag)) {
-      return { kind: "option", argument: arg };
+    } else if (isValueFlag(splitFlagToken(arg).flag)) {
+      i = readValueOperand(args, i).last;
+    } else {
+      const invalid = invalidBooleanOrUnknownOption(arg, isBooleanFlag);
+      if (invalid) {
+        return invalid;
+      }
     }
   }
   return undefined;

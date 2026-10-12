@@ -100,7 +100,7 @@ export function managedExecutionEndedPayload({
       message:
         `This managed execution has ended: its device session${sessionUuid ? ` ${sessionUuid}` : ""} ` +
         `was released (${reason}) and cannot be reused. This connection never acquires devices, so ` +
-        "device calls are refused until the runner relaunches the execution; reads still work.",
+        "device calls are refused until the runner relaunches the execution; reads that name a deviceId still work.",
       ...(sessionUuid === undefined ? {} : { sessionUuid }),
       reason,
       retryable: false as const,

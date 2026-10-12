@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parseArgs as parseNodeArgs } from "node:util";
 import { parsePort, parsePositiveNumber, type ParseLogger } from "./numericValidators";
+import { parseBooleanFlagValue, splitFlagToken } from "../utils/flagTokens";
 import type { VideoRecordingConfigInput } from "../models";
 import {
   MANAGED_SLOT_CONFIG_ENV,
@@ -111,9 +112,19 @@ export function parseArgs(
     allowPositionals: true,
     strict: false,
   });
-  // `=== true` intentionally retains the prior exact-flag behavior for
-  // `--flag=value` while delegating ordinary flag tokenization to Node/Bun.
-  const hasFlag = (name: string) => values[name] === true;
+  // Node's parser reports `--flag=value` on a boolean as the string; read it the way every
+  // other boolean flag is read (`--flag`/`--flag=true` on, `--flag=false` off, else warned).
+  const hasFlag = (name: string) => {
+    const value = values[name];
+    if (value === undefined) {
+      return false;
+    }
+    const enabled = value === true ? true : parseBooleanFlagValue(String(value));
+    if (enabled === undefined) {
+      log.warn(`Invalid value for --${name}: ${String(value)}; expected true or false`);
+    }
+    return enabled === true;
+  };
   const { enabledTools, disabledTools } = parseToolDefaults(values, environment);
   const cliMode = hasFlag("cli");
   const daemonMode = hasFlag("daemon-mode");
@@ -394,31 +405,70 @@ function parseValueOptions(
     if (["--cli", "--boot-device", "--"].includes(args[i])) {
       break;
     }
-    const connection = parseConnectionOption(args, i, log, options);
-    if (connection !== undefined) {
+    // `--flag=value` is the same option as `--flag value` (#11612): the option parsers below run
+    // on a one-pair view, so both forms reach exactly the same code.
+    const { flag, inlineValue } = splitFlagToken(args[i]);
+    const inline = inlineValue !== undefined && INLINE_LAUNCH_OPTIONS.has(flag);
+    const view = inline ? [flag, inlineValue] : args;
+    const at = inline ? 0 : i;
+    if (flag === "--a11y-use-baseline" && inlineValue !== undefined) {
+      const enabled = parseBooleanFlagValue(inlineValue);
+      if (enabled === undefined) {
+        log.warn(`Invalid value for ${flag}: ${inlineValue}; expected true or false`);
+      } else {
+        options.a11yUseBaseline = enabled;
+      }
+      continue;
+    }
+    const consumed = parseScalarOption(view, at, log, options, video);
+    if (consumed !== undefined) {
       // Invalid scalar values still belong to their option; keep the existing
       // warning/default behavior rather than diagnosing them as stray commands.
-      i = Math.max(connection, optionValueEnd(args, i));
-      continue;
-    }
-    const accessibility = parseAccessibilityOption(args, i, log, options);
-    if (accessibility !== undefined) {
-      i = accessibility;
-      continue;
-    }
-    const readiness = parseReadinessOption(args, i, log, options);
-    if (readiness !== undefined) {
-      i = readiness;
-      continue;
-    }
-    const recording = parseVideoOption(args, i, log, video);
-    if (recording !== undefined) {
-      i = recording;
+      i = inline ? i : consumed;
       continue;
     }
     i = inspectInvocationToken(args, i, daemonIndex, options);
   }
   return options;
+}
+
+/** Value-taking launcher options that also take `--flag=value`. */
+const INLINE_LAUNCH_OPTIONS: ReadonlySet<string> = new Set([
+  "--port",
+  "--host",
+  "--initial-session-uuid",
+  "--liveness-owner-token",
+  "--a11y-level",
+  "--a11y-failure-mode",
+  "--a11y-min-severity",
+  "--plan-execution-lock-scope",
+  RUNNER_READINESS_TIMEOUT_FLAG,
+  "--video-quality",
+  "--video-quality-preset",
+  "--video-target-bitrate-kbps",
+  "--video-max-throughput-mbps",
+  "--video-fps",
+  "--video-format",
+  "--video-archive-size-mb",
+]);
+
+/** The index of the last token the scalar option at `i` consumed, or undefined if none matched. */
+function parseScalarOption(
+  args: string[],
+  i: number,
+  log: ParseLogger,
+  options: ScalarOptions,
+  video: ReturnType<typeof createVideoRecordingDefaults>,
+): number | undefined {
+  const connection = parseConnectionOption(args, i, log, options);
+  if (connection !== undefined) {
+    return Math.max(connection, optionValueEnd(args, i));
+  }
+  return (
+    parseAccessibilityOption(args, i, log, options) ??
+    parseReadinessOption(args, i, log, options) ??
+    parseVideoOption(args, i, log, video)
+  );
 }
 
 function optionValueEnd(args: string[], i: number): number {

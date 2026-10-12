@@ -38,6 +38,14 @@ import {
   parseDaemonArgs,
   type DaemonCommandFlagSpec,
 } from "./daemonArgs";
+import {
+  findValueOperand,
+  findValueOperands,
+  parseBooleanFlagValue,
+  readBooleanFlag,
+  readValueOperand,
+  splitFlagToken,
+} from "../../utils/flagTokens";
 import { describeForeignForwardLeaseHolders } from "../forwardLeaseHolders";
 import { DAEMON_RESET_SLOT_SCOPE_METHOD } from "../constants";
 import {
@@ -107,19 +115,27 @@ export function parseDaemonHeartbeatCommandArgs(args: string[]): DaemonHeartbeat
   let livenessOwnerToken: string | undefined;
   let claimLivenessOwnership = false;
   for (let index = 1; index < args.length; index++) {
-    switch (args[index]) {
+    const { flag, inlineValue } = splitFlagToken(args[index]);
+    switch (flag) {
       case "--liveness-owner-token": {
-        const ownerToken = args[index + 1];
-        if (!ownerToken || ownerToken.startsWith("--")) {
+        const operand = readValueOperand(args, index);
+        if (!operand.value) {
           throw new ActionableError("--liveness-owner-token requires a non-empty value");
         }
-        livenessOwnerToken = ownerToken;
-        index++;
+        livenessOwnerToken = operand.value;
+        index = operand.last;
         break;
       }
-      case "--claim-liveness-ownership":
-        claimLivenessOwnership = true;
+      case "--claim-liveness-ownership": {
+        const claim = parseBooleanFlagValue(inlineValue);
+        if (claim === undefined) {
+          throw new ActionableError(
+            `Invalid value for --claim-liveness-ownership: ${inlineValue}; expected true or false`,
+          );
+        }
+        claimLivenessOwnership = claim;
         break;
+      }
       default:
         throw new ActionableError(`Unknown heartbeat option: ${args[index]}`);
     }
@@ -146,18 +162,22 @@ export interface ResetSlotScopeCommandArgs {
  */
 export function parseResetSlotScopeCommandArgs(args: string[]): ResetSlotScopeCommandArgs {
   const read = (flag: string, required: boolean): string | undefined => {
-    const index = args.indexOf(flag);
-    if (index === -1) {
+    const operands = findValueOperands(args, [flag]);
+    if (operands.length === 0) {
       if (required) {
         throw new ActionableError(`reset-slot-scope requires ${flag} <value>`);
       }
       return undefined;
     }
-    const value = args[index + 1]?.trim();
-    if (!value || value.startsWith("--")) {
+    const values = operands.map((operand) => operand.value?.trim());
+    if (values.some((value) => !value)) {
       throw new ActionableError(`${flag} requires a non-empty value`);
     }
-    return value;
+    if (new Set(values).size > 1) {
+      // Two different values for one option: neither can be silently dropped.
+      throw new ActionableError(`${flag} was given more than once with different values`);
+    }
+    return values[0];
   };
   const runnerNamespace = read("--runner-namespace", true)!;
   const runnerIncarnation = read("--incarnation", true)!;
@@ -172,12 +192,13 @@ export function parseResetSlotScopeCommandArgs(args: string[]): ResetSlotScopeCo
       );
     }
   }
+  const force = readBooleanFlag(args, ["--force"]) === true;
   return {
     runnerNamespace,
     runnerIncarnation,
     ...(managedHostScope === undefined ? {} : { managedHostScope }),
     ...(waitMs === undefined ? {} : { waitMs }),
-    ...(args.includes("--force") ? { force: true } : {}),
+    ...(force ? { force: true } : {}),
   };
 }
 
@@ -273,9 +294,8 @@ async function resetSlotScope(args: string[], manager: DaemonManager): Promise<v
 }
 
 export function parseRestartAdmittedMaintenanceToken(args: string[]): string {
-  const tokenIndex = args.indexOf("--maintenance-token");
-  const token = tokenIndex === -1 ? undefined : args[tokenIndex + 1];
-  if (!token || token.startsWith("--")) {
+  const token = findValueOperand(args, ["--maintenance-token"])?.value;
+  if (!token) {
     throw new ActionableError("--maintenance-token requires a non-empty value");
   }
   return token;
@@ -283,9 +303,8 @@ export function parseRestartAdmittedMaintenanceToken(args: string[]): string {
 
 export function parseAcceptanceSessionRestartScope(args: string[]): AcceptanceSessionRestartScope {
   const read = (flag: string): string => {
-    const index = args.indexOf(flag);
-    const value = index === -1 ? undefined : args[index + 1];
-    if (!value || value.startsWith("--")) {
+    const value = findValueOperand(args, [flag])?.value;
+    if (!value) {
       throw new ActionableError(`${flag} requires a non-empty value`);
     }
     return value;
@@ -355,12 +374,43 @@ const formatPoolStats = (
     ...(devices ? { devices } : {}),
   });
 
+/** The typed, retryable refusal every `available-devices` path gives for an unknown count. */
+function discoveryIncompleteRefusal(message: string): ActionableError {
+  return Object.assign(new ActionableError(message), {
+    code: "discovery_incomplete",
+    retryable: true,
+  });
+}
+
+/** Why a booted-devices resource with a pool status still has no known device count, if so. */
+function unknownPoolCountReason(data: {
+  observationComplete?: boolean;
+  poolStatus?: { countUnknown?: { platforms?: string[] } };
+  devices?: unknown[];
+}): string | undefined {
+  const countUnknown = data.poolStatus?.countUnknown;
+  if (countUnknown) {
+    // A pooled device's own discovery source did not complete, so whether it is still there is
+    // unknown: the same refusal pool stats and `daemon/availableDevices` give (#11643).
+    const platforms = countUnknown.platforms?.join(", ") || "a pooled platform";
+    return `Device discovery for ${platforms} did not complete, so the pooled device count is unknown`;
+  }
+  if (data.observationComplete === false && (data.devices?.length ?? 0) === 0) {
+    // A discovery source that exists on this host failed and the pool has nothing to fall back
+    // on: zeros here would read as "0 devices" when the count is actually unknown. Tooling that
+    // is not installed (a single-platform host) leaves the observation complete (#11605).
+    return "The booted-devices resource reports incomplete discovery and the pool has no devices, so the count is unknown";
+  }
+  return undefined;
+}
+
 /**
  * Render the booted-devices resource as `available-devices` output. A resource with no usable pool
  * status (no text, unparseable text, an error object, or no `poolStatus`) is an unknown, so it
- * fails rather than printing zeros that read as "0 devices". So does an incomplete observation
- * (`observationComplete: false`) with no device entries; a partial one with entries still prints
- * (the JSON has no field that could carry the incompleteness).
+ * fails rather than printing zeros that read as "0 devices". So does a pool status marked
+ * `countUnknown` (a pooled device's own discovery source did not complete), and an incomplete
+ * observation (`observationComplete: false`) with no device entries. A partial observation whose
+ * failed source no pooled device depends on still prints: its counts are exact.
  */
 function printAvailableDevicesContent(content: string | undefined): void {
   let data: {
@@ -372,6 +422,7 @@ function printAvailableDevicesContent(content: string | undefined): void {
       error: number;
       total: number;
       recoveryPolicy?: { onLoss: boolean; maxAttempts: number };
+      countUnknown?: { platforms?: string[] };
     };
     devices?: Array<{
       platform: string;
@@ -390,17 +441,15 @@ function printAvailableDevicesContent(content: string | undefined): void {
     throw new ActionableError(`The booted-devices resource reported an error: ${data.error}`);
   }
   if (!data?.poolStatus) {
-    throw new ActionableError(
+    throw discoveryIncompleteRefusal(
       "The booted-devices resource carried no pool status, so the device count is unknown " +
         "(discovery_incomplete); retry once the daemon finishes discovery.",
     );
   }
-  if (data.observationComplete === false && (data.devices?.length ?? 0) === 0) {
-    // Every discovery source failed and the pool has nothing to fall back on: zeros here would
-    // read as "0 devices" when the count is actually unknown.
-    throw new ActionableError(
-      "The booted-devices resource reports incomplete discovery and the pool has no devices, so the count is " +
-        "unknown (discovery_incomplete); retry once the daemon finishes discovery.",
+  const unknownCount = unknownPoolCountReason(data);
+  if (unknownCount) {
+    throw discoveryIncompleteRefusal(
+      `${unknownCount} (discovery_incomplete); retry once the daemon finishes discovery.`,
     );
   }
   console.log(
@@ -556,7 +605,7 @@ async function runDaemonLifecycleCommand(
 /** Print `--daemon status` (or its `--json` object); true when it must exit non-zero. */
 async function runDaemonStatusCommand(args: string[], manager: DaemonManager): Promise<boolean> {
   const status = await manager.status();
-  if (args.includes(DAEMON_JSON_FLAG)) {
+  if (readBooleanFlag(args, [DAEMON_JSON_FLAG]) === true) {
     console.log(JSON.stringify(status));
     return daemonStatusIsUnhealthy(status);
   }
@@ -717,9 +766,16 @@ function exitWithDaemonQueryFailure(error: unknown, json: boolean): void {
 
 /** Split `--json` out of a command's arguments. */
 function takeJsonFlag(args: string[]): { json: boolean; rest: string[] } {
+  // Words after a bare `--` are positionals, never flags.
+  const end = args.indexOf("--");
+  const options = end === -1 ? args : args.slice(0, end);
+  const positionals = end === -1 ? [] : args.slice(end + 1);
   return {
-    json: args.includes(DAEMON_JSON_FLAG),
-    rest: args.filter((arg) => arg !== DAEMON_JSON_FLAG),
+    json: readBooleanFlag(options, [DAEMON_JSON_FLAG]) === true,
+    rest: [
+      ...options.filter((arg) => splitFlagToken(arg).flag !== DAEMON_JSON_FLAG),
+      ...positionals,
+    ],
   };
 }
 
@@ -731,7 +787,10 @@ async function queryAvailableDevices(args: string[], manager: DaemonManager): Pr
     if (daemonState.isInitialized()) {
       // Running inside daemon process
       const pool = daemonState.getDevicePool();
-      const { stats, deviceIds } = await pool.getRefreshedInventory();
+      // An unknown count keeps its typed refusal (code, retryable), as the socket branch does.
+      const { stats, deviceIds } = await pool.getRefreshedInventory().catch((error: unknown) => {
+        throw new DaemonCommandRefusal("Failed to query available devices", error);
+      });
       console.log(
         formatPoolStats(
           stats,
@@ -1075,11 +1134,11 @@ const RESET_SLOT_SCOPE_FLAGS = [
 ];
 
 /**
- * Daemon commands that take no positional arguments, with the options each accepts. The
- * lifecycle commands are strict (#11252): a stray word or a misspelled option is refused
- * rather than silently stopping or restarting the daemon without it.
+ * Daemon commands with the options and positional words each accepts (none by default). The
+ * commands are strict (#11252, #11612): a stray word or a misspelled option is refused rather
+ * than silently stopping or restarting the daemon, or releasing a session, without it.
  */
-const NO_POSITIONAL_DAEMON_COMMANDS: Partial<Record<string, DaemonCommandFlagSpec>> = {
+const STRICT_DAEMON_COMMANDS: Partial<Record<string, DaemonCommandFlagSpec>> = {
   start: { launchFlags: true },
   stop: { launchFlags: true },
   restart: { launchFlags: true },
@@ -1098,6 +1157,10 @@ const NO_POSITIONAL_DAEMON_COMMANDS: Partial<Record<string, DaemonCommandFlagSpe
     valueFlags: RESET_SLOT_SCOPE_FLAGS,
     booleanFlags: ["--force"],
   },
+  // One session id each, optionally with --json: `release-session a b` would free only `a`
+  // and `session-info a --jsno` would drop the typo'd flag (#11612).
+  "session-info": { launchFlags: false, booleanFlags: [DAEMON_JSON_FLAG], positionals: 1 },
+  "release-session": { launchFlags: false, booleanFlags: [DAEMON_JSON_FLAG], positionals: 1 },
 };
 
 /**
@@ -1106,8 +1169,8 @@ const NO_POSITIONAL_DAEMON_COMMANDS: Partial<Record<string, DaemonCommandFlagSpe
  * that flag's value, so launch options such as `--port 3001` keep working after the command.
  */
 export function daemonCommandArgumentError(command: string, args: string[]): string | undefined {
-  const spec = Object.hasOwn(NO_POSITIONAL_DAEMON_COMMANDS, command)
-    ? NO_POSITIONAL_DAEMON_COMMANDS[command]
+  const spec = Object.hasOwn(STRICT_DAEMON_COMMANDS, command)
+    ? STRICT_DAEMON_COMMANDS[command]
     : undefined;
   if (!spec) {
     return undefined;
@@ -1116,8 +1179,11 @@ export function daemonCommandArgumentError(command: string, args: string[]): str
   if (!invalid) {
     return undefined;
   }
-  return invalid.kind === "positional"
-    ? `Unexpected argument for daemon ${command}: ${invalid.argument}`
+  if (invalid.kind === "positional") {
+    return `Unexpected argument for daemon ${command}: ${invalid.argument}`;
+  }
+  return invalid.kind === "value"
+    ? `Invalid value for daemon ${command} option ${invalid.argument}; expected true or false`
     : `Unknown option for daemon ${command}: ${invalid.argument}`;
 }
 
@@ -1204,8 +1270,8 @@ export async function runDaemonCommand(
     stateProvider?: () => DaemonStateLike,
   ) => DaemonManager,
 ): Promise<void> {
-  const allowSharedNamespace = rawArgs.includes(ALLOW_SHARED_NAMESPACE_FLAG);
-  const args = rawArgs.filter((arg) => arg !== ALLOW_SHARED_NAMESPACE_FLAG);
+  const allowSharedNamespace = readBooleanFlag(rawArgs, [ALLOW_SHARED_NAMESPACE_FLAG]) === true;
+  const args = rawArgs.filter((arg) => splitFlagToken(arg).flag !== ALLOW_SHARED_NAMESPACE_FLAG);
   const manager = new DaemonManager(options.clientFactory, options.stateProvider);
 
   const handlers: Partial<Record<string, () => Promise<void> | void>> = {

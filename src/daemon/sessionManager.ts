@@ -96,6 +96,7 @@ import { forgivenLeaseStart, type StallForgivingLeases } from "./stallForgivenes
 import { onSessionClock } from "./sessionClockPersistence";
 import {
   judgedLeaseHeartbeat,
+  heartbeatLeasePastGrace,
   judgesOwnerHeartbeats,
   ownerLeaseLiveAt,
   livenessLeaseState,
@@ -11137,10 +11138,22 @@ export class SessionManager {
     return (
       judgesOwnerHeartbeats(session) &&
       suspectGraceMsFor(session) > 0 &&
-      livenessLeaseState({
-        ...sessionJudgedLeaseSnapshot(session, this.sessionNow()),
-        lastHeartbeat: this.judgedLeaseHeartbeat(session),
-      }).phase === "lapsed"
+      heartbeatLeasePastGrace(
+        this.sessionNow(),
+        this.judgedLeaseHeartbeat(session),
+        session.heartbeatTimeoutMs,
+        suspectGraceMsFor(session),
+      )
+    );
+  }
+
+  /** A live owner's lapsed lease awaits the next scan, unless a control call keeps it. */
+  ownerLeaseAwaitsReap(sessionId: string): boolean {
+    const session = this.peekSession(sessionId);
+    return (
+      session !== null &&
+      this.isOwnerLeaseLapsed(session) &&
+      !this.activeSessionExecutionChecker(sessionId, { excludeReads: true })
     );
   }
 
@@ -11512,9 +11525,20 @@ export class SessionManager {
    */
   claimUnownedLivenessOwnership(sessionId: string, ownerToken: string): boolean {
     const session = this.unlessBaseEnded(this.getSession(sessionId));
-    if (!session) {
+    if (!session || !this.adoptUnownedLivenessOwnerToken(session, ownerToken)) {
       return false;
     }
+    session.lastOwnerHeartbeat = this.sessionNow();
+    return true;
+  }
+
+  /** Bind acquisition identity only: no heartbeat, claim history or release deadline changes. */
+  bindAcquiredLivenessOwnerToken(sessionId: string, ownerToken: string): boolean {
+    const session = this.peekSession(sessionId);
+    return session !== null && this.adoptUnownedLivenessOwnerToken(session, ownerToken);
+  }
+
+  private adoptUnownedLivenessOwnerToken(session: Session, ownerToken: string): boolean {
     const base = this.livenessBaseSession(session);
     const adopt = mayAdoptUnownedLiveness({
       claimantToken: ownerToken,
@@ -11526,7 +11550,6 @@ export class SessionManager {
       return false;
     }
     session.livenessOwnerToken = ownerToken;
-    session.lastOwnerHeartbeat = this.sessionNow();
     return true;
   }
 

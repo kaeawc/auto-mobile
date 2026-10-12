@@ -1,3 +1,4 @@
+import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   runCliCommand,
@@ -975,10 +976,13 @@ describe("--cli declares its session CLI-owned (#6870)", () => {
       expect(replayedMcpClient.toolCalls).toEqual([
         {
           name: "observe",
-          params: {
-            sessionUuid,
-            __autoMobileBoundSessionUuid: sessionUuid,
-          },
+          params: withProxyOwnerToken(
+            {
+              sessionUuid,
+              __autoMobileBoundSessionUuid: sessionUuid,
+            },
+            "old-mcp-token",
+          ),
         },
       ]);
     } finally {

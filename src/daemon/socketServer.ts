@@ -3241,21 +3241,30 @@ export class UnixSocketServer {
   }
 
   private async restoreSelectorSessions(args: unknown, socketSessionId: string): Promise<void> {
+    const token = this.ownedSessionsOwnerToken(args);
+    if (token !== undefined) {
+      try {
+        if (this.daemonState.isInitialized()) {
+          this.daemonState
+            .getDevicePool()
+            .declareMcpSessionLivenessOwnerToken?.(socketSessionId, token);
+        }
+      } catch (error) {
+        // Declaring an optional connection identity must not block the tool call or restore.
+        logger.warn(`Unable to declare MCP session owner token: ${errorMessage(error)}`, error);
+      }
+    }
     const ids = this.selectorSessionIds(args);
     if (!ids) {
       return;
     }
-    const ownerSocket = this.clientSockets.get(socketSessionId);
     const pool = this.daemonState.getDevicePool();
+    const ownerSocket = this.clientSockets.get(socketSessionId);
     // Restoration attaches only live sessions. It restores both explicit
     // acquisition ownership and autolock routing without reallocating a
     // released UUID.
     const refused =
-      (await pool.restoreOwnedDeviceSessionsForMcpSession?.(
-        ids,
-        socketSessionId,
-        this.ownedSessionsOwnerToken(args),
-      )) ?? [];
+      (await pool.restoreOwnedDeviceSessionsForMcpSession?.(ids, socketSessionId, token)) ?? [];
     if (this.releaseBindingsIfSocketDisconnected(socketSessionId, ownerSocket, pool)) {
       return;
     }
@@ -3292,8 +3301,11 @@ export class UnixSocketServer {
     }
   }
 
-  /** The restoring proxy's liveness owner token, when it sent one with its owned sessions. */
+  /** The proxy's acquisition/restore identity, independent of whether it retained sessions. */
   private ownedSessionsOwnerToken(args: unknown): string | undefined {
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+      return undefined;
+    }
     const token = (args as Record<string, unknown>)[DAEMON_OWNED_SESSIONS_OWNER_TOKEN_PARAM];
     return typeof token === "string" && token.trim() !== "" ? token : undefined;
   }

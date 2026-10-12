@@ -839,6 +839,8 @@ export interface GetAppleArgs {
 }
 
 export interface ProvisionDeviceArgs {
+  /** Exact owner recovery identity retained after the reservation ends. */
+  __restartResumeTargets?: readonly import("../daemon/sessionManager").RehydrationDeviceReservation[];
   /** Request-local owner snapshot assigned after public schema validation. */
   __restartResumeSessionUuid?: string;
   device: {

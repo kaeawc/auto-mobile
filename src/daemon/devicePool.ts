@@ -1277,6 +1277,12 @@ export class DevicePool {
       ownerMcpSessionIds?: ReadonlySet<string>;
     }
   >();
+  // Permission is scoped to one admitted start's actual symbols, never every hold on R's target.
+  private readonly restartReadiness = new Set<{
+    sessionId: string;
+    deviceId: string;
+    owners: Set<symbol>;
+  }>();
   private rehydrationReservationsStopped = false;
   private readonly intentionallyCancelledRecoverySessions = new WeakSet<Session>();
   /** Last foreign owner PID logged per device, so a waiting allocation logs each owner once. */
@@ -6051,6 +6057,7 @@ export class DevicePool {
    */
   releaseDeviceClaimsForShutdown(): void {
     this.rehydrationReservationsStopped = true;
+    this.restartReadiness.clear();
     for (const sessionId of [...this.rehydrationReservations.keys()]) {
       this.releaseRehydrationReservation(sessionId, true);
     }
@@ -7592,6 +7599,52 @@ export class DevicePool {
     return Object.assign(release, { owner: reservation.owner });
   }
 
+  /** An admitted owner may prepare R even if R's control call recovered it during boot. */
+  async reserveRestartRecoveryReadiness(
+    device: BootedDevice,
+    stableRuntimeName: string,
+    sessionId: string,
+  ): Promise<DeviceReadinessReservation> {
+    const permission = { sessionId, deviceId: device.deviceId, owners: new Set<symbol>() };
+    this.restartReadiness.add(permission);
+    try {
+      const reservation = await this.reserveDeviceForReadiness(
+        device.deviceId,
+        device,
+        stableRuntimeName,
+        undefined,
+        undefined,
+        true,
+      );
+      permission.owners.add(reservation.owner);
+      return Object.assign(
+        async () => {
+          try {
+            await reservation();
+          } finally {
+            this.restartReadiness.delete(permission);
+          }
+        },
+        { owner: reservation.owner },
+      );
+    } catch (error) {
+      this.restartReadiness.delete(permission);
+      throw error;
+    }
+  }
+
+  private restartReadinessOwners(device: PooledDevice, sessionId?: string): ReadonlySet<symbol> {
+    const owners = new Set<symbol>();
+    for (const permission of this.restartReadiness) {
+      if (permission.sessionId === sessionId && permission.deviceId === device.id) {
+        for (const owner of permission.owners) {
+          owners.add(owner);
+        }
+      }
+    }
+    return owners;
+  }
+
   private notifyReservationChanged(deviceId: string, platform: Platform): void {
     this.notifyDeviceStateChanged({ id: deviceId, platform });
   }
@@ -7919,9 +7972,16 @@ export class DevicePool {
    * (#11294) holds the device against everyone but the row it was made for.
    */
   private isReservedForAssignment(device: PooledDevice, forSessionId?: string): boolean {
+    const ownReadiness = this.restartReadinessOwners(device, forSessionId);
     return (
-      this.isReservedForReadiness(device.id) ||
-      this.hasReadinessNameReservation(device) ||
+      this.isReservedForReadiness(device.id, ownReadiness) ||
+      this.hasReadinessNameReservation(device, ownReadiness) ||
+      this.isReservedOutsideReadiness(device, forSessionId)
+    );
+  }
+
+  private isReservedOutsideReadiness(device: PooledDevice, forSessionId?: string): boolean {
+    return (
       this.recoveryCoordinator.isAndroidRecoveryHandoffReserved(device.id) ||
       this.isReservedForShutdown(device) ||
       this.shutdownReservationCoordinator.isDeviceUnderShutdown(device.id) ||
@@ -8432,11 +8492,11 @@ export class DevicePool {
               deviceId,
               expectedExistingSessionDeviceId,
             );
-            const confirmedSameOwner = this.assertCallerOwnsDeviceSession(
-              caller,
-              existingSession,
+            const confirmedSameOwner = this.confirmBoundSessionOwner(
               device,
-              Boolean(childProcess),
+              existingSession,
+              sessionId,
+              options,
             );
             return this.reuseExistingDeviceSession(
               deviceId,
@@ -8474,6 +8534,26 @@ export class DevicePool {
     return boundSessionId;
   }
 
+  private confirmBoundSessionOwner(
+    device: PooledDevice,
+    session: Session,
+    sessionId: string,
+    options: ExplicitBindOptions,
+  ): boolean {
+    if (options.recoveryTarget && session.sessionId === sessionId) {
+      // The issued-row recovery and prepared-target checks proved R, even when its control
+      // call won the assignment before this start could restore the connection ownership.
+      this.recordBindOwnership(options.mcpSessionId, sessionId);
+      return true;
+    }
+    return this.assertCallerOwnsDeviceSession(
+      { mcpSessionId: options.mcpSessionId, oneShotCli: options.oneShotCli },
+      session,
+      device,
+      Boolean(options.childProcess),
+    );
+  }
+
   /** Only the cancelled receipt may re-hold its stale pool assignment without idling it. */
   private assertRetainedRebindOwner(session: Session, sessionId: string, deviceId: string): void {
     const undo = requestAcquisitionReceipt();
@@ -8498,6 +8578,17 @@ export class DevicePool {
     this.assertNotReservedForShutdown(device, "and cannot be assigned");
     this.assertNotReservedForOtherRehydration(device, sessionId);
     const target = options.recoveryTarget;
+    if (
+      target &&
+      !this.matchesRestartRecoveryTarget(
+        { deviceId: device.id, name: device.name, platform: device.platform },
+        target,
+      )
+    ) {
+      throw new ActionableError(
+        `Cannot safely recover session ${sessionId}: prepared device does not match its recovery target.`,
+      );
+    }
     // Admission as the restart owner never becomes an ordinary bind after its fixed window.
     if (
       target?.restartRecoveryDeadlineMs !== undefined &&
@@ -8530,6 +8621,18 @@ export class DevicePool {
   }
 
   /** Assign `device` to `sessionId`, create (or restore) the session and record its owner. */
+  private boundSessionWasMinted(
+    previousSession: Session | null,
+    options: ExplicitBindOptions,
+    clientChosen: boolean,
+  ): boolean {
+    return (
+      previousSession === null &&
+      !options.recoveryTarget &&
+      (!options.allowSessionRebind || clientChosen)
+    );
+  }
+
   private async assignDeviceToBoundSession(
     device: PooledDevice,
     sessionId: string,
@@ -8589,7 +8692,7 @@ export class DevicePool {
     // included) takes it back without retiring the id. A session moved off another device is
     // recorded with where it was (#11593).
     const clientChosen = options.receipt.clientChosenSessionId === sessionId;
-    if (previousSession === null && (!allowSessionRebind || clientChosen)) {
+    if (this.boundSessionWasMinted(previousSession, options, clientChosen)) {
       options.receipt.minted = mintedSession(session, deviceId, clientChosen);
     } else if (previousDeviceId && previousDeviceId !== deviceId && previousCacheData) {
       options.receipt.rebound = {
@@ -10196,6 +10299,27 @@ export class DevicePool {
     return this.criteriaMatcher.filterDevices(this.getAllDevices(), criteria);
   }
 
+  /** Use the same stable identity as persisted recovery, including serial-only Android handsets. */
+  matchesRestartRecoveryTarget(
+    device: BootedDevice,
+    target: RehydrationDeviceReservation["target"],
+  ): boolean {
+    const pooled = this.devices.get(device.deviceId);
+    const emulator = this.isPooledAndroidEmulator(device.deviceId);
+    const stableId = this.stableDeviceIdFor(
+      pooled ?? {
+        id: device.deviceId,
+        name: device.name,
+        platform: device.platform,
+      },
+    );
+    return (
+      device.platform === target.platform &&
+      stableId === target.stableDeviceId &&
+      (target.androidEmulator === undefined || emulator === target.androidEmulator)
+    );
+  }
+
   private getDevicesMatchingRecoveryTarget(target: SessionRecoveryTarget): PooledDevice[] {
     const matches = this.getDevicesByPlatform(target.platform).filter(
       (device) =>
@@ -10253,12 +10377,37 @@ export class DevicePool {
       }
       return new SessionRecoveryIdentityLossError(sessionId, target, "target-absent");
     }
-    const exact = exactMatches[0];
+    return this.recoveryBusyFailure(sessionId, target, exactMatches[0]);
+  }
+
+  private recoveryBusyFailure(
+    sessionId: string,
+    target: SessionRecoveryTarget,
+    exact: PooledDevice,
+  ): SessionRecoveryIdentityLossError | DevicePoolError | undefined {
     // A restart-recovery reservation made for this very row is not "busy" (#11294).
     if (exact.status === "busy" || this.isReservedForAssignment(exact, sessionId)) {
+      if (this.recoveryWaitingForReadiness(exact, sessionId, target)) {
+        return new DevicePoolError("Recovery target is being prepared", true);
+      }
       return new SessionRecoveryIdentityLossError(sessionId, target, "target-busy");
     }
     return undefined;
+  }
+
+  private recoveryWaitingForReadiness(
+    device: PooledDevice,
+    sessionId: string,
+    target: SessionRecoveryTarget,
+  ): boolean {
+    // A request preparing an unheld target is temporary contention, not loss of R's identity.
+    // Keep waiting within the original bounds; never bypass that request's readiness symbols.
+    return (
+      device.status === "idle" &&
+      target.restartRecoveryDeadlineMs !== undefined &&
+      this.recoveryNow() < target.restartRecoveryDeadlineMs &&
+      !this.isReservedOutsideReadiness(device, sessionId)
+    );
   }
 
   private recoveryDiscoveryEvidence(
@@ -10298,7 +10447,9 @@ export class DevicePool {
     return { transportReused, transportIdentityUnresolved, absenceAuthoritative };
   }
 
-  private stableDeviceIdFor(device: PooledDevice): string | undefined {
+  private stableDeviceIdFor(
+    device: Pick<PooledDevice, "id" | "name" | "platform" | "avdName" | "identityUnresolved">,
+  ): string | undefined {
     if (device.platform === "ios") {
       return device.id;
     }

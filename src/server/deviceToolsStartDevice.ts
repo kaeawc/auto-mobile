@@ -482,7 +482,9 @@ const bootAndPrepareDevice = async (
 export function admitRestartReservedStart(args: StartDeviceArgs): void {
   const reservation = initializedDevicePool()?.restartReservationForStart?.(
     args.platform,
-    [args.avdName, args.name, args.deviceId].filter((id): id is string => id !== undefined),
+    [args.avdName, args.matchExactName ? args.name : undefined, args.deviceId].filter(
+      (id): id is string => id !== undefined,
+    ),
     startRequester(args),
   );
   if (!reservation) {
@@ -497,6 +499,10 @@ export function admitRestartReservedStart(args: StartDeviceArgs): void {
   }
   if (reservation.restartHandoff) {
     args.__restartResumeSessionUuid ??= reservation.sessionUuid;
+    args.__restartResumeTargets ??= initializedDevicePool()?.restartReservationExclusions(
+      args.platform,
+      startRequester(args),
+    ).resumeTargets;
   }
 }
 
@@ -666,13 +672,26 @@ async function reserveBootReadiness(
   try {
     await waitForDevicePreparation(
       async (reservationSignal) => {
-        await reserveInitialDeviceForReadiness(
-          daemonState,
-          state.boot!,
-          initialReservations,
-          args.__mcpSessionId,
-          args.__oneShotCli === true,
-        );
+        const resumeSessionId = restartResumeSessionForDevice(args, state.boot!.device);
+        if (resumeSessionId && daemonState.isInitialized()) {
+          initialReservations.push(
+            await daemonState
+              .getDevicePool()
+              .reserveRestartRecoveryReadiness(
+                state.boot!.device,
+                state.boot!.sourceImage?.name ?? state.boot!.device.name,
+                resumeSessionId,
+              ),
+          );
+        } else {
+          await reserveInitialDeviceForReadiness(
+            daemonState,
+            state.boot!,
+            initialReservations,
+            args.__mcpSessionId,
+            args.__oneShotCli === true,
+          );
+        }
         // A grant can win the mutex just as the caller loses its deadline race.
         // Never publish that orphan into the caller's already-drained release list.
         if (reservationAbandoned || reservationSignal?.aborted) {
@@ -994,54 +1013,79 @@ async function bindBootedDeviceSession(
         false,
         recoveryTarget,
       );
-  // getOrCreateSession owns the persisted-row claim, terminal checks, and pending recovery.
-  // Its assigner binds the already prepared target, exempting only this start's readiness owners.
   const boundSessionId = resumeSessionId
-    ? (
-        await daemonState.getSessionManager().getOrCreateSession(
-          resumeSessionId,
-          {
-            assignDeviceToSession: async (_id, _platform, recoveryTarget) => {
-              if (
-                !recoveryTarget ||
-                recoveryTarget.platform !== device.platform ||
-                recoveryTarget.stableDeviceId !==
-                  (device.platform === "android" ? device.name : device.deviceId)
-              ) {
-                throw new ActionableError(
-                  `Cannot safely recover session ${resumeSessionId}: prepared device does not match its recovery target.`,
-                );
-              }
-              return await bind(recoveryTarget);
-            },
-          },
-          device.platform,
-          undefined,
-          true,
-        )
-      ).sessionId
+    ? await resumePreparedDeviceSession(device, args, resumeSessionId, bind)
     : await bind();
   recordAcquiredSessionReadiness(daemonState, boundSessionId, achievedReadiness);
   return boundSessionId;
 }
 
-function restartResumeSessionForDevice(
+/** A join can complete without running this start's assigner, so adopt R through the reuse bind. */
+async function resumePreparedDeviceSession(
+  device: BootedDevice,
+  args: StartDeviceArgs,
+  resumeSessionId: string,
+  bind: (target?: SessionRecoveryTarget) => Promise<string>,
+): Promise<string> {
+  const daemonState = DaemonState.getInstance();
+  let boundByStart = false;
+  let recoveryTarget: SessionRecoveryTarget | undefined = args.__restartResumeTargets?.find(
+    (reservation) => reservation.sessionId === resumeSessionId,
+  )?.target;
+  const session = await daemonState.getSessionManager().getOrCreateSession(
+    resumeSessionId,
+    {
+      assignDeviceToSession: async (_id, _platform, target) => {
+        if (!target || !daemonState.getDevicePool().matchesRestartRecoveryTarget(device, target)) {
+          throw new ActionableError(
+            `Cannot safely recover session ${resumeSessionId}: prepared device does not match its recovery target.`,
+          );
+        }
+        recoveryTarget = target;
+        const bound = await bind(target);
+        boundByStart = true;
+        return bound;
+      },
+    },
+    device.platform,
+    undefined,
+    true,
+  );
+  if (session.assignedDevice !== device.deviceId || session.platform !== device.platform) {
+    throw new ActionableError(
+      `Session '${resumeSessionId}' is already assigned to a different device.`,
+    );
+  }
+  if (!boundByStart) {
+    await bind(recoveryTarget);
+  }
+  return resumeSessionId;
+}
+
+export function restartResumeSessionForDevice(
   args: StartDeviceArgs,
   device: BootedDevice,
 ): string | undefined {
-  if (args.__restartResumeSessionUuid) {
-    return args.__restartResumeSessionUuid;
+  const pool = initializedDevicePool();
+  if (!pool) {
+    return undefined;
   }
-  const stableId = device.platform === "android" ? device.name : device.deviceId;
   const admitted = args.__restartResumeTargets?.find(
-    ({ target }) => target.platform === device.platform && target.stableDeviceId === stableId,
+    ({ sessionId, target }) =>
+      (!args.__restartResumeSessionUuid || sessionId === args.__restartResumeSessionUuid) &&
+      pool.matchesRestartRecoveryTarget(device, target),
   );
   if (admitted) {
     return admitted.sessionId;
   }
-  const reservation = initializedDevicePool()?.restartReservationForStart?.(
+  if (args.__restartResumeSessionUuid) {
+    throw new ActionableError(
+      `Cannot safely recover session ${args.__restartResumeSessionUuid}: prepared device does not match its recovery target.`,
+    );
+  }
+  const reservation = pool.restartReservationForStart?.(
     device.platform,
-    [device.deviceId, device.name],
+    [device.deviceId],
     startRequester(args),
   );
   return reservation?.owned && reservation.restartHandoff ? reservation.sessionUuid : undefined;

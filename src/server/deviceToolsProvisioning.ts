@@ -1,5 +1,5 @@
 import { provisionCancellationOutcomes } from "./provisionCancellationOutcomes";
-import { admitRestartReservedStart } from "./deviceToolsStartDevice";
+import { restartResumeSessionForDevice, admitRestartReservedStart } from "./deviceToolsStartDevice";
 import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
@@ -1720,6 +1720,8 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
     return {
       platform: args.device.platform,
       name: args.device.name,
+      matchExactName: true,
+      __restartResumeTargets: args.__restartResumeTargets,
       timeoutMs: args.timeoutMs,
       __mcpSessionId: args.__mcpSessionId,
       __restartResumeSessionUuid: args.__restartResumeSessionUuid,
@@ -1731,6 +1733,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
     const start = { ...provisionSessionArgs(args), deviceId };
     admitRestartReservedStart(start);
     args.__restartResumeSessionUuid ??= start.__restartResumeSessionUuid;
+    args.__restartResumeTargets ??= start.__restartResumeTargets;
   }
 
   /**
@@ -2229,6 +2232,16 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
     const daemonState = DaemonState.getInstance();
     if (!daemonState.isInitialized()) {
       return undefined;
+    }
+    const resumeSessionId = restartResumeSessionForDevice(provisionSessionArgs(args), boot.device);
+    if (resumeSessionId) {
+      return await daemonState
+        .getDevicePool()
+        .reserveRestartRecoveryReadiness(
+          boot.device,
+          boot.sourceImage?.name ?? boot.device.name,
+          resumeSessionId,
+        );
     }
     // Reserving may reboot the device during readiness recovery, and the
     // readiness that follows resets the shared per-device CtrlProxy manager and

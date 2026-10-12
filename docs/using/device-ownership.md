@@ -401,9 +401,11 @@ daemon finishes it before rehydrating, so a released UUID is never revived.
 A device-restart handoff reserves the recorded platform and stable device identity for
 its session throughout the recovery window, even while the device is absent and no
 call is waiting. Other sessions' start selectors skip both its stopped image and its
-running device. An exact start by AVD name, device id, or iOS UDID is refused before
+running device. An exact start by `avdName`, `deviceId`, or iOS UDID is refused before
 boot or preparation, with a retry hint for the remaining hold; it does not stop a
-running reserved device. Binding rechecks the reservation if it changed during startup.
+running reserved device. A `startDevice.name` substring selector skips reserved targets
+owned by other sessions; its owner resumes only when the selected device is that target.
+Binding rechecks the reservation if it changed during startup.
 The reserving session's own start can boot the device and resume the same session UUID.
 Ownership comes from its routing session (including labels resolved through live base
 state) or the MCP connection that owned it at handoff. An anonymous or one-shot CLI

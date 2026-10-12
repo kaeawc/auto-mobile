@@ -26,7 +26,12 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import type { HostChildProcess } from "../../src/utils/HostCommandExecutor";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+import {
+  drainMicrotasks,
+  drainUntil,
+  settleWithFakeTime,
+  settleByFakeEvents,
+} from "../helpers/fakeTimerStepping";
 import { warmedTests } from "../helpers/warmedTests";
 
 const HOLDER = "restart-holder";
@@ -250,9 +255,319 @@ describe("start admission and owner resume for restart reservations", () => {
       await refusal(f, () => f.start(args));
     });
   }
-  test("rival startDevice exact name refuses before boot", async () => {
+  type Fixture = Awaited<ReturnType<typeof fixture>>;
+
+  function coldBoot(f: Fixture) {
+    const child = new FakeChildProcess(f.timer);
+    const process = child as unknown as HostChildProcess;
+    f.manager.setMockChildProcess(f.device.name, process);
+    cleanups.push(() => {
+      child.simulateExit();
+      f.timer.advanceTime(0);
+    });
+    return { child, process };
+  }
+
+  function settle<T>(f: Fixture, promise: Promise<T>) {
+    return settleWithFakeTime(f.timer, promise, {
+      stepMs: 1_000,
+      maxSteps: 20,
+      description: "owner start and control recovery",
+    });
+  }
+
+  async function assertLiveResume(f: Fixture, child: FakeChildProcess) {
+    expect(await f.persistence.getSession!(HOLDER)).toMatchObject({
+      status: "active",
+      release_reason: null,
+    });
+    expect(f.sessions.getAllSessions().map((session) => session.sessionId)).toEqual([HOLDER]);
+    expect(f.sessions.getSession(HOLDER)?.assignedDevice).toBe(f.device.deviceId);
+    expect(f.internals.rehydrationReservations.has(HOLDER)).toBe(false);
+    expect(child.killed).toBe(false);
+    expect(f.manager.getCallCount("killDevice")).toBe(0);
+    expect(f.pool.isReservedForReadiness(f.device.deviceId)).toBe(false);
+    expect(f.timer.getPendingTimeoutCount()).toBe(0);
+    expect(f.timer.getPendingSleepCount()).toBe(0);
+  }
+
+  test("undelivered owner resume after bind keeps the restored row live and boot running", async () => {
+    const f = await fixture({ connection: CONNECTION });
+    const { child } = coldBoot(f);
+    const controller = new AbortController();
+    const original = f.pool.bindOrReuseDeviceSession.bind(f.pool);
+    f.pool.bindOrReuseDeviceSession = async (...args: Parameters<typeof original>) => {
+      const result = await original(...args);
+      controller.abort(new Error("client cancelled"));
+      return result;
+    };
+    await expect(
+      settleByFakeEvents(
+        f.timer,
+        runWithToolSelectionContext({ routingSessionUuid: HOLDER }, () =>
+          ToolRegistry.getTool("getAndroid")!.handler(
+            { avdName: f.device.name, __mcpSessionId: CONNECTION },
+            undefined,
+            controller.signal,
+          ),
+        ),
+        { description: "cancelled owner resume" },
+      ),
+    ).rejects.toThrow("client cancelled");
+    await assertLiveResume(f, child);
+    expect(f.pool.resolveOwnedDeviceSessionForMcpSession(CONNECTION, f.device.deviceId)).toBe(
+      HOLDER,
+    );
+    expect(await f.call("restartControl", { sessionUuid: HOLDER })).toEqual({
+      deviceId: f.device.deviceId,
+    });
+  });
+
+  test("cancelled owner resume before bind preserves the restart row hold and deadlines", async () => {
     const f = await fixture();
-    await refusal(f, () => f.call("startDevice", { platform: "android", name: f.device.name }));
+    const { child } = coldBoot(f);
+    const row = { ...(await f.persistence.getSession!(HOLDER))! };
+    const reservation = f.internals.rehydrationReservations.get(HOLDER);
+    const deadline = reservation?.scheduledDeadlineMs;
+    const controller = new AbortController();
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async () => {
+        controller.abort(new Error("client cancelled"));
+      },
+    });
+    await expect(
+      settleByFakeEvents(
+        f.timer,
+        runWithToolSelectionContext({ routingSessionUuid: HOLDER }, () =>
+          ToolRegistry.getTool("getAndroid")!.handler(
+            { avdName: f.device.name },
+            undefined,
+            controller.signal,
+          ),
+        ),
+        { description: "cancelled owner resume" },
+      ),
+    ).rejects.toThrow("client cancelled");
+    expect(await f.persistence.getSession!(HOLDER)).toEqual(row);
+    expect(f.internals.rehydrationReservations.get(HOLDER)).toBe(reservation);
+    expect(reservation?.scheduledDeadlineMs).toBe(deadline);
+    expect(f.sessions.getSession(HOLDER)).toBeNull();
+    expect(child.killed).toBe(true);
+    f.timer.advanceTime(0);
+    await drainMicrotasks(50);
+    expect(f.timer.getPendingTimeoutCount()).toBe(1);
+  });
+
+  async function assertRace(
+    f: Fixture,
+    start: Promise<unknown>,
+    control: Promise<unknown>,
+    boot: ReturnType<typeof coldBoot>,
+  ) {
+    const [result, outcome] = await settle(
+      f,
+      Promise.all([
+        start,
+        control.then(
+          (value) => ({ value }),
+          (error: unknown) => ({ error }),
+        ),
+      ]),
+    );
+    expect(result).toMatchObject({
+      structuredContent: { runtime: { session: { sessionUuid: HOLDER } } },
+    });
+    if ("error" in outcome) {
+      expect(outcome.error).toMatchObject({
+        details: { code: "session_recovery_pending", retryable: true },
+      });
+    } else {
+      expect(outcome.value).toEqual({ deviceId: f.device.deviceId });
+    }
+    await assertLiveResume(f, boot.child);
+    expect(f.pool.hasStartedDeviceProcess(f.device.deviceId, boot.process)).toBe(true);
+    expect(f.pool.getDevice(f.device.deviceId)?.androidImage?.name).toBe(f.device.name);
+    expect(f.sessions.getSession(HOLDER)?.cacheData.deviceReadiness).toBeDefined();
+  }
+
+  test("control waiting first joins the owner's boot without terminalizing the row", async () => {
+    const f = await fixture();
+    const boot = coldBoot(f);
+    const control = f.call("restartControl", { sessionUuid: HOLDER });
+    void control.catch(() => {});
+    await drainMicrotasks(200);
+    await assertRace(f, f.start(undefined, HOLDER), control, boot);
+  });
+
+  test("control arriving during owner runner setup resumes through only its readiness hold", async () => {
+    const f = await fixture();
+    const boot = coldBoot(f);
+    const gate = Promise.withResolvers<void>();
+    let preparing = false;
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async () => {
+        preparing = true;
+        await gate.promise;
+      },
+    });
+    const start = f.start(undefined, HOLDER);
+    void start.catch(() => {});
+    await drainUntil(() => preparing, { description: "owner runner setup" });
+    const control = f.call("restartControl", { sessionUuid: HOLDER });
+    void control.catch(() => {});
+    await drainMicrotasks(200);
+    gate.resolve();
+    await assertRace(f, start, control, boot);
+  });
+
+  test("owner bind adopts recovery that claimed the pooled device before readiness", async () => {
+    const f = await fixture({ connection: CONNECTION });
+    const boot = coldBoot(f);
+    let control: Promise<unknown> | undefined;
+    f.manager.beforeReady = async () => {
+      await f.pool.initializeWithDevices([f.device]);
+      control = f.call("restartControl", { sessionUuid: HOLDER });
+      await control;
+    };
+    const start = f.start({ avdName: f.device.name, __mcpSessionId: CONNECTION }, HOLDER);
+    void start.catch(() => {});
+    await drainUntil(() => control !== undefined, { description: "recovery before readiness" });
+    await assertRace(f, start, control!, boot);
+    expect(f.pool.resolveOwnedDeviceSessionForMcpSession(CONNECTION, f.device.deviceId)).toBe(
+      HOLDER,
+    );
+  });
+
+  test("owner bind refuses R already live on a different device without rebind or second session", async () => {
+    const f = await fixture();
+    const boot = coldBoot(f);
+    const spare = { ...f.device, name: "spare-phone", deviceId: "emulator-5556" };
+    f.manager.beforeReady = async () => {
+      await f.pool.initializeWithDevices([f.device, spare]);
+      f.manager.setBootedDevices("android", [f.device, spare]);
+      await f.call("restartControl", { sessionUuid: HOLDER });
+      await f.pool.bindOrReuseDeviceSession(
+        HOLDER,
+        spare.deviceId,
+        "android",
+        undefined,
+        undefined,
+        spare,
+        true,
+      );
+    };
+    await expect(f.start(undefined, HOLDER)).rejects.toThrow(
+      "already assigned to a different device",
+    );
+    expect(f.sessions.getAllSessions().map((session) => session.sessionId)).toEqual([HOLDER]);
+    expect(f.sessions.getSession(HOLDER)?.assignedDevice).toBe(spare.deviceId);
+    expect(await f.persistence.getSession!(HOLDER)).toMatchObject({
+      status: "active",
+      release_reason: null,
+    });
+    expect(boot.child.killed).toBe(true);
+  });
+
+  test("rival start readiness keeps R pending without bypass or terminal identity loss", async () => {
+    const f = await fixture();
+    // This rival was admitted before R's hold existed; the bind must still respect the late hold.
+    f.pool.releaseRehydrationReservation(HOLDER, true);
+    const gate = Promise.withResolvers<void>();
+    let preparing = false;
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async () => {
+        await f.pool.initializeWithDevices([f.device]);
+        await f.pool.reserveDevicesForRehydration([
+          {
+            sessionId: HOLDER,
+            target: {
+              platform: "android",
+              stableDeviceId: f.device.name,
+              deviceId: f.device.deviceId,
+              androidEmulator: true,
+            },
+          },
+        ]);
+        preparing = true;
+        await gate.promise;
+      },
+    });
+    const start = f.start({ avdName: f.device.name, __mcpSessionId: "rival" });
+    void start.catch(() => {});
+    await drainUntil(() => preparing, { description: "rival runner setup" });
+    try {
+      const control = f.call("restartControl", {
+        sessionUuid: HOLDER,
+        __mcpRequestDeadlineMs: f.timer.now() + 5_000,
+      });
+      await expect(settle(f, control)).rejects.toMatchObject({
+        details: { code: "session_recovery_pending", retryable: true },
+      });
+      expect(f.sessions.getSession(HOLDER)).toBeNull();
+      expect((await f.persistence.getSession!(HOLDER))?.release_reason).toBe(
+        "device-restart:restart-phone",
+      );
+      expect(f.internals.rehydrationReservations.has(HOLDER)).toBe(true);
+      expect(f.pool.isReservedForReadiness(f.device.deviceId)).toBe(true);
+    } finally {
+      gate.resolve();
+      await expect(settle(f, start)).rejects.toMatchObject({
+        code: "device_owned_by_other_session",
+      });
+    }
+  });
+
+  for (const owner of [false, true]) {
+    test(`fuzzy name equal to reserved id selects the unheld running sibling owner=${owner}`, async () => {
+      const f = await fixture();
+      const row = { ...(await f.persistence.getSession!(HOLDER))! };
+      const hold = f.internals.rehydrationReservations.get(HOLDER);
+      const spare = { ...f.device, name: "restart-phone-2", deviceId: "emulator-5556" };
+      f.manager.setBootedDevices("android", [spare]);
+      f.manager.setDeviceImages("android", [f.image, { ...f.image, ...spare }]);
+      await f.pool.initializeWithDevices([spare]);
+      const result = await f.call(
+        "startDevice",
+        {
+          platform: "android",
+          name: "restart-phone",
+          createIfMissing: false,
+        },
+        owner ? HOLDER : undefined,
+      );
+      expect(result).toMatchObject({
+        structuredContent: {
+          runtime: {
+            deviceId: spare.deviceId,
+            session: { sessionUuid: "fake-1" },
+          },
+        },
+      });
+      expect(f.manager.getCallCount("startDevice")).toBe(0);
+      expect(await f.persistence.getSession!(HOLDER)).toEqual(row);
+      expect(f.internals.rehydrationReservations.get(HOLDER)).toBe(hold);
+    });
+  }
+
+  test("owner fuzzy name with only its reserved image boots and resumes that row", async () => {
+    const f = await fixture();
+    await resumed(f, () =>
+      f.call(
+        "startDevice",
+        {
+          platform: "android",
+          name: "restart-phone",
+          createIfMissing: false,
+        },
+        HOLDER,
+      ),
+    );
+    expect(f.manager.getCallCount("startDevice")).toBe(1);
+  });
+
+  test("rival startDevice exact avdName refuses before boot", async () => {
+    const f = await fixture();
+    await refusal(f, () => f.call("startDevice", { platform: "android", avdName: f.device.name }));
   });
   test("rival selector skips a stopped reserved image", async () => {
     const f = await fixture();
@@ -425,10 +740,10 @@ describe("start admission and owner resume for restart reservations", () => {
       await resumed(f, () => f.start(args, HOLDER));
     });
   }
-  test("owner startDevice exact name resumes", async () => {
+  test("owner startDevice exact avdName resumes", async () => {
     const f = await fixture();
     await resumed(f, () =>
-      f.call("startDevice", { platform: "android", name: f.device.name }, HOLDER),
+      f.call("startDevice", { platform: "android", avdName: f.device.name }, HOLDER),
     );
   });
   test("owner control recovers an already-running idle reserved device without a start", async () => {

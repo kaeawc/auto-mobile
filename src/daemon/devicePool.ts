@@ -7578,7 +7578,7 @@ export class DevicePool {
     expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
     stableRuntimeName = expectedIdentity.name,
     verifiedAndroidAvdName?: string,
-    autolockClient?: AutolockClient,
+    autolockClient?: AutolockClient & { restartResumeSessionId?: string },
     enforceAndroidRecoveryExclusion = false,
   ): Promise<DeviceReadinessReservation> {
     const reservation = await this.shutdownReservationCoordinator.reserveDeviceForReadiness(
@@ -7613,7 +7613,7 @@ export class DevicePool {
         device,
         stableRuntimeName,
         undefined,
-        undefined,
+        { restartResumeSessionId: sessionId },
         true,
       );
       permission.owners.add(reservation.owner);
@@ -7793,7 +7793,7 @@ export class DevicePool {
 
   private assertReadinessReservationOwner(
     device: PooledDevice,
-    client: AutolockClient | undefined,
+    client: (AutolockClient & { restartResumeSessionId?: string }) | undefined,
   ): void {
     const session = device.sessionId ? this.sessionManager.getSession(device.sessionId) : null;
     if (!session) {
@@ -7801,6 +7801,14 @@ export class DevicePool {
     }
     if (device.autolockSessionId) {
       this.autolockManager.getOwnedAutolockSession(device, client);
+      return;
+    }
+    if (client?.restartResumeSessionId !== undefined) {
+      // R may have recovered before the start restores its connection ownership, but that
+      // admission never authorizes preparing another live holder after R's restart hold ends.
+      if (session.sessionId !== client.restartResumeSessionId) {
+        throw deviceAlreadyAssignedToAnotherSessionError(device.id);
+      }
       return;
     }
     this.assertCallerOwnsDeviceSession(client, session, device);

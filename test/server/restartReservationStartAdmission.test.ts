@@ -44,6 +44,7 @@ interface Internals {
   ): Promise<void>;
   rehydrationReservations: Map<string, { restartHandoff?: boolean; scheduledDeadlineMs?: number }>;
   intentionalShutdowns: Map<string, number>;
+  restartReadiness: ReadonlySet<unknown>;
 }
 
 class RestartDeviceManager extends FakeDeviceUtils {
@@ -436,6 +437,96 @@ describe("start admission and owner resume for restart reservations", () => {
     expect(f.pool.resolveOwnedDeviceSessionForMcpSession(CONNECTION, f.device.deviceId)).toBe(
       HOLDER,
     );
+  });
+
+  test("owner readiness refuses a rival bound after the restart hold expires", async () => {
+    const f = await fixture({ running: true, connection: CONNECTION });
+    const preparedDevices: string[] = [];
+    let rivalRow: unknown;
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async ({ device }) => {
+        preparedDevices.push(device.deviceId);
+      },
+    });
+    f.timer.advanceTime(179_000);
+    f.manager.beforeReady = async () => {
+      // Admission captured R while its hold was live; discovery crosses the fixed deadline.
+      f.timer.advanceTime(2_000);
+      await drainUntil(() => !f.internals.rehydrationReservations.has(HOLDER), {
+        description: "restart hold expiry before readiness",
+      });
+      await f.sessions.getOrCreateSession("rival-session", f.pool, "android");
+      rivalRow = { ...(await f.persistence.getSession!("rival-session"))! };
+    };
+    const error: unknown = await f
+      .start({ avdName: f.device.name, __mcpSessionId: CONNECTION }, HOLDER)
+      .catch((error: unknown) => error);
+    expect(preparedDevices).toEqual([]);
+    expect(error).toBeInstanceOf(InputDeviceOwnedError);
+    expect(error).toMatchObject({
+      code: "device_owned_by_other_session",
+      deviceId: f.device.deviceId,
+    });
+    expect(f.manager.getCallCount("startDevice")).toBe(0);
+    expect(f.manager.getCallCount("killDevice")).toBe(0);
+    expect(f.pool.getDevice(f.device.deviceId)?.sessionId).toBe("rival-session");
+    expect(f.sessions.getAllSessions().map((session) => session.sessionId)).toEqual([
+      "rival-session",
+    ]);
+    expect(f.sessions.getSession("rival-session")?.assignedDevice).toBe(f.device.deviceId);
+    expect(await f.persistence.getSession!("rival-session")).toMatchObject({
+      status: "active",
+      release_reason: null,
+    });
+    expect(await f.persistence.getSession!("rival-session")).toEqual(rivalRow);
+    expect(f.sessions.getSession(HOLDER)).toBeNull();
+    expect(await f.persistence.getSession!(HOLDER)).toMatchObject({
+      status: "released",
+      release_reason: "device-restart:restart-phone",
+    });
+    expect(f.internals.rehydrationReservations.size).toBe(0);
+    expect(f.internals.restartReadiness.size).toBe(0);
+    expect(f.pool.isReservedForReadiness(f.device.deviceId)).toBe(false);
+    expect(f.timer.getPendingTimeoutCount()).toBe(0);
+    expect(f.timer.getPendingSleepCount()).toBe(0);
+    expect(f.timer.getPendingIntervalCount()).toBe(0);
+  });
+
+  test("owner readiness on an unheld device still resumes R", async () => {
+    const f = await fixture({ running: true, connection: CONNECTION });
+    const preparedDevices: string[] = [];
+    f.manager.beforeReady = async () => {
+      expect(f.pool.getDevice(f.device.deviceId)?.sessionId).toBeNull();
+      expect(f.sessions.getSession(HOLDER)).toBeNull();
+    };
+    setDeviceToolsDependencies({
+      ensureCtrlProxyReady: async ({ device }) => {
+        preparedDevices.push(device.deviceId);
+      },
+    });
+    expect(
+      await f.start({ avdName: f.device.name, __mcpSessionId: CONNECTION }, HOLDER),
+    ).toMatchObject({
+      structuredContent: { runtime: { session: { sessionUuid: HOLDER } } },
+    });
+    expect(preparedDevices).toEqual([f.device.deviceId]);
+    expect(f.sessions.getAllSessions().map((session) => session.sessionId)).toEqual([HOLDER]);
+    expect(f.sessions.getSession(HOLDER)?.assignedDevice).toBe(f.device.deviceId);
+    expect(await f.persistence.getSession!(HOLDER)).toMatchObject({
+      status: "active",
+      release_reason: null,
+    });
+    expect(f.pool.resolveOwnedDeviceSessionForMcpSession(CONNECTION, f.device.deviceId)).toBe(
+      HOLDER,
+    );
+    expect(f.manager.getCallCount("startDevice")).toBe(0);
+    expect(f.manager.getCallCount("killDevice")).toBe(0);
+    expect(f.internals.rehydrationReservations.size).toBe(0);
+    expect(f.internals.restartReadiness.size).toBe(0);
+    expect(f.pool.isReservedForReadiness(f.device.deviceId)).toBe(false);
+    expect(f.timer.getPendingTimeoutCount()).toBe(0);
+    expect(f.timer.getPendingSleepCount()).toBe(0);
+    expect(f.timer.getPendingIntervalCount()).toBe(0);
   });
 
   test("owner bind refuses R already live on a different device without rebind or second session", async () => {

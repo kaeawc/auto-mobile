@@ -1,5 +1,10 @@
 import {
   isAbandonedScope,
+  sameFreeDevice,
+  journalNamesFreeDevice,
+  type FreeDeviceIdentity,
+  type BeginFreeDeviceDeletionResult,
+  type ManagedSlotResourceSnapshot,
   isSlotJournalPhaseOpen,
   journalOwnersEqual,
   journalTargetEntries,
@@ -208,8 +213,8 @@ export class FakeSlotRegistry implements SlotRegistry {
       const freed = this.free.get(freeId);
       if (
         freed &&
-        freed.state === "stopping" &&
-        !isStaleFreeDeviceStopClaim(freed, this.timer.now())
+        (freed.deletion !== null ||
+          (freed.state === "stopping" && !isStaleFreeDeviceStopClaim(freed, this.timer.now())))
       ) {
         return { kind: "free_device_stopping" };
       }
@@ -420,7 +425,7 @@ export class FakeSlotRegistry implements SlotRegistry {
   async listFreeDevices(): Promise<FreeSlotDeviceRecord[]> {
     return [...this.free.values()]
       .sort((a, b) => a.freedAtMs - b.freedAtMs)
-      .map((device) => ({ ...device }));
+      .map((device) => structuredClone(device));
   }
 
   async beginScopeInvalidation(
@@ -535,8 +540,108 @@ export class FakeSlotRegistry implements SlotRegistry {
   async findReclaimableFreeDevices(query?: AbandonmentQuery): Promise<FreeSlotDeviceRecord[]> {
     const cutoffMs = this.timer.now() - resolveAbandonmentThresholdMs(query);
     return (await this.listFreeDevices()).filter(
-      (device) => device.freedAtMs <= cutoffMs && device.state !== "stopped",
+      (device) =>
+        device.freedAtMs <= cutoffMs && device.state !== "stopped" && device.deletion === null,
     );
+  }
+
+  async snapshotManagedSlotResources(): Promise<ManagedSlotResourceSnapshot> {
+    // Capture every map before yielding; no concurrent mutation can tear the ledger.
+    const free = [...this.free.values()].map((row) => structuredClone(row));
+    const scopes = [...this.scopes.values()].map((scope) => ({ ...scope }));
+    const openJournal = [...this.journal.values()]
+      .filter((entry) => isSlotJournalPhaseOpen(entry.phase))
+      .map((entry) => structuredClone(entry));
+    const managed = await this.snapshotManagedDevices();
+    return { managed, free, scopes, openJournal };
+  }
+
+  private deletionRow(row: FreeDeviceIdentity, owner?: SlotJournalOwner) {
+    const current = this.free.get(deviceId(row.platform, row.stableDeviceId));
+    if (!current || !sameFreeDevice(current, row)) {
+      return undefined;
+    }
+    if (owner && (!current.deletion || !journalOwnersEqual(current.deletion.owner, owner))) {
+      return undefined;
+    }
+    return current;
+  }
+
+  async beginFreeDeviceDeletion(
+    row: FreeDeviceIdentity,
+    owner: SlotJournalOwner,
+  ): Promise<BeginFreeDeviceDeletionResult> {
+    const current = this.deletionRow(row);
+    if (!current) {
+      return { kind: "not_evictable", reason: "row_moved" };
+    }
+    if (current.deletion || current.state === "stopping") {
+      return { kind: "not_evictable", reason: "deletion_pending_or_stopping" };
+    }
+    if (this.findBound(row.platform, row.stableDeviceId)) {
+      return { kind: "not_evictable", reason: "assigned" };
+    }
+    if (
+      [...this.journal.values()].some(
+        (entry) => isSlotJournalPhaseOpen(entry.phase) && journalNamesFreeDevice(entry, row),
+      )
+    ) {
+      return { kind: "not_evictable", reason: "journal_open" };
+    }
+    current.deletion = {
+      owner: { ...owner },
+      startedAtMs: this.timer.now(),
+      attempts: 0,
+      lastError: null,
+      nextAttemptAtMs: this.timer.now(),
+    };
+    return { kind: "begun", row: structuredClone(current) };
+  }
+
+  async recordFreeDeviceDeletionAttempt(
+    row: FreeDeviceIdentity,
+    owner: SlotJournalOwner,
+    attempt: { error: string; nextAttemptAtMs: number },
+  ): Promise<boolean> {
+    const current = this.deletionRow(row, owner);
+    if (!current?.deletion) {
+      return false;
+    }
+    current.deletion.attempts += 1;
+    current.deletion.lastError = attempt.error;
+    current.deletion.nextAttemptAtMs = attempt.nextAttemptAtMs;
+    return true;
+  }
+
+  async completeFreeDeviceDeletion(
+    row: FreeDeviceIdentity,
+    owner: SlotJournalOwner,
+  ): Promise<boolean> {
+    if (!this.deletionRow(row, owner)) {
+      return false;
+    }
+    this.free.delete(deviceId(row.platform, row.stableDeviceId));
+    return true;
+  }
+
+  async claimFreeDeviceDeletion(
+    row: FreeDeviceIdentity,
+    expectedOwner: SlotJournalOwner,
+    nextOwner: SlotJournalOwner,
+  ): Promise<boolean> {
+    const current = this.deletionRow(row, expectedOwner);
+    if (!current?.deletion) {
+      return false;
+    }
+    current.deletion.owner = { ...nextOwner };
+    return true;
+  }
+
+  async listFreeDeviceDeletions(): Promise<FreeSlotDeviceRecord[]> {
+    return [...this.free.values()]
+      .filter((row) => row.deletion !== null)
+      .sort((a, b) => a.deletion!.nextAttemptAtMs - b.deletion!.nextAttemptAtMs)
+      .map((row) => structuredClone(row));
   }
 
   async beginFreeDeviceStop(
@@ -546,7 +651,12 @@ export class FakeSlotRegistry implements SlotRegistry {
     const nowMs = this.timer.now();
     const cutoffMs = nowMs - resolveAbandonmentThresholdMs(query);
     const row = this.free.get(deviceId(claim.platform, claim.stableDeviceId));
-    if (!row || row.freedAtMs !== claim.freedAtMs || row.freedAtMs > cutoffMs) {
+    if (
+      !row ||
+      row.deletion !== null ||
+      row.freedAtMs !== claim.freedAtMs ||
+      row.freedAtMs > cutoffMs
+    ) {
       return { kind: "not_reclaimable" };
     }
     const claimable =
@@ -823,6 +933,7 @@ export class FakeSlotRegistry implements SlotRegistry {
               state: "free",
               stopClaimedBy: null,
               stopClaimedAtMs: null,
+              deletion: null,
             },
           ],
     );

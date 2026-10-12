@@ -1,3 +1,12 @@
+import { freeDeviceBusyReason, type FreeDeviceBusyPool } from "./freeDeviceBusyReason";
+import {
+  RegistryManagedSlotResourceBudget,
+  parseManagedSlotMaxDevices,
+} from "./managedSlotResourceBudget";
+import {
+  DefaultManagedSlotEvictionSelector,
+  JournaledManagedSlotCacheEvictor,
+} from "./managedSlotCacheEviction";
 /**
  * Assembles the daemon's `daemon/acquireManagedSlots` (#11173 part b) from production parts: the
  * host-wide slot registry, the reconciler over real inventory / provisionDevice / deleteDevice /
@@ -54,7 +63,8 @@ import {
 export interface DaemonManagedSlotAcquisitionOptions {
   registry: () => Promise<SlotRegistry>;
   sessions: ManagedSlotAcquisitionSessions;
-  pool: ManagedSlotClaimPool;
+  pool: ManagedSlotClaimPool & FreeDeviceBusyPool;
+  env?: NodeJS.ProcessEnv;
   /** Which sessions this daemon holds as live managed executions (#11275). */
   executions?: LiveExecutionSessions;
   owner: () => SlotProcessIdentity;
@@ -81,6 +91,8 @@ export interface DaemonManagedSlotTooling {
   iosRuntimeCatalog?: ExactIosRuntimeCatalog;
   /** Defaults to the process-wide boot admission gates. */
   checkBootCapacity?: ManagedSlotBootCapacityAssertion;
+  provisioner?: import("./reconciler").ManagedSlotDeviceProvisioner;
+  deleter?: import("./reconciler").ManagedSlotDeviceDeleter;
 }
 
 const sdkAndroidImageCatalog: ManagedAndroidImageCatalog = {
@@ -135,6 +147,9 @@ export interface DaemonManagedSlotAcquisitionHandle {
 export function createDaemonManagedSlotAcquisition(
   options: DaemonManagedSlotAcquisitionOptions,
 ): DaemonManagedSlotAcquisitionHandle {
+  const limit = parseManagedSlotMaxDevices(options.env);
+  const isBusy = (device: import("../../models").DeviceInfo) =>
+    freeDeviceBusyReason(options.pool, device);
   const invokeTool = options.invokeTool ?? defaultManagedSlotToolInvoker;
   const reconcilers = new WeakMap<SlotRegistry, ManagedSlotReconciler>();
   const redriveLoops = new WeakMap<SlotRegistry, SlotJournalRedriveLoop>();
@@ -144,25 +159,49 @@ export function createDaemonManagedSlotAcquisition(
       // Built on the first acquisition: daemons that never serve a managed slot never touch them.
       const tooling = hostTooling(options.tooling);
       const { deviceManager, androidConfigReader } = tooling;
+      const inventory = new DeviceManagerSlotInventory(deviceManager);
+      const claims = new PoolManagedSlotDeviceClaims(options.pool, options.executions);
+      const resourceBudget =
+        limit === null
+          ? undefined
+          : new RegistryManagedSlotResourceBudget({
+              registry: async () => registry,
+              policy: { limit: () => limit },
+              inventory,
+              eviction: {
+                selector: new DefaultManagedSlotEvictionSelector({ inventory, claims, isBusy }),
+                evictor: {
+                  evict: (candidate, opts) =>
+                    new JournaledManagedSlotCacheEvictor(registry, reconciler!.journal).evict(
+                      candidate,
+                      opts,
+                    ),
+                },
+              },
+            });
       reconciler = new ManagedSlotReconciler({
         registry,
-        inventory: new DeviceManagerSlotInventory(deviceManager),
+        inventory,
+        ...(resourceBudget ? { resourceBudget } : {}),
+        isBusy,
         matcher: new DefaultManagedSpecMatcher(androidConfigReader),
         resolver: new DefaultManagedSpecResolver(tooling.iosRuntimeCatalog, {
           androidImageCatalog: tooling.androidImageCatalog,
           androidProfileCatalog: tooling.androidProfileCatalog,
         }),
-        provisioner: new ToolManagedSlotProvisioner({
-          invokeTool,
-          deviceManager,
-          androidConfigReader,
-          timer: options.timer,
-          releaseSession: (sessionUuid) => options.sessions.releaseSession(sessionUuid),
-        }),
+        provisioner:
+          options.tooling?.provisioner ??
+          new ToolManagedSlotProvisioner({
+            invokeTool,
+            deviceManager,
+            androidConfigReader,
+            timer: options.timer,
+            releaseSession: (sessionUuid) => options.sessions.releaseSession(sessionUuid),
+          }),
         // The verified delete workflow run as the daemon (#11178): a journaled delete of an idle or
         // abandoned slot's device has no execution session for the tool-level ownership check.
-        deleter: new WorkflowManagedSlotDeviceDeleter(options.timer),
-        claims: new PoolManagedSlotDeviceClaims(options.pool, options.executions),
+        deleter: options.tooling?.deleter ?? new WorkflowManagedSlotDeviceDeleter(options.timer),
+        claims,
         // A slot whose recorded owner died with a restart stays in use while its session lives.
         ...(options.executions
           ? {

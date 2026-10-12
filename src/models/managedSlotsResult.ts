@@ -1,3 +1,4 @@
+import type { ManagedSlotReconcileFailure } from "../daemon/managedSlots/reconciler";
 /**
  * The managed-slot acquisition result (epic #11172, #11173 part b): what `daemon/acquireManagedSlots`
  * returns, and what the stdio proxy exposes as a snapshot in
@@ -51,6 +52,8 @@ export interface ManagedSlotsFailure {
   message: string;
   nextAction: string;
   /** Boot-capacity details of a `capacity_exhausted` slot failure (#11390). */
+  /** Total-resource refusal evidence; retryable, without a bounded retry delay. */
+  budget?: ManagedSlotReconcileFailure["budget"];
   capacity?: { limit: number; booted: number; retryAfterMs: number; externalDevices?: string[] };
 }
 

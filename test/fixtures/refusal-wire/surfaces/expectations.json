@@ -531,6 +531,40 @@
         "code": "DEVICE_SESSION_SUPERSEDED_BY_RESTORE",
         "acquireNewSession": false
       }
+    },
+    "managed-slots-result.managed_slot_budget_exhausted.budget": {
+      "expected": "retry",
+      "fields": {
+        "code": "managed_slot_budget_exhausted",
+        "retryable": true,
+        "acquireNewSession": false,
+        "budget": {
+          "limit": 2,
+          "usage": {
+            "total": 3,
+            "active": 1,
+            "assignedIdle": 0,
+            "cached": 0,
+            "preparing": 1,
+            "deleting": 1,
+            "orphaned": 0
+          },
+          "retained": [
+            {
+              "platform": "android",
+              "stableDeviceId": "amslot-kept",
+              "reason": "deletion_pending"
+            }
+          ],
+          "evictionFailures": [
+            {
+              "platform": "android",
+              "stableDeviceId": "amslot-kept",
+              "message": "delete failed"
+            }
+          ]
+        }
+      }
     }
   }
 }

@@ -421,6 +421,7 @@ export class ManagedSlotAcquisition {
           message: result.failure.message,
           nextAction: result.failure.nextAction,
           ...(result.failure.capacity ? { capacity: result.failure.capacity } : {}),
+          ...(result.failure.budget ? { budget: result.failure.budget } : {}),
         },
       };
     }

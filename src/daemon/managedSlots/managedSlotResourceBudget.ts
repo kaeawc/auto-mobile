@@ -1,3 +1,7 @@
+import { parseStrictPositiveInteger } from "../../utils/envNumbers";
+import { MANAGED_SLOT_DEVICE_NAME_PREFIX, type ManagedSlotInventory } from "./reconciler";
+import { deviceStableId } from "./slotDeviceIdentity";
+import type { DeviceInfo } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
@@ -11,6 +15,8 @@ import type {
 } from "./managedSlotCacheEviction";
 import {
   isSlotJournalPhaseOpen,
+  isAbandonedScope,
+  type SlotScopeRecord,
   journalCreationPlatform,
   journalNewStableId,
   type FreeSlotDeviceRecord,
@@ -20,6 +26,24 @@ import {
   type SlotRegistry,
 } from "./slotRegistry";
 
+/** Host-wide total-resource policy, independent of boot admission. */
+export const MANAGED_SLOT_MAX_DEVICES_ENV = "AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES";
+
+export function parseManagedSlotMaxDevices(env: NodeJS.ProcessEnv = process.env): number | null {
+  const value = env[MANAGED_SLOT_MAX_DEVICES_ENV];
+  if (value === undefined || value === "") {
+    return null;
+  }
+  const limit = parseStrictPositiveInteger(value);
+  if (limit !== undefined) {
+    return limit;
+  }
+  logger.warn(
+    `[ManagedSlots] Invalid ${MANAGED_SLOT_MAX_DEVICES_ENV}=${JSON.stringify(value)}; total-resource budget is not enforced.`,
+  );
+  return null;
+}
+
 /** Owner-chosen numbers; nothing here has a built-in default except the LRU clock. */
 export interface ManagedSlotResourceBudgetPolicy {
   /** Max distinct managed devices on this host across platforms and daemons; null = not enforced. */
@@ -28,7 +52,7 @@ export interface ManagedSlotResourceBudgetPolicy {
 
 /** Distinct registry commitments, independent of device power state. */
 export interface ManagedSlotResourceUsage {
-  /** Sum of the five categories, with one charge per distinct device. */
+  /** Sum of all categories, with one charge per distinct device. */
   total: number;
   /** Bound to a slot with a recorded execution session. */
   active: number;
@@ -40,6 +64,8 @@ export interface ManagedSlotResourceUsage {
   preparing: number;
   /** Bound old devices named by an open replace in intent or deleting phase. */
   deleting: number;
+  /** Daemon-named inventory devices without a registry commitment. */
+  orphaned: number;
 }
 
 /** Immediate admission evidence; unknown reads never imply free capacity. */
@@ -72,16 +98,14 @@ export interface ManagedSlotResourceBudget {
 }
 
 /** Ledger reads from the host-wide persistent registry. */
-export type ManagedSlotResourceRegistry = Pick<
-  SlotRegistry,
-  "snapshotManagedDevices" | "listOpenSlotJournal" | "listFreeDevices"
->;
+export type ManagedSlotResourceRegistry = Pick<SlotRegistry, "snapshotManagedSlotResources">;
 
 interface LedgerInput {
   openJournal: readonly SlotJournalEntry[];
   managed: readonly ManagedDeviceEntry[];
-  /** Earlier free rows missing from the snapshot remain conservatively charged for this read. */
-  freeBefore?: readonly FreeSlotDeviceRecord[];
+  free?: readonly FreeSlotDeviceRecord[];
+  scopes?: readonly SlotScopeRecord[];
+  inventory?: readonly DeviceInfo[];
 }
 
 interface ResourceCharge {
@@ -104,26 +128,20 @@ function creationJournalFor(
   );
 }
 
-function chargeEarlierFreeRows(
-  charges: ResourceCharge[],
-  seen: Set<string>,
-  rows: readonly FreeSlotDeviceRecord[],
-): void {
-  for (const row of rows) {
-    const key = resourceKey(row.platform, row.stableDeviceId);
-    if (!seen.has(key)) {
-      charges.push({ category: "cached" });
-      seen.add(key);
-    }
-  }
-}
-
 function categoryOf(
   device: ManagedDeviceEntry,
   deleting: ReadonlySet<string>,
+  free: readonly FreeSlotDeviceRecord[],
 ): ResourceCharge["category"] {
   if (device.holder === "free") {
-    return "cached";
+    return free.some(
+      (row) =>
+        row.platform === device.platform &&
+        row.stableDeviceId === device.stableDeviceId &&
+        row.deletion !== null,
+    )
+      ? "deleting"
+      : "cached";
   }
   if (device.scopeState === null) {
     return "preparing";
@@ -147,16 +165,34 @@ function resourceCharges(input: LedgerInput): ResourceCharge[] {
       .map((entry) => resourceKey(entry.platform, entry.target.oldStableId!)),
   );
   const distinct = new Map(
-    input.managed.map((device) => [resourceKey(device.platform, device.stableDeviceId), device]),
+    input.managed
+      .filter(
+        (device) =>
+          !journal.some(
+            (entry) =>
+              entry.kind === "create" &&
+              device.holder === "slot" &&
+              device.scopeState !== null &&
+              entry.scopeKey === device.scopeKey &&
+              entry.slotIndex === device.slotIndex &&
+              journalNewStableId(entry) !== device.stableDeviceId,
+          ),
+      )
+      .map((device) => [resourceKey(device.platform, device.stableDeviceId), device]),
   );
   const seen = new Set(distinct.keys());
   const charges: ResourceCharge[] = [...distinct.values()].map((device) => ({
-    category: categoryOf(device, deleting),
+    category: categoryOf(device, deleting, input.free ?? []),
     journal: creationJournalFor(device, journal),
   }));
-  chargeEarlierFreeRows(charges, seen, input.freeBefore ?? []);
+
   for (const entry of journal) {
-    if (entry.kind === "release") {
+    if (
+      entry.kind === "release" ||
+      (entry.kind === "replace" &&
+        entry.phase === "deleted" &&
+        isAbandonedScope(input.scopes?.find((scope) => scope.scopeKey === entry.scopeKey) ?? null))
+    ) {
       continue;
     }
     const newId = journalNewStableId(entry);
@@ -169,12 +205,39 @@ function resourceCharges(input: LedgerInput): ResourceCharge[] {
         seen.add(key);
       }
     } else if (!hasOldDevice(entry, distinct)) {
-      // `deleted` replacements have no new identity until `creating`. Pure abandoned deletes
-      // carry the same fields: indistinguishable here, so charge until the entry closes (R4).
+      // A genuine replacement keeps its continuous reservation after verified deletion.
       charges.push({ category: "preparing", journal: entry });
     }
   }
+  chargeOrphans(input, charges, seen);
   return charges;
+}
+
+function chargeOrphans(input: LedgerInput, charges: ResourceCharge[], seen: Set<string>): void {
+  for (const device of input.inventory ?? []) {
+    const stableId = deviceStableId(device);
+    if (!stableId || !device.name.startsWith(MANAGED_SLOT_DEVICE_NAME_PREFIX)) {
+      continue;
+    }
+    const key = resourceKey(device.platform, stableId);
+    const known =
+      input.managed.some((entry) => resourceKey(entry.platform, entry.stableDeviceId) === key) ||
+      input.openJournal.some(
+        (entry) =>
+          (entry.platform === device.platform &&
+            [entry.target.oldStableId, entry.target.oldName].some(
+              (id) => id === stableId || id === device.name,
+            )) ||
+          (journalCreationPlatform(entry) === device.platform &&
+            [entry.target.newStableId, entry.target.newName].some(
+              (id) => id === stableId || id === device.name,
+            )),
+      );
+    if (!known && !seen.has(key)) {
+      charges.push({ category: "orphaned" });
+      seen.add(key);
+    }
+  }
 }
 
 function hasOldDevice(
@@ -195,6 +258,7 @@ function usageOf(charges: readonly ResourceCharge[]): ManagedSlotResourceUsage {
     cached: 0,
     preparing: 0,
     deleting: 0,
+    orphaned: 0,
   };
   for (const charge of charges) {
     usage[charge.category] += 1;
@@ -209,30 +273,22 @@ export function computeManagedSlotResourceUsage(input: LedgerInput): ManagedSlot
 
 async function readResourceCharges(
   registry: ManagedSlotResourceRegistry,
+  inventory: ManagedSlotInventory,
+  signal?: AbortSignal,
 ): Promise<ResourceCharge[]> {
-  // Journal first: a reservation committing between these reads is seen as its bound device.
-  const firstJournal = await registry.listOpenSlotJournal();
-  const freeBefore = await registry.listFreeDevices();
-  const managed = await registry.snapshotManagedDevices();
-  // Pre-reading free rows covers adoption during the snapshot, with a one-read over-count if
-  // a row vanishes. A device BOTH freed (scope invalidation completes) and adopted between
-  // this free read and the snapshot's own free read can still be missed. The wiring change
-  // must require the registry snapshot to use one read transaction to close that residual.
-  const unmatched = managed.some(
-    (device) =>
-      device.holder === "slot" &&
-      device.scopeState === null &&
-      creationJournalFor(device, firstJournal) === undefined,
-  );
-  let openJournal = firstJournal;
-  if (unmatched) {
-    const laterJournal = await registry.listOpenSlotJournal();
-    // Retain first-read commitments; the later version wins for the same entry id.
-    openJournal = [
-      ...new Map([...firstJournal, ...laterJournal].map((entry) => [entry.id, entry])).values(),
-    ];
+  const snapshot = await registry.snapshotManagedSlotResources();
+  const devices: DeviceInfo[] = [];
+  for (const platform of ["android", "ios"] as const) {
+    signal?.throwIfAborted();
+    const listing = await inventory.list(platform, { signal });
+    if (!listing.complete) {
+      throw new ActionableError(
+        `${platform} inventory is incomplete; total-resource usage is unknown.`,
+      );
+    }
+    devices.push(...listing.devices);
   }
-  return resourceCharges({ openJournal, freeBefore, managed });
+  return resourceCharges({ ...snapshot, inventory: devices });
 }
 
 function rankedCount(charges: readonly ResourceCharge[], mine: number): number {
@@ -251,6 +307,7 @@ function rankedCount(charges: readonly ResourceCharge[], mine: number): number {
 interface BudgetDependencies {
   registry: () => Promise<ManagedSlotResourceRegistry & ManagedSlotEvictionRegistry>;
   policy: ManagedSlotResourceBudgetPolicy;
+  inventory: ManagedSlotInventory;
   /** Absent: nothing is ever evicted; a full budget is refused. */
   eviction?: { selector: ManagedSlotEvictionSelector; evictor: ManagedSlotCacheEvictor };
 }
@@ -298,7 +355,11 @@ export class RegistryManagedSlotResourceBudget implements ManagedSlotResourceBud
     let remaining: number | undefined;
     while (true) {
       request.signal?.throwIfAborted();
-      const charges = await readResourceCharges(registry);
+      let charges = await readResourceCharges(registry, this.deps.inventory, request.signal);
+      if (rankedCount(charges, request.journalEntryId) > limit) {
+        // Confirm with a fresh independent snapshot before eviction or refusal.
+        charges = await readResourceCharges(registry, this.deps.inventory, request.signal);
+      }
       const usage = usageOf(charges);
       if (rankedCount(charges, request.journalEntryId) <= limit) {
         return { kind: "admitted", enforced: true, limit, usage, evicted };

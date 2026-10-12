@@ -8,7 +8,7 @@ import {
 } from "./reconciler";
 import { deviceStableId } from "./slotDeviceIdentity";
 import {
-  journalCreationPlatform,
+  journalNamesFreeDevice,
   type FreeSlotDeviceRecord,
   type SlotJournalEntry,
   type SlotPlatform,
@@ -62,7 +62,7 @@ export type ManagedSlotEvictionResult =
   | { kind: "failed"; message: string };
 
 /**
- * PORT (no implementation here). Record the delete in the host-wide slot journal BEFORE any
+ * Record Record the delete in the host-wide slot journal BEFORE any
  * native deletion, guarded by a compare-and-set on the exact free-pool row (platform,
  * stableDeviceId, fromScopeKey, freedAtMs) so a concurrent adoption wins. Answer `absent` only
  * after verified absence and removal of the free row. A journaled delete always completes or
@@ -84,16 +84,6 @@ interface EvictionSelectorDependencies {
   isBusy?: (device: DeviceInfo) => string | undefined;
   /** Default LRU clock is the persisted free-pool row's freedAtMs. */
   lastUsedAtMs?: (device: FreeSlotDeviceRecord) => number;
-}
-
-function journalNamesDevice(entry: SlotJournalEntry, row: FreeSlotDeviceRecord): boolean {
-  const oldSide =
-    entry.platform === row.platform &&
-    [entry.target.oldStableId, entry.target.oldName].includes(row.stableDeviceId);
-  const newSide =
-    journalCreationPlatform(entry) === row.platform &&
-    [entry.target.newStableId, entry.target.newName].includes(row.stableDeviceId);
-  return oldSide || newSide;
 }
 
 /** Select only unassigned, fully discovered and quiet daemon-created cache entries. */
@@ -160,23 +150,18 @@ export class DefaultManagedSlotEvictionSelector implements ManagedSlotEvictionSe
     journal: readonly SlotJournalEntry[],
     listing: DeviceInfo[] | undefined,
   ): Promise<string | DeviceInfo> {
+    if (row.deletion !== null) {
+      return "deletion_pending";
+    }
     if (row.state === "stopping") {
       return "stopping";
     }
-    if (journal.some((entry) => journalNamesDevice(entry, row))) {
+    if (journal.some((entry) => journalNamesFreeDevice(entry, row))) {
       return "journal_open";
     }
-    if (!listing) {
-      return "discovery_incomplete";
-    }
-    const device = listing.find(
-      (entry) => entry.platform === row.platform && deviceStableId(entry) === row.stableDeviceId,
-    );
-    if (!device) {
-      return "not_in_inventory";
-    }
-    if (!device.name.startsWith(MANAGED_SLOT_DEVICE_NAME_PREFIX)) {
-      return "not_daemon_created";
+    const device = this.listedDevice(row, journal, listing);
+    if (typeof device === "string") {
+      return device;
     }
     const reason = await this.holdReason(device);
     if (reason) {
@@ -190,6 +175,29 @@ export class DefaultManagedSlotEvictionSelector implements ManagedSlotEvictionSe
       holder.device.fromScopeKey === row.fromScopeKey
       ? device
       : "row_moved";
+  }
+
+  private listedDevice(
+    row: FreeSlotDeviceRecord,
+    journal: readonly SlotJournalEntry[],
+    listing: DeviceInfo[] | undefined,
+  ): string | DeviceInfo {
+    if (!listing) {
+      return "discovery_incomplete";
+    }
+    const device = listing.find(
+      (entry) => entry.platform === row.platform && deviceStableId(entry) === row.stableDeviceId,
+    );
+    if (!device) {
+      return "not_in_inventory";
+    }
+    if (journal.some((entry) => journalNamesFreeDevice(entry, { ...row, name: device.name }))) {
+      return "journal_open";
+    }
+    if (!device.name.startsWith(MANAGED_SLOT_DEVICE_NAME_PREFIX)) {
+      return "not_daemon_created";
+    }
+    return device;
   }
 
   private async holdReason(device: DeviceInfo): Promise<string | undefined> {
@@ -209,4 +217,34 @@ export class DefaultManagedSlotEvictionSelector implements ManagedSlotEvictionSe
 
 function compareText(a: string, b: string): number {
   return a < b ? -1 : Number(a > b);
+}
+
+/** The deletion marker is never reverted: absence completes it, redrive retries it. */
+export class JournaledManagedSlotCacheEvictor implements ManagedSlotCacheEvictor {
+  constructor(
+    private readonly registry: Pick<SlotRegistry, "beginFreeDeviceDeletion">,
+    private readonly journal: Pick<
+      import("./slotJournal").ManagedSlotJournal,
+      "owner" | "driveFreeDeviceDeletion"
+    >,
+  ) {}
+
+  async evict(
+    candidate: ManagedSlotEvictionCandidate,
+    options: { signal?: AbortSignal },
+  ): Promise<ManagedSlotEvictionResult> {
+    options.signal?.throwIfAborted();
+    const begun = await this.registry.beginFreeDeviceDeletion(candidate, this.journal.owner);
+    if (begun.kind !== "begun") {
+      return { kind: "lost" };
+    }
+    const result = await this.journal.driveFreeDeviceDeletion(begun.row, options);
+    if (result.kind === "absent" || result.kind === "lost") {
+      return { kind: result.kind };
+    }
+    return {
+      kind: "failed",
+      message: "message" in result ? result.message : "Deletion was not confirmed.",
+    };
+  }
 }

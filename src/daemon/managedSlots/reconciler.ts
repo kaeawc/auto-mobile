@@ -1,3 +1,7 @@
+import type {
+  ManagedSlotResourceBudget,
+  ManagedSlotResourceAdmission,
+} from "./managedSlotResourceBudget";
 import { createHash } from "node:crypto";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import {
@@ -317,6 +321,8 @@ export interface ManagedSlotReconcilerDependencies {
   deleter: ManagedSlotDeviceDeleter;
   claims: ManagedSlotDeviceClaims;
   capacity?: ManagedSlotBootCapacity;
+  resourceBudget?: ManagedSlotResourceBudget;
+  isBusy?: (device: DeviceInfo) => string | undefined;
   /** Whether a recorded execution owner is alive; default: PID plus process generation. */
   isExecOwnerLive?: SlotExecOwnerLiveness;
   timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
@@ -381,6 +387,7 @@ export type ManagedSlotReconcileFailureCode =
   | "reconcile_in_progress"
   | "cleanup_pending"
   | "capacity_exhausted"
+  | "managed_slot_budget_exhausted"
   | "concurrent_modification"
   | "readiness_incomplete"
   | "stale_session"
@@ -399,6 +406,7 @@ const FAILURE_RETRYABILITY: Readonly<Record<ManagedSlotReconcileFailureCode, boo
   reconcile_in_progress: true,
   cleanup_pending: true,
   capacity_exhausted: true,
+  managed_slot_budget_exhausted: true,
   concurrent_modification: true,
   readiness_incomplete: true,
   stale_session: true,
@@ -422,6 +430,8 @@ const FAILURE_NEXT_ACTION: Readonly<Record<ManagedSlotReconcileFailureCode, stri
   device_busy: "Wait for the device's live session or foreign claim to end, then retry.",
   reconcile_in_progress: "Another reconciliation of this slot is in progress; retry later.",
   cleanup_pending: "The previous device could not be removed; retry after cleanup succeeds.",
+  managed_slot_budget_exhausted:
+    "Reset or release managed slot scopes that are no longer needed, or raise AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES, then retry.",
   capacity_exhausted: "Shut down a device or raise the boot limit, then retry.",
   concurrent_modification: "The slot changed concurrently; retry to converge on its new state.",
   readiness_incomplete: "Retry; the device did not reach automation readiness.",
@@ -439,6 +449,10 @@ export interface ManagedSlotReconcileFailure {
   /** Underlying provision failure, when the provision path refused. */
   provision?: { code: string; retryable: boolean };
   capacity?: ManagedSlotFailureCapacity;
+  budget?: Pick<
+    Extract<ManagedSlotResourceAdmission, { kind: "exhausted" }>,
+    "limit" | "usage" | "retained" | "evictionFailures"
+  >;
 }
 
 /** Same `externalDevices` name and shape as the non-slot `capacity_exhausted` refusal (#11390). */
@@ -1005,7 +1019,9 @@ class ReconcileAbort extends Error {
 export function failure(
   code: ManagedSlotReconcileFailureCode,
   message: string,
-  extra: Partial<Pick<ManagedSlotReconcileFailure, "provision" | "capacity" | "retryable">> = {},
+  extra: Partial<
+    Pick<ManagedSlotReconcileFailure, "provision" | "capacity" | "budget" | "retryable">
+  > = {},
 ): ManagedSlotReconcileFailure {
   return {
     code,
@@ -1014,6 +1030,7 @@ export function failure(
     nextAction: FAILURE_NEXT_ACTION[code],
     ...(extra.provision ? { provision: extra.provision } : {}),
     ...(extra.capacity ? { capacity: extra.capacity } : {}),
+    ...(extra.budget ? { budget: extra.budget } : {}),
   };
 }
 
@@ -1160,6 +1177,7 @@ export class ManagedSlotReconciler {
       matcher: deps.matcher,
       deleter: deps.deleter,
       claims: deps.claims,
+      isBusy: deps.isBusy,
       timer: deps.timer,
       owner: deps.journal?.owner ?? processJournalOwner(),
       isExecOwnerLive: this.isExecOwnerLive,
@@ -1660,7 +1678,7 @@ export class ManagedSlotReconciler {
     const { request } = context;
     const free = new Set(
       (await this.deps.registry.listFreeDevices())
-        .filter((entry) => entry.platform === request.platform)
+        .filter((entry) => entry.platform === request.platform && entry.deletion === null)
         // A `stopping` device is mid-shutdown (#11337); a `stopped` one is adopted and booted.
         .filter(
           (entry) =>
@@ -1794,6 +1812,9 @@ export class ManagedSlotReconciler {
       : await this.openCreateEntry(context, assignment, name);
     this.journal.inFlight.add(entry.id);
     try {
+      if (replacing === undefined && this.deps.resourceBudget) {
+        await this.admitFreshCreation(context, entry);
+      }
       let provisioned: ManagedSlotProvisionedDevice;
       try {
         provisioned = await this.deps.provisioner.provision({
@@ -1926,11 +1947,49 @@ export class ManagedSlotReconciler {
     return recorded.entry;
   }
 
-  /** After a failed provision: roll the entry back on proven absence, else leave it for redrive. */
-  private async settleFailedCreate(
+  /** Reserve total-resource capacity before any native creation. */
+  private async admitFreshCreation(
     context: ReconcileContext,
     entry: SlotJournalEntry,
   ): Promise<void> {
+    let admission: ManagedSlotResourceAdmission;
+    try {
+      admission = await this.deps.resourceBudget!.admitCreation({
+        journalEntryId: entry.id,
+        signal: context.request.signal,
+      });
+    } catch (error) {
+      await this.settleFailedCreate(context, entry, true);
+      // Cancellation retains its identity for the reconciler's existing handling.
+      throw error;
+    }
+    if (admission.kind === "admitted") {
+      return;
+    }
+    // Native creation has not been called: absence is already proven, including when discovery
+    // itself is incomplete. Close directly rather than rediscovering a device that never existed.
+    await this.settleFailedCreate(context, entry, true);
+    if (admission.kind === "unknown") {
+      throw new ReconcileAbort(failure("discovery_incomplete", admission.message));
+    }
+    const { limit, usage, retained, evictionFailures } = admission;
+    throw new ReconcileAbort(
+      failure("managed_slot_budget_exhausted", "Managed-slot total-resource budget is exhausted.", {
+        budget: { limit, usage, retained, evictionFailures },
+      }),
+    );
+  }
+
+  /** Roll back on proven absence; otherwise discover leftovers and retain cleanup for redrive. */
+  private async settleFailedCreate(
+    context: ReconcileContext,
+    entry: SlotJournalEntry,
+    absenceProven = false,
+  ): Promise<void> {
+    if (absenceProven) {
+      this.noteJournal(context, (await this.journal.close(entry, "rolled_back")).entry);
+      return;
+    }
     try {
       const settled = await this.journal.settleCreation(entry, {
         adopt: false,

@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { ChildProcess } from "node:child_process";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { drainMicrotasks, settleByFakeEvents } from "../helpers/fakeTimerStepping";
+import { ActionableError } from "../../src/models/ActionableError";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   InMemoryEmulatorLossIncidentStore,
@@ -1872,6 +1873,35 @@ describe("ADB server reset session recovery", () => {
       });
     } finally {
       sessionManager.stopCleanupTimer();
+    }
+  });
+});
+
+describe("managed slot ownership automation admission", () => {
+  test("the lazy ownership gate refuses unconfirmed and lost sessions with ActionableError", () => {
+    const timer = new FakeTimer();
+    const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    let refusal: string | undefined;
+    const pool = new DevicePool(
+      createDevicePoolDependencies(sessions, "daemon-session", {
+        timer,
+        managedExecutionOwnership: () => ({ automationRefusal: () => refusal }),
+      }),
+    );
+    try {
+      expect(() => pool.assertSessionReadyForAutomation("resumed")).not.toThrow();
+      for (const message of [
+        "Session 'resumed' slot ownership is not recorded for this daemon yet; the managed slot registry is busy. Retry shortly.",
+        "Session 'resumed' no longer owns its managed slot; acquire a new session.",
+      ]) {
+        refusal = message;
+        expect(() => pool.assertSessionReadyForAutomation("resumed")).toThrow(ActionableError);
+        expect(() => pool.assertSessionReadyForAutomation("resumed")).toThrow(message);
+      }
+      refusal = undefined;
+      expect(() => pool.assertSessionReadyForAutomation("resumed")).not.toThrow();
+    } finally {
+      sessions.stopCleanupTimer();
     }
   });
 });

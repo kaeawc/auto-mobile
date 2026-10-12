@@ -1050,7 +1050,7 @@ export class Daemon {
     const executions = rehydrated.filter((sessionUuid) =>
       this.sessionManager.isLiveManagedExecutionSession(sessionUuid),
     );
-    await this.managedExecutionReowner?.reown(executions);
+    await this.managedExecutionReowner?.reown(executions, { rehydrated: true });
   }
 
   /** A host that never served a managed slot has no registry; maintenance must not create one. */
@@ -1108,6 +1108,8 @@ export class Daemon {
       registry: () => this.openManagedSlotRegistry(),
       registryExists: () => this.managedSlotRegistryExists(),
       owner: () => this.managedSlotJournalOwner(),
+      timer: this.timer,
+      isSessionHeld: (id) => this.sessionManager.isLiveManagedExecutionSession(id),
     });
     DaemonState.getInstance().setManagedExecutionReowner(this.managedExecutionReowner);
     // Interrupted journaled work (#11179) is redriven in the background. The loop starts when this
@@ -1159,6 +1161,7 @@ export class Daemon {
   /** Stop the drain's settlement watchers and close the slot registry if this daemon opened it. */
   private async closeManagedExecutionRelease(): Promise<void> {
     this.managedExecutionRelease?.close();
+    this.managedExecutionReowner?.close();
     this.managedSlotReclaimer?.stop();
     this.managedSlotReclaimer = undefined;
     this.freeDeviceReclaimer?.stop();
@@ -1195,6 +1198,7 @@ export class Daemon {
       daemonSessionId: this.daemonSessionId,
       timer: this.timer,
       managedSlotExclusion: this.managedSlotExclusionFactory(this.timer),
+      managedExecutionOwnership: () => this.managedExecutionReowner,
       missingDeviceMisses: this.deviceDisconnectMisses,
       installedAppsRepository: this.installedAppsRepository,
       deviceSessionRepository: this.deviceSessionRepository,

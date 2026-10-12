@@ -928,7 +928,13 @@ export interface OwnerDisconnectOptions {
   graceMs?: number;
 }
 
+export interface ManagedExecutionOwnership {
+  automationRefusal(sessionId: string): string | undefined;
+}
+
 export interface DevicePoolDependencies {
+  /** Lazy because the re-owner is installed after the pool. */
+  managedExecutionOwnership?: () => ManagedExecutionOwnership | undefined;
   androidAdbFactory?: AdbClientFactory;
   /**
    * Who else drives a device. Multi-device allocation skips devices another live daemon owns.
@@ -1297,6 +1303,7 @@ export class DevicePool {
   private readonly deviceHealthMarkers: DeviceHealthMarkers;
   private readonly foreignDeviceOwnership: ForeignDeviceOwnership | undefined;
   private readonly iosForeignDeviceOwnership: ForeignDeviceOwnership | undefined;
+  private readonly managedExecutionOwnership: DevicePoolDependencies["managedExecutionOwnership"];
   private readonly managedSlotExclusion: ManagedSlotExclusion | undefined;
   /** Devices held for the persisted rows restart recovery is working through (#11294). */
   private readonly rehydrationReservations = new Map<
@@ -1370,12 +1377,14 @@ export class DevicePool {
     foreignDeviceOwnership,
     iosForeignDeviceOwnership,
     managedSlotExclusion,
+    managedExecutionOwnership,
   }: DevicePoolDependencies) {
     this.sessionManager = sessionManager;
     this.registerMcpSessionOwnerCallReader();
     this.foreignDeviceOwnership = foreignDeviceOwnership;
     this.iosForeignDeviceOwnership = iosForeignDeviceOwnership;
     this.managedSlotExclusion = managedSlotExclusion;
+    this.managedExecutionOwnership = managedExecutionOwnership;
     this.daemonSessionId = daemonSessionId;
     this.timer = timer;
     this.androidTransportAliases = createAndroidTransportAliases(androidAdbFactory);
@@ -10551,6 +10560,10 @@ export class DevicePool {
   }
 
   assertSessionReadyForAutomation(sessionId: string): void {
+    const ownershipRefusal = this.managedExecutionOwnership?.()?.automationRefusal(sessionId);
+    if (ownershipRefusal) {
+      throw new ActionableError(ownershipRefusal);
+    }
     if (this.adbServerResetQuarantinedSessions.has(sessionId)) {
       const loss = this.recoveringSessionLosses.get(sessionId);
       if (loss) {

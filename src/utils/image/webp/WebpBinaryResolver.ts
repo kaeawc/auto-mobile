@@ -1,7 +1,6 @@
 import { errorMessage } from "../../describeUnknownError";
 import { constants as fsConstants, existsSync } from "node:fs";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import process from "node:process";
 import type { Writable } from "node:stream";
@@ -11,6 +10,7 @@ import { type ChecksumCalculator, DefaultChecksumCalculator } from "../../Checks
 import { DefaultFileDownloader, type FileDownloader } from "../../FileDownloader";
 import { DefaultHostCommandExecutor, type HostProcessExecutor } from "../../HostCommandExecutor";
 import { logger } from "../../logger";
+import { resolveAutoMobileBaseDir } from "../../tempDir";
 
 const LIBWEBP_VERSION = "1.6.0";
 const WEBP_DOWNLOAD_BASE_URL =
@@ -48,6 +48,7 @@ export const defaultWebpBinaryFileSystem: WebpBinaryFileSystem = {
 export interface WebpBinaryResolverOptions {
   fileSystem?: WebpBinaryFileSystem;
   projectRoot?: string;
+  /** Explicit cache directory override; defaults to <data dir>/libwebp at use time. */
   cacheDir?: string;
   platform?: NodeJS.Platform;
   arch?: NodeJS.Architecture;
@@ -79,7 +80,7 @@ export interface WebpBinaryProvider {
 
 export class WebpBinaryResolver implements WebpBinaryProvider {
   private readonly projectRoot: string;
-  private readonly cacheDir: string;
+  private readonly cacheDir: string | undefined;
   private readonly platform: NodeJS.Platform;
   private readonly arch: NodeJS.Architecture;
   private readonly env: NodeJS.ProcessEnv;
@@ -91,7 +92,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
 
   constructor(options: WebpBinaryResolverOptions = {}) {
     this.projectRoot = options.projectRoot ?? defaultProjectRoot();
-    this.cacheDir = options.cacheDir ?? path.join(os.homedir(), ".auto-mobile", "libwebp");
+    this.cacheDir = options.cacheDir;
     this.platform = options.platform ?? process.platform;
     this.arch = options.arch ?? process.arch;
     this.env = options.env ?? process.env;
@@ -234,8 +235,9 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
       return null;
     }
 
+    const cacheDir = this.cacheDir ?? path.join(resolveAutoMobileBaseDir(this.env), "libwebp");
     const binaryPath = path.join(
-      this.cacheDir,
+      cacheDir,
       archive.directoryName,
       "bin",
       executableName(binary, this.platform),
@@ -244,7 +246,7 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
       return binaryPath;
     }
 
-    await this.provisionArchiveOnce(archive);
+    await this.provisionArchiveOnce(archive, cacheDir);
     await this.fileSystem.makeExecutable(binaryPath);
 
     if (await this.fileSystem.isExecutableFile(binaryPath, this.platform)) {
@@ -256,30 +258,30 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
     );
   }
 
-  private async provisionArchiveOnce(archive: WebpArchiveInfo): Promise<void> {
-    const archivePath = path.resolve(this.cacheDir, archive.archiveName);
+  private async provisionArchiveOnce(archive: WebpArchiveInfo, cacheDir: string): Promise<void> {
+    const archivePath = path.resolve(cacheDir, archive.archiveName);
     const existing = archiveProvisioningByPath.get(archivePath);
     if (existing) {
       await existing;
       return;
     }
 
-    const provision = this.provisionArchive(archive).finally(() => {
+    const provision = this.provisionArchive(archive, cacheDir).finally(() => {
       archiveProvisioningByPath.delete(archivePath);
     });
     archiveProvisioningByPath.set(archivePath, provision);
     await provision;
   }
 
-  private async provisionArchive(archive: WebpArchiveInfo): Promise<void> {
-    await this.fileSystem.ensureDirectory(this.cacheDir);
-    const archivePath = path.join(this.cacheDir, archive.archiveName);
+  private async provisionArchive(archive: WebpArchiveInfo, cacheDir: string): Promise<void> {
+    await this.fileSystem.ensureDirectory(cacheDir);
+    const archivePath = path.join(cacheDir, archive.archiveName);
     await this.fileDownloader.download(
       `${WEBP_DOWNLOAD_BASE_URL}/${archive.archiveName}`,
       archivePath,
     );
     await this.verifyArchiveChecksum(archive, archivePath);
-    await this.archiveExtractor.extractTarGz({ archivePath, destinationDir: this.cacheDir });
+    await this.archiveExtractor.extractTarGz({ archivePath, destinationDir: cacheDir });
   }
 
   private async verifyArchiveChecksum(

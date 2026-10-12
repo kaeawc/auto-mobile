@@ -59,6 +59,7 @@ import {
   type Session,
   type SessionCacheData,
   type SessionRecoveryTarget,
+  type SessionReleaseOptions,
 } from "./sessionManager";
 import { ActionableError, BootedDevice, DeviceInfo, Platform } from "../models";
 import {
@@ -784,6 +785,7 @@ interface DeviceDisconnectSessionReleaser {
     deviceId: string,
     releaseReason: SessionReleaseReason,
     shouldCommit?: () => boolean,
+    options?: SessionReleaseOptions,
   ): Promise<boolean | void>;
 }
 
@@ -1466,17 +1468,15 @@ export class DevicePool {
     this.disconnectHandler = this.createDisconnectHandler();
     this.releaseSessionForDisconnectedDevice =
       releaseSessionForDisconnectedDevice ??
-      (async (sessionId, _deviceId, releaseReason, shouldCommit) => {
+      (async (sessionId, _deviceId, releaseReason, shouldCommit, options) => {
         // The session manager re-evaluates the fence immediately before it
         // removes the session, after its setup/restoration awaits (#7031).
-        if (!shouldCommit) {
-          await this.sessionManager.releaseSession(sessionId, releaseReason);
-          return true;
-        }
         const release = await this.sessionManager.releaseSessionUnlessSuperseded(
           sessionId,
           releaseReason,
           shouldCommit,
+          false,
+          options,
         );
         return !release.superseded;
       });
@@ -4611,6 +4611,7 @@ export class DevicePool {
         device.id,
         releaseReason,
         () => !isSupersededByNewerIdentity(),
+        isDeviceRestartReleaseReason(releaseReason) ? { deviceIdentityReplaced: true } : undefined,
       );
     let released: boolean | void = undefined;
     if (isDeviceRestartReleaseReason(releaseReason)) {
@@ -8543,6 +8544,7 @@ export class DevicePool {
         sessionUuid: string;
         owned: boolean;
         restartHandoff: boolean;
+        target: RehydrationDeviceReservation["target"];
         deviceId: string;
         retryAfterMs: number;
       }
@@ -8562,6 +8564,7 @@ export class DevicePool {
         sessionUuid,
         owned: this.ownsRestartReservation(sessionUuid, requester),
         restartHandoff: target.restartHandoff === true,
+        target,
         deviceId: target.deviceId,
         retryAfterMs:
           target.scheduledDeadlineMs === undefined

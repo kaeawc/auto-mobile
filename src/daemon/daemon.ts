@@ -49,6 +49,7 @@ import {
   type ActiveSessionExecutionQuery,
   type RehydrationSummary,
   type Session,
+  type SessionReleaseOptions,
 } from "./sessionManager";
 import { registerDerivedLabelSessionReleaseCascade } from "./derivedLabelSessionReleaseCascade";
 import {
@@ -1176,9 +1177,16 @@ export class Daemon {
       missingDeviceMisses: this.deviceDisconnectMisses,
       installedAppsRepository: this.installedAppsRepository,
       deviceSessionRepository: this.deviceSessionRepository,
-      releaseSessionForDisconnectedDevice: (sessionId, _deviceId, releaseReason, shouldCommit) =>
+      releaseSessionForDisconnectedDevice: (
+        sessionId,
+        _deviceId,
+        releaseReason,
+        shouldCommit,
+        releaseOptions,
+      ) =>
         this.cancelAndReleaseSession(sessionId, releaseReason, false, undefined, shouldCommit, {
           deferFailureFallback: true,
+          releaseOptions,
         }),
       ownerDisconnect: {
         release: async (session, reason) => {
@@ -4594,6 +4602,7 @@ export class Daemon {
     shouldCommit?: () => boolean,
     options?: {
       deferFailureFallback?: boolean;
+      releaseOptions?: SessionReleaseOptions;
       /**
        * The release ends the session for a reason of its own (heartbeat reap, owner disconnect),
        * so every call it cuts is aborted with the typed release, through the routine the
@@ -4640,6 +4649,7 @@ export class Daemon {
                 releaseReason,
                 shouldCommit,
                 allowExpired,
+                ...(options?.releaseOptions ? ([options.releaseOptions] as const) : []),
               );
               if (release.superseded) {
                 logger.info(
@@ -4650,10 +4660,13 @@ export class Daemon {
               }
               deviceId = release.deviceId;
             } else {
+              const releaseOptions: [fence?: undefined, options?: SessionReleaseOptions] =
+                options?.releaseOptions ? [undefined, options.releaseOptions] : [];
               deviceId = await this.sessionManager.releaseSession(
                 sessionId,
                 releaseReason,
                 allowExpired,
+                ...releaseOptions,
               );
             }
             // A completed persistence retry may return a device already idle or

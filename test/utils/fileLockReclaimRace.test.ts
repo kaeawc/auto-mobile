@@ -13,6 +13,7 @@ import {
   type LockStep,
 } from "../../src/utils/fileLock";
 import { logger } from "../../src/utils/logger";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeLockFileSystem } from "../fakes/FakeLockFileSystem";
 import { SeededRandom } from "../fakes/SeededRandom";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -21,6 +22,184 @@ const PATH = "/locks/resource.lock";
 const NOW = 20_000;
 const OLD = "99\nstale\n\nold-generation";
 type Steps<T> = Generator<LockStep, T, void>;
+
+test("T1: a leftover tmp sharing the lock's inode is never written through", () => {
+  const f = fixture("500\nforeign-owner\nmetadata  ");
+  const original = f.fs.readText(PATH);
+  const stat = spyOn(f.fs, "stat").mockImplementationOnce(() => {
+    // An unreadable initial sample must still use the safe publication protocol.
+    throw Object.assign(new Error("sample unavailable"), { code: "EACCES" });
+  });
+  const options = { ...f.options(101), idGenerator: new FakeIdGenerator(["recycled-id"]) };
+  const racer = new Racer(acquireExclusiveLockSteps(PATH, options));
+  f.live.add(500);
+  try {
+    racer.until(
+      (step) => step.path.endsWith(".tmp") && (step.op === "unlink" || step.op === "writeFile"),
+    );
+    if (racer.pending.done) {
+      throw new Error("Missing tmp publication");
+    }
+    const tmp = racer.pending.value.path;
+    f.fs.link(PATH, tmp);
+    expect(racer.finish()).toBe(false);
+    expect(f.fs.readText(PATH)).toBe(original);
+    expect(f.fs.paths()).toEqual([PATH]);
+    expect(tmp).toEndWith(".recycled-id.tmp");
+  } finally {
+    stat.mockRestore();
+  }
+});
+
+test.each(["500\nlive-owner", ""])(
+  "T2: a contended live acquire performs zero writes (owner %j)",
+  (raw) => {
+    const f = fixture(raw);
+    f.live.add(500);
+    f.fs.update(PATH, raw); // Ownerless variant is young.
+    f.fs.operations.length = 0;
+    expect(f.acquire(101).finish()).toBe(false);
+    expect(f.fs.operations).toEqual([
+      { op: "stat", path: PATH },
+      { op: "readText", path: PATH },
+    ]);
+  },
+);
+
+test("T2: a reclaimable lock goes straight to the guard without a doomed lock publication", () => {
+  const f = fixture();
+  const racer = f.acquire(101);
+  racer.until((step) => step.op === "rename" && step.path === PATH);
+  expect(racer.trace.some((step) => step.op === "link" && step.path === PATH)).toBe(false);
+  expect(racer.finish()).toBe(true);
+  exactHolder(f.fs, 101);
+  expect(f.fs.paths()).toEqual([PATH]);
+});
+
+function unsupportedRestore() {
+  const clock = new FakeTimer();
+  const fs = new FakeLockFileSystem(() => clock.now());
+  fs.mkdir("/locks");
+  const fd = fs.openExclusive(PATH);
+  clock.advanceTime(NOW);
+  fs.linkError = "ENOTSUP";
+  const reclaimer = new Racer(
+    acquireExclusiveLockSteps(PATH, {
+      pid: 202,
+      fileSystem: fs,
+      idGenerator: new FakeIdGenerator(),
+      now: () => clock.now(),
+      isProcessRunning: () => true,
+    }),
+  );
+  reclaimer.until((step) => step.op === "rename" && step.path === PATH);
+  const raw = "101\nlate-writer\nmetadata  ";
+  fs.write(fd, raw);
+  fs.close(fd);
+  return { fs, reclaimer, raw, marker: `${PATH}.202.reclaim` };
+}
+
+test("T3: R1 late legacy writer is restored by exclusive copy when links are disabled", () => {
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    const f = unsupportedRestore();
+    expect(f.reclaimer.finish()).toBe(false);
+    expect(f.fs.readText(PATH)).toBe(f.raw);
+    expect(f.fs.paths()).toEqual([PATH]);
+    expect(f.fs.operations.some((step) => step.op === "openExclusive" && step.path === PATH)).toBe(
+      true,
+    );
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test("T3: exclusive restore copy leaves a third acquirer untouched and removes the marker", () => {
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    const f = unsupportedRestore();
+    f.reclaimer.until((step) => step.op === "link" && step.path === PATH);
+    expect(
+      tryAcquireExclusiveLock(PATH, {
+        pid: 303,
+        ownerToken: "third-acquirer",
+        fileSystem: f.fs,
+        idGenerator: new FakeIdGenerator(),
+        isProcessRunning: () => true,
+      }),
+    ).toBe(true);
+    expect(f.reclaimer.finish()).toBe(false);
+    expect(f.fs.readText(PATH)).toBe("303\nthird-acquirer");
+    expect(f.fs.paths()).toEqual([PATH]);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test.each(["openError", "writeError", "closeError"] as const)(
+  "T3: failed exclusive copy (%s) restores by last-resort rename without partial litter",
+  (operation) => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const f = unsupportedRestore();
+      f.fs[operation] = "EIO";
+      f.fs.writeFileError = "EIO";
+      expect(f.reclaimer.finish()).toBe(false);
+      expect(f.fs.readText(PATH)).toBe(f.raw);
+      expect(f.fs.paths()).toEqual([PATH]);
+      expect(f.fs.operations.some((step) => step.op === "rename" && step.path === f.marker)).toBe(
+        true,
+      );
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("exclusive copy"),
+        expect.anything(),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  },
+);
+
+test("T3: failed last-resort rename warns and retains the only displaced copy", () => {
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    const f = unsupportedRestore();
+    f.fs.openError = "EACCES";
+    const rename = spyOn(f.fs, "rename").mockImplementation((from, to) => {
+      if (from === f.marker) {
+        throw Object.assign(new Error("rename denied"), { code: "EACCES" });
+      }
+      FakeLockFileSystem.prototype.rename.call(f.fs, from, to);
+    });
+    try {
+      expect(f.reclaimer.finish()).toBe(false);
+      expect(f.fs.paths()).toEqual([f.marker]);
+      expect(f.fs.readText(f.marker)).toBe(f.raw);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("last-resort"), expect.anything());
+    } finally {
+      rename.mockRestore();
+    }
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test("T3: release restores a displaced foreign owner by exclusive copy without hard links", () => {
+  const f = fixture("101\nowner-101");
+  const release = new Racer(releaseExclusiveLockSteps(PATH, 101, "owner-101", f.fs));
+  release.until((step) => step.op === "rename" && step.path === PATH);
+  const raw = "500\nforeign-owner\nmetadata  ";
+  f.fs.update(PATH, raw);
+  f.fs.linkError = "ENOTSUP";
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    expect(() => release.finish()).not.toThrow();
+    expect(f.fs.readText(PATH)).toBe(raw);
+    expect(f.fs.paths()).toEqual([PATH]);
+  } finally {
+    warn.mockRestore();
+  }
+});
 
 test("B1: a guard whose content write fails is removed and the acquire returns false", () => {
   const f = fixture("99");
@@ -191,10 +370,12 @@ function fixture(raw = OLD) {
   const fs = new FakeLockFileSystem(() => clock.now());
   fs.seed(PATH, raw, 0);
   const live = new Set([101, 202, 303, 404]);
+  const idGenerator = new FakeIdGenerator();
   const options = (pid: number): ExclusiveLockOptions => ({
     pid,
     ownerToken: `owner-${pid}`,
     fileSystem: fs,
+    idGenerator,
     now: () => clock.now(),
     isProcessRunning: (owner) => live.has(owner),
     ownerGeneration: {
@@ -858,11 +1039,11 @@ test("F1: takeover captures once for the guard and freshly for final publication
   expect(readExclusiveLockContent(PATH, f.fs)?.generation).toBe("generation-1");
 });
 
-test("F2: leftover private tmp is overwritten on the first free-lock acquire with no litter", () => {
+test("F2: leftover private tmp is replaced on the first free-lock acquire with no litter", () => {
   const f = fixture();
   f.fs.unlink(PATH);
   const racer = f.acquire(101);
-  racer.until((step) => step.op === "writeFile");
+  racer.until((step) => step.op === "unlink" && step.path.endsWith(".tmp"));
   if (racer.pending.done) {
     throw new Error("Missing tmp publication");
   }
@@ -878,9 +1059,11 @@ function abandonedGuard(legacy = false) {
   clock.advanceTime(NOW);
   const fs = new FakeLockFileSystem(() => clock.now());
   fs.seed(PATH, "99", 0);
+  const idGenerator = new FakeIdGenerator();
   const options = (pid: number): ExclusiveLockOptions => ({
     pid,
     fileSystem: fs,
+    idGenerator,
     now: () => clock.now(),
     isProcessRunning: (owner) => owner !== 99,
     reclaimOwnPid: true,

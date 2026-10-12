@@ -6,7 +6,7 @@ export interface LockFileSystem {
   openExclusive(path: string): number;
   write(fd: number, content: string): void;
   close(fd: number): void;
-  /** Private publication tmp: truncate/overwrite leftover bytes from a recycled PID. */
+  /** Exclusive-create a private publication file; EEXIST leaves existing bytes untouched. */
   writeFile(path: string, content: string): void;
   readText(path: string): string;
   stat(path: string): { ino: number; mtimeMs: number };
@@ -24,7 +24,7 @@ export const nodeLockFileSystem: LockFileSystem = {
   openExclusive: (path) => fs.openSync(path, "wx", 0o600),
   write: (fd, content) => fs.writeFileSync(fd, content),
   close: (fd) => fs.closeSync(fd),
-  writeFile: (path, content) => fs.writeFileSync(path, content, { flag: "w", mode: 0o600 }),
+  writeFile: (path, content) => fs.writeFileSync(path, content, { flag: "wx", mode: 0o600 }),
   readText: (path) => fs.readFileSync(path, "utf-8"),
   stat: (path) => {
     const { ino, mtimeMs } = fs.statSync(path);

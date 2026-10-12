@@ -13,6 +13,7 @@ import {
   takeOverExclusiveLock,
   tryAcquireExclusiveLock,
 } from "../../src/utils/fileLock";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeLockOwnerGenerationProbe } from "../fakes/FakeLockOwnerGenerationProbe";
 import { logger } from "../../src/utils/logger";
 import { nodeLockFileSystem } from "../../src/utils/lockFileSystem";
@@ -30,11 +31,60 @@ describe("fileLock primitive", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test("the node lock filesystem overwrites a leftover private publication file", () => {
+  test("the node lock filesystem exclusively creates private publication files", () => {
     const path = join(dir, "leftover.tmp");
     writeFileSync(path, "leftover-private-publication-content");
-    nodeLockFileSystem.writeFile(path, "100");
-    expect(readFileSync(path, "utf8")).toBe("100");
+    expect(() => nodeLockFileSystem.writeFile(path, "100")).toThrow(
+      expect.objectContaining({ code: "EEXIST" }),
+    );
+    expect(readFileSync(path, "utf8")).toBe("leftover-private-publication-content");
+  });
+
+  test("publication never rewrites a lock through a leftover hard-linked tmp", () => {
+    const raw = "500\nlive-foreign-owner\nmetadata  ";
+    writeFileSync(lockPath, raw);
+    const realStat = fs.statSync;
+    let sampled = false;
+    const stat = spyOn(fs, "statSync").mockImplementation((path, options) => {
+      if (path === lockPath && !sampled) {
+        sampled = true;
+        // Exercise publication even after the initial-sample optimisation is added.
+        throw Object.assign(new Error("sample unavailable"), { code: "EACCES" });
+      }
+      return realStat(path, options);
+    });
+    const realWrite = fs.writeFileSync;
+    const realUnlink = fs.unlinkSync;
+    let tmp: string | undefined;
+    const seedTmp = (path: fs.PathLike | number) => {
+      if (typeof path === "string" && path.endsWith(".tmp") && tmp === undefined) {
+        tmp = path;
+        fs.linkSync(lockPath, path);
+      }
+    };
+    const unlink = spyOn(fs, "unlinkSync").mockImplementation((path) => {
+      seedTmp(path);
+      realUnlink(path);
+    });
+    const write = spyOn(fs, "writeFileSync").mockImplementation((path, data, options) => {
+      seedTmp(path); // Before T1 the first tmp operation was writeFile, with no unlink.
+      realWrite(path, data, options);
+    });
+    const options = {
+      pid: 100,
+      isProcessRunning: () => true,
+      idGenerator: new FakeIdGenerator(["fixed-id"]),
+    };
+    try {
+      expect(tryAcquireExclusiveLock(lockPath, options)).toBe(false);
+      expect(readFileSync(lockPath, "utf8")).toBe(raw);
+      expect(readdirSync(dir)).toEqual([basename(lockPath)]);
+      expect(tmp).toEndWith(".fixed-id.tmp");
+    } finally {
+      stat.mockRestore();
+      unlink.mockRestore();
+      write.mockRestore();
+    }
   });
 
   describe("OS generation ownership (#11812)", () => {

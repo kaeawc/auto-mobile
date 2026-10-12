@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { defaultIdGenerator, type IdGenerator } from "./IdGenerator";
 import { nodeLockFileSystem, type LockFileSystem } from "./lockFileSystem";
 import { dirname } from "path";
 import { isProcessRunning as defaultIsProcessRunning } from "./processLiveness";
@@ -42,6 +43,8 @@ export const RECLAIM_GUARD_ABANDON_AGE_MS = OWNERLESS_LOCK_RECLAIM_AGE_MS;
 export interface ExclusiveLockOptions {
   /** Optional synchronous filesystem seam; defaults to node fs. */
   fileSystem?: LockFileSystem;
+  /** Collision-resistant private publication names (defaults to the module-level NodeIdGenerator). */
+  idGenerator?: IdGenerator;
   /** Clock for ownerless-lock and abandoned-guard age checks (defaults to Date.now). */
   now?: () => number;
   /** Reclaim ownerless locks strictly older than this bound; defaults to 10 seconds. */
@@ -211,6 +214,19 @@ export function* acquireExclusiveLockSteps(
   options: ExclusiveLockOptions = {},
 ): Steps<boolean> {
   const pid = options.pid ?? process.pid;
+  const fileSystem = options.fileSystem ?? nodeLockFileSystem;
+  const initial = yield* sampleLock(lockFilePath, fileSystem);
+  if (initial) {
+    // Preserve the first attempt's generation capture, including live-lock probes;
+    // the guard reuses it and the final publication still captures freshly.
+    const generation = captureLockOwnerGeneration(options.ownerGeneration, pid);
+    // This sample only avoids doomed publication. Exclusive link and the reclaim
+    // guard arbitrate ownership; the single-holder invariant does not depend on it.
+    if (!isReclaimable(initial, options)) {
+      return false;
+    }
+    return yield* reclaimExclusiveLock(lockFilePath, options, initial, generation);
+  }
   const first = yield* writeExclusiveLockFile(lockFilePath, pid, options);
   if (first.acquired) {
     return true;
@@ -327,7 +343,13 @@ function* claimReclaimGuard(
   const content = formatLockContent(pid, options.ownerToken, undefined, generation);
   for (let k = 0; k < 16; k++) {
     const path = `${prefix}.${k}`;
-    const published = yield* publishReclaimGuard(path, content, pid, fileSystem);
+    const published = yield* publishReclaimGuard(
+      path,
+      content,
+      pid,
+      fileSystem,
+      options.idGenerator,
+    );
     if (published === "created") {
       return k;
     }
@@ -421,18 +443,56 @@ function* restoreDisplacedLock(
     yield { op: "link", path };
     fileSystem.link(marker, path);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-      yield { op: "exists", path };
-      if (!fileSystem.exists(path)) {
-        throw toActionableError(error, `Failed to restore displaced lock at ${path}`);
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      // EEXIST proves occupation even if the destination subsequently disappears.
+      logger.debug(`Lock restore destination occupied at ${path}: ${errorMessage(error)}`);
+    } else {
+      logger.warn(`Displaced lock link restore failed at ${path}: ${errorMessage(error)}`, error);
+      if (!(yield* copyDisplacedLock(path, marker, fileSystem))) {
+        yield* renameDisplacedLock(path, marker, fileSystem);
+        return;
       }
     }
-    // EEXIST proves occupation even if the destination subsequently disappears.
-    logger.debug(
-      `src/utils/fileLock.ts: restore destination occupied at ${path}: ${errorMessage(error)}`,
-    );
   }
   yield* cleanupFile(marker, fileSystem);
+}
+
+function* copyDisplacedLock(
+  path: string,
+  marker: string,
+  fileSystem: LockFileSystem,
+): Steps<boolean> {
+  const raw = yield* readText(marker, fileSystem);
+  if (raw === undefined) {
+    logger.warn(`Displaced lock exclusive copy could not read ${marker}`);
+    return false;
+  }
+  const result = yield* createLegacyFile(path, raw, fileSystem, "Displaced lock exclusive copy");
+  return result !== "failed";
+}
+
+function* renameDisplacedLock(
+  path: string,
+  marker: string,
+  fileSystem: LockFileSystem,
+): Steps<void> {
+  try {
+    yield { op: "exists", path };
+    if (fileSystem.exists(path)) {
+      // A failed copy may have left a partial destination that cleanup could not remove.
+      logger.warn(`Displaced lock last-resort restore blocked at ${path}; retaining ${marker}`);
+      return;
+    }
+    yield { op: "rename", path: marker };
+    fileSystem.rename(marker, path);
+  } catch (error) {
+    logger.warn(
+      `Displaced lock last-resort restore failed at ${path}: ${errorMessage(error)}`,
+      error,
+    );
+    // Leave the marker if even rename fails: it is the only copy of a possibly
+    // live owner's lock. Deleting it would silently free that held lock.
+  }
 }
 
 function* cleanupFile(path: string, fileSystem: LockFileSystem): Steps<void> {
@@ -525,7 +585,13 @@ export function takeOverExclusiveLock(
   observedOwner: Pick<LockContent, "pid" | "token">,
   options: Pick<
     ExclusiveLockOptions,
-    "pid" | "ownerToken" | "metadata" | "ownerGeneration" | "fileSystem" | "isProcessRunning"
+    | "pid"
+    | "ownerToken"
+    | "metadata"
+    | "ownerGeneration"
+    | "fileSystem"
+    | "isProcessRunning"
+    | "idGenerator"
   > = {},
 ): boolean {
   return finishLockSteps(takeOverLockSteps(lockFilePath, observedOwner, options));
@@ -672,10 +738,13 @@ function* publishFile(
   content: string,
   pid: number,
   fileSystem: LockFileSystem,
+  idGenerator: IdGenerator = defaultIdGenerator,
 ): Steps<Publication> {
-  const tmp = `${path}.${pid}.${++publicationCounter}.tmp`;
+  const tmp = `${path}.${pid}.${++publicationCounter}.${idGenerator.next()}.tmp`;
   let linking = false;
   try {
+    // A recycled name may still alias a live lock inode; unlink before exclusive create.
+    yield* cleanupFile(tmp, fileSystem);
     yield { op: "writeFile", path: tmp };
     fileSystem.writeFile(tmp, content);
     yield { op: "link", path };
@@ -706,7 +775,7 @@ function* writeExclusiveLockFile(
     fileSystem.mkdir(dirname(path));
     const generation = captureLockOwnerGeneration(options.ownerGeneration, pid);
     const content = formatLockContent(pid, options.ownerToken, options.metadata, generation);
-    const publication = yield* publishFile(path, content, pid, fileSystem);
+    const publication = yield* publishFile(path, content, pid, fileSystem, options.idGenerator);
     if (typeof publication === "string") {
       return { acquired: publication === "created", generation };
     }
@@ -722,18 +791,20 @@ function* publishReclaimGuard(
   content: string,
   pid: number,
   fileSystem: LockFileSystem,
+  idGenerator: IdGenerator = defaultIdGenerator,
 ): Steps<"created" | "contended" | "failed"> {
-  const publication = yield* publishFile(path, content, pid, fileSystem);
+  const publication = yield* publishFile(path, content, pid, fileSystem, idGenerator);
   if (typeof publication === "string") {
     return publication;
   }
-  return yield* writeLegacyReclaimGuard(path, content, fileSystem);
+  return yield* createLegacyFile(path, content, fileSystem, "Reclaim guard");
 }
 
-function* writeLegacyReclaimGuard(
+function* createLegacyFile(
   path: string,
   content: string,
   fileSystem: LockFileSystem,
+  context: string,
 ): Steps<"created" | "contended" | "failed"> {
   let fd: number | undefined;
   try {
@@ -749,13 +820,13 @@ function* writeLegacyReclaimGuard(
     return "created";
   } catch (error) {
     if (fd === undefined && (error as NodeJS.ErrnoException).code === "EEXIST") {
-      // Exclusive-open contention leaves the existing guard for inspection.
-      logger.debug(`Reclaim guard already held at ${path}: ${errorMessage(error)}`);
+      // Exclusive-open contention preserves the occupant, even if it later disappears.
+      logger.debug(`${context} already held at ${path}: ${errorMessage(error)}`);
       return "contended";
     }
-    logger.warn(`Reclaim guard creation failed at ${path}: ${errorMessage(error)}`, error);
+    logger.warn(`${context} creation failed at ${path}: ${errorMessage(error)}`, error);
     if (fd !== undefined) {
-      // Only our successful exclusive open proves this guard is ours to remove.
+      // Only our successful exclusive open proves this partial file is ours to remove.
       yield* cleanupFile(path, fileSystem);
     }
     return "failed";

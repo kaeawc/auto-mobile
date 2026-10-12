@@ -3,6 +3,8 @@ import { ActionableError, toActionableError } from "../../models/ActionableError
 import type { BootedDevice, DeviceInfo } from "../../models/DeviceInfo";
 import type { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { compareIosVersions } from "../../utils/ios-cmdline-tools/iosVersion";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { logger } from "../../utils/logger";
 
 type IosProfile = Extract<BrokerNativeProfile, { platform: "ios" }>;
 type ResetSimctl = Pick<SimCtlClient, "listSimulatorImages" | "eraseSimulator" | "bootSimulator">;
@@ -14,6 +16,7 @@ export class IosBaselineReset {
       simctl: ResetSimctl;
       stopDevice: (device: BootedDevice) => Promise<void>;
     },
+    private readonly timer: Pick<Timer, "now"> = defaultTimer,
   ) {}
 
   async reset(
@@ -25,14 +28,18 @@ export class IosBaselineReset {
     await this.readExpectedTarget(device.deviceId, profile, "Booted", "start reset");
 
     await assertOwned();
-    await this.dependencies.stopDevice(device);
+    await this.measureStep(device.deviceId, "stop", () => this.dependencies.stopDevice(device));
 
     await this.readExpectedTarget(device.deviceId, profile, "Shutdown", "erase simulator");
     await assertOwned();
-    await this.dependencies.simctl.eraseSimulator(device.deviceId);
+    await this.measureStep(device.deviceId, "erase", () =>
+      this.dependencies.simctl.eraseSimulator(device.deviceId),
+    );
 
     await assertOwned();
-    const booted = await this.dependencies.simctl.bootSimulator(device.deviceId);
+    const booted = await this.measureStep(device.deviceId, "boot", () =>
+      this.dependencies.simctl.bootSimulator(device.deviceId),
+    );
     if (booted.platform !== "ios" || booted.deviceId !== device.deviceId) {
       throw new ActionableError(
         `iOS baseline reset booted a different target instead of simulator '${device.deviceId}'`,
@@ -42,6 +49,26 @@ export class IosBaselineReset {
     await this.readExpectedTarget(device.deviceId, profile, "Booted", "confirm clean baseline");
     await assertOwned();
     return "clean";
+  }
+
+  private async measureStep<T>(
+    deviceId: string,
+    phase: string,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const started = this.timer.now();
+    let completed = false;
+    logger.info(`[SessionBroker] iOS baseline reset ${phase} started for ${deviceId}`);
+    try {
+      const result = await operation();
+      completed = true;
+      return result;
+    } finally {
+      logger.info(
+        `[SessionBroker] iOS baseline reset ${phase} ${completed ? "completed" : "failed"} ` +
+          `for ${deviceId} after ${this.timer.now() - started}ms`,
+      );
+    }
   }
 
   private assertInput(device: BootedDevice, profile: IosProfile): void {

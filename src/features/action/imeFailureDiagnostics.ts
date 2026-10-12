@@ -9,6 +9,7 @@ import type { TextActionResult } from "./SendKeys";
 import {
   imeCommitSubsequenceMatches,
   imeCommitSuffixMatches,
+  imeInsertedTextMatches,
 } from "../observe/android/CtrlProxyText";
 
 export interface ImeFailureDiagnostic {
@@ -98,6 +99,10 @@ export const IME_EDITOR_SYNC_LOST_ERROR = "Input connection lost while syncing e
 
 export const IME_EDITOR_SYNC_LOST_CONFIRMED_WARNING =
   "The IME editor sync was lost after every unit was dispatched; a focused-field read-back confirmed the text.";
+
+export const IME_INSERTED_TEXT_UNAVAILABLE_WARNING =
+  "The installed control-proxy APK is older than this AutoMobile host and does not report the text the editor inserted, " +
+  "so this commit was verified only by a weaker whole-field check. Update the control-proxy APK.";
 
 // Exact messages emitted before any commit in the current CtrlProxy protocol.
 // Unknown/older errors remain conservative; a zero/absent dispatch count proves nothing.
@@ -232,8 +237,7 @@ export function verifyImeInsertedText(
   if (
     insertedText === undefined ||
     text.length === 0 ||
-    imeCommitSuffixMatches(insertedText, text) !== false ||
-    imeCommitSubsequenceMatches(insertedText, text)
+    imeInsertedTextMatches(insertedText, text)
   ) {
     return result;
   }

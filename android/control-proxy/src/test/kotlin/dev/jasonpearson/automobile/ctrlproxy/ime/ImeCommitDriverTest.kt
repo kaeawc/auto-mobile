@@ -829,7 +829,7 @@ class ImeCommitDriverTest {
         for (lastResume in listOf(2, 3)) {
           assertEquals(
             if (postDispatch) ImeCommitDriver.Reconciliation.Succeed("ab")
-            else ImeCommitDriver.Reconciliation.Continue,
+            else ImeCommitDriver.Reconciliation.DropRejected(2),
             ImeCommitDriver.reconcileDecision(
               postDispatch,
               restart,
@@ -1003,6 +1003,61 @@ class ImeCommitDriverTest {
     assertTrue(result.success)
     assertNull(result.error)
     assertEquals("line oneline two", result.insertedText)
+  }
+
+  @Test
+  fun `tolerated newline rejection still reconciles a later restart lost h`() {
+    assertRejectedNewlineThenLostH(true)
+  }
+
+  @Test
+  fun `tolerated newline rejection still reconciles a later non restart lost h`() {
+    assertRejectedNewlineThenLostH(false)
+  }
+
+  private fun assertRejectedNewlineThenLostH(restart: Boolean) {
+    val sink = newlineStrippingSink()
+    val stripNewline = requireNotNull(sink.afterCommit)
+    sink.afterCommit = {
+      stripNewline()
+      if (sink.committedChars.last() == "h" && sink.committedChars.count { it == "h" } == 1) {
+        sink.editorText = requireNotNull(sink.editorText).dropLast(1)
+        sink.restarting = restart
+        sink.generation++
+      }
+    }
+    val result = commit(sink, "one\ntwo three", PRIOR_IME_ID)
+    assertEquals(2, sink.committedChars.count { it == "h" })
+    assertEquals(2, sink.committedChars.count { it == "\n" })
+    assertTrue(result.success)
+    assertNull(result.error)
+    assertEquals("onetwo three", sink.editorText)
+    assertEquals("onetwo three", result.insertedText)
+    assertEquals(13, result.committedUnits)
+  }
+
+  @Test
+  fun `tolerated newline rejection without later restart keeps one resend`() {
+    val sink = newlineStrippingSink()
+    val result = commit(sink, "one\ntwo three", PRIOR_IME_ID)
+    assertEquals(2, sink.committedChars.count { it == "\n" })
+    assertTrue(result.success)
+    assertNull(result.error)
+    assertEquals("onetwo three", sink.editorText)
+    assertEquals("onetwo three", result.insertedText)
+    assertEquals(13, result.committedUnits)
+  }
+
+  private fun newlineStrippingSink(): FakeImeCommitSink {
+    val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
+    sink.editorText = ""
+    sink.afterCommit = {
+      if (sink.committedChars.last() == "\n") {
+        sink.editorText = requireNotNull(sink.editorText).dropLast(1)
+        sink.generation++
+      }
+    }
+    return sink
   }
 
   @Test

@@ -326,6 +326,8 @@ class WebSocketServer(
     add("ime_clear_field_v1")
     // The IME commits and clears password fields; older APKs refuse them.
     add("ime_password_commit_v1")
+    // commit_text_result reports the editor delta as insertedText when readable and safe.
+    add("ime_inserted_text_v1")
     add("tap_double_v1")
     // set_network_mock_rules with a requestId is answered with set_network_mock_rules_result
     // naming the rules the app's regex engine rejected (issue #10101). Hosts only wait for the

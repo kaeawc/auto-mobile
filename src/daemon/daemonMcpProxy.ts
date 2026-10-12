@@ -37,6 +37,7 @@ import {
   DAEMON_RESTART_HANDOFF_TIMEOUT_MS,
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_RELEASE_EXECUTION_METHOD,
+  DAEMON_RELEASE_SESSION_METHOD,
   DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
   DAEMON_REGISTER_SESSION_METHOD,
   CLI_SESSION_LIVENESS_POLICY,
@@ -58,6 +59,7 @@ import {
   isGatedToolErrorCode,
   DAEMON_LIVENESS_OWNER_SUPERSEDED_CODE,
   DAEMON_LIVENESS_OWNER_UNOWNED_CODE,
+  DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE,
   PROGRESS_NOTIFICATION_METHOD,
   RESOURCE_SUBSCRIBE_METHOD,
   RESOURCE_UNSUBSCRIBE_METHOD,
@@ -1347,6 +1349,7 @@ function logManagedExecutionReleaseOutcome(sessionId: string, result: unknown): 
 
 export class DaemonMcpProxy {
   private client: DaemonClientLike | null = null;
+  private closePromise: Promise<void> | undefined;
   private config: DaemonMcpProxyConfig;
   private daemonManager: DaemonManagerLike;
   private clientFactory: DaemonClientFactory;
@@ -1961,6 +1964,60 @@ export class DaemonMcpProxy {
           logger.warn(
             `[DaemonMcpProxy] Releasing managed execution session ${sessionId} failed; the daemon ` +
               `releases it after the no-heartbeat window: ${errorMessage(error)}`,
+            error,
+          );
+        }
+      }),
+    );
+  }
+
+  /** Release only this process's ordinary heartbeat holds; harness and CLI holds survive exit. */
+  private async releaseOwnedSessions(client: DaemonClientLike | null): Promise<void> {
+    if (!client || stableLivenessOwnerToken(this.config) || this.cliSessionLivenessDeclared) {
+      return;
+    }
+    const sessions = this.heldSessionUuids().filter(
+      (sessionId) =>
+        sessionId !== this.config.initialSessionUuid?.trim() &&
+        !this.managedExecutionSessions.has(sessionId) &&
+        !this.releasedSessionReasons.has(sessionId),
+    );
+    await Promise.all(
+      sessions.map(async (sessionId) => {
+        try {
+          const result: unknown = await raceWithDeadline(
+            () =>
+              client.callDaemonMethod(
+                DAEMON_RELEASE_SESSION_METHOD,
+                { sessionId, livenessOwnerToken: this.livenessOwnerToken },
+                { timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS },
+              ),
+            {
+              timer: this.timer,
+              timeoutMs: MANAGED_EXECUTION_RELEASE_TIMEOUT_MS,
+              label: `Release owned session ${sessionId}`,
+            },
+          );
+          if (result && typeof result === "object" && Reflect.get(result, "success") === false) {
+            throw Object.assign(new ActionableError(String(Reflect.get(result, "error"))), {
+              code: Reflect.get(result, "code"),
+            });
+          }
+        } catch (error) {
+          if (
+            error &&
+            typeof error === "object" &&
+            Reflect.get(error, "code") === DAEMON_LIVENESS_OWNER_NOT_OWNER_CODE
+          ) {
+            // A successor or explicit handoff owns this session now; its lifecycle must continue.
+            logger.debug(
+              `[DaemonMcpProxy] Session ${sessionId} no longer belongs to this proxy; keeping it`,
+              error,
+            );
+            return;
+          }
+          logger.warn(
+            `[DaemonMcpProxy] Releasing owned session ${sessionId} failed; falling back to owner-disconnect release: ${errorMessage(error)}`,
             error,
           );
         }
@@ -8283,7 +8340,13 @@ export class DaemonMcpProxy {
    * unadmitted and leave the session to the owner-disconnect release (#11642). Each caller is
    * answered with a typed `DaemonUnavailableError`, never left waiting.
    */
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    // EOF and signal/transport shutdown may overlap: keep the socket until the same release settles.
+    return (this.closePromise ??= this.closeOnce());
+  }
+
+  private async closeOnce(): Promise<void> {
+    const connectedClient = this.connected ? this.client : null;
     this.closing = true;
     const closingError = new DaemonUnavailableError("MCP proxy is closing");
     this.managedSlotsAcquisitionAbort?.abort(closingError);
@@ -8301,7 +8364,10 @@ export class DaemonMcpProxy {
     this.cancelConnectedFallbackReconcile();
     this.connectionCloseReject?.(new DaemonUnavailableError("MCP proxy is closing"));
     // Before the keeper stops, so the lease stays live until the release lands (#11176).
-    await this.releaseManagedExecutionSessions();
+    await Promise.all([
+      this.releaseOwnedSessions(connectedClient),
+      this.releaseManagedExecutionSessions(),
+    ]);
     await this.stopBoundSessionHeartbeat();
     if (this.client) {
       await this.client.close();

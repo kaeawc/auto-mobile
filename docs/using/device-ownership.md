@@ -17,6 +17,13 @@ A call that acts on a held device is refused with the typed code
 - is an `input/*` socket frame without the holder's `sessionUuid`
   (see [screen control](screen-control.md)).
 
+Bind and selection refusals stay non-retryable while an ordinary live owner holds
+its device. When the daemon has armed an owner-disconnect release, the owner's
+lease is suspect, or release is already in flight, the refusal is retryable and
+includes `retryAfterMs`: the remaining grace or a short poll hint while cleanup
+runs, bounded to the owner lease plus suspect grace. Refusal does not renew the
+holder's clocks or delay release (#11920).
+
 A derived `<base>:<label>` session counts as its base session, for the holder
 check and for the owning connection alike: while the base's owner is connected,
 another connection's control call naming the derived session, or reaching one of

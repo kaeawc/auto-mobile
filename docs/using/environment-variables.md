@@ -282,6 +282,15 @@ opens the session to a new claim, including one from a previously used token.
 To take a session from a displaced owner, claim with a fresh token after
 that owner's lease has expired.
 
+On clean proxy close (stdin EOF, transport close or SIGTERM), ordinary sessions
+that proxy acquired and heartbeats are explicitly released under its current
+owner token before the daemon connection closes. Releases run in parallel with
+a 1.5 s bound; failure leaves the existing disconnect/heartbeat fallback. A
+configured `--initial-session-uuid`, a harness-supplied stable owner token and
+CLI-owned sessions retain their existing resume/idle behavior; managed executions
+use their separate release path. A predecessor cannot release a session whose
+liveness ownership was handed off (#11920).
+
 A stdio/HTTP proxy claims and heartbeats only the sessions it acquired itself
 (from a `getAndroid`, `getApple`, `startDevice` or `provisionDevice` result, which
 includes a `provisionDevice` call that returns an error but keeps its session) or was started with

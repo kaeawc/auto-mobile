@@ -5559,6 +5559,12 @@ export class SessionManager {
     return this.isCurrentSession(session) && !this.releasingSessions.has(session);
   }
 
+  /** Read ownership without admission, expiry cleanup or the stall probe (release guard, #11920). */
+  getSessionLivenessOwnerToken(sessionId: string): string | undefined {
+    return (this.sessions.get(sessionId) ?? this.releasePromises.get(sessionId)?.session)
+      ?.livenessOwnerToken;
+  }
+
   /** Resolve an admitted release even after ordinary session lookup hides its identity. */
   getReleasingSession(sessionId: string): Session | null {
     return this.releasePromises.get(sessionId)?.session ?? null;

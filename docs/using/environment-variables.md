@@ -230,7 +230,7 @@ an idle or owner-disconnect release; the release cuts it with the typed terminal
 refusal `session_ownership_lost` (#11381). An agent that
 acquires a device and then makes no tool calls for 2 minutes loses the session
 and its device even while its proxy stays open and keeps heartbeating; the
-release reason is `cleanup-expired` (or `lazy-expiry`), not `heartbeat-timeout`.
+release reason is `cleanup-expired` whichever path discovers it, not `heartbeat-timeout`.
 Watching is not use, and desktop input is (owner decisions 2026-10-08, #10693,
 #10730). A desktop or IDE window that only watches a device holds no session on it: it
 registers an observer session, which the idle window does not apply to. Its

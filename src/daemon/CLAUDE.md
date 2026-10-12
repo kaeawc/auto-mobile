@@ -301,7 +301,7 @@ holds the three to one instant for every session kind.
 Release reasons are classified in one place, `src/daemon/releaseReasons.ts`
 (#11258): a typed `Record` tags each reason `idle`, `expiry`, `terminal` and
 `recoverable`, and a new reason does not compile until it is tagged there. Never
-keep a separate reason list. Every live idle release (`lazy-expiry`, `cleanup-expired`,
+keep a separate reason list. Every live idle release (`cleanup-expired` (legacy: `lazy-expiry`),
 `cli-idle-timeout`, whatever the liveness policy) is terminal (owner decision
 2026-10-09); an idle reason is the weakest terminal reason, so a concurrent
 non-idle terminal reason replaces it. A stored row found past its idle deadline with no daemon there

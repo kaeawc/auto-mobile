@@ -50,7 +50,7 @@ import {
 // heartbeats keep arriving, and a call in flight is never released. Each row names the issue
 // whose fix flips it.
 
-const IDLE_REASONS = ["cleanup-expired", "lazy-expiry"];
+const IDLE_REASONS = ["cleanup-expired"];
 // A `cli-idle` session is reaped by the heartbeat monitor on its own idle clock.
 const CLI_IDLE_REASONS = [...IDLE_REASONS, "cli-idle-timeout"];
 // Emulator serials: tool calls run the real session setup, which probes a non-emulator serial
@@ -454,7 +454,7 @@ describe("a stream subscriber on a held device (#10840)", () => {
       {
         at: releasedAt!,
         sessionId: session,
-        reason: expect.stringMatching(/^(cleanup-expired|lazy-expiry)$/),
+        reason: "cleanup-expired",
       },
     ]);
     expect(subscriberDecision(session)).toEqual({ action: "end", reason: "session_ended" });
@@ -814,7 +814,7 @@ describe("host sleep longer than the idle window (#10661)", () => {
       expect(releasedAt! - sleptAt).toBeLessThanOrEqual(
         IDLE_WINDOW_MS + SUSPECT_GRACE_MS + 2 * SCAN_MS + RELEASE_SLACK_MS,
       );
-      expect(["lazy-expiry", "cleanup-expired"]).toContain(scenario.releaseOf(session)?.reason);
+      expect(["cleanup-expired"]).toContain(scenario.releaseOf(session)?.reason);
       expectFreed();
     });
   }

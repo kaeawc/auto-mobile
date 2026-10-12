@@ -28,7 +28,7 @@ const DEVICE = "emulator-5554";
 const SCAN_MS = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
 const IDLE_MS = DEFAULT_SESSION_IDLE_TIMEOUT_MS;
 /** Every release reason that means "idle past the window", whichever path noticed first. */
-const IDLE_RELEASE_REASONS = ["cli-idle-timeout", "cleanup-expired", "lazy-expiry"];
+const IDLE_RELEASE_REASONS = ["cli-idle-timeout", "cleanup-expired"];
 /** Stalls well past the monitor's lateness margin, so each one is forgiven. */
 const STALLS_MS = [10_000, 40_000, 90_000, 130_000];
 const QUIET_MS = [2_000, 6_000, 20_000, 50_000, 70_000, 110_000];

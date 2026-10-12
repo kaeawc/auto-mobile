@@ -42,7 +42,7 @@ import {
 // The transitional platform state is adb `offline` (the harness is Android-only); the
 // monitor holds simctl `Booting`/`Shutting Down` under the same budget.
 
-const IDLE_REASONS = ["cleanup-expired", "lazy-expiry"];
+const IDLE_REASONS = ["cleanup-expired"];
 const DEVICE_C = "emulator-5558";
 const TERMINAL = { code: "session_ownership_lost", nextAction: "acquire_new_session" };
 /** Microtask turns that let a whole acquisition or re-bind chain finish. */

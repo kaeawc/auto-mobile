@@ -120,7 +120,7 @@ describe("judging ownership of a label whose base has expired but is not yet sca
     expect(await w.manager.claimLivenessOwnership(LABEL, TOKEN)).toBe("not-found");
     expect(w.manager.peekSession(BASE)).toBeNull();
     expect(w.manager.peekSession(LABEL)).toBeNull();
-    expect(await w.manager.getReleasedSessionReason(LABEL)).toBe("lazy-expiry");
+    expect(await w.manager.getReleasedSessionReason(LABEL)).toBe("cleanup-expired");
     // Every label lookup answers as it does once the base is gone: it publishes no labels.
     expect(w.manager.getDeviceLabels(BASE)).toBeUndefined();
     expect(resolveToolSelectionBaseSessionUuid(LABEL, w.manager)).toBe(LABEL);

@@ -2082,6 +2082,9 @@
         "error": {
           "type": "string"
         },
+        "reason": {
+          "type": "string"
+        },
         "artifact": {
           "$schema": "https://json-schema.org/draft/2020-12/schema",
           "type": "object",
@@ -30535,7 +30538,7 @@
   },
   {
     "name": "startTestRecording",
-    "description": "Start recording user interactions for exportPlan.",
+    "description": "Start recording on-device user input (not tool calls) for exportPlan.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

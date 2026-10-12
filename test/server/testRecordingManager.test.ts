@@ -1,10 +1,13 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { ActionableError, type BootedDevice, type PlanStep } from "../../src/models";
 import {
   adoptOwnerlessTestRecording,
   getStoppedTestRecording,
   getTestRecordingStatus,
   isTestRecordingOwnedBy,
+  NoUserInputCapturedError,
+  TEST_RECORDING_USER_INPUT_ONLY_NOTICE,
+  resetStoppedTestRecordings,
   startTestRecording,
   stopTestRecording,
 } from "../../src/server/testRecordingManager";
@@ -40,7 +43,7 @@ class FakeRecorder {
   capturedSteps: PlanStep[] | undefined;
 
   get stepCount(): number {
-    return 0;
+    return this.steps.length;
   }
 
   async start(): Promise<void> {
@@ -76,6 +79,41 @@ const start = async (
 
 const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
 const otherDevice: BootedDevice = { ...device, deviceId: "emulator-5556" };
+
+describe("testRecordingManager user-input capture contract (#11919)", () => {
+  afterEach(async () => {
+    if (getTestRecordingStatus()) {
+      await stopTestRecording(undefined, "cleanup").catch(() => undefined);
+    }
+    resetStoppedTestRecordings();
+  });
+
+  test.each([0, 1])("status documents user-input scope with %s steps", async (count) => {
+    const timer = new FakeTimer();
+    const recorder = new FakeRecorder();
+    recorder.steps = count ? [capturedStep] : [];
+    await start(timer, recorder);
+    const status = getTestRecordingStatus(timer);
+    expect(status?.eventCount).toBe(count);
+    expect(status?.captureScope).toBe("user-input");
+    if (count === 0) {
+      expect(status?.notice).toBe(TEST_RECORDING_USER_INPUT_ONLY_NOTICE);
+      expect(status?.notice).toContain("recordSteps");
+    } else {
+      expect(status).not.toHaveProperty("notice");
+    }
+  });
+
+  test("zero-step stop explains why injected input is not recorded", async () => {
+    const timer = new FakeTimer();
+    await start(timer, new FakeRecorder());
+    const result = stopTestRecording(undefined, "empty", timer);
+    await expect(result).rejects.toBeInstanceOf(NoUserInputCapturedError);
+    await expect(result).rejects.toMatchObject({ reason: "no_user_input_captured" });
+    await expect(result).rejects.toThrow(/^No recorded interactions were captured\./);
+    await expect(result).rejects.toThrow("recordSteps");
+  });
+});
 
 describe("testRecordingManager ownership", () => {
   for (const phase of ["starting", "active"] as const) {
@@ -602,6 +640,7 @@ describe("testRecordingManager touch-track health", () => {
       (error: unknown) => error,
     );
     expect(outcome).toBeInstanceOf(ActionableError);
+    expect(outcome).not.toBeInstanceOf(NoUserInputCapturedError);
     expect(outcome).toHaveProperty(
       "message",
       "Failed to stop test recording: Touch track (getevent) stopped 0 ms after recording start: spawn adb ENOENT. Later taps may be missing.",

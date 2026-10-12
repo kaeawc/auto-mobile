@@ -1,4 +1,6 @@
-import { describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
+import { IOSCtrlProxyClient } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import {
   DeviceSessionManager,
   type ConnectedPlatformScan,
@@ -28,9 +30,16 @@ import { FakeWindow } from "../fakes/FakeWindow";
 import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDeviceLifecycleCoordinator";
 import { drainUntil, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 
+let restoreResume: (() => void) | undefined;
+afterEach(() => {
+  restoreResume?.();
+  restoreResume = undefined;
+});
+
 class FakeReadSimctl extends FakeSimctl {
   readonly presentations: string[] = [];
   readonly imageSignals: AbortSignal[] = [];
+  readonly imageCacheBypasses: boolean[] = [];
   imageError?: Error;
   imagesHang = false;
   async listSimulatorImages(
@@ -38,6 +47,7 @@ class FakeReadSimctl extends FakeSimctl {
     options?: { bypassCache?: boolean; signal?: AbortSignal },
   ): Promise<DeviceInfo[]> {
     const images = await super.listSimulatorImages();
+    this.imageCacheBypasses.push(options?.bypassCache === true);
     if (options?.signal) {
       this.imageSignals.push(options.signal);
     }
@@ -177,6 +187,34 @@ function harness(platform: Platform, daemon: boolean, simctlAvailable = true) {
       simctl.setBootedSimulatorsError(new Error("fake simctl discovery failed"));
     }
   }
+  function publishReadBoots(firstFailure?: Error) {
+    let attempts = 0;
+    const publish = () => {
+      setImages([firstImage, { ...image, isRunning: true }]);
+      setRunning([device]);
+      // Keep the per-call daemon discovery stale: the lease recheck must bypass it.
+      scan.devices = [];
+    };
+    const launchAndroid = devices.startDevice.bind(devices);
+    devices.startDevice = async (target, timeout) => {
+      if (++attempts === 1 && firstFailure) {
+        startCalls.push(target.name);
+        throw firstFailure;
+      }
+      const result = await launchAndroid(target, timeout);
+      publish();
+      return result;
+    };
+    const launchIos = simctl.bootSimulator.bind(simctl);
+    simctl.bootSimulator = async (udid) => {
+      const result = await launchIos(udid);
+      if (++attempts === 1 && firstFailure) {
+        throw firstFailure;
+      }
+      publish();
+      return result;
+    };
+  }
   function assertNoBoot() {
     expect(startCalls).toEqual([]);
     expect(simctl.getMethodCalls("bootSimulator")).toEqual([]);
@@ -222,6 +260,7 @@ function harness(platform: Platform, daemon: boolean, simctlAvailable = true) {
     setRunning,
     setImages,
     incomplete,
+    publishReadBoots,
     assertNoBoot,
     assertNoReadWrites,
     assertEmptySelection,
@@ -788,3 +827,273 @@ test("Android running image without a resolved serial is retryable discovery, ne
   h.assertNoReadWrites();
   expect(h.lifecycle.reservations).toEqual([]);
 });
+
+for (const platform of ["android", "ios"] as const) {
+  for (const daemon of [false, true]) {
+    test(`${platform} ${daemon ? "daemon" : "direct"}: concurrent stopped reads launch once after lifecycle wait`, async () => {
+      const h = harness(platform, daemon);
+      h.publishReadBoots();
+      const identity = { kind: "stable" as const, platform, stableId: h.id };
+      const blocker = await h.lifecycle.reserve(identity, {
+        operation: "start",
+        deadlineMs: 300_000,
+      });
+      const beforeReadBoot = mock(async () => {});
+      const options = { ...h.options, beforeReadBoot };
+      const client = platform === "android" ? AndroidCtrlProxyClient : IOSCtrlProxyClient;
+      const originalResume = client.resumeAfterDeviceStart;
+      const events: string[] = [];
+      const resume = spyOn(client, "resumeAfterDeviceStart").mockImplementation((deviceId) => {
+        expect(deviceId).toBe(h.device.deviceId);
+        events.push("resume");
+      });
+      restoreResume = () => {
+        resume.mockRestore();
+        expect(client.resumeAfterDeviceStart).toBe(originalResume);
+      };
+      const originalVerify = h.manager.verifyDevice.bind(h.manager);
+      const verifyDevice = mock(async (...args: Parameters<typeof originalVerify>) => {
+        events.push("verify");
+        expect(events).toEqual(["resume", "resume", "verify"]);
+        return await originalVerify(...args);
+      });
+      h.manager.verifyDevice = verifyDevice;
+      const outcomes = Promise.all([
+        h.manager.ensureDeviceReady(platform, h.id, options),
+        h.manager.ensureDeviceReady(platform, h.id, options),
+      ]);
+      await drainUntil(() => h.lifecycle.reservations.length === 3, {
+        description: "both stopped reads queue behind the lifecycle lease",
+      });
+      expect(beforeReadBoot).toHaveBeenCalledTimes(2);
+      h.assertNoBoot();
+      blocker.release();
+      const results = await outcomes;
+      expect(results.map((device) => device.deviceId)).toEqual([
+        h.device.deviceId,
+        h.device.deviceId,
+      ]);
+      expect(h.startCalls.length + h.simctl.getMethodCalls("bootSimulator").length).toBe(1);
+      expect(h.instrumentation.requests.length).toBe(platform === "ios" ? 1 : 0);
+      expect(beforeReadBoot).toHaveBeenCalledTimes(4);
+      expect(verifyDevice).toHaveBeenCalledTimes(1);
+      expect(verifyDevice.mock.calls[0]).toEqual([
+        h.device.deviceId,
+        platform,
+        expect.objectContaining({ ...options, signal: expect.any(AbortSignal) }),
+        expect.objectContaining(h.device),
+      ]);
+      if (platform === "android") {
+        expect(h.devices.getBootedDevicesDetailedCalls()).toHaveLength(2);
+        expect(
+          h.devices
+            .getBootedDevicesDetailedCalls()
+            .every(
+              (call) =>
+                call.options.bypassAndroidDeviceListCache === true &&
+                call.options.signal !== undefined,
+            ),
+        ).toBe(true);
+        expect(h.devices.getListDeviceImagesCalls()).toHaveLength(4);
+      } else {
+        expect(h.simctl.imageCacheBypasses).toEqual([true, true, true, true]);
+      }
+      expect(h.lifecycle.isReserved(identity)).toBe(false);
+      h.assertNoReadWrites();
+    });
+  }
+
+  test(`${platform}: concurrent loser boots after the first launch fails`, async () => {
+    const h = harness(platform, true);
+    const failure = new ActionableError("first fake launch failed");
+    h.publishReadBoots(failure);
+    const identity = { kind: "stable" as const, platform, stableId: h.id };
+    const blocker = await h.lifecycle.reserve(identity, {
+      operation: "start",
+      deadlineMs: 300_000,
+    });
+    const outcomes = Promise.allSettled([
+      h.manager.ensureDeviceReady(platform, h.id, h.options),
+      h.manager.ensureDeviceReady(platform, h.id, h.options),
+    ]);
+    await drainUntil(() => h.lifecycle.reservations.length === 3, {
+      description: "both reads queue before the failed boot",
+    });
+    blocker.release();
+    expect(await outcomes).toEqual([
+      { status: "rejected", reason: failure },
+      { status: "fulfilled", value: expect.objectContaining({ deviceId: h.device.deviceId }) },
+    ]);
+    expect(h.startCalls.length + h.simctl.getMethodCalls("bootSimulator").length).toBe(2);
+    expect(h.lifecycle.isReserved(identity)).toBe(false);
+    h.assertNoReadWrites();
+  });
+
+  test(`${platform}: concurrent loser ownership refusal wins over the running recheck`, async () => {
+    const h = harness(platform, true);
+    h.publishReadBoots();
+    const identity = { kind: "stable" as const, platform, stableId: h.id };
+    const blocker = await h.lifecycle.reserve(identity, {
+      operation: "start",
+      deadlineMs: 300_000,
+    });
+    const refusal = new ActionableError("holder appeared during the second read's lease wait");
+    let loserChecks = 0;
+    const outcomes = Promise.allSettled([
+      h.manager.ensureDeviceReady(platform, h.id, h.options),
+      h.manager.ensureDeviceReady(platform, h.id, {
+        ...h.options,
+        beforeReadBoot: async () => {
+          if (++loserChecks === 2) {
+            throw refusal;
+          }
+        },
+      }),
+    ]);
+    await drainUntil(() => h.lifecycle.reservations.length === 3, {
+      description: "both reads queue before ownership changes",
+    });
+    blocker.release();
+    expect(await outcomes).toEqual([
+      { status: "fulfilled", value: expect.objectContaining({ deviceId: h.device.deviceId }) },
+      { status: "rejected", reason: refusal },
+    ]);
+    expect(loserChecks).toBe(2);
+    expect(h.startCalls.length + h.simctl.getMethodCalls("bootSimulator").length).toBe(1);
+    expect(h.lifecycle.isReserved(identity)).toBe(false);
+    h.assertNoReadWrites();
+  });
+
+  for (const abort of [false, true]) {
+    test(`${platform}: concurrent loser releases the lease after running verification ${abort ? "aborts" : "fails"}`, async () => {
+      const h = harness(platform, true);
+      h.publishReadBoots();
+      const identity = { kind: "stable" as const, platform, stableId: h.id };
+      const blocker = await h.lifecycle.reserve(identity, {
+        operation: "start",
+        deadlineMs: 300_000,
+      });
+      const controller = new AbortController();
+      const failure = new ActionableError("running loser verification refused");
+      const verifyDevice = mock(
+        async (_id: string, _platform: Platform, options?: DeviceReadyOptions) => {
+          expect(h.lifecycle.isReserved(identity)).toBe(true);
+          expect(options?.readiness).toBe("booted");
+          if (abort) {
+            controller.abort(failure);
+            options?.signal?.throwIfAborted();
+          }
+          throw failure;
+        },
+      );
+      h.manager.verifyDevice = verifyDevice;
+      const outcomes = Promise.allSettled([
+        h.manager.ensureDeviceReady(platform, h.id, h.options),
+        h.manager.ensureDeviceReady(platform, h.id, { ...h.options, signal: controller.signal }),
+      ]);
+      await drainUntil(() => h.lifecycle.reservations.length === 3, {
+        description: "both reads queue before loser verification",
+      });
+      blocker.release();
+      expect(await outcomes).toEqual([
+        { status: "fulfilled", value: expect.objectContaining({ deviceId: h.device.deviceId }) },
+        { status: "rejected", reason: failure },
+      ]);
+      expect(verifyDevice).toHaveBeenCalledTimes(1);
+      expect(h.startCalls.length + h.simctl.getMethodCalls("bootSimulator").length).toBe(1);
+      expect(h.lifecycle.isReserved(identity)).toBe(false);
+      h.assertNoReadWrites();
+    });
+  }
+}
+
+for (const state of ["unresolved serial", "unknown running state"] as const) {
+  test(`android: concurrent loser reports discovery_incomplete for ${state}`, async () => {
+    const h = harness("android", true);
+    h.publishReadBoots();
+    const identity = { kind: "stable" as const, platform: "android" as const, stableId: h.id };
+    const blocker = await h.lifecycle.reserve(identity, {
+      operation: "start",
+      deadlineMs: 300_000,
+    });
+    let loserChecks = 0;
+    const outcomes = Promise.allSettled([
+      h.manager.ensureDeviceReady("android", h.id, h.options),
+      h.manager.ensureDeviceReady("android", h.id, {
+        ...h.options,
+        beforeReadBoot: async () => {
+          if (++loserChecks === 2) {
+            h.setImages([
+              {
+                ...h.image,
+                isRunning: state === "unresolved serial",
+                isRunningStateKnown: state !== "unknown running state",
+              },
+            ]);
+            h.setRunning([{ ...h.device, name: `Unknown (${h.device.deviceId})` }]);
+            h.scan.devices = [];
+          }
+        },
+      }),
+    ]);
+    await drainUntil(() => h.lifecycle.reservations.length === 3, {
+      description: "both Android reads queue before discovery becomes incomplete",
+    });
+    blocker.release();
+    expect(await outcomes).toEqual([
+      { status: "fulfilled", value: expect.objectContaining({ deviceId: h.device.deviceId }) },
+      {
+        status: "rejected",
+        reason: expect.objectContaining({
+          code: "discovery_incomplete",
+          retryable: true,
+          message:
+            state === "unresolved serial"
+              ? `Android AVD '${h.image.name}' is running but its serial could not be resolved yet.`
+              : `Cannot safely cold-boot Android AVD '${h.image.name}': its running state is unknown.`,
+        }),
+      },
+    ]);
+    expect(h.startCalls).toEqual([h.image.name]);
+    expect(h.lifecycle.isReserved(identity)).toBe(false);
+    h.assertNoReadWrites();
+  });
+}
+
+for (const daemon of [false, true]) {
+  for (const platform of ["android", "ios"] as const) {
+    const lane = `${platform} ${daemon ? "daemon" : "direct"}`;
+    test(`${lane}: shaped absent read ignores failed other-platform discovery and inventory`, async () => {
+      const h = harness(platform, daemon);
+      const other = platform === "android" ? "ios" : "android";
+      const id = platform === "android" ? "emulator-5599" : "87654321-ABCD-ABCD-ABCD-123456789ABC";
+      h.incomplete(other);
+      const otherImages = mock(async (): Promise<DeviceInfo[]> => {
+        throw new Error("other inventory must not be read");
+      });
+      if (other === "ios") {
+        h.simctl.listSimulatorImages = otherImages;
+      } else {
+        h.devices.listDeviceImages = otherImages;
+      }
+      await expect(h.manager.ensureDeviceReady("either", id, h.options)).rejects.toThrow(
+        `Device ${id} not found on either platform`,
+      );
+      expect(otherImages).not.toHaveBeenCalled();
+      h.assertNoBoot();
+      h.assertNoReadWrites();
+      expect(h.lifecycle.reservations).toEqual([]);
+    });
+    test(`${lane}: shaped image still requires healthy own-platform discovery`, async () => {
+      const h = harness(platform, daemon);
+      const id = platform === "android" ? "emulator-5599" : "87654321-ABCD-ABCD-ABCD-123456789ABC";
+      h.incomplete(platform);
+      await expect(h.manager.ensureDeviceReady("either", id, h.options)).rejects.toMatchObject({
+        code: "discovery_incomplete",
+        platform,
+        retryable: true,
+      });
+      h.assertEmptySelection();
+    });
+  }
+}

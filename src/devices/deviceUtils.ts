@@ -141,6 +141,8 @@ function iosSucceededSources(outcome: {
 
 export interface BootedDeviceDiscoveryOptions {
   coalesceInventoryEnrichment?: boolean;
+  /** Read listings only: reuse Android AVD names on the same ADB connection briefly. */
+  memoizeReadAvdNames?: boolean;
   /** Bypass Android's short device-list cache to verify ADB transport identity. */
   bypassAndroidDeviceListCache?: boolean;
   /** Bypass iOS's short simulator-list cache to verify simulator identity. */
@@ -994,6 +996,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
           false,
           {
             coalesceInventoryEnrichment: options.coalesceInventoryEnrichment,
+            memoizeReadAvdNames: options.memoizeReadAvdNames,
             bypassDeviceListCache: options.bypassAndroidDeviceListCache,
             skipNameEnrichment: options.skipAndroidNameEnrichment,
           },

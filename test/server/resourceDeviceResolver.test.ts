@@ -3,7 +3,10 @@ import * as resourceRead from "../../src/server/resourceDeviceResolver";
 import { defaultDeviceObservationAccess } from "../../src/server/deviceObservationAccess";
 import { listBootedDevicesForResource } from "../../src/server/resourceDeviceResolver";
 import type { BootedDevice } from "../../src/models";
-import type { PlatformDeviceManager } from "../../src/devices/deviceUtils";
+import type {
+  BootedDeviceDiscoveryOptions,
+  PlatformDeviceManager,
+} from "../../src/devices/deviceUtils";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { DaemonState } from "../../src/daemon/daemonState";
 import {
@@ -163,6 +166,26 @@ describe("read listing status preserves incomplete discovery", () => {
       expect(Reflect.get(PlatformDeviceManagerFactory, field)).toBe(value);
     }
     saved.clear();
+  });
+  test("only the status read listing opts into connection-keyed Android name memoization", async () => {
+    const received: BootedDeviceDiscoveryOptions[] = [];
+    const manager = {
+      getBootedDevicesDetailed: async (
+        _platform: string,
+        options: BootedDeviceDiscoveryOptions = {},
+      ) => {
+        received.push(options);
+        return { devices: [], succeededPlatforms: new Set(["android"]) };
+      },
+    };
+    PlatformDeviceManagerFactory.setInstance(manager as unknown as PlatformDeviceManager);
+    await resourceRead.listBootedDevicesForReadWithStatus("android", "test");
+    await listBootedDevicesForResource("android", "test", { requireFresh: true });
+    expect(received[0]).toMatchObject({
+      bypassAndroidDeviceListCache: true,
+      memoizeReadAvdNames: true,
+    });
+    expect(received[1]).not.toMatchObject({ memoizeReadAvdNames: true });
   });
   test("failed discovery is reported, while legacy callers still get an empty list", async () => {
     const manager = {

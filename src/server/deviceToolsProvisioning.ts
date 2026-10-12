@@ -1,4 +1,5 @@
 import { provisionCancellationOutcomes } from "./provisionCancellationOutcomes";
+import { restartResumeSessionForDevice, admitRestartReservedStart } from "./deviceToolsStartDevice";
 import {
   DEVICE_CLEANUP_IN_PROGRESS_CODE,
   DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
@@ -568,7 +569,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
         "device_owned_by_other_session",
         `Failed to provision ${args.device.platform} device '${args.device.name}': ${error.message}`,
         true,
-        { deviceId: error.deviceId },
+        { deviceId: error.deviceId, retryAfterMs: error.retryAfterMs },
       );
     }
     const acquisitionFailure = retryableAcquisitionProvisionError(args, error);
@@ -1336,6 +1337,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
       }
       return undefined;
     }
+    admitRestartReservedProvision(args, existing.deviceId);
     return await reserveIosProvisionDeviceLifecycle(args, deps, existing, totalDeadlineMs, signal);
   }
 
@@ -1465,6 +1467,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
       });
     };
     try {
+      admitRestartReservedProvision(args, args.device.deviceId);
       if (args.device.platform === "android") {
         lifecycleLease = await reserveStableDeviceLifecycle(
           { platform: "android", stableId: args.device.name },
@@ -1717,10 +1720,20 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
     return {
       platform: args.device.platform,
       name: args.device.name,
+      matchExactName: true,
+      __restartResumeTargets: args.__restartResumeTargets,
       timeoutMs: args.timeoutMs,
       __mcpSessionId: args.__mcpSessionId,
+      __restartResumeSessionUuid: args.__restartResumeSessionUuid,
       ...(args.__oneShotCli ? { __oneShotCli: true } : {}),
     };
+  }
+
+  function admitRestartReservedProvision(args: ProvisionDeviceArgs, deviceId?: string): void {
+    const start = { ...provisionSessionArgs(args), deviceId };
+    admitRestartReservedStart(start);
+    args.__restartResumeSessionUuid ??= start.__restartResumeSessionUuid;
+    args.__restartResumeTargets ??= start.__restartResumeTargets;
   }
 
   /**
@@ -1916,6 +1929,7 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
           ? serverConfig.getRunnerReadinessTimeoutMs()
           : START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
       );
+      admitRestartReservedProvision(args, provisioned.device.deviceId);
       boot = await bootService.boot({
         operationName: "provisionDevice",
         platform: args.device.platform,
@@ -2218,6 +2232,16 @@ export function createProvisionDeviceHandlers(hooks: ProvisioningHooks) {
     const daemonState = DaemonState.getInstance();
     if (!daemonState.isInitialized()) {
       return undefined;
+    }
+    const resumeSessionId = restartResumeSessionForDevice(provisionSessionArgs(args), boot.device);
+    if (resumeSessionId) {
+      return await daemonState
+        .getDevicePool()
+        .reserveRestartRecoveryReadiness(
+          boot.device,
+          boot.sourceImage?.name ?? boot.device.name,
+          resumeSessionId,
+        );
     }
     // Reserving may reboot the device during readiness recovery, and the
     // readiness that follows resets the shared per-device CtrlProxy manager and

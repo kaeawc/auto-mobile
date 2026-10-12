@@ -31,7 +31,7 @@ export class InputDeviceOwnedError extends ActionableError {
   /**
    * False when a session holds the device: the holder keeps it until it releases it, so the same
    * call cannot succeed as-is. True, with `retryAfterMs`, only for a device another request is
-   * still preparing (#11651), which ends by itself.
+   * still preparing (#11651), or held for bounded restart recovery (#11902).
    */
   readonly retryable: boolean;
   declare readonly retryAfterMs?: number;
@@ -113,6 +113,24 @@ export function deviceAssignedToOtherSessionError(
     requesterSessionUuid,
     undefined,
     `Device '${deviceId}' is already assigned to session ${holderSessionUuid}`,
+  );
+}
+
+/** Keep held-device wording while explaining the bounded restart-recovery refusal. */
+export function deviceReservedForRestartRecoveryError(
+  deviceId: string,
+  holderSessionUuid: string,
+  retryAfterMs: number,
+): InputDeviceOwnedError {
+  return new InputDeviceOwnedError(
+    "acquire",
+    deviceId,
+    undefined,
+    undefined,
+    `Device '${deviceId}' is already assigned to session ${holderSessionUuid}; ` +
+      `it is reserved for that session's device-restart recovery. Retry in ${retryAfterMs}ms, ` +
+      "or acquire another device.",
+    retryAfterMs,
   );
 }
 

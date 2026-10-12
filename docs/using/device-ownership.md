@@ -407,11 +407,21 @@ daemon finishes it before rehydrating, so a released UUID is never revived.
 
 A device-restart handoff reserves the recorded platform and stable device identity for
 its session throughout the recovery window, even while the device is absent and no
-call is waiting. Other sessions' selectors skip it and binding by id is refused;
-reads remain available. The hold ends on successful recovery, any terminal session
+call is waiting. Other sessions' start selectors skip both its stopped image and its
+running device. An exact start by `avdName`, `deviceId`, or iOS UDID is refused before
+boot or preparation, with a retry hint for the remaining hold; it does not stop a
+running reserved device. A `startDevice.name` substring selector skips reserved targets
+owned by other sessions; its owner resumes only when the selected device is that target.
+Binding rechecks the reservation if it changed during startup.
+The reserving session's own start can boot the device and resume the same session UUID.
+Ownership comes from its routing session (including labels resolved through live base
+state) or the MCP connection that owned it at handoff. An anonymous or one-shot CLI
+caller without that routing session cannot claim the hold. Reads remain available.
+The hold ends on successful recovery, any terminal session
 release, the three-minute window ending, or daemon shutdown. An idle expiry inside the
-window ends the hold without another call; tool activity extends that deadline, and a
-call in flight retains the hold through the recovery window. `killDevice` and `deleteDevice`
+window ends the hold without another call. Tool activity extends only the idle deadline;
+the hold never outlasts the fixed three-minute window from device loss. A call in flight
+can retain the hold only within that window. `killDevice` and `deleteDevice`
 drop the device-restart hold only for their admitted routing session on Android and iOS;
 another session's stop (even with `force: true`) or a sessionless stop leaves it in place.
 A base/label match requires live label state, so a label requester whose base was handed

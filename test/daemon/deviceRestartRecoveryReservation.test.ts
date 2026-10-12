@@ -909,6 +909,29 @@ describe("device restart reserves the entire recovery window", () => {
     );
     expect(notifications).toBe(1);
   });
+  test("start admission reads the hold without reserving readiness or changing its deadline", async () => {
+    await handoff();
+    const held = internals.rehydrationReservations.get(HOLDER);
+    await advance(12_345);
+    expect(pool.restartReservationForStart("ios", [SIM.deviceId], {})).toMatchObject({
+      sessionUuid: HOLDER,
+      owned: false,
+      deviceId: SIM.deviceId,
+      retryAfterMs: 107_655,
+    });
+    expect(
+      pool.restartReservationForStart("ios", [SIM.deviceId], { sessionUuid: HOLDER })?.owned,
+    ).toBe(true);
+    expect(pool.isReservedForReadiness(SIM.deviceId)).toBe(false);
+    expect(internals.rehydrationReservations.get(HOLDER)).toBe(held);
+  });
+  test("managed slot priority applies to start admission even after a hold was made", async () => {
+    await setup([SIM], true);
+    await handoff();
+    managed = true;
+    expect(pool.restartReservationForStart("ios", [SIM.deviceId], {})).toBeUndefined();
+    expect(internals.rehydrationReservations.get(HOLDER)?.restartHandoff).toBe(true);
+  });
   test("shutdown releases once and cancels the timer", async () => {
     await setup();
     await handoff();

@@ -51,6 +51,9 @@ import type {
   StartDeviceArgs,
 } from "./deviceTools";
 import type { createStartDeviceHandlers } from "./deviceToolsStartDevice";
+import { admitRestartReservedStart } from "./deviceToolsStartDevice";
+import { lifecycleRequester } from "./lifecycleDeviceOwnership";
+import { TerminalSessionError } from "../daemon/sessionManager";
 import {
   resolveTransportDeadlineMs,
   resolveLiveTransportDeadlineGetter,
@@ -464,6 +467,7 @@ async function prepareDevice(
   perf.serial(budgets.operationName);
   const deps = getDeviceToolsDependencies();
   const autolockEnabled = captureAutolockPolicy(deps.env);
+  admitRestartReservedStart(args);
   const deviceUtils = deps.deviceManagerFactory();
   const deviceMatcher = deps.deviceMatcherFactory();
   const bootDeadlineMs = Math.min(
@@ -554,6 +558,9 @@ async function prepareDevice(
       signal?.throwIfAborted();
     }
     if (error instanceof ActionableError) {
+      throw error;
+    }
+    if (error instanceof TerminalSessionError) {
       throw error;
     }
     throw toActionableError(error, `Failed to start ${args.platform} device`);
@@ -667,6 +674,7 @@ async function getAndroidHandler(
         preferRunning: true,
         createIfMissing: false,
         __mcpSessionId: mcpSessionId,
+        __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
         ...oneShotCli,
       }
     : {
@@ -676,6 +684,7 @@ async function getAndroidHandler(
         preferRunning: true,
         createIfMissing: false,
         __mcpSessionId: mcpSessionId,
+        __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
         ...oneShotCli,
       };
   return await runWithAcquisitionDeadline(
@@ -743,6 +752,7 @@ async function getAppleHandler(
           ...(presentationOrder !== undefined ? { presentationOrder } : {}),
           createIfMissing: false,
           __mcpSessionId: typeof __mcpSessionId === "string" ? __mcpSessionId : undefined,
+          __requesterSessionUuid: lifecycleRequester(rawArgs).sessionUuid,
           ...oneShotCliMarker(rawArgs),
         },
         {

@@ -65,13 +65,14 @@ export function createIosVisibleTapContext(
 
 function contextTargetNode(
   nodes: readonly SearchableEntry[],
-  context: IosVisibleTapContext,
+  context: IosVisibleTapContext | undefined,
   element: Element,
   requireElement = true,
 ): SearchableEntry | undefined {
   const source = getHierarchyNodeSource(element);
   return (
-    (source && context.bySource.get(source)) ||
+    (source &&
+      (context ? context.bySource.get(source) : nodes.find((node) => node.source === source))) ||
     nodes.find(
       (node) =>
         (!requireElement || node.element) &&
@@ -90,15 +91,21 @@ export function iosVisibleTapArea({
   target,
   nodes,
   context,
+  targetNode,
 }: {
   bounds: ElementBounds;
   matched: Element;
   target: Element;
   nodes: readonly SearchableEntry[];
   context?: IosVisibleTapContext;
+  targetNode?: SearchableEntry;
 }): ElementBounds | null {
   if (!context) {
-    return bounds;
+    return clipIosTapBoundsToScrollAncestors(
+      nodes,
+      targetNode ?? contextTargetNode(nodes, context, target),
+      bounds,
+    );
   }
   const chromeTarget =
     contextTargetNode(nodes, context, matched, false) ??

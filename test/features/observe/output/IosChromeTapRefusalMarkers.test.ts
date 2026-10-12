@@ -20,7 +20,7 @@ import {
   resolveIosOwnedTapPoint,
 } from "../../../../src/features/action/iosTapTargetOwnership";
 import * as iosTapTargetOwnership from "../../../../src/features/action/iosTapTargetOwnership";
-import type { ObserveResult, SkeletonElement } from "../../../../src/models";
+import type { ObserveResult, SkeletonElement, ViewHierarchyResult } from "../../../../src/models";
 import { DEFAULT_VISION_CONFIG } from "../../../../src/vision";
 import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { FakeTapStrategy } from "../../../fakes/FakeTapStrategy";
@@ -36,6 +36,29 @@ const capture = JSON.parse(
 ) as ObserveResult;
 
 const elements = new DefaultObserveElementCollector().collect(capture.viewHierarchy!, "ios")!;
+
+const rawHierarchy = JSON.parse(
+  readFileSync(
+    join(import.meta.dir, "../../../fixtures/ios-duo/issue8379-demos-raw-hierarchy.json"),
+    "utf8",
+  ),
+) as ViewHierarchyResult;
+const rawCapture = { viewHierarchy: rawHierarchy };
+const rawElements = new DefaultObserveElementCollector().collect(rawCapture.viewHierarchy, "ios")!;
+const keyboardCapture = JSON.parse(
+  readFileSync(
+    join(
+      import.meta.dir,
+      "../../../fixtures/ios/nested-selection/cart-a-item-44-quantity-focused.json",
+    ),
+    "utf8",
+  ),
+) as ObserveResult;
+const keyboardElements = new DefaultObserveElementCollector().collect(
+  keyboardCapture.viewHierarchy!,
+  "ios",
+)!;
+const keyboardSource = { ...keyboardCapture, elements: keyboardElements };
 
 const nodes = getSearchableEntries(elements)!;
 const context = createIosVisibleTapContext(nodes, capture.screenSize!, capture.viewHierarchy);
@@ -159,6 +182,59 @@ function expectCapturedMarkers(projection: {
 
 test("bar-covered rows and off-screen images are kept occluded, while neighbours and chrome controls stay actionable", () => {
   expectCapturedMarkers(marked());
+});
+
+test.each([
+  { name: "missing", screen: undefined },
+  { name: "zero-sized", screen: { width: 0, height: 0 } },
+])("raw capture preserves scroll-clipped cpu.fill with a $name screen", ({ screen }) => {
+  const output = projectSkeleton(rawElements, screen, undefined, {
+    ios: true,
+    iosHierarchy: rawCapture.viewHierarchy,
+  });
+  const cpu = (row: SkeletonElement) =>
+    row.elementId === "cpu.fill" && row.bounds.join(",") === "46,676,74,704";
+  expect(output.skeleton.find(cpu)).toBeUndefined();
+  const row = output.context.find(cpu);
+  expect(row?.label).toBe("Cpu Chip, Filled");
+  expect(row?.occluded).toBe(true);
+  expect(row?.affordances).toEqual([]);
+});
+
+test.each([
+  { name: "missing", screen: undefined },
+  { name: "zero-sized", screen: { width: 0, height: 0 } },
+])("iPad scroll clipping and exposed neighbour survive a $name screen", ({ screen }) => {
+  const output = projectSkeleton(elements, screen, undefined, {
+    ios: true,
+    iosHierarchy: capture.viewHierarchy,
+  });
+  const biometrics = (row: SkeletonElement) => row.bounds.join(",") === "20,-76,814,2";
+  expect(output.skeleton.find(biometrics)).toBeUndefined();
+  const clipped = output.context.find(
+    (row) => biometrics(row) && row.label === "Biometrics, Test biometric override injection",
+  );
+  expect(clipped?.label).toBe("Biometrics, Test biometric override injection");
+  expect(clipped?.occluded).toBe(true);
+  expect(clipped?.affordances).toEqual([]);
+  const neighbour = output.skeleton.find((row) => row.bounds.join(",") === "20,97,814,138");
+  expect(neighbour?.affordances).toContain("tap");
+  expect(neighbour?.occluded).toBeUndefined();
+});
+
+test("production keyboard cover excludes the off-screen remainder of AdditionalDimmingOverlay", () => {
+  const output = projectSanitizedObserveSkeleton(keyboardSource, keyboardSource);
+  const overlay = (row: SkeletonElement) =>
+    row.elementId === "AdditionalDimmingOverlay" && row.bounds.join(",") === "-120,601,522,851";
+  expect(output.skeleton?.find(overlay)).toBeUndefined();
+  const covered = output.context?.find(overlay);
+  expect(covered?.occluded).toBe(true);
+  expect(covered?.affordances).toEqual([]);
+  const neighbour = output.skeleton?.find(
+    (row) => row.label === "item_47 qty" && row.bounds.join(",") === "12,535,296,569",
+  );
+  expect(neighbour?.affordances).toContain("tap");
+  expect(neighbour?.occluded).toBeUndefined();
 });
 
 test("production skeleton threads the captured hierarchy and preserves the same markers and neighbours", () => {

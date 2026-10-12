@@ -1529,6 +1529,8 @@ function markAppRowsCoveredByIme(
   kept: SkeletonAccumulator[],
   occluder: ImeOccluder | undefined,
   measured?: ImeOccluder,
+  screen?: ObserveResult["screenSize"],
+  ios = false,
 ): void {
   if (!occluder) {
     return;
@@ -1541,7 +1543,8 @@ function markAppRowsCoveredByIme(
       measured && isAssistantBarMember(acc.provenance, occluder)
         ? [occluder.bounds[0], measured.bounds[1], occluder.bounds[2], occluder.bounds[3]]
         : occluder.bounds;
-    if (tapPointOutsideIme(acc.bounds, cover) !== null) {
+    const bounds = ios && screen ? clipRectToScreen(acc.bounds, screen) : acc.bounds;
+    if (bounds && tapPointOutsideIme(bounds, cover) !== null) {
       continue;
     }
     // Every advertised action on a fully covered row requires a coordinate or
@@ -1634,6 +1637,7 @@ function iosRowRefusedByTap(
     target: acc.target!,
     nodes,
     context,
+    targetNode: target,
   });
   if (!visibleBounds) {
     return true;
@@ -1684,7 +1688,13 @@ export function projectSkeleton(
   const occluder = ime ? getImeOccluder(elements) : undefined;
   // A parked iOS keyboard is neither a covering rectangle nor a reportable keyboard.
   const iosIme = resolveIosImeState(ime, occluder, viewport);
-  markAppRowsCoveredByIme(kept, coveringImeOccluder(ime, occluder, iosIme), occluder);
+  markAppRowsCoveredByIme(
+    kept,
+    coveringImeOccluder(ime, occluder, iosIme),
+    occluder,
+    viewport,
+    options?.ios,
+  );
   if (options?.ios) {
     markIosRowsRefusedByTap(kept, elements, viewport, options.iosHierarchy);
   }

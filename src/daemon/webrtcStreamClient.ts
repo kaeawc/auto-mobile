@@ -3,6 +3,13 @@ import { defaultTimer } from "../utils/SystemTimer";
 import type { Timer } from "../utils/SystemTimer";
 import { getSocketPath } from "./socketServer/index";
 import { WEBRTC_STREAM_SOCKET_CONFIG } from "./daemonFiles";
+import { ActionableError } from "../models/ActionableError";
+import {
+  DAEMON_ONESHOT_CLIENT_MAX_FRAME_BYTES,
+  DaemonFrameTooLargeError,
+  LineFramer,
+} from "./socketServer/LineFramer";
+import { webRtcStreamSocketResponseSchema } from "./webrtcStreamSocketTypes";
 import type {
   WebRtcStreamSocketRequest,
   WebRtcStreamSocketResponse,
@@ -15,6 +22,7 @@ interface WebRtcStreamClientOptions {
   timeoutMs?: number;
   socketFactory?: () => Socket;
   timer?: Timer;
+  maxFrameBytes?: number;
 }
 
 /**
@@ -32,7 +40,6 @@ export async function sendWebRtcStreamRequest(
 
   return new Promise<WebRtcStreamSocketResponse>((resolve, reject) => {
     const socket = options.socketFactory?.() ?? new Socket();
-    let buffer = "";
     let settled = false;
 
     const finish = (fn: () => void) => {
@@ -50,25 +57,32 @@ export async function sendWebRtcStreamRequest(
     }, timeoutMs);
 
     socket.on("error", (error) => finish(() => reject(error)));
-    socket.on("data", (chunk) => {
-      buffer += chunk.toString();
-      while (true) {
-        const newlineIndex = buffer.indexOf("\n");
-        if (newlineIndex === -1) {
+    const maxFrameBytes = options.maxFrameBytes ?? DAEMON_ONESHOT_CLIENT_MAX_FRAME_BYTES;
+    const framer = new LineFramer(maxFrameBytes, {
+      onOverflow: () => finish(() => reject(new DaemonFrameTooLargeError(maxFrameBytes))),
+      onLine: (line) => {
+        if (settled || !line.trim()) {
           return;
         }
-        const line = buffer.slice(0, newlineIndex).trim();
-        buffer = buffer.slice(newlineIndex + 1);
-        if (!line) {
-          continue;
-        }
+        let frame: unknown;
         try {
-          const response = JSON.parse(line) as WebRtcStreamSocketResponse;
-          finish(() => resolve(response));
+          frame = JSON.parse(line);
         } catch (error) {
+          // A malformed peer answer is terminal; preserve the existing parse error contract.
           finish(() => reject(error instanceof Error ? error : new Error(String(error))));
+          return;
         }
-        return;
+        const response = webRtcStreamSocketResponseSchema.safeParse(frame);
+        if (!response.success) {
+          finish(() => reject(new ActionableError("Invalid WebRTC stream response envelope")));
+          return;
+        }
+        finish(() => resolve(response.data));
+      },
+    });
+    socket.on("data", (chunk: Buffer) => {
+      if (!settled) {
+        framer.push(chunk);
       }
     });
 

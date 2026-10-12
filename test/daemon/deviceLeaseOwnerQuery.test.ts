@@ -7,6 +7,7 @@ import {
   DEVICE_LEASE_RELINQUISH_TIMEOUT_MS,
   DaemonDeviceLeaseOwnerProbe,
   rawDaemonSocketExchange,
+  createRawDaemonSocketExchange,
   type DaemonSocketExchange,
   type DaemonSocketExchangeOutcome,
 } from "../../src/daemon/deviceLeaseOwnerQuery";
@@ -17,6 +18,7 @@ import {
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeSocket } from "../fakes/FakeNetServer";
 
 function probeAnswering(outcome: DaemonSocketExchangeOutcome) {
   const frames: string[] = [];
@@ -145,5 +147,56 @@ describe("DaemonDeviceLeaseOwnerProbe (#10497)", () => {
       kind: "response",
       line: '{"success":true}',
     });
+  });
+});
+
+describe("bounded raw owner exchange", () => {
+  test("oversized owner answer is unsupported rather than unreachable", async () => {
+    const socket = new FakeSocket();
+    const timer = new FakeTimer();
+    const exchange = createRawDaemonSocketExchange({
+      socketFactory: () => socket,
+      socketExists: () => true,
+      maxFrameBytes: 64,
+    });
+    const raw = exchange("/fake/owner.sock", "{}\n", 1000, timer);
+    socket.simulateData("x".repeat(65));
+    expect(socket.destroyed).toBe(true);
+    expect(await raw).toEqual({ kind: "oversized", limitBytes: 64 });
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    const next = new FakeSocket();
+    const probe = new DaemonDeviceLeaseOwnerProbe(
+      createRawDaemonSocketExchange({
+        socketFactory: () => next,
+        socketExists: () => true,
+        maxFrameBytes: 64,
+      }),
+      timer,
+      new CountingIdGenerator("q"),
+    );
+    const answer = probe.query("/fake/owner.sock", "device");
+    next.simulateData("x".repeat(65));
+    expect(await answer).toEqual({ kind: "unsupported", detail: "response exceeded 64 bytes" });
+    expect(next.destroyed).toBe(true);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("raw owner exchange retains a split UTF-8 first line and ignores later lines", async () => {
+    const socket = new FakeSocket();
+    const timer = new FakeTimer();
+    const exchange = createRawDaemonSocketExchange({
+      socketFactory: () => socket,
+      socketExists: () => true,
+      maxFrameBytes: 64,
+    });
+    const result = exchange("/fake/owner.sock", "{}\n", 1000, timer);
+    const bytes = Buffer.from('{"extra":"😀"}\nignored\n');
+    const split = bytes.indexOf(Buffer.from("😀")) + 1;
+    socket.feed(bytes.subarray(0, split));
+    expect(timer.getPendingTimeoutCount()).toBe(1);
+    socket.feed(bytes.subarray(split));
+    expect(await result).toEqual({ kind: "response", line: '{"extra":"😀"}' });
+    expect(socket.destroyed).toBe(true);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 });

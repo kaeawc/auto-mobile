@@ -1,3 +1,5 @@
+import { ActionableError } from "../../models/ActionableError";
+
 const NEWLINE = 0x0a;
 
 /*
@@ -19,6 +21,12 @@ const NEWLINE = 0x0a;
  * | DeviceSnapshot, VideoRecording (config)    | 1 MiB   | `config/set` of scalar settings (<1 KB)                            |
  * | DeviceDataStream, FailuresPush,            | 1 MiB   | subscribe / unsubscribe / pong / cadence / storage-subscribe       |
  * | PerformancePush, TelemetryPush (push)      |         | commands with string ids and filters (<1 KB)                       |
+ *
+ * | Client inbound                           | Limit   | Largest legitimate answer                                         |
+ * | ---------------------------------------- | ------- | ----------------------------------------------------------------- |
+ * | DaemonClient (`client.ts`)                | 256 MiB | app/shared-storage reads (~86 MiB base64), video (~134 MiB default), screenshots/hierarchies (a few MiB) |
+ * | Lease owner (`deviceLeaseOwnerQuery.ts`)  | 1 MiB   | scalar lease status/relinquish envelope (<1 KB)                     |
+ * | WebRTC control (`webrtcStreamClient.ts`)  | 1 MiB   | stream descriptors/ICE settings (a few KB per device; no media)     |
  */
 
 /**
@@ -37,6 +45,33 @@ export const CONTROL_SOCKET_MAX_FRAME_BYTES = 256 * 1024 * 1024;
  * this overrides `maxFrameBytes` with its own justified constant.
  */
 export const AUX_SOCKET_MAX_FRAME_BYTES = 1024 * 1024;
+
+/**
+ * Symmetric with the control socket's 256 MiB limit. App-file reads in
+ * `src/server/appFileService.ts` cap raw files at 64 MiB (ANDROID_APP_FILE_MAX_BUFFER
+ * and the stats.size check); `src/server/sharedStorageReadService.ts` also uses
+ * SHARED_STORAGE_MAX_BUFFER = 64 MiB (~86 MiB base64). Whole-file video blobs in
+ * `src/server/videoRecordingResources.ts` use a default 100 MiB archive budget in
+ * `src/features/video/VideoRecorderService.ts` (~134 MiB base64). Screenshots are
+ * uncapped but ordinarily a few MiB, as are observe hierarchies. The limit admits
+ * these ordinary answers while bounding oversized/configured-larger output.
+ */
+export const DAEMON_CLIENT_MAX_FRAME_BYTES = CONTROL_SOCKET_MAX_FRAME_BYTES;
+
+/**
+ * Lease-owner status/relinquish answers contain scalar fields (<1 KB);
+ * `webrtcStreamSocketServer.ts` answers with descriptors/ICE settings (a few KB
+ * per device), never video bytes. The auxiliary 1 MiB budget leaves ample room.
+ */
+export const DAEMON_ONESHOT_CLIENT_MAX_FRAME_BYTES = AUX_SOCKET_MAX_FRAME_BYTES;
+
+/** Client-local transport failure: retrying could repeat an already executed tool. */
+export class DaemonFrameTooLargeError extends ActionableError {
+  constructor(readonly limitBytes: number) {
+    super(`Daemon response frame exceeded ${limitBytes} bytes; the daemon connection was closed.`);
+    this.name = "DaemonFrameTooLargeError";
+  }
+}
 
 /** `acknowledge` carries an id list the protocol does not bound; see the table above. */
 export const FAILURES_STREAM_MAX_FRAME_BYTES = 8 * 1024 * 1024;

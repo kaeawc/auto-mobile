@@ -13,6 +13,7 @@ import {
   isSlotJournalPhaseOpen,
   journalCreationPlatform,
   journalNewStableId,
+  type FreeSlotDeviceRecord,
   type ManagedDeviceEntry,
   type SlotJournalEntry,
   type SlotPlatform,
@@ -73,12 +74,14 @@ export interface ManagedSlotResourceBudget {
 /** Ledger reads from the host-wide persistent registry. */
 export type ManagedSlotResourceRegistry = Pick<
   SlotRegistry,
-  "snapshotManagedDevices" | "listOpenSlotJournal"
+  "snapshotManagedDevices" | "listOpenSlotJournal" | "listFreeDevices"
 >;
 
 interface LedgerInput {
   openJournal: readonly SlotJournalEntry[];
   managed: readonly ManagedDeviceEntry[];
+  /** Earlier free rows missing from the snapshot remain conservatively charged for this read. */
+  freeBefore?: readonly FreeSlotDeviceRecord[];
 }
 
 interface ResourceCharge {
@@ -88,6 +91,31 @@ interface ResourceCharge {
 
 function resourceKey(platform: SlotPlatform, stableDeviceId: string): string {
   return JSON.stringify([platform, stableDeviceId]);
+}
+
+function creationJournalFor(
+  device: ManagedDeviceEntry,
+  journal: readonly SlotJournalEntry[],
+): SlotJournalEntry | undefined {
+  return journal.find(
+    (entry) =>
+      journalCreationPlatform(entry) === device.platform &&
+      journalNewStableId(entry) === device.stableDeviceId,
+  );
+}
+
+function chargeEarlierFreeRows(
+  charges: ResourceCharge[],
+  seen: Set<string>,
+  rows: readonly FreeSlotDeviceRecord[],
+): void {
+  for (const row of rows) {
+    const key = resourceKey(row.platform, row.stableDeviceId);
+    if (!seen.has(key)) {
+      charges.push({ category: "cached" });
+      seen.add(key);
+    }
+  }
 }
 
 function categoryOf(
@@ -124,12 +152,9 @@ function resourceCharges(input: LedgerInput): ResourceCharge[] {
   const seen = new Set(distinct.keys());
   const charges: ResourceCharge[] = [...distinct.values()].map((device) => ({
     category: categoryOf(device, deleting),
-    journal: journal.find(
-      (entry) =>
-        journalCreationPlatform(entry) === device.platform &&
-        journalNewStableId(entry) === device.stableDeviceId,
-    ),
+    journal: creationJournalFor(device, journal),
   }));
+  chargeEarlierFreeRows(charges, seen, input.freeBefore ?? []);
   for (const entry of journal) {
     if (entry.kind === "release") {
       continue;
@@ -180,6 +205,34 @@ function usageOf(charges: readonly ResourceCharge[]): ManagedSlotResourceUsage {
 /** Pure accounting: deduplicate devices and keep unresolved journal commitments charged. */
 export function computeManagedSlotResourceUsage(input: LedgerInput): ManagedSlotResourceUsage {
   return usageOf(resourceCharges(input));
+}
+
+async function readResourceCharges(
+  registry: ManagedSlotResourceRegistry,
+): Promise<ResourceCharge[]> {
+  // Journal first: a reservation committing between these reads is seen as its bound device.
+  const firstJournal = await registry.listOpenSlotJournal();
+  const freeBefore = await registry.listFreeDevices();
+  const managed = await registry.snapshotManagedDevices();
+  // Pre-reading free rows covers adoption during the snapshot, with a one-read over-count if
+  // a row vanishes. A device BOTH freed (scope invalidation completes) and adopted between
+  // this free read and the snapshot's own free read can still be missed. The wiring change
+  // must require the registry snapshot to use one read transaction to close that residual.
+  const unmatched = managed.some(
+    (device) =>
+      device.holder === "slot" &&
+      device.scopeState === null &&
+      creationJournalFor(device, firstJournal) === undefined,
+  );
+  let openJournal = firstJournal;
+  if (unmatched) {
+    const laterJournal = await registry.listOpenSlotJournal();
+    // Retain first-read commitments; the later version wins for the same entry id.
+    openJournal = [
+      ...new Map([...firstJournal, ...laterJournal].map((entry) => [entry.id, entry])).values(),
+    ];
+  }
+  return resourceCharges({ openJournal, freeBefore, managed });
 }
 
 function rankedCount(charges: readonly ResourceCharge[], mine: number): number {
@@ -241,14 +294,11 @@ export class RegistryManagedSlotResourceBudget implements ManagedSlotResourceBud
   ): Promise<ManagedSlotResourceAdmission> {
     const evicted: ManagedSlotEvictionCandidate[] = [];
     const evictionFailures: ExhaustedAdmission["evictionFailures"] = [];
-    const failed = new Set<string>();
+    const attempted = new Set<string>();
     let remaining: number | undefined;
     while (true) {
       request.signal?.throwIfAborted();
-      // Journal first: a reservation committing between these reads is seen as its bound device.
-      const openJournal = await registry.listOpenSlotJournal();
-      const managed = await registry.snapshotManagedDevices();
-      const charges = resourceCharges({ openJournal, managed });
+      const charges = await readResourceCharges(registry);
       const usage = usageOf(charges);
       if (rankedCount(charges, request.journalEntryId) <= limit) {
         return { kind: "admitted", enforced: true, limit, usage, evicted };
@@ -270,19 +320,19 @@ export class RegistryManagedSlotResourceBudget implements ManagedSlotResourceBud
       // One attempt per initially observed free row, then one final read/selection iteration.
       remaining ??= selection.candidates.length + selection.skipped.length;
       const candidate = selection.candidates.find(
-        (device) => !failed.has(resourceKey(device.platform, device.stableDeviceId)),
+        (device) => !attempted.has(resourceKey(device.platform, device.stableDeviceId)),
       );
       if (!candidate || remaining === 0) {
         return exhausted;
       }
       remaining -= 1;
       request.signal?.throwIfAborted();
+      attempted.add(resourceKey(candidate.platform, candidate.stableDeviceId));
       const result = await this.evict(candidate, request.signal);
       if (result.kind === "absent") {
         evicted.push(candidate);
       }
       if (result.kind === "failed") {
-        failed.add(resourceKey(candidate.platform, candidate.stableDeviceId));
         evictionFailures.push({
           platform: candidate.platform,
           stableDeviceId: candidate.stableDeviceId,

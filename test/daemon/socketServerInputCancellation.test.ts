@@ -60,7 +60,8 @@ interface Internals {
   dispatchFencedInput<T>(
     gesture: "Tap" | "Swipe",
     signal: AbortSignal | undefined,
-    send: (onDispatch: () => void) => Promise<T>,
+    timeoutMs: number,
+    send: (fenced: AbortSignal | undefined, onDispatch: () => void) => Promise<T>,
   ): Promise<T>;
 }
 
@@ -268,7 +269,7 @@ test("an input/tap waiting on the device key past its budget is refused instead 
 test("an abort after the frame was written is reported as an indeterminate tap", async () => {
   const controller = new AbortController();
   await expect(
-    internals.dispatchFencedInput("Tap", controller.signal, async (onDispatch) => {
+    internals.dispatchFencedInput("Tap", controller.signal, 1000, async (_fenced, onDispatch) => {
       onDispatch();
       controller.abort();
       throw new Error("Daemon MCP client disconnected");
@@ -280,8 +281,8 @@ test("an abort before the frame was written keeps the original cancellation", as
   const controller = new AbortController();
   const cancelled = new Error("Daemon MCP client disconnected");
   await expect(
-    internals.dispatchFencedInput("Swipe", controller.signal, async () => {
-      controller.abort();
+    internals.dispatchFencedInput("Swipe", controller.signal, 1000, async () => {
+      controller.abort(cancelled);
       throw cancelled;
     }),
   ).rejects.toBe(cancelled);
@@ -290,10 +291,15 @@ test("an abort before the frame was written keeps the original cancellation", as
 test("a dispatched swipe that fails without an abort keeps its own error", async () => {
   const failure = new ActionableError("device offline");
   await expect(
-    internals.dispatchFencedInput("Swipe", new AbortController().signal, async (onDispatch) => {
-      onDispatch();
-      throw failure;
-    }),
+    internals.dispatchFencedInput(
+      "Swipe",
+      new AbortController().signal,
+      1000,
+      async (_fenced, onDispatch) => {
+        onDispatch();
+        throw failure;
+      },
+    ),
   ).rejects.toBe(failure);
 });
 

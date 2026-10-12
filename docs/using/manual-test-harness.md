@@ -24,7 +24,8 @@ protocol or its evidence assertions.
   harness guards `startDevice`, `provisionDevice`, `getAndroid`, and `getApple`;
   `--allow-selector` deliberately bypasses that guard for a selection test.
 - Never pass daemon flags to a stdio proxy: a startup-option mismatch can trigger
-  a daemon restart. Set daemon flags only through `private-daemon.ts start`.
+  a daemon restart. Record daemon flags with `init --daemon-arg`, or add one-off flags through
+  `private-daemon.ts start --`.
 - Never rebuild `dist/` while a batch's daemons run. Build first, then start the
   batch from one explicit entry script.
 
@@ -33,32 +34,106 @@ protocol or its evidence assertions.
 Run these commands from the repository root after building the entry script.
 Choose unused ports, an absolute evidence directory, and a short socket root.
 The examples create a new batch; reuse its manifest for subsequent commands.
+When invoking harness commands from an agent tool call, redirect stdin with
+`< /dev/null` so the tool cannot keep the invocation waiting on its input.
 
 ```bash
 B="$PWD/scratch/manual-batch"
 bun scripts/manual-test/private-daemon.ts init --batch-dir "$B" \
   --count 2 --base-port 3160 --aux-root /tmp/am-manual-batch \
-  --server "$PWD/dist/src/index.js"
+  --server "$PWD/dist/src/index.js" \
+  --daemon-arg --plan-execution-lock-scope --daemon-arg session \
+  --daemon-arg --tool-call-recording \
+  --env NOTE=batch --daemon-env 2:NOTE=second
 bun scripts/manual-test/private-daemon.ts start --batch-dir "$B" -- --debug
 bun scripts/manual-test/private-daemon.ts status --batch-dir "$B"
 bash scripts/manual-test/in-daemon-env.sh --batch-dir "$B" --daemon 1 daemon status
 bun scripts/manual-test/private-daemon.ts stop --batch-dir "$B" --daemon 1
 ```
 
-`init` writes `batch.json` and each `daemonN/env.sh` without starting a process.
-`start` uses the current runtime and owns `--port` and `--strict-port`; it
-refuses a recorded live PID. `status` reports the stored PID, port, socket and
-env file. `stop` targets one manifest daemon. Restart means `stop` followed by
-`start`; the wrapper refuses all `daemon start*` and `daemon restart*` shorthands.
-Use `env --batch-dir "$B" --daemon 1` to print the env file path, or source
-`"$B/daemon1/env.sh"` before using `frame`/`aux` CLIs directly.
+`init` writes `batch.json`, each `daemonN/env.sh`, and executable generated
+`bin/amN|proxyN|frameN|auxN` wrappers without starting a process. `amN daemon …`
+uses the selected private daemon; `amN cli …` performs a one-shot product CLI
+call with `--cli`. The private socket and PID path variables sourced from
+`env.sh` let the CLI find the selected private daemon. `proxyN`, `frameN` and
+`auxN` select that daemon's harness client. `wrappers --batch-dir "$B"` regenerates the wrappers alone.
 
-Every client requires all initialized private path variables and refuses host
-defaults, canonical path aliases and resident socket/PID/lock basenames. Inherited
-legacy `AUTO_MOBILE_*`, DB-file and WebRTC-socket overrides are stripped.
+`--env K=V` is repeatable and applies to all daemons; `--daemon-env N:K=V`
+overrides it for daemon N. `--daemon-arg TOKEN` records each daemon argv token;
+`N:TOKEN` selects a daemon. For example, `--daemon-arg
+--plan-execution-lock-scope --daemon-arg session --daemon-arg
+--tool-call-recording` records both options. `--daemon-arg=--debug` is also
+accepted. Restarts reuse recorded env and argv; `start -- …` adds one-off argv.
+The harness owns `--port` and `--strict-port`.
 
-Each daemon isolates its data, logs, database, coordination directory, auxiliary
-sockets, control socket, PID, lock and launch log. The daemons still share the
+`start` refuses a recorded live PID, then mirrors the daemon's JSON PID to
+`daemonN/pid.txt`. `stop` targets one manifest daemon and removes `pid.txt` on
+success; a failed stop preserves it. `status` reports JSON/plain PID agreement
+(`pidTxt` is `ok`, `missing`, or `stale`), process liveness, socket response,
+port and env file. `status --devices` appends host inventories and the daemon's
+own view, with `daemonDevicesMethod: "daemon/availableDevices"`. Status is
+read-only except for that method's inventory ownership/discovery refresh; it
+boots or claims no device. Android inventory reads `host:devices-l` over the
+local ADB server socket without launching `adb`, so it can neither start nor
+restart a server. It is skipped when no local server is listening. Each
+diagnostic failure is returned as evidence.
+
+Restart means `stop` followed by `start`; wrappers refuse `daemon start*` and
+`daemon restart*` shorthands. `env --batch-dir "$B" --daemon 1` prints an env
+file path. `in-daemon-env.sh --cd /absolute/existing/dir` opts into changing cwd;
+otherwise it preserves the caller's cwd. Its `cli` shorthand matches `amN cli`.
+
+```bash
+"$B/bin/am1" cli listDevices < /dev/null
+"$B/bin/frame1" session-info your-session-uuid < /dev/null
+bash scripts/manual-test/in-daemon-env.sh --batch-dir "$B" --daemon 1 \
+  --cd "$PWD" cli listDevices < /dev/null
+bun scripts/manual-test/private-daemon.ts status --batch-dir "$B" --devices < /dev/null
+bun scripts/manual-test/private-daemon.ts wrappers --batch-dir "$B" < /dev/null
+```
+
+Every client requires all initialized `state` variables and refuses host
+defaults, canonical aliases and resident socket/PID/lock basenames. The audited
+path policy is exhaustive for configurable product state destinations:
+
+| Kind     | Variables                                                                                                                                                                  | Harness policy                                                                                                                                                                                                                                                    |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `state`  | `AUTOMOBILE_DATA_DIR`, `AUTOMOBILE_LOG_DIR`, `AUTOMOBILE_DB_DIR`, `AUTOMOBILE_COORDINATION_DIR`                                                                            | Required per-daemon defaults under the evidence root.                                                                                                                                                                                                             |
+| `state`  | `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR`                                                                                                                                   | Batch shared default, or per-daemon with `--split-adb-coordination`.                                                                                                                                                                                              |
+| `state`  | `AUTOMOBILE_AUX_SOCKET_DIR`, `AUTOMOBILE_DAEMON_SOCKET_PATH`                                                                                                               | Short auxiliary root and `d.sock`.                                                                                                                                                                                                                                |
+| `state`  | `AUTOMOBILE_DAEMON_PID_FILE_PATH`, `AUTOMOBILE_DAEMON_LOCK_FILE_PATH`, `AUTOMOBILE_DAEMON_LAUNCH_LOG_PATH`                                                                 | Per-daemon PID, lock and launch log.                                                                                                                                                                                                                              |
+| `state`  | `AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR`, `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA`                                                                                            | Private path selection only; optional private overrides.                                                                                                                                                                                                          |
+| `opt-in` | `AUTOMOBILE_IOS_CTRLPROXY_RECORD_DIR`, `AUTOMOBILE_PLAN_HEALTH_DIR`, `AUTOMOBILE_TOOL_OUTPUTS_DIR`, `AUTOMOBILE_STARTUP_BENCHMARK_OUTPUT`                                  | Unset by default; strip inherited values in both spellings. Explicit `--env`/`--daemon-env` requires an absolute private path. These enable exchange capture, plan health files/results, tool-output artifacts, or benchmark output when benchmarking is enabled. |
+| `unset`  | `AUTOMOBILE_DB_PATH`, `AUTOMOBILE_WEBRTC_STREAM_SOCKET_PATH`                                                                                                               | Strip competing overrides in both spellings.                                                                                                                                                                                                                      |
+| `input`  | `AUTOMOBILE_CTRL_PROXY_APK_PATH`, `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH`, `AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH`, `AUTOMOBILE_CWEBP_PATH`, `AUTOMOBILE_DWEBP_PATH`          | Caller-selected read-only artifacts/executables; no harness defaults.                                                                                                                                                                                             |
+| `input`  | `AUTOMOBILE_DAEMON_LAUNCH_CWD`, `AUTOMOBILE_IOS_CODE_SIGN_ENTITLEMENTS_PATH`, `AUTOMOBILE_MIGRATIONS_DIR`, `AUTOMOBILE_NETWORK_FILTER_APP_PATH`, `AUTOMOBILE_PROJECT_ROOT` | Caller-selected working directory or build/signing inputs.                                                                                                                                                                                                        |
+| `input`  | `AUTOMOBILE_UNIT_TEST_ISOLATED_DATA_DIR`                                                                                                                                   | Test preload isolation marker, not a state destination.                                                                                                                                                                                                           |
+| `input`  | `AUTOMOBILE_MANAGED_SLOT_CONFIG`                                                                                                                                           | Read-only config, stripped from inherited client environments; use explicit binding/config.                                                                                                                                                                       |
+| `input`  | `AUTOMOBILE_FFMPEG`, `AUTOMOBILE_IOS_WEBRTC_FFMPEG`, `AUTOMOBILE_VIDEO_SERVER_JAR`, `AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER`, `AUTOMOBILE_IOS_PROTOTYPE_AGENT`               | Caller-selected read-only encoder/helper inputs.                                                                                                                                                                                                                  |
+
+Legacy `AUTO_MOBILE_*` values are stripped. `env.sh` explicitly unsets opt-ins
+unless configured, so sourcing it cannot silently enable them. Clients validate
+opt-in paths only when supplied and discard inherited opt-ins; daemon manifest
+overrides are retained on launch. `scripts/manual-test/productPathEnv.ts` is the
+registry, checked exhaustively against product env reads together with its
+sorted non-path list. Harness entry scripts preserve explicit `stderr` sinks.
+File logging before product imports requires an explicit absolute log directory
+outside both home defaults, checked lexically and through existing ancestors'
+realpaths. All other cases force the canonical stderr sink, including invalid
+sink values and data-dir-only environments. Child environments restore every
+harness sink override so private daemons log to their private files.
+
+Control sockets live under the short aux root, normally
+`/tmp/am-mt-<hash>/<N>/d.sock`, **not under the batch directory**. Each daemon
+isolates data, logs, database, coordination, auxiliary sockets, control socket,
+PID, lock, launch log and iOS cache/build paths.
+
+Known uncovered product path: the libwebp cache has no environment override
+(`src/utils/image/webp/WebpBinaryResolver.ts:94`). A private daemon that needs to
+download libwebp would write to `~/.auto-mobile/libwebp`. Supply
+`AUTOMOBILE_CWEBP_PATH` and `AUTOMOBILE_DWEBP_PATH` to avoid that download/cache.
+
+The daemons still share the
 host's adb server, AVD inventory and simulator set. By default the batch uses
 **one shared adb-server coordination directory**: both boot admission and the
 managed-slot registry live there. `init --split-adb-coordination` is only for
@@ -70,7 +145,10 @@ It does not create separate adb servers or make host capacity independent.
 
 The wrapper's `proxy` shorthand runs `proxy-session.ts`. Use a new session
 directory for every `up`. Paths resolve from your current working directory.
-`up` and `serve` require a valid private daemon PID file naming a live process.
+`up` and `serve` require a valid private daemon PID file naming a live process
+**and a responding control socket**, probed with read-only `daemon/capabilities`.
+A recycled PID cannot pass the socket precheck. `status` reports
+`daemonSocketAlive` alongside proxy/driver liveness.
 Run `private-daemon.ts start` first; never launch a proxy to wake a dead daemon.
 
 Omit `--config` for a plain proxy; supply a managed-slot config for a managed
@@ -133,10 +211,19 @@ bash scripts/manual-test/in-daemon-env.sh --batch-dir "$B" --daemon 1 \
 bash scripts/manual-test/in-daemon-env.sh --batch-dir "$B" --daemon 1 \
   frame send input/tap '@scratch/tap-params.json' --mode cancel-after:100
 bash scripts/manual-test/in-daemon-env.sh --batch-dir "$B" --daemon 1 \
-  frame send daemon/heartbeat '{"sessionId":"your-session-uuid"}'
+  frame heartbeat your-session-uuid
 ```
 
-Host/device mutation methods print a notice before sending. Restart and
+`frame session-info <sessionId>` sends `daemon/sessionInfo`; `frame heartbeat
+<sessionId>` sends the external one-shot CLI keeper fields without an ownership
+claim. A heartbeat for a proxy-owned session is rejected by the daemon and
+changes nothing. Both accept common socket/count/deadline flags. A known
+kebab-case method prints a "did you mean" hint and still sends the requested
+method, so protocol refusals remain observable.
+
+Host/device mutation methods print a notice before sending. `daemon/refreshDevices`
+prints an inventory refresh notice: no device is booted or claimed. Read routes
+such as `sessionInfo`, `capabilities` and `ide/status` print no mutation notice. Restart and
 maintenance methods additionally require `--allow-host-mutation`, because they
 can disrupt other agents using the private daemon. A typed refusal is printed
 in full and exits 1. `--socket` must remain absolute and private.
@@ -159,9 +246,36 @@ bash scripts/manual-test/in-daemon-env.sh --batch-dir "$B" --daemon 1 \
 `--hold-ms` defaults to 0, then held sessions are released with the proxy's
 owner token and bounded `releaseExecution` request. `--mode cancel` writes all
 frames and immediately destroys the socket; `cancel-after:<ms>` destroys it
-at the given delay. Cancel modes end managed sessions through owner loss and
+at the given delay. These destroy modes end managed sessions through owner loss and
 stop their heartbeat keeper. Cancellation exits 0 after the deliberate destroy,
 without requiring responses. Send mode awaits every requested response.
+
+`--mode cancel-keep-open[:<ms>]` writes the frames, waits `--cancel-after-ms`
+(default 0), then sends the product's same-connection `daemon/cancelRequest`
+with each request ID. It keeps reading until every original ID has an answer or
+the read window (default 5000 ms) expires, prints timestamped answers and a final
+`{"cancelled":[{"id":"…","answered":true,"success":false,"code":"…"}]}` summary,
+then ends the connection gracefully. Missing answers have `answered:false`.
+Exit 0 means cancellation ran; exit 3 means connection failure.
+
+Repeatable `--then '<method> <params json|@file>'` sends frames sequentially after
+the initial answers on the same connection (send mode only). Every frame has
+the same device-start guard, mutation notice and host-mutation gate. JSON string
+values accept `{{ownSessionId}}` (first acquired session),
+`{{ownSessionId:<slotIndex>}}` (the specified slot), and
+`{{ownLivenessOwnerToken}}` (the keeper's token). Missing bindings or unresolved
+placeholders refuse with exit 2 before user frames are sent. Invalid slot indices
+are caught before acquisition. Automatic release accepts typed missing-session
+or successful `alreadyReleased:true` responses as completed. Send mode exits 0
+only when every frame succeeds, otherwise 1 (3 for timeout/connection).
+
+```bash
+"$B/bin/frame1" send tools/call @scratch/params.json \
+  --mode cancel-keep-open:5000 --cancel-after-ms 100 < /dev/null
+"$B/bin/frame1" send ide/status '{}' --managed-binding configs/manual-slot.json \
+  --then 'daemon/sessionInfo {"sessionId":"{{ownSessionId}}"}' \
+  --then 'daemon/releaseExecution {"sessionId":"{{ownSessionId}}","livenessOwnerToken":"{{ownLivenessOwnerToken}}"}' < /dev/null
+```
 
 ## Auxiliary sockets and observer sessions
 
@@ -170,8 +284,17 @@ The product's WebRTC resolver also supports its socket-path override; initialize
 harness environments clear inherited overrides to keep all sockets private.
 WebRTC requests reuse `sendWebRtcStreamRequest`.
 
-Provide `--session-uuid` for an existing session, or `--observer` for a sessionless
-viewer. Observer mode mints a UUID, registers it on the control socket, heartbeats
+Recording `start`, `stop` and `status` require `--session-uuid`: a device session
+(the owner for start/stop; any live device session may read status). A retained
+stop result can still be fetched with its former owner's UUID. Get `sessionUuid`
+from the proxy's tool response or managed slots printed by `proxy up`/`status`,
+or from `amN daemon active-sessions --json`. Recording refuses `--observer` at
+parse time. The socket is `device-gesture-recording.sock`; the tools are
+`recordToolCalls` and `recordDeviceGestures`, with daemon flag
+`--tool-call-recording`.
+
+For video/WebRTC, provide `--session-uuid` for an existing session, or `--observer`
+for a sessionless viewer. Observer mode mints a UUID, registers it on the control socket, heartbeats
 every 2000 ms by default, injects `sessionUuid`, and releases the observer on exit.
 `--heartbeat-ms` must be below the returned heartbeat timeout. `--observer-name`
 sets the registration's client name. An observer and an explicit session UUID
@@ -181,7 +304,7 @@ and [Recordings](device-ownership.md#recordings) for control restrictions.
 
 ```bash
 bash scripts/manual-test/in-daemon-env.sh --batch-dir "$B" --daemon 1 \
-  aux recording status --observer
+  aux recording status --session-uuid your-session-uuid
 bash scripts/manual-test/in-daemon-env.sh --batch-dir "$B" --daemon 1 \
   aux recording start --device-id your-device-id --platform android \
   --plan-name manual-plan --session-uuid your-session-uuid
@@ -209,3 +332,11 @@ Frame and aux exit codes are 0 for success, 1 for a typed refusal, 2 for usage o
 a private-environment/device-start guard, and 3 for timeout or connection failure.
 Private-daemon and proxy commands retain their own exit codes; inspect their
 full evidence rather than treating exit 0 as device-side proof.
+
+All three client CLIs support `--help`, `-h`, `help` and `<subcommand> --help`
+on stdout with exit 0. Their help lists every accepted command/flag, defaults,
+examples and exit codes. Parse errors go to stderr with a `--help` pointer and
+exit 2. Private-daemon exits 0 on success/status, 2 on usage/guard/I/O failures,
+and propagates the product lifecycle command's exit code. Proxy exits 0 on
+success/status, 1 on a failed/refused response, 2 on usage/guard/wait deadline,
+3 when serve loses its transport and 4 when serve initialization fails.

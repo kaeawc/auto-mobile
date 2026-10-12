@@ -30,6 +30,12 @@ function classifyClearField(
       warning: "iOS clear was not verified: the focused field could not be read.",
     };
   }
+  if (field.value === lastValue) {
+    return {
+      success: true,
+      warning: `The field still holds ${JSON.stringify(field.value)} after the clear was acknowledged and retried; it may be a mask or permanent prefix at its cleared content, or the app may have refused the clear.`,
+    };
+  }
   return field.value === "" ? { success: true } : field.value;
 }
 
@@ -78,21 +84,17 @@ export async function verifyIosClear({
     const result = await clear();
     attempts++;
     if (!result.success) {
-      return result;
+      remaining = result;
+      break;
     }
-    const after = await read(remaining, attempts);
-    if (after === remaining) {
-      return {
-        success: true,
-        warning: `The field still holds ${JSON.stringify(after)} after the clear was acknowledged and retried; it may be a mask or permanent prefix at its cleared content, or the app may have refused the clear.`,
-      };
-    }
-    remaining = after;
+    remaining = await read(remaining, attempts);
   }
-  return typeof remaining === "string"
-    ? {
-        success: false,
-        error: `iOS clear left text in the focused field after ${attempts} attempt(s); remaining value: ${JSON.stringify(remaining)}.`,
-      }
-    : remaining;
+  const result =
+    typeof remaining === "string"
+      ? {
+          success: false,
+          error: `iOS clear left text in the focused field after ${attempts} attempt(s); remaining value: ${JSON.stringify(remaining)}.`,
+        }
+      : remaining;
+  return result.success ? result : { ...result, partialApplication: true };
 }

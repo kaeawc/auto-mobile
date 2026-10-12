@@ -15,6 +15,7 @@ import {
   SESSION_RELEASE_REASON_FAMILY_TRAITS,
   SESSION_RELEASE_REASON_TRAITS,
 } from "../../src/daemon/releaseReasons";
+import type { LivenessHandover } from "../../src/daemon/proxyLivenessRecovery";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import { ROUTED_SESSION_META_KEY } from "../../src/server/routedSessionMeta";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../../src/server/sessionReleaseBroadcast";
@@ -22,6 +23,22 @@ import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { drainUntilQuiescent, settleWithFakeTime } from "../helpers/fakeTimerStepping";
+
+/** This harness answers on pure promises: drain them without waiting for host scheduling. */
+class LivenessTimer extends FakeTimer {
+  override advanceTimeAsync(ms: number): Promise<void> {
+    return super.advanceTimeAsync(ms, () => drainUntilQuiescent(this));
+  }
+
+  override resolvePromise<T>(promise: Promise<T>, stepMs = 50): Promise<T> {
+    return settleWithFakeTime(this, promise, {
+      stepMs,
+      maxSteps: 1_000,
+      description: "proxy harness call",
+    });
+  }
+}
 
 // The proxy learns that the daemon released a session in five ways: the session-released
 // notification, and a heartbeat answered not-found with the release reason on a keeper tick, on
@@ -92,8 +109,10 @@ interface Harness {
   close(): Promise<void>;
 }
 
-function harness(options: { livenessOwnerToken?: string; roundTripMs?: number } = {}): Harness {
-  const timer = new FakeTimer();
+function harness(
+  options: { livenessOwnerToken?: string; roundTripMs?: number; timer?: FakeTimer } = {},
+): Harness {
+  const timer = options.timer ?? new FakeTimer();
   const releasedAs = new Map<string, string>();
   const heartbeats = new Map<string, number>();
   const minted: string[] = [];
@@ -506,8 +525,8 @@ interface Held {
 }
 
 /** A proxy holding `sessions` (the last one is its latest binding), heartbeated once. */
-async function holding(sessions: readonly string[]): Promise<Held> {
-  const world = harness({ livenessOwnerToken: "stable-owner-token", roundTripMs: 5 });
+async function holding(sessions: readonly string[], timer?: FakeTimer): Promise<Held> {
+  const world = harness({ livenessOwnerToken: "stable-owner-token", roundTripMs: 5, timer });
   for (let acquired = 0; acquired < sessions.length; acquired += 1) {
     await world.timer.resolvePromise(world.proxy.callTool("getAndroid", {}), 1);
   }
@@ -699,6 +718,181 @@ describe("every held session is re-established on a new connection as the latest
 // differently by the path the answer arrived on.
 describe("a not-found answer is decided alike on every path, for every session (#11570)", () => {
   const ones = (ticks: number): number[] => Array.from({ length: ticks }, () => 1);
+
+  const PROXY_STALL_WINDOW_CASES = ["", "daemon-restart", "device-restart:emulator-5554"].flatMap(
+    (reason) =>
+      (
+        [
+          ["latest alone", [SESSION], SESSION],
+          ["held", [SESSION, SECOND], SESSION],
+          ["latest with sibling", [SESSION, SECOND], SECOND],
+        ] as const
+      ).map(([which, sessions, target]) => ({
+        reason,
+        which,
+        sessions,
+        target,
+      })),
+  );
+
+  test.each(PROXY_STALL_WINDOW_CASES)(
+    "proxy stall preserves an awaited window: $which, reason $reason",
+    async ({ reason, sessions, target }) => {
+      const { world, perTick } = await holding(sessions, new LivenessTimer());
+      const handovers: LivenessHandover[] = [];
+      world.proxy.onLivenessHandover((handover) => handovers.push(handover));
+      try {
+        for (const sessionUuid of sessions) {
+          world.release(reason, sessionUuid);
+        }
+        if (reason === "") {
+          world.replaceDaemon();
+        }
+        await perTick(3);
+        const resets = world.connectionResets();
+
+        world.timer.simulateHostSleep(LEASE_MS + 2 * INTERVAL_MS);
+        const sent = await perTick(4);
+
+        expect(world.proxy.getTerminalSessionRelease()).toBeUndefined();
+        expect(handovers).toEqual([]);
+        for (const sessionUuid of sessions) {
+          expect(sent[sessionUuid]!.slice(-3)).toEqual(ones(3));
+        }
+        expect(world.connectionResets()).toBe(resets);
+        await world.timer.resolvePromise(world.proxy.callTool("tapOn", { sessionUuid: target }), 1);
+        expect(world.forwardedCalls()).toEqual([{ toolName: "tapOn", sessionUuid: target }]);
+      } finally {
+        await world.close();
+      }
+    },
+  );
+
+  test.each(["", "daemon-restart", "device-restart:emulator-5554"])(
+    "proxy stall waits when its not-found answer opens a window: %p",
+    async (reason) => {
+      const { world, perTick } = await holding([SESSION], new LivenessTimer());
+      const handovers: LivenessHandover[] = [];
+      world.proxy.onLivenessHandover((handover) => handovers.push(handover));
+      try {
+        world.release(reason);
+        if (reason === "") {
+          world.replaceDaemon();
+        }
+        const resets = world.connectionResets();
+        world.timer.simulateHostSleep(LEASE_MS + 2 * INTERVAL_MS);
+        const sent = await perTick(4);
+
+        expect(world.proxy.getTerminalSessionRelease()).toBeUndefined();
+        expect(handovers).toEqual([]);
+        expect(sent[SESSION]!.slice(-3)).toEqual(ones(3));
+        expect(world.connectionResets()).toBe(resets);
+        await world.timer.resolvePromise(
+          world.proxy.callTool("tapOn", { sessionUuid: SESSION }),
+          1,
+        );
+        expect(world.forwardedCalls()).toEqual([{ toolName: "tapOn", sessionUuid: SESSION }]);
+      } finally {
+        await world.close();
+      }
+    },
+  );
+
+  test("proxy stall skips a stopped latest binding while recovering its live sibling", async () => {
+    const { world, perTick } = await holding([SESSION, SECOND], new LivenessTimer());
+    const handovers: LivenessHandover[] = [];
+    world.proxy.onLivenessHandover((handover) => handovers.push(handover));
+    try {
+      world.release("", SECOND);
+      const stopped = await perTick(3);
+      expect(stopped[SECOND]!.at(-1)).toBe(0);
+      const before = world.heartbeats(SECOND);
+
+      world.timer.simulateHostSleep(LEASE_MS + 2 * INTERVAL_MS);
+      const sent = await perTick(4);
+
+      expect(world.heartbeats(SECOND)).toBe(before);
+      expect(world.proxy.getTerminalSessionRelease()).toBeUndefined();
+      expect(handovers).toEqual([]);
+      // Recovery asks the sibling once, and the regular keeper continues on later ticks.
+      expect(sent[SESSION]![0]).toBeGreaterThan(0);
+      expect(sent[SESSION]!.slice(-3)).toEqual(ones(3));
+      await world.timer.resolvePromise(world.proxy.callTool("tapOn", { sessionUuid: SECOND }), 1);
+      expect(world.forwardedCalls()).toEqual([{ toolName: "tapOn", sessionUuid: SECOND }]);
+      // The call re-establishes ownership, then the keeper continues heartbeating it.
+      expect((await perTick(2))[SECOND]).toEqual([2, 1]);
+    } finally {
+      await world.close();
+    }
+  });
+
+  test.each([SESSION, SECOND])(
+    "proxy stall fences only the session released for heartbeat-timeout: %s",
+    async (target) => {
+      const { world, perTick } = await holding([SESSION, SECOND], new LivenessTimer());
+      const sibling = target === SESSION ? SECOND : SESSION;
+      const handovers: LivenessHandover[] = [];
+      world.proxy.onLivenessHandover((handover) => handovers.push(handover));
+      try {
+        world.timer.simulateHostSleep(LEASE_MS + 2 * INTERVAL_MS);
+        world.release("heartbeat-timeout", target);
+        const sent = await perTick(4);
+
+        expect(handovers).toHaveLength(1);
+        expect(handovers[0]).toMatchObject({
+          code: "proxy_stalled",
+          sessions: [{ sessionUuid: target }],
+          releaseReasons: { [target]: "heartbeat-timeout" },
+        });
+        expect(world.proxy.getTerminalSessionRelease()).toEqual(
+          target === SECOND ? { sessionUuid: target, reason: "heartbeat-timeout" } : undefined,
+        );
+        expect(sent[target]!.slice(-3)).toEqual([0, 0, 0]);
+        expect(sent[sibling]!.slice(-3)).toEqual(ones(3));
+        await expect(
+          world.timer.resolvePromise(world.proxy.callTool("tapOn", { sessionUuid: target }), 1),
+        ).rejects.toMatchObject({ reason: "proxy_stalled" });
+        expect(world.forwardedCalls()).toEqual([]);
+        await world.timer.resolvePromise(
+          world.proxy.callTool("tapOn", { sessionUuid: sibling }),
+          1,
+        );
+        expect(world.forwardedCalls()).toEqual([{ toolName: "tapOn", sessionUuid: sibling }]);
+      } finally {
+        await world.close();
+      }
+    },
+  );
+
+  test("proxy stall still loses a live session answered not-found without a window", async () => {
+    const { world, perTick } = await holding([SESSION, SECOND], new LivenessTimer());
+    const handovers: LivenessHandover[] = [];
+    world.proxy.onLivenessHandover((handover) => handovers.push(handover));
+    try {
+      world.timer.simulateHostSleep(LEASE_MS + 2 * INTERVAL_MS);
+      world.release("", SECOND);
+      const sent = await perTick(4);
+
+      expect(world.proxy.getTerminalSessionRelease()).toEqual({
+        sessionUuid: SECOND,
+        reason: "session-not-found",
+      });
+      expect(handovers).toHaveLength(1);
+      expect(handovers[0]).toMatchObject({
+        code: "proxy_stalled",
+        sessions: [{ sessionUuid: SECOND }],
+        releaseReasons: { [SECOND]: "session-not-found" },
+      });
+      expect(sent[SECOND]!.slice(-3)).toEqual([0, 0, 0]);
+      expect(sent[SESSION]!.slice(-3)).toEqual(ones(3));
+      await expect(
+        world.timer.resolvePromise(world.proxy.callTool("tapOn", { sessionUuid: SECOND }), 1),
+      ).rejects.toMatchObject({ reason: "proxy_stalled" });
+      expect(world.forwardedCalls()).toEqual([]);
+    } finally {
+      await world.close();
+    }
+  });
 
   // The daemon was unreachable for longer than a heartbeat request, so liveness recovery asks
   // the daemon that replaced it. That answer is each session's first on the new connection.

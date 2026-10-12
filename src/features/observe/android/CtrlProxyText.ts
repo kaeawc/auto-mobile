@@ -77,6 +77,54 @@ export function imeCommitSuffixMatches(committedText: string, text: string): boo
 }
 
 /**
+ * 1. Canonical spelling: NFC normalization.
+ * 2. Inline format markers consumed: INLINE_FORMAT_SPAN's * _ ~ and backtick
+ *    characters removed; marker-only requests remain unverifiable and match.
+ * 3. Line-start block shortcut consumed or replaced by a list marker.
+ * 4. Input filters: lower/upper case tokens (including expansions) and decimal-digit value.
+ * 5. Input mask: the editor may ADD characters that are not letters, digits or marks
+ *    (`[^\p{L}\p{N}\p{M}]`) around the sent text; every sent token must remain in order.
+ *    This also accepts added punctuation such as "hi, there" -> "hi, there!".
+ * 6. Mention chips and code fences: unpredictable replacements retain subsequence acceptance on the delta.
+ */
+export function imeInsertedTextMatches(insertedText: string, text: string): boolean {
+  const markers = /[*_~`]/g;
+  if (text.replace(markers, "").length === 0) {
+    return true;
+  }
+  // Mirror MENTION_BEFORE_SPACE in ImeCommitDriver.kt, at any token-ending space.
+  if (/(^|\s)@[\p{L}\p{N}._-]+ /u.test(text) || text.includes("```")) {
+    return imeCommitSubsequenceMatches(insertedText, text);
+  }
+  // Mirror LINE_START_SHORTCUT in ImeCommitDriver.kt, at each line start.
+  const blockShortcut = /^(>|[-*•+]|\d+[.)]) /gm;
+  const project = (value: string): string =>
+    value.normalize("NFC").replace(blockShortcut, "").replace(markers, "").normalize("NFC");
+  const field = project(insertedText);
+  const sent = project(text);
+  const lowerField = imeLowerTokens(field);
+  const lowerSent = imeLowerTokens(sent);
+  const upperField = imeUpperTokens(field);
+  const upperSent = imeUpperTokens(sent);
+  return (
+    imeInputMaskTokensMatch(lowerField, lowerSent) || imeInputMaskTokensMatch(upperField, upperSent)
+  );
+}
+
+function imeInputMaskTokensMatch(field: readonly string[], sent: readonly string[]): boolean {
+  let index = 0;
+  for (const token of field) {
+    // The earliest match is safe: any skipped alternative must itself be mask formatting.
+    if (token === sent[index]) {
+      index++;
+    } else if (/[\p{L}\p{N}\p{M}]/u.test(token)) {
+      return false;
+    }
+  }
+  return index === sent.length;
+}
+
+/**
  * Accept canonical spellings, decimal digit values, and locale-independent case
  * filters. Lowercase expansions stay atomic (İ is not i + a separate dot), while
  * uppercase expansions allow input filters such as straße -> STRASSE.
@@ -98,13 +146,19 @@ export function imeCommitSubsequenceMatches(committedText: string, text: string)
 }
 
 function imeCaseSubsequenceMatches(field: string, sent: string): boolean {
-  const lowerTokens = (value: string): string[] =>
-    Array.from(value, (codePoint) => imeDecimalDigit(codePoint).toLowerCase());
-  const upperTokens = (value: string): string[] =>
-    Array.from(value, imeDecimalDigit).flatMap((codePoint) => Array.from(codePoint.toUpperCase()));
   return (
-    imeCodePointSubsequenceMatches(lowerTokens(field), lowerTokens(sent)) ||
-    imeCodePointSubsequenceMatches(upperTokens(field), upperTokens(sent))
+    imeCodePointSubsequenceMatches(imeLowerTokens(field), imeLowerTokens(sent)) ||
+    imeCodePointSubsequenceMatches(imeUpperTokens(field), imeUpperTokens(sent))
+  );
+}
+
+function imeLowerTokens(value: string): string[] {
+  return Array.from(value, (codePoint) => imeDecimalDigit(codePoint).toLowerCase());
+}
+
+function imeUpperTokens(value: string): string[] {
+  return Array.from(value, imeDecimalDigit).flatMap((codePoint) =>
+    Array.from(codePoint.toUpperCase()),
   );
 }
 

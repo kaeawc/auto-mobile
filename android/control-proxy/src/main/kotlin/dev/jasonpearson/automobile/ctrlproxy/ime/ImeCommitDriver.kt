@@ -158,17 +158,20 @@ class ImeCommitDriver(
   ) {
     private val segments = splitInlineFormatSpans(text)
     private val segmentUnits = segments.map { splitGraphemes(it.text) }
-    private val dispatched = mutableListOf<String>()
+    private val dispatched = mutableListOf<ExpectedUnit>()
+    // Request progress remains independent of the editor expectation after a rejected unit.
+    private var dispatchedPosition = 0
     private val totalUnits = segmentUnits.sumOf { it.size }
     private val postDispatch: Boolean
-      get() = dispatched.size == totalUnits
+      get() = dispatchedPosition == totalUnits
 
     private var generation = sink.connectionGeneration()
     private val identity = sink.editorIdentity()
     private val baseline =
       sink.readEditorTextBeforeCursor(EDITOR_READ_CAP)?.takeIf { it.length < EDITOR_READ_CAP }
     private var resumes = 0
-    private var lastResumeConfirmed = -1
+    private var lastResumePosition = -1
+    private val rejectedUnitTexts = mutableSetOf<String>()
     private val currentLine = StringBuilder()
     private var settleWaitMs = 0L
 
@@ -272,17 +275,40 @@ class ImeCommitDriver(
           sink.startedByRestart(),
           baseline,
           now,
-          dispatched,
-          lastResumeConfirmed,
+          dispatched.map { it.text },
+          // Express the last resent request position in the remaining expectation's indices.
+          dispatched.indexOfLast { it.requestPosition <= lastResumePosition },
         )
       generation = sink.connectionGeneration()
       when (decision) {
         Reconciliation.Continue -> next()
-        is Reconciliation.Resume -> resumeFrom(decision.confirmed, now)
+        is Reconciliation.DropRejected -> {
+          dropRejected(decision.confirmed, now)
+          next()
+        }
+        is Reconciliation.Resume -> reconcileMissingUnit(decision.confirmed, now, next)
         is Reconciliation.Fail ->
           complete(failure(decision.error).copy(insertedText = decision.delta))
         is Reconciliation.Succeed -> succeed(decision.delta)
       }
+    }
+
+    private fun reconcileMissingUnit(confirmed: Int, now: String?, next: () -> Unit) {
+      if (dispatched[confirmed].text in rejectedUnitTexts) {
+        dropRejected(confirmed, now)
+        next()
+      } else {
+        resumeFrom(confirmed, now)
+      }
+    }
+
+    private fun dropRejected(confirmed: Int, now: String?) {
+      val rejected = dispatched[confirmed]
+      rejectedUnitTexts.add(rejected.text)
+      // Only recovered losses consume the budget. Each request position is still resent at
+      // most once (lastResumePosition is monotonic), bounding rejected resends by unit count.
+      if (rejected.requestPosition == lastResumePosition) resumes--
+      retainConfirmed(confirmed, now)
     }
 
     private fun resumeFrom(confirmed: Int, now: String?) {
@@ -295,19 +321,27 @@ class ImeCommitDriver(
         return
       }
       resumes++
-      lastResumeConfirmed = confirmed
-      while (dispatched.size > confirmed) dispatched.removeAt(dispatched.lastIndex)
-      committedUnits = confirmed
-      currentLine.setLength(0)
-      currentLine.append(applied.substringAfterLast('\n'))
-      resumeAt(confirmed)
+      val requestPosition = dispatched[confirmed].requestPosition
+      lastResumePosition = requestPosition
+      retainConfirmed(confirmed, now)
+      dispatchedPosition = requestPosition
+      committedUnits = requestPosition
+      // A retained prefix cannot tell us whether a newline submitted the editor. The one
+      // permitted resend can repeat that action; there is no safe consumed-action signal.
+      resumeAt(requestPosition)
     }
 
-    private fun resumeAt(confirmed: Int) {
+    private fun retainConfirmed(confirmed: Int, now: String?) {
+      while (dispatched.size > confirmed) dispatched.removeAt(dispatched.lastIndex)
+      currentLine.setLength(0)
+      currentLine.append(requireNotNull(editorDelta(now)).substringAfterLast('\n'))
+    }
+
+    private fun resumeAt(requestPosition: Int) {
       var offset = 0
       for ((index, units) in segmentUnits.withIndex()) {
-        if (confirmed < offset + units.size) {
-          commitUnits(index, units, confirmed - offset)
+        if (requestPosition < offset + units.size) {
+          commitUnits(index, units, requestPosition - offset)
           return
         }
         offset += units.size
@@ -421,7 +455,7 @@ class ImeCommitDriver(
         val unit = units[unitIndex]
         // A false return can follow an applied prefix: count conservatively before dispatch.
         committedUnits++
-        dispatched.add(unit)
+        dispatched.add(ExpectedUnit(unit, dispatchedPosition++))
         if (!sink.commitChar(unit)) {
           complete(failure("Input connection lost during commit"))
           return
@@ -526,10 +560,14 @@ class ImeCommitDriver(
 
     data class Resume(val confirmed: Int) : Reconciliation
 
+    data class DropRejected(val confirmed: Int) : Reconciliation
+
     data class Fail(val error: String, val delta: String?) : Reconciliation
 
     data class Succeed(val delta: String?) : Reconciliation
   }
+
+  private data class ExpectedUnit(val text: String, val requestPosition: Int)
 
   private data class Segment(val text: String, val trailingSpan: String?)
 
@@ -601,7 +639,7 @@ class ImeCommitDriver(
           when {
             confirmed > lastResumeConfirmed -> Reconciliation.Resume(confirmed)
             postDispatch -> Reconciliation.Succeed(delta)
-            else -> Reconciliation.Continue
+            else -> Reconciliation.DropRejected(confirmed)
           }
         postDispatch -> Reconciliation.Succeed(delta)
         confirmed == 0 -> Reconciliation.Fail(NONE_APPLIED_ERROR, delta)

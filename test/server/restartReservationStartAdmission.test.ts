@@ -86,6 +86,7 @@ describe("start admission and owner resume for restart reservations", () => {
       label?: boolean;
       idleMs?: number;
       autolock?: boolean;
+      ownerToken?: string;
     } = {},
   ) {
     const platform = options.platform ?? "android";
@@ -201,6 +202,11 @@ describe("start admission and owner resume for restart reservations", () => {
     if (options.label) {
       await sessions.createSession(HOLDER, "spare-device", platform);
       sessions.setDeviceLabels(HOLDER, { phone: holder, tablet: `${HOLDER}:tablet` });
+    }
+    if (options.ownerToken) {
+      expect(
+        await sessions.claimLivenessOwnership(options.label ? HOLDER : holder, options.ownerToken),
+      ).toBe("claimed");
     }
     const internals = pool as unknown as Internals;
     await internals.releaseDisconnectedRecoverySessionWithRetry(
@@ -926,6 +932,140 @@ describe("start admission and owner resume for restart reservations", () => {
     const f = await fixture();
     await resumed(f, () => f.start(undefined, HOLDER));
   });
+  test("token-proved reconnect resumes HOLDER without routing and preserves hold deadlines until start", async () => {
+    const f = await fixture({ connection: CONNECTION, ownerToken: "holder-token" });
+    const target = f.internals.rehydrationReservations.get(HOLDER)!;
+    const before = { ...target };
+    const row = { ...(await f.persistence.getSession!(HOLDER))! };
+    expect(
+      await f.pool.restoreOwnedDeviceSessionsForMcpSession([HOLDER], "reconnected", "holder-token"),
+    ).toEqual([]);
+    expect(target.scheduledDeadlineMs).toBe(before.scheduledDeadlineMs);
+    for (const key of ["idleDeadlineMs", "recoveryWindowEndMs"]) {
+      expect(Reflect.get(target, key)).toBe(Reflect.get(before, key));
+    }
+    expect(await f.persistence.getSession!(HOLDER)).toEqual(row);
+    expect(f.sessions.getSession(HOLDER)).toBeNull();
+    expect(
+      f.pool.isRestartReservationOwnedByOtherConnection(f.device.deviceId, {
+        sessionUuid: HOLDER,
+        mcpSessionId: "other",
+      }),
+    ).toBe(true);
+    expect(
+      f.pool.isRestartReservationOwnedByOtherConnection(f.device.deviceId, {
+        sessionUuid: HOLDER,
+        mcpSessionId: "reconnected",
+      }),
+    ).toBe(false);
+    await resumed(f, () => f.start({ avdName: f.device.name, __mcpSessionId: "reconnected" }));
+    expect(f.pool.resolveOwnedDeviceSessionForMcpSession("reconnected", f.device.deviceId)).toBe(
+      HOLDER,
+    );
+  });
+
+  for (const token of [undefined, "wrong-token"]) {
+    test(`reconnect with ${token ?? "no token"} cannot start or name the holder to stop`, async () => {
+      const f = await fixture({ connection: CONNECTION, ownerToken: "holder-token" });
+      expect(
+        await f.pool.restoreOwnedDeviceSessionsForMcpSession([HOLDER], "other", token),
+      ).toEqual([]);
+      expect(
+        f.pool.isRestartReservationOwnedByOtherConnection(f.device.deviceId, {
+          sessionUuid: HOLDER,
+          mcpSessionId: "other",
+        }),
+      ).toBe(true);
+      await refusal(f, () => f.start({ avdName: f.device.name, __mcpSessionId: "other" }));
+    });
+  }
+
+  test("a hold without a captured liveness token does not accept a reconnect token", async () => {
+    const f = await fixture({ connection: CONNECTION });
+    expect(
+      await f.pool.restoreOwnedDeviceSessionsForMcpSession([HOLDER], "other", "holder-token"),
+    ).toEqual([]);
+    await refusal(f, () => f.start({ avdName: f.device.name, __mcpSessionId: "other" }));
+  });
+
+  test("token restore waiting for assignment cannot record a connection that closed", async () => {
+    const f = await fixture({ connection: CONNECTION, ownerToken: "holder-token" });
+    const mutex = (
+      f.pool as unknown as {
+        assignmentMutex: { runExclusive<T>(run: () => Promise<T>): Promise<T> };
+      }
+    ).assignmentMutex;
+    const gate = Promise.withResolvers<void>();
+    const blocked = mutex.runExclusive(() => gate.promise);
+    const restore = f.pool.restoreOwnedDeviceSessionsForMcpSession(
+      [HOLDER],
+      "closed",
+      "holder-token",
+    );
+    f.pool.releaseMcpSessionBindings("closed");
+    gate.resolve();
+    await blocked;
+    expect(await restore).toEqual([]);
+    await refusal(f, () => f.start({ avdName: f.device.name, __mcpSessionId: "closed" }));
+  });
+
+  test("a derived handoff captures the ownership base's liveness token", async () => {
+    const f = await fixture({ label: true, connection: CONNECTION, ownerToken: "base-token" });
+    expect(
+      await f.pool.restoreOwnedDeviceSessionsForMcpSession([f.holder], "reconnected", "base-token"),
+    ).toEqual([]);
+    await resumed(f, () => f.start({ avdName: f.device.name, __mcpSessionId: "reconnected" }));
+    expect(f.pool.resolveOwnedDeviceSessionForMcpSession("reconnected", f.device.deviceId)).toBe(
+      f.holder,
+    );
+  });
+
+  test("a daemon-rehydration-only reservation does not gain a token-proved owner", async () => {
+    const f = await fixture({ connection: CONNECTION, ownerToken: "holder-token" });
+    f.timer.advanceTime(180_001);
+    await drainMicrotasks(256);
+    await f.pool.reserveDevicesForRehydration([
+      {
+        sessionId: HOLDER,
+        target: {
+          platform: f.device.platform,
+          stableDeviceId: f.device.name,
+          deviceId: f.device.deviceId,
+          androidEmulator: true,
+        },
+      },
+    ]);
+    const target = f.internals.rehydrationReservations.get(HOLDER)!;
+    expect(
+      await f.pool.restoreOwnedDeviceSessionsForMcpSession([HOLDER], "other", "holder-token"),
+    ).toEqual([]);
+    expect(Reflect.get(target, "ownerMcpSessionIds")).toBeUndefined();
+    expect(
+      f.pool.restartReservationForStart(f.device.platform, [f.device.name], {
+        mcpSessionId: "other",
+      })?.owned,
+    ).toBe(false);
+  });
+
+  test("late token restore after a hold ends records nothing and ordinary acquisition proceeds", async () => {
+    const f = await fixture({ connection: CONNECTION, ownerToken: "holder-token" });
+    const target = f.internals.rehydrationReservations.get(HOLDER)!;
+    f.timer.advanceTime(180_001);
+    await drainMicrotasks(256);
+    expect(Reflect.get(target, "ownerLivenessToken")).toBeUndefined();
+    expect(Reflect.get(target, "ownerMcpSessionIds")).toBeUndefined();
+    expect(
+      await f.pool.restoreOwnedDeviceSessionsForMcpSession([HOLDER], "late", "holder-token"),
+    ).toEqual([]);
+    expect(f.internals.rehydrationReservations.has(HOLDER)).toBe(false);
+    expect(
+      f.pool.resolveOwnedDeviceSessionForMcpSession("late", f.device.deviceId),
+    ).toBeUndefined();
+    expect(await f.start({ avdName: f.device.name, __mcpSessionId: "late" })).toMatchObject({
+      structuredContent: { runtime: { session: { sessionUuid: "fake-1" } } },
+    });
+  });
+
   test("owning MCP connection resumes without a routing session and owns the live session again", async () => {
     const f = await fixture({ connection: CONNECTION });
     await resumed(f, () => f.start({ avdName: f.device.name, __mcpSessionId: CONNECTION }));

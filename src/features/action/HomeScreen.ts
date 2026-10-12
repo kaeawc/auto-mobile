@@ -18,7 +18,12 @@ import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { deriveIosScreenIdentity } from "../observe/ios/IosScreenIdentity";
 import { hierarchyChanged } from "../../utils/hierarchyFingerprint";
 import type { CtrlProxyHierarchy } from "../observe/ios/types";
-import { resolveIosHomeBackend } from "../../utils/ios-cmdline-tools/IosHomeBackend";
+import {
+  resolveIosHomeBackend,
+  type IosHomeBackend,
+} from "../../utils/ios-cmdline-tools/IosHomeBackend";
+import { SimctlCommandTimeoutError } from "../../utils/ios-cmdline-tools/SimctlCommandTimeoutError";
+import { IosHomeLaunchTimeoutError } from "../../models/IosHomeLaunchTimeoutError";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { sequenceBackoff, type BackoffPolicy } from "../../utils/Backoff";
@@ -61,7 +66,10 @@ export class HomeScreen extends BaseVisualChange {
   private static readonly IOS_HOME_RETRY_DELAYS_MS: readonly number[] = [300, 600, 900];
   private static readonly IOS_SIMULATOR_RETRY_DELAYS_MS: readonly number[] = [100, 200, 400, 500];
   private static readonly IOS_SIMULATOR_READ_TIMEOUT_MS = 1500;
-  private static readonly IOS_SIMCTL_LAUNCH_TIMEOUT_MS = 1000;
+  // Busy simulator hosts can take over 1s just to run an xcrun child (#11946).
+  private static readonly IOS_SIMCTL_LAUNCH_ATTEMPT_TIMEOUT_MS = 2500;
+  // SpringBoard launch is idempotent; retry timeouts briefly within the Home budget (#11946).
+  private static readonly IOS_SIMCTL_LAUNCH_RETRY_DELAYS_MS: readonly number[] = [100, 200, 400];
 
   constructor(
     device: BootedDevice,
@@ -327,21 +335,20 @@ export class HomeScreen extends BaseVisualChange {
       return;
     }
 
-    const deadline = this.timer.now() + (timeoutMs ?? 5000);
-    try {
-      throwIfAborted(signal);
-      const launchTimeoutMs = Math.min(
-        HomeScreen.IOS_SIMCTL_LAUNCH_TIMEOUT_MS,
-        this.iosHomeRemainingMs(deadline),
+    const budgetMs = timeoutMs ?? 5000;
+    const deadline = this.timer.now() + budgetMs;
+    const attempts = await this.launchIosSpringboard(
+      backend,
+      deadline,
+      budgetMs,
+      signal,
+      onDispatch,
+    );
+    throwIfAborted(signal);
+    if (deadline - this.timer.now() <= 0) {
+      throw new IosHomeLaunchTimeoutError(
+        `SpringBoard launch used the whole Home budget after ${attempts} attempt(s) (${budgetMs}ms), so the foreground could not be verified. The simulator host may be busy; the call can be retried.`,
       );
-      onDispatch?.();
-      await awaitWhileRequestIsLive(
-        backend.launchSpringboard({ timeoutMs: launchTimeoutMs }),
-        signal,
-      );
-    } catch (error) {
-      throwIfAborted(signal);
-      throw toActionableError(error, "Failed to launch SpringBoard with simctl");
     }
 
     try {
@@ -360,6 +367,56 @@ export class HomeScreen extends BaseVisualChange {
         `simctl launched SpringBoard, but foreground verification failed: ${errorMessage(error)}`,
         { cause: error },
       );
+    }
+  }
+
+  private async launchIosSpringboard(
+    backend: IosHomeBackend,
+    deadline: number,
+    budgetMs: number,
+    signal?: AbortSignal,
+    onDispatch?: () => void,
+  ): Promise<number> {
+    const backoff = sequenceBackoff(HomeScreen.IOS_SIMCTL_LAUNCH_RETRY_DELAYS_MS);
+    let attempts = 0;
+    let lastTimeout: SimctlCommandTimeoutError | undefined;
+    for (;;) {
+      throwIfAborted(signal);
+      const remainingMs = deadline - this.timer.now();
+      if (remainingMs <= 0) {
+        throw new IosHomeLaunchTimeoutError(
+          `SpringBoard could not be launched with simctl within the Home budget after ${attempts} attempt(s) (${budgetMs}ms). The simulator host may be busy; the call can be retried.`,
+          { cause: lastTimeout },
+        );
+      }
+      attempts++;
+      try {
+        if (attempts === 1) {
+          onDispatch?.();
+        }
+        throwIfAborted(signal);
+        await awaitWhileRequestIsLive(
+          backend.launchSpringboard({
+            timeoutMs: Math.min(HomeScreen.IOS_SIMCTL_LAUNCH_ATTEMPT_TIMEOUT_MS, remainingMs),
+          }),
+          signal,
+        );
+        throwIfAborted(signal);
+        return attempts;
+      } catch (error) {
+        throwIfAborted(signal);
+        if (!(error instanceof SimctlCommandTimeoutError)) {
+          throw toActionableError(error, "Failed to launch SpringBoard with simctl");
+        }
+        lastTimeout = error;
+        // A busy host timeout is safe to retry because SpringBoard launch is idempotent.
+        logger.debug(`[HOME] SpringBoard launch attempt ${attempts} timed out`, error);
+      }
+      const delayMs = Math.min(backoff.delayForAttempt(attempts), deadline - this.timer.now());
+      if (delayMs > 0) {
+        await awaitWhileRequestIsLive(this.timer.sleep(delayMs), signal);
+      }
+      throwIfAborted(signal);
     }
   }
 

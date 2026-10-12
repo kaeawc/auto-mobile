@@ -236,8 +236,8 @@ connection used for tools and resources:
    retry clears only that ended session's record; one a live execution holds
    again is left to that execution's own release. Failed acquisition back-out also
    retries owed session release and owner clearing in the background, with eight
-   attempts at 250 ms doubling to 5 s; a gave-up cleanup is retained and re-armed
-   by the next acquisition on that daemon. It clears only the backed-out session's
+   attempts at 250 ms doubling to 5 s, then every 30 s until it lands or the daemon
+   closes. It clears only the backed-out session's
    record belonging to that daemon and preserves the device assignment. If the
    `settling` mark itself cannot be written, the slot keeps its owner record and
    the daemon keeps treating that owner as live for as long as the released work

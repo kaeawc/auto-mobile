@@ -51,6 +51,7 @@ import {
   type SlotScopeIdentity,
   type SlotScopeRecord,
 } from "./slotRegistry";
+import { MANAGED_EXECUTION_SETTLEMENT_SLOW_POLL_MS } from "./managedExecutionRelease";
 import { SLOT_SCOPE_RESET_DEFAULT_WAIT_MS, type SlotScopeResetScopeResult } from "./slotScopeReset";
 
 export interface ManagedSlotAcquisitionSessions {
@@ -81,6 +82,7 @@ export interface ManagedSlotAcquisitionDependencies {
   timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
   backOutRetryBackoff?: BackoffPolicy;
   backOutRetryMaxAttempts?: number;
+  backOutRetrySlowPollMs?: number;
   /**
    * The implicit reset of a superseded incarnation (`SlotScopeReset.resetSupersededScope`, #11174):
    * waits up to `waitMs` for the old scope's owners and cleanup to settle. Absent, or returning
@@ -137,6 +139,7 @@ export const MANAGED_SLOT_BACK_OUT_RETRY_INITIAL_DELAY_MS = 250;
 export const MANAGED_SLOT_BACK_OUT_RETRY_MAX_DELAY_MS = 5_000;
 export const MANAGED_SLOT_BACK_OUT_RETRY_MAX_ATTEMPTS = 8;
 
+/** Owed cleanup; gave_up means the bounded round ended, with attempts still counted slowly. */
 export interface ManagedSlotBackOutCleanup {
   key: SlotKey;
   sessionUuid: string;
@@ -170,7 +173,7 @@ export class ManagedSlotAcquisition {
     }
   }
 
-  /** Gave-up entries remain inspectable but do not hold this promise open. */
+  /** Wait until no background task runs, including slow retries, which end on cleanup or close. */
   async whenIdle(): Promise<void> {
     while (this.background.size > 0) {
       await Promise.allSettled([...this.background]);
@@ -188,7 +191,6 @@ export class ManagedSlotAcquisition {
     config: ManagedSlotConfig,
     options: ManagedSlotAcquireOptions,
   ): Promise<ManagedSlotsResult> {
-    this.rearmBackOutCleanups();
     const identity: SlotScopeIdentity = {
       managedHostScope: config.managedHostScope,
       runnerNamespace: config.runnerNamespace,
@@ -521,7 +523,9 @@ export class ManagedSlotAcquisition {
   /**
    * The owner row is the durable record: it names this process, so all daemons read it dead once
    * this process exits. While it runs, keep owed cleanup here, including after a bounded round
-   * gives up; the next acquisition re-arms every such entry without waiting for it.
+   * gives up: the same task continues slowly, keeping gave_up state and counting attempts.
+   * A slow timer failure leaves an inspectable gave_up entry with no task; its row dies with
+   * the process. No acquisition re-arms it.
    */
   private retainBackOutCleanup(registry: SlotRegistry, cleanup: ManagedSlotBackOutCleanup): void {
     const id = JSON.stringify([cleanup.key.scopeKey, cleanup.key.slotIndex, cleanup.sessionUuid]);
@@ -539,28 +543,30 @@ export class ManagedSlotAcquisition {
     this.startBackOutRetry(id, registry, cleanup);
   }
 
-  private rearmBackOutCleanups(): void {
-    if (this.closed) {
-      return;
-    }
-    for (const [id, { registry, cleanup }] of this.backOutCleanups) {
-      if (cleanup.state === "gave_up") {
-        this.startBackOutRetry(id, registry, cleanup);
-      }
-    }
-  }
-
   private startBackOutRetry(
     id: string,
     registry: SlotRegistry,
     cleanup: ManagedSlotBackOutCleanup,
   ): void {
-    cleanup.state = "retrying";
-    cleanup.attempts = 0;
     const round: Promise<void> = this.retryBackOutCleanup(id, registry, cleanup)
       .catch((error: unknown) => {
-        // A failed backoff/timer also leaves a typed, re-armable cleanup instead of an unhandled task.
+        // A bounded policy/timer failure gives up once, then the same task continues slowly.
         this.giveUpBackOutCleanup(cleanup, errorMessage(error));
+      })
+      .then(async () => {
+        if (!this.closed && cleanup.state === "gave_up") {
+          await this.retryBackOutSlowly(id, registry, cleanup);
+        }
+      })
+      .catch((error: unknown) => {
+        // A broken slow timer cannot be redriven safely; keep the row until process exit.
+        if (!this.closed) {
+          cleanup.lastError = errorMessage(error);
+          logger.warn(
+            `${this.backOutCleanupLabel(cleanup)} slow retry stopped; no task remains: ${cleanup.lastError}`,
+            error,
+          );
+        }
       })
       .finally(() => this.background.delete(round));
     this.background.add(round);
@@ -591,7 +597,29 @@ export class ManagedSlotAcquisition {
     this.giveUpBackOutCleanup(cleanup, cleanup.lastError);
   }
 
+  private async retryBackOutSlowly(
+    id: string,
+    registry: SlotRegistry,
+    cleanup: ManagedSlotBackOutCleanup,
+  ): Promise<void> {
+    const delayMs = this.deps.backOutRetrySlowPollMs ?? MANAGED_EXECUTION_SETTLEMENT_SLOW_POLL_MS;
+    while (!this.closed) {
+      await this.waitForBackOutRetry(delayMs);
+      if (this.closed) {
+        return;
+      }
+      cleanup.attempts++;
+      if (await this.retryBackOutOnce(registry, cleanup)) {
+        this.backOutCleanups.delete(id);
+        return;
+      }
+    }
+  }
+
   private waitForBackOutRetry(delayMs: number): Promise<void> {
+    if (this.closed) {
+      return Promise.resolve();
+    }
     return new Promise((resolve) => {
       const finish = () => {
         this.deps.timer.clearTimeout(handle);
@@ -635,15 +663,19 @@ export class ManagedSlotAcquisition {
     } catch (error) {
       if (!this.closed) {
         cleanup.lastError = errorMessage(error);
-        const message = `${this.backOutCleanupLabel(cleanup)} retry failed: ${cleanup.lastError}`;
-        if (cleanup.attempts === 1) {
-          logger.warn(message, error);
-        } else {
-          // Repeated contention is already warned once; the round retains a typed failure.
-          logger.debug(message, error);
-        }
+        this.logBackOutRetryFailure(cleanup, error);
       }
       return false;
+    }
+  }
+
+  private logBackOutRetryFailure(cleanup: ManagedSlotBackOutCleanup, error: unknown): void {
+    const message = `${this.backOutCleanupLabel(cleanup)} retry failed: ${cleanup.lastError}`;
+    if (cleanup.state === "retrying" && cleanup.attempts === 1) {
+      logger.warn(message, error);
+    } else {
+      // Contention is already warned once; owed work continues in this task.
+      logger.debug(message, error);
     }
   }
 
@@ -667,7 +699,8 @@ export class ManagedSlotAcquisition {
       cleanup.lastError = lastError;
       cleanup.state = "gave_up";
       logger.warn(
-        `${this.backOutCleanupLabel(cleanup)} gave up after ${cleanup.attempts} attempts: ${lastError}`,
+        `${this.backOutCleanupLabel(cleanup)} gave up after ${cleanup.attempts} attempts: ${lastError}; ` +
+          `cleanup continues every ${(this.deps.backOutRetrySlowPollMs ?? MANAGED_EXECUTION_SETTLEMENT_SLOW_POLL_MS) / 1_000} s until it lands or the daemon closes`,
       );
     }
   }

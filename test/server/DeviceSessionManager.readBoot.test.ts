@@ -86,11 +86,14 @@ function harness(platform: Platform, daemon: boolean, simctlAvailable = true) {
     name: platform === "android" ? "Named_Pixel" : "Named iPhone",
     deviceId: platform === "android" ? "emulator-5556" : "named-ios",
   };
-  const image: DeviceInfo = { ...device, isRunning: false, isAvailable: true };
+  const image: DeviceInfo =
+    platform === "android"
+      ? { name: device.name, platform, isRunning: false, isAvailable: true, source: "local" }
+      : { ...device, isRunning: false, isAvailable: true };
   const firstImage: DeviceInfo = {
     ...image,
     name: "First image",
-    deviceId: platform === "android" ? "emulator-5554" : "first-ios",
+    ...(platform === "ios" ? { deviceId: "first-ios" } : {}),
   };
   const adb = new FakeAdbExecutor();
   const devices = new FakeDeviceUtils();
@@ -165,6 +168,12 @@ function harness(platform: Platform, daemon: boolean, simctlAvailable = true) {
       devices.setMockChildProcess(d.name, null);
     }
   }
+  const wait = devices.waitForDeviceReady.bind(devices);
+  devices.waitForDeviceReady = (target, ...args) =>
+    wait(
+      { ...target, deviceId: target.name === device.name ? device.deviceId : "emulator-5554" },
+      ...args,
+    );
   const start = devices.startDevice.bind(devices);
   const startCalls: string[] = [];
   let startError: Error | undefined;
@@ -173,7 +182,12 @@ function harness(platform: Platform, daemon: boolean, simctlAvailable = true) {
     if (startError) {
       throw startError;
     }
-    const result = await start(target, timeout);
+    const result = await start(
+      platform === "android"
+        ? { ...target, deviceId: target.name === device.name ? device.deviceId : "emulator-5554" }
+        : target,
+      timeout,
+    );
     adb.setDevices(await devices.getBootedDevices("android"));
     return result;
   };
@@ -591,7 +605,9 @@ describe("read boots only an explicitly named stopped device", () => {
           ...h.options,
           intent: undefined,
         });
-        expect(result.deviceId).toBe(h.firstImage.deviceId!);
+        expect(result.deviceId).toBe(
+          platform === "android" ? "emulator-5554" : h.firstImage.deviceId!,
+        );
         expect(h.startCalls).toEqual(platform === "android" ? [h.firstImage.name] : []);
         expect(h.simctl.getMethodCalls("bootSimulator")).toEqual(
           platform === "ios" ? [{ udid: h.firstImage.deviceId }] : [],
@@ -1097,3 +1113,87 @@ for (const daemon of [false, true]) {
     });
   }
 }
+
+for (const platform of ["android", "ios"] as const) {
+  for (const refused of [false, true]) {
+    test(`${platform}: resolved running read checks ownership before resume and verify, refused=${refused}`, async () => {
+      const h = harness(platform, true);
+      const identity = { kind: "stable" as const, platform, stableId: h.id };
+      const blocker = await h.lifecycle.reserve(identity, {
+        operation: "start",
+        deadlineMs: 300_000,
+      });
+      const client = platform === "android" ? AndroidCtrlProxyClient : IOSCtrlProxyClient;
+      const events: string[] = [];
+      const resume = spyOn(client, "resumeAfterDeviceStart").mockImplementation(() => {
+        events.push("resume");
+      });
+      restoreResume = () => resume.mockRestore();
+      const verify = mock(async () => {
+        events.push("verify");
+      });
+      h.manager.verifyDevice = verify;
+      const failure = new ActionableError("resolved target held");
+      const beforeReadReadiness = mock(async (device: BootedDevice) => {
+        expect(device).toMatchObject(h.device);
+        expect(events).toEqual([]);
+        expect(h.lifecycle.isReserved(identity)).toBe(true);
+        events.push("ownership");
+        if (refused) {
+          throw failure;
+        }
+      });
+      const outcome = h.manager
+        .ensureDeviceReady(platform, h.id, { ...h.options, beforeReadReadiness })
+        .then(
+          (device) => device,
+          (error: unknown) => error,
+        );
+      await drainUntil(() => h.lifecycle.reservations.length === 2, {
+        description: "read lease queued",
+      });
+      h.setRunning([h.device]);
+      h.setImages([{ ...h.image, isRunning: true }]);
+      blocker.release();
+      if (refused) {
+        expect(await outcome).toBe(failure);
+        expect(events).toEqual(["ownership"]);
+        expect(verify).not.toHaveBeenCalled();
+        expect(resume).not.toHaveBeenCalled();
+      } else {
+        expect(await outcome).toMatchObject(h.device);
+        expect(events).toEqual(["ownership", "resume", "verify"]);
+      }
+      expect(beforeReadReadiness).toHaveBeenCalledTimes(1);
+      expect(h.lifecycle.isReserved(identity)).toBe(false);
+      h.assertNoBoot();
+      h.assertNoReadWrites();
+    });
+  }
+}
+
+test("Android cold read readiness refusal leaves the booted emulator running and releases its lease", async () => {
+  const h = harness("android", true);
+  const identity = { kind: "stable" as const, platform: "android" as const, stableId: h.id };
+  const failure = new ActionableError("booted serial acquired");
+  const resume = spyOn(AndroidCtrlProxyClient, "resumeAfterDeviceStart");
+  restoreResume = () => resume.mockRestore();
+  const verify = mock(async () => {});
+  h.manager.verifyAndroidDevice = verify;
+  const beforeReadReadiness = mock(async (device: BootedDevice) => {
+    expect(device).toMatchObject(h.device);
+    expect(h.lifecycle.isReserved(identity)).toBe(true);
+    throw failure;
+  });
+  await expect(
+    h.manager.ensureDeviceReady("android", h.id, { ...h.options, beforeReadReadiness }),
+  ).rejects.toBe(failure);
+  expect(h.startCalls).toEqual([h.id]);
+  expect(resume).not.toHaveBeenCalled();
+  expect(verify).not.toHaveBeenCalled();
+  expect(
+    h.devices.getExecutedOperations().filter((operation) => operation.startsWith("killDevice")),
+  ).toEqual([]);
+  expect(h.lifecycle.isReserved(identity)).toBe(false);
+  h.assertNoReadWrites();
+});

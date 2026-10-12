@@ -397,6 +397,8 @@ export interface DeviceReadyOptions {
   intent?: "read" | "control";
   /** Last read ownership check after image discovery, before any lifecycle or boot work. */
   beforeReadBoot?: (image: DeviceInfo) => Promise<void>;
+  /** Resolved read identity check before runner resume or verification. */
+  beforeReadReadiness?: (device: BootedDevice) => Promise<void>;
   skipCtrlProxyDownload?: boolean;
   signal?: AbortSignal;
   /** Reuses device discovery already started by the current target resolution. */
@@ -1215,11 +1217,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
       }
     }
     if (running) {
-      if (image.platform === "android") {
-        AndroidCtrlProxyClient.resumeAfterDeviceStart(running.deviceId);
-      } else {
-        IOSCtrlProxyClient.resumeAfterDeviceStart(running.deviceId);
-      }
+      await options.beforeReadReadiness?.(running);
+      options.signal?.throwIfAborted();
+      const client = { android: AndroidCtrlProxyClient, ios: IOSCtrlProxyClient }[image.platform];
+      client.resumeAfterDeviceStart(running.deviceId);
       await this.verifyDevice(running.deviceId, image.platform, options, running);
     }
     return running;
@@ -2234,6 +2235,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
           throw new ActionableError(`Failed to start Android emulator ${deviceImage}.`);
         }
 
+        if (options?.intent === "read") {
+          await options.beforeReadReadiness?.(newDevice);
+          signal.throwIfAborted();
+        }
         AndroidCtrlProxyClient.resumeAfterDeviceStart(newDevice.deviceId!);
         perf.startOperation("verifyDevice");
         await this.verifyAndroidDevice(newDevice.deviceId!, { ...options, signal }, newDevice);

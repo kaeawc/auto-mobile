@@ -202,7 +202,7 @@ export class OwnerDisconnectRelease {
   ) {}
 
   /** The connection `mcpSessionId` that owned `sessionId` closed and no other connection owns it. */
-  ownerDisconnected(sessionId: string, mcpSessionId: string): void {
+  ownerDisconnected(sessionId: string, mcpSessionId: string, graceMs = this.graceMs): void {
     const session = this.port.getSession(sessionId);
     if (!session) {
       return;
@@ -216,12 +216,13 @@ export class OwnerDisconnectRelease {
       return;
     }
     this.cancel(sessionId);
-    const handle = this.timer.setTimeout(() => this.fire(sessionId), this.graceMs);
+    // #11999: even an undelivered mint releases outside the assignment commit.
+    const handle = this.timer.setTimeout(() => this.fire(sessionId), graceMs);
     this.pending.set(sessionId, {
       session,
       mcpSessionId,
       closedAt,
-      dueAt: closedAt + this.graceMs,
+      dueAt: closedAt + graceMs,
       handle,
       deferred: false,
       rearmRequested: false,

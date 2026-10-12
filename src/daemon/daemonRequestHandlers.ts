@@ -161,6 +161,7 @@ export interface DaemonStateAccess {
     /** Reverse-map holders, including sessions awaiting or completing release. */
     getHeldDeviceSessions?(): readonly HeldDeviceSession[];
     getTerminalReleaseSnapshot?(sessionId: string): SessionReleaseSnapshot | undefined;
+    getExpiredReleaseSnapshot?(sessionId: string): Promise<SessionReleaseSnapshot | undefined>;
     /** Why a session this daemon released was released; undefined for a never-issued UUID. */
     getReleasedSessionReason?(sessionId: string): Promise<string | undefined>;
     recordHeartbeat?(sessionId: string): void;
@@ -209,6 +210,7 @@ export interface DaemonStateAccess {
       livenessOwnerToken?: string,
     ): Promise<readonly RefusedOwnedSessionRestore[] | void>;
     releaseMcpSessionBindings?(mcpSessionId: string): void;
+    beginMcpToolCall?(mcpSessionId: string | undefined): (delivered?: boolean) => void;
     declareMcpSessionLivenessOwnerToken?(mcpSessionId: string, token: string): void;
     /** Give up the restart-recovery reservation made for a session, if any (#11294). */
     releaseRehydrationReservation?(sessionId: string): void;
@@ -427,16 +429,27 @@ async function releaseDrainRefusal(
  * snapshot and no row, and still registers as an observer.
  *
  * The in-memory snapshot is empty after a daemon restart, so a UUID without one is judged by its
- * persisted `release_reason` under the same predicate. The read changes nothing: a recoverable
- * handoff or a re-issuable `plan-auto-release` row keeps registering and stays as it was.
+ * persisted release or the same expired-row snapshot that refuses control admission. The read
+ * changes nothing: a handoff or `plan-auto-release` row still inside its window keeps registering.
  */
 async function terminalSessionRegistrationRefusal(
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
   sessionId: string,
 ): Promise<DaemonMethodResult | undefined> {
   const snapshot = manager.getTerminalReleaseSnapshot?.(sessionId);
-  const release = snapshot ?? (await persistedTerminalRelease(manager, sessionId));
-  if (!release?.terminal || !isExpiryReleaseReason(release.releaseReason)) {
+  let expired: SessionReleaseSnapshot | undefined;
+  if (!snapshot) {
+    try {
+      expired = await manager.getExpiredReleaseSnapshot?.(sessionId);
+    } catch (error) {
+      logger.warn(`Expired snapshot lookup failed for ${sessionId}: ${errorMessage(error)}`, error);
+    }
+  }
+  const release = snapshot ?? expired ?? (await persistedTerminalRelease(manager, sessionId));
+  if (
+    !release?.terminal ||
+    (expired === undefined && !isExpiryReleaseReason(release.releaseReason))
+  ) {
     return undefined;
   }
   const { releaseReason, ownerPid } = release;

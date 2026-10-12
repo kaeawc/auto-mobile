@@ -6,6 +6,7 @@ import {
   confirmImeCommitAfterSyncLoss,
   IME_EDITOR_SYNC_LOST_CONFIRMED_WARNING,
   IME_EDITOR_SYNC_LOST_ERROR,
+  IME_INSERTED_TEXT_UNAVAILABLE_WARNING,
   verifyImeCommitResult,
 } from "../../../src/features/action/imeFailureDiagnostics";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -582,6 +583,23 @@ describe("IME inserted delta verification", () => {
   });
 
   test.each([
+    { text: "one\ntwo three", insertedText: "onetwo three" },
+    { text: "one\ntwo three", insertedText: "one\ntwothree" },
+    { text: "hi, there", insertedText: "hi there" },
+    { text: "hello", insertedText: "prefix hello" },
+  ])("rejects nonexact inserted delta: $insertedText", async ({ text, insertedText }) => {
+    const h = harness(text + insertedText);
+    h.client.commitViaIme = async () => ({ success: true, insertedText });
+    const result = await h.executor.type({ action: "type", text, mode: "ime" });
+    expect(result).toMatchObject({
+      success: false,
+      partialApplication: true,
+      imeFailure: { stage: "verification", observedText: insertedText },
+    });
+    expect(result.error).toContain(JSON.stringify(insertedText));
+  });
+
+  test.each([
     { error: "Editor disconnected during IME commit", committedUnits: 5, insertedText: "" },
     { error: "IME commit deadline exceeded", committedUnits: 6, insertedText: "abcdef" },
   ])("keeps device cause and inserted delta: $error", async (failure) => {
@@ -616,9 +634,12 @@ describe("IME inserted delta verification", () => {
 
   test.each([
     { text: "hello", insertedText: "hello" },
+    { text: "5551234567", insertedText: "(555) 123-4567" },
     { text: "- item", insertedText: "• item" },
     { text: "*bold*", insertedText: "bold" },
     { text: "hello", insertedText: "HELLO" },
+    { text: "hi @name there", insertedText: "prefix hi name there suffix" },
+    { text: "```code```", insertedText: "prefix code suffix" },
   ])("accepts editor transformations and still observes: $insertedText", async (input) => {
     const h = harness(input.insertedText);
     let readsAtCommit = 0;
@@ -631,10 +652,107 @@ describe("IME inserted delta verification", () => {
     expect(h.observationReads).toBeGreaterThan(readsAtCommit);
   });
 
-  test("an old APK retains legacy whole-field acceptance", async () => {
+  test("an old APK retains legacy whole-field acceptance and warns once", async () => {
     const h = harness(text + "line online two\nline three");
     h.client.commitViaIme = async () => ({ success: true, committedUnits: 28 });
-    expect((await h.executor.type({ action: "type", text, mode: "ime" })).success).toBe(true);
+    let probes = 0;
+    h.client.supportsImeInsertedText = async () => {
+      probes++;
+      return false;
+    };
+    const result = await h.action.execute([{ action: "type", text, mode: "ime" }]);
+    expect(result.success).toBe(true);
+    expect(result.commands[0].warning).toBe(IME_INSERTED_TEXT_UNAVAILABLE_WARNING);
+    expect(result.commands[0]).not.toHaveProperty("insertedText");
+    expect(probes).toBe(1);
+    expect(result.commands[0].warning).not.toContain(text);
+  });
+
+  test("a failed capability probe preserves the verified commit without a skew warning", async () => {
+    const h = harness("hello");
+    h.client.commitViaIme = async () => ({ success: true, committedUnits: 5 });
+    let probes = 0;
+    h.client.supportsImeInsertedText = async () => {
+      probes++;
+      throw new Error("socket dropped after commit");
+    };
+    const result = await h.executor.type({ action: "type", text: "hello", mode: "ime" });
+    expect(result).toMatchObject({ success: true, committedUnits: 5, resolvedMode: "ime" });
+    expect(result.warning).toBeUndefined();
+    expect(result.error).toBeUndefined();
+    expect(probes).toBe(1);
+  });
+
+  test.each(["signal", "AbortError"] as const)(
+    "a failed capability probe still honours %s cancellation",
+    async (kind) => {
+      const h = harness("hello");
+      h.client.commitViaIme = async () => ({ success: true });
+      const controller = new AbortController();
+      const error = new Error("probe cancelled");
+      h.client.supportsImeInsertedText = async () => {
+        if (kind === "signal") {
+          controller.abort(error);
+        } else {
+          error.name = "AbortError";
+        }
+        throw error;
+      };
+      await expect(
+        h.executor.type({ action: "type", text: "hello", mode: "ime" }, controller.signal),
+      ).rejects.toThrow("probe cancelled");
+    },
+  );
+
+  test("a new APK without insertedText has no skew warning", async () => {
+    const h = harness("hello");
+    h.client.commitViaIme = async () => ({ success: true });
+    let probes = 0;
+    h.client.supportsImeInsertedText = async () => {
+      probes++;
+      return true;
+    };
+    const result = await h.executor.type({ action: "type", text: "hello", mode: "ime" });
+    expect(result.success).toBe(true);
+    expect(result.warning).toBeUndefined();
+    expect(probes).toBe(1);
+  });
+
+  test.each([
+    { name: "delta present", password: false, success: true, mode: "ime", insertedText: "hello" },
+    { name: "password", password: true, success: true, mode: "ime" },
+    { name: "failed commit", password: false, success: false, mode: "ime" },
+    { name: "key events", password: false, success: true, mode: "imeKeyEvents" },
+  ] as const)("does not probe or warn for $name", async (input) => {
+    const h = input.password ? harness("", passwordField()) : harness("hello");
+    h.client.supportsImePasswordCommit = async () => true;
+    let probes = 0;
+    h.client.supportsImeInsertedText = async () => {
+      probes++;
+      return false;
+    };
+    h.client.commitViaIme = async () => ({
+      success: input.success,
+      ...(input.success ? {} : { error: "No active input connection" }),
+      ...("insertedText" in input ? { insertedText: input.insertedText } : {}),
+    });
+    const result = await h.executor.type({ action: "type", text: "hello", mode: input.mode });
+    expect(result.success).toBe(input.success);
+    expect(result.warning).toBeUndefined();
+    expect(probes).toBe(0);
+  });
+
+  test("clear-field delivery does not probe or warn", async () => {
+    const h = harness("");
+    let probes = 0;
+    h.client.supportsImeInsertedText = async () => {
+      probes++;
+      return false;
+    };
+    const result = await h.executor.clear(undefined, undefined, "ime");
+    expect(result.success).toBe(true);
+    expect(result.warning).toBeUndefined();
+    expect(probes).toBe(0);
   });
 
   test("password masked delta mismatch stays unverifiable without naming values", async () => {

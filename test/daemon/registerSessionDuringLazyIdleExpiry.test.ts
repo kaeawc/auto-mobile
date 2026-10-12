@@ -114,9 +114,9 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
   const sessionInfo = () =>
     handleDaemonRequest(request("daemon/sessionInfo", { sessionId: SESSION }), state);
 
-  async function registerBeforeFence() {
+  async function registerBeforeFence(registration = register()) {
     return await Promise.race([
-      register(),
+      registration,
       drainMicrotasks(100).then(() => {
         throw new Error("Registration did not settle while restore was blocked");
       }),
@@ -177,6 +177,37 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
 
     expect(answer).toEqual(idleRefusal);
     expect(registry.list()).toEqual([]);
+  });
+
+  test("a session issued and already idle-expired while the persisted row is read is refused, not registered", async () => {
+    // Leave a recoverable row and no live session; reissuance happens only during the read.
+    manager.setKeepScreenAwake(SESSION, { applied: false, method: "svc", svcWasEnabled: false });
+    await manager.releaseSession(SESSION, "daemon-shutdown");
+    expect(manager.hasSession(SESSION)).toBe(false);
+    const finishRead = Promise.withResolvers<void>();
+    let reading = false;
+    const expired = spyOn(manager, "getExpiredReleaseSnapshot").mockImplementationOnce(async () => {
+      reading = true;
+      await finishRead.promise;
+      return undefined;
+    });
+    try {
+      const registration = register();
+      await drainUntil(() => reading, { description: "blocked persisted snapshot read" });
+      await manager.createSession(SESSION, DEVICE, "android", IDLE_MS);
+      manager.setKeepScreenAwake(SESSION, { applied: true, method: "svc", svcWasEnabled: false });
+      expireWithoutLookup();
+      finishRead.resolve();
+      const answer = await registerBeforeFence(registration);
+      expectPreFenceRestore();
+      expect(answer).toEqual(idleRefusal);
+      expect(registry.list()).toEqual([]);
+      expect(expired).toHaveBeenCalledTimes(1);
+    } finally {
+      finishRead.resolve();
+      expired.mockRestore();
+      finishRestore();
+    }
   });
 
   test("control admission waits for pre-fence teardown then rejects with the idle end", async () => {

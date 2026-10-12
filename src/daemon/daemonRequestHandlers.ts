@@ -437,13 +437,11 @@ async function releaseDrainRefusal(
  * the expired-row snapshot or persisted release (also covering daemon restarts). The read changes
  * nothing: a handoff or `plan-auto-release` row still inside its window keeps registering.
  */
-async function terminalSessionRegistrationRefusal(
+async function lookupTerminalSessionRegistrationRefusal(
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
   sessionId: string,
 ): Promise<DaemonMethodResult | undefined> {
-  const snapshot =
-    manager.getTerminalReleaseSnapshot?.(sessionId) ??
-    manager.peekTerminalAnswerForEndedSession?.(sessionId)?.release;
+  const snapshot = inMemorySessionRelease(manager, sessionId);
   let expired: SessionReleaseSnapshot | undefined;
   if (!snapshot) {
     try {
@@ -453,10 +451,27 @@ async function terminalSessionRegistrationRefusal(
     }
   }
   const release = snapshot ?? expired ?? (await persistedTerminalRelease(manager, sessionId));
-  if (
-    !release?.terminal ||
-    (expired === undefined && !isExpiryReleaseReason(release.releaseReason))
-  ) {
+  return terminalSessionRegistrationRefusal(sessionId, release, expired !== undefined);
+}
+
+/** The release this UUID ended or is ending with, without yielding or starting teardown. */
+function inMemorySessionRelease(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+): SessionReleaseSnapshot | undefined {
+  return (
+    manager.getTerminalReleaseSnapshot?.(sessionId) ??
+    manager.peekTerminalAnswerForEndedSession?.(sessionId)?.release
+  );
+}
+
+/** Build the unchanged terminal-expiry refusal; expired rows also qualify without an expiry reason. */
+function terminalSessionRegistrationRefusal(
+  sessionId: string,
+  release: Pick<SessionReleaseSnapshot, "releaseReason" | "terminal" | "ownerPid"> | undefined,
+  expiredRow = false,
+): DaemonMethodResult | undefined {
+  if (!release?.terminal || (!expiredRow && !isExpiryReleaseReason(release.releaseReason))) {
     return undefined;
   }
   const { releaseReason, ownerPid } = release;
@@ -560,7 +575,7 @@ async function handleRegisterSession(
   if (live) {
     return live;
   }
-  const terminal = await terminalSessionRegistrationRefusal(manager, sessionId);
+  const terminal = await lookupTerminalSessionRegistrationRefusal(manager, sessionId);
   if (terminal) {
     return terminal;
   }
@@ -569,7 +584,23 @@ async function handleRegisterSession(
   if (issued) {
     return issued;
   }
-  const registry = state.getObserverSessionRegistry?.();
+  // This last lookup may itself start lazy expiry. Judge its end synchronously before registering.
+  const ended = terminalSessionRegistrationRefusal(
+    sessionId,
+    inMemorySessionRelease(manager, sessionId),
+  );
+  return (
+    ended ??
+    observerSessionRegistration(state.getObserverSessionRegistry?.(), sessionId, clientName)
+  );
+}
+
+/** Register an observer only after synchronous device-session admission has finished. */
+function observerSessionRegistration(
+  registry: ObserverSessionStore | undefined,
+  sessionId: string,
+  clientName: string,
+): DaemonMethodResult {
   if (!registry) {
     return { success: false, error: "Observer session registration is unavailable" };
   }

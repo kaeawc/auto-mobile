@@ -51,7 +51,7 @@ const sockets: DaemonSocketPaths = {
   "performance-push": "/isolated/pp.sock",
   "performance-stream": "/isolated/ps.sock",
   "telemetry-push": "/isolated/tp.sock",
-  "test-recording": "/isolated/tr.sock",
+  "device-gesture-recording": "/isolated/tr.sock",
   "video-recording": "/isolated/vr.sock",
   "video-stream": "/isolated/vs.sock",
   "webrtc-stream": "/isolated/ws.sock",

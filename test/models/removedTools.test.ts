@@ -10,6 +10,7 @@ import { formatDaemonToolError } from "../../src/cli/removedTools";
 
 test("one removed-tool table supplies the same replacement sentence to all paths", () => {
   expect(REMOVED_TOOLS).toEqual({
+    startTestRecording: "recordDeviceGestures",
     captureScreenshot: 'observe {screenshot:"settled"} (returns screenshotPath)',
     inputText: "sendKeys",
     clearText: "sendKeys",

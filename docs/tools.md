@@ -22,11 +22,11 @@ The following tools expose `sessionUuid` and `keepScreenAwake`:
 `identifyInteractions`, `inspectPackageSigning`, `installApp`, `keyboard`, `launchApp`, `listApps`, `listDataStores`,
 `mockNetwork`, `navigateTo`, `network`, `observe`, `openLink`, `phoneCall`, `pinchOn`,
 `postNotification`, `pressButton`, `prototype`, `putAppFile`, `recentApps`,
-`reconcileDeviceResources`, `recordSteps`, `removeKeyValue`,
+`reconcileDeviceResources`, `recordDeviceGestures`, `recordSteps`, `removeKeyValue`,
 `resetAppLogs`, `resetKeychain`, `rotate`, `selectAllText`, `sendKeys`, `sendSms`,
 `setActiveDevice`, `setAppPermissions`, `setDeviceResources`, `setDeviceState`, `setKeyValue`,
 `setNotificationPolicy`, `setPosture`, `setPreference`, `setUIState`, `shake`, `snapshotOf`,
-`sqlQuery`, `startTestRecording`,
+`sqlQuery`,
 `swipeOn`, `systemTray`, `tapAny`, `tapAt`, `tapOn`, `terminateApp`, `uninstallApp`,
 `videoRecording`, `wakeAndUnlock`.
 
@@ -2149,7 +2149,7 @@ while the shared 10,000 ms read continues; coalesced AVD reads use a 30,000 ms s
 | 🔒 <code>criticalSection</code>                                | Synchronizes devices, then runs steps serially.                                |
 | 🚧 <code>barrier</code>                                        | Synchronizes devices, then lets them proceed concurrently.                     |
 | 📝 <code>recordSteps</code>                                    | Records MCP calls to YAML; begin and end require <code>--mcp-recording</code>. |
-| ⏺️ <code>startTestRecording</code>                             | Records on-device user input (not tool calls) for <code>exportPlan</code>.     |
+| ⏺️ <code>recordDeviceGestures</code>                           | Records on-device user input (not tool calls) for <code>exportPlan</code>.     |
 | 📤 <code>exportPlan</code>                                     | Stops the active recording and exports a YAML plan.                            |
 | 🎥 <code>videoRecording</code>                                 | Starts or stops device video recording.                                        |
 
@@ -2218,7 +2218,7 @@ were all skipped fails with an error that lists them.
 `exportPlan.recordingId` identifies the recording to export, and `planName`
 names the exported plan.
 
-Test recordings capture input made on the device itself: touches on its touch
+Device gesture recordings capture input made on the device itself: touches on its touch
 screen or emulator window, and text changes in input fields. A text change is recorded whatever produced it,
 so text typed by a tool becomes a `sendKeys` step. Taps, swipes and
 other gestures sent through AutoMobile tools (`tapAt`, `tapOn`, `swipeOn`, etc.)

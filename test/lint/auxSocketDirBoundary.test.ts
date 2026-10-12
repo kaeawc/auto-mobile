@@ -15,7 +15,7 @@ const SERVER_CLASSES = [
   "PerformancePush",
   "PerformanceStream",
   "TelemetryPush",
-  "TestRecording",
+  "DeviceGestureRecording",
   "VideoRecording",
   "VideoStream",
   "WebRtcStream",

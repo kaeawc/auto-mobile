@@ -17,8 +17,8 @@ import dev.jasonpearson.automobile.desktop.core.daemon.RemoveKeyValueResult
 import dev.jasonpearson.automobile.desktop.core.daemon.SetActiveDeviceResult
 import dev.jasonpearson.automobile.desktop.core.daemon.SetKeyValueResult
 import dev.jasonpearson.automobile.desktop.core.daemon.StartDeviceResult
-import dev.jasonpearson.automobile.desktop.core.daemon.TestRecordingStartResult
-import dev.jasonpearson.automobile.desktop.core.daemon.TestRecordingStopResult
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceGestureRecordingStartResult
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceGestureRecordingStopResult
 import dev.jasonpearson.automobile.desktop.core.daemon.TestRunQuery
 import dev.jasonpearson.automobile.desktop.core.daemon.TestRunSummary
 import dev.jasonpearson.automobile.desktop.core.daemon.TestTimingQuery
@@ -56,10 +56,10 @@ class FakeAutoMobileClient : AutoMobileClient {
     PerformanceAuditHistoryResult()
   var getTestTimingsResult: TestTimingSummary = TestTimingSummary()
   var getTestRunsResult: TestRunSummary = TestRunSummary()
-  var startTestRecordingResult: TestRecordingStartResult =
-    TestRecordingStartResult(recordingId = "fake-id", startedAt = "2025-01-01T00:00:00Z")
-  var stopTestRecordingResult: TestRecordingStopResult =
-    TestRecordingStopResult(
+  var startDeviceGestureRecordingResult: DeviceGestureRecordingStartResult =
+    DeviceGestureRecordingStartResult(recordingId = "fake-id", startedAt = "2025-01-01T00:00:00Z")
+  var stopDeviceGestureRecordingResult: DeviceGestureRecordingStopResult =
+    DeviceGestureRecordingStopResult(
       recordingId = "fake-id",
       startedAt = "2025-01-01T00:00:00Z",
       stoppedAt = "2025-01-01T00:00:01Z",
@@ -330,14 +330,14 @@ class FakeAutoMobileClient : AutoMobileClient {
     return getTestRunsResult
   }
 
-  override fun startTestRecording(platform: String): TestRecordingStartResult {
-    calls.add("startTestRecording")
-    return startTestRecordingResult
+  override fun startDeviceGestureRecording(platform: String): DeviceGestureRecordingStartResult {
+    calls.add("startDeviceGestureRecording")
+    return startDeviceGestureRecordingResult
   }
 
-  override fun stopTestRecording(recordingId: String?, planName: String?): TestRecordingStopResult {
-    calls.add("stopTestRecording")
-    return stopTestRecordingResult
+  override fun stopDeviceGestureRecording(recordingId: String?, planName: String?): DeviceGestureRecordingStopResult {
+    calls.add("stopDeviceGestureRecording")
+    return stopDeviceGestureRecordingResult
   }
 
   override fun executePlan(

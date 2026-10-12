@@ -7,7 +7,7 @@ import { getFailuresStreamSocketPath } from "./failuresStreamSocketServer";
 import { getPerformancePushSocketPath } from "./performancePushSocketServer";
 import { getPerformanceStreamSocketPath } from "./performanceStreamSocketServer";
 import { getTelemetryPushSocketPath } from "./telemetryPushSocketServer";
-import { getTestRecordingSocketPath } from "./testRecordingSocketServer";
+import { getDeviceGestureRecordingSocketPath } from "./deviceGestureRecordingSocketServer";
 import { getVideoRecordingSocketPath } from "./videoRecordingSocketServer";
 import { getVideoStreamSocketPath } from "./videoStreamSocketServer";
 import { getWebRtcStreamSocketPath } from "./webrtcStreamSocketServer";
@@ -32,7 +32,7 @@ export function getDaemonSocketPathsByName(): DaemonSocketPaths {
     "performance-push": getPerformancePushSocketPath(),
     "performance-stream": getPerformanceStreamSocketPath(),
     "telemetry-push": getTelemetryPushSocketPath(),
-    "test-recording": getTestRecordingSocketPath(),
+    "device-gesture-recording": getDeviceGestureRecordingSocketPath(),
     "video-recording": getVideoRecordingSocketPath(),
     "video-stream": getVideoStreamSocketPath(),
     "webrtc-stream": getWebRtcStreamSocketPath(),

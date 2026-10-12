@@ -41,7 +41,7 @@ class McpStdioClient(
 ) : AutoMobileClient {
   override val transportName: String = "MCP STDIO"
   override val connectionDescription: String = command
-  private val testRecordingClient = TestRecordingSocketClient()
+  private val deviceGestureRecordingClient = DeviceGestureRecordingSocketClient()
 
   private val ioLock = Any()
   private var process: Process? = null
@@ -162,16 +162,16 @@ class McpStdioClient(
     return decodeResourceResponse(json, contents, serializer<TestRunSummary>())
   }
 
-  override fun startTestRecording(platform: String): TestRecordingStartResult {
-    return testRecordingClient.startTestRecording(platform)
+  override fun startDeviceGestureRecording(platform: String): DeviceGestureRecordingStartResult {
+    return deviceGestureRecordingClient.startDeviceGestureRecording(platform)
   }
 
-  override fun stopTestRecording(
+  override fun stopDeviceGestureRecording(
     recordingId: String?,
     planName: String?,
-  ): TestRecordingStopResult {
+  ): DeviceGestureRecordingStopResult {
     val resolvedPlanName = planName?.ifBlank { null }
-    return testRecordingClient.stopTestRecording(recordingId, resolvedPlanName)
+    return deviceGestureRecordingClient.stopDeviceGestureRecording(recordingId, resolvedPlanName)
   }
 
   override fun executePlan(

@@ -547,7 +547,7 @@ export class LivenessScenario {
       this.incompleteRecordings.push(recordingId);
     };
     deps.listActiveVideoRecordings = async () => [];
-    deps.isTestRecordingOwnedBy = () => false;
+    deps.isDeviceGestureRecordingOwnedBy = () => false;
     this.restoreRecordingDeps = () => Object.assign(deps, original);
   }
 

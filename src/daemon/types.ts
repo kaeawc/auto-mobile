@@ -424,7 +424,7 @@ export type DaemonSocketName =
   | "performance-push"
   | "performance-stream"
   | "telemetry-push"
-  | "test-recording"
+  | "device-gesture-recording"
   | "video-recording"
   | "video-stream"
   | "webrtc-stream";

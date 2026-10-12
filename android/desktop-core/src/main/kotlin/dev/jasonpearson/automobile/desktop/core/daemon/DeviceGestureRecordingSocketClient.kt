@@ -7,26 +7,26 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-interface TestRecordingClient {
-  fun startTestRecording(platform: String? = null): TestRecordingStartResult
+interface DeviceGestureRecordingClient {
+  fun startDeviceGestureRecording(platform: String? = null): DeviceGestureRecordingStartResult
 
-  fun stopTestRecording(
+  fun stopDeviceGestureRecording(
     recordingId: String? = null,
     planName: String? = null,
-  ): TestRecordingStopResult
+  ): DeviceGestureRecordingStopResult
 }
 
-class TestRecordingSocketClient
+class DeviceGestureRecordingSocketClient
 internal constructor(
-  private val socketPathValue: String = TestRecordingSocketPaths.socketPath(),
+  private val socketPathValue: String = DeviceGestureRecordingSocketPaths.socketPath(),
   private val json: Json = DaemonJson,
-  private val requestTimeoutMs: Long = TEST_RECORDING_REQUEST_TIMEOUT_MS,
+  private val requestTimeoutMs: Long = DEVICE_GESTURE_RECORDING_REQUEST_TIMEOUT_MS,
   private val watchdog: SocketRequestWatchdog,
-) : TestRecordingClient {
+) : DeviceGestureRecordingClient {
   constructor(
-    socketPathValue: String = TestRecordingSocketPaths.socketPath(),
+    socketPathValue: String = DeviceGestureRecordingSocketPaths.socketPath(),
     json: Json = DaemonJson,
-    requestTimeoutMs: Long = TEST_RECORDING_REQUEST_TIMEOUT_MS,
+    requestTimeoutMs: Long = DEVICE_GESTURE_RECORDING_REQUEST_TIMEOUT_MS,
   ) : this(
     socketPathValue,
     json,
@@ -34,10 +34,10 @@ internal constructor(
     SharedSocketRequestWatchdog,
   )
 
-  override fun startTestRecording(platform: String?): TestRecordingStartResult {
-    val response = sendRequest(TestRecordingSocketCommand(command = "start", platform = platform))
+  override fun startDeviceGestureRecording(platform: String?): DeviceGestureRecordingStartResult {
+    val response = sendRequest(DeviceGestureRecordingSocketCommand(command = "start", platform = platform))
     ensureSuccess(response)
-    return TestRecordingStartResult(
+    return DeviceGestureRecordingStartResult(
       recordingId = response.recordingId ?: throw missingField("recordingId"),
       startedAt = response.startedAt ?: throw missingField("startedAt"),
       deviceId = response.deviceId,
@@ -45,20 +45,20 @@ internal constructor(
     )
   }
 
-  override fun stopTestRecording(
+  override fun stopDeviceGestureRecording(
     recordingId: String?,
     planName: String?,
-  ): TestRecordingStopResult {
+  ): DeviceGestureRecordingStopResult {
     val response =
       sendRequest(
-        TestRecordingSocketCommand(
+        DeviceGestureRecordingSocketCommand(
           command = "stop",
           recordingId = recordingId,
           planName = planName,
         ),
       )
     ensureSuccess(response)
-    return TestRecordingStopResult(
+    return DeviceGestureRecordingStopResult(
       recordingId = response.recordingId ?: throw missingField("recordingId"),
       startedAt = response.startedAt ?: throw missingField("startedAt"),
       stoppedAt = response.stoppedAt ?: throw missingField("stoppedAt"),
@@ -71,7 +71,7 @@ internal constructor(
     )
   }
 
-  private fun sendRequest(request: TestRecordingSocketCommand): TestRecordingSocketResponse {
+  private fun sendRequest(request: DeviceGestureRecordingSocketCommand): DeviceGestureRecordingSocketResponse {
     ensureSocketExists()
 
     val line =
@@ -79,7 +79,7 @@ internal constructor(
         socketPath = socketPathValue,
         requestLine = json.encodeToString(request),
         timeoutMs = requestTimeoutMs,
-        label = "Test recording",
+        label = "Device gesture recording",
         watchdog = watchdog,
       )
 
@@ -89,36 +89,36 @@ internal constructor(
   private fun ensureSocketExists() {
     val path = File(socketPathValue).toPath()
     if (!Files.exists(path)) {
-      throw McpConnectionException("Test recording socket not found at $socketPathValue")
+      throw McpConnectionException("Device gesture recording socket not found at $socketPathValue")
     }
   }
 
-  private fun ensureSuccess(response: TestRecordingSocketResponse) {
+  private fun ensureSuccess(response: DeviceGestureRecordingSocketResponse) {
     if (!response.success) {
-      throw McpConnectionException(response.error ?: "Test recording request failed")
+      throw McpConnectionException(response.error ?: "Device gesture recording request failed")
     }
   }
 
   private fun missingField(name: String): McpConnectionException {
-    return McpConnectionException("Test recording response missing $name")
+    return McpConnectionException("Device gesture recording response missing $name")
   }
 }
 
-data class FakeTestRecordingStartCall(val platform: String?)
+data class FakeDeviceGestureRecordingStartCall(val platform: String?)
 
-data class FakeTestRecordingStopCall(val recordingId: String?, val planName: String?)
+data class FakeDeviceGestureRecordingStopCall(val recordingId: String?, val planName: String?)
 
-class FakeTestRecordingClient(
-  private val startResponses: List<TestRecordingStartResult> = emptyList(),
-  private val stopResponses: List<TestRecordingStopResult> = emptyList(),
-) : TestRecordingClient {
-  val startCalls = mutableListOf<FakeTestRecordingStartCall>()
-  val stopCalls = mutableListOf<FakeTestRecordingStopCall>()
+class FakeDeviceGestureRecordingClient(
+  private val startResponses: List<DeviceGestureRecordingStartResult> = emptyList(),
+  private val stopResponses: List<DeviceGestureRecordingStopResult> = emptyList(),
+) : DeviceGestureRecordingClient {
+  val startCalls = mutableListOf<FakeDeviceGestureRecordingStartCall>()
+  val stopCalls = mutableListOf<FakeDeviceGestureRecordingStopCall>()
   private var startIndex = 0
   private var stopIndex = 0
 
-  override fun startTestRecording(platform: String?): TestRecordingStartResult {
-    startCalls.add(FakeTestRecordingStartCall(platform))
+  override fun startDeviceGestureRecording(platform: String?): DeviceGestureRecordingStartResult {
+    startCalls.add(FakeDeviceGestureRecordingStartCall(platform))
     if (startResponses.isEmpty()) {
       throw IllegalStateException("No start responses configured")
     }
@@ -127,8 +127,8 @@ class FakeTestRecordingClient(
     return response
   }
 
-  override fun stopTestRecording(recordingId: String?, planName: String?): TestRecordingStopResult {
-    stopCalls.add(FakeTestRecordingStopCall(recordingId, planName))
+  override fun stopDeviceGestureRecording(recordingId: String?, planName: String?): DeviceGestureRecordingStopResult {
+    stopCalls.add(FakeDeviceGestureRecordingStopCall(recordingId, planName))
     if (stopResponses.isEmpty()) {
       throw IllegalStateException("No stop responses configured")
     }
@@ -138,8 +138,8 @@ class FakeTestRecordingClient(
   }
 
   companion object {
-    /** Creates a FakeTestRecordingClient with sample responses for UI development/testing. */
-    fun withSampleResponses(): FakeTestRecordingClient {
+    /** Creates a FakeDeviceGestureRecordingClient with sample responses for UI development/testing. */
+    fun withSampleResponses(): FakeDeviceGestureRecordingClient {
       val sampleYaml =
         """
         |name: recorded-plan-2026-02-01T10-30-00
@@ -167,10 +167,10 @@ class FakeTestRecordingClient(
         """
           .trimMargin()
 
-      return FakeTestRecordingClient(
+      return FakeDeviceGestureRecordingClient(
         startResponses =
           listOf(
-            TestRecordingStartResult(
+            DeviceGestureRecordingStartResult(
               recordingId = "rec-001",
               startedAt = "2026-02-01T10:30:00Z",
               deviceId = "emulator-5554",
@@ -179,7 +179,7 @@ class FakeTestRecordingClient(
           ),
         stopResponses =
           listOf(
-            TestRecordingStopResult(
+            DeviceGestureRecordingStopResult(
               recordingId = "rec-001",
               startedAt = "2026-02-01T10:30:00Z",
               stoppedAt = "2026-02-01T10:30:12Z",
@@ -196,12 +196,12 @@ class FakeTestRecordingClient(
   }
 }
 
-object TestRecordingSocketPaths {
-  fun socketPath(): String = AutoMobileSocketPaths.socketPath("test-recording.sock")
+object DeviceGestureRecordingSocketPaths {
+  fun socketPath(): String = AutoMobileSocketPaths.socketPath("device-gesture-recording.sock")
 }
 
 @Serializable
-private data class TestRecordingSocketCommand(
+private data class DeviceGestureRecordingSocketCommand(
   val command: String,
   val deviceId: String? = null,
   val platform: String? = null,
@@ -210,7 +210,7 @@ private data class TestRecordingSocketCommand(
 )
 
 @Serializable
-private data class TestRecordingSocketResponse(
+private data class DeviceGestureRecordingSocketResponse(
   val success: Boolean,
   val recordingId: String? = null,
   val startedAt: String? = null,

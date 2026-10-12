@@ -76,9 +76,9 @@ function registeredRecordingCapMs(deviceId: string): number | undefined {
       stopSegmentedRecordings: async () => {},
       listActiveVideoRecordings: async () => [],
       stopVideoRecording: async () => {},
-      isTestRecordingOwnedBy: () => false,
-      ownedTestRecordingId: () => undefined,
-      stopTestRecording: async () => {},
+      isDeviceGestureRecordingOwnedBy: () => false,
+      ownedDeviceGestureRecordingId: () => undefined,
+      stopDeviceGestureRecording: async () => {},
       activeRecordingIdsForOwner: () => [],
       timer: new FakeTimer(),
       finalizeCapMs: defaultRecordingSessionCleanupDeps.finalizeCapMs,
@@ -146,7 +146,7 @@ describe("finalize wait budget shared with the runners (#11360)", () => {
       timer,
       adoptVideoRecordings: async () => {},
       adoptSegmentedRecordings: () => {},
-      adoptTestRecording: () => false,
+      adoptDeviceGestureRecording: () => false,
     })("device", "holder");
     const state = new NetworkState({ timer, notifier: { notifyResourceUpdated: () => {} } });
     state.startSimulation("device", "timeout", 30, null);

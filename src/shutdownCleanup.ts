@@ -102,7 +102,7 @@ export const DAEMON_SHUTDOWN_STAGES = {
   "ADB missing-device subscription": writesDatabase(25),
   "session cleanup timer": writesDatabase(25),
   "video recording socket server": writesDatabase(30),
-  "test recording socket server": writesDatabase(30),
+  "device gesture recording socket server": writesDatabase(30),
   "device snapshot socket server": writesDatabase(30),
   "appearance socket server": writesDatabase(30),
   "performance stream socket server": writesDatabase(30),
@@ -159,7 +159,7 @@ export const STDIO_SHUTDOWN_STAGES = {
   "direct-mode capture and iOS CtrlProxy children": writesDatabase(2_000),
   "direct-mode managed ADB server": databaseFree(300),
   "video recording socket server": writesDatabase(30),
-  "test recording socket server": writesDatabase(30),
+  "device gesture recording socket server": writesDatabase(30),
   "device snapshot socket server": writesDatabase(30),
   "appearance socket server": writesDatabase(30),
   "WebRTC stream socket server": writesDatabase(200),
@@ -518,7 +518,7 @@ export interface StdioShutdownDependencies {
   cleanupChildProcesses: StdioCleanup;
   stopManagedAdbServer: StdioCleanup;
   stopVideoRecordingSocketServer: StdioCleanup;
-  stopTestRecordingSocketServer: StdioCleanup;
+  stopDeviceGestureRecordingSocketServer: StdioCleanup;
   stopDeviceSnapshotSocketServer: StdioCleanup;
   stopAppearanceSocketServer: StdioCleanup;
   stopWebRtcStreamSocketServer: StdioCleanup;
@@ -592,9 +592,9 @@ export function createStdioShutdownStages(
       always(dependencies.stopVideoRecordingSocketServer),
     ),
     stage(
-      "test recording socket server",
+      "device gesture recording socket server",
       closing,
-      always(dependencies.stopTestRecordingSocketServer),
+      always(dependencies.stopDeviceGestureRecordingSocketServer),
     ),
     stage(
       "device snapshot socket server",

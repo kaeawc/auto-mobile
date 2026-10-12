@@ -341,7 +341,7 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
       "performance-push": join(tempDir, "performance-push.sock"),
       "performance-stream": join(tempDir, "performance-stream.sock"),
       "telemetry-push": join(tempDir, "telemetry-push.sock"),
-      "test-recording": join(tempDir, "test-recording.sock"),
+      "device-gesture-recording": join(tempDir, "device-gesture-recording.sock"),
       "video-recording": join(tempDir, "video-recording.sock"),
     };
     const data: PidFileData = {

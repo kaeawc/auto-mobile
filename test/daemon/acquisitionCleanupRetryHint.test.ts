@@ -63,13 +63,13 @@ class WedgedRecordings implements RecordingSessionCleanupDeps, RecordingAcquisit
   async stopVideoRecording(): Promise<void> {
     await new Promise<void>(() => {});
   }
-  isTestRecordingOwnedBy(): boolean {
+  isDeviceGestureRecordingOwnedBy(): boolean {
     return false;
   }
-  ownedTestRecordingId(): string | undefined {
+  ownedDeviceGestureRecordingId(): string | undefined {
     return undefined;
   }
-  async stopTestRecording(): Promise<void> {}
+  async stopDeviceGestureRecording(): Promise<void> {}
   adoptVideoRecordings(_deviceId: string, sessionId: string): Promise<void> | undefined {
     let adopted = false;
     for (const [recordingId, owner] of this.active) {
@@ -81,7 +81,7 @@ class WedgedRecordings implements RecordingSessionCleanupDeps, RecordingAcquisit
     return adopted ? this.adoptionPersistence : undefined;
   }
   adoptSegmentedRecordings(): void {}
-  adoptTestRecording(): boolean {
+  adoptDeviceGestureRecording(): boolean {
     return false;
   }
   activeRecordingIdsForOwner(sessionId: string | undefined): string[] {

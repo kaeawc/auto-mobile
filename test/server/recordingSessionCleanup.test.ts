@@ -12,13 +12,13 @@ import {
 } from "../../src/server/recordingSessionCleanup";
 
 import {
-  getStoppedTestRecording,
-  getTestRecordingStatus,
-  ownedTestRecordingId,
-  resetStoppedTestRecordings,
-  startTestRecording,
-  stopTestRecording,
-} from "../../src/server/testRecordingManager";
+  getStoppedDeviceGestureRecording,
+  getDeviceGestureRecordingStatus,
+  ownedDeviceGestureRecordingId,
+  resetStoppedDeviceGestureRecordings,
+  startDeviceGestureRecording,
+  stopDeviceGestureRecording,
+} from "../../src/server/deviceGestureRecordingManager";
 import { VideoRecorderService } from "../../src/features/video";
 import {
   markVideoRecordingIncomplete,
@@ -99,7 +99,7 @@ class FakeRecordings implements RecordingSessionCleanupDeps, RecordingAcquisitio
     { recordingId: string; deviceId: string; ownerSessionUuid: string | undefined }
   >();
   segmentedStops: string[] = [];
-  testRecording: { ownerSessionUuid: string | undefined; deviceId: string } | null = null;
+  deviceGestureRecording: { ownerSessionUuid: string | undefined; deviceId: string } | null = null;
   testStops = 0;
   stopFailure: Error | null = null;
   /** When set, video stops never settle (a wedged backend). */
@@ -120,11 +120,11 @@ class FakeRecordings implements RecordingSessionCleanupDeps, RecordingAcquisitio
     return Promise.resolve();
   }
   adoptSegmentedRecordings(_deviceId: string, _sessionId: string): void {}
-  adoptTestRecording(deviceId: string, sessionId: string): boolean {
-    if (!this.isTestRecordingOwnedBy(undefined, deviceId)) {
+  adoptDeviceGestureRecording(deviceId: string, sessionId: string): boolean {
+    if (!this.isDeviceGestureRecordingOwnedBy(undefined, deviceId)) {
       return false;
     }
-    this.testRecording!.ownerSessionUuid = sessionId;
+    this.deviceGestureRecording!.ownerSessionUuid = sessionId;
     return true;
   }
 
@@ -144,10 +144,12 @@ class FakeRecordings implements RecordingSessionCleanupDeps, RecordingAcquisitio
       .filter((record) => record.deviceId === deviceId && record.ownerSessionUuid === sessionId)
       .map((record) => record.recordingId);
     const all = [...video, ...this.segmentedIds];
-    return this.isTestRecordingOwnedBy(sessionId, deviceId) ? [...all, `test-${sessionId}`] : all;
+    return this.isDeviceGestureRecordingOwnedBy(sessionId, deviceId)
+      ? [...all, `test-${sessionId}`]
+      : all;
   }
   hasRecordingsToStop(sessionId: string | undefined, deviceId: string): boolean {
-    return this.active.size > 0 || this.isTestRecordingOwnedBy(sessionId, deviceId);
+    return this.active.size > 0 || this.isDeviceGestureRecordingOwnedBy(sessionId, deviceId);
   }
   async stopSegmentedRecordings(sessionId: string | undefined, deviceId: string): Promise<void> {
     if (this.hangSegmented) {
@@ -183,19 +185,24 @@ class FakeRecordings implements RecordingSessionCleanupDeps, RecordingAcquisitio
       }
     }
   }
-  isTestRecordingOwnedBy(sessionId: string | undefined, deviceId: string): boolean {
+  isDeviceGestureRecordingOwnedBy(sessionId: string | undefined, deviceId: string): boolean {
     return (
-      this.testRecording !== null &&
-      this.testRecording.ownerSessionUuid === sessionId &&
-      this.testRecording.deviceId === deviceId
+      this.deviceGestureRecording !== null &&
+      this.deviceGestureRecording.ownerSessionUuid === sessionId &&
+      this.deviceGestureRecording.deviceId === deviceId
     );
   }
-  ownedTestRecordingId(sessionId: string | undefined, deviceId: string): string | undefined {
-    return this.isTestRecordingOwnedBy(sessionId, deviceId) ? `test-${sessionId}` : undefined;
+  ownedDeviceGestureRecordingId(
+    sessionId: string | undefined,
+    deviceId: string,
+  ): string | undefined {
+    return this.isDeviceGestureRecordingOwnedBy(sessionId, deviceId)
+      ? `test-${sessionId}`
+      : undefined;
   }
-  async stopTestRecording(): Promise<void> {
+  async stopDeviceGestureRecording(): Promise<void> {
     this.testStops += 1;
-    this.testRecording = null;
+    this.deviceGestureRecording = null;
   }
 }
 
@@ -242,7 +249,7 @@ describe("registerRecordingSessionCleanup", () => {
   test("release captures the recording ids it finalizes before stopping them, once", async () => {
     const { manager, recordings } = setup();
     recordings.start("SIM-1", "session-a");
-    recordings.testRecording = { ownerSessionUuid: "session-a", deviceId: "SIM-1" };
+    recordings.deviceGestureRecording = { ownerSessionUuid: "session-a", deviceId: "SIM-1" };
 
     manager.release("session-a", "SIM-1");
     // Capture happens synchronously, so it holds even after the stops removed the recordings.
@@ -314,20 +321,26 @@ describe("registerRecordingSessionCleanup", () => {
     expect(recordings.segmentedStops).toEqual(["session-a@SIM-1"]);
   });
 
-  test("release stops the owner's test recording", async () => {
+  test("release stops the owner's device gesture recording", async () => {
     const { manager, recordings } = setup();
-    recordings.testRecording = { ownerSessionUuid: "session-a", deviceId: "emulator-5554" };
+    recordings.deviceGestureRecording = {
+      ownerSessionUuid: "session-a",
+      deviceId: "emulator-5554",
+    };
 
     manager.release("session-a", "emulator-5554");
     await manager.settle();
 
     expect(recordings.testStops).toBe(1);
-    expect(recordings.testRecording).toBeNull();
+    expect(recordings.deviceGestureRecording).toBeNull();
   });
 
-  test("a test recording owned by another session survives the release", async () => {
+  test("a device gesture recording owned by another session survives the release", async () => {
     const { manager, recordings } = setup();
-    recordings.testRecording = { ownerSessionUuid: "session-b", deviceId: "emulator-5554" };
+    recordings.deviceGestureRecording = {
+      ownerSessionUuid: "session-b",
+      deviceId: "emulator-5554",
+    };
 
     manager.release("session-a", "emulator-5554");
     await manager.settle();
@@ -384,7 +397,7 @@ describe("registerRecordingSessionCleanup", () => {
     expect(recordings.timer.getPendingTimeoutCount()).toBe(0);
   });
 
-  test("a segmented stage settling after the cap cannot stop the same session's replacement test recording", async () => {
+  test("a segmented stage settling after the cap cannot stop the same session's replacement device gesture recording", async () => {
     const timer = new FakeTimer();
     const manager = new FakeSessionManager();
     const device = { deviceId: "emulator-5554", platform: "android" as const, name: "Fake" };
@@ -414,7 +427,7 @@ describe("registerRecordingSessionCleanup", () => {
       now: () => new Date(timer.now()),
     });
     try {
-      const first = await startTestRecording(
+      const first = await startDeviceGestureRecording(
         device,
         timer,
         new FakeIdGenerator(["R1"]),
@@ -425,10 +438,10 @@ describe("registerRecordingSessionCleanup", () => {
         ...defaultRecordingSessionCleanupDeps,
         timer,
         stopSegmentedRecordings: () => wedge.promise,
-        stopTestRecording: async (id) => {
+        stopDeviceGestureRecording: async (id) => {
           stopAttempts += 1;
           try {
-            await defaultRecordingSessionCleanupDeps.stopTestRecording(id);
+            await defaultRecordingSessionCleanupDeps.stopDeviceGestureRecording(id);
           } finally {
             if (stopAttempts === 2) {
               lateStage.resolve();
@@ -443,7 +456,7 @@ describe("registerRecordingSessionCleanup", () => {
       await timer.advanceTimersByTimeAsync(120_000);
       await freed;
       expect(stops).toEqual([first.recordingId]);
-      const second = await startTestRecording(
+      const second = await startDeviceGestureRecording(
         device,
         timer,
         new FakeIdGenerator(["R2"]),
@@ -455,13 +468,13 @@ describe("registerRecordingSessionCleanup", () => {
       await lateStage.promise;
       expect(stopAttempts).toBe(2);
       expect(stops).toEqual([first.recordingId]);
-      expect(getTestRecordingStatus(timer)?.recordingId).toBe(second.recordingId);
+      expect(getDeviceGestureRecordingStatus(timer)?.recordingId).toBe(second.recordingId);
     } finally {
       wedge.resolve();
-      if (getTestRecordingStatus(timer)) {
-        await stopTestRecording(undefined, undefined, timer);
+      if (getDeviceGestureRecordingStatus(timer)) {
+        await stopDeviceGestureRecording(undefined, undefined, timer);
       }
-      resetStoppedTestRecordings();
+      resetStoppedDeviceGestureRecordings();
       resetVideoRecordingManagerDependencies();
     }
   });
@@ -494,7 +507,7 @@ describe("registerRecordingSessionCleanup", () => {
         const testId = "test-session-a";
         try {
           await startVideoRecording({ device, ownerSessionUuid: "session-a" });
-          await startTestRecording(
+          await startDeviceGestureRecording(
             device,
             timer,
             new FakeIdGenerator([testId]),
@@ -540,15 +553,15 @@ describe("registerRecordingSessionCleanup", () => {
           );
           expect(marked).not.toContain(testId);
           expect(testStops).toBe(1);
-          expect(getTestRecordingStatus(timer)).toBeNull();
-          expect(ownedTestRecordingId("session-a", device.deviceId)).toBeUndefined();
-          expect(getStoppedTestRecording(testId, "session-a")?.stepCount).toBe(1);
+          expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
+          expect(ownedDeviceGestureRecordingId("session-a", device.deviceId)).toBeUndefined();
+          expect(getStoppedDeviceGestureRecording(testId, "session-a")?.stepCount).toBe(1);
           expect((await repository.getRecording("rec-session-a"))?.status).toBe("incomplete");
         } finally {
-          if (getTestRecordingStatus(timer)) {
-            await stopTestRecording(undefined, undefined, timer);
+          if (getDeviceGestureRecordingStatus(timer)) {
+            await stopDeviceGestureRecording(undefined, undefined, timer);
           }
-          resetStoppedTestRecordings();
+          resetStoppedDeviceGestureRecordings();
           resetVideoRecordingManagerDependencies();
         }
       });
@@ -586,14 +599,17 @@ describe("registerRecordingSessionCleanup", () => {
       expect(recordings.active.get("SIM-1")?.ownerSessionUuid).toBe("session-a");
     });
 
-    test("a sessionless test recording is adopted without stopping", async () => {
+    test("a sessionless device gesture recording is adopted without stopping", async () => {
       const { manager, recordings } = setup();
       manager.holders.set("emulator-5554", "session-a");
-      recordings.testRecording = { ownerSessionUuid: undefined, deviceId: "emulator-5554" };
+      recordings.deviceGestureRecording = {
+        ownerSessionUuid: undefined,
+        deviceId: "emulator-5554",
+      };
       createOwnerlessRecordingAcquisitionCleanup(manager, recordings)("emulator-5554", "session-a");
       await manager.settle();
-      expect(recordings.isTestRecordingOwnedBy(undefined, "emulator-5554")).toBe(false);
-      expect(recordings.isTestRecordingOwnedBy("session-a", "emulator-5554")).toBe(true);
+      expect(recordings.isDeviceGestureRecordingOwnedBy(undefined, "emulator-5554")).toBe(false);
+      expect(recordings.isDeviceGestureRecordingOwnedBy("session-a", "emulator-5554")).toBe(true);
       expect(recordings.testStops).toBe(0);
       manager.release("session-a", "emulator-5554");
       await manager.settle();

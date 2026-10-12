@@ -53,12 +53,12 @@ interface AutoMobileClient {
 
   fun getTestRuns(query: TestRunQuery = TestRunQuery()): TestRunSummary
 
-  fun startTestRecording(platform: String = "android"): TestRecordingStartResult
+  fun startDeviceGestureRecording(platform: String = "android"): DeviceGestureRecordingStartResult
 
-  fun stopTestRecording(
+  fun stopDeviceGestureRecording(
     recordingId: String? = null,
     planName: String? = null,
-  ): TestRecordingStopResult
+  ): DeviceGestureRecordingStopResult
 
   fun executePlan(
     planContent: String,

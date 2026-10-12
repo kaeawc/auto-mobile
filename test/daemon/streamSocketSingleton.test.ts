@@ -8,7 +8,7 @@ import * as failuresStreamSocketServer from "../../src/daemon/failuresStreamSock
 import * as performancePushSocketServer from "../../src/daemon/performancePushSocketServer";
 import * as performanceStreamSocketServer from "../../src/daemon/performanceStreamSocketServer";
 import * as telemetryPushSocketServer from "../../src/daemon/telemetryPushSocketServer";
-import * as testRecordingSocketServer from "../../src/daemon/testRecordingSocketServer";
+import * as deviceGestureRecordingSocketServer from "../../src/daemon/deviceGestureRecordingSocketServer";
 import * as videoRecordingSocketServer from "../../src/daemon/videoRecordingSocketServer";
 import * as videoStreamSocketServer from "../../src/daemon/videoStreamSocketServer";
 import * as webRtcStreamSocketServer from "../../src/daemon/webrtcStreamSocketServer";
@@ -70,11 +70,11 @@ const cases = [
     path: telemetryPushSocketServer.getTelemetryPushSocketPath,
   },
   {
-    name: "TestRecording",
-    Server: testRecordingSocketServer.TestRecordingSocketServer,
-    start: testRecordingSocketServer.startTestRecordingSocketServer,
-    stop: testRecordingSocketServer.stopTestRecordingSocketServer,
-    path: testRecordingSocketServer.getTestRecordingSocketPath,
+    name: "DeviceGestureRecording",
+    Server: deviceGestureRecordingSocketServer.DeviceGestureRecordingSocketServer,
+    start: deviceGestureRecordingSocketServer.startDeviceGestureRecordingSocketServer,
+    stop: deviceGestureRecordingSocketServer.stopDeviceGestureRecordingSocketServer,
+    path: deviceGestureRecordingSocketServer.getDeviceGestureRecordingSocketPath,
   },
   {
     name: "VideoRecording",

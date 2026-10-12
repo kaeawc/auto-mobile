@@ -13,7 +13,7 @@ import * as streamPolicy from "../../src/daemon/streamSubscriptionPolicy";
 import * as namespaceGuard from "../../src/daemon/sharedNamespaceGuard";
 import * as restartAdmission from "../../src/daemon/daemonRestartAdmission";
 import * as deviceSessionResolver from "../../src/daemon/deviceSessionResolver";
-import * as recordingAdmission from "../../src/daemon/testRecordingStartAdmission";
+import * as recordingAdmission from "../../src/daemon/deviceGestureRecordingStartAdmission";
 import * as handoffInterruption from "../../src/daemon/daemonHandoffInterruption";
 import * as daemonProxy from "../../src/daemon/daemonMcpProxy";
 import * as sessionManager from "../../src/daemon/sessionManager";
@@ -88,7 +88,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "daemon/sharedNamespaceGuard": namespaceGuard,
   "daemon/daemonRestartAdmission": restartAdmission,
   "daemon/deviceSessionResolver": deviceSessionResolver,
-  "daemon/testRecordingStartAdmission": recordingAdmission,
+  "daemon/deviceGestureRecordingStartAdmission": recordingAdmission,
   "daemon/daemonHandoffInterruption": handoffInterruption,
   "daemon/daemonMcpProxy": daemonProxy,
   "daemon/sessionManager": sessionManager,

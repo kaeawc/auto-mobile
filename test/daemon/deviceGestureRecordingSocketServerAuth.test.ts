@@ -1,20 +1,20 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { TestRecordingSocketServer } from "../../src/daemon/testRecordingSocketServer";
+import { DeviceGestureRecordingSocketServer } from "../../src/daemon/deviceGestureRecordingSocketServer";
 import {
   SessionScopedStreamAuthenticator,
   type StreamSocketAuthenticator,
 } from "../../src/daemon/streamSocketAuth";
-import type { TestRecordingCommand } from "../../src/daemon/testRecordingSocketTypes";
+import type { DeviceGestureRecordingCommand } from "../../src/daemon/deviceGestureRecordingSocketTypes";
 import { ActionableError } from "../../src/models";
 import type { DeviceAdmissionGate } from "../../src/daemon/deviceAdmissionGate";
-import type { TestRecordingDeviceResolution } from "../../src/daemon/testRecordingSocketServer";
+import type { DeviceGestureRecordingDeviceResolution } from "../../src/daemon/deviceGestureRecordingSocketServer";
 import {
-  getTestRecordingStatus,
-  startTestRecording,
-  stopTestRecording,
-  resetStoppedTestRecordings,
-  TEST_RECORDING_USER_INPUT_ONLY_NOTICE,
-} from "../../src/server/testRecordingManager";
+  getDeviceGestureRecordingStatus,
+  startDeviceGestureRecording,
+  stopDeviceGestureRecording,
+  resetStoppedDeviceGestureRecordings,
+  DEVICE_GESTURE_RECORDING_USER_INPUT_ONLY_NOTICE,
+} from "../../src/server/deviceGestureRecordingManager";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { BootedDevice, PlanStep } from "../../src/models";
@@ -24,13 +24,13 @@ import type { BootedDevice, PlanStep } from "../../src/models";
  * the authorization gate can be exercised without opening a real Unix socket or
  * driving a real recorder.
  */
-class TestableServer extends TestRecordingSocketServer {
-  invoke(request: TestRecordingCommand) {
+class TestableServer extends DeviceGestureRecordingSocketServer {
+  invoke(request: DeviceGestureRecordingCommand) {
     return this.handleRequest(request);
   }
 }
 
-describe("TestRecordingSocketServer user-input capture contract (#11919)", () => {
+describe("DeviceGestureRecordingSocketServer user-input capture contract (#11919)", () => {
   const timer = new FakeTimer();
   const server = new TestableServer(
     undefined,
@@ -45,10 +45,10 @@ describe("TestRecordingSocketServer user-input capture contract (#11919)", () =>
   afterEach(async () => {
     await drainInFlightStop?.();
     drainInFlightStop = undefined;
-    if (getTestRecordingStatus(timer)) {
-      await stopTestRecording(undefined, "cleanup", timer).catch(() => undefined);
+    if (getDeviceGestureRecordingStatus(timer)) {
+      await stopDeviceGestureRecording(undefined, "cleanup", timer).catch(() => undefined);
     }
-    resetStoppedTestRecordings();
+    resetStoppedDeviceGestureRecordings();
   });
 
   test.each([
@@ -63,7 +63,7 @@ describe("TestRecordingSocketServer user-input capture contract (#11919)", () =>
       await Promise.allSettled(stops);
     };
     const sessionUuid = "recording-owner";
-    const active = await startTestRecording(
+    const active = await startDeviceGestureRecording(
       { deviceId: "fake-recording", name: "Fake", platform: "android" },
       timer,
       new CountingIdGenerator(),
@@ -96,7 +96,8 @@ describe("TestRecordingSocketServer user-input capture contract (#11919)", () =>
             success: false,
             reason: "no_user_input_captured",
             error:
-              "No recorded interactions were captured. " + TEST_RECORDING_USER_INPUT_ONLY_NOTICE,
+              "No recorded interactions were captured. " +
+              DEVICE_GESTURE_RECORDING_USER_INPUT_ONLY_NOTICE,
           },
         };
     const outcomes = await results;
@@ -109,13 +110,13 @@ describe("TestRecordingSocketServer user-input capture contract (#11919)", () =>
         }
       }
     }
-    expect(getTestRecordingStatus(timer)).toBeNull();
+    expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
   });
 
   test.each(["status", "stop"] as const)(
     "%s explains the user-input-only capture scope",
     async (command) => {
-      const active = await startTestRecording(
+      const active = await startDeviceGestureRecording(
         { deviceId: "fake-recording", name: "Fake", platform: "android" },
         timer,
         new CountingIdGenerator(),
@@ -129,14 +130,16 @@ describe("TestRecordingSocketServer user-input capture contract (#11919)", () =>
       if (command === "status") {
         expect(response.recording).toMatchObject({
           captureScope: "user-input",
-          notice: TEST_RECORDING_USER_INPUT_ONLY_NOTICE,
+          notice: DEVICE_GESTURE_RECORDING_USER_INPUT_ONLY_NOTICE,
           eventCount: 0,
         });
       } else {
         expect(response).toEqual({
           success: false,
           reason: "no_user_input_captured",
-          error: "No recorded interactions were captured. " + TEST_RECORDING_USER_INPUT_ONLY_NOTICE,
+          error:
+            "No recorded interactions were captured. " +
+            DEVICE_GESTURE_RECORDING_USER_INPUT_ONLY_NOTICE,
         });
       }
     },
@@ -172,7 +175,7 @@ function quarantineGate(deviceId: string): DeviceAdmissionGate {
   };
 }
 
-describe("TestRecordingSocketServer device admission (issue #6863)", () => {
+describe("DeviceGestureRecordingSocketServer device admission (issue #6863)", () => {
   test("refuses a start on a quarantined serial before any device work", async () => {
     const calls: Array<{ sessionUuid?: string; deviceId?: string }> = [];
     const server = new TestableServer(
@@ -188,7 +191,7 @@ describe("TestRecordingSocketServer device admission (issue #6863)", () => {
         deviceId: "emu-1",
         platform: "android",
       }),
-    ).rejects.toThrow(/Refusing to start a test recording on device 'emu-1'/);
+    ).rejects.toThrow(/Refusing to start a device gesture recording on device 'emu-1'/);
   });
 });
 
@@ -197,12 +200,12 @@ describe("TestRecordingSocketServer device admission (issue #6863)", () => {
  * gate runs BEFORE any runner setup. A device the gate refuses must never reach
  * `readyDevice`, which is where CtrlProxy/runner setup side effects live.
  */
-describe("TestRecordingSocketServer gates the resolved device before readiness (#6923)", () => {
+describe("DeviceGestureRecordingSocketServer gates the resolved device before readiness (#6923)", () => {
   const resolved: BootedDevice = { deviceId: "emu-1", name: "Pixel_8", platform: "android" };
 
   test("refuses a resolved quarantined device before any readiness side effect", async () => {
     const order: string[] = [];
-    const resolution: TestRecordingDeviceResolution = {
+    const resolution: DeviceGestureRecordingDeviceResolution = {
       selectDevice: async () => {
         order.push("select");
         return resolved;
@@ -230,13 +233,13 @@ describe("TestRecordingSocketServer gates the resolved device before readiness (
     // the gate's one chance to refuse it is between selection and readiness.
     await expect(
       server.invoke({ command: "start", sessionUuid: "live", platform: "android" }),
-    ).rejects.toThrow(/Refusing to start a test recording on device 'emu-1'/);
+    ).rejects.toThrow(/Refusing to start a device gesture recording on device 'emu-1'/);
     expect(order).toEqual(["select", "gate:emu-1"]);
   });
 
   test("readies the device only after the gate admits it", async () => {
     const order: string[] = [];
-    const resolution: TestRecordingDeviceResolution = {
+    const resolution: DeviceGestureRecordingDeviceResolution = {
       selectDevice: async (deviceId, platform) => {
         order.push(`select:${deviceId}:${platform}`);
         return resolved;
@@ -273,11 +276,11 @@ describe("TestRecordingSocketServer gates the resolved device before readiness (
   });
 });
 
-describe("TestRecordingSocketServer authorization (issue #4752)", () => {
+describe("DeviceGestureRecordingSocketServer authorization (issue #4752)", () => {
   test("omitted deviceId is checked against the selected device before readiness", async () => {
     const resolved: BootedDevice = { deviceId: "emu-1", name: "Pixel", platform: "android" };
     let readyCalls = 0;
-    const resolution: TestRecordingDeviceResolution = {
+    const resolution: DeviceGestureRecordingDeviceResolution = {
       selectDevice: async () => resolved,
       readyDevice: async () => {
         readyCalls++;
@@ -291,7 +294,7 @@ describe("TestRecordingSocketServer authorization (issue #4752)", () => {
         getSessionForDevice: () => owner.current,
         getDeviceLabels: () => undefined,
       }),
-      "test recording",
+      "device gesture recording",
       {} as NodeJS.ProcessEnv,
     );
     const server = new TestableServer(undefined, undefined, auth, undefined, resolution);
@@ -317,10 +320,10 @@ describe("TestRecordingSocketServer authorization (issue #4752)", () => {
     expect(calls).toEqual([{ sessionUuid: undefined, deviceId: "emu-1" }]);
   });
 
-  test("rejects a stop from a caller with no live session before stopTestRecording runs", async () => {
+  test("rejects a stop from a caller with no live session before stopDeviceGestureRecording runs", async () => {
     const calls: Array<{ sessionUuid?: string; deviceId?: string }> = [];
     const server = new TestableServer(undefined, undefined, recordingAuthenticator(calls));
-    // The auth gate must reject a non-live session BEFORE stopTestRecording runs.
+    // The auth gate must reject a non-live session BEFORE stopDeviceGestureRecording runs.
     // The scoped device is whatever the current active recording reports (or
     // undefined), so assert on the caller identity, not on cross-suite global
     // recording state.
@@ -355,7 +358,7 @@ describe("TestRecordingSocketServer authorization (issue #4752)", () => {
         getSessionForDevice: (deviceId: string) => (deviceId === "emu-held" ? "owner" : null),
         getDeviceLabels: () => undefined,
       }),
-      "testRecording",
+      "deviceGestureRecording",
       {},
     );
 
@@ -394,7 +397,7 @@ test("recording stop cannot disguise another device as the caller's own", async 
     },
     stepCount: 1,
   };
-  const active = await startTestRecording(
+  const active = await startDeviceGestureRecording(
     { deviceId: "other-device", platform: "android", name: "Fake" },
     timer,
     new CountingIdGenerator(),
@@ -406,7 +409,7 @@ test("recording stop cannot disguise another device as the caller's own", async 
       getSessionForDevice: (id) => (id === "own-device" ? "live" : "other"),
       getDeviceLabels: () => undefined,
     }),
-    "test recording",
+    "device gesture recording",
     {},
   );
   const server = new TestableServer(undefined, timer, auth);
@@ -415,21 +418,21 @@ test("recording stop cannot disguise another device as the caller's own", async 
       server.invoke({ command: "stop", sessionUuid: "live", deviceId: "own-device" }),
     ).rejects.toThrow(/different daemon session|not found/);
     expect(stops).toBe(0);
-    expect(getTestRecordingStatus(timer)?.recordingId).toBe(active.recordingId);
+    expect(getDeviceGestureRecordingStatus(timer)?.recordingId).toBe(active.recordingId);
   } finally {
-    if (getTestRecordingStatus(timer)) {
-      await stopTestRecording(active.recordingId, "cleanup", timer);
+    if (getDeviceGestureRecordingStatus(timer)) {
+      await stopDeviceGestureRecording(active.recordingId, "cleanup", timer);
     }
   }
 });
 
-describe("TestRecordingSocketServer managed-slot exclusion (#11352)", () => {
+describe("DeviceGestureRecordingSocketServer managed-slot exclusion (#11352)", () => {
   const slotDevice: BootedDevice = { deviceId: "slot-1", name: "Pixel_8", platform: "android" };
   const openGate: DeviceAdmissionGate = { assertDeviceActionable: () => {} };
 
   function harness(refuse: boolean) {
     const order: string[] = [];
-    const resolution: TestRecordingDeviceResolution = {
+    const resolution: DeviceGestureRecordingDeviceResolution = {
       selectDevice: async () => slotDevice,
       readyDevice: async (device) => {
         order.push(`ready:${device.deviceId}`);
@@ -463,7 +466,7 @@ describe("TestRecordingSocketServer managed-slot exclusion (#11352)", () => {
     await expect(
       server.invoke({ command: "start", sessionUuid: "live", platform: "android" }),
     ).rejects.toThrow("device_assigned_to_managed_slot");
-    expect(order).toEqual(["slot:testRecording start:slot-1:live"]);
+    expect(order).toEqual(["slot:deviceGestureRecording start:slot-1:live"]);
   });
 
   test("the slot's own execution (gate admits) reaches readiness", async () => {
@@ -472,7 +475,7 @@ describe("TestRecordingSocketServer managed-slot exclusion (#11352)", () => {
     await expect(
       server.invoke({ command: "start", sessionUuid: "live", platform: "android" }),
     ).rejects.toThrow("runner setup failed");
-    expect(order).toEqual(["slot:testRecording start:slot-1:live", "ready:slot-1"]);
+    expect(order).toEqual(["slot:deviceGestureRecording start:slot-1:live", "ready:slot-1"]);
   });
 
   test("refuses a stop of an active recording on a slot device without stopping it", async () => {
@@ -486,7 +489,7 @@ describe("TestRecordingSocketServer managed-slot exclusion (#11352)", () => {
       },
       stepCount: 1,
     };
-    const active = await startTestRecording(
+    const active = await startDeviceGestureRecording(
       slotDevice,
       timer,
       new CountingIdGenerator(),
@@ -497,10 +500,10 @@ describe("TestRecordingSocketServer managed-slot exclusion (#11352)", () => {
       await expect(server.invoke({ command: "stop", sessionUuid: "live" })).rejects.toThrow(
         "device_assigned_to_managed_slot",
       );
-      expect(order).toEqual(["slot:testRecording stop:slot-1:live"]);
+      expect(order).toEqual(["slot:deviceGestureRecording stop:slot-1:live"]);
       expect(stops).toBe(0);
     } finally {
-      await stopTestRecording(active.recordingId, "cleanup", timer);
+      await stopDeviceGestureRecording(active.recordingId, "cleanup", timer);
     }
   });
 });
@@ -517,7 +520,7 @@ test("socket stop preserves a partial-plan warning in its existing error field",
     }),
     stepCount: 1,
   };
-  const active = await startTestRecording(
+  const active = await startDeviceGestureRecording(
     { deviceId: "fake-device", platform: "android", name: "Fake" },
     timer,
     new CountingIdGenerator(),
@@ -538,8 +541,8 @@ test("socket stop preserves a partial-plan warning in its existing error field",
       "Warning: Touch track (getevent) stopped 1250 ms after recording start: getevent exited with code 1. Later taps may be missing.",
     );
   } finally {
-    if (getTestRecordingStatus(timer)) {
-      await stopTestRecording(active.recordingId, "cleanup", timer);
+    if (getDeviceGestureRecordingStatus(timer)) {
+      await stopDeviceGestureRecording(active.recordingId, "cleanup", timer);
     }
   }
 });

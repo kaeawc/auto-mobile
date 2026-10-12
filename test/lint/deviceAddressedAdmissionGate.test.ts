@@ -73,7 +73,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
     "src/daemon/deviceDataStreamSocketServer.ts",
     "src/daemon/videoStreamSocketServer.ts",
     "src/daemon/webrtcStreamSocketServer.ts",
-    "src/daemon/testRecordingSocketServer.ts",
+    "src/daemon/deviceGestureRecordingSocketServer.ts",
   ] as const;
 
   /**
@@ -131,10 +131,10 @@ describe("device-addressed admission gate (issue #6863)", () => {
       what: "webrtcStream start — gated before the WHIP publisher attaches to the device",
     },
     {
-      file: "src/daemon/testRecordingSocketServer.ts",
+      file: "src/daemon/deviceGestureRecordingSocketServer.ts",
       fn: "handleRequest",
       what:
-        "testRecording start — gated on the SELECTED device before readyDevice performs any " +
+        "deviceGestureRecording start — gated on the SELECTED device before readyDevice performs any " +
         "runner setup (#6923)",
     },
   ];
@@ -151,7 +151,7 @@ describe("device-addressed admission gate (issue #6863)", () => {
   const RESOLVERS_ONLY: readonly string[] = [
     "src/daemon/webrtcStreamSocketServer.ts#resolveWebRtcStreamDevice",
     "src/daemon/videoStreamSocketServer.ts#resolveVideoStreamDevice",
-    "src/daemon/testRecordingSocketServer.ts#resolveTestRecordingDevice",
+    "src/daemon/deviceGestureRecordingSocketServer.ts#resolveDeviceGestureRecordingDevice",
   ];
 
   interface NamedFunction {

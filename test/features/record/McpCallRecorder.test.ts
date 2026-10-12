@@ -113,7 +113,7 @@ describe("McpCallRecorder", () => {
       recorder.record("killDevice", { deviceId: "emulator-5554" });
       recorder.record("setActiveDevice", { deviceId: "emulator-5554" });
       recorder.record("installApp", { appPath: "/tmp/app.apk" });
-      recorder.record("startTestRecording", {});
+      recorder.record("recordDeviceGestures", {});
       recorder.record("exportPlan", {});
       recorder.record("executePlan", { plan: "test" });
       recorder.record("screenshot", {});
@@ -260,7 +260,7 @@ describe("PLAN_RELEVANT_TOOLS", () => {
       "killDevice",
       "setActiveDevice",
       "installApp",
-      "startTestRecording",
+      "recordDeviceGestures",
       "exportPlan",
       "executePlan",
       "screenshot",

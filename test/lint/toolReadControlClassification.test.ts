@@ -108,6 +108,7 @@ const CLASSIFICATION: Classification = {
     "putAppFile",
     "recentApps",
     "reconcileDeviceResources",
+    "recordDeviceGestures",
     "removeKeyValue",
     "resetAppLogs",
     "resetKeychain",
@@ -125,7 +126,6 @@ const CLASSIFICATION: Classification = {
     "setUIState",
     "shake",
     "stageSessionDownloads",
-    "startTestRecording",
     "swipeOn",
     // Pulls the notification shade down, even to list or find.
     "systemTray",

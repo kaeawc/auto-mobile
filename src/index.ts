@@ -150,7 +150,8 @@ async function main() {
   const { guardDatabaseStartup } = await import("./daemon/daemonStartupGuard");
   const { DefaultDatabaseInitializer } = await import("./db/DatabaseInitializer");
   const videoRecordingSocketServer = await import("./daemon/videoRecordingSocketServer");
-  const testRecordingSocketServer = await import("./daemon/testRecordingSocketServer");
+  const deviceGestureRecordingSocketServer =
+    await import("./daemon/deviceGestureRecordingSocketServer");
   const deviceSnapshotSocketServer = await import("./daemon/deviceSnapshotSocketServer");
   const appearanceSocketServer = await import("./daemon/appearanceSocketServer");
   const webrtcStreamSocketServer = await import("./daemon/webrtcStreamSocketServer");
@@ -168,8 +169,8 @@ async function main() {
 
   const { startVideoRecordingSocketServer, stopVideoRecordingSocketServer } =
     videoRecordingSocketServer;
-  const { startTestRecordingSocketServer, stopTestRecordingSocketServer } =
-    testRecordingSocketServer;
+  const { startDeviceGestureRecordingSocketServer, stopDeviceGestureRecordingSocketServer } =
+    deviceGestureRecordingSocketServer;
   const { startDeviceSnapshotSocketServer, stopDeviceSnapshotSocketServer } =
     deviceSnapshotSocketServer;
   const { startAppearanceSocketServer, stopAppearanceSocketServer } = appearanceSocketServer;
@@ -192,7 +193,7 @@ async function main() {
           cleanupChildProcesses: () => cleanupDaemonChildProcesses(),
           stopManagedAdbServer: () => stopManagedAdbServer(),
           stopVideoRecordingSocketServer: () => stopVideoRecordingSocketServer(),
-          stopTestRecordingSocketServer: () => stopTestRecordingSocketServer(),
+          stopDeviceGestureRecordingSocketServer: () => stopDeviceGestureRecordingSocketServer(),
           stopDeviceSnapshotSocketServer: () => stopDeviceSnapshotSocketServer(),
           stopAppearanceSocketServer: () => stopAppearanceSocketServer(),
           stopWebRtcStreamSocketServer: () => stopWebRtcStreamSocketServer(),
@@ -731,7 +732,7 @@ async function main() {
         logger.info("Starting MCP server in direct mode (--no-proxy flag)");
         // Start auxiliary services only in direct mode
         await startVideoRecordingSocketServer();
-        await startTestRecordingSocketServer();
+        await startDeviceGestureRecordingSocketServer();
         await startDeviceSnapshotSocketServer();
         await startAppearanceSocketServer();
         await startWebRtcStreamSocketServer();

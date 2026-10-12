@@ -14,7 +14,7 @@ const NEWLINE = 0x0a;
  * |                                            |         | (polls return at most 500 ids, ~6 KB); 8 MiB holds ~800k ids.      |
  * | VideoStream (`videoStreamSocketServer.ts`) | 1 MiB   | one subscribe line (~200 B); later lines are ignored               |
  * | WebRtcStream (`webrtcStreamSocketServer`)  | 1 MiB   | start with `iceServers` + WHIP endpoint/token (a few KB)           |
- * | TestRecording (`testRecordingSocket...`)   | 1 MiB   | command + ids/plan name (<1 KB); plan YAML is only in responses    |
+ * | DeviceGestureRecording (`deviceGestureRecordingSocket...`)   | 1 MiB   | command + ids/plan name (<1 KB); plan YAML is only in responses    |
  * | PerformanceStream, Appearance              | 1 MiB   | scalar query / toggle request (<1 KB)                              |
  * | DeviceSnapshot, VideoRecording (config)    | 1 MiB   | `config/set` of scalar settings (<1 KB)                            |
  * | DeviceDataStream, FailuresPush,            | 1 MiB   | subscribe / unsubscribe / pong / cadence / storage-subscribe       |

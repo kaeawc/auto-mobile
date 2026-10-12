@@ -1,7 +1,7 @@
 import type { InteractionEvent } from "../../observe/android/AndroidCtrlProxyClient";
 
 /**
- * Shared types for Android test recording via getevent + CtrlProxy.
+ * Shared types for Android device gesture recording via getevent + CtrlProxy.
  */
 
 // ---------------------------------------------------------------------------

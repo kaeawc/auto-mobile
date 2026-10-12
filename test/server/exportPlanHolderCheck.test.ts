@@ -7,12 +7,12 @@ import { DEVICE_OWNED_BY_OTHER_SESSION_CODE } from "../../src/daemon/inputDevice
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice, PlanStep } from "../../src/models";
 import {
-  getTestRecordingStatus,
-  isTestRecordingOwnedBy,
-  resetStoppedTestRecordings,
-  startTestRecording,
-  stopTestRecording,
-} from "../../src/server/testRecordingManager";
+  getDeviceGestureRecordingStatus,
+  isDeviceGestureRecordingOwnedBy,
+  resetStoppedDeviceGestureRecordings,
+  startDeviceGestureRecording,
+  stopDeviceGestureRecording,
+} from "../../src/server/deviceGestureRecordingManager";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { logger } from "../../src/utils/logger";
@@ -35,11 +35,11 @@ const OTHER = "conn-stranger";
 const step: PlanStep = { tool: "tapOn", params: { text: "OK" } };
 
 /**
- * `exportPlan` stops the daemon's one live test recording and returns its plan. It is a plain
+ * `exportPlan` stops the daemon's one live device gesture recording and returns its plan. It is a plain
  * tool (no device routing), so ToolRegistry's device-holder check never sees it, and the MCP
  * ingress only judges the session a call NAMES (#11344/#11542). Its handler therefore checks the
  * holder of the recording's device itself (#11647), as `killDevice`/`deleteDevice` do
- * (`assertLifecycleCallerHoldsDevice`, `device_owned_by_other_session`) and as the test-recording
+ * (`assertLifecycleCallerHoldsDevice`, `device_owned_by_other_session`) and as the device-gesture-recording
  * socket's `stop` does: a call from another connection that names its own session, or none,
  * neither stops the holder's recording nor receives its plan.
  */
@@ -80,7 +80,7 @@ describe("exportPlan from a connection that does not hold the recording's device
 
   /** Starts a recording through the real manager with a fake recorder that counts its stops. */
   const record = (device: BootedDevice, idPrefix: string, ownerSessionUuid?: string) =>
-    startTestRecording(
+    startDeviceGestureRecording(
       device,
       timer,
       new CountingIdGenerator(idPrefix),
@@ -145,10 +145,10 @@ describe("exportPlan from a connection that does not hold the recording's device
   });
 
   afterEach(async () => {
-    if (getTestRecordingStatus()) {
-      await stopTestRecording(undefined, undefined, timer).catch(() => undefined);
+    if (getDeviceGestureRecordingStatus()) {
+      await stopDeviceGestureRecording(undefined, undefined, timer).catch(() => undefined);
     }
-    resetStoppedTestRecordings();
+    resetStoppedDeviceGestureRecordings();
     await fixture?.teardown();
     fixture = undefined;
     tools.uninstall();
@@ -168,15 +168,15 @@ describe("exportPlan from a connection that does not hold the recording's device
   test("precondition: the holder's session owns the live recording on the device it holds", () => {
     expect(manager.getSessionForDevice(held.deviceId)).toBe(HOLDER);
     expect(pool.isSessionOwnedByOtherConnection(HOLDER, OTHER)).toBe(true);
-    expect(isTestRecordingOwnedBy(HOLDER, held.deviceId)).toBe(true);
-    expect(getTestRecordingStatus()?.recordingId).toBe(recordingId);
+    expect(isDeviceGestureRecordingOwnedBy(HOLDER, held.deviceId)).toBe(true);
+    expect(getDeviceGestureRecordingStatus()?.recordingId).toBe(recordingId);
   });
 
   test("naming its own session, another connection does not stop the holder's recording", async () => {
     const result = await exportPlan(OTHER, STRANGER);
 
     expect(recorderStops).toBe(0);
-    expect(getTestRecordingStatus()?.recordingId).toBe(recordingId);
+    expect(getDeviceGestureRecordingStatus()?.recordingId).toBe(recordingId);
     expect(JSON.stringify(result)).not.toContain("planContent");
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result)).toContain(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
@@ -186,7 +186,7 @@ describe("exportPlan from a connection that does not hold the recording's device
     const result = await exportPlan(OTHER);
 
     expect(recorderStops).toBe(0);
-    expect(getTestRecordingStatus()?.recordingId).toBe(recordingId);
+    expect(getDeviceGestureRecordingStatus()?.recordingId).toBe(recordingId);
     expect(JSON.stringify(result)).not.toContain("planContent");
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result)).toContain(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
@@ -198,7 +198,7 @@ describe("exportPlan from a connection that does not hold the recording's device
     expect(result.isError).not.toBe(true);
     expect(recorderStops).toBe(1);
     expect(JSON.stringify(result)).toContain(recordingId);
-    expect(getTestRecordingStatus()).toBeNull();
+    expect(getDeviceGestureRecordingStatus()).toBeNull();
   });
 
   test("the connection that acquired the holding session exports without naming it", async () => {
@@ -219,7 +219,7 @@ describe("exportPlan from a connection that does not hold the recording's device
   });
 
   test("a recording on a device no session holds stays exportable by any caller", async () => {
-    await stopTestRecording(undefined, undefined, timer);
+    await stopDeviceGestureRecording(undefined, undefined, timer);
     recorderStops = 0;
     expect(manager.getSessionForDevice(unheld.deviceId)).toBeNull();
     const started = await record(unheld, "unheld");
@@ -232,7 +232,7 @@ describe("exportPlan from a connection that does not hold the recording's device
   });
 
   test("an ownerless recording on a held device is exported only by the device's holder", async () => {
-    await stopTestRecording(undefined, undefined, timer);
+    await stopDeviceGestureRecording(undefined, undefined, timer);
     recorderStops = 0;
     const started = await record(held, "ownerless");
 

@@ -2,15 +2,15 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
-import { TestRecordingSocketServer } from "../../src/daemon/testRecordingSocketServer";
+import { DeviceGestureRecordingSocketServer } from "../../src/daemon/deviceGestureRecordingSocketServer";
 import { SessionScopedStreamAuthenticator } from "../../src/daemon/streamSocketAuth";
-import type { TestRecordingCommand } from "../../src/daemon/testRecordingSocketTypes";
+import type { DeviceGestureRecordingCommand } from "../../src/daemon/deviceGestureRecordingSocketTypes";
 import type { BootedDevice } from "../../src/models";
 import {
-  getTestRecordingStatus,
-  startTestRecording,
-  stopTestRecording,
-} from "../../src/server/testRecordingManager";
+  getDeviceGestureRecordingStatus,
+  startDeviceGestureRecording,
+  stopDeviceGestureRecording,
+} from "../../src/server/deviceGestureRecordingManager";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
@@ -19,13 +19,13 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { noActiveDeviceSessionPayload } from "../../src/server/proxyServer";
 
-class TestableServer extends TestRecordingSocketServer {
-  invoke(request: TestRecordingCommand) {
+class TestableServer extends DeviceGestureRecordingSocketServer {
+  invoke(request: DeviceGestureRecordingCommand) {
     return this.handleRequest(request);
   }
 }
 
-describe("test recording start holder admission (#11665)", () => {
+describe("device gesture recording start holder admission (#11665)", () => {
   const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
   const iphone: BootedDevice = { deviceId: "physical-iphone", name: "iPhone", platform: "ios" };
   const otherDevice: BootedDevice = { deviceId: "other-iphone", name: "Other", platform: "ios" };
@@ -60,7 +60,7 @@ describe("test recording start holder admission (#11665)", () => {
     server = new TestableServer(
       undefined,
       timer,
-      new SessionScopedStreamAuthenticator(() => manager, "testRecording", {}),
+      new SessionScopedStreamAuthenticator(() => manager, "deviceGestureRecording", {}),
       { assertDeviceActionable: () => {} },
       {
         selectDevice: async () => {
@@ -77,8 +77,8 @@ describe("test recording start holder admission (#11665)", () => {
   });
 
   afterEach(async () => {
-    if (getTestRecordingStatus(timer)) {
-      await stopTestRecording(undefined, "cleanup", timer);
+    if (getDeviceGestureRecordingStatus(timer)) {
+      await stopDeviceGestureRecording(undefined, "cleanup", timer);
     }
     DaemonState.getInstance().reset();
     manager.stopCleanupTimer();
@@ -99,7 +99,7 @@ describe("test recording start holder admission (#11665)", () => {
       });
       expect(selectionCalls).toBe(0);
       expect(readyCalls).toBe(0);
-      expect(getTestRecordingStatus(timer)).toBeNull();
+      expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
     });
   }
 
@@ -122,7 +122,7 @@ describe("test recording start holder admission (#11665)", () => {
         const response = await server.invoke({ command: "start", deviceId, sessionUuid });
         const { error } = noActiveDeviceSessionPayload({
           message:
-            `testRecording start refused: no session of yours holds device '${device.deviceId}'. ` +
+            `deviceGestureRecording start refused: no session of yours holds device '${device.deviceId}'. ` +
             "Call getAndroid or getApple to acquire a session on it first.",
           reason: "device_not_held",
         });
@@ -138,7 +138,7 @@ describe("test recording start holder admission (#11665)", () => {
           recovery: { action: "acquire_replacement_session", tools: ["getAndroid", "getApple"] },
         });
         expect(readyCalls).toBe(0);
-        expect(getTestRecordingStatus(timer)).toBeNull();
+        expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
       });
     }
   }
@@ -149,7 +149,7 @@ describe("test recording start holder admission (#11665)", () => {
     const gatedServer = new TestableServer(
       undefined,
       timer,
-      new SessionScopedStreamAuthenticator(() => manager, "testRecording", {}),
+      new SessionScopedStreamAuthenticator(() => manager, "deviceGestureRecording", {}),
       { assertDeviceActionable: () => {} },
       {
         selectDevice: async () => device,
@@ -168,14 +168,14 @@ describe("test recording start holder admission (#11665)", () => {
     ).rejects.toThrow("device_assigned_to_managed_slot");
     expect(slotCalls).toBe(1);
     expect(readyCalls).toBe(0);
-    expect(getTestRecordingStatus(timer)).toBeNull();
+    expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
   });
 
   test("a holder released during the slot gate is refused before setup", async () => {
     const gatedServer = new TestableServer(
       undefined,
       timer,
-      new SessionScopedStreamAuthenticator(() => manager, "testRecording", {}),
+      new SessionScopedStreamAuthenticator(() => manager, "deviceGestureRecording", {}),
       { assertDeviceActionable: () => {} },
       {
         selectDevice: async () => device,
@@ -193,7 +193,7 @@ describe("test recording start holder admission (#11665)", () => {
       code: "no_active_device_session",
     });
     expect(readyCalls).toBe(0);
-    expect(getTestRecordingStatus(timer)).toBeNull();
+    expect(getDeviceGestureRecordingStatus(timer)).toBeNull();
   });
 
   test("ownership is rechecked after the managed-slot gate before setup", async () => {
@@ -202,7 +202,7 @@ describe("test recording start holder admission (#11665)", () => {
     const gatedServer = new TestableServer(
       undefined,
       timer,
-      new SessionScopedStreamAuthenticator(() => manager, "testRecording", {}),
+      new SessionScopedStreamAuthenticator(() => manager, "deviceGestureRecording", {}),
       { assertDeviceActionable: () => {} },
       {
         selectDevice: async () => device,
@@ -234,7 +234,7 @@ describe("test recording start holder admission (#11665)", () => {
 
   test("the holder starts successfully with readiness called once", async () => {
     // An already-active fake capture keeps the ingress's real manager call device-free.
-    const active = await startTestRecording(
+    const active = await startDeviceGestureRecording(
       device,
       timer,
       new CountingIdGenerator(),
@@ -273,7 +273,7 @@ describe("test recording start holder admission (#11665)", () => {
     expect(
       pool.resolveOwnedDeviceSessionForMcpSession("acquiring-connection", device.deviceId),
     ).toBe(acquired);
-    const active = await startTestRecording(
+    const active = await startDeviceGestureRecording(
       device,
       timer,
       new CountingIdGenerator(),

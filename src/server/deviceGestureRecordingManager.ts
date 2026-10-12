@@ -14,11 +14,11 @@ import { DaemonState } from "../daemon/daemonState";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import { isOwnerWithinBase } from "../db/videoRecordingRepository";
 
-/** Test recordings observe on-device input; recordSteps records AutoMobile tool calls. */
-export const TEST_RECORDING_CAPTURE_SCOPE = "user-input" as const;
+/** Device gesture recordings observe on-device input; recordSteps records AutoMobile tool calls. */
+export const DEVICE_GESTURE_RECORDING_CAPTURE_SCOPE = "user-input" as const;
 export const NO_USER_INPUT_CAPTURED_REASON = "no_user_input_captured" as const;
-export const TEST_RECORDING_USER_INPUT_ONLY_NOTICE: string =
-  "Test recordings capture input made on the device itself (touches on its touch screen or emulator window, and text changes in input fields). " +
+export const DEVICE_GESTURE_RECORDING_USER_INPUT_ONLY_NOTICE: string =
+  "Device gesture recordings capture input made on the device itself (touches on its touch screen or emulator window, and text changes in input fields). " +
   "Taps, swipes and other gestures sent through AutoMobile tools (tapAt, tapOn, swipeOn, etc.) or adb shell input are injected and are not recorded by design; use recordSteps to record tool calls.";
 
 /** Plain empty capture, distinct from touch-track and recorder-stop failures. */
@@ -26,18 +26,20 @@ export class NoUserInputCapturedError extends ActionableError {
   readonly reason = NO_USER_INPUT_CAPTURED_REASON;
 
   constructor() {
-    super("No recorded interactions were captured. " + TEST_RECORDING_USER_INPUT_ONLY_NOTICE);
+    super(
+      "No recorded interactions were captured. " + DEVICE_GESTURE_RECORDING_USER_INPUT_ONLY_NOTICE,
+    );
   }
 }
 
-interface TestRecordingStartResult {
+interface DeviceGestureRecordingStartResult {
   recordingId: string;
   startedAt: string;
   deviceId: string;
   platform: Platform;
 }
 
-interface TestRecordingStopResult {
+interface DeviceGestureRecordingStopResult {
   /** Partial-plan warning, carried through the existing tool/socket error field. */
   error?: string;
   recordingId: string;
@@ -51,7 +53,7 @@ interface TestRecordingStopResult {
   platform: Platform;
 }
 
-export interface TestRecordingStatus {
+export interface DeviceGestureRecordingStatus {
   recordingId: string;
   deviceId: string;
   platform: Platform;
@@ -59,7 +61,7 @@ export interface TestRecordingStatus {
   eventCount: number;
   durationMs: number;
   /** On-device user-input capture; tool calls belong to recordSteps. */
-  captureScope: typeof TEST_RECORDING_CAPTURE_SCOPE;
+  captureScope: typeof DEVICE_GESTURE_RECORDING_CAPTURE_SCOPE;
   /** Explains an empty capture; omitted once at least one step exists. */
   notice?: string;
 }
@@ -86,11 +88,11 @@ type RecorderFactory = (device: BootedDevice) => TestRecorder;
 let activeRecording: RecordingSession | null = null;
 let startingRecording: {
   session: RecordingSession;
-  promise: Promise<TestRecordingStartResult>;
+  promise: Promise<DeviceGestureRecordingStartResult>;
 } | null = null;
 let stoppingRecording: {
   session: RecordingSession;
-  promise: Promise<TestRecordingStopResult>;
+  promise: Promise<DeviceGestureRecordingStopResult>;
 } | null = null;
 
 const MAX_RETAINED_STOPPED_PLANS = 16;
@@ -100,9 +102,12 @@ const MAX_RETAINED_STOPPED_PLANS = 16;
  * release-time stop is not lost: the previous owner fetches it with the id. Bounded, oldest
  * dropped first.
  */
-const stoppedPlans = new Map<string, { owner: string; result: TestRecordingStopResult }>();
+const stoppedPlans = new Map<string, { owner: string; result: DeviceGestureRecordingStopResult }>();
 
-function retainStoppedPlan(session: RecordingSession, result: TestRecordingStopResult): void {
+function retainStoppedPlan(
+  session: RecordingSession,
+  result: DeviceGestureRecordingStopResult,
+): void {
   if (!session.ownerSessionUuid) {
     return;
   }
@@ -131,21 +136,21 @@ function daemonBaseSessionUuid(sessionUuid: string): string {
  * recording (#11140), its base session or a sibling derived session of the same base (#11533).
  * `baseSessionUuid` resolves a session to its base; another base's plans stay hidden.
  */
-export function getStoppedTestRecording(
+export function getStoppedDeviceGestureRecording(
   recordingId: string,
   ownerSessionUuid: string | undefined,
   baseSessionUuid: (sessionUuid: string) => string = daemonBaseSessionUuid,
-): TestRecordingStopResult | undefined {
+): DeviceGestureRecordingStopResult | undefined {
   const entry = stoppedPlans.get(recordingId);
   if (!entry || ownerSessionUuid === undefined) {
     return undefined;
   }
-  return testRecordingOwnerVisible(entry.owner, ownerSessionUuid, baseSessionUuid)
+  return deviceGestureRecordingOwnerVisible(entry.owner, ownerSessionUuid, baseSessionUuid)
     ? entry.result
     : undefined;
 }
 
-function testRecordingOwnerVisible(
+function deviceGestureRecordingOwnerVisible(
   owner: string | undefined,
   requester: string | undefined,
   baseSessionUuid: (sessionUuid: string) => string,
@@ -166,29 +171,35 @@ function testRecordingOwnerVisible(
  * already has STOP_RECORDING_TIMEOUT_MS as its deadline; no additional timer is needed.
  * A stranger or an unknown id returns immediately, without waiting on or exposing the stop.
  */
-export async function joinInFlightTestRecordingStop(
+export async function joinInFlightDeviceGestureRecordingStop(
   recordingId: string,
   ownerSessionUuid: string | undefined,
   baseSessionUuid: (sessionUuid: string) => string = daemonBaseSessionUuid,
-): Promise<TestRecordingStopResult | undefined> {
+): Promise<DeviceGestureRecordingStopResult | undefined> {
   const stopping = stoppingRecording;
   if (
     !stopping ||
     stopping.session.recordingId !== recordingId ||
-    !testRecordingOwnerVisible(stopping.session.ownerSessionUuid, ownerSessionUuid, baseSessionUuid)
+    !deviceGestureRecordingOwnerVisible(
+      stopping.session.ownerSessionUuid,
+      ownerSessionUuid,
+      baseSessionUuid,
+    )
   ) {
     return undefined;
   }
   await stopping.promise;
-  return getStoppedTestRecording(recordingId, ownerSessionUuid, baseSessionUuid);
+  return getStoppedDeviceGestureRecording(recordingId, ownerSessionUuid, baseSessionUuid);
 }
 
 /** Test seam: forget retained plans. */
-export function resetStoppedTestRecordings(): void {
+export function resetStoppedDeviceGestureRecordings(): void {
   stoppedPlans.clear();
 }
 
-export function getTestRecordingStatus(timer: Timer = defaultTimer): TestRecordingStatus | null {
+export function getDeviceGestureRecordingStatus(
+  timer: Timer = defaultTimer,
+): DeviceGestureRecordingStatus | null {
   if (!activeRecording) {
     return null;
   }
@@ -203,8 +214,8 @@ export function getTestRecordingStatus(timer: Timer = defaultTimer): TestRecordi
     startedAt: new Date(activeRecording.startedAt).toISOString(),
     eventCount,
     durationMs,
-    captureScope: TEST_RECORDING_CAPTURE_SCOPE,
-    ...(eventCount === 0 ? { notice: TEST_RECORDING_USER_INPUT_ONLY_NOTICE } : {}),
+    captureScope: DEVICE_GESTURE_RECORDING_CAPTURE_SCOPE,
+    ...(eventCount === 0 ? { notice: DEVICE_GESTURE_RECORDING_USER_INPUT_ONLY_NOTICE } : {}),
   };
 }
 
@@ -219,7 +230,10 @@ function ownableSession(): RecordingSession | null {
 }
 
 /** Adopt capture still running or starting, including teardown already in flight. */
-export function adoptOwnerlessTestRecording(deviceId: string, sessionUuid: string): boolean {
+export function adoptOwnerlessDeviceGestureRecording(
+  deviceId: string,
+  sessionUuid: string,
+): boolean {
   const session = ownableSession();
   if (!session || session.deviceId !== deviceId || session.ownerSessionUuid !== undefined) {
     return false;
@@ -229,23 +243,28 @@ export function adoptOwnerlessTestRecording(deviceId: string, sessionUuid: strin
 }
 
 /**
- * Whether the daemon session `sessionUuid` owns the live test recording on `deviceId`;
+ * Whether the daemon session `sessionUuid` owns the live device gesture recording on `deviceId`;
  * `undefined` asks about an owner-less (sessionless) one.
  */
-export function isTestRecordingOwnedBy(sessionUuid: string | undefined, deviceId: string): boolean {
+export function isDeviceGestureRecordingOwnedBy(
+  sessionUuid: string | undefined,
+  deviceId: string,
+): boolean {
   const session = ownableSession();
   return (
     session !== null && session.ownerSessionUuid === sessionUuid && session.deviceId === deviceId
   );
 }
 
-/** Id of the live test recording `isTestRecordingOwnedBy` matches; its plan stays fetchable by that id. */
-export function ownedTestRecordingId(
+/** Id of the live device gesture recording `isDeviceGestureRecordingOwnedBy` matches; its plan stays fetchable by that id. */
+export function ownedDeviceGestureRecordingId(
   sessionUuid: string | undefined,
   deviceId: string,
 ): string | undefined {
   const session = ownableSession();
-  return session && isTestRecordingOwnedBy(sessionUuid, deviceId) ? session.recordingId : undefined;
+  return session && isDeviceGestureRecordingOwnedBy(sessionUuid, deviceId)
+    ? session.recordingId
+    : undefined;
 }
 
 const buildPlanFromSteps = (
@@ -296,17 +315,17 @@ const formatPlanName = (planName?: string): string => {
   return `recorded-plan-${timestamp}`;
 };
 
-export async function startTestRecording(
+export async function startDeviceGestureRecording(
   device: BootedDevice,
   timer: Timer = defaultTimer,
   idGenerator: IdGenerator = defaultIdGenerator,
   recorderFactory: RecorderFactory = (target) => new DualTrackRecorder(target),
   ownerSessionUuid?: string,
   baseSessionUuid?: (sessionUuid: string) => string,
-): Promise<TestRecordingStartResult> {
+): Promise<DeviceGestureRecordingStartResult> {
   if (stoppingRecording) {
     await stoppingRecording.promise.catch(() => undefined);
-    return startTestRecording(
+    return startDeviceGestureRecording(
       device,
       timer,
       idGenerator,
@@ -318,7 +337,7 @@ export async function startTestRecording(
 
   const ownerMatches = (existingOwner: string | undefined): boolean =>
     existingOwner === ownerSessionUuid ||
-    testRecordingOwnerVisible(
+    deviceGestureRecordingOwnerVisible(
       existingOwner,
       ownerSessionUuid,
       baseSessionUuid ?? daemonBaseSessionUuid,
@@ -337,7 +356,7 @@ export async function startTestRecording(
       );
     }
     logger.info(
-      `[TestRecording] Recording already active (${activeRecording.recordingId}), returning existing session`,
+      `[DeviceGestureRecording] Recording already active (${activeRecording.recordingId}), returning existing session`,
     );
     return {
       recordingId: activeRecording.recordingId,
@@ -365,7 +384,7 @@ export async function startTestRecording(
 
   if (device.platform !== "android") {
     throw new Error(
-      `Test recording is only supported on Android right now (got ${device.platform}).`,
+      `Device gesture recording is only supported on Android right now (got ${device.platform}).`,
     );
   }
 
@@ -385,7 +404,9 @@ export async function startTestRecording(
     try {
       await session.recorder.start();
       activeRecording = session;
-      logger.info(`[TestRecording] Started recording ${recordingId} on ${device.deviceId}`);
+      logger.info(
+        `[DeviceGestureRecording] Started recording ${recordingId} on ${device.deviceId}`,
+      );
       return {
         recordingId,
         startedAt: new Date(startedAt).toISOString(),
@@ -398,10 +419,10 @@ export async function startTestRecording(
       } catch (cleanupError) {
         throw toActionableError(
           new AggregateError([error, cleanupError], "Recorder startup and teardown both failed"),
-          "Failed to start test recording",
+          "Failed to start device gesture recording",
         );
       }
-      throw toActionableError(error, "Failed to start test recording");
+      throw toActionableError(error, "Failed to start device gesture recording");
     } finally {
       if (startingRecording?.session === session) {
         startingRecording = null;
@@ -413,15 +434,15 @@ export async function startTestRecording(
 }
 
 /** Stops without an explicit clock use the recorder's injected clock, including release cleanup. */
-function testRecordingStopTimer(): Timer {
+function deviceGestureRecordingStopTimer(): Timer {
   return ownableSession()?.timer ?? defaultTimer;
 }
 
-export async function stopTestRecording(
+export async function stopDeviceGestureRecording(
   recordingId?: string,
   planName?: string,
-  timer: Timer = testRecordingStopTimer(),
-): Promise<TestRecordingStopResult> {
+  timer: Timer = deviceGestureRecordingStopTimer(),
+): Promise<DeviceGestureRecordingStopResult> {
   if (startingRecording) {
     await startingRecording.promise;
   }
@@ -474,15 +495,15 @@ async function stopRecorder(session: RecordingSession, timer: Timer): Promise<Re
     return await raceWithDeadline(() => session.recorder.stop(), {
       timer,
       timeoutMs: STOP_RECORDING_TIMEOUT_MS,
-      label: "Stopping test recording",
+      label: "Stopping device gesture recording",
       timeoutError: () =>
-        new Error(`Test recording stop timed out after ${STOP_RECORDING_TIMEOUT_MS} ms`),
+        new Error(`Device gesture recording stop timed out after ${STOP_RECORDING_TIMEOUT_MS} ms`),
     });
   } catch (error) {
-    logger.warn(`[TestRecording] Failed to stop recording ${session.recordingId}`, error);
+    logger.warn(`[DeviceGestureRecording] Failed to stop recording ${session.recordingId}`, error);
     const captured = session.recorder.capturedSteps ?? [];
     if (captured.length === 0) {
-      throw toActionableError(error, "Failed to stop test recording");
+      throw toActionableError(error, "Failed to stop device gesture recording");
     }
     return { steps: [...captured], salvagedAfter: errorMessage(error) };
   }
@@ -492,7 +513,7 @@ async function stopAndBuildResult(
   session: RecordingSession,
   planName: string | undefined,
   timer: Timer,
-): Promise<TestRecordingStopResult> {
+): Promise<DeviceGestureRecordingStopResult> {
   const { steps, touchTrackFailure, geometryWarnings, salvagedAfter } = await stopRecorder(
     session,
     timer,
@@ -504,13 +525,13 @@ async function stopAndBuildResult(
   if (touchTrackMessage && steps.length === 0) {
     throw toActionableError(
       new Error(touchTrackMessage, { cause: touchTrackFailure?.error }),
-      "Failed to stop test recording",
+      "Failed to stop device gesture recording",
     );
   }
   // Preserve useful partial plans, including accessibility-only inputText steps.
   // The export schema has no warnings field, so success carries its warning in error.
   if (touchTrackMessage) {
-    logger.warn(`[TestRecording] ${touchTrackMessage}`);
+    logger.warn(`[DeviceGestureRecording] ${touchTrackMessage}`);
   }
   // A rotation or display size change (or an unreadable rotation) can leave tapAt/swipeOn
   // steps at the wrong coordinates or direction (#10174); never report that as a clean plan.
@@ -518,13 +539,13 @@ async function stopAndBuildResult(
     ? `Display geometry changed or was unreadable during recording: ${geometryWarnings.join("; ")}. Steps labelled "Warning:" may be recorded at the wrong coordinates or direction.`
     : undefined;
   if (geometryMessage) {
-    logger.warn(`[TestRecording] ${geometryMessage}`);
+    logger.warn(`[DeviceGestureRecording] ${geometryMessage}`);
   }
   const salvageMessage = salvagedAfter
     ? `Stopping the recorder did not finish (${salvagedAfter}); the steps captured so far are returned without confirming display rotation/size, so tapAt and swipeOn steps recorded after a display change may be at the wrong coordinates or direction.`
     : undefined;
   if (salvageMessage) {
-    logger.warn(`[TestRecording] ${salvageMessage}`);
+    logger.warn(`[DeviceGestureRecording] ${salvageMessage}`);
   }
   const warningMessage = [touchTrackMessage, geometryMessage, salvageMessage]
     .filter(Boolean)
@@ -541,7 +562,9 @@ async function stopAndBuildResult(
 
   const durationMs = stoppedAt - session.startedAt;
 
-  logger.info(`[TestRecording] Stopped recording ${session.recordingId} with ${stepCount} steps`);
+  logger.info(
+    `[DeviceGestureRecording] Stopped recording ${session.recordingId} with ${stepCount} steps`,
+  );
 
   return {
     recordingId: session.recordingId,

@@ -25,19 +25,22 @@ import { RealToolCallPath } from "../helpers/realToolCallPath";
 import { assignManagedSlotDevice } from "../daemon/managedSlots/managedSlotFixtures";
 import type { BootedDevice } from "../../src/models";
 import { registerPlanTools } from "../../src/server/planTools";
-import * as realTestRecordingManager from "../../src/server/testRecordingManager";
+import * as realDeviceGestureRecordingManager from "../../src/server/deviceGestureRecordingManager";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { isTypedToolRefusal, shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { z } from "zod/v4";
+import { getRemovedToolHint } from "../../src/models/removedTools";
 import { executionTracker } from "../../src/server/executionTracker";
 
 isolateToolRegistry();
 
-const realStartTestRecording = realTestRecordingManager.startTestRecording;
-const realStopTestRecording = realTestRecordingManager.stopTestRecording;
-const realGetTestRecordingStatus = realTestRecordingManager.getTestRecordingStatus;
+const realStartDeviceGestureRecording =
+  realDeviceGestureRecordingManager.startDeviceGestureRecording;
+const realStopDeviceGestureRecording = realDeviceGestureRecordingManager.stopDeviceGestureRecording;
+const realGetDeviceGestureRecordingStatus =
+  realDeviceGestureRecordingManager.getDeviceGestureRecordingStatus;
 
-describe("startTestRecording tool", () => {
+describe("recordDeviceGestures tool", () => {
   const mockDevice = {
     deviceId: "emulator-5554",
     name: "Pixel 6 API 33",
@@ -45,7 +48,7 @@ describe("startTestRecording tool", () => {
     status: "booted" as const,
   };
 
-  const mockStartTestRecording = mock(() =>
+  const mockStartDeviceGestureRecording = mock(() =>
     Promise.resolve({
       recordingId: "rec-123",
       startedAt: "2024-01-01T00:00:00.000Z",
@@ -55,31 +58,40 @@ describe("startTestRecording tool", () => {
   );
 
   beforeAll(() => {
-    if (!ToolRegistry.getTool("startTestRecording")) {
+    if (!ToolRegistry.getTool("recordDeviceGestures")) {
       registerPlanTools();
     }
   });
 
   afterEach(() => {
-    mockStartTestRecording.mockClear();
+    mockStartDeviceGestureRecording.mockClear();
   });
 
   afterAll(() => {
-    mock.module("../../src/server/testRecordingManager", () => ({
-      startTestRecording: realStartTestRecording,
-      stopTestRecording: realStopTestRecording,
-      getTestRecordingStatus: realGetTestRecordingStatus,
+    mock.module("../../src/server/deviceGestureRecordingManager", () => ({
+      startDeviceGestureRecording: realStartDeviceGestureRecording,
+      stopDeviceGestureRecording: realStopDeviceGestureRecording,
+      getDeviceGestureRecordingStatus: realGetDeviceGestureRecordingStatus,
     }));
   });
 
+  test("registers the public replacement and removes the old tool name", () => {
+    const tool = ToolRegistry.getRegisteredTool("recordDeviceGestures");
+    expect(ToolRegistry.getRegisteredTool("startTestRecording")).toBeUndefined();
+    expect(tool).toBeDefined();
+    expect(tool!.requiresDevice).toBe(true);
+    expect(tool!.hidden).toBe(false);
+    expect(getRemovedToolHint("startTestRecording")).toContain("recordDeviceGestures");
+  });
+
   test("successfully starts a new recording", async () => {
-    mock.module("../../src/server/testRecordingManager", () => ({
-      startTestRecording: mockStartTestRecording,
-      stopTestRecording: mock(() => Promise.resolve({})),
-      getTestRecordingStatus: mock(() => null),
+    mock.module("../../src/server/deviceGestureRecordingManager", () => ({
+      startDeviceGestureRecording: mockStartDeviceGestureRecording,
+      stopDeviceGestureRecording: mock(() => Promise.resolve({})),
+      getDeviceGestureRecordingStatus: mock(() => null),
     }));
 
-    const tool = ToolRegistry.getTool("startTestRecording");
+    const tool = ToolRegistry.getTool("recordDeviceGestures");
     expect(tool).toBeDefined();
     expect(tool!.deviceAwareHandler).toBeDefined();
 
@@ -101,13 +113,13 @@ describe("startTestRecording tool", () => {
       platform: "android",
     };
 
-    mock.module("../../src/server/testRecordingManager", () => ({
-      startTestRecording: mock(() => Promise.resolve(existingSession)),
-      stopTestRecording: mock(() => Promise.resolve({})),
-      getTestRecordingStatus: mock(() => existingSession),
+    mock.module("../../src/server/deviceGestureRecordingManager", () => ({
+      startDeviceGestureRecording: mock(() => Promise.resolve(existingSession)),
+      stopDeviceGestureRecording: mock(() => Promise.resolve({})),
+      getDeviceGestureRecordingStatus: mock(() => existingSession),
     }));
 
-    const tool = ToolRegistry.getTool("startTestRecording");
+    const tool = ToolRegistry.getTool("recordDeviceGestures");
     expect(tool).toBeDefined();
 
     const response = await tool!.deviceAwareHandler!(mockDevice, {});
@@ -119,15 +131,15 @@ describe("startTestRecording tool", () => {
   });
 
   test("returns error when recording fails to start", async () => {
-    mock.module("../../src/server/testRecordingManager", () => ({
-      startTestRecording: mock(() =>
+    mock.module("../../src/server/deviceGestureRecordingManager", () => ({
+      startDeviceGestureRecording: mock(() =>
         Promise.reject(new Error("Unable to connect to accessibility service")),
       ),
-      stopTestRecording: mock(() => Promise.resolve({})),
-      getTestRecordingStatus: mock(() => null),
+      stopDeviceGestureRecording: mock(() => Promise.resolve({})),
+      getDeviceGestureRecordingStatus: mock(() => null),
     }));
 
-    const tool = ToolRegistry.getTool("startTestRecording");
+    const tool = ToolRegistry.getTool("recordDeviceGestures");
     expect(tool).toBeDefined();
 
     const response = await tool!.deviceAwareHandler!(mockDevice, {});
@@ -145,16 +157,16 @@ describe("startTestRecording tool", () => {
       status: "booted" as const,
     };
 
-    mock.module("../../src/server/testRecordingManager", () => ({
-      startTestRecording: mock(() =>
+    mock.module("../../src/server/deviceGestureRecordingManager", () => ({
+      startDeviceGestureRecording: mock(() =>
         Promise.reject(
           new Error(
             "Recording already active on device emulator-5554 (rec-123). Stop the existing recording before starting a new one on emulator-5556.",
           ),
         ),
       ),
-      stopTestRecording: mock(() => Promise.resolve({})),
-      getTestRecordingStatus: mock(() => ({
+      stopDeviceGestureRecording: mock(() => Promise.resolve({})),
+      getDeviceGestureRecordingStatus: mock(() => ({
         recordingId: "rec-123",
         deviceId: "emulator-5554",
         platform: "android",
@@ -164,7 +176,7 @@ describe("startTestRecording tool", () => {
       })),
     }));
 
-    const tool = ToolRegistry.getTool("startTestRecording");
+    const tool = ToolRegistry.getTool("recordDeviceGestures");
     expect(tool).toBeDefined();
 
     const response = await tool!.deviceAwareHandler!(differentDevice, {});
@@ -176,7 +188,7 @@ describe("startTestRecording tool", () => {
   });
 });
 
-describe("startTestRecording ToolRegistry admission (#11665)", () => {
+describe("recordDeviceGestures ToolRegistry admission (#11665)", () => {
   const held: BootedDevice = { deviceId: "emulator-5554", name: "Held", platform: "android" };
   const other: BootedDevice = { deviceId: "emulator-5556", name: "Other", platform: "android" };
   const slot: BootedDevice = { deviceId: "slot-iphone", name: "Slot", platform: "ios" };
@@ -188,7 +200,9 @@ describe("startTestRecording ToolRegistry admission (#11665)", () => {
   let readiness: ReturnType<
     typeof spyOn<typeof toolExecutionContext, "createToolExecutionContext">
   >;
-  let start: ReturnType<typeof spyOn<typeof realTestRecordingManager, "startTestRecording">>;
+  let start: ReturnType<
+    typeof spyOn<typeof realDeviceGestureRecordingManager, "startDeviceGestureRecording">
+  >;
 
   beforeEach(async () => {
     const timer = new FakeTimer();
@@ -234,7 +248,10 @@ describe("startTestRecording ToolRegistry admission (#11665)", () => {
         devicePlatform: held.platform,
       }),
     );
-    start = spyOn(realTestRecordingManager, "startTestRecording").mockResolvedValue({
+    start = spyOn(
+      realDeviceGestureRecordingManager,
+      "startDeviceGestureRecording",
+    ).mockResolvedValue({
       recordingId: "fake-recording",
       startedAt: "2024-01-01T00:00:00.000Z",
       deviceId: held.deviceId,
@@ -269,14 +286,14 @@ describe("startTestRecording ToolRegistry admission (#11665)", () => {
 
   test("a sessionless explicit unheld start is refused before device work", async () => {
     await expect(
-      tools.call("startTestRecording", { deviceId: unheld.deviceId }),
+      tools.call("recordDeviceGestures", { deviceId: unheld.deviceId }),
     ).rejects.toMatchObject(unheldRefusal);
     expectNoDeviceWork();
   });
 
   test("a sessionless predicted unheld start is refused before device work", async () => {
     tools.deviceSessionManager.setConnectedDevices([unheld]);
-    await expect(tools.call("startTestRecording", {})).rejects.toMatchObject(unheldRefusal);
+    await expect(tools.call("recordDeviceGestures", {})).rejects.toMatchObject(unheldRefusal);
     expectNoDeviceWork();
   });
 
@@ -284,7 +301,7 @@ describe("startTestRecording ToolRegistry admission (#11665)", () => {
     test(`a live device-less session cannot auto-acquire (${deviceId ?? "no target"})`, async () => {
       const session = await manager.createSession("device-less", "", "android");
       await expect(
-        tools.call("startTestRecording", { sessionUuid: session.sessionId, deviceId }),
+        tools.call("recordDeviceGestures", { sessionUuid: session.sessionId, deviceId }),
       ).rejects.toMatchObject(unheldRefusal);
       expect(manager.getSession(session.sessionId)?.assignedDevice).toBe("");
       expect(pool.getAllDevices().some((device) => device.sessionId === session.sessionId)).toBe(
@@ -295,12 +312,12 @@ describe("startTestRecording ToolRegistry admission (#11665)", () => {
   }
 
   test("an unheld start throws a typed refusal rendered as an MCP error result", async () => {
-    const refusal = await tools.call("startTestRecording", { deviceId: unheld.deviceId }).then(
+    const refusal = await tools.call("recordDeviceGestures", { deviceId: unheld.deviceId }).then(
       () => undefined,
       (error: unknown) => error,
     );
     expect(isTypedToolRefusal(refusal)).toBe(true);
-    const result = shapeToolCallError(refusal, { toolName: "startTestRecording", source: "MCP" });
+    const result = shapeToolCallError(refusal, { toolName: "recordDeviceGestures", source: "MCP" });
     expect(result.isError).toBe(true);
     expect(JSON.parse(result.content[0].text)).toMatchObject({
       success: false,
@@ -345,7 +362,7 @@ describe("startTestRecording ToolRegistry admission (#11665)", () => {
         return { sessionId, deviceId: unheld.deviceId, devicePlatform: "android" };
       },
     );
-    await tools.call("startTestRecording", {
+    await tools.call("recordDeviceGestures", {
       sessionUuid: "recovering",
       deviceId: unheld.deviceId,
     });
@@ -357,7 +374,7 @@ describe("startTestRecording ToolRegistry admission (#11665)", () => {
 
   test("direct mode still permits an unheld recording start", async () => {
     DaemonState.getInstance().reset();
-    await tools.call("startTestRecording", { deviceId: unheld.deviceId });
+    await tools.call("recordDeviceGestures", { deviceId: unheld.deviceId });
     expect(readiness).not.toHaveBeenCalled();
     expect(tools.deviceSessionManager.getEnsureDeviceReadyCalls()).toBe(1);
     expect(start).toHaveBeenCalledTimes(1);
@@ -366,7 +383,7 @@ describe("startTestRecording ToolRegistry admission (#11665)", () => {
   test("a held managed-slot device refuses the non-holder before the slot refusal", async () => {
     await manager.createSession("slot-holder", slot.deviceId, "ios");
     await expect(
-      tools.call("startTestRecording", { deviceId: slot.deviceId }),
+      tools.call("recordDeviceGestures", { deviceId: slot.deviceId }),
     ).rejects.toMatchObject({
       code: "device_owned_by_other_session",
       deviceId: slot.deviceId,
@@ -377,7 +394,7 @@ describe("startTestRecording ToolRegistry admission (#11665)", () => {
 
   test("a predicted idle managed-slot device keeps its refusal before readiness", async () => {
     tools.deviceSessionManager.setConnectedDevices([slot]);
-    await expect(tools.call("startTestRecording", { platform: "ios" })).rejects.toMatchObject({
+    await expect(tools.call("recordDeviceGestures", { platform: "ios" })).rejects.toMatchObject({
       code: "device_assigned_to_managed_slot",
     });
     expectNoDeviceWork();
@@ -386,7 +403,7 @@ describe("startTestRecording ToolRegistry admission (#11665)", () => {
   for (const sessionUuid of ["stranger", undefined]) {
     test(`${sessionUuid ?? "sessionless"} is refused before readiness or recording setup`, async () => {
       await expect(
-        tools.call("startTestRecording", { deviceId: held.deviceId, sessionUuid }),
+        tools.call("recordDeviceGestures", { deviceId: held.deviceId, sessionUuid }),
       ).rejects.toMatchObject({
         code: "device_owned_by_other_session",
         deviceId: held.deviceId,
@@ -400,7 +417,7 @@ describe("startTestRecording ToolRegistry admission (#11665)", () => {
   }
 
   test("the holder's start works and calls the fake readiness once", async () => {
-    const response = await tools.call("startTestRecording", {
+    const response = await tools.call("recordDeviceGestures", {
       deviceId: held.deviceId,
       sessionUuid: "holder",
     });
@@ -411,7 +428,7 @@ describe("startTestRecording ToolRegistry admission (#11665)", () => {
   });
 
   test("the acquiring MCP connection's deviceId-only start works as the holder", async () => {
-    const response = await tools.call("startTestRecording", {
+    const response = await tools.call("recordDeviceGestures", {
       deviceId: held.deviceId,
       __mcpSessionId: "acquiring-connection",
     });
@@ -423,7 +440,7 @@ describe("startTestRecording ToolRegistry admission (#11665)", () => {
 
   test("an idle managed-slot device keeps its existing refusal before readiness", async () => {
     await expect(
-      tools.call("startTestRecording", { deviceId: slot.deviceId }),
+      tools.call("recordDeviceGestures", { deviceId: slot.deviceId }),
     ).rejects.toMatchObject({ code: "device_assigned_to_managed_slot" });
     expect(readiness).not.toHaveBeenCalled();
     expect(tools.deviceSessionManager.getEnsureDeviceReadyCalls()).toBe(0);

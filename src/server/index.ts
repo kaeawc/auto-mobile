@@ -654,7 +654,7 @@ export function registerMcpTools(daemonMode: boolean): void {
   registerDeepLinkTools();
   registerNavigationTools();
   registerNotificationTools();
-  // Plan tools (executePlan, recordSteps, startTestRecording, exportPlan)
+  // Plan tools (executePlan, recordSteps, recordDeviceGestures, exportPlan)
   // registered outside the daemonMode gate so MCP recording works in stdio mode
   // (the standard MCP transport agents use). executePlan multi-device allocation
   // still requires daemon and throws a clear error without it.

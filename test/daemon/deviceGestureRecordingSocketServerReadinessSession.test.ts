@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
-  createTestRecordingDeviceResolution,
-  TestRecordingSocketServer,
-  type TestRecordingDeviceResolution,
-} from "../../src/daemon/testRecordingSocketServer";
-import type { TestRecordingCommand } from "../../src/daemon/testRecordingSocketTypes";
+  createDeviceGestureRecordingDeviceResolution,
+  DeviceGestureRecordingSocketServer,
+  type DeviceGestureRecordingDeviceResolution,
+} from "../../src/daemon/deviceGestureRecordingSocketServer";
+import type { DeviceGestureRecordingCommand } from "../../src/daemon/deviceGestureRecordingSocketTypes";
 import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
 import {
   ActionableError,
@@ -22,7 +22,7 @@ import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDevic
 import { FakeWindow } from "../fakes/FakeWindow";
 
 /**
- * A test-recording `start` readies its device for the session that asked (#11641). Readiness
+ * A device-gesture-recording `start` readies its device for the session that asked (#11641). Readiness
  * writes the appearance to the device on connect, and that write follows the connecting session's
  * own config (#10976): a holder that chose `set_appearance light` (stored under its session with
  * syncWithHost false) keeps a light device when it starts a recording on a dark host. Without the
@@ -31,8 +31,8 @@ import { FakeWindow } from "../fakes/FakeWindow";
  * The production resolution runs here over a real DeviceSessionManager on fakes, so the assertion
  * is the device write itself.
  */
-class TestableServer extends TestRecordingSocketServer {
-  invoke(request: TestRecordingCommand) {
+class TestableServer extends DeviceGestureRecordingSocketServer {
+  invoke(request: DeviceGestureRecordingCommand) {
     return this.handleRequest(request);
   }
 }
@@ -83,7 +83,7 @@ function harness() {
       executionBinding: { bindDeviceExecution: () => {} },
     },
   );
-  const production = createTestRecordingDeviceResolution(() => ({
+  const production = createDeviceGestureRecordingDeviceResolution(() => ({
     getPlatformDeviceManager: () => manager.getPlatformDeviceManager(),
     getCurrentDevice: () => manager.getCurrentDevice(),
     // Runner setup is not what this pins: readiness stops at "booted", then makes the same
@@ -91,7 +91,7 @@ function harness() {
     ensureDeviceReady: (platform, deviceId, options) =>
       manager.ensureDeviceReady(platform, deviceId, { ...options, readiness: "booted" }),
   }));
-  const resolution: TestRecordingDeviceResolution = {
+  const resolution: DeviceGestureRecordingDeviceResolution = {
     selectDevice: async () => held,
     readyDevice: async (device, sessionUuid) => {
       await production.readyDevice(device, sessionUuid);
@@ -112,7 +112,7 @@ function harness() {
   return { server, configKeys, nightModeWrites };
 }
 
-describe("test-recording start readies the device for the session that asked", () => {
+describe("device-gesture-recording start readies the device for the session that asked", () => {
   test("a holder that chose light keeps a light device when it starts a recording on a dark host", async () => {
     const { server, configKeys, nightModeWrites } = harness();
 

@@ -237,9 +237,9 @@ import {
   stopVideoRecordingSocketServer,
 } from "./videoRecordingSocketServer";
 import {
-  startTestRecordingSocketServer,
-  stopTestRecordingSocketServer,
-} from "./testRecordingSocketServer";
+  startDeviceGestureRecordingSocketServer,
+  stopDeviceGestureRecordingSocketServer,
+} from "./deviceGestureRecordingSocketServer";
 import {
   startDeviceSnapshotSocketServer,
   stopDeviceSnapshotSocketServer,
@@ -1787,7 +1787,10 @@ export class Daemon {
   private async startServicesAfterSocketBind(): Promise<void> {
     startupBenchmark.startPhase("auxiliarySocketServerStart");
     await this.startAuxiliarySocket("video-recording", startVideoRecordingSocketServer);
-    await this.startAuxiliarySocket("test-recording", startTestRecordingSocketServer);
+    await this.startAuxiliarySocket(
+      "device-gesture-recording",
+      startDeviceGestureRecordingSocketServer,
+    );
     await this.startAuxiliarySocket("device-snapshot", startDeviceSnapshotSocketServer);
     await this.startAuxiliarySocket("appearance", startAppearanceSocketServer);
     await this.startAuxiliarySocket("performance-stream", startPerformanceStreamSocketServer);
@@ -5113,8 +5116,8 @@ export class Daemon {
       shutdownStage("video recording socket server", "its connections closing", () =>
         stopVideoRecordingSocketServer(),
       ),
-      shutdownStage("test recording socket server", "its connections closing", () =>
-        stopTestRecordingSocketServer(),
+      shutdownStage("device gesture recording socket server", "its connections closing", () =>
+        stopDeviceGestureRecordingSocketServer(),
       ),
       shutdownStage("device snapshot socket server", "its connections closing", () =>
         stopDeviceSnapshotSocketServer(),

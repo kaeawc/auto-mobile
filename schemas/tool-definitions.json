@@ -2235,6 +2235,7 @@
               "putAppFile",
               "recentApps",
               "reconcileDeviceResources",
+              "recordDeviceGestures",
               "recordSteps",
               "removeKeyValue",
               "resetAppLogs",
@@ -2256,7 +2257,6 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
-              "startTestRecording",
               "swipeOn",
               "systemTray",
               "tapAny",
@@ -2362,6 +2362,7 @@
               "putAppFile",
               "recentApps",
               "reconcileDeviceResources",
+              "recordDeviceGestures",
               "recordSteps",
               "removeKeyValue",
               "resetAppLogs",
@@ -2383,7 +2384,6 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
-              "startTestRecording",
               "swipeOn",
               "systemTray",
               "tapAny",
@@ -22776,6 +22776,7 @@
               "putAppFile",
               "recentApps",
               "reconcileDeviceResources",
+              "recordDeviceGestures",
               "recordSteps",
               "removeKeyValue",
               "resetAppLogs",
@@ -22797,7 +22798,6 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
-              "startTestRecording",
               "swipeOn",
               "systemTray",
               "tapAny",
@@ -23990,6 +23990,80 @@
         }
       },
       "required": ["resources"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "recordDeviceGestures",
+    "description": "Start recording on-device user input (not tool calls) for exportPlan.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "recordingId": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "deviceId": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "artifact": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
+            }
+          },
+          "required": ["path", "format", "payload", "bytes", "tool"],
+          "additionalProperties": {}
+        }
+      },
+      "required": ["success"],
       "additionalProperties": false
     }
   },
@@ -30007,6 +30081,7 @@
             "putAppFile",
             "recentApps",
             "reconcileDeviceResources",
+            "recordDeviceGestures",
             "recordSteps",
             "removeKeyValue",
             "resetAppLogs",
@@ -30028,7 +30103,6 @@
             "snapshotOf",
             "sqlQuery",
             "stageSessionDownloads",
-            "startTestRecording",
             "swipeOn",
             "systemTray",
             "tapAny",
@@ -30100,6 +30174,7 @@
               "putAppFile",
               "recentApps",
               "reconcileDeviceResources",
+              "recordDeviceGestures",
               "recordSteps",
               "removeKeyValue",
               "resetAppLogs",
@@ -30121,7 +30196,6 @@
               "snapshotOf",
               "sqlQuery",
               "stageSessionDownloads",
-              "startTestRecording",
               "swipeOn",
               "systemTray",
               "tapAny",
@@ -30533,80 +30607,6 @@
         }
       },
       "required": ["sessionUuid", "directory", "files"],
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "startTestRecording",
-    "description": "Start recording on-device user input (not tool calls) for exportPlan.",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "sessionUuid": {
-          "description": "Session",
-          "type": "string"
-        },
-        "keepScreenAwake": {
-          "type": "boolean"
-        }
-      },
-      "additionalProperties": false
-    },
-    "outputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "success": {
-          "type": "boolean"
-        },
-        "recordingId": {
-          "type": "string"
-        },
-        "startedAt": {
-          "type": "string"
-        },
-        "deviceId": {
-          "type": "string"
-        },
-        "platform": {
-          "type": "string"
-        },
-        "error": {
-          "type": "string"
-        },
-        "artifact": {
-          "$schema": "https://json-schema.org/draft/2020-12/schema",
-          "type": "object",
-          "properties": {
-            "path": {
-              "type": "string"
-            },
-            "format": {
-              "type": "string",
-              "const": "json"
-            },
-            "payload": {
-              "type": "string"
-            },
-            "bytes": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 9007199254740991
-            },
-            "tool": {
-              "type": "string"
-            },
-            "resourceUri": {
-              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
-              "type": "string"
-            }
-          },
-          "required": ["path", "format", "payload", "bytes", "tool"],
-          "additionalProperties": {}
-        }
-      },
-      "required": ["success"],
       "additionalProperties": false
     }
   },

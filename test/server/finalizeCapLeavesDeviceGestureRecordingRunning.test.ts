@@ -9,12 +9,12 @@ import {
   type RecordingSessionCleanupDeps,
 } from "../../src/server/recordingSessionCleanup";
 import {
-  getTestRecordingStatus,
-  isTestRecordingOwnedBy,
-  resetStoppedTestRecordings,
-  startTestRecording,
-  stopTestRecording,
-} from "../../src/server/testRecordingManager";
+  getDeviceGestureRecordingStatus,
+  isDeviceGestureRecordingOwnedBy,
+  resetStoppedDeviceGestureRecordings,
+  startDeviceGestureRecording,
+  stopDeviceGestureRecording,
+} from "../../src/server/deviceGestureRecordingManager";
 import {
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
@@ -69,24 +69,24 @@ class FakeSessionManager implements CleanupManager {
 /**
  * "A recording stops and finalizes when its session is released, capped at about 120 s"
  * (docs/using/device-ownership.md), and the cap covers EVERY recording the owner has: single-file,
- * segmented and the test recording (#11041). recordingSessionCleanup.test.ts pins that with a fake
+ * segmented and the device gesture recording (#11041). recordingSessionCleanup.test.ts pins that with a fake
  * whose `markVideoRecordingIncomplete` accepts any id.
  *
  * The real one (`markVideoRecordingIncomplete` in src/server/videoRecordingManager.ts) only knows
- * video recordings: handed the test recording's id it force-stops nothing and finds no row. The
- * test recording is stopped only by the last stage of `stopOwnedRecordings`, which a wedged
+ * video recordings: handed the device gesture recording's id it force-stops nothing and finds no row. The
+ * device gesture recording is stopped only by the last stage of `stopOwnedRecordings`, which a wedged
  * earlier stage never reaches. So at the cap the device is freed with the released session's
  * recorder still capturing, still owned by the ended session, and the next holder's `start` joins
  * it: the new holder's session is recorded into the old holder's recording.
  */
-describe("finalize cap with a wedged video stage and the released session's test recording", () => {
+describe("finalize cap with a wedged video stage and the released session's device gesture recording", () => {
   let timer: FakeTimer;
   let recorderStops: number;
 
   beforeEach(async () => {
     timer = new FakeTimer();
     recorderStops = 0;
-    resetStoppedTestRecordings();
+    resetStoppedDeviceGestureRecordings();
     await setVideoRecordingManagerDependencies({
       videoRecorderService: new VideoRecorderService({
         backend: new FakeVideoCaptureBackend(),
@@ -104,7 +104,7 @@ describe("finalize cap with a wedged video stage and the released session's test
 
   afterEach(async () => {
     // Module state: stop whatever the scenario left running.
-    await stopTestRecording(undefined, undefined, timer).catch(() => undefined);
+    await stopDeviceGestureRecording(undefined, undefined, timer).catch(() => undefined);
     takeRecordingIdsFinalizedByRelease(OLD_HOLDER);
     resetVideoRecordingManagerDependencies();
   });
@@ -119,7 +119,7 @@ describe("finalize cap with a wedged video stage and the released session's test
   });
 
   const releaseWithWedgedVideoStage = async (): Promise<string> => {
-    const started = await startTestRecording(
+    const started = await startDeviceGestureRecording(
       device,
       timer,
       new CountingIdGenerator("recording"),
@@ -130,7 +130,7 @@ describe("finalize cap with a wedged video stage and the released session's test
     const deps: RecordingSessionCleanupDeps = {
       ...defaultRecordingSessionCleanupDeps,
       timer,
-      // The stage before the test-recording stop never settles (a wedged capture backend).
+      // The stage before the device-gesture-recording stop never settles (a wedged capture backend).
       stopSegmentedRecordings: () => new Promise<void>(() => {}),
     };
     registerRecordingSessionCleanup(manager, deps);
@@ -148,14 +148,14 @@ describe("finalize cap with a wedged video stage and the released session's test
     await releaseWithWedgedVideoStage();
 
     expect(recorderStops).toBe(1);
-    expect(isTestRecordingOwnedBy(OLD_HOLDER, device.deviceId)).toBe(false);
-    expect(getTestRecordingStatus()).toBeNull();
+    expect(isDeviceGestureRecordingOwnedBy(OLD_HOLDER, device.deviceId)).toBe(false);
+    expect(getDeviceGestureRecordingStatus()).toBeNull();
   });
 
   test("the next holder's start gets its own recording, not the released session's", async () => {
     const oldRecordingId = await releaseWithWedgedVideoStage();
 
-    const next = await startTestRecording(
+    const next = await startDeviceGestureRecording(
       device,
       timer,
       new CountingIdGenerator("next"),
@@ -164,6 +164,6 @@ describe("finalize cap with a wedged video stage and the released session's test
     );
 
     expect(next.recordingId).not.toBe(oldRecordingId);
-    expect(isTestRecordingOwnedBy(NEW_HOLDER, device.deviceId)).toBe(true);
+    expect(isDeviceGestureRecordingOwnedBy(NEW_HOLDER, device.deviceId)).toBe(true);
   });
 });

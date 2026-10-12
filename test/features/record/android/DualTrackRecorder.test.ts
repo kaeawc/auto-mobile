@@ -1634,7 +1634,7 @@ describe("DualTrackRecorder", () => {
     expect(steps[1].params.button).toBe("home");
   });
 
-  test("stopTestRecording returns correct step count", async () => {
+  test("stopDeviceGestureRecording returns correct step count", async () => {
     await recorder.start();
     fakeGestures.emit({ type: "pressButton", arrivedAt: fakeTimer.now(), button: "back" });
     const { stepCount } = await recorder.stop();

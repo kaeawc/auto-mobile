@@ -46,7 +46,7 @@ const EXCLUDED_TOOLS: Record<string, string> = {
   executePlan: SESSION_META,
   exportPlan: SESSION_META,
   recordSteps: SESSION_META,
-  startTestRecording: SESSION_META,
+  recordDeviceGestures: SESSION_META,
   setToolEnabled: SESSION_META,
   criticalSection: "Multi-device coordination primitive, handled by the plan executor",
   barrier: "Multi-device coordination primitive, handled by the plan executor",

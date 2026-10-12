@@ -26,6 +26,7 @@ const NEWLINE = 0x0a;
  * | ---------------------------------------- | ------- | ----------------------------------------------------------------- |
  * | DaemonClient (`client.ts`)                | 256 MiB | app/shared-storage reads (~86 MiB base64), video (~134 MiB default), screenshots/hierarchies (a few MiB) |
  * | Lease owner (`deviceLeaseOwnerQuery.ts`)  | 1 MiB   | scalar lease status/relinquish envelope (<1 KB)                     |
+ * | Prototype agent (`prototypeAgentClient.ts`) | 4 MiB | status/events carry spec-bounded state (~2 MiB escaped); change payloads can copy state values |
  * | WebRTC control (`webrtcStreamClient.ts`)  | 1 MiB   | stream descriptors/ICE settings (a few KB per device; no media)     |
  */
 

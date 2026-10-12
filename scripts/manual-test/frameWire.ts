@@ -1,3 +1,4 @@
+import { LineFramer } from "../../src/daemon/socketServer/LineFramer";
 import type { DaemonRequest } from "../../src/daemon/types";
 
 export function encodeJsonLine(value: unknown): string {
@@ -24,24 +25,48 @@ export function encodeDaemonFrame(frame: {
     ...(frame.timeoutMs === undefined ? {} : { timeoutMs: frame.timeoutMs }),
   });
 }
-export class LineDecoder {
-  private tail = Buffer.alloc(0);
-  /** limit=1 preserves every byte after a video acknowledgement, including binary newlines. */
-  push(chunk: Buffer | string, limit = Infinity): string[] {
-    this.tail = Buffer.concat([this.tail, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
-    const lines: string[] = [];
-    while (lines.length < limit) {
-      const index = this.tail.indexOf(10);
-      if (index < 0) {
-        break;
-      }
-      lines.push(this.tail.subarray(0, index).toString("utf8"));
-      this.tail = this.tail.subarray(index + 1);
-    }
-    return lines;
+export class HarnessFrameTooLargeError extends Error {
+  constructor(
+    readonly limitBytes: number,
+    subject: string,
+  ) {
+    super(`${subject} frame exceeds ${limitBytes} bytes`);
+    this.name = "HarnessFrameTooLargeError";
   }
-  remainder(): Buffer {
-    return this.tail;
+}
+/** Shared bounded line framing; raw bytes after a first-line boundary never enter the framer. */
+export class LineDecoder {
+  private readonly framer: LineFramer;
+  private lines: string[] = [];
+  private firstLineComplete = false;
+  constructor(maxFrameBytes: number, subject = "Harness response") {
+    this.framer = new LineFramer(maxFrameBytes, {
+      onLine: (line) => this.lines.push(line),
+      onOverflow: () => {
+        throw new HarnessFrameTooLargeError(maxFrameBytes, subject);
+      },
+    });
+  }
+  push(chunk: Buffer | string): string[] {
+    this.lines = [];
+    this.framer.push(chunk);
+    return this.lines;
+  }
+  /** Scan only incoming bytes: partial acknowledgement bytes remain solely in LineFramer. */
+  pushFirst(chunk: Buffer): { line?: string; raw: Buffer } {
+    if (this.framer.hasOverflowed) {
+      return { raw: Buffer.alloc(0) };
+    }
+    if (this.firstLineComplete) {
+      return { raw: chunk };
+    }
+    const newline = chunk.indexOf(0x0a);
+    const [line] = this.push(newline < 0 ? chunk : chunk.subarray(0, newline + 1));
+    if (newline < 0) {
+      return { raw: Buffer.alloc(0) };
+    }
+    this.firstLineComplete = true;
+    return { line, raw: chunk.subarray(newline + 1) };
   }
 }
 export interface FrameConnection {

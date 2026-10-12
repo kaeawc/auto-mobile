@@ -289,7 +289,8 @@ export class InMemoryControlSocket {
 interface DaemonClientInternals {
   connected: boolean;
   socket: unknown;
-  connectionClosedHandlers: Set<() => void>;
+  closedSockets: WeakSet<object>;
+  handleSocketClosed(socket: InMemoryClientSocket): void;
   pendingRequests: Map<
     string,
     {
@@ -312,6 +313,7 @@ export class InMemoryDaemonClient extends DaemonClient {
     private readonly dial: () => InMemoryClientSocket | undefined,
     timer: Timer,
     idGenerator: IdGenerator,
+    maxInboundFrameBytes?: number,
   ) {
     super(
       assertNotHostDaemonPath("client socket path", IN_MEMORY_SOCKET_PATH),
@@ -321,6 +323,8 @@ export class InMemoryDaemonClient extends DaemonClient {
       { pidFilePath: `${IN_MEMORY_DATA_DIR}/no-daemon.pid`, isProcessRunning: () => true },
       undefined,
       idGenerator,
+      undefined,
+      maxInboundFrameBytes,
     );
   }
 
@@ -347,14 +351,13 @@ export class InMemoryDaemonClient extends DaemonClient {
   /** `DaemonClient.connectOnce`'s `close` listener. */
   private socketClosed(socket: InMemoryClientSocket): void {
     const internals = this as unknown as DaemonClientInternals;
-    if (internals.socket !== null && internals.socket !== socket) {
+    if (
+      (internals.socket !== null && internals.socket !== socket) ||
+      internals.closedSockets.has(socket)
+    ) {
       return;
     }
-    internals.connected = false;
-    internals.socket = null;
-    for (const handler of Array.from(internals.connectionClosedHandlers)) {
-      handler();
-    }
+    internals.handleSocketClosed(socket);
     for (const pending of internals.pendingRequests.values()) {
       internals.timer.clearTimeout(pending.timeout);
       pending.removeAbortListener?.();

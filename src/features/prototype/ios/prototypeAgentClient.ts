@@ -8,6 +8,8 @@
  * prototype message names as newline-delimited JSON: requests answered by `prototype_result`, and
  * unsolicited `prototype_event` pushes. Same-id `show_prototype` is the update path.
  */
+import { LineFramer } from "../../../daemon/socketServer/LineFramer";
+import { MAX_PROTOTYPE_SPEC_BYTES } from "../prototypeSpec";
 import { createConnection, type Socket } from "node:net";
 import { ActionableError } from "../../../models/ActionableError";
 import type { IdGenerator } from "../../../utils/IdGenerator";
@@ -17,6 +19,28 @@ import { defaultTimer, type Timer } from "../../../utils/SystemTimer";
 
 /** Must equal `PrototypeAgentProtocol.protocolVersion` in the agent. */
 export const PROTOTYPE_AGENT_PROTOCOL_VERSION = 1;
+/**
+ * Agent-to-host status() (PrototypeModel.swift) and wireObject() (PrototypeSession.swift)
+ * include the whole state. PrototypeStateValidator caps non-state + state JSON at
+ * MAX_PROTOTYPE_SPEC_BYTES (1 MiB). JSONSerialization may double slash bytes (\/),
+ * making the state roughly 2 MiB on the wire. The contract's explicit emit-action
+ * payload budget is 4096 bytes, but change events also copy changed state values
+ * into payload (PrototypeSession.emitStateChange). The 4 MiB client ceiling allows
+ * another state-sized budget for that copy and pages/assets/appearance/envelopes;
+ * it is a hard bound, not a guarantee of 2x spare headroom for every event.
+ * The agent's 64 MiB inbound budget is for host-to-agent screenshot assets.
+ */
+export const PROTOTYPE_AGENT_CLIENT_MAX_FRAME_BYTES = 4 * MAX_PROTOTYPE_SPEC_BYTES;
+
+export class PrototypeAgentFrameTooLargeError extends ActionableError {
+  constructor(readonly limitBytes: number) {
+    super(
+      `Prototype agent response frame exceeded ${limitBytes} bytes; the connection was closed. ` +
+        "Relaunch the app with prototype injection; the agent build may not match this host.",
+    );
+    this.name = "PrototypeAgentFrameTooLargeError";
+  }
+}
 const LOOPBACK_HOST = "127.0.0.1";
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 5_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
@@ -112,6 +136,7 @@ export interface ConnectPrototypeAgentOptions {
   timer?: Timer;
   handshakeTimeoutMs?: number;
   requestTimeoutMs?: number;
+  maxFrameBytes?: number;
 }
 
 /** Connects, authenticates and checks the protocol version; rejects with an ActionableError. */
@@ -134,6 +159,7 @@ export async function connectPrototypeAgent(
     port,
     options.timer ?? defaultTimer,
     options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+    options.maxFrameBytes ?? PROTOTYPE_AGENT_CLIENT_MAX_FRAME_BYTES,
   );
   await client.authenticate(
     options.token,
@@ -181,7 +207,7 @@ function isResult(message: PrototypeAgentMessage): message is PrototypeAgentResu
 }
 
 class SocketPrototypeAgentClient implements PrototypeAgentClient {
-  private buffer = "";
+  private readonly framer: LineFramer;
   private nextRequestId = 1;
   private readonly waiters = new Map<string, Waiter>();
   private readonly eventListeners = new Set<(event: PrototypeAgentMessage) => void>();
@@ -195,7 +221,17 @@ class SocketPrototypeAgentClient implements PrototypeAgentClient {
     private readonly port: number,
     private readonly timer: Timer,
     private readonly requestTimeoutMs: number,
+    maxFrameBytes: number,
   ) {
+    this.framer = new LineFramer(maxFrameBytes, {
+      onLine: (line) => {
+        // LineFramer can emit several lines in a push; fail() closes dispatch immediately.
+        if (this.closedError === undefined && line.trim()) {
+          this.receiveLine(line.trim());
+        }
+      },
+      onOverflow: () => this.fail(new PrototypeAgentFrameTooLargeError(maxFrameBytes)),
+    });
     socket.onData((chunk) => this.receive(chunk));
     socket.onClose((error) => this.handleClose(error));
   }
@@ -271,15 +307,8 @@ class SocketPrototypeAgentClient implements PrototypeAgentClient {
   }
 
   private receive(chunk: string): void {
-    this.buffer += chunk;
-    let newline = this.buffer.indexOf("\n");
-    while (newline >= 0 && this.closedError === undefined) {
-      const line = this.buffer.slice(0, newline).trim();
-      this.buffer = this.buffer.slice(newline + 1);
-      if (line.length > 0) {
-        this.receiveLine(line);
-      }
-      newline = this.buffer.indexOf("\n");
+    if (this.closedError === undefined) {
+      this.framer.push(chunk);
     }
   }
 

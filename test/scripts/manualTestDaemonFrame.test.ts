@@ -1,6 +1,7 @@
 import { expect, spyOn, test } from "bun:test";
 import { resolve } from "node:path";
 import {
+  FrameRpc,
   parseDaemonFrameArgs,
   runDaemonFrame,
   type DaemonFrameCommand,
@@ -994,4 +995,18 @@ posixTest("keep-open summary remains final after managed cleanup", async () => {
   expect(f.connection.writes.at(-1)?.method).toBe("daemon/releaseExecution");
   expect(f.connection.ended).toBe(true);
   expect(f.connection.destroyed).toBe(false);
+});
+
+test("oversized control line fails every waiter and destroys the connection", async () => {
+  const f = fixture();
+  f.connection.silent = true;
+  const rpc = new FrameRpc(f.connection, f.deps, 32);
+  const pending = rpc.request("daemon/capabilities", {}, 100).catch((error: unknown) => error);
+  const pause = rpc.pause(100).catch((error: unknown) => error);
+  f.connection.data(Buffer.from("x".repeat(33)));
+  expect(f.connection.destroyed).toBe(true);
+  expect(((await pending) as Error).message).toBe("Control response frame exceeds 32 bytes");
+  expect(((await pause) as Error).message).toBe("Control response frame exceeds 32 bytes");
+  expect(() => rpc.assertOpen()).toThrow("exceeds 32 bytes");
+  expect(f.timer.getPendingTimeoutCount()).toBe(0);
 });

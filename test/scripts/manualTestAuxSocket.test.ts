@@ -429,3 +429,27 @@ test("help main writes stdout and returns zero for top-level and subcommand help
     err.mockRestore();
   }
 });
+
+for (const kind of ["video", "recording"] as const) {
+  posixTest(
+    `oversized ${kind} response rejects through the existing CLI failure path`,
+    async () => {
+      const f = fixture();
+      f.deps.maxFrameBytes = 32;
+      f.aux.respond = () => f.aux.data(Buffer.from("x".repeat(33)));
+      const command = parsed(
+        kind === "video"
+          ? ["video", '{"action":"subscribe"}']
+          : ["recording", "stop", "--session-uuid", "uuid"],
+      );
+      const pending = runAuxSocket(command, f.deps);
+      await drainUntilQuiescent(f.timer);
+      expect(f.aux.ended).toBe(true);
+      expect(await pending).toBe(3);
+      expect(f.err.join("\n")).toContain(
+        `${kind === "video" ? "Video acknowledgement" : "Recording response"} frame exceeds 32 bytes`,
+      );
+      expect(f.timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
+}

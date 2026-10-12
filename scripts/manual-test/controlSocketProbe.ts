@@ -1,4 +1,8 @@
 // Harness scripts deliberately never import the product logger (harnessLogSink.ts explains why); the returned reason is the trace.
+import {
+  DAEMON_CLIENT_MAX_FRAME_BYTES,
+  DAEMON_ONESHOT_CLIENT_MAX_FRAME_BYTES,
+} from "../../src/daemon/socketServer/LineFramer";
 import { z } from "zod";
 import type { Timer } from "../../src/utils/SystemTimer";
 import type { IdGenerator } from "../../src/utils/IdGenerator";
@@ -23,7 +27,7 @@ const responseSchema = z.object({
 export async function probeControlSocket(
   socketPath: string,
   deps: { connect: ConnectFrameSocket; timer: Timer; ids: IdGenerator },
-  options: { timeoutMs?: number; method?: string } = {},
+  options: { timeoutMs?: number; method?: string; maxFrameBytes?: number } = {},
 ): Promise<ControlSocketProbeResult> {
   let connection: FrameConnection | undefined;
   let settled = false;
@@ -51,7 +55,14 @@ export async function probeControlSocket(
           return;
         }
         const id = deps.ids.next();
-        const decoder = new LineDecoder();
+        // Capabilities is a small scalar/list answer (1 MiB). availableDevices includes
+        // an uncapped inventory/stats list; other explicit methods use the 256 MiB client budget.
+        const maxFrameBytes =
+          options.maxFrameBytes ??
+          (options.method === undefined || options.method === CONTROL_SOCKET_PROBE_METHOD
+            ? DAEMON_ONESHOT_CLIENT_MAX_FRAME_BYTES
+            : DAEMON_CLIENT_MAX_FRAME_BYTES);
+        const decoder = new LineDecoder(maxFrameBytes, "Control probe response");
         connection.onClose((error) =>
           finish({
             alive: false,
@@ -59,7 +70,17 @@ export async function probeControlSocket(
           }),
         );
         connection.onData((chunk) => {
-          for (const line of decoder.push(chunk)) {
+          if (settled) {
+            return;
+          }
+          let lines: string[];
+          try {
+            lines = decoder.push(chunk);
+          } catch (error) {
+            finish({ alive: false, reason: errorMessage(error) });
+            return;
+          }
+          for (const line of lines) {
             try {
               const response = responseSchema.safeParse(JSON.parse(line));
               if (response.success && response.data.id === id) {

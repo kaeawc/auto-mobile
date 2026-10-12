@@ -3,6 +3,8 @@ import {
   connectPrototypeAgent,
   createPrototypeAgentLaunchConfig,
   PROTOTYPE_AGENT_PROTOCOL_VERSION,
+  PROTOTYPE_AGENT_CLIENT_MAX_FRAME_BYTES,
+  PrototypeAgentFrameTooLargeError,
   type PrototypeAgentClient,
 } from "../../../../src/features/prototype/ios/prototypeAgentClient";
 import { ActionableError } from "../../../../src/models/ActionableError";
@@ -37,7 +39,7 @@ async function flushMicrotasks(): Promise<void> {
   }
 }
 
-function setup() {
+function setup(maxFrameBytes?: number) {
   const socket = new FakePrototypeAgentSocket();
   const connector = new FakePrototypeAgentConnector(socket);
   const timer = new FakeTimer();
@@ -46,18 +48,19 @@ function setup() {
     token: TOKEN,
     connector,
     timer,
+    maxFrameBytes,
     handshakeTimeoutMs: 1_000,
     requestTimeoutMs: 2_000,
   });
   return { socket, connector, timer, connecting };
 }
 
-async function connected(): Promise<{
+async function connected(maxFrameBytes?: number): Promise<{
   socket: FakePrototypeAgentSocket;
   timer: FakeTimer;
   client: PrototypeAgentClient;
 }> {
-  const { socket, timer, connecting } = setup();
+  const { socket, timer, connecting } = setup(maxFrameBytes);
   await flushMicrotasks();
   socket.push(helloResult());
   const client = await connecting;
@@ -259,6 +262,69 @@ describe("PrototypeAgentClient after the handshake", () => {
     const pending = client.request("get_prototype_status");
     client.close();
     await expect(pending).rejects.toThrow("closed by the host");
+    expect(socket.ended).toBe(true);
+  });
+});
+
+import { MAX_PROTOTYPE_SPEC_BYTES } from "../../../../src/features/prototype/prototypeSpec";
+
+describe("prototype inbound frame bounds", () => {
+  test("default is four times the spec byte budget", () => {
+    expect(PROTOTYPE_AGENT_CLIENT_MAX_FRAME_BYTES).toBe(4 * MAX_PROTOTYPE_SPEC_BYTES);
+  });
+  test("overflow rejects all requests, closes once and ignores later chunks", async () => {
+    const limit = Buffer.byteLength(JSON.stringify(helloResult()));
+    const { socket, timer, client } = await connected(limit);
+    const closed: Error[] = [],
+      events: unknown[] = [];
+    client.onClosed((error) => closed.push(error));
+    client.onEvent((event) => events.push(event));
+    const pending = client.request("get_prototype_status");
+    const other = client.request("show_prototype");
+    socket.pushRaw("é".repeat(Math.floor(limit / 2) + 1));
+    expect(socket.ended).toBe(true);
+    const error = await pending.catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(PrototypeAgentFrameTooLargeError);
+    expect(error).toBeInstanceOf(ActionableError);
+    expect((error as PrototypeAgentFrameTooLargeError).limitBytes).toBe(limit);
+    await expect(other).rejects.toBe(error);
+    await expect(client.request("get_prototype_status")).rejects.toBe(error);
+    socket.push({ type: "prototype_event" });
+    socket.closeFromAgent();
+    expect(events).toEqual([]);
+    expect(closed).toEqual([error as Error]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+  test("handshake overflow is a typed transport failure", async () => {
+    const { socket, connecting, timer } = setup(32);
+    await flushMicrotasks();
+    socket.pushRaw("x".repeat(33));
+    expect(socket.ended).toBe(true);
+    await expect(connecting).rejects.toBeInstanceOf(PrototypeAgentFrameTooLargeError);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+  test("exact byte limit, split replies, blanks and batched events are accepted", async () => {
+    const limit = Buffer.byteLength(JSON.stringify(helloResult()));
+    const { socket, client } = await connected(limit);
+    const pending = client.request("get_prototype_status");
+    const reply = JSON.stringify({ type: "prototype_result", requestId: "r1", success: true });
+    const padded = reply + " ".repeat(limit - Buffer.byteLength(reply));
+    socket.pushRaw("\n \n" + padded.slice(0, 9));
+    socket.pushRaw(padded.slice(9, 20));
+    socket.pushRaw(padded.slice(20) + "\n");
+    expect((await pending).success).toBe(true);
+    const events: unknown[] = [];
+    client.onEvent((event) => events.push(event));
+    socket.pushRaw('{"type":"prototype_event","seq":1}\n{"type":"prototype_event","seq":2}\n');
+    expect(events).toHaveLength(2);
+    client.close();
+  });
+  test("a failing line prevents dispatch of a later line in the same chunk", async () => {
+    const { socket, client } = await connected();
+    const events: unknown[] = [];
+    client.onEvent((event) => events.push(event));
+    socket.pushRaw('bad json\n{"type":"prototype_event"}\n');
+    expect(events).toEqual([]);
     expect(socket.ended).toBe(true);
   });
 });

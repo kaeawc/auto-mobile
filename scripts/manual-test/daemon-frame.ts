@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import "./harnessLogSink";
+import { DAEMON_CLIENT_MAX_FRAME_BYTES } from "../../src/daemon/socketServer/LineFramer";
 import * as daemonConstants from "../../src/daemon/constants";
 import { DAEMON_FRAME_COMMANDS, DAEMON_FRAME_FLAGS, daemonFrameHelp } from "./daemonFrameHelp";
 import { substituteFramePlaceholders, type ManagedFrameIdentity } from "./daemonFramePlaceholders";
@@ -303,15 +304,29 @@ export class FrameRpc {
   >();
   private failure?: Error;
   private pauses = new Set<(error: Error) => void>();
-  private decoder = new LineDecoder();
+  private decoder: LineDecoder;
   private startedAt: number;
   constructor(
     readonly connection: FrameConnection,
     private readonly deps: Pick<DaemonFrameDeps, "timer" | "ids" | "out">,
+    // Same control answers as DaemonClient: 256 MiB, including file/video payloads.
+    maxFrameBytes = DAEMON_CLIENT_MAX_FRAME_BYTES,
   ) {
+    this.decoder = new LineDecoder(maxFrameBytes, "Control response");
     this.startedAt = deps.timer.now();
     connection.onData((chunk) => {
-      for (const line of this.decoder.push(chunk)) {
+      if (this.failure) {
+        return;
+      }
+      let lines: string[];
+      try {
+        lines = this.decoder.push(chunk);
+      } catch (error) {
+        this.fail(error instanceof Error ? error : new Error(errorMessage(error)));
+        connection.destroy();
+        return;
+      }
+      for (const line of lines) {
         deps.out(`[${deps.timer.now() - this.startedAt}ms] ${line}`);
         try {
           const response: DaemonResponse = JSON.parse(line);

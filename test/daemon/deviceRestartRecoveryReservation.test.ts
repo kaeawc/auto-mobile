@@ -745,6 +745,41 @@ describe("device restart reserves the entire recovery window", () => {
     expect(internals.rehydrationReservations.get(HOLDER)?.restartHandoff).toBe(true);
     expect(pool.genericAvailability(SIM.deviceId)).toBe("reserved");
   });
+  test("a live base's stop drops its handed-off label session's hold", async () => {
+    const base = "live-base";
+    await sessions.createSession(base, SPARE.deviceId, "ios");
+    sessions.setDeviceLabels(base, { phone: `${base}:phone` });
+    await sessions.releaseSession(HOLDER, "explicit-release");
+    await pool.releaseDevice(SIM.deviceId, HOLDER);
+    const closeMint = sessions.openPlanLabelMints(base, { phone: `${base}:phone` });
+    await pool.bindOrReuseDeviceSession(
+      `${base}:phone`,
+      SIM.deviceId,
+      "ios",
+      undefined,
+      undefined,
+      SIM,
+    );
+    closeMint();
+    await internals.releaseDisconnectedRecoverySessionWithRetry(
+      `${base}:phone`,
+      SIM.deviceId,
+      `device-restart:${SIM.name}`,
+    );
+    await pool.releaseDevice(SIM.deviceId, `${base}:phone`);
+    expect(sessions.getDeviceLabels(base)).toEqual({ phone: `${base}:phone` });
+    expect(internals.rehydrationReservations.get(`${base}:phone`)?.restartHandoff).toBe(true);
+    pool.markIntentionalShutdown(SIM.deviceId, base);
+    expect(internals.rehydrationReservations.has(`${base}:phone`)).toBe(false);
+  });
+  test("a handed-off base's label requester leaves its unresolved hold intact", async () => {
+    sessions.setDeviceLabels(HOLDER, { phone: `${HOLDER}:phone` });
+    await handoff();
+    expect(sessions.getDeviceLabels(HOLDER)).toBeUndefined();
+    pool.markIntentionalShutdown(SIM.deviceId, `${HOLDER}:phone`);
+    expect(internals.rehydrationReservations.get(HOLDER)?.restartHandoff).toBe(true);
+    expect(pool.genericAvailability(SIM.deviceId)).toBe("reserved");
+  });
   test("a holder's intentional stop ends only its handoff source and timer", async () => {
     await handoff();
     await pool.reserveDevicesForRehydration([

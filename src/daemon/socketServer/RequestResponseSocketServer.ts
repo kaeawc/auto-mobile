@@ -1,3 +1,4 @@
+import { streamAuthRefusalFields } from "../streamSocketAuth";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { Socket } from "node:net";
 import { logger } from "../../utils/logger";
@@ -89,7 +90,10 @@ export abstract class RequestResponseSocketServer<
       this.sendJson(socket, response);
     } catch (error) {
       logger.error(`[${this.serverName}] Request handler error: ${error}`);
-      const errorResponse = this.createErrorResponse(request.id, errorMessage(error));
+      const errorResponse = {
+        ...this.createErrorResponse(request.id, errorMessage(error)),
+        ...streamAuthRefusalFields(error),
+      };
       this.sendJson(socket, errorResponse);
     }
   }

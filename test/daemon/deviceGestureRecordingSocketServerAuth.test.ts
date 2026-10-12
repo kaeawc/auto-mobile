@@ -1,3 +1,14 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import type { Socket } from "node:net";
+import { FakeSocket } from "../fakes/FakeNetServer";
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+import {
+  REFUSAL_SURFACES_DIR,
+  serializeRefusalSurfaceFixture,
+  surfaceFixtureStem,
+  type RefusalSurfaceFixture,
+} from "../helpers/refusalWireFixtures";
 import { afterEach, describe, expect, test } from "bun:test";
 import { DeviceGestureRecordingSocketServer } from "../../src/daemon/deviceGestureRecordingSocketServer";
 import {
@@ -27,6 +38,9 @@ import type { BootedDevice, PlanStep } from "../../src/models";
 class TestableServer extends DeviceGestureRecordingSocketServer {
   invoke(request: DeviceGestureRecordingCommand) {
     return this.handleRequest(request);
+  }
+  line(socket: FakeSocket, request: DeviceGestureRecordingCommand) {
+    return this.processLine(socket as unknown as Socket, JSON.stringify(request));
   }
 }
 
@@ -372,6 +386,37 @@ describe("DeviceGestureRecordingSocketServer authorization (issue #4752)", () =>
       expect(response.success).toBe(true);
     });
 
+    test("ownership refusal crosses the real aux response boundary", async () => {
+      const server = new TestableServer(undefined, new FakeTimer(), authenticator);
+      const socket = new FakeSocket();
+      await server.line(socket, {
+        command: "start",
+        sessionUuid: "viewer",
+        deviceId: "emu-held",
+        platform: "android",
+      });
+      await drainMicrotasks();
+      const response = socket.getWrittenMessages()[0];
+      expect(response).toMatchObject({
+        success: false,
+        code: "device_owned_by_other_session",
+        retryable: false,
+        deviceId: "emu-held",
+      });
+      const fixture: RefusalSurfaceFixture = {
+        surface: "aux-socket-response",
+        name: "device_owned_by_other_session",
+        builder: "DeviceGestureRecordingSocketServer.processLine",
+        payload: response,
+      };
+      const path = join(REFUSAL_SURFACES_DIR, `${surfaceFixtureStem(fixture)}.json`);
+      const serialized = serializeRefusalSurfaceFixture(fixture);
+      if (process.env.UPDATE_CAPTURED_FIXTURES === "1") {
+        writeFileSync(path, serialized);
+      }
+      expect(readFileSync(path, "utf8")).toBe(serialized);
+    });
+
     test("start from a live non-owner is still refused", async () => {
       const server = new TestableServer(undefined, undefined, authenticator);
       await expect(
@@ -382,6 +427,14 @@ describe("DeviceGestureRecordingSocketServer authorization (issue #4752)", () =>
           platform: "android",
         }),
       ).rejects.toThrow(/bound to a different daemon session/);
+      await expect(
+        server.invoke({
+          command: "start",
+          sessionUuid: "viewer",
+          deviceId: "emu-held",
+          platform: "android",
+        }),
+      ).rejects.toMatchObject({ code: "device_owned_by_other_session", retryable: false });
     });
   });
 });

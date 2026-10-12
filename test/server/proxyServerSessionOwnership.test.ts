@@ -121,6 +121,46 @@ describe("proxy server session ownership errors", () => {
     }
   });
 
+  test("a bound-session routing refusal reaches the MCP client as a typed result", async () => {
+    const fakeClient = new FakeDaemonClient();
+    const daemonManager = new FakeDaemonManager();
+    daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
+    const { server, proxy } = createProxyMcpServer({
+      proxyConfig: {
+        initialSessionUuid: "session-a",
+        timer: new FakeTimer(),
+        clientFactory: () => fakeClient,
+        daemonManager,
+        daemonAvailabilityProbe: async () => true,
+        autoStartDaemon: false,
+      },
+    });
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "bound-routing-client", version: "0.0.1" });
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      const result = await client.callTool({
+        name: "tapAt",
+        arguments: { sessionUuid: "session-b", x: 1, y: 1 },
+      });
+      expect(result.isError).toBe(true);
+      expect(JSON.parse((result.content as { text: string }[])[0].text)).toEqual({
+        success: false,
+        error: expect.stringMatching(/MCP connection is bound to device session session-a/),
+        code: "device_outside_bound_session",
+        boundSessionUuid: "session-a",
+        requestedSessionUuid: "session-b",
+        retryable: false,
+      });
+      expect(fakeClient.callToolCalls).toHaveLength(0);
+    } finally {
+      await client.close();
+      await server.close();
+      await proxy.close();
+    }
+  });
+
   test("resources/read passes the MCP request signal to the proxy and daemon client", async () => {
     const started = Promise.withResolvers<void>();
     const gate = Promise.withResolvers<void>();

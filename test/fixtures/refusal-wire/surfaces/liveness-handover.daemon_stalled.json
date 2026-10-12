@@ -1,0 +1,25 @@
+{
+  "surface": "liveness-handover",
+  "name": "daemon_stalled",
+  "builder": "DaemonSessionStalledError.toPayload via livenessHandoverPayload",
+  "payload": {
+    "error": {
+      "code": "daemon_stalled",
+      "message": "The AutoMobile daemon stopped acknowledging heartbeats for 11111111-2222-4333-8444-555555555555 (emulator-5554). This proxy made 3 automatic recovery attempts (reconnect and re-heartbeat with the same owner token) and has stopped. It never restarts the daemon because other harnesses share it: restart the daemon yourself, then resume each session by passing its sessionUuid.",
+      "sessions": [
+        {
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "deviceId": "emulator-5554",
+          "lastAcknowledgedHeartbeatAt": 10
+        }
+      ],
+      "attempts": 3,
+      "maxAttempts": 3,
+      "lastAcknowledgedHeartbeatAt": 10,
+      "retryable": true,
+      "recovery": {
+        "action": "restart_daemon_then_resume_by_session_uuid"
+      }
+    }
+  }
+}

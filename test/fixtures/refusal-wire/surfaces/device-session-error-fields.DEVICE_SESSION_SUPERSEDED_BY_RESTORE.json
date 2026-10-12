@@ -1,0 +1,8 @@
+{
+  "surface": "device-session-error-fields",
+  "name": "DEVICE_SESSION_SUPERSEDED_BY_RESTORE",
+  "builder": "deviceSessionErrorFields",
+  "payload": {
+    "code": "DEVICE_SESSION_SUPERSEDED_BY_RESTORE"
+  }
+}

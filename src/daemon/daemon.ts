@@ -1163,9 +1163,13 @@ export class Daemon {
     this.managedSlotReclaimer = undefined;
     this.freeDeviceReclaimer?.stop();
     this.freeDeviceReclaimer = undefined;
-    // Signalled, not awaited: the loop may be in its inter-pass sleep, and shutdown must not wait
-    // it out. A pass still running when the registry closes fails, logs, and the loop exits.
-    void this.managedSlotRedrive?.stop();
+    // Interrupt discovery and the inter-pass wait, then join within 100ms of this stage's 200ms.
+    // Unfinished cleanup stays journaled even if an unabortable registry call outlives the join.
+    try {
+      await this.managedSlotRedrive?.stop();
+    } catch (error) {
+      logger.warn(`[Daemon] Stopping journal redrive failed: ${errorMessage(error)}`, error);
+    }
     this.managedSlotRedrive = undefined;
     this.managedSlotAcquisition = undefined;
     const registry = this.managedSlotRegistry;
@@ -5140,7 +5144,7 @@ export class Daemon {
         // A shutdown release keeps the execution owner: the rehydrated session awaits its
         // owner (#11177).
         "managed execution release",
-        "the managed slot registry close",
+        "the journal redrive loop stop and the managed slot registry close",
         () => this.closeManagedExecutionRelease(),
       ),
       shutdownStage(

@@ -10,6 +10,7 @@ import {
   unlinkSync,
   utimesSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   ADMISSION_LOCK_MAX_AGE_MS,
@@ -28,9 +29,7 @@ let directory: string;
 let timer: FakeTimer;
 let live: Set<number>;
 beforeEach(() => {
-  const root = join(process.cwd(), "scratch/lane-11369");
-  mkdirSync(root, { recursive: true });
-  directory = mkdtempSync(join(root, "boot-admission-test-"));
+  directory = mkdtempSync(join(tmpdir(), "boot-admission-test-"));
   timer = new FakeTimer();
   live = new Set([100, 200]);
 });
@@ -320,11 +319,11 @@ test("F3b: old live-owner corrupt files are dropped while young files fail close
   const corrupt = join(directory, "200.corrupt.json");
   const valid = recordFile(200, "valid");
   writeFileSync(corrupt, "");
-  const youngMs = timer.now() - INVALID_ADMISSION_RECORD_MAX_AGE_MS + 1;
+  const youngMs = timer.now() - INVALID_ADMISSION_RECORD_MAX_AGE_MS + 5000;
   utimesSync(corrupt, youngMs / 1000, youngMs / 1000);
   expect(() => registry().readPeerAdmissions()).toThrow(HostBootAdmissionRegistryError);
   expect(existsSync(corrupt)).toBe(true);
-  const oldMs = timer.now() - INVALID_ADMISSION_RECORD_MAX_AGE_MS - 1;
+  const oldMs = timer.now() - INVALID_ADMISSION_RECORD_MAX_AGE_MS - 5000;
   utimesSync(corrupt, oldMs / 1000, oldMs / 1000);
   const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
   try {
@@ -342,7 +341,7 @@ test("F3c: old live-owner locks are taken over, young locks remain held", async 
   timer.setCurrentTime(1800000000000);
   const path = join(directory, "admission.lock");
   writeFileSync(path, "200\nold-peer-token");
-  const oldMs = timer.now() - ADMISSION_LOCK_MAX_AGE_MS - 1;
+  const oldMs = timer.now() - ADMISSION_LOCK_MAX_AGE_MS - 5000;
   utimesSync(path, oldMs / 1000, oldMs / 1000);
   let entered = 0;
   const warn = spyOn(logger, "warn").mockImplementation(() => undefined);
@@ -362,7 +361,7 @@ test("F3c: old live-owner locks are taken over, young locks remain held", async 
   expect(entered).toBe(1);
   expect(existsSync(path)).toBe(false);
   writeFileSync(path, "200\nfresh-peer-token");
-  const youngMs = timer.now() - ADMISSION_LOCK_MAX_AGE_MS + 101;
+  const youngMs = timer.now() - ADMISSION_LOCK_MAX_AGE_MS + 5000;
   utimesSync(path, youngMs / 1000, youngMs / 1000);
   const failure = rejected(
     registry().withAdmissionLock({ timeoutMs: 100 }, async () => {
@@ -427,7 +426,7 @@ test("F3c: the constructor can override the stale-lock age for tests", async () 
   timer.setCurrentTime(1800000000000);
   const path = join(directory, "admission.lock");
   writeFileSync(path, "200\npeer-token");
-  const oldMs = timer.now() - 1001;
+  const oldMs = timer.now() - 1000 - 5000;
   utimesSync(path, oldMs / 1000, oldMs / 1000);
   const owner = new FileHostBootAdmissionRegistry({
     directory: () => directory,

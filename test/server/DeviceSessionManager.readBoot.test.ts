@@ -505,7 +505,7 @@ describe("read boots only an explicitly named stopped device", () => {
         if (invalid === "unavailable" && platform !== "ios") {
           continue;
         }
-        test(`${lane}: ${invalid} named image keeps the not-found answer`, async () => {
+        test(`${lane}: ${invalid} named image keeps the platform-specific discovery answer`, async () => {
           const h = harness(platform, daemon);
           h.setImages(
             invalid === "missing"
@@ -520,8 +520,14 @@ describe("read boots only an explicitly named stopped device", () => {
                     },
                   ],
           );
-          await expect(h.manager.ensureDeviceReady(platform, h.id, h.options)).rejects.toThrow(
-            `Device ${h.id} not found on ${platform} platform. Available ${platform} devices: none`,
+          await expect(
+            h.manager.ensureDeviceReady(platform, h.id, h.options),
+          ).rejects.toMatchObject(
+            platform === "android" && invalid === "running"
+              ? { code: "discovery_incomplete", retryable: true }
+              : {
+                  message: `Device ${h.id} not found on ${platform} platform. Available ${platform} devices: none`,
+                },
           );
           h.assertNoBoot();
           expect(h.lifecycle.reservations).toEqual([]);
@@ -768,3 +774,17 @@ for (const platform of ["android", "ios"] as const) {
     h.assertNoReadWrites();
   });
 }
+
+test("Android running image without a resolved serial is retryable discovery, never a boot", async () => {
+  const h = harness("android", true);
+  h.setRunning([{ ...h.device, name: h.device.deviceId }]);
+  h.setImages([{ ...h.image, isRunning: true }]);
+  await expect(h.manager.ensureDeviceReady("android", h.id, h.options)).rejects.toMatchObject({
+    code: "discovery_incomplete",
+    retryable: true,
+    message: `Android AVD '${h.image.name}' is running but its serial could not be resolved yet.`,
+  });
+  h.assertNoBoot();
+  h.assertNoReadWrites();
+  expect(h.lifecycle.reservations).toEqual([]);
+});

@@ -931,6 +931,40 @@ async function ensureReadTargetOrWatch(
   }
 }
 
+/** Raw ids avoid name enrichment; names use the same fresh inventory as explicit observe. */
+async function findRunningExplicitReadTarget(
+  input: ExecutionTargetInput,
+  read: SessionlessDeviceRead,
+  platform: SomePlatform,
+  getConnectedPlatforms: (refresh?: boolean) => Promise<ConnectedPlatformScan>,
+  alreadyChecked: boolean,
+): Promise<BootedDevice | undefined> {
+  const scan = await getConnectedPlatforms();
+  const exact = scan.devices.find(
+    (device) =>
+      device.deviceId === input.args.deviceId &&
+      (platform === "either" || device.platform === platform),
+  );
+  if (exact || alreadyChecked) {
+    return exact;
+  }
+  const running = await withReadRestartReservation(input, input.args.deviceId, () =>
+    read.findRunning
+      ? read.findRunning(input.args.deviceId, input.signal, platform)
+      : Promise.resolve(matchRunningReadTarget(scan.devices, input.args.deviceId, platform)),
+  );
+  if (
+    running &&
+    !scan.devices.some(
+      (device) => device.deviceId === running.deviceId && device.platform === running.platform,
+    )
+  ) {
+    // Fresh Android bypass discovery publishes the ADB cache; discard only the stale call memo.
+    await getConnectedPlatforms(true);
+  }
+  return running;
+}
+
 function isDeviceReadOnlyCall(options: DeviceAwareToolOptions, args: unknown): boolean {
   return isReadOnlyCall(options.deviceReadOnly, args);
 }
@@ -1268,7 +1302,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         return resolveSessionlessDeviceRead(input, read, running.deviceId, running);
       }
       // Only absence falls through to the manager's existing named-image boot and errors.
-      const target = await this.resolveNormalExecutionTarget(input);
+      const target = await this.resolveNormalExecutionTarget(input, true);
       if (target.device && !target.sessionUuid) {
         read.assertAuthorized(target.device);
         return { ...target, deviceRead: read };
@@ -1280,12 +1314,16 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
 
   private async resolveNormalExecutionTarget(
     input: ExecutionTargetInput,
+    runningReadAlreadyChecked = false,
   ): Promise<ExecutionTargetContext> {
     const autolockEnabled = captureAutolockPolicy();
     const { name, args, options, deviceSessionManager, signal } = input;
     signal?.throwIfAborted();
     let connectedPlatformsPromise: Promise<ConnectedPlatformScan> | undefined;
-    const getConnectedPlatforms = (): Promise<ConnectedPlatformScan> => {
+    const getConnectedPlatforms = (refresh = false): Promise<ConnectedPlatformScan> => {
+      if (refresh) {
+        connectedPlatformsPromise = undefined;
+      }
       connectedPlatformsPromise ??= deviceSessionManager.detectConnectedPlatformsWithStatus(
         signal,
         {
@@ -1675,10 +1713,12 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         }
         const runningReadTarget =
           readOnly && !sessionUuid && providedDeviceId
-            ? matchRunningReadTarget(
-                (await getConnectedPlatforms()).devices,
-                providedDeviceId,
+            ? await findRunningExplicitReadTarget(
+                input,
+                options.sessionlessDeviceRead ?? this.defaultDeviceRead,
                 platform,
+                getConnectedPlatforms,
+                runningReadAlreadyChecked,
               )
             : undefined;
         readinessTarget = runningReadTarget?.deviceId ?? readinessTarget;
@@ -1696,6 +1736,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
             input,
             options.sessionlessDeviceRead ?? this.defaultDeviceRead,
             lateHeldReadTarget,
+            runningReadTarget,
           );
         }
         // Check and mark in one turn, before readiness: a session acquiring the target while
@@ -1720,7 +1761,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         const readinessResult = await ensureReadTargetOrWatch(
           input,
           platform,
-          providedDeviceId,
+          runningReadTarget?.deviceId ?? providedDeviceId,
           {
             sessionId: sessionUuid,
             intent: readOnly && !sessionUuid ? "read" : undefined,

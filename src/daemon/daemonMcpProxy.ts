@@ -4917,8 +4917,8 @@ export class DaemonMcpProxy {
 
   /**
    * Route platform-only device calls to their unique held session when every held platform is
-   * known; a configured binding, release fence or expired default lease keeps today's routing.
-   * Sibling-only selection leaves default injection to the existing bound-session path.
+   * known. Sibling-only selection preserves startup binding and expired-default routing;
+   * default selection leaves injection and release reporting to the existing bound-session path.
    */
   private ownSessionForPlatformSelector(
     name: string,
@@ -4932,10 +4932,9 @@ export class DaemonMcpProxy {
       !this.hasImplicitDeviceSelector(args, false) ||
       typeof args.deviceId === "string" ||
       this.sessionUuidFromArgs(args) !== undefined ||
-      this.config.initialSessionUuid ||
+      (siblingOnly && this.shouldPreserveSiblingSelectorRouting()) ||
       !bound ||
-      this.terminalBoundSession ||
-      this.isBoundSessionReplayExpired()
+      this.terminalBoundSession
     ) {
       return undefined;
     }
@@ -4945,6 +4944,10 @@ export class DaemonMcpProxy {
     }
     const candidates = held.filter((id) => this.sessionPlatforms.get(id) === args.platform);
     return candidates.find((id) => candidates.length === 1 && (!siblingOnly || id !== bound));
+  }
+
+  private shouldPreserveSiblingSelectorRouting(): boolean {
+    return !!this.config.initialSessionUuid || this.isBoundSessionReplayExpired();
   }
 
   /**

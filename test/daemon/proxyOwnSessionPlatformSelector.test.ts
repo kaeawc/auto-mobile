@@ -711,6 +711,106 @@ describe("#11714: an unambiguous platform-only call uses its connection's defaul
     await expectDefaultRoute(second);
   });
 
+  test("an expired ios default reports its release before a default-platform read beside an android sibling", async () => {
+    await acquire("getAndroid", ANDROID);
+    await acquire("getApple", IOS);
+    timer.setCurrentTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS + 1);
+    const before = forwarded.length;
+    const refusal = await proxy.callTool("observe", { platform: "ios" }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect(refusal).toBeInstanceOf(DaemonConnectionSessionReleasedError);
+    expect(refusal).toMatchObject({ reason: "replay-lease-expired" });
+    expect(forwarded.length).toBe(before);
+  });
+
+  test("reacquisition after a released startup binding injects the new default for control and read", async () => {
+    const daemonManager = new FakeDaemonManager();
+    daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
+    const startupProxy = new DaemonMcpProxy({
+      initialSessionUuid: "startup-session",
+      livenessOwnerToken: "stable-owner-token",
+      clientFactory: () => client,
+      daemonManager,
+      autoStartDaemon: false,
+      timer,
+      idGenerator: new FakeIdGenerator(),
+      heartbeatIntervalMs: 2_000,
+      heartbeatTimeoutMs: 10_000,
+    });
+    try {
+      await startupProxy.claimInitialSession();
+      client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "startup-session", "idle");
+      acquisitions.push(ANDROID);
+      await startupProxy.callTool("getAndroid", {});
+      const before = forwarded.length;
+      await startupProxy.callTool("homeScreen", { platform: "android" });
+      await startupProxy.callTool("observe", { platform: "android" });
+      expect(forwarded.slice(before)).toEqual([
+        {
+          name: "homeScreen",
+          params: {
+            platform: "android",
+            sessionUuid: ANDROID.sessionUuid,
+            [DAEMON_BOUND_SESSION_PARAM]: ANDROID.sessionUuid,
+          },
+        },
+        {
+          name: "observe",
+          params: {
+            platform: "android",
+            sessionUuid: ANDROID.sessionUuid,
+            [DAEMON_BOUND_SESSION_PARAM]: ANDROID.sessionUuid,
+          },
+        },
+      ]);
+    } finally {
+      await startupProxy.close();
+    }
+  });
+
+  test("PIN: an expired default leaves a sibling platform-only read sessionless", async () => {
+    await acquire("getAndroid", ANDROID);
+    await acquire("getApple", IOS);
+    timer.setCurrentTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS + 1);
+    const before = forwarded.length;
+    await proxy.callTool("observe", { platform: "android" });
+    expect(forwarded.length).toBe(before + 1);
+    expect(lastParams()).toMatchObject({ platform: "android" });
+    expect(lastParams()).not.toHaveProperty("sessionUuid");
+    expect(lastParams()).not.toHaveProperty(DAEMON_BOUND_SESSION_PARAM);
+  });
+
+  test("PIN: a managed android binding keeps the ios selector on its default", async () => {
+    daemonMethodResults.set(DAEMON_TOKEN_OWNED_SESSIONS_METHOD, {
+      sessions: [
+        {
+          sessionId: ANDROID.sessionUuid,
+          deviceId: ANDROID.deviceId,
+          platform: "android",
+          lastUsedAt: timer.now(),
+        },
+        {
+          sessionId: IOS.sessionUuid,
+          deviceId: IOS.deviceId,
+          platform: "ios",
+          lastUsedAt: timer.now(),
+        },
+      ],
+    });
+    await proxy.holdManagedExecutionSession(ANDROID.sessionUuid);
+    for (const name of ["homeScreen", "observe"]) {
+      await proxy.callTool(name, { platform: "ios" });
+      expect(lastParams()).toEqual({
+        platform: "ios",
+        sessionUuid: ANDROID.sessionUuid,
+        [DAEMON_BOUND_SESSION_PARAM]: ANDROID.sessionUuid,
+      });
+    }
+    expect(forwarded).toHaveLength(2);
+  });
+
   test("D PIN: an expired replay lease refuses a matching platform like untargeted control", async () => {
     await acquire("getAndroid", ANDROID);
     // The matching platform call must discover expiry, rather than bypass the replay fence.

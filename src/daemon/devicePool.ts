@@ -1136,7 +1136,12 @@ export class DevicePool {
    * closed meanwhile already had its bindings released, so recording it then would leave a dead
    * owner that suppresses the owner-disconnect release forever.
    */
-  private readonly mcpBindsInFlight = new Map<string, { pending: number; closed: boolean }>();
+  private readonly mcpBindsInFlight = new Map<
+    string,
+    { pending: number; closed: boolean; toolCalls: number }
+  >();
+  // #11999: only socket tool-call claims can have an answer still awaiting delivery.
+  private readonly mcpSessionUndeliveredMints = new Map<string, Set<string>>();
   private readonly refreshMissingDeviceMisses: Map<string, number>;
   private readonly androidTransportAliases: AndroidTransportAliases;
   private androidAliasObservation = 0;
@@ -1856,7 +1861,7 @@ export class DevicePool {
         stableDeviceIdFor: (device) => this.stableDeviceIdFor(device),
         recordBindOwnership: (client, session, minted) =>
           minted
-            ? this.recordMintedSessionOwnership(client, session)
+            ? this.recordMintedSessionOwnership(client, session, false)
             : this.recordBindOwnership(client, session),
         restoreSessionAssignment: (device, snapshot) =>
           this.restoreSessionAssignment(device, snapshot),
@@ -8947,7 +8952,7 @@ export class DevicePool {
       };
     }
     if (options.receipt.minted?.session === session) {
-      this.recordMintedSessionOwnership(caller.mcpSessionId, sessionId);
+      this.recordMintedSessionOwnership(caller.mcpSessionId, sessionId, caller.oneShotCli === true);
     } else {
       this.recordBindOwnership(caller.mcpSessionId, sessionId);
     }
@@ -9558,14 +9563,45 @@ export class DevicePool {
     if (!mcpSessionId) {
       return () => {};
     }
-    const bind = this.mcpBindsInFlight.get(mcpSessionId) ?? { pending: 0, closed: false };
+    const bind = this.mcpBindsInFlight.get(mcpSessionId) ?? {
+      pending: 0,
+      closed: false,
+      toolCalls: 0,
+    };
     bind.pending++;
     this.mcpBindsInFlight.set(mcpSessionId, bind);
+    let ended = false;
     return () => {
+      if (ended) {
+        return;
+      }
+      ended = true;
       bind.pending--;
       if (bind.pending === 0 && this.mcpBindsInFlight.get(mcpSessionId) === bind) {
         this.mcpBindsInFlight.delete(mcpSessionId);
       }
+    };
+  }
+
+  /** #11999: retain a connection's close through forwarding and its terminal answer write. */
+  beginMcpToolCall(mcpSessionId: string | undefined): () => void {
+    const endBind = this.beginMcpBind(mcpSessionId);
+    const bind = mcpSessionId === undefined ? undefined : this.mcpBindsInFlight.get(mcpSessionId);
+    if (bind) {
+      bind.toolCalls++;
+    }
+    let ended = false;
+    return () => {
+      if (ended) {
+        return;
+      }
+      ended = true;
+      if (bind && mcpSessionId !== undefined) {
+        bind.toolCalls--;
+        // Any answer on this connection conservatively acknowledges its mints (#11999).
+        this.mcpSessionUndeliveredMints.delete(mcpSessionId);
+      }
+      endBind();
     };
   }
 
@@ -9620,11 +9656,22 @@ export class DevicePool {
   private recordMintedSessionOwnership(
     mcpSessionId: string | undefined,
     sessionId: string,
+    oneShotCli: boolean,
   ): boolean {
     const recorded = this.recordBindOwnership(mcpSessionId, sessionId);
     const token = mcpSessionId && this.mcpSessionLivenessOwnerTokens.get(mcpSessionId);
     if (recorded && token) {
       this.sessionManager.bindAcquiredLivenessOwnerToken(sessionId, token);
+    }
+    if (mcpSessionId !== undefined && !oneShotCli) {
+      const ownerSessionId = this.ownershipSessionId(sessionId);
+      if (!recorded && !this.hasConnectedMcpSessionOwner(ownerSessionId)) {
+        this.ownerDisconnectRelease.ownerDisconnected(ownerSessionId, mcpSessionId, 0);
+      } else if (recorded && this.mcpBindsInFlight.get(mcpSessionId)?.toolCalls) {
+        const undelivered = this.mcpSessionUndeliveredMints.get(mcpSessionId) ?? new Set<string>();
+        undelivered.add(ownerSessionId);
+        this.mcpSessionUndeliveredMints.set(mcpSessionId, undelivered);
+      }
     }
     return recorded;
   }
@@ -10175,13 +10222,19 @@ export class DevicePool {
       bindInFlight.closed = true;
     }
     const acquired = this.mcpSessionAcquiredDeviceSessions.get(mcpSessionId);
+    const undelivered = this.mcpSessionUndeliveredMints.get(mcpSessionId);
+    this.mcpSessionUndeliveredMints.delete(mcpSessionId);
     this.mcpSessionAcquiredDeviceSessions.delete(mcpSessionId);
     this.mcpSessionLivenessOwnerTokens.delete(mcpSessionId);
     this.autolockManager.releaseMcpSessionBindings(mcpSessionId);
     this.mcpSessionRecoveryDevices.delete(mcpSessionId);
     for (const sessionId of acquired ?? []) {
       if (!this.hasConnectedMcpSessionOwner(sessionId)) {
-        this.ownerDisconnectRelease.ownerDisconnected(sessionId, mcpSessionId);
+        this.ownerDisconnectRelease.ownerDisconnected(
+          sessionId,
+          mcpSessionId,
+          undelivered?.has(sessionId) ? 0 : undefined,
+        );
       }
     }
   }
@@ -10257,6 +10310,12 @@ export class DevicePool {
    */
   private clearMcpSessionOwnership(sessionId: string): void {
     this.ownerDisconnectRelease.cancel(sessionId);
+    for (const [mcpSessionId, undelivered] of this.mcpSessionUndeliveredMints) {
+      undelivered.delete(sessionId);
+      if (undelivered.size === 0) {
+        this.mcpSessionUndeliveredMints.delete(mcpSessionId);
+      }
+    }
     for (const [mcpSessionId, acquired] of this.mcpSessionAcquiredDeviceSessions) {
       acquired.delete(sessionId);
       if (acquired.size === 0) {

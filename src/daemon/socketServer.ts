@@ -1747,6 +1747,7 @@ export class UnixSocketServer {
     let deviceId: string | undefined;
     let pending: PendingSocketRequest | undefined;
     let errorCode: number | undefined;
+    let endToolCall = (): void => {};
     try {
       let parsed: unknown;
       try {
@@ -1782,6 +1783,18 @@ export class UnixSocketServer {
       if (this.onFrameTrace) {
         this.traceFrame("frame_parsed", request.id, deviceId);
       }
+      const beginToolCall = (): void => {
+        if (request.method === "tools/call" && this.daemonState.isInitialized()) {
+          try {
+            endToolCall =
+              this.daemonState.getDevicePool().beginMcpToolCall?.(sessionId) ?? endToolCall;
+          } catch (error) {
+            // #11999: optional tracking may fall back to the existing owner-disconnect grace.
+            logger.debug("Could not begin MCP tool-call ownership claim", error);
+          }
+        }
+      };
+      beginToolCall();
       const response = await this.handleRequest(
         sessionId,
         socket,
@@ -1818,6 +1831,8 @@ export class UnixSocketServer {
       } else {
         this.writeFrame(socket, sessionId, errorResponse, undefined, deviceId);
       }
+    } finally {
+      endToolCall();
     }
   }
 

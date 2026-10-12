@@ -29,6 +29,23 @@ import { errorMessage } from "../../utils/describeUnknownError";
 const ADB_LISTING_TIMEOUT_MS = 5_000;
 
 /**
+ * Where the Android boot-admission lock and records live: one directory per adb server
+ * (`adbServerScope`), under the adb-server coordination root. It ignores
+ * AUTOMOBILE_COORDINATION_DIR and the data directory, so daemons that share an adb server share
+ * one boot limit; AUTOMOBILE_ADB_SERVER_COORDINATION_DIR is the only override, and daemons given
+ * different values do NOT share admissions (#11903).
+ */
+export function androidBootAdmissionRegistryDirectory(
+  env: NodeJS.ProcessEnv = process.env,
+  homeDir?: string,
+): string {
+  return join(
+    getAdbServerScopedAutoMobileDir(adbServerScope(env), "boot-admissions", env, homeDir),
+    "android",
+  );
+}
+
+/**
  * The process-wide gates. One per platform so every device manager in this
  * process (daemon pool, tool handlers, recovery) shares one ledger of
  * admitted boots; a per-manager gate could not see its siblings' boots.
@@ -98,11 +115,7 @@ export function createBootAdmissionGates(
             env,
             hostRegistry: new FileHostBootAdmissionRegistry({
               timer,
-              directory: () =>
-                join(
-                  getAdbServerScopedAutoMobileDir(adbServerScope(env), "boot-admissions", env),
-                  "android",
-                ),
+              directory: () => androidBootAdmissionRegistryDirectory(env),
             }),
           },
         )

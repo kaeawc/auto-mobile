@@ -6850,12 +6850,13 @@ export class SessionManager {
       guard: NonNullable<UpsertActiveSessionOptions["rewriteOverSupersededRelease"]>,
     ) => Promise<T>,
     releaseReason?: string,
+    unlessDaemonShutdown?: boolean,
   ): Promise<T> {
     for (let attempt = 0; attempt < 2; attempt++) {
       const row = await this.deviceSessionRepository.getSession?.(sessionId);
       if (
         !this.deviceSessionRepository.getSession ||
-        this.rowWritePermanentlyRefused(row, guard, releaseReason)
+        this.rowWritePermanentlyRefused(row, guard, releaseReason, unlessDaemonShutdown)
       ) {
         throw error;
       }
@@ -6898,6 +6899,7 @@ export class SessionManager {
     row: DeviceSession | undefined,
     guard: NonNullable<UpsertActiveSessionOptions["rewriteOverSupersededRelease"]>,
     releaseReason: string | undefined,
+    unlessDaemonShutdown: boolean | undefined,
   ): boolean {
     if (!row) {
       return releaseReason !== undefined;
@@ -6916,6 +6918,9 @@ export class SessionManager {
       return false;
     }
     if (releaseReason !== undefined && outranksReleaseReason(reason, releaseReason)) {
+      return true;
+    }
+    if (unlessDaemonShutdown && reason === "daemon-shutdown") {
       return true;
     }
     return isTerminalReleaseReason(reason) && !guard.supersededReasons.includes(reason);
@@ -7515,6 +7520,7 @@ export class SessionManager {
    * A release never replaces a live peer's row or an unrelated terminal reason (#11557).
    * A non-terminal one also applies only to its captured incarnation (#11129). A committed
    * terminal release can replace this incarnation's own known superseded terminal reason.
+   * A parked non-terminal write also preserves the shutdown handoff of its incarnation.
    */
   private releaseWritePrecondition(snapshot: SessionReleaseSnapshot): MarkReleasedOptions {
     const expectedRowGeneration = snapshot.terminal
@@ -7524,6 +7530,9 @@ export class SessionManager {
     const supersededReasons = held ? this.supersededReleaseReasons.get(held) : undefined;
     return {
       ...(expectedRowGeneration === undefined ? {} : { expectedRowGeneration }),
+      ...(!snapshot.terminal && snapshot.releaseReason !== "daemon-shutdown"
+        ? { unlessDaemonShutdown: true }
+        : {}),
       unlessTerminalOrOwnedByLivePeer: {
         livePeerDaemonSessionIds: [],
         ownDaemonSessionId: this.daemonSessionId,
@@ -7718,6 +7727,7 @@ export class SessionManager {
           },
           (next) => issueWrite({ ...precondition, unlessTerminalOrOwnedByLivePeer: next }),
           snapshot.releaseReason,
+          precondition.unlessDaemonShutdown,
         ));
       };
       const deadlineNow = () => this.timer.monotonicNow?.() ?? this.timer.now();
@@ -8009,6 +8019,7 @@ export class SessionManager {
           },
           (next) => issueWrite({ ...precondition, unlessTerminalOrOwnedByLivePeer: next }),
           snapshot.releaseReason,
+          precondition.unlessDaemonShutdown,
         ));
       };
       const deadlineNow = () => this.timer.monotonicNow?.() ?? this.timer.now();

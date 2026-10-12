@@ -835,6 +835,7 @@ export async function runSessionRowInterleaving(
    * terminally released.
    */
   const restart = async (): Promise<void> => {
+    const issuingAtShutdown = reissuing;
     repository.log.push("-- shutdown");
     drained = true;
     // The database answers through shutdown; what is in flight still lands when it lands.
@@ -882,16 +883,16 @@ export async function runSessionRowInterleaving(
     const fencedAtExit =
       journal.intents.has(sessionId) ||
       (Reflect.get(manager, "terminalReleaseSnapshots") as Map<string, unknown>).has(sessionId);
+    const handedOffAfterRelease = !liveAtShutdown && lastReason === SHUTDOWN_RELEASE;
     const expected =
       !ownTerminal &&
       !fencedAtExit &&
       peerTerminal !== "decisive" &&
       !peerOwns &&
-      (liveAtShutdown || heldAtExit);
-    // Committed plan releases still take shutdown's handoff reason: the pinned retry test
-    // requires that upgrade, and changing that test is outside this lane (#11557, case 2).
-    const handedOffAfterRelease = !liveAtShutdown && lastReason === SHUTDOWN_RELEASE;
-    const unjudged = !ownTerminal && handedOffAfterRelease;
+      (liveAtShutdown || heldAtExit || (handedOffAfterRelease && !issuingAtShutdown));
+    // An in-flight issue entangles its refused creation's shutdown announcement and row claim
+    // with the release upgrade; whether that run is a handoff needs an owner decision.
+    const unjudged = !ownTerminal && handedOffAfterRelease && issuingAtShutdown;
 
     repository.log.push("-- restart");
     const store = new DeviceSessionRepository(db, timer);
@@ -914,7 +915,7 @@ export async function runSessionRowInterleaving(
     const rowState = `${row?.status}/${row?.release_reason ?? "none"}/${row?.daemon_session_id}`;
     const ended = `ended as ${heldAtExit ? "live" : (lastReason ?? "nothing")}`;
     if (unjudged) {
-      // Case 2 remains open: see the pinned expectation above.
+      repository.log.push("restart: unjudged in-flight issue and release handoff");
     } else if (rehydrated && !expected) {
       violations.push(`restart: a ghost was rehydrated (${ended}, row ${rowState})`);
     } else if (!rehydrated && expected) {

@@ -22,6 +22,7 @@ import {
 import { DevicePool } from "../../src/daemon/devicePool";
 import { deviceLossCancellationReason } from "../../src/daemon/emulatorLossIncident";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 
 const AUTOLOCK_ENV_KEYS = [
@@ -51,6 +52,58 @@ describe("DeviceSessionRepository", () => {
     clearAutolockEnv();
     await db.destroy();
   });
+
+  test.each(
+    ["real", "fake"].flatMap((implementation) =>
+      ["active", "daemon-restart", "daemon-shutdown"].map((reason) => [implementation, reason]),
+    ),
+  )(
+    "a conditioned plan release preserves only the shutdown handoff (%s, %s)",
+    async (implementation, reason) => {
+      const store = implementation === "fake" ? new FakeDeviceSessionPersistence() : repo;
+      const id = "shutdown-release-guard";
+      const generation = await store.upsertActiveSession({
+        sessionUuid: id,
+        deviceId: "emulator-5554",
+        platform: "android",
+        daemonSessionId: "daemon-1",
+        createdAtMs: 1_000,
+        lastUsedAtMs: 1_000,
+        expiresAtMs: 61_000,
+        sessionTimeoutMs: 60_000,
+        heartbeatTimeoutMs: 60_000,
+        hasReceivedHeartbeat: false,
+      });
+      if (reason !== "active") {
+        await store.markReleased(
+          id,
+          reason === "daemon-restart" ? "expired" : "released",
+          1_100,
+          reason,
+        );
+      }
+      const before = await store.getSession(id);
+      const write = store.markReleased(id, "released", 1_200, "plan-auto-release", {
+        expectedRowGeneration: generation,
+        unlessDaemonShutdown: true,
+      });
+      if (reason === "daemon-shutdown") {
+        await expect(write).rejects.toBeInstanceOf(DeviceSessionRowNotReleasableError);
+        expect(await store.getSession(id)).toEqual(before);
+        await store.markReleased(id, "released", 1_300, "explicit-release", {
+          expectedRowGeneration: generation,
+        });
+        expect(await store.getSession(id)).toMatchObject({ release_reason: "explicit-release" });
+      } else {
+        await write;
+        expect(await store.getSession(id)).toMatchObject({
+          status: "released",
+          release_reason: "plan-auto-release",
+          stable_identity_generation: generation,
+        });
+      }
+    },
+  );
 
   test.each(["released", "expired", "active", "missing"] as const)(
     "activity rewrite refuses only release-statement rows (%s)",

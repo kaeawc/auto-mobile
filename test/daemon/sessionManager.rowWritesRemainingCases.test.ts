@@ -9,7 +9,11 @@ import {
   test,
 } from "bun:test";
 import type { Kysely } from "kysely";
-import { SessionManager, type SessionDeviceAssigner } from "../../src/daemon/sessionManager";
+import {
+  SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+  SessionManager,
+  type SessionDeviceAssigner,
+} from "../../src/daemon/sessionManager";
 import {
   DeviceSessionNotActiveError,
   DeviceSessionRepository,
@@ -146,6 +150,133 @@ describe("remaining session row writes (#11557)", () => {
     },
   });
   const reissue = () => manager.getOrCreateSession(SESSION, pool(), "android", undefined, true);
+
+  test.each(["own", "unowned"])(
+    "a parked plan release cannot overwrite the shutdown upgrade or arm another write (owner: %s)",
+    async (owner) => {
+      await create();
+      manager.attachLiveDaemonSessionIds(() => {
+        throw new Error("an own-row release must not discover peers");
+      });
+      const reads = spyOn(store, "getSession");
+      const gate = Promise.withResolvers<void>();
+      store.releaseGate = gate.promise;
+      const plan = manager.releaseSession(SESSION, PLAN);
+      await settle();
+      expect(store.releases).toEqual([PLAN]);
+      expect(reads).not.toHaveBeenCalled();
+      reads.mockRestore();
+      const handoff = manager.releaseSession(SESSION, "daemon-shutdown");
+      store.releaseGate = undefined;
+      await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+      await Promise.all([plan, handoff]);
+      expect(announced).toEqual([PLAN, "daemon-shutdown"]);
+      expect(store.releases).toEqual([PLAN, "daemon-shutdown"]);
+      if (owner === "unowned") {
+        await db
+          .updateTable("device_sessions")
+          .set({ daemon_session_id: null })
+          .where("session_uuid", "=", SESSION)
+          .execute();
+      }
+      const shutdownRow = await row();
+      expect(shutdownRow).toMatchObject({ release_reason: "daemon-shutdown" });
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      // The deadline warning happened already; the late statement refusal itself is silent.
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        let drained = false;
+        const drain = manager.drainReleasePromises(1_000).then((result) => {
+          drained = true;
+          return result;
+        });
+        await settle();
+        expect(drained).toBe(false);
+        gate.resolve();
+        expect(await drain).toBe(true);
+        expect(await row()).toEqual(shutdownRow);
+        expect(warn).not.toHaveBeenCalled();
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+        await timer.advanceTimeAsync(RETRY_MS);
+        await settle();
+        expect(store.releases).toEqual([PLAN, "daemon-shutdown"]);
+        expect(announced).toEqual([PLAN, "daemon-shutdown"]);
+      } finally {
+        gate.resolve();
+        warn.mockRestore();
+      }
+    },
+  );
+
+  test("the shutdown upgrade still lands after the parked plan write lands first", async () => {
+    await create();
+    const gate = Promise.withResolvers<void>();
+    store.releaseGate = gate.promise;
+    const plan = manager.releaseSession(SESSION, PLAN);
+    await settle();
+    const handoff = manager.releaseSession(SESSION, "daemon-shutdown");
+    gate.resolve();
+    await Promise.all([plan, handoff]);
+    expect(await row()).toMatchObject({ release_reason: "daemon-shutdown" });
+    expect(announced).toEqual([PLAN, "daemon-shutdown"]);
+    expect(store.releases).toEqual([PLAN, "daemon-shutdown"]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("an explicit release still replaces the shutdown handoff row", async () => {
+    await create();
+    await manager.releaseSession(SESSION, "daemon-shutdown");
+    await manager.releaseSession(SESSION, "explicit-release");
+    expect(await row()).toMatchObject({ release_reason: "explicit-release" });
+    expect(announced).toEqual(["daemon-shutdown", "explicit-release"]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("a failed shutdown upgrade retries without the parked plan's condition", async () => {
+    await create();
+    const gate = Promise.withResolvers<void>();
+    store.releaseGate = gate.promise;
+    const plan = manager.releaseSession(SESSION, PLAN);
+    await settle();
+    const handoff = manager.releaseSession(SESSION, "daemon-shutdown");
+    store.releaseGate = undefined;
+    store.failReleases = 1;
+    await timer.advanceTimeAsync(SESSION_RELEASE_PERSIST_TIMEOUT_MS);
+    await Promise.all([plan, handoff]);
+    await settle();
+    expect(timer.getPendingTimeouts()).toEqual([RETRY_MS]);
+    // Another shutdown handoff already landed before the retry: equal-reason writes stay legal.
+    await peer.markReleased(SESSION, "released", timer.now(), "daemon-shutdown");
+    await timer.advanceTimeAsync(RETRY_MS);
+    await settle();
+    gate.resolve();
+    expect(await manager.drainReleasePromises(1_000)).toBe(true);
+    expect(await row()).toMatchObject({ release_reason: "daemon-shutdown" });
+    expect(store.releases).toEqual([PLAN, "daemon-shutdown", "daemon-shutdown"]);
+    expect(announced).toEqual([PLAN, "daemon-shutdown"]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test.each(["active", "daemon-restart", `device-restart:${DEVICE}`])(
+    "a plan release still lands on its own generation's %s row",
+    async (reason) => {
+      await create();
+      const generation = (await row())!.stable_identity_generation;
+      if (reason === "daemon-restart") {
+        await sweep();
+      } else if (reason !== "active") {
+        await peer.markReleased(SESSION, "released", timer.now(), reason);
+      }
+      await manager.releaseSession(SESSION, PLAN);
+      expect(await row()).toMatchObject({
+        status: "released",
+        release_reason: PLAN,
+        stable_identity_generation: generation,
+      });
+      expect(store.releases).toEqual([PLAN]);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    },
+  );
 
   test("a parked activity repair refuses its own released row without warning, compensation or retry", async () => {
     await create();

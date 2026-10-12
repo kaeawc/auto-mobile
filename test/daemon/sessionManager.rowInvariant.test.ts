@@ -43,6 +43,8 @@ const EXTENDED_REGRESSION_SEEDS = [
   [4024, 9103, 13761, 14856],
   // Failed creation and shutdown refusal restore the row they claimed.
   [9271, 17669, 15266, 19329],
+  // A parked plan release overwrote the announced shutdown handoff of the same incarnation.
+  [3144, 3760, 4352, 5646],
 ];
 const EXTENDED: SessionRowRunOptions = { allowed: EXTENDED_OPERATIONS };
 

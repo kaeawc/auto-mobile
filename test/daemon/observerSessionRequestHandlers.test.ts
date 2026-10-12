@@ -338,6 +338,14 @@ describe("registration-only daemon requests", () => {
       state,
     );
     try {
+      // The handler reads the ended-session answer before it arms the drain wait.
+      for (
+        let turn = 0;
+        turn < 50 && !timer.getPendingTimeouts().includes(SESSION_RELEASE_DRAIN_TIMEOUT_MS);
+        turn++
+      ) {
+        await Promise.resolve();
+      }
       timer.advanceTime(SESSION_RELEASE_DRAIN_TIMEOUT_MS);
       expect(await registration).toEqual({
         success: false,

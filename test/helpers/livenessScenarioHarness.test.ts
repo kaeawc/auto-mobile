@@ -50,6 +50,46 @@ const scenarioTest = warmedTests(async () => {
 });
 
 describe("the liveness harness never reaches the host's daemon", () => {
+  scenarioTest(
+    "passive-work overrides are isolated for the scenario and restored on stop",
+    async () => {
+      const keys = [
+        "AUTOMOBILE_APPEARANCE_SYNC",
+        "AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES",
+      ] as const;
+      const previous = keys.map((key) => process.env[key]);
+      const held = "emulator-5554";
+      const free = "emulator-5556";
+      process.env.AUTOMOBILE_APPEARANCE_SYNC = "0";
+      process.env.AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES = free;
+      try {
+        scenario = await LivenessScenario.start({ devices: [held, free] });
+        await scenario.acquire(held);
+        expect(scenario.appearanceSyncTargets().map((target) => target.deviceId)).toEqual([held]);
+        await scenario.daemonRestart();
+        await scenario.idle(2 * KEEPER_INTERVAL_MS);
+        expect(scenario.appearanceSyncTargets().map((target) => target.deviceId)).toEqual([held]);
+        await scenario.stop();
+        scenario = undefined;
+        expect(process.env.AUTOMOBILE_APPEARANCE_SYNC).toBe("0");
+        expect(process.env.AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES).toBe(free);
+      } finally {
+        try {
+          await scenario?.stop();
+          scenario = undefined;
+        } finally {
+          keys.forEach((key, index) => {
+            if (previous[index] === undefined) {
+              delete process.env[key];
+            } else {
+              process.env[key] = previous[index];
+            }
+          });
+        }
+      }
+    },
+  );
+
   test.each([
     ["the control socket", SOCKET_PATH],
     ["the default control socket", DEFAULT_SOCKET_PATH],

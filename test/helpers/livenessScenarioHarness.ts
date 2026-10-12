@@ -338,11 +338,15 @@ function matchingDaemonManager(): FakeDaemonManager {
   return manager;
 }
 
-const AUTOLOCK_ENV_KEYS = [
+const SCENARIO_ENV_KEYS = [
   "AUTOMOBILE_DEVICE_POOL_AUTOLOCK",
   "AUTO_MOBILE_DEVICE_POOL_AUTOLOCK",
   "AUTOMOBILE_DEVICE_POOL_TIMEOUT",
   "AUTO_MOBILE_DEVICE_POOL_TIMEOUT",
+  "AUTOMOBILE_APPEARANCE_SYNC",
+  "AUTOMOBILE_ANDROID_APPEARANCE_SYNC_DEVICES",
+  "AUTOMOBILE_ANDROID_OBSERVATION_STREAM_DEVICES",
+  "AUTOMOBILE_IOS_WARMUP_DEVICES",
 ] as const;
 
 export class LivenessScenario {
@@ -484,7 +488,8 @@ export class LivenessScenario {
       spyOn(DefaultDeviceSettingsAccess.prototype, "read").mockResolvedValue({}),
       spyOn(DefaultDeviceSettingsAccess.prototype, "write").mockResolvedValue([]),
     );
-    for (const key of AUTOLOCK_ENV_KEYS) {
+    // Keep every daemon in this scenario independent of inherited passive-work switches.
+    for (const key of SCENARIO_ENV_KEYS) {
       this.savedEnv.set(key, process.env[key]);
       delete process.env[key];
     }

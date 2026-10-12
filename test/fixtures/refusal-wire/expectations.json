@@ -620,6 +620,14 @@
         "retryable": false,
         "acquireNewSession": false
       }
+    },
+    "timeout.iosHomeLaunch": {
+      "expected": "retry",
+      "fields": {
+        "code": "timeout",
+        "retryable": true,
+        "acquireNewSession": false
+      }
     }
   }
 }

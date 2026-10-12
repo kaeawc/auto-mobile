@@ -5,6 +5,7 @@ import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { ManagedSlotConfigError } from "../../src/models/managedSlotConfig";
 import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { DeviceShutdownTimeoutError } from "../../src/models/DeviceShutdownTimeoutError";
+import { IosHomeLaunchTimeoutError } from "../../src/models/IosHomeLaunchTimeoutError";
 import { SharedDaemonNamespaceError } from "../../src/daemon/sharedNamespaceGuard";
 import { DeviceSessionSupersededByRestoreError } from "../../src/daemon/deviceSessionResolver";
 import { DeviceGestureRecordingStartUnheldError } from "../../src/daemon/deviceGestureRecordingStartAdmission";
@@ -302,6 +303,11 @@ export function overloadRefusalError(): McpOverloadError {
 
 /** One entry per wire code, each produced by the builder the daemon itself calls. */
 const BUILDERS: readonly FixtureEntry[] = [
+  [
+    "timeout.iosHomeLaunch",
+    "IosHomeLaunchTimeoutError via shapeToolCallError",
+    () => shaped(new IosHomeLaunchTimeoutError("SpringBoard launch exhausted the Home budget")),
+  ],
   [
     "provision_device.platform_command_failed.create_rejected",
     "ProvisionDeviceCreateRejectedError via createToolErrorResponse",
@@ -850,6 +856,10 @@ const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
       }),
   ],
   ["timeout.shutdown", () => new DeviceShutdownTimeoutError("Device shutdown deadline exhausted")],
+  [
+    "timeout.iosHomeLaunch",
+    () => new IosHomeLaunchTimeoutError("SpringBoard launch exhausted the Home budget"),
+  ],
   ["timeout.boot", () => new DeviceBootTimeoutError("boot", "readiness", 1_000, 1_000, DEVICE)],
   [
     "daemon_handoff_interrupted",

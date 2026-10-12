@@ -78,6 +78,14 @@
         "acquireNewSession": false
       }
     },
+    "device_outside_bound_session.other_session": {
+      "expected": "fail",
+      "fields": {
+        "code": "device_outside_bound_session",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
     "device_outside_managed_slots": {
       "expected": "fail",
       "fields": {

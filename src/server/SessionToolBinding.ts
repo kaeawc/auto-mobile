@@ -1,5 +1,8 @@
-import { ActionableError } from "../models/ActionableError";
-import { DeviceOutsideBoundSessionError } from "./deviceOutsideBoundSessionRefusal";
+import { nonBlankSessionUuid } from "./planCallerIdentity";
+import {
+  DeviceOutsideBoundSessionError,
+  SessionOutsideBoundSessionError,
+} from "./deviceOutsideBoundSessionRefusal";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 
 export class SessionToolBinding {
@@ -43,13 +46,16 @@ export class SessionToolBinding {
     return this.directDeviceSessionUuid ?? this.initialSessionUuid;
   }
 
-  effectiveSessionUuid(mcpSessionId: string | undefined, params?: unknown): string | undefined {
+  effectiveSessionUuid(
+    mcpSessionId: string | undefined,
+    params?: unknown,
+    options?: { readOnly?: boolean; onReadOutsideBoundSession: () => void },
+  ): string | undefined {
     const explicit =
       params && typeof params === "object" && !Array.isArray(params)
         ? (params as Record<string, unknown>).sessionUuid
         : undefined;
-    const explicitSessionUuid =
-      typeof explicit === "string" && explicit.trim().length > 0 ? explicit : undefined;
+    const explicitSessionUuid = nonBlankSessionUuid(explicit);
     const boundSessionUuid = this.boundSessionUuid(mcpSessionId);
     // The connection's own tool-selection profile is not a device route: the
     // daemon-proxy loopback for an acquired device carries it as its second
@@ -65,10 +71,16 @@ export class SessionToolBinding {
       // sessions; whose base it is stays the owner rule's question.
       !this.namesLiveSessionOfBoundPlan(explicitSessionUuid, this.initialSessionUuid)
     ) {
-      throw new ActionableError(
-        `MCP connection is bound to device session ${this.initialSessionUuid}; ` +
-          `cannot route this call to ${explicitSessionUuid} until the binding is released. Use a separate MCP connection for ${explicitSessionUuid}.`,
-      );
+      if (options?.readOnly) {
+        options.onReadOutsideBoundSession();
+      } else {
+        throw new SessionOutsideBoundSessionError(
+          this.initialSessionUuid,
+          explicitSessionUuid,
+          `MCP connection is bound to device session ${this.initialSessionUuid}; ` +
+            `cannot route this call to ${explicitSessionUuid} until the binding is released. Use a separate MCP connection for ${explicitSessionUuid}.`,
+        );
+      }
     }
     return explicitSessionUuid ?? boundSessionUuid;
   }
@@ -86,8 +98,12 @@ export class SessionToolBinding {
     lookup: (sessionUuid: string) => { deviceId: string; platform: string } | undefined,
     selectingActiveDevice = false,
     deferForeignDevice = false,
+    readOnly?: boolean,
   ): string | undefined {
-    const fallback = this.effectiveSessionUuid(mcpSessionId, params);
+    const fallback = this.effectiveSessionUuid(mcpSessionId, params, {
+      readOnly,
+      onReadOutsideBoundSession: () => {},
+    });
     const platform =
       params.platform === "android" || params.platform === "ios" ? params.platform : undefined;
     const deviceId = typeof params.deviceId === "string" ? params.deviceId : undefined;

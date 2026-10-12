@@ -51,6 +51,7 @@ import {
   authorizeResolvedDevice,
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
+  streamAuthRefusalFields,
 } from "./streamSocketAuth";
 import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import { resolveStreamDevice } from "./streamDeviceResolver";
@@ -325,6 +326,7 @@ function subscribeFailureResponse(
     type: "video_stream_response",
     success: false,
     error: errorMessage(error),
+    ...streamAuthRefusalFields(error),
   };
 }
 

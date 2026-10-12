@@ -45,6 +45,7 @@ import {
   authorizeResolvedDevice,
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
+  streamAuthRefusalFields,
 } from "./streamSocketAuth";
 import { daemonDeviceAdmissionGate, type DeviceAdmissionGate } from "../utils/deviceAdmissionGate";
 import { resolveStreamDevice } from "./streamDeviceResolver";
@@ -479,6 +480,15 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
     request: WebRtcStreamSocketRequest;
     error: unknown;
   }): WebRtcStreamSocketResponse {
+    const fields = streamAuthRefusalFields(error);
+    if ("code" in fields) {
+      logger.warn(`[WebRtcStream] Ownership refusal: ${errorMessage(error)}`, error);
+      return {
+        ...this.createErrorResponse(request.id, errorMessage(error)),
+        ...fields,
+        errorCode: fields.code,
+      };
+    }
     if (error instanceof ViewerReadOnlyError) {
       this.logViewerControlRejection(request);
       return {

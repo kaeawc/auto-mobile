@@ -1804,17 +1804,17 @@ export class UnixSocketServer {
         this.traceFrame("frame_parsed", request.id, deviceId);
       }
       const beginToolCall = (): void => {
-        if (request.method === "tools/call" && this.daemonState.isInitialized()) {
-          try {
+        try {
+          if (request.method === "tools/call" && this.daemonState.isInitialized()) {
             endToolCall =
               this.daemonState.getDevicePool().beginMcpToolCall?.(sessionId) ?? endToolCall;
-          } catch (error) {
-            // #11999: optional tracking may fall back to the existing owner-disconnect grace.
-            logger.warn(
-              `Could not begin MCP tool-call ownership claim: ${errorMessage(error)}`,
-              error,
-            );
           }
+        } catch (error) {
+          // #11999: optional tracking may fall back to the existing owner-disconnect grace.
+          logger.warn(
+            `Could not begin MCP tool-call ownership claim: ${errorMessage(error)}`,
+            error,
+          );
         }
       };
       beginToolCall();

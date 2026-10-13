@@ -443,7 +443,7 @@ test("retained readers apply generation liveness and preserve readable P precede
   expect(f.fs.operations).toEqual([{ op: "readText", path: PATH }]);
 });
 
-test.each([...Array.from({ length: 32 }, (_, i) => 6001 + i), 4939, 7749, 8581, 11767])(
+test.each([34, ...Array.from({ length: 32 }, (_, i) => 6001 + i), 4939, 7749, 8581, 11767])(
   "retained property seed %d",
   (seed) => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
@@ -613,43 +613,49 @@ test.each(["link", "openExclusive", "writeFile", "rename", "unlink"] as const)(
   },
 );
 
-test.each(["atomic", "legacy-wx"] as const)("R1: ENOENT P still holds (%s)", (publication) => {
-  const f = fixture(raw(101));
-  f.live.add(707);
-  const stale = new Racer(releaseExclusiveLockSteps(PATH, 101, "owner-101", f.fs));
-  stale.until((s) => s.op === "rename" && s.path === PATH);
-  expect(takeOverExclusiveLock(PATH, { pid: 101, token: "owner-101" }, f.options(707))).toBe(true);
-  releaseExclusiveLock(PATH, 707, "owner-707", f.fs);
-  const warn = spyOn(logger, "warn").mockImplementation(() => {});
-  try {
-    if (publication === "legacy-wx") {
-      f.fs.linkError = "ENOTSUP";
+test.each(["atomic", "legacy-wx"] as const)(
+  "own publication retained before the post-check (atomic holds; legacy-wx waits): %s",
+  (publication) => {
+    const f = fixture(raw(101));
+    f.live.add(707);
+    const stale = new Racer(releaseExclusiveLockSteps(PATH, 101, "owner-101", f.fs));
+    stale.until((s) => s.op === "rename" && s.path === PATH);
+    expect(takeOverExclusiveLock(PATH, { pid: 101, token: "owner-101" }, f.options(707))).toBe(
+      true,
+    );
+    releaseExclusiveLock(PATH, 707, "owner-707", f.fs);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      if (publication === "legacy-wx") {
+        f.fs.linkError = "ENOTSUP";
+      }
+      const acquirer = f.acquire(303);
+      acquirer.until((s) => s.op === "stat" && s.path === F);
+      f.fs.failure = (op, path) =>
+        path === PATH
+          ? op === "link"
+            ? "ENOTSUP"
+            : op === "openExclusive"
+              ? "ENOSPC"
+              : undefined
+          : undefined;
+      stale.finish();
+      expect(f.fs.readText(F)).toBe(raw(303));
+      expect(f.fs.exists(PATH)).toBe(false);
+      f.fs.failure = undefined;
+      expect(acquirer.finish()).toBe(publication === "atomic");
+      expect(f.fs.peek(PATH)?.raw).toBe(publication === "atomic" ? raw(303) : undefined);
+      expect(f.fs.peek(F)?.raw).toBe(raw(303));
+      expect(f.acquire(404).finish()).toBe(false);
+      expect(f.fs.peek(PATH)?.raw).toBe(publication === "atomic" ? raw(303) : undefined);
+      releaseExclusiveLock(PATH, 303, "owner-303", f.fs);
+      expect(f.fs.paths()).toEqual([]);
+      expect(f.acquire(404).finish()).toBe(true);
+    } finally {
+      warn.mockRestore();
     }
-    const acquirer = f.acquire(303);
-    acquirer.until((s) => s.op === "stat" && s.path === F);
-    f.fs.failure = (op, path) =>
-      path === PATH
-        ? op === "link"
-          ? "ENOTSUP"
-          : op === "openExclusive"
-            ? "ENOSPC"
-            : undefined
-        : undefined;
-    stale.finish();
-    expect(f.fs.readText(F)).toBe(raw(303));
-    expect(f.fs.exists(PATH)).toBe(false);
-    f.fs.failure = undefined;
-    f.fs.linkError = undefined;
-    expect(acquirer.finish()).toBe(true);
-    expect(f.acquire(404).finish()).toBe(false);
-    expect(f.fs.readText(PATH)).toBe(raw(303));
-    releaseExclusiveLock(PATH, 303, "owner-303", f.fs);
-    expect(f.fs.paths()).toEqual([]);
-    expect(f.acquire(404).finish()).toBe(true);
-  } finally {
-    warn.mockRestore();
-  }
-});
+  },
+);
 
 test("same-owner older instance at F with the new publication still at P backs out", () => {
   const f = fixture(raw(303));
@@ -1104,4 +1110,94 @@ test("PID reuse with a generation token and a different probe removes F and acqu
   expect(f.acquire(303).finish()).toBe(true);
   expect(f.fs.peek(F)).toBeUndefined();
   expect(f.fs.peek(PATH)?.raw).toBe(raw(303));
+});
+
+test("V1: an exhausted marker verification read during back-out is remembered and drained", () => {
+  const f = retained();
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  let failures = 0;
+  f.fs.failure = (op, path) =>
+    op === "readText" && path.includes(".202.release.") ? (failures++, "EIO") : undefined;
+  try {
+    expect(f.acquire(202).finish()).toBe(false);
+    expect(failures).toBe(3);
+    expect(f.fs.peek(PATH)?.raw).toBe(raw(202));
+    f.fs.failure = undefined;
+    expect(f.acquire(202).finish()).toBe(false);
+    expect(f.fs.peek(PATH)?.raw).not.toBe(raw(202));
+    expect(f.fs.peek(F)?.raw).toBe(raw(101));
+    releaseExclusiveLock(PATH, 101, "owner-101", f.fs);
+    expect(f.acquire(303).finish()).toBe(true);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test("V2: re-acquiring while holding through F never deletes the genuine hold", () => {
+  const f = retained();
+  const held = { ...f.fs.peek(F)! };
+  // The stale displacer's read predates both new publications.
+  f.fs.seed(PATH, raw(909));
+  const stale = new Racer(releaseExclusiveLockSteps(PATH, 909, "owner-909", f.fs));
+  stale.until((s) => s.op === "rename" && s.path === PATH);
+  f.fs.unlink(PATH);
+  const c = f.acquire(202);
+  c.until((s) => s.op === "link" && s.path === PATH);
+  const again = f.acquire(101);
+  again.until((s) => s.op === "stat" && s.path === F);
+  stale.until((s) => s.op === "link" && s.path === PATH);
+  c.until((s) => s.op === "readText" && s.path === PATH);
+  stale.finish(); // Restore encounters 202 at P: EEXIST, then drops its private marker.
+  expect(again.finish()).toBe(false);
+  expect(f.fs.peek(F)).toEqual(held);
+  expect(c.finish()).toBe(false);
+  expect(f.acquire(303).finish()).toBe(false);
+  releaseExclusiveLock(PATH, 101, "owner-101", f.fs);
+  expect(f.acquire(303).finish()).toBe(true);
+});
+
+test("V2: own publication provably at F with P foreign removes F", () => {
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    const { f, a } = ownRetainedWithPeer();
+    expect(a.finish()).toBe(false);
+    expect(f.fs.peek(F)).toBeUndefined();
+    expect(f.fs.peek(PATH)?.raw).toBe(raw(404));
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test("V2: own publication provably at F with P the same instance holds", () => {
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    const { f, a } = ownRetainedWithPeer();
+    releaseExclusiveLock(PATH, 404, "owner-404", f.fs);
+    f.fs.linkError = undefined;
+    f.fs.link(F, PATH); // Another actor has already completed the retained restore.
+    const held = { ...f.fs.peek(F)! };
+    f.fs.operations.length = 0;
+    expect(a.finish()).toBe(true);
+    expect(f.fs.peek(PATH)).toEqual(held);
+    expect(f.fs.peek(F)).toEqual(held);
+    expect(f.fs.operations.some((s) => ["link", "rename"].includes(s.op))).toBe(false);
+    releaseExclusiveLock(PATH, 303, "owner-303", f.fs);
+    expect(f.acquire(202).finish()).toBe(true);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test("V1: a successful foreign marker verification restores without remembering a back-out", () => {
+  const f = retained();
+  const acquirer = f.acquire(202);
+  acquirer.until((s) => s.op === "rename" && s.path === PATH);
+  f.fs.seed(PATH, raw(303)); // The pending claim gets foreign bytes after its read of P.
+  f.fs.operations.length = 0;
+  expect(acquirer.finish()).toBe(false);
+  expect(f.fs.peek(PATH)?.raw).toBe(raw(303));
+  expect(
+    f.fs.operations.filter((s) => s.op === "readText" && s.path.includes(".202.release.")),
+  ).toHaveLength(1);
+  assertNoPendingOperations(f);
 });

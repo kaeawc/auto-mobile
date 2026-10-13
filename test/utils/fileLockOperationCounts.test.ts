@@ -25,8 +25,8 @@ const PUBLISH_LOCK = [
   op("unlink", "lock-tmp"),
   op("writeFile", "lock-tmp"),
   op("link", "lock"),
-  op("unlink", "lock-tmp"),
   op("stat", "displaced"),
+  op("unlink", "lock-tmp"),
 ];
 const REMOVE_STALE = [
   ...SAMPLE,

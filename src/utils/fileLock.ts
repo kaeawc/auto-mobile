@@ -840,12 +840,55 @@ function* checkRetainedLock(
   generation: string | undefined,
   reclaimed: LockSample | undefined,
   publishedContent: string,
+  tmp?: string,
 ): Steps<boolean> {
   const fileSystem = options.fileSystem ?? nodeLockFileSystem;
   const retained = yield* sampleRetainedLock(`${path}.displaced`, fileSystem);
   if (retained === "absent") {
     return true;
   }
+  const publicationSample = tmp
+    ? yield* samplePublication(tmp, publishedContent, fileSystem)
+    : undefined;
+  if (yield* reclaimRetainedLock(path, retained, options, generation, reclaimed)) {
+    return true;
+  }
+  const pid = options.pid ?? process.pid;
+  const publication = yield* isRetainedPublication(
+    path,
+    retained,
+    publishedContent,
+    fileSystem,
+    publicationSample,
+  );
+  if (publication === "absent") {
+    yield* completeRetainedLock(path, fileSystem);
+    return true;
+  }
+  if (publication === "same") {
+    return true; // Another actor already completed this publication; keep both names untouched.
+  }
+  if (publication === "older") {
+    return false; // An older same-owner hold is authoritative; P is absent, foreign or unreadable.
+  }
+  if (publication === "blocked") {
+    // These are our doomed bytes: only their owner's release may remove live F.
+    yield* releaseRetainedLock(path, pid, options.ownerToken, fileSystem);
+    return false;
+  }
+  // Back out only P; F remains the retained owner's authority throughout COMPLETE.
+  yield* backOutLockPath(path, publishedContent, pid, fileSystem);
+  yield* completeRetainedLock(path, fileSystem);
+  return false;
+}
+
+function* reclaimRetainedLock(
+  path: string,
+  retained: LockSample | "unreadable",
+  options: ExclusiveLockOptions,
+  generation: string | undefined,
+  reclaimed: LockSample | undefined,
+): Steps<boolean> {
   if (typeof retained !== "string") {
     if (reclaimed !== undefined && sameSample(retained, reclaimed)) {
       yield* removeRetainedInstance(path, reclaimed, options);
@@ -860,21 +903,22 @@ function* checkRetainedLock(
       return true;
     }
   }
-  const pid = options.pid ?? process.pid;
-  const publication = yield* isRetainedPublication(path, retained, publishedContent, fileSystem);
-  if (publication === "absent") {
-    yield* completeRetainedLock(path, fileSystem);
-    return true;
-  }
-  if (publication === "blocked") {
-    // These are our doomed bytes: only their owner's release may remove live F.
-    yield* releaseRetainedLock(path, pid, options.ownerToken, fileSystem);
-    return false;
-  }
-  // Back out only P; F remains the retained owner's authority throughout COMPLETE.
-  yield* backOutLockPath(path, publishedContent, pid, fileSystem);
-  yield* completeRetainedLock(path, fileSystem);
   return false;
+}
+
+function* samplePublication(
+  tmp: string,
+  raw: string,
+  fileSystem: LockFileSystem,
+): Steps<LockSample | undefined> {
+  try {
+    yield { op: "stat", path: tmp };
+    return { ...fileSystem.stat(tmp), raw };
+  } catch (error) {
+    // Without proof of this inode, F may be an older genuine hold and must be preserved.
+    logger.debug(`Lock publication identity unavailable at ${tmp}: ${errorMessage(error)}`, error);
+    return undefined;
+  }
 }
 
 function* isRetainedPublication(
@@ -882,13 +926,24 @@ function* isRetainedPublication(
   retained: LockSample | "unreadable",
   publishedContent: string,
   fileSystem: LockFileSystem,
-): Steps<"other" | "same" | "absent" | "blocked"> {
+  publication?: LockSample,
+): Steps<"other" | "older" | "same" | "absent" | "blocked"> {
   if (typeof retained === "string" || retained.raw !== publishedContent) {
     return "other";
   }
+  if (!sameSample(publication, retained)) {
+    // Legacy wx has no identity proof: if displaced into F it reports false and stays
+    // live there until exit or release; without hard links COMPLETE cannot restore it either.
+    return (yield* readText(path, fileSystem)) === publishedContent ? "other" : "older";
+  }
   try {
     yield { op: "readText", path };
-    return fileSystem.readText(path) === publishedContent ? "same" : "blocked";
+    const raw = fileSystem.readText(path);
+    if (raw !== publishedContent) {
+      return "blocked";
+    }
+    yield { op: "stat", path };
+    return sameSample({ ...fileSystem.stat(path), raw }, retained) ? "same" : "blocked";
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       // F existed before this read: later publishers see live F and back out;
@@ -1282,12 +1337,16 @@ function* backOutAttempt(
   if (typeof claim === "string") {
     return claim === "missing";
   }
-  const claimed = yield* readReleasePath(marker, fileSystem);
-  if (claimed !== raw) {
+  const claimed = yield* retryLockStep({ op: "readText", path: marker }, () =>
+    fileSystem.readText(marker),
+  );
+  if (typeof claimed === "string" || claimed.value !== raw) {
     yield* restoreDisplacedLock(path, marker, fileSystem);
-  } else {
-    yield* unlinkBackOutMarker(path, marker, fileSystem);
+    // Unknown claimed bytes may have restored this doomed publication to P. Remember
+    // its exact bytes for the next call; a successful foreign read needs no pending entry.
+    return claimed !== "failed";
   }
+  yield* unlinkBackOutMarker(path, marker, fileSystem);
   return true;
 }
 
@@ -1334,26 +1393,32 @@ function* publishFile(
   pid: number,
   fileSystem: LockFileSystem,
   idGenerator: IdGenerator = defaultIdGenerator,
+  postPublish?: (tmp: string) => Steps<void>,
 ): Steps<Publication> {
   const tmp = `${path}.${pid}.${++publicationCounter}.${idGenerator.next()}.tmp`;
   let linking = false;
   try {
-    // A recycled name may still alias a live lock inode; unlink before exclusive create.
-    yield* cleanupFile(tmp, fileSystem);
-    yield { op: "writeFile", path: tmp };
-    fileSystem.writeFile(tmp, content);
-    yield { op: "link", path };
-    linking = true;
-    fileSystem.link(tmp, path);
-    return "created";
-  } catch (error) {
-    if (linking && (error as NodeJS.ErrnoException).code === "EEXIST") {
-      // Exclusive link contention is expected and never overwrites an owner.
-      logger.debug(`Lock publication contended at ${path}: ${errorMessage(error)}`);
-      return "contended";
+    try {
+      // A recycled name may still alias a live lock inode; unlink before exclusive create.
+      yield* cleanupFile(tmp, fileSystem);
+      yield { op: "writeFile", path: tmp };
+      fileSystem.writeFile(tmp, content);
+      yield { op: "link", path };
+      linking = true;
+      fileSystem.link(tmp, path);
+    } catch (error) {
+      if (linking && (error as NodeJS.ErrnoException).code === "EEXIST") {
+        // Exclusive link contention is expected and never overwrites an owner.
+        logger.debug(`Lock publication contended at ${path}: ${errorMessage(error)}`);
+        return "contended";
+      }
+      logger.warn(`Atomic lock publication failed at ${path}: ${errorMessage(error)}`, error);
+      return { error };
     }
-    logger.warn(`Atomic lock publication failed at ${path}: ${errorMessage(error)}`, error);
-    return { error };
+    if (postPublish) {
+      yield* postPublish(tmp);
+    }
+    return "created";
   } finally {
     yield* cleanupFile(tmp, fileSystem);
   }
@@ -1387,7 +1452,17 @@ function* writeExclusiveLockFile(
   try {
     const generation = captureLockOwnerGeneration(options.ownerGeneration, pid);
     const content = formatLockContent(pid, options.ownerToken, options.metadata, generation);
-    const publication = yield* publishFile(path, content, pid, fileSystem, options.idGenerator);
+    let acquired = false;
+    const publication = yield* publishFile(
+      path,
+      content,
+      pid,
+      fileSystem,
+      options.idGenerator,
+      function* (tmp): Steps<void> {
+        acquired = yield* checkRetainedLock(path, options, generation, reclaimed, content, tmp);
+      },
+    );
     const published =
       typeof publication === "string"
         ? publication === "created"
@@ -1395,7 +1470,9 @@ function* writeExclusiveLockFile(
     if (!published) {
       return { acquired: false, generation, swept: sweep };
     }
-    const acquired = yield* checkRetainedLock(path, options, generation, reclaimed, content);
+    if (typeof publication !== "string") {
+      acquired = yield* checkRetainedLock(path, options, generation, reclaimed, content);
+    }
     return { acquired, generation, swept: sweep, blocked: !acquired };
   } catch (error) {
     // Genuine IO failures are not contention (#3623).

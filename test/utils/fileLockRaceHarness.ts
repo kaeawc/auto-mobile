@@ -127,6 +127,8 @@ export interface Actor {
   backOutReturned?: boolean;
   retainedPeerDecision?: boolean;
   releaseReturned?: boolean;
+  reopenOwner?: Actor;
+  reopened?: boolean;
 }
 
 function actorRaw(actor: Actor): string {
@@ -197,10 +199,19 @@ export function advanceActor(
     if (!ioFailureIsAttempt || !(error instanceof ActionableError) || actor.phase !== "acquiring") {
       throw error;
     }
-    retryActor(actor);
+    if (actor.reopenOwner) {
+      finishReopen(actor, f.fs);
+    } else {
+      retryActor(actor);
+    }
     return;
   }
   if (!actor.racer.pending.done) {
+    return;
+  }
+  if (actor.reopenOwner) {
+    expect(actor.racer.pending.value).toBe(false);
+    finishReopen(actor, f.fs);
     return;
   }
   if (actor.phase === "releasing") {
@@ -215,6 +226,17 @@ export function advanceActor(
       actor.racer.trace.some((step) => step.op === "stat" && step.path === `${PATH}.displaced`);
     retryActor(actor);
   }
+}
+
+function finishReopen(actor: Actor, fs: FakeLockFileSystem): void {
+  const owner = actor.reopenOwner!;
+  expect(
+    [PATH, `${PATH}.displaced`].some((name) => {
+      const node = fs.peek(name);
+      return node?.ino === owner.publicationIno && node?.raw === actorRaw(owner);
+    }),
+  ).toBe(true);
+  actor.phase = "finished";
 }
 
 function retryActor(actor: Actor): void {
@@ -353,6 +375,13 @@ export function checkMutation(
     .flatMap((other) =>
       namesHolding(f.fs, actorRaw(other))
         .filter((name) => name === PATH || name === `${PATH}.displaced`)
+        .filter(
+          (name) =>
+            !trackResiduals ||
+            other.publicationIno === undefined ||
+            f.fs.peek(name)?.ino === other.publicationIno ||
+            other.publicationCopies?.has(f.fs.peek(name)!.ino),
+        )
         .map((name) => ({ name, raw: actorRaw(other), owner: other })),
     );
   const pathWasAbsent = !f.fs.peek(PATH);
@@ -380,8 +409,9 @@ export function checkMutation(
     !pending.done &&
     pending.value.op === "readText" &&
     pending.value.path === PATH &&
-    previous?.op === "readText" &&
-    previous.path === `${PATH}.displaced` &&
+    ((previous?.op === "readText" && previous.path === `${PATH}.displaced`) ||
+      (previous?.op === "stat" && previous.path.endsWith(".tmp"))) &&
+    f.fs.peek(`${PATH}.displaced`)?.ino === actor.publicationIno &&
     f.fs.peek(`${PATH}.displaced`)?.raw === actorRaw(actor);
   const peerAtDecision = f.fs.peek(PATH)?.raw;
   const start = f.fs.operations.length;
@@ -540,11 +570,11 @@ function executeRetainedSchedule(seed: number, trace: string[]): void {
     faultStreaks: new Map(),
     actors: [holder, ...[202, 303, 404].map((pid) => retainedActor(f, pid))],
   };
-  scheduleRetainedActors(context);
-  f.fs.failure = undefined;
-  // A second real displacement after setup: read an owner's P before a takeover frees it.
-  // This releaser's rename can now claim a later publication and exercise restore failures/F1.
   try {
+    scheduleRetainedActors(context);
+    f.fs.failure = undefined;
+    // A second real displacement after setup: read an owner's P before a takeover frees it.
+    // This releaser's rename can now claim a later publication and exercise restore failures/F1.
     addStaleReleaser(context);
     scheduleRetainedActors(context);
     finishRetainedSchedule(context);
@@ -644,11 +674,14 @@ function scheduleRetainedActors(context: RetainedContext): void {
     if (!actor) {
       return;
     }
-    if (actor.phase === "holding" && shouldKeepHolding(actor, actors)) {
-      continue;
+    if (actor.phase === "holding") {
+      maybeReopen(context, actor);
+      if (shouldKeepHolding(actor, actors)) {
+        continue;
+      }
     }
     trace.push(`${actor.pid} ${actor.phase} ${JSON.stringify(actor.racer.pending.value)}`);
-    if (seed % 2 === 1 && !actor.staleRelease && random.next() < 0.015) {
+    if (seed % 2 === 1 && !actor.staleRelease && !actor.reopenOwner && random.next() < 0.015) {
       actor.phase = "crashed";
       f.live.delete(actor.pid);
       trace.push(`${actor.pid} CRASH`);
@@ -663,7 +696,30 @@ function scheduleRetainedActors(context: RetainedContext): void {
   throw new Error("Retained scheduler exceeded step budget");
 }
 
+function maybeReopen(context: RetainedContext, owner: Actor): void {
+  if (
+    owner.reopened ||
+    owner.everResidual ||
+    owner.publicationIno === undefined ||
+    context.f.fs.peek(`${PATH}.displaced`)?.ino !== owner.publicationIno ||
+    context.random.next() >= 0.2
+  ) {
+    return;
+  }
+  owner.reopened = true;
+  // Identical options deliberately have no per-acquisition nonce (#2947).
+  const reopen = retainedActor(context.f, owner.pid);
+  reopen.options = owner.options;
+  reopen.racer = new Racer(acquireExclusiveLockSteps(PATH, reopen.options));
+  reopen.reopenOwner = owner;
+  context.actors.push(reopen);
+  context.trace.push(`${owner.pid} REOPEN while holding inode ${owner.publicationIno}`);
+}
+
 function shouldKeepHolding(actor: Actor, actors: Actor[]): boolean {
+  if (actors.some((a) => a.reopenOwner === actor && a.phase === "acquiring")) {
+    return true;
+  }
   if (!actors.some((a) => a.phase === "acquiring")) {
     return false;
   }

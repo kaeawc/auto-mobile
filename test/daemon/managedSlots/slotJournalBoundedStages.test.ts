@@ -8,6 +8,7 @@ import {
   SLOT_JOURNAL_DELETE_GRACE_MS,
   SLOT_JOURNAL_STEP_BUDGET_MS,
   SLOT_JOURNAL_STOP_BUDGET_MS,
+  SLOT_JOURNAL_OVERDUE_DELETE_GRACE_MS,
   type SlotJournalPassResult,
 } from "../../../src/daemon/managedSlots/slotJournal";
 import {
@@ -574,6 +575,45 @@ describe("bounded journal provider stages (#12056)", () => {
       expect(h.inventory.has(open[0].target.oldStableId!)).toBe(false);
     });
   }
+
+  test("acquisition beyond overdue grace returns immediately and leaves retry to the pass", async () => {
+    const h = await replacementHarness();
+    h.deleter.beforeDelete = () => new Promise<void>(() => {});
+    const replacement = h.reconciler.reconcile({
+      ...h.request,
+      requestedSpec: SPEC,
+      deadlineMs: h.timer.now() + 10,
+    });
+    await flush();
+    expect(h.deleter.calls).toHaveLength(1);
+    h.timer.advanceTime(10 + SLOT_JOURNAL_DELETE_GRACE_MS);
+    expect(await replacement).toMatchObject({
+      outcome: "failed",
+      failure: { code: "cleanup_pending", retryable: true },
+    });
+    h.timer.advanceTime(SLOT_JOURNAL_OVERDUE_DELETE_GRACE_MS + 1);
+    const before = await h.registry.listOpenSlotJournal(h.key);
+    const now = h.timer.now();
+    let returned = false;
+    const acquisition = h.reconciler
+      .reconcile({ ...h.request, deadlineMs: now + 10 })
+      .then((result) => {
+        returned = true;
+        return result;
+      });
+    await flush();
+    expect(returned).toBe(true);
+    expect(await acquisition).toMatchObject({
+      outcome: "failed",
+      failure: { code: "cleanup_pending", retryable: true },
+    });
+    expect(h.timer.now()).toBe(now);
+    expect(h.deleter.calls).toHaveLength(1);
+    expect(await h.registry.listOpenSlotJournal(h.key)).toEqual(before);
+    h.deleter.beforeDelete = undefined;
+    expect(await h.journal.runPass()).toMatchObject({ settled: [{ phase: "committed" }] });
+    expect(h.deleter.calls).toHaveLength(2);
+  });
 
   test("public deletion with an already aborted signal records cleanup_pending", async () => {
     const h = await harness();

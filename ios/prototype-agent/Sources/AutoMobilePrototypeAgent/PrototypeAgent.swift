@@ -1,4 +1,3 @@
-import Combine
 import os
 import SwiftUI
 import UIKit
@@ -14,8 +13,20 @@ public func amPrototypeAgentStart() {
     }
 }
 
+/// A distinct selector target keeps each scene registration's identity and synchronous delivery.
+@MainActor
+private final class PrototypeSceneActivationObserver: NSObject {
+    private let action: (Notification) -> Void
+
+    init(action: @escaping (Notification) -> Void) { self.action = action }
+
+    @objc
+    func activated(_ note: Notification) { action(note) }
+}
+
 /// A window above the app's own windows (including its alerts) that accepts touches only inside
 /// the prototype content and the host dismiss control; everything else falls through to the app.
+@MainActor
 final class PassthroughWindow: UIWindow {
     weak var model: PrototypeModel?
 
@@ -45,16 +56,18 @@ final class PassthroughWindow: UIWindow {
     }
 }
 
-final class PrototypeAgent {
+@MainActor
+final class PrototypeAgent: NSObject {
     static let shared = PrototypeAgent()
 
     let model = PrototypeModel()
     private var window: PassthroughWindow?
     private var server: PrototypeServer?
     private var layers: PrototypeLayersViewController?
-    private var sceneObserver: NSObjectProtocol?
-    private var keyboardObservers: [NSObjectProtocol] = []
-    private var sessionObserver: AnyCancellable?
+    private var sceneObserver: PrototypeSceneActivationObserver?
+    // Selector observers are weakly held by NotificationCenter. Retain each registration just as
+    // its old block registration was retained by the center until that registration was removed.
+    private var sceneObservers: [PrototypeSceneActivationObserver] = []
     /// Keeps the scene's appearance observation alive; the window, once attached, is never removed.
     private var appearanceObservation: (any UITraitChangeRegistration)?
     /// App windows' own `accessibilityElementsHidden` while the prototype covers them.
@@ -96,12 +109,13 @@ final class PrototypeAgent {
         server.onClientCountChanged = { [weak self] count in self?.clientCountChanged(count) }
         model.onVisibilityChange = { [weak self] visible in self?.setVisible(visible) }
         model.onEndEditing = { [weak self] in _ = self?.window?.endEditing(true) }
-        // `$session` publishes the new value before `model.session` holds it, so the flags are
-        // computed from the published value: a dialog opening or closing re-applies them.
-        sessionObserver = model.$session.sink { [weak self] session in
+        // Session changes deliver the new value before storage and transition side effects,
+        // so a dialog opening or closing re-applies the flags at the same point.
+        model.onSessionChange = { [weak self] session in
             self?.updateAccessibility(session: session)
             self?.applyInterfaceStyle(session: session)
         }
+        model.onSessionChange?(model.session)
         observeKeyboard()
         server.start()
         self.server = server
@@ -113,23 +127,43 @@ final class PrototypeAgent {
     /// app's process, so these are the notifications of the keyboard the app shows.
     private func observeKeyboard() {
         let center = NotificationCenter.default
-        keyboardObservers = [
-            center.addObserver(
-                forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main
-            ) { [weak self] note in
-                let info = note.userInfo
-                let frame = (info?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
-                let duration = (info?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue
-                MainActor.assumeIsolated { self?.model.setKeyboard(frame: frame, duration: duration) }
-            },
-            center.addObserver(
-                forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main
-            ) { [weak self] note in
-                let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?
-                    .doubleValue
-                MainActor.assumeIsolated { self?.model.setKeyboard(frame: nil, duration: duration) }
-            },
-        ]
+        center.addObserver(
+            self,
+            selector: #selector(keyboardChanged(_:)),
+            name: UIResponder.keyboardWillChangeFrameNotification,
+            object: nil
+        )
+        center.addObserver(
+            self,
+            selector: #selector(keyboardHidden(_:)),
+            name: UIResponder.keyboardWillHideNotification,
+            object: nil
+        )
+    }
+
+    @objc
+    private func keyboardChanged(_ note: Notification) {
+        let info = note.userInfo
+        let frame = (info?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+        let duration = (info?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue
+        model.setKeyboard(frame: frame, duration: duration)
+    }
+
+    @objc
+    private func keyboardHidden(_ note: Notification) {
+        let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue
+        model.setKeyboard(frame: nil, duration: duration)
+    }
+
+    @objc
+    private func sceneActivated(_: Notification) {
+        guard model.spec != nil else { return }
+        if let observer = sceneObserver {
+            NotificationCenter.default.removeObserver(observer)
+            sceneObservers.removeAll { $0 === observer }
+        }
+        sceneObserver = nil
+        setVisible(true)
     }
 
     // MARK: Window
@@ -150,8 +184,8 @@ final class PrototypeAgent {
     }
 
     /// Puts the resolved mode on the window's UIKit trait, so UIKit-backed pieces (a text field's
-    /// keyboard, dynamic `UIColor`s) match what SwiftUI draws. `session` is the published value,
-    /// which `model.session` does not hold yet while `$session` is publishing.
+    /// keyboard, dynamic `UIColor`s) match what SwiftUI draws. `session` is the incoming value,
+    /// delivered before `model.session` is replaced.
     private func applyInterfaceStyle(session: PrototypeSession) {
         guard let window, let appearance = session.appearance else { return }
         let style: UIUserInterfaceStyle = appearance.dark ? .dark : .light
@@ -210,14 +244,15 @@ final class PrototypeAgent {
         guard window == nil else { return }
         guard let scene = activeScene() else {
             // The app has not connected a scene yet; attach when one activates.
-            sceneObserver = NotificationCenter.default.addObserver(
-                forName: UIScene.didActivateNotification, object: nil, queue: .main
-            ) { [weak self] _ in
-                guard let self, self.model.spec != nil else { return }
-                if let observer = self.sceneObserver { NotificationCenter.default.removeObserver(observer) }
-                self.sceneObserver = nil
-                self.setVisible(true)
-            }
+            let observer = PrototypeSceneActivationObserver { [weak self] note in self?.sceneActivated(note) }
+            NotificationCenter.default.addObserver(
+                observer,
+                selector: #selector(PrototypeSceneActivationObserver.activated(_:)),
+                name: UIScene.didActivateNotification,
+                object: nil
+            )
+            sceneObservers.append(observer)
+            sceneObserver = observer
             return
         }
         let window = PassthroughWindow(windowScene: scene)
@@ -232,12 +267,10 @@ final class PrototypeAgent {
         self.window = window
         // A simulator appearance change re-resolves the shown prototype (#11222).
         // The window is attached from the main queue, which is the isolation UIKit asks for here.
-        appearanceObservation = MainActor.assumeIsolated {
-            scene.registerForTraitChanges(
-                [UITraitUserInterfaceStyle.self]
-            ) { [weak self] (_: UIWindowScene, _: UITraitCollection) in
-                self?.syncDeviceAppearance()
-            }
+        appearanceObservation = scene.registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self]
+        ) { [weak self] (_: UIWindowScene, _: UITraitCollection) in
+            self?.syncDeviceAppearance()
         }
         syncDeviceAppearance()
         applyInterfaceStyle(session: model.session)
@@ -429,6 +462,7 @@ final class PrototypeAgent {
 /// The prototype window's root: the page's hosting view with the top layer's above it (see
 /// `PrototypeHostLayer`). Each lays out the whole window the same way and draws only its own layer,
 /// so their `.global` frames, and the hit rects reported from them, are both window coordinates.
+@MainActor
 final class PrototypeLayersViewController: UIViewController {
     private let model: PrototypeModel
     private let page: UIHostingController<PrototypeRootView>
@@ -480,6 +514,7 @@ final class PrototypeLayersViewController: UIViewController {
 
 /// Routes each touch to the hosting view that drew what is under it. Both views fill the window,
 /// so without this the top one would take every touch, including those meant for the page.
+@MainActor
 private final class PrototypeLayersView: UIView {
     weak var model: PrototypeModel?
     var hosts: (page: UIView, top: UIView)?
@@ -506,8 +541,9 @@ private final class PrototypeLayersView: UIView {
 /// Lays out the shown spec by placement and records the touchable rects for the window. `layer`
 /// picks what this hosting view draws: the page (the spec's tree and anchor layer) or the top
 /// layer (open dialogs and snackbars and the host dismiss control).
+@MainActor
 struct PrototypeRootView: View {
-    @ObservedObject var model: PrototypeModel
+    let model: PrototypeModel
     let layer: PrototypeHostLayer
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -720,6 +756,7 @@ extension View {
 
 /// Calls back after the next display frame, so a visual change made just before is on screen.
 /// Falls back after 100 ms if no frame is delivered (backgrounded app, paused display link).
+@MainActor
 private final class FrameWaiter: NSObject {
     private var link: CADisplayLink?
     private var completion: (() -> Void)?

@@ -42,7 +42,7 @@ fi
 xcrun --sdk iphonesimulator swiftc \
   -target "${target}" \
   -sdk "${sdk}" \
-  -swift-version 5 \
+  -swift-version 6 \
   -warnings-as-errors \
   -O \
   -module-name AutoMobilePrototypeAgent \

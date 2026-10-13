@@ -382,7 +382,7 @@ describe("session release device ownership hold", () => {
   });
 });
 
-test("bind refusal uses the real four second hold and resets its bound at early confirmation", async () => {
+test("bind refusal uses the real derived hold and resets its bound at early confirmation", async () => {
   const { manager, timer, behavior, session } = await harness();
   const teardown = Promise.withResolvers<void>();
   behavior.gate = teardown.promise;
@@ -420,10 +420,11 @@ test("bind refusal uses the real four second hold and resets its bound at early 
   }
   try {
     const base = getSessionReleaseCleanupWorstCaseMs(undefined, session.cacheData);
-    expect(await refusedBind()).toBe(4_000 + base);
+    expect(await refusedBind()).toBe(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS + base);
     expect(reowner.isReleaseHeld(SESSION)).toBe(true);
-    timer.advanceTime(1_200);
-    expect(await refusedBind()).toBe(2_800 + base);
+    const elapsed = MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS / 2;
+    timer.advanceTime(elapsed);
+    expect(await refusedBind()).toBe(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS - elapsed + base);
     reowner.confirmOwnership(SESSION);
     await drainMicrotasks(40);
     expect(await refusedBind()).toBe(base);

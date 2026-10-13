@@ -243,6 +243,9 @@ export function* acquireExclusiveLockSteps(
     return yield* reclaimExclusiveLock(lockFilePath, options, initial, generation);
   }
   const first = yield* writeExclusiveLockFile(lockFilePath, pid, options);
+  if (first.blocked) {
+    return false;
+  }
   if (first.acquired) {
     return true;
   }
@@ -663,7 +666,7 @@ function* reclaimExclusiveLock(
       // Once removed, this fingerprint cannot pass the path check again.
       yield* cleanupFile(`${prefix}.${lower}`, fileSystem);
     }
-    return (yield* writeExclusiveLockFile(lockFilePath, pid, options, false)).acquired;
+    return (yield* writeExclusiveLockFile(lockFilePath, pid, options, false, observed)).acquired;
   } finally {
     yield* releaseGuard(`${prefix}.${guard.k}`, guard.content, fileSystem);
     if (guard.compacted) {
@@ -672,6 +675,12 @@ function* reclaimExclusiveLock(
   }
 }
 
+/**
+ * F = P.displaced remains authoritative until owner release or guarded reclaim.
+ * COMPLETE only links F to P; it never removes F or copies sampled bytes.
+ * R2 remains only while a lock is at a private in-flight marker: a third publisher
+ * can win, or owner release can miss it before the displacer restores/retains it.
+ */
 function* restoreDisplacedLock(
   path: string,
   marker: string,
@@ -688,7 +697,7 @@ function* restoreDisplacedLock(
     } else {
       logger.warn(`Displaced lock link restore failed at ${path}: ${errorMessage(error)}`, error);
       if (!(yield* copyDisplacedLock(path, marker, fileSystem))) {
-        yield* renameDisplacedLock(path, marker, fileSystem);
+        yield* retainDisplacedLock(path, marker, fileSystem);
         return;
       }
     }
@@ -710,28 +719,133 @@ function* copyDisplacedLock(
   return result !== "failed";
 }
 
-function* renameDisplacedLock(
+function* sampleRetainedLock(
+  path: string,
+  fileSystem: LockFileSystem,
+): Steps<LockSample | "absent" | "unreadable"> {
+  let identity: { ino: number; mtimeMs: number };
+  try {
+    yield { op: "stat", path };
+    identity = fileSystem.stat(path);
+  } catch (error) {
+    // Only ENOENT proves absence; all other failures conservatively block acquisition.
+    logger.debug(`Retained lock stat failed at ${path}: ${errorMessage(error)}`, error);
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : "unreadable";
+  }
+  const raw = yield* readText(path, fileSystem);
+  return raw === undefined ? "unreadable" : { ...identity, raw };
+}
+
+function* retainDisplacedLock(
   path: string,
   marker: string,
   fileSystem: LockFileSystem,
 ): Steps<void> {
-  try {
-    yield { op: "exists", path };
-    if (fileSystem.exists(path)) {
-      // A failed copy may have left a partial destination that cleanup could not remove.
-      logger.warn(`Displaced lock last-resort restore blocked at ${path}; retaining ${marker}`);
-      return;
+  const retained = `${path}.displaced`;
+  const sample = yield* sampleRetainedLock(retained, fileSystem);
+  if (sample === "absent") {
+    try {
+      yield { op: "rename", path: marker };
+      fileSystem.rename(marker, retained);
+      logger.warn(
+        `Displaced lock restore failed at ${path}; retained at ${retained}; lock state is held-unknown`,
+      );
+    } catch (error) {
+      logger.warn(
+        `Displaced lock retention failed at ${path}; retaining ${marker}: ${errorMessage(error)}`,
+        error,
+      );
     }
-    yield { op: "rename", path: marker };
-    fileSystem.rename(marker, path);
-  } catch (error) {
-    logger.warn(
-      `Displaced lock last-resort restore failed at ${path}: ${errorMessage(error)}`,
-      error,
-    );
-    // Leave the marker if even rename fails: it is the only copy of a possibly
-    // live owner's lock. Deleting it would silently free that held lock.
+    return;
   }
+  if (sample !== "unreadable" && sameSample(yield* sampleLock(marker, fileSystem), sample)) {
+    yield* cleanupFile(marker, fileSystem);
+    return;
+  }
+  logger.warn(
+    `Displaced lock retention blocked at ${retained}; retaining ${marker}; lock state is held-unknown`,
+  );
+}
+
+/** Caller holds the guard for observed; verify both sides of the rename before deleting. */
+function* removeRetainedInstance(
+  path: string,
+  observed: LockSample,
+  options: ExclusiveLockOptions,
+): Steps<void> {
+  const fileSystem = options.fileSystem ?? nodeLockFileSystem;
+  const retained = `${path}.displaced`;
+  if (!sameSample(yield* sampleLock(retained, fileSystem), observed)) {
+    return;
+  }
+  const marker = `${path}.${options.pid ?? process.pid}.reclaim`;
+  if (!(yield* claimLockMarker(retained, marker, fileSystem))) {
+    return;
+  }
+  if (!sameSample(yield* sampleLock(marker, fileSystem), observed)) {
+    yield* retainDisplacedLock(path, marker, fileSystem);
+    return;
+  }
+  yield* cleanupFile(marker, fileSystem);
+}
+
+function* reclaimRetainedInstance(
+  path: string,
+  observed: LockSample,
+  options: ExclusiveLockOptions,
+  generation: string | undefined,
+): Steps<void> {
+  const fileSystem = options.fileSystem ?? nodeLockFileSystem;
+  const prefix = guardPrefix(path, observed);
+  const guard = yield* claimReclaimGuard(prefix, options, generation);
+  if (guard === undefined) {
+    return;
+  }
+  try {
+    yield* removeRetainedInstance(path, observed, options);
+  } finally {
+    yield* releaseGuard(`${prefix}.${guard.k}`, guard.content, fileSystem);
+    if (guard.compacted) {
+      yield* releaseGuard(`${prefix}.0`, guard.content, fileSystem);
+    }
+  }
+}
+
+function* checkRetainedLock(
+  path: string,
+  options: ExclusiveLockOptions,
+  generation: string | undefined,
+  reclaimed: LockSample | undefined,
+): Steps<boolean> {
+  const fileSystem = options.fileSystem ?? nodeLockFileSystem;
+  const retained = yield* sampleRetainedLock(`${path}.displaced`, fileSystem);
+  if (retained === "absent") {
+    return true;
+  }
+  if (typeof retained !== "string") {
+    if (reclaimed !== undefined && sameSample(retained, reclaimed)) {
+      yield* removeRetainedInstance(path, reclaimed, options);
+      return true;
+    }
+    if (isReclaimable(retained, options)) {
+      const alreadyGuarded =
+        reclaimed !== undefined && guardPrefix(path, reclaimed) === guardPrefix(path, retained);
+      if (!alreadyGuarded) {
+        yield* reclaimRetainedInstance(path, retained, options, generation);
+      }
+      return true;
+    }
+  }
+  // Back out only P; F remains the retained owner's authority throughout COMPLETE.
+  yield* releaseLockPath(path, options.pid ?? process.pid, options.ownerToken, fileSystem);
+  try {
+    yield { op: "link", path };
+    fileSystem.link(`${path}.displaced`, path);
+  } catch (error) {
+    // Occupation, owner release or unavailable links safely leave F authoritative.
+    logger.debug(`Retained lock completion skipped at ${path}: ${errorMessage(error)}`, error);
+  }
+  return false;
 }
 
 function* cleanupFile(path: string, fileSystem: LockFileSystem): Steps<void> {
@@ -762,7 +876,7 @@ function* removeStaleLockMarker(path: string, fileSystem: LockFileSystem): Steps
 }
 
 /**
- * Read the PID recorded in an exclusive lock file without attempting to
+ * Read the PID from P, falling back to its retained sibling when unreadable, without attempting to
  * acquire or reclaim it (issue #6260). Used by callers that need to name the
  * process currently holding a lease in an actionable error — e.g. "another
  * AutoMobile process (PID N) owns this resource" — rather than a bare
@@ -775,11 +889,8 @@ export function readLockOwnerPid(
   ownerGeneration?: LockOwnerGenerationProbe,
   fileSystem: LockFileSystem = nodeLockFileSystem,
 ): number | undefined {
-  let content: string;
-  try {
-    content = fileSystem.readText(lockFilePath).trim();
-  } catch (error) {
-    logger.debug(`src/utils/fileLock.ts readLockOwnerPid: lock unreadable: ${error}`, error);
+  const content = finishLockSteps(readLockOrRetained(lockFilePath, fileSystem))?.trim();
+  if (content === undefined) {
     return undefined;
   }
   const { pid, generation } = parseLockContent(content);
@@ -797,18 +908,23 @@ export function readLockOwnerPid(
 }
 
 /**
- * Read and parse an exclusive lock file without acquiring or reclaiming it.
+ * Read and parse P, falling back to its retained sibling only when P is unreadable.
  * Returns `undefined` when the file is missing, unreadable, or empty.
  */
 export function readExclusiveLockContent(
   lockFilePath: string,
   fileSystem: LockFileSystem = nodeLockFileSystem,
 ): LockContent | undefined {
-  const content = finishLockSteps(readText(lockFilePath, fileSystem))?.trim();
+  const content = finishLockSteps(readLockOrRetained(lockFilePath, fileSystem))?.trim();
   if (content === undefined || content.length === 0) {
     return undefined;
   }
   return parseLockContent(content);
+}
+
+function* readLockOrRetained(path: string, fileSystem: LockFileSystem): Steps<string | undefined> {
+  const content = yield* readText(path, fileSystem);
+  return content ?? (yield* readText(`${path}.displaced`, fileSystem));
 }
 
 /**
@@ -817,7 +933,10 @@ export function readExclusiveLockContent(
  * its control socket is unreachable). The takeover only succeeds when the lock
  * still holds exactly the observed owner's PID and token. Removal is guarded by
  * the sampled file identity just like dead-owner reclaim. R2: a live owner's own
- * release racing takeover retains the residual window documented in release.
+ * release racing takeover retains the private-marker in-flight window below.
+ * A lock only at F cannot be taken over. A taker crashing after publication but
+ * before removing a live owner's linked F is undone by the next acquirer,
+ * which restores that owner's lock to P as if the takeover never happened.
  */
 export function takeOverExclusiveLock(
   lockFilePath: string,
@@ -887,6 +1006,42 @@ export function* releaseExclusiveLockSteps(
   ownerToken?: string,
   fileSystem: LockFileSystem = nodeLockFileSystem,
 ): Steps<void> {
+  yield* releaseRetainedLock(lockFilePath, pid, ownerToken, fileSystem);
+  yield* releaseLockPath(lockFilePath, pid, ownerToken, fileSystem);
+}
+
+function* releaseRetainedLock(
+  path: string,
+  pid: number,
+  ownerToken: string | undefined,
+  fileSystem: LockFileSystem,
+): Steps<void> {
+  const retained = `${path}.displaced`;
+  const raw = yield* readText(retained, fileSystem);
+  if (raw === undefined || !isOwnLockContent(parseLockContent(raw.trim()), pid, ownerToken)) {
+    return;
+  }
+  const marker = `${path}.${pid}.release.${++releaseMarkerCounter}`;
+  if (!(yield* claimLockMarker(retained, marker, fileSystem))) {
+    return;
+  }
+  const claimed = yield* readText(marker, fileSystem);
+  if (
+    claimed === undefined ||
+    !isOwnLockContent(parseLockContent(claimed.trim()), pid, ownerToken)
+  ) {
+    yield* retainDisplacedLock(path, marker, fileSystem);
+    return;
+  }
+  yield* cleanupFile(marker, fileSystem);
+}
+
+function* releaseLockPath(
+  lockFilePath: string,
+  pid: number,
+  ownerToken: string | undefined,
+  fileSystem: LockFileSystem,
+): Steps<void> {
   let content: string;
   try {
     yield { op: "readText", path: lockFilePath };
@@ -908,12 +1063,7 @@ export function* releaseExclusiveLockSteps(
   // unlink-by-path, which would delete the TAKER's lock. Claim the exact file
   // instance by renaming it to a unique marker, verify the marker is ours, and
   // only then delete it; a displaced foreign lock is restored instead.
-  // POSIX has no compare-and-unlink, so a residual window remains: a releaser
-  // whose read predates a completed takeover can rename the taker's lock away
-  // and a third fresh acquirer can win before the restore. Forwarding-lease
-  // owners that answer their socket therefore release on request instead of
-  // being taken over (#10506 review); only an unreachable or orphaned owner is
-  // taken over while live.
+  // R2 is the private-marker in-flight window described at restoreDisplacedLock.
   const releaseMarker = `${lockFilePath}.${pid}.release.${++releaseMarkerCounter}`;
   try {
     yield { op: "rename", path: lockFilePath };
@@ -1008,7 +1158,8 @@ function* writeExclusiveLockFile(
   pid: number,
   options: ExclusiveLockOptions,
   sweep = true,
-): Steps<{ acquired: boolean; generation: string | undefined; swept: boolean }> {
+  reclaimed?: LockSample,
+): Steps<{ acquired: boolean; generation: string | undefined; swept: boolean; blocked?: boolean }> {
   const fileSystem = options.fileSystem ?? nodeLockFileSystem;
   try {
     yield { op: "mkdir", path: dirname(path) };
@@ -1031,14 +1182,15 @@ function* writeExclusiveLockFile(
     const generation = captureLockOwnerGeneration(options.ownerGeneration, pid);
     const content = formatLockContent(pid, options.ownerToken, options.metadata, generation);
     const publication = yield* publishFile(path, content, pid, fileSystem, options.idGenerator);
-    if (typeof publication === "string") {
-      return { acquired: publication === "created", generation, swept: sweep };
+    const published =
+      typeof publication === "string"
+        ? publication === "created"
+        : yield* writeLegacyLock(path, content, fileSystem);
+    if (!published) {
+      return { acquired: false, generation, swept: sweep };
     }
-    return {
-      acquired: yield* writeLegacyLock(path, content, fileSystem),
-      generation,
-      swept: sweep,
-    };
+    const acquired = yield* checkRetainedLock(path, options, generation, reclaimed);
+    return { acquired, generation, swept: sweep, blocked: !acquired };
   } catch (error) {
     // Genuine IO failures are not contention (#3623).
     throw toActionableError(error, `Failed to create exclusive lock file at ${path}`);

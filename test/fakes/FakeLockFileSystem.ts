@@ -15,6 +15,7 @@ export class FakeLockFileSystem implements LockFileSystem {
   private nextInode = 1;
   private nextDescriptor = 1;
   readonly operations: { op: keyof LockFileSystem; path: string }[] = [];
+  failure?: (op: keyof LockFileSystem, path: string) => string | undefined;
   linkError?: string;
   openError?: string;
   writeError?: string;
@@ -98,6 +99,10 @@ export class FakeLockFileSystem implements LockFileSystem {
 
   openExclusive(path: string): number {
     this.record("openExclusive", path);
+    const failure = this.failure?.("openExclusive", path);
+    if (failure) {
+      throw this.error(failure, path);
+    }
     if (this.files.has(path)) {
       throw this.error("EEXIST", path);
     }
@@ -135,6 +140,10 @@ export class FakeLockFileSystem implements LockFileSystem {
 
   writeFile(path: string, content: string): void {
     this.record("writeFile", path);
+    const failure = this.failure?.("writeFile", path);
+    if (failure) {
+      throw this.error(failure, path);
+    }
     if (this.writeFileError) {
       throw this.error(this.writeFileError, path);
     }
@@ -154,6 +163,10 @@ export class FakeLockFileSystem implements LockFileSystem {
 
   rename(from: string, to: string): void {
     this.record("rename", from);
+    const failure = this.failure?.("rename", from);
+    if (failure) {
+      throw this.error(failure, from);
+    }
     const node = this.file(from);
     if (!this.directories.has(dirname(to))) {
       throw this.error("ENOENT", to);
@@ -167,6 +180,10 @@ export class FakeLockFileSystem implements LockFileSystem {
 
   link(from: string, to: string): void {
     this.record("link", to);
+    const failure = this.failure?.("link", to);
+    if (failure) {
+      throw this.error(failure, to);
+    }
     if (this.linkError) {
       throw this.error(this.linkError, to);
     }
@@ -182,6 +199,10 @@ export class FakeLockFileSystem implements LockFileSystem {
 
   unlink(path: string): void {
     this.record("unlink", path);
+    const failure = this.failure?.("unlink", path);
+    if (failure) {
+      throw this.error(failure, path);
+    }
     if (!this.files.delete(path)) {
       throw this.error("ENOENT", path);
     }

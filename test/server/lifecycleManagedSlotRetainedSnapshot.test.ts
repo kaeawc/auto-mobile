@@ -19,7 +19,6 @@ const DEVICE = { name: "iPhone", deviceId: "IOS-SLOT", platform: "ios" as const 
 const EXECUTION = "exec-new";
 
 describe("lifecycle retained managed-slot snapshot", () => {
-  // Reuse the lifecycle harness's singleton reset and its uninitialized-state assertion.
   const { test, cleanups } = restartStopHarness();
 
   async function fixture() {
@@ -56,6 +55,10 @@ describe("lifecycle retained managed-slot snapshot", () => {
     pool.getDevice(DEVICE.deviceId)!.sessionId = EXECUTION;
     pool.getDevice(DEVICE.deviceId)!.status = "assigned";
     DaemonState.getInstance().initialize(sessions, pool);
+    cleanups.push(() => {
+      DaemonState.getInstance().reset();
+      expect(DaemonState.getInstance().isInitialized()).toBe(false);
+    });
     const input = (sessionUuid: string | undefined = EXECUTION) => ({
       toolName: "killDevice",
       device: DEVICE,

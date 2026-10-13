@@ -13,13 +13,13 @@ enum AppStateWait {
     }
 
     /// Sleep only between failed probes; exhaustion or cancellation returns `false`.
-    static func poll<C: Clock>(
-        clock: C,
+    static func poll(
+        clock: any Clock<Duration>,
         attempts: Int = 10,
         interval: Duration = .milliseconds(50),
         probe: () -> Bool
     )
-        async -> Bool where C.Duration == Duration
+        async -> Bool
     {
         guard attempts > 0 else { return false }
         for attempt in 0 ..< attempts {

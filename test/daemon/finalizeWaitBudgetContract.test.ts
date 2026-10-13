@@ -75,6 +75,7 @@ function registeredRecordingCapMs(deviceId: string): number | undefined {
       },
     },
     {
+      abandonRecordingsOnReplacedDevice: async () => {},
       hasRecordingsToStop: () => true,
       stopSegmentedRecordings: async () => {},
       listActiveVideoRecordings: async () => [],

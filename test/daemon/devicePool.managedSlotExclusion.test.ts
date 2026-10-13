@@ -371,6 +371,45 @@ describe("DevicePool managed-slot exclusion", () => {
     ).rejects.toMatchObject({ code: DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE });
   });
 
+  test("a retained refusal for a nonholding session retries until a current read proves assignment", async () => {
+    await assignManagedSlotDevice(registry, "ios", "SIM-SLOT", "runner", "exec");
+    await setUp([ios("SIM-SLOT")]);
+    const readable = registry.snapshotManagedDevices.bind(registry);
+    await failAfterSnapshot();
+    const input = {
+      action: "tapOn",
+      deviceId: "SIM-SLOT",
+      platform: "ios" as const,
+      requesterSessionUuid: "other",
+    };
+    await expect(pool.assertNotAssignedToManagedSlot(input)).rejects.toMatchObject({
+      code: "discovery_incomplete",
+      retryable: true,
+      retryAfterMs: 2_000,
+    });
+    registry.snapshotManagedDevices = readable;
+    await expect(pool.assertNotAssignedToManagedSlot(input)).rejects.toMatchObject({
+      code: "device_assigned_to_managed_slot",
+      retryable: false,
+    });
+  });
+
+  test("a current registry naming another execution refuses even the session held by this pool", async () => {
+    await assignManagedSlotDevice(registry, "ios", "SIM-SLOT", "runner", "peer");
+    await setUp([ios("SIM-SLOT")]);
+    const held = pool.getDevice("SIM-SLOT")!;
+    held.sessionId = "local";
+    held.status = "assigned";
+    await expect(
+      pool.assertNotAssignedToManagedSlot({
+        action: "tapOn",
+        deviceId: "SIM-SLOT",
+        platform: "ios",
+        requesterSessionUuid: "local",
+      }),
+    ).rejects.toMatchObject({ code: "device_assigned_to_managed_slot", retryable: false });
+  });
+
   test("an existing unmanaged holder keeps control and inventory remains available", async () => {
     await setUp([ios("SIM-FREE")]);
     await pool.bindOrReuseDeviceSession("existing", "SIM-FREE", "ios");

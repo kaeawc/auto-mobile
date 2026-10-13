@@ -4,6 +4,7 @@ import { PROTOTYPE_THEME_MODES_CAPABILITY } from "../observe/android/ctrlProxyPr
 import {
   GUIDE_APPEARANCE,
   GUIDE_COMPONENTS,
+  GUIDE_COST,
   GUIDE_ERRORS,
   GUIDE_INTRO,
   GUIDE_REPEAT,
@@ -214,6 +215,7 @@ export function renderPrototypeGuide(): string {
     GUIDE_APPEARANCE,
     renderIcons(),
     renderPlatformDifferences(),
+    GUIDE_COST,
     GUIDE_ERRORS,
   ].join("\n\n");
 }

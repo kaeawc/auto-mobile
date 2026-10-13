@@ -1,7 +1,7 @@
 import { PrototypeAgentSuspendedError } from "../../../../src/features/prototype/ios/prototypeAgentSuspended";
-import * as agentClient from "../../../../src/features/prototype/ios/prototypeAgentClient";
+import { PrototypeAgentRequestTimeoutError } from "../../../../src/features/prototype/ios/prototypeAgentClient";
 import { ActionableError, toActionableError } from "../../../../src/models/ActionableError";
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import {
   captureHideDeadlineMs,
   IosPrototypeTransport,
@@ -20,10 +20,13 @@ function fakeAgent(
     success: true,
     ...(type === "restore_after_capture" ? { restored: true } : {}),
   }),
+  requestCalls?: Parameters<PrototypeAgentClient["request"]>[],
 ): PrototypeAgentClient {
   return {
     handshake: { agentVersion: "t", protocolVersion: 1, capabilities },
-    async request(type: PrototypeAgentRequestType, body?: PrototypeAgentMessage) {
+    async request(...args: Parameters<PrototypeAgentClient["request"]>) {
+      requestCalls?.push(args);
+      const [type, body] = args;
       calls.push(
         body?.deadlineMs !== undefined
           ? `${type}:${body.deadlineMs}`
@@ -239,18 +242,18 @@ describe("IosPrototypeTransport.captureWithPrototypeHidden", () => {
 
 describe("iOS status suspension deadline", () => {
   test("only status uses the 3000 ms override", async () => {
-    const agent = fakeAgent([], []);
-    const request = spyOn(agent, "request");
+    const requestCalls: Parameters<PrototypeAgentClient["request"]>[] = [];
+    const agent = fakeAgent([], [], undefined, requestCalls);
     const transport = new IosPrototypeTransport(agent);
     await transport.status();
-    expect(request.mock.calls[0]).toEqual(["get_prototype_status", undefined, { timeoutMs: 3000 }]);
+    expect(requestCalls[0]).toEqual(["get_prototype_status", undefined, { timeoutMs: 3000 }]);
     await transport.show({ id: "test", root: { type: "text", text: "Hello" } });
     await transport.dismiss({ all: true });
-    expect(request.mock.calls[1]).toHaveLength(2);
-    expect(request.mock.calls[2]).toHaveLength(2);
+    expect(requestCalls[1]).toHaveLength(2);
+    expect(requestCalls[2]).toHaveLength(2);
   });
   test("status timeout gives foreground guidance and preserves its cause and inspect message", async () => {
-    const timeout = new agentClient.PrototypeAgentRequestTimeoutError("get_prototype_status", 3000);
+    const timeout = new PrototypeAgentRequestTimeoutError("get_prototype_status", 3000);
     const transport = new IosPrototypeTransport(fakeAgent([], [], () => timeout));
     const error = await transport.status().catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(ActionableError);

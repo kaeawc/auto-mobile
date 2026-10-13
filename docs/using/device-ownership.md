@@ -770,12 +770,29 @@ code (owner decision 2026-10-09, #10982): `device_cleanup_in_progress` while the
 device is still being released (#10960), and `device_owned_by_other_daemon` when
 another daemon holds it. Clients may wait and retry.
 
+A health marker refuses acquisition with `device_unhealthy` for every health
+reason (#12112). `devices` lists the unhealthy candidates in selection order,
+with each device's `deviceId`, oldest unresolved `reason`, and `recovering` state.
+A device is recovering only when every unresolved marker has a running recovery, and its bound is the largest marker bound only when all are computable.
+A single device also has top-level `deviceId` and `reason`. `retryable` and
+`recovering` are true while any listed device is recovering; `retryAfterMs`, when
+present, is the smallest remaining recovery bound, rounded up to at least 1 ms.
+Recovery waiting for a live owner, cleanup, identity replacement, or a timed-out
+command to settle has no computable bound; clock retries are also unbounded.
+Such refusals remain retryable without `retryAfterMs`. When recovery ends with
+the marker kept, the refusal is non-retryable: replace the device with
+`killDevice` then `startDevice`. This code has no `nextAction` and is not in the
+runners' device-wait code tables. Healthy candidates remain eligible; reads
+remain allowed on marked devices. Skipped recovery ticks re-arm the same
+attempt, and only a dispatched restore consumes one of the three attempts.
+In a plan failure result, top-level `deviceId` and `platform` identify the plan's device, while `devices[]` identifies the refused devices and top-level `reason`, `recovering`, `code`, `retryable`, and any `retryAfterMs` retain the refusal evidence.
+
 An exact Android acquisition also waits up to 5 s when adb still lists its
 transport as `offline` or `unauthorized` (#11713). If it stays transitional,
 `device_offline` carries `retryable: true`, `deviceId`, and a 1 s `retryAfterMs`
 hint. The refusal is retryable, and any existing pool entry is left untouched.
 
-Each refusal carries a `retryAfterMs` hint. For `device_cleanup_in_progress` it
+The acquisition refusals below carry a `retryAfterMs` hint. For `device_cleanup_in_progress` it
 is the time the cleanup can still take (#11360): the rest of an in-flight release's
 forced-release worst case, or of a registered cleanup's own cap, including a
 recording finalize's cap (120 s plus a 5 s grace),
@@ -829,6 +846,17 @@ refused with `session_rebinding` (`retryable: true`, with `retryAfterMs`), and a
 kill naming a device the session has left with `session_no_longer_owns_device`
 (`retryable: false`, no `nextAction`; check who holds the device before killing
 it, a new session would not help).
+
+A control call that begins after the idle deadline can join a live timely control
+call. Other late calls or tracked work that is aborted or past its request deadline
+cannot admit it: the session ends immediately with `session_ownership_lost`, reason
+`cleanup-expired`, `idle: true` and `nextAction: "acquire_new_session"`.
+If session-preserving device recovery is in flight, the hold and idle deadline
+stay unchanged instead. The late control call receives `session_held_by_recovery`
+with `sessionUuid`, `deviceId`, `retryable: true` and `retryAfterMs: 1000`.
+Retry after recovery settles; the retry receives either the live session or the
+terminal idle answer. A late read behind any hold still runs sessionlessly on the
+held device without releasing or refreshing the session.
 
 ## Device status in listings
 

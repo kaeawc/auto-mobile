@@ -106,7 +106,8 @@ describe("criteria allocation rollback on thrown errors", () => {
     const expectedMessage =
       "Unhealthy devices cannot be assigned: 'device-c' (clock, since 0). " +
       "Session state could not be restored. Retry after restoration succeeds, manually restore the state, " +
-      "or use killDevice/startDevice to replace the device. Automatic erase/reboot is not performed.";
+      "or use killDevice/startDevice to replace the device. Automatic erase/reboot is not performed." +
+      " Background recovery has ended and the marker is held until the device is replaced (code device_unhealthy).";
     const allocation = pool.assignMultipleDevicesByCriteria(requests, 10_000);
     await expect(allocation).rejects.toBeInstanceOf(ActionableError);
     await expect(allocation).rejects.toMatchObject({ message: expectedMessage });

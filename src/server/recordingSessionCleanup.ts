@@ -282,6 +282,8 @@ async function attempt(description: string, work: () => Promise<void>): Promise<
 
 interface RecordingFinalizeStageState {
   stopping: Set<string>;
+  /** Never pruned: a resolved stage is not proof that its capture released ownership. */
+  owned: Set<string>;
   capExpired: boolean;
 }
 
@@ -324,6 +326,7 @@ async function stopOwnedRecordings(
         }
         if (!state.capExpired) {
           stopping.add(recordingId);
+          state.owned.add(recordingId);
         }
         await attempt(
           `stop video recording ${recordingId} of released session ${sessionId ?? "(owner-less)"}`,
@@ -372,21 +375,24 @@ async function stopOwnedRecordingsWithinCap(
 ): Promise<void> {
   // Every recording the owner has, up front: single-file, segmented and the device gesture recording, so
   // the cap force-stops all of them rather than only the one mid-stop (#11041).
+  const owned = new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId));
   const state: RecordingFinalizeStageState = {
-    stopping: new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId)),
+    stopping: new Set(owned),
+    owned,
     capExpired: false,
   };
   const segmentedCaptureIds = deps.captureSegmentedRecordingIdsForOwner?.(sessionId, deviceId);
   let originalIds: string[] = [];
   const deviceGestureRecordingId = deps.ownedDeviceGestureRecordingId(sessionId, deviceId);
   const capMs = deps.finalizeCapMs(deviceId);
+  const releasedSession = sessionId ?? "(owner-less)";
   try {
     await raceWithDeadline(
       stopOwnedRecordings(deps, sessionId, deviceId, state, deviceGestureRecordingId),
       {
         timer: deps.timer,
         timeoutMs: capMs,
-        label: `finalize recordings of released session ${sessionId ?? "(owner-less)"}`,
+        label: `finalize recordings of released session ${releasedSession}`,
         timeoutError: () => new FinalizeCapExceeded(),
         onTimeout: () => {
           // Freeze eligibility in the timer callback, before the detached stage can resume.
@@ -394,40 +400,63 @@ async function stopOwnedRecordingsWithinCap(
           const segmentIds = segmentedCaptureIds?.() ?? [];
           for (const id of segmentIds) {
             state.stopping.add(id);
+            owned.add(id);
           }
           const active = new Set([
             ...deps.activeRecordingIdsForOwner(sessionId, deviceId),
             ...segmentIds,
           ]);
-          originalIds = [...state.stopping].filter((id) => active.has(id));
+          originalIds = [
+            ...new Set([
+              ...[...state.stopping].filter((id) => active.has(id)),
+              ...unconfirmedRecordingIds(deps, sessionId, deviceId, [...owned]),
+            ]),
+          ];
         },
       },
     );
   } catch (error) {
-    if (!(error instanceof FinalizeCapExceeded)) {
-      throw error;
+    if (error instanceof FinalizeCapExceeded) {
+      logger.warn(
+        `[recording] Finalizing recordings of released session ${releasedSession} on ${deviceId} exceeded ${capMs}ms; ` +
+          `force-stopping ${originalIds.join(", ") || "none"} and marking incomplete`,
+      );
+    } else {
+      logger.warn(
+        `[recording] Finalizing recordings of released session ${releasedSession} on ${deviceId} failed: ${errorMessage(error)}`,
+        error,
+      );
     }
-    logger.warn(
-      `[recording] Finalizing recordings of released session ${sessionId ?? "(owner-less)"} on ${deviceId} exceeded ${capMs}ms; ` +
-        `force-stopping ${originalIds.join(", ") || "none"} and marking incomplete`,
-    );
-    // The video incomplete handler cannot stop a test recorder. Start this independently
-    // of the wedged stage, by its captured owner id, so it cannot stop a replacement recorder.
-    await forceStopOwnedRecordings(deps, originalIds, deviceGestureRecordingId);
-    if (unconfirmedRecordingIds(deps, sessionId, deviceId, originalIds).length === 0) {
+  }
+  if (!state.capExpired) {
+    // Preserve every release-owned/discovered capture even if the stage pruned it. Only
+    // retained captures enter fast-path force-stop; normally finalized rows stay untouched.
+    const candidates = [...new Set([...owned, ...(segmentedCaptureIds?.() ?? [])])];
+    originalIds = unconfirmedRecordingIds(deps, sessionId, deviceId, candidates);
+    if (originalIds.length === 0) {
       return;
     }
-    const retryPhase = retryRecordingTeardown(deps, {
-      sessionId,
-      deviceId,
-      recordingIds: originalIds,
-      deviceGestureRecordingId,
-      attempts: 0,
-    });
-    // Extend the manager's bound synchronously before the initial cleanup can settle (#12059).
-    registerRetryCleanup(retryPhase, deps.teardownRetryBudgetMs);
-    await retryPhase;
+    logger.warn(
+      `[recording] Finalizing recordings of released session ${releasedSession} on ${deviceId} left retained captures; ` +
+        `force-stopping ${originalIds.join(", ")} and marking incomplete`,
+    );
   }
+  // The video incomplete handler cannot stop a test recorder. Start this independently
+  // of the wedged stage, by its captured owner id, so it cannot stop a replacement recorder.
+  await forceStopOwnedRecordings(deps, originalIds, deviceGestureRecordingId);
+  if (unconfirmedRecordingIds(deps, sessionId, deviceId, originalIds).length === 0) {
+    return;
+  }
+  const retryPhase = retryRecordingTeardown(deps, {
+    sessionId,
+    deviceId,
+    recordingIds: originalIds,
+    deviceGestureRecordingId,
+    attempts: 0,
+  });
+  // Extend the manager's bound synchronously before the initial cleanup can settle (#12059).
+  registerRetryCleanup(retryPhase, deps.teardownRetryBudgetMs);
+  await retryPhase;
 }
 
 function unconfirmedRecordingIds(

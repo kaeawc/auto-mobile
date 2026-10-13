@@ -47,7 +47,8 @@ export const OWN_TMP_SWEEP_CANDIDATE_LIMIT = 64;
 export const OWN_TMP_SWEEP_DIRECTORY_LIMIT = 64;
 
 // List at most once per filesystem/PID/directory every five minutes (unless the clock
-// moves backwards). Remember bounded own-PID candidates across lock basenames;
+// moves backwards). Remember bounded own-PID candidates across lock basenames,
+// prioritizing the listing acquire's basename before filling the remaining slots;
 // each publishing acquire rechecks its candidates' names and ages before removal.
 const ownTmpSweeps = new WeakMap<
   LockFileSystem,
@@ -264,6 +265,7 @@ const publicationName = /^.+\.(\d+)\.\d+\.[^.]+\.tmp$/;
 
 function* ownPublicationTmpCandidates(
   directory: string,
+  prefix: string,
   pid: string,
   fileSystem: LockFileSystem,
   now: number,
@@ -286,11 +288,14 @@ function* ownPublicationTmpCandidates(
     directories.set(key, entry);
     try {
       yield { op: "list", path: directory };
-      entry.candidates = fileSystem
+      const names = fileSystem
         .list(directory)
         .sort()
-        .filter((name) => publicationName.exec(name)?.[1] === pid)
-        .slice(0, OWN_TMP_SWEEP_CANDIDATE_LIMIT);
+        .filter((name) => publicationName.exec(name)?.[1] === pid);
+      entry.candidates = [
+        ...names.filter((name) => name.startsWith(prefix)),
+        ...names.filter((name) => !name.startsWith(prefix)),
+      ].slice(0, OWN_TMP_SWEEP_CANDIDATE_LIMIT);
     } catch (error) {
       // Optional litter cleanup can be skipped safely when the directory is missing/unreadable.
       logger.debug(`Lock tmp listing unavailable at ${directory}: ${errorMessage(error)}`, error);
@@ -303,24 +308,27 @@ function* sweepOwnPublicationTmps(path: string, options: ExclusiveLockOptions): 
   const fileSystem = options.fileSystem ?? nodeLockFileSystem;
   const directory = dirname(path);
   const pid = String(options.pid ?? process.pid);
+  const prefix = `${basename(path)}.`;
   const candidates = yield* ownPublicationTmpCandidates(
     directory,
+    prefix,
     pid,
     fileSystem,
     (options.now ?? Date.now)(),
   );
-  const prefix = `${basename(path)}.`;
   let attempts = 0;
-  for (let index = 0; index < candidates.length;) {
-    const name = candidates[index];
+  // Walk a bounded snapshot so interleaved removals cannot skip a shifted candidate.
+  for (const name of [...candidates]) {
     if (!name.startsWith(prefix) || publicationName.exec(name)?.[1] !== pid) {
-      index++;
       continue;
     }
     const tmp = path.slice(0, path.length - basename(path).length) + name;
     const abandoned = yield* isAbandonedPublicationTmp(tmp, options);
     if (abandoned === false) {
-      index++;
+      continue;
+    }
+    const index = candidates.indexOf(name);
+    if (index === -1) {
       continue;
     }
     candidates.splice(index, 1);

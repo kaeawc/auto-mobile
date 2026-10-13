@@ -46,6 +46,71 @@ function exact(fs: FakeLockFileSystem): void {
 }
 
 describe("own publication tmp sweep", () => {
+  test("listing prioritizes the acquiring lock and fills remaining slots across basenames", () => {
+    const f = setup();
+    for (let i = 0; i < fileLock.OWN_TMP_SWEEP_CANDIDATE_LIMIT; i++) {
+      f.fs.seed(tmp(i, "/locks/aaa.lock"), "old", 0);
+    }
+    f.fs.seed(tmp(1), "old", 0);
+    const survives: boolean[] = [];
+    for (let i = 0; i < 5; i++) {
+      f.fs.operations.length = 0;
+      expect(tryAcquireExclusiveLock(LOCK, f.options)).toBe(true);
+      survives.push(f.fs.exists(tmp(1)));
+      expect(f.fs.operations.filter(({ op }) => op === "list")).toHaveLength(1);
+      releaseExclusiveLock(LOCK, PID, "mine", f.fs);
+      f.clock.advanceTime(fileLock.OWN_TMP_SWEEP_INTERVAL_MS);
+    }
+    expect(survives).toEqual([false, false, false, false, false]);
+
+    const filled = setup();
+    const others = Array.from(
+      { length: fileLock.OWN_TMP_SWEEP_CANDIDATE_LIMIT },
+      (_, i) => `/locks/aaa${String(i).padStart(2, "0")}.lock`,
+    );
+    for (const other of [...others].reverse()) {
+      filled.fs.seed(tmp(1, other), "old", 0);
+    }
+    for (let i = 1; i <= 3; i++) {
+      filled.fs.seed(tmp(i), "old", 0);
+    }
+    expect(tryAcquireExclusiveLock(LOCK, filled.options)).toBe(true);
+    expect(filled.fs.operations.filter(({ op }) => op === "list")).toHaveLength(1);
+    for (let i = 1; i <= 3; i++) {
+      expect(filled.fs.exists(tmp(i))).toBe(false);
+    }
+    filled.fs.operations.length = 0;
+    expect(tryAcquireExclusiveLock(others[60], filled.options)).toBe(true);
+    expect(filled.fs.exists(tmp(1, others[60]))).toBe(false);
+    expect(tryAcquireExclusiveLock(others[61], filled.options)).toBe(true);
+    expect(filled.fs.exists(tmp(1, others[61]))).toBe(true);
+    expect(filled.fs.operations.filter(({ op }) => op === "list")).toHaveLength(0);
+  });
+
+  test("interleaved sweeps drop candidates by name and retain young candidates without listing", () => {
+    const f = setup();
+    f.fs.seed(tmp(1), "old", 0);
+    f.fs.seed(tmp(2), "young");
+    const a = new Racer(acquireExclusiveLockSteps(LOCK, f.options));
+    const c = new Racer(acquireExclusiveLockSteps(LOCK, f.options));
+    a.until((step) => step.op === "stat" && step.path === tmp(1));
+    c.until((step) => step.op === "stat" && step.path === tmp(1));
+    expect(a.finish()).toBe(true);
+    expect(f.fs.exists(tmp(1))).toBe(false);
+    expect(c.finish()).toBe(false);
+    expect(f.fs.exists(tmp(2))).toBe(true);
+    releaseExclusiveLock(LOCK, PID, "mine", f.fs);
+    f.clock.advanceTime(20_000);
+    f.fs.operations.length = 0;
+    expect(tryAcquireExclusiveLock(LOCK, f.options)).toBe(true);
+    expect(f.fs.operations.filter(({ op }) => op === "list")).toHaveLength(0);
+    expect(f.fs.exists(tmp(2))).toBe(false);
+    expect(f.fs.operations.filter(({ op, path }) => op === "stat" && path === tmp(2))).toHaveLength(
+      1,
+    );
+    expect(c.trace.some((step) => step.op === "stat" && step.path === tmp(2))).toBe(true);
+  });
+
   test("cached directory candidates carry over across lock basenames", () => {
     const f = setup();
     const other = "/locks/other.lock";

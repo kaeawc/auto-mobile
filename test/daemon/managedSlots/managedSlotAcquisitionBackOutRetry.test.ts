@@ -19,6 +19,8 @@ import {
   type SlotRegistry,
 } from "../../../src/daemon/managedSlots/slotRegistry";
 import { openSqliteSlotRegistry } from "../../../src/daemon/managedSlots/sqliteSlotRegistry";
+import { RegistryRetryPacing } from "../../../src/daemon/managedSlots/registryRetryPacing";
+import { MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS } from "../../../src/daemon/managedSlots/managedExecutionRelease";
 import { parseManagedSlotConfig } from "../../../src/models/managedSlotConfig";
 import { logger } from "../../../src/utils/logger";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
@@ -373,6 +375,166 @@ describe("ManagedSlotAcquisition back-out retry", () => {
     };
     return { pending, calls, release };
   }
+
+  scenario("back-out gives the shared turn back at one total attempt deadline", async () => {
+    sessions.releaseFailures = 1;
+    busy = 1;
+    await fail("refused");
+    const release = Promise.withResolvers<void>();
+    const read = Promise.withResolvers<Awaited<ReturnType<SlotRegistry["getAssignment"]>>>();
+    let releaseCalls = 0;
+    sessions.releaseSession = () => {
+      releaseCalls++;
+      return release.promise;
+    };
+    const reads = spyOn(registry, "getAssignment").mockImplementation(() => read.promise);
+    const pacing = new RegistryRetryPacing({
+      timer,
+    });
+    const expedite = new AbortController();
+    expedite.abort();
+    let started: number | undefined;
+    let queued: Promise<boolean> | undefined;
+    try {
+      await tick(25);
+      const start = timer.now();
+      queued = pacing.run(
+        async () => {
+          started = timer.now();
+          return true;
+        },
+        (r) => r,
+        undefined,
+        expedite.signal,
+      );
+      await tick(400);
+      release.resolve();
+      await drainUntil(() => reads.mock.calls.length === 1, {
+        description: "ownership read after release",
+      });
+      await tick(MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS - 401);
+      expect(started).toBeUndefined();
+      await tick(1);
+      expect(started).toBe(start + MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS);
+      await queued;
+      expect(releaseCalls).toBe(1);
+      expect(acquisition.pendingBackOutCleanups()[0]?.sessionReleaseOwed).toBe(false);
+    } finally {
+      acquisition.close();
+      pacing.close();
+      release.resolve();
+      read.resolve(null);
+      await Promise.allSettled(queued ? [queued] : []);
+      reads.mockRestore();
+    }
+  });
+
+  scenarios(
+    [300, 6_000],
+    (n) => `inline back-out shares ${n} ms blocked quiet time`,
+    async (n) => {
+      busy = 1;
+      blockedMs = n;
+      const pacing = new RegistryRetryPacing({
+        timer,
+      });
+      let started = false;
+      let next: Promise<boolean> | undefined;
+      try {
+        await fail("refused");
+        const end = timer.now();
+        next = pacing.run(
+          async () => {
+            started = true;
+            return true;
+          },
+          (r) => r,
+        );
+        await tick(Math.min(n, 5_000) - 1);
+        expect(started).toBe(false);
+        await tick(1);
+        await next;
+        expect(timer.now()).toBe(end + Math.min(n, 5_000));
+      } finally {
+        pacing.close();
+        await Promise.allSettled(next ? [next] : []);
+      }
+    },
+  );
+
+  scenario(
+    "back-out and another pacer serialize and share each blocked attempt's quiet time",
+    async () => {
+      sessions.releaseFailures = 1;
+      busy = 1;
+      await fail("refused");
+      const release = Promise.withResolvers<void>();
+      sessions.releaseSession = () => release.promise;
+      const pacing = new RegistryRetryPacing({
+        timer,
+      });
+      let otherStarted = false;
+      let other: Promise<boolean> | undefined;
+      try {
+        await tick(25);
+        const start = timer.now();
+        other = pacing.run(
+          async () => {
+            otherStarted = true;
+            timer.setCurrentTime(timer.now() + 100);
+            return false;
+          },
+          (r) => r,
+        );
+        await tick(100);
+        expect(otherStarted).toBe(false);
+        release.reject(new Error("session busy"));
+        await drainMicrotasks(100);
+        await tick(99);
+        expect(otherStarted).toBe(false);
+        await tick(1);
+        await other;
+        expect(timer.now()).toBe(start + 300);
+        expect(acquisition.pendingBackOutCleanups()[0]?.attempts).toBe(1);
+        sessions.releaseSession = async () => {};
+        await tick(99);
+        expect(acquisition.pendingBackOutCleanups()[0]?.attempts).toBe(1);
+        await tick(1);
+        await acquisition.whenIdle();
+        expect(acquisition.pendingBackOutCleanups()).toEqual([]);
+      } finally {
+        acquisition.close();
+        pacing.close();
+        release.resolve();
+        await Promise.allSettled(other ? [other] : []);
+      }
+    },
+  );
+
+  scenario("back-out does not share turns or quiet time with a different timer", async () => {
+    sessions.releaseFailures = 1;
+    busy = 1;
+    await fail("refused");
+    const release = Promise.withResolvers<void>();
+    sessions.releaseSession = () => release.promise;
+    const pacing = new RegistryRetryPacing({
+      timer: new FakeTimer(),
+    });
+    try {
+      await tick(25);
+      expect(
+        await pacing.run(
+          async () => true,
+          (r) => r,
+        ),
+      ).toBe(true);
+      expect(acquisition.pendingBackOutCleanups()[0]?.attempts).toBe(1);
+    } finally {
+      acquisition.close();
+      pacing.close();
+      release.resolve();
+    }
+  });
 
   scenario("hung session release frees the shared turn and never piles up calls", async () => {
     const { pending, calls } = await hangGroupRelease();
@@ -780,7 +942,7 @@ describe("ManagedSlotAcquisition back-out retry", () => {
     blockedMs = 3_300;
     await fail("group");
     await tick(25);
-    expect(timer.getPendingTimeouts()).toEqual([3_275]);
+    expect(timer.getPendingTimeouts()).toEqual([3_275]); // Both cleanups share one quiet timer.
     expect(acquisition.pendingBackOutCleanups()).toHaveLength(2);
     const cleared = clearCalls.length;
     const released = sessions.releases.length;
@@ -1021,6 +1183,53 @@ describe("ManagedSlotAcquisition back-out retry", () => {
         expect(timer.getPendingTimeoutCount()).toBe(0);
         expect(clearCalls).toHaveLength(later ? 2 : 1);
         expect(warn.mock.calls).toHaveLength(1);
+      } finally {
+        timers.mockRestore();
+      }
+    },
+  );
+
+  scenario(
+    "a quiet timer failure during inline back-out retains both cleanups and the acquisition answer",
+    async () => {
+      busy = Infinity;
+      blockedMs = 300;
+      expect((await fail("policy")).failure?.code).toBe("execution_policy_failed");
+      await tick(25); // Session 1 is queued behind its inline attempt's quiet time.
+      expect(timer.getPendingTimeouts()).toEqual([275]);
+      const schedule = timer.setTimeout.bind(timer);
+      const error = new Error("shared quiet timer failed");
+      const timers = spyOn(timer, "setTimeout").mockImplementation((callback, delay) => {
+        if (delay === 25 || delay === 700) {
+          return schedule(callback, delay);
+        }
+        throw error;
+      });
+      try {
+        const result = await fail("policy").catch((caught: unknown) => caught);
+        expect(result).toMatchObject({
+          outcome: "failed",
+          failure: { code: "execution_policy_failed" },
+        });
+        await tick(25);
+        await acquisition.whenIdle();
+        expect(
+          acquisition.pendingBackOutCleanups().map((entry) => [entry.sessionUuid, entry.lastError]),
+        ).toEqual([
+          ["session-1", error.message],
+          ["session-2", error.message],
+        ]);
+        for (const session of ["session-1", "session-2"]) {
+          expect(
+            warn.mock.calls.filter(
+              ([message]) =>
+                String(message).includes(session) &&
+                String(message).includes("retry stopped; no task remains"),
+            ),
+          ).toHaveLength(1);
+        }
+        expect(clearCalls).toHaveLength(2);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
       } finally {
         timers.mockRestore();
       }

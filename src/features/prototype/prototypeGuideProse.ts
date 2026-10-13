@@ -195,6 +195,90 @@ What the device reports (\`prototype_appearance_v1\`; absent on a device without
   the mode stays the same, nor for the show itself, whose result already carries the mode.
 `;
 
+export const GUIDE_COST = `## Runtime cost
+
+What each construct costs on a device, so a large prototype can pick the cheap form. This is
+guidance read from the renderer code, not measurement: the Android renderer (Jetpack Compose) and
+the iOS agent (SwiftUI) were read, and no statement below has been measured on a device. The only
+measurement behind it is epic #12127: a prototype of several hundred nodes on a debug build of the
+Android renderer dropped frames on tab switches, section collapses and page swipes. It predates
+the fixes noted below and gives no per-construct cost. A row marked *being changed* describes
+today's behaviour; the issue it names is open and the row will shrink when it lands.
+
+What one state change costs:
+
+- **Android.** Every state write publishes one new snapshot. The render tree is mapped once per
+  snapshot: every node is visited, hidden ones included, and its \`visibleWhen\`, \`styleWhen\` and
+  \`{key}\` text are evaluated against the new state. A node whose result equals the previous one
+  is reused as the same object, so only the nodes that changed recompose (#12162). The mapping is
+  proportional to the node count; the recomposition to the nodes that changed.
+- **Android, validation.** A state write is validated by re-checking the new state and the nodes
+  that bind a key, not by re-encoding and re-validating the whole spec (#12162). The whole spec is
+  checked once, on the first write after a \`show\` or a replace. A tap with several
+  \`setState\`, \`toggle\` or \`increment\` actions validates each of them in turn before anything
+  is applied.
+- **iOS.** Every node view reads the prototype's state, so a state change re-evaluates the body of
+  each node on screen and SwiftUI's diffing decides what is redrawn. Each write also re-validates
+  the whole tree (every node, in several passes) and re-encodes the state to check the size cap;
+  iOS has no equivalent of the Android state-only validation.
+- A tap's action list sends one \`change\` event with the final state, however many keys it wrote.
+
+Authoring choices:
+
+- **Writes.** Each \`setState\` in a tap is its own validation and its own state snapshot on
+  Android. Prefer one key that several nodes read (a selected tab index that \`visibleWhen\` and
+  \`styleWhen\` compare against) over several keys set together. Whether snapshots published in
+  one frame are mapped separately depends on frame timing; one key avoids the question.
+- **\`styleWhen\` over two \`visibleWhen\` siblings.** On Android a node with \`visibleWhen\` is
+  wrapped in an animation container while motion is on; iOS keeps an equivalent container. Two
+  siblings with opposite \`visibleWhen\` conditions that cross-fade cost two such wrappers; one
+  node whose look changes with \`styleWhen\` costs none, because the style is merged into the
+  node's own modifiers.
+- **\`visibleWhen\` transition.** The default transition (no \`transition\`, or \`expand\`) animates
+  the node's size, which re-measures its siblings while it runs. Use \`transition: "fade"\`,
+  \`"slide"\` or \`"none"\` unless the size change is the point. *Being changed (#12136):* every
+  \`box\`, \`row\` and \`column\` also animates its own size whenever its children change while
+  motion is on, so a size change below a container is animated by that container whatever
+  transition the child chose. iOS does the same per container, from a layout signature computed
+  from the container's children on each state change.
+- **Hidden subtrees.** A node hidden by \`visibleWhen\` costs nothing at rest on either platform:
+  its subtree is not composed (Android) or not built (iOS). It is built in the frame in which it
+  becomes visible, so a large subtree behind \`visibleWhen\` can make that one frame slow; keep
+  such subtrees small, or split the prototype. *Being changed (#12133):* on Android a hidden
+  subtree is disposed when hidden and rebuilt when shown, and a pager page other than the current
+  one is not composed until it is swiped to.
+- **\`pressScale\`.** On Android it adds an animated press state and a graphics layer to each
+  tappable node that sets it, so put it on buttons, not on every row. On iOS every node with
+  \`onTap\` already has the press gesture, a minimum touch target and a scale effect whether or
+  not it sets \`pressScale\`, so \`pressScale\` adds nothing there.
+- **Images.** On Android each \`image\` node is a sub-composition that asks the image cache for a
+  bitmap sized to the node, so many small images in a list cost more than one strip image. Decode
+  is cached and runs off the main thread. Further per-recomposition work in images and icons is
+  *being changed (#12138)*. The iOS image path was not checked.
+- **Accessibility nodes.** On Android every node reports an accessibility node except a layout
+  container (\`box\`, \`row\`, \`column\`, \`scroll\`, \`pager\`, \`card\`, \`divider\`, \`spacer\`) that
+  is not tappable and has no text, \`testTag\`, content description or state. Every \`text\`,
+  \`icon\` and \`image\` is therefore one, and a \`testTag\` or an \`onTap\` on a container adds one.
+  Give a \`testTag\` only to nodes you will look up. Every accessibility node is work whenever
+  \`observe\` or a screen reader reads the tree. *Being changed (#12135):* decorative icons and
+  images are exposed and labelled with their role name.
+- **Long lists.** A \`scroll\` node builds all of its children up front on both platforms, so a
+  long list inside \`scroll\` pays for every row when it is shown. *Being changed on Android
+  (#12139).* \`repeat\` expands to real nodes that count against the node limit.
+- **\`motion: "none"\`.** It removes the visibility animations, size animations and press springs
+  (changes become instant) and a hidden \`visibleWhen\` node is simply absent, so it is the right
+  choice for automated checks. Motion is also off when the system animation scale is 0.
+- **Window format.** On Android an opaque fullscreen prototype is still composited as a
+  translucent layer, whatever the spec says. *Being changed (#12140).*
+- **Accessibility events.** The Android accessibility service resolves an event's window type once
+  per window rather than once per event (#12160), so a prototype that changes a lot no longer
+  pays that lookup on every change event. Throttling the events a prototype's own window emits is
+  *being changed (#12134)*.
+- **Size.** The node count and the spec bytes are both limited (see Limits) and both drive the
+  per-change work above. No tested budget exists yet; for a prototype of several hundred nodes
+  every rule above matters, so split it well before it nears the limits.
+`;
+
 export const GUIDE_ERRORS = `## Common validation errors
 
 | Message | Fix |

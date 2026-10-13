@@ -67,12 +67,16 @@ export interface ManagedExecutionReownerDependencies {
   deviceOf?: (sessionUuid: string) => string | null;
 }
 
-// One re-own attempt's 700 ms bound plus one blocked registry write's 250 ms busy timeout = 950 ms.
-// Measured on the daemon's timer; an attempt queued behind another pacer's turn is not
-// guaranteed to finish inside the cap. A synchronous write crossing it delays the cap
-// by at most that write, and the cap-derived cleanup hint is short by that delay.
-export const MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS =
+/** Worst case of one shared registry turn: the 700 ms attempt bound plus one blocked registry write. */
+const REGISTRY_TURN_WORST_CASE_MS =
   MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS + REGISTRY_BUSY_WRITE_MS;
+// Measured on the daemon's timer; covers one turn in flight when the hold is created
+// plus the hold's own expedited attempt. More than one eligible attempt queued ahead
+// is still not guaranteed to fit. A synchronous write crossing the cap delays it by
+// at most that write, and the cap-derived cleanup hint is short by that delay.
+export const MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS =
+  REGISTRY_TURN_WORST_CASE_MS /* the turn in flight when the hold is created */ +
+  REGISTRY_TURN_WORST_CASE_MS; /* the hold's own expedited attempt */
 export const MANAGED_EXECUTION_REOWN_RETRY_INITIAL_DELAY_MS = REGISTRY_RETRY_INITIAL_DELAY_MS;
 export const MANAGED_EXECUTION_REOWN_RETRY_MAX_DELAY_MS = REGISTRY_RETRY_MAX_DELAY_MS;
 export const MANAGED_EXECUTION_REOWN_RETRY_MAX_BLOCKED_WAIT_MS = REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS;

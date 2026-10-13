@@ -1,4 +1,5 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
   MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS,
   MANAGED_EXECUTION_REOWN_RETRY_INITIAL_DELAY_MS,
@@ -26,6 +27,8 @@ import {
   MANAGED_SLOT_BACK_OUT_RETRY_MAX_BLOCKED_WAIT_MS,
 } from "../../../src/daemon/managedSlots/managedSlotAcquisition";
 import {
+  RegistryRetryPacing,
+  REGISTRY_BUSY_WRITE_MS,
   REGISTRY_RETRY_INITIAL_DELAY_MS,
   REGISTRY_RETRY_MAX_DELAY_MS,
   REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS,
@@ -251,7 +254,8 @@ test("close wakes hung and queued attempts without starting another registry cal
   expect(h.info).not.toHaveBeenCalled();
 });
 
-for (const blocked of [3_300, 300, 6_000]) {
+// The 6 s case guards a longer per-daemon DB write inside an attempt and the 5 s quiet cap.
+for (const blocked of [REGISTRY_BUSY_WRITE_MS, 300, 6_000]) {
   test(`blocked ${blocked} ms attempts create shared quiet time capped at five seconds`, async () => {
     const h = await harness();
     h.behavior.failures = 1;
@@ -269,14 +273,14 @@ for (const blocked of [3_300, 300, 6_000]) {
 test("two sessions take turns and cannot fill each other's blocked quiet period", async () => {
   const h = await harness();
   h.behavior.failures = Infinity;
-  h.behavior.blocked = 3_300;
+  h.behavior.blocked = REGISTRY_BUSY_WRITE_MS;
   const batch = h.reowner.reown(["a", "b"], { rehydrated: true });
   await h.step(0);
   expect(h.calls).toHaveLength(1);
-  await h.step(3_299);
+  await h.step(REGISTRY_BUSY_WRITE_MS - 1);
   expect(h.calls).toHaveLength(1);
   await h.step(1);
-  expect(h.calls[1]?.at).toBe(6_600);
+  expect(h.calls[1]?.at).toBe(2 * REGISTRY_BUSY_WRITE_MS);
   expect(h.calls[1]?.id).toBe("b");
   h.reowner.close();
   await batch;
@@ -425,9 +429,9 @@ test("busy ownership hold drops state exactly at the derived cap", async () => {
   const hold = h.reowner.releaseDeviceHold("a");
   expect(hold?.capMs).toBe(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS);
   expect(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS).toBe(
-    MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS + MANAGED_SLOT_REGISTRY_BUSY_TIMEOUT_MS,
+    2 * (MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS + MANAGED_SLOT_REGISTRY_BUSY_TIMEOUT_MS),
   );
-  expect(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS).toBe(950);
+  expect(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS).toBe(1_900);
   let outcome: string | undefined;
   void hold?.settled?.then((result) => {
     outcome = result;
@@ -442,11 +446,12 @@ test("busy ownership hold drops state exactly at the derived cap", async () => {
   expect(h.reowner.isReleaseHeld("a")).toBe(false);
 });
 
-for (const successBlocked of [0, 3_300]) {
-  test(`release bypasses old quiet time; a ${successBlocked} ms synchronous successful write delays the cap`, async () => {
+// The older 3.3 s crossing-cap case remains reachable through a per-daemon DB write.
+for (const successBlocked of [0, REGISTRY_BUSY_WRITE_MS, 3_300]) {
+  test(`release bypasses old quiet time for a ${successBlocked} ms synchronous successful write`, async () => {
     const h = await harness();
     h.behavior.failures = 1;
-    h.behavior.blocked = 3_300;
+    h.behavior.blocked = REGISTRY_BUSY_WRITE_MS;
     await h.reowner.reown(["a"], { rehydrated: true });
     await h.step(25); // The retry is now inside the shared quiet period.
     h.behavior.successBlocked = successBlocked;
@@ -461,7 +466,7 @@ for (const successBlocked of [0, 3_300]) {
   });
 }
 
-for (const successAttempt of [1, 2, 3]) {
+for (const successAttempt of [1, 2, 3, 4, 5]) {
   test(`release attempt ${successAttempt} confirms before the cap or continues after it`, async () => {
     const h = await harness();
     h.behavior.blocked = 300;
@@ -471,15 +476,19 @@ for (const successAttempt of [1, 2, 3]) {
     const start = h.timer.now();
     const hold = h.reowner.releaseDeviceHold("a");
     await h.step(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS - 1);
+    // Attempt 5 waits 400 ms after its 300 ms write: backoff now exceeds quiet time.
+    const attemptStarts = [0, 600, 1_200, 1_800, 2_500];
     expect(h.calls.slice(1).map((call) => call.at - start)).toEqual(
-      [0, 600, 1_200].slice(0, successAttempt),
+      attemptStarts
+        .slice(0, successAttempt)
+        .filter((at) => at < MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS),
     );
-    const confirmationDelay = (successAttempt - 1) * 600;
+    const confirmationDelay = attemptStarts[successAttempt - 1]!;
     expect(await hold?.settled).toBe(
       confirmationDelay < MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS ? "teardown" : "skip-device-writes",
     );
     if (confirmationDelay >= MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS) {
-      await h.step(confirmationDelay - MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS + 1);
+      await h.step(confirmationDelay - (h.timer.now() - start));
     }
     expect(h.confirmed[0] - start).toBe(confirmationDelay);
     expect(h.warn.mock.calls).toHaveLength(
@@ -490,6 +499,7 @@ for (const successAttempt of [1, 2, 3]) {
 
 test("one expedite per hold then a failed OLD attempt restores shared quiet time", async () => {
   const h = await harness();
+  // Guard the older 3.3 s cap overrun: a per-daemon DB write can still block this long.
   h.behavior.blocked = 3_300;
   h.behavior.failures = 2;
   await h.reowner.reown(["a"], { rehydrated: true });
@@ -554,7 +564,7 @@ test("A's release expedites its attempt behind B's blocking in-flight attempt", 
   await h.step(0);
   expect(h.calls.map((c) => c.id)).toEqual(["a", "b"]);
   // Hold A was created while B owned the turn; model B blocking before its failure completes.
-  h.timer.setCurrentTime(3_300);
+  h.timer.setCurrentTime(REGISTRY_BUSY_WRITE_MS);
   h.behavior.hangClaim = false;
   h.claim.resolve({ kind: "binding_changed" });
   await h.step(0);
@@ -562,10 +572,10 @@ test("A's release expedites its attempt behind B's blocking in-flight attempt", 
   expect(h.calls.map((c) => [c.id, c.at])).toEqual([
     ["a", 0],
     ["b", 0],
-    ["a", 3_300],
+    ["a", REGISTRY_BUSY_WRITE_MS],
   ]);
   expect(await hold?.settled).toBe("teardown");
-  expect(h.confirmed).toEqual([3_300]);
+  expect(h.confirmed).toEqual([REGISTRY_BUSY_WRITE_MS]);
 });
 
 test("back-out, re-own and settled-slot recovery export the shared retry schedule", () => {
@@ -589,4 +599,93 @@ test("back-out, re-own and settled-slot recovery export the shared retry schedul
     MANAGED_SETTLED_SLOT_RECOVERY_RETRY_MAX_DELAY_MS,
     MANAGED_SETTLED_SLOT_RECOVERY_RETRY_MAX_BLOCKED_WAIT_MS,
   ]).toEqual(schedule);
+});
+
+test("the hold covers an in-flight shared turn and its own asynchronous claim", async () => {
+  const h = await harness();
+  h.behavior.failures = 1;
+  await h.reowner.reown(["a"], { rehydrated: true });
+  const pacing = new RegistryRetryPacing({ timer: h.timer });
+  const gate = Promise.withResolvers<boolean>();
+  const turn = pacing.run(
+    () => gate.promise,
+    (r) => r,
+  );
+  const claimExecution = h.faulty.claimExecution.bind(h.faulty);
+  const claim = spyOn(h.faulty, "claimExecution").mockImplementation(async (...args) => {
+    await new Promise<void>((resolve) => h.timer.setTimeout(resolve, 300));
+    return claimExecution(...args);
+  });
+  let outcome: string | undefined;
+  try {
+    await h.step(0);
+    const hold = h.reowner.releaseDeviceHold("a");
+    void hold?.settled?.then((result) => {
+      outcome = result;
+    });
+    await h.step(MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS);
+    expect(outcome).toBeUndefined();
+    gate.resolve(true);
+    await turn;
+    await h.step(299);
+    expect(outcome).toBeUndefined();
+    await h.step(1);
+    expect(await hold?.settled).toBe("teardown");
+    expect(h.confirmed).toEqual([1_000]);
+    expect(h.timer.now()).toBeLessThan(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS);
+    expect(h.warn).not.toHaveBeenCalled();
+  } finally {
+    pacing.close();
+    gate.resolve(true);
+    await turn;
+    claim.mockRestore();
+  }
+});
+
+test("a rejected quiet waiter is a failed re-own attempt and later retries normally", async () => {
+  const h = await harness();
+  const pacing = new RegistryRetryPacing({ timer: h.timer });
+  h.behavior.failures = 1;
+  h.behavior.blocked = REGISTRY_BUSY_WRITE_MS;
+  await h.reowner.reown(["a"], { rehydrated: true });
+  await h.step(25);
+  const error = new Error("re-own quiet timer failed");
+  const schedule = spyOn(h.timer, "setTimeout").mockImplementation(() => {
+    throw error;
+  });
+  try {
+    expect(() => pacing.noteBlocked(0)).not.toThrow();
+    schedule.mockRestore();
+    await h.step(0);
+    expect(h.calls).toHaveLength(1);
+    expect(h.reowner.ownershipState("a")).toBe("unconfirmed");
+    expect(h.debug.mock.calls.some(([message]) => String(message).includes(error.message))).toBe(
+      true,
+    );
+    expect(h.warn.mock.calls).toEqual([
+      [expect.stringContaining("Registry retry quiet timer failed"), error],
+    ]);
+    await h.step(REGISTRY_BUSY_WRITE_MS + 25);
+    expect(h.confirmed).toEqual([2 * (REGISTRY_BUSY_WRITE_MS + 25)]);
+    expect(h.reowner.ownershipState("a")).toBeUndefined();
+  } finally {
+    schedule.mockRestore();
+    pacing.close();
+  }
+});
+
+test("published hold timing matches the derived cap in both ownership guides", () => {
+  for (const name of ["managed-slots", "device-ownership"]) {
+    const guide = readFileSync(new URL(`../../../docs/using/${name}.md`, import.meta.url), "utf8");
+    expect(guide).toContain(`up to ${MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS / 1_000} s`);
+    expect(guide).toContain("two shared turns at their worst case");
+    expect(guide).toContain(`${MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS} ms attempt bound`);
+    expect(guide).toContain(`${REGISTRY_BUSY_WRITE_MS} ms busy timeout each`);
+    expect(guide).not.toContain("950 ms");
+    expect(guide).not.toContain("about 300 ms");
+    expect(guide).not.toContain("the previous worst-case 3.3 s is retained as headroom");
+    if (name === "managed-slots") {
+      expect(guide).toContain("A back-out attempt abandoned at its 700 ms deadline");
+    }
+  }
 });

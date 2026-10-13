@@ -267,6 +267,9 @@ connection used for tools and resources:
    attempts that are only waiting out quiet time. After a blocked attempt, they wait at least as
    long as that attempt took (at most 5 s). The inline first back-out takes no turn
    and waits for no quiet period; the acquisition answer never waits for retries.
+   A back-out attempt abandoned at its 700 ms deadline (for example, a hung session
+   release) still takes its turn and its quiet time, delaying re-own attempts
+   queued behind it by those durations.
    It clears only the backed-out session's
    record belonging to that daemon and preserves the device assignment. If the
    `settling` mark itself cannot be written, the slot keeps its owner record and
@@ -370,17 +373,19 @@ Back-out cleanup, re-own and settled-slot recovery take turns in arrival order a
 share quiet time after a blocked registry call (capped at 5 s). An expedited re-own
 may pass attempts that are only waiting out quiet time. Asynchronous waits are
 bounded at 700 ms; failures warn once after 5 s of unconfirmed ownership.
-A release while ownership is unconfirmed holds device teardown for up to 950 ms (one 700 ms attempt plus the registry’s
-250 ms busy timeout) on the
-daemon’s timer and expedites one waiting re-own attempt without overlapping another session's attempt.
+A release while ownership is unconfirmed holds device teardown for up to 1.9 s on the
+daemon’s timer: two shared turns at their worst case (700 ms attempt bound + the
+registry’s 250 ms busy timeout each), covering the turn in flight when the hold is
+created and the hold’s own expedited attempt. Creating the hold expedites one waiting
+re-own attempt without overlapping another session's attempt.
 Confirmation starts teardown early; proven ownership loss skips device writes. At the
 cap, device writes are skipped and one warning says saved device state was dropped
 because ownership could not be confirmed. Ownership retries continue while the session
-object remains present. A queued attempt is not guaranteed to finish within the cap.
+object remains present. More than one eligible attempt queued ahead is still not
+guaranteed to fit within the cap.
 A synchronously blocked registry write crossing the cap delays it by at most that write;
 device writes are skipped in that case, and the cap-derived `device_cleanup_in_progress`
-hint is short by the blocked time. Busy writes now fail in about 300 ms (#12123);
-the previous worst-case 3.3 s is retained as headroom.
+hint is short by the blocked time.
 
 Values are the defaults in `src/daemon/sessionLivenessWindows.ts`; see
 [Device ownership](device-ownership.md#when-a-session-is-released) for the

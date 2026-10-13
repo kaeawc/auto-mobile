@@ -684,3 +684,170 @@ test("extending quiet time re-arms one shared timer for all queued waiters", asy
     await Promise.allSettled([first, second]);
   }
 });
+
+for (const failure of ["arm", "rearm", "clear"] as const) {
+  test(`a shared quiet timer ${failure} failure rejects only quiet-dependent waiters`, async () => {
+    const { timer, pacing: a } = harness();
+    const { pacing: b } = harness(undefined, timer);
+    const error = new Error("shared quiet timer failed");
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    timer.setCurrentTime(300);
+    a.noteBlocked(0);
+    const calls: string[] = [];
+    const run = (name: string, expedited?: AbortSignal) =>
+      b.run(
+        async () => {
+          calls.push(name);
+          return true;
+        },
+        (r) => r,
+        undefined,
+        expedited,
+      );
+    let timerSpy: ReturnType<typeof spyOn> | undefined;
+    const results: Array<Promise<unknown>> = [];
+    try {
+      if (failure === "arm") {
+        timerSpy = spyOn(timer, "setTimeout").mockImplementation(() => {
+          throw error;
+        });
+      }
+      const first = run("first").catch((caught: unknown) => caught);
+      const second = run("second").catch((caught: unknown) => caught);
+      results.push(first, second);
+      if (failure !== "arm") {
+        timerSpy =
+          failure === "clear"
+            ? spyOn(timer, "clearTimeout").mockImplementation((handle) => {
+                // Model a timer that clears its resource but then reports failure.
+                timerSpy?.mockRestore();
+                timer.clearTimeout(handle);
+                throw error;
+              })
+            : spyOn(timer, "setTimeout").mockImplementation(() => {
+                throw error;
+              });
+        timer.advanceTime(100);
+        expect(() => a.noteBlocked(0)).not.toThrow();
+      }
+      expect(await first).toBe(error);
+      expect(await second).toBe(error);
+      expect(calls).toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(failure === "arm" ? 2 : 1);
+      timerSpy?.mockRestore();
+      const expedite = new AbortController();
+      expedite.abort();
+      expect(await run("urgent", expedite.signal)).toBe(true);
+      timer.advanceTime(1_000);
+      expect(await run("later")).toBe(true);
+      expect(calls).toEqual(["urgent", "later"]);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      timerSpy?.mockRestore();
+      a.close();
+      b.close();
+      await Promise.allSettled(results);
+      warn.mockRestore();
+    }
+  });
+}
+
+for (const trigger of ["wake", "cancel", "callback", "eligible"] as const) {
+  test(`a quiet timer failure from ${trigger} cannot escape or strand an eligible turn`, async () => {
+    const { timer, pacing } = harness();
+    const error = new Error("quiet timer event failed");
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const stop = new AbortController();
+    const expedite = new AbortController();
+    const gate = Promise.withResolvers<boolean>();
+    timer.setCurrentTime(300);
+    pacing.noteBlocked(0);
+    const calls: string[] = [];
+    const quiet = pacing
+      .run(
+        async () => {
+          calls.push("quiet");
+          return true;
+        },
+        (r) => r,
+        stop.signal,
+      )
+      .catch((caught: unknown) => caught);
+    let urgent: Promise<boolean> | undefined;
+    let spy: ReturnType<typeof spyOn> | undefined;
+    try {
+      if (trigger === "callback") {
+        spy = spyOn(timer, "setTimeout").mockImplementation(() => {
+          throw error;
+        });
+        timer.stepWallClock(-100); // The callback must re-arm because quiet time has not ended.
+        expect(() => timer.advanceTime(300)).not.toThrow();
+        expect(await quiet).toBe(error);
+      } else {
+        // Leave the old timer pending: a failing clear must not let its stale callback reschedule.
+        spy = spyOn(timer, "clearTimeout").mockImplementation(() => {
+          throw error;
+        });
+        if (trigger === "cancel") {
+          expect(() => stop.abort(error)).not.toThrow();
+          expect(await quiet).toBe(error);
+        } else {
+          if (trigger === "eligible") {
+            timer.setCurrentTime(600); // Quiet ended; clearing its old timer still fails.
+          }
+          urgent = pacing.run(
+            () => {
+              calls.push("urgent");
+              return gate.promise;
+            },
+            (r) => r,
+            undefined,
+            expedite.signal,
+          );
+          if (trigger === "wake") {
+            expect(() => expedite.abort()).not.toThrow();
+            expect(await quiet).toBe(error);
+          } else {
+            expect(await quiet).toBe(true);
+          }
+          await drainUntil(() => calls.includes("urgent"), {
+            description: "eligible turn after timer failure",
+          });
+          expect(calls).toEqual(trigger === "wake" ? ["urgent"] : ["quiet", "urgent"]);
+        }
+      }
+      spy.mockRestore();
+      expect(warn.mock.calls).toEqual([
+        [expect.stringContaining("Registry retry quiet timer failed"), error],
+      ]);
+      let successorStarted = false;
+      const successor = pacing.run(
+        async () => {
+          successorStarted = true;
+          return true;
+        },
+        (r) => r,
+      );
+      await drainMicrotasks(30);
+      if (urgent) {
+        expect(successorStarted).toBe(false); // The granted operation still owns the turn.
+      }
+      timer.advanceTime(300); // Consume any callback left behind by the failed clear.
+      await drainMicrotasks(30);
+      if (urgent) {
+        expect(successorStarted).toBe(false);
+      }
+      gate.resolve(true);
+      await urgent;
+      expect(await successor).toBe(true);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      spy?.mockRestore();
+      pacing.close();
+      gate.resolve(true);
+      await Promise.allSettled([quiet, ...(urgent ? [urgent] : [])]);
+      warn.mockRestore();
+    }
+  });
+}

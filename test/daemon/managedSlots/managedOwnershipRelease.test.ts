@@ -16,6 +16,7 @@ import { ManagedSlotOwnershipUnconfirmedError } from "../../../src/daemon/manage
 import { openSqliteSlotRegistry } from "../../../src/daemon/managedSlots/sqliteSlotRegistry";
 import { InFlightSlotReservations } from "../../../src/daemon/managedSlots/slotOwnerLiveness";
 import type { SlotRegistry } from "../../../src/daemon/managedSlots/slotRegistry";
+import { REGISTRY_RETRY_MAX_DELAY_MS } from "../../../src/daemon/managedSlots/registryRetryPacing";
 import { fixedBackoff } from "../../../src/utils/Backoff";
 import { SUSPECT_GRACE_MS } from "../../../src/daemon/livenessOwnerLease";
 import { logger } from "../../../src/utils/logger";
@@ -357,6 +358,38 @@ describe("managed ownership release", () => {
     expect(h.timer.now()).toBe(startedMs);
   });
 
+  test("a regular one-second re-own retry confirms the hold before teardown writes", async () => {
+    const h = await harness();
+    h.behavior.busy = true;
+    h.behavior.busyMark = true;
+    await h.reowner.reown([SESSION], { rehydrated: true });
+    const hold = h.reowner.releaseDeviceHold(SESSION);
+    const release = h.manager.releaseSession(SESSION);
+    await drainMicrotasks(100); // The expedited attempt fails; the next attempt uses regular cadence.
+    h.timer.advanceTime(REGISTRY_RETRY_MAX_DELAY_MS - 1);
+    await drainMicrotasks(100);
+    expect(h.confirmed).toEqual([]);
+    expect(h.writes).toEqual([]);
+    expect(h.reowner.isReleaseHeld(SESSION)).toBe(true);
+    h.behavior.busy = false;
+    h.timer.advanceTime(1);
+    expect(await hold?.settled).toBe("teardown");
+    expect(h.confirmed).toEqual([SESSION]);
+    await release;
+    expect(h.writes).toEqual(["restore"]);
+    expect(h.timer.now()).toBe(REGISTRY_RETRY_MAX_DELAY_MS);
+    expect(h.timer.now()).toBeLessThan(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS);
+    expect(h.events[0]).toBe("confirmed");
+    expect(h.lost).toEqual([]);
+    h.behavior.busyMark = false;
+    await settleWithFakeTime(h.timer, h.drain.whenIdle(), {
+      description: "settlement after regular re-own confirmation",
+      stepMs: 100,
+      maxSteps: 100,
+    });
+    expect(h.writes).toEqual(["restore"]);
+  });
+
   test("the hold ends at the cap; the re-own lands afterwards without device writes", async () => {
     const h = await harness();
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
@@ -375,7 +408,9 @@ describe("managed ownership release", () => {
       const hold = h.reowner.releaseDeviceHold(SESSION);
       release = h.manager.releaseSession(SESSION);
       await drainMicrotasks(100); // The hold's single expedited attempt fails while busy.
-      h.timer.advanceTime(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS - 1);
+      await h.timer.advanceTimeAsync(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS - 1, () =>
+        drainMicrotasks(100),
+      );
       await drainMicrotasks(100);
       expect(h.reowner.isReleaseHeld(SESSION)).toBe(true);
       expect(h.confirmed).toEqual([]);
@@ -398,7 +433,10 @@ describe("managed ownership release", () => {
       ).toHaveLength(1);
       h.behavior.busy = false;
       // Mark remains busy so the drain cannot supply confirmation before the re-own.
-      h.timer.advanceTime(1_000 - MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS - 1);
+      const retryAfterCap =
+        (Math.floor(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS / REGISTRY_RETRY_MAX_DELAY_MS) + 1) *
+        REGISTRY_RETRY_MAX_DELAY_MS;
+      h.timer.advanceTime(retryAfterCap - MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS - 1);
       await drainMicrotasks(100);
       expect(h.confirmed).toEqual([]);
       h.timer.advanceTime(1);

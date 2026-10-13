@@ -569,8 +569,8 @@ export class ManagedSlotAcquisition {
       }
     }
     if (cleanup.ownerClearOwed || cleanup.sessionReleaseOwed) {
-      this.pacing.noteBlocked(startedMs);
       this.retainBackOutCleanup(registry, cleanup);
+      this.pacing.noteBlocked(startedMs);
     }
   }
 

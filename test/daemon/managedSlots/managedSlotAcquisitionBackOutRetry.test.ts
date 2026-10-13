@@ -1190,6 +1190,53 @@ describe("ManagedSlotAcquisition back-out retry", () => {
   );
 
   scenario(
+    "a quiet timer failure during inline back-out retains both cleanups and the acquisition answer",
+    async () => {
+      busy = Infinity;
+      blockedMs = 300;
+      expect((await fail("policy")).failure?.code).toBe("execution_policy_failed");
+      await tick(25); // Session 1 is queued behind its inline attempt's quiet time.
+      expect(timer.getPendingTimeouts()).toEqual([275]);
+      const schedule = timer.setTimeout.bind(timer);
+      const error = new Error("shared quiet timer failed");
+      const timers = spyOn(timer, "setTimeout").mockImplementation((callback, delay) => {
+        if (delay === 25 || delay === 700) {
+          return schedule(callback, delay);
+        }
+        throw error;
+      });
+      try {
+        const result = await fail("policy").catch((caught: unknown) => caught);
+        expect(result).toMatchObject({
+          outcome: "failed",
+          failure: { code: "execution_policy_failed" },
+        });
+        await tick(25);
+        await acquisition.whenIdle();
+        expect(
+          acquisition.pendingBackOutCleanups().map((entry) => [entry.sessionUuid, entry.lastError]),
+        ).toEqual([
+          ["session-1", error.message],
+          ["session-2", error.message],
+        ]);
+        for (const session of ["session-1", "session-2"]) {
+          expect(
+            warn.mock.calls.filter(
+              ([message]) =>
+                String(message).includes(session) &&
+                String(message).includes("retry stopped; no task remains"),
+            ),
+          ).toHaveLength(1);
+        }
+        expect(clearCalls).toHaveLength(2);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        timers.mockRestore();
+      }
+    },
+  );
+
+  scenario(
     "a newer acquisition owns the slot before the retry: no old-session write follows",
     async () => {
       busy = 1;

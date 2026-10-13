@@ -24,6 +24,7 @@ interface RegistryRetryPacingOptions {
 
 interface RetryWaiter {
   resolve: () => void;
+  reject: (error: unknown) => void;
   expedited?: AbortSignal;
   started: boolean;
 }
@@ -142,7 +143,12 @@ export class RegistryRetryPacing {
     const signal = this.signal(stopped);
     signal.throwIfAborted();
     const granted = Promise.withResolvers<void>();
-    const waiter: RetryWaiter = { resolve: granted.resolve, expedited, started: false };
+    const waiter: RetryWaiter = {
+      resolve: granted.resolve,
+      reject: granted.reject,
+      expedited,
+      started: false,
+    };
     const wake = () => this.schedule();
     const cancel = () => {
       granted.reject(signal.reason);
@@ -195,30 +201,54 @@ export class RegistryRetryPacing {
   private schedule(): void {
     const shared = this.shared;
     const timer = this.options.timer;
-    const index = shared.active
-      ? -1
-      : shared.queue.findIndex(
-          (waiter) => waiter.expedited?.aborted || timer.now() >= shared.quietUntilMs,
-        );
-    const needsQuietTimer = !shared.active && index === -1 && shared.queue.length > 0;
-    if (!needsQuietTimer || shared.wakeAtMs !== shared.quietUntilMs) {
-      if (shared.quietTimer !== undefined) {
-        timer.clearTimeout(shared.quietTimer);
-        shared.quietTimer = undefined;
-        shared.wakeAtMs = undefined;
+    const eligible = (waiter: RetryWaiter) =>
+      waiter.expedited?.aborted || timer.now() >= shared.quietUntilMs;
+    const waiter = shared.active ? undefined : shared.queue.find(eligible);
+    const needsQuietTimer = !shared.active && !waiter && shared.queue.length > 0;
+    try {
+      this.updateQuietTimer(needsQuietTimer);
+    } catch (error) {
+      logger.warn(
+        `[ManagedSlots] Registry retry quiet timer failed: ${errorMessage(error)}`,
+        error,
+      );
+      for (const queued of [...shared.queue]) {
+        if (!eligible(queued)) {
+          this.removeQueued(queued);
+          queued.reject(error);
+        }
       }
     }
-    if (index !== -1) {
-      const [waiter] = shared.queue.splice(index, 1);
+    if (waiter) {
+      this.removeQueued(waiter);
       shared.active = waiter;
       waiter.resolve();
-    } else if (needsQuietTimer && shared.quietTimer === undefined) {
-      shared.wakeAtMs = shared.quietUntilMs;
-      shared.quietTimer = timer.setTimeout(() => {
+    }
+  }
+
+  private updateQuietTimer(needsQuietTimer: boolean): void {
+    const shared = this.shared;
+    const timer = this.options.timer;
+    if (!needsQuietTimer || shared.wakeAtMs !== shared.quietUntilMs) {
+      if (shared.quietTimer !== undefined) {
+        const handle = shared.quietTimer;
+        shared.quietTimer = undefined;
+        shared.wakeAtMs = undefined;
+        timer.clearTimeout(handle);
+      }
+    }
+    if (needsQuietTimer && shared.quietTimer === undefined) {
+      const handle = timer.setTimeout(() => {
+        // A failed clear may leave an old callback; it no longer owns the shared wake-up.
+        if (shared.quietTimer !== handle) {
+          return;
+        }
         shared.quietTimer = undefined;
         shared.wakeAtMs = undefined;
         this.schedule();
       }, shared.quietUntilMs - timer.now());
+      shared.quietTimer = handle;
+      shared.wakeAtMs = shared.quietUntilMs;
     }
   }
 

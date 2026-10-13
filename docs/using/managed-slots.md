@@ -675,6 +675,22 @@ materializes. The registry persists commitments across daemon restarts and scope
 resets. Unknown or incomplete registry or inventory reads refuse with retryable
 `discovery_incomplete`; unknown never means headroom or a full budget.
 
+A platform whose lister is verifiably not installed contributes zero inventory
+orphans to this budget, allowing single-platform hosts to create devices. Its
+listing remains incomplete: missing tooling does not prove any specific device
+absent. A transient failure of installed tooling still makes total usage unknown.
+
+A free row's charge is released only on VERIFIED ABSENCE: its stable id is missing
+from a COMPLETE platform listing at selection and again from the journal's fresh
+COMPLETE listing inside `driveFreeDeviceDeletion`. Incomplete discovery at either
+point proves nothing and releases nothing. Only `completeFreeDeviceDeletion`
+removes the row. If the image reappears, ordinary journaled deletion checks all
+session, claim, busy and generated-name holds; the image is deleted first or its
+marker stays for redrive. Absent candidates precede listed cache in eviction order.
+Without budget pressure, the reclaim sweep requires two complete absence
+observations for the same row before journaling deletion; incomplete observations
+neither confirm nor clear that evidence, and a listed device clears it.
+
 Compatible eligible cache is adopted first. Adoption of cache or an orphan is
 charge-neutral. Fresh creation opens its journal reservation before native creation.
 Concurrent reservations are ordered by the registry's journal id: later fresh

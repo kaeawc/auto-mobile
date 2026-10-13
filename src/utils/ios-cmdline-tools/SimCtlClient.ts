@@ -2355,7 +2355,12 @@ export class SimCtlClient implements SimCtl {
       }
 
       logger.warn(`Failed to get iOS devices: ${detail}`);
-      throw new ActionableError(`Failed to list iOS simulator devices: ${detail}`);
+      const message = `Failed to list iOS simulator devices: ${detail}`;
+      const listingError = (): ActionableError =>
+        error instanceof SimctlUnavailableError
+          ? new SimctlUnavailableError(message)
+          : new ActionableError(message);
+      throw listingError();
     }
   }
 

@@ -1,3 +1,8 @@
+import type {
+  ManagedSlotCacheEvictor,
+  ManagedSlotEvictionCandidate,
+  ManagedSlotEvictionResult,
+} from "../../../src/daemon/managedSlots/managedSlotCacheEviction";
 import { beforeEach, describe, expect, test } from "bun:test";
 import type { DeviceInfo } from "../../../src/models";
 import {
@@ -108,7 +113,7 @@ describe("FreeDeviceReclaimer", () => {
 
     const report = await reclaimer().sweep();
 
-    expect(report).toEqual({ stopped: [], failed: [], skipped: [] });
+    expect(report).toEqual({ stopped: [], released: [], failed: [], skipped: [] });
     expect(stopper.calls).toEqual([]);
   });
 
@@ -416,7 +421,7 @@ describe("FreeDeviceReclaimer", () => {
       registryExists: () => false,
     });
 
-    expect(await sweeper.sweep()).toEqual({ stopped: [], failed: [], skipped: [] });
+    expect(await sweeper.sweep()).toEqual({ stopped: [], released: [], failed: [], skipped: [] });
     expect(opened).toBe(0);
   });
 
@@ -437,5 +442,117 @@ describe("FreeDeviceReclaimer", () => {
     timer.advanceTime(FREE_DEVICE_RECLAIM_SWEEP_INTERVAL_MS * 2);
     await flush();
     expect(stopper.calls).toHaveLength(1);
+  });
+
+  class FakeAbsentEvictor implements ManagedSlotCacheEvictor {
+    calls: ManagedSlotEvictionCandidate[] = [];
+    result: ManagedSlotEvictionResult = { kind: "absent" };
+    error: Error | undefined;
+    async evict(candidate: ManagedSlotEvictionCandidate): Promise<ManagedSlotEvictionResult> {
+      this.calls.push(candidate);
+      if (this.error) {
+        throw this.error;
+      }
+      return this.result;
+    }
+  }
+
+  test.each(["free", "stopped"] as const)(
+    "two complete sweeps release a missing %s row",
+    async (state) => {
+      await freeDevice("amslot-a");
+      const [row] = await registry.listFreeDevices();
+      if (state === "stopped") {
+        const claim = { ...row!, claimedBy: "stopper" };
+        await registry.beginFreeDeviceStop(claim, { thresholdMs: 0 });
+        await registry.completeFreeDeviceStop(claim);
+      }
+      inventory.remove("amslot-a");
+      pastThreshold();
+      const evictor = new FakeAbsentEvictor();
+      const sweep = reclaimer({ absentRowEvictor: () => evictor });
+      expect((await sweep.sweep()).skipped[0]?.reason).toBe("absence_unconfirmed");
+      expect(evictor.calls).toEqual([]);
+      expect((await sweep.sweep()).released).toEqual([
+        { platform: "android", stableDeviceId: "amslot-a" },
+      ]);
+      expect(evictor.calls).toEqual([
+        {
+          platform: row!.platform,
+          stableDeviceId: row!.stableDeviceId,
+          fromScopeKey: row!.fromScopeKey,
+          freedAtMs: row!.freedAtMs,
+          name: row!.stableDeviceId,
+          lastUsedAtMs: row!.freedAtMs,
+          absent: true,
+        },
+      ]);
+    },
+  );
+
+  test("listing again clears the per-row absence observation", async () => {
+    await freeDevice("amslot-a");
+    pastThreshold();
+    inventory.remove("amslot-a");
+    const evictor = new FakeAbsentEvictor();
+    const sweep = reclaimer({ absentRowEvictor: () => evictor });
+    await sweep.sweep();
+    inventory.devices.push(avd("amslot-a"));
+    expect((await sweep.sweep()).released).toEqual([]);
+    inventory.remove("amslot-a");
+    expect((await sweep.sweep()).skipped[0]?.reason).toBe("absence_unconfirmed");
+    expect(evictor.calls).toEqual([]);
+  });
+
+  test("incomplete discovery neither confirms nor clears absence", async () => {
+    await freeDevice("amslot-a");
+    pastThreshold();
+    inventory.remove("amslot-a");
+    const evictor = new FakeAbsentEvictor();
+    const sweep = reclaimer({ absentRowEvictor: () => evictor });
+    await sweep.sweep();
+    inventory.complete = false;
+    const incomplete = await sweep.sweep();
+    expect(incomplete.skipped[0]?.reason).toBe("discovery_incomplete");
+    expect(incomplete.released).toEqual([]);
+    expect(evictor.calls).toEqual([]);
+    inventory.complete = true;
+    expect((await sweep.sweep()).released).toHaveLength(1);
+  });
+
+  test.each(["lost", "failed", "throw"] as const)(
+    "absent eviction %s is reported without aborting the sweep",
+    async (kind) => {
+      await freeDevice("amslot-a");
+      await freeDevice("amslot-b", "runner-b");
+      pastThreshold();
+      inventory.devices = [];
+      const evictor = new FakeAbsentEvictor();
+      if (kind === "throw") {
+        evictor.error = new Error("boom");
+      } else {
+        evictor.result = kind === "lost" ? { kind } : { kind, message: "boom" };
+      }
+      const sweep = reclaimer({ absentRowEvictor: () => evictor });
+      await sweep.sweep();
+      const report = await sweep.sweep();
+      expect(evictor.calls).toHaveLength(2);
+      if (kind === "lost") {
+        expect(report.skipped.map((skip) => skip.reason)).toEqual(["row_moved", "row_moved"]);
+      } else {
+        expect(report.failed.map((failure) => failure.message)).toEqual(["boom", "boom"]);
+      }
+    },
+  );
+
+  test("young missing rows are never considered for release", async () => {
+    await freeDevice("amslot-a");
+    inventory.devices = [];
+    timer.advanceTime(MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS - 1);
+    const evictor = new FakeAbsentEvictor();
+    const sweep = reclaimer({ absentRowEvictor: () => evictor });
+    expect((await sweep.sweep()).skipped).toEqual([]);
+    expect((await sweep.sweep()).released).toEqual([]);
+    expect(evictor.calls).toEqual([]);
   });
 });

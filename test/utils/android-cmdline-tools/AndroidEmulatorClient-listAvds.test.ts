@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import {
+  AndroidEmulatorClient,
+  AndroidEmulatorUnavailableError,
+} from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import {
   parseAvdConfig,
   type AvdConfigReader,
@@ -363,5 +366,46 @@ describe("AndroidEmulatorClient listAvds", () => {
     (client as any).ensureEmulatorPath = async () => "emulator";
 
     await expect(client.listAvds()).resolves.toMatchObject([{ apiLevel: 34 }]);
+  });
+
+  test("missing executable retains the typed unavailable error and existing message", async () => {
+    const client = new AndroidEmulatorClient(
+      async () => {
+        throw Object.assign(new Error("spawn emulator ENOENT"), {
+          code: "ENOENT",
+          path: "emulator",
+          syscall: "spawn emulator",
+        });
+      },
+      null,
+      new FakeTimer(),
+      undefined,
+      noAvdConfigReader,
+    );
+    Object.assign(client, { emulatorPath: "emulator", ensureEmulatorPath: async () => "emulator" });
+    await expect(client.listAvds()).rejects.toBeInstanceOf(AndroidEmulatorUnavailableError);
+    await expect(client.listAvds()).rejects.toThrow("Android emulator not found.");
+  });
+
+  test.each([
+    "Command failed: emulator -list-avds\nNo such file or directory: missing AVD home",
+    "spawn /bin/sh ENOENT",
+  ])("an installed executable failure stays untyped: %s", async (message) => {
+    // This existing on-disk source file stands in for the resolved executable; it is never run.
+    const client = new AndroidEmulatorClient(
+      async () => {
+        throw new Error(message);
+      },
+      null,
+      new FakeTimer(),
+      undefined,
+      noAvdConfigReader,
+    );
+    (client as any).emulatorPath = import.meta.path;
+    (client as any).ensureEmulatorPath = async () => import.meta.path;
+    await expect(client.listAvds()).rejects.not.toBeInstanceOf(AndroidEmulatorUnavailableError);
+    await expect(client.listAvds()).rejects.toThrow(
+      message.includes("/bin/sh") ? "daemon working directory" : "Android emulator not found.",
+    );
   });
 });

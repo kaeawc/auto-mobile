@@ -1,6 +1,6 @@
 import { errorMessage } from "../describeUnknownError";
 import { existsSync } from "node:fs";
-import { extname, resolve } from "node:path";
+import { extname, resolve, isAbsolute } from "node:path";
 import type { FileSystem } from "../filesystem/DefaultFileSystem";
 import { logger } from "../logger";
 import { testOverrides } from "../testOverrides";
@@ -850,6 +850,8 @@ const execAsync = async (
 
 /** Offline discovery failed; callers must retain the prior episode state. */
 export class AndroidOfflineProbeError extends ActionableError {}
+
+export class AndroidEmulatorUnavailableError extends ActionableError {}
 
 export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorForDeviceManager {
   private execAsync: (file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>;
@@ -1955,7 +1957,26 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         );
       }
       if (missingEmulator) {
-        throw new ActionableError(
+        const path = this.emulatorPath;
+        const missingExecutable = (): boolean => {
+          // execFile preserves numeric exit codes when the executable actually ran.
+          if (error instanceof Error && "code" in error && typeof error.code === "number") {
+            return false;
+          }
+          return (
+            !errorMsg.startsWith("Command failed:") &&
+            ((isAbsolute(path) && !existsSync(path)) ||
+              [
+                `${path}: command not found`,
+                `spawn ${path} ENOENT`,
+                `ENOENT: no such file or directory, posix_spawn '${path}'`,
+              ].includes(errorMsg))
+          );
+        };
+        const MissingError = missingExecutable()
+          ? AndroidEmulatorUnavailableError
+          : ActionableError;
+        throw new MissingError(
           `Android emulator not found.\n${this.describeEmulatorResolution()}\n\n` +
             `Install the emulator package with: sdkmanager --install "emulator"\n` +
             `(Android Studio installs it too: https://developer.android.com/studio)\n` +

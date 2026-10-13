@@ -139,6 +139,8 @@ nav:
       - "iOS Playground theme parity": design-docs/plat/ios/playground-theme-parity.md
       - "Android emulator optimization": design-docs/android-emulator-optimization.md
       - "Android prototype specification": design-docs/plat/android/prototype-ux.md
+      - "Prototype performance measurement": design-docs/plat/android/prototype-performance-measurement.md
+      - "Prototype Compose compiler report": design-docs/plat/android/prototype-compose-compiler-report.md
       - "iOS simulator prototype agent": design-docs/plat/ios/prototype-agent.md
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Unit lane scaling": design-docs/ci/unit-lane-scaling.md

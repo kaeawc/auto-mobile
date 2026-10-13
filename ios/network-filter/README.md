@@ -259,6 +259,134 @@ the simulator IDs, process generations, request/revision, expected behavior,
 observed result, and host/control-plane health. Successful diagnostic unit tests
 are not native isolation evidence. Do not close #6298 on this preparation alone.
 
+## Shaping core (#10265, not wired)
+
+`NetworkFilterCore` now contains a Foundation-only `ShapingProfile` and
+`FlowShaper`, tested with a fake monotonic clock and fake rule source. They are
+not connected to the provider, controller, XPC contract, rule store, or snapshot.
+The provider still applies only offline. No shaping behavior here has been
+verified against real traffic; the native isolation gate above still applies.
+
+Outbound means app to remote (upload); inbound means remote to app (download).
+One target is one app on one simulator (`NetworkRuleTarget`). Host requests use
+added **round-trip** integral milliseconds (0...4000), integral decimal kilobits
+per second (1000 bits; zero is unlimited, otherwise 8...1000000), and finite
+loss percent (0...100, including fractional values).
+Resolution splits delay into outbound `ceil(delay/2)` and inbound the remainder,
+and converts each rate to bytes per second with `kbit/s * 125`. Profiles validate
+both construction and decoding: each directional delay is 0...2000 ms, each
+optional directional rate is 1000...125000000 bytes/s, and at least one effect
+is required. Non-zero packet loss is always reported as unapplied; a content
+filter drop cannot prove packet-loss emulation. Loss-only and all-zero requests
+are rejected, and out-of-range components are named in the rejection.
+
+All flows of a target share one reservation timeline **per direction**; upload
+and download budgets are independent. For a rate-limited stream, one grant is
+`min(availableBytes, clamp(rate/10, 1...1048576))` bytes (at most 100 ms of
+budget). Unlimited directions do not clamp grant size. Granted datagrams are
+always whole and charged in full. Directional data peek windows use that quantum, or
+65536 bytes for an unlimited direction. New-flow verdicts have a single peek
+value, so they use the smallest shaped directional quantum. FIFO reservation
+order lets concurrent transfers share the aggregate rate without multiplying it.
+
+For every rate-limited grant, `slotStart = max(now, nextFree)` and
+`nextFree = slotStart + ceil(bytes * 1e9 / rate)`. Integer arithmetic rounds up
+and uses full-width multiplication/division; unrepresentable times saturate,
+and an exhausted timeline or unrepresentable delay deadline drops further work
+rather than wrapping into an early release. Idle time or sleep earns no budget
+credit: the first slot is available immediately and the next waits a full slot.
+Backwards clock readings are clamped to the last observed reading, so time never underflows.
+
+Latency is a **burst-start hold**, per flow and direction: first data, or data
+after neither arrival nor release for at least the profile's smallest non-zero
+directional delay, receives that direction's hold. Continuous chunks are not
+held again. Direction activity is recorded only for granted or reserved data,
+never for a dropped callback. Known limitation: the burst-start hold repeats on
+every request/response exchange only when the profile delays both directions
+(as `ShapingProfile.resolve` produces for any delay of 2 ms or more) or the
+exchange period is at least the quiet gap; a profile that delays a single
+direction holds a fast ping-pong once. New stream connections additionally hold
+their new-flow verdict for one added round trip; datagram new-flow verdicts are not held.
+`releaseAt = max(now + hold, slotStart)`; charging the timeline at `slotStart`
+allows another flow's slot to proceed while this flow is still held.
+
+For any window of duration T on a rate-limited target/direction, released bytes
+are bounded by `rate * (T + directional delay) + (1 + D) grants`; cumulatively from rule
+start the bound is `rate * T + (1 + D) grants`. For differently sized datagrams,
+use the largest grant in the relevant release/reservation history as the grant
+size. D counts debt releases in that window: an old paused decision settled
+under a different ticket, or an unexpected data callback while already paused.
+Each immediately passes one grant and advances the current timeline by its full
+duration. The bound is at most one callback debt release per outstanding pause,
+plus one debt release per paused data decision settled under a different ticket.
+These releases are visible in `debtReleases`; when D is zero the bound has
+exactly one grant of slack. Counters reset on ticket changes, so measuring D
+across replacements requires accumulating the observed tickets' debt releases.
+
+The caller owns one timer per pause and calls `resume` at its deadline. The
+non-optional `ResumeOutcome` distinguishes `.settled(ResumeDecision)` (apply the
+verdict once), `.alreadySettled` (no outstanding matching pause: settled, foreign
+or unknown token), and `.notDue(resumeAtNanoseconds:)` (same-ticket pause still
+pending: call again at that deadline). Resume verdicts cannot contain another
+pause. For an outstanding pause that has not latched allow, resume re-reads the
+rule: no rule allows and forgets the flow; a due same-ticket pause releases its
+reservation; a different ticket discards the old decision and immediately
+passes bytes re-clamped to the current stream quantum, charged as debt with no
+new hold (or filters a paused new flow under the current profile). A due pause,
+replacement or removed rule always settles; if the current timeline cannot be
+created at capacity, resume settles with allow and forgets the flow.
+
+A ticket change inherits each direction's `nextFree` from the previous target
+timeline and resets counters; a direction that is no longer rate-limited ignores
+its inherited budget. Replacements therefore earn no fresh first slot.
+Same-ticket lease renewals preserve both budgets and counters. A timeline pruned
+because its target had no rule starts fresh if that target is later admitted.
+Data callbacks also re-check the rule. Once allow is returned for a tracked
+flow, subsequent data decisions can only allow: an unpaused flow is forgotten
+immediately, while a paused flow retains an allow latch and its token until
+`resume`, `settleStale`, `flowEnded` or `removeAll` settles it with allow and
+forgets it, regardless of any intervening rule installation. Reset, replacement
+or a latched allow can settle before the deadline. Rule-source lock order is
+**shaper lock, then rule source**; the source must never call back into the shaper.
+
+An unexpected callback while paused never adds a second pause: at most one
+positive callback passes one grant as debt and leaves the original pause valid,
+across both directions and intervening ticket changes. A second positive
+callback drops, counts an over-budget drop, and forgets the flow; its old token
+then returns `.alreadySettled`. Empty/negative available-byte callbacks pass
+zero with the directional peek window and no charge, and do not consume this
+debt allowance; callbacks while paused are still counted. An allow latch takes
+precedence over all of these data decisions. No payload data is buffered.
+Each flow retains at most one reservation and one timer token. Stream waits are
+limited to 30 seconds; datagram waits to 8 seconds, below Apple's ten-second UDP
+pause limit. A longer required pause drops without reserving or charging bytes.
+A positive rate-limited datagram data callback also drops, uncharged and counted
+as over-budget, when its own `ceil(bytes * 1e9 / rate)` exceeds 8 seconds, even on an idle timeline
+or during a pause. Exactly 8 seconds of budget is permitted.
+The 256-flow cap and stream quantum bound normal stream waits below 30 seconds
+only when no datagram flow shares that target's direction; a wait above the
+limit drops the flow. Every data drop forgets the flow and invalidates its
+outstanding pause, with no activity or charge from the rejected callback;
+charges from previously accepted grants remain on the shared timeline.
+
+There are at most 256 tracked flows and 64 timelines. At flow capacity, admission
+evicts the least recently active unpaused flow idle for at least 60 seconds
+(UUID order breaks ties); otherwise it drops and counts a refusal. At timeline
+capacity, it prunes targets without a rule before refusing a new target. Data
+for an unknown/ended/evicted flow allows and increments the separate
+`untrackedDataCallbacks` accessor. Refused-only targets have a bounded 64-entry
+FIFO diagnostic history, migrated into their timeline if subsequently admitted.
+
+`settleStale` allows paused flows with no current rule or with an allow latch,
+and prunes timelines of targets without a rule. `flowEnded` and `removeAll` also
+settle outstanding pauses with allow; all return settlements exactly once, and stale sweeps and provider-stop results
+are sorted by ascending pause ID. A resume of an already settled pause returns
+`.alreadySettled`. Stop clears flows, timelines and counters, but pause IDs and the clock clamp persist
+so old tokens cannot match new work. Codable status is sorted by device set,
+simulator UDID and bundle ID, and reports the current ticket, tracked/paused
+flows, directional bytes and held bursts, over-budget drops, refusals, paused
+callbacks and debt releases.
+
 ## References
 
 - [Apple Filtering Network Traffic sample](https://developer.apple.com/documentation/networkextension/filtering-network-traffic)

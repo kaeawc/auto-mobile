@@ -12,6 +12,10 @@ export class RecorderTeardownRetries {
   private readonly entries = new Map<string | symbol, RecorderRetry>();
   revision = 0;
 
+  constructor(
+    private readonly reason: "recording-teardown" | "app-cleanup" = "recording-teardown",
+  ) {}
+
   add(retry: () => Promise<void>, retryTimeoutMs: number, retryKey?: string): void {
     this.entries.set(retryKey ?? Symbol(), { retry, retryTimeoutMs });
     this.revision++;
@@ -35,17 +39,23 @@ export class RecorderTeardownRetries {
             this.entries.delete(key);
           }
         } catch (error) {
-          logger.warn("Recorder teardown retry remains unconfirmed", error);
+          logger.warn(
+            `${this.reason === "recording-teardown" ? "Recorder teardown" : "App cleanup"} retry remains unconfirmed`,
+            error,
+          );
         }
       }),
     );
     if (!this.empty) {
-      throw new Error("Recorder teardown retries remain unconfirmed");
+      throw new Error(
+        `${this.reason === "recording-teardown" ? "Recorder teardown" : "App cleanup"} retries remain unconfirmed`,
+      );
     }
   }
 }
 
 interface RecorderRecoveryDeps {
+  reason?: "recording-teardown" | "app-cleanup";
   timer: Timer;
   delays: number[];
   isCurrent(): Promise<boolean>;
@@ -77,23 +87,24 @@ async function settleDispatch(
   timeoutMs: number,
   deps: RecorderRecoveryDeps,
 ): Promise<void> {
-  const timeout = new Error("Recorder teardown recovery timed out");
+  const label = deps.reason === "app-cleanup" ? "App cleanup" : "Recorder teardown";
+  const timeout = new Error(`${label} recovery timed out`);
   try {
     await raceWithDeadline(inFlight, {
       timer: deps.timer,
       timeoutMs,
-      label: "Recorder teardown recovery",
+      label: `${label} recovery`,
       timeoutError: () => timeout,
     });
   } catch (error) {
-    logger.warn("Recorder teardown recovery dispatch failed", error);
+    logger.warn(`${label} recovery dispatch failed`, error);
     if (error === timeout) {
       deps.publishDeadline(undefined);
       // Never overlap a timed-out composite; its individual late successes still count.
       try {
         await inFlight;
       } catch (lateError) {
-        logger.warn("Timed-out recorder teardown recovery failed late", lateError);
+        logger.warn(`Timed-out ${label.toLowerCase()} recovery failed late`, lateError);
       }
     }
   }

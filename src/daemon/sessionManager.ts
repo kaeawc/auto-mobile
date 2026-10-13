@@ -2290,7 +2290,12 @@ export class SessionManager {
 
   private readonly recorderTeardownRetries = new Map<
     string,
-    { deviceId: string; incarnation: number; retries: RecorderTeardownRetries }
+    {
+      deviceId: string;
+      incarnation: number;
+      reason: "recording-teardown" | "app-cleanup";
+      retries: RecorderTeardownRetries;
+    }
   >();
 
   private readonly healthRecoveries = new Map<string, Promise<void>>();
@@ -2342,7 +2347,8 @@ export class SessionManager {
   /**
    * A plan's app cleanup did not complete on this device. Marks it unhealthy so it cannot
    * be allocated dirty, and retries `retry` on the bounded health-recovery budget once the
-   * device is idle; the marker clears when `retry` resolves. `retry` must run under its
+   * device is idle; keyed retries compose and the marker clears when every owed retry resolves.
+   * `retry` must run under its
    * own abort signal: the recovery inherits this call's (possibly aborted) ambient one.
    * `retryTimeoutMs` is the caller's real budget for one retry: a cleanup (`pm clear`,
    * simctl container removal, a physical-iOS reinstall) legitimately takes far longer than
@@ -2353,13 +2359,9 @@ export class SessionManager {
     deviceId: string,
     retry: () => Promise<void>,
     retryTimeoutMs: number,
+    retryKey?: string,
   ): void {
-    this.abandonRestore(
-      { deviceId, incarnation: this.deviceHealth?.incarnation(deviceId) },
-      "app-cleanup",
-      retry,
-      retryTimeoutMs,
-    );
+    this.markDeviceNeedsKeyedRecovery(deviceId, retry, retryTimeoutMs, retryKey, "app-cleanup");
   }
 
   /** Recorder teardown was unconfirmed; quarantine synchronously before release settles. */
@@ -2369,51 +2371,70 @@ export class SessionManager {
     retryTimeoutMs: number,
     retryKey?: string,
   ): void {
+    this.markDeviceNeedsKeyedRecovery(
+      deviceId,
+      retry,
+      retryTimeoutMs,
+      retryKey,
+      "recording-teardown",
+    );
+  }
+
+  private markDeviceNeedsKeyedRecovery(
+    deviceId: string,
+    retry: () => Promise<void>,
+    retryTimeoutMs: number,
+    retryKey: string | undefined,
+    reason: "recording-teardown" | "app-cleanup",
+  ): void {
     this.pruneRecorderTeardownRetries();
     const health = this.deviceHealth;
     const incarnation = health?.incarnation(deviceId);
     if (!health || incarnation === undefined) {
       logger.warn(
-        `Recorder teardown on ${deviceId} has no pool incarnation; cannot key health marker`,
+        `${reason === "recording-teardown" ? "Recorder teardown" : "App cleanup"} on ${deviceId} has no pool incarnation; cannot key health marker`,
       );
       return;
     }
     const target = { deviceId, incarnation };
-    const key = `${deviceId}#${incarnation}:recording-teardown`;
-    const retries = this.recorderTeardownRetries.get(key)?.retries ?? new RecorderTeardownRetries();
-    this.recorderTeardownRetries.set(key, { ...target, retries });
+    const key = `${deviceId}#${incarnation}:${reason}`;
+    const retries =
+      this.recorderTeardownRetries.get(key)?.retries ?? new RecorderTeardownRetries(reason);
+    this.recorderTeardownRetries.set(key, { ...target, reason, retries });
     retries.add(retry, retryTimeoutMs, retryKey);
-    health.markers.mark(deviceId, incarnation, "recording-teardown");
+    health.markers.mark(deviceId, incarnation, reason);
     this.healthRecoveryDeadlines.set(key, undefined);
     if (this.healthRecoveries.has(key)) {
       return;
     }
-    this.startRecorderTeardownRecovery(target, retries);
+    this.startRecorderTeardownRecovery(target, retries, reason);
   }
 
   private startRecorderTeardownRecovery(
     target: { deviceId: string; incarnation: number },
     retries: RecorderTeardownRetries,
+    reason: "recording-teardown" | "app-cleanup",
   ): void {
     const { deviceId, incarnation } = target;
     const health = this.deviceHealth!;
-    const key = `${deviceId}#${incarnation}:recording-teardown`;
+    const key = `${deviceId}#${incarnation}:${reason}`;
     let completedRevision: number | undefined;
     const generation = this.replacedRestoreGenerations.get(deviceId) ?? 0;
     const recovery = runWithAbortSignal(undefined, () =>
       recoverRecorderTeardowns(retries, {
+        reason,
         timer: this.timer,
         delays: [1, 2, 3].map((attempt) => health.backoff.delayForAttempt(attempt)),
         isCurrent: async () =>
           (await this.waitForIdentityReplacement(deviceId, generation)) &&
           this.restoreIncarnationIsCurrent(target) &&
           this.recorderTeardownRetries.get(key)?.retries === retries &&
-          !!health.markers.get(deviceId, incarnation, "recording-teardown"),
+          !!health.markers.get(deviceId, incarnation, reason),
         canRecover: () => health.canRecover(deviceId),
         acceptingSessions: () => this.acceptingSessionCreations,
         dispatch: (work) => this.dispatchDeviceRestore(deviceId, work, generation),
         publishDeadline: (deadline) => this.healthRecoveryDeadlines.set(key, deadline),
-        clear: () => this.clearRestoreHealth(target, "recording-teardown"),
+        clear: () => this.clearRestoreHealth(target, reason),
         drop: () => {
           if (this.recorderTeardownRetries.get(key)?.retries === retries) {
             this.recorderTeardownRetries.delete(key);
@@ -2426,7 +2447,10 @@ export class SessionManager {
     this.healthRecoveries.set(key, recovery);
     void recovery
       .catch((error: unknown) => {
-        logger.warn(`Recorder teardown recovery failed on ${deviceId}`, error);
+        logger.warn(
+          `${reason === "recording-teardown" ? "Recorder teardown" : "App cleanup"} recovery failed on ${deviceId}`,
+          error,
+        );
       })
       .finally(() => {
         if (this.healthRecoveries.get(key) === recovery) {
@@ -2440,7 +2464,7 @@ export class SessionManager {
             pending &&
             (pending.retries !== retries || pending.retries.revision !== completedRevision)
           ) {
-            this.startRecorderTeardownRecovery(target, pending.retries);
+            this.startRecorderTeardownRecovery(target, pending.retries, reason);
           }
         }
       });
@@ -2450,7 +2474,7 @@ export class SessionManager {
     for (const [key, entry] of this.recorderTeardownRetries) {
       if (
         !this.restoreIncarnationIsCurrent(entry) ||
-        !this.deviceHealth?.markers.get(entry.deviceId, entry.incarnation, "recording-teardown")
+        !this.deviceHealth?.markers.get(entry.deviceId, entry.incarnation, entry.reason)
       ) {
         this.recorderTeardownRetries.delete(key);
       }

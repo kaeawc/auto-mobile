@@ -276,9 +276,9 @@ test.each(["clear", "incarnation"])(
   },
 );
 
-test("app-cleanup still ignores a second mark while recovery runs", async () => {
+test("app-cleanup composes a second mark while recovery runs", async () => {
   let first = 0;
-  let ignored = 0;
+  let second = 0;
   manager.markDeviceNeedsAppCleanup(
     deviceId,
     async () => {
@@ -289,14 +289,14 @@ test("app-cleanup still ignores a second mark while recovery runs", async () => 
   manager.markDeviceNeedsAppCleanup(
     deviceId,
     async () => {
-      ignored++;
+      second++;
     },
     20000,
   );
-  expect(manager.getDeviceHealthRecovery(deviceId, 1, "app-cleanup").retryAfterMs).toBe(37000);
+  expect(manager.getDeviceHealthRecovery(deviceId, 1, "app-cleanup").retryAfterMs).toBeUndefined();
   await step(1000);
   expect(first).toBe(1);
-  expect(ignored).toBe(0);
+  expect(second).toBe(1);
 });
 
 test("a new mark while the previous recovery clears is dispatched after its finalizer", async () => {

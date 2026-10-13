@@ -526,6 +526,19 @@ describe("executePlan cleans every acquired device before release", () => {
     expect(marker("device-B")).toBeUndefined();
   });
 
+  test("failed cleanup passes the plan app id as its retry key", async () => {
+    await acquire(devices.slice(0, 1));
+    cleanup.softFailuresRemaining.set("device-A", 1);
+    const mark = spyOn(sessionManager, "markDeviceNeedsAppCleanup");
+    try {
+      await lifecycle.afterExecution(input());
+      expect(mark).toHaveBeenCalledTimes(1);
+      expect(mark.mock.calls[0]?.[3]).toBe("com.example.chat");
+    } finally {
+      mark.mockRestore();
+    }
+  });
+
   test("a clean cleanup marks nothing", async () => {
     await acquire(devices.slice(0, 2));
     await lifecycle.afterExecution(input());

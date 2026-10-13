@@ -1,3 +1,8 @@
+import com.android.build.api.artifact.ScopedArtifact
+import com.android.build.api.artifact.SingleArtifact
+import com.android.build.api.variant.ScopedArtifacts
+import dev.jasonpearson.automobile.buildlogic.r8.VerifyR8KeptClassesTask
+
 plugins {
   id("automobile.kotlin-common")
   id("automobile.android-app-signing")
@@ -5,6 +10,12 @@ plugins {
   alias(libs.plugins.kotlin.serialization)
   alias(libs.plugins.compose.compiler)
 }
+
+val minifyRelease =
+  providers
+    .gradleProperty("automobile.ctrlproxy.minifyRelease")
+    .map { !it.equals("false", ignoreCase = true) }
+    .orElse(true)
 
 android {
   namespace = "dev.jasonpearson.automobile.ctrlproxy"
@@ -23,7 +34,7 @@ android {
 
   buildTypes {
     release {
-      isMinifyEnabled = false
+      isMinifyEnabled = minifyRelease.get()
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
     }
   }
@@ -56,6 +67,37 @@ android {
   }
 }
 
+androidComponents {
+  onVariants(selector().withBuildType("release")) { variant ->
+    if (minifyRelease.get()) {
+      val verify =
+        tasks.register<VerifyR8KeptClassesTask>("verifyReleaseR8KeptClasses") {
+          mappingFile.set(variant.artifacts.get(SingleArtifact.OBFUSCATION_MAPPING_FILE))
+          mergedManifest.set(variant.artifacts.get(SingleArtifact.MERGED_MANIFEST))
+          namespace.set(variant.namespace)
+          ownedPackagePrefixes.set(listOf("dev/jasonpearson/automobile/"))
+          requiredMembers.set(
+            listOf("filled", "outlined", "rounded", "sharp", "twotone").map {
+              "androidx.compose.material.icons.$it.HomeKt#getHome"
+            },
+          )
+          reportFile.set(layout.buildDirectory.file("reports/r8/release-kept-classes.txt"))
+        }
+      variant.artifacts
+        .forScope(ScopedArtifacts.Scope.ALL)
+        .use(verify)
+        .toGet(
+          ScopedArtifact.CLASSES,
+          VerifyR8KeptClassesTask::classJars,
+          VerifyR8KeptClassesTask::classDirs,
+        )
+      tasks.matching { it.name == "assembleRelease" }.configureEach { dependsOn(verify) }
+      // Verify every R8 invocation, including packageRelease, installRelease and bundleRelease.
+      tasks.matching { it.name == "minifyReleaseWithR8" }.configureEach { finalizedBy(verify) }
+    }
+  }
+}
+
 dependencies {
   implementation(libs.androidx.core)
 
@@ -67,7 +109,15 @@ dependencies {
 
   // Compose BOM
   implementation(platform(libs.compose.bom))
-  implementation(libs.bundles.compose.ui)
+  // The compose.ui bundle includes ui-tooling, which must stay debug-only in CtrlProxy.
+  implementation(libs.androidx.activity.compose)
+  implementation(libs.compose.ui.core)
+  implementation(libs.compose.ui.util)
+  implementation(libs.compose.ui.graphics)
+  implementation(libs.compose.ui.foundation)
+  implementation(libs.compose.ui.tooling.preview)
+  implementation(libs.compose.material)
+  implementation(libs.compose.material.icons.extended)
   implementation(libs.androidx.lifecycle.viewmodel.compose)
 
   // Kotlin coroutines

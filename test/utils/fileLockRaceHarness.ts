@@ -624,8 +624,10 @@ function addStaleReleaser(context: RetainedContext): void {
   }
 }
 
-function setRetainedFailures(context: RetainedContext): void {
+function setRetainedFailures(context: RetainedContext, actor: Actor): void {
   const { random, f } = context;
+  // Actors are only appended; a reopen has its own index even when its PID matches.
+  const actorIndex = context.actors.indexOf(actor);
   const linkFails = random.next() < 0.45;
   const copyFails = random.next() < 0.65;
   const readFails = random.next() < 0.03;
@@ -638,7 +640,7 @@ function setRetainedFailures(context: RetainedContext): void {
       return "ENOSPC";
     }
     if (op === "readText" || op === "rename") {
-      const key = `${op}:${path}`;
+      const key = `${actorIndex}:${op}:${path}`;
       const streak = context.faultStreaks.get(key) ?? 0;
       const fails = (op === "readText" ? readFails : renameFails) && streak < 2;
       context.faultStreaks.set(key, fails ? streak + 1 : 0);
@@ -686,7 +688,7 @@ function scheduleRetainedActors(context: RetainedContext): void {
       f.live.delete(actor.pid);
       trace.push(`${actor.pid} CRASH`);
     } else {
-      setRetainedFailures(context);
+      setRetainedFailures(context, actor);
       checkMutation(actor, f, actors, true, true);
     }
     recordResiduals(f.fs, actors);

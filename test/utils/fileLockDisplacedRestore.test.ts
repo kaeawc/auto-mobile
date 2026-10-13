@@ -443,17 +443,25 @@ test("retained readers apply generation liveness and preserve readable P precede
   expect(f.fs.operations).toEqual([{ op: "readText", path: PATH }]);
 });
 
-test.each([34, ...Array.from({ length: 32 }, (_, i) => 6001 + i), 4939, 7749, 8581, 11767])(
-  "retained property seed %d",
-  (seed) => {
-    const warn = spyOn(logger, "warn").mockImplementation(() => {});
-    try {
-      runRetainedSchedule(seed);
-    } finally {
-      warn.mockRestore();
-    }
-  },
-);
+test.each([
+  34,
+  ...Array.from({ length: 32 }, (_, i) => 6001 + i),
+  4939,
+  7749,
+  8581,
+  11767,
+  1714,
+  5158,
+  10138,
+  17165,
+])("retained property seed %d", (seed) => {
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    runRetainedSchedule(seed);
+  } finally {
+    warn.mockRestore();
+  }
+});
 
 test("takeover removes a still-live same-instance F under its existing guard", () => {
   const f = retained();
@@ -1071,6 +1079,34 @@ test.each([PATH, F])(
     ).toHaveLength(3);
   },
 );
+
+test("release whose own lock read keeps failing leaves the lock in place (3 attempts, warned)", () => {
+  const f = fixture(raw(101));
+  const held = { ...f.fs.peek(PATH)! };
+  f.fs.operations.length = 0;
+  f.fs.failure = (op, path) => (op === "readText" && path === PATH ? "EIO" : undefined);
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    expect(() => releaseExclusiveLock(PATH, 101, "owner-101", f.fs)).not.toThrow();
+    expect(f.fs.operations.filter((s) => s.op === "readText" && s.path === PATH)).toHaveLength(3);
+    expect(f.fs.peek(PATH)).toEqual(held);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      `Lock release read failed at ${PATH}; lock left in place`,
+      "failed",
+    );
+    expect(f.acquire(202).finish()).toBe(false);
+    expect(f.fs.peek(PATH)).toEqual(held);
+    f.fs.failure = undefined;
+    expect(f.acquire(202).finish()).toBe(false);
+    expect(f.fs.peek(PATH)).toEqual(held);
+    releaseExclusiveLock(PATH, 101, "owner-101", f.fs);
+    expect(f.fs.peek(PATH)).toBeUndefined();
+    expect(f.acquire(202).finish()).toBe(true);
+  } finally {
+    warn.mockRestore();
+  }
+});
 
 test.each([PATH, F])("release whose claim keeps failing warns and leaves the lock (%s)", (name) => {
   const f = fixture(raw(101));

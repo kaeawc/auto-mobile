@@ -791,8 +791,8 @@ attempts, two 6 s row writes and 2 s scheduling slack, plus 15 s for clock, 1 s 
 rotation and 35 s for screen-reader state when it carries them. Two heartbeat-monitor
 intervals (one to scan, one for a late tick) and 10 s quarantine make the advertised
 bound 32 s without that state at the default 2 s interval;
-the monitor only forces releases
-it tracks, while terminal explicit releases rely on their own bounded stages.
+the monitor tracks every release in flight and forces it at its stuck deadline,
+including terminal explicit releases that no monitor reap joins.
 `device_shutting_down` always
 advertises 2 s: a shutdown reservation is held across several separately bounded
 steps (stop, wait for the device to disappear, restart handoff) and records no

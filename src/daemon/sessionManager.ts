@@ -1352,7 +1352,7 @@ export function getSessionReleaseStuckDeadlineMs(
  * (the ownership hold's cap while pending), even when a monitor reap joins it: one interval,
  * then the capped forced quarantine. A second interval allows a late timer tick. With the
  * default 2 s interval this advertises 32 s without clock, rotation or screen-reader state.
- * Only monitor-tracked releases are forced; terminal explicit releases rely on their own stages.
+ * Every release in flight is tracked and forced by the monitor at its stuck deadline.
  */
 export function getSessionReleaseCleanupWorstCaseMs(
   env: NodeJS.ProcessEnv = process.env,
@@ -2912,6 +2912,25 @@ export class SessionManager {
         sessionId: release.session.sessionId,
         startedAtMs: release.startedAtMs ?? this.sessionNow(),
         session: release.session,
+      }));
+  }
+
+  /**
+   * Terminal releases without an idle expiry origin that still hold their device. Together with
+   * the idle and non-terminal lists, this lets the heartbeat monitor enforce the advertised
+   * cleanup bound for every release, even when no monitor reap ever joins it.
+   */
+  getTerminalReleasesInProgress(): { sessionId: string; startedAtMs: number }[] {
+    return Array.from(this.activeReleasePromises)
+      .filter(
+        (release) =>
+          !release.forced &&
+          release.expiryOrigin === undefined &&
+          isTerminalReleaseReason(release.reason.value),
+      )
+      .map((release) => ({
+        sessionId: release.session.sessionId,
+        startedAtMs: release.startedAtMs ?? this.sessionNow(),
       }));
   }
 

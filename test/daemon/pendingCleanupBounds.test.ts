@@ -24,6 +24,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import {
@@ -68,10 +69,12 @@ function harness(
     undefined,
     restorers,
   );
+  const deviceManager = new FakeDeviceUtils();
   const pool = new DevicePool(
     createDevicePoolDependencies(manager, "cleanup-bounds", {
       timer,
-      deviceManager: new FakeDeviceUtils(),
+      deviceManager,
+      installedAppsRepository: new FakeInstalledAppsRepository(),
     }),
   );
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
@@ -80,10 +83,53 @@ function harness(
     timer.reset();
     warn.mockRestore();
   });
-  return { timer, manager, pool, warn };
+  return { timer, manager, pool, deviceManager, warn };
 }
 type Harness = ReturnType<typeof harness>;
 const flush = () => drainMicrotasks(100);
+
+for (const [reason, forced] of [
+  ["cleanup-expired", false],
+  ["plan-auto-release", false],
+  ["explicit-release", true],
+  ["explicit-release", false],
+] as const) {
+  test(`terminal release enumeration partitions ${reason} and excludes it after ${forced ? "force" : "settlement"}`, async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    const h = harness(persistence);
+    await h.manager.createSession("old", android.deviceId, "android", 600_000, 600_000);
+    const gate = Promise.withResolvers<void>();
+    const write = spyOn(persistence, "markReleased").mockImplementation(() => gate.promise);
+    dispose.push(() => write.mockRestore());
+    const startedAtMs = h.timer.now();
+    const release = h.manager.releaseSession(
+      "old",
+      reason,
+      false,
+      undefined,
+      reason === "cleanup-expired" ? { expiryOrigin: "cleanup-expired" } : undefined,
+    );
+    await flush();
+    const entry = { sessionId: "old", startedAtMs };
+    expect(h.manager.getTerminalReleasesInProgress()).toEqual(
+      reason === "explicit-release" ? [entry] : [],
+    );
+    expect(h.manager.getIdleReleasesInProgress()).toEqual(
+      reason === "cleanup-expired" ? [entry] : [],
+    );
+    expect(
+      h.manager.getNonTerminalReleasesInProgress().map(({ session: _session, ...item }) => item),
+    ).toEqual(reason === "plan-auto-release" ? [entry] : []);
+    if (forced) {
+      h.manager.forceStuckRelease("old");
+      expect(h.manager.getTerminalReleasesInProgress()).toEqual([]);
+    }
+    gate.resolve();
+    await release;
+    expect(h.manager.getTerminalReleasesInProgress()).toEqual([]);
+    expect(h.manager.isReleaseInProgress("old", startedAtMs)).toBe(false);
+  });
+}
 
 test("the stuck deadline derives from first attempts and two shutdown-safe writes", () => {
   expect(releaseBudgets.SESSION_RELEASE_STUCK_DEADLINE_MS).toBeLessThanOrEqual(20_000);
@@ -979,4 +1025,92 @@ test("the env-resolved monitor interval is shared by the manager release bound",
   expect(h.manager.getDeviceCleanupRetryAfterMs(android.deviceId)).toBe(
     getSessionReleaseCleanupWorstCaseMs(),
   );
+});
+
+test("an explicit release with a live owner meets the advertised cleanup bound without a reap", async () => {
+  const step = () => drainMicrotasks(20);
+  class ParkedPersistence extends FakeDeviceSessionPersistence {
+    gate: Promise<void> | undefined;
+    override async upsertActiveSession(record: DeviceSessionRecord) {
+      await this.gate;
+      await super.upsertActiveSession(record);
+    }
+  }
+  const persistence = new ParkedPersistence();
+  const h = harness(persistence);
+  h.deviceManager.setBootedDevices("android", [android]);
+  await h.pool.initializeWithDevices([android]);
+  const session = await h.manager.createSession(
+    "old",
+    android.deviceId,
+    "android",
+    600_000,
+    600_000,
+  );
+  expect(await h.manager.claimLivenessOwnership("old", "live-owner")).toBe("claimed");
+  persistence.gate = new Promise<void>(() => {});
+  void h.manager.rebindSession("old", "emulator-5556", "android");
+  await step();
+  const force = spyOn(h.manager, "forceStuckRelease");
+  dispose.push(() => force.mockRestore());
+  const forcedAt: number[] = [];
+  let reaps = 0;
+  const monitor = new SessionHeartbeatMonitor(
+    h.manager,
+    () => false,
+    async (id, reason) => {
+      reaps++;
+      await h.manager.releaseSession(id, reason);
+    },
+    h.timer,
+    {
+      forceStuckRelease: async (id) => {
+        forcedAt.push(h.timer.now());
+        await forceStuckSessionRelease(h.manager, h.pool, id);
+      },
+    },
+  );
+  const scanOrigin = h.timer.now();
+  monitor.start();
+  dispose.push(() => void monitor.stop());
+  await h.timer.advanceTimeAsync(1, step);
+  const startedAt = h.timer.now();
+  void h.manager.releaseSession("old", "explicit-release");
+  await step();
+  const worst = getSessionReleaseCleanupWorstCaseMs();
+  const stuckAt = h.manager.getReleaseStuckAtMs("old")!;
+  const interval = getSessionHeartbeatCheckIntervalMs();
+  const dueScan = scanOrigin + Math.ceil((stuckAt - scanOrigin) / interval) * interval;
+  expect(stuckAt).toBe(startedAt + STUCK_REAP_WARN_MS);
+  expect(session.heartbeatTimeoutMs).toBeGreaterThan(worst);
+  expect(h.manager.getDeviceCleanupRetryAfterMs(android.deviceId)).toBe(worst);
+  await expect(
+    h.pool.bindOrReuseDeviceSession("next", android.deviceId, "android"),
+  ).rejects.toBeInstanceOf(DeviceCleanupInProgressError);
+  await h.timer.advanceTimeAsync(dueScan - 1 - h.timer.now(), step);
+  expect(force).not.toHaveBeenCalled();
+  expect(() => h.pool.assertDeviceCleanupComplete(android.deviceId)).toThrow(
+    DeviceCleanupInProgressError,
+  );
+  await h.timer.advanceTimeAsync(1, step);
+  expect(forcedAt).toEqual([dueScan]);
+  expect(force).toHaveBeenCalledTimes(1);
+  expect(h.manager.getSession("old")).toBeNull();
+  expect(h.manager.getSessionForDevice(android.deviceId)).toBeNull();
+  expect(h.manager.getTerminalReleaseSnapshot("old")?.releaseReason).toBe("explicit-release");
+  await h.timer.advanceTimeAsync(cap - 1, step);
+  await expect(
+    h.pool.bindOrReuseDeviceSession("next", android.deviceId, "android"),
+  ).rejects.toBeInstanceOf(DeviceCleanupInProgressError);
+  await h.timer.advanceTimeAsync(1, step);
+  expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(false);
+  expect(h.timer.now()).toBeLessThanOrEqual(startedAt + worst);
+  // Only the replacement row write is unparked; the old rebind remains wedged.
+  persistence.gate = undefined;
+  expect(await h.pool.bindOrReuseDeviceSession("next", android.deviceId, "android")).toBe("next");
+  await h.timer.advanceTimeAsync(2 * interval, step);
+  expect(reaps).toBe(0);
+  expect(force).toHaveBeenCalledTimes(1);
+  expect(h.manager.getSession("old")).toBeNull();
+  expect(h.manager.getTerminalReleaseSnapshot("old")?.releaseReason).toBe("explicit-release");
 });

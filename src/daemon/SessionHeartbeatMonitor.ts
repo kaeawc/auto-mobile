@@ -71,6 +71,11 @@ export interface HeartbeatSessionSource {
    */
   getNonTerminalReleasesInProgress?(): NonTerminalReleaseInProgress[];
   /**
+   * Terminal releases without an idle expiry origin, including releases no monitor reap joins.
+   * Every release in flight must be tracked and forced to enforce the advertised cleanup bound.
+   */
+  getTerminalReleasesInProgress?(): IdleReleaseInProgress[];
+  /**
    * Whether the release of this session that started at `startedAtMs` is still running and still
    * holds its device, whatever reason it carries now (#11554). A joiner can upgrade a non-terminal
    * release to a terminal reason, which drops it from {@link getNonTerminalReleasesInProgress}
@@ -98,7 +103,7 @@ interface TrackedRelease {
   at: number;
   /** Reported (and forced, when a force is wired) already: once per release. */
   reported: boolean;
-  /** Started by the session source (an idle or non-terminal release), not by a monitor reap. */
+  /** Started by the session source (idle, non-terminal or terminal), not by a monitor reap. */
   sourceRelease?: boolean;
 }
 
@@ -218,8 +223,8 @@ export class SessionHeartbeatMonitor {
   private readonly reapsInFlight = new Map<string, Promise<void>>();
   /**
    * When each release in progress started, and whether it has been reported as stuck: the
-   * monitor's own reaps, the source's idle releases (#11481) and its non-terminal releases
-   * (#11554). Stuck detection runs over this
+   * monitor's own reaps and every source release (idle, non-terminal or terminal). All are
+   * tracked and forced at their stuck deadline. Stuck detection runs over this
    * set, never over the visible sessions, which hide a session once its idle deadline passes.
    */
   private readonly reapStartedAt = new Map<string, TrackedRelease>();
@@ -580,14 +585,12 @@ export class SessionHeartbeatMonitor {
   }
 
   /**
-   * Mirror the releases the source runs without a monitor reap into {@link reapStartedAt}: its
-   * idle releases (#11481) and its non-terminal releases, which the monitor never joins (#11554)
-   * and so must hold to the stuck deadline from their own start. One that settled, or was forced
-   * and so no longer holds its device, is forgotten here; a new release of the same session id
-   * starts a new deadline. One a joiner upgraded to a terminal reason also drops out of the
-   * source's lists, but it is the same release, as wedged as before, and no reap of the monitor
-   * need ever join it (an in-flight call vetoes the reap): it stays tracked from its own start
-   * until the source says it is over, and is forced with whatever reason it carries by then. A
+   * Mirror every source release into {@link reapStartedAt}: idle (#11481), non-terminal (#11554)
+   * and terminal releases are tracked and forced at their stuck deadline even when no monitor
+   * reap joins them. Only non-terminal releases freeze heartbeat-refused judgement. One that
+   * settled, or was forced and so no longer holds its device, is forgotten here; a new release
+   * of the same session id starts a new deadline. A reason upgrade keeps the same release's
+   * start and reported state, so it is forced once with whatever reason it carries by then. A
    * reap of the monitor's own is left alone: it is already tracked from its own start and
    * forgotten when it settles.
    */
@@ -596,11 +599,13 @@ export class SessionHeartbeatMonitor {
     this.heartbeatsRefusedSince = new Map(
       nonTerminal.map((release) => [release.session, release.startedAtMs]),
     );
+    const sourceReleases = [
+      nonTerminal,
+      this.sessions.getIdleReleasesInProgress?.(),
+      this.sessions.getTerminalReleasesInProgress?.(),
+    ].flatMap((releases) => releases ?? []);
     const inProgress = new Map(
-      [...nonTerminal, ...(this.sessions.getIdleReleasesInProgress?.() ?? [])].map((release) => [
-        release.sessionId,
-        release.startedAtMs,
-      ]),
+      sourceReleases.map((release) => [release.sessionId, release.startedAtMs]),
     );
     for (const [sessionId, tracked] of this.reapStartedAt) {
       if (

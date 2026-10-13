@@ -9,12 +9,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.assertHeightIsEqualTo
+import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.protocol.*
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CoroutineDispatcher
@@ -54,8 +57,10 @@ class PrototypeRenderWorkTest {
   private var resolver: ContentResolver = RuntimeEnvironment.getApplication().contentResolver
   private val store = PrototypeAssetStore(FakePrototypeAssetFiles())
   private var decodes = 0
-  private val decoder = PrototypeImageDecoder { _, _ ->
+  private val decodeTargets = mutableListOf<PrototypeImageTarget>()
+  private val decoder = PrototypeImageDecoder { _, target ->
     decodes++
+    decodeTargets += target
     BitmapPrototypeImage(Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888))
   }
   private val cache =
@@ -245,6 +250,28 @@ class PrototypeRenderWorkTest {
     show(spec(image()))
     assertReady()
     assertEquals(0, count(PrototypeRenderWork.IMAGE_SUBCOMPOSITION, "root"))
+  }
+
+  @Test
+  fun `a dp sized image in a tighter parent decodes for the authored size`() {
+    upload()
+    show(
+      spec(
+        PrototypeBoxNode(
+          style = PrototypeStyle(width = PrototypeDimension.Dp(24.0)),
+          children = listOf(image()),
+        ),
+      ),
+    )
+    assertReady()
+    compose
+      .onNodeWithTag("image", useUnmergedTree = true)
+      .assertWidthIsEqualTo(24.dp)
+      .assertHeightIsEqualTo(48.dp)
+    val authoredBucket = with(compose.density) { powerOfTwoAtLeast(48.dp.roundToPx()) }
+    val constrainedBucket = with(compose.density) { powerOfTwoAtLeast(24.dp.roundToPx()) }
+    assertTrue("the authored width needs a larger bucket", authoredBucket > constrainedBucket)
+    assertEquals(listOf(PrototypeImageTarget(authoredBucket, authoredBucket)), decodeTargets)
   }
 
   @Test
@@ -552,6 +579,78 @@ class PrototypeRenderWorkTest {
       .fetchSemanticsNode()
       .config[SemanticsProperties.VerticalScrollAxisRange]
       .value()
+
+  private fun scrollSubtreeSpec(rows: Int) =
+    spec(
+      PrototypeBoxNode(
+        children =
+          listOf(
+            PrototypeBoxNode(
+              visibleWhen = shownCondition,
+              transition = "none",
+              children =
+                listOf(
+                  PrototypeScrollNode(
+                    testTag = "scroll",
+                    style = PrototypeStyle(height = PrototypeDimension.Dp(60.0)),
+                    child =
+                      PrototypeColumnNode(
+                        children =
+                          List(rows) {
+                            PrototypeTextNode(
+                              text = "row $it",
+                              style = PrototypeStyle(height = PrototypeDimension.Dp(24.0)),
+                            )
+                          },
+                      ),
+                  ),
+                ),
+            ),
+          ),
+      ),
+    )
+
+  private fun scrollDown(): Float {
+    compose.onNodeWithTag("scroll", useUnmergedTree = true).performSemanticsAction(
+      SemanticsActions.ScrollBy,
+    ) {
+      assertTrue(it(0f, 100f))
+    }
+    settle()
+    return scrollOffset().also { assertTrue("scroll moved", it > 0f) }
+  }
+
+  private fun assertScrollKeptAfterReplace(runtime: PrototypeRuntime, rows: Int) {
+    val before = scrollDown()
+    compose.runOnIdle { runtime.replace(scrollSubtreeSpec(rows)) }
+    repeat(2) { compose.mainClock.advanceTimeByFrame() }
+    settle()
+    // Scroll state is remembered above the row children: keeping it proves no subtree disposal.
+    assertEquals("remembered scroll state survived replacement", before, scrollOffset(), 0.01f)
+  }
+
+  @Test
+  fun `a visible scroll keeps its state when replacement grows its subtree from 23 to 24 nodes`() {
+    val runtime = show(scrollSubtreeSpec(20))
+    assertScrollKeptAfterReplace(runtime, rows = 21)
+  }
+
+  @Test
+  fun `a visible scroll keeps its state when replacement shrinks its subtree from 24 to 23 nodes`() {
+    val runtime = show(scrollSubtreeSpec(21))
+    assertScrollKeptAfterReplace(runtime, rows = 20)
+  }
+
+  @Test
+  fun `a shown again retained scroll keeps its epoch when replacement leaves retention`() {
+    val runtime = show(scrollSubtreeSpec(21))
+    scrollDown()
+    runtime.setShown(false)
+    assertEquals(0, shown("scroll", unmerged = false))
+    runtime.setShown(true)
+    assertEquals("settled hide and show advanced the scroll epoch", 0f, scrollOffset(), 0.01f)
+    assertScrollKeptAfterReplace(runtime, rows = 20)
+  }
 
   @Test
   fun `a retained scroll resets its offset after a settled hide and show`() {

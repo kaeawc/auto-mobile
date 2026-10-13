@@ -104,7 +104,8 @@ internal val LocalPrototypeRetainedSubtrees = compositionLocalOf<Set<String>> { 
 /** Moves each time a retained subtree is shown again after it had settled hidden. */
 internal val LocalPrototypeShowEpoch = compositionLocalOf { 0 }
 
-private class RetainedVisibilityHistory {
+/** Show history kept across changes in subtree retention membership. */
+internal class RetainedVisibilityHistory {
   var shown = false
   var settledHidden = false
   var epoch = 0
@@ -127,10 +128,10 @@ private class RetainedVisibilityHistory {
 internal fun PrototypeRetainedVisibility(
   visible: Boolean,
   fade: Boolean,
+  history: RetainedVisibilityHistory,
   modifier: Modifier = Modifier,
   content: @Composable () -> Unit,
 ) {
-  val history = remember { RetainedVisibilityHistory() }
   // Initially visible starts at alpha 1; initially hidden keeps alpha 0 for its first enter fade.
   val alpha = retainedVisibilityAlpha(visible, fade)
   val hidden by

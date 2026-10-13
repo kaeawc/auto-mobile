@@ -319,14 +319,11 @@ private fun RenderPrototypeNode(
     CaptureAnchorLocals(node.identity)
     return
   }
-  if (node.identity in LocalPrototypeRetainedSubtrees.current) {
-    PrototypeRetainedVisibility(
-      node.visible,
-      fade = LocalPrototypeMotion.current && node.source?.transition == "fade",
-      modifier = parentModifier,
-    ) {
-      RenderPrototypeNodeContent(node, interact, weightAxis = weightAxis, windowRoot = windowRoot)
-    }
+  if (
+    node.source?.visibleWhen != null &&
+      (node.source.transition == "fade" || node.source.transition == "none")
+  ) {
+    RenderPrototypeVisibility(node, interact, parentModifier, weightAxis, windowRoot)
     return
   }
   // Only `visibleWhen` nodes animate; wrapping every node would add a layout to each one.
@@ -344,6 +341,51 @@ private fun RenderPrototypeNode(
     }
   } else if (node.visible) {
     RenderPrototypeNodeContent(node, interact, parentModifier, weightAxis, windowRoot)
+  }
+}
+
+@Composable
+private fun RenderPrototypeVisibility(
+  node: PrototypeRenderNode,
+  interact: (PrototypeInteraction) -> Unit,
+  parentModifier: Modifier,
+  weightAxis: PrototypeWeightAxis?,
+  windowRoot: Boolean,
+) {
+  // Retention membership can change while shown; move the content with its remembered state.
+  val content =
+    remember(interact, weightAxis, windowRoot) {
+      movableContentOf<PrototypeRenderNode, Modifier> { n, m ->
+        RenderPrototypeNodeContent(n, interact, m, weightAxis, windowRoot)
+      }
+    }
+  val history = remember { RetainedVisibilityHistory() }
+  if (node.identity in LocalPrototypeRetainedSubtrees.current) {
+    PrototypeRetainedVisibility(
+      node.visible,
+      fade = LocalPrototypeMotion.current && node.source?.transition == "fade",
+      history = history,
+      modifier = parentModifier,
+    ) {
+      content(node, Modifier)
+    }
+    return
+  }
+  CompositionLocalProvider(
+    LocalPrototypeShowEpoch provides LocalPrototypeShowEpoch.current + history.epoch,
+  ) {
+    if (LocalPrototypeMotion.current) {
+      AnimatedVisibility(
+        visible = node.visible,
+        modifier = parentModifier,
+        enter = prototypeEnterTransition(node.source?.transition),
+        exit = prototypeExitTransition(node.source?.transition),
+      ) {
+        ProvideAnchorFade(none = node.source?.transition == "none") { content(node, Modifier) }
+      }
+    } else if (node.visible) {
+      content(node, parentModifier)
+    }
   }
 }
 

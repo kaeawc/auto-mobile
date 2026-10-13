@@ -154,7 +154,11 @@ private fun prototypeImageTarget(constraints: Constraints): PrototypeImageTarget
   )
 }
 
-/** Authored content dp size only when layout cannot modify the two explicit dp axes. Pure. */
+/**
+ * Authored content dp size for eligible explicit dp axes can yield a different decode target from
+ * the constraint-derived target when a parent is tighter. When they differ, the authored-size
+ * target can only be larger.
+ */
 internal fun prototypeAuthoredImageSize(node: PrototypeRenderNode): DpSize? {
   if (node.role != "image") return null
   val style = node.style.source

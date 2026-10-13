@@ -1,8 +1,8 @@
 /**
  * killDevice identity + termination-primitive contract.
  *
- * The kill is unconditionally the serial-scoped emulator console kill
- * `adb -s <serial> emu kill`. That is the only termination that lets the
+ * Without a processStop seam, the kill remains the serial-scoped emulator console kill
+ * `adb -s <serial> emu kill`. That is the termination that lets the
  * emulator write its quick-boot snapshot on exit (#6849), and `adb emu`
  * selects only via `-s`/ANDROID_SERIAL, so serial scoping is also what keeps
  * the kill unambiguous with several emulators attached (#6845).
@@ -23,12 +23,183 @@ import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeEmulatorProcessStopper } from "../../fakes/FakeEmulatorProcessStopper";
+import { AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
+import { EmulatorStillRunningError } from "../../../src/utils/android-cmdline-tools/EmulatorProcessStop";
+import { raceWithDeadline } from "../../../src/utils/raceWithDeadline";
 
 const original: BootedDevice = {
   name: "Pixel_8",
   platform: "android",
   deviceId: "emulator-5554",
 };
+
+function processFallbackFixture(name = original.name, offline = false) {
+  const adb = new FakeAdbExecutor();
+  adb.setDevices(offline ? [] : [{ ...original, name }]);
+  adb.setDeviceStates([{ deviceId: original.deviceId, state: offline ? "offline" : "device" }]);
+  adb.setCommandResponse("emu avd name", execResult(`${name}\nOK\n`));
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const execute = adb.execute.bind(adb);
+  adb.execute = async (args, options = {}) => {
+    const result = await execute(args, options);
+    if (args.join(" ") !== "emu kill") {
+      return result;
+    }
+    return raceWithDeadline(new Promise<never>(() => {}), {
+      timer,
+      signal: options.signal,
+      timeoutMs: options.timeoutMs,
+      label: "emu kill",
+      timeoutError: () => new AdbCommandTimeoutError("Console kill timed out"),
+    });
+  };
+  const stopper = new FakeEmulatorProcessStopper();
+  stopper.outcome = { kind: "stopped", pid: 83205, signal: "SIGTERM" };
+  stopper.candidates = [
+    { pid: 83205, command: "qemu-system-aarch64-headless -avd Foreign -port 5554" },
+  ];
+  const client = new AndroidEmulatorClient(null, null, timer, new FakeAdbClientFactory(adb));
+  return { adb, client, timer, stopper, options: { timeoutMs: 30_000, processStop: { stopper } } };
+}
+
+test("bounded console kill falls back with the real AVD name and original deadline", async () => {
+  const f = processFallbackFixture();
+  await expect(f.client.killDevice(original, f.options)).resolves.toMatchObject(original);
+  expect(f.stopper.stopCalls).toEqual([
+    [
+      { serial: original.deviceId, avdName: original.name },
+      { deadlineMs: 30_000, signal: undefined },
+    ],
+  ]);
+  expect(f.timer.now()).toBe(10_000);
+  expect(emuKillArgv(f.adb)).toHaveLength(1);
+});
+
+test("mute discovery uses a real requested name without spending the console kill bound", async () => {
+  const f = processFallbackFixture("Unknown (emulator-5554)");
+  await expect(f.client.killDevice(original, f.options)).resolves.toMatchObject(original);
+  expect(emuKillArgv(f.adb)).toEqual([]);
+  expect(f.stopper.stopCalls[0][0]).toEqual({ serial: original.deviceId, avdName: original.name });
+});
+
+test("process-table mismatch uses serial-reuse refusal", async () => {
+  const f = processFallbackFixture();
+  f.stopper.outcome = { kind: "identity-mismatch", pid: 83205, runningAvdName: "Replacement" };
+  await expect(f.client.killDevice(original, f.options)).rejects.toThrow(
+    "refusing to kill its replacement (AVD 'Replacement')",
+  );
+});
+
+test("a named discovery replacement never reaches the process stopper", async () => {
+  const f = processFallbackFixture("Replacement");
+  await expect(f.client.killDevice(original, f.options)).rejects.toThrow("identity changed");
+  expect(f.stopper.stopCalls).toEqual([]);
+  expect(emuKillArgv(f.adb)).toEqual([]);
+});
+
+for (const offline of [false, true]) {
+  test(`forced ${offline ? "offline" : "online"} stop uses the pooled expected name after console timeout`, async () => {
+    const f = processFallbackFixture("Unknown (emulator-5554)", offline);
+    const target = { ...original, name: "Unknown (emulator-5554)" };
+    await expect(
+      f.client.killDevice(target, {
+        ...f.options,
+        force: true,
+        processStop: { stopper: f.stopper, expectedAvdName: original.name },
+      }),
+    ).resolves.toMatchObject({ deviceId: original.deviceId });
+    expect(f.stopper.stopCalls[0][0]).toEqual({
+      serial: original.deviceId,
+      avdName: original.name,
+    });
+    expect(emuKillArgv(f.adb)).toHaveLength(1);
+  });
+}
+
+test("forced nameless stop describes candidates without authorizing a process signal", async () => {
+  const f = processFallbackFixture();
+  await expect(
+    f.client.killDevice(
+      { ...original, name: "Unknown (emulator-5554)" },
+      { ...f.options, force: true },
+    ),
+  ).rejects.toThrow(/83205[\s\S]*-avd Foreign -port 5554/);
+  expect(f.stopper.stopCalls).toEqual([]);
+});
+
+test("still-running outcome exposes a typed error with pid, serial and AVD", async () => {
+  const f = processFallbackFixture();
+  f.stopper.outcome = {
+    kind: "still-running",
+    pid: 83205,
+    command: "qemu-system-aarch64 -avd Pixel_8 -port 5554",
+  };
+  const result = await f.client.killDevice(original, f.options).catch((error: unknown) => error);
+  expect(result).toBeInstanceOf(EmulatorStillRunningError);
+  expect(result).toMatchObject({ pid: 83205, serial: original.deviceId, avdName: original.name });
+});
+
+test("caller abort never enters process fallback", async () => {
+  const f = processFallbackFixture();
+  const abort = new AbortController();
+  abort.abort(new Error("caller cancelled"));
+  await expect(
+    f.client.killDevice(original, { ...f.options, signal: abort.signal }),
+  ).rejects.toThrow("caller cancelled");
+  expect(f.stopper.stopCalls).toEqual([]);
+});
+
+test("caller abort during console kill propagates unchanged without process fallback", async () => {
+  const f = processFallbackFixture();
+  const abort = new AbortController();
+  const reason = new Error("caller cancelled console kill");
+  f.timer.setTimeout(() => abort.abort(reason), 100);
+  await expect(f.client.killDevice(original, { ...f.options, signal: abort.signal })).rejects.toBe(
+    reason,
+  );
+  expect(emuKillArgv(f.adb)).toHaveLength(1);
+  expect(f.stopper.stopCalls).toEqual([]);
+  expect(f.stopper.describeCalls).toEqual([]);
+});
+
+test("non-timeout console failure never enters process fallback", async () => {
+  const f = processFallbackFixture();
+  const execute = f.adb.execute.bind(f.adb);
+  f.adb.execute = async (args, options) => {
+    if (args.join(" ") === "emu kill") {
+      throw new Error("console rejected command");
+    }
+    return execute(args, options);
+  };
+  await expect(f.client.killDevice(original, f.options)).rejects.toThrow(
+    "console rejected command",
+  );
+  expect(f.stopper.stopCalls).toEqual([]);
+});
+
+test("unidentified process retains the console timeout type and supplies manual process escape", async () => {
+  const f = processFallbackFixture();
+  f.stopper.outcome = { kind: "unidentified", identity: { kind: "absent" } };
+  const error = await f.client.killDevice(original, f.options).catch((error: unknown) => error);
+  expect(error).toBeInstanceOf(AdbCommandTimeoutError);
+  expect((error as Error).message).toContain("Console kill timed out");
+  expect((error as Error).message).toContain("kill 83205");
+});
+
+test("unidentified mute discovery retains a could-not-name-itself refusal and sends no console kill", async () => {
+  const f = processFallbackFixture("Unknown (emulator-5554)");
+  f.stopper.outcome = {
+    kind: "unidentified",
+    identity: { kind: "unreadable", detail: "ps unavailable" },
+  };
+  f.stopper.candidates = [];
+  await expect(f.client.killDevice(original, f.options)).rejects.toThrow(
+    /could not name itself[\s\S]*No process candidate[\s\S]*ps -axo/,
+  );
+  expect(emuKillArgv(f.adb)).toEqual([]);
+});
 
 function execResult(stdout: string) {
   return {

@@ -3,7 +3,11 @@ import { createStructuredToolResponse } from "../utils/toolUtils";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
 import { ActionableError, type BootedDevice, type SomePlatform } from "../models";
 import { DeviceShutdownTimeoutError } from "../models/DeviceShutdownTimeoutError";
-import type { BootedDeviceDiscovery, PlatformDeviceManager } from "../devices/deviceUtils";
+import type {
+  DeviceShutdownOptions,
+  BootedDeviceDiscovery,
+  PlatformDeviceManager,
+} from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
 import { fixedBackoff } from "../utils/Backoff";
 import { getAbortSignal } from "../utils/AbortContext";
@@ -1376,7 +1380,12 @@ async function resolvePooledAvdKillTarget(
     pooledAvdIdentity.capture,
     devicePool,
     dependencies.resolveRunningAndroidAvdName,
-    { timer: dependencies.timer, deadlineMs: budget.deadlineMs, signal: budget.requestAbortSignal },
+    {
+      timer: dependencies.timer,
+      deadlineMs: budget.deadlineMs,
+      signal: budget.requestAbortSignal,
+      processStopper: dependencies.androidEmulatorProcessStopper,
+    },
     pooledAvdIdentity.force,
   ).catch((error: unknown) => {
     logger.warn(`[DeviceTools] Pooled stop identity probe failed for ${device.deviceId}`, error);
@@ -1398,6 +1407,7 @@ async function resolvePooledAvdKillTarget(
 }
 
 interface KillProcessAndRetireOwnershipOptions {
+  processStop?: DeviceShutdownOptions["processStop"];
   stoppingSessionUuid?: string;
   stoppingMcpSessionId?: string;
   stableIds?: readonly string[];
@@ -1543,6 +1553,19 @@ export async function commitStoppedRestartHold(
   }
 }
 
+function androidKillProcessStop(
+  dependencies: DeviceToolsDependencies,
+  device: BootedDevice,
+  identity: PooledAvdKillIdentity | undefined,
+): DeviceShutdownOptions["processStop"] {
+  return device.platform === "android"
+    ? {
+        stopper: dependencies.androidEmulatorProcessStopper,
+        expectedAvdName: identity?.capture?.avdName,
+      }
+    : undefined;
+}
+
 async function killProcessAndRetireOwnership(
   context: ShutdownEntryContext &
     Pick<
@@ -1562,6 +1585,7 @@ async function killProcessAndRetireOwnership(
     timeoutMs,
     killTarget,
     force,
+    processStop,
     retainReservationUntil,
   } = options;
   const shutdownDeadlineMs = context.deadlineMs;
@@ -1599,7 +1623,7 @@ async function killProcessAndRetireOwnership(
         requestAbortSignal: requestAbortSignal,
         operation: async (signal, timeoutMs) => {
           platformShutdown = deviceManager
-            .killDevice(killTarget, { signal, timeoutMs, force })
+            .killDevice(killTarget, { signal, timeoutMs, force, processStop })
             .finally(() => {
               platformShutdownSettled = true;
             });
@@ -1943,6 +1967,7 @@ export async function shutdownDevice(
             timeoutMs,
             killTarget,
             force: pooledAvdIdentity?.force ?? false,
+            processStop: androidKillProcessStop(dependencies, device, pooledAvdIdentity),
           },
         );
 

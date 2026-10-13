@@ -1,3 +1,4 @@
+import type { EmulatorProcessStopper } from "../utils/android-cmdline-tools/EmulatorProcessStop";
 import {
   AdbCommandTimeoutError,
   AdbUnavailableError,
@@ -195,6 +196,7 @@ export interface DeviceImageDiscoveryOptions {
 }
 /** Bounds and cancels a platform shutdown command. */
 export interface DeviceShutdownOptions {
+  processStop?: { stopper: EmulatorProcessStopper; expectedAvdName?: string };
   timeoutMs?: number;
   signal?: AbortSignal;
   /**

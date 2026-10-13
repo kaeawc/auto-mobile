@@ -319,6 +319,7 @@ function parseJournalTarget(json: string): SlotJournalTarget {
   }
   return {
     ...(newPlatform ? { newPlatform } : {}),
+    ...(record.removalRequested === true ? { removalRequested: true as const } : {}),
     oldStableId: nullableString(record, "oldStableId"),
     oldName: nullableString(record, "oldName"),
     newName: nullableString(record, "newName"),

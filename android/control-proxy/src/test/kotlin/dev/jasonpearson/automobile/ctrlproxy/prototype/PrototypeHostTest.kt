@@ -1,6 +1,9 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import android.view.InputDevice
 import android.view.KeyEvent
+import android.view.MotionEvent
+import android.view.View
 import android.view.WindowManager.LayoutParams
 import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.ComposeView
@@ -37,6 +40,13 @@ import org.robolectric.annotation.Config
 @Config(sdk = [30])
 class PrototypeHostTest {
   companion object {
+    private const val HOLD_BEFORE_UPDATE_MILLIS = 900L
+    private const val HOLD_REMAINING_MILLIS = 100L
+    private const val POINTER_DOWN =
+      MotionEvent.ACTION_POINTER_DOWN or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
+    private const val POINTER_UP =
+      MotionEvent.ACTION_POINTER_UP or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
+
     @JvmStatic
     @BeforeClass
     fun warmRuntime() {
@@ -54,13 +64,19 @@ class PrototypeHostTest {
   private var density = 2.5f
   private var blocked = false
   private var lost = 0
+  private lateinit var escapeScheduler: FakePrototypeEscapeScheduler
+  private val contentTouches = mutableListOf<Int>()
+  private var contentHandlesTouch = true
 
   @Before
   fun setUp() {
     history.clear()
+    contentTouches.clear()
+    contentHandlesTouch = true
     density = 2.5f
     blocked = false
     lost = 0
+    escapeScheduler = FakePrototypeEscapeScheduler()
     main = FakePrototypeMainThread()
     timer = FakePrototypeSettleTimer(history)
     manager = RecordingPrototypeWindowManager(main, history)
@@ -76,10 +92,312 @@ class PrototypeHostTest {
         onWindowAttached = { history += "hook" },
         onWindowLost = { lost++ },
         backScope = CoroutineScope(Dispatchers.Unconfined),
+        escapeSchedulerFactory = { escapeScheduler },
+        escapeTouchSlop = { 8 },
+        dispatchToContent = { event ->
+          contentTouches += event.action
+          contentHandlesTouch
+        },
       )
     // Warm platform/Compose constructors outside test bodies; no window attaches or composition
     // runs.
     ComposeView(RuntimeEnvironment.getApplication())
+  }
+
+  private fun chromelessRequest() =
+    PrototypeRequest(PrototypePlacement.Fullscreen(), chrome = PrototypeWindowChrome.NONE)
+
+  private fun beginHold(view: View) {
+    assertTrue(touch(view, MotionEvent.ACTION_DOWN))
+    assertTrue(touch(view, POINTER_DOWN, 2))
+  }
+
+  private fun endHold(view: View) {
+    assertTrue(touch(view, POINTER_UP, 2))
+    assertTrue(touch(view, MotionEvent.ACTION_UP))
+  }
+
+  private fun touch(view: View, action: Int, count: Int = 1): Boolean {
+    val properties =
+      Array(count) { index ->
+        MotionEvent.PointerProperties().apply {
+          id = index
+          toolType = MotionEvent.TOOL_TYPE_FINGER
+        }
+      }
+    val coordinates =
+      Array(count) { index ->
+        MotionEvent.PointerCoords().apply {
+          x = 20f + index * 40f
+          y = 30f
+          pressure = 1f
+          size = 1f
+        }
+      }
+    val event =
+      MotionEvent.obtain(
+        0L,
+        0L,
+        action,
+        count,
+        properties,
+        coordinates,
+        0,
+        0,
+        1f,
+        1f,
+        0,
+        0,
+        InputDevice.SOURCE_TOUCHSCREEN,
+        0,
+      )
+    return try {
+      view.dispatchTouchEvent(event)
+    } finally {
+      event.recycle()
+    }
+  }
+
+  @Test
+  fun `chromeless host cancels children on escape and swallows the remaining gesture`() = runTest {
+    host.show(
+      PrototypeRequest(PrototypePlacement.Fullscreen(), chrome = PrototypeWindowChrome.NONE),
+    )
+    val view = manager.view as PrototypeComposeView
+    val events = contentTouches
+    assertTrue(touch(view, MotionEvent.ACTION_DOWN))
+    assertTrue(
+      touch(
+        view,
+        POINTER_DOWN,
+        2,
+      ),
+    )
+    assertFalse(view.escapeState.revealed)
+    escapeScheduler.advanceBy(PROTOTYPE_ESCAPE_HOLD_MILLIS)
+    assertTrue(view.escapeState.revealed)
+    assertEquals(
+      listOf(MotionEvent.ACTION_DOWN, POINTER_DOWN, MotionEvent.ACTION_CANCEL),
+      events,
+    )
+    assertTrue(touch(view, MotionEvent.ACTION_MOVE, 2))
+    assertTrue(
+      touch(
+        view,
+        POINTER_UP,
+        2,
+      ),
+    )
+    assertTrue(touch(view, MotionEvent.ACTION_UP))
+    assertEquals(3, events.size)
+    assertTrue(touch(view, MotionEvent.ACTION_DOWN))
+    assertTrue(touch(view, MotionEvent.ACTION_UP))
+    assertEquals(listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP), events.takeLast(2))
+    assertTrue(host.dismiss())
+    assertFalse(host.isShowing)
+    assertEquals(1, manager.removals)
+  }
+
+  @Test
+  fun `bar fullscreen and floating dispatch the same two finger hold unchanged`() = runTest {
+    val requests =
+      listOf(
+        PrototypeRequest(PrototypePlacement.Fullscreen()),
+        PrototypeRequest(PrototypePlacement.Floating(), chrome = PrototypeWindowChrome.NONE),
+        PrototypeRequest(
+          PrototypePlacement.Sheet(PrototypePlacement.Edge.BOTTOM, 100f),
+          chrome = PrototypeWindowChrome.NONE,
+        ),
+      )
+    contentHandlesTouch = false
+    for (request in requests) {
+      contentTouches.clear()
+      host.show(request)
+      val view = manager.view as PrototypeComposeView
+      val events = contentTouches
+      assertFalse(touch(view, MotionEvent.ACTION_DOWN))
+      assertFalse(touch(view, POINTER_DOWN, 2))
+      escapeScheduler.advanceBy(PROTOTYPE_ESCAPE_HOLD_MILLIS)
+      assertFalse(touch(view, POINTER_UP, 2))
+      assertFalse(touch(view, MotionEvent.ACTION_UP))
+      assertFalse(view.escapeState.revealed)
+      assertTrue(escapeScheduler.tasks.isEmpty())
+      assertEquals(
+        listOf(
+          MotionEvent.ACTION_DOWN,
+          POINTER_DOWN,
+          POINTER_UP,
+          MotionEvent.ACTION_UP,
+        ),
+        events,
+      )
+      host.dismiss()
+    }
+  }
+
+  @Test
+  fun `host dismiss removes an unrevealed zero-opacity chromeless fullscreen window`() = runTest {
+    host.show(
+      PrototypeRequest(
+        PrototypePlacement.Fullscreen(),
+        chrome = PrototypeWindowChrome.NONE,
+        opacityPercent = 0,
+      ),
+    )
+    val view = manager.view as PrototypeComposeView
+    assertEquals(1f, view.alpha, 0f)
+    assertFalse(view.escapeState.revealed)
+    assertTrue(host.dismiss())
+    assertFalse(host.isShowing)
+    assertEquals(1, manager.removals)
+  }
+
+  @Test
+  fun `chromeless fullscreen keeps the text-field-only Back behavior`() = runTest {
+    var dismissals = 0
+    host.show(
+      PrototypeRequest(
+        PrototypePlacement.Fullscreen(),
+        chrome = PrototypeWindowChrome.NONE,
+        onHostDismiss = { dismissals++ },
+      ),
+    )
+    val view = manager.view!!
+    assertFalse(view.dispatchKeyEvent(key(KeyEvent.ACTION_UP)))
+    assertEquals(0, dismissals)
+    host.setTextFieldVisible(true)
+    assertTrue(view.dispatchKeyEvent(key(KeyEvent.ACTION_UP)))
+    assertEquals(1, dismissals)
+  }
+
+  @Test
+  fun `in-place show at 900 ms preserves the stationary hold deadline`() = runTest {
+    val request = chromelessRequest()
+    assertTrue(host.show(request))
+    val view = manager.view as PrototypeComposeView
+    beginHold(view)
+    escapeScheduler.advanceBy(HOLD_BEFORE_UPDATE_MILLIS)
+    assertTrue(host.show(request))
+    assertSame(view, manager.view)
+    assertEquals(1, escapeScheduler.tasks.size)
+    assertEquals(0, escapeScheduler.cancelled)
+    escapeScheduler.advanceBy(HOLD_REMAINING_MILLIS - 1)
+    assertFalse(view.escapeState.revealed)
+    escapeScheduler.advanceBy(1)
+    assertTrue(view.escapeState.revealed)
+    assertEquals(
+      listOf(MotionEvent.ACTION_DOWN, POINTER_DOWN, MotionEvent.ACTION_CANCEL),
+      contentTouches,
+    )
+  }
+
+  @Test
+  fun `in-place show and opacity update retain the revealed pill without restarting its reveal`() =
+    runTest {
+      val request = chromelessRequest()
+      assertTrue(host.show(request))
+      val view = manager.view as PrototypeComposeView
+      beginHold(view)
+      escapeScheduler.advanceBy(PROTOTYPE_ESCAPE_HOLD_MILLIS)
+      assertTrue(view.escapeState.revealed)
+      val revealCounter = view.escapeState.revealCounter
+      assertTrue(host.show(request))
+      assertTrue(view.escapeState.revealed)
+      assertEquals(revealCounter, view.escapeState.revealCounter)
+      host.setOpacity(0)
+      assertSame(view, manager.view)
+      assertTrue(view.escapeState.revealed)
+      assertEquals(revealCounter, view.escapeState.revealCounter)
+    }
+
+  @Test
+  fun `in-place show after recognition keeps swallowing until every pointer is up`() = runTest {
+    val request = chromelessRequest()
+    assertTrue(host.show(request))
+    val view = manager.view as PrototypeComposeView
+    beginHold(view)
+    escapeScheduler.advanceBy(PROTOTYPE_ESCAPE_HOLD_MILLIS)
+    val delivered = contentTouches.toList()
+    assertTrue(host.show(request))
+    assertTrue(touch(view, MotionEvent.ACTION_MOVE, 2))
+    endHold(view)
+    assertEquals(delivered, contentTouches)
+    assertTrue(touch(view, MotionEvent.ACTION_DOWN))
+    assertTrue(touch(view, MotionEvent.ACTION_UP))
+    assertEquals(delivered + listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP), contentTouches)
+  }
+
+  @Test
+  fun `switching to bar hides the pill and disables escape then none starts clean`() = runTest {
+    val request = chromelessRequest()
+    assertTrue(host.show(request))
+    val view = manager.view as PrototypeComposeView
+    beginHold(view)
+    escapeScheduler.advanceBy(PROTOTYPE_ESCAPE_HOLD_MILLIS)
+    assertTrue(view.escapeState.revealed)
+    assertTrue(host.show(request.copy(chrome = PrototypeWindowChrome.BAR)))
+    assertSame(view, manager.view)
+    assertFalse(view.escapeState.revealed)
+    contentTouches.clear()
+    beginHold(view)
+    escapeScheduler.advanceBy(PROTOTYPE_ESCAPE_HOLD_MILLIS)
+    endHold(view)
+    assertFalse(view.escapeState.revealed)
+    assertEquals(1, escapeScheduler.tasks.size)
+    assertEquals(
+      listOf(MotionEvent.ACTION_DOWN, POINTER_DOWN, POINTER_UP, MotionEvent.ACTION_UP),
+      contentTouches,
+    )
+    assertTrue(host.show(request))
+    assertFalse(view.escapeState.revealed)
+    beginHold(view)
+    escapeScheduler.advanceBy(PROTOTYPE_ESCAPE_HOLD_MILLIS)
+    assertTrue(view.escapeState.revealed)
+    assertEquals(MotionEvent.ACTION_CANCEL, contentTouches.last())
+  }
+
+  @Test
+  fun `dismiss mid-hold cancels the callback and late delivery touches no content`() = runTest {
+    assertTrue(host.show(chromelessRequest()))
+    val view = manager.view as PrototypeComposeView
+    beginHold(view)
+    escapeScheduler.advanceBy(HOLD_BEFORE_UPDATE_MILLIS)
+    val stale = escapeScheduler.tasks.single().block
+    val delivered = contentTouches.toList()
+    assertTrue(host.dismiss())
+    assertFalse(host.isShowing)
+    assertEquals(1, escapeScheduler.cancelled)
+    escapeScheduler.advanceBy(PROTOTYPE_ESCAPE_HOLD_MILLIS)
+    stale()
+    assertFalse(view.escapeState.revealed)
+    assertEquals(delivered, contentTouches)
+    assertEquals(1, manager.removals)
+  }
+
+  @Test
+  fun `dismiss and destroy remove a revealed chromeless window during swallowing`() = runTest {
+    for (destroy in listOf(false, true)) {
+      assertTrue(host.show(chromelessRequest()))
+      val view = manager.view as PrototypeComposeView
+      val removals = manager.removals
+      beginHold(view)
+      escapeScheduler.advanceBy(PROTOTYPE_ESCAPE_HOLD_MILLIS)
+      assertTrue(view.escapeState.revealed)
+      val delivered = contentTouches.toList()
+      assertTrue(touch(view, MotionEvent.ACTION_MOVE, 2))
+      assertEquals(delivered, contentTouches)
+      assertTrue(if (destroy) host.destroy() else host.dismiss())
+      assertFalse(host.isShowing)
+      assertEquals(removals + 1, manager.removals)
+      assertEquals(
+        Lifecycle.State.DESTROYED,
+        view.findViewTreeLifecycleOwner()!!.lifecycle.currentState,
+      )
+      assertFalse(view.escapeState.revealed)
+      escapeScheduler.tasks.last().block()
+      assertFalse(view.escapeState.revealed)
+      assertEquals(delivered, contentTouches)
+    }
   }
 
   @Test

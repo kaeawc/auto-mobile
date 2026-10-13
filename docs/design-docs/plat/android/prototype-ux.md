@@ -168,7 +168,9 @@ the system setting. Every per-mode form below reads that one resolved mode. A de
   no `maxWidth`/`maxHeight` cap and no `aspectRatio`, no non-zero `offset`, no rounded corner
   (`cornerRadius` absent, `0`, `none` or all corners `0`) and no `pressScale` below one. A root
   that fails any of these lets the app show at an edge or corner, so only an opaque fullscreen
-  scrim behind it can still make the window opaque.
+  scrim behind it can still make the window opaque. A chromeless fullscreen window can report
+  `prototypeOpaque: true` when opacity is 100 and its root or scrim is solid; a fullscreen window
+  with the translucent dismiss bar still reports false.
 
 ### Live appearance (#11221, `prototype_appearance_v1`)
 
@@ -207,7 +209,8 @@ context follows the same value as one on the service context.
 ## Windows
 
 `window` has required `placement` and optional integer `opacity` (0–100, default
-100). Opacity applies to the entire prototype, including content and scrims.
+100). Opacity fades authored content and scrims. Fullscreen windows (with either
+chrome mode) and persistent non-fullscreen windows keep their host controls opaque.
 
 | Placement `type` | Properties                                                                                                               |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
@@ -242,10 +245,15 @@ Optional `chrome` (#12064) is `none` (default) or `bar`, fullscreen placement on
 on a device advertising `prototype_window_chrome_v1`. `persistence: "device"`
 defaults to `bar`. `none` fills the window including under the status bar; use
 `safeAreaPadding` on the top edge of a `topAppBar` or top content. Relative sheet
-detents use the full window height. A two-finger long press (about 1 s) reveals a
-host dismiss pill for 5 s. The device side ships separately: a CtrlProxy without
-`prototype_window_chrome_v1` keeps the bar, and the host refuses explicit `none`;
-omitted chrome and `bar` succeed. `lastResult.chrome` reports the effective chrome
+detents use the full window height. CtrlProxy intercepts a stationary two-finger
+long press for 1 s before authored content and reveals a host dismiss pill for
+5 s; single-pointer taps and swipes cannot reveal it. The host wrapper also exposes
+the `Dismiss AutoMobile prototype` accessibility dismiss action without touch.
+While touch exploration (TalkBack) is enabled, the pill stays visible with no
+gesture or timeout. Spec opacity fades only the content, keeping the pill opaque
+even at opacity 0. A CtrlProxy without `prototype_window_chrome_v1` keeps the bar,
+and the host refuses explicit `none`; omitted chrome and `bar` succeed.
+`lastResult.chrome` reports the effective chrome
 on a successful fullscreen show and in subsequent host-local status, absent on
 sheet/floating windows, dismiss, failed show and adopted prototypes.
 
@@ -991,19 +999,32 @@ inset padding does not reinterpret their coordinate origin.
 
 #12064 reverses the #9307 "non-removable dismiss control" default: chromeless
 fullscreen is the default on a device advertising `prototype_window_chrome_v1`,
-the bar is opt-in, and the host escape is a two-finger long press (about 1 s)
-anywhere on the window that reveals a small dismiss pill for 5 s. Back is not the
-exit. The pill dismisses with reason `user`; agent dismiss, a replacing show,
-authored dismiss, the five-minute session idle TTL and last-client disconnect
-keep working. Device support ships separately: a CtrlProxy that does not
-advertise `prototype_window_chrome_v1` keeps the bar, and explicit `none` is
-refused by the host.
+the bar is opt-in, and CtrlProxy's host escape is a stationary two-finger long
+press for 1 s anywhere on the window that reveals a small dismiss pill for 5 s.
+Recognition cancels authored touch handling and swallows the rest of that gesture.
+A second hold restarts the pill's timeout; a replacing show hides it. A
+host-owned wrapper exposes the `Dismiss AutoMobile prototype` accessibility
+dismiss action without touch, and touch exploration (TalkBack) keeps the pill
+permanently visible. Both the pill and the accessibility action dismiss with
+reason `user` and remain usable at spec opacity 0. Back is not the exit: its
+existing behavior is unchanged, dismissing only while a text field makes the
+window focusable. Agent dismiss, a replacing show, authored dismiss, the
+five-minute session idle TTL, last-client disconnect and service teardown keep
+working. Home hides a session prototype when its app leaves the foreground.
+A CtrlProxy that does not advertise `prototype_window_chrome_v1` keeps the bar,
+and explicit `none` is refused by the host.
+
+Two safety cases still need device verification: 3-button navigation with
+`layer: "system"`, and a prototype shown with no application window in front
+(which Home does not hide).
 
 With `none`, authored content fills the full window including under the status
 bar; top content needs top-edge `safeAreaPadding`, and relative sheet detents use
 the full window height. With `bar` (including the older-device fallback), the
-opaque host row remains above clipped authored content, independent of spec
+translucent host row remains above clipped authored content, independent of spec
 style and opacity; its height is excluded from the authored viewport.
+Both fullscreen modes keep the window alpha at 1 and fade only authored content
+and its scrim, so the host dismiss control never inherits spec opacity.
 A `persistence: "device"` prototype outlives its host session: it is not dismissed
 when the last client disconnects (including a show queued after that edge), it
 has no idle TTL, and its uploaded assets are kept until it is dismissed. Because

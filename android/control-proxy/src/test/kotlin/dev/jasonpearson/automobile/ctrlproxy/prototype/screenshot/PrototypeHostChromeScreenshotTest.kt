@@ -2,10 +2,12 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype.screenshot
 
 import android.app.Application
 import androidx.compose.runtime.Composable
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeEscapeState
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeInsetFloor
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypePlacement
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRequest
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSpecContent
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWindowChrome
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWindowContent
 import dev.jasonpearson.automobile.ctrlproxy.prototype.mapPrototypeSpec
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeShownThemeFlow
@@ -47,6 +49,37 @@ class PrototypeHostChromeScreenshotTest {
   fun closeControlDark() =
     chromeTest("host_chrome_close_control_dark", dark = true, fullscreen = false)
 
+  @Test
+  fun chromelessLight() = chromelessTest("host_chrome_none_light", dark = false, revealed = false)
+
+  @Test
+  fun chromelessDark() = chromelessTest("host_chrome_none_dark", dark = true, revealed = false)
+
+  @Test
+  fun escapePillLight() =
+    chromelessTest("host_chrome_escape_pill_light", dark = false, revealed = true)
+
+  @Test
+  fun escapePillDark() =
+    chromelessTest("host_chrome_escape_pill_dark", dark = true, revealed = true)
+
+  private fun chromelessTest(name: String, dark: Boolean, revealed: Boolean) {
+    PrototypeScreenshotEnvironment.assumeReferencePlatform()
+    PrototypeScreenshotEnvironment.skipIfPending(name, pending = true)
+    PrototypeScreenshotEnvironment.handleResult(
+      BitmapPngCodec,
+      name,
+      renderPrototypeChrome(
+        name,
+        dark,
+        fullscreen = true,
+        chrome = PrototypeWindowChrome.NONE,
+        revealed = revealed,
+      ),
+      PrototypeScreenshotComparator.Options(),
+    )
+  }
+
   private fun chromeTest(name: String, dark: Boolean, fullscreen: Boolean) {
     PrototypeScreenshotEnvironment.assumeReferencePlatform()
     PrototypeScreenshotEnvironment.skipIfPending(name, pending = true)
@@ -64,6 +97,8 @@ internal fun renderPrototypeChrome(
   name: String,
   dark: Boolean,
   fullscreen: Boolean,
+  chrome: PrototypeWindowChrome = PrototypeWindowChrome.BAR,
+  revealed: Boolean = false,
 ): PrototypeScreenshotComparator.Image {
   val model = mapPrototypeSpec(validPrototypeFixture("doc-example-3", resolveElementAnchors = true))
   val request =
@@ -71,11 +106,13 @@ internal fun renderPrototypeChrome(
       placement =
         if (fullscreen) PrototypePlacement.Fullscreen() else PrototypePlacement.Floating(),
       persistent = !fullscreen,
+      chrome = chrome,
       theme = prototypeShownThemeFlow(model, dark),
       content = { PrototypeSpecContent(model.root, theme = model.theme) },
     )
+  val escape = PrototypeEscapeState().apply { if (revealed) reveal() }
   val content: @Composable () -> Unit = {
-    PrototypeWindowContent(request) { PrototypeInsetFloor.None }
+    PrototypeWindowContent(request, escape) { PrototypeInsetFloor.None }
   }
   return renderComposable(name, content)
 }

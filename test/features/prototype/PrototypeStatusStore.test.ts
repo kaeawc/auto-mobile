@@ -173,6 +173,17 @@ describe("InMemoryPrototypeStatusStore appearance", () => {
     expect(store.status(scope).prototypes[0]?.appearance).toEqual(light);
   });
 
+  test("a host-refused sibling leaves the in-flight show's crossing marker intact", () => {
+    const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+    store.beginShowDispatch(scope.deviceId, "panel");
+    store.record(scope, "show", { id: "panel" }, { success: false, error: "refused" });
+    store.recordEvent(scope, change(1, { mode: "dark", source: "system" }));
+    const result = store.record(scope, "show", { id: "panel" }, { ...ok, appearance: light });
+    expect(result.appearance).toEqual(light);
+    expect(store.status(scope).lastResult?.appearance).toEqual(light);
+    expect(store.status(scope).prototypes[0]).not.toHaveProperty("appearance");
+  });
+
   test.each(["same", "other-id", "other-device"])(
     "dispatch crossings are device/id keyed across sessions: %s",
     (crossing) => {

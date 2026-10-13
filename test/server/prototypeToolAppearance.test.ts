@@ -62,9 +62,13 @@ function changed(
 /** Emit an accepted push while the real handler is waiting for the show reply. */
 class CrossingCtrlProxy extends FakeCtrlProxy {
   crossing?: PrototypeEvent;
+  showGate?: Promise<void>;
+  showDispatched?: () => void;
 
   override async requestShowPrototype(...args: Parameters<FakeCtrlProxy["requestShowPrototype"]>) {
     const result = await super.requestShowPrototype(...args);
+    this.showDispatched?.();
+    await this.showGate;
     if (this.crossing) {
       this.emitPrototypeEvent(this.crossing);
       this.crossing = undefined;
@@ -345,6 +349,35 @@ describe("prototype appearance on the host (#11223)", () => {
   });
 
   describe("appearance events crossing a show reply", () => {
+    test("a host-refused sibling preserves the in-flight show's crossing", async () => {
+      client.setPrototypeResult({ success: true, appearance: lightSystem });
+      await show(android);
+      const gate = Promise.withResolvers<void>();
+      const dispatched = Promise.withResolvers<void>();
+      client.showGate = gate.promise;
+      client.showDispatched = dispatched.resolve;
+      const showing = show(android);
+      await dispatched.promise;
+      const refused = await show(android, {
+        assets: [{ id: "missing", path: "/img/does-not-exist.png" }],
+      });
+      const history = client.getPrototypeHistory();
+      client.emitPrototypeEvent(changed(1, { mode: "dark", source: "system" }));
+      const duringShow = await call(android, { action: "status" });
+      gate.resolve();
+      const shown = await showing;
+      expect(refused.success).toBe(false);
+      expect(refused.error).toContain("/img/does-not-exist.png");
+      expect(history.map((request) => request.method)).toEqual(["show", "show"]);
+      expect(duringShow.prototypes?.[0]?.lastSequence).toBe(1);
+      expect(duringShow.prototypes?.[0]?.appearance).toEqual({ mode: "dark", source: "system" });
+      expect(shown.lastResult?.appearance).toEqual(lightSystem);
+      const status = await call(android, { action: "status" });
+      expect(status.lastResult?.appearance).toEqual(hostLocal(lightSystem));
+      expect(status.prototypes).toHaveLength(1);
+      expect(status.prototypes?.[0]).not.toHaveProperty("appearance");
+    });
+
     test.each([false, true])(
       "fresh/reset=%s crossing leaves presence unknown and preserves the buffered event",
       async (reset) => {
@@ -426,6 +459,11 @@ describe("prototype appearance on the host (#11223)", () => {
       const status = await call(android, { action: "status" });
       expect(status.prototypes).toHaveLength(1);
       expect(status.prototypes?.[0]?.appearance).toEqual({ mode: "dark", source: "system" });
+      client.setPrototypeResult({ success: true, appearance: lightSystem });
+      await show(android);
+      expect((await call(android, { action: "status" })).prototypes?.[0]?.appearance).toEqual(
+        hostLocal(lightSystem),
+      );
     });
 
     test("a malformed crossing payload does not invalidate the show answer", async () => {

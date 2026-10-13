@@ -110,6 +110,7 @@ export const MAX_PROTOTYPE_STATUS_SCOPES = 128;
 /** Successful shows establish presence; host dismissals and terminal device events remove it. */
 export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
   private readonly scopes = new Map<string, StoredPrototypeStatus>();
+  // A marker left by a failed, thrown or superseded show is reset by the next dispatch of that id and dropped with the device.
   private readonly showDispatches = new Map<string, Map<string, boolean>>();
 
   constructor(
@@ -265,9 +266,9 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     return { ...entry };
   }
 
-  /** Consume every recorded show's window, while preserving its device answer in lastResult. */
+  /** Consume successful shows' windows, while preserving their device answers in lastResult. */
   private consumeShowDispatch(deviceId: string, entry: PrototypeLastResult): PrototypeLastResult {
-    if (entry.lastAction !== "show" || !entry.id) {
+    if (entry.lastAction !== "show" || !entry.success || !entry.id) {
       return entry;
     }
     const dispatches = this.showDispatches.get(deviceId);

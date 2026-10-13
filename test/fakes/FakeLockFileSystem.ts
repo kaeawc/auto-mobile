@@ -69,6 +69,11 @@ export class FakeLockFileSystem implements LockFileSystem {
     return [...this.files.keys()].sort();
   }
 
+  /** Fixture inspection without recording an operation or injecting an I/O failure. */
+  peek(path: string): Readonly<FileNode> | undefined {
+    return this.files.get(path);
+  }
+
   mkdir(path: string): void {
     this.record("mkdir", path);
     if (this.files.has(path)) {

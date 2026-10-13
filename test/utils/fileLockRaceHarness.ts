@@ -90,9 +90,9 @@ export function pauseAfterJudgement(racer: Racer<boolean>): void {
 
 export function exactHolder(fs: FakeLockFileSystem, pid: number): void {
   const raw = formatLockContent(pid, `owner-${pid}`, undefined, "current-generation");
-  const atPath = fs.exists(PATH) && fs.readText(PATH) === raw;
-  expect(fs.readText(atPath ? PATH : `${PATH}.displaced`)).toBe(raw);
-  if (atPath || !fs.exists(PATH)) {
+  const atPath = fs.peek(PATH)?.raw === raw;
+  expect(fs.peek(atPath ? PATH : `${PATH}.displaced`)?.raw).toBe(raw);
+  if (atPath || !fs.peek(PATH)) {
     expect(readExclusiveLockContent(PATH, fs)?.pid).toBe(pid);
     expect(readLockOwnerPid(PATH, () => true, undefined, fs)).toBe(pid);
   }
@@ -129,20 +129,29 @@ function actorRaw(actor: Actor): string {
   );
 }
 
-function namesHolding(fs: FakeLockFileSystem, raw: string): string[] {
-  return fs.paths().filter((name) => fs.readText(name) === raw);
+function namesHolding(fs: FakeLockFileSystem, raw: string, includePrivate = false): string[] {
+  // Public names suffice unless the instance has been displaced into a private marker.
+  const names = [PATH, `${PATH}.displaced`].filter((name) => fs.peek(name)?.raw === raw);
+  if (names.length && !includePrivate) {
+    return names;
+  }
+  return [
+    ...names,
+    ...fs.paths().filter((name) => isPrivateMarker(name) && fs.peek(name)?.raw === raw),
+  ];
 }
 
 function publicationNames(fs: FakeLockFileSystem, actor: Actor): string[] {
-  return fs
-    .paths()
-    .filter(
-      (name) =>
-        fs.readText(name) === actorRaw(actor) ||
-        (actor.phase === "acquiring" &&
-          actor.publicationIno !== undefined &&
-          fs.stat(name).ino === actor.publicationIno),
+  const raw = actorRaw(actor);
+  return fs.paths().filter((name) => {
+    const node = fs.peek(name);
+    return (
+      node?.raw === raw ||
+      (actor.phase === "acquiring" &&
+        actor.publicationIno !== undefined &&
+        node?.ino === actor.publicationIno)
     );
+  });
 }
 
 function isPrivateMarker(name: string): boolean {
@@ -274,7 +283,7 @@ function executeSchedule(context: {
   const { seed, random, f, actors, trace } = context;
   let freshAdded = false;
   for (let count = 0; count < 1200; count++) {
-    if (!freshAdded && (!f.fs.exists(PATH) || f.fs.readText(PATH) !== originalStale(seed))) {
+    if (!freshAdded && f.fs.peek(PATH)?.raw !== originalStale(seed)) {
       f.live.add(606);
       actors.push({
         pid: 606,
@@ -328,6 +337,8 @@ export function checkMutation(
   f: ReturnType<typeof fixture>,
   actors: Actor[],
   ioFailureIsAttempt = false,
+  // Only retained schedules witness and track the in-flight private-marker residual.
+  trackResiduals = false,
 ): void {
   const protectedNames = actors
     .filter((other) => other.pid !== actor.pid && other.phase === "holding")
@@ -336,16 +347,18 @@ export function checkMutation(
         .filter((name) => name === PATH || name === `${PATH}.displaced`)
         .map((name) => ({ name, raw: actorRaw(other) })),
     );
-  const privateBelievers = actors.filter((other) => {
-    const names = publicationNames(f.fs, other);
-    return (
-      (other.phase === "holding" || other.phase === "acquiring") &&
-      !names.includes(PATH) &&
-      !names.includes(`${PATH}.displaced`) &&
-      names.some(isPrivateMarker)
-    );
-  });
-  const privateNames = publicationNames(f.fs, actor).filter(isPrivateMarker);
+  const privateBelievers = trackResiduals
+    ? actors.filter((other) => {
+        const names = publicationNames(f.fs, other);
+        return (
+          (other.phase === "holding" || other.phase === "acquiring") &&
+          !names.includes(PATH) &&
+          !names.includes(`${PATH}.displaced`) &&
+          names.some(isPrivateMarker)
+        );
+      })
+    : [];
+  const privateNames = trackResiduals ? publicationNames(f.fs, actor).filter(isPrivateMarker) : [];
   if (
     (actor.phase === "holding" || actor.phase === "releasing") &&
     privateNames.length &&
@@ -355,17 +368,18 @@ export function checkMutation(
   ) {
     actor.releasedInFlight = true;
   }
-  const pathWasAbsent = !f.fs.paths().includes(PATH);
+  const pathWasAbsent = !f.fs.peek(PATH);
   const start = f.fs.operations.length;
   advanceActor(actor, f, ioFailureIsAttempt);
   const operations = f.fs.operations.slice(start);
   if (
+    trackResiduals &&
     pathWasAbsent &&
-    f.fs.paths().includes(PATH) &&
+    f.fs.peek(PATH) &&
     operations.some((op) => op.path === PATH && ["link", "openExclusive"].includes(op.op)) &&
-    (f.fs.readText(PATH) === actorRaw(actor) || f.fs.readText(PATH) === "")
+    (f.fs.peek(PATH)?.raw === actorRaw(actor) || f.fs.peek(PATH)?.raw === "")
   ) {
-    actor.publicationIno = f.fs.stat(PATH).ino;
+    actor.publicationIno = f.fs.peek(PATH)?.ino;
   }
   for (const { name, raw } of protectedNames) {
     const mutations = operations.filter(
@@ -373,15 +387,17 @@ export function checkMutation(
     );
     if (actor.staleRelease && name === PATH && mutations.every((op) => op.op === "rename")) {
       // A known stale release can move P only into its private marker, the documented residual.
-      expect(namesHolding(f.fs, raw).some((path) => path === PATH || isPrivateMarker(path))).toBe(
-        true,
-      );
+      expect(
+        namesHolding(f.fs, raw, true).some((path) => path === PATH || isPrivateMarker(path)),
+      ).toBe(true);
     } else {
       expect(mutations).toHaveLength(0);
-      expect(f.fs.readText(name)).toBe(raw);
+      expect(f.fs.peek(name)?.raw).toBe(raw);
     }
   }
-  observePrivateWindow(actor, f.fs, actors, privateBelievers, operations, pathWasAbsent);
+  if (trackResiduals) {
+    observePrivateWindow(actor, f.fs, actors, privateBelievers, operations, pathWasAbsent);
+  }
 }
 
 /** Real failed restore, shared by the named tests and the retained schedule. */
@@ -432,13 +448,12 @@ function observePrivateWindow(
 ): void {
   const legacyOpened =
     pathWasAbsent &&
-    fs.paths().includes(PATH) &&
+    fs.peek(PATH) &&
     operations.some((op) => op.op === "openExclusive" && op.path === PATH);
   const published =
     legacyOpened ||
     (operations.some((op) => (op.path === PATH && op.op === "link") || op.op === "write") &&
-      fs.paths().includes(PATH) &&
-      fs.readText(PATH) === actorRaw(actor));
+      fs.peek(PATH)?.raw === actorRaw(actor));
   if (published && actor.phase !== "releasing") {
     for (const other of privateBelievers.filter((b) => b.pid !== actor.pid)) {
       actor.residualPeers ??= new Set();
@@ -457,7 +472,7 @@ function observePrivateWindow(
         (op) => op.op === "unlink" && isPrivateMarker(op.path),
       );
       const otherPublication =
-        fs.paths().includes(PATH) && fs.readText(PATH) !== actorRaw(believer);
+        fs.peek(PATH) !== undefined && fs.peek(PATH)?.raw !== actorRaw(believer);
       // A wx restore can have sampled an empty marker before its owner's descriptor write.
       believer.lostInFlight =
         believer.privatePublicationWitnessed === true || (privateCleanup && otherPublication);
@@ -540,7 +555,7 @@ function pickRetainedActor(context: RetainedContext): Actor | undefined {
     if (!a.staleRelease || a.racer.trace.some((s) => s.op === "rename")) {
       return true;
     }
-    return context.f.fs.paths().includes(PATH);
+    return context.f.fs.peek(PATH) !== undefined;
   });
   if (!runnable.length && active.length) {
     return active[0]; // Everyone finished without publication: let the stale release observe ENOENT.
@@ -565,7 +580,7 @@ function scheduleRetainedActors(context: RetainedContext): void {
       trace.push(`${actor.pid} CRASH`);
     } else {
       setRetainedFailures(context);
-      checkMutation(actor, f, actors, true);
+      checkMutation(actor, f, actors, true, true);
     }
     assertBelievers(f.fs, actors);
   }
@@ -599,7 +614,7 @@ function finishRetainedSchedule(context: RetainedContext): void {
     expect(
       f.fs
         .paths()
-        .every((name) => name === PATH && f.fs.readText(name) === "" && emptyRestoreResidual),
+        .every((name) => name === PATH && f.fs.peek(name)?.raw === "" && emptyRestoreResidual),
     ).toBe(true);
   }
   f.clock.advanceTime(RECLAIM_GUARD_ABANDON_AGE_MS + 1);

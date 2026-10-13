@@ -255,13 +255,17 @@ Authoring choices:
   bitmap sized to the node, so many small images in a list cost more than one strip image. Decode
   is cached and runs off the main thread. Further per-recomposition work in images and icons is
   *being changed (#12138)*. The iOS image path was not checked.
-- **Accessibility nodes.** On Android every node reports an accessibility node except a layout
-  container (\`box\`, \`row\`, \`column\`, \`scroll\`, \`pager\`, \`card\`, \`divider\`, \`spacer\`) that
-  is not tappable and has no text, \`testTag\`, content description or state. Every \`text\`,
-  \`icon\` and \`image\` is therefore one, and a \`testTag\` or an \`onTap\` on a container adds one.
-  Give a \`testTag\` only to nodes you will look up. Every accessibility node is work whenever
-  \`observe\` or a screen reader reads the tree. *Being changed (#12135):* decorative icons and
-  images are exposed and labelled with their role name.
+- **Accessibility nodes.** On Android a decorative \`icon\` or \`image\` (not tappable,
+  no \`testTag\`, no \`contentDescription\`) reports no node. A tappable \`box\`,
+  \`row\`, \`column\` or \`card\` whose only text is one \`text\` node is one node
+  labelled by that text when its descendants have no independent tags, actions, descriptions,
+  controls or visibility conditions. Non-tappable text, icon and image nodes are never labelled
+  with their kind; empty tappable ones keep the kind as their only selector handle. An unlabelled,
+  non-tappable layout container (\`box\`, \`row\`, \`column\`, \`scroll\`, \`pager\`, \`card\`,
+  \`divider\`, \`spacer\`) with no text, \`testTag\`, content description or state also reports
+  no node. Every text, tagged node and tappable node stays targetable. Give a \`testTag\` only to
+  nodes you will look up. Every accessibility node is work whenever \`observe\` or a screen reader
+  reads the tree.
 - **Long lists.** A \`scroll\` node builds all of its children up front on both platforms, so a
   long list inside \`scroll\` pays for every row when it is shown. *Being changed on Android
   (#12139).* \`repeat\` expands to real nodes that count against the node limit.

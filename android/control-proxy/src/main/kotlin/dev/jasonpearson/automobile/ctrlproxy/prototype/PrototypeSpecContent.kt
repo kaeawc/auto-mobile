@@ -108,7 +108,11 @@ internal fun PrototypeRuntimeContent(
         LocalPrototypeFontCache provides fonts,
         LocalPrototypeMotion provides motion,
       ) {
+        val traceSink = PrototypeTrace.sink
+        val traceEnabled = traceSink.isEnabled()
+        if (traceEnabled) traceSink.begin(PrototypeTrace.COMPOSE)
         PrototypeSpecContent(runtime.renderModel(snapshot).root, snapshot.spec.theme, send)
+        if (traceEnabled) traceSink.end()
       }
     }
   }
@@ -404,6 +408,9 @@ private fun RenderPrototypeNodeContent(
   weightAxis: PrototypeWeightAxis? = null,
   windowRoot: Boolean = false,
 ) {
+  val traceSink = PrototypeTrace.sink
+  val traceEnabled = traceSink.isEnabled()
+  if (traceEnabled) traceSink.begin(PrototypeTrace.NODE)
   LocalPrototypeCompositionProbe.current?.invoke(node.identity)
   val modifier = parentModifier.then(prototypeNodeModifier(node, interact, weightAxis, windowRoot))
   // Only box/row/column with repeat or a direct visibleWhen child animate and clip their size.
@@ -564,6 +571,7 @@ private fun RenderPrototypeNodeContent(
     // Spacer keeps its size and authored actions.
     else -> Box(modifier)
   }
+  if (traceEnabled) traceSink.end()
 }
 
 @Composable
@@ -888,7 +896,22 @@ private fun prototypeNodeModifier(
     prototypeStateDescription(node.role, node.page, node.children.size, prototypePickerValue(node))
   // A layout container with nothing of its own to report gets no semantics node, so its children
   // join the nearest reporting ancestor, as with Compose's own layouts (#10446).
-  if (!isSemanticsFreeContainer(node, tappable, description, state)) {
+  val mergedTapLabel =
+    if (tappable && node.role in MERGEABLE_TAP_CONTAINERS) {
+      remember(node, tappable) { prototypeMergedTapLabel(node, tappable) }
+    } else null
+  if (mergedTapLabel != null) {
+    modifier = modifier.clearAndSetSemantics {
+      text = AnnotatedString(mergedTapLabel)
+      contentDescription = mergedTapLabel
+      this[PrototypeRole] = node.role
+      state?.let { stateDescription = it }
+      node.testTag?.let { testTag = it }
+    }
+  } else if (
+    !isSemanticsFreeContainer(node, tappable, description, state) &&
+      !isDecorativePrototypeVisual(node, tappable)
+  ) {
     modifier = modifier.semantics {
       if (node.role != "textField" && node.role !in SEMANTICS_FREE_CONTAINERS) {
         text = AnnotatedString(node.text)
@@ -969,13 +992,59 @@ internal fun isSemanticsFreeContainer(
     description == null &&
     state == null
 
+/** Icon names describe the drawing, not an authored accessibility label. */
+internal fun isDecorativePrototypeVisual(node: PrototypeRenderNode, tappable: Boolean): Boolean =
+  (node.role == "icon" || node.role == "image") &&
+    !tappable &&
+    node.testTag == null &&
+    node.contentDescription.isNullOrEmpty()
+
+private val VISUAL_TEXT_ROLES = setOf("text", "icon", "image")
+
+private val MERGEABLE_TAP_CONTAINERS = setOf("box", "row", "column", "card")
+
+/** Preserve exact text selectors and every independently targetable descendant. */
+internal fun prototypeMergedTapLabel(node: PrototypeRenderNode, tappable: Boolean): String? {
+  if (
+    !tappable ||
+      node.role !in MERGEABLE_TAP_CONTAINERS ||
+      node.text.isNotEmpty() ||
+      !node.contentDescription.isNullOrEmpty()
+  )
+    return null
+  var label: String? = null
+  fun visit(child: PrototypeRenderNode): Boolean {
+    if (
+      child.testTag != null ||
+        !child.contentDescription.isNullOrEmpty() ||
+        !child.source?.onTap.isNullOrEmpty() ||
+        child.source?.visibleWhen != null ||
+        child.source?.anchor != null
+    )
+      return false
+    when {
+      child.role == "text" -> {
+        if (label != null || child.text.isEmpty()) return false
+        label = child.text
+      }
+      isDecorativePrototypeVisual(child, tappable = false) -> Unit
+      child.role == "spacer" || child.role == "divider" -> Unit
+      child.role in MERGEABLE_TAP_CONTAINERS && child.text.isEmpty() -> Unit
+      else -> return false
+    }
+    return child.children.all { visit(it) }
+  }
+  return if (node.children.all { visit(it) }) label else null
+}
+
 /**
  * The accessible label for a prototype node. An authored `contentDescription` wins, then authored
  * text; an icon-only tappable node reads as its icon name, and so does a tappable layout container
  * whose only content is an icon (a FAB). A layout container or navigation bar is never labelled by
  * its node kind ("box", "row", "tabBar") while it has content (#10524, #10608, #10446): its
  * children label it instead. Only a tappable container with no children at all keeps its kind, as
- * nothing else names it. Every other node keeps its kind as the label.
+ * nothing else names it. Non-tappable text, icons and images never use their kind as a label;
+ * controls and other information-bearing kinds keep that fallback as a selector handle.
  */
 internal fun prototypeContentDescription(
   role: String,
@@ -990,6 +1059,7 @@ internal fun prototypeContentDescription(
     text.isNotEmpty() -> text
     (tappable || role in PROTOTYPE_ICON_CONTROL_ROLES) && !iconName.isNullOrEmpty() -> iconName
     role in CHILD_LABELLED_ROLES -> null
+    !tappable && role in VISUAL_TEXT_ROLES -> null
     role !in SEMANTICS_FREE_CONTAINERS -> role
     !tappable -> null
     children.isEmpty() -> role

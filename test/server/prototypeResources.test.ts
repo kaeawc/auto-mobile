@@ -88,10 +88,12 @@ describe("automobile:prototype resource", () => {
     expect(cost).toBeGreaterThan(icons);
     expect(errors).toBeGreaterThan(cost);
     const section = guide.slice(cost, errors);
+    expect(section).toContain("a decorative `icon` or `image`");
+    expect(section).toContain("labelled by that text");
+    expect(section).not.toContain("Being changed (#12135)");
     for (const issue of [
       "#12133",
       "#12134",
-      "#12135",
       "#12136",
       "#12138",
       "#12139",

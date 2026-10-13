@@ -324,10 +324,17 @@ function crashSchedule(seed: number): void {
   for (let count = 0; count < 6000; count++) {
     const active = actors.filter((a) => a.phase !== "finished" && a.phase !== "crashed");
     if (!active.length) {
-      break;
+      if (crashes === 40) {
+        break;
+      }
+      // Exhausted attempts must not end the crash budget early when fs steps change.
+      const replacement = actor();
+      actors.push(replacement);
+      active.push(replacement);
     }
     const a = random.pick(active);
-    if (crashes < 40 && random.next() < 0.16) {
+    // A completed acquire remains crashable without voluntarily releasing its lock.
+    if (crashes < 40 && (a.phase === "holding" || random.next() < 0.16)) {
       a.phase = "crashed";
       crash(f, a.pid);
       crashes++;

@@ -33,6 +33,8 @@ import { buildReport, renderMarkdown, type Bundle } from "./ciTimeToGreenReport"
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { createPathClassifier, parseWorkflowPathFilters } from "./prPathClassification";
 
+import { createCircleciMacosMatcher, parseCircleciMacosJobNames } from "./circleciMacosJobs";
+
 const execFileAsync = promisify(execFile);
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -103,6 +105,11 @@ async function loadBundle(options: CliOptions): Promise<Bundle> {
   const classify = createPathClassifier(
     parseWorkflowPathFilters(readFileSync(workflowFile, "utf8")),
   );
+  const circleciMacosMatcher = options.circleci
+    ? createCircleciMacosMatcher(
+        parseCircleciMacosJobNames(readFileSync(options.circleciConfig, "utf8")),
+      )
+    : () => false;
   const repo = await resolveRepo(options);
   const api = new BudgetedGhApi(ghCli, options.maxApiCalls);
   const cacheDir = options.cacheDir ?? mkdtempSync(join(tmpdir(), "ci-time-to-green-"));
@@ -123,6 +130,9 @@ async function loadBundle(options: CliOptions): Promise<Bundle> {
         prRunsOnly: options.prRunsOnly,
         concurrency: options.concurrency,
         classify,
+        circleci: options.circleci,
+        circleciMainPushes: options.circleciMainPushes,
+        circleciMacosMatcher,
       },
       requiredChecks,
     );
@@ -150,7 +160,7 @@ async function main(argv: readonly string[]): Promise<number> {
     return EXIT_OK;
   }
   const bundle = await loadBundle(options);
-  const report = buildReport(bundle, options.prType);
+  const report = buildReport(bundle, options.prType, { namespaceVcpus: options.namespaceVcpus });
   process.stdout.write(
     options.json ? `${JSON.stringify(report, null, 2)}\n` : renderMarkdown(report),
   );

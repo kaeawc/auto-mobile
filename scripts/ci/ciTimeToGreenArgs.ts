@@ -30,6 +30,10 @@ export interface CliOptions {
   fromBundle: string | null;
   saveBundle: string | null;
   workflowFile: string | null;
+  namespaceVcpus: Record<string, number>;
+  circleci: boolean;
+  circleciMainPushes: boolean;
+  circleciConfig: string;
 }
 
 const LARGE_API_BUDGET = 1000;
@@ -55,6 +59,10 @@ Read-only: GET requests through \`gh api\` only.
   --from-bundle PATH   Aggregate a saved bundle; no network access
   --save-bundle PATH   Write the fetched bundle (under scratch/ or the system temp dir)
   --workflow-file PATH pull_request.yml to read path filters from (default: the checkout's)
+  --namespace-vcpus NAME=N[,NAME=N...] Override Namespace profile vCPU weights
+  --no-circleci        Skip CircleCI commit statuses
+  --circleci-main-pushes Include main pushes; costs one API call per push to main
+  --circleci-config PATH CircleCI config (default: .circleci/continue_config.yml)
   -h, --help           Show this help
 
 Exit codes: 0 ok, 1 unexpected failure, 2 usage error, 3 GitHub API failure,
@@ -99,6 +107,23 @@ export function assertSafeOutputPath(path: string, repoRoot: string, tmpDir: str
   return resolved;
 }
 
+export function parseNamespaceVcpus(value: string | undefined): Record<string, number> {
+  if (value === undefined) {
+    return {};
+  }
+  const weights: Record<string, number> = {};
+  for (const entry of value.split(",")) {
+    const match = /^(namespace-[A-Za-z0-9_-]+)=(\d+)$/.exec(entry);
+    if (!match || !Number.isSafeInteger(Number(match[2])) || Number(match[2]) < 1) {
+      throw new UsageError(
+        `--namespace-vcpus expects NAME=N[,NAME=N...] with namespace profile names and positive integer weights, got "${entry}"`,
+      );
+    }
+    weights[match[1]] = Number(match[2]);
+  }
+  return weights;
+}
+
 export function parseCliArgs(
   argv: readonly string[],
   nowMs: number,
@@ -124,6 +149,10 @@ export function parseCliArgs(
         "from-bundle": { type: "string" },
         "save-bundle": { type: "string" },
         "workflow-file": { type: "string" },
+        "namespace-vcpus": { type: "string" },
+        "no-circleci": { type: "boolean" },
+        "circleci-main-pushes": { type: "boolean" },
+        "circleci-config": { type: "string" },
         help: { type: "boolean", short: "h" },
       },
     }));
@@ -165,5 +194,9 @@ export function parseCliArgs(
     saveBundle:
       saveBundle === undefined ? null : assertSafeOutputPath(saveBundle, repoRoot, tmpDir),
     workflowFile: values["workflow-file"] ?? null,
+    namespaceVcpus: parseNamespaceVcpus(values["namespace-vcpus"]),
+    circleci: values["no-circleci"] !== true,
+    circleciMainPushes: values["circleci-main-pushes"] === true,
+    circleciConfig: values["circleci-config"] ?? resolve(repoRoot, ".circleci/continue_config.yml"),
   };
 }

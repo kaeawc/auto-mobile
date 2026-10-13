@@ -147,6 +147,8 @@ are rejected; a missing text path renders empty.
   unresolved repeat placeholders contribute zero. State placeholders are not validated because
   state can change after show. Exceeding the cap fails at the authored field path with
   \`Substituted text length limit exceeded\`.
+  During state interpolation, a replacement that would exceed the per-call substitution limit stays
+  as written, and later placeholders may still substitute.
 - A condition uses exactly one of \`key\`, \`data\`, \`all\`, \`any\`, \`not\`. A data condition has exactly
   one comparison: \`equals\` (same scalar type and value), \`notEquals\` (its inverse, including missing
   or non-scalar), \`gt\` or \`lt\` (numbers only, otherwise false). \`equals\`/\`notEquals\` operands are

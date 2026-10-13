@@ -141,6 +141,8 @@ No data means every path is missing. `/a/` accesses the empty key inside `a`.
   then repeat in every bindable field for each item, including repeat placeholders inserted by
   data. Literal characters and unresolved repeat placeholders contribute zero; state placeholders
   are not validated because state can change after show.
+  During state interpolation, a replacement that would exceed the per-call substitution limit stays
+  as written, and later placeholders may still substitute.
 - `{data:/pointer}` binds only the text-kind fields repeat already binds: text, button/FAB labels,
   segmented option labels, app bar title/navigation/action labels, dialog title/text/button labels,
   and snackbar text/action label. Missing, object or array values become empty text. Other braces

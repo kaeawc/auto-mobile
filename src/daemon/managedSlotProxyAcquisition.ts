@@ -13,6 +13,7 @@
 
 import {
   daemonSupportsManagedSlots,
+  unmetManagedSlotConfigCapabilities,
   type ManagedSlotConfig,
   type ManagedSlotConfigErrorCode,
 } from "../models/managedSlotConfig";
@@ -185,6 +186,18 @@ export async function acquireManagedSlotsThroughDaemon(
           "The running daemon does not advertise managed-slots/v1; nothing was changed.",
           false,
           "Restart the daemon from a build that supports managed slots.",
+        ),
+      );
+    }
+    const unmet = unmetManagedSlotConfigCapabilities(config, advertised);
+    if (unmet.length > 0) {
+      return failedManagedSlotsResult(
+        config,
+        failure(
+          "contract_unsupported",
+          `The running daemon does not advertise ${unmet[0]!.capability}, which ${unmet[0]!.field} requires; nothing was changed.`,
+          false,
+          "Upgrade the daemon to a build that supports deviceFamily; if it starts automatically from this same installation, an older daemon is still running and must be restarted. Alternatively, remove deviceFamily from the config.",
         ),
       );
     }

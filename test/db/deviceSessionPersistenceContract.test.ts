@@ -10,6 +10,9 @@ import {
   DeviceSessionRowNotRewritableError,
   DeviceSessionRowNotReleasableError,
   DeviceSessionTerminallyReleasedError,
+  isRecoverableDeviceSession,
+  persistedSessionExpiryReason,
+  DEVICE_SESSION_RETENTION_MAX_AGE_MS,
   type DeviceSessionPersistence,
   type DeviceSessionRecord,
 } from "../../src/db/deviceSessionRepository";
@@ -80,6 +83,59 @@ describe.each(implementations)("device-session persistence contract: %s", (_name
   async function rowOf(persistence: DeviceSessionPersistence) {
     return await persistence.getSession?.(SESSION);
   }
+
+  test.each(["managed-execution", "heartbeat"])(
+    "expired idle deadline recovery for %s",
+    async (policy) => {
+      const persistence = await create();
+      await persistence.upsertActiveSession(
+        record({ livenessPolicy: policy as "managed-execution" | "heartbeat" }),
+      );
+      await persistence.markReleased(SESSION, "released", 2_000, "daemon-shutdown");
+      const rows = await persistence.listRecoverableSessions(30 * 60_000);
+      const managed = policy === "managed-execution";
+      expect(rows.map((row) => row.session_uuid)).toEqual(managed ? [SESSION] : []);
+      expect((await rowOf(persistence))?.release_reason).toBe(
+        managed ? "daemon-shutdown" : "expired",
+      );
+    },
+  );
+
+  test("managed predicates and SELECTs keep restart and terminal bounds beyond idle expiry", async () => {
+    const persistence = await create();
+    await persistence.upsertActiveSession(record({ livenessPolicy: "managed-execution" }));
+    await persistence.markReleased(SESSION, "released", 2_000, "device-restart:Pixel_8");
+    const row = (await rowOf(persistence))!;
+    expect(isRecoverableDeviceSession(row, 6_000)).toBe(true);
+    expect(persistedSessionExpiryReason(row, 6_000)).toBeUndefined();
+    expect(isRecoverableDeviceSession(row, 2_001 + DEVICE_SESSION_RETENTION_MAX_AGE_MS)).toBe(
+      false,
+    );
+    expect(
+      (await persistence.listRecoverableSessions(6_000)).map((entry) => entry.session_uuid),
+    ).toEqual([SESSION]);
+    const windowEnd = 2_000 + DEFAULT_DEVICE_READY_TIMEOUT_MS;
+    expect(persistedSessionExpiryReason(row, windowEnd)).toBe("restart-recovery-timeout");
+    expect(await persistence.listRecoverableSessions(windowEnd)).toEqual([]);
+    expect((await rowOf(persistence))?.release_reason).toBe("restart-recovery-timeout");
+  });
+
+  test("managed terminal releases are never returned despite idle exemption", async () => {
+    const persistence = await create();
+    await persistence.upsertActiveSession(record({ livenessPolicy: "managed-execution" }));
+    await persistence.markReleased(SESSION, "released", 2_000, "heartbeat-timeout");
+    expect(await persistence.listRecoverableSessions(30 * 60_000)).toEqual([]);
+    expect((await rowOf(persistence))?.release_reason).toBe("heartbeat-timeout");
+  });
+
+  test("managed idle exemption never bypasses released-row retention", async () => {
+    const persistence = await create();
+    await persistence.upsertActiveSession(record({ livenessPolicy: "managed-execution" }));
+    await persistence.markReleased(SESSION, "released", 2_000, "daemon-shutdown");
+    expect(
+      await persistence.listRecoverableSessions(2_001 + DEVICE_SESSION_RETENTION_MAX_AGE_MS),
+    ).toEqual([]);
+  });
 
   test.each(["unchanged", "resumed", "new-handoff", "idle-first", "generation", "peer"])(
     "restart window statement preserves a %s row",

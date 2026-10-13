@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import {
@@ -26,6 +26,7 @@ import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+import { daemonHeartbeatHandler } from "../helpers/daemonHeartbeatHandler";
 
 // #11176: the proxy holds a managed execution's session from launch (not from its first tool
 // call) and releases it promptly when the execution ends (stdin EOF / owner loss close it).
@@ -35,6 +36,30 @@ const SESSION = "managed-slot-session";
 const OTHER = "other-session";
 const TOKEN = "managed-proxy-token";
 const HEARTBEAT_INTERVAL_MS = 2_000;
+
+beforeAll(async () => {
+  // Warm the proxy's lazy connection/hold setup outside the per-test assertion budget.
+  const timer = new FakeTimer();
+  const sessions = new SessionManager(timer, new FakeDeviceSessionPersistence());
+  await sessions.createSession("warm-managed-hold", "emulator-5554", "android");
+  await sessions.adoptManagedExecutionLivenessPolicy("warm-managed-hold");
+  const manager = new FakeDaemonManager();
+  manager.statusResult = { ...manager.statusResult, version: DAEMON_VERSION };
+  const proxy = new DaemonMcpProxy({
+    timer,
+    clientFactory: () =>
+      new FakeDaemonClient({ onCallDaemonMethod: daemonHeartbeatHandler(sessions) }),
+    daemonManager: manager,
+    daemonAvailabilityProbe: async () => true,
+    autoStartDaemon: false,
+  });
+  try {
+    await proxy.holdManagedExecutionSession("warm-managed-hold");
+  } finally {
+    await proxy.close();
+    sessions.stopCleanupTimer();
+  }
+});
 
 describe("proxy managed-execution session hold", () => {
   let timer: FakeTimer;
@@ -176,8 +201,8 @@ describe("proxy managed-execution session hold", () => {
       expect(sessionManager.getSession(SESSION)?.livenessOwnerToken).toBe(TOKEN);
       expect(proxy.getManagedExecutionSessions()).toEqual([SESSION]);
 
-      // The keeper renews the lease with no tool call, and the session's own 10-minute managed
-      // window (not the ordinary 2 minutes) bounds tool-free reasoning.
+      // The keeper renews the lease with no tool call. The 10-minute window stays stored;
+      // a non-lapsed owner lease exempts this execution from idle release.
       const beatsBefore = heartbeats(clients[0]!).length;
       await timer.advanceTimeAsync(3 * HEARTBEAT_INTERVAL_MS);
       expect(heartbeats(clients[0]!).length).toBeGreaterThan(beatsBefore);

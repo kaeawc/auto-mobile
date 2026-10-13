@@ -17,7 +17,21 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
     /// `apply`, `reset` or `renew`; `nil` for the read-only commands.
     private var ruleCommand: NetworkRuleCommand?
 
+    private var contractVersion = ControllerContract.defaultVersion
+
     func run() {
+        let invocation: ControllerInvocation
+        do {
+            invocation = try ControllerInvocation.parse(Array(CommandLine.arguments.dropFirst()))
+            contractVersion = invocation.version
+        } catch let error as ControllerInvocationError {
+            contractVersion = error.result.version
+            finish(.unavailable, error.description, code: 2)
+            return
+        } catch {
+            finish(.unavailable, "\(error)", code: 2)
+            return
+        }
         DispatchQueue.global().asyncAfter(deadline: .now() + 8) { [self] in
             finish(
                 .unavailable,
@@ -25,7 +39,7 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
                 code: 1
             )
         }
-        switch CommandLine.arguments.dropFirst().first {
+        switch invocation.command {
         case "activate":
             guard ProbeSigning.peerRequirement(identifier: ProbeSigning.providerIdentifier) != nil else {
                 finish(
@@ -44,7 +58,7 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
         case "status", "snapshot":
             do {
                 managedSimulators = try ManagedSimulatorArguments.parse(
-                    Array(CommandLine.arguments.dropFirst(2)),
+                    invocation.arguments,
                     canonicalize: canonicalDeviceSetPath
                 )
             } catch {
@@ -52,11 +66,12 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
                 return
             }
             readSnapshot()
-        case let .some(name) where NetworkRuleCommandKind(rawValue: name) != nil:
+        case let name where NetworkRuleCommandKind(rawValue: name) != nil:
             do {
                 ruleCommand = try NetworkRuleArguments.parse(
                     NetworkRuleCommandKind(rawValue: name) ?? .reset,
-                    Array(CommandLine.arguments.dropFirst(2)),
+                    invocation.arguments,
+                    version: contractVersion,
                     canonicalize: canonicalDeviceSetPath
                 )
             } catch {
@@ -67,9 +82,7 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
         default:
             finish(
                 .unavailable,
-                "Usage: network-filter-controller \(ControllerContract.commands.joined(separator: "|"))"
-                    + " [--managed <device-set-path> <udid>]... (status|snapshot)"
-                    + " | apply|reset|renew \(NetworkRuleArguments.usage)",
+                ControllerInvocationError.invalidCommand(version: contractVersion).description,
                 code: 2
             )
         }
@@ -173,11 +186,11 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
             finish(.unavailable, "Unable to encode managed simulators", code: 1)
             return
         }
-        service.snapshot(version: IdentityProbe.version, managedSimulators: managed) { [self] data, error in
+        service.snapshot(version: contractVersion, managedSimulators: managed) { [self] data, error in
             guard claimOutcome(generation) else { return }
             guard error == nil, let data,
                   let snapshot = try? JSONDecoder().decode(ProbeSnapshot.self, from: data),
-                  snapshot.version == IdentityProbe.version, IdentityProbe.modes.contains(snapshot.mode)
+                  snapshot.version == contractVersion, IdentityProbe.modes(for: contractVersion).contains(snapshot.mode)
             else {
                 retryOrFinish(
                     .readback(error),
@@ -210,7 +223,7 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
             finish(.unavailable, "Unable to encode the network rule command", code: 1)
             return
         }
-        service.rule(version: IdentityProbe.version, command: encoded) { [self] data, error in
+        service.rule(version: contractVersion, command: encoded) { [self] data, error in
             guard claimOutcome(generation) else { return }
             guard error == nil, let data, let result = try? JSONDecoder().decode(NetworkRuleResult.self, from: data)
             else {
@@ -262,7 +275,13 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
         defer { outputLock.unlock() }
         guard !finished else { return }
         finished = true
-        let result = ControllerResult(state: state, detail: detail, snapshot: snapshot, rule: rule)
+        let result = ControllerResult(
+            state: state,
+            detail: detail,
+            snapshot: snapshot,
+            rule: rule,
+            version: contractVersion
+        )
         if let data = try? result.encodedLine() {
             FileHandle.standardOutput.write(data)
             FileHandle.standardOutput.write(Data([10]))

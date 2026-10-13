@@ -27,6 +27,7 @@ import {
 import type { DeviceObservationAccess } from "../../src/server/deviceObservationAccess";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { FakeDeviceHealthMarkers } from "../fakes/FakeDeviceHealthMarkers";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -73,6 +74,8 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
   let sessionManager: SessionManager;
   let devices: FakeDeviceSessionManager;
   let timer: FakeTimer;
+  let markers: FakeDeviceHealthMarkers;
+  let pool: DevicePool;
   let persistence: FakeDeviceSessionPersistence;
   let reowner: ManagedExecutionReowner | undefined;
 
@@ -143,10 +146,12 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     sessionManager.stopCleanupTimer();
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [held, free]);
-    const pool = new DevicePool(
+    markers = new FakeDeviceHealthMarkers(timer);
+    pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "read-only-device-path", {
         timer,
         deviceManager: fakeDeviceUtils,
+        deviceHealthMarkers: markers,
         managedExecutionOwnership: () => reowner,
       }),
     );
@@ -221,6 +226,19 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     expect(devices.getLastOptions()?.intent).toBe("read");
     expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
     expect(audited).toEqual([{ name: "readProbe", deviceId: free.deviceId }]);
+  });
+
+  test("#12112 a sessionless read on an unhealthy free device preserves its marker and read readiness", async () => {
+    markers.mark(free.deviceId, pool.getDeviceIncarnation(free.deviceId)!, "app-cleanup");
+    await expect(
+      call("readProbe", { platform: "android", deviceId: free.deviceId }),
+    ).resolves.toMatchObject({ success: true });
+    expect(sessionManager.getSessionForDevice(free.deviceId)).toBeNull();
+    expect(pool.getDeviceHealthMarker(free.deviceId)?.reason).toBe("app-cleanup");
+    // #12112: current behaviour, see issue
+    expect(devices.getEnsureDeviceReadyCalls()).toBe(1);
+    expect(devices.getLastOptions()?.intent).toBe("read");
+    expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
   });
 
   test("a sessionless control call on a free device uses control readiness and pins", async () => {

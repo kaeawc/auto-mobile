@@ -2,6 +2,7 @@ import { afterEach, expect, spyOn, test } from "bun:test";
 import { logger } from "../../src/utils/logger";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { CLOCK_RESTORE_TIMEOUT_MS, SessionManager } from "../../src/daemon/sessionManager";
+import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
 import { ActionableError } from "../../src/models/ActionableError";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -298,6 +299,7 @@ for (const route of ["direct", "autolock", "setActiveDevice"] as const) {
                 deviceId: device.deviceId,
                 platform: "android",
               });
+      await expect(acquire()).rejects.toBeInstanceOf(acquisitionRefusals.DeviceUnhealthyError);
       await expect(acquire()).rejects.toThrow("network-condition");
       await expect(acquire()).rejects.toThrow("killDevice");
       expect(h.pool.getDevice(device.deviceId)?.sessionId).toBeNull();
@@ -611,3 +613,301 @@ test("a failed keep-awake restore quarantines the device until background recove
   expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
   expect(await h.pool.assignDeviceToSession("next", "android")).toBe(device.deviceId);
 });
+
+async function typedAllocationError(h: Awaited<ReturnType<typeof harness>>) {
+  return h.pool.bindOrReuseDeviceSession("next", device.deviceId, "android").then(
+    () => {
+      throw new Error("expected refusal");
+    },
+    (error: unknown) => error,
+  );
+}
+
+test("#12112 named unhealthy recovery has an exact shrinking bound", async () => {
+  const h = await harness();
+  await abandon(h, "network-condition");
+  const error = await typedAllocationError(h);
+  expect(error).toMatchObject({
+    code: "device_unhealthy",
+    deviceId: device.deviceId,
+    reason: "network-condition",
+    recovering: true,
+    retryable: true,
+    retryAfterMs: 13000,
+    devices: [
+      {
+        deviceId: device.deviceId,
+        reason: "network-condition",
+        recovering: true,
+        retryAfterMs: 13000,
+      },
+    ],
+  });
+  expect(error).toBeInstanceOf(acquisitionRefusals.DeviceUnhealthyError);
+  await h.timer.advanceTimeAsync(137, flush);
+  expect(await typedAllocationError(h)).toMatchObject({ retryAfterMs: 12863 });
+  h.pause();
+  try {
+    await h.timer.advanceTimeAsync(863, flush);
+    expect(await typedAllocationError(h)).toMatchObject({ retryAfterMs: 12000 });
+    await h.timer.advanceTimeAsync(173, flush);
+    expect(await typedAllocationError(h)).toMatchObject({ retryAfterMs: 11827 });
+  } finally {
+    h.resume();
+    await flush();
+  }
+  expect(await typedAllocationError(h)).toMatchObject({ retryAfterMs: 11000 });
+});
+
+test("#12112 three dispatched failed attempts make the typed refusal permanent", async () => {
+  const h = await harness();
+  await abandon(h, "network-condition");
+  for (const delay of [1000, 2000, 4000]) {
+    await h.timer.advanceTimeAsync(delay, flush);
+  }
+  expect(h.calls).toBe(6);
+  const error = await typedAllocationError(h);
+  expect(error).toMatchObject({ code: "device_unhealthy", retryable: false, recovering: false });
+  expect(error).toBeInstanceOf(acquisitionRefusals.DeviceUnhealthyError);
+  if (!(error instanceof acquisitionRefusals.DeviceUnhealthyError)) {
+    throw new Error("expected typed refusal");
+  }
+  expect(typeof error.retryAfterMs).not.toBe("number");
+  expect(error.message).toContain("killDevice/startDevice");
+  expect(error.message).toContain(
+    "Background recovery has ended and the marker is held until the device is replaced (code device_unhealthy).",
+  );
+});
+
+test("#12112 app-cleanup uses its own retry deadline and keeps the permanent remedy", async () => {
+  const h = await harness();
+  let calls = 0;
+  h.manager.markDeviceNeedsAppCleanup(
+    device.deviceId,
+    async () => {
+      calls++;
+      throw new Error("pm clear refused");
+    },
+    21000,
+  );
+  expect(await typedAllocationError(h)).toMatchObject({
+    reason: "app-cleanup",
+    retryAfterMs: 133000,
+  });
+  for (const delay of [1000, 2000, 4000]) {
+    await h.timer.advanceTimeAsync(delay, flush);
+  }
+  expect(calls).toBe(3);
+  const error = await typedAllocationError(h);
+  expect(error).toMatchObject({ retryable: false, recovering: false, retryAfterMs: undefined });
+  expect(error).toBeInstanceOf(acquisitionRefusals.DeviceUnhealthyError);
+  if (!(error instanceof Error)) {
+    throw new Error("expected error");
+  }
+  expect(error.message).toContain(
+    "call killDevice with device { name: 'Pixel A', deviceId: 'emulator-5554', platform: 'android' }, then startDevice",
+  );
+});
+
+test("#12112 clock recovery is unbounded and an orphan marker is permanent", async () => {
+  const h = await harness();
+  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  setRestoreState(h.manager, "clock");
+  await h.manager.releaseSession("old");
+  await h.pool.releaseDevice(device.deviceId, "old");
+  expect(await typedAllocationError(h)).toMatchObject({
+    code: "device_unhealthy",
+    reason: "clock",
+    retryable: true,
+    recovering: true,
+    retryAfterMs: undefined,
+  });
+  h.manager.retireClockRestoration(device.deviceId);
+  h.markers.mark(device.deviceId, h.pool.getDeviceIncarnation(device.deviceId)!, "clock");
+  expect(await typedAllocationError(h)).toMatchObject({
+    retryable: false,
+    recovering: false,
+    retryAfterMs: undefined,
+  });
+});
+
+test("#12112 timed-out in-flight recovery remains retryable without a bound", async () => {
+  const h = await harness();
+  await abandon(h, "network-condition");
+  h.pause();
+  try {
+    await h.timer.advanceTimeAsync(1000, flush);
+    expect(await typedAllocationError(h)).toMatchObject({ retryAfterMs: 12000 });
+    await h.timer.advanceTimeAsync(1000, flush);
+    expect(await typedAllocationError(h)).toMatchObject({
+      retryable: true,
+      recovering: true,
+      retryAfterMs: undefined,
+    });
+    await h.timer.advanceTimeAsync(10000, flush);
+    expect(h.calls).toBe(4);
+  } finally {
+    h.resume();
+    await flush();
+  }
+});
+
+test("#12112 every unhealthy candidate carries evidence and the smallest recovery bound", async () => {
+  const h = await harness(2);
+  h.manager.markDeviceNeedsAppCleanup(
+    device.deviceId,
+    async () => {
+      throw new Error("failed");
+    },
+    21000,
+  );
+  h.manager.markDeviceNeedsAppCleanup(
+    other.deviceId,
+    async () => {
+      throw new Error("failed");
+    },
+    1234,
+  );
+  const error = await h.pool
+    .assignDeviceToSession("next", "android")
+    .catch((caught: unknown) => caught);
+  expect(error).toMatchObject({
+    code: "device_unhealthy",
+    retryable: true,
+    recovering: true,
+    retryAfterMs: 14404,
+    devices: [
+      { deviceId: device.deviceId, reason: "app-cleanup", recovering: true, retryAfterMs: 133000 },
+      { deviceId: other.deviceId, reason: "app-cleanup", recovering: true, retryAfterMs: 14404 },
+    ],
+  });
+  expect(error).toBeInstanceOf(acquisitionRefusals.DeviceUnhealthyError);
+  expect(error).not.toHaveProperty("deviceId", expect.any(String));
+  expect(error).not.toHaveProperty("reason", expect.any(String));
+  h.markers.clear(other.deviceId);
+  h.markers.mark(other.deviceId, h.pool.getDeviceIncarnation(other.deviceId)!, "clock");
+  const mixed = await h.pool
+    .assignDeviceToSession("next", "android")
+    .catch((caught: unknown) => caught);
+  expect(mixed).toMatchObject({
+    retryable: true,
+    retryAfterMs: 133000,
+    devices: [
+      { deviceId: device.deviceId, reason: "app-cleanup", recovering: true, retryAfterMs: 133000 },
+      { deviceId: other.deviceId, reason: "clock", recovering: false },
+    ],
+  });
+  h.markers.clear(device.deviceId);
+  h.markers.mark(device.deviceId, h.pool.getDeviceIncarnation(device.deviceId)!, "clock");
+  const permanent = await h.pool
+    .assignDeviceToSession("next", "android")
+    .catch((caught: unknown) => caught);
+  expect(permanent).toMatchObject({ retryable: false, recovering: false, retryAfterMs: undefined });
+});
+
+test("#12112 an unhealthy idle candidate does not preempt waiting for a healthy busy device", async () => {
+  const h = await harness(2);
+  await h.pool.bindOrReuseDeviceSession("owner", other.deviceId, "android");
+  h.markers.mark(device.deviceId, h.pool.getDeviceIncarnation(device.deviceId)!, "app-cleanup");
+  let settled = false;
+  const waiting = h.pool.assignDeviceToSession("next", "android").finally(() => {
+    settled = true;
+  });
+  await flush();
+  expect(settled).toBe(false);
+  await h.timer.advanceTimeAsync(500, flush);
+  expect(settled).toBe(false);
+  await h.manager.releaseSession("owner");
+  await h.pool.releaseDevice(other.deviceId, "owner");
+  await h.timer.advanceTimeAsync(500, flush);
+  expect(await waiting).toBe(other.deviceId);
+});
+
+test("#12112 skipped ticks under a live owner preserve all three dispatched attempts", async () => {
+  const h = await harness();
+  await h.pool.bindOrReuseDeviceSession("owner", device.deviceId, "android");
+  let calls = 0;
+  h.manager.markDeviceNeedsAppCleanup(
+    device.deviceId,
+    async () => {
+      calls++;
+      if (calls < 3) {
+        throw new Error("retry");
+      }
+    },
+    1234,
+  );
+  await h.timer.advanceTimeAsync(60000, flush);
+  expect(calls).toBe(0);
+  await h.manager.releaseSession("owner");
+  await h.pool.releaseDevice(device.deviceId, "owner");
+  await h.timer.advanceTimeAsync(1000, flush);
+  expect(calls).toBe(1);
+  for (const delay of [2000, 4000]) {
+    await h.timer.advanceTimeAsync(delay, flush);
+  }
+  expect(calls).toBe(3);
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
+});
+
+test("#12112 a cleanup gate skips ticks without consuming an attempt", async () => {
+  const h = await harness();
+  let recoverable = false;
+  let calls = 0;
+  h.manager.setDeviceHealthMarkers(
+    h.markers,
+    (id) => h.pool.getDeviceIncarnation(id),
+    () => recoverable,
+  );
+  h.manager.markDeviceNeedsAppCleanup(
+    device.deviceId,
+    async () => {
+      calls++;
+    },
+    1234,
+  );
+  await h.timer.advanceTimeAsync(60000, flush);
+  expect(calls).toBe(0);
+  expect(await typedAllocationError(h)).toMatchObject({
+    retryable: true,
+    recovering: true,
+    retryAfterMs: undefined,
+  });
+  recoverable = true;
+  await h.timer.advanceTimeAsync(1000, flush);
+  expect(calls).toBe(1);
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
+});
+
+for (const retirement of ["bump", "remove", "shutdown", "clear"] as const) {
+  test(`#12112 ${retirement} ends recovery while ticks are skipped`, async () => {
+    const h = await harness();
+    let calls = 0;
+    h.manager.setDeviceHealthMarkers(
+      h.markers,
+      (id) => h.pool.getDeviceIncarnation(id),
+      () => false,
+    );
+    h.manager.markDeviceNeedsAppCleanup(
+      device.deviceId,
+      async () => {
+        calls++;
+      },
+      1234,
+    );
+    await h.timer.advanceTimeAsync(60000, flush);
+    expect(h.timer.getPendingSleepCount()).toBe(1);
+    if (retirement === "bump") {
+      h.pool.bumpDeviceIncarnation(device.deviceId);
+    } else if (retirement === "remove") {
+      await h.pool.removeDevice(device.deviceId);
+    } else if (retirement === "shutdown") {
+      h.manager.stopAcceptingSessionCreations();
+    } else {
+      h.markers.clear(device.deviceId);
+    }
+    await h.timer.advanceTimeAsync(1000, flush);
+    expect(calls).toBe(0);
+    expect(h.timer.getPendingSleepCount()).toBe(0);
+  });
+}

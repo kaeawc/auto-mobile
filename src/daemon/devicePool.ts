@@ -12,6 +12,8 @@ import type { SessionReleaseReason } from "./releaseReasons";
 import type { Environment } from "./poolConfig";
 import {
   DeviceCleanupInProgressError,
+  DeviceUnhealthyError,
+  DEVICE_UNHEALTHY_CODE,
   DeviceOwnedByOtherDaemonError,
   DeviceShuttingDownError,
   freshStartAlreadyBoundError,
@@ -7055,7 +7057,7 @@ export class DevicePool {
     }
   }
 
-  private unhealthyDevicesError(devices: readonly PooledDevice[]): ActionableError {
+  private unhealthyDevicesError(devices: readonly PooledDevice[]): DeviceUnhealthyError {
     const reasons = devices.flatMap((device) => {
       const marker = this.getDeviceHealthMarker(device.id);
       return marker ? [`'${device.id}' (${marker.reason}, since ${marker.since})`] : [];
@@ -7070,12 +7072,32 @@ export class DevicePool {
           `deviceId: '${device.id}', platform: '${device.platform}' }, then startDevice to ` +
           "bring up a fresh device.",
       );
-    return new ActionableError(
+    const evidence = devices.flatMap((device) => {
+      const marker = this.getDeviceHealthMarker(device.id);
+      const incarnation = this.getDeviceIncarnation(device.id);
+      return marker && incarnation !== undefined
+        ? [
+            {
+              deviceId: device.id,
+              reason: marker.reason,
+              ...this.sessionManager.getDeviceHealthRecovery(device.id, incarnation, marker.reason),
+            },
+          ]
+        : [];
+    });
+    const error = new DeviceUnhealthyError(
+      evidence,
       `Unhealthy devices cannot be assigned: ${reasons.join(", ")}. ` +
         "Session state could not be restored. Retry after restoration succeeds, manually restore the state, " +
         "or use killDevice/startDevice to replace the device. Automatic erase/reboot is not performed." +
         appCleanupRecovery.join(""),
     );
+    error.message += error.recovering
+      ? error.retryAfterMs === undefined
+        ? ` Background recovery is still running with no fixed bound (code ${DEVICE_UNHEALTHY_CODE}); retry later.`
+        : ` Background recovery is still running (code ${DEVICE_UNHEALTHY_CODE}); retry in about ${error.retryAfterMs}ms.`
+      : ` Background recovery has ended and the marker is held until the device is replaced (code ${DEVICE_UNHEALTHY_CODE}).`;
+    return error;
   }
 
   /** Exact-device acquisition honors cleanup and health; live-owner reuse stays valid. */

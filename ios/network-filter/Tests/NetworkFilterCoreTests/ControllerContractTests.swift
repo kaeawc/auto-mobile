@@ -36,6 +36,40 @@ final class ControllerContractTests: XCTestCase {
         XCTAssertEqual(ControllerContract.commands, ["activate", "status", "snapshot", "apply", "reset", "renew"])
     }
 
+    func testRealVersionThreeSnapshotsMatchMainLimitationsAndRuleKeys() throws {
+        let limitations = [
+            "Simulator attribution methods are unverified on a signed run (#10263).",
+            "Offline rules drop new socket flows of one attributed app; established connections continue " +
+                "until they close, and unattributed or conflicting flows are always allowed.",
+            "Flow history is attributed at read-back: a process that exited since its flow is reported " +
+                "as unattributed. Offline verdicts are attributed when each flow arrives.",
+            "New socket flows only; non-socket traffic is not filtered.",
+            "Code metadata may be absent if a process exits before snapshot collection.",
+            "The newest 128 flow identities are retained; no payloads or network addresses are collected.",
+        ]
+        let offline = try XCTUnwrap(snapshot().rules?.first)
+        let probe = IdentityProbe(resolver: FakeIdentityResolver(), processTable: FakeProcessTable())
+        for rules in [[], [offline]] {
+            let snapshot = probe.snapshot(managedSimulators: [offline.target.simulator], rules: rules, version: 3)
+            XCTAssertEqual(snapshot.version, 3)
+            XCTAssertEqual(snapshot.mode, rules.isEmpty ? "allow_only" : "app_offline")
+            XCTAssertEqual(snapshot.limitations, limitations)
+            let data = try JSONEncoder().encode(snapshot)
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            XCTAssertEqual(object["version"] as? Int, 3)
+            XCTAssertEqual(object["mode"] as? String, rules.isEmpty ? "allow_only" : "app_offline")
+            let encodedRules = try XCTUnwrap(object["rules"] as? [[String: Any]])
+            XCTAssertEqual(encodedRules.count, rules.count)
+            if let rule = encodedRules.first {
+                XCTAssertEqual(Set(rule.keys), [
+                    "condition", "droppedFlows", "leaseRemainingMilliseconds", "owner", "ownerGeneration",
+                    "revision", "target",
+                ])
+                XCTAssertEqual(rule["condition"] as? String, "offline")
+            }
+        }
+    }
+
     func testStateWireValuesMatchTheDaemonContract() {
         XCTAssertEqual(
             ControllerState.allCases.map(\.rawValue),

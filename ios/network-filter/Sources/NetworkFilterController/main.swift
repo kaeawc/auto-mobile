@@ -41,14 +41,6 @@ private final class Controller: NSObject, OSSystemExtensionRequestDelegate {
         }
         switch invocation.command {
         case "activate":
-            if let argument = invocation.arguments.first {
-                finish(
-                    .unavailable,
-                    "\(NetworkRuleArgumentError.unexpectedArgument(argument, version: contractVersion))",
-                    code: 2
-                )
-                return
-            }
             guard ProbeSigning.peerRequirement(identifier: ProbeSigning.providerIdentifier) != nil else {
                 finish(
                     .installationRequired,

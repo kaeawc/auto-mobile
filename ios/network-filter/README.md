@@ -181,17 +181,27 @@ the provider, which only accepts peers signed by its own team. The types live in
 | `snapshot` | object, optional | `status`/`snapshot` when `ready`: the provider's snapshot, with its own `version`, its `mode` (`allow_only` or `app_offline` in version 3; also `app_shaped` and `app_mixed` in version 4) and the visible active `rules`. |
 | `rule` | object, optional | `apply`/`reset`/`renew` when `ready`: the provider's definitive `outcome`, `installedRevision` and `leaseRemainingMilliseconds`; version 4 can also carry a `shaping` resolution or an `invalid_shaping` rejection. Absent whenever the outcome is unknown. |
 
-Every command accepts one `--contract-version <n>` anywhere after its name.
-Omitting it uses version 3, the last version before negotiation existed, so the
-version-3 host works unchanged with a controller built from this package.
-Explicit version 3 is byte-compatible with the previous encoder. Repeated,
-malformed or unsupported negotiation prints one version-4 `unavailable` line
-naming supported versions and exits 2. All other endings, including argument
-errors, installation requirements and the 8-second timeout, carry the negotiated
-version. The controller passes that version over XPC; the provider accepts 3 and 4.
-An installed version-3 controller rejects `--contract-version 4` as an unknown
-flag and prints its own version-3 `unavailable` line. Unknown command flags remain
-errors in both modes; negotiation does not make legacy argument parsers permissive.
+Every command accepts `--contract-version <n>` only immediately after its name:
+`network-filter-controller <command> --contract-version <n> …`. The value must
+be exactly `3` or `4`. Omitting it uses version 3, so the version-3 host works
+unchanged with a controller built from this package. Explicit version 3 is
+byte-compatible with the previous encoder. A missing, malformed or unsupported
+value prints one version-4 `unavailable` line naming supported versions and exits 2.
+The detail retains the historical wording "Invalid or repeated --contract-version"
+for fixture compatibility. A later occurrence is passed unchanged to the command's
+parser, as a value where expected or its usual unexpected argument error; it does
+not negotiate or count as repeated negotiation. All other endings, including
+argument errors, installation requirements and the 8-second timeout, carry the
+negotiated version. The controller passes that version over XPC; the provider
+accepts 3 and 4.
+
+In this build, version-3 `activate` ignores trailing arguments; version-4
+`activate` rejects any arguments after the negotiation pair with an `activate`
+usage error. An installed version-3 controller rejects `--contract-version 4`
+as an unknown flag for `status`, `snapshot`, `apply`, `reset` and `renew`, printing
+its own version-3 `unavailable` line. Its `activate` instead ignores the arguments,
+performs activation and answers with version-3 lines. A host that needs version 4
+must check the version of every returned line and never assume the flag was honoured.
 
 Version-3 snapshots omit shaped rules, use only `allow_only`/`app_offline`, and
 append one limitation stating the omitted count and that version 3 supports only

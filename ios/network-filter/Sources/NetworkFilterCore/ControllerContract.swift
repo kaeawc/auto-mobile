@@ -62,8 +62,8 @@ public struct ControllerResult: Codable {
     }
 }
 
-/// Negotiation is stripped before command-specific parsing, so old hosts keep
-/// version 3 and every asynchronous ending uses the same requested version.
+/// Only a leading negotiation pair is stripped before command-specific parsing,
+/// preserving legacy flag values and keeping every ending in the requested version.
 public struct ControllerInvocation: Equatable {
     public let command: String
     public let version: Int
@@ -72,28 +72,35 @@ public struct ControllerInvocation: Equatable {
     public static func parse(_ arguments: [String]) throws -> ControllerInvocation {
         guard let command = arguments.first else { throw ControllerInvocationError.invalidCommand() }
         var remaining = Array(arguments.dropFirst())
-        let positions = remaining.indices.filter { remaining[$0] == "--contract-version" }
-        guard positions.count <= 1 else { throw ControllerInvocationError.invalidVersion }
         var version = ControllerContract.defaultVersion
-        if let index = positions.first {
-            guard remaining.indices.contains(index + 1), let requested = Int(remaining[index + 1]),
-                  ControllerContract.supportedVersions.contains(requested)
-            else { throw ControllerInvocationError.invalidVersion }
-            version = requested
-            remaining.removeSubrange(index ... index + 1)
+        if remaining.first == "--contract-version" {
+            guard remaining.count >= 2 else { throw ControllerInvocationError.invalidVersion }
+            switch remaining[1] {
+            case "3": version = 3
+            case "4": version = 4
+            default: throw ControllerInvocationError.invalidVersion
+            }
+            remaining.removeFirst(2)
         }
         guard ControllerContract.commands.contains(command)
         else { throw ControllerInvocationError.invalidCommand(version: version) }
+        // Legacy activate ignores arguments; version 4 makes its argument errors explicit.
+        if command == "activate", version == 4, let argument = remaining.first {
+            throw ControllerInvocationError.unexpectedActivateArgument(argument)
+        }
         return ControllerInvocation(command: command, version: version, arguments: remaining)
     }
 }
 
 public enum ControllerInvocationError: Error, Equatable, CustomStringConvertible {
     case invalidVersion
+    case unexpectedActivateArgument(String)
     case invalidCommand(version: Int = ControllerContract.defaultVersion)
 
     public var description: String {
         switch self {
+        case let .unexpectedActivateArgument(argument):
+            "Unexpected argument '\(argument)'; use activate [--contract-version <3|4>]"
         case .invalidVersion:
             "Invalid or repeated --contract-version. Supported contract versions: 3, 4."
         case let .invalidCommand(version):
@@ -106,7 +113,7 @@ public enum ControllerInvocationError: Error, Equatable, CustomStringConvertible
     public var result: ControllerResult {
         let version: Int
         switch self {
-        case .invalidVersion: version = ControllerContract.version
+        case .invalidVersion, .unexpectedActivateArgument: version = ControllerContract.version
         case let .invalidCommand(requested): version = requested
         }
         return ControllerResult(state: .unavailable, detail: description, version: version)

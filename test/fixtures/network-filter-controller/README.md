@@ -9,15 +9,24 @@ adds the default-version argument error. Version-4 `ready.json` carries a mixed
 snapshot with one offline rule and one shaped rule, with packet loss unapplied.
 The version-4 ready line round-trips through the production Codable types.
 
-Every command accepts one `--contract-version <n>` anywhere after its name.
-Newest is 4, supported versions are 3 and 4, and absent negotiation defaults to 3
-(the last version before negotiation existed). Thus the unchanged version-3 host
-continues working against this controller. All invocation endings carry the
-negotiated version, including installation requirements, argument errors and the
-8-second timeout. Unsupported, repeated or malformed negotiation prints a
-version-4 `unavailable` line naming supported versions, exiting 2. An installed
-version-3 controller rejects `--contract-version 4` as unknown and prints its own
-version-3 `unavailable` line. Unknown flags remain errors in both modes.
+Every command accepts `--contract-version <n>` only immediately after its name:
+`network-filter-controller <command> --contract-version <n> …`. The value must be
+exactly `3` or `4`; newest is 4 and absent negotiation defaults to 3. Thus the
+unchanged version-3 host continues working against this controller. A missing,
+malformed or unsupported value prints a version-4 `unavailable` line naming
+supported versions, exiting 2. Its historical "Invalid or repeated --contract-version"
+detail stays pinned by `v4/unsupported-contract-version.json`. Later occurrences
+are passed unchanged to the command's parser as values or ordinary unexpected
+arguments, without negotiation. All other invocation endings carry the negotiated
+version, including installation requirements, argument errors and the 8-second timeout.
+
+This build's version-3 `activate` ignores trailing arguments; version-4 `activate`
+rejects any arguments after the negotiation pair with an `activate` usage error.
+An installed version-3 controller rejects `--contract-version 4` as unknown for
+`status`, `snapshot`, `apply`, `reset` and `renew`, printing a version-3 `unavailable`
+line. Its `activate` ignores arguments, performs activation and answers with
+version-3 lines. A host requiring version 4 must check every returned line's version
+and never assume the flag was honoured. Do not use `activate` to capture fixtures.
 
 Version 3 preserves offline wire output, rejects shaping flags with a requirement
 for `--contract-version 4`, and omits shaped snapshot rules with one limitation

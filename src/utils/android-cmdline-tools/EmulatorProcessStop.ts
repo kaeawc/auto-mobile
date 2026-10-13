@@ -46,8 +46,9 @@ export interface EmulatorProcessStopper {
   stop(target: StopTarget, options: StopOptions): Promise<EmulatorProcessStopOutcome>;
 }
 
-export const EMULATOR_TERM_GRACE_MS = 5_000;
+export const EMULATOR_TERM_GRACE_MS = 15_000;
 export const EMULATOR_KILL_WAIT_MS = 1_000;
+export const EMULATOR_STOP_RESULT_MARGIN_MS = 2_000;
 const EXIT_BACKOFF = exponentialBackoff({ initialDelayMs: 50, maxDelayMs: 500 });
 const SDK_QEMU_EXECUTABLE = /\/qemu\/[^/\s]+\/qemu-system-[^/\s]*(?:\s|$)/;
 
@@ -56,6 +57,19 @@ export function isEmulatorQemuProcess(row: Pick<EmulatorHostProcessRow, "command
   const executable = row.command.split(" -")[0] ?? "";
   const name = executable.slice(executable.lastIndexOf("/") + 1).trim();
   return name.startsWith("qemu-system-") || SDK_QEMU_EXECUTABLE.test(row.command);
+}
+
+/** Signalling requires the command's own executable, never a wrapper's argument. */
+export function isSignalableEmulatorQemuProcess(
+  row: Pick<EmulatorHostProcessRow, "command">,
+): boolean {
+  const executable = row.command.split(" -")[0] ?? "";
+  const name = executable.slice(executable.lastIndexOf("/") + 1).trim();
+  return name.startsWith("qemu-system-");
+}
+
+export function isSafeEmulatorProcessPid(pid: number, ownPid = process.pid): boolean {
+  return Number.isInteger(pid) && pid > 1 && pid !== ownPid;
 }
 
 function serialPort(serial: string): number | undefined {
@@ -82,17 +96,25 @@ function processArguments(command: string): { avdName?: string; port?: number } 
 function candidatesForSerial(
   rows: EmulatorHostProcessRow[],
   serial: string,
+  ownPid: number,
 ): EmulatorHostProcessRow[] {
   const port = serialPort(serial);
   return port === undefined
     ? []
     : rows.filter(
-        (row) => isEmulatorQemuProcess(row) && processArguments(row.command).port === port,
+        (row) =>
+          isSafeEmulatorProcessPid(row.pid, ownPid) &&
+          isSignalableEmulatorQemuProcess(row) &&
+          processArguments(row.command).port === port,
       );
 }
 
-function identifyRows(rows: EmulatorHostProcessRow[], target: StopTarget): EmulatorProcessIdentity {
-  const candidates = candidatesForSerial(rows, target.serial);
+function identifyRows(
+  rows: EmulatorHostProcessRow[],
+  target: StopTarget,
+  ownPid: number,
+): EmulatorProcessIdentity {
+  const candidates = candidatesForSerial(rows, target.serial, ownPid);
   if (candidates.length === 0) {
     return { kind: "absent" };
   }
@@ -110,7 +132,11 @@ function identifyRows(rows: EmulatorHostProcessRow[], target: StopTarget): Emula
 }
 
 /** Keep diagnostics short rather than printing the complete ps command. */
-export function emulatorProcessEscapeHint(serial: string, candidates: Candidate[] = []): string {
+export function emulatorProcessEscapeHint(
+  serial: string,
+  candidates: Candidate[] = [],
+  tableStatus?: "absent" | "unreadable",
+): string {
   if (candidates.length > 0) {
     const descriptions = candidates.map(({ pid, command }) => {
       const executable = command.match(/qemu-system-[^/\s]+/)?.[0] ?? "qemu-system-*";
@@ -119,10 +145,33 @@ export function emulatorProcessEscapeHint(serial: string, candidates: Candidate[
     });
     return `Stop it by hand after checking its identity: ${descriptions.join("; ")} stops it even when the console does not answer (\`adb -s ${serial} emu kill\` goes through the same console).`;
   }
-  return `No process candidate on this port was identified (the table may be unreadable or lack an explicit port). Find and check it with \`ps -axo pid=,command= | grep -- '-port ${serialPort(serial) ?? "<port>"}'\`, then use \`kill <pid>\`. Use \`adb -s ${serial} emu kill\` only if the console answers.`;
+  const detail =
+    tableStatus === "absent"
+      ? "The process table has no emulator candidate with this explicit port."
+      : tableStatus === "unreadable"
+        ? "The process table could not be read."
+        : "No process table was consulted.";
+  return `${detail} Find and check it with \`ps -axo pid=,command= | grep -- '-port ${serialPort(serial) ?? "<port>"}'\`, then use \`kill <pid>\`. Use \`adb -s ${serial} emu kill\` only if the console answers.`;
 }
 
-export class EmulatorStillRunningError extends ActionableError {
+const STOP_DISPATCHED = Symbol("emulatorStopDispatched");
+
+/** A stop reached the console or signaler; a late exit must remain intentional. */
+export class EmulatorStopDispatchedError extends ActionableError {}
+
+/** Preserve adb's timeout type while attaching the dispatched-stop classification. */
+export function markEmulatorStopDispatched<T extends Error>(error: T): T {
+  return Object.assign(error, { [STOP_DISPATCHED]: true });
+}
+
+export function isEmulatorStopDispatchedError(error: unknown): boolean {
+  return (
+    error instanceof EmulatorStopDispatchedError ||
+    (error instanceof Error && STOP_DISPATCHED in error)
+  );
+}
+
+export class EmulatorStillRunningError extends EmulatorStopDispatchedError {
   constructor(
     readonly pid: number,
     readonly serial: string,
@@ -140,25 +189,32 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
     private readonly table: EmulatorProcessTableSource,
     private readonly signaler: EmulatorProcessSignaler,
     private readonly timer: Timer,
+    private readonly options: { ownPid?: number } = {},
   ) {}
 
   async identify(target: StopTarget, options: StopOptions): Promise<EmulatorProcessIdentity> {
     const result = await this.read(options);
     return result.value
-      ? identifyRows(result.value, target)
+      ? identifyRows(result.value, target, this.options.ownPid ?? process.pid)
       : { kind: "unreadable", detail: result.error ?? "Process table unavailable" };
   }
 
   async describeSerial(serial: string, options: StopOptions): Promise<Candidate[]> {
     const result = await this.read(options);
-    return candidatesForSerial(result.value ?? [], serial).map(({ pid, command }) => ({
-      pid,
-      command,
-    }));
+    return candidatesForSerial(result.value ?? [], serial, this.options.ownPid ?? process.pid).map(
+      ({ pid, command }) => ({
+        pid,
+        command,
+      }),
+    );
   }
 
   async stop(target: StopTarget, options: StopOptions): Promise<EmulatorProcessStopOutcome> {
-    const identity = await this.identify(target, options);
+    const stopOptions = {
+      ...options,
+      deadlineMs: options.deadlineMs - EMULATOR_STOP_RESULT_MARGIN_MS,
+    };
+    const identity = await this.identify(target, stopOptions);
     if (identity.kind === "mismatch") {
       return {
         kind: "identity-mismatch",
@@ -181,13 +237,16 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
     }
     const exited = await this.waitForExit(
       identity.pid,
-      Math.min(options.deadlineMs, this.timer.now() + EMULATOR_TERM_GRACE_MS),
+      Math.min(
+        stopOptions.deadlineMs - EMULATOR_KILL_WAIT_MS,
+        this.timer.now() + EMULATOR_TERM_GRACE_MS,
+      ),
       options.signal,
     );
     if (exited) {
       return { kind: "stopped", pid: identity.pid, signal: "SIGTERM" };
     }
-    return this.escalate(target, identity, options);
+    return this.escalate(target, identity, stopOptions);
   }
 
   private async escalate(
@@ -195,7 +254,7 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
     identity: Extract<EmulatorProcessIdentity, { kind: "match" }>,
     options: StopOptions,
   ): Promise<EmulatorProcessStopOutcome> {
-    if (this.timer.now() >= options.deadlineMs) {
+    if (!this.hasKillWaitBudget(identity.pid, options.deadlineMs)) {
       return this.stillRunning(identity);
     }
     const result = await this.read(options);
@@ -209,13 +268,12 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
       );
       return { kind: "stopped", pid: identity.pid, signal: "SIGTERM" };
     }
-    const current = identifyRows(result.value, target);
+    const current = identifyRows(result.value, target, this.options.ownPid ?? process.pid);
     options.signal?.throwIfAborted();
-    if (
-      current.kind !== "match" ||
-      current.pid !== identity.pid ||
-      this.timer.now() >= options.deadlineMs
-    ) {
+    if (current.kind !== "match" || current.pid !== identity.pid) {
+      return this.stillRunning(identity);
+    }
+    if (!this.hasKillWaitBudget(identity.pid, options.deadlineMs)) {
       return this.stillRunning(identity);
     }
     const kill = this.send(identity, "SIGKILL");
@@ -229,6 +287,16 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
     ))
       ? { kind: "stopped", pid: identity.pid, signal: "SIGKILL" }
       : this.stillRunning(identity);
+  }
+
+  private hasKillWaitBudget(pid: number, deadlineMs: number): boolean {
+    if (this.timer.now() < deadlineMs) {
+      return true;
+    }
+    logger.warn(
+      `[EmulatorProcessStop] no budget for SIGKILL wait for pid ${pid}; SIGTERM was sent`,
+    );
+    return false;
   }
 
   private stillRunning(identity: Candidate): EmulatorProcessStopOutcome {

@@ -1,3 +1,4 @@
+import { isEmulatorStopDispatchedError } from "../utils/android-cmdline-tools/EmulatorProcessStop";
 import { deviceLossCancellationReason } from "../daemon/emulatorLossIncident";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
@@ -384,7 +385,11 @@ function shouldKeepIntentionalShutdownAfterCommandError(
   error: unknown,
   requestAbortSignal: AbortSignal | undefined,
 ): boolean {
-  return requestAbortSignal?.aborted === true || isShutdownTimeoutError(error);
+  return (
+    requestAbortSignal?.aborted === true ||
+    isShutdownTimeoutError(error) ||
+    isEmulatorStopDispatchedError(error)
+  );
 }
 
 function shouldRestoreAndroidObserverAfterCommandFailure(

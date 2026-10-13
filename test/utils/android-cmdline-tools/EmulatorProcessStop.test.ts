@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, test, spyOn } from "bun:test";
 import { readFileSync } from "node:fs";
 import { parsePsSnapshot } from "../../../src/features/iosSimFleet/psSnapshot";
 import {
@@ -10,6 +10,7 @@ import {
   FakeEmulatorProcessTableSource,
 } from "../../fakes/FakeEmulatorProcessStopper";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { logger } from "../../../src/utils/logger";
 
 const rows = parsePsSnapshot(
   readFileSync(
@@ -122,7 +123,7 @@ test("failed and pending reads are unreadable inside the caller bound", async ()
     detail: "ps unavailable",
   });
   f.table.pending = true;
-  expect(await f.stopper.stop(target, { deadlineMs: 100 })).toMatchObject({
+  expect(await f.stopper.stop(target, { deadlineMs: 2100 })).toMatchObject({
     kind: "unidentified",
     identity: { kind: "unreadable" },
   });
@@ -160,13 +161,21 @@ test("TERM exit is observed through FakeTimer polling", async () => {
 test("deadline shorter than TERM grace leaves no time for re-read or KILL", async () => {
   const f = fixture();
   f.signaler.exitOn = undefined;
-  expect(await f.stopper.stop(target, { deadlineMs: 1000 })).toMatchObject({
+  const read = f.table.read.bind(f.table);
+  f.table.read = async (options) => {
+    const result = await read(options);
+    // The identity read consumes all the budget reserved for process waits.
+    f.timer.setCurrentTime(1000);
+    return result;
+  };
+  expect(await f.stopper.stop(target, { deadlineMs: 3000 })).toMatchObject({
     kind: "still-running",
     pid: 75134,
   });
   expect(f.signaler.signals).toEqual([{ pid: 75134, signal: "SIGTERM" }]);
   expect(f.table.calls).toHaveLength(1);
-  expect(f.timer.getSleepHistory().reduce((a, b) => a + b, 0)).toBe(1000);
+  expect(f.timer.getSleepHistory()).toEqual([]);
+  expect(f.timer.now()).toBe(1000);
 });
 
 test("caller abort during TERM grace propagates without escalating", async () => {
@@ -231,8 +240,8 @@ test("survives KILL until a clipped deadline and reports pid and command", async
     pid: 75134,
     command: rows[0].command,
   });
-  expect(f.timer.now()).toBe(5500);
-  expect(f.timer.getSleepHistory().reduce((a, b) => a + b, 0)).toBe(5500);
+  expect(f.timer.now()).toBe(3500);
+  expect(f.timer.getSleepHistory().reduce((a, b) => a + b, 0)).toBe(3500);
   expect(f.signaler.signals).toHaveLength(2);
 });
 
@@ -265,4 +274,113 @@ test("caller abort propagates unchanged before reading and during a pending read
   await expect(pending).rejects.toBe(reason);
   await expect(f.stopper.stop(target, { ...f.options, signal: abort.signal })).rejects.toBe(reason);
   expect(f.signaler.signals).toEqual([]);
+});
+
+for (const command of [
+  "sh -c /sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64 -avd Pixel -port 5556",
+  "grep -- /sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64 -avd Pixel -port 5556",
+  "tail -f /tmp/qemu/x/qemu-system-log -avd Pixel -port 5556",
+  "/sdk/ - odd/emulator/qemu/darwin-aarch64/qemu-system-aarch64 -avd Pixel -port 5556",
+]) {
+  test(`signalling rejects a wrapper or unparseable executable: ${command}`, async () => {
+    const f = fixture();
+    // Wrapper and unparseable-path decoys derived from the captured row's pid and port.
+    const decoy = { ...rows[0], pid: 90001, command };
+    f.table.rows = [decoy];
+    expect(await f.stopper.identify(target, f.options)).toEqual({ kind: "absent" });
+    expect(await f.stopper.describeSerial(target.serial, f.options)).toEqual([]);
+    expect(await f.stopper.stop(target, f.options)).toEqual({
+      kind: "unidentified",
+      identity: { kind: "absent" },
+    });
+    expect(f.signaler.signals).toEqual([]);
+    f.table.rows = [decoy, rows[0]];
+    expect(await f.stopper.identify(target, f.options)).toMatchObject({
+      kind: "match",
+      pid: 75134,
+    });
+  });
+}
+
+for (const pid of [0, 1, 90002, -1, 2.5, Number.NaN]) {
+  test(`signalling rejects unsafe candidate pid ${pid}`, async () => {
+    const f = fixture();
+    f.table.rows = [{ ...rows[0], pid }];
+    const stopper = new ProcessTableEmulatorProcessStopper(f.table, f.signaler, f.timer, {
+      ownPid: 90002,
+    });
+    expect(await stopper.identify(target, f.options)).toEqual({ kind: "absent" });
+    expect(await stopper.describeSerial(target.serial, f.options)).toEqual([]);
+    expect(await stopper.stop(target, f.options)).toEqual({
+      kind: "unidentified",
+      identity: { kind: "absent" },
+    });
+    expect(f.signaler.signals).toEqual([]);
+  });
+}
+
+test("TERM has a fifteen-second snapshot grace with a far deadline", async () => {
+  const f = fixture();
+  f.signaler.exitOn = "SIGKILL";
+  expect(await f.stopper.stop(target, { deadlineMs: 60_000 })).toMatchObject({
+    kind: "stopped",
+    signal: "SIGKILL",
+  });
+  expect(f.timer.getSleepHistory().reduce((a, b) => a + b, 0)).toBe(15_000);
+});
+
+test("a pending escalation read returns the pid before the result margin", async () => {
+  const f = fixture();
+  f.signaler.exitOn = undefined;
+  const read = f.table.read.bind(f.table);
+  f.table.read = async (options) => {
+    if (f.table.calls.length === 1) {
+      f.table.pending = true;
+    }
+    return read(options);
+  };
+  expect(await f.stopper.stop(target, f.options)).toMatchObject({
+    kind: "still-running",
+    pid: 75134,
+  });
+  expect(f.timer.now()).toBe(28_000);
+  expect(f.table.calls.at(-1)?.signal?.aborted).toBe(true);
+  expect(f.signaler.signals).toEqual([{ pid: 75134, signal: "SIGTERM" }]);
+});
+
+test("default own pid is excluded without signalling", async () => {
+  const f = fixture();
+  f.table.rows = [{ ...rows[0], pid: process.pid }];
+  expect(await f.stopper.stop(target, f.options)).toEqual({
+    kind: "unidentified",
+    identity: { kind: "absent" },
+  });
+  expect(f.signaler.signals).toEqual([]);
+});
+
+test("an escalation read exhausting the wait budget leaves TERM sent and logs the pid", async () => {
+  const f = fixture();
+  f.signaler.exitOn = undefined;
+  const read = f.table.read.bind(f.table);
+  f.table.read = async (options) => {
+    const result = await read(options);
+    if (f.table.calls.length === 2) {
+      f.timer.setCurrentTime(options.deadlineMs!);
+    }
+    return result;
+  };
+  const warn = spyOn(logger, "warn");
+  try {
+    expect(await f.stopper.stop(target, f.options)).toMatchObject({
+      kind: "still-running",
+      pid: 75134,
+    });
+    expect(f.signaler.signals).toEqual([{ pid: 75134, signal: "SIGTERM" }]);
+    expect(f.timer.now()).toBe(28_000);
+    expect(warn).toHaveBeenCalledWith(
+      "[EmulatorProcessStop] no budget for SIGKILL wait for pid 75134; SIGTERM was sent",
+    );
+  } finally {
+    warn.mockRestore();
+  }
 });

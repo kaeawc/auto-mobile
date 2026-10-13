@@ -1,5 +1,6 @@
 import {
   ProcessTableEmulatorProcessStopper,
+  isSafeEmulatorProcessPid,
   emulatorProcessEscapeHint,
   type EmulatorProcessStopper,
 } from "../utils/android-cmdline-tools/EmulatorProcessStop";
@@ -1702,7 +1703,12 @@ function getValidatedPooledAndroidAvdName(
 
 type PooledAvdNameRefusal =
   | { reason: "conflict"; pooledAvdName: string; runtimeAvdName: string }
-  | { reason: "unresolved"; pooledAvdName: string; candidates?: { pid: number; command: string }[] }
+  | {
+      reason: "unresolved";
+      pooledAvdName: string;
+      candidates?: { pid: number; command: string }[];
+      processTableStatus?: "absent" | "unreadable";
+    }
   | { reason: "moved"; pooledAvdName: string };
 
 /**
@@ -1984,7 +1990,14 @@ async function confirmPooledAvdFromProcessTable(
     `[DeviceTools] Could not confirm that ${device.deviceId} is still AVD '${pooledAvdName}': ` +
       "the emulator console did not report a name.",
   );
-  return { kind: "refusal", refusal: { reason: "unresolved", pooledAvdName, candidates } };
+  const processTableStatus =
+    processIdentity?.kind === "absent" || processIdentity?.kind === "unreadable"
+      ? processIdentity.kind
+      : undefined;
+  return {
+    kind: "refusal",
+    refusal: { reason: "unresolved", pooledAvdName, candidates, processTableStatus },
+  };
 }
 
 export function pooledAvdNameRefusalMessage(
@@ -2012,7 +2025,7 @@ export function pooledAvdNameRefusalMessage(
     `AVD '${refusal.pooledAvdName}', but the emulator console on that serial did not answer, so ` +
     "the AVD actually running there could not be confirmed. Acting on the recorded name could " +
     "stop a different emulator that took the serial. Resolve the target and retry. " +
-    emulatorProcessEscapeHint(device.deviceId, refusal.candidates)
+    emulatorProcessEscapeHint(device.deviceId, refusal.candidates, refusal.processTableStatus)
   );
 }
 
@@ -3480,6 +3493,9 @@ function createAndroidEmulatorProcessStopper(): EmulatorProcessStopper {
     }),
     {
       signal: (pid, signal) => {
+        if (!isSafeEmulatorProcessPid(pid)) {
+          throw new ActionableError(`Refusing to signal unsafe emulator pid ${pid}`);
+        }
         process.kill(pid, signal);
       },
       isRunning: (pid) => {

@@ -23,9 +23,17 @@ import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { FakeEmulatorProcessStopper } from "../../fakes/FakeEmulatorProcessStopper";
+import {
+  FakeEmulatorProcessStopper,
+  FakeEmulatorProcessTableSource,
+  FakeEmulatorProcessSignaler,
+} from "../../fakes/FakeEmulatorProcessStopper";
 import { AdbCommandTimeoutError } from "../../../src/utils/android-cmdline-tools/AdbClient";
-import { EmulatorStillRunningError } from "../../../src/utils/android-cmdline-tools/EmulatorProcessStop";
+import {
+  EmulatorStillRunningError,
+  ProcessTableEmulatorProcessStopper,
+  isEmulatorStopDispatchedError,
+} from "../../../src/utils/android-cmdline-tools/EmulatorProcessStop";
 import { raceWithDeadline } from "../../../src/utils/raceWithDeadline";
 
 const original: BootedDevice = {
@@ -185,7 +193,11 @@ test("unidentified process retains the console timeout type and supplies manual 
   const error = await f.client.killDevice(original, f.options).catch((error: unknown) => error);
   expect(error).toBeInstanceOf(AdbCommandTimeoutError);
   expect((error as Error).message).toContain("Console kill timed out");
-  expect((error as Error).message).toContain("kill 83205");
+  expect((error as Error).message).toContain(
+    "The process table has no emulator candidate with this explicit port.",
+  );
+  expect(isEmulatorStopDispatchedError(error)).toBe(true);
+  expect(f.stopper.describeCalls).toEqual([]);
 });
 
 test("unidentified mute discovery retains a could-not-name-itself refusal and sends no console kill", async () => {
@@ -196,7 +208,7 @@ test("unidentified mute discovery retains a could-not-name-itself refusal and se
   };
   f.stopper.candidates = [];
   await expect(f.client.killDevice(original, f.options)).rejects.toThrow(
-    /could not name itself[\s\S]*No process candidate[\s\S]*ps -axo/,
+    /could not name itself[\s\S]*The process table could not be read[\s\S]*ps -axo/,
   );
   expect(emuKillArgv(f.adb)).toEqual([]);
 });
@@ -633,3 +645,82 @@ test("a kill asks for the adb states in the mode that rejects a missing adb exec
   expect((failure as Error).message).toContain("ADB executable is unavailable");
   expect((failure as Error).message).not.toContain("is not running");
 });
+
+for (const timeoutMs of [30_000, 6000]) {
+  test(`hung console returns a typed process outcome before the ${timeoutMs}ms deadline`, async () => {
+    const f = processFallbackFixture();
+    const table = new FakeEmulatorProcessTableSource();
+    table.rows = [{ pid: 83205, ppid: 1, command: "qemu-system-aarch64 -avd Pixel_8 -port 5554" }];
+    const signaler = new FakeEmulatorProcessSignaler();
+    signaler.exitOn = undefined;
+    const stopper = new ProcessTableEmulatorProcessStopper(table, signaler, f.timer);
+    const result = await f.client
+      .killDevice(original, { timeoutMs, processStop: { stopper } })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    expect(result).toBeInstanceOf(EmulatorStillRunningError);
+    expect(result).toMatchObject({ pid: 83205 });
+    expect(f.timer.now()).toBeLessThan(timeoutMs);
+    const consoleMs = Math.min(10_000, timeoutMs / 3);
+    const termMs = Math.min(15_000, timeoutMs - consoleMs - 2000 - 1000);
+    expect(f.timer.now()).toBe(consoleMs + termMs + 1000);
+    expect(f.timer.getSleepHistory().reduce((a, b) => a + b, 0)).toBe(termMs + 1000);
+    expect(signaler.signals).toEqual([
+      { pid: 83205, signal: "SIGTERM" },
+      { pid: 83205, signal: "SIGKILL" },
+    ]);
+  });
+}
+
+test("without processStop, two placeholders preserve the original refusal byte for byte", async () => {
+  const placeholder = { ...original, name: "Unknown (emulator-5554)" };
+  const f = fixture(placeholder);
+  const result = await f.client.killDevice(placeholder).then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  expect(result).toBeInstanceOf(Error);
+  expect((result as Error).message).toBe(
+    "Refusing to kill 'emulator-5554': the emulator could not name itself, so this daemon cannot tell it apart from a replacement that took the serial. Resolve its AVD name and retry, or stop it by hand with `adb -s emulator-5554 emu kill`.",
+  );
+  expect(emuKillArgv(f.adb)).toEqual([]);
+});
+
+test("without processStop, an adb error survives a concurrent caller abort unchanged", async () => {
+  const f = fixture(original);
+  const abort = new AbortController();
+  const adbError = new Error("adb's own failure");
+  const execute = f.adb.execute.bind(f.adb);
+  f.adb.execute = async (args, options) => {
+    if (args.join(" ") === "emu kill") {
+      abort.abort(new Error("caller abort"));
+      throw adbError;
+    }
+    return execute(args, options);
+  };
+  await expect(f.client.killDevice(original, { signal: abort.signal })).rejects.toBe(adbError);
+});
+
+for (const identity of [
+  { kind: "absent" } as const,
+  { kind: "unreadable", detail: "ps unavailable" } as const,
+]) {
+  test(`mute process refusal distinguishes ${identity.kind}`, async () => {
+    const f = processFallbackFixture("Unknown (emulator-5554)");
+    f.stopper.outcome = { kind: "unidentified", identity };
+    const result = await f.client.killDevice(original, f.options).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    expect((result as Error).message).toContain(
+      identity.kind === "absent"
+        ? "The process table has no emulator candidate with this explicit port."
+        : "The process table could not be read.",
+    );
+    expect(isEmulatorStopDispatchedError(result)).toBe(false);
+    expect(emuKillArgv(f.adb)).toEqual([]);
+    expect(f.stopper.describeCalls).toEqual([]);
+  });
+}

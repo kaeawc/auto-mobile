@@ -1,6 +1,8 @@
 import {
   emulatorProcessEscapeHint,
   EmulatorStillRunningError,
+  markEmulatorStopDispatched,
+  type EmulatorProcessIdentity,
   type EmulatorProcessStopper,
 } from "./EmulatorProcessStop";
 import { AdbCommandTimeoutError } from "./AdbClient";
@@ -4049,7 +4051,9 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         throw new ActionableError(
           `Refusing to kill '${device.deviceId}': the emulator could not name itself, so this ` +
             "daemon cannot tell it apart from a replacement that took the serial. Resolve its AVD " +
-            `name and retry. ${await this.processStopEscapeHint(device, options)}`,
+            (options.processStop
+              ? `name and retry. ${await this.processStopEscapeHint(device, options)}`
+              : `name and retry, or stop it by hand with \`adb -s ${device.deviceId} emu kill\`.`),
         );
       }
     } else {
@@ -4116,7 +4120,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     const remainingMs =
       (options.deadlineMs ?? this.timer.now() + (options.timeoutMs ?? 30_000)) - this.timer.now();
     const timeoutMs = options.processStop
-      ? Math.max(0, Math.min(remainingMs, EMULATOR_CONSOLE_KILL_BOUND_MS))
+      ? Math.max(0, Math.min(remainingMs / 3, EMULATOR_CONSOLE_KILL_BOUND_MS))
       : options.timeoutMs;
     try {
       await this.adbFactory.create(target).execute(["emu", "kill"], {
@@ -4126,15 +4130,26 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         waitForProcessSettlementAfterAbort: true,
       });
     } catch (error) {
+      if (!options.processStop) {
+        throw error;
+      }
       options.signal?.throwIfAborted();
-      if (!options.processStop || !(error instanceof AdbCommandTimeoutError)) {
+      if (!(error instanceof AdbCommandTimeoutError)) {
         throw error;
       }
       logger.warn(
         `[AndroidEmulatorClient] console kill timed out for ${target.deviceId}; checking process identity`,
         error,
       );
-      await this.stopEmulatorProcess(identityTarget, options, error);
+      try {
+        await this.stopEmulatorProcess(identityTarget, options, error);
+      } catch (stopError) {
+        throw markEmulatorStopDispatched(
+          stopError instanceof Error
+            ? stopError
+            : toActionableError(stopError, "Emulator stop failed after console kill"),
+        );
+      }
     }
   }
 
@@ -4162,12 +4177,43 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
   private async processStopEscapeHint(
     device: BootedDevice,
     options: EmulatorKillOptions,
+    identity?: EmulatorProcessIdentity,
   ): Promise<string> {
-    const candidates = await options.processStop?.stopper.describeSerial(device.deviceId, {
+    if (identity) {
+      return this.processIdentityEscapeHint(device, identity);
+    }
+    const stopper = options.processStop?.stopper;
+    if (!stopper) {
+      return emulatorProcessEscapeHint(device.deviceId);
+    }
+    const stopOptions = {
       deadlineMs: options.deadlineMs ?? this.timer.now(),
       signal: options.signal,
-    });
-    return emulatorProcessEscapeHint(device.deviceId, candidates);
+    };
+    const candidates = await stopper.describeSerial(device.deviceId, stopOptions);
+    if (candidates.length > 0) {
+      return emulatorProcessEscapeHint(device.deviceId, candidates);
+    }
+    const observed = await stopper.identify(
+      { serial: device.deviceId, avdName: this.processStopAvdName(device, options) ?? "" },
+      stopOptions,
+    );
+    return this.processIdentityEscapeHint(device, observed);
+  }
+
+  private processIdentityEscapeHint(
+    device: BootedDevice,
+    identity: EmulatorProcessIdentity,
+  ): string {
+    switch (identity.kind) {
+      case "absent":
+      case "unreadable":
+        return emulatorProcessEscapeHint(device.deviceId, [], identity.kind);
+      case "ambiguous":
+        return emulatorProcessEscapeHint(device.deviceId, identity.candidates);
+      default:
+        return emulatorProcessEscapeHint(device.deviceId, [identity]);
+    }
   }
 
   private async stopEmulatorProcess(
@@ -4196,7 +4242,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       case "still-running":
         throw new EmulatorStillRunningError(outcome.pid, device.deviceId, avdName, outcome.command);
       case "unidentified":
-        throw await this.processStopRefusal(device, options, refusal);
+        throw await this.processStopRefusal(device, options, refusal, outcome.identity);
     }
   }
 
@@ -4204,8 +4250,9 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     device: BootedDevice,
     options: EmulatorKillOptions,
     refusal: Error,
+    identity?: EmulatorProcessIdentity,
   ): Promise<Error> {
-    const message = `${refusal.message} ${await this.processStopEscapeHint(device, options)}`;
+    const message = `${refusal.message} ${await this.processStopEscapeHint(device, options, identity)}`;
     return refusal instanceof AdbCommandTimeoutError
       ? new AdbCommandTimeoutError(message)
       : new ActionableError(message, { cause: refusal });

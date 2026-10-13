@@ -5,11 +5,12 @@ import {
 } from "../../../src/daemon/managedSlots/reconciler";
 import {
   ManagedSlotJournal,
+  SLOT_JOURNAL_REMOVAL_FLAG_WRITE_BUDGET_MS,
   SlotJournalInFlight,
 } from "../../../src/daemon/managedSlots/slotJournal";
 import { FakeSlotRegistry } from "../../fakes/FakeSlotRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { drainUntil } from "../../helpers/fakeTimerStepping";
+import { drainMicrotasks, drainUntil } from "../../helpers/fakeTimerStepping";
 import {
   FakeClaims,
   FakeDeleter,
@@ -169,6 +170,136 @@ test("an expired commit refusal still attempts the flag write before release", a
   expect(order.slice(0, 2)).toEqual(["flag", "release"]);
   expect((await h.registry.getSlotJournal(1))?.target.removalRequested).toBe(true);
   await assertRemovedByNext(h);
+});
+
+test("an already-aborted commit refusal writes the flag before release", async () => {
+  const h = await harness(true);
+  const controller = new AbortController();
+  const advance = h.registry.advanceSlotJournal.bind(h.registry);
+  const order: string[] = [];
+  h.registry.advanceSlotJournal = async (id, input) => {
+    if (input.phase === "committed") {
+      controller.abort();
+      return { kind: "stale_binding", current: (await h.registry.getAssignment(h.key))! };
+    }
+    if (input.target?.removalRequested) {
+      order.push("flag");
+    }
+    return advance(id, input);
+  };
+  h.provisioner.releaseSession = async () => {
+    order.push("release");
+  };
+  expect(await h.reconciler.reconcile({ ...h.request, signal: controller.signal })).toMatchObject({
+    outcome: "failed",
+    failure: { code: "concurrent_modification" },
+  });
+  expect(h.timer.now()).toBeLessThan(h.request.deadlineMs);
+  expect(order.slice(0, 2)).toEqual(["flag", "release"]);
+  expect((await h.registry.getSlotJournal(1))?.target.removalRequested).toBe(true);
+  h.registry.advanceSlotJournal = advance;
+  await assertRemovedByNext(h);
+  expect(h.deleter.stableIds()).toEqual(["UDID-1"]);
+});
+
+test("an expired hung flag releases within its budget and this daemon later removes", async () => {
+  const h = await harness(true);
+  const advance = h.registry.advanceSlotJournal.bind(h.registry);
+  let writing = false;
+  h.registry.advanceSlotJournal = async (id, input) => {
+    if (input.phase === "committed") {
+      h.timer.setCurrentTime(h.request.deadlineMs + 1);
+      return { kind: "stale_binding", current: (await h.registry.getAssignment(h.key))! };
+    }
+    if (input.target?.removalRequested) {
+      writing = true;
+      return new Promise<never>(() => {});
+    }
+    return advance(id, input);
+  };
+  const first = h.reconciler.reconcile(h.request);
+  await drainUntil(() => writing, { description: "hung removal flag" });
+  expect(h.provisioner.released).toEqual([]);
+  h.timer.advanceTime(SLOT_JOURNAL_REMOVAL_FLAG_WRITE_BUDGET_MS + 1);
+  await drainMicrotasks(156);
+  expect(h.provisioner.released).toEqual(["session-1"]);
+  expect(await first).toMatchObject({
+    outcome: "failed",
+    failure: { code: "concurrent_modification" },
+  });
+  expect((await h.registry.getSlotJournal(1))?.target.removalRequested).toBeUndefined();
+  h.registry.advanceSlotJournal = advance;
+  expect(await h.driver.redriveSlot(h.key)).toMatchObject({ kind: "clear" });
+  expect((await h.registry.getAssignment(h.key))?.stableDeviceId).toBeNull();
+  expect((await h.registry.getSlotJournal(1))?.phase).toBe("rolled_back");
+  expect(h.deleter.stableIds()).toEqual(["UDID-1"]);
+});
+
+test.each([false, true])("death before flag lands with binding moved: %s", async (bindingMoved) => {
+  const h = await harness(true);
+  const advance = h.registry.advanceSlotJournal.bind(h.registry);
+  let writing = false;
+  h.registry.advanceSlotJournal = async (id, input) => {
+    if (input.phase === "committed") {
+      if (bindingMoved) {
+        const assignment = (await h.registry.getAssignment(h.key))!;
+        expect(
+          await h.registry.commitBinding(h.key, assignment, {
+            stableDeviceId: null,
+            deviceName: null,
+            resolvedSpec: null,
+            specFingerprint: null,
+            state: "provisioning",
+          }),
+        ).toMatchObject({ kind: "committed" });
+        // Exercise the registry's actual CAS refusal against the moved generation.
+        return advance(id, input);
+      }
+      return { kind: "stale_binding", current: (await h.registry.getAssignment(h.key))! };
+    }
+    if (input.target?.removalRequested) {
+      writing = true;
+      return new Promise<never>(() => {});
+    }
+    return advance(id, input);
+  };
+  void h.reconciler.reconcile(h.request);
+  await drainUntil(() => writing, { description: "death before flag lands" });
+  const entry = (await h.registry.getSlotJournal(1))!;
+  const assignment = (await h.registry.getAssignment(h.key))!;
+  expect(assignment.stableDeviceId).toBeNull();
+  expect(assignment.generation === entry.binding.generation).toBe(!bindingMoved);
+  expect(entry).toMatchObject({ phase: "created", target: { newStableId: "UDID-1" } });
+  expect(entry.target.removalRequested).toBeUndefined();
+  expect(await h.registry.findDeviceHolder("ios", "UDID-1")).toBeNull();
+  expect(h.provisioner.released).toEqual([]);
+  let adoptionCas = false;
+  h.registry.advanceSlotJournal = async (id, input) => {
+    if (input.phase === "committed") {
+      expect(input.assignment).toMatchObject({
+        kind: "commit",
+        expected: entry.binding,
+        next: { stableDeviceId: "UDID-1", state: "provisioning" },
+      });
+      adoptionCas = true;
+    }
+    return advance(id, input);
+  };
+  // Residual: if refusal clears before takeover, adoption's CAS may bind as provisioning for re-provisioning before use.
+  expect(await h.journal(NEXT).redriveSlot(h.key)).toMatchObject({ kind: "clear" });
+  expect(adoptionCas).toBe(!bindingMoved);
+  if (bindingMoved) {
+    expect((await h.registry.getAssignment(h.key))?.stableDeviceId).toBeNull();
+    expect(h.deleter.stableIds()).toEqual(["UDID-1"]);
+    expect((await h.registry.getSlotJournal(1))?.phase).toBe("rolled_back");
+  } else {
+    expect(await h.registry.getAssignment(h.key)).toMatchObject({
+      stableDeviceId: "UDID-1",
+      state: "provisioning",
+    });
+    expect(h.deleter.calls).toEqual([]);
+    expect((await h.registry.getSlotJournal(1))?.phase).toBe("committed");
+  }
 });
 
 test("busy created write fails, releases, and keeps this daemon from adopting", async () => {

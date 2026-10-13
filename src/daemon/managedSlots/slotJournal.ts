@@ -81,6 +81,8 @@ export const SLOT_JOURNAL_STOP_BUDGET_MS = 100;
 export const SLOT_JOURNAL_OVERDUE_DELETE_GRACE_MS = 1_000;
 export const SLOT_JOURNAL_MAX_ABANDONED_DELETES = 3;
 export const SLOT_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS = 6;
+/** Durability gets one caller-independent attempt without indefinitely holding its session. */
+export const SLOT_JOURNAL_REMOVAL_FLAG_WRITE_BUDGET_MS = 500;
 export const SLOT_JOURNAL_REGISTRY_RETRY_INITIAL_DELAY_MS = 25;
 export const SLOT_JOURNAL_REGISTRY_RETRY_MAX_DELAY_MS = 1_000;
 export const SLOT_JOURNAL_REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS = 5_000;
@@ -390,9 +392,14 @@ export class ManagedSlotJournal {
       return entry;
     }
     this.markRemovalIntended(entry);
+    // Cancellation and an expired deadline only bound retries, never the first durability write.
+    const recorded = await this.tryRemovalFlag(entry, new AbortController().signal, true);
+    if (recorded) {
+      return recorded.kind === "advanced" ? recorded.entry : entry;
+    }
     if (options.deadlineMs !== undefined && this.deps.timer.now() >= options.deadlineMs) {
-      // Even an expired request must attempt durability before releasing its created device.
-      return this.retryRemovalFlag(entry, new AbortController().signal, true);
+      logger.warn(`[SlotJournal] Removal flag for entry ${entry.id} missed its deadline.`);
+      return entry;
     }
     const controller = new AbortController();
     const signal = options.signal
@@ -425,20 +432,13 @@ export class ManagedSlotJournal {
   private async retryRemovalFlag(
     entry: SlotJournalEntry,
     signal: AbortSignal,
-    singleAttempt = false,
   ): Promise<SlotJournalEntry> {
-    const maxAttempts = singleAttempt ? 1 : SLOT_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    for (let attempt = 2; attempt <= SLOT_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS; attempt++) {
       signal.throwIfAborted();
-      const recorded = await this.tryRemovalFlag(entry, signal, singleAttempt);
+      await this.removalFlagPacing.wait(this.removalFlagPacing.delay(attempt - 1), signal);
+      const recorded = await this.tryRemovalFlag(entry, signal);
       if (recorded) {
-        if (recorded.kind === "advanced" || recorded.kind === "journal_conflict") {
-          this.removalIntents.delete(entry.id);
-        }
         return recorded.kind === "advanced" ? recorded.entry : entry;
-      }
-      if (attempt < maxAttempts) {
-        await this.removalFlagPacing.wait(this.removalFlagPacing.delay(attempt), signal);
       }
     }
     logger.warn(`[SlotJournal] Removal flag for entry ${entry.id} exhausted registry retries.`);
@@ -446,6 +446,8 @@ export class ManagedSlotJournal {
   }
 
   private async tryRemovalFlag(entry: SlotJournalEntry, signal: AbortSignal, immediate = false) {
+    const startedMs = this.deps.timer.now();
+    const timeout = new Error(`Removal flag for entry ${entry.id} exceeded its write budget.`);
     try {
       const write = () =>
         this.advanceStep(
@@ -460,13 +462,30 @@ export class ManagedSlotJournal {
           },
           signal,
         );
-      return await (immediate
-        ? write()
+      const recorded = await (immediate
+        ? raceWithDeadline(write, {
+            timer: this.deps.timer,
+            timeoutMs: SLOT_JOURNAL_REMOVAL_FLAG_WRITE_BUDGET_MS,
+            timeoutError: () => timeout,
+            label: `first removal flag write for entry ${entry.id}`,
+          })
         : this.removalFlagPacing.run(write, (result) => result.kind === "advanced", signal));
+      if (recorded.kind === "advanced" || recorded.kind === "journal_conflict") {
+        this.removalIntents.delete(entry.id);
+      }
+      return recorded;
     } catch (error) {
+      if (error === timeout) {
+        logger.warn(`[SlotJournal] ${errorMessage(error)}`, error);
+        return { kind: "removal_flag_timed_out" as const };
+      }
       if (classifySqliteError(error) !== "retryable") {
         // Preserve non-retryable errors; the in-memory intent still prevents adoption.
+        logger.warn(`[SlotJournal] Removal flag failed: ${errorMessage(error)}`, error);
         throw error;
+      }
+      if (immediate) {
+        this.removalFlagPacing.noteBlocked(startedMs);
       }
       // Expected SQLite contention is retried on the shared pacing before any deletion.
       logger.debug(`[SlotJournal] Removal flag deferred: ${errorMessage(error)}`, error);

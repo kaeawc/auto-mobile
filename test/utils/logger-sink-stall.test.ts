@@ -1,3 +1,4 @@
+import { useRealLogSinks } from "../helpers/realLogSinks";
 import { describe, expect, test, spyOn } from "bun:test";
 import fs from "node:fs";
 import { EventEmitter } from "node:events";
@@ -6,6 +7,8 @@ import * as io from "../../src/utils/io";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { useScratchRoot } from "../helpers/scratchRoot";
+
+useRealLogSinks();
 
 const STALL_MS = 5_000;
 const ABANDON_MS = 30_000;

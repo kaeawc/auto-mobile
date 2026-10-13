@@ -1,9 +1,12 @@
+import { useRealLogSinks } from "../helpers/realLogSinks";
 import { describe, expect, test, spyOn } from "bun:test";
 import fs from "fs";
 import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LogLevel, parseAutomobileLogLevel, resolveProcessLogPrefix } from "../../src/utils/logger";
+
+useRealLogSinks();
 
 class FakeLogStream extends EventEmitter {
   writableFinished = false;

@@ -1,7 +1,10 @@
+import { useRealLogSinks } from "../helpers/realLogSinks";
 import { describe, expect, test, spyOn } from "bun:test";
 import fs, { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+useRealLogSinks();
 
 /**
  * Seeds a log file at a given size without paying for real data writes. A

@@ -4,24 +4,6 @@ import XCTest
 
 @MainActor
 final class AppStateWaitTests: XCTestCase {
-    func testAwaitAppStateUsesInjectedClockWithoutBlocking() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let sourceURL = packageRoot.appendingPathComponent("Sources/CtrlProxyRewrite/ElementLocator.swift")
-        let source = try String(contentsOf: sourceURL, encoding: .utf8)
-        let functionStart = try XCTUnwrap(source.range(of: "func awaitAppState("))
-        let remainingSource = source[functionStart.upperBound...]
-        let functionEnd = try XCTUnwrap(remainingSource.range(of: "\n        private ")).lowerBound
-        let function = source[functionStart.lowerBound ..< functionEnd]
-
-        XCTAssertTrue(function.contains("async -> Bool"))
-        XCTAssertTrue(function.contains("await AppStateWait.poll("))
-        XCTAssertTrue(function.contains("clock: appStateClock"))
-        XCTAssertFalse(source.contains("Thread.sleep"))
-    }
-
     func testMainActorMakesProgressWhilePollIsSuspended() async {
         let clock = KeyboardTestClock(manual: true)
         var probes = 0

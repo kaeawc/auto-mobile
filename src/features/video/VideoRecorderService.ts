@@ -61,6 +61,13 @@ export interface VideoCaptureConfig extends VideoRecordingConfig {
   physicalDisplayId?: string;
 }
 
+/** Durable identity for an Android recorder that may outlive its daemon. */
+export interface VideoCaptureTeardownDescriptor {
+  kind: "android-screenrecord";
+  devicePid?: number;
+  deviceTempPath: string;
+}
+
 export interface RecordingHandle {
   recordingId: string;
   outputPath: string;
@@ -176,6 +183,7 @@ export interface ForceStopOptions {
 }
 
 export interface VideoCaptureBackend {
+  describeCaptureTeardown?(handle: RecordingHandle): VideoCaptureTeardownDescriptor | undefined;
   start(config: VideoCaptureConfig): Promise<RecordingHandle>;
   stop(handle: RecordingHandle): Promise<RecordingResult>;
   forceStop?(handle: RecordingHandle, options?: ForceStopOptions): Promise<void>;
@@ -388,6 +396,11 @@ export class VideoRecorderService {
    */
   listActiveRecordingIds(): string[] {
     return Array.from(this.activeRecordings.keys());
+  }
+
+  getCaptureTeardown(recordingId: string): VideoCaptureTeardownDescriptor | undefined {
+    const handle = this.activeRecordings.get(recordingId)?.handle;
+    return handle ? this.backend.describeCaptureTeardown?.(handle) : undefined;
   }
 
   /** The file an active capture is writing, when it differs from its output path. */

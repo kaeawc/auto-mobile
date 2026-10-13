@@ -1,3 +1,4 @@
+import { ActionableError } from "../models/ActionableError";
 import type { SessionManager } from "../daemon/sessionManager";
 import { registerBoundedAcquisitionCleanup } from "../utils/boundedAcquisitionCleanup";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -12,6 +13,7 @@ import {
 } from "./deviceGestureRecordingManager";
 import {
   adoptOwnerlessSegmentedVideoRecordings,
+  captureSegmentedRecordingIdsForOwner,
   hasSegmentedVideoRecordingsForOwner,
   finalizeSegmentedVideoRecordingsForOwnerOnReplacedDevice,
   segmentedVideoRecordingHandlesForOwner,
@@ -19,6 +21,7 @@ import {
 } from "./videoRecordingTools";
 import {
   adoptOwnerlessActiveVideoRecordings,
+  INCOMPLETE_MARK_GRACE_MS,
   abandonVideoRecordingOnReplacedDevice,
   listActiveVideoRecordingIdsForOwner,
   listActiveVideoRecordings,
@@ -107,6 +110,11 @@ export interface RecordingSessionCleanupDeps {
   ): string | undefined;
   /** Ids of the recordings a session owns on the device, from memory only (no DB read). */
   activeRecordingIdsForOwner(sessionId: string | undefined, deviceId: string): string[];
+  /** Capture only release-time sessions; the reader includes their later rotation segments. */
+  captureSegmentedRecordingIdsForOwner?(
+    sessionId: string | undefined,
+    deviceId: string,
+  ): () => readonly string[];
   /** Capture ids still owned by the recorder or gesture service; excludes registry handles. */
   retainedCaptureIdsForOwner(sessionId: string | undefined, deviceId: string): string[];
   /** Deadline clock for the finalize cap; a FakeTimer in tests. */
@@ -127,6 +135,7 @@ export const defaultRecordingSessionCleanupDeps: RecordingSessionCleanupDeps = {
     hasSegmentedVideoRecordingsForOwner(sessionId, deviceId) ||
     isDeviceGestureRecordingOwnedBy(sessionId, deviceId),
   stopSegmentedRecordings: stopSegmentedVideoRecordingsForOwner,
+  captureSegmentedRecordingIdsForOwner,
   listActiveVideoRecordings: (deviceId) => listActiveVideoRecordings({ deviceId }),
   stopVideoRecording: async (recordingId) => {
     await stopVideoRecordingUnattended(recordingId);
@@ -167,6 +176,46 @@ export const defaultRecordingSessionCleanupDeps: RecordingSessionCleanupDeps = {
     recorderRecoveryNeeded.set(giveUp.deviceId, giveUps);
   },
 };
+
+/** Connect give-up to the pool's synchronous health quarantine and bounded recovery. */
+export function createRecorderTeardownRecoveryMarker(
+  manager: Pick<SessionManager, "markDeviceNeedsRecorderTeardown">,
+  deps: RecordingSessionCleanupDeps = defaultRecordingSessionCleanupDeps,
+): RecordingSessionCleanupDeps["markDeviceNeedsRecorderRecovery"] {
+  return (giveUp) => {
+    defaultRecordingSessionCleanupDeps.markDeviceNeedsRecorderRecovery(giveUp);
+    manager.markDeviceNeedsRecorderTeardown(
+      giveUp.deviceId,
+      () => retryGivenUpRecordings(giveUp.deviceId, deps),
+      INCOMPLETE_MARK_GRACE_MS,
+    );
+  };
+}
+
+async function retryGivenUpRecordings(
+  deviceId: string,
+  deps: RecordingSessionCleanupDeps,
+): Promise<void> {
+  // Health recovery deduplicates by device/reason. Include later give-ups in that same retry.
+  const giveUps = recorderRecoveryNeeded.get(deviceId) ?? [];
+  for (const giveUp of giveUps) {
+    const retained = unconfirmedRecordingIds(deps, giveUp.sessionId, deviceId, giveUp.recordingIds);
+    await forceStopOwnedRecordings(
+      deps,
+      retained,
+      deps.ownedDeviceGestureRecordingId(giveUp.sessionId, deviceId),
+    );
+  }
+  const remaining = (recorderRecoveryNeeded.get(deviceId) ?? []).flatMap((giveUp) =>
+    unconfirmedRecordingIds(deps, giveUp.sessionId, deviceId, giveUp.recordingIds),
+  );
+  if (remaining.length > 0) {
+    throw new ActionableError(
+      `Recorder teardown on device ${deviceId} is still unconfirmed for ${remaining.join(", ")}. Recover the device if retries fail.`,
+    );
+  }
+  recorderRecoveryNeeded.delete(deviceId);
+}
 
 async function abandonRecordingsOnReplacedDevice(
   sessionId: string,
@@ -219,9 +268,6 @@ export function takeRecordingIdsFinalizedByRelease(sessionId: string): string[] 
   idsCapturedAtRelease.delete(sessionId);
   return ids;
 }
-
-/** Extra time the force-stop and `incomplete` marking get once the cap has passed. */
-const INCOMPLETE_MARK_GRACE_MS = 5_000;
 
 class FinalizeCapExceeded extends Error {}
 
@@ -330,6 +376,7 @@ async function stopOwnedRecordingsWithinCap(
     stopping: new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId)),
     capExpired: false,
   };
+  const segmentedCaptureIds = deps.captureSegmentedRecordingIdsForOwner?.(sessionId, deviceId);
   let originalIds: string[] = [];
   const deviceGestureRecordingId = deps.ownedDeviceGestureRecordingId(sessionId, deviceId);
   const capMs = deps.finalizeCapMs(deviceId);
@@ -344,7 +391,14 @@ async function stopOwnedRecordingsWithinCap(
         onTimeout: () => {
           // Freeze eligibility in the timer callback, before the detached stage can resume.
           state.capExpired = true;
-          const active = new Set(deps.activeRecordingIdsForOwner(sessionId, deviceId));
+          const segmentIds = segmentedCaptureIds?.() ?? [];
+          for (const id of segmentIds) {
+            state.stopping.add(id);
+          }
+          const active = new Set([
+            ...deps.activeRecordingIdsForOwner(sessionId, deviceId),
+            ...segmentIds,
+          ]);
           originalIds = [...state.stopping].filter((id) => active.has(id));
         },
       },

@@ -6,6 +6,7 @@ import { selectMigrationLock } from "../../db/migrationLock";
 import * as slotRegistry000 from "./migrations/2026_10_09_000_slot_registry";
 import * as slotRegistry001 from "./migrations/2026_10_09_001_slot_owner_fencing";
 import * as slotJournal002 from "./migrations/2026_10_09_002_slot_journal";
+import * as freeDeviceDeletion004 from "./migrations/2026_10_12_004_free_device_deletion";
 import * as freeDeviceStop003 from "./migrations/2026_10_10_003_free_device_stop_state";
 
 /**
@@ -18,6 +19,7 @@ export const SLOT_REGISTRY_MIGRATIONS: Readonly<Record<string, Migration>> = {
   "2026_10_09_001_slot_owner_fencing": slotRegistry001,
   "2026_10_09_002_slot_journal": slotJournal002,
   "2026_10_10_003_free_device_stop_state": freeDeviceStop003,
+  "2026_10_12_004_free_device_deletion": freeDeviceDeletion004,
 };
 
 export const slotRegistryMigrationProvider: MigrationProvider = {
@@ -25,17 +27,20 @@ export const slotRegistryMigrationProvider: MigrationProvider = {
 };
 
 /**
- * Migrate the registry to latest under a cross-process file lock keyed to `dbPath` (no-op for
- * `:memory:`), so two daemons opening the shared file at once cannot collide on the migration table.
+ * Probe with reads only: Kysely's getMigrations does not create missing bookkeeping tables, and
+ * reports their migrations as unexecuted. A migrated WAL registry can open behind a peer writer.
+ * Only pending work takes the cross-process file lock (no-op for `:memory:`); migrateToLatest
+ * rechecks under that lock and the registry's transactional-DDL adapter keeps the changes atomic.
  */
 export async function migrateSlotRegistry<DB>(db: Kysely<DB>, dbPath: string): Promise<void> {
+  const migrator = new Migrator({ db, provider: slotRegistryMigrationProvider });
+  if ((await migrator.getMigrations()).every((migration) => migration.executedAt !== undefined)) {
+    return;
+  }
   const lock = selectMigrationLock(dbPath);
   await lock.acquire();
   try {
-    const { error } = await new Migrator({
-      db,
-      provider: slotRegistryMigrationProvider,
-    }).migrateToLatest();
+    const { error } = await migrator.migrateToLatest();
     if (error) {
       throw new ActionableError(
         `Failed to migrate the managed slot registry at ${dbPath}: ${errorMessage(error)}`,

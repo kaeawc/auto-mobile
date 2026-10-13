@@ -473,6 +473,81 @@ describe("registerRecordingSessionCleanup", () => {
     }
   });
 
+  for (const retained of [false, true]) {
+    test(`cap includes an in-flight rotation's new capture (${retained ? "retry and give-up" : "confirmed stop"})`, async () => {
+      const { manager, recordings } = setup();
+      recordings.segmentedIds = ["session-handle"];
+      recordings.hangSegmented = true;
+      recordings.teardownRetryBudgetMs = 2_000;
+      const liveIds: string[] = [];
+      registerRecordingSessionCleanup(manager, {
+        ...defaultRecordingSessionCleanupDeps,
+        hasRecordingsToStop: () => true,
+        timer: recordings.timer,
+        activeRecordingIdsForOwner: (owner, deviceId) =>
+          recordings.activeRecordingIdsForOwner(owner, deviceId),
+        retainedCaptureIdsForOwner: (owner, deviceId) =>
+          recordings.retainedCaptureIdsForOwner(owner, deviceId),
+        captureSegmentedRecordingIdsForOwner: () => () => [...liveIds],
+        stopSegmentedRecordings: () => new Promise<void>(() => {}),
+        listActiveVideoRecordings: (id) => recordings.listActiveVideoRecordings(id),
+        stopVideoRecording: (id) => recordings.stopVideoRecording(id),
+        markVideoRecordingIncomplete: (id) => recordings.markVideoRecordingIncomplete(id),
+        teardownRetryBackoff: recordings.teardownRetryBackoff,
+        teardownRetryBudgetMs: recordings.teardownRetryBudgetMs,
+        markDeviceNeedsRecorderRecovery: (giveUp) =>
+          recordings.markDeviceNeedsRecorderRecovery(giveUp),
+      });
+      const force = spyOn(recordings, "markVideoRecordingIncomplete");
+      if (retained) {
+        force.mockRejectedValue(new Error("rotation capture retained"));
+      }
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        manager.release("session-a", "SIM-1");
+        liveIds.push("rotation-capture");
+        recordings.active.set("SIM-1", {
+          recordingId: "rotation-capture",
+          deviceId: "SIM-1",
+          ownerSessionUuid: "session-a",
+        });
+        recordings.active.set("later-unrelated", {
+          recordingId: "later-unrelated",
+          deviceId: "SIM-1",
+          ownerSessionUuid: "session-a",
+        });
+        await recordings.timer.advanceTimeAsync(120_000, () =>
+          drainUntilQuiescent(recordings.timer),
+        );
+        expect(force).toHaveBeenCalledWith("rotation-capture");
+        if (retained) {
+          await recordings.timer.advanceTimeAsync(2_000, () =>
+            drainUntilQuiescent(recordings.timer),
+          );
+          expect(force.mock.calls.filter(([id]) => id === "rotation-capture")).toHaveLength(2);
+          expect(recordings.giveUps).toEqual([
+            {
+              deviceId: "SIM-1",
+              sessionId: "session-a",
+              recordingIds: ["rotation-capture"],
+              attempts: 1,
+              budgetMs: 2_000,
+            },
+          ]);
+        } else {
+          expect(recordings.active.has("SIM-1")).toBe(false);
+          expect(recordings.giveUps).toEqual([]);
+        }
+        expect(force.mock.calls.map(([id]) => id)).not.toContain("later-unrelated");
+        expect(recordings.active.get("later-unrelated")?.recordingId).toBe("later-unrelated");
+        await manager.settle();
+      } finally {
+        force.mockRestore();
+        warn.mockRestore();
+      }
+    });
+  }
+
   test("a segmented stage settling after the cap leaves a same-session video started after the cap running", async () => {
     const { manager, recordings } = setup();
     recordings.start("SIM-1", "session-a");

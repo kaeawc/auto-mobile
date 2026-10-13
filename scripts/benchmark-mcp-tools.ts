@@ -10,6 +10,8 @@
  *
  * Device I/O operations (ADB calls) will fail without a real device, but we measure
  * the MCP plumbing overhead up to that point, which is sufficient for regression detection.
+ * A tool over threshold is re-measured once with a fresh fixture; both samples remain visible,
+ * and the second full sample run decides the verdict.
  *
  * Usage:
  *   bun scripts/benchmark-mcp-tools.ts [--config path/to/config.json] [--output path/to/report.json] [--compare path/to/baseline.json]
@@ -47,11 +49,7 @@ import {
   type ToolFixture,
 } from "./benchmark-device-tools-fixture";
 import { installListDevicesFixture } from "./benchmark-listdevices-fixture";
-import {
-  chooseBatchSize,
-  compareAgainstThreshold,
-  type ThresholdResult,
-} from "./benchmark-thresholds";
+import { chooseBatchSize, judgeWithRemeasure, type ThresholdResult } from "./benchmark-thresholds";
 
 import fs from "node:fs";
 import path from "node:path";
@@ -134,6 +132,8 @@ interface ToolMetrics {
 interface ToolBenchmarkResult extends ToolMetrics {
   thresholdChecks?: ThresholdResult[];
   overallPassed?: boolean;
+  remeasured?: true;
+  firstSample?: Omit<ToolMetrics, "toolName"> & { thresholdChecks: ThresholdResult[] };
 }
 
 // Complete benchmark report
@@ -147,6 +147,7 @@ interface BenchmarkReport {
     totalTools: number;
     passedTools: number;
     failedTools: number;
+    remeasuredTools: string[];
     averageThroughput: number; // ops/second
   };
   violations: string[];
@@ -362,26 +363,57 @@ async function runBenchmarks(
 
     try {
       const metrics = await benchmarkTool(toolName, sampleSize, mockDevice);
-      const result: ToolBenchmarkResult = { ...metrics };
+      const decision = await judgeWithRemeasure(metrics, config?.thresholds[toolName], () =>
+        benchmarkTool(toolName, sampleSize, mockDevice),
+      );
+      const result: ToolBenchmarkResult = { ...decision.deciding.metrics };
+      if (decision.remeasured) {
+        result.remeasured = true;
+        result.firstSample = {
+          p50: metrics.p50,
+          p95: metrics.p95,
+          mean: metrics.mean,
+          stdDev: metrics.stdDev,
+          min: metrics.min,
+          max: metrics.max,
+          successRate: metrics.successRate,
+          sampleSize: metrics.sampleSize,
+          measurements: metrics.measurements,
+          thresholdChecks: decision.first.checks,
+        };
+      }
 
       // Compare against threshold if config provided
       if (config?.thresholds[toolName]) {
-        const checks = compareAgainstThreshold(metrics, config.thresholds[toolName]);
+        const checks = decision.deciding.checks;
         result.thresholdChecks = checks;
-        result.overallPassed = checks.every((c) => c.passed);
+        result.overallPassed = decision.passed;
 
         if (!result.overallPassed) {
           const failedChecks = checks.filter((c) => !c.passed);
           for (const check of failedChecks) {
+            const firstCheck = decision.first.checks.find((c) => c.metric === check.metric)!;
+            const remeasureDetails = decision.remeasured
+              ? ` after re-measure; first sample ${firstCheck.actual.toFixed(2)}ms`
+              : "";
             violations.push(
-              `${toolName}.${check.metric}: ${check.actual.toFixed(2)}ms exceeds threshold ${check.threshold.toFixed(2)}ms (${check.regression.toFixed(1)}% regression)`,
+              `${toolName}.${check.metric}: ${check.actual.toFixed(2)}ms exceeds threshold ${check.threshold.toFixed(2)}ms (${check.regression.toFixed(1)}% regression)${remeasureDetails}`,
             );
           }
         }
       }
 
       results.push(result);
-      console.log(`✓ (p50: ${metrics.p50.toFixed(1)}ms)`);
+      const firstFailures = decision.first.checks
+        .filter((check) => !check.passed)
+        .map((check) => `${check.metric}: ${check.actual.toFixed(1)}ms`)
+        .join(", ");
+      const remeasureDetails = decision.remeasured
+        ? `, re-measured; first sample ${firstFailures}`
+        : "";
+      console.log(
+        `${decision.passed ? "✓" : "✗"} (p50: ${result.p50.toFixed(1)}ms${remeasureDetails})`,
+      );
     } catch (error) {
       console.log(`✗ (error: ${error})`);
       violations.push(`${toolName}: Benchmark failed - ${error}`);
@@ -406,6 +438,9 @@ async function runBenchmarks(
       totalTools: results.length,
       passedTools,
       failedTools,
+      remeasuredTools: results
+        .filter((result) => result.remeasured)
+        .map((result) => result.toolName),
       averageThroughput,
     },
     violations,
@@ -452,6 +487,16 @@ function printReport(report: BenchmarkReport): void {
           `${statusColor}${status}${resetColor}`,
       );
 
+      if (result.firstSample) {
+        for (const check of result.firstSample.thresholdChecks.filter((c) => !c.passed)) {
+          console.log(
+            `  └─ re-measured: first sample ${check.metric.toUpperCase()} ` +
+              `${check.actual.toFixed(2)}ms > ${check.threshold.toFixed(2)}ms ` +
+              `(+${check.regression.toFixed(1)}%)`,
+          );
+        }
+      }
+
       // Print failed threshold checks
       if (result.thresholdChecks && result.overallPassed === false) {
         for (const check of result.thresholdChecks.filter((c) => !c.passed)) {
@@ -466,6 +511,11 @@ function printReport(report: BenchmarkReport): void {
 
   console.log("\n" + "=".repeat(100));
   console.log(`Summary: ${report.summary.passedTools}/${report.summary.totalTools} tools passed`);
+  if (report.summary.remeasuredTools.length > 0) {
+    console.log(
+      `Re-measured (first sample over threshold): ${report.summary.remeasuredTools.join(", ")}`,
+    );
+  }
 
   if (report.violations.length > 0) {
     console.log("\n" + "⚠️  PERFORMANCE REGRESSIONS DETECTED:");

@@ -89,6 +89,12 @@ state keys. Only a new full show replaces data. See the generated Limits table.
 The data byte limit uses the \`emit.payload\` cost: every number costs 32 bytes regardless of
 its digits, so numeric-heavy data reaches the limit before its serialized size does.
 
+\`MAX_PROTOTYPE_REPEAT_PATH_CELLS\` bounds all path-bound repeats after component expansion,
+including empty templates. An instantiated object item costs one cell per projected scalar member,
+with a minimum of one cell. Literal repeats do not count. Containers are checked in pre-order;
+a crossing container fails at \`repeat.items.path\` with \`Repeat path cell limit exceeded\`, after
+its three path-source checks and before template projection.
+
 Pointers are nonempty RFC 6901 paths relative to data, beginning with \`/\`; decode \`~1\` as \`/\`
 and \`~0\` as \`~\`. Object keys are exact own members; array indices are \`0\` or a positive decimal
 without leading zeros. An empty key uses a trailing slash. Invalid escapes and overlong pointers
@@ -342,6 +348,7 @@ export const GUIDE_ERRORS = `## Common validation errors
 | \`Duplicate repeat key "x" (items <i> and <j>)\` | Give every item a unique rendered identity. |
 | \`Bound state key "x" is invalid (repeat item <i>)\` | A path-bound key must form a valid state key; error is at repeat.items.path. |
 | \`Requires key or data\` | Supply one condition source with exactly one comparison. |
+| \`Repeat path cell limit exceeded\` | Reduce path-bound repeats or the scalar members projected per item; see \`MAX_PROTOTYPE_REPEAT_PATH_CELLS\`. |
 | \`Repeat placeholder in a data condition operand is not supported\` | Use a literal operand; state conditions still bind repeat operands. |
 | \`Unknown repeat field "x"\` | Every item needs the field the placeholder names. |
 | \`Missing component prop "x"\` / \`Unused component prop\` | Pass exactly the props the component's \`{props.*}\` placeholders name. |

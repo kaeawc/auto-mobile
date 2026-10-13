@@ -8,7 +8,7 @@ import {
   repeatKeyInstances,
   type KeyInstance,
 } from "./prototypeRepeat";
-import { isPrototypeDataPointer } from "./prototypeData";
+import { isPrototypeDataPointer, PrototypeRepeatData } from "./prototypeData";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
 
@@ -868,10 +868,11 @@ function stateTypeErrors(
   value: unknown,
   context: Context,
   data: Record<string, unknown>,
+  repeats: PrototypeRepeatData,
 ): PrototypeValidationError | undefined {
   const checked: Checked = {
-    nodes: repeatKeyInstances(value, context.nodes).map(bound),
-    actions: repeatKeyInstances(value, context.actions).map(bound),
+    nodes: repeatKeyInstances(value, context.nodes, repeats).map(bound),
+    actions: repeatKeyInstances(value, context.actions, repeats).map(bound),
   };
   return (
     bindingErrors(checked, data) ??
@@ -889,11 +890,12 @@ function validateValue(value: unknown): PrototypeValidationResult {
     conditionDepth: 0,
   };
   const data = object(value) ?? {};
+  const repeats = new PrototypeRepeatData(data.data);
   const error =
     walk(value, definitions.spec, "", context, 0) ??
-    repeatErrors(value) ??
+    repeatErrors(value, repeats) ??
     pagerErrors(context) ??
-    stateTypeErrors(value, context, data);
+    stateTypeErrors(value, context, data, repeats);
   if (error) {
     return { success: false, error };
   }

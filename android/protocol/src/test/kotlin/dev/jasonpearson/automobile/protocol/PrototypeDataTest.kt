@@ -224,6 +224,7 @@ class PrototypeDataTest {
         .jsonObject
     val actual =
       mapOf(
+        "MAX_PROTOTYPE_REPEAT_PATH_CELLS" to PrototypeSpecValidator.MAX_PROTOTYPE_REPEAT_PATH_CELLS,
         "MAX_PROTOTYPE_DATA_BYTES" to PrototypeSpecValidator.MAX_PROTOTYPE_DATA_BYTES,
         "MAX_PROTOTYPE_DATA_DEPTH" to PrototypeSpecValidator.MAX_PROTOTYPE_DATA_DEPTH,
         "MAX_PROTOTYPE_DATA_ARRAY_ITEMS" to PrototypeSpecValidator.MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
@@ -233,10 +234,114 @@ class PrototypeDataTest {
     for ((name, value) in actual) assertEquals(limits.getValue(name).jsonPrimitive.int, value)
   }
 
+  @Test
+  fun `shared repeat cell boundary fixtures have matching errors`() {
+    val result = PrototypeSpecValidator.validate(cellInvalid.getValue("spec").toString())
+    assertTrue(result is PrototypeSpecValidation.Failure, result.toString())
+    val error = (result as PrototypeSpecValidation.Failure).error
+    assertEquals(cellInvalid.getValue("expectedPath").jsonPrimitive.content, error.path)
+    assertEquals(cellInvalid.getValue("expectedMessage").jsonPrimitive.content, error.message)
+    assertTrue(
+      PrototypeSpecValidator.validate(cellExact.toString()) is PrototypeSpecValidation.Success,
+    )
+  }
+
+  @Test
+  fun `three path source errors win before cell errors`() {
+    val source = cellInvalid.getValue("spec").jsonObject
+    val data = source.getValue("data").jsonObject
+    val objects = data.getValue("items").jsonArray
+    val invalidSources =
+      listOf(
+        JsonObject(emptyMap()) to "Repeat path does not resolve to an array",
+        JsonArray(objects + objects.first()) to "Repeat path resolves to more than 128 items",
+        JsonArray(objects.dropLast(1) + JsonPrimitive(true)) to
+          "Repeat path item 127 is not an object",
+      )
+    val root = source.getValue("root").jsonObject
+    val children = root.getValue("children").jsonArray
+    val last = children.last().jsonObject
+    val repeat = last.getValue("repeat").jsonObject
+    val badRepeat = JsonObject(repeat + ("items" to buildJsonObject { put("path", "/bad") }))
+    val bad = JsonObject(last + ("repeat" to badRepeat))
+    for ((items, message) in invalidSources) {
+      val value =
+        JsonObject(
+          source +
+            mapOf(
+              "data" to JsonObject(data + ("bad" to items)),
+              "root" to JsonObject(root + ("children" to JsonArray(children.dropLast(1) + bad))),
+            ),
+        )
+      val error = PrototypeRepeatValidator.validate(value)
+      assertEquals("root.children[19].repeat.items.path", error?.path)
+      assertEquals(message, error?.message)
+    }
+  }
+
+  @Test
+  fun `literal repeats do not count and empty projections count one cell`() {
+    val source = cellInvalid.getValue("spec").jsonObject
+    val items = source.getValue("data").jsonObject.getValue("items")
+    val children =
+      source.getValue("root").jsonObject.getValue("children").jsonArray.map {
+        val node = it.jsonObject
+        val repeat = JsonObject(node.getValue("repeat").jsonObject + ("items" to items))
+        JsonObject(node + ("repeat" to repeat))
+      }
+    val literal = buildJsonObject {
+      put(
+        "root",
+        buildJsonObject {
+          put("type", "column")
+          put("children", JsonArray(children))
+        },
+      )
+    }
+    assertNull(PrototypeRepeatValidator.validate(literal))
+    val data =
+      Json.parseToJsonElement("""{"items":[{"bad name":true,"nested":{}},{}]}""").jsonObject
+    val cache = PrototypeRepeatData(data)
+    assertEquals(2, cache.cells("/items"))
+    assertEquals(listOf(JsonObject(emptyMap()), JsonObject(emptyMap())), cache.items("/items"))
+  }
+
+  @Test
+  fun `1500 repeats reject the crossing container and reuse the projected list`() {
+    val cache = PrototypeRepeatData(amplified.getValue("data").jsonObject)
+    val error = PrototypeRepeatValidator.validate(amplified, cache)
+    assertEquals("root.children[2].repeat.items.path", error?.path)
+    assertEquals("Repeat path cell limit exceeded", error?.message)
+    val scopes = PrototypeRepeatValidator.scopes(amplified, cache)
+    assertEquals(1500, scopes.size)
+    assertTrue(scopes.all { it.items === scopes.first().items })
+    assertSame(scopes.first().items, cache.items("/items"))
+    assertEquals(25600, cache.cells("/items"))
+  }
+
+  @Test
+  fun `resolveRoot shares projected arrays per pointer and isolates separate calls`() {
+    val source = cellExact
+    val root = source.getValue("root").jsonObject
+    val data = source.getValue("data").jsonObject
+    val resolved = PrototypeDataResolver.resolveRoot(root, data)
+    fun arrays(value: JsonObject) =
+      value.getValue("children").jsonArray.map {
+        it.jsonObject.getValue("repeat").jsonObject.getValue("items")
+      }
+    val projected = arrays(resolved)
+    assertTrue(projected.all { it === projected.first() })
+    assertNotSame(projected.first(), arrays(PrototypeDataResolver.resolveRoot(root, data)).first())
+    assertEquals(root, source["root"])
+  }
+
   private data class ConditionCase(val condition: JsonObject, val holds: Boolean)
 
   companion object {
     private val json = PrototypeSpecValidator.json
+    private lateinit var cellInvalid: JsonObject
+    private lateinit var cellExact: JsonObject
+    private lateinit var amplified: JsonObject
     private lateinit var pointerFixture: JsonObject
     private lateinit var fixtures: Map<File, JsonObject>
     private val conditionData =
@@ -277,7 +382,28 @@ class PrototypeDataTest {
     @BeforeAll
     @JvmStatic
     fun loadFixtures() {
-      val directory = File(fixtureDirectory(), "data")
+      val base = fixtureDirectory()
+      cellInvalid =
+        Json.parseToJsonElement(File(base, "invalid/data-repeat-path-cell-limit.json").readText())
+          .jsonObject
+      cellExact =
+        Json.parseToJsonElement(File(base, "valid/data-repeat-path-cells-exact.json").readText())
+          .jsonObject
+      val item = JsonObject((0 until 200).associate { "f$it" to JsonPrimitive("") })
+      val container = cellExact.getValue("root").jsonObject.getValue("children").jsonArray.first()
+      amplified = buildJsonObject {
+        put("data", buildJsonObject { put("items", JsonArray(List(128) { item })) })
+        put(
+          "root",
+          buildJsonObject {
+            put("type", "column")
+            put("children", JsonArray(List(1500) { container }))
+          },
+        )
+      }
+      PrototypeSpecValidator.validate(cellInvalid.getValue("spec").toString())
+      PrototypeSpecValidator.validate(cellExact.toString())
+      val directory = File(base, "data")
       pointerFixture =
         Json.parseToJsonElement(File(directory, "pointers.json").readText()).jsonObject
       fixtures =

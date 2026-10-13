@@ -281,12 +281,17 @@ internal object PrototypeRepeatValidator {
 
   private class Budget(var nodes: Int = 0, var images: Int = 0)
 
+  private class RepeatState(val data: PrototypeRepeatData, var cells: Int = 0)
+
   private val stateKeyPattern = Regex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 
-  fun validate(spec: JsonElement): PrototypeSpecError? {
+  fun validate(
+    spec: JsonElement,
+    data: PrototypeRepeatData =
+      PrototypeRepeatData((spec as? JsonObject)?.get("data") as? JsonObject),
+  ): PrototypeSpecError? {
     val root = (spec as? JsonObject)?.get("root") as? JsonObject ?: return null
-    val data = (spec as? JsonObject)?.get("data") as? JsonObject
-    return templateErrors(root, "root", null, data)
+    return templateErrors(root, "root", null, RepeatState(data))
       ?: expandedErrors(root, "root", Budget(), null, data)
   }
 
@@ -381,35 +386,35 @@ internal object PrototypeRepeatValidator {
     }
   }
 
-  private fun scopeOf(node: JsonObject, path: String, data: JsonObject?): Scope? {
+  private fun scopeOf(node: JsonObject, path: String, data: PrototypeRepeatData): Scope? {
     val repeat = node["repeat"] as? JsonObject ?: return null
     val alias = repeat.text("as") ?: return null
     val source = repeat["items"] as? JsonObject
-    val resolved =
-      source?.text("path")?.let { PrototypeDataPointer.resolve(data, it) } ?: repeat["items"]
+    val pointer = source?.text("path")
     val items =
-      (resolved as? JsonArray)
-        .orEmpty()
-        .mapNotNull { it as? JsonObject }
-        .map { if (source != null) PrototypeDataValues.project(it) else it }
+      if (pointer != null) data.items(pointer)
+      else (repeat["items"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
     return Scope(path, alias, items, source != null)
   }
 
   private fun repeatSourceError(
     node: JsonObject,
     path: String,
-    data: JsonObject?,
+    state: RepeatState,
   ): PrototypeSpecError? {
     val source = (node["repeat"] as? JsonObject)?.get("items") as? JsonObject ?: return null
     val pointer = source.text("path") ?: return null
     val at = "$path.repeat.items.path"
     val items =
-      PrototypeDataPointer.resolve(data, pointer) as? JsonArray
-        ?: return fail(at, "Repeat path does not resolve to an array")
+      state.data.source(pointer) ?: return fail(at, "Repeat path does not resolve to an array")
     val maximum = PrototypeSpecValidator.maxRepeatItems
     if (items.size > maximum) return fail(at, "Repeat path resolves to more than $maximum items")
     val invalid = items.indexOfFirst { it !is JsonObject }
-    return if (invalid < 0) null else fail(at, "Repeat path item $invalid is not an object")
+    if (invalid >= 0) return fail(at, "Repeat path item $invalid is not an object")
+    state.cells += state.data.cells(pointer)
+    return if (state.cells > PrototypeSpecValidator.MAX_PROTOTYPE_REPEAT_PATH_CELLS)
+      fail(at, "Repeat path cell limit exceeded")
+    else null
   }
 
   private fun repeatKeyError(node: JsonObject, path: String, scope: Scope?): PrototypeSpecError? {
@@ -441,7 +446,7 @@ internal object PrototypeRepeatValidator {
     node: JsonObject,
     path: String,
     scope: Scope?,
-    data: JsonObject?,
+    state: RepeatState,
   ): PrototypeSpecError? {
     if (scope != null) {
       if (node.containsKey("repeat")) return fail("$path.repeat", "Nested repeat is not supported")
@@ -450,13 +455,13 @@ internal object PrototypeRepeatValidator {
     }
     val own = if (scope != null) checkOwnFields(node, path, scope) else checkLiteralKeys(node, path)
     if (own != null) return own
-    repeatSourceError(node, path, data)?.let {
+    repeatSourceError(node, path, state)?.let {
       return it
     }
-    val ownScope = scopeOf(node, path, data)
+    val ownScope = scopeOf(node, path, state.data)
     val childScope = ownScope ?: scope
     for (child in childrenOf(node, path)) {
-      templateErrors(child.node, child.path, childScope, data)?.let {
+      templateErrors(child.node, child.path, childScope, state)?.let {
         return it
       }
     }
@@ -476,7 +481,7 @@ internal object PrototypeRepeatValidator {
     path: String,
     budget: Budget,
     repeatPath: String?,
-    data: JsonObject?,
+    data: PrototypeRepeatData,
   ): PrototypeSpecError? {
     val at = repeatPath ?: path
     if (++budget.nodes > PrototypeSpecValidator.MAX_PROTOTYPE_NODES)
@@ -497,9 +502,12 @@ internal object PrototypeRepeatValidator {
   }
 
   /** Every repeat container in the spec, outermost first. */
-  fun scopes(spec: JsonElement): List<Scope> {
+  fun scopes(
+    spec: JsonElement,
+    data: PrototypeRepeatData =
+      PrototypeRepeatData((spec as? JsonObject)?.get("data") as? JsonObject),
+  ): List<Scope> {
     val root = (spec as? JsonObject)?.get("root") as? JsonObject ?: return emptyList()
-    val data = (spec as? JsonObject)?.get("data") as? JsonObject
     val scopes = mutableListOf<Scope>()
     fun collect(node: JsonObject, path: String) {
       scopeOf(node, path, data)?.let(scopes::add)

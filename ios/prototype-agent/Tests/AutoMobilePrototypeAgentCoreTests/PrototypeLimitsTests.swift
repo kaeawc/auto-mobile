@@ -47,6 +47,7 @@ final class PrototypeLimitsTests: XCTestCase {
         XCTAssertEqual(PrototypeLimits.maxDataArrayItems, limits["MAX_PROTOTYPE_DATA_ARRAY_ITEMS"])
         XCTAssertEqual(PrototypeLimits.maxDataPointerLength, limits["MAX_PROTOTYPE_DATA_POINTER_LENGTH"])
         XCTAssertEqual(PrototypeLimits.maxDataBytes, limits["MAX_PROTOTYPE_DATA_BYTES"])
+        XCTAssertEqual(PrototypeLimits.maxRepeatPathCells, limits["MAX_PROTOTYPE_REPEAT_PATH_CELLS"])
     }
 
     func testExactLimitFixturesDecode() throws {
@@ -80,5 +81,40 @@ final class PrototypeLimitsTests: XCTestCase {
         let reason = try XCTUnwrap(rejection(spec))
         XCTAssertTrue(reason.hasSuffix("Node limit exceeded"), reason)
         XCTAssertTrue(reason.hasPrefix("root.children[79].repeat["), reason)
+    }
+
+    private func pathRepeatSpec(_ root: JSONValue) throws -> Data {
+        // Data deliberately absent: authored limits must not depend on pointer resolution.
+        try JSONEncoder().encode(JSONValue.object([
+            "id": .string("authored"),
+            "window": .object(["placement": .object(["type": .string("fullscreen")])]),
+            "root": root,
+        ]))
+    }
+
+    func testAuthoredPathRepeatsExceedNodeLimitWithoutData() throws {
+        let column: JSONValue = .object([
+            "type": .string("column"), "children": .array([]),
+            "repeat": .object(["items": .object(["path": .string("/missing")]), "as": .string("item")]),
+        ])
+        let root: JSONValue = .object([
+            "type": .string("column"), "children": .array(Array(repeating: column, count: 2001)),
+        ])
+        XCTAssertEqual(try rejection(pathRepeatSpec(root)), "root.children[1999]: Node limit exceeded")
+    }
+
+    func testAuthoredPathRepeatTemplateDepthLimitWithoutData() throws {
+        var template: JSONValue = .object(["type": .string("text"), "text": .string("leaf")])
+        for _ in 0 ..< 23 {
+            template = .object(["type": .string("scroll"), "child": template])
+        }
+        let root: JSONValue = .object([
+            "type": .string("column"), "children": .array([template]),
+            "repeat": .object(["items": .object(["path": .string("/missing")]), "as": .string("item")]),
+        ])
+        XCTAssertEqual(
+            try rejection(pathRepeatSpec(root)),
+            "root.children[0]" + String(repeating: ".child", count: 23) + ": Tree depth limit exceeded"
+        )
     }
 }

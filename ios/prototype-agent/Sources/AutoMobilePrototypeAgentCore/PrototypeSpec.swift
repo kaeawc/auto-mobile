@@ -116,6 +116,8 @@ struct PrototypeSpec: Decodable {
         theme = try container.decodeIfPresent(PrototypeTheme.self, forKey: .theme)
         motion = try container.decodeIfPresent(String.self, forKey: .motion)
         let raw = try container.decode(JSONValue.self, forKey: .root)
+        try PrototypeLimits.guardTree(raw)
+        try PrototypeLimits.guardRepeatPathCells(raw, data: data)
         let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
         try PrototypeLimits.guardTree(resolved)
         root = try JSONDecoder().decode(

@@ -94,6 +94,55 @@ enum PrototypeDataValues {
     }
 }
 
+/// One guard or resolver call's cache. UTF-16 keys keep canonically equivalent pointers distinct.
+/// JSONValue and its collections have value semantics; sharing their storage cannot mutate a caller.
+struct PrototypeRepeatData {
+    let data: [String: JSONValue]?
+    private var sources: [[UInt16]: [[String: JSONValue]]] = [:]
+    private var counts: [[UInt16]: Int] = [:]
+    private var projections: [[UInt16]: JSONValue] = [:]
+
+    init(data: [String: JSONValue]?) {
+        self.data = data
+    }
+
+    private mutating func objects(_ pointer: String) -> [[String: JSONValue]] {
+        let key = Array(pointer.utf16)
+        if let cached = sources[key] { return cached }
+        let resolved = PrototypeDataPointer.resolve(data, pointer: pointer)
+        let array: [JSONValue] = if case let .array(items)? = resolved { items } else { [] }
+        let objects = Array(array.compactMap { item -> [String: JSONValue]? in
+            if case let .object(fields) = item { return fields }
+            return nil
+        }.prefix(PrototypeLimits.maxRepeatItems))
+        sources[key] = objects
+        return objects
+    }
+
+    mutating func cells(_ pointer: String) -> Int {
+        let key = Array(pointer.utf16)
+        if let cached = counts[key] { return cached }
+        let count = objects(pointer).reduce(0) { total, item in
+            total + max(1, item.reduce(0) { count, member in
+                count + (
+                    PrototypeRepeat.isFieldName(member.key) &&
+                        PrototypeDataValues.isScalar(member.value) ? 1 : 0
+                )
+            })
+        }
+        counts[key] = count
+        return count
+    }
+
+    mutating func items(_ pointer: String) -> JSONValue {
+        let key = Array(pointer.utf16)
+        if let cached = projections[key] { return cached }
+        let projected = JSONValue.array(objects(pointer).map(PrototypeDataValues.project))
+        projections[key] = projected
+        return projected
+    }
+}
+
 /// Scans authored UTF-16 once, just like Kotlin; replacement values are never scanned again.
 enum PrototypeDataText {
     static func bind(_ text: String, data: [String: JSONValue]?) -> String {
@@ -126,12 +175,21 @@ enum PrototypeDataText {
     }
 }
 
-/// Pure, one-time resolution before structural limits, repeat expansion and state interpolation.
+/// Pure, one-time resolution after authored limits, before repeat expansion and state interpolation.
 enum PrototypeDataResolver {
     static func resolveRoot(_ root: JSONValue, data: [String: JSONValue]?) -> JSONValue {
+        var repeats = PrototypeRepeatData(data: data)
+        return resolveRoot(root, data: data, repeats: &repeats)
+    }
+
+    private static func resolveRoot(
+        _ root: JSONValue, data: [String: JSONValue]?, repeats: inout PrototypeRepeatData
+    )
+        -> JSONValue
+    {
         guard case var .object(fields) = root else { return root }
         PrototypeRepeat.bindTextFields(&fields) { PrototypeDataText.bind($0, data: data) }
-        if let value = fields["repeat"] { fields["repeat"] = resolveRepeat(value, data: data) }
+        if let value = fields["repeat"] { fields["repeat"] = resolveRepeat(value, repeats: &repeats) }
         if let value = fields["visibleWhen"] { fields["visibleWhen"] = resolveCondition(value, data: data) }
         if case let .array(styles)? = fields["styleWhen"] {
             fields["styleWhen"] = .array(styles.map { entry in
@@ -141,26 +199,18 @@ enum PrototypeDataResolver {
             })
         }
         if let child = fields["child"] {
-            fields["child"] = resolveRoot(child, data: data)
+            fields["child"] = resolveRoot(child, data: data, repeats: &repeats)
         } else if case let .array(children)? = fields["children"] {
-            fields["children"] = .array(children.map { resolveRoot($0, data: data) })
+            fields["children"] = .array(children.map { resolveRoot($0, data: data, repeats: &repeats) })
         }
         return .object(fields)
     }
 
-    private static func resolveRepeat(_ value: JSONValue, data: [String: JSONValue]?) -> JSONValue {
+    private static func resolveRepeat(_ value: JSONValue, repeats: inout PrototypeRepeatData) -> JSONValue {
         guard case var .object(fields) = value, case let .object(source)? = fields["items"] else {
             return value
         }
-        let pointer = source["path"]?.stringValue ?? ""
-        let resolved = PrototypeDataPointer.resolve(data, pointer: pointer)
-        let array: [JSONValue] = if case let .array(items)? = resolved { items } else { [] }
-        // Kotlin skips non-objects before taking the first maxRepeatItems projected rows.
-        let objects = array.compactMap { item -> [String: JSONValue]? in
-            if case let .object(fields) = item { return fields }
-            return nil
-        }
-        fields["items"] = .array(objects.prefix(PrototypeLimits.maxRepeatItems).map(PrototypeDataValues.project))
+        fields["items"] = repeats.items(source["path"]?.stringValue ?? "")
         return .object(fields)
     }
 

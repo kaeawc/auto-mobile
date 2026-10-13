@@ -9,6 +9,7 @@ export const {
   MAX_PROTOTYPE_DATA_DEPTH,
   MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
   MAX_PROTOTYPE_DATA_POINTER_LENGTH,
+  MAX_PROTOTYPE_REPEAT_PATH_CELLS,
 } = contract.limits;
 export type PrototypeJson =
   | null

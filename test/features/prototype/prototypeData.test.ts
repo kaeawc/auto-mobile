@@ -1,8 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import pointers from "../../fixtures/prototype-spec/data/pointers.json";
 import {
+  PrototypeRepeatData,
   isPrototypeDataPointer,
   prototypeDataPointerTokens,
   resolvePrototypeDataPointer,
@@ -16,6 +17,10 @@ import {
   validatePrototypeSpec,
 } from "../../../src/features/prototype/prototypeValidation";
 import contract from "../../../schemas/prototype-spec-contract.json";
+
+import { repeatErrors, repeatKeyInstances } from "../../../src/features/prototype/prototypeRepeat";
+import cellInvalid from "../../fixtures/prototype-spec/invalid/data-repeat-path-cell-limit.json";
+import cellExact from "../../fixtures/prototype-spec/valid/data-repeat-path-cells-exact.json";
 
 const spec = (root: unknown = { type: "text", text: "hello" }) => ({ root });
 
@@ -238,4 +243,115 @@ const resolveFixtures = readdirSync(resolveDirectory)
   }));
 test.each(resolveFixtures)("resolver fixture $name is a valid authored spec", ({ spec }) => {
   expect(validatePrototypeSpec(spec).success).toBe(true);
+});
+
+describe("repeat path cells", () => {
+  const column = (path = "/items") => ({
+    type: "column",
+    repeat: { items: { path }, as: "item" },
+    children: [],
+  });
+  const amplifiedItem = Object.fromEntries(Array.from({ length: 200 }, (_, i) => [`f${i}`, ""]));
+  const amplified = {
+    data: { items: Array.from({ length: 128 }, () => amplifiedItem) },
+    root: { type: "column", children: Array.from({ length: 1500 }, () => column()) },
+  };
+
+  test("rejects the crossing container at its path", () => {
+    expect(repeatErrors(cellInvalid.spec)).toEqual({
+      path: cellInvalid.expectedPath,
+      message: cellInvalid.expectedMessage,
+    });
+  });
+  test("exactly the shared cell limit passes", () => {
+    expect(repeatErrors(cellExact)).toBeUndefined();
+  });
+  test.each([
+    { items: {}, message: "Repeat path does not resolve to an array" },
+    {
+      items: Array.from({ length: 129 }, () => amplifiedItem),
+      message: "Repeat path resolves to more than 128 items",
+    },
+    {
+      items: [...cellInvalid.spec.data.items.slice(0, 127), true],
+      message: "Repeat path item 127 is not an object",
+    },
+  ])("source error wins before the crossing container: $message", ({ items, message }) => {
+    const children = [...cellInvalid.spec.root.children.slice(0, 19), column("/bad")];
+    expect(
+      repeatErrors({
+        data: { ...cellInvalid.spec.data, bad: items },
+        root: { type: "column", children },
+      }),
+    ).toEqual({
+      path: "root.children[19].repeat.items.path",
+      message,
+    });
+  });
+  test("literal repeats do not spend cells", () => {
+    const children = Array.from({ length: 20 }, () => ({
+      type: "column",
+      repeat: { items: cellInvalid.spec.data.items, as: "item" },
+      children: [],
+    }));
+    expect(repeatErrors({ root: { type: "column", children } })).toBeUndefined();
+  });
+  test("zero projectable members spend one cell each", () => {
+    const data = new PrototypeRepeatData({ items: [{ "bad name": true, nested: {} }, {}] });
+    expect(data.cells("/items")).toBe(2);
+    expect(data.items("/items")).toEqual([{}, {}]);
+  });
+  test("1500 repeats are rejected after one shared projection, without rescanning cells", () => {
+    let reads = 0;
+    const item = Object.fromEntries(Object.keys(amplifiedItem).map((key) => [key, ""]));
+    Object.defineProperty(item, "f0", {
+      enumerable: true,
+      get: () => {
+        reads++;
+        return "";
+      },
+    });
+    const value = { ...amplified, data: { items: Array.from({ length: 128 }, () => item) } };
+    const data = new PrototypeRepeatData(value.data);
+    const projections = spyOn(data, "items");
+    expect(repeatErrors(value, data)).toEqual({
+      path: "root.children[2].repeat.items.path",
+      message: "Repeat path cell limit exceeded",
+    });
+    expect(projections).toHaveBeenCalledTimes(2);
+    expect(projections.mock.results[0].value).toBe(projections.mock.results[1].value);
+    expect(reads).toBe(256); // One cell scan and one projection, each visiting 128 objects.
+    expect(data.cells("/items")).toBe(25600);
+    expect(reads).toBe(256);
+    projections.mockRestore();
+  });
+  test("the validation passes share immutable projections and caches never outlive a call", () => {
+    const data = new PrototypeRepeatData(cellExact.data);
+    const first = data.items("/items");
+    expect(repeatErrors(cellExact, data)).toBeUndefined();
+    expect(repeatKeyInstances(cellExact, [], data)).toEqual([]);
+    expect(data.items("/items")).toBe(first);
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(first.every(Object.isFrozen)).toBe(true);
+    expect(new PrototypeRepeatData(cellExact.data).items("/items")).not.toBe(first);
+  });
+  test.each(["box", "row", "column"])(
+    "%s accepts empty children but requires the field",
+    (type) => {
+      expect(
+        validatePrototypeSpec({ ...cellExact, root: { ...column(), type }, data: { items: [{}] } })
+          .success,
+      ).toBe(true);
+      expect(
+        validatePrototypeSpec({
+          ...cellExact,
+          root: { type, repeat: column().repeat },
+          data: { items: [{}] },
+        }),
+      ).toEqual({
+        success: false,
+        error: { path: "root.children", message: "Required property" },
+      });
+    },
+  );
 });

@@ -273,4 +273,57 @@ final class PrototypeDataTests: XCTestCase {
             ["data": .string("/text"), "equals": .string("e\u{0301}")], data: data
         ))
     }
+
+    func testSharedRepeatPathCellLimits() throws {
+        let wrapper = try object(JSONDecoder().decode(
+            JSONValue.self, from: fixture("invalid/data-repeat-path-cell-limit.json")
+        ))
+        let spec = try XCTUnwrap(wrapper["spec"])
+        let path = try XCTUnwrap(wrapper["expectedPath"]?.stringValue)
+        let message = try XCTUnwrap(wrapper["expectedMessage"]?.stringValue)
+        XCTAssertThrowsError(try JSONDecoder().decode(PrototypeSpec.self, from: encoded(spec))) { error in
+            guard case let DecodingError.dataCorrupted(context) = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+            XCTAssertTrue(context.debugDescription.hasPrefix(path + ": "), context.debugDescription)
+            XCTAssertEqual(context.debugDescription, "\(path): \(message)")
+        }
+        _ = try JSONDecoder().decode(
+            PrototypeSpec.self, from: fixture("valid/data-repeat-path-cells-exact.json")
+        )
+    }
+
+    func testRepeatCellsCountEmptyProjectionsAndSkipLiteralSources() throws {
+        let wrapper = try object(JSONDecoder().decode(
+            JSONValue.self, from: fixture("invalid/data-repeat-path-cell-limit.json")
+        ))
+        let spec = try object(XCTUnwrap(wrapper["spec"]))
+        let data = try object(XCTUnwrap(spec["data"]))
+        let root = try object(XCTUnwrap(spec["root"]))
+        guard case let .array(children)? = root["children"] else { return XCTFail("Missing children") }
+        let literal = try children.map { node -> JSONValue in
+            var fields = try object(node)
+            var repeated = try object(XCTUnwrap(fields["repeat"]))
+            repeated["items"] = data["items"]
+            fields["repeat"] = .object(repeated)
+            return .object(fields)
+        }
+        try PrototypeLimits.guardRepeatPathCells(
+            .object(["type": .string("column"), "children": .array(literal)]), data: data
+        )
+        var cache = PrototypeRepeatData(data: ["items": .array([
+            .object(["bad name": .bool(true), "nested": .object([:])]), .object([:]),
+        ])])
+        XCTAssertEqual(cache.cells("/items"), 2)
+        XCTAssertEqual(cache.items("/items"), .array([.object([:]), .object([:])]))
+        XCTAssertEqual(cache.cells("/missing"), 0)
+    }
+
+    func testRepeatPointerCacheKeepsExactUTF16Keys() {
+        var cache = PrototypeRepeatData(data: ["é": .array([.object(["id": .number(1)])])])
+        XCTAssertEqual(cache.cells("/é"), 1)
+        XCTAssertEqual(cache.cells("/e\u{0301}"), 0)
+        XCTAssertEqual(cache.items("/é"), .array([.object(["id": .number(1)])]))
+        XCTAssertEqual(cache.items("/e\u{0301}"), .array([]))
+    }
 }

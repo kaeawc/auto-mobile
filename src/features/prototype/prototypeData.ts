@@ -70,17 +70,79 @@ export function prototypeDataPlaceholders(text: string): string[] {
   return pointers;
 }
 
+function projectableMember(key: string, member: unknown): boolean {
+  return (
+    STATE_KEY.test(key) &&
+    (typeof member === "string" ||
+      typeof member === "boolean" ||
+      (typeof member === "number" && Number.isFinite(member)))
+  );
+}
+
 /** Repeat templates see only named finite scalars; other content remains in the data object. */
 export function projectPrototypeDataItem(value: Raw): Raw {
   return Object.fromEntries(
-    Object.entries(value).filter(
-      ([key, member]) =>
-        STATE_KEY.test(key) &&
-        (typeof member === "string" ||
-          typeof member === "boolean" ||
-          (typeof member === "number" && Number.isFinite(member))),
-    ),
+    Object.entries(value).filter(([key, member]) => projectableMember(key, member)),
   );
+}
+
+/** One validation's pointer cache, shared by source, template, expansion and state checks. */
+export class PrototypeRepeatData {
+  private readonly sources = new Map<string, unknown>();
+  private readonly counts = new Map<string, number>();
+  private readonly projections = new Map<string, readonly Readonly<Raw>[]>();
+
+  constructor(private readonly data: unknown) {}
+
+  source(pointer: string): unknown {
+    if (!this.sources.has(pointer)) {
+      this.sources.set(pointer, resolvePrototypeDataPointer(this.data, pointer));
+    }
+    return this.sources.get(pointer);
+  }
+
+  cells(pointer: string): number {
+    const cached = this.counts.get(pointer);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const source = this.source(pointer);
+    const objects = Array.isArray(source)
+      ? source.filter((item) => record(item) !== undefined)
+      : [];
+    const maximum =
+      contract.definitions.repeat.fields.items.rule.options.find(
+        (option) => option.kind === "array",
+      )?.max ?? Infinity;
+    let cells = 0;
+    for (const item of objects.slice(0, maximum)) {
+      let members = 0;
+      for (const [key, value] of Object.entries(item)) {
+        if (projectableMember(key, value)) {
+          members++;
+        }
+      }
+      cells += Math.max(1, members);
+    }
+    this.counts.set(pointer, cells);
+    return cells;
+  }
+
+  items(pointer: string): readonly Readonly<Raw>[] {
+    const cached = this.projections.get(pointer);
+    if (cached) {
+      return cached;
+    }
+    const source = this.source(pointer);
+    const objects = Array.isArray(source)
+      ? source.filter((item): item is Raw => record(item) !== undefined)
+      : [];
+    const projected = Object.freeze(
+      objects.map((item) => Object.freeze(projectPrototypeDataItem(item))),
+    );
+    this.projections.set(pointer, projected);
+    return projected;
+  }
 }
 
 function conditionFields(value: unknown, path: string, fields: Set<string>): void {

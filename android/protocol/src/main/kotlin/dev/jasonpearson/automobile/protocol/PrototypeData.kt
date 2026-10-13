@@ -100,6 +100,48 @@ internal object PrototypeDataValues {
   }
 }
 
+/** Per-call caches; JSON values are read-only and projected rows are shared, never mutated. */
+internal class PrototypeRepeatData(private val data: JsonObject?) {
+  private val sources = mutableMapOf<String, JsonArray?>()
+  private val counts = mutableMapOf<String, Int>()
+  private val projections = mutableMapOf<String, List<JsonObject>>()
+  private val arrays = mutableMapOf<String, JsonArray>()
+
+  fun source(pointer: String): JsonArray? {
+    if (!sources.containsKey(pointer)) {
+      sources[pointer] = PrototypeDataPointer.resolve(data, pointer) as? JsonArray
+    }
+    return sources[pointer]
+  }
+
+  fun cells(pointer: String): Int =
+    counts.getOrPut(pointer) {
+      source(pointer)
+        .orEmpty()
+        .filterIsInstance<JsonObject>()
+        .take(PrototypeSpecValidator.maxRepeatItems)
+        .sumOf { item ->
+          maxOf(
+            1,
+            item.count { (key, value) ->
+              PrototypeRepeatTemplate.isFieldName(key) && PrototypeDataValues.isScalar(value)
+            },
+          )
+        }
+    }
+
+  fun items(pointer: String): List<JsonObject> =
+    projections.getOrPut(pointer) {
+      source(pointer)
+        .orEmpty()
+        .filterIsInstance<JsonObject>()
+        .take(PrototypeSpecValidator.maxRepeatItems)
+        .map(PrototypeDataValues::project)
+    }
+
+  fun array(pointer: String): JsonArray = arrays.getOrPut(pointer) { JsonArray(items(pointer)) }
+}
+
 /** Authored text is scanned once; replacement values are never scanned again. */
 internal object PrototypeDataText {
   private data class Placeholder(val start: Int, val end: Int, val pointer: String)
@@ -146,20 +188,27 @@ internal object PrototypeDataText {
 
 /** Pure, one-time resolution before repeat expansion and state interpolation. */
 object PrototypeDataResolver {
-  fun resolveRoot(root: JsonObject, data: JsonObject?): JsonObject {
+  fun resolveRoot(root: JsonObject, data: JsonObject?): JsonObject =
+    resolveRoot(root, data, PrototypeRepeatData(data))
+
+  private fun resolveRoot(
+    root: JsonObject,
+    data: JsonObject?,
+    repeats: PrototypeRepeatData,
+  ): JsonObject {
     val own = textFields(root, data)
     val resolved =
       JsonObject(
         own.mapValues { (key, value) ->
           when (key) {
-            "repeat" -> resolveRepeat(value, data)
+            "repeat" -> resolveRepeat(value, repeats)
             "visibleWhen" -> resolveCondition(value, data)
             "styleWhen" -> resolveStyles(value, data)
             else -> value
           }
         },
       )
-    return mapChildren(resolved) { resolveRoot(it, data) }
+    return mapChildren(resolved) { resolveRoot(it, data, repeats) }
   }
 
   fun resolve(spec: PrototypeSpec): PrototypeSpec {
@@ -170,18 +219,11 @@ object PrototypeDataResolver {
     return spec.copy(root = resolved)
   }
 
-  private fun resolveRepeat(value: JsonElement, data: JsonObject?): JsonElement {
+  private fun resolveRepeat(value: JsonElement, repeats: PrototypeRepeatData): JsonElement {
     val repeat = value as? JsonObject ?: return value
     val source = repeat["items"] as? JsonObject ?: return value
     val pointer = (source["path"] as? JsonPrimitive)?.content.orEmpty()
-    val array = PrototypeDataPointer.resolve(data, pointer) as? JsonArray
-    val items =
-      array
-        .orEmpty()
-        .filterIsInstance<JsonObject>()
-        .take(PrototypeSpecValidator.maxRepeatItems)
-        .map(PrototypeDataValues::project)
-    return JsonObject(repeat + ("items" to JsonArray(items)))
+    return JsonObject(repeat + ("items" to repeats.array(pointer)))
   }
 
   private fun resolveCondition(value: JsonElement, data: JsonObject?): JsonElement {

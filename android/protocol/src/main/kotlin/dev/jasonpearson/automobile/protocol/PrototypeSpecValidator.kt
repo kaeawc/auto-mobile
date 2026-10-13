@@ -53,6 +53,7 @@ object PrototypeSpecValidator {
   val MAX_PROTOTYPE_DATA_BYTES: Int = limit("MAX_PROTOTYPE_DATA_BYTES")
   val MAX_PROTOTYPE_DATA_DEPTH: Int = limit("MAX_PROTOTYPE_DATA_DEPTH")
   val MAX_PROTOTYPE_DATA_ARRAY_ITEMS: Int = limit("MAX_PROTOTYPE_DATA_ARRAY_ITEMS")
+  val MAX_PROTOTYPE_REPEAT_PATH_CELLS: Int = limit("MAX_PROTOTYPE_REPEAT_PATH_CELLS")
   val MAX_PROTOTYPE_DATA_POINTER_LENGTH: Int = limit("MAX_PROTOTYPE_DATA_POINTER_LENGTH")
   internal val maxRepeatItems: Int =
     definitions
@@ -221,11 +222,12 @@ object PrototypeSpecValidator {
 
   private fun validateElement(value: JsonElement, context: Context): PrototypeSpecValidation {
     context.root = value
+    val repeats = PrototypeRepeatData((value as? JsonObject)?.get("data") as? JsonObject)
     val error =
       walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
-        ?: PrototypeRepeatValidator.validate(value)
+        ?: PrototypeRepeatValidator.validate(value, repeats)
         ?: pagerErrors(context)
-        ?: stateTypeErrors(value, context)
+        ?: stateTypeErrors(value, context, repeats)
     if (error != null) return PrototypeSpecValidation.Failure(error)
     return try {
       PrototypeSpecValidation.Success(
@@ -286,15 +288,23 @@ object PrototypeSpecValidator {
    * State-type checks over every repeat instance: a node or action whose state keys hold
    * placeholders is checked once per item with those keys bound (#11051).
    */
-  private fun stateTypeErrors(value: JsonElement, context: Context): PrototypeSpecError? {
+  private fun stateTypeErrors(
+    value: JsonElement,
+    context: Context,
+    repeats: PrototypeRepeatData,
+  ): PrototypeSpecError? {
     val data = value as? JsonObject ?: JsonObject(emptyMap())
-    val checked = stateInstances(value, context)
+    val checked = stateInstances(value, context, repeats)
     context.stateBindings = checked
     return checkedStateErrors(checked, data)
   }
 
-  private fun stateInstances(value: JsonElement, context: Context): Context {
-    val scopes = PrototypeRepeatValidator.scopes(value)
+  private fun stateInstances(
+    value: JsonElement,
+    context: Context,
+    repeats: PrototypeRepeatData,
+  ): Context {
+    val scopes = PrototypeRepeatValidator.scopes(value, repeats)
     fun List<Located>.instances() = flatMap { located ->
       val templated = PrototypeRepeatValidator.operandTemplated(scopes, located.value, located.path)
       PrototypeRepeatValidator.keyInstances(scopes, located.value, located.path).map { (bound, item)

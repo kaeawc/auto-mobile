@@ -123,6 +123,7 @@ class PrototypeController(
       val shown = activeTheme?.value
       prototypeWindowMetadata(
         runtime.renderModel(current),
+        dismissBarDrawn = activeRequest?.let { prototypeHostChrome(it).dismissVisible } ?: true,
         palettes = shown?.let { listOf(prototypeShownPalette(it)) },
         appearance = shown?.appearance,
       )
@@ -253,7 +254,8 @@ class PrototypeController(
     appearance: PrototypeAppearanceOverride? = null,
   ) {
     val validated = validate(spec)
-    val request = render(validated).copy(displayId = displayId)
+    val request =
+      render(validated).copy(displayId = displayId, chrome = prototypeWindowChrome(validated))
     requireDisplayAvailable(displayId)
     requireLayerPermitted(request.layer)
     val previous = activeRuntime

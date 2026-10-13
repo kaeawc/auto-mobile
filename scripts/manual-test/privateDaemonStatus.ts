@@ -64,14 +64,17 @@ async function diagnostic<T>(run: () => Promise<T>, failure: (reason: string) =>
   }
 }
 type DeviceSection = unknown[] | { skipped: string } | { error: string };
-async function androidDevices(deps: PrivateDaemonCliDeps): Promise<DeviceSection> {
+export async function androidDevices(
+  deps: PrivateDaemonCliDeps,
+  timeoutMs = TIMEOUT_MS,
+): Promise<DeviceSection> {
   const port = Number(deps.env.ANDROID_ADB_SERVER_PORT ?? 5037);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     return { skipped: "invalid ANDROID_ADB_SERVER_PORT" };
   }
   let payload: string;
   try {
-    payload = await deps.queryAdbHost("127.0.0.1", port, "host:devices-l", TIMEOUT_MS);
+    payload = await deps.queryAdbHost("127.0.0.1", port, "host:devices-l", timeoutMs);
   } catch (error) {
     // A refused connection means inventory is unavailable; never start an adb server.
     if (
@@ -92,7 +95,7 @@ async function androidDevices(deps: PrivateDaemonCliDeps): Promise<DeviceSection
       return { deviceId, state, details };
     });
 }
-function definedEnv(env: Record<string, string | undefined>): Record<string, string> {
+export function definedEnv(env: Record<string, string | undefined>): Record<string, string> {
   return Object.fromEntries(
     Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
   );
@@ -102,12 +105,15 @@ const simctlSchema = z.object({
     z.array(z.object({ udid: z.string(), name: z.string(), state: z.string() }).passthrough()),
   ),
 });
-async function iosDevices(deps: PrivateDaemonCliDeps): Promise<DeviceSection> {
+export async function iosDevices(
+  deps: PrivateDaemonCliDeps,
+  timeoutMs = TIMEOUT_MS,
+): Promise<DeviceSection> {
   const result = await deps.runCapture(
     "xcrun",
     ["simctl", "list", "devices", "booted", "--json"],
     definedEnv(deps.env),
-    TIMEOUT_MS,
+    timeoutMs,
   );
   if (result.exitCode !== 0) {
     return { skipped: result.stderr || `simctl exited ${result.exitCode}` };

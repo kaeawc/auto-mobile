@@ -1226,10 +1226,11 @@ export class ManagedSlotReconciler {
         const waitFailure = await this.waitForQueue(previous, request);
         if (waitFailure) {
           abandoned = true;
+          // The queued deadline has passed or waiting was aborted; allow the fixed read cap.
           return {
             outcome: "failed",
             failure: waitFailure,
-            assignment: await this.deps.registry.getAssignment(request.key),
+            assignment: await this.failedResultAssignment(request, undefined),
             evidence: { initial: null, inventoryComplete: null },
           };
         }
@@ -1282,6 +1283,30 @@ export class ManagedSlotReconciler {
     }
   }
 
+  private async failedResultAssignment(
+    request: ManagedSlotReconcileRequest,
+    deadlineMs: number | undefined,
+  ): Promise<SlotAssignmentRecord | null> {
+    try {
+      return await this.journal.removalRegistryStage(
+        () => this.deps.registry.getAssignment(request.key),
+        deadlineMs,
+      );
+    } catch (error) {
+      if (
+        error instanceof SlotJournalRemovalRegistryTimeout ||
+        classifySqliteError(error) === "retryable"
+      ) {
+        logger.warn(
+          `[ManagedSlots] failed result assignment unavailable: ${errorMessage(error)}`,
+          error,
+        );
+        return null;
+      }
+      throw error;
+    }
+  }
+
   private async reconcileSerialized(
     request: ManagedSlotReconcileRequest,
   ): Promise<ManagedSlotReconcileResult> {
@@ -1298,24 +1323,7 @@ export class ManagedSlotReconciler {
             error instanceof ReconcileAbort
               ? error.failure
               : failure("discovery_incomplete", errorMessage(error)),
-          assignment: await this.journal
-            .removalRegistryStage(
-              () => this.deps.registry.getAssignment(request.key),
-              request.deadlineMs,
-            )
-            .catch((readError) => {
-              if (
-                readError instanceof SlotJournalRemovalRegistryTimeout ||
-                classifySqliteError(readError) === "retryable"
-              ) {
-                logger.warn(
-                  `[ManagedSlots] failed result assignment unavailable: ${errorMessage(readError)}`,
-                  readError,
-                );
-                return null;
-              }
-              throw readError;
-            }),
+          assignment: await this.failedResultAssignment(request, request.deadlineMs),
           evidence,
         };
       }

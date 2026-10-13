@@ -1046,8 +1046,11 @@ export class ManagedSlotJournal {
       if (!(error instanceof SlotJournalRemovalRegistryTimeout)) {
         throw error;
       }
-      logger.warn(`[SlotJournal] Creation cleanup failed: ${errorMessage(error)}`, error);
-      return blocked(entry, "reconcile_in_progress", error.message);
+      const message = options.adopt
+        ? `Settling created entry ${entry.id} deferred to the next redrive: registry stage timed out`
+        : "Creation cleanup deferred to journal redrive: registry stage timed out";
+      logger.warn(`[SlotJournal] ${message}`, error);
+      return blocked(entry, "reconcile_in_progress", message);
     }
   }
 

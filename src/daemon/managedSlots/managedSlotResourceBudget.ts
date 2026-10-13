@@ -434,12 +434,10 @@ export class RegistryManagedSlotResourceBudget implements ManagedSlotResourceBud
         retained,
         evictionFailures,
       };
-      // Counted markers commit room while native deletion redrives; stuck markers do not.
+      // Any counted pending marker commits room until redrive finishes or it becomes stuck.
+      // Evicting beside it either over-frees capacity or deletes cache and still refuses creation.
       const shortfall = rankedCount(charges, request.journalEntryId) - limit;
-      if (
-        !this.deps.eviction ||
-        retained.filter((row) => !isStuckFreeDeviceDeletion(row)).length >= shortfall
-      ) {
+      if (!this.deps.eviction || retained.some((row) => !isStuckFreeDeviceDeletion(row))) {
         return exhausted;
       }
       checkAdmissionBudget(request, this.timer);
@@ -460,10 +458,12 @@ export class RegistryManagedSlotResourceBudget implements ManagedSlotResourceBud
       }));
       // One attempt per initially observed free row, then one final read/selection iteration.
       remaining ??= selection.candidates.length + selection.skipped.length;
-      const candidate = selection.candidates.find(
+      const untried = selection.candidates.filter(
         (device) => !attempted.has(resourceKey(device.platform, device.stableDeviceId)),
       );
-      if (!candidate || remaining === 0) {
+      // Do not destroy cache unless the remaining attempts can make this creation fit.
+      const candidate = untried[0];
+      if (untried.length < shortfall || !candidate || remaining === 0) {
         return exhausted;
       }
       remaining -= 1;

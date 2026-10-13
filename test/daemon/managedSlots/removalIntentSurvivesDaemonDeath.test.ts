@@ -7,6 +7,7 @@ import {
   ManagedSlotJournal,
   SLOT_JOURNAL_REMOVAL_FLAG_WRITE_BUDGET_MS,
   SlotJournalInFlight,
+  SlotJournalRemovalRegistryTimeout,
 } from "../../../src/daemon/managedSlots/slotJournal";
 import { FakeSlotRegistry } from "../../fakes/FakeSlotRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -711,4 +712,81 @@ test("this daemon's redrive bounds its own hung flag rewrite", async () => {
   h.registry.advanceSlotJournal = advance;
   expect(await h.driver.redriveSlot(h.key)).toMatchObject({ kind: "clear" });
   expect((await h.registry.getSlotJournal(1))?.phase).toBe("rolled_back");
+});
+
+test.each([false, true])("queued timeout bounds assignment read (hang=%s)", async (hang) => {
+  const h = await harness(true);
+  const release = Promise.withResolvers<void>();
+  let creating = false;
+  h.provisioner.beforeCreate = async () => {
+    creating = true;
+    await release.promise;
+  };
+  const first = h.reconciler.reconcile(h.request);
+  await drainUntil(() => creating, { description: "first creation parked" });
+  const read = h.registry.getAssignment.bind(h.registry);
+  const assignment = await read(h.key);
+  let reading = false;
+  h.registry.getAssignment = async (key) => {
+    reading = true;
+    if (hang) {
+      return new Promise<never>(() => {});
+    }
+    await h.timer.sleep(100);
+    return read(key);
+  };
+  let settled = false;
+  const duplicate = h.reconciler
+    .reconcile({
+      ...h.request,
+      deadlineMs: h.timer.now() + 10,
+    })
+    .then((result) => {
+      settled = true;
+      return result;
+    });
+  await drainMicrotasks(156);
+  h.timer.advanceTime(10);
+  await drainUntil(() => reading, { description: "queued failure assignment read" });
+  await drainMicrotasks(156);
+  h.timer.advanceTime(100);
+  await drainMicrotasks(156);
+  if (hang) {
+    expect(settled).toBe(false);
+    h.timer.advanceTime(SLOT_JOURNAL_REMOVAL_FLAG_WRITE_BUDGET_MS - 101);
+    await drainMicrotasks(156);
+    expect(settled).toBe(false);
+    h.timer.advanceTime(1);
+  }
+  await drainMicrotasks(156);
+  expect(settled).toBe(true);
+  expect(await duplicate).toMatchObject({
+    outcome: "failed",
+    failure: { code: "timeout" },
+    assignment: hang ? null : assignment,
+  });
+  h.registry.getAssignment = read;
+  release.resolve();
+  expect((await first).outcome).toBe("ready");
+});
+
+test("expired registry stage keeps immediate answers and times out hung reads at zero", async () => {
+  const h = await harness();
+  const assignment = await h.registry.getAssignment(h.key);
+  expect(
+    await h.driver.removalRegistryStage(() => h.registry.getAssignment(h.key), h.timer.now() - 1),
+  ).toEqual(assignment);
+  let timedOut = false;
+  const read = h.driver
+    .removalRegistryStage(() => new Promise<never>(() => {}), h.timer.now() - 1)
+    .catch((error: unknown) => {
+      timedOut = true;
+      return error;
+    });
+  await drainMicrotasks(156);
+  expect(timedOut).toBe(false);
+  h.timer.advanceTime(0);
+  await drainMicrotasks(156);
+  expect(timedOut).toBe(true);
+  expect(await read).toBeInstanceOf(SlotJournalRemovalRegistryTimeout);
 });

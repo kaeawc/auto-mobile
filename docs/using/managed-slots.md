@@ -705,7 +705,10 @@ reservations cannot take capacity promised to earlier ones. A replacement keeps 
 continuous charge through delete, verified absence, and preparation of its successor.
 An over-limit read is confirmed by a fresh independent read before eviction or refusal.
 
-With headroom, unrelated cache is retained. Creation needing room may evict eligible
+With headroom, unrelated cache is retained. When over the limit, creation is refused
+before deleting cache if a counted deletion is still pending or the remaining
+eligible caches cannot free enough room. Retry after the pending deletion finishes
+or becomes stuck. Creation needing room may evict eligible
 unassigned cache from either platform, oldest `freedAtMs` first. Assignments in every
 scope (including abandoned but revivable scopes), open journal targets, stopping or
 already deleting rows, held devices, foreign claims, incomplete discovery, pooled

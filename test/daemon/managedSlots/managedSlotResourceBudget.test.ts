@@ -281,6 +281,122 @@ describe("managed-slot total-resource budget", () => {
     return (await registry.listFreeDevices()).find((row) => row.stableDeviceId === name)!;
   }
 
+  test.each([0, 2])("pending marker prevents futile cache eviction (stuck=%s)", async (stuck) => {
+    for (let index = 0; index < stuck; index += 1) {
+      await markedCache(3, 3, `amslot-stuck-${index}`);
+      timer.advanceTime(1);
+    }
+    await markedCache(1, 1, "amslot-pending");
+    await cache("amslot-first");
+    timer.advanceTime(1);
+    await cache("amslot-second");
+    const before = await registry.listFreeDevices();
+    const mine = await creation("amslot-new");
+    evictor.action = absent;
+    const result = await budget(stuck === 0 ? 2 : 3, true).admitCreation({
+      journalEntryId: mine.id,
+    });
+    expect(result.kind).toBe("exhausted");
+    expect(evictor.calls).toEqual([]);
+    expect(await registry.listFreeDevices()).toEqual(before);
+    if (result.kind !== "exhausted") {
+      throw new Error("expected exhausted");
+    }
+    expect(result.retained).toContainEqual(
+      expect.objectContaining({
+        stableDeviceId: "amslot-pending",
+        reason: "deletion_pending",
+        failedDeletes: 1,
+      }),
+    );
+  });
+
+  test("without a pending marker only the creation shortfall is evicted", async () => {
+    await cache("amslot-first");
+    timer.advanceTime(1);
+    await cache("amslot-second");
+    const mine = await creation("amslot-new");
+    evictor.action = absent;
+    expect(await budget(2, true).admitCreation({ journalEntryId: mine.id })).toMatchObject({
+      kind: "admitted",
+      usage: { total: 2 },
+      evicted: [{ stableDeviceId: "amslot-first" }],
+    });
+    expect(evictor.calls.map((row) => row.stableDeviceId)).toEqual(["amslot-first"]);
+    expect((await registry.listFreeDevices()).map((row) => row.stableDeviceId)).toEqual([
+      "amslot-second",
+    ]);
+  });
+
+  test.each([1, 2])("two stuck markers only evict when sufficient (limit=%s)", async (limit) => {
+    await markedCache(3, 3, "amslot-older");
+    timer.advanceTime(1);
+    await markedCache(3, 3, "amslot-younger");
+    await cache("amslot-cache");
+    const before = await registry.listFreeDevices();
+    const mine = await creation("amslot-new");
+    evictor.action = absent;
+    const result = await budget(limit, true).admitCreation({ journalEntryId: mine.id });
+    if (limit === 2) {
+      expect(result).toMatchObject({
+        kind: "admitted",
+        usage: { total: 2 },
+        evicted: [{ stableDeviceId: "amslot-cache" }],
+      });
+      expect(evictor.calls.map((row) => row.stableDeviceId)).toEqual(["amslot-cache"]);
+      return;
+    }
+    expect(result.kind).toBe("exhausted");
+    expect(evictor.calls).toEqual([]);
+    expect(await registry.listFreeDevices()).toEqual(before);
+    if (result.kind !== "exhausted") {
+      throw new Error("expected exhausted");
+    }
+    expect(result.retained).toMatchObject([
+      { stableDeviceId: "amslot-older", reason: "deletion_stuck", uncounted: true },
+      { stableDeviceId: "amslot-younger", reason: "deletion_stuck" },
+    ]);
+    expect(result.retained.filter((row) => row.uncounted).map((row) => row.stableDeviceId)).toEqual(
+      ["amslot-older"],
+    );
+  });
+
+  test("one stuck marker permits the cache eviction at limit one", async () => {
+    await markedCache(3);
+    await cache("amslot-cache");
+    const mine = await creation("amslot-new");
+    evictor.action = absent;
+    expect(await budget(1, true).admitCreation({ journalEntryId: mine.id })).toMatchObject({
+      kind: "admitted",
+      usage: { total: 1 },
+      evicted: [{ stableDeviceId: "amslot-cache" }],
+    });
+    expect(evictor.calls.map((row) => row.stableDeviceId)).toEqual(["amslot-cache"]);
+  });
+
+  test.each([1, 2])("insufficient remaining caches stop eviction (limit=%s)", async (limit) => {
+    await assignManagedSlotDevice(registry, "android", "active", "active", "exec");
+    await cache("amslot-first");
+    timer.advanceTime(1);
+    await cache("amslot-second");
+    const mine = await creation("amslot-new");
+    evictor.action = async () => ({ kind: "failed", message: "native failure" });
+    const result = await budget(limit, true).admitCreation({ journalEntryId: mine.id });
+    expect(result).toMatchObject({
+      kind: "exhausted",
+      usage: { total: 4 },
+      evictionFailures:
+        limit === 1 ? [] : [{ stableDeviceId: "amslot-first", message: "native failure" }],
+    });
+    expect(evictor.calls.map((row) => row.stableDeviceId)).toEqual(
+      limit === 1 ? [] : ["amslot-first"],
+    );
+    expect((await registry.listFreeDevices()).map((row) => row.stableDeviceId)).toEqual([
+      "amslot-first",
+      "amslot-second",
+    ]);
+  });
+
   test.each([false, true])("only oldest stuck marker is exempt (eviction=%s)", async (eviction) => {
     const first = await markedCache(3);
     timer.advanceTime(1);

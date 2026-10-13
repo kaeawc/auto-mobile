@@ -6,6 +6,7 @@ import {
   shownAppearance,
   type ShownPrototypeAppearance,
 } from "./prototypeAppearance";
+import type { PrototypeWindowChrome } from "./prototypeWindowChrome";
 
 export type PrototypeMutation = "show" | "dismiss";
 export interface PrototypeLastResult {
@@ -26,6 +27,8 @@ export interface PrototypeLastResult {
    */
   suspended?: true;
   displayId?: number;
+  /** Host-resolved chrome for a successful fullscreen show; absent for adopted prototypes. */
+  chrome?: PrototypeWindowChrome;
   /**
    * The light or dark mode the prototype is drawn in, as last reported by the device: a show
    * result, an `inspect`, or an `appearance_changed` event since (which updates `mode` and `source`
@@ -87,6 +90,7 @@ export interface PrototypeStatusStore {
     target: { id?: string; all?: true },
     result: PrototypeResult,
     displayId?: number,
+    chrome?: PrototypeWindowChrome,
   ): PrototypeLastResult;
 }
 interface StoredPrototypeStatus extends PrototypeScope {
@@ -221,6 +225,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     target: { id?: string; all?: true },
     result: PrototypeResult,
     displayId?: number,
+    chrome?: PrototypeWindowChrome,
   ): PrototypeLastResult {
     const key = JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]);
     const existing = this.scopes.get(key);
@@ -229,7 +234,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       action !== "show" && target.id !== undefined
         ? existing?.shown.get(target.id)?.displayId
         : undefined;
-    const entry = this.createResult(action, target, result, displayId ?? shownDisplay);
+    const entry = this.createResult(action, target, result, displayId ?? shownDisplay, chrome);
     if (!existing && !result.success) {
       return { ...entry };
     }
@@ -321,11 +326,13 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     target: { id?: string; all?: true },
     result: PrototypeResult,
     displayId?: number,
+    chrome?: PrototypeWindowChrome,
   ): PrototypeLastResult {
     return {
       ...target,
       lastAction: action,
       ...(displayId === undefined ? {} : { displayId }),
+      ...(action === "show" && result.success && chrome !== undefined ? { chrome } : {}),
       ...shownAppearance(action, result),
       success: result.success,
       ...(result.error ? { error: result.error } : {}),

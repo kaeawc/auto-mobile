@@ -24,6 +24,21 @@ Minimal spec:
 \`\`\`
 
 A \`{key}\` placeholder in a \`text\` node reads the state value of that key.
+
+## Fullscreen host chrome
+
+\`window.chrome\` is \`"none"\` (default) or \`"bar"\`, fullscreen only, on a device advertising
+\`prototype_window_chrome_v1\`. With \`none\` there is no host dismiss bar: content starts at the
+very top of the screen, including under the status bar. A \`topAppBar\` or top content needs
+\`safeAreaPadding\` on the top edge; relative sheet detents use the full window height.
+A host-owned two-finger long press (about 1 s) anywhere on the window reveals a dismiss pill for
+5 s; tapping it dismisses with reason \`user\`. Agent dismiss, a replacing show, authored dismiss,
+the session's five-minute idle TTL and last-client disconnect still work.
+\`window.persistence: "device"\` defaults to \`bar\` and keeps its existing persistence behaviour.
+The device implementations ship separately: without the capability a device keeps the bar,
+explicit \`none\` is refused, and omitted chrome or \`bar\` succeeds. A successful fullscreen
+show and subsequent host-local status report the effective value as \`lastResult.chrome\`;
+it is absent for sheet/floating windows, dismiss, failed show and adopted prototypes.
 `;
 
 export const GUIDE_REPEAT = `## Lists: repeat

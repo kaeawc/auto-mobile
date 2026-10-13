@@ -14,6 +14,8 @@ import {
   WINDOWS_FILE_DB_TEST_TIMEOUT_MS,
 } from "../../db/withFileBackedDb";
 
+import { retryBusyRegistryWrite } from "./fixtures/retryBusyRegistryWrite";
+
 const IDENTITY: SlotScopeIdentity = {
   managedHostScope: "host-1",
   runnerNamespace: "runner-a",
@@ -124,6 +126,8 @@ describe("SqliteSlotRegistry on a shared file", () => {
   test(
     "a second process racing the same slot and device cannot double-assign",
     async () => {
+      // Busy writes are re-driven; compare-and-set still permits exactly one slot winner.
+      // Eight attempts schedule 2.575 s of backoff, plus bounded busy quiet time, well below 30 s.
       const dir = await getHarness().makeTempDbDir("am-slots-");
       const dbPath = join(dir, "slots.sqlite");
       const goFile = join(dir, "go");
@@ -141,19 +145,25 @@ describe("SqliteSlotRegistry on a shared file", () => {
       );
       const stdout = collectChildStdout(child.stdout);
       const stderrText = new Response(child.stderr).text();
-      const parent = await openSqliteSlotRegistry({ dbPath });
+      const { result: parent } = await retryBusyRegistryWrite(() =>
+        openSqliteSlotRegistry({ dbPath }),
+      );
       try {
-        const scopeKey = await readyScopeKey(parent);
+        const { result: scopeKey } = await retryBusyRegistryWrite(() => readyScopeKey(parent));
         const key = { scopeKey, slotIndex: 0 };
         const otherKey = { scopeKey, slotIndex: 1 };
-        await parent.initSlot(key, INIT);
-        await parent.initSlot(otherKey, INIT);
+        await retryBusyRegistryWrite(() => parent.initSlot(key, INIT));
+        await retryBusyRegistryWrite(() => parent.initSlot(otherKey, INIT));
         // Release both racers only once the child has opened, migrated and initialized.
         expect(await stdout.ready).toBe(true);
         writeFileSync(goFile, "");
         const [sameSlot, sameDevice] = await Promise.all([
-          parent.commitBinding(key, UNBOUND, bind("avd-parent")),
-          parent.commitBinding(otherKey, UNBOUND, bind("avd-shared")),
+          retryBusyRegistryWrite(() => parent.commitBinding(key, UNBOUND, bind("avd-parent"))).then(
+            ({ result }) => result,
+          ),
+          retryBusyRegistryWrite(() =>
+            parent.commitBinding(otherKey, UNBOUND, bind("avd-shared")),
+          ).then(({ result }) => result),
         ]);
         expect(await child.exited).toBe(0);
         const childResult: { kind: string } = JSON.parse(

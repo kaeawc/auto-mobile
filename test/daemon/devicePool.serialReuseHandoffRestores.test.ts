@@ -927,6 +927,7 @@ warmedTest(
         mockLocationClears: {
           markSet: () => {},
           clearLateSet: () => null,
+          abandonClear: () => {},
           retireDevice: () => {},
           clearAfter: (_owner, serial) => {
             h.restores.push(`location-clear:${serial}`);

@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   STUCK_REAP_WARN_MS,
   SessionHeartbeatMonitor,
+  type HeartbeatSessionSource,
 } from "../../src/daemon/SessionHeartbeatMonitor";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
-import { SessionManager } from "../../src/daemon/sessionManager";
+import { SessionManager, type Session } from "../../src/daemon/sessionManager";
 import { DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS } from "../../src/daemon/sessionLivenessWindows";
 import { logger } from "../../src/utils/logger";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -112,4 +113,122 @@ describe("a release that never settles (#10704)", () => {
       warn.mockRestore();
     }
   });
+});
+
+describe("monitor reap timestamps", () => {
+  let timer: FakeTimer;
+  let manager: SessionManager;
+  let session: Session;
+  let monitor: SessionHeartbeatMonitor;
+  let sourceStartedAt: number | undefined;
+  let visible: boolean;
+  let forcedAt: number[];
+  let reapedAt: number[];
+  let gate: ReturnType<typeof Promise.withResolvers<void>>;
+  let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
+
+  beforeEach(async () => {
+    timer = new FakeTimer();
+    manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    session = await manager.createSession("same-id", "emulator-5554", "android", 600_000, LEASE_MS);
+    manager.recordHeartbeat(session.sessionId);
+    timer.advanceTime(LEASE_MS + SUSPECT_GRACE_MS + 1);
+    sourceStartedAt = undefined;
+    visible = true;
+    forcedAt = [];
+    reapedAt = [];
+    gate = Promise.withResolvers<void>();
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(async () => {
+    gate.resolve();
+    if (monitor) {
+      await monitor.stop();
+    }
+    manager.stopCleanupTimer();
+    timer.reset();
+    warn.mockRestore();
+  });
+
+  function start(joinAt = timer.now()) {
+    const source: HeartbeatSessionSource = {
+      getAllSessions: () => (visible ? [session] : []),
+      cleanupExpiredSessions: () => {},
+      getNonTerminalReleasesInProgress: () =>
+        sourceStartedAt === undefined
+          ? []
+          : [{ sessionId: session.sessionId, session, startedAtMs: sourceStartedAt }],
+      isReleaseInProgress: (id, at) => id === session.sessionId && at === sourceStartedAt,
+    };
+    monitor = new SessionHeartbeatMonitor(
+      source,
+      () => timer.now() < joinAt,
+      async () => {
+        reapedAt.push(timer.now());
+        await gate.promise;
+      },
+      timer,
+      {
+        checkIntervalMs: SCAN_MS,
+        forceStuckRelease: async () => {
+          forcedAt.push(timer.now());
+        },
+      },
+    );
+    monitor.start();
+  }
+
+  const flush = () => drainMicrotasks(20);
+
+  test("a reap without a tracked source release starts its deadline at the joining scan", async () => {
+    const origin = timer.now();
+    start();
+    await timer.advanceTimeAsync(SCAN_MS, flush);
+    expect(reapedAt).toEqual([origin + SCAN_MS]);
+    await timer.advanceTimeAsync(STUCK_REAP_WARN_MS - 1, flush);
+    expect(forcedAt).toEqual([]);
+    await timer.advanceTimeAsync(1, flush);
+    expect(forcedAt).toEqual([reapedAt[0]! + STUCK_REAP_WARN_MS]);
+  });
+
+  test("joining an already reported source release does not report or force it twice", async () => {
+    sourceStartedAt = timer.now();
+    start(sourceStartedAt + STUCK_REAP_WARN_MS);
+    await timer.advanceTimeAsync(STUCK_REAP_WARN_MS, flush);
+    expect(reapedAt).toEqual([sourceStartedAt + STUCK_REAP_WARN_MS]);
+    expect(forcedAt).toEqual([sourceStartedAt + STUCK_REAP_WARN_MS]);
+    await timer.advanceTimeAsync(STUCK_REAP_WARN_MS + SCAN_MS, flush);
+    expect(forcedAt).toHaveLength(1);
+    expect(
+      warn.mock.calls.filter(([message]) => String(message).includes("release has not settled")),
+    ).toHaveLength(1);
+  });
+
+  for (const delayedJoinSettlement of [false, true]) {
+    test(`a later release of the same id has a fresh deadline (${delayedJoinSettlement ? "delayed" : "prompt"} join settlement)`, async () => {
+      sourceStartedAt = timer.now();
+      start(sourceStartedAt + 2 * SCAN_MS);
+      await timer.advanceTimeAsync(3 * SCAN_MS, flush);
+      expect(reapedAt).toEqual([sourceStartedAt + 2 * SCAN_MS]);
+      // The source release ends; even a join promise still unwinding must not retain its deadline.
+      sourceStartedAt = undefined;
+      visible = false;
+      if (!delayedJoinSettlement) {
+        gate.resolve();
+        await flush();
+      }
+      await timer.advanceTimeAsync(SCAN_MS, flush);
+      sourceStartedAt = timer.now();
+      const secondStartedAt = sourceStartedAt;
+      await timer.advanceTimeAsync(SCAN_MS, flush);
+      await timer.advanceTimeAsync(STUCK_REAP_WARN_MS - SCAN_MS - 1, flush);
+      expect(forcedAt).toEqual([]);
+      // The old join's settle handler must not forget the second release's new tracked object.
+      gate.resolve();
+      await flush();
+      await timer.advanceTimeAsync(1, flush);
+      expect(forcedAt).toEqual([secondStartedAt + STUCK_REAP_WARN_MS]);
+    });
+  }
 });

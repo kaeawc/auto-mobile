@@ -33,6 +33,7 @@ const NO_MOCK_LOCATION_CLEARS: MockLocationClears = {
   clearLateSet: () => null,
   clearAfter: () => null,
   retireDevice: () => undefined,
+  abandonClear: () => undefined,
 };
 
 describe("a terminal upgrade of an already-finalized release (#10825)", () => {

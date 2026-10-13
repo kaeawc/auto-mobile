@@ -198,7 +198,7 @@ export function judgedLeaseHeartbeat(session: LeaseSession): number {
 /**
  * Whether an owned session's owner lease was still running at `at` (#11080): `at` is within one
  * lease of the owner's last heartbeat. The daemon's stall forgiveness asks this of a gap's start,
- * so it excuses only owners that were live when the daemon stopped hearing them. Read from the
+ * for full forgiveness of owners live when the daemon stopped hearing them. Read from the
  * raw heartbeat stamp, not the forgiven lease start, so successive late scans cannot chain one
  * forgiveness onto the last for an owner that is gone; and, for a session judged on its owner's
  * heartbeats, from `lastOwnerHeartbeat` rather than the activity-refreshed `lastHeartbeat`, so a

@@ -11,9 +11,11 @@ import {
   type RetryableDeviceAcquisitionError,
 } from "../../src/daemon/deviceAcquisitionRefusals";
 import {
-  SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+  getSessionReleaseCleanupWorstCaseMs,
+  SESSION_RELEASE_STUCK_DEADLINE_MS,
   SESSION_RELEASE_TEARDOWN_CAP_MS,
 } from "../../src/daemon/sessionManager";
+import { getSessionHeartbeatCheckIntervalMs } from "../../src/daemon/sessionLivenessWindows";
 import { readDeviceCleanupInProgressRefusal } from "../../src/server/deviceSessionResult";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
@@ -121,13 +123,19 @@ describe("finalize wait budget shared with the runners (#11360)", () => {
 
   test("the daemon's bounded cleanups never advertise more than the shared waitBudgetMs", () => {
     const { waitBudgetMs } = finalizeWait();
+    const interval = getSessionHeartbeatCheckIntervalMs({});
+    const releaseWorstCaseMs = getSessionReleaseCleanupWorstCaseMs({});
+    expect(releaseWorstCaseMs).toBe(
+      SESSION_RELEASE_STUCK_DEADLINE_MS + 2 * interval + SESSION_RELEASE_TEARDOWN_CAP_MS,
+    );
+    expect(releaseWorstCaseMs).toBeLessThanOrEqual(waitBudgetMs);
     const advertised = [
       registeredRecordingCapMs("emulator-5554"),
       registeredRecordingCapMs("2300914A-231E-4874-8F8A-40C3D2F1E24B"),
-      SESSION_RELEASE_TEARDOWN_CAP_MS + SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+      releaseWorstCaseMs,
     ];
-    // Both platforms' finalize cap plus the incomplete-mark grace, then the release phases.
-    expect(advertised).toEqual([125_000, 125_000, 20_000]);
+    // Both platforms' finalize cap plus incomplete-mark grace, then the forced-release worst case.
+    expect(advertised).toEqual([125_000, 125_000, 54_000]);
     expect(Math.max(...advertised.map((capMs) => capMs ?? Infinity))).toBeLessThanOrEqual(
       waitBudgetMs,
     );

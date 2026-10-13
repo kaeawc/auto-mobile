@@ -546,7 +546,7 @@
       }
     },
     "socket-frame.device_unhealthy": {
-      "expected": "retry",
+      "expected": "wait",
       "fields": {
         "code": "device_unhealthy",
         "retryable": true,

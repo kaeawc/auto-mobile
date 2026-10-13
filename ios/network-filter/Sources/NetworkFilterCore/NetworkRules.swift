@@ -317,10 +317,11 @@ public struct NetworkRuleTicket: Equatable {
 /// Active rules at one instant, for flow evaluation outside the store's lock.
 public struct NetworkRuleEvaluationSnapshot {
     public let tickets: [NetworkRuleTarget: NetworkRuleTicket]
+    public let shapedTargets: Set<NetworkRuleTarget>
 
     /// The simulators that active rules name: the only ones attribution may select.
     public var managedSimulators: Set<ManagedSimulator> {
-        Set(tickets.keys.map(\.simulator))
+        Set(tickets.keys.map(\.simulator)).union(shapedTargets.map(\.simulator))
     }
 }
 
@@ -422,8 +423,7 @@ public final class NetworkRuleStore: ShapingRuleSource {
         .sorted { ($0.target.simulator.udid, $0.target.bundleId) < ($1.target.simulator.udid, $1.target.bundleId) }
     }
 
-    /// `nil` when no offline rule is active: shaped configuration never triggers
-    /// attribution or a drop in this build.
+    /// `nil` only when no rule is active, preserving the no-lookup fast path.
     public func evaluationSnapshot() -> NetworkRuleEvaluationSnapshot? {
         lock.lock()
         defer { lock.unlock() }
@@ -438,7 +438,8 @@ public final class NetworkRuleStore: ShapingRuleSource {
                 revision: rule.ownership.revision
             )
         }
-        return tickets.isEmpty ? nil : NetworkRuleEvaluationSnapshot(tickets: tickets)
+        let shapedTargets = Set(rules.keys.filter { rules[$0]?.shaping != nil })
+        return NetworkRuleEvaluationSnapshot(tickets: tickets, shapedTargets: shapedTargets)
     }
 
     /// Commits a drop computed outside the lock. Returns `false`, and counts

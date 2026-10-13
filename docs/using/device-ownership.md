@@ -796,10 +796,13 @@ Recovery waiting for a live owner, cleanup, identity replacement, or a timed-out
 command to settle has no computable bound; clock retries are also unbounded.
 Such refusals remain retryable without `retryAfterMs`. When recovery ends with
 the marker kept, the refusal is non-retryable: replace the device with
-`killDevice` then `startDevice`. This code has no `nextAction` and is not in the
-runners' device-wait code tables. Healthy candidates remain eligible; reads
-remain allowed on marked devices. Skipped recovery ticks re-arm the same
-attempt, and only a dispatched restore consumes one of the three attempts.
+`killDevice` then `startDevice`. This code has no `nextAction`. The JUnit runner
+and XCTestRunner wait on it within their bounded device wait only while
+`recovering` and `retryable` are true, honouring `retryAfterMs`. A non-recovering
+refusal fails at once with each device's reason. Healthy candidates remain
+eligible; reads remain allowed on marked devices. Skipped recovery ticks re-arm
+the same attempt, and only a dispatched restore consumes one of the three
+attempts.
 Recorder teardown composes all unconfirmed retries for the device incarnation; new or replaced retries get a fresh attempt budget, and a later mark also retries work left unconfirmed after exhaustion. Recorder rows from a successful startup read remain tracked when discovery pools a device later or assigns it a new incarnation: quarantine is synchronous before binding, and late redrive rechecks local and peer ownership before device commands; a descriptor with no pid and no finite expiry quarantines one incarnation only. A held device keeps its startup orphan until the owner stops it by recording id, the next recording start stops it before starting another capture, or the session releases the device. Stop-by-id and start return retryable `orphan_recorder_active` if the recorder cannot be confirmed stopped; retry or stop it by id. For a pid-less orphan with a valid `startedAt`, `orphan_recorder_active` clears by itself once the 185-second hard limit has passed. A pid-less orphan with an unparsable `startedAt` is no longer listed, found or stopped after its first marked incarnation. Confirmed teardown clears its descriptor and immediately clears a startup quarantine whose whole retry batch is confirmed. A failed startup read keeps the descriptors but creates no orphan handle: a recording start cannot see a pre-restart recorder until the next daemon start.
 
 Recorder teardown consumes an attempt only after reaching the device: an unanswered pid identity probe or missing pooled device re-arms the same attempt and delay when every failing entry is unreachable. A reached failure consumes it, even alongside unreachable entries. Timed-out work settles before another dispatch and follows the same rule. Unreachable re-arms keep reporting recovering with a retry deadline; marker/incarnation retirement ends recovery, and shutdown ends it on a skipped tick or after an unreachable dispatch. Reached failures keep their existing shutdown behaviour.
@@ -879,6 +882,10 @@ cannot admit it: the session ends immediately with `session_ownership_lost`, rea
 If session-preserving device recovery is in flight, the hold and idle deadline
 stay unchanged instead. The late control call receives `session_held_by_recovery`
 with `sessionUuid`, `deviceId`, `retryable: true` and `retryAfterMs: 1000`.
+The JUnit runner and XCTestRunner wait within their bounded device wait,
+honouring `retryAfterMs`, then run the next `executePlan` pass under a fresh
+session, as they do for every waited refusal. Only the JUnit runner's AI-recovery
+first call retries the same session.
 Retry after recovery settles; the retry receives either the live session or the
 terminal idle answer. A late read behind any hold still runs sessionlessly on the
 held device without releasing or refreshing the session.

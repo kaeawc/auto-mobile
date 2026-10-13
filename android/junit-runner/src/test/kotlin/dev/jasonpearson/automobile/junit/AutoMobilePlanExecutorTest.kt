@@ -2,12 +2,16 @@ package dev.jasonpearson.automobile.junit
 
 import dev.jasonpearson.automobile.validation.ErrorToolResult
 import dev.jasonpearson.automobile.validation.TapOnResponse
+import java.io.File
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -44,6 +48,171 @@ class AutoMobilePlanExecutorTest {
     AutoMobilePlanExecutor.retryBackoffMs = 2000L
     AutoMobilePlanExecutor.deviceOwnedSleeper = { Thread.sleep(it) }
     AutoMobilePlanExecutor.deviceOwnedWaitBudgetMs = 30_000L
+  }
+
+  private fun recoveryFixtureDir(): File {
+    var current: File? = File("").absoluteFile
+    while (current != null) {
+      val dir = File(current, "test/fixtures/refusal-wire")
+      if (dir.isDirectory) return dir
+      current = current.parentFile
+    }
+    error("refusal fixtures not found")
+  }
+
+  private fun recoveryPayload(file: File): JsonObject {
+    val result = json.parseToJsonElement(file.readText()).jsonObject.getValue("result").jsonObject
+    return payload(
+      result
+        .getValue("content")
+        .jsonArray
+        .first()
+        .jsonObject
+        .getValue("text")
+        .jsonPrimitive
+        .content,
+    )
+  }
+
+  private fun assertUnhealthyMessage(message: String, wire: JsonObject) {
+    val evidence = (wire["details"] as? JsonObject) ?: (wire["error"] as? JsonObject) ?: wire
+    assertTrue(message, message.contains("device_unhealthy"))
+    val daemonError =
+      (wire["error"] as? JsonPrimitive)?.content ?: (evidence["message"] as? JsonPrimitive)?.content
+    assertTrue(message, message.contains(daemonError!!))
+    val devices = evidence["devices"]?.jsonArray?.map { it.jsonObject } ?: listOf(evidence)
+    val rendered =
+      devices.joinToString(", ") {
+        "${it.getValue("deviceId").jsonPrimitive.content} (${it.getValue("reason").jsonPrimitive.content}, ${if (it["recovering"] == JsonPrimitive(true)) "recovering" else "not recovering"})"
+      }
+    assertTrue(message, message.contains("Unhealthy devices: $rendered"))
+  }
+
+  @Test
+  fun `recovery corpus waits without retries and permanent health failures include reasons`() {
+    val sleeps = mutableListOf<Long>()
+    AutoMobilePlanExecutor.deviceOwnedSleeper = { sleeps.add(it) }
+    var hinted = false
+    var unbounded = false
+    var permanent = false
+    for (file in
+      recoveryFixtureDir().listFiles()!!.filter {
+        it.extension == "json" && it.name != "expectations.json"
+      }) {
+      val wire = recoveryPayload(file)
+      val envelope = wire["error"] as? JsonObject
+      val code = (envelope?.get("code") ?: wire["code"])?.jsonPrimitive?.content
+      if (code !in setOf("device_unhealthy", "session_held_by_recovery")) continue
+      val recovering = (envelope?.get("recovering") ?: wire["recovering"]) == JsonPrimitive(true)
+      val retryable = (envelope?.get("retryable") ?: wire["retryable"]) == JsonPrimitive(true)
+      val waits = retryable && (code == "session_held_by_recovery" || recovering)
+      val hint = (envelope?.get("retryAfterMs") ?: wire["retryAfterMs"])?.jsonPrimitive?.long
+      fakeDaemonClient = FakeDaemonToolClient()
+      DaemonSocketClientManager.testClient = fakeDaemonClient
+      sleeps.clear()
+      fakeDaemonClient.queueExecutePlanResponse(buildDaemonResponse(wire, true))
+      fakeDaemonClient.queueExecutePlanResponse(buildDaemonResponse(successPayload()))
+      val result =
+        executePlan(
+          AutoMobilePlanExecutionOptions(maxRetries = if (waits) 0 else 2, aiAssistance = false),
+        )
+      assertEquals(file.name, waits, result.success)
+      assertEquals(
+        file.name,
+        if (waits) listOf(maxOf(500L, hint ?: 0L)) else emptyList<Long>(),
+        sleeps,
+      )
+      assertEquals(file.name, if (waits) 2 else 1, fakeDaemonClient.executePlanCalls)
+      if (code == "device_unhealthy") {
+        if (waits) {
+          hinted = hinted || hint != null
+          unbounded = unbounded || hint == null
+        } else {
+          permanent = permanent || !recovering
+          assertUnhealthyMessage(result.errorMessage, wire)
+          assertTrue(
+            result.errorMessage,
+            result.errorMessage.contains("Replace the device with killDevice then startDevice."),
+          )
+        }
+      }
+    }
+    assertTrue(hinted && unbounded && permanent)
+  }
+
+  @Test
+  fun `recovery give up spends exactly the bounded budget and reports recovery`() {
+    for ((name, lead) in
+      listOf(
+        "device_unhealthy" to "Device is still being recovered",
+        "session_held_by_recovery" to "Session's device is still being recovered",
+      )) {
+      val wire = recoveryPayload(File(recoveryFixtureDir(), "$name.json"))
+      val sleeps = mutableListOf<Long>()
+      AutoMobilePlanExecutor.deviceOwnedSleeper = { sleeps.add(it) }
+      fakeDaemonClient = FakeDaemonToolClient()
+      DaemonSocketClientManager.testClient = fakeDaemonClient
+      fakeDaemonClient.setResponse("executePlan", buildDaemonResponse(wire, true))
+      val result = executePlan(AutoMobilePlanExecutionOptions(maxRetries = 0, aiAssistance = false))
+      assertEquals(false, result.success)
+      assertEquals(30_000L, sleeps.sum())
+      assertEquals(sleeps.size + 1, fakeDaemonClient.executePlanCalls)
+      assertTrue(result.errorMessage, result.errorMessage.contains("$lead ($name)"))
+      assertTrue(
+        result.errorMessage,
+        result.errorMessage.contains("The runner waited 30000ms for the recovery to finish."),
+      )
+      if (name == "device_unhealthy") assertUnhealthyMessage(result.errorMessage, wire)
+    }
+  }
+
+  @Test
+  fun `failed health frames wait or fail with reasons from details`() {
+    var waitingUnhealthy = false
+    var nonWaitingUnhealthy = false
+    for (file in
+      File(recoveryFixtureDir(), "surfaces").listFiles()!!.filter {
+        it.name.startsWith("socket-frame.") && it.extension == "json"
+      }) {
+      val wire = json.parseToJsonElement(file.readText()).jsonObject.getValue("payload").jsonObject
+      val code = wire["code"]?.jsonPrimitive?.content
+      if (code !in setOf("device_unhealthy", "session_held_by_recovery")) continue
+      val frame =
+        json.decodeFromString(
+          DaemonResponse.serializer(),
+          JsonObject(wire + ("id" to JsonPrimitive("frame"))).toString(),
+        )
+      val sleeps = mutableListOf<Long>()
+      AutoMobilePlanExecutor.deviceOwnedSleeper = { sleeps.add(it) }
+      fakeDaemonClient = FakeDaemonToolClient()
+      DaemonSocketClientManager.testClient = fakeDaemonClient
+      fakeDaemonClient.queueExecutePlanResponse(frame)
+      fakeDaemonClient.queueExecutePlanResponse(buildDaemonResponse(successPayload()))
+      val waits =
+        wire["retryable"] == JsonPrimitive(true) &&
+          (code == "session_held_by_recovery" ||
+            (wire["details"] as? JsonObject)?.get("recovering") == JsonPrimitive(true))
+      val hint = wire["retryAfterMs"]?.jsonPrimitive?.long
+      if (code == "device_unhealthy") {
+        waitingUnhealthy = waitingUnhealthy || waits
+        nonWaitingUnhealthy = nonWaitingUnhealthy || !waits
+      }
+      val result =
+        executePlan(
+          AutoMobilePlanExecutionOptions(maxRetries = if (waits) 0 else 2, aiAssistance = false),
+        )
+      assertEquals(waits, result.success)
+      assertEquals(if (waits) listOf(maxOf(500L, hint ?: 0L)) else emptyList<Long>(), sleeps)
+      assertEquals(if (waits) 2 else 1, fakeDaemonClient.executePlanCalls)
+      if (!waits && code == "device_unhealthy") {
+        assertUnhealthyMessage(result.errorMessage, wire)
+        assertTrue(
+          result.errorMessage,
+          result.errorMessage.contains("Replace the device with killDevice then startDevice."),
+        )
+      }
+    }
+    assertTrue(waitingUnhealthy && nonWaitingUnhealthy)
   }
 
   @Test

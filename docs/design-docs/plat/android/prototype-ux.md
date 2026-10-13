@@ -168,7 +168,9 @@ the system setting. Every per-mode form below reads that one resolved mode. A de
   no `maxWidth`/`maxHeight` cap and no `aspectRatio`, no non-zero `offset`, no rounded corner
   (`cornerRadius` absent, `0`, `none` or all corners `0`) and no `pressScale` below one. A root
   that fails any of these lets the app show at an edge or corner, so only an opaque fullscreen
-  scrim behind it can still make the window opaque.
+  scrim behind it can still make the window opaque. A chromeless fullscreen window can report
+  `prototypeOpaque: true` when opacity is 100 and its root or scrim is solid; a fullscreen window
+  with the translucent dismiss bar still reports false.
 
 ### Live appearance (#11221, `prototype_appearance_v1`)
 
@@ -207,7 +209,8 @@ context follows the same value as one on the service context.
 ## Windows
 
 `window` has required `placement` and optional integer `opacity` (0–100, default
-100). Opacity applies to the entire prototype, including content and scrims.
+100). Opacity fades authored content and scrims. Fullscreen windows (with either
+chrome mode) and persistent non-fullscreen windows keep their host controls opaque.
 
 | Placement `type` | Properties                                                                                                               |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------ |
@@ -237,6 +240,22 @@ Optional `persistence` (#10494) is `session` (default) or `device`. See
 Lifecycle and safety. Both fields are honoured only by a CtrlProxy that advertises
 `prototype_window_options_v1`; the request decoder ignores unknown spec fields, so
 the host refuses them for an older device instead of sending them.
+
+Optional `chrome` (#12064) is `none` (default) or `bar`, fullscreen placement only,
+on a device advertising `prototype_window_chrome_v1`. `persistence: "device"`
+defaults to `bar`. `none` fills the window including under the status bar; use
+`safeAreaPadding` on the top edge of a `topAppBar` or top content. Relative sheet
+detents use the full window height. CtrlProxy intercepts a stationary two-finger
+long press for 1 s before authored content and reveals a host dismiss pill for
+5 s; single-pointer taps and swipes cannot reveal it. The host wrapper also exposes
+the `Dismiss AutoMobile prototype` accessibility dismiss action without touch.
+While touch exploration (TalkBack) is enabled, the pill stays visible with no
+gesture or timeout. Spec opacity fades only the content, keeping the pill opaque
+even at opacity 0. A CtrlProxy without `prototype_window_chrome_v1` keeps the bar,
+and the host refuses explicit `none`; omitted chrome and `bar` succeed.
+`lastResult.chrome` reports the effective chrome
+on a successful fullscreen show and in subsequent host-local status, absent on
+sheet/floating windows, dismiss, failed show and adopted prototypes.
 
 ## Common node properties
 
@@ -330,8 +349,9 @@ shape as the iOS agent (#11409). The event `pages` map still carries every pager
 state key may be absent (sheet closed); an existing value must be boolean. A
 swipe dismissal with `dismissOnSwipe: true` writes `!equals` to that key, making
 the condition false. Defaults: `dragHandle: true`, `dismissOnSwipe: true`. Setting
-both false is permitted; the host's non-removable safety dismiss control remains
-outside author content (#9307). Detents are unique values: positive `{dp: n}`,
+both false is permitted; the host escape remains outside author control (the
+dismiss bar, or a two-finger long press on a device advertising
+`prototype_window_chrome_v1`, #12064). Detents are unique values: positive `{dp: n}`,
 `"half"`, or `"full"`. They preserve author order. Half/full refer to the prototype
 window's height. Sheet node scrim applies inside that window, not beyond a
 floating or sheet window's bounds. A modal sheet intercepts touches inside the
@@ -977,19 +997,42 @@ inset padding does not reinterpret their coordinate origin.
 
 ## Lifecycle and safety
 
-Fullscreen windows reserve an opaque host row above clipped authored content, with
-“Dismiss AutoMobile prototype”. Its visibility, style and opacity are independent of
-the spec, including modal sheets and `window.opacity: 0`. The authored content
-viewport excludes the host row; relative sheet detents use that remaining height.
-Spec opacity continues
-to apply to authored content and scrims; it cannot fade the safety control.
+#12064 reverses the #9307 "non-removable dismiss control" default: chromeless
+fullscreen is the default on a device advertising `prototype_window_chrome_v1`,
+the bar is opt-in, and CtrlProxy's host escape is a stationary two-finger long
+press for 1 s anywhere on the window that reveals a small dismiss pill for 5 s.
+Recognition cancels authored touch handling and swallows the rest of that gesture.
+A second hold restarts the pill's timeout; a replacing show hides it. A
+host-owned wrapper exposes the `Dismiss AutoMobile prototype` accessibility
+dismiss action without touch, and touch exploration (TalkBack) keeps the pill
+permanently visible. Both the pill and the accessibility action dismiss with
+reason `user` and remain usable at spec opacity 0. Back is not the exit: its
+existing behavior is unchanged, dismissing only while a text field makes the
+window focusable. Agent dismiss, a replacing show, authored dismiss, the
+five-minute session idle TTL, last-client disconnect and service teardown keep
+working. Home hides a session prototype when its app leaves the foreground.
+A CtrlProxy that does not advertise `prototype_window_chrome_v1` keeps the bar,
+and explicit `none` is refused by the host.
 
+Two safety cases still need device verification: 3-button navigation with
+`layer: "system"`, and a prototype shown with no application window in front
+(which Home does not hide).
+
+With `none`, authored content fills the full window including under the status
+bar; top content needs top-edge `safeAreaPadding`, and relative sheet detents use
+the full window height. With `bar` (including the older-device fallback), the
+translucent host row remains above clipped authored content, independent of spec
+style and opacity; its height is excluded from the authored viewport.
+Both fullscreen modes keep the window alpha at 1 and fade only authored content
+and its scrim, so the host dismiss control never inherits spec opacity.
 A `persistence: "device"` prototype outlives its host session: it is not dismissed
 when the last client disconnects (including a show queued after that edge), it
 has no idle TTL, and its uploaded assets are kept until it is dismissed. Because
 nobody may be connected to remove it, sheet and floating windows also carry an
 opaque “Close” control drawn above the authored content, and spec opacity fades
-only the content. It ends through that control or the fullscreen dismiss row
+only the content. Fullscreen defaults to `bar`; a device advertising
+`prototype_window_chrome_v1` also honours explicit `none` with the hidden escape.
+It ends through that control, the fullscreen dismiss row or revealed pill
 (`user`), `dismiss_prototype` (`agent`), a replacing show, or service
 unbind/destroy (`teardown`). Keyguard hiding is unchanged.
 

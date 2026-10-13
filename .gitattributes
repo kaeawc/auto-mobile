@@ -154,3 +154,4 @@ test/fixtures/refusal-wire-hints/*.json text eol=lf
 test/lint/*-baseline.txt text eol=lf
 
 test/fixtures/android-boot-admission/README.md text eol=lf
+test/fixtures/gradle-retry/*.log text eol=lf

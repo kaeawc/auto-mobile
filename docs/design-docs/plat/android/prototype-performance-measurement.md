@@ -131,6 +131,7 @@ method is called. The async-section calls also need API 29.
 | `Prototype.node`               | `RenderPrototypeNodeContent`, first and last statement of the body                                                          | Synchronous, constant name; slices per frame = nodes recomposed    | in renderer |
 | `Prototype.host.show`          | `PrototypeHost.showOnMain`, whole body                                                                                      | Synchronous                                                        | pending     |
 
-The slice count of `Prototype.node` inside one `Prototype.compose` is the number of nodes a state change
-recomposed, which is the epic's target metric; `Prototype.mapRenderTree` should appear at most once per
-`Prototype.interact`.
+Count `Prototype.node` slices per frame (per `Choreographer#doFrame`) to measure the number of nodes
+recomposed, which is the epic's target metric. Those inside `Prototype.compose` come from a new render
+model; node-local recompositions can run outside that slice. `Prototype.mapRenderTree` should appear
+at most once per `Prototype.interact`.

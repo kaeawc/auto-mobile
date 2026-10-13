@@ -130,6 +130,7 @@ fun PrototypeSpecContent(
     CompositionLocalProvider(
       LocalPrototypeAnchorLocals provides anchorLocals,
       LocalPrototypeRetainedSubtrees provides remember(root) { prototypeRetainedSubtrees(root) },
+      LocalPrototypeHandleVisuals provides remember(root) { prototypeHandleVisuals(root) },
     ) {
       val fillsWindow = LocalPrototypeFillsWindow.current
       Box(Modifier.semantics { testTagsAsResourceId = true }) {
@@ -825,13 +826,10 @@ private fun prototypeNodeModifier(
 ): Modifier {
   val style = node.style.source
   val actions = node.source?.onTap.orEmpty()
-  val tappable =
-    actions.isNotEmpty() &&
-      node.role != "textField" &&
-      node.role !in PROTOTYPE_MODAL_ROLES &&
-      node.role !in PROTOTYPE_COMPONENT_ROLES &&
-      node.role !in PROTOTYPE_SELECTION_ROLES &&
-      node.role !in PROTOTYPE_MATERIAL_ROLES
+  val tappable = prototypeNodeTappable(node)
+  val handleVisual =
+    (node.role == "icon" || node.role == "image") &&
+      node.identity in LocalPrototypeHandleVisuals.current
   val presses = remember { MutableInteractionSource() }
   var modifier: Modifier = Modifier
   // Outermost: the anchor fixes where the whole node, offset and touch target included, lands on
@@ -891,7 +889,7 @@ private fun prototypeNodeModifier(
       tappable,
       node.children,
       node.contentDescription,
-    )
+    ) ?: if (handleVisual) node.role else null
   val state =
     prototypeStateDescription(node.role, node.page, node.children.size, prototypePickerValue(node))
   // A layout container with nothing of its own to report gets no semantics node, so its children
@@ -910,7 +908,7 @@ private fun prototypeNodeModifier(
     }
   } else if (
     !isSemanticsFreeContainer(node, tappable, description, state) &&
-      !isDecorativePrototypeVisual(node, tappable)
+      (handleVisual || !isDecorativePrototypeVisual(node, tappable))
   ) {
     modifier = modifier.semantics {
       if (node.role != "textField" && node.role !in SEMANTICS_FREE_CONTAINERS) {

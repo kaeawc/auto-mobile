@@ -256,10 +256,12 @@ Authoring choices:
   is cached and runs off the main thread. Further per-recomposition work in images and icons is
   *being changed (#12138)*. The iOS image path was not checked.
 - **Accessibility nodes.** On Android a decorative \`icon\` or \`image\` (not tappable,
-  no \`testTag\`, no \`contentDescription\`) reports no node. A tappable \`box\`,
+  no \`testTag\`, no \`contentDescription\`) reports no node, except inside a tappable node with
+  no text of its own and no \`contentDescription\`, where icons and images keep their node and label
+  because they are the only way to find it. A tappable \`box\`,
   \`row\`, \`column\` or \`card\` whose only text is one \`text\` node is one node
   labelled by that text when its descendants have no independent tags, actions, descriptions,
-  controls or visibility conditions. Non-tappable text, icon and image nodes are never labelled
+  controls or visibility conditions. Other non-tappable text, icon and image nodes are never labelled
   with their kind; empty tappable ones keep the kind as their only selector handle. An unlabelled,
   non-tappable layout container (\`box\`, \`row\`, \`column\`, \`scroll\`, \`pager\`, \`card\`,
   \`divider\`, \`spacer\`) with no text, \`testTag\`, content description or state also reports

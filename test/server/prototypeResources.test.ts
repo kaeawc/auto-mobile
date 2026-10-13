@@ -90,6 +90,7 @@ describe("automobile:prototype resource", () => {
     const section = guide.slice(cost, errors);
     expect(section).toContain("a decorative `icon` or `image`");
     expect(section).toContain("labelled by that text");
+    expect(section).toContain("where icons and images keep their node and label");
     expect(section).not.toContain("Being changed (#12135)");
     for (const issue of [
       "#12133",

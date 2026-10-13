@@ -16,6 +16,57 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class PrototypeSelectorCompatibilityTest {
   @Test
+  fun `unlabelled tap owners retain their exact visual selectors`() {
+    val tap = listOf<PrototypeAction>(PrototypeEmitAction("select"))
+    val root =
+      PrototypeColumnNode(
+        children =
+          listOf(
+            PrototypeRowNode(
+              onTap = tap,
+              children = listOf(PrototypeIconNode(name = "arrow_back"), PrototypeSpacerNode()),
+            ),
+            PrototypeRowNode(
+              onTap = tap,
+              children =
+                listOf(PrototypeIconNode(name = "home"), PrototypeIconNode(name = "settings")),
+            ),
+            PrototypeBoxNode(
+              onTap = tap,
+              children = listOf(PrototypeImageNode(asset = PrototypeModeValue.Single("missing"))),
+            ),
+            PrototypeRowNode(
+              onTap = tap,
+              children =
+                listOf(PrototypeIconNode(name = "mail"), PrototypeTextNode(text = "Inbox")),
+            ),
+            PrototypeColumnNode(children = listOf(PrototypeIconNode(name = "star"))),
+            PrototypeBoxNode(onTap = tap, children = listOf(PrototypeIconNode(name = "add"))),
+          ),
+      )
+    PrototypeSemanticsRender(semanticsSpec(root)).use { rendered ->
+      for (text in listOf("arrow_back", "home", "settings", "image")) {
+        val matches = rendered.nodes.filter { it.hasExactPrototypeText(text) }
+        assertTrue("missing exact visual selector: $text", matches.isNotEmpty())
+        assertTrue(
+          "no clickable ancestor for: $text",
+          matches.any { node ->
+            generateSequence(node) { it.parent }
+              .any { it.config.contains(SemanticsActions.OnClick) }
+          },
+        )
+      }
+      assertFalse(rendered.nodes.any { it.hasExactPrototypeText("mail") })
+      assertFalse(rendered.nodes.any { it.hasExactPrototypeText("star") })
+      val inbox = rendered.nodes.single { it.hasExactPrototypeText("Inbox") }
+      assertEquals("row", inbox.config[PrototypeRole])
+      assertTrue(inbox.config.contains(SemanticsActions.OnClick))
+      val singleIcon = rendered.nodes.filter { it.hasExactPrototypeText("add") }
+      assertEquals(setOf("box", "icon"), singleIcon.map { it.config[PrototypeRole] }.toSet())
+    }
+  }
+
+  @Test
   fun `every benchmark scenario selector resolves exactly in its scenario state`() {
     val initial = benchmarkSemanticsSpec()
     val scenarios =

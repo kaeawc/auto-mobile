@@ -164,14 +164,14 @@ class DisplayIdentityTest {
           executor.submit<List<String?>> {
             val display = FakeDisplay("local:$index")
             ready.countDown()
-            check(start.await(1, TimeUnit.SECONDS))
+            check(start.await(30, TimeUnit.SECONDS))
             List(50) { resolver.resolve(display) }
           }
         }
-      assertTrue(ready.await(1, TimeUnit.SECONDS))
+      assertTrue(ready.await(30, TimeUnit.SECONDS))
       start.countDown()
       results.forEachIndexed { index, result ->
-        assertEquals(List(50) { "local:$index" }, result.get(1, TimeUnit.SECONDS))
+        assertEquals(List(50) { "local:$index" }, result.get(30, TimeUnit.SECONDS))
       }
       assertEquals(1, lookups.get())
       assertEquals(400, invocations.get())

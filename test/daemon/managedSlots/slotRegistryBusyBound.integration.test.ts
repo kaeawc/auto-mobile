@@ -72,7 +72,14 @@ describe("registry busy bound (real SQLite)", () => {
         db: peerDb,
         provider: slotRegistryMigrationProvider,
       }).getMigrations();
-      expect(pending.filter((migration) => migration.executedAt === undefined)).toHaveLength(1);
+      expect(
+        pending
+          .filter((migration) => migration.executedAt === undefined)
+          .map((migration) => migration.name),
+      ).toEqual([
+        "2026_10_12_004_free_device_deletion",
+        "2026_10_13_005_free_device_deletion_failed_deletes",
+      ]);
       peer.exec("COMMIT");
       locked = false;
       const reopened = await openSqliteSlotRegistry({ dbPath });

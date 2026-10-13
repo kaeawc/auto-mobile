@@ -31,13 +31,18 @@ import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { executionTracker, sessionExecutionMetadataOf } from "./executionTracker";
+import {
+  executionTracker,
+  sessionExecutionMetadataOf,
+  subscribeRequestCancellation,
+} from "./executionTracker";
 import { withAdmittedSessionEcho } from "./routedSessionEcho";
 import { withForeignOwnedSessionMeta } from "./routedSessionMeta";
 import { holdsOwnerHeartbeatLease } from "../daemon/managedExecutionLiveness";
 import { combineRequestAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
+import { sessionForToolBinding } from "./sessionForToolBinding";
 import { dropToolCallRecording } from "./toolCallRecordingManager";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { DaemonSessionCreationRejectedError, TerminalSessionError } from "../daemon/sessionManager";
@@ -1474,11 +1479,17 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const endExecutionOnce = (): void => {
       if (!executionEnded) {
         executionEnded = true;
+        unsubscribeRequestCancellation();
         executionTracker.endExecution(execution.id);
       }
     };
     const requestSignal = combineRequestAbortSignals(
       execution.abortController.signal,
+      extra.signal,
+    );
+    const unsubscribeRequestCancellation = subscribeRequestCancellation(
+      executionTracker,
+      execution.id,
       extra.signal,
     );
     const handlerParams =
@@ -1763,9 +1774,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         !readOutsideBoundSession &&
         !isRecordingIdCleanup &&
         !isDeviceInventoryTool(name)
-          ? daemonSessionManager.getSessionForNewExecution(
+          ? sessionForToolBinding(
+              daemonSessionManager,
               providedSessionUuid,
               sessionExecutionMetadataOf(execution),
+              tool.isDeviceReadOnlyCall?.(parsedParams) === true,
             )
           : undefined;
       if (

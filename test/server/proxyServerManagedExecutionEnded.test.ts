@@ -85,18 +85,19 @@ async function callThrough(
 
 test("a managed connection answers a released slot session with managed_execution_ended", async () => {
   const { error } = await callThrough(readyManagedSlotsResult(SESSION), {
-    throws: new DaemonBoundSessionExpiredError(SESSION, "heartbeat_timeout"),
+    throws: new DaemonBoundSessionExpiredError(SESSION, "heartbeat-timeout"),
   });
   expect(error).toMatchObject({
     code: "managed_execution_ended",
     retryable: false,
     nextAction: "relaunch_execution",
     sessionUuid: SESSION,
-    reason: "heartbeat_timeout",
+    reason: "heartbeat-timeout",
     slotIndex: 1,
     assignmentGeneration: 3,
   });
   expect(error).not.toHaveProperty("recovery");
+  expect(error).not.toHaveProperty("idle");
 });
 
 test("the managed refusal never points the agent at getAndroid or getApple", async () => {

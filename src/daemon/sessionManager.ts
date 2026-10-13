@@ -1,3 +1,4 @@
+import { ignoresManagedExecutionIdleDeadline } from "./managedExecutionLiveness";
 import type { DeferredRebindCleanup } from "./acquisitionReceipt";
 import type { TimingData } from "../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
@@ -85,6 +86,7 @@ import { deviceReadinessRank, type DeviceReadinessLevel } from "../devices/Devic
 import {
   getCliSessionIdleTimeoutMs as resolveCliSessionIdleTimeoutMs,
   MAX_CLI_SESSION_IDLE_TIMEOUT_MS,
+  SESSION_RELEASE_DRAIN_TIMEOUT_MS,
   sanitizeCliSessionIdleTimeoutMs as sanitizeRequestedCliIdleTimeoutMs,
 } from "./constants";
 import { isAndroidEmulatorSerial, isAndroidTransportAddressSerial } from "../utils/androidSerial";
@@ -112,7 +114,10 @@ import {
   type LivenessOwnerHold,
   type LivenessOwnerLeaseSnapshot,
 } from "./livenessOwnerLease";
-import { isReleaseVetoedByExecutions } from "./unsettledExecutionVeto";
+import {
+  isReleaseVetoedByExecutions,
+  UNSETTLED_EXECUTION_VETO_CEILING_MS,
+} from "./unsettledExecutionVeto";
 import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   getSessionHeartbeatCheckIntervalMs,
@@ -125,6 +130,7 @@ import {
   DeviceOwnedByOtherDaemonError,
   SESSION_NO_LONGER_OWNS_DEVICE_CODE,
   SESSION_REBINDING_CODE,
+  SESSION_HELD_BY_RECOVERY_CODE,
   SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
   SessionCreationTimeoutError,
   SessionReleasedDuringCreationError,
@@ -711,7 +717,11 @@ export class SessionTerminalReleaseInProgressError extends ActionableError {
   }
 }
 
-export { SESSION_NO_LONGER_OWNS_DEVICE_CODE, SESSION_REBINDING_CODE };
+export {
+  SESSION_NO_LONGER_OWNS_DEVICE_CODE,
+  SESSION_REBINDING_CODE,
+  SESSION_HELD_BY_RECOVERY_CODE,
+};
 export { SessionNoLongerOwnsDeviceError };
 
 /**
@@ -730,6 +740,25 @@ export class SessionRebindingError extends ActionableError {
         "retry shutdown after it settles.",
     );
     this.name = "SessionRebindingError";
+  }
+}
+
+/** A late control call waits for session-preserving recovery before judging idle expiry. */
+export class SessionHeldByRecoveryError extends ActionableError {
+  readonly code = SESSION_HELD_BY_RECOVERY_CODE;
+  readonly retryable = true;
+  readonly retryAfterMs = DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS;
+
+  constructor(
+    readonly sessionUuid: string,
+    readonly deviceId: string,
+  ) {
+    super(
+      `Session ${sessionUuid} is past its idle deadline and its device ${deviceId} is being recovered ` +
+        `(code ${SESSION_HELD_BY_RECOVERY_CODE}); retry after the recovery settles to receive ` +
+        "either the live session or the terminal idle answer.",
+    );
+    this.name = "SessionHeldByRecoveryError";
   }
 }
 
@@ -830,9 +859,13 @@ export interface SessionExecutionMetadata {
 type SessionClockExecution = SessionExecutionMetadata & { sessionClockStartTime: number };
 
 export interface ActiveSessionExecutionQuery {
+  /** Count only session-preserving recovery, without consulting tracked executions. */
+  recoveryOnly?: boolean;
   startedAtOrBefore?: number;
   /** Compare the start captured on the session clock, immune to wall-clock steps (#11290). */
   sessionClockStartedAtOrBefore?: number;
+  /** Admission only: count non-aborted work within its deadline or its undated allowance. */
+  liveOnSessionClock?: { at: number; undatedForMs: number };
   excludeExecutionId?: string;
   /** Count control calls only: reads never hold idle or owner-disconnect release (#11381). */
   excludeReads?: boolean;
@@ -946,8 +979,12 @@ interface SessionReleaseOperation extends PendingSessionRelease {
   /** Owner proof received during this release; never advances session activity or idle clocks. */
   ownerHeartbeatDuringRelease?: number;
   commitFenced?: boolean;
+  /** A declined commit fence keeps the session live; its rewrite has no forced-release bound. */
+  commitDeclined?: boolean;
   /** When the release started; bounds the retry hint for a bind it refuses (#10960). */
   startedAtMs?: number;
+  /** Captured before teardown can clear state: first attempts, two writes and scheduling slack. */
+  stuckDeadlineMs: number;
   /** Ownership holds bound teardown from their cap while waiting, and from their end once settled. */
   teardownStartsByMs?: number;
   /** Set for an idle release the manager started itself (#11481): see `getIdleReleasesInProgress`. */
@@ -1228,14 +1265,14 @@ export interface RebindSessionOptions {
   deferCleanup?: (cleanup: DeferredRebindCleanup) => void;
 }
 
-const KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS = 1_000;
+export const KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS = 1_000;
 /**
  * A failed keep-awake restore leaves a physical device that never sleeps, so — like the network
  * restorer — it is retried inside the pending cleanup, then handed to health recovery (#11145).
  */
 const KEEP_SCREEN_AWAKE_RESTORE_RETRY_ATTEMPTS = 2;
 const KEEP_SCREEN_AWAKE_RESTORE_RETRY_DELAY_MS = 250;
-const BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS = 1_000;
+export const BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS = 1_000;
 /**
  * A failed restore leaves the simulator holding session-modified enrollment, so
  * the device must not return to the idle pool on the strength of one attempt.
@@ -1244,7 +1281,7 @@ const BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS = 1_000;
  */
 const BIOMETRIC_ENROLLMENT_RESTORE_RETRY_ATTEMPTS = 2;
 const BIOMETRIC_ENROLLMENT_RESTORE_RETRY_DELAY_MS = 250;
-const NETWORK_CONDITION_RESTORE_TIMEOUT_MS = 1_000;
+export const NETWORK_CONDITION_RESTORE_TIMEOUT_MS = 1_000;
 /**
  * Clock restore ends with `adb unroot`, which restarts adbd: the device goes offline and the
  * restore only finishes once it reconnects (a few seconds on an emulator). The network path's
@@ -1299,13 +1336,11 @@ function isNonRetryableRotationRestoreError(error: unknown): boolean {
 }
 export const SESSION_SETUP_DRAIN_TIMEOUT_MS = 1_000;
 /**
- * Overall budget for the restores one release runs through the ambient signal
- * (keep-awake, biometric, network), measured from the start of the drain with the
- * injected Timer. Release teardown runs under its own signal, not the caller's, so
- * this bound is what stops a wedged device command from holding the device
- * quarantined; the screen-reader, clock and rotation restores keep their own budgets
- * and abandon mechanisms. Sized well above the three 1 s attempts plus their 250 ms
- * retries, below the screen-reader budget (#10198).
+ * Cap for pending keep-awake, biometric and network teardown retries, measured with the
+ * injected Timer. The release awaits their separately bounded first attempts, then hands
+ * pending work back as device cleanup. Teardown runs under its own signal, not the caller's;
+ * this cap stops wedged retries from holding the device quarantined. Screen-reader, clock
+ * and rotation restores keep their own budgets and abandon mechanisms (#10198).
  */
 export const SESSION_RELEASE_TEARDOWN_CAP_MS = 10_000;
 /**
@@ -1313,26 +1348,52 @@ export const SESSION_RELEASE_TEARDOWN_CAP_MS = 10_000;
  * path that has no budget of its own, so a wedged DB write would otherwise hold the session's
  * device forever. A terminal release that reaches it keeps the session fenced in memory, frees
  * the device, and leaves the row for a later release to persist. It is longer than the shutdown
- * release drain, so a write wedged at shutdown still keeps the database open and the release on
- * the drain's daemon-shutdown fallback path.
+ * release drain by 1 s, so a write wedged at shutdown still keeps the database open and the
+ * release on the drain's daemon-shutdown fallback path.
  */
-export const SESSION_RELEASE_PERSIST_TIMEOUT_MS = 10_000;
-/** Slack beyond bounded teardown and both release writes before the monitor forces a release. */
-const SESSION_RELEASE_STUCK_MARGIN_MS = 10_000;
+export const SESSION_RELEASE_PERSIST_TIMEOUT_MS = SESSION_RELEASE_DRAIN_TIMEOUT_MS + 1_000;
+/**
+ * Scheduling slack between stages separated only by microtasks; monitor scan granularity is
+ * budgeted separately. This is the only slack a release waiting on a pending rebind gets.
+ */
+export const SESSION_RELEASE_STUCK_MARGIN_MS = 2_000;
+/** First attempts plus two row writes and scheduling slack: 18 s without own-budget state. */
 export const SESSION_RELEASE_STUCK_DEADLINE_MS =
-  SESSION_RELEASE_TEARDOWN_CAP_MS +
+  SESSION_SETUP_DRAIN_TIMEOUT_MS +
+  KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS +
+  BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS +
+  NETWORK_CONDITION_RESTORE_TIMEOUT_MS +
   2 * SESSION_RELEASE_PERSIST_TIMEOUT_MS +
   SESSION_RELEASE_STUCK_MARGIN_MS;
 
 /**
- * Force at the first scan at or after the stuck deadline measured from the release's own start,
- * even when a monitor reap joins it: one interval, then the capped forced quarantine. A second
- * interval allows a late timer tick so the advertised hint never understates the cleanup bound.
- * Only monitor-tracked releases are forced; terminal explicit releases rely on their own stages.
+ * The first attempts a release actually awaits: 18 s plus clock (15 s), rotation (1 s) and
+ * screen-reader (35 s) budgets when it carries that state. Pending retries do not hold release.
  */
-export function getSessionReleaseCleanupWorstCaseMs(env: NodeJS.ProcessEnv = process.env): number {
+export function getSessionReleaseStuckDeadlineMs(
+  state?: Pick<SessionCacheData, "clock" | "rotation" | "screenReader">,
+): number {
   return (
     SESSION_RELEASE_STUCK_DEADLINE_MS +
+    (state?.clock ? CLOCK_RESTORE_TIMEOUT_MS : 0) +
+    (state?.rotation ? NETWORK_CONDITION_RESTORE_TIMEOUT_MS : 0) +
+    (state?.screenReader ? SCREEN_READER_RESTORE_TIMEOUT_MS : 0)
+  );
+}
+
+/**
+ * Force at the first scan at or after the per-release deadline measured from teardown's start
+ * (the ownership hold's cap while pending), even when a monitor reap joins it: one interval,
+ * then the capped forced quarantine. A second interval allows a late timer tick. With the
+ * default 2 s interval this advertises 32 s without clock, rotation or screen-reader state.
+ * Every release in flight is tracked and forced by the monitor at its stuck deadline.
+ */
+export function getSessionReleaseCleanupWorstCaseMs(
+  env: NodeJS.ProcessEnv = process.env,
+  state?: Pick<SessionCacheData, "clock" | "rotation" | "screenReader">,
+): number {
+  return (
+    getSessionReleaseStuckDeadlineMs(state) +
     2 * getSessionHeartbeatCheckIntervalMs(env) +
     SESSION_RELEASE_TEARDOWN_CAP_MS
   );
@@ -1497,7 +1558,9 @@ function restartRecoveryDeadlineFromPersisted(
     return undefined;
   }
   const restartWindowEnd = persisted.released_at_ms + DEVICE_RESTART_RECOVERY_WINDOW_MS;
-  return callerInFlight ? restartWindowEnd : Math.min(persisted.expires_at_ms, restartWindowEnd);
+  return callerInFlight || ignoresManagedExecutionIdleDeadline(persisted.liveness_policy)
+    ? restartWindowEnd
+    : Math.min(persisted.expires_at_ms, restartWindowEnd);
 }
 
 /** The persisted handoff's fixed window; idle activity never moves this deadline. */
@@ -1660,6 +1723,8 @@ export class SessionManager {
   private readonly pendingDeviceCleanupWork = new Map<string, Set<Promise<unknown>>>();
   /** Bounds belong to individual promises and disappear as each settles. */
   private readonly pendingDeviceCleanupBounds = new Map<string, Set<PendingDeviceCleanupBound>>();
+  /** Capped teardown promises retain the shield's deadline when transferred to device cleanup. */
+  private readonly teardownCleanupBounds = new WeakMap<Promise<void>, number>();
   /**
    * Work started by the device's current acquisition (owner-less recording stop, #11041). It never
    * blocks the live holder, but counts as cleanup once the device has no owner again.
@@ -2223,6 +2288,39 @@ export class SessionManager {
   }
 
   private readonly healthRecoveries = new Map<string, Promise<void>>();
+  private readonly healthRecoveryDeadlines = new Map<string, number | undefined>();
+
+  /** Whether a background recovery for this marker is still running, and its remaining bound (#12112). */
+  getDeviceHealthRecovery(
+    deviceId: string,
+    incarnation: number,
+    reason: DeviceHealthReason,
+  ): { recovering: boolean; retryAfterMs?: number } {
+    if (this.deviceHealth?.incarnation(deviceId) !== incarnation) {
+      return { recovering: false };
+    }
+    // Clock restoration owns a separate pending registry and retries without a bounded batch.
+    if (reason === "clock") {
+      return {
+        recovering: [...(this.pendingClockRestores.get(deviceId)?.values() ?? [])].some(
+          (target) => !target.removed,
+        ),
+      };
+    }
+    const key = `${deviceId}#${incarnation}:${reason}`;
+    if (!this.healthRecoveries.has(key)) {
+      return { recovering: false };
+    }
+    const deadline = this.healthRecoveryDeadlines.get(key);
+    return {
+      recovering: true,
+      ...(deadline !== undefined &&
+      !this.identityReplacementFences.has(deviceId) &&
+      this.deviceHealth.canRecover(deviceId)
+        ? { retryAfterMs: Math.max(1, Math.ceil(deadline - this.timer.now())) }
+        : {}),
+    };
+  }
 
   /** Optional pool wiring, preserving existing positional constructors. */
   setDeviceHealthMarkers(
@@ -2323,9 +2421,21 @@ export class SessionManager {
     // running under an aborted request signal or an expired teardown shield, and a
     // recovery attempt that inherited it would fail before reaching the device (#10198).
     const generation = this.replacedRestoreGenerations.get(target.deviceId) ?? 0;
+    // The existing backoff policies are deterministic; sample each delay once for both
+    // scheduling and the bound, and re-use that attempt's delay on skipped ticks (#12112).
+    const delays = [1, 2, 3].map((attempt) => health.backoff.delayForAttempt(attempt));
+    const remainingBudget = (attempt: number, sleeping: boolean) =>
+      delays
+        .slice(attempt - 1)
+        .reduce(
+          (total, delay, index) =>
+            total + restoreTimeoutMs * (attempt + index) + (index > 0 || sleeping ? delay : 0),
+          0,
+        );
     const recovery = runWithAbortSignal(undefined, async () => {
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        await this.timer.sleep(health.backoff.delayForAttempt(attempt));
+      for (let attempt = 1; attempt <= 3;) {
+        this.healthRecoveryDeadlines.set(key, this.timer.now() + remainingBudget(attempt, true));
+        await this.timer.sleep(delays[attempt - 1]!);
         if (
           !(await this.waitForIdentityReplacement(target.deviceId, generation)) ||
           !this.restoreIncarnationIsCurrent(target)
@@ -2338,11 +2448,15 @@ export class SessionManager {
           return;
         }
         if (!health.canRecover(target.deviceId)) {
+          if (!this.acceptingSessionCreations) {
+            return;
+          }
           continue;
         }
         const timeout = new Error("Device health recovery timed out");
         // Async wrapper: a synchronous throw from `restore` becomes this attempt's rejection.
         const inFlight = this.dispatchDeviceRestore(target.deviceId, restore, generation);
+        this.healthRecoveryDeadlines.set(key, this.timer.now() + remainingBudget(attempt, false));
         try {
           // Later attempts get a scaled deadline: a device slow enough to miss the
           // first one is likely to need longer, not to fail outright (#11145).
@@ -2363,11 +2477,16 @@ export class SessionManager {
           // retry: the marker stays while it runs, so no new session can race it.
           // Await it instead of giving up, so one slow command does not quarantine
           // the device until a kill/restart (#11145).
+          if (error === timeout) {
+            this.healthRecoveryDeadlines.set(key, undefined);
+          }
           if (error === timeout && (await this.inFlightRestoreSucceeded(inFlight, target))) {
             this.clearRestoreHealth(target, reason);
             return;
           }
         }
+        // Only the dispatch above consumes an attempt; a busy/cleanup tick re-arms it.
+        attempt++;
       }
     });
     this.healthRecoveries.set(key, recovery);
@@ -2378,6 +2497,7 @@ export class SessionManager {
       .finally(() => {
         if (this.healthRecoveries.get(key) === recovery) {
           this.healthRecoveries.delete(key);
+          this.healthRecoveryDeadlines.delete(key);
         }
       });
   }
@@ -2786,11 +2906,16 @@ export class SessionManager {
   getDeviceCleanupRetryAfterMs(deviceId: string): number {
     const now = this.sessionNow();
     const bounds = Array.from(this.activeReleasePromises)
-      .filter((release) => !release.forced && release.session.assignedDevice === deviceId)
+      .filter(
+        (release) =>
+          !release.forced && !release.commitDeclined && release.session.assignedDevice === deviceId,
+      )
       .map(
         (release) =>
           (release.teardownStartsByMs ?? release.startedAtMs ?? now) +
-          getSessionReleaseCleanupWorstCaseMs(),
+          release.stuckDeadlineMs +
+          2 * getSessionHeartbeatCheckIntervalMs() +
+          SESSION_RELEASE_TEARDOWN_CAP_MS,
       );
     for (const record of this.pendingDeviceCleanupBounds.get(deviceId) ?? []) {
       if (record.start) {
@@ -2901,6 +3026,26 @@ export class SessionManager {
   }
 
   /**
+   * Terminal releases without an idle expiry origin that still hold their device. Together with
+   * the idle and non-terminal lists, this lets the heartbeat monitor enforce the advertised
+   * cleanup bound for every release, even when no monitor reap ever joins it.
+   */
+  getTerminalReleasesInProgress(): { sessionId: string; startedAtMs: number }[] {
+    return Array.from(this.activeReleasePromises)
+      .filter(
+        (release) =>
+          !release.forced &&
+          !release.commitDeclined &&
+          release.expiryOrigin === undefined &&
+          isTerminalReleaseReason(release.reason.value),
+      )
+      .map((release) => ({
+        sessionId: release.session.sessionId,
+        startedAtMs: release.startedAtMs ?? this.sessionNow(),
+      }));
+  }
+
+  /**
    * Whether the release of `sessionId` that started at `startedAtMs` (session clock) is still
    * running and still holds its device, whatever reason it carries now (#11554). The heartbeat
    * monitor asks this of a release it tracks once that release leaves the lists above: one a
@@ -2914,6 +3059,18 @@ export class SessionManager {
         release.session.sessionId === sessionId &&
         release.startedAtMs === startedAtMs,
     );
+  }
+
+  /** The unforced release's absolute stuck deadline on the session clock, if still in flight. */
+  getReleaseStuckAtMs(sessionId: string): number | undefined {
+    const release = Array.from(this.activeReleasePromises).find(
+      (release) =>
+        !release.forced && !release.commitDeclined && release.session.sessionId === sessionId,
+    );
+    return release
+      ? (release.teardownStartsByMs ?? release.startedAtMs ?? this.sessionNow()) +
+          release.stuckDeadlineMs
+      : undefined;
   }
 
   /**
@@ -2939,7 +3096,12 @@ export class SessionManager {
     sessionId: string,
   ): { deviceId: string; stage: SessionReleaseStage | undefined } | undefined {
     const operation = this.releasePromises.get(sessionId);
-    if (!operation || operation.forced || !this.activeReleasePromises.has(operation)) {
+    if (
+      !operation ||
+      operation.forced ||
+      operation.commitDeclined ||
+      !this.activeReleasePromises.has(operation)
+    ) {
       return undefined;
     }
     const { session } = operation;
@@ -3914,7 +4076,7 @@ export class SessionManager {
       return this.terminalizeRestartRecoveryHandoff(persisted, onlyIfOwnedByDaemon);
     }
     if (
-      persisted.expires_at_ms > now ||
+      persistedSessionExpiryReason(persisted, now) === undefined ||
       (persisted.release_reason &&
         (isTerminalReleaseReason(persisted.release_reason) ||
           sessionReleaseReasonTraits(persisted.release_reason).releasedBeforeHandout))
@@ -4088,7 +4250,8 @@ export class SessionManager {
       return undefined;
     }
     const reason = this.isRowOwnedByLivePeer(persisted)
-      ? persisted.expires_at_ms <= this.sessionNow()
+      ? !ignoresManagedExecutionIdleDeadline(persisted.liveness_policy) &&
+        persisted.expires_at_ms <= this.sessionNow()
         ? "expired"
         : undefined
       : persistedSessionExpiryReason(persisted, this.sessionNow());
@@ -4158,7 +4321,8 @@ export class SessionManager {
   /**
    * Resolve a session before a new tool execution is accepted. A timely control call still in
    * flight keeps the session in use, so another control call may join it after the idle deadline.
-   * Calls that all began late cannot revive the session by counting each other.
+   * Only live timely control work admits it: late or non-live calls end the idle session at once.
+   * Recovery alone preserves the hold and refuses the late call with a typed retryable answer.
    */
   getSessionForNewExecution(
     sessionId: string,
@@ -4183,13 +4347,13 @@ export class SessionManager {
     }
     const startedExecution = execution && this.executionOnSessionClock(execution);
     if (expireDespiteActiveExecution) {
-      if (this.isLateExecutionWhileEarlierWorkIsActive(session, startedExecution, true)) {
+      if (
+        this.isLateExecutionWhileEarlierWorkIsActive(session, startedExecution, "timely-control")
+      ) {
         return session;
       }
-      if (this.isLateExecutionWhileEarlierWorkIsActive(session, startedExecution)) {
-        throw new Error(
-          `Session ${sessionId} expired before this execution began while earlier work is still active.`,
-        );
+      if (this.isLateExecutionWhileEarlierWorkIsActive(session, startedExecution, "recovery")) {
+        throw new SessionHeldByRecoveryError(sessionId, session.assignedDevice);
       }
     }
     if (this.shouldExpireSession(session, expireDespiteActiveExecution, startedExecution)) {
@@ -5677,7 +5841,7 @@ export class SessionManager {
     } else {
       const pending = await this.restoreRebindOverrides(existing);
       if (pending.length > 0) {
-        this.trackPendingDeviceCleanup(previousDevice, pending);
+        this.trackPendingTeardownCleanup(previousDevice, pending);
       }
     }
     // Preserve object identity so an already-started release observes the
@@ -5727,6 +5891,8 @@ export class SessionManager {
   ): DeferredRebindCleanup {
     const gate = Promise.withResolvers<void>();
     let state: "deferred" | "started" | "cancelled" | "rebound" = "deferred";
+    let resolved = false;
+    const capMs = SESSION_CREATE_WAIT_TIMEOUT_MS + SESSION_RELEASE_TEARDOWN_CAP_MS;
     const incarnation = this.deviceHealth?.incarnation(oldView.assignedDevice);
     const mayRestore = () => {
       const holder = this.getSessionForDevice(oldView.assignedDevice);
@@ -5742,8 +5908,17 @@ export class SessionManager {
       this.iosAppNetworkLeases.stop(leaseKey);
       this.deferredRebindCleanups.delete(cleanup);
     };
+    const settle = () => {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      finish();
+      this.timer.clearTimeout(deadline);
+      gate.resolve();
+    };
     const start = (failedUndo = false) => {
-      if (state !== "deferred" && !(failedUndo && state === "cancelled")) {
+      if (resolved || (state !== "deferred" && !(failedUndo && state === "cancelled"))) {
         return;
       }
       state = "started";
@@ -5754,19 +5929,25 @@ export class SessionManager {
         logger.warn(
           `Not restoring rebound device ${oldView.assignedDevice}: runtime changed or reassigned`,
         );
-        gate.resolve();
+        settle();
         return;
       }
-      void runOutsideRequestContext(async () => {
-        const pending = await this.restoreRebindOverrides(oldView, mayRestore);
-        await Promise.allSettled(pending);
-      }).then(gate.resolve, (error: unknown) => {
-        logger.warn(
-          `Deferred rebind cleanup failed on ${oldView.assignedDevice}: ${errorMessage(error)}`,
-          error,
-        );
-        gate.resolve();
-      });
+      const run = Promise.resolve()
+        .then(() =>
+          runOutsideRequestContext(async () => {
+            const pending = await this.restoreRebindOverrides(oldView, mayRestore);
+            this.trackPendingTeardownCleanup(oldView.assignedDevice, pending);
+            await Promise.allSettled(pending);
+          }),
+        )
+        .catch((error: unknown) => {
+          logger.warn(
+            `Deferred rebind cleanup failed on ${oldView.assignedDevice}: ${errorMessage(error)}`,
+            error,
+          );
+        });
+      this.registerPendingDeviceCleanup(oldView.assignedDevice, run);
+      settle();
     };
     const cleanup: DeferredRebindCleanup = {
       settled: gate.promise,
@@ -5785,10 +5966,13 @@ export class SessionManager {
         return true;
       },
       finish: (outcome) => {
+        if (resolved) {
+          return;
+        }
         if (state === "cancelled") {
           if (outcome === "rebound") {
             state = "rebound";
-            gate.resolve();
+            settle();
           } else {
             // Only failed undo may restart cancelled restores, using the same old-device view.
             start(true);
@@ -5803,9 +5987,21 @@ export class SessionManager {
         }
       },
     };
-    // Reuse the creation/release-finalization wait (40s); an orphaned receipt cannot reserve A forever.
+    // Start deferred restores at the creation wait; cancellation only clears this soft timer.
+    // At the hard deadline an unfinished undo hands quarantine to the restores, too.
     const bound = this.timer.setTimeout(cleanup.commit, SESSION_CREATE_WAIT_TIMEOUT_MS);
     bound.unref?.();
+    const deadline = this.timer.setTimeout(() => {
+      if (state === "cancelled") {
+        logger.warn(
+          `Deferred rebind cleanup deadline on ${oldView.assignedDevice} after ${capMs}ms: undo did not finish in time`,
+        );
+        start(true);
+      } else {
+        start();
+      }
+    }, capMs);
+    deadline.unref?.();
     this.deferredRebindCleanups.set(cleanup, {
       sessionId: oldView.sessionId,
       deviceId: oldView.assignedDevice,
@@ -5817,11 +6013,7 @@ export class SessionManager {
         () => state === "deferred" && this.getSessionForDevice(oldView.assignedDevice) === null,
       );
     }
-    this.registerPendingDeviceCleanup(
-      oldView.assignedDevice,
-      gate.promise,
-      SESSION_CREATE_WAIT_TIMEOUT_MS + SESSION_RELEASE_TEARDOWN_CAP_MS,
-    );
+    this.registerPendingDeviceCleanup(oldView.assignedDevice, gate.promise, capMs);
     return cleanup;
   }
 
@@ -6095,9 +6287,10 @@ export class SessionManager {
 
   /**
    * Whether this daemon holds `sessionId` as a live managed slot execution (#11275): present, on
-   * the `managed-execution` policy, not expired and not being released. A session rehydrated after
-   * a restart and still waiting for its proxy counts: the heartbeat monitor releases it if the proxy
-   * never returns. Side-effect free: an expired session is reported dead, never released here.
+   * the `managed-execution` policy and not being released. The stored idle deadline does not
+   * decide managed liveness; a lapsed owner lease stays live until the heartbeat path actually
+   * releases the session. A rehydrated session waiting for its proxy counts until released too.
+   * Side-effect free apart from the stall probe every lookup runs.
    */
   isLiveManagedExecutionSession(sessionId: string): boolean {
     const session = this.getSessionInternal(sessionId, false, undefined, false);
@@ -6252,6 +6445,7 @@ export class SessionManager {
       reason,
       judgeSuspectOwnerAtCommit,
       startedAtMs: this.sessionNow(),
+      stuckDeadlineMs: getSessionReleaseStuckDeadlineMs(session.cacheData),
       expiryOrigin: options.expiryOrigin,
       forcedAbort: new AbortController(),
     };
@@ -6813,6 +7007,8 @@ export class SessionManager {
       // can overtake a device-loss eviction. Fence before the terminal snapshot
       // is persisted so a declined release leaves no terminal trace behind.
       if (releaseSuperseded(shouldCommit)) {
+        // releaseSessionAttempt always supplies its operation before entering teardown.
+        operation!.commitDeclined = true;
         return this.abandonSupersededRelease(sessionId, deviceId, pendingCleanup);
       }
       const releasedAtMs = this.sessionNow();
@@ -6863,6 +7059,7 @@ export class SessionManager {
       // the live session keeps routing, and the terminal row it wrote is
       // rewritten live so a restart rehydrates it (#11206).
       if (releaseSuperseded(shouldCommit)) {
+        operation!.commitDeclined = true;
         return await this.abandonReleaseSupersededAfterPersist(
           session,
           releaseSnapshot,
@@ -6949,7 +7146,7 @@ export class SessionManager {
   ): boolean {
     const removed = this.removeSession(sessionId, session);
     if (pendingCleanup.length > 0) {
-      this.trackPendingDeviceCleanup(deviceId, pendingCleanup);
+      this.trackPendingTeardownCleanup(deviceId, pendingCleanup);
     }
     if (!removed) {
       logger.warn(`Skipping release finalization for ${sessionId}: session ownership changed`);
@@ -7060,7 +7257,7 @@ export class SessionManager {
       settled = true;
     });
     const capError = new Error("Session release teardown cap reached");
-    return raceWithDeadline(tracked, {
+    const bounded = raceWithDeadline(tracked, {
       timer: this.timer,
       timeoutMs: Math.max(0, SESSION_RELEASE_TEARDOWN_CAP_MS - (this.sessionNow() - startedAtMs)),
       label: "Session release teardown",
@@ -7076,6 +7273,20 @@ export class SessionManager {
         throw error;
       }
     });
+    this.teardownCleanupBounds.set(bounded, startedAtMs + SESSION_RELEASE_TEARDOWN_CAP_MS);
+    return bounded;
+  }
+
+  private trackPendingTeardownCleanup(deviceId: string, cleanups: readonly Promise<void>[]): void {
+    for (const cleanup of cleanups) {
+      const settlesBy = this.teardownCleanupBounds.get(cleanup);
+      if (settlesBy !== undefined) {
+        this.trackDeviceCleanupBound(this.pendingDeviceCleanupBounds, deviceId, cleanup, {
+          settlesBy,
+        });
+      }
+    }
+    this.trackPendingDeviceCleanup(deviceId, cleanups);
   }
 
   private async startReleaseTeardown(
@@ -7109,6 +7320,12 @@ export class SessionManager {
       async () => {
         pendingSetups =
           setups.length > 0 ? (await this.waitForSessionSetup(sessionId, setups)).pending : null;
+        if (operation) {
+          operation.stuckDeadlineMs = Math.max(
+            operation.stuckDeadlineMs,
+            getSessionReleaseStuckDeadlineMs(session.cacheData),
+          );
+        }
         return { pending: pendingSetups, setup: true };
       },
       async () => ({
@@ -7357,7 +7574,7 @@ export class SessionManager {
       this.terminalReleaseJournal.resolve(sessionId);
     }
     if (pendingCleanup.length > 0) {
-      this.trackPendingDeviceCleanup(deviceId, pendingCleanup);
+      this.trackPendingTeardownCleanup(deviceId, pendingCleanup);
     }
     logger.info(
       `Skipping release of ${sessionId}: a newer identity confirmation superseded the eviction of ${deviceId}`,
@@ -12592,6 +12809,10 @@ export class SessionManager {
    * Check if session is expired
    */
   private isSessionExpired(session: Session): boolean {
+    // Owner loss, including a lapsed lease, belongs to the heartbeat monitor.
+    if (ignoresManagedExecutionIdleDeadline(session.livenessPolicy)) {
+      return false;
+    }
     // A CLI-owned session (#6870) is governed solely by the wall-clock idle
     // policy `SessionHeartbeatMonitor` applies, which releases it as
     // `cli-idle-timeout`. The ordinary expiry deadline must not release it
@@ -12713,6 +12934,9 @@ export class SessionManager {
     session: Session,
     execution?: SessionClockExecution,
   ): boolean {
+    if (ignoresManagedExecutionIdleDeadline(session.livenessPolicy)) {
+      return false;
+    }
     // A lookup that carries no execution (routing resolution: autolock, setActiveDevice, the
     // lifecycle ownership check) is not a call that arrived after the deadline; it only asks who
     // holds the device. It must respect the unsettled-execution veto exactly as the idle sweep
@@ -12730,21 +12954,34 @@ export class SessionManager {
   }
 
   /**
-   * A late call while other control work or recovery holds the session. Only a timely control
-   * call admits new control work; the unbounded check preserves the hold without admission.
+   * A late call while control work or recovery holds the session. Only live timely control
+   * work admits it; recovery alone refuses control with a retryable answer. The unbounded view
+   * lets late reads use the held device sessionlessly without releasing any hold.
    */
   private isLateExecutionWhileEarlierWorkIsActive(
     session: Session,
     execution: SessionClockExecution | undefined,
-    timelyControlOnly = false,
+    hold: "any" | "timely-control" | "recovery" = "any",
   ): boolean {
+    if (ignoresManagedExecutionIdleDeadline(session.livenessPolicy)) {
+      return false;
+    }
     const idleDeadline = sessionIdleDeadline(session);
     return (
       execution !== undefined &&
       this.sessionNow() > idleDeadline &&
       execution.sessionClockStartTime > idleDeadline &&
       this.activeSessionExecutionChecker(session.sessionId, {
-        ...(timelyControlOnly ? { sessionClockStartedAtOrBefore: idleDeadline } : {}),
+        ...(hold === "timely-control"
+          ? {
+              sessionClockStartedAtOrBefore: idleDeadline,
+              liveOnSessionClock: {
+                at: this.sessionNow(),
+                undatedForMs: UNSETTLED_EXECUTION_VETO_CEILING_MS,
+              },
+            }
+          : {}),
+        ...(hold === "recovery" ? { recoveryOnly: true } : {}),
         excludeExecutionId: execution.executionId,
         excludeReads: true,
       })

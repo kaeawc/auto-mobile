@@ -859,7 +859,7 @@ export class DaemonClient {
   private createInboundFramer(): LineFramer {
     return new LineFramer(this.maxInboundFrameBytes, {
       onLine: (line) => this.handleInboundLine(line),
-      onOverflow: () => this.handleInboundOverflow(),
+      onOverflow: (head) => this.handleInboundOverflow(head),
     });
   }
 
@@ -887,14 +887,64 @@ export class DaemonClient {
     logger.warn("Dropped daemon frame: invalid response or notification envelope");
   }
 
-  private handleInboundOverflow(): void {
+  /** Owner request id, null for a positively unrelated frame, undefined for an unreadable head. */
+  private overflowingResponseId(head?: Buffer): string | null | undefined {
+    const prefix = head?.toString("utf8");
+    if (!prefix?.startsWith('{"')) {
+      return undefined;
+    }
+    try {
+      const keyEnd = this.overflowStringEnd(prefix, 1);
+      const key: unknown = JSON.parse(prefix.slice(1, keyEnd + 1));
+      if (key !== "id") {
+        return null;
+      }
+      if (!prefix.slice(keyEnd + 1).startsWith(':"')) {
+        return undefined;
+      }
+      const idStart = keyEnd + 2;
+      const idEnd = this.overflowStringEnd(prefix, idStart);
+      const id: string = JSON.parse(prefix.slice(idStart, idEnd + 1));
+      return this.pendingRequests.has(id) ? id : null;
+    } catch {
+      // An incomplete or invalid id is expected in a bounded head; attribute nothing.
+      logger.debug("Oversized daemon frame head contained no complete response id");
+      return undefined;
+    }
+  }
+
+  /** Locate a quoted key/id's end; JSON.parse validates its escapes and contents. */
+  private overflowStringEnd(prefix: string, start: number): number {
+    for (let index = start + 1; index < prefix.length; index++) {
+      if (prefix[index] === "\\") {
+        index++;
+      } else if (prefix[index] === '"') {
+        return index;
+      }
+    }
+    return -1;
+  }
+
+  private handleInboundOverflow(head?: Buffer): void {
     const error = new DaemonFrameTooLargeError(this.maxInboundFrameBytes);
     logger.warn(error.message);
+    const attribution = this.overflowingResponseId(head);
+    const owner =
+      attribution === undefined && this.pendingRequests.size === 1
+        ? this.pendingRequests.keys().next().value
+        : attribution;
     const socket = this.socket;
-    for (const pending of this.pendingRequests.values()) {
+    for (const [requestId, pending] of this.pendingRequests) {
       this.timer.clearTimeout(pending.timeout);
       pending.removeAbortListener?.();
-      pending.reject(error);
+      pending.reject(
+        requestId === owner
+          ? error
+          : new DaemonUnavailableError(
+              `Daemon socket connection lost: another frame on the connection exceeded ${this.maxInboundFrameBytes} bytes`,
+              { cause: error },
+            ),
+      );
     }
     this.pendingRequests.clear();
     try {

@@ -43,8 +43,10 @@ import {
 } from "../daemon/managedSlots/managedSlotRefusal";
 import {
   RetryableDeviceAcquisitionError,
+  DeviceUnhealthyError,
   SESSION_NO_LONGER_OWNS_DEVICE_CODE,
   SESSION_REBINDING_CODE,
+  SESSION_HELD_BY_RECOVERY_CODE,
   SESSION_RELEASED_DURING_CREATION_CODE,
   SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
 } from "../daemon/deviceAcquisitionRefusals";
@@ -153,6 +155,7 @@ function toolCallErrorText(error: unknown, message: string): string {
 function hasSelfDescribedRefusalPayload(
   error: unknown,
 ): error is
+  | DeviceUnhealthyError
   | PlanExecutionInProgressError
   | AmbiguousDeviceTargetError
   | DeviceAssignedToManagedSlotError
@@ -164,19 +167,20 @@ function hasSelfDescribedRefusalPayload(
   | AppNotRunningError
   | ManagedSlotDiscoveryIncompleteError
   | ManagedSlotOwnershipUnconfirmedError {
-  return (
-    error instanceof PlanExecutionInProgressError ||
-    error instanceof AmbiguousDeviceTargetError ||
-    error instanceof DeviceAssignedToManagedSlotError ||
-    error instanceof DeviceOutsideManagedSlotsError ||
-    error instanceof DeviceOutsideBoundSessionError ||
-    error instanceof SessionOutsideBoundSessionError ||
-    error instanceof InputDeviceOwnedError ||
-    error instanceof DeviceGestureRecordingStartUnheldError ||
-    error instanceof AppNotRunningError ||
-    error instanceof ManagedSlotDiscoveryIncompleteError ||
-    error instanceof ManagedSlotOwnershipUnconfirmedError
-  );
+  return [
+    DeviceUnhealthyError,
+    PlanExecutionInProgressError,
+    AmbiguousDeviceTargetError,
+    DeviceAssignedToManagedSlotError,
+    DeviceOutsideManagedSlotsError,
+    DeviceOutsideBoundSessionError,
+    SessionOutsideBoundSessionError,
+    InputDeviceOwnedError,
+    DeviceGestureRecordingStartUnheldError,
+    AppNotRunningError,
+    ManagedSlotDiscoveryIncompleteError,
+    ManagedSlotOwnershipUnconfirmedError,
+  ].some((Refusal) => error instanceof Refusal);
 }
 
 /** The typed fields of a device or session refusal, after `success` and `error`. */
@@ -239,18 +243,18 @@ function isSuspectSessionError(
   );
 }
 
-/** Session refusals around a kill's terminal release that carry their own wire code. */
+/** Session refusals carrying their own wire code, including recovery-held late control. */
 const TYPED_SESSION_REFUSAL_CODES: ReadonlySet<unknown> = new Set([
   SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
   SESSION_NO_LONGER_OWNS_DEVICE_CODE,
   SESSION_REBINDING_CODE,
+  SESSION_HELD_BY_RECOVERY_CODE,
   SESSION_RELEASED_DURING_CREATION_CODE,
 ]);
 
 /**
- * A typed session refusal from a kill's terminal release (#11146, #11166, #11189): the session is
- * being terminally released (not retryable under that UUID), no longer owns the device (not
- * retryable as-is), or is mid-rebind (retryable after `retryAfterMs`). Matched on its wire `code`
+ * A typed session refusal: terminally releasing or no longer owning the device is not retryable
+ * as-is; a rebind or recovery hold is retryable after `retryAfterMs`. Matched on its wire `code`
  * so this module does not import the daemon's session manager.
  */
 function isTypedSessionRefusal(error: unknown): error is Error & {

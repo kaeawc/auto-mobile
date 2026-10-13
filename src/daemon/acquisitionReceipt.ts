@@ -2,10 +2,11 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { Platform } from "../models";
 import type { Session, SessionCacheData } from "./sessionManager";
 
-/** The old device stays quarantined until delivery cleanup or undo's bind-back settles. */
+/** The old device stays quarantined for delivery cleanup or undo, then hands off to tracked restores. */
 export interface DeferredRebindCleanup {
+  /** The bounded gate phase is over; started restores may still quarantine the device independently. */
   readonly settled: Promise<void>;
-  /** Undo owns this still-closed gate after preventing restores from starting. */
+  /** Undo retains the old-device snapshot only until it finishes or the gate's hard deadline starts restores. */
   readonly retained: boolean;
   commit(): void;
   /** True only when undo prevented every restore from starting. */

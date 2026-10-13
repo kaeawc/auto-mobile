@@ -195,7 +195,9 @@ There are three execution endings to observe, as documented in
   releasing sessions. Only simulate this on processes your batch started.
 
 Managed release retains the slot's device assignment. Heartbeats and reads do
-not extend the managed idle window; release does not delete the device.
+never move managed activity clocks. A managed execution stays held beyond 2 minutes
+with a live owner and proxy heartbeat, regardless of its stored idleTimeoutMs. It ends
+on owner exit, heartbeat loss or explicit release; release does not delete the device.
 
 ## Raw daemon frames
 

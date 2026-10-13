@@ -117,13 +117,17 @@
   [[ "$output" == *"/tmp/control-proxy-debug.apk"* ]]
 }
 
-@test "pull request CtrlProxy build compiles the release variant" {
+@test "pull request CtrlProxy debug build and required JVM Consumer Checks compile both variants" {
   wiring_requires_yq
   local workflow=".github/workflows/pull_request.yml"
 
   run yq -r '.jobs."build-android-control-proxy".steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' "$workflow"
   [ "$status" -eq 0 ]
   [[ "$output" == *":control-proxy:assembleDebug"* ]]
+  [[ "$output" != *":control-proxy:assembleRelease"* ]]
+  [ "$(yq -r '.jobs."jvm-consumer-checks".name' "$workflow")" = "JVM Consumer Checks" ]
+  run yq -r '.jobs."jvm-consumer-checks".steps[] | select(.uses == "./.github/actions/gradle-task-run") | .with."gradle-tasks"' "$workflow"
+  [ "$status" -eq 0 ]
   [[ "$output" == *":control-proxy:assembleRelease"* ]]
 }
 

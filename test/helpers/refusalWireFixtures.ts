@@ -21,6 +21,7 @@ import {
 } from "../../src/features/bootAdmission/BootAdmissionGate";
 import {
   DeviceCleanupInProgressError,
+  DeviceUnhealthyError,
   DeviceOwnedByOtherDaemonError,
   DeviceShuttingDownError,
   DeviceTransportOfflineError,
@@ -91,6 +92,7 @@ import {
   UnissuedSessionError,
   SessionRecoveryIdentityLossError,
   SessionRebindingError,
+  SessionHeldByRecoveryError,
   SessionSuspectError,
   SessionTerminalReleaseInProgressError,
   TerminalSessionError,
@@ -170,6 +172,25 @@ export const REFUSAL_FIXTURES_DIR = join(import.meta.dir, "..", "fixtures", "ref
 
 const SESSION = "11111111-2222-4333-8444-555555555555";
 const DEVICE = "emulator-5554";
+
+/** Health refusal variants are built by the real class; no reason-specific wire contract (#12112). */
+export function unhealthyRefusal(variant = "bounded"): DeviceUnhealthyError {
+  const recovering = variant !== "permanent";
+  return new DeviceUnhealthyError(
+    [
+      {
+        deviceId: DEVICE,
+        reason: "network-condition",
+        recovering,
+        ...(recovering && variant !== "unbounded" ? { retryAfterMs: 12863 } : {}),
+      },
+      ...(variant === "all_candidates"
+        ? [{ deviceId: "emulator-5556", reason: "app-cleanup", recovering: false }]
+        : []),
+    ],
+    "Unhealthy devices cannot be assigned: restoration is unresolved.",
+  );
+}
 
 export function shapedRefusalResult(error: unknown): RefusalWireResult {
   return shaped(error);
@@ -401,6 +422,18 @@ const BUILDERS: readonly FixtureEntry[] = [
     "DeviceCleanupInProgressError via shapeToolCallError",
     () => shaped(new DeviceCleanupInProgressError(DEVICE, 1_000)),
   ],
+  ...(
+    [
+      ["device_unhealthy", "bounded"],
+      ["device_unhealthy.recovering_unbounded", "unbounded"],
+      ["device_unhealthy.permanent", "permanent"],
+      ["device_unhealthy.all_candidates", "all_candidates"],
+    ] as const
+  ).map(([stem, variant]): readonly [string, string, () => RefusalWireResult] => [
+    stem,
+    "DeviceUnhealthyError via shapeToolCallError",
+    () => shaped(unhealthyRefusal(variant)),
+  ]),
   [
     "device_shutting_down",
     "DeviceShuttingDownError via shapeToolCallError",
@@ -509,12 +542,6 @@ const BUILDERS: readonly FixtureEntry[] = [
       ),
   ],
   [
-    "managed_execution_ended.released_cleanup_expired",
-    "managedEndedPayload",
-    () =>
-      jsonResult(managedEndedPayload(readyManagedSlotsResult(SESSION), SESSION, "cleanup-expired")),
-  ],
-  [
     "session_terminal_release_in_progress",
     "SessionTerminalReleaseInProgressError via shapeToolCallError",
     () =>
@@ -535,6 +562,11 @@ const BUILDERS: readonly FixtureEntry[] = [
     "session_rebinding",
     "SessionRebindingError via shapeToolCallError",
     () => shaped(new SessionRebindingError(SESSION)),
+  ],
+  [
+    "session_held_by_recovery",
+    "SessionHeldByRecoveryError via shapeToolCallError",
+    () => shaped(new SessionHeldByRecoveryError(SESSION, DEVICE)),
   ],
   [
     "daemon_session_suspect",
@@ -1001,6 +1033,8 @@ function terminalAtAdmission(releaseReason: SessionReleaseReason): TerminalSessi
 }
 
 const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
+  ["device_unhealthy", () => unhealthyRefusal()],
+  ["device_unhealthy.permanent", () => unhealthyRefusal("permanent")],
   [
     "discovery_incomplete.android",
     () =>

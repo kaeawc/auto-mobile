@@ -137,7 +137,7 @@ below are the defaults; the constants live in
   first heartbeat, any idle release or an owner-disconnect release, a read in flight
   neither holds nor extends the release (#11372, #11381). The same release cuts
   a read still running and answers it with the typed terminal refusal (#11384).
-- **Idle.** `DEFAULT_SESSION_IDLE_TIMEOUT_MS` (2 min) after the last control tool
+- **Idle.** Plain sessions use `DEFAULT_SESSION_IDLE_TIMEOUT_MS` (2 min) after the last control tool
   call ends. An idle release is terminal: the session UUID ends with it. The
   grace does not stretch it: a heartbeating session is released at the idle
   deadline. Heartbeats and reads (`observe`, `listDevices`, `doctor`,
@@ -145,7 +145,13 @@ below are the defaults; the constants live in
   call still in flight holds the release, until its request deadline plus 10 s
   (or the 30 min ceiling without a deadline). A read in flight never holds it;
   the release cuts the read with the typed terminal refusal `session_ownership_lost`.
-- **`idleReleaseAt`** is the idle deadline as wall-clock epoch milliseconds. The
+- **Managed executions.** Only `managed-execution` sessions are idle-exempt while
+  their owner lease is live or suspect. Owner exit, heartbeat loss and explicit release
+  end them; a hung but living owner with heartbeats holds indefinitely. A passed
+  persisted idle deadline does not prevent restart recovery; awaiting-owner and
+  device-restart windows still bound recovery. Other policies keep their idle behavior.
+- **`idleReleaseAt`** is the idle deadline as wall-clock epoch milliseconds, or `null`
+  for an exempt managed execution. Explicit null disables proxy-local idle fallback. The
   daemon computes it (session-clock instants are converted to wall time at the
   daemon boundary), reports it in the session hold diagnostics and the heartbeat
   acknowledgement, and clients should treat it as authoritative rather than
@@ -764,12 +770,29 @@ code (owner decision 2026-10-09, #10982): `device_cleanup_in_progress` while the
 device is still being released (#10960), and `device_owned_by_other_daemon` when
 another daemon holds it. Clients may wait and retry.
 
+A health marker refuses acquisition with `device_unhealthy` for every health
+reason (#12112). `devices` lists the unhealthy candidates in selection order,
+with each device's `deviceId`, oldest unresolved `reason`, and `recovering` state.
+A device is recovering only when every unresolved marker has a running recovery, and its bound is the largest marker bound only when all are computable.
+A single device also has top-level `deviceId` and `reason`. `retryable` and
+`recovering` are true while any listed device is recovering; `retryAfterMs`, when
+present, is the smallest remaining recovery bound, rounded up to at least 1 ms.
+Recovery waiting for a live owner, cleanup, identity replacement, or a timed-out
+command to settle has no computable bound; clock retries are also unbounded.
+Such refusals remain retryable without `retryAfterMs`. When recovery ends with
+the marker kept, the refusal is non-retryable: replace the device with
+`killDevice` then `startDevice`. This code has no `nextAction` and is not in the
+runners' device-wait code tables. Healthy candidates remain eligible; reads
+remain allowed on marked devices. Skipped recovery ticks re-arm the same
+attempt, and only a dispatched restore consumes one of the three attempts.
+In a plan failure result, top-level `deviceId` and `platform` identify the plan's device, while `devices[]` identifies the refused devices and top-level `reason`, `recovering`, `code`, `retryable`, and any `retryAfterMs` retain the refusal evidence.
+
 An exact Android acquisition also waits up to 5 s when adb still lists its
 transport as `offline` or `unauthorized` (#11713). If it stays transitional,
 `device_offline` carries `retryable: true`, `deviceId`, and a 1 s `retryAfterMs`
 hint. The refusal is retryable, and any existing pool entry is left untouched.
 
-Each refusal carries a `retryAfterMs` hint. For `device_cleanup_in_progress` it
+The acquisition refusals below carry a `retryAfterMs` hint. For `device_cleanup_in_progress` it
 is the time the cleanup can still take (#11360): the rest of an in-flight release's
 forced-release worst case, or of a registered cleanup's own cap, including a
 recording finalize's cap (120 s plus a 5 s grace),
@@ -780,15 +803,19 @@ push, location route stop, mock-location clear, and late-set clear, starting
 when its holder leaves. At the cap the manager abandons it, warns about possible
 leftover state, and frees the device from that cleanup's quarantine. Downloads
 staging, `putAppFile` to `user_files`, registrations with no bound, and internal
-release-teardown, late-setup, and rebind-restore transfers stay uncapped here
-and contribute no bound (a 1 s polling hint when nothing else bounds cleanup).
+late-setup and uncapped release-teardown/rebind-restore transfers contribute no
+bound (a 1 s polling hint when nothing else bounds cleanup); capped restores retain their bound.
 Trusted numeric caps remain owned by recording finalize, held-plan app cleanup,
 forced stuck release, network-condition TTL restore, deferred rebind gates, and
 bounded acquisition cleanups. An in-flight release
-advertises the stuck deadline from its own start plus two heartbeat-monitor intervals
-(one to scan, one for a late tick) plus 10 s quarantine (54 s with the default interval);
-the monitor only forces releases
-it tracks, while terminal explicit releases rely on their own bounded stages.
+advertises its recorded stuck deadline from teardown's start (the ownership hold's
+cap while pending): 18 s for setup drain, keep-awake, biometric and network first
+attempts, two 6 s row writes and 2 s scheduling slack, plus 15 s for clock, 1 s for
+rotation and 35 s for screen-reader state when it carries them. Two heartbeat-monitor
+intervals (one to scan, one for a late tick) and 10 s quarantine make the advertised
+bound 32 s without that state at the default 2 s interval;
+the monitor tracks every release in flight and forces it at its stuck deadline,
+including terminal explicit releases that no monitor reap joins.
 `device_shutting_down` always
 advertises 2 s: a shutdown reservation is held across several separately bounded
 steps (stop, wait for the device to disappear, restart handoff) and records no
@@ -819,6 +846,17 @@ refused with `session_rebinding` (`retryable: true`, with `retryAfterMs`), and a
 kill naming a device the session has left with `session_no_longer_owns_device`
 (`retryable: false`, no `nextAction`; check who holds the device before killing
 it, a new session would not help).
+
+A control call that begins after the idle deadline can join a live timely control
+call. Other late calls or tracked work that is aborted or past its request deadline
+cannot admit it: the session ends immediately with `session_ownership_lost`, reason
+`cleanup-expired`, `idle: true` and `nextAction: "acquire_new_session"`.
+If session-preserving device recovery is in flight, the hold and idle deadline
+stay unchanged instead. The late control call receives `session_held_by_recovery`
+with `sessionUuid`, `deviceId`, `retryable: true` and `retryAfterMs: 1000`.
+Retry after recovery settles; the retry receives either the live session or the
+terminal idle answer. A late read behind any hold still runs sessionlessly on the
+held device without releasing or refreshing the session.
 
 ## Device status in listings
 

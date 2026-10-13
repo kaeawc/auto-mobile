@@ -545,6 +545,48 @@
         }
       }
     },
+    "socket-frame.device_unhealthy": {
+      "expected": "retry",
+      "fields": {
+        "code": "device_unhealthy",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 12863,
+        "details": {
+          "deviceId": "emulator-5554",
+          "reason": "network-condition",
+          "recovering": true,
+          "devices": [
+            {
+              "deviceId": "emulator-5554",
+              "reason": "network-condition",
+              "recovering": true,
+              "retryAfterMs": 12863
+            }
+          ]
+        }
+      }
+    },
+    "socket-frame.device_unhealthy.permanent": {
+      "expected": "fail",
+      "fields": {
+        "code": "device_unhealthy",
+        "retryable": false,
+        "acquireNewSession": false,
+        "details": {
+          "deviceId": "emulator-5554",
+          "reason": "network-condition",
+          "recovering": false,
+          "devices": [
+            {
+              "deviceId": "emulator-5554",
+              "reason": "network-condition",
+              "recovering": false
+            }
+          ]
+        }
+      }
+    },
     "managed-slots-result.managed_slot_budget_exhausted.budget": {
       "expected": "retry",
       "fields": {

@@ -369,7 +369,11 @@ distinguished by the result type (`AppendTextFailureSource`), never by inspectin
     is in use.** No read counts as activity, not even the owner's own
     (#10964): a `deviceReadOnly` call is admitted read-only and its end is not
     use; the matrix's default "tool call" is a control call. A heartbeat renews the owner lease and never the idle deadline
-    (#10656). Every change to a liveness path ships a two-sided test: each
+    (#10656). Exception (#11340, owner decision 2026-10-12): only managed-execution
+    sessions with a non-lapsed owner lease (live or suspect) are idle-exempt. A hung
+    but alive owner with a healthy proxy heartbeat holds its slot indefinitely.
+    Heartbeat loss, owner exit and explicit release still end it; recovery ignores
+    persisted idle expiry and retains awaiting-owner and fixed restart bounds. Every change to a liveness path ships a two-sided test: each
     "kept while X" assertion is paired with "released when Y", driven by the
     real producers (the proxy's own keeper, tool calls, tokenless desktop
     heartbeats) on a `FakeTimer`. Add the row to

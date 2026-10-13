@@ -19,6 +19,20 @@ fun isDevicePersistent(spec: PrototypeSpec): Boolean =
     else -> error("window.persistence: Unknown persistence")
   }
 
+enum class PrototypeWindowChrome {
+  NONE,
+  BAR,
+}
+
+/** Fullscreen defaults to chromeless, except an unattended device-persistent window. */
+fun prototypeWindowChrome(spec: PrototypeSpec): PrototypeWindowChrome =
+  when (spec.window.chrome) {
+    "none" -> PrototypeWindowChrome.NONE
+    "bar" -> PrototypeWindowChrome.BAR
+    null -> if (isDevicePersistent(spec)) PrototypeWindowChrome.BAR else PrototypeWindowChrome.NONE
+    else -> error("window.chrome: Unknown chrome")
+  }
+
 fun mapPrototypePlacement(placement: SpecPlacement): PrototypePlacement =
   when (placement) {
     is PrototypeFullscreenPlacement ->

@@ -46,6 +46,7 @@ import {
   prototypeTextFieldBindings,
   verifyPrototypeTextTarget,
   type PrototypeTextTargetReader,
+  type PrototypeTextReading,
 } from "../prototype/prototypeTextTarget";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 import type { HierarchyCaptureRequest } from "../observe/HierarchyCapture";
@@ -79,7 +80,12 @@ import {
 import { withImeActionApproximationWarning } from "./imeActionApproximationWarning";
 import { imeActionFailedAfterTextEntered } from "./imeActionFailedAfterTextEntered";
 import type { KeyboardProfileId } from "./keyboardProfiles";
-import { TapOnElement, tapFocusFailure, type TapOnFocusResult } from "./TapOnElement";
+import {
+  TapOnElement,
+  tapFocusFailure,
+  tapResolvedLayer,
+  type TapOnFocusResult,
+} from "./TapOnElement";
 import { Keyboard } from "./Keyboard";
 import { prepareTargetDisplayAction, type RenderedObservationReader } from "./TargetDisplayAction";
 import { FieldTypeDetector } from "./FieldTypeDetector";
@@ -442,6 +448,8 @@ export interface SendKeysTargetFocuser {
       /** The resolved target is a password field. */
       passwordField?: boolean;
       identifiers?: readonly string[];
+      /** Layer of the resolved element, when known. */
+      layer?: HierarchyLayer;
     }
   >;
 }
@@ -3244,7 +3252,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
 
     if (operation === "replace") {
-      const textLength = getFocusedTextLength(focusResult.hierarchy, undefined, true);
+      const textLength =
+        getFocusedTextLength(focusResult.hierarchy, undefined, true) ??
+        (this.targetLayer === "prototype" ? 0 : undefined);
       if (textLength === undefined) {
         return {
           success: false,
@@ -3336,6 +3346,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       skipScreenshot: true,
     });
     const hierarchy = observation.viewHierarchy;
+    if (this.targetLayer === "prototype" && error === ANDROID_TYPE_FOCUSED_INPUT_ERROR) {
+      return { success: true, hierarchy: hierarchy ?? { hierarchy: {} } };
+    }
     if (!hierarchy || !hasFocusedTextInput(hierarchy)) {
       return {
         success: false,
@@ -3497,6 +3510,7 @@ export class SendKeys {
   private readonly displayTransitionReader: DisplayTransitionReader;
   /** The selector resolved to a password field during the current execute. */
   private focusedPasswordTarget = false;
+  private effectiveTargetLayer: HierarchyLayer | undefined;
 
   constructor(
     private readonly device: BootedDevice,
@@ -3543,6 +3557,7 @@ export class SendKeys {
             success: result.success,
             error: result.error,
             focusVerified: result.focusVerified,
+            layer: result[tapResolvedLayer],
             [tapFocusFailure]: result[tapFocusFailure],
             identifiers: [
               result.element?.["resource-id"],
@@ -3569,7 +3584,8 @@ export class SendKeys {
     this.prototypeTargetIdentifiers = [selector?.elementId, selector?.testTag].filter(
       (id): id is string => !!id,
     );
-    this.executor.setTargetLayer?.(options?.layer);
+    this.effectiveTargetLayer = options?.layer;
+    this.executor.setTargetLayer?.(this.effectiveTargetLayer);
     const result = await this.executeFocused(
       commands,
       selector,
@@ -4094,6 +4110,8 @@ export class SendKeys {
   ): ReturnType<SendKeysTargetFocuser["focus"]> {
     const result = await this.focusWithKeyboardRecovery(selector, signal, display, options);
     signal?.throwIfAborted();
+    this.effectiveTargetLayer = options.layer ?? result.layer ?? this.effectiveTargetLayer;
+    this.executor.setTargetLayer?.(this.effectiveTargetLayer);
     this.focusedPasswordTarget ||= result.passwordField === true;
     this.prototypeTargetIdentifiers = [
       ...this.prototypeTargetIdentifiers,
@@ -4272,6 +4290,7 @@ export class SendKeys {
       await beginPostActionCaptureAction();
       signal?.throwIfAborted();
       routing.onCommandStart?.();
+      const before = await this.readPrototypeBefore(command, routing, signal);
       const result = await this.executeCommand(
         command,
         signal,
@@ -4279,7 +4298,7 @@ export class SendKeys {
         routing.displayId,
         routing.display,
       );
-      return this.verifyPrototypeCommand(command, result, routing, signal);
+      return this.verifyPrototypeCommand(command, result, routing, signal, before);
     } catch (error) {
       signal?.throwIfAborted();
       logger.warn(`[SendKeys] ${command.action} command ${index} failed`, error);
@@ -4295,14 +4314,39 @@ export class SendKeys {
     }
   }
 
+  private async readPrototypeBefore(
+    command: SendKeysCommand,
+    routing: SendKeysRouting,
+    signal?: AbortSignal,
+  ): Promise<PrototypeTextReading | undefined> {
+    if (
+      this.effectiveTargetLayer !== "prototype" ||
+      command.action !== "type" ||
+      !command.text ||
+      this.focusedPasswordTarget
+    )
+      return undefined;
+    try {
+      return await this.prototypeTextTarget.read(
+        { identifiers: this.prototypeTargetIdentifiers, display: routing.display },
+        signal,
+      );
+    } catch (error) {
+      logger.warn("Prototype text before-read failed", error);
+      signal?.throwIfAborted();
+      return { kind: "unverifiable", reason: errorMessage(error) };
+    }
+  }
+
   private async verifyPrototypeCommand(
     command: SendKeysCommand,
     result: SendKeysCommandResult,
     routing: SendKeysRouting,
     signal?: AbortSignal,
+    before?: PrototypeTextReading,
   ): Promise<SendKeysCommandResult> {
     if (
-      routing.layer !== "prototype" ||
+      this.effectiveTargetLayer !== "prototype" ||
       command.action !== "type" ||
       !command.text ||
       !result.success ||
@@ -4318,6 +4362,7 @@ export class SendKeys {
       operation: command.operation ?? "insert",
       timer: this.timer,
       settleMs: IME_COMMIT_READ_BACK_SETTLE_MS,
+      before,
       signal,
     });
     return {

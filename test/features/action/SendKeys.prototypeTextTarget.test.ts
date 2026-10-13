@@ -1,3 +1,4 @@
+import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import { afterEach, beforeAll, expect, spyOn, test } from "bun:test";
 import {
   SendKeys,
@@ -64,6 +65,7 @@ function androidFrame(value: string, focused = true, secure = false, hint?: stri
             password: String(secure),
             "hint-text": hint,
             "resource-id": "ptf",
+            bounds: nodeAttributes(iosField).bounds,
           },
         },
       ];
@@ -113,6 +115,7 @@ const iosField = (() => {
 function iosPrototypeObservation(value: string) {
   const field = structuredClone(iosField);
   nodeAttributes(field).value = value;
+  nodeAttributes(field)["resource-id"] = "ptf";
   return {
     timestamp: 1,
     viewHierarchy: {
@@ -137,6 +140,7 @@ function harness(
     focus?: SendKeysDependencies["focuser"];
   } = {},
 ) {
+  const { focused, secure } = options;
   const device = platform === "android" ? android : ios;
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
@@ -147,10 +151,14 @@ function harness(
       ? androidFrame(options.value ?? "Rb one", options.focused, options.secure)
       : iosPrototypeObservation("old");
   const observer = {
-    execute: async (options = {}) => {
+    execute: async (
+      options: Parameters<NonNullable<SendKeysDependencies["observer"]>["execute"]>[0] = {},
+    ) => {
       reads.push(options);
       if (platform === "android") {
-        return frame;
+        return reads.length === 1 && options.hierarchyOnly
+          ? androidFrame("old", focused, secure)
+          : frame;
       }
       return iosPrototypeObservation(draft);
     },
@@ -190,12 +198,14 @@ function harness(
   return { ...h, action, run, reads, timer, keyboardCalls, observer };
 }
 
-function iosReader(values: unknown[] = ["Rb one"]) {
+function iosReader(values: unknown[] = ["Rb one"], before: unknown = "before") {
   const bindings = new InMemoryPrototypeTextFieldBindings();
   bindings.record(ios.deviceId, textSpec);
   const agent = new FakePrototypeAgentClient();
   agent.queueReplies(
-    ...values.map((value) => ({ status: { shown: true, id: "panel", state: { name: value } } })),
+    ...[before, ...values].map((value) => ({
+      status: { shown: true, id: "panel", state: { name: value } },
+    })),
   );
   const reader = new IosPrototypeTextTargetReader({
     deviceId: ios.deviceId,
@@ -267,12 +277,15 @@ test("Android refused and reverted text fails with stored value and final observ
   ]);
 });
 
-test("iOS accepted state is verified in exactly one status request with no warning", async () => {
+test("iOS accepted state has one before-read and one verification request with no warning", async () => {
   const r = iosReader();
   const result = await harness("ios", { reader: r.reader }).run();
   expect(result.success).toBe(true);
   expect(result.commands[0]?.warning).toBeUndefined();
-  expect(r.agent.requests.map((request) => request.type)).toEqual(["get_prototype_status"]);
+  expect(r.agent.requests.map((request) => request.type)).toEqual([
+    "get_prototype_status",
+    "get_prototype_status",
+  ]);
 });
 
 test("iOS prototype refuses stored state while its draft still shows typed text", async () => {
@@ -299,16 +312,16 @@ test("iOS prototype refuses stored state while its draft still shows typed text"
   expect(h.clientCalls).toEqual(["insert:Rb one"]);
   expect(h.keyboardCalls).toEqual([]);
   expect(r.agent.requests.map((request) => request.type)).toEqual(
-    Array(3).fill("get_prototype_status"),
+    Array(4).fill("get_prototype_status"),
   );
-  expect(times).toEqual([0, IME_COMMIT_READ_BACK_SETTLE_MS, 2 * IME_COMMIT_READ_BACK_SETTLE_MS]);
+  expect(times).toEqual([0, 0, IME_COMMIT_READ_BACK_SETTLE_MS, 2 * IME_COMMIT_READ_BACK_SETTLE_MS]);
 });
 
 test("iOS late acceptance wins on the second read", async () => {
   const r = iosReader(["old", "Rb one"]);
   const h = harness("ios", { reader: r.reader });
   expect((await h.run()).success).toBe(true);
-  expect(r.agent.requests).toHaveLength(2);
+  expect(r.agent.requests).toHaveLength(3);
   expect(h.timer.getSleepHistory()).toEqual([IME_COMMIT_READ_BACK_SETTLE_MS]);
 });
 
@@ -432,7 +445,7 @@ for (const selector of [{ text: "Name" }, { testTag: "ptf" }]) {
       focus: { focus: async () => ({ success: true, identifiers: ["field-id"] }) },
     });
     expect((await h.run("prototype", commands, selector)).success).toBe(true);
-    expect(r.agent.requests).toHaveLength(1);
+    expect(r.agent.requests).toHaveLength(2);
   });
 }
 
@@ -477,7 +490,7 @@ test("the default focuser reports the resolved node identifiers for an iOS text 
     );
     expect(result.success).toBe(true);
     expect(result.commands[0]?.warning).toBeUndefined();
-    expect(r.agent.requests).toHaveLength(1);
+    expect(r.agent.requests).toHaveLength(2);
   } finally {
     focus.mockRestore();
   }
@@ -547,5 +560,196 @@ for (const platform of ["android", "ios"] as const) {
     } finally {
       capability.mockRestore();
     }
+  });
+}
+
+for (const mode of ["eventLast", "eventAll", "eventOnly"] as const) {
+  test(`prototype ${mode} dispatches without a readable focused field`, async () => {
+    const h = harness("android", { focused: false });
+    const result = await h.run("prototype", [{ action: "type", text: "a", mode }]);
+    expect(h.deliveries.length).toBeGreaterThan(0);
+    expect(result.success).toBe(true);
+    expect(result.warning).toContain("not verified against the prototype");
+    expect(result.error).toBeUndefined();
+  });
+  test(`app ${mode} still refuses without focused input`, async () => {
+    const h = harness("android", { focused: false });
+    h.observer.execute = async () => {
+      const frame = structuredClone(androidFrame("", false));
+      const roots = frame.viewHierarchy!.hierarchy.node!;
+      for (const root of Array.isArray(roots) ? roots : [roots]) {
+        for (const child of Array.isArray(root.node) ? root.node : [root.node!]) {
+          nodeAttributes(child).focused = "false";
+        }
+      }
+      return { ...frame, focusedElement: undefined };
+    };
+    const result = await h.action.execute([{ action: "type", text: "a", mode }], {
+      elementId: "ptf",
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toBe(
+      'Android event delivery requires a focused editable field. For printable ASCII, mode: "imeKeyEvents" types without requiring a focused editable node.',
+    );
+    expect(h.deliveries).toEqual([]);
+  });
+}
+
+for (const platform of ["android", "ios"] as const) {
+  test(`${platform} implicit resolved prototype uses prototype truth`, async () => {
+    const r = iosReader(["old", "old", "old", "old"]);
+    const h = harness(platform, {
+      reader: platform === "ios" ? r.reader : undefined,
+      focus: { focus: async () => ({ success: true, layer: "prototype" }) },
+    });
+    const result = await h.action.execute(commands, { elementId: "ptf" });
+    expect(result.success).toBe(platform === "android");
+    if (platform === "android") {
+      expect(result.commands[0]?.imeFailure).toBeUndefined();
+    } else {
+      expect(result.commands[0]?.partialApplication).toBe(true);
+      expect(result.error).toContain('state key "name" holds "old"');
+    }
+  });
+}
+
+for (const changed of [false, true]) {
+  test(`prototype insert requires changed truth (${changed})`, async () => {
+    const r = iosReader(Array(3).fill(changed ? "101" : "10"), "10");
+    const h = harness("ios", { reader: r.reader });
+    const order: string[] = [];
+    const read = r.reader.read.bind(r.reader);
+    r.reader.read = async (...args) => {
+      order.push("read");
+      return read(...args);
+    };
+    const insert = h.client.insert;
+    h.client.insert = async (...args) => {
+      order.push("dispatch");
+      return insert(...args);
+    };
+    const result = await h.run("prototype", [{ action: "type", text: "1", operation: "insert" }]);
+    expect(result.success).toBe(changed);
+    expect(order).toEqual(
+      changed ? ["read", "dispatch", "read"] : ["read", "dispatch", "read", "read", "read"],
+    );
+    if (!changed) expect(result.error).toContain('holds "10"');
+  });
+}
+
+test("forgotten iOS bindings make typing unverifiable", async () => {
+  const r = iosReader();
+  r.bindings.forget(ios.deviceId);
+  const result = await harness("ios", { reader: r.reader }).run();
+  expect(result.success).toBe(true);
+  expect(result.warning).toContain(
+    "not verified against the prototype: no shown prototype bindings",
+  );
+  expect(r.agent.requests).toHaveLength(0);
+});
+
+test("unverifiable insert before-read keeps the contains rule", async () => {
+  let calls = 0;
+  const reader: PrototypeTextTargetReader = {
+    read: async () =>
+      ++calls === 1
+        ? { kind: "unverifiable", reason: "before unavailable" }
+        : { kind: "value", source: "state", stateKey: "name", value: "10" },
+  };
+  const result = await harness("ios", { reader }).run("prototype", [
+    { action: "type", text: "1", operation: "insert" },
+  ]);
+  expect(result.success).toBe(true);
+  expect(calls).toBe(2);
+});
+
+for (const platform of ["android", "ios"] as const) {
+  test(`${platform} real default focus infers prototype from the resolved node`, async () => {
+    const r = iosReader(["old", "old", "old"]);
+    const h = harness(platform, { reader: platform === "ios" ? r.reader : undefined });
+    const frame = platform === "android" ? androidFrame("Rb one") : iosPrototypeObservation("old");
+    const interaction = spyOn(TapOnElement.prototype, "observedInteraction").mockImplementation(
+      async (block) => block(recordObservationRead(frame)),
+    );
+    const capability =
+      platform === "android"
+        ? spyOn(AndroidCtrlProxyClient.prototype, "getSupportedCommands").mockResolvedValue([])
+        : spyOn(IOSCtrlProxyClient.prototype, "getSupportedCommands").mockResolvedValue([]);
+    try {
+      const action = new SendKeys(platform === "android" ? android : ios, h.adbFactory, {
+        executor: h.executor,
+        observer: h.observer,
+        timer: h.timer,
+        prototypeTextTarget: platform === "ios" ? r.reader : undefined,
+        timestampProvider: { now: async () => 1 },
+      });
+      const result = await action.execute(commands, { elementId: "ptf" });
+      if (platform === "android") expect(result.error).toBeUndefined();
+      expect(result.success).toBe(platform === "android");
+      if (platform === "ios") expect(result.error).toContain('state key "name" holds "old"');
+    } finally {
+      interaction.mockRestore();
+      capability.mockRestore();
+    }
+  });
+}
+
+for (const platform of ["android", "ios"] as const) {
+  test(`${platform} resolved app adds no reads and explicit app overrides resolved prototype`, async () => {
+    let calls = 0;
+    const reader: PrototypeTextTargetReader = {
+      read: async () => {
+        calls++;
+        return { kind: "unverifiable", reason: "unused" };
+      },
+    };
+    const baseline = harness(platform);
+    await baseline.action.execute(commands, { elementId: "ptf" });
+    for (const layer of ["app", "prototype"] as const) {
+      const h = harness(platform, {
+        reader,
+        focus: { focus: async () => ({ success: true, layer }) },
+      });
+      await h.action.execute(
+        commands,
+        { elementId: "ptf" },
+        undefined,
+        undefined,
+        undefined,
+        layer === "prototype" ? { layer: "app" } : undefined,
+      );
+      expect(h.reads).toHaveLength(baseline.reads.length);
+    }
+    expect(calls).toBe(0);
+  });
+}
+
+test("inferred prototype layer does not leak into the next execute", async () => {
+  let focuses = 0;
+  const h = harness("android", {
+    focus: {
+      focus: async () => ({ success: true, layer: ++focuses === 1 ? "prototype" : undefined }),
+    },
+  });
+  expect((await h.action.execute(commands, { elementId: "ptf" })).success).toBe(true);
+  const result = await h.action.execute(commands, { elementId: "ptf" });
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("focused field holds");
+});
+
+for (const mode of ["eventLast", "eventAll", "eventOnly"] as const) {
+  test(`prototype ${mode} proceeds when hierarchy is absent`, async () => {
+    const h = harness("android", {
+      reader: { read: async () => ({ kind: "unverifiable", reason: "no hierarchy" }) },
+    });
+    h.observer.execute = async () => ({
+      ...androidFrame(""),
+      viewHierarchy: undefined,
+      focusedElement: undefined,
+    });
+    const result = await h.run("prototype", [{ action: "type", text: "a", mode }]);
+    expect(h.deliveries.length).toBeGreaterThan(0);
+    expect(result.success).toBe(true);
+    expect(result.warning).toContain("not verified against the prototype");
   });
 }

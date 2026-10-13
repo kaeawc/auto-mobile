@@ -189,3 +189,37 @@ test("a custom reader exception warns without failing acknowledged typing", asyn
     warning: "Typed text was not verified against the prototype: offline",
   });
 });
+
+for (const text of [" ", "0x0", "0", "-3", "1.50"]) {
+  test(`numeric truth only accepts decimal ${JSON.stringify(text)}`, async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const numericValue = text === "-3" ? -3 : text === "1.50" ? 1.5 : 0;
+    const result = await verifyPrototypeTextTarget({
+      reader: {
+        read: async () => ({
+          kind: "value",
+          source: "state",
+          stateKey: "name",
+          value: String(numericValue),
+          numericValue,
+        }),
+      },
+      target: { identifiers: ["ptf"] },
+      text,
+      operation: "replace",
+      timer,
+      settleMs: 1,
+    });
+    expect(result.success).toBe(text !== " " && text !== "0x0");
+  });
+}
+
+test("forget only drops the named device binding", () => {
+  const bindings = new InMemoryPrototypeTextFieldBindings();
+  bindings.record("one", spec);
+  bindings.record("two", spec);
+  bindings.forget("one");
+  expect(bindings.forDevice("one")).toBeUndefined();
+  expect(bindings.forDevice("two")?.keys.get("ptf")).toBe("name");
+});

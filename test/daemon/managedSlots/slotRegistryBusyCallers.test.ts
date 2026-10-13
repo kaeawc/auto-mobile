@@ -179,7 +179,54 @@ describe("busy registry callers", () => {
       } finally {
         write.mockRestore();
       }
-      expect(await reconciler.reconcile(request())).toMatchObject({ outcome: "ready" });
+      const retry = await reconciler.reconcile(
+        request(SPEC_18, { owner: { daemonId: "d", pid: 7 } }),
+      );
+      expect(retry.outcome).toBe("ready");
+      if (retry.outcome !== "ready") {
+        throw new Error("retry failed");
+      }
+      expect(inventory.devices).toHaveLength(1);
+      expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+      expect((await registry.getAssignment(key))?.execOwner?.sessionUuid).toBe(retry.sessionUuid);
+    },
+  );
+
+  test.each(["readiness", "commit conflict"] as const)(
+    "busy cleanup after %s keeps its typed failure and releases the session once",
+    async (cause) => {
+      const advance = registry.advanceSlotJournal.bind(registry);
+      const write = spyOn(registry, "advanceSlotJournal").mockImplementationOnce(advance);
+      if (cause === "readiness") {
+        provisioner.readinessStatus = "booted";
+      } else {
+        write.mockResolvedValueOnce({ kind: "scope_not_valid", scope: null });
+      }
+      write.mockRejectedValueOnce(
+        Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" }),
+      );
+      try {
+        const result = await reconciler.reconcile(request());
+        expect(provisioner.released).toEqual(["session-1"]);
+        expect(result).toMatchObject({
+          outcome: "failed",
+          failure: { code: cause === "readiness" ? "readiness_incomplete" : "scope_not_valid" },
+        });
+        expect(await registry.listOpenSlotJournal(key)).toHaveLength(1);
+      } finally {
+        write.mockRestore();
+      }
+      provisioner.readinessStatus = "automation_ready";
+      const retry = await reconciler.reconcile(
+        request(SPEC_18, { owner: { daemonId: "d", pid: 7 } }),
+      );
+      expect(retry.outcome).toBe("ready");
+      if (retry.outcome !== "ready") {
+        throw new Error("retry failed");
+      }
+      expect(inventory.devices).toHaveLength(1);
+      expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+      expect((await registry.getAssignment(key))?.execOwner?.sessionUuid).toBe(retry.sessionUuid);
     },
   );
 

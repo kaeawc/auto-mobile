@@ -1,11 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { Database as Sqlite } from "bun:sqlite";
 import { Kysely, sql } from "kysely";
+import { Migrator } from "kysely/migration";
 import { BunSqliteDialect } from "../../../src/db/bunSqliteDialect";
 import * as freeStop003 from "../../../src/daemon/managedSlots/migrations/2026_10_10_003_free_device_stop_state";
 import * as freeDeletion004 from "../../../src/daemon/managedSlots/migrations/2026_10_12_004_free_device_deletion";
 import * as slotRegistry000 from "../../../src/daemon/managedSlots/migrations/2026_10_09_000_slot_registry";
-import { migrateSlotRegistry } from "../../../src/daemon/managedSlots/slotRegistryMigrations";
+import {
+  migrateSlotRegistry,
+  slotRegistryMigrationProvider,
+} from "../../../src/daemon/managedSlots/slotRegistryMigrations";
 import {
   SqliteSlotRegistry,
   type SlotRegistryDatabase,
@@ -13,6 +17,28 @@ import {
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 describe("slot registry migrations", () => {
+  test("the public pending-migration probe never creates bookkeeping tables", async () => {
+    const db = new Kysely<SlotRegistryDatabase>({
+      dialect: new BunSqliteDialect({ database: new Sqlite(":memory:") }),
+    });
+    try {
+      const migrations = await new Migrator({
+        db,
+        provider: slotRegistryMigrationProvider,
+      }).getMigrations();
+      expect(migrations).toHaveLength(5);
+      expect(migrations.every((migration) => migration.executedAt === undefined)).toBe(true);
+      expect(await db.introspection.getTables({ withInternalKyselyTables: true })).toEqual([]);
+      await migrateSlotRegistry(db, ":memory:");
+      const migrated = await new Migrator({
+        db,
+        provider: slotRegistryMigrationProvider,
+      }).getMigrations();
+      expect(migrated.every((migration) => migration.executedAt !== undefined)).toBe(true);
+    } finally {
+      await db.destroy();
+    }
+  });
   test("migration 004 preserves stopped images, defaults markers to null and preserves the state CHECK", async () => {
     const db = new Kysely<SlotRegistryDatabase>({
       dialect: new BunSqliteDialect({ database: new Sqlite(":memory:") }),

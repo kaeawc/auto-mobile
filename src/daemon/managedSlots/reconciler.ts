@@ -1843,11 +1843,14 @@ export class ManagedSlotReconciler {
         await this.settleFailedCreate(context, entry);
         throw new ReconcileAbort(provisionFailure(error));
       }
-      return await this.readyOrReleaseOnBusy(provisioned, async () => {
+      return await this.readyOrReleaseOnBusy(provisioned, async (release) => {
         entry = await this.recordCreated(context, entry, provisioned);
         if (!this.isAutomationReady(provisioned)) {
-          await this.discardUncommitted(context, provisioned, entry);
-          throw new ReconcileAbort(
+          return await this.discardUncommitted(
+            context,
+            provisioned,
+            entry,
+            release,
             failure("readiness_incomplete", `Device '${name}' did not reach automation readiness.`),
           );
         }
@@ -1875,8 +1878,13 @@ export class ManagedSlotReconciler {
           );
         }
         if (committed.kind !== "advanced") {
-          await this.discardUncommitted(context, provisioned, entry);
-          throw new ReconcileAbort(claimFailure(committed, "create commit"));
+          return await this.discardUncommitted(
+            context,
+            provisioned,
+            entry,
+            release,
+            claimFailure(committed, "create commit"),
+          );
         }
         this.noteJournal(context, committed.entry);
         return await this.claimAndReady(
@@ -2026,8 +2034,27 @@ export class ManagedSlotReconciler {
     context: ReconcileContext,
     provisioned: ManagedSlotProvisionedDevice,
     entry: SlotJournalEntry,
+    release: () => Promise<void>,
+    reason: ManagedSlotReconcileFailure,
+  ): Promise<never> {
+    await release();
+    try {
+      await this.cleanupUncommitted(context, provisioned, entry);
+    } catch (error) {
+      if (classifySqliteError(error) !== "retryable") {
+        throw error;
+      }
+      // The durable entry stays open for redrive; preserve the failure that required cleanup.
+      logger.debug(`[ManagedSlots] uncommitted cleanup deferred: ${errorMessage(error)}`);
+    }
+    throw new ReconcileAbort(reason);
+  }
+
+  private async cleanupUncommitted(
+    context: ReconcileContext,
+    provisioned: ManagedSlotProvisionedDevice,
+    entry: SlotJournalEntry,
   ): Promise<void> {
-    await this.releaseSession(provisioned.sessionUuid);
     if (!provisioned.created) {
       this.noteJournal(context, (await this.journal.close(entry, "rolled_back")).entry);
       return;
@@ -2449,13 +2476,20 @@ export class ManagedSlotReconciler {
   /** A busy publish cannot hand out its freshly provisioned session; release it before refusing. */
   private async readyOrReleaseOnBusy(
     provisioned: ManagedSlotProvisionedDevice,
-    publish: () => Promise<ReadyResult>,
+    publish: (release: () => Promise<void>) => Promise<ReadyResult>,
   ): Promise<ReadyResult> {
+    let released = false;
+    const release = async () => {
+      if (!released) {
+        released = true;
+        await this.releaseSession(provisioned.sessionUuid);
+      }
+    };
     try {
-      return await publish();
+      return await publish(release);
     } catch (error) {
       if (classifySqliteError(error) === "retryable") {
-        await this.releaseSession(provisioned.sessionUuid);
+        await release();
       }
       throw error;
     }

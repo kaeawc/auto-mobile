@@ -442,8 +442,13 @@ export interface OpenSqliteSlotRegistryOptions extends SqliteSlotRegistryOptions
 
 /**
  * bun:sqlite waits for a busy lock synchronously, blocking this daemon's event loop (heartbeat
- * lease handling included). One attempt waits at most 250ms: one busy_timeout, no dialect retry
- * or backoff, plus statement/error-handling overhead (not a hard wall-clock deadline). A healthy
+ * lease handling included). A busy write waits one nominal 250ms busy_timeout, with no dialect retry or
+ * backoff. Opening a migrated WAL registry uses reads only and never waits for a peer writer.
+ * An open that must migrate can wait one timeout at BEGIN IMMEDIATE (or the first initialization
+ * PRAGMA/bookkeeping write for a new file); failure closes without further lock waits. Close skips
+ * optimize/checkpoint maintenance and adds no busy_timeout wait. SQLite's sleep granularity plus
+ * statement, filesystem and error-handling overhead mean these are not hard wall-clock deadlines;
+ * waiting for another opener's migration file lock yields asynchronously. A healthy
  * peer's few short statements and FULL-sync commit (one fsync) have room to finish, while a slow
  * disk or prolonged lock yields a retryable refusal well below the per-daemon DB's
  * {@link SQLITE_BUSY_TIMEOUT_MS}. Callers retry after yielding the event loop. Two connections in
@@ -463,7 +468,19 @@ function openRegistrySqlite(dbPath: string): RegistrySqliteHandle {
   const { Database } = require("bun:sqlite") as {
     Database: new (path: string) => RegistrySqliteHandle;
   };
-  const sqliteDb = new Database(dbPath);
+  // The shared driver still finalizes statements, rejects queued work and closes the handle.
+  // Only this registry handle skips its close-time maintenance: both PRAGMAs can each wait a
+  // fresh busy_timeout behind a peer writer, even after a failed open. SQLite's automatic WAL
+  // checkpoints and durable FULL-sync commits suffice; explicit shutdown truncation is optional.
+  class RegistryDatabase extends Database {
+    override exec(sql: string): void {
+      if (sql === "PRAGMA optimize;" || sql === "PRAGMA wal_checkpoint(TRUNCATE);") {
+        return;
+      }
+      super.exec(sql);
+    }
+  }
+  const sqliteDb = new RegistryDatabase(dbPath);
   try {
     sqliteDb.exec(`PRAGMA busy_timeout = ${MANAGED_SLOT_REGISTRY_BUSY_TIMEOUT_MS};`);
     sqliteDb.exec("PRAGMA journal_mode = WAL;");
@@ -510,7 +527,8 @@ export async function openSqliteSlotRegistry(
       // Applies to BEGIN and autocommit statements: fail fast so the owning operation can retry
       // the whole unit. Migration DDL is atomic and opens are serialized by a file lock;
       // a busy open is forgotten by factories and refused retryably. Transaction bodies already
-      // never retry. Initialization and close PRAGMAs use raw exec, outside dialect retry.
+      // never retry. Initialization PRAGMAs use raw exec, outside dialect retry; close maintenance
+      // is disabled on the registry handle so a failed open adds no more busy waits.
       retry: { maxAttempts: 1 },
     }),
   });

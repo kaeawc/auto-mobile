@@ -27,17 +27,20 @@ export const slotRegistryMigrationProvider: MigrationProvider = {
 };
 
 /**
- * Migrate the registry to latest under a cross-process file lock keyed to `dbPath` (no-op for
- * `:memory:`), so two daemons opening the shared file at once cannot collide on the migration table.
+ * Probe with reads only: Kysely's getMigrations does not create missing bookkeeping tables, and
+ * reports their migrations as unexecuted. A migrated WAL registry can open behind a peer writer.
+ * Only pending work takes the cross-process file lock (no-op for `:memory:`); migrateToLatest
+ * rechecks under that lock and the registry's transactional-DDL adapter keeps the changes atomic.
  */
 export async function migrateSlotRegistry<DB>(db: Kysely<DB>, dbPath: string): Promise<void> {
+  const migrator = new Migrator({ db, provider: slotRegistryMigrationProvider });
+  if ((await migrator.getMigrations()).every((migration) => migration.executedAt !== undefined)) {
+    return;
+  }
   const lock = selectMigrationLock(dbPath);
   await lock.acquire();
   try {
-    const { error } = await new Migrator({
-      db,
-      provider: slotRegistryMigrationProvider,
-    }).migrateToLatest();
+    const { error } = await migrator.migrateToLatest();
     if (error) {
       throw new ActionableError(
         `Failed to migrate the managed slot registry at ${dbPath}: ${errorMessage(error)}`,

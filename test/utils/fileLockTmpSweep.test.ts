@@ -1,7 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   acquireExclusiveLockSteps,
   formatLockContent,
@@ -45,6 +45,29 @@ function exact(fs: FakeLockFileSystem): void {
 }
 
 describe("own publication tmp sweep", () => {
+  test("sweeps tmps using the lock path's literal directory prefix", () => {
+    const f = setup();
+    const lock = "/locks//resource.lock";
+    const name = "resource.lock.101.1.id.tmp";
+    const path = `/locks//${name}`;
+    f.fs.seed(path, "litter", 0);
+    expect(f.fs.list(dirname(lock))).toContain(name);
+    f.fs.operations.length = 0;
+    const racer = new Racer(acquireExclusiveLockSteps(lock, f.options));
+    expect(racer.finish()).toBe(true);
+    expect(racer.trace.filter((step) => step.op === "list")).toEqual([
+      { op: "list", path: dirname(lock) },
+    ]);
+    expect(f.fs.operations.filter((op) => op.op === "list")).toEqual([
+      { op: "list", path: dirname(lock) },
+    ]);
+    expect(f.fs.operations.filter((op) => op.path === path)).toEqual([
+      { op: "stat", path },
+      { op: "unlink", path },
+    ]);
+    expect(f.fs.exists(path)).toBe(false);
+  });
+
   test.each(["free", "reclaim", "takeover"] as const)(
     "%s removes own stale lock and guard tmps",
     (route) => {

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { defaultIdGenerator, type IdGenerator } from "./IdGenerator";
 import { nodeLockFileSystem, type LockFileSystem } from "./lockFileSystem";
-import { basename, dirname, join } from "path";
+import { basename, dirname } from "path";
 import { isProcessRunning as defaultIsProcessRunning } from "./processLiveness";
 import { errorMessage } from "./describeUnknownError";
 import { logger } from "./logger";
@@ -269,7 +269,7 @@ function* sweepOwnPublicationTmps(path: string, options: ExclusiveLockOptions): 
     if (!name.startsWith(prefix) || publicationName.exec(name)?.[1] !== pid) {
       continue;
     }
-    const tmp = join(directory, name);
+    const tmp = path.slice(0, path.length - basename(path).length) + name;
     if (!(yield* isAbandonedPublicationTmp(tmp, options))) {
       continue;
     }

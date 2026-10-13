@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
 import { Database as BunDatabase } from "bun:sqlite";
 import { Kysely, sql } from "kysely";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
@@ -17,20 +17,31 @@ import { up as captureUp } from "../../src/db/migrations/2026_10_12_001_video_re
 
 let db: Kysely<unknown>;
 let repo: VideoRecordingRepository;
-beforeEach(async () => {
-  db = new Kysely<unknown>({
-    dialect: new BunSqliteDialect({ database: new BunDatabase(":memory:") }),
+let template: Uint8Array;
+beforeAll(async () => {
+  const database = new BunDatabase(":memory:");
+  const schema = new Kysely<unknown>({
+    dialect: new BunSqliteDialect({ database }),
   });
-  for (const up of [baseUp, highlightsUp, ownerUp, displayUp, captureUp]) {
-    await up(db);
+  try {
+    for (const up of [baseUp, highlightsUp, ownerUp, displayUp, captureUp, recorderUp]) {
+      await up(schema);
+    }
+    await sql`CREATE TABLE device_sessions (session_uuid TEXT, status TEXT, daemon_session_id TEXT)`.execute(
+      schema,
+    );
+    await sql`INSERT INTO device_sessions VALUES ('peer-owner', 'released', 'peer-daemon')`.execute(
+      schema,
+    );
+    template = database.serialize();
+  } finally {
+    await schema.destroy();
   }
-  await recorderUp(db);
-  await sql`CREATE TABLE device_sessions (session_uuid TEXT, status TEXT, daemon_session_id TEXT)`.execute(
-    db,
-  );
-  await sql`INSERT INTO device_sessions VALUES ('peer-owner', 'released', 'peer-daemon')`.execute(
-    db,
-  );
+});
+beforeEach(() => {
+  db = new Kysely<unknown>({
+    dialect: new BunSqliteDialect({ database: new BunDatabase(new Uint8Array(template)) }),
+  });
   repo = new VideoRecordingRepository(db.withTables<Database>());
 });
 afterEach(async () => {
@@ -86,15 +97,18 @@ for (const owner of [undefined, "peer-owner"]) {
   });
 }
 
-test("unknown recorder is protected while any peer is live", async () => {
-  await insert(null);
-  expect(
-    await repo.listRecordings({
-      hasCaptureTeardown: true,
-      excludeLiveDaemonSessionIds: new Set(["peer-daemon"]),
-    }),
-  ).toEqual([]);
-});
+test.each(["capture", "interruption"] as const)(
+  "unknown recorder is protected from %s without an own daemon id while a peer is live",
+  async (sweep) => {
+    await insert(null);
+    expect(
+      await repo.listRecordings({
+        ...(sweep === "capture" ? { hasCaptureTeardown: true } : { status: "recording" as const }),
+        excludeLiveDaemonSessionIds: new Set(["peer-daemon"]),
+      }),
+    ).toEqual([]);
+  },
+);
 
 test("unknown recorder remains eligible without live peers", async () => {
   await insert(null);
@@ -104,6 +118,46 @@ test("unknown recorder remains eligible without live peers", async () => {
       excludeLiveDaemonSessionIds: new Set(),
     }),
   ).toHaveLength(1);
+});
+
+for (const sweep of ["capture", "interruption"] as const) {
+  test(`unknown recorder remains eligible for ${sweep} when only this daemon is live`, async () => {
+    await insert(null);
+    const query = {
+      ...(sweep === "capture" ? { hasCaptureTeardown: true } : { status: "recording" as const }),
+      excludeLiveDaemonSessionIds: new Set(["this-daemon"]),
+      ownDaemonSessionId: "this-daemon",
+    };
+    expect(await repo.listRecordings(query)).toHaveLength(1);
+  });
+
+  test.each([
+    [null, 0],
+    ["peer-daemon", 0],
+    ["this-daemon", 0],
+    ["dead-daemon", 1],
+  ] as const)(`${sweep} with self and peer live protects recorder %s`, async (recorder, count) => {
+    await insert(recorder);
+    const query = {
+      ...(sweep === "capture" ? { hasCaptureTeardown: true } : { status: "recording" as const }),
+      excludeLiveDaemonSessionIds: new Set(["this-daemon", "peer-daemon"]),
+      ownDaemonSessionId: "this-daemon",
+    };
+    expect(await repo.listRecordings(query)).toHaveLength(count);
+  });
+}
+
+test("an active owner on this daemon still protects a legacy recorder", async () => {
+  await sql`UPDATE device_sessions SET status='active', daemon_session_id='this-daemon'`.execute(
+    db,
+  );
+  await insert(null, "peer-owner");
+  const query = {
+    status: "recording" as const,
+    excludeLiveDaemonSessionIds: new Set(["this-daemon"]),
+    ownDaemonSessionId: "this-daemon",
+  };
+  expect(await repo.listRecordings(query)).toEqual([]);
 });
 
 test("recorder migration is nullable, idempotent, and reversible", async () => {

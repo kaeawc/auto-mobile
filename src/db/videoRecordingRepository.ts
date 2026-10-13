@@ -87,6 +87,8 @@ export interface VideoRecordingQuery extends VideoRecordingOwnerScope {
   /** Maintenance excludes live recorders, unknown recorders while any peer is live,
    * and active owners belonging to live daemons. */
   excludeLiveDaemonSessionIds?: ReadonlySet<string>;
+  /** The caller's own daemon id; it is not a peer for the unknown-recorder rule. */
+  ownDaemonSessionId?: string;
   status?: VideoRecordingStatus | VideoRecordingStatus[];
   deviceId?: string;
   platform?: "android" | "ios";
@@ -220,9 +222,17 @@ function applyMaintenanceScope<O>(
 ): SelectQueryBuilder<Database, "video_recordings", O> {
   const liveDaemonSessionIds = Array.from(query.excludeLiveDaemonSessionIds ?? []);
   if (liveDaemonSessionIds.length > 0) {
+    const peers = liveDaemonSessionIds.filter((id) => id !== query.ownDaemonSessionId);
+    if (peers.length > 0) {
+      builder = builder.where("recorder_daemon_session_id", "is not", null);
+    }
     builder = builder
-      .where("recorder_daemon_session_id", "is not", null)
-      .where("recorder_daemon_session_id", "not in", liveDaemonSessionIds)
+      .where((eb) =>
+        eb.or([
+          eb("recorder_daemon_session_id", "is", null),
+          eb("recorder_daemon_session_id", "not in", liveDaemonSessionIds),
+        ]),
+      )
       .where((eb) =>
         eb.not(
           eb.exists(

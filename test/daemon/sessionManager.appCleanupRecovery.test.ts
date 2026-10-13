@@ -82,6 +82,28 @@ test("same app replaces its closure before dispatch", async () => {
   expect(marked()).toBeUndefined();
 });
 
+test("different cleanup steps for one app both settle before the marker clears", async () => {
+  const clear = Promise.withResolvers<void>();
+  const terminate = Promise.withResolvers<void>();
+  const calls: string[] = [];
+  mark(async () => {
+    calls.push("clearAppData");
+    await clear.promise;
+  }, "app.a:clearAppData");
+  mark(async () => {
+    calls.push("terminateApp");
+    await terminate.promise;
+  }, "app.a:terminateApp");
+  await step(1000);
+  expect(calls).toEqual(["clearAppData", "terminateApp"]);
+  clear.resolve();
+  await step(0);
+  expect(marked()).toBeDefined();
+  terminate.resolve();
+  await step(0);
+  expect(marked()).toBeUndefined();
+});
+
 test("later successful app cannot acknowledge an exhausted app", async () => {
   let firstCalls = 0;
   let secondCalls = 0;

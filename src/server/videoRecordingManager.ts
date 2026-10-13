@@ -497,6 +497,7 @@ async function performVideoRecordingStateInitialization(
   const active = await deps.recordingRepository.listRecordings({
     status: "recording",
     excludeLiveDaemonSessionIds: deps.liveDaemonSessionIds,
+    ownDaemonSessionId: deps.daemonSessionId,
   });
   if (moduleDependencies === deps) {
     ensureRetentionSweep(deps);

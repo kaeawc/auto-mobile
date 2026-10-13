@@ -1886,7 +1886,13 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         // A read is marked for its readiness phase only (#10970); once ready it watches.
         if (readinessTarget !== providedDeviceId) {
           options.assertHeldDeviceStart?.(readinessTarget, sessionUuid, false);
-          await assertManagedSlotControlAccess({ ...managedSlotAccess, deviceId: readinessTarget });
+          await assertManagedSlotControlAccess({
+            ...managedSlotAccess,
+            deviceId: readinessTarget,
+            remedy: !providedDeviceId
+              ? "This call named no device and the only candidate is driven by another daemon: pass the deviceId of a device this daemon may drive, or acquire one with getAndroid/getApple and pass its sessionUuid."
+              : undefined,
+          });
           await assertToolControlTargetIdentity(
             { ...managedSlotAccess, deviceId: readinessTarget },
             signal,
@@ -3221,6 +3227,7 @@ async function assertManagedSlotControlAccess(input: {
   sessionUuid: string | undefined;
   mcpSessionId: string | undefined;
   platform: unknown;
+  remedy?: string;
 }): Promise<void> {
   const daemonState = DaemonState.getInstance();
   if (input.readOnly || !daemonState.isInitialized()) {
@@ -3263,7 +3270,12 @@ async function assertManagedSlotControlAccess(input: {
       maxAgeMs: MANAGED_SLOT_INPUT_SNAPSHOT_MAX_AGE_MS,
     });
     // A device no local session holds may be another daemon's (#11349).
-    await assertControlNotOnForeignDaemonDevice({ deviceId, platform, gate: pool });
+    await assertControlNotOnForeignDaemonDevice({
+      deviceId,
+      platform,
+      gate: pool,
+      remedy: input.remedy ?? TOOL_CALL_REMEDY,
+    });
   }
 }
 

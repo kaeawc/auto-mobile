@@ -636,6 +636,18 @@ Owner decisions 2026-10-09 (#10982):
   and selecting or pinning the current device. The only settings it may write are
   the accessibility settings that enable CtrlProxy. A later control call still
   performs appearance sync and current-device selection or pinning.
+- A device held by a shared allocation claim or forwarding lease, a managed slot,
+  or an unrecorded CtrlProxy forward with a live foreign client PID is held for
+  this readiness decision (#12220). The forward's PID stays evidence while that
+  PID is alive and its forwarded port remains listed, even if its connection
+  disappears; an idle lease relinquish does not erase it. A known forwarded port
+  whose client probe fails is also held. Reads of such a running device use the
+  installed read-only path without CtrlProxy setup or settings writes. Foreign
+  claims and forwards refuse control with retryable `device_owned_by_other_daemon`
+  (`ownerPid` omitted when unknown); managed slots use their own typed refusal.
+  An unnamed control call never selects a foreign-held device automatically.
+  Pass the `deviceId` of a device this daemon may drive, or acquire one with
+  `getAndroid`/`getApple` and pass its `sessionUuid`.
 - A sessionless read boots a stopped device only when the call explicitly passes
   its `deviceId` (owner decision 2026-10-11, follow-up to #11641). Every device-aware
   read tool, including `observe`, accepts a running device's serial or iOS UDID,
@@ -682,6 +694,17 @@ setup through that path. These are the exact sets pinned
 by `test/server/readToolsExplicitDeviceIdRule.test.ts`: 18 of 21 tools on each platform.
 The handlers are stubbed in that test; platform-specific feature support is separate
 from target resolution and readiness.
+
+This readiness exception applies only when ownership by another daemon is ruled out. A shared
+claim or forwarding lease, a managed slot, or an unrecorded CtrlProxy forward
+with a live or remembered-live foreign client PID keeps the device on the
+installed read-only path, regardless of a **Yes** entry. If a listed forward's
+client ownership is unknown, reads still use that path and control gets a typed
+refusal without an `ownerPid`. A daemon removes only forwards its coordination
+directory recorded, or unrecorded forwards whose owner is provably gone. An unreadable forward list with no known port warns
+and leaves the ordinary claim decision in place. A peer using a different
+coordination directory with **no forward** leaves no forward evidence for this
+check to detect.
 
 | Tool                    | Android                                     | iOS simulator                               |
 | ----------------------- | ------------------------------------------- | ------------------------------------------- |

@@ -226,6 +226,8 @@ allocation claim under its shutdown reservation (reported as an active execution
 Acquisition (`getAndroid`, `getApple`, `startDevice` on a running device) is
 guarded by the pool's own owner check instead.
 
+Android's default foreign-owner gate also refuses control when an unrecorded CtrlProxy forward has a live or remembered-live foreign client PID, or a known forwarded port has an unknown owner; reads remain on the installed watch path (#12220).
+
 Managed slots (#11174, #11178): a device a valid managed slot holds, or one parked in
 the managed free pool, is never generic capacity, idle or not. `DevicePool` reads a
 host-wide registry snapshot through the injected `ManagedSlotExclusion`

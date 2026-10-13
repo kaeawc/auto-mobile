@@ -35,6 +35,7 @@ import {
   iosDeviceOwnershipFileSource,
   type ForeignDeviceOwnership,
 } from "./foreignDeviceOwnership";
+import { createForeignCtrlProxyForwardEvidence } from "../features/observe/android/foreignCtrlProxyForwardEvidence";
 import {
   InMemoryDeviceHealthMarkers,
   NotifyingDeviceHealthMarkers,
@@ -1300,7 +1301,14 @@ export class DevicePool {
 
   static create(deps: DevicePoolDependencies): DevicePool {
     return new DevicePool({
-      foreignDeviceOwnership: new ForwardLeaseForeignDeviceOwnership(),
+      foreignDeviceOwnership: new ForwardLeaseForeignDeviceOwnership(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        createForeignCtrlProxyForwardEvidence(),
+      ),
       iosForeignDeviceOwnership: new ForwardLeaseForeignDeviceOwnership(
         process.pid,
         iosDeviceOwnershipFileSource,

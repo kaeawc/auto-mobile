@@ -5,7 +5,11 @@ import {
   DeviceOwnedByOtherDaemonError,
 } from "../../src/daemon/deviceAcquisitionRefusals";
 import { DevicePool } from "../../src/daemon/devicePool";
-import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
+import {
+  ForwardLeaseForeignDeviceOwnership,
+  type DeviceOwnershipFileSource,
+} from "../../src/daemon/foreignDeviceOwnership";
+import type { ForeignCtrlProxyForwardVerdict } from "../../src/features/observe/android/foreignCtrlProxyForwardEvidence";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
 import { registerInteractionTools } from "../../src/server/interactionTools";
@@ -33,10 +37,14 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
 
   let ran: Array<{ name: string; deviceId: string }>;
   let foreignOwners: Map<string, number>;
+  let forwardVerdict: ForeignCtrlProxyForwardVerdict;
   let originals: Array<[string, unknown]>;
   let restorePipeline: () => void;
   let sessionManager: SessionManager;
   let readinessRequests: number;
+  let devices: FakeDeviceSessionManager;
+  let fakeDeviceUtils: FakeDeviceUtils;
+  let visibleDevices: BootedDevice[];
 
   const call = (name: string, args: Record<string, unknown>) =>
     ToolRegistry.getTool(name)!.handler(args);
@@ -50,8 +58,10 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
   beforeEach(async () => {
     ran = [];
     foreignOwners = new Map([[claimed.deviceId, FOREIGN_PID]]);
+    forwardVerdict = { kind: "none" };
     ToolRegistry.clearTools();
-    const deviceReadAccess = { listBooted: async () => [claimed, free], isAuthorized: () => true };
+    visibleDevices = [claimed, free];
+    const deviceReadAccess = { listBooted: async () => visibleDevices, isAuthorized: () => true };
     restorePipeline = ToolRegistry.setPipelineOverridesForTesting({
       displayInventory: new FakeDisplayInventoryProvider(),
       deviceReadAccess,
@@ -67,8 +77,9 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
         },
       },
     });
-    const devices = new FakeDeviceSessionManager();
+    devices = new FakeDeviceSessionManager();
     devices.setConnectedDevices([claimed, free]);
+    devices.setCurrentDevice(claimed, "android");
     readinessRequests = 0;
     const ensureDeviceReady = devices.ensureDeviceReady.bind(devices);
     devices.ensureDeviceReady = async (...args) => {
@@ -85,14 +96,29 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
     const timer = new FakeTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.stopCleanupTimer();
-    const fakeDeviceUtils = new FakeDeviceUtils();
+    fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [claimed, free]);
-    const foreignDeviceOwnership: ForeignDeviceOwnership = {
-      refresh: async () => {},
-      foreignOwnerPid: (deviceId) => foreignOwners.get(deviceId),
-      claim: async (deviceId) => !foreignOwners.has(deviceId),
+    const files: DeviceOwnershipFileSource = {
+      leasePath: () => undefined,
+      claimPath: (deviceId) => `/claims/${deviceId}`,
+      legacyClaimPath: () => undefined,
+      read: (path) => {
+        const pid = foreignOwners.get(path.slice("/claims/".length));
+        return pid === undefined ? undefined : { pid, token: "peer" };
+      },
+      isProcessRunning: (pid) => pid === FOREIGN_PID,
+      tryAcquire: () => true,
+      takeOver: () => true,
       release: () => {},
     };
+    const foreignDeviceOwnership = new ForwardLeaseForeignDeviceOwnership(
+      100,
+      files,
+      { query: async () => ({ kind: "unreachable", detail: "unused" }) },
+      () => undefined,
+      timer,
+      { read: async () => forwardVerdict },
+    );
     const pool = new DevicePool(
       createDevicePoolDependencies(sessionManager, "foreign-daemon-control", {
         timer,
@@ -136,6 +162,12 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
     ["tapOn", { text: "OK", action: "tap" }],
   ];
 
+  const onlyClaimedVisible = () => {
+    visibleDevices = [claimed];
+    devices.setConnectedDevices([claimed]);
+    fakeDeviceUtils.setBootedDevices("android", [claimed]);
+  };
+
   for (const [name, args] of controlCalls) {
     test(`a sessionless ${name} on the claimed device is refused before readiness or the handler`, async () => {
       const error = await refusal(name, {
@@ -178,5 +210,100 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
   test("a read of the claimed device is never refused", async () => {
     await call("observe", { platform: "android", deviceId: claimed.deviceId });
     expect(ran).toEqual([{ name: "observe", deviceId: claimed.deviceId }]);
+  });
+
+  test.each([
+    ["tapOn", { text: "OK", action: "tap" }],
+    ["rotate", { orientation: "landscape" }],
+  ])(
+    "#12220 unnamed %s refuses a foreign forward before readiness and handler",
+    async (name, args) => {
+      onlyClaimedVisible();
+      foreignOwners.clear();
+      forwardVerdict = {
+        kind: "foreign",
+        ports: [19001],
+        clientPids: [FOREIGN_PID],
+        message: "foreign CtrlProxy forward",
+      };
+      const error = await refusal(name, { ...args, platform: "android" });
+      expect(error).toMatchObject({
+        code: DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+        ownerPid: FOREIGN_PID,
+        deviceId: claimed.deviceId,
+      });
+      expect(String(error)).toContain("pass the deviceId");
+      expect(String(error)).toContain("getAndroid/getApple");
+      expect(ran).toEqual([]);
+      expect(readinessRequests).toBe(0);
+    },
+  );
+
+  test("#12220 explicit tapOn reports foreign PID and acquisition remedy", async () => {
+    foreignOwners.clear();
+    forwardVerdict = {
+      kind: "foreign",
+      ports: [19001],
+      clientPids: [FOREIGN_PID],
+      message: "foreign CtrlProxy forward",
+    };
+    const error = await refusal("tapOn", {
+      text: "OK",
+      action: "tap",
+      platform: "android",
+      deviceId: claimed.deviceId,
+    });
+    expect(error).toMatchObject({
+      code: DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+      ownerPid: FOREIGN_PID,
+    });
+    expect(String(error)).toContain("setActiveDevice");
+    expect(ran).toEqual([]);
+    expect(readinessRequests).toBe(0);
+  });
+
+  test("#12220 unknown forwarded port refuses control while observe watches", async () => {
+    foreignOwners.clear();
+    forwardVerdict = {
+      kind: "unknown",
+      ports: [19001],
+      reason: "pid unavailable",
+      message: "unknown forward owner",
+    };
+    const error = await refusal("tapOn", {
+      text: "OK",
+      action: "tap",
+      platform: "android",
+      deviceId: claimed.deviceId,
+    });
+    expect(error).toMatchObject({
+      code: DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+      ownerPid: undefined,
+    });
+    expect(readinessRequests).toBe(0);
+    await call("observe", { platform: "android", deviceId: claimed.deviceId });
+    expect(ran).toEqual([{ name: "observe", deviceId: claimed.deviceId }]);
+    expect(readinessRequests).toBe(0);
+  });
+
+  test("#12220 foreign forward remains watchable through observe", async () => {
+    foreignOwners.clear();
+    forwardVerdict = {
+      kind: "foreign",
+      ports: [19001],
+      clientPids: [FOREIGN_PID],
+      message: "foreign CtrlProxy forward",
+    };
+    onlyClaimedVisible();
+    await call("observe", { platform: "android", deviceId: claimed.deviceId });
+    expect(ran).toEqual([{ name: "observe", deviceId: claimed.deviceId }]);
+    expect(readinessRequests).toBe(0);
+  });
+
+  test("#12220 no forward admits unnamed control", async () => {
+    onlyClaimedVisible();
+    foreignOwners.clear();
+    await call("tapOn", { text: "OK", action: "tap", platform: "android" });
+    expect(ran).toEqual([{ name: "tapOn", deviceId: claimed.deviceId }]);
   });
 });

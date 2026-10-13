@@ -24,6 +24,7 @@ import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
 import android.os.PowerManager
+import android.os.SystemClock
 import android.provider.Settings
 import android.text.Spanned
 import android.text.style.ClickableSpan
@@ -426,8 +427,8 @@ internal fun shouldSkipOwnWindowEvent(
 
 /**
  * Window type of the window [event] came from, or null when it cannot be determined (no source
- * node, window not retrievable, or the node call throws). Reads the source node's window rather
- * than enumerating `windows`, so no window list is allocated per event.
+ * node, window not retrievable, or the node call throws). This binder-cost resolver is invoked only
+ * on a window-type memo miss. Reads the source node's window rather than enumerating `windows`.
  */
 private fun ownEventWindowType(event: AccessibilityEvent): Int? {
   val source =
@@ -1199,6 +1200,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   /** Fresh for every service process, preventing a restarted runner from reusing an old token. */
   private val frameContextEpoch = UUID.randomUUID().toString()
 
+  private val ownWindowTypeMemo = OwnWindowTypeMemo(nowMs = SystemClock::elapsedRealtime)
+
   private fun currentFrameContext(): String = "$frameContextEpoch:${frameContext.get()}"
 
   // A hierarchy has object identity for its short trip from extraction to broadcast. Retaining the
@@ -1816,7 +1819,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             DefaultPrototypeHost(
               context = this,
               displayWindows = prototypeDisplays,
-              onWindowAttached = { overlayManager.setPrototypeAttached(true) },
+              onWindowAttached = {
+                ownWindowTypeMemo.clear()
+                overlayManager.setPrototypeAttached(true)
+              },
               onWindowLost = ::refreshPrototypeWindow,
               isBlocked = ::isPrototypeBlocked,
               imeInset = PrototypeImeInset { displayId -> prototypeImeLiftPx(displayId) },
@@ -1824,6 +1830,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             ),
             prototypeResultSink,
             onDismissed = {
+              ownWindowTypeMemo.clear()
               withContext(Dispatchers.Main.immediate) {
                 overlayManager.setPrototypeAttached(false)
               }
@@ -3574,11 +3581,25 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
   /** Feeds a window-state event to prototype foreground scoping, only while a prototype exists. */
-  private fun trackPrototypeForeground(event: AccessibilityEvent, eventPackage: String?) {
+  private fun trackPrototypeForeground(
+    event: AccessibilityEvent,
+    eventPackage: String?,
+    ownWindowType: Int?,
+  ) {
     if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
     if (!::prototypeController.isInitialized) return
     if (!prototypeController.isShowing && !prototypeController.isSuspendedByForeground) return
-    prototypeForeground.onWindowEvent(eventPackage, ownEventWindowType(event))
+    val windowType =
+      if (eventPackage == packageName) ownWindowType
+      else ownWindowTypeMemo.windowType(event.windowId) { ownEventWindowType(event) }
+    prototypeForeground.onWindowEvent(eventPackage, windowType)
+  }
+
+  private fun invalidateOwnWindowTypeMemo(event: AccessibilityEvent) {
+    if (event.eventType != AccessibilityEvent.TYPE_WINDOWS_CHANGED) return
+    val windowChanges =
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) event.windowChanges else null
+    if (invalidatesOwnWindowTypes(event.eventType, windowChanges)) ownWindowTypeMemo.clear()
   }
 
   /** The keyboard's reach up from [displayId]'s bottom edge, from its accessibility window. */
@@ -3615,17 +3636,26 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       return
     }
 
+    invalidateOwnWindowTypeMemo(event)
+
     // Prototype animations must not feed the hierarchy debouncer or navigation tracking. Only the
-    // prototype's OWN accessibility-overlay windows are dropped: this package also owns the
-    // CtrlProxy
-    // keyboard (input-method window) and MainActivity, whose events must keep advancing
-    // frameContext
-    // and feeding the hierarchy push. The window type is resolved only for own-package events.
+    // own accessibility-overlay windows, or system windows while an app-layer prototype shows, are
+    // dropped. The keyboard and MainActivity keep advancing frameContext and hierarchy pushes.
+    // This filter touches neither the memo nor prototype state for foreign packages. Unknown types
+    // fail open and are retried at a bounded rate.
     val eventPackage = event.packageName?.toString()
-    val ownWindowType = if (eventPackage == packageName) ownEventWindowType(event) else null
-    val appLayerShowing =
-      ::prototypeController.isInitialized && prototypeController.isAppLayerShowing
-    if (shouldSkipOwnWindowEvent(eventPackage, packageName, ownWindowType, appLayerShowing)) return
+    val ownWindowDecision =
+      ownWindowEventDecision(
+        eventPackage,
+        packageName,
+        event.windowId,
+        ownWindowTypeMemo,
+        appLayerShowing = {
+          ::prototypeController.isInitialized && prototypeController.isAppLayerShowing
+        },
+        resolve = { ownEventWindowType(event) },
+      )
+    if (ownWindowDecision.skip) return
     // A window appearing in an app is the cheapest sign its process (re)started; an open storage
     // subscription uses it to re-arm the app-side listener a restart wiped (#10069). A map miss
     // for every package without a subscription, so this is free on the hot path.
@@ -3636,7 +3666,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     ) {
       storageSubscriptionManager.onPackageActivity(eventPackage)
     }
-    trackPrototypeForeground(event, eventPackage)
+    trackPrototypeForeground(event, eventPackage, ownWindowDecision.windowType)
     if (
       event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
         event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED

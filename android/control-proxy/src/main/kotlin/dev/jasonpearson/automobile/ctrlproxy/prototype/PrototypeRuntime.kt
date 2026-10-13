@@ -105,6 +105,14 @@ class PrototypeRuntime(
   private val requestDismiss: suspend () -> Boolean = { true },
   previousPages: Map<String, Int> = emptyMap(),
 ) {
+  private val renderMapper = PrototypeRenderMapper()
+
+  internal fun renderModel(snapshot: PrototypeRuntimeSnapshot = current): PrototypeRenderModel =
+    renderMapper.map(snapshot.spec, snapshot.pages)
+
+  internal val renderMappingPasses: Int
+    get() = renderMapper.mappingPasses
+
   private val mutableSnapshot = MutableStateFlow(snapshot(spec, previousPages))
   val snapshots = mutableSnapshot.asStateFlow()
   val current: PrototypeRuntimeSnapshot

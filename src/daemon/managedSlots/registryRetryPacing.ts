@@ -46,17 +46,28 @@ export class RegistryRetryPacing {
     }
   }
 
-  async wait(delayMs: number, stopped?: AbortSignal): Promise<void> {
+  /** An expedited signal wakes this wait successfully; stop/close still cancel it. */
+  async wait(delayMs: number, stopped?: AbortSignal, expedited?: AbortSignal): Promise<void> {
     let handle: NodeJS.Timeout | undefined;
+    let wake: (() => void) | undefined;
     try {
       await raceWithDeadline(
         () =>
           new Promise<void>((resolve) => {
-            handle = this.options.timer.setTimeout(resolve, delayMs);
+            wake = resolve;
+            expedited?.addEventListener("abort", wake, { once: true });
+            if (expedited?.aborted) {
+              resolve();
+            } else {
+              handle = this.options.timer.setTimeout(resolve, delayMs);
+            }
           }),
         { timer: this.options.timer, signal: this.signal(stopped), label: "Registry retry wait" },
       );
     } finally {
+      if (wake) {
+        expedited?.removeEventListener("abort", wake);
+      }
       if (handle !== undefined) {
         this.options.timer.clearTimeout(handle);
       }
@@ -67,38 +78,49 @@ export class RegistryRetryPacing {
     operation: () => Promise<T>,
     succeeded: (result: T) => boolean,
     stopped?: AbortSignal,
+    expedited?: AbortSignal,
   ): Promise<T> {
-    const previous = this.turn;
-    const finished = Promise.withResolvers<void>();
-    // A cancelled queued turn must not let its successor overtake an earlier active turn.
-    this.turn = previous.then(() => finished.promise);
-    let startedMs: number | undefined;
-    let failed = true;
-    try {
-      await raceWithDeadline(previous, {
-        timer: this.options.timer,
-        signal: this.signal(stopped),
-        label: "Registry retry turn",
-      });
-      await this.waitForQuiet(stopped);
-      this.signal(stopped).throwIfAborted();
-      startedMs = this.options.timer.now();
-      const result = await raceWithDeadline(operation, {
-        timer: this.options.timer,
-        signal: this.signal(stopped),
-        label: "Registry retry operation",
-      });
-      failed = !succeeded(result);
-      return result;
-    } finally {
-      if (failed && startedMs !== undefined && !this.closing.signal.aborted) {
-        const endMs = this.options.timer.now();
-        this.quietUntilMs = Math.max(
-          this.quietUntilMs,
-          endMs + Math.min(Math.max(0, endMs - startedMs), this.options.maxBlockedWaitMs),
-        );
+    while (true) {
+      // Quiet waiters own no turn, so an expedited waiter can reach the next free turn.
+      if (!expedited?.aborted && this.options.timer.now() < this.quietUntilMs) {
+        await this.waitForQuiet(stopped, expedited);
       }
-      finished.resolve();
+      const previous = this.turn;
+      const finished = Promise.withResolvers<void>();
+      // A cancelled queued turn must not let its successor overtake an earlier active turn.
+      this.turn = previous.then(() => finished.promise);
+      let startedMs: number | undefined;
+      let failed = true;
+      try {
+        await raceWithDeadline(previous, {
+          timer: this.options.timer,
+          signal: this.signal(stopped),
+          label: "Registry retry turn",
+        });
+        this.signal(stopped).throwIfAborted();
+        // The preceding turn may have extended quiet time while we queued. Yield and rejoin.
+        // Future quiet time awaits a timer above; an expedite instead awaits the next turn.
+        if (!expedited?.aborted && this.options.timer.now() < this.quietUntilMs) {
+          continue;
+        }
+        startedMs = this.options.timer.now();
+        const result = await raceWithDeadline(operation, {
+          timer: this.options.timer,
+          signal: this.signal(stopped),
+          label: "Registry retry operation",
+        });
+        failed = !succeeded(result);
+        return result;
+      } finally {
+        if (failed && startedMs !== undefined && !this.closing.signal.aborted) {
+          const endMs = this.options.timer.now();
+          this.quietUntilMs = Math.max(
+            this.quietUntilMs,
+            endMs + Math.min(Math.max(0, endMs - startedMs), this.options.maxBlockedWaitMs),
+          );
+        }
+        finished.resolve();
+      }
     }
   }
 
@@ -106,9 +128,9 @@ export class RegistryRetryPacing {
     return stopped ? AbortSignal.any([this.closing.signal, stopped]) : this.closing.signal;
   }
 
-  private async waitForQuiet(stopped?: AbortSignal): Promise<void> {
-    while (this.options.timer.now() < this.quietUntilMs) {
-      await this.wait(this.quietUntilMs - this.options.timer.now(), stopped);
+  private async waitForQuiet(stopped?: AbortSignal, expedited?: AbortSignal): Promise<void> {
+    while (!expedited?.aborted && this.options.timer.now() < this.quietUntilMs) {
+      await this.wait(this.quietUntilMs - this.options.timer.now(), stopped, expedited);
     }
   }
 }

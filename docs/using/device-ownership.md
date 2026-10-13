@@ -156,6 +156,14 @@ below are the defaults; the constants live in
   with `device_owned_by_other_session`. A successful restore moves ownership, so
   the previous connection no longer owns the session.
 
+A managed session released while slot ownership is unconfirmed holds device teardown for
+at most 4 s. Creating the hold expedites one waiting re-own attempt, still in turn with
+other attempts; an in-flight attempt continues and recovery admission stays unchanged.
+Confirmation starts teardown early. Proven ownership loss skips device writes. At the
+cap, teardown skips device writes and one warning reports that saved device state was
+dropped because ownership could not be confirmed. A `device_cleanup_in_progress` hint
+includes the remaining hold plus the bounded teardown time, resetting when the hold settles.
+
 ### Release reasons
 
 Every release records one reason. The daemon classifies them in one table,

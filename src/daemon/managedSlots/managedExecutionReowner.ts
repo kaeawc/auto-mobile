@@ -61,7 +61,11 @@ export interface ManagedExecutionReownerDependencies {
   deviceOf?: (sessionUuid: string) => string | null;
 }
 
-export const MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS = 10_000;
+const OLD_REGISTRY_BUSY_WRITE_MS = 3_300;
+// One attempt started with the hold: 700 ms async budget + one OLD busy write (~3.3 s) = 4 s.
+// With NEW busy writes (~300 ms), the same cap covers about three paced attempts.
+export const MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS =
+  MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS + OLD_REGISTRY_BUSY_WRITE_MS;
 export const MANAGED_EXECUTION_REOWN_RETRY_INITIAL_DELAY_MS = 25;
 export const MANAGED_EXECUTION_REOWN_RETRY_MAX_DELAY_MS = 1_000;
 export const MANAGED_EXECUTION_REOWN_RETRY_MAX_BLOCKED_WAIT_MS = 5_000;
@@ -92,6 +96,8 @@ export class ManagedExecutionReowner {
   private readonly ownerReads = new Map<string, Promise<SlotAssignmentRecord[]>>();
   private readonly ownerClaims = new Map<string, Promise<ClaimExecutionResult>>();
   private readonly background = new Map<string, Promise<void>>();
+  /** Only a retry waiting for backoff/quiet/a turn can consume a hold's one expedite. */
+  private readonly retryExpedites = new Map<string, AbortController>();
   private readonly closing = new AbortController();
   private readonly releaseHolds = new Map<string, ReleaseHold>();
   private readonly episodes = new Map<
@@ -196,8 +202,15 @@ export class ManagedExecutionReowner {
         ),
       };
       this.releaseHolds.set(sessionUuid, hold);
+      this.expediteRetry(sessionUuid);
     }
     return { settled: hold.settled, capMs: MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS };
+  }
+
+  private expediteRetry(id: string): void {
+    if (this.canAttempt(id)) {
+      this.retryExpedites.get(id)?.abort();
+    }
   }
 
   isReleaseHeld(sessionUuid: string): boolean {
@@ -471,12 +484,14 @@ export class ManagedExecutionReowner {
   private async retryLoop(id: string): Promise<void> {
     const stopped = this.episode(id).stop.signal;
     for (let retry = 1; this.needsRetry(id); retry++) {
+      const expedite = new AbortController();
+      this.retryExpedites.set(id, expedite);
       try {
-        await this.pacing.wait(this.pacing.delay(retry), stopped);
+        await this.pacing.wait(this.pacing.delay(retry), stopped, expedite.signal);
         if (!this.needsRetry(id)) {
           return;
         }
-        const result = await this.attempt(id);
+        const result = await this.attempt(id, expedite.signal);
         if (!this.canAttempt(id, stopped)) {
           return;
         }
@@ -490,11 +505,13 @@ export class ManagedExecutionReowner {
           return;
         }
         this.logRetry(id, error);
+      } finally {
+        this.retryExpedites.delete(id);
       }
     }
   }
 
-  private attempt(id: string): Promise<ReownAttempt> {
+  private attempt(id: string, expedited?: AbortSignal): Promise<ReownAttempt> {
     const pending = this.attempts.get(id);
     if (pending) {
       return pending;
@@ -503,6 +520,7 @@ export class ManagedExecutionReowner {
     const work = this.pacing
       .run(
         async () => {
+          this.retryExpedites.delete(id);
           if (!this.canAttempt(id, episode.stop.signal)) {
             return { assignments: [], outcome: "retry" } satisfies ReownAttempt;
           }
@@ -511,6 +529,7 @@ export class ManagedExecutionReowner {
         },
         (result) => result.outcome !== "retry",
         episode.stop.signal,
+        expedited,
       )
       .finally(() => {
         this.attempts.delete(id);

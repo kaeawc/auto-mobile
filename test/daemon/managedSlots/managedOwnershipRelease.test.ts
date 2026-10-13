@@ -18,7 +18,12 @@ import { sessionOwnershipLostPayload } from "../../../src/server/deviceSessionRe
 import { FakeDbWriteBarrier } from "../../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { drainMicrotasks, drainUntil, settleWithFakeTime } from "../../helpers/fakeTimerStepping";
+import {
+  drainMicrotasks,
+  drainUntil,
+  drainUntilQuiescent,
+  settleWithFakeTime,
+} from "../../helpers/fakeTimerStepping";
 
 const SESSION = "recovering-session";
 const DEVICE = "fake-managed-device";
@@ -332,17 +337,20 @@ describe("managed ownership release", () => {
     const h = await harness();
     h.behavior.busy = true;
     await h.reowner.reown([SESSION], { rehydrated: true });
+    h.behavior.busy = false;
+    const releaseStartedAt = h.timer.now();
     const release = h.manager.releaseSession(SESSION);
     expect(h.manager.isLiveManagedExecutionSession(SESSION)).toBe(false);
     expect(h.reowner.automationRefusal(SESSION)).toBeDefined();
-    h.behavior.busy = false;
-    await drainMicrotasks(30);
-    h.timer.advanceTime(2_000);
+    await drainUntil(() => h.writes.length > 0, {
+      description: "hold-triggered re-own and device teardown without advancing fake time",
+    });
     await release;
     await h.reowner.whenIdle();
     await h.drain.whenIdle();
     expect(h.writes).toEqual(["restore"]);
     expect(h.confirmed).toEqual([SESSION]);
+    expect(h.timer.now()).toBe(releaseStartedAt);
   });
 
   test("loss during a release hold skips writes and aborts retries", async () => {
@@ -520,23 +528,26 @@ describe("managed ownership release", () => {
         "explicit-release",
         () => false,
       );
-      await drainMicrotasks(40);
+      await drainUntilQuiescent(h.timer);
       // Admission checks during releasing must not prune the mark.
       expect(h.reowner.automationRefusal(SESSION)).toBeDefined();
       if (end === "retry-tick") {
-        h.timer.advanceTime(2_000);
-        await drainMicrotasks(60);
+        await h.timer.advanceTimeAsync(2_000, () => drainUntilQuiescent(h.timer));
         expect(h.reowner.automationRefusal(SESSION)).toBeDefined();
-        h.timer.advanceTime(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS - 2_000);
+        await h.timer.advanceTimeAsync(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS - 2_000, () =>
+          drainUntilQuiescent(h.timer),
+        );
       } else {
-        h.timer.advanceTime(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS);
+        await h.timer.advanceTimeAsync(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS, () =>
+          drainUntilQuiescent(h.timer),
+        );
       }
       expect(await release).toEqual({ superseded: true });
       expect(h.manager.hasSession(SESSION)).toBe(true);
       expect(h.reowner.automationRefusal(SESSION)).toBeDefined();
       h.behavior.busy = false;
-      await drainMicrotasks(40);
-      await h.timer.advanceTimeAsync(2_000, () => drainMicrotasks(100));
+      await drainUntilQuiescent(h.timer);
+      await h.timer.advanceTimeAsync(2_000, () => drainUntilQuiescent(h.timer));
       await drainUntil(() => h.confirmed.length > 0, {
         description: "claim after superseded release",
       });

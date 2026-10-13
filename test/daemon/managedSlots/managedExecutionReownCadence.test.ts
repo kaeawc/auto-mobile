@@ -1,5 +1,6 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import {
+  MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS,
   ManagedExecutionReowner,
   type ManagedExecutionReownerDependencies,
   type ManagedExecutionReownRegistry,
@@ -57,7 +58,14 @@ async function harness(policy?: ManagedExecutionReownerDependencies["retryBackof
       },
     );
   }
-  const behavior = { failures: 0, until: 0, blocked: 0, retry: false, hangClaim: false };
+  const behavior = {
+    failures: 0,
+    until: 0,
+    blocked: 0,
+    successBlocked: 0,
+    retry: false,
+    hangClaim: false,
+  };
   const calls: Array<{ id: string; at: number; end: number }> = [];
   const claim =
     Promise.withResolvers<Awaited<ReturnType<ManagedExecutionReownRegistry["claimExecution"]>>>();
@@ -77,6 +85,8 @@ async function harness(policy?: ManagedExecutionReownerDependencies["retryBackof
       if (behavior.hangClaim) {
         return claim.promise;
       }
+      timer.setCurrentTime(timer.now() + behavior.successBlocked);
+      call.end = timer.now();
       return registry.claimExecution(key, binding, owner, options);
     },
   };
@@ -386,4 +396,117 @@ test("release schedule stays unchanged while ownership and discovery hints are i
   ).toEqual([250, 500, 1_000, 2_000, 4_000, 5_000]);
   expect(new ManagedSlotOwnershipUnconfirmedError("a").toPayload().retryAfterMs).toBe(1_000);
   expect(new ManagedSlotDiscoveryIncompleteError("a").toPayload().retryAfterMs).toBe(2_000);
+});
+
+test("busy ownership hold drops state exactly at the four second cap", async () => {
+  const h = await harness();
+  h.behavior.failures = Infinity;
+  await h.reowner.reown(["a"], { rehydrated: true });
+  const hold = h.reowner.releaseDeviceHold("a");
+  expect(hold?.capMs).toBe(4_000);
+  expect(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS).toBe(4_000);
+  let outcome: string | undefined;
+  void hold?.settled?.then((result) => {
+    outcome = result;
+  });
+  await h.step(3_999);
+  expect(outcome).toBeUndefined();
+  expect(h.warn).not.toHaveBeenCalled();
+  await h.step(1);
+  expect(outcome).toBe("skip-device-writes");
+  expect(h.warn).toHaveBeenCalledTimes(1);
+  expect(h.warn.mock.calls[0]?.[0]).toContain("saved device state was dropped");
+  expect(h.reowner.isReleaseHeld("a")).toBe(false);
+});
+
+for (const successBlocked of [0, 3_300]) {
+  test(`release bypasses OLD quiet time and a ${successBlocked} ms successful write fits the cap`, async () => {
+    const h = await harness();
+    h.behavior.failures = 1;
+    h.behavior.blocked = 3_300;
+    await h.reowner.reown(["a"], { rehydrated: true });
+    await h.step(25); // The retry is now inside the shared quiet period.
+    h.behavior.successBlocked = successBlocked;
+    const start = h.timer.now();
+    const hold = h.reowner.releaseDeviceHold("a");
+    await h.step(0);
+    expect(h.calls.map((call) => call.at)).toEqual([0, start]);
+    expect(await hold?.settled).toBe("teardown");
+    expect(h.confirmed).toEqual([start + successBlocked]);
+    expect(h.timer.now() - start).toBeLessThan(4_000);
+    expect(h.warn).not.toHaveBeenCalled();
+  });
+}
+
+for (const successAttempt of [1, 2, 3]) {
+  test(`NEW timing confirms on release attempt ${successAttempt} inside four seconds`, async () => {
+    const h = await harness();
+    h.behavior.blocked = 300;
+    h.behavior.failures = 1;
+    await h.reowner.reown(["a"], { rehydrated: true });
+    h.behavior.failures = successAttempt - 1;
+    const start = h.timer.now();
+    const hold = h.reowner.releaseDeviceHold("a");
+    await h.step(3_999);
+    expect(h.calls.slice(1).map((call) => call.at - start)).toEqual(
+      [0, 600, 1_200].slice(0, successAttempt),
+    );
+    expect(await hold?.settled).toBe("teardown");
+    expect(h.confirmed[0] - start).toBeLessThan(4_000);
+    expect(h.warn).not.toHaveBeenCalled();
+  });
+}
+
+test("one expedite per hold then a failed OLD attempt restores shared quiet time", async () => {
+  const h = await harness();
+  h.behavior.blocked = 3_300;
+  h.behavior.failures = 2;
+  await h.reowner.reown(["a"], { rehydrated: true });
+  const hold = h.reowner.releaseDeviceHold("a");
+  expect(h.reowner.releaseDeviceHold("a")?.settled).toBe(hold?.settled);
+  await h.step(0);
+  expect(h.calls.map((call) => call.at)).toEqual([0, 3_300]);
+  expect(h.reowner.releaseDeviceHold("a")?.settled).toBe(hold?.settled);
+  await h.step(3_299);
+  expect(h.calls).toHaveLength(2);
+  expect(await hold?.settled).toBe("skip-device-writes");
+  await h.step(1);
+  expect(h.calls.map((call) => call.at)).toEqual([0, 3_300, 9_900]);
+});
+
+test("a hold during an in-flight retry starts no concurrent session attempt", async () => {
+  const h = await harness();
+  h.behavior.failures = 1;
+  await h.reowner.reown(["a"], { rehydrated: true });
+  h.behavior.hangClaim = true;
+  await h.step(25);
+  const hold = h.reowner.releaseDeviceHold("a");
+  const peer = h.reowner.reown(["b"], { rehydrated: true });
+  await h.step(0);
+  expect(h.calls.map((call) => call.id)).toEqual(["a", "a"]);
+  h.behavior.hangClaim = false;
+  h.claim.resolve({ kind: "binding_changed" });
+  await h.step(0);
+  await peer;
+  expect(h.calls.map((call) => call.id)).toEqual(["a", "a", "b"]);
+  await h.step(50);
+  expect(await hold?.settled).toBe("teardown");
+  expect(h.calls.map((call) => call.id)).toEqual(["a", "a", "b", "a"]);
+});
+
+test("a recovering session's release never forces registry admission", async () => {
+  const h = await harness();
+  const recovery = Promise.withResolvers<void>();
+  h.reowner.noteRecovering("a", recovery.promise);
+  const hold = h.reowner.releaseDeviceHold("a");
+  expect(hold?.capMs).toBe(4_000);
+  await h.step(3_999);
+  expect(h.calls).toHaveLength(0);
+  expect(h.opens()).toBe(0);
+  await h.step(1);
+  expect(await hold?.settled).toBe("skip-device-writes");
+  h.reowner.close();
+  recovery.resolve();
+  await h.step(0);
+  expect(h.calls).toHaveLength(0);
 });

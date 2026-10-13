@@ -334,6 +334,12 @@ While re-owning is unconfirmed, control calls refuse with
 25 ms, double to a 1 s cap, and continue while the session remains unconfirmed.
 Attempts share quiet time after a blocked registry call (capped at 5 s), with
 asynchronous waits bounded at 700 ms; failures warn once after 5 s of unconfirmed ownership.
+A release while ownership is unconfirmed holds device teardown for at most 4 s and
+expedites one waiting re-own attempt without overlapping another session's attempt.
+Confirmation starts teardown early; proven ownership loss skips device writes. At the
+cap, device writes are skipped and one warning says saved device state was dropped
+because ownership could not be confirmed. Ownership retries continue while the session
+object remains present.
 
 Values are the defaults in `src/daemon/sessionLivenessWindows.ts`; see
 [Device ownership](device-ownership.md#when-a-session-is-released) for the

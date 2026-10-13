@@ -50,7 +50,12 @@ import { type BackoffPolicy, exponentialBackoff } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { RegistryRetryPacing } from "./registryRetryPacing";
+import {
+  RegistryRetryPacing,
+  REGISTRY_RETRY_INITIAL_DELAY_MS,
+  REGISTRY_RETRY_MAX_DELAY_MS,
+  REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS,
+} from "./registryRetryPacing";
 import { DefaultRetryExecutor, type RetryExecutor } from "../../utils/retry/RetryExecutor";
 import type { Timer } from "../../utils/SystemTimer";
 import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../managedExecutionLiveness";
@@ -203,8 +208,10 @@ const RECENT_RELEASE_LIMIT = 256;
 
 const RELEASE_REASON = "managed-execution-release";
 
-export const MANAGED_SETTLED_SLOT_RECOVERY_RETRY_INITIAL_DELAY_MS = 25;
-export const MANAGED_SETTLED_SLOT_RECOVERY_RETRY_MAX_DELAY_MS = 1_000;
+export const MANAGED_SETTLED_SLOT_RECOVERY_RETRY_INITIAL_DELAY_MS = REGISTRY_RETRY_INITIAL_DELAY_MS;
+export const MANAGED_SETTLED_SLOT_RECOVERY_RETRY_MAX_DELAY_MS = REGISTRY_RETRY_MAX_DELAY_MS;
+export const MANAGED_SETTLED_SLOT_RECOVERY_RETRY_MAX_BLOCKED_WAIT_MS =
+  REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS;
 export const MANAGED_SETTLED_SLOT_RECOVERY_WARN_AFTER_MS = 5_000;
 
 /**
@@ -317,7 +324,7 @@ export class ManagedExecutionRelease {
       timer: options.timer,
       initialDelayMs: MANAGED_SETTLED_SLOT_RECOVERY_RETRY_INITIAL_DELAY_MS,
       maxDelayMs: MANAGED_SETTLED_SLOT_RECOVERY_RETRY_MAX_DELAY_MS,
-      maxBlockedWaitMs: 5_000,
+      maxBlockedWaitMs: MANAGED_SETTLED_SLOT_RECOVERY_RETRY_MAX_BLOCKED_WAIT_MS,
     });
     this.ownerHolds = options.ownerHolds ?? inFlightSlotReservations;
   }

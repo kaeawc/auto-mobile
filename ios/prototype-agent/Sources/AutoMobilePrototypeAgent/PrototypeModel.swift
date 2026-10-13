@@ -1,20 +1,44 @@
-import Combine
+import Observation
 import SwiftUI
 import UIKit
 
 /// Prototype state owned by the main thread. Transitions and event sequencing live in the
-/// device-free `PrototypeSession`; this adds SwiftUI publishing, assets and window geometry.
-final class PrototypeModel: ObservableObject {
-    @Published private(set) var session = PrototypeSession()
-    @Published var safeInsets = UIEdgeInsets.zero
+/// device-free `PrototypeSession`; this adds Observation tracking, assets and window geometry.
+@MainActor
+@Observable
+final class PrototypeModel {
+    @ObservationIgnored private(set) var session = PrototypeSession()
+    private(set) var spec: PrototypeSpec?
+    private(set) var state: [String: JSONValue] = [:]
+    private(set) var pages: [String: Int] = [:]
+    private(set) var appearance: PrototypeAppearance?
+    private(set) var deviceDark = false
+    /// Redraws controls that hold platform values when a transition leaves state and pages unchanged.
+    private var refusedChangeRevision = 0
+    /// Receives the new value synchronously before it is stored or any transition side effects run.
+    @ObservationIgnored var onSessionChange: ((PrototypeSession) -> Void)?
+
+    private func publish(_ next: PrototypeSession, replacingSpec: Bool = false) {
+        onSessionChange?(next)
+        // Only show and dismissal change structure; state transitions must not invalidate readers
+        // of an unchanged (non-Equatable) spec merely by copying the session back.
+        if replacingSpec || session.isShown != next.isShown { spec = next.spec }
+        session = next
+        if state != next.state { state = next.state }
+        if pages != next.pages { pages = next.pages }
+        if appearance != next.appearance { appearance = next.appearance }
+        if deviceDark != next.deviceDark { deviceDark = next.deviceDark }
+    }
+
+    var safeInsets = UIEdgeInsets.zero
     /// The prototype window's own (0, 0) on screen, in points; anchors are screen coordinates.
-    @Published var windowOrigin = CGPoint.zero
+    var windowOrigin = CGPoint.zero
     /// The prototype window's size in points, for placing a sheet against the keyboard.
-    @Published var windowSize = CGSize.zero
+    var windowSize = CGSize.zero
     /// The software keyboard's frame in screen points, nil while hidden, and the duration its
     /// show or hide animates over (UIKit keyboard notifications).
-    @Published private(set) var keyboardFrame: CGRect?
-    private(set) var keyboardDuration: Double?
+    private(set) var keyboardFrame: CGRect?
+    @ObservationIgnored private(set) var keyboardDuration: Double?
     var assets: [String: UIImage] = [:]
 
     func setKeyboard(frame: CGRect?, duration: Double?) {
@@ -37,25 +61,25 @@ final class PrototypeModel: ObservableObject {
     }
 
     /// Window-space rects that accept touches; everything else passes through to the app.
-    var hitRects: [String: CGRect] = [:]
+    @ObservationIgnored var hitRects: [String: CGRect] = [:]
 
-    var onEvent: (([String: Any]) -> Void)?
-    var onVisibilityChange: ((Bool) -> Void)?
+    @ObservationIgnored var onEvent: (([String: Any]) -> Void)?
+    @ObservationIgnored var onVisibilityChange: ((Bool) -> Void)?
     /// Resigns keyboard focus inside the prototype window.
-    var onEndEditing: (() -> Void)?
+    @ObservationIgnored var onEndEditing: (() -> Void)?
 
     /// Closes snackbars that set `durationMs`; created with the model so it can call back into it.
-    private lazy var snackbarTimeouts = SnackbarTimeouts(clock: clock) { [weak self] node in
+    @ObservationIgnored private lazy var snackbarTimeouts = SnackbarTimeouts(clock: clock) { [weak self] node in
         // A timer closing a snackbar is not user activity, so it must not restart the idle TTL.
         self?.apply(activity: false) { $0.closeModal(node) }
     }
 
     /// Ends a prototype nobody has touched for the TTL (`reason: ttl`, as on Android).
-    private lazy var idleTimer = PrototypeIdleTimer(clock: clock) { [weak self] in
+    @ObservationIgnored private lazy var idleTimer = PrototypeIdleTimer(clock: clock) { [weak self] in
         self?.dismiss(reason: .ttl)
     }
 
-    private let clock: PrototypeClock
+    @ObservationIgnored private let clock: PrototypeClock
 
     init(clock: PrototypeClock = SystemPrototypeClock()) {
         self.clock = clock
@@ -66,10 +90,6 @@ final class PrototypeModel: ObservableObject {
     var idleTtlMilliseconds: Int {
         get { idleTimer.ttlMilliseconds }
         set { idleTimer.ttlMilliseconds = newValue }
-    }
-
-    var spec: PrototypeSpec? {
-        session.spec
     }
 
     /// Re-arms snackbar timeouts against the snackbars the session now has open.
@@ -87,18 +107,10 @@ final class PrototypeModel: ObservableObject {
         return insets
     }
 
-    var state: [String: JSONValue] {
-        session.state
-    }
-
-    var pages: [String: Int] {
-        session.pages
-    }
-
     /// Whether the prototype draws dark: the one value the palette, the host chrome and the window's
     /// UIKit trait all take (`PrototypeSession.appearance`).
     var dark: Bool {
-        session.appearance?.dark ?? session.deviceDark
+        appearance?.dark ?? deviceDark
     }
 
     /// Reports the device's appearance. A changed value re-themes a prototype that follows the
@@ -117,35 +129,37 @@ final class PrototypeModel: ObservableObject {
     ) {
         // Keep the touchable rects: SwiftUI re-reports a frame only when it changes, so clearing
         // them on a same-geometry re-show would leave the prototype passing every touch through.
-        session.show(spec, reset: reset, appearance: appearance, specBytes: specBytes)
+        var next = session
+        next.show(spec, reset: reset, appearance: appearance, specBytes: specBytes)
+        publish(next, replacingSpec: true)
         syncSnackbarTimeouts()
         // An accepted show, including a same-id replace, is activity.
         idleTimer.arm()
         onVisibilityChange?(true)
     }
 
-    /// Asset changes must redraw: `assets` is not published, so notify observers explicitly.
+    /// Uploaded assets are tracked independently of session transitions.
     func putAsset(_ id: String, _ image: UIImage) {
-        objectWillChange.send()
         assets[id] = image
     }
 
     func removeAsset(_ id: String) {
         guard assets[id] != nil else { return }
-        objectWillChange.send()
         assets[id] = nil
     }
 
     func holds(_ condition: Condition) -> Bool {
-        session.holds(condition)
+        condition.holds(state)
     }
 
     func fontAssets() -> [String] {
-        session.fontAssets()
+        _ = spec
+        return session.fontAssets()
     }
 
     func missingAssets() -> [String] {
-        session.missingAssets(available: Set(assets.keys))
+        _ = spec
+        return session.missingAssets(available: Set(assets.keys))
     }
 
     // MARK: Interactions
@@ -215,7 +229,6 @@ final class PrototypeModel: ObservableObject {
     func hostDisconnected() {
         dismiss(reason: .disconnect)
         if !assets.isEmpty {
-            objectWillChange.send()
             assets = [:]
         }
     }
@@ -225,8 +238,15 @@ final class PrototypeModel: ObservableObject {
     /// TTL while the prototype stays up.
     private func apply(activity: Bool = true, _ transition: (inout PrototypeSession) -> [PrototypeEvent]) {
         let wasShown = session.isShown
+        let previousState = session.state
+        let previousPages = session.pages
         // `transition` adds the `appearance_changed` a state or page change caused.
-        let events = session.transition(transition)
+        var next = session
+        let events = next.transition(transition)
+        publish(next)
+        // A rejected edit (#11562) or no-op transition leaves the stored values unchanged;
+        // redraw value-holding controls so they show those values instead of the refused input.
+        if next.state == previousState, next.pages == previousPages { refusedChangeRevision += 1 }
         if session.isShown {
             if activity { idleTimer.arm() }
         } else {
@@ -257,15 +277,21 @@ final class PrototypeModel: ObservableObject {
         return status
     }
 
+    /// Registers a view or binding's dependency on redraws after refused or no-op transitions.
+    var refusedChanges: Int {
+        refusedChangeRevision
+    }
+
     /// Typing goes through `change`, so every edit both updates state and emits `change`.
     func binding(forStateKey key: String) -> Binding<String> {
-        Binding(
-            get: { self.state[key]?.displayString ?? "" },
+        _ = refusedChanges
+        return Binding(
+            get: {
+                _ = self.refusedChanges
+                return self.state[key]?.displayString ?? ""
+            },
             set: { value in
                 self.apply { $0.change(key: key, value: .string(value)) }
-                // A rejected edit (#11562) leaves the state as it was; redraw so the field shows it
-                // again instead of the text that was refused.
-                if self.state[key] != .string(value) { self.objectWillChange.send() }
             }
         )
     }

@@ -647,7 +647,7 @@ wiring_requires_yq() {
   [ "$routing" = 'ubuntu-latest' ]
   [ "$(yq -r '.jobs."mac-runner-queue".needs[]' "$WF")" = $'detect-changes\nfast-validation' ]
   # This includes every roll-up gate: no required job can inherit the advisory red.
-  run yq -r '[.jobs[] | .needs // [] | (if type == "!!str" then [.] else . end) | .[] | select(. == "mac-runner-queue")] | length' "$WF"
+  run yq -r '[.jobs[] | .needs // [] | [.] | flatten | .[] | select(. == "mac-runner-queue")] | length' "$WF"
   [ "$status" -eq 0 ]
   [ "$output" -eq 0 ]
 }

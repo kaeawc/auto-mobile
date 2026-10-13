@@ -1,3 +1,4 @@
+import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import * as planUtils from "../../src/utils/planUtils";
 import {
@@ -110,5 +111,50 @@ test("planRefusalFields does not repeat a refusal's details beside them", () => 
     retryable: true,
     retryAfterMs: 5_000,
     details: { ...details, code: "capacity_exhausted", retryable: true },
+  });
+});
+
+for (const recovering of [true, false]) {
+  test(`#12112 planRefusalFields preserves unhealthy evidence (recovering=${recovering})`, async () => {
+    const devices = [
+      {
+        deviceId: "emulator-5554",
+        reason: "new-health-reason",
+        recovering,
+        ...(recovering ? { retryAfterMs: 12345 } : {}),
+      },
+    ];
+    const error = new acquisitionRefusals.DeviceUnhealthyError(devices, "unhealthy");
+    const expected = {
+      code: "device_unhealthy",
+      deviceId: "emulator-5554",
+      reason: "new-health-reason",
+      recovering,
+      retryable: recovering,
+      ...(recovering ? { retryAfterMs: 12345 } : {}),
+      devices,
+    };
+    expect(planRefusalFields(error)).toEqual(expected);
+    execute.mockRejectedValue(error);
+    expect(await run()).toMatchObject({
+      success: false,
+      error: "DeviceUnhealthyError: unhealthy",
+      ...expected,
+      deviceId: "fake-device",
+    });
+  });
+}
+
+test("#12112 a cleanup refusal keeps the plan deviceId at top level", async () => {
+  execute.mockRejectedValue(
+    new acquisitionRefusals.DeviceCleanupInProgressError("emulator-9999", 1000),
+  );
+  expect(await run()).toMatchObject({
+    success: false,
+    code: "device_cleanup_in_progress",
+    retryable: true,
+    retryAfterMs: 1000,
+    deviceId: "fake-device",
+    platform: "android",
   });
 });

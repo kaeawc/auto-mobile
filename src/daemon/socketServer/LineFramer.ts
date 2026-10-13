@@ -80,8 +80,8 @@ export const FAILURES_STREAM_MAX_FRAME_BYTES = 8 * 1024 * 1024;
 export interface LineFramerHandlers {
   /** One complete frame, without its trailing newline. May be empty. */
   onLine(line: string): void;
-  /** The pending frame exceeded the limit. Called once; the framer then discards all input. */
-  onOverflow(): void;
+  /** Called once with at most 256 copied head bytes on overflow; all later input is discarded. */
+  onOverflow(frameHead?: Buffer): void;
 }
 
 /**
@@ -140,11 +140,11 @@ export class LineFramer {
   }
 
   private appendPending(piece: Buffer): void {
-    this.pendingBytes += piece.length;
-    if (this.pendingBytes > this.maxFrameBytes) {
-      this.overflow();
+    if (this.pendingBytes + piece.length > this.maxFrameBytes) {
+      this.overflow(piece);
       return;
     }
+    this.pendingBytes += piece.length;
     this.pending.push(piece);
   }
 
@@ -152,7 +152,7 @@ export class LineFramer {
   private completeFrame(tail: Buffer): boolean {
     const frameBytes = this.pendingBytes + tail.length;
     if (frameBytes > this.maxFrameBytes) {
-      this.overflow();
+      this.overflow(tail);
       return false;
     }
     const frame =
@@ -163,10 +163,20 @@ export class LineFramer {
     return true;
   }
 
-  private overflow(): void {
+  private overflow(tail: Buffer): void {
+    // Only the bounded head is copied; it must not retain an oversized input buffer.
+    const head = Buffer.allocUnsafe(Math.min(256, this.pendingBytes + tail.length));
+    let offset = 0;
+    for (const piece of this.pending) {
+      offset += piece.copy(head, offset, 0, head.length - offset);
+      if (offset === head.length) {
+        break;
+      }
+    }
+    tail.copy(head, offset, 0, head.length - offset);
     this.overflowed = true;
     this.pending = [];
     this.pendingBytes = 0;
-    this.handlers.onOverflow();
+    this.handlers.onOverflow(head);
   }
 }

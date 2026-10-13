@@ -10,6 +10,10 @@ inputs:
     description: "Script to execute once Android Emulator is ready"
     example: "./gradlew tests"
     required: "true"
+  prebuild-script:
+    description: "Command started in the background from working-directory when an attempt starts; runs while the emulator boots and dexopt settles and is awaited before script. Failure never fails the action; script then builds what it needs."
+    default: ""
+    required: "false"
   api_level:
     description: "Android API level"
     example: "35"
@@ -194,16 +198,20 @@ runs:
 
     # The third-party action above owns SDK/AVD/snapshot preparation only. The
     # product owns every actual emulator launch and readiness probe below.
+    # Prebuild (#11578) starts only after every SDK-mutating step (AVD creation
+    # and ensure-emulator-sdk) has finished, so Gradle never races sdkmanager.
     - name: Boot and test Emulator (Attempt 1)
       id: emulator-attempt-1
       continue-on-error: true
       shell: ${{ inputs.shell }}
       working-directory: ${{ inputs.working-directory }}
+      env:
+        ANDROID_EMULATOR_PREBUILD_SCRIPT: ${{ inputs.prebuild-script }}
       run: |
         export AUTOMOBILE_EMULATOR_ARGS='${{ inputs.windowed == 'true' && '["-no-snapshot-save","-gpu","swiftshader_indirect","-noaudio","-no-boot-anim","-camera-back","none"]' || '["-no-snapshot-save","-no-window","-gpu","swiftshader_indirect","-noaudio","-no-boot-anim","-camera-back","none"]' }}'
         export AUTOMOBILE_BOOT_PROGRESS=true
         export AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR="${{ github.workspace }}/android-emulator-diagnostics/attempt-1"
-        "${{ github.workspace }}/scripts/android/boot-emulator.sh" --avd-name "${{ inputs.avd-name }}"
+        "${{ github.workspace }}/scripts/android/run-with-background-prebuild.sh" "$ANDROID_EMULATOR_PREBUILD_SCRIPT" -- "${{ github.workspace }}/scripts/android/boot-emulator.sh" --avd-name "${{ inputs.avd-name }}"
         "${{ github.workspace }}/scripts/android/run-emulator-tests.sh" "${{ inputs.accessibility-apk-path }}" "${{ inputs.script }}" || {
           test_status=$?
           "${{ github.workspace }}/scripts/android/collect-emulator-diagnostics.sh" \
@@ -231,12 +239,14 @@ runs:
       if: steps.emulator-attempt-1.outcome == 'failure'
       shell: ${{ inputs.shell }}
       working-directory: ${{ inputs.working-directory }}
+      env:
+        ANDROID_EMULATOR_PREBUILD_SCRIPT: ${{ inputs.prebuild-script }}
       run: |
         echo "Starting emulator retry attempt 2."
         export AUTOMOBILE_EMULATOR_ARGS='${{ inputs.windowed == 'true' && '["-no-snapshot-save","-gpu","swiftshader_indirect","-noaudio","-no-boot-anim","-camera-back","none"]' || '["-no-snapshot-save","-no-window","-gpu","swiftshader_indirect","-noaudio","-no-boot-anim","-camera-back","none"]' }}'
         export AUTOMOBILE_BOOT_PROGRESS=true
         export AUTOMOBILE_EMULATOR_DIAGNOSTICS_DIR="${{ github.workspace }}/android-emulator-diagnostics/attempt-2"
-        "${{ github.workspace }}/scripts/android/boot-emulator.sh" --avd-name "${{ inputs.avd-name }}"
+        "${{ github.workspace }}/scripts/android/run-with-background-prebuild.sh" "$ANDROID_EMULATOR_PREBUILD_SCRIPT" -- "${{ github.workspace }}/scripts/android/boot-emulator.sh" --avd-name "${{ inputs.avd-name }}"
         "${{ github.workspace }}/scripts/android/run-emulator-tests.sh" "${{ inputs.accessibility-apk-path }}" "${{ inputs.script }}" || {
           test_status=$?
           "${{ github.workspace }}/scripts/android/collect-emulator-diagnostics.sh" \

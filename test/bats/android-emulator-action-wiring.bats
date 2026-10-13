@@ -152,3 +152,16 @@ wiring_requires_yq() {
   [[ "$writer" == gradle/actions/setup-gradle@* ]]
   [ "$reader" = "$writer" ]
 }
+
+@test "optional prebuild wraps boot before the suites in both attempts (#11578)" {
+  wiring_requires_yq
+  local attempt attempt_run
+  [ "$(yq -r '.inputs."prebuild-script".default' "$ACTION")" = "" ]
+  [ "$(yq -r '.inputs."prebuild-script".required' "$ACTION")" = "false" ]
+  for attempt in emulator-attempt-1 emulator-attempt-2; do
+    attempt_run="$(yq -r ".runs.steps[] | select(.id == \"$attempt\") | .run" "$ACTION")"
+    [[ "$attempt_run" == *'scripts/android/run-with-background-prebuild.sh" "$ANDROID_EMULATOR_PREBUILD_SCRIPT" -- "${{ github.workspace }}/scripts/android/boot-emulator.sh"'*'scripts/android/run-emulator-tests.sh'* ]] || return 1
+    [ "$(yq -r ".runs.steps[] | select(.id == \"$attempt\") | .env.ANDROID_EMULATOR_PREBUILD_SCRIPT" "$ACTION")" = '${{ inputs.prebuild-script }}' ] || return 1
+    [[ "$attempt_run" != *'${{ inputs.prebuild-script }}'* ]] || return 1
+  done
+}

@@ -1,0 +1,26 @@
+{
+  "surface": "socket-frame",
+  "name": "device_unhealthy",
+  "builder": "mcpRequestFailureDetails",
+  "payload": {
+    "type": "mcp_response",
+    "success": false,
+    "error": "Unhealthy devices cannot be assigned: restoration is unresolved.",
+    "code": "device_unhealthy",
+    "retryable": true,
+    "retryAfterMs": 12863,
+    "details": {
+      "deviceId": "emulator-5554",
+      "reason": "network-condition",
+      "recovering": true,
+      "devices": [
+        {
+          "deviceId": "emulator-5554",
+          "reason": "network-condition",
+          "recovering": true,
+          "retryAfterMs": 12863
+        }
+      ]
+    }
+  }
+}

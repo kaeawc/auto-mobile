@@ -28,6 +28,9 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import dev.jasonpearson.automobile.protocol.PrototypeBoxNode
+import dev.jasonpearson.automobile.protocol.PrototypeColumnNode
+import dev.jasonpearson.automobile.protocol.PrototypeRowNode
 
 /**
  * Whether prototype state changes (visibility, page) animate. Off by default so previews and direct
@@ -94,9 +97,32 @@ internal fun prototypeExitTransition(transition: String?): ExitTransition =
     else -> fadeOut() + shrinkOut()
   }
 
+/** Whether this container owns size animation for repeat or child visibility changes. Pure. */
+internal fun prototypeContainerAnimatesSize(node: PrototypeRenderNode): Boolean {
+  val repeats =
+    when (val source = node.source) {
+      is PrototypeBoxNode -> source.repeat != null
+      is PrototypeRowNode -> source.repeat != null
+      is PrototypeColumnNode -> source.repeat != null
+      else -> false
+    }
+  return repeats || prototypeChildrenChangeVisibility(node)
+}
+
+private fun prototypeChildrenChangeVisibility(node: PrototypeRenderNode): Boolean =
+  node.children.any { child ->
+    child.source?.visibleWhen != null ||
+      (child.role in SIZE_TRANSPARENT_ROLES && prototypeChildrenChangeVisibility(child))
+  }
+
+private val SIZE_TRANSPARENT_ROLES = setOf("card", "scroll", "pager")
+
 /**
- * Animates a container's size as its children appear, disappear or change; unchanged when motion is
- * off so settled screenshots never see an in-flight size.
+ * Animates and clips box/row/column containers only with authored repeat or a direct visibleWhen
+ * child, recursively looking through card/scroll/pager children only. Nested box/row/column
+ * children own their animation, which their parent follows frame by frame. Other containers do not
+ * spring for text, style or image-load size changes, and do not clip children while motion is on.
+ * No size animation or clipping is added when motion is off.
  */
 internal fun Modifier.prototypeAnimateSize(enabled: Boolean): Modifier =
   if (enabled) animateContentSize() else this

@@ -22018,6 +22018,56 @@
           "required": ["lastAction", "success", "timestamp"],
           "additionalProperties": false
         },
+        "platformNotes": {
+          "description": "Successful show on iOS only: platform and construct identify the difference; effect says ignored or substituted; paths list affected fields in the component-expanded, anchor-resolved device spec in tree order, capped at 20, including bottomSheet.dismissOnSwipe when absent and defaulted; total is the full count only when capped; values are distinct sorted placeholder icon names for icon.name; detail explains iOS and Android behavior. Absent when nothing applies or the show failed.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "platform": {
+                "type": "string",
+                "const": "ios"
+              },
+              "construct": {
+                "type": "string",
+                "enum": [
+                  "node.id",
+                  "bottomSheet.dismissOnSwipe",
+                  "bottomSheet.detents",
+                  "icon.name",
+                  "icon.variant"
+                ]
+              },
+              "effect": {
+                "type": "string",
+                "enum": ["ignored", "substituted"]
+              },
+              "paths": {
+                "maxItems": 20,
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "total": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 9007199254740991
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "detail": {
+                "type": "string"
+              }
+            },
+            "required": ["platform", "construct", "effect", "paths", "detail"],
+            "additionalProperties": false
+          }
+        },
         "event": {
           "type": "object",
           "properties": {

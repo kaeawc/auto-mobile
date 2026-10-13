@@ -55,7 +55,7 @@ public final class ProbeService: NSObject, ProbeBridge {
     }
 
     public func snapshot(version: Int, managedSimulators: Data, reply: @escaping (Data?, String?) -> Void) {
-        guard version == IdentityProbe.version else {
+        guard IdentityProbe.supportedVersions.contains(version) else {
             reply(nil, "Unsupported identity-probe protocol version")
             return
         }
@@ -75,7 +75,7 @@ public final class ProbeService: NSObject, ProbeBridge {
         }
         do {
             let data = try JSONEncoder().encode(
-                probe.snapshot(managedSimulators: simulators, rules: rules.activeRules())
+                probe.snapshot(managedSimulators: simulators, rules: rules.activeRules(), version: version)
             )
             lock.lock()
             let current = active && revision == generation
@@ -91,7 +91,7 @@ public final class ProbeService: NSObject, ProbeBridge {
     }
 
     public func rule(version: Int, command: Data, reply: @escaping (Data?, String?) -> Void) {
-        guard version == IdentityProbe.version else {
+        guard IdentityProbe.supportedVersions.contains(version) else {
             reply(nil, "Unsupported identity-probe protocol version")
             return
         }
@@ -108,7 +108,13 @@ public final class ProbeService: NSObject, ProbeBridge {
             reply(nil, ProbeReadbackStartupState.inactiveProviderMessage)
             return
         }
-        guard let data = try? JSONEncoder().encode(rules.execute(decoded)) else {
+        let result: NetworkRuleResult
+        if version == 3, let condition = decoded.condition, condition != .offline {
+            result = NetworkRuleResult(outcome: .invalidCommand)
+        } else {
+            result = rules.execute(decoded)
+        }
+        guard let data = try? JSONEncoder().encode(result) else {
             reply(nil, "Unable to encode network rule result")
             return
         }

@@ -17,6 +17,7 @@ import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers"
 import {
   getVideoRecordingMetadata,
   getVideoRecordingOwnerRef,
+  heldVideoRecordingOwner,
   IOS_MAX_DURATION_SECONDS,
   listActiveVideoRecordings,
   rollbackVideoRecordingStart,
@@ -943,9 +944,28 @@ async function stopRecordingById(
 
   const results: Array<Record<string, unknown>> = [];
   const evictedRecordingIds: string[] = [];
+  const heldOwner = heldVideoRecordingOwner(recordingId);
   const activeRecords = await listActiveVideoRecordings();
   const matching = activeRecords.find((record) => record.recordingId === recordingId);
-  if (!matching) {
+  const captureOwner = heldOwner ?? matching;
+  if (captureOwner) {
+    // An interrupted row can still have a live capture. Its in-memory owner wins, including
+    // an explicitly ownerless capture; consult the row only when no memory entry exists.
+    const owner =
+      "deviceId" in captureOwner ? captureOwner : await getVideoRecordingOwnerRef(recordingId);
+    if (owner?.deviceId !== undefined) {
+      assertActiveRecordingOwner({
+        recordingId,
+        deviceId: owner.deviceId,
+        recordingOwner: owner.ownerSessionUuid,
+        requesterSessionUuid: ownerSessionUuid,
+        requesterMcpSessionId,
+      });
+    }
+  } else {
+    // No held capture or recording row: finalized-artifact reads stop nothing (#11647).
+    // Sessions require finalizedOwnerVisible (owner, same base, or acquiring connection);
+    // sessionless requesters and ownerless rows retain their unscoped read access.
     const finalized = await finalizedStopResponse(
       recordingId,
       ownerSessionUuid,
@@ -954,14 +974,6 @@ async function stopRecordingById(
     if (finalized) {
       return finalized;
     }
-  } else {
-    assertActiveRecordingOwner({
-      recordingId,
-      deviceId: matching.deviceId,
-      recordingOwner: matching.ownerSessionUuid,
-      requesterSessionUuid: ownerSessionUuid,
-      requesterMcpSessionId,
-    });
   }
 
   try {

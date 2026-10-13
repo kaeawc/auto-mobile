@@ -1890,6 +1890,15 @@ export function listActiveVideoRecordingIdsForOwner(
     .map(([recordingId]) => recordingId);
 }
 
+/** A held capture's owner, regardless of its durable row status; never queries the database. */
+export function heldVideoRecordingOwner(
+  recordingId: string,
+): { deviceId?: string; ownerSessionUuid?: string } | undefined {
+  return listOwnedActiveVideoRecordingIds().includes(recordingId)
+    ? (recordingOwners.get(recordingId) ?? {})
+    : undefined;
+}
+
 export async function listVideoRecordings(
   scope: { ownerSessionUuid?: string } = {},
 ): Promise<VideoRecordingMetadata[]> {

@@ -27,10 +27,10 @@ data class PrototypeWindowMetadata(
 )
 
 /**
- * Whether the host's own dismiss bar, drawn above the spec in every fullscreen window, is fully
- * opaque. It is a translucent strip (`prototypeDismissColors`), so app pixels show through it and a
- * fullscreen window can never claim to hide the whole app. Flip this only if the bar becomes
- * opaque.
+ * Whether the host's own dismiss bar, drawn above the spec in a fullscreen window with `chrome:
+ * "bar"`, is fully opaque. It is a translucent strip (`prototypeDismissColors`), so app pixels show
+ * through it and a fullscreen window with that bar cannot claim to hide the whole app. Flip this
+ * only if the bar becomes opaque.
  */
 const val FULLSCREEN_DISMISS_BAR_OPAQUE = false
 
@@ -45,12 +45,15 @@ const val FULLSCREEN_DISMISS_BAR_OPAQUE = false
  * the side for each palette's mode is, and the `scrim` role in a scrim slot never does, because it
  * is drawn at the default scrim opacity. The controller passes the one palette of the mode the show
  * resolved to, with that [appearance]; without it every mode the spec can resolve to is checked.
+ * [dismissBarDrawn] defaults to the legacy fullscreen bar; a chromeless window has no translucent
+ * strip, so its authored surface alone decides opacity.
  */
 internal fun prototypeWindowMetadata(
   model: PrototypeRenderModel,
   dismissBarOpaque: Boolean = FULLSCREEN_DISMISS_BAR_OPAQUE,
   palettes: List<PrototypePalette>? = null,
   appearance: PrototypeAppearance? = null,
+  dismissBarDrawn: Boolean = true,
 ): PrototypeWindowMetadata {
   val placement = model.placement
   val name =
@@ -77,7 +80,8 @@ internal fun prototypeWindowMetadata(
   val scrimSolid =
     fullscreen != null &&
       drawn.all { opaque(prototypeResolveScrim(it, fullscreen.scrim, fullscreen.scrimSpec)) }
-  val chromeOpaque = placement !is PrototypePlacement.Fullscreen || dismissBarOpaque
+  val chromeOpaque =
+    placement !is PrototypePlacement.Fullscreen || !dismissBarDrawn || dismissBarOpaque
   return PrototypeWindowMetadata(
     name,
     model.opacityPercent == 100 && chromeOpaque && (rootSolid || scrimSolid),

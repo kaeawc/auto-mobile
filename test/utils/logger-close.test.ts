@@ -1,3 +1,4 @@
+import { useRealLogSinks } from "../helpers/realLogSinks";
 import { describe, expect, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
@@ -6,6 +7,8 @@ import { join } from "node:path";
 import { ActionableError } from "../../src/models/ActionableError";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+useRealLogSinks();
 
 const previousSink = process.env.AUTOMOBILE_LOG_SINK;
 process.env.AUTOMOBILE_LOG_SINK = "stderr";

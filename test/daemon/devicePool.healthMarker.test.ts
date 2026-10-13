@@ -36,7 +36,10 @@ afterEach(() => {
   PlatformDeviceManagerFactory.reset();
 });
 
-async function harness(count = 1) {
+async function harness(
+  count = 1,
+  assigned?: (deviceId: string, incarnation: number, visible: number | undefined) => void,
+) {
   const timer = new FakeTimer();
   timer.setCurrentTime(1000);
   const markers = new InMemoryDeviceHealthMarkers(timer);
@@ -70,6 +73,8 @@ async function harness(count = 1) {
       timer,
       deviceManager: utils,
       deviceHealthMarkers: markers,
+      onDeviceIncarnationAssigned: (id, incarnation) =>
+        assigned?.(id, incarnation, pool.getDeviceIncarnation(id)),
     }),
   );
   await pool.initializeWithDevices(devices);
@@ -78,6 +83,7 @@ async function harness(count = 1) {
     markers,
     manager,
     pool,
+    utils,
     get calls() {
       return calls;
     },
@@ -1202,4 +1208,47 @@ test("three recorder recovery failures hold the incarnation independently of app
   expect(h.markers.get(device.deviceId, incarnation, "recording-teardown")?.reason).toBe(
     "recording-teardown",
   );
+});
+
+test("pool incarnation hook observes published entries for initialization, add, and refresh, but not bump", async () => {
+  const assigned: Array<[string, number, number | undefined]> = [];
+  const h = await harness(1, (id, incarnation, visible) =>
+    assigned.push([id, incarnation, visible]),
+  );
+  const original = h.pool.getDeviceIncarnation(device.deviceId)!;
+  expect(assigned).toEqual([[device.deviceId, original, original]]);
+  h.pool.bumpDeviceIncarnation(device.deviceId);
+  expect(assigned).toHaveLength(1);
+  h.utils.setBootedDevices("android", [device, other]);
+  await h.pool.refreshDevices();
+  const refreshed = h.pool.getDeviceIncarnation(other.deviceId)!;
+  expect(assigned).toEqual([
+    [device.deviceId, original, original],
+    [other.deviceId, refreshed, refreshed],
+  ]);
+  await h.pool.removeDevice(other.deviceId);
+  await h.pool.addDevice(other);
+  const added = h.pool.getDeviceIncarnation(other.deviceId)!;
+  expect(assigned.at(-1)).toEqual([other.deviceId, added, added]);
+  expect(assigned).toHaveLength(3);
+});
+
+test("throwing incarnation listener warns and does not break initialization or refresh", async () => {
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    const h = await harness(1, () => {
+      throw new Error("listener failed");
+    });
+    expect(h.pool.getDeviceIncarnation(device.deviceId)).toBeDefined();
+    h.utils.setBootedDevices("android", [device, other]);
+    await h.pool.refreshDevices();
+    expect(h.pool.getDeviceIncarnation(other.deviceId)).toBeDefined();
+    expect(
+      warn.mock.calls.filter(([message]) =>
+        String(message).includes("incarnation listener failed"),
+      ),
+    ).toHaveLength(2);
+  } finally {
+    warn.mockRestore();
+  }
 });

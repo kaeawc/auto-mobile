@@ -34,6 +34,8 @@ export const testOverrides: {
   bootAdmissionGatesDisabled: boolean;
   /** True while the daemon must not read its own process generation token (`ps` on macOS). */
   processGenerationCaptureDisabled: (() => boolean) | undefined;
+  /** True while in-process log records are discarded before formatting instead of reaching the file, stderr or stdout sinks. */
+  logSinksDisabled: (() => boolean) | undefined;
 } = {
   gitMetadataClient: undefined,
   hostPortAvailabilityChecker: undefined,
@@ -42,4 +44,5 @@ export const testOverrides: {
   auxSocketDir: undefined,
   bootAdmissionGatesDisabled: false,
   processGenerationCaptureDisabled: undefined,
+  logSinksDisabled: undefined,
 };

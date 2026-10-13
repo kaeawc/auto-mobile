@@ -40,8 +40,20 @@ export const OWNERLESS_LOCK_RECLAIM_AGE_MS = 10_000;
 // Guards cover a synchronous burst; tokenless/corrupt crash remnants get the same grace.
 export const RECLAIM_GUARD_ABANDON_AGE_MS = OWNERLESS_LOCK_RECLAIM_AGE_MS;
 export const RECLAIM_GUARD_SLOT_LIMIT = 64;
-// Count unlink attempts, including failures, across the entire acquire attempt.
+// Count own-tmp unlink attempts, including failures, across the entire acquire attempt.
 export const OWN_TMP_SWEEP_LIMIT = 8;
+export const OWN_TMP_SWEEP_INTERVAL_MS = 300_000;
+export const OWN_TMP_SWEEP_CANDIDATE_LIMIT = 64;
+export const OWN_TMP_SWEEP_DIRECTORY_LIMIT = 64;
+
+// List at most once per filesystem/PID/directory every five minutes (unless the clock
+// moves backwards). Remember bounded own-PID candidates across lock basenames,
+// prioritizing the listing acquire's basename before filling the remaining slots;
+// each publishing acquire rechecks its candidates' names and ages before removal.
+const ownTmpSweeps = new WeakMap<
+  LockFileSystem,
+  Map<string, { listedAt: number; candidates: string[] }>
+>();
 
 export interface ExclusiveLockOptions {
   /** Optional synchronous filesystem seam; defaults to node fs. */
@@ -248,29 +260,79 @@ export function* acquireExclusiveLockSteps(
   );
 }
 
+// Parse from the end: a guard prefix's fractional mtime may itself contain dots.
+const publicationName = /^.+\.(\d+)\.\d+\.[^.]+\.tmp$/;
+
+function* ownPublicationTmpCandidates(
+  directory: string,
+  prefix: string,
+  pid: string,
+  fileSystem: LockFileSystem,
+  now: number,
+): Steps<string[]> {
+  const key = `${pid}:${directory}`;
+  let directories = ownTmpSweeps.get(fileSystem);
+  if (!directories) {
+    directories = new Map();
+    ownTmpSweeps.set(fileSystem, directories);
+  }
+  let entry = directories.get(key);
+  if (!entry || now - entry.listedAt >= OWN_TMP_SWEEP_INTERVAL_MS || now < entry.listedAt) {
+    if (!entry && directories.size >= OWN_TMP_SWEEP_DIRECTORY_LIMIT) {
+      const oldest = directories.keys().next().value;
+      if (oldest !== undefined) {
+        directories.delete(oldest);
+      }
+    }
+    entry = { listedAt: now, candidates: [] };
+    directories.set(key, entry);
+    try {
+      yield { op: "list", path: directory };
+      const names = fileSystem
+        .list(directory)
+        .sort()
+        .filter((name) => publicationName.exec(name)?.[1] === pid);
+      entry.candidates = [
+        ...names.filter((name) => name.startsWith(prefix)),
+        ...names.filter((name) => !name.startsWith(prefix)),
+      ].slice(0, OWN_TMP_SWEEP_CANDIDATE_LIMIT);
+    } catch (error) {
+      // Optional litter cleanup can be skipped safely when the directory is missing/unreadable.
+      logger.debug(`Lock tmp listing unavailable at ${directory}: ${errorMessage(error)}`, error);
+    }
+  }
+  return entry.candidates;
+}
+
 function* sweepOwnPublicationTmps(path: string, options: ExclusiveLockOptions): Steps<void> {
   const fileSystem = options.fileSystem ?? nodeLockFileSystem;
   const directory = dirname(path);
-  let names: string[];
-  try {
-    yield { op: "list", path: directory };
-    names = fileSystem.list(directory);
-  } catch (error) {
-    // Optional litter cleanup can be skipped safely when the directory is missing/unreadable.
-    logger.debug(`Lock tmp listing unavailable at ${directory}: ${errorMessage(error)}`, error);
-    return;
-  }
   const pid = String(options.pid ?? process.pid);
   const prefix = `${basename(path)}.`;
-  // Parse from the end: a guard prefix's fractional mtime may itself contain dots.
-  const publicationName = /^.+\.(\d+)\.\d+\.[^.]+\.tmp$/;
+  const candidates = yield* ownPublicationTmpCandidates(
+    directory,
+    prefix,
+    pid,
+    fileSystem,
+    (options.now ?? Date.now)(),
+  );
   let attempts = 0;
-  for (const name of names.sort()) {
+  // Walk a bounded snapshot so interleaved removals cannot skip a shifted candidate.
+  for (const name of [...candidates]) {
     if (!name.startsWith(prefix) || publicationName.exec(name)?.[1] !== pid) {
       continue;
     }
     const tmp = path.slice(0, path.length - basename(path).length) + name;
-    if (!(yield* isAbandonedPublicationTmp(tmp, options))) {
+    const abandoned = yield* isAbandonedPublicationTmp(tmp, options);
+    if (abandoned === false) {
+      continue;
+    }
+    const index = candidates.indexOf(name);
+    if (index === -1) {
+      continue;
+    }
+    candidates.splice(index, 1);
+    if (abandoned === undefined) {
       continue;
     }
     yield* cleanupFile(tmp, fileSystem);
@@ -280,7 +342,10 @@ function* sweepOwnPublicationTmps(path: string, options: ExclusiveLockOptions): 
   }
 }
 
-function* isAbandonedPublicationTmp(path: string, options: ExclusiveLockOptions): Steps<boolean> {
+function* isAbandonedPublicationTmp(
+  path: string,
+  options: ExclusiveLockOptions,
+): Steps<boolean | undefined> {
   try {
     yield { op: "stat", path };
     const { mtimeMs } = (options.fileSystem ?? nodeLockFileSystem).stat(path);
@@ -288,7 +353,7 @@ function* isAbandonedPublicationTmp(path: string, options: ExclusiveLockOptions)
   } catch (error) {
     // A vanished/unreadable tmp can be left safely; publication never depends on cleanup.
     logger.debug(`Lock tmp age unavailable at ${path}: ${errorMessage(error)}`, error);
-    return false;
+    return undefined;
   }
 }
 

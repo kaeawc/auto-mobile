@@ -990,6 +990,13 @@ export const PROTOTYPE_ANCHOR_CAPABILITY = "prototype_anchor_v1";
  */
 export const PROTOTYPE_THEME_MODES_CAPABILITY = "prototype_theme_modes_v1";
 
+/** Future iOS capabilities that lift host-reported prototype platform differences. */
+export const PROTOTYPE_IDENTIFIER_TEST_TAG_ONLY_CAPABILITY =
+  "prototype_identifier_test_tag_only_v1";
+export const PROTOTYPE_BOTTOM_SHEET_DRAG_CAPABILITY = "prototype_bottom_sheet_drag_v1";
+export const PROTOTYPE_ICON_SET_MATERIAL_CAPABILITY = "prototype_icon_set_material_v1";
+export const PROTOTYPE_ICON_VARIANT_CAPABILITY = "prototype_icon_variant_v1";
+
 /**
  * Advertised by a CtrlProxy or iOS prototype agent that honours `show_prototype`'s `appearance`,
  * reports the resolved `appearance` in the show result and in inspect or status, re-themes a shown

@@ -1,8 +1,11 @@
+import { useRealLogSinks } from "../helpers/realLogSinks";
 import { describe, expect, test, spyOn } from "bun:test";
 import fs, { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+useRealLogSinks();
 
 /** A stream that constructs successfully but can be made to fail later, the
  * way a real fd surfaces EACCES/ENOSPC asynchronously after open(). */

@@ -101,6 +101,7 @@ export interface DevicePoolRefreshPort {
   getIntentionalShutdowns(): Map<string, number>;
   seedLastUsedAt(now: number): number;
   nextDeviceIncarnation(): number;
+  notifyDeviceIncarnationAssigned?(deviceId: string): void;
   setDeviceSessionTracking(deviceId: string, now: number): Promise<void>;
   clearAutoStartSuppressionForBootedDevice(device: BootedDevice): void;
   foldObservationIntoPooledEntry(
@@ -260,6 +261,7 @@ export class DevicePoolRefresh {
             ...this.pool.identityEvidenceFields(this.pool.identityEvidenceForBootedDevice(device)),
             incarnation: this.pool.nextDeviceIncarnation(),
           });
+          this.pool.notifyDeviceIncarnationAssigned?.(device.deviceId);
           this.pool.getDeviceSessionStarts().set(device.deviceId, now);
           this.pool.getRefreshMissingDeviceMisses().delete(device.deviceId);
           await this.pool.setDeviceSessionTracking(device.deviceId, now);

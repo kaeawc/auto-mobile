@@ -23,6 +23,7 @@ export interface RecordingTeardownRedriveDeps {
     device: BootedDevice,
     descriptor: VideoCaptureTeardownDescriptor,
   ): Promise<void>;
+  onDeviceIncarnationAssigned?(listener: (deviceId: string) => void): void;
   now(): number;
   timer: Pick<Timer, "sleep" | "setTimeout" | "clearTimeout">;
 }
@@ -36,11 +37,55 @@ type RedriveManager = Pick<
   | "registerPendingDeviceCleanup"
 >;
 
+/** Startup-only bookkeeping; never written back to the repository. */
+interface RetainedCaptureRow extends VideoRecordingRecord {
+  firstMarkedIncarnation?: number;
+  warnedUnconfirmableRedrive?: boolean;
+}
+
 /** Idle devices are marked now; held devices redrive under release-time quarantine. */
 export async function redriveUnconfirmedCaptureTeardowns(
   manager: RedriveManager,
   deps: RecordingTeardownRedriveDeps,
 ): Promise<boolean> {
+  const byDevice = new Map<string, RetainedCaptureRow[]>();
+  const pending = new Map<string, PendingRedrive>();
+  const redrivenIncarnations = new Map<string, number>();
+  let subscribedPending = false;
+  const redriveDevice = (deviceId: string, hookDriven: boolean): void => {
+    const incarnation = deps.getDeviceIncarnation(deviceId);
+    const owned = new Set(deps.ownedCaptureIds());
+    const records = (byDevice.get(deviceId) ?? []).filter(
+      (row) =>
+        row.captureTeardown &&
+        (!hookDriven || !owned.has(row.recordingId)) &&
+        canRedriveCapture(row, incarnation),
+    );
+    if (
+      records.length === 0 ||
+      (incarnation !== undefined && redrivenIncarnations.get(deviceId) === incarnation)
+    ) {
+      return;
+    }
+    if (incarnation === undefined) {
+      logger.warn(
+        `[RecordingTeardownRedrive] Device ${deviceId} has no pool incarnation; retaining capture descriptors until the device is pooled`,
+      );
+      return;
+    }
+    redrivenIncarnations.set(deviceId, incarnation);
+    if (manager.getSessionForDevice(deviceId) !== null) {
+      pending.set(deviceId, { records, hookDriven });
+      if (!subscribedPending) {
+        subscribePendingRedrive(manager, pending, deps);
+        subscribedPending = true;
+      }
+    } else {
+      markOrphanedCaptures(manager, deviceId, records, deps, hookDriven);
+    }
+  };
+  // Install before the startup read yields: its loop handles devices added during the read.
+  deps.onDeviceIncarnationAssigned?.((deviceId) => redriveDevice(deviceId, true));
   let rows: VideoRecordingRecord[];
   try {
     rows = await deps.recordingRepository.listRecordings({
@@ -55,40 +100,45 @@ export async function redriveUnconfirmedCaptureTeardowns(
     return false;
   }
   const owned = new Set(deps.ownedCaptureIds());
-  const byDevice = new Map<string, VideoRecordingRecord[]>();
   for (const row of rows) {
     if (!row.captureTeardown || owned.has(row.recordingId)) {
       continue;
     }
     const group = byDevice.get(row.deviceId) ?? [];
-    group.push(row);
+    group.push({ ...row });
     byDevice.set(row.deviceId, group);
   }
-  const pending = new Map<string, VideoRecordingRecord[]>();
-  for (const [deviceId, records] of byDevice) {
-    if (deps.getDeviceIncarnation(deviceId) === undefined) {
-      logger.warn(
-        `[RecordingTeardownRedrive] Device ${deviceId} has no pool incarnation; retaining capture descriptors for next startup`,
-      );
-      continue;
-    }
-    if (manager.getSessionForDevice(deviceId) !== null) {
-      pending.set(deviceId, records);
-    } else {
-      markOrphanedCaptures(manager, deviceId, records, deps);
-    }
-  }
-  if (pending.size > 0) {
-    subscribePendingRedrive(manager, pending, deps);
+  for (const deviceId of byDevice.keys()) {
+    redriveDevice(deviceId, false);
   }
   return true;
+}
+
+function canRedriveCapture(row: RetainedCaptureRow, incarnation: number | undefined): boolean {
+  if (
+    incarnation === undefined ||
+    row.firstMarkedIncarnation === undefined ||
+    row.firstMarkedIncarnation === incarnation ||
+    row.captureTeardown?.devicePid !== undefined ||
+    Number.isFinite(orphanExpiresAt(row))
+  ) {
+    return true;
+  }
+  if (!row.warnedUnconfirmableRedrive) {
+    logger.warn(
+      `[RecordingTeardownRedrive] Unconfirmable descriptor for ${row.recordingId} is retained; device ${row.deviceId} is no longer quarantined for it after its first marked incarnation`,
+    );
+    row.warnedUnconfirmableRedrive = true;
+  }
+  return false;
 }
 
 function markOrphanedCaptures(
   manager: RedriveManager,
   deviceId: string,
-  records: VideoRecordingRecord[],
+  records: RetainedCaptureRow[],
   deps: RecordingTeardownRedriveDeps,
+  hookDriven = false,
 ): void {
   const remainingMs = records.map((row) => {
     const expiry = orphanExpiresAt(row);
@@ -96,21 +146,30 @@ function markOrphanedCaptures(
   });
   manager.markDeviceNeedsRecorderTeardown(
     deviceId,
-    () => retryOrphanedCaptures(deviceId, records, deps, true),
+    () => retryOrphanedCaptures(deviceId, records, deps, true, hookDriven),
     Math.max(INCOMPLETE_MARK_GRACE_MS, ...remainingMs.map((ms) => ms + INCOMPLETE_MARK_GRACE_MS)),
   );
+  for (const row of records) {
+    row.firstMarkedIncarnation ??= deps.getDeviceIncarnation(deviceId);
+  }
+}
+
+interface PendingRedrive {
+  records: RetainedCaptureRow[];
+  hookDriven: boolean;
 }
 
 function subscribePendingRedrive(
   manager: RedriveManager,
-  pending: Map<string, VideoRecordingRecord[]>,
+  pending: Map<string, PendingRedrive>,
   deps: RecordingTeardownRedriveDeps,
 ): void {
   const consume = (deviceId: string, identityReplaced = false): void => {
-    const records = pending.get(deviceId);
-    if (!records) {
+    const work = pending.get(deviceId);
+    if (!work) {
       return;
     }
+    const { records, hookDriven } = work;
     pending.delete(deviceId);
     if (identityReplaced) {
       void clearReplacedDescriptors(records, deps);
@@ -118,7 +177,7 @@ function subscribePendingRedrive(
     }
     manager.registerPendingDeviceCleanup(
       deviceId,
-      confirmReleasedCaptures(manager, deviceId, records, deps),
+      confirmReleasedCaptures(manager, deviceId, records, deps, hookDriven),
       INCOMPLETE_MARK_GRACE_MS,
     );
   };
@@ -152,22 +211,26 @@ async function clearReplacedDescriptors(
 async function confirmReleasedCaptures(
   manager: RedriveManager,
   deviceId: string,
-  records: VideoRecordingRecord[],
+  records: RetainedCaptureRow[],
   deps: RecordingTeardownRedriveDeps,
+  hookDriven: boolean,
 ): Promise<void> {
   try {
-    await raceWithDeadline(() => retryOrphanedCaptures(deviceId, records, deps, false), {
-      timer: deps.timer,
-      timeoutMs: INCOMPLETE_MARK_GRACE_MS,
-      label: `Released orphan recorder teardown on ${deviceId}`,
-    });
+    await raceWithDeadline(
+      () => retryOrphanedCaptures(deviceId, records, deps, false, hookDriven),
+      {
+        timer: deps.timer,
+        timeoutMs: INCOMPLETE_MARK_GRACE_MS,
+        label: `Released orphan recorder teardown on ${deviceId}`,
+      },
+    );
   } catch (error) {
     logger.warn(
       `[RecordingTeardownRedrive] Release-time teardown unconfirmed on ${deviceId}`,
       error,
     );
     // Mark synchronously before this pending cleanup settles, so allocation stays fenced.
-    markOrphanedCaptures(manager, deviceId, records, deps);
+    markOrphanedCaptures(manager, deviceId, records, deps, hookDriven);
   }
 }
 
@@ -176,6 +239,7 @@ async function retryOrphanedCaptures(
   records: VideoRecordingRecord[],
   deps: RecordingTeardownRedriveDeps,
   waitForExpiry: boolean,
+  hookDriven = false,
 ): Promise<void> {
   const unconfirmed: string[] = [];
   for (const row of records) {
@@ -183,6 +247,9 @@ async function retryOrphanedCaptures(
       continue;
     }
     try {
+      if (hookDriven && !(await hookRowStillUnconfirmed(row, deps))) {
+        continue;
+      }
       await confirmOrphanedCapture(row, deps, waitForExpiry);
       await deps.recordingRepository.updateRecording(row.recordingId, {
         captureTeardown: undefined,
@@ -201,6 +268,27 @@ async function retryOrphanedCaptures(
       `Orphan recorder teardown on ${deviceId} is unconfirmed for ${unconfirmed.join(", ")}. Recover the device if retries fail.`,
     );
   }
+}
+
+/** Revalidate only startup work; rows newly discovered by this read are never acted on. */
+async function hookRowStillUnconfirmed(
+  row: VideoRecordingRecord,
+  deps: RecordingTeardownRedriveDeps,
+): Promise<boolean> {
+  if (deps.ownedCaptureIds().includes(row.recordingId)) {
+    return false;
+  }
+  const current = await deps.recordingRepository.listRecordings({
+    hasCaptureTeardown: true,
+    excludeLiveDaemonSessionIds: deps.liveDaemonSessionIds,
+    deviceId: row.deviceId,
+  });
+  if (current.some((candidate) => candidate.recordingId === row.recordingId)) {
+    return !deps.ownedCaptureIds().includes(row.recordingId);
+  }
+  // Cleared or now peer-owned: acknowledge locally, without writing somebody else's row.
+  row.captureTeardown = undefined;
+  return false;
 }
 
 function orphanExpiresAt(row: VideoRecordingRecord): number {

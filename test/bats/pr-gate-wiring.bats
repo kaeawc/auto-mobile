@@ -401,6 +401,23 @@ wiring_requires_yq() {
   done
 }
 
+@test "desktop_core change detection covers the refusal wire-contract fixtures (#12166)" {
+  wiring_requires_yq
+  run yq -r '
+    .jobs."detect-changes".steps[]
+    | select(.id == "filter-desktop-core")
+    | (.with.filters | from_yaml | .desktop_core[])
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  local path
+  for path in \
+    "test/fixtures/refusal-wire/**" \
+    "scripts/generate-refusal-wire-fixtures.ts" \
+    "test/daemon/refusalWireContract.test.ts"; do
+    [[ $'\n'"$output"$'\n' == *$'\n'"$path"$'\n'* ]]
+  done
+}
+
 @test "node-checks runs the clean-room pinned-graph check exactly once (#5421, #10894)" {
   # The heavy pack+install verification runs exactly once per PR, as its own
   # step of the combined Node Checks job. Read parsed `run` fields so a

@@ -1,9 +1,12 @@
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { jsonArrayFrom } from "kysely/helpers/sqlite";
-import { Kysely, type Generated, type Selectable, type Transaction } from "kysely";
+import { Kysely, type Generated, type Selectable, type Transaction, SqliteAdapter } from "kysely";
 import { BunSqliteDialect } from "../../db/bunSqliteDialect";
 import { SQLITE_BUSY_TIMEOUT_MS } from "../../db/database";
+import { classifySqliteError } from "../../db/databaseFailureClassification";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { ManagedSlotDiscoveryIncompleteError } from "./managedSlotRefusal";
 import { isInMemoryDatabasePath } from "../../db/migrationLock";
 import { ActionableError } from "../../models/ActionableError";
 import { ensureSecureDirectorySync, getAdbServerScopedAutoMobileDir } from "../../utils/tempDir";
@@ -439,16 +442,20 @@ export interface OpenSqliteSlotRegistryOptions extends SqliteSlotRegistryOptions
 
 /**
  * bun:sqlite waits for a busy lock synchronously, blocking this daemon's event loop (heartbeat
- * lease handling included) for up to the busy timeout per attempt of the dialect's bounded retry.
- * Registry transactions are a few short statements, so the registry waits far less than the
- * per-daemon DB's {@link SQLITE_BUSY_TIMEOUT_MS} and surfaces contention as a retryable busy error
- * instead of stalling (#11242 item 9). Keep registry transactions short and off the heartbeat path.
+ * lease handling included). One attempt waits at most 250ms: one busy_timeout, no dialect retry
+ * or backoff, plus statement/error-handling overhead (not a hard wall-clock deadline). A healthy
+ * peer's few short statements and FULL-sync commit (one fsync) have room to finish, while a slow
+ * disk or prolonged lock yields a retryable refusal well below the per-daemon DB's
+ * {@link SQLITE_BUSY_TIMEOUT_MS}. Callers retry after yielding the event loop. Two connections in
+ * one process cannot release each other's lock during this synchronous wait; waiting longer only
+ * stalls them. A single uncontended connection never waits. Keep transactions short (#12104).
  */
-export const MANAGED_SLOT_REGISTRY_BUSY_TIMEOUT_MS = Math.min(1_000, SQLITE_BUSY_TIMEOUT_MS);
+export const MANAGED_SLOT_REGISTRY_BUSY_TIMEOUT_MS = Math.min(250, SQLITE_BUSY_TIMEOUT_MS);
 
 /** The slice of a bun:sqlite handle this module touches before handing it to the dialect. */
 interface RegistrySqliteHandle {
   exec(sql: string): void;
+  close(): void;
 }
 
 function openRegistrySqlite(dbPath: string): RegistrySqliteHandle {
@@ -457,12 +464,32 @@ function openRegistrySqlite(dbPath: string): RegistrySqliteHandle {
     Database: new (path: string) => RegistrySqliteHandle;
   };
   const sqliteDb = new Database(dbPath);
-  sqliteDb.exec(`PRAGMA busy_timeout = ${MANAGED_SLOT_REGISTRY_BUSY_TIMEOUT_MS};`);
-  sqliteDb.exec("PRAGMA journal_mode = WAL;");
-  // Assignment authority must survive power loss; writes are rare, so pay for the fsync.
-  sqliteDb.exec("PRAGMA synchronous = FULL;");
-  sqliteDb.exec("PRAGMA foreign_keys = ON;");
+  try {
+    sqliteDb.exec(`PRAGMA busy_timeout = ${MANAGED_SLOT_REGISTRY_BUSY_TIMEOUT_MS};`);
+    sqliteDb.exec("PRAGMA journal_mode = WAL;");
+    // Assignment authority must survive power loss; writes are rare, so pay for the fsync.
+    sqliteDb.exec("PRAGMA synchronous = FULL;");
+    sqliteDb.exec("PRAGMA foreign_keys = ON;");
+  } catch (error) {
+    sqliteDb.close();
+    throw error;
+  }
   return sqliteDb;
+}
+
+// SQLite supports transactional DDL. Kysely's default SQLite adapter opts out; here a busy
+// migration must roll back its ALTERs AND migration records before a factory retries the open.
+// Kept registry-local so the per-daemon database retains its existing migration behavior.
+class RegistrySqliteAdapter extends SqliteAdapter {
+  override get supportsTransactionalDdl(): boolean {
+    return true;
+  }
+}
+
+class RegistrySqliteDialect extends BunSqliteDialect {
+  override createAdapter(): SqliteAdapter {
+    return new RegistrySqliteAdapter();
+  }
 }
 
 /**
@@ -478,12 +505,22 @@ export async function openSqliteSlotRegistry(
     ensureSecureDirectorySync(dirname(dbPath));
   }
   const db = new Kysely<SlotRegistryDatabase>({
-    dialect: new BunSqliteDialect({ database: () => openRegistrySqlite(dbPath) }),
+    dialect: new RegistrySqliteDialect({
+      database: () => openRegistrySqlite(dbPath),
+      // Applies to BEGIN and autocommit statements: fail fast so the owning operation can retry
+      // the whole unit. Migration DDL is atomic and opens are serialized by a file lock;
+      // a busy open is forgotten by factories and refused retryably. Transaction bodies already
+      // never retry. Initialization and close PRAGMAs use raw exec, outside dialect retry.
+      retry: { maxAttempts: 1 },
+    }),
   });
   try {
     await migrateSlotRegistry(db, dbPath);
   } catch (error) {
     await db.destroy();
+    if (classifySqliteError(error) === "retryable") {
+      throw new ManagedSlotDiscoveryIncompleteError(errorMessage(error));
+    }
     throw error;
   }
   return new SqliteSlotRegistry(db, options);

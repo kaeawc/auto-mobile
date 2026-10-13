@@ -407,14 +407,17 @@ async function managedConnectionRegistrationRefusal(
   return undefined;
 }
 
-/** Every failing proof must be unrehydrated and lack any terminal release to remain retryable. */
+/** Retry only unknown or tokenless managed proofs, without any terminal release. */
 async function managedRegistrationSessionsAreUnknown(
   manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
   sessionIds: string[],
 ): Promise<boolean> {
   for (const sessionId of sessionIds) {
+    const session = sessionForIngress(manager, sessionId);
     if (
-      sessionForIngress(manager, sessionId) ||
+      (session &&
+        (session.livenessPolicy !== MANAGED_EXECUTION_LIVENESS_POLICY ||
+          session.livenessOwnerToken !== undefined)) ||
       inMemorySessionRelease(manager, sessionId)?.terminal
     ) {
       return false;

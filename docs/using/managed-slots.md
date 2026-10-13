@@ -197,8 +197,15 @@ connection used for tools and resources:
    device-tool refusal). A daemon restart does not end the execution: its session
    is rehydrated, the proxy re-binds, and the restarted daemon records itself as
    the slot's owner. If registration arrives before the session is rehydrated, the
-   proxy retries on the same confined socket with backoff until it binds or the
-   execution ends; permanent refusals are not retried. While the daemon is away,
+   proxy retries on the same confined socket at 50 ms doubling to 1 s, then every
+   1 s, until it binds or the execution ends. The daemon's `retryAfterMs` floor
+   still wins (currently 500 ms for rehydration or an owner claim still pending).
+   A present managed session awaiting its owner token stays confined and retryable;
+   another token, a non-managed session or a terminal release is refused permanently.
+   Failed attempts log at debug; after more than 60 s one warning names the scope,
+   session UUIDs, elapsed time, attempt count and last failure. A successful retry
+   logs elapsed time and attempt count once. Shutdown stops retries quietly; the
+   next connection re-binds. While the daemon is away,
    tool calls answer `daemon_stalled`
    after automatic recovery is exhausted. Its message names the affected sessions
    and attempt count, with `recovery.action: "wait_for_managed_reclaim"`: the proxy
@@ -683,3 +690,15 @@ MCP in under a second with outcome `failed`, `spec_unsupported`, zero tools,
 - [Device ownership](device-ownership.md): session holds, release rules and reads.
 - [Environment variables](environment-variables.md): heartbeat and idle tuning.
 - [Managed Macs and CI runners](managed-macs.md).
+
+Startup recovery of slots left `settling` by a dead daemon retries registry reads
+and opens at 25 ms doubling to 1 s, then every 1 s until successful or shutdown.
+After a blocked failure it also waits at least as long as the attempt took,
+capped at 5 s. Concurrent startup recovery calls share one loop. A failed read
+never means nothing needed recovery: rehydrated executions remain gated until
+ownership is confirmed. Failures log at debug, with one warning after more than
+5 s naming the last error. Recovery logs the number of restored slots when
+positive and, after any failure, elapsed time and attempt count even for zero
+slots. Shutdown cancels the wait quietly and leaves recovery to the next daemon.
+The drain's other registry retries keep their existing 250 ms to 5 s schedule,
+then every 30 s after the settlement cap.

@@ -1,5 +1,16 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { DAEMON_REGISTER_SESSION_METHOD } from "../../src/daemon/constants";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  DAEMON_REGISTER_SESSION_METHOD,
+  DAEMON_HEARTBEAT_METHOD,
+  DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD,
+  DAEMON_VERSION,
+} from "../../src/daemon/constants";
+import { DaemonClient, daemonResponseError } from "../../src/daemon/client";
+import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
+import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
+import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+import { readyManagedSlotsResult } from "../helpers/refusalWireFixtures";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
@@ -30,12 +41,15 @@ describe("managed proxy re-bind after its slot session ended (#11399)", () => {
   const OLD_SOCKET = "socket-1";
   const NEW_SOCKET = "socket-2";
 
+  let timer: FakeTimer;
+  let proxy: DaemonMcpProxy | undefined;
+  let available: ReturnType<typeof spyOn> | undefined;
   let sessionManager: SessionManager;
   let scopes: ManagedConnectionScopes;
   let state: DaemonStateAccess;
 
   beforeEach(async () => {
-    const timer = new FakeTimer();
+    timer = new FakeTimer();
     timer.setCurrentTime(1_000_000);
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     scopes = new ManagedConnectionScopes();
@@ -57,7 +71,11 @@ describe("managed proxy re-bind after its slot session ended (#11399)", () => {
     scopes.bind(OLD_SOCKET, { scopeKey: SCOPE, sessionUuids: [SLOT_SESSION] });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await proxy?.close();
+    proxy = undefined;
+    available?.mockRestore();
+    available = undefined;
     sessionManager.stopCleanupTimer();
   });
 
@@ -68,6 +86,95 @@ describe("managed proxy re-bind after its slot session ended (#11399)", () => {
       args: {},
       slotDeviceOf: (sessionUuid) => sessionManager.getSession(sessionUuid)?.assignedDevice,
     });
+
+  describe("tokenless reconnect", () => {
+    const clients: FakeDaemonClient[] = [];
+    const registrations: string[] = [];
+    let allowClaim = true;
+    let claimGate = Promise.withResolvers<void>();
+    beforeEach(async () => {
+      clients.length = 0;
+      registrations.length = 0;
+      allowClaim = true;
+      claimGate = Promise.withResolvers<void>();
+      available = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const manager = new FakeDaemonManager();
+      manager.statusResult = { ...manager.statusResult, version: DAEMON_VERSION };
+      proxy = new DaemonMcpProxy({
+        timer,
+        livenessOwnerToken: TOKEN,
+        daemonManager: manager,
+        autoStartDaemon: false,
+        heartbeatIntervalMs: 2_000,
+        clientFactory: () => {
+          const socketSessionId = `proxy-socket-${clients.length}`;
+          const client = new FakeDaemonClient({
+            daemonMethodResults: new Map<string, unknown>([
+              ["tools/list", { tools: [] }],
+              ["daemon/capabilities", { capabilities: ["managed-slots/v1"] }],
+              [DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD, readyManagedSlotsResult(SLOT_SESSION)],
+            ]),
+            onCallDaemonMethod: async (method, params) => {
+              if (method !== DAEMON_HEARTBEAT_METHOD && method !== DAEMON_REGISTER_SESSION_METHOD) {
+                return undefined;
+              }
+              if (method === DAEMON_HEARTBEAT_METHOD && !allowClaim) {
+                // The reconnect starts its coalesced keeper without waiting for this claim.
+                await claimGate.promise;
+              }
+              if (method === DAEMON_REGISTER_SESSION_METHOD) {
+                registrations.push(socketSessionId);
+              }
+              const response = await handleDaemonRequest(
+                { id: "proxy", type: "daemon_request", method, params },
+                state,
+                undefined,
+                undefined,
+                { socketSessionId },
+              );
+              if (!response.success) {
+                throw daemonResponseError({ id: "proxy", type: "daemon_response", ...response });
+              }
+              return response.result;
+            },
+          });
+          clients.push(client);
+          return client;
+        },
+      });
+      await proxy.acquireManagedSlots({
+        contractVersion: 1,
+        managedHostScope: "host",
+        runnerNamespace: "runner",
+        runnerIncarnation: "boot",
+        localSlotCapacity: 1,
+        requests: [{ slotIndex: 1, role: "primary", platform: "android", requestedSpec: {} }],
+      });
+    });
+    test("a tokenless reconnect is claimed by the keeper and binds without another connection", async () => {
+      // A successor can rehydrate a managed row without a persisted owner token.
+      sessionManager.stopCleanupTimer();
+      sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+      await sessionManager.createSession(SLOT_SESSION, "emulator-5554", "android");
+      await sessionManager.adoptManagedExecutionLivenessPolicy(SLOT_SESSION, {});
+      allowClaim = false;
+      clients[0]!.emitConnectionClosed();
+      await proxy!.ensureConnected();
+      expect(sessionManager.getSession(SLOT_SESSION)?.livenessOwnerToken).toBeUndefined();
+      expect(scopes.get("proxy-socket-1")?.sessionUuids.size).toBe(0);
+      await timer.advanceTimeAsync(500, () => drainMicrotasks(80));
+      expect(scopes.get("proxy-socket-1")?.sessionUuids.size).toBe(0);
+      allowClaim = true;
+      claimGate.resolve();
+      await drainMicrotasks(80);
+      await timer.advanceTimeAsync(500, () => drainMicrotasks(80));
+      expect(sessionManager.getSession(SLOT_SESSION)?.livenessOwnerToken).toBe(TOKEN);
+      expect([...scopes.get("proxy-socket-1")!.sessionUuids]).toEqual([SLOT_SESSION]);
+      expect(clients).toHaveLength(2);
+      expect(registrations.length).toBeGreaterThan(1);
+      expect(new Set(registrations)).toEqual(new Set(["proxy-socket-1"]));
+    });
+  });
 
   test("the owner releases its live execution after a refused rebind, while other methods stay confined", async () => {
     const drained: string[] = [];

@@ -181,6 +181,24 @@ describe("daemon/registerSession on managed connections", () => {
     expect(control()).toBeUndefined();
   });
 
+  test("a present tokenless managed session retries confined until the claim supplies its token", async () => {
+    const late = "00000000-0000-4000-8000-000000000004";
+    await sessionManager.createSession(late, "emulator-5560", "android");
+    await sessionManager.adoptManagedExecutionLivenessPolicy(late, {});
+    expect(sessionManager.getSession(late)?.livenessOwnerToken).toBeUndefined();
+    expect(await register(rebind([late]), "tokenless")).toMatchObject({
+      success: false,
+      code: "managed_slot_registration_refused",
+      retryable: true,
+      retryAfterMs: 500,
+    });
+    expect(scopes.get("tokenless")?.sessionUuids.size).toBe(0);
+    expect(reowned).toEqual([]);
+    await sessionManager.claimLivenessOwnership(late, TOKEN);
+    expect(await register(rebind([late]), "tokenless")).toMatchObject({ success: true });
+    expect([...scopes.get("tokenless")!.sessionUuids]).toEqual([late]);
+  });
+
   test("a placeholder cannot register without managedSlots or change its scope", async () => {
     scopes.bind("placeholder", { scopeKey: SCOPE, sessionUuids: [] });
     expect(

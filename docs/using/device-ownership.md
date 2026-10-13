@@ -796,10 +796,13 @@ Recovery waiting for a live owner, cleanup, identity replacement, or a timed-out
 command to settle has no computable bound; clock retries are also unbounded.
 Such refusals remain retryable without `retryAfterMs`. When recovery ends with
 the marker kept, the refusal is non-retryable: replace the device with
-`killDevice` then `startDevice`. This code has no `nextAction` and is not in the
-runners' device-wait code tables. Healthy candidates remain eligible; reads
-remain allowed on marked devices. Skipped recovery ticks re-arm the same
-attempt, and only a dispatched restore consumes one of the three attempts.
+`killDevice` then `startDevice`. This code has no `nextAction`. The JUnit runner
+and XCTestRunner wait on it within their bounded device wait only while
+`recovering` and `retryable` are true, honouring `retryAfterMs`. A non-recovering
+refusal fails at once with each device's reason. Healthy candidates remain
+eligible; reads remain allowed on marked devices. Skipped recovery ticks re-arm
+the same attempt, and only a dispatched restore consumes one of the three
+attempts.
 In a plan failure result, top-level `deviceId` and `platform` identify the plan's device, while `devices[]` identifies the refused devices and top-level `reason`, `recovering`, `code`, `retryable`, and any `retryAfterMs` retain the refusal evidence.
 
 An exact Android acquisition also waits up to 5 s when adb still lists its
@@ -869,6 +872,10 @@ cannot admit it: the session ends immediately with `session_ownership_lost`, rea
 If session-preserving device recovery is in flight, the hold and idle deadline
 stay unchanged instead. The late control call receives `session_held_by_recovery`
 with `sessionUuid`, `deviceId`, `retryable: true` and `retryAfterMs: 1000`.
+The JUnit runner and XCTestRunner wait within their bounded device wait,
+honouring `retryAfterMs`, then run the next `executePlan` pass under a fresh
+session, as they do for every waited refusal. Only the JUnit runner's AI-recovery
+first call retries the same session.
 Retry after recovery settles; the retry receives either the live session or the
 terminal idle answer. A late read behind any hold still runs sessionlessly on the
 held device without releasing or refreshing the session.

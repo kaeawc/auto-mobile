@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { CtrlProxyHierarchy } from "../../../../src/features/observe/ios/CtrlProxyHierarchy";
 import type {
   CtrlProxyNode,
@@ -31,13 +31,24 @@ const PROTOTYPE_IDS = [
 ];
 const APP_IDS = ["Toolbar", "Settings"];
 
-function convert(raw: XCTestHierarchy = iosFloatingOverlayOverSettings()): ViewHierarchyResult {
+// Shared captures are read-only; scenario-specific window and marker edits use cloned inputs.
+let captured: XCTestHierarchy;
+let convertedCapture: ViewHierarchyResult;
+beforeAll(() => {
+  captured = iosFloatingOverlayOverSettings();
+  convertedCapture = convert(captured);
+});
+
+function convert(raw?: XCTestHierarchy): ViewHierarchyResult {
+  if (!raw) {
+    return convertedCapture;
+  }
   return new CtrlProxyHierarchy({} as HierarchyDelegateContext).convertToViewHierarchyResult(raw);
 }
 
 /** The captured tree with only the window at `index` (0 = Settings, 1 = the prototype agent's). */
 function onlyWindow(index: number): ViewHierarchyResult {
-  const raw = iosFloatingOverlayOverSettings();
+  const raw = structuredClone(captured);
   raw.hierarchy.node = (raw.hierarchy.node as unknown[]).slice(
     index,
     index + 1,
@@ -47,12 +58,12 @@ function onlyWindow(index: number): ViewHierarchyResult {
 
 /** The runner's unconverted tree, which keeps the UIWindow wrappers. */
 function unconverted(): ViewHierarchyResult {
-  return iosFloatingOverlayOverSettings() as unknown as ViewHierarchyResult;
+  return captured as unknown as ViewHierarchyResult;
 }
 
 /** Derived chromeless FULLSCREEN shape; a real capture of its root marker is still owed. */
 function withWindowMarker(keepDismiss = false, markRoot = true): XCTestHierarchy {
-  const raw = structuredClone(iosFloatingOverlayOverSettings());
+  const raw = structuredClone(captured);
   const agentWindow = (raw.hierarchy.node as CtrlProxyNode[])[1];
   const root = (Array.isArray(agentWindow.node) ? agentWindow.node[0] : agentWindow.node)!;
   const attributes = root as CtrlProxyNode & { "resource-id"?: string };
@@ -112,7 +123,7 @@ describe("iOS prototype agent window with layer (iphone D2)", () => {
       ]) {
         expect(ownPrototypeCoversPoint(hierarchy, point)).toBe(true);
       }
-    }, 15);
+    });
 
     test(`revealing the dismiss pill keeps the fullscreen roots (${form})`, () => {
       const hiddenPill = hierarchyForForm(false);
@@ -138,7 +149,7 @@ describe("iOS prototype agent window with layer (iphone D2)", () => {
         expect(ids(scopeHierarchyToLayer(revealedPill, layer))).toEqual(expected);
       }
       expect(ownPrototypeCoversPoint(revealedPill, { x: 200, y: 300 })).toBe(true);
-    }, 15);
+    });
   }
 
   test("the captured agent window with neither marker is not an own prototype", () => {

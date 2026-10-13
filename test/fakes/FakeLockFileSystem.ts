@@ -26,6 +26,10 @@ export class FakeLockFileSystem implements LockFileSystem {
 
   private record(op: keyof LockFileSystem, path: string): void {
     this.operations.push({ op, path });
+    const failure = this.failure?.(op, path);
+    if (failure) {
+      throw this.error(failure, path);
+    }
   }
 
   private error(code: string, path: string): NodeJS.ErrnoException {
@@ -104,10 +108,6 @@ export class FakeLockFileSystem implements LockFileSystem {
 
   openExclusive(path: string): number {
     this.record("openExclusive", path);
-    const failure = this.failure?.("openExclusive", path);
-    if (failure) {
-      throw this.error(failure, path);
-    }
     if (this.files.has(path)) {
       throw this.error("EEXIST", path);
     }
@@ -145,10 +145,6 @@ export class FakeLockFileSystem implements LockFileSystem {
 
   writeFile(path: string, content: string): void {
     this.record("writeFile", path);
-    const failure = this.failure?.("writeFile", path);
-    if (failure) {
-      throw this.error(failure, path);
-    }
     if (this.writeFileError) {
       throw this.error(this.writeFileError, path);
     }
@@ -157,29 +153,17 @@ export class FakeLockFileSystem implements LockFileSystem {
 
   readText(path: string): string {
     this.record("readText", path);
-    const failure = this.failure?.("readText", path);
-    if (failure) {
-      throw this.error(failure, path);
-    }
     return this.file(path).raw;
   }
 
   stat(path: string): { ino: number; mtimeMs: number } {
     this.record("stat", path);
-    const failure = this.failure?.("stat", path);
-    if (failure) {
-      throw this.error(failure, path);
-    }
     const { ino, mtimeMs } = this.file(path);
     return { ino, mtimeMs };
   }
 
   rename(from: string, to: string): void {
     this.record("rename", from);
-    const failure = this.failure?.("rename", from);
-    if (failure) {
-      throw this.error(failure, from);
-    }
     const node = this.file(from);
     if (!this.directories.has(dirname(to))) {
       throw this.error("ENOENT", to);
@@ -193,10 +177,6 @@ export class FakeLockFileSystem implements LockFileSystem {
 
   link(from: string, to: string): void {
     this.record("link", to);
-    const failure = this.failure?.("link", to);
-    if (failure) {
-      throw this.error(failure, to);
-    }
     if (this.linkError) {
       throw this.error(this.linkError, to);
     }
@@ -212,10 +192,6 @@ export class FakeLockFileSystem implements LockFileSystem {
 
   unlink(path: string): void {
     this.record("unlink", path);
-    const failure = this.failure?.("unlink", path);
-    if (failure) {
-      throw this.error(failure, path);
-    }
     if (!this.files.delete(path)) {
       throw this.error("ENOENT", path);
     }

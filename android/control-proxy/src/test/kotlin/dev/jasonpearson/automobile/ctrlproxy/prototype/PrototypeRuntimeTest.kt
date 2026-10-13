@@ -33,6 +33,94 @@ class PrototypeRuntimeTest {
   private fun tap(vararg actions: PrototypeAction) = PrototypeInteraction.Tap(actions.toList())
 
   @Test
+  fun `three writes prepare once and replacement invalidates the lazy preparation`() = runTest {
+    val initial =
+      spec(
+        PrototypeSwitchNode(stateKey = "flag"),
+        mapOf("flag" to PrototypeScalar.BooleanValue(false)),
+      )
+    val runtime = runtime(initial)
+    var preparations = 0
+    var stateChecks = 0
+    // This fake has no full-spec encoder or validator. It pins the runtime's work boundary;
+    // the protocol differential tests independently exercise the production preparation.
+    runtime.prepareStateWrites = {
+      preparations++
+      PrototypeStateWriteValidator { state ->
+        stateChecks++
+        assertTrue(state["flag"] is PrototypeScalar.BooleanValue)
+        null
+      }
+    }
+    val actions =
+      listOf("a", "b", "c").map {
+        PrototypeSetStateAction(it, PrototypeScalar.Numeric(1.0))
+      }
+    assertEquals(0, preparations)
+    runtime.handle(PrototypeInteraction.Tap(actions))
+    assertEquals(1, preparations)
+    assertEquals(3, stateChecks)
+    runtime.handle(PrototypeInteraction.Tap(actions))
+    assertEquals(1, preparations)
+    assertEquals(6, stateChecks)
+    runtime.handle(PrototypeInteraction.Toggle("flag", actions))
+    assertEquals(1, preparations)
+    assertEquals(10, stateChecks)
+    runtime.replace(initial.copy(id = "replacement"))
+    assertEquals(1, preparations)
+    runtime.handle(PrototypeInteraction.Tap(actions))
+    assertEquals(2, preparations)
+    assertEquals(13, stateChecks)
+  }
+
+  @Test
+  fun `write rejection preserves the full validator message and applies and emits nothing`() =
+    runTest {
+      val encoder = Json { classDiscriminator = "type" }
+      val initial =
+        spec(
+          PrototypeColumnNode(
+            children =
+              listOf(
+                PrototypeTextFieldNode(stateKey = "query"),
+                PrototypeSliderNode(stateKey = "level", min = 0.0, max = 10.0),
+              ),
+          ),
+          mapOf("query" to PrototypeScalar.Text(""), "level" to PrototypeScalar.Numeric(1.0)),
+        )
+      for ((key, value) in
+        listOf(
+          "query" to PrototypeScalar.Numeric(1.0),
+          "level" to PrototypeScalar.Numeric(11.0),
+          "query" to
+            PrototypeScalar.Text("x".repeat(PrototypeSpecValidator.MAX_PROTOTYPE_SPEC_BYTES)),
+        )) {
+        val runtime = runtime(initial)
+        val before = runtime.current
+        val rejected = initial.copy(state = initial.state.orEmpty() + (key to value))
+        val expected =
+          PrototypeSpecValidator.validate(
+            encoder.encodeToString(PrototypeSpec.serializer(), rejected),
+          ) as PrototypeSpecValidation.Failure
+        try {
+          runtime.handle(
+            tap(
+              PrototypeEmitAction("before"),
+              PrototypeSetStateAction("unbound", PrototypeScalar.BooleanValue(true)),
+              PrototypeSetStateAction(key, value),
+            ),
+          )
+          fail("Write must be rejected")
+        } catch (error: IllegalArgumentException) {
+          assertEquals(expected.error.toString(), error.message)
+        }
+        assertSame(before, runtime.current)
+        assertTrue(events.isEmpty())
+        assertEquals(0L, sequence)
+      }
+    }
+
+  @Test
   fun `every action runs in order and dismissal is terminal even within an action list`() =
     runTest {
       val runtime = runtime()

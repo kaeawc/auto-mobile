@@ -53,6 +53,8 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 /** Per-key epochs of the controller-held text; a field adopts the shown value when its moves. */
 internal val LocalPrototypeTextEpochs = compositionLocalOf<Map<String, Int>> { emptyMap() }
 
+internal val LocalPrototypeCompositionProbe = staticCompositionLocalOf<((String) -> Unit)?> { null }
+
 val PrototypeRole = SemanticsPropertyKey<String>("PrototypeRole")
 
 /** Compose owns gesture mechanics only; all authored state/actions go through the pure runtime. */
@@ -73,6 +75,13 @@ internal fun PrototypeRuntimeContent(
       // the order they happened, whatever the dispatcher does with separately launched jobs.
       val queue = remember { Channel<PrototypeInteraction>(Channel.UNLIMITED) }
       LaunchedEffect(queue) { for (interaction in queue) interact(interaction) }
+      val send =
+        remember(queue) {
+          { interaction: PrototypeInteraction ->
+            queue.trySend(interaction)
+            Unit
+          }
+        }
       CompositionLocalProvider(
         LocalPrototypeTextEpochs provides snapshot.textEpochs,
         LocalPrototypeImageCache provides images,
@@ -80,11 +89,10 @@ internal fun PrototypeRuntimeContent(
         LocalPrototypeMotion provides motion,
       ) {
         PrototypeSpecContent(
-          mapPrototypeSpec(snapshot.spec, snapshot.pages).root,
+          runtime.renderModel(snapshot).root,
           snapshot.spec.theme,
-        ) { interaction ->
-          queue.trySend(interaction)
-        }
+          send,
+        )
       }
     }
   }
@@ -102,7 +110,7 @@ fun PrototypeSpecContent(
     CompositionLocalProvider(LocalPrototypeAnchorLocals provides anchorLocals) {
       val fillsWindow = LocalPrototypeFillsWindow.current
       Box(Modifier.semantics { testTagsAsResourceId = true }) {
-        val modals = modalPrototypeSheets(root)
+        val modals = remember(root) { modalPrototypeSheets(root) }
         // An open dialog is modal: the page behind it leaves the accessibility tree, as it does
         // on iOS and as touches already do. A snackbar or sheet does not block the page.
         val pageBlocked = modals.any { it.role == "dialog" }
@@ -112,12 +120,15 @@ fun PrototypeSpecContent(
             .then(if (pageBlocked) Modifier.clearAndSetSemantics {} else Modifier),
         ) {
           RenderPrototypeNode(root, interact, windowRoot = true)
-          PrototypeAnchorLayer(layeredPrototypeAnchors(root), interact)
+          PrototypeAnchorLayer(remember(root) { layeredPrototypeAnchors(root) }, interact)
         }
         modals.forEach { node ->
           key(node.identity) {
             RenderPrototypeModal(node, interact)
-            PrototypeAnchorLayer(layeredPrototypeAnchorsIn(node.children), interact)
+            PrototypeAnchorLayer(
+              remember(node) { layeredPrototypeAnchorsIn(node.children) },
+              interact,
+            )
           }
         }
       }
@@ -260,12 +271,14 @@ private fun RenderPrototypeModal(
     "dialog" ->
       RenderPrototypeDialog(node, modifier, interact) {
         node.children.forEach {
-          RenderPrototypeNode(
-            it,
-            interact,
-            columnWeight(it),
-            it.weightAxis(PrototypeWeightAxis.VERTICAL),
-          )
+          key(it.identity) {
+            RenderPrototypeNode(
+              it,
+              interact,
+              columnWeight(it),
+              it.weightAxis(PrototypeWeightAxis.VERTICAL),
+            )
+          }
         }
       }
     "snackbar" -> RenderPrototypeSnackbar(node, modifier, interact)
@@ -313,13 +326,14 @@ private fun RenderPrototypeNodeContent(
   weightAxis: PrototypeWeightAxis? = null,
   windowRoot: Boolean = false,
 ) {
+  LocalPrototypeCompositionProbe.current?.invoke(node.identity)
   val modifier = parentModifier.then(prototypeNodeModifier(node, interact, weightAxis, windowRoot))
   // Containers whose children can appear, disappear or change animate their size with them.
   val containerModifier = modifier.prototypeAnimateSize(LocalPrototypeMotion.current)
   when (node.role) {
     "box" ->
       Box(containerModifier, contentAlignment = node.style.alignment) {
-        node.children.forEach { RenderPrototypeNode(it, interact) }
+        node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
       }
     "row" ->
       Row(
@@ -328,12 +342,14 @@ private fun RenderPrototypeNodeContent(
         verticalAlignment = node.style.verticalAlignment,
       ) {
         node.children.forEach {
-          RenderPrototypeNode(
-            it,
-            interact,
-            rowWeight(it),
-            it.weightAxis(PrototypeWeightAxis.HORIZONTAL),
-          )
+          key(it.identity) {
+            RenderPrototypeNode(
+              it,
+              interact,
+              rowWeight(it),
+              it.weightAxis(PrototypeWeightAxis.HORIZONTAL),
+            )
+          }
         }
       }
     "column" ->
@@ -343,12 +359,14 @@ private fun RenderPrototypeNodeContent(
         horizontalAlignment = node.style.horizontalAlignment,
       ) {
         node.children.forEach {
-          RenderPrototypeNode(
-            it,
-            interact,
-            columnWeight(it),
-            it.weightAxis(PrototypeWeightAxis.VERTICAL),
-          )
+          key(it.identity) {
+            RenderPrototypeNode(
+              it,
+              interact,
+              columnWeight(it),
+              it.weightAxis(PrototypeWeightAxis.VERTICAL),
+            )
+          }
         }
       }
     "text" -> {
@@ -410,7 +428,9 @@ private fun RenderPrototypeNodeContent(
       val scrolling =
         if (source?.axis == "horizontal") modifier.horizontalScroll(scroll)
         else modifier.verticalScroll(scroll)
-      Box(scrolling) { node.children.forEach { RenderPrototypeNode(it, interact) } }
+      Box(scrolling) {
+        node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
+      }
     }
     "pager" -> RenderPrototypePager(node, modifier, interact)
     "tabBar",
@@ -438,12 +458,14 @@ private fun RenderPrototypeNodeContent(
     "card" ->
       RenderPrototypeCard(node, modifier) {
         node.children.forEach {
-          RenderPrototypeNode(
-            it,
-            interact,
-            columnWeight(it),
-            it.weightAxis(PrototypeWeightAxis.VERTICAL),
-          )
+          key(it.identity) {
+            RenderPrototypeNode(
+              it,
+              interact,
+              columnWeight(it),
+              it.weightAxis(PrototypeWeightAxis.VERTICAL),
+            )
+          }
         }
       }
     // Spacer keeps its size and authored actions.
@@ -659,12 +681,14 @@ private fun RenderPrototypeSheet(
             .background(prototypeHandleColor(MaterialTheme.colorScheme), RoundedCornerShape(2.dp)),
         )
       node.children.forEach {
-        RenderPrototypeNode(
-          it,
-          interact,
-          columnWeight(it),
-          it.weightAxis(PrototypeWeightAxis.VERTICAL),
-        )
+        key(it.identity) {
+          RenderPrototypeNode(
+            it,
+            interact,
+            columnWeight(it),
+            it.weightAxis(PrototypeWeightAxis.VERTICAL),
+          )
+        }
       }
     }
   }

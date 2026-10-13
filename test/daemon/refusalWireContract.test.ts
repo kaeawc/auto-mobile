@@ -352,17 +352,21 @@ interface RefusalFields {
   retryable: boolean;
   acquireNewSession: boolean;
   retryAfterMs?: number;
+  recovering?: boolean;
   externalDevices?: string[];
 }
 
 interface WirePayload {
+  details?: { recovering?: boolean };
   retryAfterMs?: number;
+  recovering?: boolean;
   externalDevices?: string[];
   code?: string;
   retryable?: boolean;
   nextAction?: string;
   error?: {
     retryAfterMs?: number;
+    recovering?: boolean;
     code?: string;
     retryable?: boolean;
     nextAction?: string;
@@ -387,17 +391,20 @@ const WAIT_CODES: ReadonlySet<string> = new Set([
 const RETRYABLE_WAIT_CODES: ReadonlySet<string> = new Set([
   "capacity_exhausted",
   "discovery_incomplete",
+  "session_held_by_recovery",
 ]);
 
 /** What a runner reads from a payload: the shape `fields` pins for the Kotlin and Swift suites. */
 function readFields(payload: WirePayload): RefusalFields {
   const envelope = typeof payload.error === "object" ? payload.error : undefined;
   const retryAfterMs = envelope?.retryAfterMs ?? payload.retryAfterMs;
+  const recovering = envelope?.recovering ?? payload.recovering ?? payload.details?.recovering;
   return {
     code: envelope?.code ?? payload.code,
     retryable: envelope?.retryable === true || payload.retryable === true,
     acquireNewSession: (envelope?.nextAction ?? payload.nextAction) === "acquire_new_session",
     ...(typeof retryAfterMs === "number" && retryAfterMs > 0 ? { retryAfterMs } : {}),
+    ...(typeof recovering === "boolean" ? { recovering } : {}),
     ...(payload.externalDevices ? { externalDevices: payload.externalDevices } : {}),
   };
 }
@@ -409,6 +416,7 @@ function deriveDisposition(payload: WirePayload): RefusalDisposition {
     envelope?.code ?? payload.code ?? "",
     (envelope?.retryable ?? payload.retryable) === true,
     envelope?.nextAction ?? payload.nextAction,
+    (envelope?.recovering ?? payload.recovering ?? payload.details?.recovering) === true,
   );
 }
 
@@ -416,8 +424,12 @@ function dispositionOf(
   code: string,
   retryable: boolean,
   nextAction: string | undefined,
+  recovering = false,
 ): RefusalDisposition {
-  if (WAIT_CODES.has(code) || (retryable && RETRYABLE_WAIT_CODES.has(code))) {
+  if (
+    WAIT_CODES.has(code) ||
+    (retryable && (RETRYABLE_WAIT_CODES.has(code) || (code === "device_unhealthy" && recovering)))
+  ) {
     return "wait";
   }
   if (nextAction === "acquire_new_session") {
@@ -890,6 +902,21 @@ describe("refusal wire contract", () => {
     }
   });
 
+  test("unhealthy corpus waits exactly while recovering and retryable", () => {
+    const outcomes = new Set<string>();
+    for (const fixture of fixtures) {
+      const payload = JSON.parse(fixture.result.content[0].text) as WirePayload;
+      const fields = readFields(payload);
+      if (fields.code !== "device_unhealthy") {
+        continue;
+      }
+      const disposition = deriveDisposition(payload);
+      expect(disposition === "wait").toBe(fields.recovering === true && fields.retryable === true);
+      outcomes.add(disposition);
+    }
+    expect(outcomes).toEqual(new Set(["wait", "fail"]));
+  });
+
   test("the expectations agree with the disposition the wire fields imply", () => {
     for (const fixture of fixtures) {
       const payload = JSON.parse(fixture.result.content[0].text) as WirePayload;
@@ -1299,6 +1326,7 @@ describe("refusal wire contract", () => {
             fields.code ?? "",
             fields.retryable === true,
             fields.acquireNewSession ? "acquire_new_session" : undefined,
+            (fields.recovering ?? fields.details?.recovering) === true,
           ),
         );
       }

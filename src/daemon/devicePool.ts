@@ -12,6 +12,8 @@ import type { SessionReleaseReason } from "./releaseReasons";
 import type { Environment } from "./poolConfig";
 import {
   DeviceCleanupInProgressError,
+  DeviceUnhealthyError,
+  DEVICE_UNHEALTHY_CODE,
   DeviceOwnedByOtherDaemonError,
   DeviceShuttingDownError,
   freshStartAlreadyBoundError,
@@ -7055,7 +7057,7 @@ export class DevicePool {
     }
   }
 
-  private unhealthyDevicesError(devices: readonly PooledDevice[]): ActionableError {
+  private unhealthyDevicesError(devices: readonly PooledDevice[]): DeviceUnhealthyError {
     const reasons = devices.flatMap((device) => {
       const marker = this.getDeviceHealthMarker(device.id);
       return marker ? [`'${device.id}' (${marker.reason}, since ${marker.since})`] : [];
@@ -7078,13 +7080,48 @@ export class DevicePool {
           "Recovery is retried in the background (three attempts); if it stays held, " +
           `call killDevice with device { name: '${device.name}', deviceId: '${device.id}', platform: '${device.platform}' }, then startDevice to bring up a fresh device.`,
       );
-    return new ActionableError(
+    const evidence = devices.flatMap((device) => {
+      const incarnation = this.getDeviceIncarnation(device.id);
+      if (incarnation === undefined) {
+        return [];
+      }
+      const markers = this.deviceHealthMarkers.list(device.id, incarnation);
+      const oldest = markers[0];
+      if (!oldest) {
+        return [];
+      }
+      const recoveries = markers.map((marker) =>
+        this.sessionManager.getDeviceHealthRecovery(device.id, incarnation, marker.reason),
+      );
+      const recovering = recoveries.every((recovery) => recovery.recovering);
+      const bounds = recoveries.flatMap((recovery) =>
+        recovery.retryAfterMs === undefined ? [] : [recovery.retryAfterMs],
+      );
+      return [
+        {
+          deviceId: device.id,
+          reason: oldest.reason,
+          recovering,
+          ...(recovering && bounds.length === recoveries.length
+            ? { retryAfterMs: Math.max(...bounds) }
+            : {}),
+        },
+      ];
+    });
+    const error = new DeviceUnhealthyError(
+      evidence,
       `Unhealthy devices cannot be assigned: ${reasons.join(", ")}. ` +
         "Session state could not be restored. Retry after restoration succeeds, manually restore the state, " +
         "or use killDevice/startDevice to replace the device. Automatic erase/reboot is not performed." +
         appCleanupRecovery.join("") +
         recordingTeardownRecovery.join(""),
     );
+    error.message += error.recovering
+      ? error.retryAfterMs === undefined
+        ? ` Background recovery is still running with no fixed bound (code ${DEVICE_UNHEALTHY_CODE}); retry later.`
+        : ` Background recovery is still running (code ${DEVICE_UNHEALTHY_CODE}); retry in about ${error.retryAfterMs}ms.`
+      : ` Background recovery has ended and the marker is held until the device is replaced (code ${DEVICE_UNHEALTHY_CODE}).`;
+    return error;
   }
 
   /** Exact-device acquisition honors cleanup and health; live-owner reuse stays valid. */

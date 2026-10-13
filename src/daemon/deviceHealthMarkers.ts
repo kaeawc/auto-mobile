@@ -21,6 +21,8 @@ export interface DeviceHealthMarkers {
     incarnation: number,
     reason?: DeviceHealthReason,
   ): DeviceHealthMarker | undefined;
+  /** All unresolved reasons, oldest first; reading a new incarnation drops stale markers. */
+  list(deviceId: string, incarnation: number): readonly DeviceHealthMarker[];
   clear(deviceId: string, incarnation?: number, reason?: DeviceHealthReason): void;
 }
 
@@ -56,14 +58,19 @@ export class InMemoryDeviceHealthMarkers implements DeviceHealthMarkers {
     incarnation: number,
     reason?: DeviceHealthReason,
   ): DeviceHealthMarker | undefined {
+    const markers = this.list(deviceId, incarnation);
+    return reason ? markers.find((marker) => marker.reason === reason) : markers[0];
+  }
+
+  list(deviceId: string, incarnation: number): readonly DeviceHealthMarker[] {
     const entry = this.devices.get(deviceId);
     if (entry?.incarnation !== incarnation) {
       if (entry && entry.incarnation < incarnation) {
         this.devices.delete(deviceId);
       }
-      return undefined;
+      return [];
     }
-    return reason ? entry.reasons.get(reason) : entry.reasons.values().next().value;
+    return [...entry.reasons.values()];
   }
 
   clear(deviceId: string, incarnation?: number, reason?: DeviceHealthReason): void {
@@ -108,6 +115,10 @@ export class NotifyingDeviceHealthMarkers implements DeviceHealthMarkers {
     reason?: DeviceHealthReason,
   ): DeviceHealthMarker | undefined {
     return this.inner.get(deviceId, incarnation, reason);
+  }
+
+  list(deviceId: string, incarnation: number): readonly DeviceHealthMarker[] {
+    return this.inner.list(deviceId, incarnation);
   }
 
   clear(deviceId: string, incarnation?: number, reason?: DeviceHealthReason): void {

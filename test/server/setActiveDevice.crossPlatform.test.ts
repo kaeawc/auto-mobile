@@ -213,4 +213,22 @@ describe("setActiveDevice never rebinds a session across platforms (#11167)", ()
 
     expect(manager.getSession(owned)!.assignedDevice).toBe(android2.deviceId);
   });
+
+  test("a platform hint can still return an explicitly selected Android session on its current device", async () => {
+    await setup([android, iphone]);
+    const owned = (await pool.autolockDevice(android.deviceId, "android", CONNECTION))!;
+    const result = await tools.call("setActiveDevice", {
+      platform: "ios",
+      deviceId: android.deviceId,
+      sessionUuid: owned,
+      __mcpSessionId: CONNECTION,
+    });
+    const content = result.content[0];
+    expect(content?.type).toBe("text");
+    if (content?.type !== "text") {
+      throw new Error("Expected selection text");
+    }
+    expect(JSON.parse(content.text)).toMatchObject({ sessionUuid: owned });
+    expect(manager.getSession(owned)!.platform).toBe("android");
+  });
 });

@@ -23,82 +23,9 @@ extension ElementLocator {
 
         // MARK: - Hierarchy Optimization
 
-        /// Check if an element has meaningful content that should be preserved
-        private func meetsFilterCriteria(_ element: UIElementInfo) -> Bool {
-            // String criteria - element has useful identifying information
-            let hasStringCriteria =
-                element.text != nil ||
-                element.resourceId != nil ||
-                element.role != nil ||
-                element.hintText != nil
-
-            // Boolean criteria - element is interactive
-            let hasBooleanCriteria =
-                element.clickable == "true" ||
-                element.scrollable == "true" ||
-                element.focused == "true" ||
-                element.selected == "true" ||
-                element.checkable == "true"
-
-            return hasStringCriteria || hasBooleanCriteria
-        }
-
-        /// Check if a class name is a structural wrapper (no semantic meaning)
-        private func isStructuralWrapper(_ className: String?) -> Bool {
-            guard let className = className else { return false }
-            return ElementLocator.structuralClassNames.contains(className)
-        }
-
-        /// Optimizes the hierarchy by:
-        /// 1. Promoting children of bounds-only wrapper nodes (structural nodes with only bounds)
-        /// 2. Filtering out empty structural nodes
-        /// 3. Preserving interactive elements and their children
-        ///
-        /// This significantly reduces hierarchy size for complex UIs.
+        /// Keep the live capture call site on the host-tested optimization path.
         func optimizeHierarchy(_ element: UIElementInfo, isRoot: Bool = false) -> [UIElementInfo] {
-            // Check if this element is a bounds-only wrapper (has no useful properties)
-            let meetsCriteria = meetsFilterCriteria(element)
-            let isStructural = isStructuralWrapper(element.className)
-            let isBoundsOnlyWrapper = !meetsCriteria && isStructural
-
-            // Never promote children of interactive elements
-            let isInteractive = element.clickable == "true" ||
-                element.scrollable == "true" ||
-                element.selected == "true"
-
-            // First, recursively optimize children
-            var optimizedChildren: [UIElementInfo]?
-            if let children = element.node {
-                let optimized = children.flatMap { child in
-                    optimizeHierarchy(child, isRoot: false)
-                }
-                let cleaned = ElementLocator.cleanupXCTestUIKitNoise(parent: element, children: optimized)
-                optimizedChildren = cleaned.isEmpty ? nil : cleaned
-            }
-
-            // Root element is always kept
-            if isRoot {
-                return [ElementLocator.removingUnlabeledIconDescendants(Self.copying(element, node: optimizedChildren))]
-            }
-
-            // Only promote children (flatten hierarchy) if this is a bounds-only wrapper AND not interactive
-            if isBoundsOnlyWrapper, !isInteractive {
-                if let children = optimizedChildren {
-                    if ElementLocator.containsOnlyUnprotectedScrollBarNoise(children) {
-                        return []
-                    }
-                    // Promote children - flatten this wrapper node
-                    return children
-                }
-                // No children and no content - filter out completely
-                return []
-            }
-
-            // Keep this element with optimized children. Strip icon artwork after
-            // bottom-up wrapper promotion so identified intermediate views cannot
-            // hide unlabeled descendants from the icon-level cleanup.
-            let retained = Self.copying(element, node: optimizedChildren)
-            return [ElementLocator.removingUnlabeledIconDescendants(retained)]
+            Self.optimizeHierarchy(element, isRoot: isRoot)
         }
 
         func mapElementType(_ type: XCUIElement.ElementType) -> String {
@@ -213,4 +140,137 @@ extension ElementLocator {
             }
         }
     #endif
+}
+
+extension ElementLocator {
+    // MARK: - Platform-independent hierarchy optimization (host-compiled and host-tested)
+
+    // These pure UIElementInfo helpers live outside the iOS block. On this @MainActor
+    // class they are nonisolated static so host tests can call them synchronously.
+
+    /// Front-to-back window position read by src/features/observe/ios/iosWindowLayer.ts.
+    nonisolated static let iosWindowLayerExtra = "automobile:iosWindowLayer"
+
+    /// Check if an element has meaningful content that should be preserved
+    private nonisolated static func meetsFilterCriteria(_ element: UIElementInfo) -> Bool {
+        // String criteria - element has useful identifying information
+        let hasStringCriteria =
+            element.text != nil ||
+            element.resourceId != nil ||
+            element.role != nil ||
+            element.hintText != nil
+
+        // Boolean criteria - element is interactive
+        let hasBooleanCriteria =
+            element.clickable == "true" ||
+            element.scrollable == "true" ||
+            element.focused == "true" ||
+            element.selected == "true" ||
+            element.checkable == "true"
+
+        return hasStringCriteria || hasBooleanCriteria
+    }
+
+    /// Check if a class name is a structural wrapper (no semantic meaning)
+    private nonisolated static func isStructuralWrapper(_ className: String?) -> Bool {
+        guard let className = className else { return false }
+        return ElementLocator.structuralClassNames.contains(className)
+    }
+
+    /// Optimizes the hierarchy by:
+    /// 1. Promoting children of bounds-only wrapper nodes (structural nodes with only bounds)
+    /// 2. Filtering out empty structural nodes
+    /// 3. Preserving interactive elements and their children
+    ///
+    /// This significantly reduces hierarchy size for complex UIs.
+    nonisolated static func optimizeHierarchy(_ element: UIElementInfo, isRoot: Bool = false) -> [UIElementInfo] {
+        if isRoot {
+            return optimizeRootHierarchy(element, stampWindowLayers: true)
+        }
+
+        // Check if this element is a bounds-only wrapper (has no useful properties)
+        let meetsCriteria = meetsFilterCriteria(element)
+        let isStructural = isStructuralWrapper(element.className)
+        let isBoundsOnlyWrapper = !meetsCriteria && isStructural
+
+        // Never promote children of interactive elements
+        let isInteractive = element.clickable == "true" ||
+            element.scrollable == "true" ||
+            element.selected == "true"
+
+        // First, recursively optimize children
+        var optimizedChildren: [UIElementInfo]?
+        if let children = element.node {
+            let optimized = children.flatMap { child in
+                optimizeHierarchy(child, isRoot: false)
+            }
+            let cleaned = ElementLocator.cleanupXCTestUIKitNoise(parent: element, children: optimized)
+            optimizedChildren = cleaned.isEmpty ? nil : cleaned
+        }
+
+        // Only promote children (flatten hierarchy) if this is a bounds-only wrapper AND not interactive
+        if isBoundsOnlyWrapper, !isInteractive {
+            if let children = optimizedChildren {
+                if ElementLocator.containsOnlyUnprotectedScrollBarNoise(children) {
+                    return []
+                }
+                // Promote children - flatten this wrapper node
+                return children
+            }
+            // No children and no content - filter out completely
+            return []
+        }
+
+        // Keep this element with optimized children. Strip icon artwork after
+        // bottom-up wrapper promotion so identified intermediate views cannot
+        // hide unlabeled descendants from the icon-level cleanup.
+        let retained = Self.copying(element, node: optimizedChildren)
+        return [ElementLocator.removingUnlabeledIconDescendants(retained)]
+    }
+
+    /// The pre-stamping root pass, shared with the live path for survivor parity tests.
+    nonisolated static func optimizeHierarchyUnstampedRoot(_ element: UIElementInfo) -> [UIElementInfo] {
+        optimizeRootHierarchy(element, stampWindowLayers: false)
+    }
+
+    private nonisolated static func optimizeRootHierarchy(
+        _ element: UIElementInfo,
+        stampWindowLayers: Bool
+    )
+        -> [UIElementInfo]
+    {
+        var survivors: [UIElementInfo] = []
+        var origins: [Int?] = []
+        for (index, child) in (element.node ?? []).enumerated() {
+            let optimized = optimizeHierarchy(child, isRoot: false)
+            survivors.append(contentsOf: optimized)
+            let origin: Int? = child.className == "UIWindow" ? index : nil
+            origins.append(contentsOf: Array(repeating: origin, count: optimized.count))
+        }
+        // Extras protect noise nodes, so retain original indices and stamp only after cleanup.
+        let indices = cleanupXCTestUIKitNoiseIndices(parent: element, children: survivors)
+        var children = indices.map { survivors[$0] }
+        if stampWindowLayers {
+            children = stampingWindowLayers(children, origins: indices.map { origins[$0] })
+        }
+        let root = copying(element, node: children.isEmpty ? nil : children)
+        return [removingUnlabeledIconDescendants(root)]
+    }
+
+    private nonisolated static func stampingWindowLayers(
+        _ children: [UIElementInfo],
+        origins: [Int?]
+    )
+        -> [UIElementInfo]
+    {
+        // XCUITest orders windows back to front; count only windows with cleaned survivors.
+        let windows = Set(origins.compactMap { $0 }).sorted(by: >)
+        guard windows.count >= 2 else { return children }
+        return zip(children, origins).map { child, origin in
+            guard let origin, let layer = windows.firstIndex(of: origin) else { return child }
+            var extras = child.extras ?? [:]
+            extras[iosWindowLayerExtra] = String(layer)
+            return copying(child, node: child.node, extras: extras)
+        }
+    }
 }

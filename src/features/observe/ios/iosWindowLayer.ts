@@ -2,12 +2,16 @@
  * iOS window z-order, carried through hierarchy flattening.
  *
  * XCUITest lists an app's `UIWindow`s back to front (ascending window level), and the iOS
- * converter collapses those wrappers, so every node would otherwise share one window rank. An
- * in-app prototype window, an alert window or the keyboard would then rank level with the app's own
+ * runner flattens those wrappers in normal captures, so every node would otherwise share one
+ * window rank. An in-app prototype window, an alert window or the keyboard would then rank level
+ * with the app's own
  * navigation bar and toolbars, and chrome clipping would treat app chrome as covering them.
  *
  * When two or more windows contribute nodes, each top-level node of a window is stamped with its
- * position counted from the front (0 = topmost). Descendants inherit it in `SearchableHierarchy`.
+ * position counted from the front (0 = topmost). Normal captures are stamped by the runner while
+ * flattening windows (`ElementLocator.optimizeHierarchy`, key `ElementLocator.iosWindowLayerExtra`).
+ * The host converter stamps only raw captures that still carry `UIWindow` wrappers. Descendants
+ * inherit the stamp in `SearchableHierarchy`.
  */
 export const IOS_WINDOW_LAYER_EXTRA = "automobile:iosWindowLayer";
 

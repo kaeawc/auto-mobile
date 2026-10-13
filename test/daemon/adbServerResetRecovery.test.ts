@@ -1902,11 +1902,13 @@ describe("managed slot ownership automation admission", () => {
         retryAfterMs: 2_000,
       });
       const lost = new ManagedSlotOwnershipLostError("resumed");
-      expect(lost.toPayload()).toEqual({
-        code: "managed_slot_ownership_lost",
-        sessionUuid: "resumed",
+      expect(lost).toMatchObject({
+        code: "session_ownership_lost",
         retryable: false,
+        nextAction: "acquire_new_session",
+        details: { sessionUuid: "resumed", reason: "managed-slot-ownership-lost" },
       });
+      expect(lost.details).not.toHaveProperty("idle");
       refusal = unconfirmed;
       expect(() => pool.assertSessionReadyForAutomation("resumed")).toThrow(
         ManagedSlotOwnershipUnconfirmedError,

@@ -1,3 +1,5 @@
+import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
+import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import { TextIndeterminateError } from "../../src/features/action/textTransportTimeout";
 import { SessionRecoveryAssignmentError } from "../../src/models/SessionRecoveryAssignmentError";
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
@@ -64,7 +66,6 @@ describe("shapeToolCallError", () => {
       }),
       new ManagedSlotDiscoveryIncompleteError("registry busy"),
       new ManagedSlotOwnershipUnconfirmedError("session"),
-      new ManagedSlotOwnershipLostError("session"),
     ];
     for (const error of refusals) {
       expect(isTypedToolRefusal(error)).toBe(true);
@@ -78,6 +79,36 @@ describe("shapeToolCallError", () => {
         });
       }
     }
+  });
+
+  test("known ownership loss at the gate equals the terminal release on every wire", () => {
+    const gate = new ManagedSlotOwnershipLostError("session");
+    const released = new SessionReleasedDuringCallError("session", "managed-slot-ownership-lost");
+    for (const source of ["MCP", "ProxyServer"] as const) {
+      const payload = (error: Error) => {
+        const { message, ...fields } = JSON.parse(
+          shapeToolCallError(error, { ...context, source }).content[0].text,
+        ).error;
+        expect(message).toBe(error.message);
+        return fields;
+      };
+      expect(payload(gate)).toEqual(payload(released));
+      expect(payload(gate)).toMatchObject({
+        code: "session_ownership_lost",
+        retryable: false,
+        nextAction: "acquire_new_session",
+        sessionUuid: "session",
+        reason: "managed-slot-ownership-lost",
+      });
+      expect(payload(gate)).not.toHaveProperty("idle");
+    }
+    expect(mcpRequestFailureDetails(gate, undefined)).toEqual(
+      mcpRequestFailureDetails(released, undefined),
+    );
+    expect(gate.message).toBe(
+      "Session session is terminal after managed-slot-ownership-lost and cannot be reused. Acquire a new device with getAndroid or getApple.",
+    );
+    expect(gate.name).toBe("ManagedSlotOwnershipLostError");
   });
 
   test("runner-connect deadline is a typed retryable timeout on every tool boundary", () => {

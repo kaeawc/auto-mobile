@@ -595,7 +595,7 @@ const BUILDERS: readonly FixtureEntry[] = [
     () => shaped(new ManagedSlotOwnershipUnconfirmedError(SESSION)),
   ],
   [
-    "managed_slot_ownership_lost",
+    "session_ownership_lost.managed_slot_ownership_lost_at_gate",
     "ManagedSlotOwnershipLostError via shapeToolCallError",
     () => shaped(new ManagedSlotOwnershipLostError(SESSION)),
   ],
@@ -1086,7 +1086,10 @@ const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
   ["daemon_restart_pending", () => new DaemonRestartPendingError()],
   ["device_outside_bound_session", boundSessionError],
   ["managed_slot_ownership_unconfirmed", () => new ManagedSlotOwnershipUnconfirmedError(SESSION)],
-  ["managed_slot_ownership_lost", () => new ManagedSlotOwnershipLostError(SESSION)],
+  [
+    "session_ownership_lost.managed_slot_ownership_lost_at_gate",
+    () => new ManagedSlotOwnershipLostError(SESSION),
+  ],
   ["capacity_exhausted.ios", () => bootCapacityRefusal("ios") as Error],
   ["discovery_incomplete.ios", iosInventoryIncomplete],
   [

@@ -14,11 +14,12 @@ enum PrototypeHostLayer: Equatable, Sendable {
     case top
 
     /// The layer whose view reported the hit rect `key` (see `reportFrame`): `dismiss` and
-    /// `dismissBar` (host chrome), `modal.<index>` (an open dialog or snackbar) and
+    /// `dismissBar` and `escape` (host chrome), `modal.<index>` (an open dialog or snackbar) and
     /// `anchor.modal<index>…` (an anchored node inside one) are the top layer's; `content` and the
     /// page's `anchor.root…` are the page's.
     init(hitRectKey key: String) {
-        let top = key == "dismiss" || key == "dismissBar" || key.hasPrefix("modal.") || key.hasPrefix("anchor.modal")
+        let top = key == "dismiss" || key == "dismissBar" || key == "escape" || key.hasPrefix("modal.") || key
+            .hasPrefix("anchor.modal")
         self = top ? .top : .page
     }
 
@@ -43,17 +44,21 @@ struct PrototypeHostAccessibility: Equatable, Sendable {
     /// placement. Floating and sheet prototypes otherwise leave the app reachable.
     let coversApp: Bool
 
+    /// Only chromeless fullscreen needs a root marker; other placements keep their dismiss marker.
+    let windowMarked: Bool
+
     static let hidden = PrototypeHostAccessibility(pageElementsHidden: false, topIsModal: false, coversApp: false)
 
-    init(pageElementsHidden: Bool, topIsModal: Bool, coversApp: Bool) {
+    init(pageElementsHidden: Bool, topIsModal: Bool, coversApp: Bool, windowMarked: Bool = false) {
         self.pageElementsHidden = pageElementsHidden
         self.topIsModal = topIsModal
         self.coversApp = coversApp
+        self.windowMarked = windowMarked
     }
 
     /// The flags for `session` while the prototype window is shown (`windowShown`) or hidden.
     init(session: PrototypeSession, windowShown: Bool) {
-        guard windowShown, let spec = session.spec else {
+        guard windowShown, session.isShown, let spec = session.spec else {
             self = .hidden
             return
         }
@@ -61,7 +66,9 @@ struct PrototypeHostAccessibility: Equatable, Sendable {
         self.init(
             pageElementsHidden: dialogOpen,
             topIsModal: dialogOpen,
-            coversApp: dialogOpen || spec.window.placement.type == "fullscreen"
+            coversApp: dialogOpen || spec.window.placement.type == "fullscreen",
+            windowMarked: PrototypeHostChrome(placementType: spec.window.placement.type, chrome: spec.window.chrome)
+                .escape
         )
     }
 }

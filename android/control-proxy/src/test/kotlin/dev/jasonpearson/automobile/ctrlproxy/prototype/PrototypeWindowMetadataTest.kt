@@ -39,7 +39,7 @@ class PrototypeWindowMetadataTest {
         ),
     )
 
-  // The shipped host draws a translucent dismiss bar over fullscreen windows; the cases below that
+  // The bar remains translucent when requested; the cases below that
   // exercise the surface rules assume an opaque bar so they isolate the root/scrim logic.
   private fun metadata(spec: PrototypeSpec, dismissBarOpaque: Boolean = true) =
     prototypeWindowMetadata(mapPrototypeSpec(spec), dismissBarOpaque)
@@ -58,6 +58,13 @@ class PrototypeWindowMetadataTest {
         ),
       ),
     )
+  }
+
+  @Test
+  fun `opaque fullscreen without the bar reports opaque while the bar keeps it translucent`() {
+    val model = mapPrototypeSpec(spec(PrototypeFullscreenPlacement()))
+    assertTrue(prototypeWindowMetadata(model, dismissBarDrawn = false).opaque)
+    assertFalse(prototypeWindowMetadata(model, dismissBarDrawn = true).opaque)
   }
 
   @Test
@@ -320,6 +327,12 @@ class PrototypeWindowMetadataTest {
     controller.show("r1", spec(PrototypeFullscreenPlacement()))
     // The appearance the show resolved to rides along; PrototypeAppearanceTest covers it.
     fun placementAndOpacity() = controller.windowMetadata()?.copy(appearance = null)
+    assertEquals(PrototypeWindowMetadata("fullscreen", true), placementAndOpacity())
+
+    controller.show(
+      "bar",
+      spec(PrototypeFullscreenPlacement()).let { it.copy(window = it.window.copy(chrome = "bar")) },
+    )
     assertEquals(PrototypeWindowMetadata("fullscreen", false), placementAndOpacity())
 
     controller.show("r2", spec(PrototypeSheetPlacement("bottom", 120.0), opacity = 50))

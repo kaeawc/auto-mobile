@@ -4,7 +4,9 @@ import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -17,8 +19,9 @@ import org.robolectric.RobolectricTestRunner
  * `UIElementInfo` moved children from a serialized `JsonElement` subtree to a typed in-memory
  * [UIElementInfo.children] list, with the wire `node` projection produced once at the boundary by
  * [WireNodeCodec]. This test proves the emitted JSON is byte-for-byte identical to the pre-refactor
- * format. [WIRE_GOLDEN] was captured from the base commit (before this change) by serializing the
- * exact same logical tree with the production `jsonCompact` config.
+ * format, except for the deliberate #12203 removal of null `truncationReasons`. [WIRE_GOLDEN] was
+ * captured from the base commit by serializing the exact same logical tree with the production
+ * `jsonCompact` config.
  */
 @RunWith(RobolectricTestRunner::class)
 class WireNodeCodecTest {
@@ -79,6 +82,19 @@ class WireNodeCodecTest {
   }
 
   @Test
+  fun `complete captures omit truncation reasons while partial captures encode them`() {
+    val complete = representativeHierarchy()
+    val completeJson = jsonCompact.encodeToString(ViewHierarchy.serializer(), complete)
+    assertFalse(
+      jsonCompact.parseToJsonElement(completeJson).jsonObject.containsKey("truncationReasons"),
+    )
+
+    val partial = complete.copy(truncationReasons = listOf("max_nodes"))
+    val partialJson = jsonCompact.encodeToString(ViewHierarchy.serializer(), partial)
+    assertTrue(partialJson.contains(""""truncationReasons":["max_nodes"]"""))
+  }
+
+  @Test
   fun `single child materializes as an object and multiple as an array`() {
     val singleChildNode = WireNodeCodec.buildNodeJson(listOf(childB()))
     assertTrue(
@@ -105,8 +121,9 @@ class WireNodeCodecTest {
   }
 
   companion object {
-    // Captured on the base commit (pre-#5471) from the production jsonCompact serializer.
+    // Captured on the base commit (pre-#5471) from the production jsonCompact serializer;
+    // deliberately removed only the null truncationReasons member for #12203.
     private const val WIRE_GOLDEN =
-      """{"updatedAt":123,"packageName":"com.example.app","userId":null,"hierarchy":{"text":null,"textSize":null,"text-color":null,"content-desc":null,"resource-id":null,"view-id":null,"className":null,"bounds":null,"clickable":null,"enabled":null,"focusable":null,"focused":null,"accessibility-focused":null,"scrollable":null,"password":null,"checkable":null,"checked":null,"selected":null,"long-clickable":null,"fragment":null,"test-tag":null,"unique-id":null,"visible-to-user":null,"container-title":null,"role":null,"state-description":null,"error-message":null,"hint-text":null,"tooltip-text":null,"pane-title":null,"live-region":null,"collection-info":null,"collection-item-info":null,"collection-row-index":null,"collection-column-index":null,"range-info":null,"input-type":null,"actions":null,"extras":null,"occlusionState":null,"occludedBy":null,"occludedByViewId":null,"recomposition":null,"node":{"className":"android.widget.FrameLayout","bounds":{"left":0,"top":0,"right":20,"bottom":40},"node":[{"text":"ChildA","bounds":{"left":0,"top":0,"right":20,"bottom":20},"node":{"text":"Grandchild","resource-id":"com.example:id/gc","view-id":"com.example:id/gc","className":"android.widget.TextView","bounds":{"left":0,"top":0,"right":10,"bottom":10},"clickable":"true","actions":["click","focus"],"extras":{"k":"v"}}},{"content-desc":"ChildB","bounds":{"left":0,"top":20,"right":20,"bottom":40},"visible-to-user":false,"collection-row-index":2,"collection-column-index":1}]}},"windowInfo":null,"windows":null,"contentHiddenRegions":null,"intentChooserDetected":null,"notificationPermissionDetected":null,"accessibility-focused-element":null,"ctrlProxyIncomplete":null,"error":null,"screenWidth":null,"screenHeight":null,"rotation":null,"systemInsets":null,"insets":null,"wakefulness":null,"foregroundActivity":null,"density":null,"sdkInt":null,"deviceModel":null,"isEmulator":null,"accessibilityTool":null,"nativeScale":null,"pixelWidth":null,"pixelHeight":null,"truncationReasons":null}"""
+      """{"updatedAt":123,"packageName":"com.example.app","userId":null,"hierarchy":{"text":null,"textSize":null,"text-color":null,"content-desc":null,"resource-id":null,"view-id":null,"className":null,"bounds":null,"clickable":null,"enabled":null,"focusable":null,"focused":null,"accessibility-focused":null,"scrollable":null,"password":null,"checkable":null,"checked":null,"selected":null,"long-clickable":null,"fragment":null,"test-tag":null,"unique-id":null,"visible-to-user":null,"container-title":null,"role":null,"state-description":null,"error-message":null,"hint-text":null,"tooltip-text":null,"pane-title":null,"live-region":null,"collection-info":null,"collection-item-info":null,"collection-row-index":null,"collection-column-index":null,"range-info":null,"input-type":null,"actions":null,"extras":null,"occlusionState":null,"occludedBy":null,"occludedByViewId":null,"recomposition":null,"node":{"className":"android.widget.FrameLayout","bounds":{"left":0,"top":0,"right":20,"bottom":40},"node":[{"text":"ChildA","bounds":{"left":0,"top":0,"right":20,"bottom":20},"node":{"text":"Grandchild","resource-id":"com.example:id/gc","view-id":"com.example:id/gc","className":"android.widget.TextView","bounds":{"left":0,"top":0,"right":10,"bottom":10},"clickable":"true","actions":["click","focus"],"extras":{"k":"v"}}},{"content-desc":"ChildB","bounds":{"left":0,"top":20,"right":20,"bottom":40},"visible-to-user":false,"collection-row-index":2,"collection-column-index":1}]}},"windowInfo":null,"windows":null,"contentHiddenRegions":null,"intentChooserDetected":null,"notificationPermissionDetected":null,"accessibility-focused-element":null,"ctrlProxyIncomplete":null,"error":null,"screenWidth":null,"screenHeight":null,"rotation":null,"systemInsets":null,"insets":null,"wakefulness":null,"foregroundActivity":null,"density":null,"sdkInt":null,"deviceModel":null,"isEmulator":null,"accessibilityTool":null,"nativeScale":null,"pixelWidth":null,"pixelHeight":null}"""
   }
 }

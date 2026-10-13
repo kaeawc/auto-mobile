@@ -900,6 +900,8 @@ data class PrototypeWindow(
    * interactive after the last client disconnects and disables the idle timeout.
    */
   val persistence: String? = null,
+  /** Fullscreen host chrome: `none` by default, or `bar`; device persistence defaults to `bar`. */
+  val chrome: String? = null,
 )
 
 /**

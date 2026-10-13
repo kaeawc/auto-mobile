@@ -1,3 +1,4 @@
+import { normalizeHierarchyOptionalFields } from "../truncationReasons";
 import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import { DUMPSYS_MAX_BUFFER } from "../../../utils/android-cmdline-tools/dumpsysLimits";
 import type { HierarchyReadOptions } from "../interfaces/ViewHierarchy";
@@ -1247,7 +1248,7 @@ export class CtrlProxyHierarchy {
         const errorMessage =
           accessibilityHierarchy.error ||
           "Accessibility hierarchy missing from accessibility service";
-        return {
+        return normalizeHierarchyOptionalFields({
           captureSequence: accessibilityHierarchy.captureSequence,
           displayId: accessibilityHierarchy.displayId,
           panelUniqueId: accessibilityHierarchy.panelUniqueId,
@@ -1276,7 +1277,7 @@ export class CtrlProxyHierarchy {
           // so #4549 can consume it regardless of which route produced the hierarchy. Same
           // all-or-nothing validator as the main return and client retention.
           ...screenScaleMetadataSpread(accessibilityHierarchy),
-        } as ViewHierarchyResult;
+        } as ViewHierarchyResult);
       }
 
       // Convert the accessibility node format
@@ -1336,7 +1337,7 @@ export class CtrlProxyHierarchy {
       const duration = this.context.timer.now() - startTime;
       logger.debug(`[CTRL_PROXY] Format conversion completed in ${duration}ms`);
 
-      return result;
+      return normalizeHierarchyOptionalFields(result);
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Format conversion failed after ${duration}ms: ${error}`);

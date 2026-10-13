@@ -859,7 +859,7 @@ export class DaemonClient {
   private createInboundFramer(): LineFramer {
     return new LineFramer(this.maxInboundFrameBytes, {
       onLine: (line) => this.handleInboundLine(line),
-      onOverflow: () => this.handleInboundOverflow(),
+      onOverflow: (head) => this.handleInboundOverflow(head),
     });
   }
 
@@ -887,14 +887,49 @@ export class DaemonClient {
     logger.warn("Dropped daemon frame: invalid response or notification envelope");
   }
 
-  private handleInboundOverflow(): void {
+  private overflowingResponseId(head?: Buffer): string | undefined {
+    const prefix = head?.toString("utf8");
+    if (!prefix?.startsWith('{"id":"')) {
+      return undefined;
+    }
+    const end = prefix.indexOf('"', 7);
+    if (end === -1) {
+      return undefined;
+    }
+    try {
+      const response: unknown = JSON.parse(prefix.slice(0, end + 1) + "}");
+      return response !== null &&
+        typeof response === "object" &&
+        "id" in response &&
+        typeof response.id === "string" &&
+        this.pendingRequests.has(response.id)
+        ? response.id
+        : undefined;
+    } catch {
+      // An incomplete or invalid id is expected in a bounded head; attribute nothing.
+      logger.debug("Oversized daemon frame head contained no complete response id");
+      return undefined;
+    }
+  }
+
+  private handleInboundOverflow(head?: Buffer): void {
     const error = new DaemonFrameTooLargeError(this.maxInboundFrameBytes);
     logger.warn(error.message);
+    const owner =
+      this.overflowingResponseId(head) ??
+      (this.pendingRequests.size === 1 ? this.pendingRequests.keys().next().value : undefined);
     const socket = this.socket;
-    for (const pending of this.pendingRequests.values()) {
+    for (const [requestId, pending] of this.pendingRequests) {
       this.timer.clearTimeout(pending.timeout);
       pending.removeAbortListener?.();
-      pending.reject(error);
+      pending.reject(
+        requestId === owner
+          ? error
+          : new DaemonUnavailableError(
+              `Daemon socket connection lost: another frame on the connection exceeded ${this.maxInboundFrameBytes} bytes`,
+              { cause: error },
+            ),
+      );
     }
     this.pendingRequests.clear();
     try {

@@ -206,3 +206,90 @@ SCRIPT
   [[ "$output" == *"Running Gradle attempt 2/2"* ]]
   [ "$(tr '\n' ' ' < "$SLEEP_LOG")" = "1 " ]
 }
+
+write_missing_artifact_gradle() {
+  write_fake_gradle <<'SCRIPT'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "--stop" ]]; then
+  exit 0
+fi
+if [[ ! -e "$FAKE_GRADLE_STATE" ]]; then
+  touch "$FAKE_GRADLE_STATE"
+  cat "$FAKE_GRADLE_FIXTURE"
+  exit 1
+fi
+printf '%s\n' "$*" > "$FAKE_GRADLE_ARGS"
+echo "BUILD SUCCESSFUL"
+SCRIPT
+}
+
+@test "missing pinned artifact retries with 45s propagation delay and refreshed dependencies" {
+  write_missing_artifact_gradle
+  run env GRADLE_RETRY_LOG_DIR="$LOG_DIR" SLEEP_LOG="$SLEEP_LOG" \
+    FAKE_GRADLE_STATE="${TEST_ROOT}/state" FAKE_GRADLE_ARGS="${TEST_ROOT}/args" \
+    FAKE_GRADLE_FIXTURE="test/fixtures/gradle-retry/missing-pinned-artifact.log" \
+    bash "$SCRIPT" -- "$COMMAND" :junit-runner:compileKotlin
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Retryable missing-artifact (repository propagation) failure detected."* ]]
+  [[ "$output" == *"Running Gradle attempt 2/2"* ]]
+  [ "$(cat "$SLEEP_LOG")" = "45" ]
+  grep -q -- '--refresh-dependencies' "${TEST_ROOT}/args"
+}
+
+@test "custom missing artifact delay is honored" {
+  write_missing_artifact_gradle
+  run env GRADLE_RETRY_LOG_DIR="$LOG_DIR" SLEEP_LOG="$SLEEP_LOG" \
+    GRADLE_RETRY_MISSING_ARTIFACT_DELAY_SECONDS=75 \
+    FAKE_GRADLE_STATE="${TEST_ROOT}/state" FAKE_GRADLE_ARGS="${TEST_ROOT}/args" \
+    FAKE_GRADLE_FIXTURE="test/fixtures/gradle-retry/missing-pinned-artifact.log" \
+    bash "$SCRIPT" -- "$COMMAND" :junit-runner:compileKotlin
+  [ "$status" -eq 0 ]
+  [ "$(cat "$SLEEP_LOG")" = "75" ]
+}
+
+@test "invalid missing artifact delay is rejected" {
+  write_fake_gradle <<'SCRIPT'
+#!/usr/bin/env bash
+echo "BUILD SUCCESSFUL"
+SCRIPT
+  for invalid in 0 -1 1.5 invalid; do
+    run env GRADLE_RETRY_LOG_DIR="$LOG_DIR" SLEEP_LOG="$SLEEP_LOG" \
+      GRADLE_RETRY_MISSING_ARTIFACT_DELAY_SECONDS="$invalid" \
+      bash "$SCRIPT" -- "$COMMAND" test
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"GRADLE_RETRY_MISSING_ARTIFACT_DELAY_SECONDS must be a positive integer"* ]]
+    [[ "$output" != *"Running Gradle attempt"* ]]
+  done
+}
+
+@test "bare missing coordinate retries without a wrapping resolution error" {
+  printf 'Could not find org.jetbrains.kotlin:kotlin-gradle-plugins-bom:2.4.10.\n' > "${TEST_ROOT}/bare.log"
+  write_missing_artifact_gradle
+  run env GRADLE_RETRY_LOG_DIR="$LOG_DIR" SLEEP_LOG="$SLEEP_LOG" \
+    FAKE_GRADLE_STATE="${TEST_ROOT}/state" FAKE_GRADLE_ARGS="${TEST_ROOT}/args" \
+    FAKE_GRADLE_FIXTURE="${TEST_ROOT}/bare.log" \
+    bash "$SCRIPT" -- "$COMMAND" test
+  [ "$status" -eq 0 ]
+  [ "$(cat "$SLEEP_LOG")" = "45" ]
+}
+
+@test "compile errors, test failures, missing methods and missing any version are not retried" {
+  write_fake_gradle <<'SCRIPT'
+#!/usr/bin/env bash
+printf '%s\n' "$FAKE_GRADLE_ERROR"
+exit 1
+SCRIPT
+  for failure in \
+    'e: file:///x/Foo.kt:3:5 Unresolved reference: bar' \
+    'error: cannot find symbol' \
+    'Test failed' \
+    'Could not find method foo()' \
+    'Could not find any version that matches example:artifact:+'; do
+    run env GRADLE_RETRY_LOG_DIR="$LOG_DIR" SLEEP_LOG="$SLEEP_LOG" \
+      FAKE_GRADLE_ERROR="$failure" bash "$SCRIPT" -- "$COMMAND" test
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"Failure did not match Maven/plugin repository retry patterns."* ]]
+    [[ "$output" != *"attempt 2/2"* ]]
+    [ ! -s "$SLEEP_LOG" ]
+  done
+}

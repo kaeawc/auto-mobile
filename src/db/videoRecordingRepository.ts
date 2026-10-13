@@ -32,6 +32,7 @@ export const FINISHED_VIDEO_RECORDING_STATUSES: VideoRecordingStatus[] = [
 
 export interface VideoRecordingRecord extends VideoRecordingMetadata {
   captureTeardown?: VideoCaptureTeardownDescriptor;
+  recorderDaemonSessionId?: string;
   deviceId: string;
   platform: "android" | "ios";
   status: VideoRecordingStatus;
@@ -83,7 +84,8 @@ export function ownerVisibleInScope(
 
 export interface VideoRecordingQuery extends VideoRecordingOwnerScope {
   hasCaptureTeardown?: boolean;
-  /** Restart maintenance must leave active sessions owned by live daemons alone. */
+  /** Maintenance excludes live recorders, unknown recorders while any peer is live,
+   * and active owners belonging to live daemons. */
   excludeLiveDaemonSessionIds?: ReadonlySet<string>;
   status?: VideoRecordingStatus | VideoRecordingStatus[];
   deviceId?: string;
@@ -151,6 +153,7 @@ function parseCaptureTeardown(value: string | null): VideoCaptureTeardownDescrip
 function toRecord(row: DbVideoRecording): VideoRecordingRecord {
   return {
     recordingId: row.recording_id,
+    recorderDaemonSessionId: row.recorder_daemon_session_id ?? undefined,
     captureTeardown: parseCaptureTeardown(row.capture_teardown_json),
     deviceId: row.device_id,
     platform: row.platform as "android" | "ios",
@@ -217,18 +220,21 @@ function applyMaintenanceScope<O>(
 ): SelectQueryBuilder<Database, "video_recordings", O> {
   const liveDaemonSessionIds = Array.from(query.excludeLiveDaemonSessionIds ?? []);
   if (liveDaemonSessionIds.length > 0) {
-    builder = builder.where((eb) =>
-      eb.not(
-        eb.exists(
-          eb
-            .selectFrom("device_sessions")
-            .select("session_uuid")
-            .whereRef("device_sessions.session_uuid", "=", "video_recordings.owner_session_uuid")
-            .where("device_sessions.status", "=", "active")
-            .where("device_sessions.daemon_session_id", "in", liveDaemonSessionIds),
+    builder = builder
+      .where("recorder_daemon_session_id", "is not", null)
+      .where("recorder_daemon_session_id", "not in", liveDaemonSessionIds)
+      .where((eb) =>
+        eb.not(
+          eb.exists(
+            eb
+              .selectFrom("device_sessions")
+              .select("session_uuid")
+              .whereRef("device_sessions.session_uuid", "=", "video_recordings.owner_session_uuid")
+              .where("device_sessions.status", "=", "active")
+              .where("device_sessions.daemon_session_id", "in", liveDaemonSessionIds),
+          ),
         ),
-      ),
-    );
+      );
   }
   if (query.hasCaptureTeardown) {
     builder = builder.where("capture_teardown_json", "is not", null);
@@ -352,6 +358,7 @@ export class VideoRecordingRepository {
     const db = await this.getDb();
     const row: NewVideoRecording = {
       recording_id: record.recordingId,
+      recorder_daemon_session_id: record.recorderDaemonSessionId ?? null,
       device_id: record.deviceId,
       platform: record.platform,
       status: record.status,
@@ -383,6 +390,9 @@ export class VideoRecordingRepository {
         // INSERT still sets it for new rows; last_accessed_at carries the "touched"
         // time (#3498).
         oc.column("recording_id").doUpdateSet({
+          recorder_daemon_session_id: sql<
+            string | null
+          >`coalesce(${row.recorder_daemon_session_id}, video_recordings.recorder_daemon_session_id)`,
           device_id: row.device_id,
           platform: row.platform,
           status: row.status,

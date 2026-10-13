@@ -5155,7 +5155,10 @@ export class Daemon {
         "daemon-restart",
         liveDaemonSessionIds,
       );
-      await setVideoRecordingManagerDependencies({ liveDaemonSessionIds });
+      await setVideoRecordingManagerDependencies({
+        liveDaemonSessionIds,
+        daemonSessionId: this.daemonSessionId,
+      });
       logger.info(
         `[Daemon] Cleared old daemon session caches, current session: ${this.daemonSessionId}`,
       );

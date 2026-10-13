@@ -71,6 +71,7 @@ describe("video recording daemon ownership", () => {
     const record: VideoRecordingRecord = {
       recordingId,
       ownerSessionUuid,
+      recorderDaemonSessionId: "this-daemon",
       deviceId: recordingId,
       platform: "ios",
       status: "recording",
@@ -117,7 +118,7 @@ describe("video recording daemon ownership", () => {
     expect((await recordings.getRecording(active.recordingId))?.status).toBe("completed");
   });
 
-  test("restart preserves live peer rows and interrupts dead, missing, inactive and NULL owners", async () => {
+  test("restart preserves active peer owners and interrupts known dead recorders with dead, missing, inactive and NULL owners", async () => {
     await configure(new Set(["peer"]));
     await insertSession("peer-session", "peer");
     await insertSession("dead-session", "dead");

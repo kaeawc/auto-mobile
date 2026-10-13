@@ -400,6 +400,16 @@ describe("durable capture ownership", () => {
     warn.mockRestore();
   });
   const start = () => videoManager.startVideoRecording({ device, ownerSessionUuid: "owner" });
+  test.each([undefined, "this-daemon"])(
+    "start stamps the recording daemon (%s)",
+    async (daemonSessionId) => {
+      await videoManager.setVideoRecordingManagerDependencies({ daemonSessionId });
+      const active = await start();
+      expect((await repo.getRecording(active.recordingId))?.recorderDaemonSessionId).toBe(
+        daemonSessionId,
+      );
+    },
+  );
   test("start persists descriptor and service reflects asynchronously learned pid", async () => {
     const active = await start();
     expect((await repo.getRecording(active.recordingId))?.captureTeardown).toEqual(

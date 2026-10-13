@@ -196,6 +196,7 @@ interface VideoRecordingManagerDependencies {
   now: () => Date;
   /** The same live-owner snapshot used by daemon startup's device-session sweep. */
   liveDaemonSessionIds: ReadonlySet<string>;
+  daemonSessionId?: string;
   /**
    * Time-based retention + in-progress size-cap policy (issue #4762). Injected so
    * tests can drive the sweep/monitor with FakeTimer; defaults come from
@@ -531,6 +532,7 @@ async function getVideoRecordingDependencies(): Promise<VideoRecordingManagerDep
       timer: defaultTimer,
       now: () => new Date(),
       liveDaemonSessionIds: new Set(),
+      daemonSessionId: undefined,
       retentionPolicy: resolveVideoRetentionPolicy(),
       statFileSize: getFileSize,
       resolveAndroidDisplay: defaultResolveAndroidDisplay,
@@ -547,6 +549,7 @@ export async function setVideoRecordingManagerDependencies(
   deps: Partial<VideoRecordingManagerDependencies>,
 ): Promise<void> {
   const current = moduleDependencies ?? (await initialVideoRecordingDependencies(deps));
+  deps = { daemonSessionId: current.daemonSessionId, ...deps };
   moduleDependencies = {
     videoRecorderService: deps.videoRecorderService ?? current.videoRecorderService,
     recordingRepository: deps.recordingRepository ?? current.recordingRepository,
@@ -555,6 +558,7 @@ export async function setVideoRecordingManagerDependencies(
     timer: deps.timer ?? current.timer,
     now: deps.now ?? current.now,
     liveDaemonSessionIds: deps.liveDaemonSessionIds ?? current.liveDaemonSessionIds,
+    daemonSessionId: deps.daemonSessionId,
     retentionPolicy: deps.retentionPolicy ?? current.retentionPolicy,
     statFileSize: deps.statFileSize ?? current.statFileSize,
     resolveAndroidDisplay: deps.resolveAndroidDisplay ?? current.resolveAndroidDisplay,
@@ -573,6 +577,7 @@ async function initialVideoRecordingDependencies(
     timer: deps.timer ?? defaultTimer,
     now: deps.now ?? (() => new Date()),
     liveDaemonSessionIds: deps.liveDaemonSessionIds ?? new Set(),
+    daemonSessionId: deps.daemonSessionId,
     retentionPolicy: deps.retentionPolicy ?? resolveVideoRetentionPolicy(),
     statFileSize: deps.statFileSize ?? getFileSize,
     resolveAndroidDisplay: deps.resolveAndroidDisplay ?? defaultResolveAndroidDisplay,
@@ -1314,6 +1319,7 @@ async function persistStartedVideoRecording(
     recordedPanel: active.recordedPanel,
     transitions: active.recordedPanel ? [] : undefined,
     ownerSessionUuid: ownerAtInsert,
+    recorderDaemonSessionId: deps.daemonSessionId,
   });
   abortSignal.throwIfAborted();
   // An acquisition during insert may have claimed capture before its row existed.

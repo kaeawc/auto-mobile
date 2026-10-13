@@ -1,6 +1,7 @@
 import {
   prototypePatchReplyFields,
   type PrototypePatchRequest,
+  type PrototypePatchReply,
 } from "../../prototype/prototypePatchWire";
 import {
   describeForeignCtrlProxyForwards,
@@ -1362,7 +1363,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     patch: PrototypePatchRequest,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<PrototypeResult>;
+  ): Promise<PrototypePatchReply>;
   requestInspectPrototypes(timeoutMs?: number, perf?: PerformanceTracker): Promise<PrototypeResult>;
   requestPutPrototypeAsset(
     asset: PrototypeAssetUpload,
@@ -3887,7 +3888,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     patch: PrototypePatchRequest,
     timeoutMs?: number,
     perf?: PerformanceTracker,
-  ): Promise<PrototypeResult> {
+  ): Promise<PrototypePatchReply> {
     return this.prototypes.requestPatchPrototype(patch, timeoutMs, perf);
   }
 

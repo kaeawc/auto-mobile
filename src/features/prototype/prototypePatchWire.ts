@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { PROTOTYPE_PATCH_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import type { PrototypeResult, PrototypeState } from "../observe/android/ctrlProxyProtocol";
 import type { PrototypePatchOp } from "./prototypePatch";
 import { STATE_KEY } from "./prototypeTemplate";
 
@@ -9,7 +10,9 @@ export interface PrototypePatchRequest {
   baseRevision?: number;
   ops: readonly PrototypePatchOp[];
 }
-export type PrototypeState = Record<string, string | number | boolean>;
+export type PrototypePatchReply = PrototypeResult & {
+  delivery: "unsent" | "answered" | "indeterminate";
+};
 export interface PrototypePatchConflict {
   revision: number;
   state: PrototypeState;

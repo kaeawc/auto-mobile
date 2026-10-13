@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   PROTOTYPE_PATCH_CAPABILITY,
   PROTOTYPE_DATA_MODEL_CAPABILITY,
@@ -235,6 +235,79 @@ describe("prototype patch host", () => {
       conflict: { revision: 1, state: { "bad-key": true } },
     });
     expect(await patch(check)).toEqual({ success: true });
+  });
+  test("Android timeout forgets tracking and never exposes delivery", async () => {
+    await show();
+    const timeout = {
+      success: false,
+      error: "prototype_result timed out after 50ms",
+      delivery: "indeterminate",
+    };
+    proxy.setPatchResult(timeout);
+    const output = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(android, {
+      action: "patch",
+      id: "orders",
+      ops: replace,
+    });
+    expect(output.structuredContent).not.toHaveProperty("delivery");
+    expect(prototypeOutputSchema.parse(output.structuredContent).error).toEndWith(
+      " The device may or may not have applied the patch: show the prototype again before the next patch.",
+    );
+    proxy.setPatchResult({ success: true });
+    expect((await patch()).error).toContain("not tracking its spec");
+    await show();
+    expect((await patch()).success).toBe(true);
+  });
+  test("unsent and answered failures keep tracking", async () => {
+    await show();
+    for (const delivery of ["unsent", "answered"] as const) {
+      const refusal = {
+        success: false,
+        error: delivery === "unsent" ? "Not connected" : "refused",
+        delivery,
+      };
+      proxy.setPatchResult(refusal);
+      expect(await patch()).toEqual({ success: false, error: refusal.error });
+      proxy.setPatchResult({ success: true });
+      expect((await patch([{ op: "test", path: "/data/cartCount", value: 1 }])).success).toBe(true);
+    }
+  });
+  test("iOS rejection after dispatch forgets tracking", async () => {
+    await show(ios);
+    agent.setPatchResult(new Error("socket closed"));
+    expect((await patch(replace, {}, ios)).error).toEndWith(
+      " The device may or may not have applied the patch: show the prototype again before the next patch.",
+    );
+    agent.setPatchResult({ success: true });
+    expect((await patch(replace, {}, ios)).error).toContain("not tracking its spec");
+    await show(ios);
+    expect((await patch(replace, {}, ios)).success).toBe(true);
+  });
+  test("deep patch value is a typed failure before sending", async () => {
+    await show();
+    let value: Record<string, unknown> = {};
+    for (let i = 0; i < 8000; i++) {
+      value = { child: value };
+    }
+    // Native stringify's overflow threshold varies by engine; inject its RangeError
+    // at the byte-limit boundary to exercise the catch without a slow native overflow.
+    const serialize = spyOn(JSON, "stringify").mockImplementationOnce(() => {
+      throw new RangeError("Maximum call stack size exceeded");
+    });
+    try {
+      expect(await patch([{ op: "add", path: "/data/deep", value }])).toEqual({
+        success: false,
+        error: "Invalid patch at ops: Patch is nested too deeply",
+      });
+      expect(serialize.mock.calls[0][0]).toEqual({
+        id: "orders",
+        baseRevision: undefined,
+        ops: [{ op: "add", path: "/data/deep", value }],
+      });
+      expect(proxy.patchRequests).toEqual([]);
+    } finally {
+      serialize.mockRestore();
+    }
   });
   test("a transport throw forgets tracking until a new show", async () => {
     await show();

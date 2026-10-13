@@ -286,10 +286,26 @@ describe("iOS patch transport", () => {
       capabilities: ["patch_prototype"],
     });
     const transport = new IosPrototypeTransport(agent);
-    await expect(transport.patch({ id: "orders", ops: patchOps })).rejects.toThrow(
-      prototypePatchUnsupportedMessage("ios"),
-    );
+    expect(await transport.patch({ id: "orders", ops: patchOps })).toEqual({
+      success: false,
+      delivery: "unsent",
+      error: prototypePatchUnsupportedMessage("ios"),
+    });
     expect(agent.requests).toEqual([]);
+  });
+  test("request rejection is indeterminate after issuance", async () => {
+    const agent = new FakePrototypeAgentClient({
+      agentVersion: "new",
+      protocolVersion: 1,
+      capabilities: [PROTOTYPE_PATCH_CAPABILITY],
+    });
+    agent.setPatchResult(new Error("socket closed"));
+    expect(await new IosPrototypeTransport(agent).patch({ id: "orders", ops: patchOps })).toEqual({
+      success: false,
+      delivery: "indeterminate",
+      error: "socket closed",
+    });
+    expect(agent.patchRequests).toHaveLength(1);
   });
   test("patch frame omits absent baseRevision and sanitizes revision and conflict", async () => {
     const agent = new FakePrototypeAgentClient({
@@ -301,6 +317,7 @@ describe("iOS patch transport", () => {
     agent.setPatchResult({ success: true, revision: 13 });
     expect(await transport.patch({ id: "orders", ops: patchOps })).toMatchObject({
       success: true,
+      delivery: "answered",
       revision: 13,
     });
     expect(agent.patchRequests[0]).toEqual({ id: "orders", ops: patchOps });

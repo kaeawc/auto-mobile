@@ -1,4 +1,4 @@
-import type { PrototypePatchRequest } from "./prototypePatchWire";
+import type { PrototypePatchReply, PrototypePatchRequest } from "./prototypePatchWire";
 /**
  * The narrow device-side seam the prototype tool talks through (#10568). Android
  * implements it over CtrlProxy; iOS simulators implement it over the injected prototype agent.
@@ -41,9 +41,9 @@ export interface PrototypeDeviceStatus {
 }
 
 export interface PrototypeTransport {
-  patch(patch: PrototypePatchRequest, timeoutMs?: number): Promise<PrototypeResult>;
   show(spec: PrototypeSpec, options?: PrototypeShowOptions): Promise<PrototypeResult>;
   dismiss(target: PrototypeDismiss, timeoutMs?: number): Promise<PrototypeResult>;
+  patch(patch: PrototypePatchRequest, timeoutMs?: number): Promise<PrototypePatchReply>;
   putAsset(
     asset: PrototypeAssetUpload,
     options?: PrototypeAssetRequestOptions,

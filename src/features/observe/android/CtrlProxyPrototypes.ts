@@ -2,6 +2,7 @@ import {
   prototypePatchReplyFields,
   prototypePatchUnsupportedMessage,
   type PrototypePatchRequest,
+  type PrototypePatchReply,
 } from "../../prototype/prototypePatchWire";
 import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import { z } from "zod";
@@ -21,7 +22,7 @@ import {
 } from "../../prototype/prototypeAssets";
 import { validatePrototypeSpec } from "../../prototype/prototypeValidation";
 import { errorMessage } from "../../../utils/describeUnknownError";
-import { sendCommand } from "../DeviceServiceUtils";
+import { sendCommand, type SendCommandOptions } from "../DeviceServiceUtils";
 import type { DelegateContext } from "./types";
 import {
   ctrlProxyRequests,
@@ -166,16 +167,45 @@ export class CtrlProxyPrototypes {
     patch: PrototypePatchRequest,
     timeoutMs = 5000,
     perf?: PerformanceTracker,
-  ): Promise<PrototypeResult> {
-    const result = await this.request(
-      ctrlProxyRequests.patchPrototype({ requestId: "", ...patch }),
-      timeoutMs,
-      perf,
-    );
-    const rest = { ...result };
-    delete rest.revision;
-    delete rest.conflict;
-    return { ...rest, ...prototypePatchReplyFields(result) };
+  ): Promise<PrototypePatchReply> {
+    let dispatched = false;
+    let unconfirmed = false;
+    try {
+      const result = await this.request(
+        ctrlProxyRequests.patchPrototype({ requestId: "", ...patch }),
+        timeoutMs,
+        perf,
+        {
+          onDispatch: () => {
+            dispatched = true;
+          },
+          timeoutError: (timeout) => {
+            unconfirmed = true;
+            return {
+              success: false,
+              totalTimeMs: timeout,
+              error: `prototype_result timed out after ${timeout}ms`,
+            };
+          },
+        },
+      );
+      const rest = { ...result };
+      delete rest.revision;
+      delete rest.conflict;
+      return {
+        ...rest,
+        ...prototypePatchReplyFields(result),
+        delivery: !dispatched ? "unsent" : unconfirmed ? "indeterminate" : "answered",
+      };
+    } catch (error) {
+      logger.warn("[CTRL_PROXY] Prototype patch transport failed", error);
+      rethrowRealCtrlProxyWebSocketInTestError(error);
+      return {
+        success: false,
+        delivery: dispatched ? "indeterminate" : "unsent",
+        error: errorMessage(error),
+      };
+    }
   }
 
   requestDismissPrototype(
@@ -354,6 +384,7 @@ export class CtrlProxyPrototypes {
       | PatchPrototypeMessage,
     timeoutMs: number,
     perf?: PerformanceTracker,
+    deliveryOptions: Pick<SendCommandOptions<PrototypeResult>, "onDispatch" | "timeoutError"> = {},
   ): Promise<PrototypeResult> {
     const connected = perf
       ? await perf.track("ensureConnected", () => this.context.ensureConnected(perf))
@@ -361,32 +392,8 @@ export class CtrlProxyPrototypes {
     if (!connected) {
       return { success: false, error: "Not connected", totalTimeMs: 0 };
     }
-    if (
-      message.type === "patch_prototype" &&
-      this.context.isCommandSupported?.(PROTOTYPE_PATCH_CAPABILITY) !== true
-    ) {
-      throw new ActionableError(prototypePatchUnsupportedMessage("android"));
-    }
+    this.requirePrototypeSupport(message);
     const type = message.type;
-    if (this.context.isCommandSupported?.(type) === false) {
-      throw new ActionableError(
-        `${type}: this CtrlProxy build does not support prototypes; update the connected CtrlProxy.`,
-      );
-    }
-    if (
-      message.type === "inspect_prototypes" &&
-      this.context.isCommandSupported?.(PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY) !== true
-    ) {
-      throw new ActionableError(prototypeInspectUnsupportedMessage());
-    }
-    if (
-      message.type === "show_prototype" &&
-      message.displayId !== undefined &&
-      this.context.isCommandSupported?.(PROTOTYPE_DISPLAY_CAPABILITY) !== true
-    ) {
-      // Never send displayId to a device that would ignore it and show on the default display.
-      throw new ActionableError(prototypeDisplayUnsupportedMessage(message.displayId));
-    }
     const params: Record<string, unknown> = { ...message };
     delete params.type;
     delete params.requestId;
@@ -398,7 +405,41 @@ export class CtrlProxyPrototypes {
       timeoutMs,
       perf,
       requireExistingConnection: true,
+      ...deliveryOptions,
     });
+  }
+
+  private requirePrototypeSupport(
+    message:
+      | ShowPrototypeMessage
+      | DismissPrototypeMessage
+      | InspectPrototypesMessage
+      | PatchPrototypeMessage,
+  ): void {
+    const supports = (command: string) => this.context.isCommandSupported?.(command);
+    if (message.type === "patch_prototype" && supports(PROTOTYPE_PATCH_CAPABILITY) !== true) {
+      throw new ActionableError(prototypePatchUnsupportedMessage("android"));
+    }
+    const type = message.type;
+    if (supports(type) === false) {
+      throw new ActionableError(
+        `${type}: this CtrlProxy build does not support prototypes; update the connected CtrlProxy.`,
+      );
+    }
+    if (
+      message.type === "inspect_prototypes" &&
+      supports(PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY) !== true
+    ) {
+      throw new ActionableError(prototypeInspectUnsupportedMessage());
+    }
+    if (
+      message.type === "show_prototype" &&
+      message.displayId !== undefined &&
+      supports(PROTOTYPE_DISPLAY_CAPABILITY) !== true
+    ) {
+      // Never send displayId to a device that would ignore it and show on the default display.
+      throw new ActionableError(prototypeDisplayUnsupportedMessage(message.displayId));
+    }
   }
 
   onPrototypeEvent(listener: (event: PrototypeEvent) => void): () => void {

@@ -2,6 +2,7 @@ import {
   prototypePatchReplyFields,
   prototypePatchUnsupportedMessage,
   type PrototypePatchRequest,
+  type PrototypePatchReply,
 } from "../prototypePatchWire";
 /**
  * The shared prototype transport over the injected iOS simulator prototype agent (#10568).
@@ -236,16 +237,25 @@ export class IosPrototypeTransport implements PrototypeTransport {
     );
   }
 
-  async patch(patch: PrototypePatchRequest): Promise<PrototypeResult> {
+  async patch(patch: PrototypePatchRequest): Promise<PrototypePatchReply> {
     if (!this.supportsCapability(PROTOTYPE_PATCH_CAPABILITY)) {
-      throw new ActionableError(prototypePatchUnsupportedMessage("ios"));
+      return { success: false, delivery: "unsent", error: prototypePatchUnsupportedMessage("ios") };
     }
-    const reply = await this.agent.request("patch_prototype", {
-      id: patch.id,
-      ...(patch.baseRevision === undefined ? {} : { baseRevision: patch.baseRevision }),
-      ops: patch.ops,
-    });
-    return { ...toPrototypeResult(reply), ...prototypePatchReplyFields(reply) };
+    try {
+      const reply = await this.agent.request("patch_prototype", {
+        id: patch.id,
+        ...(patch.baseRevision === undefined ? {} : { baseRevision: patch.baseRevision }),
+        ops: patch.ops,
+      });
+      return {
+        ...toPrototypeResult(reply),
+        ...prototypePatchReplyFields(reply),
+        delivery: "answered",
+      };
+    } catch (error) {
+      logger.warn("[prototype-agent] Patch request failed", error);
+      return { success: false, delivery: "indeterminate", error: errorMessage(error) };
+    }
   }
 
   async dismiss(target: PrototypeDismiss): Promise<PrototypeResult> {

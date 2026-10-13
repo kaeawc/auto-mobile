@@ -1,4 +1,7 @@
-import type { PrototypePatchRequest } from "../../src/features/prototype/prototypePatchWire";
+import type {
+  PrototypePatchReply,
+  PrototypePatchRequest,
+} from "../../src/features/prototype/prototypePatchWire";
 import {
   AndroidCtrlProxy,
   ScreenshotResult,
@@ -112,12 +115,12 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   }
 
   readonly patchRequests: PrototypePatchRequest[] = [];
-  private patchResult: PrototypeResult = { success: true };
+  private patchResult: PrototypePatchReply = { success: true, delivery: "answered" };
   private patchHold?: Promise<PrototypeResult>;
   private showHold?: Promise<PrototypeResult>;
 
-  setPatchResult(result: PrototypeResult): void {
-    this.patchResult = result;
+  setPatchResult(result: PrototypeResult & Partial<Pick<PrototypePatchReply, "delivery">>): void {
+    this.patchResult = { delivery: "answered", ...result };
   }
   holdPatchReply(reply: Promise<PrototypeResult>): void {
     this.patchHold = reply;
@@ -130,12 +133,12 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     patch: PrototypePatchRequest,
     _timeoutMs?: number,
     _perf?: PerformanceTracker,
-  ): Promise<PrototypeResult> {
+  ): Promise<PrototypePatchReply> {
     this.patchRequests.push(structuredClone(patch));
     this.checkFailure("requestPatchPrototype");
     const hold = this.patchHold;
     this.patchHold = undefined;
-    return hold ?? this.patchResult;
+    return hold ? { delivery: "answered", ...(await hold) } : this.patchResult;
   }
 
   private prototypeResult: PrototypeResult = { success: true };

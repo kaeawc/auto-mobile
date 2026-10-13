@@ -256,30 +256,32 @@ interface TreeNode {
 }
 
 function* tree(entry: TreeNode): Generator<TreeNode> {
-  yield entry;
-  const insideRepeat = entry.insideRepeat || Object.hasOwn(entry.node, "repeat");
-  const child = record(own(entry.node, "child"));
-  if (child) {
-    yield* tree({
-      node: child,
-      path: `${entry.path}.child`,
-      parent: entry.node,
-      key: "child",
-      insideRepeat,
-    });
-  }
-  const children = own(entry.node, "children");
-  if (!Array.isArray(children)) {
-    return;
-  }
-  for (let i = 0; i < children.length; i++) {
-    const node = record(children[i]);
-    if (node) {
-      yield* tree({
-        node,
-        path: `${entry.path}.children[${i}]`,
-        parent: children,
-        key: String(i),
+  const stack = [entry];
+  while (stack.length) {
+    const current = stack.pop()!;
+    yield current;
+    const insideRepeat = current.insideRepeat || Object.hasOwn(current.node, "repeat");
+    const childrenValue = own(current.node, "children");
+    const children = Array.isArray(childrenValue) ? childrenValue : [];
+    for (let i = children.length - 1; i >= 0; i--) {
+      const node = record(children[i]);
+      if (node) {
+        stack.push({
+          node,
+          path: `${current.path}.children[${i}]`,
+          parent: children,
+          key: String(i),
+          insideRepeat,
+        });
+      }
+    }
+    const child = record(own(current.node, "child"));
+    if (child) {
+      stack.push({
+        node: child,
+        path: `${current.path}.child`,
+        parent: current.node,
+        key: "child",
         insideRepeat,
       });
     }

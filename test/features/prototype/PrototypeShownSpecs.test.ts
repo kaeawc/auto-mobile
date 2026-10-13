@@ -79,6 +79,27 @@ describe("PrototypeShownSpecs", () => {
     store.forget("other");
     expect(store.read("other", "panel").kind).toBe("unknown");
   });
+  test("clear cannot let a late show close a new show's ticket", () => {
+    const store = new PrototypeShownSpecs();
+    const old = store.beginShow("d");
+    store.clearDevice("d");
+    const current = store.beginShow("d");
+    store.endShow("d", old, { id: "panel", spec });
+    expect(store.read("d", "panel")).toEqual({ kind: "busy" });
+    const newer = { data: { count: 2 } };
+    store.endShow("d", current, { id: "panel", spec: newer });
+    expect(store.read("d", "panel")).toMatchObject({ kind: "known", spec: newer });
+    expect(current).not.toBe(old);
+  });
+  test("clear cannot recycle a patch version after another show", () => {
+    const store = new PrototypeShownSpecs();
+    const before = shown(store);
+    store.clearDevice("d");
+    const after = shown(store);
+    expect(store.commitPatch("d", "panel", before.version, { data: { count: 99 } })).toBe(false);
+    expect(store.read("d", "panel")).toEqual({ kind: "unknown" });
+    expect(after.version).not.toBe(before.version);
+  });
   test("clearing a device ignores late endShow and patch commits", () => {
     const store = new PrototypeShownSpecs();
     const ticket = store.beginShow("d");

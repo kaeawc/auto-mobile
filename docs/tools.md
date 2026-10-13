@@ -843,8 +843,9 @@ and an acknowledged patch overlap, their device-side order is unknown: the host
 forgets its spec, warns, and requires a further successful show before patching.
 A failed dispatched show, dismissed event, successful dismiss, session release,
 device removal or unbinding also ends tracking. An adopted different id ends
-tracking; inspecting the same tracked id retains it. A transport failure after
-patch dispatch is indeterminate and requires a new show. An atomic device
+tracking; inspecting the same tracked id retains it. A timeout or connection loss after
+patch dispatch is indeterminate and requires a new show. A failure before dispatch
+keeps the tracked copy. An atomic device
 refusal leaves the tracked copy unchanged. A successful patch refreshes shown
 status data without changing `lastResult`, timestamps or event snapshots.
 

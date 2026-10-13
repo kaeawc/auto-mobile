@@ -13,6 +13,7 @@ interface DeviceSpecs {
 }
 /** Tracks acknowledged device specs, forgetting outcomes whose wire order is indeterminate. */
 export class PrototypeShownSpecs {
+  private sequence = 0;
   private readonly devices = new Map<string, DeviceSpecs>();
 
   beginShow(deviceId: string): number {
@@ -23,10 +24,11 @@ export class PrototypeShownSpecs {
       open: new Set<number>(),
       poisonedThrough: 0,
     };
-    const ticket = ++state.issued;
+    const ticket = ++this.sequence;
+    state.issued = ticket;
     state.lastTicket = ticket;
     state.open.add(ticket);
-    state.epoch++;
+    state.epoch = ++this.sequence;
     this.devices.set(deviceId, state);
     return ticket;
   }
@@ -36,7 +38,7 @@ export class PrototypeShownSpecs {
     if (!state?.open.delete(ticket)) {
       return;
     }
-    state.epoch++;
+    state.epoch = ++this.sequence;
     if (ticket === state.lastTicket) {
       state.entry =
         shown && ticket > state.poisonedThrough
@@ -67,7 +69,7 @@ export class PrototypeShownSpecs {
       state.entry = undefined;
       state.poisonedThrough = state.issued;
     }
-    state.epoch++;
+    state.epoch = ++this.sequence;
     return committed;
   }
 
@@ -75,7 +77,7 @@ export class PrototypeShownSpecs {
     const state = this.devices.get(deviceId);
     if (state?.entry && (id === undefined || state.entry.id === id)) {
       state.entry = undefined;
-      state.epoch++;
+      state.epoch = ++this.sequence;
     }
   }
 

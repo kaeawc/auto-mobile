@@ -68,6 +68,24 @@ describe("shared prototype patch fixtures", () => {
 });
 
 describe("prototype patch direct contracts", () => {
+  test("13 replacement ops with an 8000-deep child chain report rule 23 without throwing", () => {
+    let node: Record<string, unknown> = { type: "use", component: "deep" };
+    for (let i = 0; i < 8000; i++) {
+      node = { type: "card", child: node };
+    }
+    node.id = "label";
+    const ops = Array(13).fill({ op: "replaceNode", id: "label", node });
+    const started = performance.now();
+    const result = applyPrototypePatch(base, ops);
+    expect(performance.now() - started).toBeLessThan(15);
+    expect(result).toEqual({
+      success: false,
+      error: {
+        path: `ops[0].node${".child".repeat(8000)}.type`,
+        message: "Components are not expanded in a patch: inline the node or use show",
+      },
+    });
+  });
   test("pollution-sensitive names are own members", () => {
     const prototype = Object.getOwnPropertyDescriptors(Object.prototype);
     const value = { polluted: true };

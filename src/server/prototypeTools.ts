@@ -1544,6 +1544,36 @@ async function stageUnlessRefused(
     : stageAssets(target, args, readers, signal);
 }
 
+async function performPrototypeAction(
+  dependencies: PrototypeHandlerDependencies,
+  device: BootedDevice,
+  args: Omit<z.infer<typeof prototypeSchema>, "action"> & { action: PrototypeMutation | "patch" },
+  scope: PrototypeScope,
+  queue: PrototypePatchQueue,
+  signal?: AbortSignal,
+): Promise<PrototypeOutput> {
+  if (args.action === "patch") {
+    const { store, target, cacheInvalidator } = dependencies;
+    return performPrototypePatch(
+      {
+        store,
+        transport: target.transport,
+        supportsPatch: async () =>
+          target.android
+            ? target.android.supportsCommand(PROTOTYPE_PATCH_CAPABILITY)
+            : target.ios?.supportsCapability(PROTOTYPE_PATCH_CAPABILITY) === true,
+        platform: device.platform === "android" ? "android" : "ios",
+        queue,
+        retire: (result) => retireObservation(cacheInvalidator, device, result),
+      },
+      device.deviceId,
+      { id: args.id!, ops: args.ops, baseRevision: args.baseRevision, timeoutMs: args.timeoutMs },
+      signal,
+    );
+  }
+  return performMutation(dependencies, device, { ...args, action: args.action }, scope, signal);
+}
+
 async function performMutation(
   dependencies: PrototypeHandlerDependencies,
   device: BootedDevice,
@@ -1753,7 +1783,6 @@ function retireObservation(
 }
 
 interface ShowOrdering {
-  specTicket?: number;
   commits: PrototypeCommitGenerations;
   scope: PrototypeScope;
   target: { id?: string };
@@ -1762,6 +1791,7 @@ interface ShowOrdering {
   sent: boolean;
   /** This call created the fresh event epoch; unsent refusals must not clear another call's. */
   startedFreshEvents: boolean;
+  specTicket?: number;
 }
 
 function withdrawGeneration(ordering: ShowOrdering): void {
@@ -2492,10 +2522,10 @@ function prototypeClock(dependencies: PrototypeToolDependencies): Pick<Timer, "n
  * re-registers the tool for every MCP connection, so this state must outlive any one handler.
  */
 interface PrototypeHost {
-  patchQueue: PrototypePatchQueue;
   store: PrototypeStatusStore;
   events: PrototypeEventCoordinator;
   commits: PrototypeCommitGenerations;
+  patchQueue: PrototypePatchQueue;
   transports: PrototypeTransportCache;
   /** Subscribes any lifecycle hook that was not yet available; a no-op once all are active. */
   ensureLifecycle(): void;
@@ -2686,31 +2716,6 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
         ...suspendedWaitWarning(store, scope, args.id, waited),
       });
     }
-    if (args.action === "patch") {
-      return responseFor(
-        await performPrototypePatch(
-          {
-            store,
-            transport: target.transport,
-            supportsPatch: async () =>
-              target.android
-                ? target.android.supportsCommand(PROTOTYPE_PATCH_CAPABILITY)
-                : target.ios?.supportsCapability(PROTOTYPE_PATCH_CAPABILITY) === true,
-            platform: device.platform === "android" ? "android" : "ios",
-            queue: host.patchQueue,
-            retire: (result) => retireObservation(cacheInvalidator, device, result),
-          },
-          device.deviceId,
-          {
-            id: args.id!,
-            ops: args.ops,
-            baseRevision: args.baseRevision,
-            timeoutMs: args.timeoutMs,
-          },
-          combineWithAmbientAbort(signal),
-        ),
-      );
-    }
     const handlerDependencies: PrototypeHandlerDependencies = {
       store,
       events,
@@ -2725,11 +2730,12 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
       anchorHierarchyCaptureFactory: dependencies.anchorHierarchyCaptureFactory,
     };
     return responseFor(
-      await performMutation(
+      await performPrototypeAction(
         handlerDependencies,
         device,
         { ...args, action: args.action },
         scope,
+        host.patchQueue,
         combineWithAmbientAbort(signal),
       ),
     );

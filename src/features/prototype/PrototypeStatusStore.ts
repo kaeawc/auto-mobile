@@ -68,8 +68,6 @@ export interface PrototypeScope {
   deviceId: string;
 }
 export interface PrototypeStatusStore {
-  readonly shownSpecs: PrototypeShownSpecs;
-  recordPatchedData(deviceId: string, id: string, data: PrototypeData | undefined): void;
   status(scope: PrototypeScope): PrototypeStatus;
   /**
    * The prototype currently shown with this id on the device, from any session. The device holds one
@@ -103,6 +101,8 @@ export interface PrototypeStatusStore {
     displayId?: number,
     details?: PrototypeRecordDetails,
   ): PrototypeLastResult;
+  readonly shownSpecs: PrototypeShownSpecs;
+  recordPatchedData(deviceId: string, id: string, data: PrototypeData | undefined): void;
 }
 /** What a show placed besides its display: the spec's data (#11673) and the chrome drawn (#12064). */
 export interface PrototypeRecordDetails {
@@ -134,23 +134,6 @@ export const MAX_PROTOTYPE_STATUS_SCOPES = 128;
 
 /** Successful shows establish presence; host dismissals and terminal device events remove it. */
 export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
-  readonly shownSpecs = new PrototypeShownSpecs();
-
-  recordPatchedData(deviceId: string, id: string, data: PrototypeData | undefined): void {
-    for (const stored of this.scopes.values()) {
-      const entry = stored.deviceId === deviceId ? stored.shown.get(id) : undefined;
-      if (entry) {
-        const patched = { ...entry };
-        if (data === undefined) {
-          delete patched.data;
-        } else {
-          patched.data = structuredClone(data);
-        }
-        stored.shown.set(id, patched);
-      }
-    }
-  }
-
   private readonly scopes = new Map<string, StoredPrototypeStatus>();
   // A marker left by a failed, thrown or superseded show is reset by the next dispatch of that id and dropped with the device.
   private readonly showDispatches = new Map<string, Map<string, boolean>>();
@@ -321,6 +304,23 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     this.updatePresence(stored, { ...presence, ...shownData(action, result, details?.data) });
     this.remember(key, stored);
     return structuredClone(entry);
+  }
+
+  readonly shownSpecs = new PrototypeShownSpecs();
+
+  recordPatchedData(deviceId: string, id: string, data: PrototypeData | undefined): void {
+    for (const stored of this.scopes.values()) {
+      const entry = stored.deviceId === deviceId ? stored.shown.get(id) : undefined;
+      if (entry) {
+        const patched = { ...entry };
+        if (data === undefined) {
+          delete patched.data;
+        } else {
+          patched.data = structuredClone(data);
+        }
+        stored.shown.set(id, patched);
+      }
+    }
   }
 
   /** Consume successful shows' windows, while preserving their device answers in lastResult. */

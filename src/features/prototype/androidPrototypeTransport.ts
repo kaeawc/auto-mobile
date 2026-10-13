@@ -1,4 +1,4 @@
-import type { PrototypePatchRequest } from "./prototypePatchWire";
+import type { PrototypePatchReply, PrototypePatchRequest } from "./prototypePatchWire";
 import type { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
 import type { PrototypeAssetRequestOptions } from "../observe/android/CtrlProxyPrototypes";
 import type {
@@ -49,7 +49,7 @@ export class AndroidPrototypeTransport implements PrototypeTransport {
     );
   }
 
-  patch(patch: PrototypePatchRequest, timeoutMs?: number): Promise<PrototypeResult> {
+  patch(patch: PrototypePatchRequest, timeoutMs?: number): Promise<PrototypePatchReply> {
     return this.client.requestPatchPrototype(patch, timeoutMs);
   }
 

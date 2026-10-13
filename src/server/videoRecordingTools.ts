@@ -329,6 +329,15 @@ export function segmentedVideoRecordingHandlesForOwner(
   return segmentedSessions.forOwner(sessionUuid, deviceId).map(([handle]) => handle);
 }
 
+/** Snapshot session identities now; read their changing capture ids at the release cap. */
+export function captureSegmentedRecordingIdsForOwner(
+  sessionUuid: string | undefined,
+  deviceId: string,
+): () => readonly string[] {
+  const sessions = segmentedSessions.forOwner(sessionUuid, deviceId).map(([, session]) => session);
+  return () => sessions.flatMap((session) => [...session.liveCaptureIds]);
+}
+
 /**
  * Finalize the segmented sessions a released daemon session owns on a device, so their rotation
  * timers stop and each segment is finalized. Failures are logged and never thrown: release must

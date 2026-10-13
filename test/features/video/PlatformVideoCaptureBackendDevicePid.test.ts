@@ -286,3 +286,107 @@ describe("PlatformVideoCaptureBackend device-side recorder pid (#9898)", () => {
     });
   });
 });
+
+describe("orphaned Android recorder teardown", () => {
+  const device = { deviceId: "orphan-device", platform: "android" as const, name: "Fake" };
+  const descriptor = {
+    kind: "android-screenrecord" as const,
+    devicePid: 4321,
+    deviceTempPath: DEVICE_FILE,
+  };
+  function harness() {
+    const factory = new FakeAdbClientFactory();
+    const backend = new PlatformVideoCaptureBackend(factory, new FakeTimer());
+    return { backend, client: factory.getFakeClient() };
+  }
+  test("descriptor reads the pid learned after start", () => {
+    const { backend } = harness();
+    const devicePid: { pid?: number } = {};
+    const handle: RecordingHandle = {
+      recordingId: RECORDING_ID,
+      outputPath: "/unused",
+      startedAt: "",
+      backendHandle: { kind: "android", deviceTempPath: DEVICE_FILE, devicePid },
+    };
+    expect(backend.describeCaptureTeardown(handle)).toEqual({
+      kind: "android-screenrecord",
+      deviceTempPath: DEVICE_FILE,
+      devicePid: undefined,
+    });
+    devicePid.pid = 4321;
+    expect(backend.describeCaptureTeardown(handle)).toEqual(descriptor);
+    expect(
+      backend.describeCaptureTeardown({ ...handle, backendHandle: undefined }),
+    ).toBeUndefined();
+  });
+  test("orphan ours is killed by pid and confirmed without removing files or pkill", async () => {
+    const { backend, client } = harness();
+    client.setCommandResultSequence(PROBE, [OUR_CMDLINE, ""]);
+    await backend.forceStopOrphanedCapture(device, descriptor);
+    expect(client.getAllCommands()).toEqual([PROBE, "shell kill -9 4321", PROBE]);
+  });
+  test.each([
+    ["gone", ""],
+    ["another app", "com.other.app\u0000"],
+    ["another recorder", "screenrecord\u0000/sdcard/other.mp4\u0000"],
+  ])("reused or gone pid (%s) is never signalled", async (_label: string, cmdline: string) => {
+    const { backend, client } = harness();
+    client.setCommandResult(PROBE, cmdline);
+    await backend.forceStopOrphanedCapture(device, descriptor);
+    expect(client.getAllCommands()).toEqual([PROBE]);
+  });
+  test.each(["probe", "kill", "confirmation"])(
+    "orphan transport failure at %s is unconfirmed",
+    async (stage: string) => {
+      const { backend, client } = harness();
+      client.setCommandResult(PROBE, OUR_CMDLINE);
+      if (stage === "confirmation") {
+        const execute = client.executeCommand.bind(client);
+        let probes = 0;
+        spyOn(client, "executeCommand").mockImplementation(
+          async (...args: Parameters<typeof client.executeCommand>) => {
+            if (args[0] === PROBE && ++probes === 2) {
+              throw new Error("transport offline");
+            }
+            return execute(...args);
+          },
+        );
+      } else {
+        client.setCommandError(
+          stage === "probe" ? PROBE : "shell kill -9 4321",
+          new Error("transport offline"),
+        );
+      }
+      await expect(backend.forceStopOrphanedCapture(device, descriptor)).rejects.toThrow("orphan");
+      expect(client.getAllCommands().some((cmd) => /pkill|killall|rm /.test(cmd))).toBe(false);
+    },
+  );
+  test("returned kill transport error is unconfirmed even when the pid subsequently disappears", async () => {
+    const { backend, client } = harness();
+    client.setCommandResultSequence(PROBE, [OUR_CMDLINE, ""]);
+    const execute = client.executeCommand.bind(client);
+    spyOn(client, "executeCommand").mockImplementation(
+      async (...args: Parameters<typeof client.executeCommand>) => {
+        const result = await execute(...args);
+        return args[0] === "shell kill -9 4321"
+          ? { ...result, error: "transport offline" }
+          : result;
+      },
+    );
+    await expect(backend.forceStopOrphanedCapture(device, descriptor)).rejects.toThrow(
+      "transport offline",
+    );
+  });
+  test("orphan still alive after kill is unconfirmed", async () => {
+    const { backend, client } = harness();
+    client.setCommandResult(PROBE, OUR_CMDLINE);
+    await expect(backend.forceStopOrphanedCapture(device, descriptor)).rejects.toThrow("confirm");
+  });
+  test("orphan with no pid cannot be identified and sends no command", async () => {
+    const { backend, client } = harness();
+    await expect(
+      backend.forceStopOrphanedCapture(device, { ...descriptor, devicePid: undefined }),
+    ).rejects.toThrow("pid");
+    expect(client.getAllCommands()).toEqual([]);
+  });
+});

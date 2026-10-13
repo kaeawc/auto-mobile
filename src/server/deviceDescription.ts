@@ -470,6 +470,7 @@ export const deviceDescriptionSchema = z
           "network-condition",
           "clock",
           "app-cleanup",
+          "recording-teardown",
           "keep-screen-awake",
         ]),
         since: z.number(),

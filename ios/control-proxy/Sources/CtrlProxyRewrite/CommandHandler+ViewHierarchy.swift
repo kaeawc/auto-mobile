@@ -163,9 +163,22 @@ extension CommandHandler {
             return nil
         }
 
-        guard let fresh = await sdkHierarchyClient?.fetchFreshHierarchy(),
-              sdkHierarchy(fresh, matches: foregroundBundleId)
-        else {
+        let fresh: SdkViewHierarchy
+        switch await sdkHierarchyClient?.fetchFreshHierarchyResult() ?? .unavailable {
+        case let .hierarchy(hierarchy):
+            guard sdkHierarchy(hierarchy, matches: foregroundBundleId) else {
+                sdkHierarchyCache?.clear()
+                return nil
+            }
+            fresh = hierarchy
+        case .unavailable:
+            sdkHierarchyCache?.clear()
+            return nil
+        case let .failed(failure):
+            Logger(subsystem: "dev.jasonpearson.automobile", category: "CommandHandler")
+                .warning(
+                    "SDK hierarchy fetch failed for \(foregroundBundleId, privacy: .public): \(failure.reason, privacy: .public); continuing with the XCUITest hierarchy"
+                )
             sdkHierarchyCache?.clear()
             return nil
         }

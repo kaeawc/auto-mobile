@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import * as fileLock from "../../src/utils/fileLock";
 import { dirname } from "node:path";
 import {
   releaseExclusiveLock,
@@ -169,3 +170,112 @@ test.each([0, 100])(
     );
   },
 );
+
+const FREE_RELEASE = [
+  op("stat", "lock"),
+  op("mkdir", "dir"),
+  ...PUBLISH_LOCK,
+  op("readText", "lock"),
+  op("rename", "lock"),
+  op("readText", "marker"),
+  op("unlink", "marker"),
+];
+
+test.each([0, 100])(
+  "steady second acquire: 10 total / 7 writes, %d unrelated entries",
+  (unrelated) => {
+    const f = prepare(unrelated);
+    f.fs.unlink(PATH);
+    f.fs.operations.length = 0;
+    expect(tryAcquireExclusiveLock(PATH, f.options(101))).toBe(true);
+    releaseExclusiveLock(PATH, 101, "owner-101", f.fs);
+    f.verify(
+      [FREE_RELEASE[0], FREE_RELEASE[1], op("list", "dir"), ...FREE_RELEASE.slice(2)],
+      11,
+      7,
+    );
+    f.fs.operations.length = 0;
+    expect(tryAcquireExclusiveLock(PATH, f.options(101))).toBe(true);
+    releaseExclusiveLock(PATH, 101, "owner-101", f.fs);
+    f.verify(FREE_RELEASE, 10, 7);
+    expect(f.fs.operations.filter(({ op }) => op === "list")).toHaveLength(0);
+  },
+);
+
+test("50 publishing cycles inside the interval list once", () => {
+  const f = prepare(100);
+  f.fs.unlink(PATH);
+  f.fs.operations.length = 0;
+  for (let i = 0; i < 50; i++) {
+    expect(tryAcquireExclusiveLock(PATH, f.options(101))).toBe(true);
+    releaseExclusiveLock(PATH, 101, "owner-101", f.fs);
+    f.clock.advanceTime(1);
+  }
+  expect(f.fs.operations.filter(({ op }) => op === "list")).toHaveLength(1);
+});
+
+test("listing interval is inclusive at 300000ms", () => {
+  const f = prepare(0);
+  f.fs.unlink(PATH);
+  const cycle = () => {
+    expect(tryAcquireExclusiveLock(PATH, f.options(101))).toBe(true);
+    releaseExclusiveLock(PATH, 101, "owner-101", f.fs);
+  };
+  cycle();
+  f.fs.operations.length = 0;
+  f.clock.advanceTime(299_999);
+  cycle();
+  expect(f.fs.operations.filter(({ op }) => op === "list")).toHaveLength(0);
+  f.clock.advanceTime(1);
+  cycle();
+  expect(f.fs.operations.filter(({ op }) => op === "list")).toHaveLength(1);
+  expect(fileLock.OWN_TMP_SWEEP_INTERVAL_MS).toBe(300_000);
+});
+
+test("dead-owner reclaim after listing: 19 total / 12 writes", () => {
+  const f = prepare(0);
+  expect(tryAcquireExclusiveLock("/locks/other.lock", f.options(101))).toBe(true);
+  releaseExclusiveLock("/locks/other.lock", 101, "owner-101", f.fs);
+  f.fs.operations.length = 0;
+  expect(tryAcquireExclusiveLock(PATH, f.options(101))).toBe(true);
+  f.verify(
+    [
+      ...SAMPLE,
+      ...publishGuard(0),
+      ...REMOVE_STALE,
+      op("readText", "guard.0"),
+      op("unlink", "guard.0"),
+    ],
+    19,
+    12,
+  );
+});
+
+test("listing keys separate pids and directories and refresh backwards clocks", () => {
+  const f = prepare(0);
+  f.fs.unlink(PATH);
+  const cycle = (path: string, pid: number) => {
+    f.fs.operations.length = 0;
+    expect(tryAcquireExclusiveLock(path, f.options(pid))).toBe(true);
+    releaseExclusiveLock(path, pid, `owner-${pid}`, f.fs);
+    return f.fs.operations.filter(({ op }) => op === "list").length;
+  };
+  expect(cycle(PATH, 101)).toBe(1);
+  expect(cycle(PATH, 202)).toBe(1);
+  expect(cycle(PATH, 202)).toBe(0);
+  expect(cycle("/other/resource.lock", 101)).toBe(1);
+  expect(cycle("/other/resource.lock", 101)).toBe(0);
+  f.clock.stepWallClock(-1);
+  expect(cycle(PATH, 101)).toBe(1);
+});
+
+test.each(["202\nlive", ""])("contended %j after listing: 2 total / 0 writes", (raw) => {
+  const f = prepare(0);
+  f.fs.unlink(PATH);
+  expect(tryAcquireExclusiveLock(PATH, f.options(101))).toBe(true);
+  releaseExclusiveLock(PATH, 101, "owner-101", f.fs);
+  f.fs.seed(PATH, raw, f.clock.now());
+  f.fs.operations.length = 0;
+  expect(tryAcquireExclusiveLock(PATH, f.options(101))).toBe(false);
+  f.verify(SAMPLE, 2, 0);
+});

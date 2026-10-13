@@ -1,3 +1,4 @@
+import type { PrototypePatchRequest } from "../../src/features/prototype/prototypePatchWire";
 import {
   AndroidCtrlProxy,
   ScreenshotResult,
@@ -110,6 +111,33 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     return { success: true, totalTimeMs: duration };
   }
 
+  readonly patchRequests: PrototypePatchRequest[] = [];
+  private patchResult: PrototypeResult = { success: true };
+  private patchHold?: Promise<PrototypeResult>;
+  private showHold?: Promise<PrototypeResult>;
+
+  setPatchResult(result: PrototypeResult): void {
+    this.patchResult = result;
+  }
+  holdPatchReply(reply: Promise<PrototypeResult>): void {
+    this.patchHold = reply;
+  }
+  holdShowReply(reply: Promise<PrototypeResult>): void {
+    this.showHold = reply;
+  }
+
+  async requestPatchPrototype(
+    patch: PrototypePatchRequest,
+    _timeoutMs?: number,
+    _perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    this.patchRequests.push(structuredClone(patch));
+    this.checkFailure("requestPatchPrototype");
+    const hold = this.patchHold;
+    this.patchHold = undefined;
+    return hold ?? this.patchResult;
+  }
+
   private prototypeResult: PrototypeResult = { success: true };
   private readonly prototypeHistory: Array<
     | {
@@ -162,7 +190,9 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       ...(reset === undefined ? {} : { reset }),
       ...(appearance === undefined ? {} : { appearance }),
     });
-    return this.nextPrototypeResult();
+    const hold = this.showHold;
+    this.showHold = undefined;
+    return hold ?? this.nextPrototypeResult();
   }
 
   async requestDismissPrototype(

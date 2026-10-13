@@ -1,3 +1,8 @@
+import {
+  prototypePatchReplyFields,
+  prototypePatchUnsupportedMessage,
+  type PrototypePatchRequest,
+} from "../../prototype/prototypePatchWire";
 import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import { z } from "zod";
 import { ActionableError } from "../../../models/ActionableError";
@@ -21,6 +26,8 @@ import type { DelegateContext } from "./types";
 import {
   ctrlProxyRequests,
   PROTOTYPE_DISPLAY_CAPABILITY,
+  PROTOTYPE_PATCH_CAPABILITY,
+  type PatchPrototypeMessage,
   PROTOTYPE_EVENT_KINDS,
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
   UNKNOWN_PROTOTYPE_EVENT_KIND,
@@ -153,6 +160,22 @@ export class CtrlProxyPrototypes {
       timeoutMs,
       perf,
     );
+  }
+
+  async requestPatchPrototype(
+    patch: PrototypePatchRequest,
+    timeoutMs = 5000,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    const result = await this.request(
+      ctrlProxyRequests.patchPrototype({ requestId: "", ...patch }),
+      timeoutMs,
+      perf,
+    );
+    const rest = { ...result };
+    delete rest.revision;
+    delete rest.conflict;
+    return { ...rest, ...prototypePatchReplyFields(result) };
   }
 
   requestDismissPrototype(
@@ -324,7 +347,11 @@ export class CtrlProxyPrototypes {
   }
 
   private async request(
-    message: ShowPrototypeMessage | DismissPrototypeMessage | InspectPrototypesMessage,
+    message:
+      | ShowPrototypeMessage
+      | DismissPrototypeMessage
+      | InspectPrototypesMessage
+      | PatchPrototypeMessage,
     timeoutMs: number,
     perf?: PerformanceTracker,
   ): Promise<PrototypeResult> {
@@ -333,6 +360,12 @@ export class CtrlProxyPrototypes {
       : await this.context.ensureConnected();
     if (!connected) {
       return { success: false, error: "Not connected", totalTimeMs: 0 };
+    }
+    if (
+      message.type === "patch_prototype" &&
+      this.context.isCommandSupported?.(PROTOTYPE_PATCH_CAPABILITY) !== true
+    ) {
+      throw new ActionableError(prototypePatchUnsupportedMessage("android"));
     }
     const type = message.type;
     if (this.context.isCommandSupported?.(type) === false) {

@@ -1,4 +1,8 @@
 import {
+  prototypePatchReplyFields,
+  type PrototypePatchRequest,
+} from "../../prototype/prototypePatchWire";
+import {
   describeForeignCtrlProxyForwards,
   listedCtrlProxyForwardPorts,
   parseOwnPortForward,
@@ -1351,6 +1355,11 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
   ): Promise<PrototypeResult>;
   requestDismissPrototype(
     target: PrototypeDismiss,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult>;
+  requestPatchPrototype(
+    patch: PrototypePatchRequest,
     timeoutMs?: number,
     perf?: PerformanceTracker,
   ): Promise<PrototypeResult>;
@@ -3874,6 +3883,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   ): Promise<PrototypeResult> {
     return this.prototypes.requestDismissPrototype(target, timeoutMs, perf);
   }
+  requestPatchPrototype(
+    patch: PrototypePatchRequest,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    return this.prototypes.requestPatchPrototype(patch, timeoutMs, perf);
+  }
+
   requestInspectPrototypes(
     timeoutMs?: number,
     perf?: PerformanceTracker,
@@ -6328,6 +6345,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         ...(Array.isArray(message.missingAssets) && message.missingAssets.length > 0
           ? { missingAssets: message.missingAssets.filter((id) => typeof id === "string") }
           : {}),
+        ...prototypePatchReplyFields(message),
         ...(Array.isArray(message.prototypes) ? { prototypes: message.prototypes } : {}),
         ...(typeof message.droppedEvents === "number"
           ? { droppedEvents: message.droppedEvents }

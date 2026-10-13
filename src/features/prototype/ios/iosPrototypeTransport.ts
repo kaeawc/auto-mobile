@@ -1,3 +1,8 @@
+import {
+  prototypePatchReplyFields,
+  prototypePatchUnsupportedMessage,
+  type PrototypePatchRequest,
+} from "../prototypePatchWire";
 /**
  * The shared prototype transport over the injected iOS simulator prototype agent (#10568).
  *
@@ -14,6 +19,7 @@ import type { PrototypeAssetRequestOptions } from "../../observe/android/CtrlPro
 import { decodePrototypeEvent } from "../../observe/android/CtrlProxyPrototypes";
 import {
   PROTOTYPE_APPEARANCE_CAPABILITY,
+  PROTOTYPE_PATCH_CAPABILITY,
   PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
   SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY,
 } from "../../observe/android/ctrlProxyProtocol";
@@ -228,6 +234,18 @@ export class IosPrototypeTransport implements PrototypeTransport {
         ...(appearance === undefined ? {} : { appearance }),
       }),
     );
+  }
+
+  async patch(patch: PrototypePatchRequest): Promise<PrototypeResult> {
+    if (!this.supportsCapability(PROTOTYPE_PATCH_CAPABILITY)) {
+      throw new ActionableError(prototypePatchUnsupportedMessage("ios"));
+    }
+    const reply = await this.agent.request("patch_prototype", {
+      id: patch.id,
+      ...(patch.baseRevision === undefined ? {} : { baseRevision: patch.baseRevision }),
+      ops: patch.ops,
+    });
+    return { ...toPrototypeResult(reply), ...prototypePatchReplyFields(reply) };
   }
 
   async dismiss(target: PrototypeDismiss): Promise<PrototypeResult> {

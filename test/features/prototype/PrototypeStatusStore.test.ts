@@ -332,3 +332,68 @@ test("data is copied on show, adoption and every read, preserved on failure, and
   store.record(scope, "dismiss", { id: "orders" }, ok);
   expect(store.status(scope).prototypes).toEqual([]);
 });
+
+describe("patch spec and data hooks", () => {
+  const scope = { deviceId: "device", sessionUuid: "one" };
+  function track(store: InMemoryPrototypeStatusStore) {
+    const ticket = store.shownSpecs.beginShow(scope.deviceId);
+    store.shownSpecs.endShow(scope.deviceId, ticket, { id: "panel", spec: { data: { count: 1 } } });
+    store.record(scope, "show", { id: "panel" }, ok, undefined, { count: 1 });
+  }
+  test("patched data refreshes every session without touching results or snapshots", () => {
+    const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+    track(store);
+    const other = { ...scope, sessionUuid: "two" };
+    store.adopt(other, { id: "panel", pages: {}, state: { title: "Hello" } });
+    store.recordEvent(other, { ...event(1), id: "panel" });
+    const before = store.status(other);
+    const data = { count: 2 };
+    store.recordPatchedData("device", "panel", data);
+    data.count = 99;
+    expect(store.status(other).prototypes[0]).toEqual({
+      ...before.prototypes[0],
+      data: { count: 2 },
+    });
+    expect(store.status(other).lastResult).toEqual(before.lastResult);
+    store.recordPatchedData("device", "panel", undefined);
+    expect(store.status(other)).toEqual(before);
+    // Insert another session presence through the public show path, then prove device/id filtering.
+    store.record(scope, "show", { id: "panel" }, ok, undefined, { count: 1 });
+    store.recordPatchedData("device", "other", { count: 3 });
+    expect(store.status(scope).prototypes[0].data).toEqual({ count: 1 });
+  });
+  test.each(["dismissed", "dismiss", "all", "clearDevice", "clearSession", "adopt"])(
+    "%s removes tracked specs",
+    (hook) => {
+      const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+      track(store);
+      if (hook === "dismissed") {
+        store.dismissed(scope, "panel");
+      }
+      if (hook === "dismiss") {
+        store.record(scope, "dismiss", { id: "panel" }, ok);
+      }
+      if (hook === "all") {
+        store.record(scope, "dismiss", { all: true }, ok);
+      }
+      if (hook === "clearDevice") {
+        store.clearDevice("device");
+      }
+      if (hook === "clearSession") {
+        store.clearSession("one");
+      }
+      if (hook === "adopt") {
+        store.adopt(scope, { id: "other", pages: {}, state: {} });
+      }
+      expect(store.shownSpecs.read("device", "panel")).toEqual({ kind: "unknown" });
+    },
+  );
+  test("failed dismiss, wrong-id dismissal and same-id adoption retain the spec", () => {
+    const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+    track(store);
+    store.record(scope, "dismiss", { id: "panel" }, { success: false });
+    store.dismissed(scope, "other");
+    store.adopt(scope, { id: "panel", pages: {}, state: {} });
+    expect(store.shownSpecs.read("device", "panel").kind).toBe("known");
+  });
+});

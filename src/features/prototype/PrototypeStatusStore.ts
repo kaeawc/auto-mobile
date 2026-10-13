@@ -1,3 +1,4 @@
+import { PrototypeShownSpecs } from "./PrototypeShownSpecs";
 import type { PrototypeData } from "./prototypeSpec";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
@@ -67,6 +68,8 @@ export interface PrototypeScope {
   deviceId: string;
 }
 export interface PrototypeStatusStore {
+  readonly shownSpecs: PrototypeShownSpecs;
+  recordPatchedData(deviceId: string, id: string, data: PrototypeData | undefined): void;
   status(scope: PrototypeScope): PrototypeStatus;
   /**
    * The prototype currently shown with this id on the device, from any session. The device holds one
@@ -131,6 +134,23 @@ export const MAX_PROTOTYPE_STATUS_SCOPES = 128;
 
 /** Successful shows establish presence; host dismissals and terminal device events remove it. */
 export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
+  readonly shownSpecs = new PrototypeShownSpecs();
+
+  recordPatchedData(deviceId: string, id: string, data: PrototypeData | undefined): void {
+    for (const stored of this.scopes.values()) {
+      const entry = stored.deviceId === deviceId ? stored.shown.get(id) : undefined;
+      if (entry) {
+        const patched = { ...entry };
+        if (data === undefined) {
+          delete patched.data;
+        } else {
+          patched.data = structuredClone(data);
+        }
+        stored.shown.set(id, patched);
+      }
+    }
+  }
+
   private readonly scopes = new Map<string, StoredPrototypeStatus>();
   // A marker left by a failed, thrown or superseded show is reset by the next dispatch of that id and dropped with the device.
   private readonly showDispatches = new Map<string, Map<string, boolean>>();
@@ -184,6 +204,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
   }
 
   adopt(scope: PrototypeScope, prototype: AdoptedPrototype): void {
+    this.shownSpecs.retainOnly(scope.deviceId, prototype.id);
     const key = JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]);
     const stored = this.scopes.get(key) ?? {
       ...scope,
@@ -277,6 +298,9 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       action !== "show" && target.id !== undefined
         ? existing?.shown.get(target.id)?.displayId
         : undefined;
+    if (action === "dismiss" && result.success) {
+      this.shownSpecs.forget(scope.deviceId, target.id);
+    }
     const entry = this.createResult(
       action,
       target,
@@ -350,6 +374,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
   }
 
   clearDevice(deviceId: string): void {
+    this.shownSpecs.clearDevice(deviceId);
     this.showDispatches.delete(deviceId);
     for (const [key, stored] of this.scopes) {
       if (stored.deviceId === deviceId) {
@@ -376,6 +401,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
   }
 
   dismissed(scope: PrototypeScope, id: string): void {
+    this.shownSpecs.forget(scope.deviceId, id);
     this.clearShown(scope.deviceId, id);
   }
 

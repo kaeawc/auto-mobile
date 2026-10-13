@@ -37,6 +37,7 @@ screenshots (#10943, #10988) and the renderer and accessibility fixes that follo
 | Bottom sheet lifting above the keyboard                                               | Supported, not yet device-verified; see [Bottom sheet and the keyboard](#bottom-sheet-and-the-keyboard)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Style `weight`, `minWidth`/`maxWidth`/`minHeight`/`maxHeight`, `aspectRatio` (#11543) | Supported, not yet device-verified: sized by `PrototypeSizing` in Android's order (bounds, then `width`/`height`, then aspect ratio); a weight takes exactly its share of a `row`/`column`'s main axis and beats that axis's size and bounds, and is ignored outside a row or column; `min` wins when it exceeds `max`; content on an axis with no authored size (or `wrap`) is centred in the box a min bound grew, as `wrapContentWidth()`/`wrapContentHeight()` do, while an explicit `width`/`height`/`fill` keeps the node's alignment; weighted stacks mirror under RTL via SwiftUI's own Layout mirroring; sizes are fractional points, not rounded to pixels |
 | Data model (#11673)                                                                   | Implemented with `prototype_data_model_v1`: authored tree and repeat-cell guards precede resolution; resolved limits precede repeat expansion; status reports read-only `data`; see [Data model](../android/prototype-ux.md#data-model-11673).                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Patch (#11675)                                                                        | Not implemented: the agent does not advertise `prototype_patch_v1` (the pure applier and shared fixtures exist in the agent core).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Non-scalar state values (`null`, array, object)                                       | Refused at `show`, as Android and the host schema do: state is string, number or boolean only                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Foreground scoping to the shown-over app                                              | Not needed: the agent lives in the app, so backgrounding the app hides its window                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Accessibility identifier fallback (`node.id`)                                         | Uses `testTag ?? id`, including `<id>.<part>` for composite parts; host reports `platformNotes`, lifted by `prototype_identifier_test_tag_only_v1`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -503,3 +504,60 @@ Two data keys that are canonically equivalent Unicode strings collapse into one 
 Swift dictionary keys compare by canonical equivalence, unlike the host and Android.
 The agent re-checks data depth and array limits in the host's traversal order. It does not duplicate
 the host validator's data byte-cost rule; the existing 1 MiB whole-spec byte cap still bounds input.
+
+### Patch (#11675)
+
+Use `show` for a new screen or a window, theme or root change. Use `patch` for
+content (`/data`), state (`/state`) or one node by id (`replaceNode`). The host action,
+wire contract and capability gate exist, but **no device advertises
+`prototype_patch_v1` yet**. Every patch is refused before sending: update CtrlProxy
+on Android, or relaunch the app with `launchApp prototype: true` on iOS when a
+supporting agent is available; until then, send the whole spec with `show`.
+
+`{action:"patch", id, ops, baseRevision?}` sends a `patch_prototype` frame
+`{requestId, id, baseRevision?, ops}` only to a device advertising
+`prototype_patch_v1`. Android and iOS use `prototype_result` replies. Success
+carries `revision`; a state conflict carries
+`{success:false,error,conflict:{revision,state:{key:scalar}}}`. Revisions are
+non-negative safe integers; conflict values are strings, booleans or finite
+numbers with valid state keys. Malformed reply fields are dropped. Show, status,
+inspect and events do not report revisions through this host contract.
+
+Ops apply in order, completely or not at all. `add`, `replace`, `remove` and
+`test` address `/data` or `/data` followed by an RFC 6901 JSON pointer: `~0`
+escapes `~`, `~1` escapes `/`; array indices are canonical non-negative decimal
+integers, and `-` appends for `add` only. Parent paths must exist. `replace`,
+`remove` and `test` require the addressed value to exist. `add`, `replace` and
+`test` carry `value`; `remove` does not. State ops address exactly
+`/state/<key>`, where keys match `[A-Za-z_][A-Za-z0-9_]{0,63}` and values are
+strings, booleans or finite numbers.
+
+`replaceNode` carries `{op:"replaceNode",id,node}`. The id must identify exactly
+one node in the tree, cannot be the root or inside a repeat, and the replacement
+must keep that id. Replacement nodes cannot contain `use` nodes or element
+anchors. Inline the component, use a bounds anchor, or use `show`.
+
+The agent writes data; the user writes state. Data-only patches and patches
+containing only data ops and `replaceNode` ignore `baseRevision`. Any state op,
+including `test`, requires `baseRevision`. A device supporting the capability
+must refuse the whole patch with `conflict` if the user changed a touched state
+key since that revision, returning the current revision and those keys' values.
+
+There are at most 64 ops, the frame is capped at 1 MiB, and the resulting whole
+spec must satisfy every spec/data limit, including node count and depth. The
+host tracks a cloned copy of the device spec from the last acknowledged show,
+with components expanded and anchors resolved. It applies ops to a copy and
+runs the full validator before sending. Errors preserve deterministic paths.
+The host validates state ops against the agent-declared state and leaves value
+comparison for `/state` `test` to the device; its copy cannot know user edits.
+
+Patches are FIFO per device, with one in flight at a time. A pending show makes
+patch refuse as busy. Shows are not delayed by patches. If a dispatched show
+and an acknowledged patch overlap, their device-side order is unknown: the host
+forgets its spec, warns, and requires a further successful show before patching.
+A failed dispatched show, dismissed event, successful dismiss, session release,
+device removal or unbinding also ends tracking. An adopted different id ends
+tracking; inspecting the same tracked id retains it. A transport failure after
+patch dispatch is indeterminate and requires a new show. An atomic device
+refusal leaves the tracked copy unchanged. A successful patch refreshes shown
+status data without changing `lastResult`, timestamps or event snapshots.

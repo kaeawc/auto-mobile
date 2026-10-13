@@ -842,14 +842,13 @@ wiring_requires_yq() {
   rm -rf "$dir"
 }
 
-@test "CtrlProxy release R8 is off by default and opt-in verifies kept classes without obfuscation (#12129)" {
+@test "CtrlProxy release shrinks without obfuscation and verifies kept classes (#12129)" {
   local build="android/control-proxy/build.gradle.kts"
   local rules="android/control-proxy/proguard-rules.pro"
   grep -Fq '.gradleProperty("automobile.ctrlproxy.minifyRelease")' "$build"
-  grep -Fq '.map { it.equals("true", ignoreCase = true) }' "$build"
-  grep -Fq '.orElse(false)' "$build"
+  grep -Fq '.map { !it.equals("false", ignoreCase = true) }' "$build"
+  grep -Fq '.orElse(true)' "$build"
   grep -Fq 'isMinifyEnabled = minifyRelease.get()' "$build"
-  grep -Fq 'if (minifyRelease.get()) {' "$build"
   grep -Fq 'tasks.register<VerifyR8KeptClassesTask>("verifyReleaseR8KeptClasses")' "$build"
   grep -Fq 'tasks.matching { it.name == "assembleRelease" }.configureEach { dependsOn(verify) }' "$build"
   grep -Fq 'tasks.matching { it.name == "minifyReleaseWithR8" }.configureEach { finalizedBy(verify) }' "$build"
@@ -857,29 +856,4 @@ wiring_requires_yq() {
   grep -Fq -- '-keep @kotlinx.serialization.Serializable class dev.jasonpearson.automobile.** { *; }' "$rules"
   run grep -Fq 'implementation(libs.bundles.compose.ui)' "$build"
   [ "$status" -eq 1 ]
-}
-
-@test "CtrlProxy publishing builds never opt into release R8 (#12129)" {
-  wiring_requires_yq
-  local workflow=".github/workflows/build-control-proxy-apk.yml"
-  run yq -r '.jobs.build.steps[]
-    | select(.uses == "./.github/actions/gradle-task-run")
-    | ((.with."gradle-flags" // "") | test("minifyRelease"))' "$workflow"
-  [ "$status" -eq 0 ]
-  [ "$output" = "false" ]
-  run yq -r '.jobs.build.steps[]
-    | select(.uses == "./.github/actions/gradle-task-run")
-    | .with."gradle-tasks"' "$workflow"
-  [ "$status" -eq 0 ]
-  [ "$output" = ":control-proxy:assembleRelease" ]
-  [[ "$output" != *"minifyRelease"* ]]
-
-  for workflow in build-control-proxy-apk nightly live-idle-release prepare-release release; do
-    local file=".github/workflows/$workflow.yml"
-    if [[ "$workflow" = "release" && ! -f "$file" ]]; then
-      continue
-    fi
-    run grep -F 'automobile.ctrlproxy.minifyRelease' "$file"
-    [ "$status" -eq 1 ]
-  done
 }

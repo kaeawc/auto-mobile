@@ -3285,10 +3285,8 @@ jobs:
       - uses: ./.github/actions/gradle-task-run
         with:
           # Moved from Build CtrlProxy APK (#11578); the release variant from
-          # #5228 still gates every Android PR through this required check. The flag
-          # runs R8 and the kept-class verifier while the published APK stays unminified.
+          # #5228 still gates every Android PR through this required check.
           gradle-tasks: ":junitRunner:assemble :control-proxy:assembleRelease"
-          gradle-flags: '["-Pautomobile.ctrlproxy.minifyRelease=true"]'
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ env.GRADLE_BUILD_ACTION_CACHE_KEY_JOB }}"
           reuse-configuration-cache: true

@@ -320,11 +320,18 @@ export function registerLocationRouteSessionCleanup(
     const settled = active ? registry.stopAndSettle(deviceId) : Promise.resolve();
     if (active) {
       // stopAndSettle cancels synchronously; publish quarantine before the hook returns.
-      manager.registerPendingDeviceCleanup(deviceId, settled);
+      manager.registerPendingDeviceCleanup(deviceId, settled, {
+        name: "stop location route",
+        leftover: "a location fix sent before the stop",
+      });
     }
     const clear = mockLocationClears.clearAfter(sessionId, deviceId, settled);
     if (clear) {
-      manager.registerPendingDeviceCleanup(deviceId, clear);
+      manager.registerPendingDeviceCleanup(deviceId, clear, {
+        name: "clear mock location",
+        leftover: "the released session's simulated location",
+        abandon: () => mockLocationClears.abandonClear(sessionId, deviceId),
+      });
     }
     registry.forget(deviceId);
   };

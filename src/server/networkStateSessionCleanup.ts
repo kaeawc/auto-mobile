@@ -66,7 +66,13 @@ export function registerNetworkStateSessionCleanup(
     if (!state.clearDeviceOwnedBySession(deviceId, sessionId)) {
       return;
     }
-    manager.registerPendingDeviceCleanup(deviceId, pushClearedState(pusher, deviceId));
+    // iOS probes capability before reading CURRENT rules; simulation is read after
+    // that push settles. Android reads and sends synchronously. A late push therefore
+    // delivers the current holder's host state, never a captured cleared snapshot.
+    manager.registerPendingDeviceCleanup(deviceId, pushClearedState(pusher, deviceId), {
+      name: "push cleared network state",
+      leftover: "the released session's network mock rules and error simulation",
+    });
   };
   manager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, releaseOptions) => {
     if (releaseOptions?.deviceIdentityReplaced) {

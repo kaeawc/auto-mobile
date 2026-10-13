@@ -513,3 +513,202 @@ test("created journal conflict clears the losing driver's memory intent", async 
   expect((await h.registry.getAssignment(h.key))?.stableDeviceId).toBe("UDID-1");
   expect(h.deleter.calls).toEqual([]);
 });
+
+test.each([false, true])(
+  "hung removal flag settles before deadline (aborted=%s)",
+  async (aborted) => {
+    const h = await harness(true);
+    const controller = new AbortController();
+    const advance = h.registry.advanceSlotJournal.bind(h.registry);
+    let writing = false;
+    h.registry.advanceSlotJournal = async (id, input) => {
+      if (input.phase === "committed") {
+        if (aborted) {
+          controller.abort();
+        }
+        return { kind: "stale_binding", current: (await h.registry.getAssignment(h.key))! };
+      }
+      if (input.target?.removalRequested) {
+        writing = true;
+        return new Promise<never>(() => {});
+      }
+      return advance(id, input);
+    };
+    let settled = false;
+    const result = h.reconciler
+      .reconcile({ ...h.request, signal: controller.signal })
+      .then((value) => {
+        settled = true;
+        return value;
+      });
+    await drainUntil(() => writing, { description: "flag write" });
+    h.timer.advanceTime(SLOT_JOURNAL_REMOVAL_FLAG_WRITE_BUDGET_MS + 1);
+    await drainMicrotasks(156);
+    expect(settled).toBe(true);
+    expect(await result).toMatchObject({
+      outcome: "failed",
+      failure: { code: "concurrent_modification" },
+      evidence: { uncommittedCleanup: { stableId: "UDID-1", removed: false } },
+    });
+    expect(h.provisioner.released).toEqual(["session-1"]);
+    expect(h.deleter.calls).toEqual([]);
+    expect((await h.registry.getSlotJournal(1))?.target.removalRequested).toBeUndefined();
+    h.registry.advanceSlotJournal = advance;
+    expect(await h.driver.redriveSlot(h.key)).toMatchObject({ kind: "clear" });
+    expect((await h.registry.getSlotJournal(1))?.phase).toBe("rolled_back");
+    expect((await h.registry.getAssignment(h.key))?.stableDeviceId).toBeNull();
+    expect(h.inventory.devices).toEqual([]);
+  },
+);
+
+test.each(["holder", "rollback", "blocked", "assignment", "deadline"] as const)(
+  "durable removal survives hung %s",
+  async (stage) => {
+    const h = await harness(true);
+    const advance = h.registry.advanceSlotJournal.bind(h.registry);
+    const holder = h.registry.findDeviceHolder.bind(h.registry);
+    const assignment = h.registry.getAssignment.bind(h.registry);
+    if (stage === "blocked") {
+      h.deleter.failWith = "native delete failed";
+    }
+    let hanging = false;
+    let flagged = false;
+    h.registry.advanceSlotJournal = async (id, input) => {
+      if (input.phase === "committed") {
+        return { kind: "stale_binding", current: (await h.registry.getAssignment(h.key))! };
+      }
+      if (
+        (stage === "rollback" && input.phase === "rolled_back") ||
+        (stage === "blocked" && input.attempt)
+      ) {
+        hanging = true;
+        return new Promise<never>(() => {});
+      }
+      const value = await advance(id, input);
+      if (input.target?.removalRequested) {
+        flagged = true;
+      }
+      return value;
+    };
+    h.registry.findDeviceHolder = async (platform, id) => {
+      if ((stage === "holder" || stage === "deadline") && flagged) {
+        hanging = true;
+        return new Promise<never>(() => {});
+      }
+      return holder(platform, id);
+    };
+    h.registry.getAssignment = async (key) => {
+      if (stage === "assignment" && flagged) {
+        hanging = true;
+        return new Promise<never>(() => {});
+      }
+      return assignment(key);
+    };
+    let settled = false;
+    const result = h.reconciler.reconcile(h.request).then((value) => {
+      settled = true;
+      return value;
+    });
+    await drainUntil(() => hanging, { description: "cleanup stage" });
+    h.timer.advanceTime(SLOT_JOURNAL_REMOVAL_FLAG_WRITE_BUDGET_MS + 1);
+    await drainMicrotasks(156);
+    if (stage === "assignment") {
+      // Cleanup and the failed-result read each get a bounded registry stage.
+      h.timer.advanceTime(SLOT_JOURNAL_REMOVAL_FLAG_WRITE_BUDGET_MS + 1);
+      await drainMicrotasks(156);
+    }
+    expect(settled).toBe(true);
+    expect(await result).toMatchObject({
+      outcome: "failed",
+      ...(stage === "assignment" ? { assignment: null } : {}),
+      failure: { code: "concurrent_modification" },
+      evidence: { uncommittedCleanup: { removed: false } },
+    });
+    expect(h.provisioner.released).toEqual(["session-1"]);
+    expect((await h.registry.getSlotJournal(1))?.phase).toBe("created");
+    expect(h.deleter.calls.length).toBe(
+      stage === "holder" || stage === "assignment" || stage === "deadline" ? 0 : 1,
+    );
+    h.registry.advanceSlotJournal = advance;
+    h.registry.findDeviceHolder = holder;
+    h.registry.getAssignment = assignment;
+    h.deleter.failWith = undefined;
+    expect(await h.driver.redriveSlot(h.key)).toMatchObject({ kind: "clear" });
+    expect((await h.registry.getSlotJournal(1))?.phase).toBe("rolled_back");
+    expect((await h.registry.getAssignment(h.key))?.stableDeviceId).toBeNull();
+    expect(h.inventory.devices).toEqual([]);
+  },
+);
+
+test("healthy cleanup preserves flag release delete rollback order", async () => {
+  const h = await harness(true);
+  const order: string[] = [];
+  const advance = h.registry.advanceSlotJournal.bind(h.registry);
+  const release = h.provisioner.releaseSession.bind(h.provisioner);
+  h.registry.advanceSlotJournal = async (id, input) => {
+    if (input.phase === "committed") {
+      return { kind: "stale_binding", current: (await h.registry.getAssignment(h.key))! };
+    }
+    if (input.target?.removalRequested) {
+      order.push("flag");
+    }
+    if (input.phase === "rolled_back") {
+      order.push("rollback");
+    }
+    return advance(id, input);
+  };
+  h.provisioner.releaseSession = async (id) => {
+    order.push("release");
+    await release(id);
+  };
+  h.deleter.beforeDelete = async () => {
+    order.push("delete");
+  };
+  expect(await h.reconciler.reconcile(h.request)).toMatchObject({
+    outcome: "failed",
+    failure: { code: "concurrent_modification" },
+  });
+  expect(order).toEqual(["flag", "release", "delete", "rollback"]);
+});
+
+test("this daemon's redrive bounds its own hung flag rewrite", async () => {
+  const h = await harness(true);
+  const advance = h.registry.advanceSlotJournal.bind(h.registry);
+  let writing = false;
+  h.registry.advanceSlotJournal = async (id, input) => {
+    if (input.phase === "committed") {
+      return { kind: "stale_binding", current: (await h.registry.getAssignment(h.key))! };
+    }
+    if (input.target?.removalRequested) {
+      writing = true;
+      return new Promise<never>(() => {});
+    }
+    return advance(id, input);
+  };
+  let settled = false;
+  const first = h.reconciler.reconcile(h.request).then((value) => {
+    settled = true;
+    return value;
+  });
+  await drainUntil(() => writing, { description: "first flag write" });
+  h.timer.advanceTime(SLOT_JOURNAL_REMOVAL_FLAG_WRITE_BUDGET_MS + 1);
+  await drainMicrotasks(156);
+  expect(settled).toBe(true);
+  expect((await first).outcome).toBe("failed");
+  writing = false;
+  settled = false;
+  const redrive = h.driver.redriveSlot(h.key).then((value) => {
+    settled = true;
+    return value;
+  });
+  await drainUntil(() => writing, { description: "redrive flag rewrite" });
+  h.timer.advanceTime(SLOT_JOURNAL_REMOVAL_FLAG_WRITE_BUDGET_MS + 1);
+  await drainMicrotasks(156);
+  expect(settled).toBe(true);
+  expect(await redrive).toMatchObject({ kind: "blocked", reason: "reconcile_in_progress" });
+  expect(h.deleter.calls).toEqual([]);
+  expect((await h.registry.getSlotJournal(1))?.target.removalRequested).toBeUndefined();
+  h.registry.advanceSlotJournal = advance;
+  expect(await h.driver.redriveSlot(h.key)).toMatchObject({ kind: "clear" });
+  expect((await h.registry.getSlotJournal(1))?.phase).toBe("rolled_back");
+});

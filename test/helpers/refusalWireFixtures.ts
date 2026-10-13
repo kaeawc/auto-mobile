@@ -775,6 +775,7 @@ function budgetSlotFailure(): ManagedSlotsFailure {
             reason: "deletion_stuck",
             attempts: 5,
             failedDeletes: 3,
+            uncounted: true,
             lastError: "native delete keeps failing",
           },
         ],

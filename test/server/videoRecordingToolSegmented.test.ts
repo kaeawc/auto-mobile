@@ -34,6 +34,7 @@ import {
   stopSegmentedVideoRecordingsForOwner,
   finalizeSegmentedVideoRecordingsForOwnerOnReplacedDevice,
   segmentedVideoRecordingHandlesForOwner,
+  captureSegmentedRecordingIdsForOwner,
 } from "../../src/server/videoRecordingTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
@@ -192,6 +193,42 @@ describe("videoRecording tool segmentation branch", () => {
   });
 
   const handler = () => ToolRegistry.getTool("videoRecording")!.deviceAwareHandler!;
+
+  test("release capture reader follows rotated segments and excludes later sessions of the same owner", async () => {
+    setSegmentedSessionRecordingDependencies({
+      startVideoRecording: async ({ outputName }) => {
+        segmentStarts.push(outputName!);
+        return makeSegmentRecording(outputName!, outputName);
+      },
+      stopVideoRecording: async (id = "missing") => ({
+        metadata: makeSegmentMetadata(id),
+        evictedRecordingIds: [],
+      }),
+      rollbackVideoRecordingStart: async () => {},
+    });
+    await handler()(androidDevice, {
+      action: "start",
+      maxDuration: 600,
+      outputName: "released",
+      sessionUuid: "session-a",
+    });
+    const capturedIds = captureSegmentedRecordingIdsForOwner("session-a", androidDevice.deviceId);
+    expect(capturedIds()).toEqual(["released"]);
+    await handler()(androidDevice, {
+      action: "start",
+      maxDuration: 600,
+      outputName: "later",
+      sessionUuid: "session-a",
+    });
+    segmentTimer.advanceTime(ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS);
+    await waitFor(() => segmentStarts.length === 4, "both sessions rotated");
+    await drainUntilQuiescent(segmentTimer);
+    expect(capturedIds()).toEqual(["released-seg1"]);
+    expect(captureSegmentedRecordingIdsForOwner("session-a", androidDevice.deviceId)()).toEqual([
+      "released-seg1",
+      "later-seg1",
+    ]);
+  });
 
   test("replaced-device finalize retains two completed segments and writes their manifest once", async () => {
     const rollbacks: Array<[string, { deviceWide?: boolean; hostOnly?: boolean } | undefined]> = [];

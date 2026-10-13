@@ -748,6 +748,7 @@ export class LivenessScenario {
       },
       startHttpIngress: async () => void steps.push("startHttpIngress"),
       sweepStaleAppearanceConfigs: async () => void steps.push("sweepStaleAppearanceConfigs"),
+      redriveRecorderTeardowns: async () => true,
       bindControlSocket: async () => {
         steps.push("bindControlSocket");
         // A slow start: the work between session rehydration and the bind takes this long.

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { NoopTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
 import type { DaemonExitRecord } from "../../src/daemon/daemonExitRecord";
 import { Daemon, type DaemonStartHost } from "../../src/daemon/daemon";
 import * as buildIdentity from "../../src/daemon/buildIdentity";
@@ -16,6 +17,11 @@ import { createTestDatabase } from "../db/testDbHelper";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 
+import * as videoManager from "../../src/server/videoRecordingManager";
+import { VideoRecordingRepository } from "../../src/db/videoRecordingRepository";
+import { DEFAULT_VIDEO_RECORDING_CONFIG, VideoRecorderService } from "../../src/features/video";
+import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
+
 // #10975: `start()` itself must subscribe the daemon to tool-call-end activity (owner decision
 // 2026-10-08: the idle window counts from the END of a call). `daemonToolCallEndWiring.test.ts`
 // calls the private subscription directly, so a `start()` that stopped calling it survived every
@@ -23,12 +29,16 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // that would touch the machine (the early owner record), with the real subscription in place.
 
 interface DaemonStartInternals {
+  daemonSessionId: string;
   options: DaemonOptions;
   port: number;
   processStartHost(): DaemonStartHost;
   setupShutdownHandlers(): void;
   writeEarlyOwnerRecord(): Promise<void>;
   startThroughSocketBind(): Promise<void>;
+  initializeDatabase(): Promise<void>;
+  initializeDevicePoolWithTimeout(timeoutMs: number): Promise<void>;
+  initializeIosServices(): Promise<void>;
   stopSessionTimers(): void;
 }
 
@@ -93,6 +103,116 @@ describe("Daemon.start() tool-call-end wiring", () => {
       DaemonState.getInstance().reset();
     }
     NavigationGraphManager.resetInstance();
+  });
+
+  test("redrive wiring includes this daemon's rehydrated owner and excludes live peer owners", async () => {
+    const { daemon, internals, timer } = await makeDaemon({ port: 3161, debug: true });
+    const db = await createTestDatabase();
+    const repository = new VideoRecordingRepository(db);
+    const sessions = new DeviceSessionRepository(db, timer);
+    const actualOwnId = internals.daemonSessionId;
+    const host = internals.processStartHost();
+    const live = new Set([actualOwnId, "peer-daemon"]);
+    for (const [owner, daemonId] of [
+      ["own-owner", actualOwnId],
+      ["peer-owner", "peer-daemon"],
+    ] as const) {
+      await sessions.upsertActiveSession({
+        sessionUuid: owner,
+        daemonSessionId: daemonId,
+        deviceId: owner,
+        platform: "android",
+        createdAtMs: 0,
+        lastUsedAtMs: 0,
+        expiresAtMs: 60_000,
+        sessionTimeoutMs: 60_000,
+        heartbeatTimeoutMs: 10_000,
+        hasReceivedHeartbeat: false,
+      });
+      await repository.insertRecording({
+        recordingId: owner,
+        ownerSessionUuid: owner,
+        deviceId: owner,
+        platform: "android",
+        status: "recording",
+        fileName: "rec.mp4",
+        filePath: "/unused/rec.mp4",
+        format: "mp4",
+        sizeBytes: 0,
+        createdAt: "1970-01-01T00:00:00.000Z",
+        startedAt: "1970-01-01T00:00:00.000Z",
+        lastAccessedAt: "1970-01-01T00:00:00.000Z",
+        config: DEFAULT_VIDEO_RECORDING_CONFIG,
+        captureTeardown: {
+          kind: "android-screenrecord",
+          deviceTempPath: "/sdcard/rec.mp4",
+          devicePid: 42,
+        },
+      });
+    }
+    const initialize = spyOn(
+      videoManager,
+      "initializeRecordingTeardownRedriveState",
+    ).mockResolvedValue({
+      recordingRepository: repository,
+      videoRecorderService: new VideoRecorderService({ backend: new FakeVideoCaptureBackend() }),
+      liveDaemonSessionIds: live,
+    });
+    const incarnations = spyOn(daemon.getDevicePool(), "getDeviceIncarnation").mockReturnValue(1);
+    const mark = spyOn(
+      daemon.getSessionManager(),
+      "markDeviceNeedsRecorderTeardown",
+    ).mockImplementation(() => {});
+    try {
+      expect(await host.redriveRecorderTeardowns()).toBe(true);
+      expect(mark.mock.calls.map((call) => call[0])).toEqual(["own-owner"]);
+      expect(live).toEqual(new Set([actualOwnId, "peer-daemon"]));
+    } finally {
+      initialize.mockRestore();
+      incarnations.mockRestore();
+      mark.mockRestore();
+      internals.stopSessionTimers();
+      timer.reset();
+      await db.destroy();
+    }
+  });
+
+  test("startup redrives recorder teardowns after pool initialization before binding the control socket", async () => {
+    const { daemon, internals } = await makeDaemon({ port: 3161, debug: true });
+    const events: string[] = [];
+    const spies = [
+      spyOn(internals, "initializeDatabase").mockResolvedValue(undefined),
+      spyOn(internals, "initializeDevicePoolWithTimeout").mockImplementation(async () => {
+        events.push("pool");
+      }),
+      spyOn(internals, "initializeIosServices").mockResolvedValue(undefined),
+      spyOn(logger, "info").mockImplementation(() => {}),
+    ];
+    const host: DaemonStartHost = {
+      ...internals.processStartHost(),
+      enterProcess: () => {},
+      publishForwardLeaseOwner: () => {},
+      writeExitRecord: () => {},
+      writeEarlyOwnerRecord: async () => {},
+      openTerminalReleaseJournal: () => new NoopTerminalReleaseJournal(),
+      startHttpIngress: async () => {},
+      sweepStaleAppearanceConfigs: async () => {},
+      redriveRecorderTeardowns: async () => {
+        events.push("redrive");
+        return true;
+      },
+      bindControlSocket: async () => {
+        events.push("bind");
+        throw new StartupStopped();
+      },
+    };
+    try {
+      await expect(daemon.startOn(host)).rejects.toBeInstanceOf(StartupStopped);
+      expect(events).toEqual(["pool", "redrive", "bind"]);
+    } finally {
+      spies.reverse().forEach((spy) => spy.mockRestore());
+      internals.stopSessionTimers();
+    }
   });
 
   test("a started daemon stamps a session's activity at the end of its tool call", async () => {

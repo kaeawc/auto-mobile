@@ -235,6 +235,7 @@
 		F497AC61E0FA4FF9D8993E59 /* VoiceOverToggleError.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4F91CACFEF2EA1DE401CC68 /* VoiceOverToggleError.swift */; };
 		F4F26CC962D55BED65AD14C9 /* SystemVoiceOverDefaultsReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BF44B809165C65F617A2C33 /* SystemVoiceOverDefaultsReader.swift */; };
 		F542BC7033C2C730F49861EE /* GesturePerforming.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB5DF139FFDF4B2DF4FB3606 /* GesturePerforming.swift */; };
+		F58D151AB4F2F6CA96DC698E /* AppStateWaiter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54984792DE9C49BBC38F445B /* AppStateWaiter.swift */; };
 		F7A215ECC8EE446115D39A21 /* DefaultVoiceOverToggle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68D923F1DE4BB230AC35A73B /* DefaultVoiceOverToggle.swift */; };
 		F9CD02DB784D4A38A648A5C8 /* FrameContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4C11720F03CD9C25F3DD639 /* FrameContext.swift */; };
 		F9E2475C6F9FCC93791E5E68 /* RequestSetVoiceOverState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F370A04437F4561A96089B /* RequestSetVoiceOverState.swift */; };
@@ -373,6 +374,7 @@
 		542518F925DF5D13D824DCC4 /* TapDiagnosticsSampling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TapDiagnosticsSampling.swift; sourceTree = "<group>"; };
 		542D4AB842B818229F5C7B80 /* VoiceOverToggling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceOverToggling.swift; sourceTree = "<group>"; };
 		54641150EA4C713299C3E7CD /* CaretMovePressClassification.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaretMovePressClassification.swift; sourceTree = "<group>"; };
+		54984792DE9C49BBC38F445B /* AppStateWaiter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppStateWaiter.swift; sourceTree = "<group>"; };
 		5546E563FFB0CEE4BFC158E9 /* Highlight.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Highlight.swift; sourceTree = "<group>"; };
 		56D7093935E79C5B0A3669D3 /* SetNetworkErrorSimulationResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetNetworkErrorSimulationResponse.swift; sourceTree = "<group>"; };
 		56F27564F3E0A45B24D6F67D /* ElementBounds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElementBounds.swift; sourceTree = "<group>"; };
@@ -562,6 +564,7 @@
 			children = (
 				DCDAF8EC4DC718D7EB961451 /* AppStateExpectation.swift */,
 				3AF5560AE531B80816348DE4 /* AppStateWait.swift */,
+				54984792DE9C49BBC38F445B /* AppStateWaiter.swift */,
 				08125C56479E153437ACE83C /* AppSwitcherDetector.swift */,
 				4F8A0CC4855579D12DEB7BFA /* BundleId.swift */,
 				CA7AF3DFF9E964313765FFF7 /* ByteChannel.swift */,
@@ -1038,6 +1041,7 @@
 			files = (
 				826D052CB1DD825E578A1C0D /* AppStateExpectation.swift in Sources */,
 				EAB92880ABC9916D07FCE70E /* AppStateWait.swift in Sources */,
+				F58D151AB4F2F6CA96DC698E /* AppStateWaiter.swift in Sources */,
 				7EAF9F56CFE709431DB8DE33 /* AppSwitcherDetector.swift in Sources */,
 				D5F848B6EF05467488BF266A /* BundleId.swift in Sources */,
 				B93612A6DB1A13DC93E9C4E7 /* ByteChannel.swift in Sources */,

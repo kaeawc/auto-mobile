@@ -5,6 +5,7 @@ export type DeviceHealthReason =
   | "network-condition"
   | "clock"
   | "app-cleanup"
+  | "recording-teardown"
   | "keep-screen-awake";
 export interface DeviceHealthMarker {
   readonly reason: DeviceHealthReason;
@@ -23,7 +24,7 @@ export interface DeviceHealthMarkers {
   clear(deviceId: string, incarnation?: number, reason?: DeviceHealthReason): void;
 }
 
-/** Daemon-local only: restart loses markers and does not re-detect dirty state. */
+/** Daemon-local markers; persisted recorder descriptors redrive separately after restart. */
 export class InMemoryDeviceHealthMarkers implements DeviceHealthMarkers {
   private readonly devices = new Map<
     string,

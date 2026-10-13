@@ -12,7 +12,7 @@ import {
 } from "../../src/daemon/deviceAcquisitionRefusals";
 import {
   getSessionReleaseCleanupWorstCaseMs,
-  SESSION_RELEASE_STUCK_DEADLINE_MS,
+  getSessionReleaseStuckDeadlineMs,
   SESSION_RELEASE_TEARDOWN_CAP_MS,
 } from "../../src/daemon/sessionManager";
 import { getSessionHeartbeatCheckIntervalMs } from "../../src/daemon/sessionLivenessWindows";
@@ -126,7 +126,7 @@ describe("finalize wait budget shared with the runners (#11360)", () => {
     const interval = getSessionHeartbeatCheckIntervalMs({});
     const releaseWorstCaseMs = getSessionReleaseCleanupWorstCaseMs({});
     expect(releaseWorstCaseMs).toBe(
-      SESSION_RELEASE_STUCK_DEADLINE_MS + 2 * interval + SESSION_RELEASE_TEARDOWN_CAP_MS,
+      getSessionReleaseStuckDeadlineMs() + 2 * interval + SESSION_RELEASE_TEARDOWN_CAP_MS,
     );
     expect(releaseWorstCaseMs).toBeLessThanOrEqual(waitBudgetMs);
     const advertised = [
@@ -135,7 +135,7 @@ describe("finalize wait budget shared with the runners (#11360)", () => {
       releaseWorstCaseMs,
     ];
     // Both platforms' finalize cap plus incomplete-mark grace, then the forced-release worst case.
-    expect(advertised).toEqual([125_000, 125_000, 54_000]);
+    expect(advertised).toEqual([125_000, 125_000, getSessionReleaseCleanupWorstCaseMs({})]);
     expect(Math.max(...advertised.map((capMs) => capMs ?? Infinity))).toBeLessThanOrEqual(
       waitBudgetMs,
     );

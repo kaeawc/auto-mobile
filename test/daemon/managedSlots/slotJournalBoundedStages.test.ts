@@ -377,7 +377,7 @@ describe("bounded journal provider stages (#12056)", () => {
     expect(await pass).toMatchObject({ blocked: [{ reason: "cleanup_pending" }] });
     const before = await h.registry.listOpenSlotJournal();
     expect(before).toMatchObject([
-      { phase: "deleting", attempts: 1, nextAttemptAtMs: h.timer.now() + BACKOFF },
+      { phase: "deleting", attempts: 1, nextAttemptAtMs: h.timer.now() },
     ]);
     expect(await h.registry.getAssignment(first.key)).toMatchObject({
       stableDeviceId: first.id,
@@ -518,10 +518,11 @@ describe("bounded journal provider stages (#12056)", () => {
       const h = await replacementHarness();
       const controller = new AbortController();
       const reached = Promise.withResolvers<void>();
+      const completed = Promise.withResolvers<void>();
       if (cancellation === "parked") {
         h.deleter.beforeDelete = () => {
           reached.resolve();
-          return new Promise<void>(() => {});
+          return completed.promise;
         };
       } else {
         h.deleter.deleteAndVerifyAbsence = async (target) => {
@@ -549,7 +550,7 @@ describe("bounded journal provider stages (#12056)", () => {
       expect(open[0]).toMatchObject({
         phase: "deleting",
         attempts: 1,
-        nextAttemptAtMs: h.timer.now() + BACKOFF,
+        nextAttemptAtMs: h.timer.now() + (cancellation === "parked" ? 0 : BACKOFF),
       });
       expect(await h.registry.getAssignment(h.key)).toMatchObject({ state: "cleanup_pending" });
       expect(h.journal.inFlight.has(open[0].id)).toBe(false);
@@ -559,6 +560,15 @@ describe("bounded journal provider stages (#12056)", () => {
         h.deleter,
       );
       h.timer.advanceTime(BACKOFF);
+      if (cancellation === "parked") {
+        expect(await h.journal.redriveSlot(h.key)).toMatchObject({
+          kind: "blocked",
+          reason: "cleanup_pending",
+        });
+        expect(h.deleter.calls).toHaveLength(1);
+        completed.resolve();
+        await flush();
+      }
       expect(await h.journal.redriveSlot(h.key)).toMatchObject({ kind: "clear" });
       expect(await h.registry.listOpenSlotJournal(h.key)).toEqual([]);
       expect(h.inventory.has(open[0].target.oldStableId!)).toBe(false);

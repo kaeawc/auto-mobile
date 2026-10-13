@@ -105,7 +105,20 @@ returns false, inbound data, `drain`, or a successful write callback leaving
 
 ## Device health marker
 
-Biometric/network/keep-awake restoration abandoned after bounded retries sets a device health marker; clock restoration sets it on its first failed attempt. Successful restoration/background recovery, device removal, or an incarnation change clears it. Idle selection skips marked devices, and exact-id requests refuse them with an actionable error naming the device and reason; pool status surfaces optional `unhealthy`. There is no automatic erase/reboot: the owner decides whether to use `killDevice`/`startDevice`. Markers do not persist across daemon restart; only persisted recorder descriptors re-detect dirty state at startup.
+Biometric/network/keep-awake restoration abandoned after bounded retries sets a device health marker; clock restoration sets it on its first failed attempt. Successful restoration/background recovery, device removal, or an incarnation change clears it. Idle selection skips marked devices, and exact-id requests refuse them with a typed error naming the device and reason; pool status surfaces optional `unhealthy`. There is no automatic erase/reboot: the owner decides whether to use `killDevice`/`startDevice`. Markers do not persist across daemon restart; only persisted recorder descriptors re-detect dirty state at startup.
+
+Every health reason refuses allocation with typed `device_unhealthy` (#12112):
+`devices` carries each candidate's oldest marker reason and recovery evidence.
+Each device is recovering only when every unresolved marker has a running recovery, and its bound is the largest marker bound only when all are computable.
+Exactly one candidate also carries top-level `deviceId` and `reason`. `recovering`
+and `retryable` are true iff any candidate is recovering. `retryAfterMs` is the
+smallest computable remaining bound (ceil, minimum 1 ms), never a default polling
+hint. A live owner/cleanup, identity fence, or timed-out in-flight command makes
+the bound unknown; clock restoration's pending registry is unbounded. No running
+recovery means a non-retryable held marker. No `nextAction` is invented. Skipped
+`canRecover` ticks sleep the same attempt's backoff and recheck all exit conditions;
+only dispatch consumes an attempt. Shutdown's existing session-creation fence
+ends this loop only on a skipped tick. Recovery bookkeeping is deleted when the recovery settles.
 
 The `app-cleanup` reason is set by `executePlan` when a plan's `cleanupAppId` cleanup (terminate / clear data / physical-iOS reinstall) did not complete on a device (`markDeviceNeedsAppCleanup`). Recovery re-runs the cleanup three times (1s/2s/4s backoff) once the device is idle; each retry gets its own deadline (`PLAN_APP_CLEANUP_RETRY_DEADLINE_MS`, the cleanup's 20s cap plus a margin), not the 1s a settings restore gets. Every background recovery scales its deadline by the attempt number (1x, 2x, 3x). A cleanup that can never succeed (for example `pm clear` always refused) has no automatic exit: after the third attempt the marker is held for the device's incarnation, by design. The allocation error then names `app-cleanup` and the exact recovery: `killDevice` with the device's `{ name, deviceId, platform }`, then `startDevice`. A timed-out retry is never overlapped by another: recovery waits for it to settle, clears the marker if it completes late, and otherwise continues with the remaining attempts (#11145).
 

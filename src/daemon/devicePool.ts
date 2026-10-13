@@ -12,6 +12,8 @@ import type { SessionReleaseReason } from "./releaseReasons";
 import type { Environment } from "./poolConfig";
 import {
   DeviceCleanupInProgressError,
+  DeviceUnhealthyError,
+  DEVICE_UNHEALTHY_CODE,
   DeviceOwnedByOtherDaemonError,
   DeviceShuttingDownError,
   freshStartAlreadyBoundError,
@@ -7055,7 +7057,7 @@ export class DevicePool {
     }
   }
 
-  private unhealthyDevicesError(devices: readonly PooledDevice[]): ActionableError {
+  private unhealthyDevicesError(devices: readonly PooledDevice[]): DeviceUnhealthyError {
     const reasons = devices.flatMap((device) => {
       const marker = this.getDeviceHealthMarker(device.id);
       return marker ? [`'${device.id}' (${marker.reason}, since ${marker.since})`] : [];
@@ -7078,13 +7080,48 @@ export class DevicePool {
           "Recovery is retried in the background (three attempts); if it stays held, " +
           `call killDevice with device { name: '${device.name}', deviceId: '${device.id}', platform: '${device.platform}' }, then startDevice to bring up a fresh device.`,
       );
-    return new ActionableError(
+    const evidence = devices.flatMap((device) => {
+      const incarnation = this.getDeviceIncarnation(device.id);
+      if (incarnation === undefined) {
+        return [];
+      }
+      const markers = this.deviceHealthMarkers.list(device.id, incarnation);
+      const oldest = markers[0];
+      if (!oldest) {
+        return [];
+      }
+      const recoveries = markers.map((marker) =>
+        this.sessionManager.getDeviceHealthRecovery(device.id, incarnation, marker.reason),
+      );
+      const recovering = recoveries.every((recovery) => recovery.recovering);
+      const bounds = recoveries.flatMap((recovery) =>
+        recovery.retryAfterMs === undefined ? [] : [recovery.retryAfterMs],
+      );
+      return [
+        {
+          deviceId: device.id,
+          reason: oldest.reason,
+          recovering,
+          ...(recovering && bounds.length === recoveries.length
+            ? { retryAfterMs: Math.max(...bounds) }
+            : {}),
+        },
+      ];
+    });
+    const error = new DeviceUnhealthyError(
+      evidence,
       `Unhealthy devices cannot be assigned: ${reasons.join(", ")}. ` +
         "Session state could not be restored. Retry after restoration succeeds, manually restore the state, " +
         "or use killDevice/startDevice to replace the device. Automatic erase/reboot is not performed." +
         appCleanupRecovery.join("") +
         recordingTeardownRecovery.join(""),
     );
+    error.message += error.recovering
+      ? error.retryAfterMs === undefined
+        ? ` Background recovery is still running with no fixed bound (code ${DEVICE_UNHEALTHY_CODE}); retry later.`
+        : ` Background recovery is still running (code ${DEVICE_UNHEALTHY_CODE}); retry in about ${error.retryAfterMs}ms.`
+      : ` Background recovery has ended and the marker is held until the device is replaced (code ${DEVICE_UNHEALTHY_CODE}).`;
+    return error;
   }
 
   /** Exact-device acquisition honors cleanup and health; live-owner reuse stays valid. */
@@ -9173,6 +9210,7 @@ export class DevicePool {
   ): Promise<void> {
     const { session, deviceId, fromDeviceId } = rebound;
     const { sessionId } = session;
+    const overridesStillRetained = () => cleanup?.retained === true;
     let outcome: "rebound" | "failed" = "failed";
     try {
       const current = this.sessionManager.getSession(sessionId);
@@ -9186,11 +9224,7 @@ export class DevicePool {
       logger.info(
         `[DevicePool] Rebind of session ${sessionId} to ${deviceId} was cancelled before it was delivered; moving it back to ${fromDeviceId}`,
       );
-      const retainedOverrides = await this.cancelAndSettleRebindCleanup(
-        fromDeviceId,
-        sessionId,
-        cleanup,
-      );
+      await this.cancelAndSettleRebindCleanup(fromDeviceId, sessionId, cleanup);
       await runWithAcquisitionReceipt({ rebound, deferredRebindCleanup: cleanup }, () =>
         this.bindOrReuseDeviceSession(
           sessionId,
@@ -9205,8 +9239,9 @@ export class DevicePool {
       // Moving back was a rebind too, and a rebind keeps only the session's routing cache. The
       // session is on the device that cache described again, so it gets back what still describes
       // that device: its display pin, readiness and observation baselines. When undo cancelled
-      // deferred cleanup, all six overrides are still applied and their records come back too.
-      // If the bound already started restores, omit those records to keep the cache honest.
+      // deferred cleanup and its gate is still retained after the bind, all six overrides are
+      // still applied and their records come back too. If either deadline started restores,
+      // including during the awaited bind, omit those records to keep the cache honest.
       // Label routing is session-level, so whatever it is now stays.
       if (
         this.sessionManager.getSession(sessionId) !== session ||
@@ -9220,7 +9255,7 @@ export class DevicePool {
           ? {}
           : { deviceLabels: session.cacheData.deviceLabels }),
       };
-      if (!retainedOverrides) {
+      if (!overridesStillRetained()) {
         for (const override of OVERRIDES_A_REBIND_RESTORES) {
           delete restored[override];
         }
@@ -10941,7 +10976,9 @@ export class DevicePool {
   /**
    * Refuse a generic caller's control of a device a managed slot holds (#11174, #11178), with a
    * fresh registry read: `device_assigned_to_managed_slot`, not retryable. Only the slot's own
-   * live execution session passes; no force flag overrides it.
+   * live execution session passes; no force flag overrides it. On a failed read, a session already
+   * holding the device in this pool passes first; other sessions get retryable discovery failure
+   * when a retained entry refuses them. Plain callers keep the retained fail-closed verdict.
    */
   async assertNotAssignedToManagedSlot(input: {
     action: string;
@@ -10985,21 +11022,25 @@ export class DevicePool {
     input: Parameters<DevicePool["assertNotAssignedToManagedSlot"]>[0],
     error: ManagedSlotDiscoveryIncompleteError,
   ): void {
-    const holder = this.managedSlotExclusion?.holderOf(
-      this.managedRefFor(input.deviceId, input.platform, input.stableIds),
-    );
-    if (holder) {
-      const refusal = this.managedSlotRefusalFor(input);
-      if (refusal) {
-        throw refusal;
-      }
-      return;
-    }
+    // A failed read cannot revoke a device this session already holds, even if the retained
+    // snapshot predates its slot claim. Current successful reads still judge the registry first.
     if (
       input.requesterSessionUuid &&
       this.devices.get(input.deviceId)?.sessionId === input.requesterSessionUuid
     ) {
       return;
+    }
+    const holder = this.managedSlotExclusion?.holderOf(
+      this.managedRefFor(input.deviceId, input.platform, input.stableIds),
+    );
+    if (holder) {
+      const refusal = this.managedSlotRefusalFor(input);
+      if (!refusal) {
+        return;
+      }
+      // A session's retained refusal may name a previous execution; only a current read can
+      // refuse it permanently. Plain callers still fail closed on known managed devices.
+      throw input.requesterSessionUuid ? error : refusal;
     }
     throw error;
   }

@@ -166,6 +166,7 @@ export interface DaemonStateAccess {
     peekTerminalAnswerForEndedSession?(
       sessionId: string,
     ): { release: SessionReleaseSnapshot } | undefined;
+    terminalAnswerForEndedSession?(sessionId: string): unknown;
     getExpiredReleaseSnapshot?(sessionId: string): Promise<SessionReleaseSnapshot | undefined>;
     /** Why a session this daemon released was released; undefined for a never-issued UUID. */
     getReleasedSessionReason?(sessionId: string): Promise<string | undefined>;
@@ -595,6 +596,16 @@ function liveSessionRegistration(
   };
 }
 
+/** Start or join lazy idle expiry before publishing its refusal, without waiting for teardown. */
+function releaseBeforeRegistrationRefusal(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+  refusal: DaemonMethodResult,
+): DaemonMethodResult {
+  manager.terminalAnswerForEndedSession?.(sessionId);
+  return refusal;
+}
+
 async function handleRegisterSession(
   request: DaemonRequest,
   state: DaemonStateAccess,
@@ -631,7 +642,7 @@ async function handleRegisterSession(
   }
   const terminal = await lookupTerminalSessionRegistrationRefusal(manager, sessionId);
   if (terminal) {
-    return terminal;
+    return releaseBeforeRegistrationRefusal(manager, sessionId, terminal);
   }
   // The persisted read yielded: a session issued meanwhile answers as itself, never an observer.
   const issued = liveSessionRegistration(manager, sessionId, clientName);
@@ -643,10 +654,10 @@ async function handleRegisterSession(
     sessionId,
     inMemorySessionRelease(manager, sessionId),
   );
-  return (
-    ended ??
-    observerSessionRegistration(state.getObserverSessionRegistry?.(), sessionId, clientName)
-  );
+  if (ended) {
+    return releaseBeforeRegistrationRefusal(manager, sessionId, ended);
+  }
+  return observerSessionRegistration(state.getObserverSessionRegistry?.(), sessionId, clientName);
 }
 
 /** Register an observer only after synchronous device-session admission has finished. */

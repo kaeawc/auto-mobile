@@ -1496,7 +1496,12 @@ export class DaemonMcpProxy {
   /** Held terminal losses awaiting one platform-only control answer, in loss order (#12090). */
   private readonly pendingHeldSessionPlatformLosses = new Map<
     string,
-    { platform: "android" | "ios"; reason: string; release?: SessionReleaseSnapshot }
+    {
+      platform: "android" | "ios";
+      reason: string;
+      release?: SessionReleaseSnapshot;
+      proxyJudged?: true;
+    }
   >();
   /** Bounded per-session recovery when heartbeat acknowledgements stop (#10053). */
   private readonly livenessRecovery: LivenessRecovery;
@@ -4720,7 +4725,7 @@ export class DaemonMcpProxy {
         signal,
         label: `Daemon tool ${name}`,
       });
-      this.creditRoutedSession(result);
+      this.creditRoutedSession(result, forwardedSessionUuid);
       if (result?.isError) {
         // Provisioning retains its usable device session when optional resource
         // configuration fails. Own that result-minted session before returning
@@ -5072,19 +5077,31 @@ export class DaemonMcpProxy {
     sessionUuid: string,
     reason = "released",
     release?: SessionReleaseSnapshot,
+    proxyJudged?: true,
   ): void {
+    const pending = this.pendingHeldSessionPlatformLosses.get(sessionUuid);
+    if (pending) {
+      pending.reason = reason === "released" ? pending.reason : reason;
+      pending.release = release ?? pending.release;
+      pending.proxyJudged = proxyJudged;
+      return;
+    }
     const platform = this.sessionPlatforms.get(sessionUuid);
     const handedOver = this.stallHandovers.get(sessionUuid);
     if (
       platform === undefined ||
       sessionUuid === this.boundSessionUuid ||
       sessionUuid === this.terminalBoundSession?.sessionUuid ||
-      (!this.otherHeldSessions.has(sessionUuid) && (!handedOver || handedOver.restore.bound)) ||
-      this.pendingHeldSessionPlatformLosses.has(sessionUuid)
+      (!this.otherHeldSessions.has(sessionUuid) && (!handedOver || handedOver.restore.bound))
     ) {
       return;
     }
-    this.pendingHeldSessionPlatformLosses.set(sessionUuid, { platform, reason, release });
+    this.pendingHeldSessionPlatformLosses.set(sessionUuid, {
+      platform,
+      reason,
+      release,
+      proxyJudged,
+    });
   }
 
   private recordHeldSessionNotFoundLoss(sessionUuid: string, outcome: NotFoundAnswerOutcome): void {
@@ -5095,9 +5112,9 @@ export class DaemonMcpProxy {
 
   private clearHeldSessionLossesForSelection(sessionUuid: string, callPlatform?: unknown): void {
     this.pendingHeldSessionPlatformLosses.delete(sessionUuid);
-    this.clearHeldSessionPlatformLosses(this.sessionPlatforms.get(sessionUuid));
-    if (callPlatform === "android" || callPlatform === "ios") {
-      this.clearHeldSessionPlatformLosses(callPlatform);
+    const platform = this.sessionPlatforms.get(sessionUuid) ?? callPlatform;
+    if (platform === "android" || platform === "ios") {
+      this.clearHeldSessionPlatformLosses(platform);
     }
   }
 
@@ -5617,8 +5634,19 @@ export class DaemonMcpProxy {
    * (#11348). A binding declared in a call's args is credited too: it is not heartbeated, but its
    * replay lease follows its use (#4610).
    */
-  private creditRoutedSession(result: unknown): void {
+  private creditRoutedSession(result: unknown, forwardedSessionUuid: string | undefined): void {
     const routed = routedSessionUuidFromResult(result);
+    // A non-terminal answer clears only that session's proxy-judged idle eviction;
+    // daemon-confirmed losses survive. Reads have no routed-use echo, so use their
+    // forwarded UUID without restarting protection.
+    const answeredSessionUuid = routed ?? forwardedSessionUuid;
+    if (
+      answeredSessionUuid !== undefined &&
+      this.pendingHeldSessionPlatformLosses.get(answeredSessionUuid)?.proxyJudged === true &&
+      readTerminalSessionRefusal(result)?.sessionUuid !== answeredSessionUuid
+    ) {
+      this.pendingHeldSessionPlatformLosses.delete(answeredSessionUuid);
+    }
     if (routed !== undefined) {
       this.noteSessionRestoredByCall(routed);
       this.creditSessionUse(routed);
@@ -5684,10 +5712,13 @@ export class DaemonMcpProxy {
    * through noteDaemonIdleEvidence, then the CLI closes without another tool call.
    */
   private retireIdleBinding(sessionUuid: string): void {
-    const reason = this.daemonIdleReports.has(sessionUuid)
+    this.fenceBoundSessionUuid(sessionUuid, this.idleSessionReleaseReason(sessionUuid));
+  }
+
+  private idleSessionReleaseReason(sessionUuid: string): string {
+    return this.daemonIdleReports.has(sessionUuid)
       ? IDLE_WINDOW_RELEASE_REASON
       : REPLAY_LEASE_EXPIRED_REASON;
-    this.fenceBoundSessionUuid(sessionUuid, reason);
   }
 
   private fenceBoundSessionUuid(
@@ -7158,6 +7189,12 @@ export class DaemonMcpProxy {
         logger.info(
           `[DaemonMcpProxy] Held session ${sessionUuid} was not used for ${this.boundSessionReplayTtlMs}ms; no longer heartbeating it`,
         );
+        this.recordHeldSessionTerminalLoss(
+          sessionUuid,
+          this.idleSessionReleaseReason(sessionUuid),
+          undefined,
+          true,
+        );
         this.dropHeldSession(sessionUuid);
       }
     }
@@ -8013,11 +8050,11 @@ export class DaemonMcpProxy {
       this.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
     }
     const platform = getDevicePlatformFromResult(result);
-    if (platform) {
-      this.sessionPlatforms.set(mintedSessionUuid, platform);
-    }
-    this.clearHeldSessionLossesForSelection(mintedSessionUuid);
     if (mintedSessionUuid === this.boundSessionUuid) {
+      if (platform) {
+        this.sessionPlatforms.set(mintedSessionUuid, platform);
+      }
+      this.clearHeldSessionLossesForSelection(mintedSessionUuid);
       return;
     }
     this.rememberSessionDevice(mintedSessionUuid, getDeviceIdFromResult(result));
@@ -8039,6 +8076,10 @@ export class DaemonMcpProxy {
       this.syncHeartbeatKeeper();
       throw new DaemonBoundSessionExpiredError(mintedSessionUuid, releasedWhileStopping);
     }
+    if (platform) {
+      this.sessionPlatforms.set(mintedSessionUuid, platform);
+    }
+    this.clearHeldSessionLossesForSelection(mintedSessionUuid);
     this.terminalBoundSession = undefined;
     this.holdPreviousBinding(mintedSessionUuid);
     this.boundSessionUuid = mintedSessionUuid;

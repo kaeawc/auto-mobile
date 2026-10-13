@@ -37,6 +37,9 @@ export interface ManagedSlotRefreshOptions {
  * Lookups are synchronous against the last snapshot so the pool's hot path stays synchronous;
  * callers refresh first. An unreadable registry keeps the last good snapshot; when none was ever
  * loaded, or requireCurrent is requested, refresh throws {@link ManagedSlotDiscoveryIncompleteError} instead of reporting "free".
+ * On that failed read, DevicePool admits a session already holding its device before consulting
+ * retained entries; retained refusals for other sessions are retryable discovery failures. Plain
+ * callers keep known-device refusals, and reconciler exemptions remain slot-specific.
  */
 export interface ManagedSlotExclusion {
   refresh(options?: ManagedSlotRefreshOptions): Promise<void>;

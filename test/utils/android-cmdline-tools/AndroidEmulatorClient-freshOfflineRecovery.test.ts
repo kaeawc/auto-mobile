@@ -1,11 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { ExecResult } from "../../../src/models";
-import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
-import type {
-  AdbDeviceState,
-  AdbExecutor,
-} from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { AdbDeviceState } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -58,7 +55,7 @@ class FreshOfflineAdbExecutor extends FakeAdbExecutor {
   }
 
   /**
-   * After the first `adb reconnect offline` settles, REJECT exactly one
+   * After the first `adb -s <serial> reconnect` settles, REJECT exactly one
    * subsequent device-state probe (an ADB-server blip during the recovery
    * grace), then resume reporting `offline`. Models a probe gap that must not
    * wipe the one-shot recovery history and let a re-confirmed offline start a
@@ -112,7 +109,7 @@ class FreshOfflineAdbExecutor extends FakeAdbExecutor {
     ) {
       return result("0\n");
     }
-    if (command.includes("reconnect offline")) {
+    if (command.endsWith(" reconnect")) {
       this.reconnectCalls += 1;
       if (this.rejectOnceAfterReconnect) {
         // Fire the probe gap only after the FIRST reconnect.
@@ -135,20 +132,12 @@ class FreshOfflineAdbExecutor extends FakeAdbExecutor {
   }
 }
 
-class FreshOfflineAdbFactory implements AdbClientFactory {
-  constructor(private readonly adb: AdbExecutor) {}
-
-  create(): AdbExecutor {
-    return this.adb;
-  }
-}
-
 function clientWith(adb: FreshOfflineAdbExecutor, timer: FakeTimer): AndroidEmulatorClient {
   return new AndroidEmulatorClient(
     async () => result(),
     null,
     timer,
-    new FreshOfflineAdbFactory(adb),
+    new FakeAdbClientFactory(adb),
   );
 }
 
@@ -180,7 +169,7 @@ describe("Android emulator fresh-provision offline recovery", () => {
     }
   });
 
-  test("recovers a fresh AVD when 'adb reconnect offline' brings the serial online", async () => {
+  test("recovers a fresh AVD when 'adb -s <serial> reconnect' brings the serial online", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const adb = new FreshOfflineAdbExecutor();
@@ -201,6 +190,37 @@ describe("Android emulator fresh-provision offline recovery", () => {
     expect(device.deviceId).toBe("emulator-5554");
     expect(adb.reconnectCalls).toBeGreaterThanOrEqual(1);
     expect(timer.now()).toBeLessThan(120_000);
+  });
+
+  test("reconnects only the fresh target while a foreign serial is also offline", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const adb = new FreshOfflineAdbExecutor();
+    adb.setDeviceStates([
+      { deviceId: "emulator-5554", state: "offline" },
+      { deviceId: "emulator-5556", state: "offline" },
+    ]);
+    adb.setDevices([]);
+    configureReadyProbes(adb);
+    await expect(
+      clientWith(adb, timer).waitForEmulatorReady(
+        "Pixel_9_Pro",
+        30_000,
+        null,
+        "emulator-5556",
+        undefined,
+        { freshProvision: true },
+      ),
+    ).rejects.toThrow("state=offline");
+    expect(
+      adb.getExecutedArgv().filter((argv) => argv.some((arg) => arg.includes("reconnect"))),
+    ).toEqual([["-s", "emulator-5556", "reconnect"]]);
+    const reconnects = adb.getCommandCalls().filter((call) => call.command.includes("reconnect"));
+    expect(reconnects).toHaveLength(1);
+    expect(reconnects[0]?.noRetry).toBe(true);
+    expect(adb.getExecutedCommands().some((command) => command.includes("reconnect offline"))).toBe(
+      false,
+    );
   });
 
   test("allows a fresh AVD to leave ADB-offline after more than 20 seconds", async () => {
@@ -245,7 +265,7 @@ describe("Android emulator fresh-provision offline recovery", () => {
     );
 
     await expect(readiness).rejects.toThrow("state=offline");
-    await expect(readiness).rejects.not.toThrow("adb reconnect offline");
+    await expect(readiness).rejects.not.toThrow("adb -s emulator-5554 reconnect");
     await readiness.catch(() => undefined);
     expect(adb.reconnectCalls).toBe(1);
     expect(timer.now()).toBeGreaterThanOrEqual(30_000);
@@ -295,7 +315,7 @@ describe("Android emulator fresh-provision offline recovery", () => {
     );
 
     await expect(readiness).rejects.toThrow("target=emulator-5554; state=offline");
-    await expect(readiness).rejects.not.toThrow("adb reconnect offline");
+    await expect(readiness).rejects.not.toThrow("adb -s emulator-5554 reconnect");
     await readiness.catch(() => undefined);
     expect(adb.reconnectCalls).toBe(0);
     expect(timer.now()).toBeGreaterThanOrEqual(1_250);
@@ -330,7 +350,7 @@ describe("Android emulator fresh-provision offline recovery", () => {
 
     await expect(readiness).rejects.toThrow();
     // A run of failed probes must never satisfy the offline-failure threshold.
-    await expect(readiness).rejects.not.toThrow("adb reconnect offline");
+    await expect(readiness).rejects.not.toThrow("adb -s emulator-5554 reconnect");
     await readiness.catch(() => undefined);
     expect(adb.reconnectCalls).toBe(0);
   });
@@ -361,14 +381,20 @@ describe("Android emulator fresh-provision offline recovery", () => {
 
     const reconnectCalls = adb
       .getCommandCalls()
-      .filter((call) => call.command.includes("reconnect offline"));
+      .filter((call) => call.command.endsWith(" reconnect"));
     expect(reconnectCalls).toHaveLength(1);
     expect(reconnectCalls[0]?.noRetry).toBe(true);
+    expect(adb.getExecutedArgv().filter((argv) => argv.includes("reconnect"))).toEqual([
+      ["-s", "emulator-5554", "reconnect"],
+    ]);
+    expect(adb.getExecutedCommands().some((command) => command.includes("reconnect offline"))).toBe(
+      false,
+    );
   });
 
   test("a probe gap after the first reconnect does NOT resurrect a second reconnect", async () => {
     // REGRESSION (#7054): the round-2 clearOfflineTracker() also wiped
-    // recoveryAttempted/recoveryAt. So once the first `adb reconnect offline`
+    // recoveryAttempted/recoveryAt. So once the first `adb -s <serial> reconnect`
     // was dispatched, a probe that rejects/omits the target and then re-reports
     // offline was treated as a brand-new offline episode: it restarted the 15s
     // threshold and issued a SECOND reconnect, breaking the one-shot-recovery-
@@ -396,7 +422,7 @@ describe("Android emulator fresh-provision offline recovery", () => {
     );
 
     await expect(readiness).rejects.toThrow("state=offline");
-    await expect(readiness).rejects.not.toThrow("adb reconnect offline");
+    await expect(readiness).rejects.not.toThrow("adb -s emulator-5554 reconnect");
     await readiness.catch(() => undefined);
     // Exactly one reconnect per readiness invocation, despite the probe gap.
     expect(adb.reconnectCalls).toBe(1);
@@ -419,7 +445,7 @@ describe("Android emulator fresh-provision offline recovery", () => {
     );
 
     await expect(readiness).rejects.toThrow("target=emulator-5554; state=offline");
-    await expect(readiness).rejects.not.toThrow("adb reconnect offline");
+    await expect(readiness).rejects.not.toThrow("adb -s emulator-5554 reconnect");
     await readiness.catch(() => undefined);
     expect(adb.reconnectCalls).toBe(0);
   });

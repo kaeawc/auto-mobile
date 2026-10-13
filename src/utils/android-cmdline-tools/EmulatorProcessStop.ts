@@ -33,7 +33,7 @@ export type EmulatorProcessIdentity =
   | { kind: "unreadable"; detail: string };
 export type EmulatorProcessStopOutcome =
   | { kind: "stopped"; pid: number; signal: "SIGTERM" | "SIGKILL" }
-  | { kind: "still-running"; pid: number; command: string }
+  | { kind: "still-running"; pid: number; command: string; signalled: boolean }
   | { kind: "identity-mismatch"; pid: number; runningAvdName: string }
   | {
       kind: "unidentified";
@@ -47,6 +47,7 @@ export interface EmulatorProcessStopper {
 }
 
 export const EMULATOR_TERM_GRACE_MS = 15_000;
+export const EMULATOR_MIN_TERM_GRACE_MS = 5_000;
 export const EMULATOR_KILL_WAIT_MS = 1_000;
 export const EMULATOR_STOP_RESULT_MARGIN_MS = 2_000;
 const EXIT_BACKOFF = exponentialBackoff({ initialDelayMs: 50, maxDelayMs: 500 });
@@ -65,7 +66,11 @@ export function isSignalableEmulatorQemuProcess(
 ): boolean {
   const executable = row.command.split(" -")[0] ?? "";
   const name = executable.slice(executable.lastIndexOf("/") + 1).trim();
-  return name.startsWith("qemu-system-");
+  return (
+    (executable.startsWith("/") || !/\s/.test(executable)) &&
+    !executable.includes(" /") &&
+    name.startsWith("qemu-system-")
+  );
 }
 
 export function isSafeEmulatorProcessPid(pid: number, ownPid = process.pid): boolean {
@@ -227,10 +232,11 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
     }
     options.signal?.throwIfAborted();
     if (this.timer.now() >= options.deadlineMs) {
-      return this.stillRunning(identity);
+      return this.stillRunning(identity, false);
     }
     // Between the ps snapshot and kill(2), a pid can exit and be reused. macOS has no
     // pidfd to close that window; send TERM immediately after the one table read.
+    const termSentAt = this.timer.now();
     const term = this.send(identity, "SIGTERM");
     if (term) {
       return term;
@@ -245,6 +251,12 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
     );
     if (exited) {
       return { kind: "stopped", pid: identity.pid, signal: "SIGTERM" };
+    }
+    if (this.timer.now() - termSentAt < EMULATOR_MIN_TERM_GRACE_MS) {
+      logger.warn(
+        `[EmulatorProcessStop] SIGKILL withheld for pid ${identity.pid}: SIGTERM grace was shorter than ${EMULATOR_MIN_TERM_GRACE_MS}ms`,
+      );
+      return this.stillRunning(identity);
     }
     return this.escalate(target, identity, stopOptions);
   }
@@ -299,8 +311,8 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
     return false;
   }
 
-  private stillRunning(identity: Candidate): EmulatorProcessStopOutcome {
-    return { kind: "still-running", pid: identity.pid, command: identity.command };
+  private stillRunning(identity: Candidate, signalled = true): EmulatorProcessStopOutcome {
+    return { kind: "still-running", pid: identity.pid, command: identity.command, signalled };
   }
 
   private send(
@@ -324,7 +336,7 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
         `[EmulatorProcessStop] ${signal} failed for pid ${identity.pid}: ${errorMessage(error)}`,
         error,
       );
-      return this.stillRunning(identity);
+      return this.stillRunning(identity, signal === "SIGKILL");
     }
     return undefined;
   }

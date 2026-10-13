@@ -3,6 +3,9 @@ import { readFileSync } from "node:fs";
 import { parsePsSnapshot } from "../../../src/features/iosSimFleet/psSnapshot";
 import {
   EMULATOR_TERM_GRACE_MS,
+  EMULATOR_MIN_TERM_GRACE_MS,
+  EMULATOR_KILL_WAIT_MS,
+  EMULATOR_STOP_RESULT_MARGIN_MS,
   ProcessTableEmulatorProcessStopper,
 } from "../../../src/utils/android-cmdline-tools/EmulatorProcessStop";
 import {
@@ -235,13 +238,13 @@ for (const change of ["reused", "gone", "unreadable"]) {
 test("survives KILL until a clipped deadline and reports pid and command", async () => {
   const f = fixture();
   f.signaler.exitOn = undefined;
-  expect(await f.stopper.stop(target, { deadlineMs: 5500 })).toMatchObject({
+  expect(await f.stopper.stop(target, { deadlineMs: 8500 })).toMatchObject({
     kind: "still-running",
     pid: 75134,
     command: rows[0].command,
   });
-  expect(f.timer.now()).toBe(3500);
-  expect(f.timer.getSleepHistory().reduce((a, b) => a + b, 0)).toBe(3500);
+  expect(f.timer.now()).toBe(6500);
+  expect(f.timer.getSleepHistory().reduce((a, b) => a + b, 0)).toBe(6500);
   expect(f.signaler.signals).toHaveLength(2);
 });
 
@@ -277,6 +280,11 @@ test("caller abort propagates unchanged before reading and during a pending read
 });
 
 for (const command of [
+  "sudo /sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64 -avd Pixel -port 5556",
+  "env FOO=1 /sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64 -avd Pixel -port 5556",
+  "grep /sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64 -avd Pixel -port 5556",
+  "tail /tmp/qemu/x/qemu-system-log -avd Pixel -port 5556",
+  "/usr/bin/sudo /sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64 -avd Pixel -port 5556",
   "sh -c /sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64 -avd Pixel -port 5556",
   "grep -- /sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64 -avd Pixel -port 5556",
   "tail -f /tmp/qemu/x/qemu-system-log -avd Pixel -port 5556",
@@ -383,4 +391,108 @@ test("an escalation read exhausting the wait budget leaves TERM sent and logs th
   } finally {
     warn.mockRestore();
   }
+});
+
+test("derived captured SDK path with spaces remains signalable", async () => {
+  const f = fixture();
+  // Derived from the captured row: only the SDK owner's directory changes.
+  f.table.rows = rows.map((row) => ({
+    ...row,
+    command: row.command.replace("/Users/dev/", "/Users/My Name/"),
+  }));
+  expect(await f.stopper.identify(target, f.options)).toMatchObject({ kind: "match", pid: 75134 });
+  expect(await f.stopper.stop(target, f.options)).toMatchObject({
+    kind: "stopped",
+    signal: "SIGTERM",
+  });
+});
+
+for (const deadlineMs of [2500, 3500]) {
+  test(`withholds KILL without minimum TERM grace at ${deadlineMs}ms`, async () => {
+    const f = fixture();
+    f.signaler.exitOn = undefined;
+    const warn = spyOn(logger, "warn");
+    try {
+      expect(await f.stopper.stop(target, { deadlineMs })).toMatchObject({
+        kind: "still-running",
+        signalled: true,
+      });
+      expect(f.signaler.signals).toEqual([{ pid: 75134, signal: "SIGTERM" }]);
+      expect(f.timer.now()).toBe(Math.max(0, deadlineMs - 3000));
+      expect(f.table.calls).toHaveLength(1);
+      expect(
+        warn.mock.calls.some(([message]) => String(message).includes("SIGKILL withheld")),
+      ).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+}
+
+test("EPERM from TERM reports no delivered signal", async () => {
+  const f = fixture();
+  f.signaler.errorCode = "EPERM";
+  expect(await f.stopper.stop(target, f.options)).toMatchObject({
+    kind: "still-running",
+    signalled: false,
+  });
+  expect(f.signaler.signals).toEqual([{ pid: 75134, signal: "SIGTERM" }]);
+  expect(f.signaler.deliveredSignals).toEqual([]);
+});
+
+test("identity read spending the caller deadline reports no delivered signal", async () => {
+  const f = fixture();
+  const identify = f.stopper.identify.bind(f.stopper);
+  f.stopper.identify = async (target, options) => {
+    const identity = await identify(target, options);
+    f.timer.setCurrentTime(f.options.deadlineMs);
+    return identity;
+  };
+  expect(await f.stopper.stop(target, f.options)).toMatchObject({
+    kind: "still-running",
+    signalled: false,
+  });
+  expect(f.signaler.signals).toEqual([]);
+});
+
+test("exact minimum TERM grace plus kill wait and margin permits KILL", async () => {
+  const f = fixture();
+  f.signaler.exitOn = "SIGKILL";
+  const signal = f.signaler.signal.bind(f.signaler);
+  const signalTimes: number[] = [];
+  f.signaler.signal = (pid, kind) => {
+    signalTimes.push(f.timer.now());
+    if (kind === "SIGKILL") {
+      expect(f.table.calls).toHaveLength(2);
+    }
+    signal(pid, kind);
+  };
+  expect(
+    await f.stopper.stop(target, {
+      deadlineMs:
+        EMULATOR_MIN_TERM_GRACE_MS + EMULATOR_KILL_WAIT_MS + EMULATOR_STOP_RESULT_MARGIN_MS,
+    }),
+  ).toMatchObject({ kind: "stopped", signal: "SIGKILL" });
+  expect(signalTimes).toEqual([0, EMULATOR_MIN_TERM_GRACE_MS]);
+  expect(f.signaler.signals).toEqual([
+    { pid: 75134, signal: "SIGTERM" },
+    { pid: 75134, signal: "SIGKILL" },
+  ]);
+});
+
+test("failed KILL retains the successful TERM dispatch", async () => {
+  const f = fixture();
+  f.signaler.exitOn = undefined;
+  const signal = f.signaler.signal.bind(f.signaler);
+  f.signaler.signal = (pid, kind) => {
+    if (kind === "SIGKILL") {
+      f.signaler.errorCode = "EPERM";
+    }
+    signal(pid, kind);
+  };
+  expect(await f.stopper.stop(target, f.options)).toMatchObject({
+    kind: "still-running",
+    signalled: true,
+  });
+  expect(f.signaler.signals).toHaveLength(2);
 });

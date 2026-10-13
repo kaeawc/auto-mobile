@@ -4240,6 +4240,11 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
           `Emulator '${device.deviceId}' identity changed before termination; refusing to kill its replacement (AVD '${outcome.runningAvdName}').`,
         );
       case "still-running":
+        if (!outcome.signalled) {
+          throw new ActionableError(
+            `Emulator '${device.deviceId}' (AVD '${avdName}') is still running with pid ${outcome.pid}; no signal could be delivered (deadline spent or signal refused: permission denied or unsafe pid). ${emulatorProcessEscapeHint(device.deviceId, [{ pid: outcome.pid, command: outcome.command }])}`,
+          );
+        }
         throw new EmulatorStillRunningError(outcome.pid, device.deviceId, avdName, outcome.command);
       case "unidentified":
         throw await this.processStopRefusal(device, options, refusal, outcome.identity);

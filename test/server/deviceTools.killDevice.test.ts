@@ -63,7 +63,6 @@ import { InMemoryEmulatorConsoleBusyRegistry } from "../../src/utils/android-cmd
 import { AdbCommandTimeoutError } from "../../src/utils/android-cmdline-tools/AdbClient";
 import type { AdbExecuteOptions } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { raceWithDeadline } from "../../src/utils/raceWithDeadline";
-import { createExecResult } from "../../src/utils/execResult";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";

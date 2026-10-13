@@ -141,6 +141,7 @@ test("still-running outcome exposes a typed error with pid, serial and AVD", asy
   const f = processFallbackFixture();
   f.stopper.outcome = {
     kind: "still-running",
+    signalled: true,
     pid: 83205,
     command: "qemu-system-aarch64 -avd Pixel_8 -port 5554",
   };
@@ -646,7 +647,7 @@ test("a kill asks for the adb states in the mode that rejects a missing adb exec
   expect((failure as Error).message).not.toContain("is not running");
 });
 
-for (const timeoutMs of [30_000, 6000]) {
+for (const timeoutMs of [30_000, 12_000]) {
   test(`hung console returns a typed process outcome before the ${timeoutMs}ms deadline`, async () => {
     const f = processFallbackFixture();
     const table = new FakeEmulatorProcessTableSource();
@@ -723,4 +724,32 @@ for (const identity of [
     expect(emuKillArgv(f.adb)).toEqual([]);
     expect(f.stopper.describeCalls).toEqual([]);
   });
+}
+
+for (const signalled of [false, true]) {
+  for (const consoleDispatched of [false, true]) {
+    test(`still-running signalled=${signalled}, consoleDispatched=${consoleDispatched} preserves dispatch classification`, async () => {
+      const f = processFallbackFixture(
+        consoleDispatched ? original.name : "Unknown (emulator-5554)",
+      );
+      f.stopper.outcome = {
+        kind: "still-running",
+        signalled,
+        pid: 83205,
+        command: "qemu-system-aarch64 -avd Pixel_8 -port 5554",
+      };
+      const result = await f.client.killDevice(original, f.options).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(isEmulatorStopDispatchedError(result)).toBe(signalled || consoleDispatched);
+      expect((result as Error).message).toContain("83205");
+      expect((result as Error).message).toContain("-avd Pixel_8 -port 5554");
+      if (!signalled) {
+        expect((result as Error).message).toContain("no signal could be delivered");
+        expect((result as Error).message).toMatch(/deadline spent|permission denied/);
+      }
+      expect(emuKillArgv(f.adb)).toHaveLength(consoleDispatched ? 1 : 0);
+    });
+  }
 }

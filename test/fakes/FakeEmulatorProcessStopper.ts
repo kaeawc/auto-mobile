@@ -61,6 +61,7 @@ export class FakeEmulatorProcessTableSource implements EmulatorProcessTableSourc
 
 export class FakeEmulatorProcessSignaler implements EmulatorProcessSignaler {
   readonly signals: { pid: number; signal: "SIGTERM" | "SIGKILL" }[] = [];
+  readonly deliveredSignals: { pid: number; signal: "SIGTERM" | "SIGKILL" }[] = [];
   readonly probes: number[] = [];
   running = true;
   exitOn: "SIGTERM" | "SIGKILL" | undefined = "SIGTERM";
@@ -70,6 +71,7 @@ export class FakeEmulatorProcessSignaler implements EmulatorProcessSignaler {
     if (this.errorCode) {
       throw Object.assign(new Error(this.errorCode), { code: this.errorCode });
     }
+    this.deliveredSignals.push({ pid, signal });
     if (signal === this.exitOn) {
       this.running = false;
     }

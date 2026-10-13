@@ -1,17 +1,22 @@
-import { expect, spyOn, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { RegistryRetryPacing } from "../../../src/daemon/managedSlots/registryRetryPacing";
 import { logger } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { drainMicrotasks, drainUntil } from "../../helpers/fakeTimerStepping";
 
+const pacers: RegistryRetryPacing[] = [];
+afterEach(() => {
+  for (const pacing of pacers.splice(0)) {
+    pacing.close();
+  }
+});
+
 function harness(policy?: { delayForAttempt(attempt: number): number }, timer = new FakeTimer()) {
   const pacing = new RegistryRetryPacing({
     timer,
-    initialDelayMs: 25,
-    maxDelayMs: 1_000,
-    maxBlockedWaitMs: 5_000,
     backoff: policy,
   });
+  pacers.push(pacing);
   return { timer, pacing };
 }
 
@@ -263,9 +268,10 @@ test("a newly extended quiet period releases queued ordinary turns for an expedi
       description: "expedited turn bypassing the ordinary waiter's new quiet period",
     });
     expect(calls).toEqual(["active", "urgent"]);
-    expect(timer.getPendingTimeouts()).toEqual([300]);
+    expect(timer.getPendingTimeouts()).toEqual([]); // No quiet timer while urgent owns the turn.
     urgentGate.resolve(true);
     await urgent;
+    expect(timer.getPendingTimeouts()).toEqual([300]);
     timer.advanceTime(299);
     await drainMicrotasks(30);
     expect(calls).toEqual(["active", "urgent"]);
@@ -402,3 +408,446 @@ test.each(["queued", "quiet", "active"] as const)(
     expect(timer.getPendingTimeoutCount()).toBe(0);
   },
 );
+
+for (const blocked of [300, 6_000]) {
+  test(`noteBlocked shares inline quiet time capped at 5 s: ${blocked} ms`, async () => {
+    const { timer, pacing: a } = harness();
+    const { pacing: b } = harness(undefined, timer);
+    let started = false;
+    let next: Promise<boolean> | undefined;
+    try {
+      timer.setCurrentTime(blocked);
+      a.noteBlocked(0);
+      next = b.run(
+        async () => {
+          started = true;
+          return true;
+        },
+        (r) => r,
+      );
+      await drainMicrotasks(30);
+      expect(started).toBe(false);
+      timer.advanceTime(Math.min(blocked, 5_000) - 1);
+      await drainMicrotasks(30);
+      expect(started).toBe(false);
+      timer.advanceTime(1);
+      expect(await next).toBe(true);
+      a.close();
+      timer.setCurrentTime(timer.now() + blocked);
+      a.noteBlocked(timer.now() - blocked);
+      expect(
+        await b.run(
+          async () => true,
+          (r) => r,
+        ),
+      ).toBe(true);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      a.close();
+      b.close();
+      await Promise.allSettled(next ? [next] : []);
+    }
+  });
+}
+
+test("timer-only options use the shared schedule and blocked wait cap", async () => {
+  const timer = new FakeTimer();
+  const pacing = new RegistryRetryPacing({ timer });
+  pacers.push(pacing);
+  expect([1, 2, 3, 4, 5, 6, 7, 50].map((n) => pacing.delay(n))).toEqual([
+    25, 50, 100, 200, 400, 800, 1_000, 1_000,
+  ]);
+  await pacing.run(
+    async () => {
+      timer.setCurrentTime(6_000);
+      return false;
+    },
+    (r) => r,
+  );
+  let started = false;
+  const next = pacing.run(
+    async () => {
+      started = true;
+      return true;
+    },
+    (r) => r,
+  );
+  try {
+    timer.advanceTime(4_999);
+    await drainMicrotasks(30);
+    expect(started).toBe(false);
+    timer.advanceTime(1);
+    await next;
+    expect(timer.now()).toBe(11_000);
+  } finally {
+    pacing.close();
+    await Promise.allSettled([next]);
+  }
+});
+
+test("a queued waiter keeps its place when a retry wakes in the quiet-end step", async () => {
+  const { timer, pacing: a } = harness();
+  const { pacing: b } = harness(undefined, timer);
+  const gate = Promise.withResolvers<boolean>();
+  const calls: string[] = [];
+  const first = a.run(
+    () => gate.promise,
+    (r) => r,
+  );
+  const queued = b.run(
+    async () => {
+      calls.push("B");
+      return true;
+    },
+    (r) => r,
+  );
+  let retry: Promise<boolean> | undefined;
+  try {
+    await drainMicrotasks(30);
+    timer.advanceTime(300);
+    gate.resolve(false);
+    await first;
+    await drainMicrotasks(30); // B is parked on the quiet period before A's retry is armed.
+    retry = a.wait(50).then(() =>
+      a.run(
+        async () => {
+          calls.push("A retry");
+          return true;
+        },
+        (r) => r,
+      ),
+    );
+    // The backoff fires before quiet ends, but its continuation runs in the same step.
+    timer.advanceTime(300);
+    await Promise.all([queued, retry]);
+    expect(calls).toEqual(["B", "A retry"]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  } finally {
+    a.close();
+    b.close();
+    gate.resolve(false);
+    await Promise.allSettled([first, queued, ...(retry ? [retry] : [])]);
+  }
+});
+
+test("an expedite passes two quiet-blocked waiters who retain their original order", async () => {
+  const { timer, pacing } = harness();
+  timer.setCurrentTime(300);
+  pacing.noteBlocked(0);
+  const calls: string[] = [];
+  const run = (name: string, expedited?: AbortSignal) =>
+    pacing.run(
+      async () => {
+        calls.push(name);
+        return true;
+      },
+      (r) => r,
+      undefined,
+      expedited,
+    );
+  const first = run("first");
+  const second = run("second");
+  const expedite = new AbortController();
+  const urgent = run("urgent", expedite.signal);
+  try {
+    expect(timer.getPendingTimeoutCount()).toBe(1);
+    expedite.abort();
+    await urgent;
+    expect(calls).toEqual(["urgent"]);
+    expect(timer.getPendingTimeoutCount()).toBe(1);
+    timer.advanceTime(300);
+    await Promise.all([first, second]);
+    expect(calls).toEqual(["urgent", "first", "second"]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  } finally {
+    pacing.close();
+    await Promise.allSettled([first, second, urgent]);
+  }
+});
+
+test.each(["close", "stopped"] as const)(
+  "%s removes a quiet queued waiter without disturbing its successor",
+  async (cancel) => {
+    const { timer, pacing: a } = harness();
+    const { pacing: b } = harness(undefined, timer);
+    timer.setCurrentTime(300);
+    a.noteBlocked(0);
+    const stop = new AbortController();
+    const reason = new Error("episode stopped");
+    const calls: string[] = [];
+    const cancelled = a.run(
+      async () => {
+        calls.push("cancelled");
+        return true;
+      },
+      (r) => r,
+      stop.signal,
+    );
+    const observed = cancelled.catch((error: unknown) => error);
+    const next = b.run(
+      async () => {
+        calls.push("next");
+        return true;
+      },
+      (r) => r,
+    );
+    try {
+      if (cancel === "close") {
+        a.close();
+      } else {
+        stop.abort(reason);
+      }
+      if (cancel === "close") {
+        expect(await observed).toBeInstanceOf(DOMException);
+      } else {
+        expect(await observed).toBe(reason);
+      }
+      expect(timer.getPendingTimeoutCount()).toBe(1);
+      timer.advanceTime(300);
+      expect(await next).toBe(true);
+      expect(calls).toEqual(["next"]);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      a.close();
+      b.close();
+      await Promise.allSettled([cancelled, next]);
+    }
+  },
+);
+
+test.each(["close", "stopped"] as const)(
+  "%s after grant but before operation start releases the turn",
+  async (cancel) => {
+    const { timer, pacing: a } = harness();
+    const { pacing: b } = harness(undefined, timer);
+    const stop = new AbortController();
+    const calls: string[] = [];
+    const cancelled = a.run(
+      async () => {
+        calls.push("cancelled");
+        return true;
+      },
+      (r) => r,
+      stop.signal,
+    );
+    const observed = cancelled.catch(() => false);
+    const next = b.run(
+      async () => {
+        calls.push("next");
+        return true;
+      },
+      (r) => r,
+    );
+    if (cancel === "close") {
+      a.close();
+    } else {
+      stop.abort();
+    }
+    expect(await observed).toBe(false);
+    expect(await next).toBe(true);
+    expect(calls).toEqual(["next"]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  },
+);
+
+test("extending quiet time re-arms one shared timer for all queued waiters", async () => {
+  const { timer, pacing: a } = harness();
+  const { pacing: b } = harness(undefined, timer);
+  timer.setCurrentTime(300);
+  a.noteBlocked(0); // Quiet ends at 600.
+  const calls: number[] = [];
+  const operation = async () => {
+    calls.push(timer.now());
+    return true;
+  };
+  const first = a.run(operation, (r) => r);
+  const second = b.run(operation, (r) => r);
+  try {
+    expect(timer.getPendingTimeoutCount()).toBe(1);
+    timer.advanceTime(100);
+    b.noteBlocked(0); // Quiet now ends at 800, not 600.
+    expect(timer.getPendingTimeouts()).toEqual([400]);
+    timer.advanceTime(200);
+    await drainMicrotasks(30);
+    expect(calls).toEqual([]);
+    expect(timer.getPendingTimeoutCount()).toBe(1);
+    timer.advanceTime(199);
+    await drainMicrotasks(30);
+    expect(calls).toEqual([]);
+    timer.advanceTime(1);
+    await Promise.all([first, second]);
+    expect(calls).toEqual([800, 800]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  } finally {
+    a.close();
+    b.close();
+    await Promise.allSettled([first, second]);
+  }
+});
+
+for (const failure of ["arm", "rearm", "clear"] as const) {
+  test(`a shared quiet timer ${failure} failure rejects only quiet-dependent waiters`, async () => {
+    const { timer, pacing: a } = harness();
+    const { pacing: b } = harness(undefined, timer);
+    const error = new Error("shared quiet timer failed");
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    timer.setCurrentTime(300);
+    a.noteBlocked(0);
+    const calls: string[] = [];
+    const run = (name: string, expedited?: AbortSignal) =>
+      b.run(
+        async () => {
+          calls.push(name);
+          return true;
+        },
+        (r) => r,
+        undefined,
+        expedited,
+      );
+    let timerSpy: ReturnType<typeof spyOn> | undefined;
+    const results: Array<Promise<unknown>> = [];
+    try {
+      if (failure === "arm") {
+        timerSpy = spyOn(timer, "setTimeout").mockImplementation(() => {
+          throw error;
+        });
+      }
+      const first = run("first").catch((caught: unknown) => caught);
+      const second = run("second").catch((caught: unknown) => caught);
+      results.push(first, second);
+      if (failure !== "arm") {
+        timerSpy =
+          failure === "clear"
+            ? spyOn(timer, "clearTimeout").mockImplementation((handle) => {
+                // Model a timer that clears its resource but then reports failure.
+                timerSpy?.mockRestore();
+                timer.clearTimeout(handle);
+                throw error;
+              })
+            : spyOn(timer, "setTimeout").mockImplementation(() => {
+                throw error;
+              });
+        timer.advanceTime(100);
+        expect(() => a.noteBlocked(0)).not.toThrow();
+      }
+      expect(await first).toBe(error);
+      expect(await second).toBe(error);
+      expect(calls).toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(failure === "arm" ? 2 : 1);
+      timerSpy?.mockRestore();
+      const expedite = new AbortController();
+      expedite.abort();
+      expect(await run("urgent", expedite.signal)).toBe(true);
+      timer.advanceTime(1_000);
+      expect(await run("later")).toBe(true);
+      expect(calls).toEqual(["urgent", "later"]);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      timerSpy?.mockRestore();
+      a.close();
+      b.close();
+      await Promise.allSettled(results);
+      warn.mockRestore();
+    }
+  });
+}
+
+for (const trigger of ["wake", "cancel", "callback", "eligible"] as const) {
+  test(`a quiet timer failure from ${trigger} cannot escape or strand an eligible turn`, async () => {
+    const { timer, pacing } = harness();
+    const error = new Error("quiet timer event failed");
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const stop = new AbortController();
+    const expedite = new AbortController();
+    const gate = Promise.withResolvers<boolean>();
+    timer.setCurrentTime(300);
+    pacing.noteBlocked(0);
+    const calls: string[] = [];
+    const quiet = pacing
+      .run(
+        async () => {
+          calls.push("quiet");
+          return true;
+        },
+        (r) => r,
+        stop.signal,
+      )
+      .catch((caught: unknown) => caught);
+    let urgent: Promise<boolean> | undefined;
+    let spy: ReturnType<typeof spyOn> | undefined;
+    try {
+      if (trigger === "callback") {
+        spy = spyOn(timer, "setTimeout").mockImplementation(() => {
+          throw error;
+        });
+        timer.stepWallClock(-100); // The callback must re-arm because quiet time has not ended.
+        expect(() => timer.advanceTime(300)).not.toThrow();
+        expect(await quiet).toBe(error);
+      } else {
+        // Leave the old timer pending: a failing clear must not let its stale callback reschedule.
+        spy = spyOn(timer, "clearTimeout").mockImplementation(() => {
+          throw error;
+        });
+        if (trigger === "cancel") {
+          expect(() => stop.abort(error)).not.toThrow();
+          expect(await quiet).toBe(error);
+        } else {
+          if (trigger === "eligible") {
+            timer.setCurrentTime(600); // Quiet ended; clearing its old timer still fails.
+          }
+          urgent = pacing.run(
+            () => {
+              calls.push("urgent");
+              return gate.promise;
+            },
+            (r) => r,
+            undefined,
+            expedite.signal,
+          );
+          if (trigger === "wake") {
+            expect(() => expedite.abort()).not.toThrow();
+            expect(await quiet).toBe(error);
+          } else {
+            expect(await quiet).toBe(true);
+          }
+          await drainUntil(() => calls.includes("urgent"), {
+            description: "eligible turn after timer failure",
+          });
+          expect(calls).toEqual(trigger === "wake" ? ["urgent"] : ["quiet", "urgent"]);
+        }
+      }
+      spy.mockRestore();
+      expect(warn.mock.calls).toEqual([
+        [expect.stringContaining("Registry retry quiet timer failed"), error],
+      ]);
+      let successorStarted = false;
+      const successor = pacing.run(
+        async () => {
+          successorStarted = true;
+          return true;
+        },
+        (r) => r,
+      );
+      await drainMicrotasks(30);
+      if (urgent) {
+        expect(successorStarted).toBe(false); // The granted operation still owns the turn.
+      }
+      timer.advanceTime(300); // Consume any callback left behind by the failed clear.
+      await drainMicrotasks(30);
+      if (urgent) {
+        expect(successorStarted).toBe(false);
+      }
+      gate.resolve(true);
+      await urgent;
+      expect(await successor).toBe(true);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      spy?.mockRestore();
+      pacing.close();
+      gate.resolve(true);
+      await Promise.allSettled([quiet, ...(urgent ? [urgent] : [])]);
+      warn.mockRestore();
+    }
+  });
+}

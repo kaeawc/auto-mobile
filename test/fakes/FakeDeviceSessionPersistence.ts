@@ -1,3 +1,4 @@
+import { ignoresManagedExecutionIdleDeadline } from "../../src/daemon/managedExecutionLiveness";
 import {
   isReissuableByNameReleaseReason,
   isTerminalReleaseReason,
@@ -16,6 +17,7 @@ import {
   type DeviceSessionRecord,
   type MarkReleasedOptions,
   persistedSessionExpiryReason,
+  isRecoverableDeviceSession,
   type RecoverableRowIncarnation,
   type UpsertActiveSessionOptions,
 } from "../../src/db/deviceSessionRepository";
@@ -188,7 +190,8 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
         (row) =>
           row.release_reason &&
           isRecoverableDaemonReleaseReason(row.release_reason) &&
-          (nowMs === undefined || !persistedSessionExpiryReason(row, nowMs)),
+          (nowMs === undefined ||
+            (isRecoverableDeviceSession(row, nowMs) && !persistedSessionExpiryReason(row, nowMs))),
       )
       .sort((a, b) => b.last_used_at_ms - a.last_used_at_ms);
   }
@@ -289,9 +292,12 @@ export class FakeDeviceSessionPersistence implements DeviceSessionPersistence {
           !isDeviceRestartReleaseReason(row.release_reason) ||
           row.released_at_ms === null ||
           row.released_at_ms > options.onlyIfRestartRecoveryHandoff.releasedAtOrBeforeMs ||
-          row.expires_at_ms <=
-            row.released_at_ms + options.onlyIfRestartRecoveryHandoff.recoveryWindowMs)) ||
-      (options.onlyIfExpiredAtMs !== undefined && row.expires_at_ms > options.onlyIfExpiredAtMs) ||
+          (!ignoresManagedExecutionIdleDeadline(row.liveness_policy) &&
+            row.expires_at_ms <=
+              row.released_at_ms + options.onlyIfRestartRecoveryHandoff.recoveryWindowMs))) ||
+      (options.onlyIfExpiredAtMs !== undefined &&
+        (ignoresManagedExecutionIdleDeadline(row.liveness_policy) ||
+          row.expires_at_ms > options.onlyIfExpiredAtMs)) ||
       (options.onlyIfOwnedByDaemon !== undefined &&
         row.daemon_session_id !== options.onlyIfOwnedByDaemon)
     ) {

@@ -23,6 +23,16 @@ export const MANAGED_SLOT_SUPPORTED_CONTRACT_VERSIONS: readonly number[] = [1];
 /** Capability token the daemon advertises in `daemon/capabilities` for contract version 1. */
 export const MANAGED_SLOTS_V1_CAPABILITY = "managed-slots/v1";
 
+/** Capability token: the daemon's managed-slot requested spec accepts the optional `deviceFamily` (#12054). */
+export const MANAGED_SLOTS_V1_DEVICE_FAMILY_CAPABILITY = "managed-slots/v1.deviceFamily";
+
+/** A config field that needs a daemon capability newer than `managed-slots/v1`. */
+export interface ManagedSlotConfigCapabilityRequirement {
+  /** Config path of the first use, e.g. `requests.0.requestedSpec.deviceFamily`. */
+  field: string;
+  capability: string;
+}
+
 /**
  * True once the proxy consumes a parsed managed slot config (acquisition wiring, #11173 part b):
  * the daemon advertises {@link MANAGED_SLOTS_V1_CAPABILITY} and serves `daemon/acquireManagedSlots`,
@@ -40,7 +50,7 @@ export const MANAGED_SLOT_CONFIG_ENV = "AUTOMOBILE_MANAGED_SLOT_CONFIG";
 /** Initial support is exactly one slot and one device per group. */
 export const MAX_MANAGED_SLOT_GROUP_SIZE = 1;
 
-/** The 2-minute default; a trusted config may lengthen but never shorten the idle window. */
+/** Stored 2-minute default; validated overrides remain accepted but never end a live-owned execution. */
 export const MIN_MANAGED_SLOT_IDLE_TIMEOUT_MS = MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS;
 export const MAX_MANAGED_SLOT_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 
@@ -105,6 +115,7 @@ export const managedSlotConfigSchema = z
       .positive()
       .max(MAX_PROVISION_DEVICE_TIMEOUT_MS)
       .optional(),
+    /** Stored/reported idle window (2–60 minutes); a non-lapsed managed owner lease exempts release. */
     idleTimeoutMs: z
       .number()
       .int()
@@ -134,6 +145,30 @@ export const managedSlotConfigSchema = z
 
 export type ManagedSlotRequest = z.infer<typeof managedSlotRequestSchema>;
 export type ManagedSlotConfig = z.infer<typeof managedSlotConfigSchema>;
+
+/**
+ * Requirements of `config` that the daemon's advertised `daemon/capabilities` list does not meet.
+ * Empty for a config that uses only base `managed-slots/v1` fields, whatever the daemon advertises.
+ */
+export function unmetManagedSlotConfigCapabilities(
+  config: ManagedSlotConfig,
+  capabilities: readonly string[],
+): ManagedSlotConfigCapabilityRequirement[] {
+  if (capabilities.includes(MANAGED_SLOTS_V1_DEVICE_FAMILY_CAPABILITY)) {
+    return [];
+  }
+  const index = config.requests.findIndex(
+    (request) => request.requestedSpec.deviceFamily !== undefined,
+  );
+  return index === -1
+    ? []
+    : [
+        {
+          field: `requests.${index}.requestedSpec.deviceFamily`,
+          capability: MANAGED_SLOTS_V1_DEVICE_FAMILY_CAPABILITY,
+        },
+      ];
+}
 
 const contractVersionProbeSchema = z.object({ contractVersion: z.unknown() }).loose();
 

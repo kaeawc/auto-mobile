@@ -285,6 +285,13 @@ Make the target device active and leave the other alone. For **each** checklist 
 **Prototype acceptance:** when the range touches the prototype host, tool or
 `layer` scoping, run the recipe in [prototype-acceptance.md](prototype-acceptance.md).
 
+**Managed execution oracle (#11340):** a managed execution remains held past 2 minutes
+(and past its declared idleTimeoutMs) while its owner and proxy heartbeat remain alive.
+Its idleReleaseAt is null; heartbeat and reads do not move activity clocks. It ends on
+owner exit, heartbeat loss or explicit release, with the existing non-idle owner reason.
+A hung-but-alive owner with a healthy proxy heartbeat holds indefinitely. Plain sessions
+keep the idle oracle below.
+
 **Device-session idle release:** when the range touches session liveness, run
 `bash scripts/live-idle-release-check.sh --confirm-live --serial <emulator> --port <unused-port>`
 against an emulator no other daemon holds. It starts its own private daemon with a

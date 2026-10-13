@@ -3,10 +3,11 @@
  *
  * A session a managed slot execution acquired is held by that execution's stdio proxy for the
  * execution's whole lifetime. It keeps the ordinary owner-heartbeat lease (4 s lease plus 4 s
- * suspect grace, so ~10 s after the last heartbeat), and the ordinary idle rule measured from the
- * end of the last tool call: reads never count. Only the idle WINDOW differs: the 2-minute default,
- * or the longer `idleTimeoutMs` the launcher-trusted slot config declared, bounded to 2–60 minutes
- * (owner decision 2026-10-09, Q1: configurable, never exempt).
+ * suspect grace, so ~10 s after the last heartbeat). A non-lapsed owner lease exempts it from
+ * idle release (owner decision 2026-10-12). A lapsed lease ends through the heartbeat path,
+ * never idle cleanup. The validated 2–60 minute idleTimeoutMs remains stored and reported;
+ * it does not end a live-owned execution. Persisted rows have no heartbeat stamp, so recovery
+ * ignores their idle deadline and retains the existing awaiting-owner and recovery bounds.
  *
  * Kept free of the session machinery so the proxy and the request handlers can read it cheaply.
  */
@@ -17,8 +18,21 @@ import {
   ManagedSlotConfigError,
 } from "../models/managedSlotConfig";
 import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "./sessionLivenessWindows";
+import type { LivenessLeasePhase } from "./livenessOwnerLease";
 
 export const MANAGED_EXECUTION_LIVENESS_POLICY = "managed-execution";
+
+/**
+ * The shared idle-deadline exception. Without a lease phase (persistence and idle reapers),
+ * managed executions defer entirely to owner-loss/recovery rules. Reporting supplies the judged
+ * phase: only live and suspect leases advertise exemption, never a lapsed owner.
+ */
+export function ignoresManagedExecutionIdleDeadline(
+  policy: string | null | undefined,
+  leasePhase?: LivenessLeasePhase,
+): boolean {
+  return policy === MANAGED_EXECUTION_LIVENESS_POLICY && leasePhase !== "lapsed";
+}
 
 /**
  * Bound on the proxy's release of its managed execution sessions at shutdown (stdin EOF, owner

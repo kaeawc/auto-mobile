@@ -1,3 +1,4 @@
+import { prototypeAppLayerVisibilityOutput } from "../features/prototype/prototypeAppLayerVisibility";
 import { prototypePlatformNotes } from "../features/prototype/prototypePlatformNotes";
 import { TelemetryRecorder } from "../features/telemetry/TelemetryRecorder";
 import { z } from "zod/v4";
@@ -625,11 +626,23 @@ export const prototypeOutputSchema = z.object({
     .describe(
       "show: asset ids the prototype references that the device has no copy of; the prototype is shown with placeholders. Absent when none. Upload them with assets on a show.",
     ),
+  visible: z
+    .literal(false)
+    .optional()
+    .describe(
+      'show with window.layer "app" on Android: no prototype window was on screen after the show; absent when visible or not checked',
+    ),
+  notVisibleReason: z
+    .enum(["no_prototype_window_on_screen"])
+    .optional()
+    .describe(
+      'show with window.layer "app" on Android: why visible is false. no_prototype_window_on_screen: the window was created but the screen does not show it, usually because the app in front hides app-layer windows; absent when visible or not checked',
+    ),
   warning: z
     .string()
     .optional()
     .describe(
-      "show succeeded or awaitEvent timed out, and it needs attention: names what to do about missingAssets, that display was ignored by a same-id show, or (awaitEvent timeout) that the prototype is hidden because its app is not in front",
+      "show succeeded or awaitEvent timed out, and it needs attention: names what to do about missingAssets, that display was ignored by a same-id show, that an Android app-layer prototype is not on screen, or (awaitEvent timeout) that the prototype is hidden because its app is not in front",
     ),
   anchors: z
     .array(
@@ -1007,9 +1020,9 @@ async function resolveElementAnchors(
   if (!hasElementAnchors(spec)) {
     return {};
   }
-  const capture = (
-    dependencies.anchorHierarchyCaptureFactory ?? ((d) => createDeviceHierarchyCapture(d))
-  )(device);
+  const capture = (dependencies.anchorHierarchyCaptureFactory ?? createDeviceHierarchyCapture)(
+    device,
+  );
   const snapshot = await capture.capture({ freshness: "fresh", ...request });
   // iOS hierarchies are in points, the unit iOS spec sizes use; Android's px convert to dp.
   const resolution = resolvePrototypeAnchors(spec, {
@@ -1387,6 +1400,7 @@ type PrototypeHandlerDependencies = {
   commits: PrototypeCommitGenerations;
   cacheInvalidator: DeviceWindowCacheInvalidator;
   now: () => number;
+  timer?: Timer;
 } & Pick<
   PrototypeToolDependencies,
   "adbFactory" | "lastRenderedObservation" | "anchorHierarchyCaptureFactory"
@@ -1520,6 +1534,18 @@ async function performMutation(
           previouslyShown,
           startedFreshEvents: ordering.startedFreshEvents,
         });
+    const { warning: visibilityWarning, ...visibility } = await prototypeAppLayerVisibilityOutput({
+      android: prototypeTarget.android !== undefined,
+      action: args.action,
+      success: result.success,
+      spec: sendArgs.spec as PrototypeSpec,
+      superseded: () => isSuperseded(commits, scope, target, generation),
+      capture: () =>
+        (dependencies.anchorHierarchyCaptureFactory ?? createDeviceHierarchyCapture)(device),
+      timer: dependencies.timer,
+      displayId,
+      signal,
+    });
     return {
       success: result.success,
       ...(result.error ? { error: result.error } : {}),
@@ -1527,7 +1553,8 @@ async function performMutation(
       ...(stage.uploaded.length > 0 ? { uploadedAssets: stage.uploaded } : {}),
       ...anchorsOutput(resolved),
       ...platformNotesOutput(sendArgs, device, prototypeTarget, result.success),
-      ...missingAssetsOutput(result, [warning, placed.warning], legacy),
+      ...visibility,
+      ...missingAssetsOutput(result, [warning, placed.warning, visibilityWarning], legacy),
     };
   } finally {
     settleGeneration(ordering);
@@ -2515,6 +2542,7 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
       commits,
       cacheInvalidator,
       now: () => clock.now(),
+      timer: dependencies.timer,
       adbFactory: dependencies.adbFactory,
       lastRenderedObservation: dependencies.lastRenderedObservation,
       anchorHierarchyCaptureFactory: dependencies.anchorHierarchyCaptureFactory,

@@ -95,10 +95,22 @@ describe("journaled free-pool deletion", () => {
     const driver = journal();
     expect((await driver.runPass()).freeDeviceDeletions).toEqual([]);
     await registry.claimFreeDeviceDeletion(row, OTHER, OWNER);
-    driver.freeDeletionInFlight.add(JSON.stringify([row.platform, row.stableDeviceId]));
+    let finishDiscovery: () => void = () => {};
+    inventory.beforeList = async () =>
+      new Promise<void>((resolve) => {
+        finishDiscovery = resolve;
+      });
+    const pending = driver.driveFreeDeviceDeletion({
+      ...row,
+      deletion: { ...row.deletion!, owner: OWNER },
+    });
+    await flushMicrotasks();
     expect((await driver.runPass()).freeDeviceDeletions).toEqual([]);
     expect(deleter.calls).toEqual([]);
     expect(await registry.listFreeDeviceDeletions()).toHaveLength(1);
+    inventory.beforeList = undefined;
+    finishDiscovery();
+    expect(await pending).toEqual({ kind: "absent" });
   });
 
   test("a failed row does not starve the next due row", async () => {
@@ -118,7 +130,10 @@ describe("journaled free-pool deletion", () => {
     const row = await cache();
     await assignManagedSlotDevice(registry, "android", row.stableDeviceId, "adopter");
     expect(
-      await new JournaledManagedSlotCacheEvictor(registry, journal()).evict(candidate(row), {}),
+      await new JournaledManagedSlotCacheEvictor(registry, () => journal()).evict(
+        candidate(row),
+        {},
+      ),
     ).toEqual({ kind: "lost" });
     expect(deleter.calls).toEqual([]);
     expect(await registry.findDeviceHolder("android", row.stableDeviceId)).toMatchObject({
@@ -365,7 +380,6 @@ describe("journaled free-pool deletion", () => {
     controller.abort(new Error("cancel"));
     expect(await rejected).toBeInstanceOf(Error);
     expect((await registry.listFreeDeviceDeletions())[0].deletion?.attempts).toBe(0);
-    expect(driver.freeDeletionInFlight.size).toBe(0);
     inventory.beforeList = undefined;
     expect((await driver.runPass()).freeDeviceDeletions).toMatchObject([{ outcome: "absent" }]);
   });

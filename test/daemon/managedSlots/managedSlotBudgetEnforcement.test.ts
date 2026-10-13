@@ -25,6 +25,7 @@ import {
 } from "../../../src/daemon/managedSlots/reconciler";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
+import { flushMicrotasks } from "../../helpers/shutdownStageHarness";
 import {
   FakeInventory,
   FakeClaims,
@@ -76,12 +77,10 @@ describe("managed-slot total-resource enforcement on SQLite", () => {
       registry: async () => source,
       policy: { limit: () => limit },
       inventory,
+      timer,
       eviction: {
-        selector: new DefaultManagedSlotEvictionSelector({ inventory, claims }),
-        evictor: {
-          evict: (row, opts) =>
-            new JournaledManagedSlotCacheEvictor(source, reconciler.journal).evict(row, opts),
-        },
+        selector: new DefaultManagedSlotEvictionSelector({ inventory, claims, timer }),
+        evictor: new JournaledManagedSlotCacheEvictor(source, () => reconciler.journal),
       },
     });
     const reconciler = makeWithBudget(budget, source, owner);
@@ -266,6 +265,312 @@ describe("managed-slot total-resource enforcement on SQLite", () => {
     expect(deleter.stableIds()).toEqual(["amslot-cache", "amslot-cache"]);
   });
 
+  warmTest("a failed oldest deletion refuses creation without evicting newer cache", async () => {
+    await cache("amslot-old");
+    timer.advanceTime(1);
+    await cache("amslot-newer");
+    const originalDelete = deleter.deleteAndVerifyAbsence.bind(deleter);
+    deleter.deleteAndVerifyAbsence = async (target) => {
+      if (deleter.calls.length === 0) {
+        deleter.calls.push(target);
+        return { kind: "failed", message: "native deletion failed" };
+      }
+      return originalDelete(target);
+    };
+    const reconciler = make(2);
+    expect(await reconciler.reconcile(await request())).toMatchObject({
+      outcome: "failed",
+      failure: {
+        code: "managed_slot_budget_exhausted",
+        budget: { retained: [{ stableDeviceId: "amslot-old", reason: "deletion_pending" }] },
+      },
+    });
+    expect(deleter.stableIds()).toEqual(["amslot-old"]);
+    expect(
+      (await registry.listFreeDevices()).find((row) => row.stableDeviceId === "amslot-newer")
+        ?.deletion,
+    ).toBeNull();
+    expect(provisioner.calls).toEqual([]);
+    timer.advanceTime(1_000);
+    expect((await reconciler.journal.runPass()).freeDeviceDeletions).toMatchObject([
+      { outcome: "absent" },
+    ]);
+    expect((await reconciler.reconcile(await request("retry"))).outcome).toBe("ready");
+    expect((await registry.listFreeDevices()).map((row) => row.stableDeviceId)).toEqual([
+      "amslot-newer",
+    ]);
+    expect(deleter.stableIds()).toEqual(["amslot-old", "amslot-old"]);
+  });
+
+  warmTest(
+    "a shortfall of two with one pending deletion evicts exactly one more cache",
+    async () => {
+      const pending = await cache("amslot-pending");
+      await registry.beginFreeDeviceDeletion(pending, OWNER);
+      timer.advanceTime(1);
+      await cache("amslot-next");
+      timer.advanceTime(1);
+      await cache("amslot-newer");
+      const result = await make(2).reconcile(await request());
+      expect(result).toMatchObject({
+        outcome: "failed",
+        failure: { code: "managed_slot_budget_exhausted" },
+      });
+      expect(deleter.stableIds()).toEqual(["amslot-next"]);
+      expect((await registry.listFreeDevices()).map((row) => row.stableDeviceId)).toEqual([
+        "amslot-pending",
+        "amslot-newer",
+      ]);
+      expect(provisioner.calls).toEqual([]);
+    },
+  );
+
+  warmTest("a hanging cache delete settles at the preparation deadline with timeout", async () => {
+    await cache("amslot-cache");
+    const started = Promise.withResolvers<void>();
+    const finishDelete = Promise.withResolvers<void>();
+    deleter.beforeDelete = async () => {
+      started.resolve();
+      return finishDelete.promise;
+    };
+    const req = { ...(await request()), deadlineMs: timer.now() + 5_000 };
+    const reconciler = make();
+    let result: Awaited<ReturnType<ManagedSlotReconciler["reconcile"]>> | undefined;
+    const pending = reconciler.reconcile(req).then((value) => {
+      result = value;
+    });
+    try {
+      await started.promise;
+      expect(deleter.calls).toHaveLength(1);
+      timer.advanceTime(4_999);
+      await flushMicrotasks();
+      expect(result).toBeUndefined();
+      timer.advanceTime(1);
+      await flushMicrotasks();
+      expect(result).toMatchObject({ outcome: "failed", failure: { code: "timeout" } });
+    } finally {
+      if (result === undefined) {
+        finishDelete.resolve();
+      }
+      await pending;
+    }
+    await pending;
+    expect(await registry.listOpenSlotJournal(req.key)).toEqual([]);
+    expect(await registry.listFreeDeviceDeletions()).toHaveLength(1);
+    expect(provisioner.calls).toEqual([]);
+    // The timed-out deletion is never reverted; periodic redrive completes it.
+    deleter.beforeDelete = undefined;
+    timer.advanceTime(1_000);
+    expect((await reconciler.journal.runPass()).freeDeviceDeletions).toMatchObject([
+      { outcome: "absent" },
+    ]);
+    finishDelete.resolve();
+  });
+
+  warmTest("a hanging ledger inventory read is bounded by the preparation deadline", async () => {
+    const req = { ...(await request()), deadlineMs: timer.now() + 5_000 };
+    const original = registry.snapshotManagedSlotResources.bind(registry);
+    const started = Promise.withResolvers<void>();
+    const finishRead = Promise.withResolvers<void>();
+    registry.snapshotManagedSlotResources = async () => {
+      const snapshot = await original();
+      inventory.beforeList = async () => {
+        started.resolve();
+        await finishRead.promise;
+      };
+      return snapshot;
+    };
+    let result: Awaited<ReturnType<ManagedSlotReconciler["reconcile"]>> | undefined;
+    const pending = make()
+      .reconcile(req)
+      .then((value) => {
+        result = value;
+      });
+    try {
+      await started.promise;
+      timer.advanceTime(5_000);
+      await flushMicrotasks();
+      expect(result).toMatchObject({ outcome: "failed", failure: { code: "timeout" } });
+    } finally {
+      finishRead.resolve();
+      await pending;
+    }
+    expect(await registry.listOpenSlotJournal(req.key)).toEqual([]);
+    expect(provisioner.calls).toEqual([]);
+    await flushMicrotasks();
+  });
+
+  warmTest("admission does not read again after a ledger read consumes its deadline", async () => {
+    const req = { ...(await request()), deadlineMs: timer.now() + 5_000 };
+    const original = registry.snapshotManagedSlotResources.bind(registry);
+    let reads = 0;
+    registry.snapshotManagedSlotResources = async () => {
+      reads += 1;
+      const snapshot = await original();
+      timer.advanceTime(5_000);
+      inventory.beforeList = async () => {
+        throw new Error("inventory read after deadline");
+      };
+      return snapshot;
+    };
+    expect(await make().reconcile(req)).toMatchObject({
+      outcome: "failed",
+      failure: { code: "timeout" },
+    });
+    expect(reads).toBe(1);
+    expect(provisioner.calls).toEqual([]);
+    expect(await registry.listOpenSlotJournal(req.key)).toEqual([]);
+  });
+
+  warmTest("an admitted request whose deadline passed never provisions", async () => {
+    const req = { ...(await request()), deadlineMs: timer.now() + 5_000 };
+    const reconciler = makeWithBudget({
+      admitCreation: async (input) => {
+        expect(input.deadlineMs).toBe(req.deadlineMs);
+        timer.advanceTime(5_000);
+        return { kind: "admitted", enforced: false };
+      },
+    });
+    expect(await reconciler.reconcile(req)).toMatchObject({
+      outcome: "failed",
+      failure: { code: "timeout" },
+    });
+    expect(provisioner.calls).toEqual([]);
+    expect(await registry.listOpenSlotJournal(req.key)).toEqual([]);
+  });
+
+  warmTest(
+    "a post-marker transient busy refusal keeps its delete committed for redrive",
+    async () => {
+      await cache("amslot-cache");
+      let checks = 0;
+      claims.beforeDescribe = async () => {
+        if (++checks === 2) {
+          claims.claims.set("amslot-cache", { kind: "unknown", reason: "transient" });
+        }
+      };
+      const reconciler = make();
+      expect(await reconciler.reconcile(await request())).toMatchObject({
+        outcome: "failed",
+        failure: { code: "managed_slot_budget_exhausted" },
+      });
+      expect(deleter.calls).toEqual([]);
+      expect(await registry.listFreeDeviceDeletions()).toHaveLength(1);
+      timer.advanceTime(1_000);
+      claims.claims.clear();
+      expect((await reconciler.journal.runPass()).freeDeviceDeletions).toMatchObject([
+        { outcome: "absent" },
+      ]);
+      expect(deleter.stableIds()).toEqual(["amslot-cache"]);
+    },
+  );
+
+  warmTest.each(["exhausted", "cancelled"] as const)(
+    "a failed create-entry close preserves the original %s admission failure",
+    async (kind) => {
+      const controller = new AbortController();
+      const req = { ...(await request()), signal: controller.signal };
+      const original = registry.advanceSlotJournal.bind(registry);
+      let failed = false;
+      registry.advanceSlotJournal = async (id, input) => {
+        if (input.phase === "rolled_back" && !failed) {
+          failed = true;
+          throw new Error("registry busy");
+        }
+        return original(id, input);
+      };
+      const reconciler = makeWithBudget({
+        admitCreation: async () => {
+          if (kind === "cancelled") {
+            controller.abort(new Error("original cancellation"));
+            throw controller.signal.reason;
+          }
+          return {
+            kind: "exhausted",
+            limit: 1,
+            usage: {
+              total: 2,
+              active: 0,
+              assignedIdle: 1,
+              cached: 0,
+              preparing: 1,
+              deleting: 0,
+              orphaned: 0,
+            },
+            retained: [],
+            evictionFailures: [],
+          };
+        },
+      });
+      if (kind === "cancelled") {
+        await expect(reconciler.reconcile(req)).rejects.toThrow("original cancellation");
+      } else {
+        expect(await reconciler.reconcile(req)).toMatchObject({
+          outcome: "failed",
+          failure: { code: "managed_slot_budget_exhausted" },
+        });
+      }
+      expect(failed).toBe(true);
+      expect(await registry.listOpenSlotJournal(req.key)).toHaveLength(1);
+      expect(provisioner.calls).toEqual([]);
+      expect((await reconciler.journal.runPass()).settled).toMatchObject([
+        { phase: "rolled_back" },
+      ]);
+      expect(await registry.listOpenSlotJournal(req.key)).toEqual([]);
+    },
+  );
+
+  warmTest.each([
+    ["bound", "claim"],
+    ["owner_changed", "claim"],
+    ["gone", "claim"],
+    ["bound", "absence"],
+    ["owner_changed", "absence"],
+    ["gone", "absence"],
+  ] as const)(
+    "the final deletion recheck protects a row that became %s during %s discovery",
+    async (change, stage) => {
+      const row = await cache("amslot-cache");
+      const begun = await registry.beginFreeDeviceDeletion(row, OWNER);
+      if (begun.kind !== "begun") {
+        throw new Error(begun.reason);
+      }
+      const req = await request("older-build");
+      await registry.initSlot(req.key, {
+        role: "primary",
+        platform: "android",
+        requestedSpec: SPEC,
+      });
+      const changeRow = async () => {
+        if (change === "bound") {
+          // An older build ignores the deletion marker when publishing its assignment.
+          await db
+            .updateTable("slot_assignments")
+            .set({ stable_device_id: row.stableDeviceId, device_name: row.stableDeviceId })
+            .where("scope_key", "=", req.key.scopeKey)
+            .execute();
+        } else if (change === "owner_changed") {
+          await registry.claimFreeDeviceDeletion(row, OWNER, { daemonId: "other", pid: 202 });
+        } else {
+          await registry.completeFreeDeviceDeletion(row, OWNER);
+        }
+      };
+      if (stage === "claim") {
+        claims.beforeDescribe = changeRow;
+      } else {
+        inventory.remove(row.stableDeviceId);
+        inventory.beforeList = changeRow;
+      }
+      expect(await make().journal.driveFreeDeviceDeletion(begun.row)).toMatchObject(
+        change === "bound" ? { kind: "blocked", message: "assigned" } : { kind: "lost" },
+      );
+      expect(deleter.calls).toEqual([]);
+      if (change === "bound") {
+        expect((await registry.listFreeDeviceDeletions())[0].deletion?.attempts).toBe(1);
+      }
+    },
+  );
+
   test.each(["cache", "orphan"] as const)(
     "compatible %s adoption is charge-neutral at the limit",
     async (source) => {
@@ -414,13 +719,14 @@ describe("managed-slot total-resource enforcement on SQLite", () => {
       }
       return snapshot;
     };
-    const evictor = new JournaledManagedSlotCacheEvictor(registry, make().journal);
+    const evictor = new JournaledManagedSlotCacheEvictor(registry, () => make().journal);
     const budget = new RegistryManagedSlotResourceBudget({
       registry: async () => registry,
       policy: { limit: () => 1 },
       inventory,
+      timer,
       eviction: {
-        selector: new DefaultManagedSlotEvictionSelector({ inventory, claims }),
+        selector: new DefaultManagedSlotEvictionSelector({ inventory, claims, timer }),
         evictor,
       },
     });

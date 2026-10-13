@@ -240,7 +240,7 @@ function keyOf(entry: SlotKey): SlotKey {
 export class ManagedSlotJournal {
   readonly inFlight: SlotJournalInFlight;
   /** Shared by eviction and periodic redrive through this journal instance. */
-  readonly freeDeletionInFlight = new Set<string>();
+  private readonly freeDeletionInFlight = new Set<string>();
   private readonly isOwnerLive: SlotJournalOwnerLiveness;
   private readonly isExecOwnerLive: SlotExecOwnerLiveness;
   private readonly backoff: BackoffPolicy;
@@ -447,6 +447,15 @@ export class ManagedSlotJournal {
     }
     this.freeDeletionInFlight.add(key);
     try {
+      checkCancellation(options.signal);
+      if (options.deadlineMs !== undefined && this.deps.timer.now() >= options.deadlineMs) {
+        return await this.recordFreeDeletionFailure(
+          row,
+          "failed",
+          "preparation_deadline_passed",
+          options.signal,
+        );
+      }
       return await this.freeDeviceDeletionStep(row, options);
     } catch (error) {
       if (error instanceof SlotJournalDriveCancelled) {
@@ -498,6 +507,10 @@ export class ManagedSlotJournal {
     }
     const device = findByStableId(inventory, row.platform, row.stableDeviceId);
     if (!device) {
+      const fence = await this.freeDeletionFence(current, signal);
+      if (fence) {
+        return fence;
+      }
       return this.completeFreeDeletion(current, signal);
     }
     if (!device.name.startsWith(MANAGED_SLOT_DEVICE_NAME_PREFIX)) {
@@ -508,6 +521,23 @@ export class ManagedSlotJournal {
     if (reason) {
       return this.recordFreeDeletionFailure(current, "blocked", reason, signal);
     }
+    return this.deleteFreeDevice(current, device, deadlineMs, options);
+  }
+
+  private async deleteFreeDevice(
+    row: FreeSlotDeviceRecord,
+    device: DeviceInfo,
+    deadlineMs: number,
+    options: { signal?: AbortSignal; deadlineMs?: number },
+  ): Promise<FreeDeviceDeletionDriveResult> {
+    const { signal } = options;
+    const fence = await this.freeDeletionFence(row, signal);
+    if (fence) {
+      return fence;
+    }
+    if (this.deps.timer.now() >= deadlineMs) {
+      return this.recordFreeDeletionFailure(row, "failed", "preparation_deadline_passed", signal);
+    }
     const deletion = await this.deleteDevice(
       {
         platform: row.platform,
@@ -517,10 +547,33 @@ export class ManagedSlotJournal {
         signal,
       },
       signal,
+      options.deadlineMs,
     );
     return deletion.kind === "absent"
-      ? this.completeFreeDeletion(current, signal)
-      : this.recordFreeDeletionFailure(current, "failed", deletion.message, signal);
+      ? this.completeFreeDeletion(row, signal)
+      : this.recordFreeDeletionFailure(row, "failed", deletion.message, signal);
+  }
+
+  /** Selection and claims can yield to an older daemon that ignores deletion markers. */
+  private async freeDeletionFence(
+    row: FreeSlotDeviceRecord,
+    signal?: AbortSignal,
+  ): Promise<FreeDeviceDeletionDriveResult | undefined> {
+    const holder = await this.deps.registry.findDeviceHolder(row.platform, row.stableDeviceId);
+    checkCancellation(signal);
+    if (holder?.kind === "slot") {
+      // Attempt recording is owner-checked: a lost marker returns lost rather than blocked.
+      return this.recordFreeDeletionFailure(row, "blocked", "assigned", signal);
+    }
+    if (
+      holder?.kind !== "free" ||
+      !sameFreeDevice(holder.device, row) ||
+      !holder.device.deletion ||
+      !journalOwnersEqual(holder.device.deletion.owner, this.owner)
+    ) {
+      return { kind: "lost" };
+    }
+    return undefined;
   }
 
   private async freeDeletionHoldReason(
@@ -1316,6 +1369,7 @@ export class ManagedSlotJournal {
   private deleteDevice(
     target: Parameters<ManagedSlotDeviceDeleter["deleteAndVerifyAbsence"]>[0],
     cancel?: AbortSignal,
+    hardDeadlineMs?: number,
   ): Promise<ManagedSlotDeletionResult> {
     return this.boundedStage<ManagedSlotDeletionResult>(
       (signal) => this.deps.deleter.deleteAndVerifyAbsence({ ...target, signal }),
@@ -1323,7 +1377,8 @@ export class ManagedSlotJournal {
         label: `deleting '${target.stableId}'`,
         timeoutMs: Math.max(
           0,
-          target.deadlineMs + this.budgets.deleteGraceMs - this.deps.timer.now(),
+          Math.min(target.deadlineMs + this.budgets.deleteGraceMs, hardDeadlineMs ?? Infinity) -
+            this.deps.timer.now(),
         ),
         signal: target.signal,
         cancel,

@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { warmedTests } from "../../helpers/warmedTests";
+import { afterAll, describe, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import {
   Kysely,
@@ -38,22 +39,56 @@ describe("SQLite managed-resource snapshot", () => {
   let db: Kysely<SlotRegistryDatabase>;
   let plugin: SnapshotInterleave;
   let registry: SqliteSlotRegistry;
-  beforeEach(async () => {
+  let queries: string[];
+  const test = warmedTests(async () => {
+    await db?.destroy();
     raw = new Database(":memory:");
     plugin = new SnapshotInterleave();
+    queries = [];
     db = new Kysely<SlotRegistryDatabase>({
       dialect: new BunSqliteDialect({ database: raw }),
       plugins: [plugin],
+      log: (event) => {
+        if (event.level === "query") {
+          queries.push(event.query.sql);
+        }
+      },
     });
     await migrateSlotRegistry(db, ":memory:");
     registry = new SqliteSlotRegistry(db, { timer: new FakeTimer(), isExecOwnerLive: () => false });
   });
-  afterEach(async () => {
+  afterAll(async () => {
     await db.destroy();
   });
 
+  test("generic snapshots do not read scope history and the ledger exposes only abandoned keys", async () => {
+    const rows = Array.from({ length: 200 }, (_, i) => ({
+      scope_key: `history-${i}`,
+      managed_host_scope: "host",
+      runner_namespace: `history-${i}`,
+      runner_incarnation: "inc",
+      state: "invalidated" as const,
+      invalidation_reason: "operator_reset" as const,
+      created_at_ms: 0,
+      last_acquired_at_ms: 0,
+    }));
+    await db.insertInto("slot_scopes").values(rows).execute();
+    await db
+      .updateTable("slot_scopes")
+      .set({ state: "invalidating", invalidation_reason: "abandoned" })
+      .where("scope_key", "=", "history-0")
+      .execute();
+    queries.length = 0;
+    expect(await registry.snapshotManagedDevices()).toEqual([]);
+    expect(queries).toHaveLength(1);
+    expect(queries[0]).not.toContain('from "slot_scopes"');
+    expect(await registry.snapshotManagedSlotResources()).toMatchObject({
+      abandonedScopeKeys: ["history-0"],
+    });
+  });
+
   describe("atomic adoption", () => {
-    beforeEach(async () => {
+    const prepareAdoption = async () => {
       const cached = await assignManagedSlotDevice(registry, "android", "amslot-cache", "cache");
       await registry.beginScopeInvalidation(cached.scopeKey, "operator_reset");
       await registry.completeScopeInvalidation(cached.scopeKey);
@@ -83,8 +118,9 @@ describe("SQLite managed-resource snapshot", () => {
       };
       // Warm the read codec without arming the interleaving hook or mutating the fixture.
       await registry.snapshotManagedDevices();
-    });
+    };
     test("a binding commit between internal reads cannot omit or double-count an adopted image", async () => {
+      await prepareAdoption();
       plugin.armed = true;
       const before = await registry.snapshotManagedDevices();
       plugin.armed = false;

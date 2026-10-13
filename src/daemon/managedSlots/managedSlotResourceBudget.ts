@@ -5,6 +5,9 @@ import type { DeviceInfo } from "../../models";
 import { ActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import type { ManagedSlotBudgetEvidence } from "../../models/managedSlotsResult";
 import type {
   ManagedSlotCacheEvictor,
   ManagedSlotEvictionCandidate,
@@ -15,8 +18,6 @@ import type {
 } from "./managedSlotCacheEviction";
 import {
   isSlotJournalPhaseOpen,
-  isAbandonedScope,
-  type SlotScopeRecord,
   journalCreationPlatform,
   journalNewStableId,
   type FreeSlotDeviceRecord,
@@ -78,14 +79,7 @@ export type ManagedSlotResourceAdmission =
       usage: ManagedSlotResourceUsage;
       evicted: ManagedSlotEvictionCandidate[];
     }
-  | {
-      kind: "exhausted";
-      limit: number;
-      usage: ManagedSlotResourceUsage;
-      /** Cached devices protected by the selector's safety checks. */
-      retained: ManagedSlotEvictionSkip[];
-      evictionFailures: Array<{ platform: SlotPlatform; stableDeviceId: string; message: string }>;
-    }
+  | ({ kind: "exhausted" } & ManagedSlotBudgetEvidence)
   | { kind: "unknown"; message: string };
 
 /** Admission for an already persisted creation reservation; no waiting or job queue. */
@@ -93,6 +87,7 @@ export interface ManagedSlotResourceBudget {
   /** Called after the creation's journal entry is open and before native creation. Never waits for capacity. */
   admitCreation(request: {
     journalEntryId: number;
+    deadlineMs?: number;
     signal?: AbortSignal;
   }): Promise<ManagedSlotResourceAdmission>;
 }
@@ -104,13 +99,14 @@ interface LedgerInput {
   openJournal: readonly SlotJournalEntry[];
   managed: readonly ManagedDeviceEntry[];
   free?: readonly FreeSlotDeviceRecord[];
-  scopes?: readonly SlotScopeRecord[];
+  abandonedScopeKeys?: readonly string[];
   inventory?: readonly DeviceInfo[];
 }
 
 interface ResourceCharge {
   category: Exclude<keyof ManagedSlotResourceUsage, "total">;
   journal?: SlotJournalEntry;
+  pendingDeletion?: ManagedSlotEvictionSkip;
 }
 
 function resourceKey(platform: SlotPlatform, stableDeviceId: string): string {
@@ -184,6 +180,18 @@ function resourceCharges(input: LedgerInput): ResourceCharge[] {
   const charges: ResourceCharge[] = [...distinct.values()].map((device) => ({
     category: categoryOf(device, deleting, input.free ?? []),
     journal: creationJournalFor(device, journal),
+    pendingDeletion: input.free?.some(
+      (row) =>
+        row.platform === device.platform &&
+        row.stableDeviceId === device.stableDeviceId &&
+        row.deletion !== null,
+    )
+      ? {
+          platform: device.platform,
+          stableDeviceId: device.stableDeviceId,
+          reason: "deletion_pending",
+        }
+      : undefined,
   }));
 
   for (const entry of journal) {
@@ -191,7 +199,7 @@ function resourceCharges(input: LedgerInput): ResourceCharge[] {
       entry.kind === "release" ||
       (entry.kind === "replace" &&
         entry.phase === "deleted" &&
-        isAbandonedScope(input.scopes?.find((scope) => scope.scopeKey === entry.scopeKey) ?? null))
+        input.abandonedScopeKeys?.includes(entry.scopeKey))
     ) {
       continue;
     }
@@ -274,13 +282,15 @@ export function computeManagedSlotResourceUsage(input: LedgerInput): ManagedSlot
 async function readResourceCharges(
   registry: ManagedSlotResourceRegistry,
   inventory: ManagedSlotInventory,
-  signal?: AbortSignal,
+  request: { signal?: AbortSignal; deadlineMs?: number },
+  timer: Pick<Timer, "now">,
 ): Promise<ResourceCharge[]> {
+  checkAdmissionBudget(request, timer);
   const snapshot = await registry.snapshotManagedSlotResources();
   const devices: DeviceInfo[] = [];
   for (const platform of ["android", "ios"] as const) {
-    signal?.throwIfAborted();
-    const listing = await inventory.list(platform, { signal });
+    checkAdmissionBudget(request, timer);
+    const listing = await inventory.list(platform, { signal: request.signal });
     if (!listing.complete) {
       throw new ActionableError(
         `${platform} inventory is incomplete; total-resource usage is unknown.`,
@@ -289,6 +299,18 @@ async function readResourceCharges(
     devices.push(...listing.devices);
   }
   return resourceCharges({ ...snapshot, inventory: devices });
+}
+
+function checkAdmissionBudget(
+  request: { signal?: AbortSignal; deadlineMs?: number },
+  timer: Pick<Timer, "now">,
+): void {
+  request.signal?.throwIfAborted();
+  if (request.deadlineMs !== undefined && timer.now() >= request.deadlineMs) {
+    throw new ActionableError(
+      "Managed-slot preparation deadline passed during resource admission.",
+    );
+  }
 }
 
 function rankedCount(charges: readonly ResourceCharge[], mine: number): number {
@@ -308,6 +330,7 @@ interface BudgetDependencies {
   registry: () => Promise<ManagedSlotResourceRegistry & ManagedSlotEvictionRegistry>;
   policy: ManagedSlotResourceBudgetPolicy;
   inventory: ManagedSlotInventory;
+  timer?: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
   /** Absent: nothing is ever evicted; a full budget is refused. */
   eviction?: { selector: ManagedSlotEvictionSelector; evictor: ManagedSlotCacheEvictor };
 }
@@ -316,10 +339,15 @@ type ExhaustedAdmission = Extract<ManagedSlotResourceAdmission, { kind: "exhaust
 
 /** Registry-derived admission with ordered reservations and conditional, bounded LRU eviction. */
 export class RegistryManagedSlotResourceBudget implements ManagedSlotResourceBudget {
-  constructor(private readonly deps: BudgetDependencies) {}
+  private readonly timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
+
+  constructor(private readonly deps: BudgetDependencies) {
+    this.timer = deps.timer ?? defaultTimer;
+  }
 
   async admitCreation(request: {
     journalEntryId: number;
+    deadlineMs?: number;
     signal?: AbortSignal;
   }): Promise<ManagedSlotResourceAdmission> {
     const limit = this.deps.policy.limit();
@@ -332,8 +360,17 @@ export class RegistryManagedSlotResourceBudget implements ManagedSlotResourceBud
       );
     }
     try {
-      const registry = await this.deps.registry();
-      return await this.admitFromRegistry(registry, limit, request);
+      checkAdmissionBudget(request, this.timer);
+      const admission = async () =>
+        this.admitFromRegistry(await this.deps.registry(), limit, request);
+      return request.deadlineMs === undefined
+        ? await admission()
+        : await raceWithDeadline(admission, {
+            timer: this.timer,
+            timeoutMs: Math.max(0, request.deadlineMs - this.timer.now()),
+            signal: request.signal,
+            label: "Managed-slot resource admission",
+          });
     } catch (error) {
       request.signal?.throwIfAborted();
       logger.warn(
@@ -347,18 +384,17 @@ export class RegistryManagedSlotResourceBudget implements ManagedSlotResourceBud
   private async admitFromRegistry(
     registry: ManagedSlotResourceRegistry & ManagedSlotEvictionRegistry,
     limit: number,
-    request: { journalEntryId: number; signal?: AbortSignal },
+    request: { journalEntryId: number; deadlineMs?: number; signal?: AbortSignal },
   ): Promise<ManagedSlotResourceAdmission> {
     const evicted: ManagedSlotEvictionCandidate[] = [];
     const evictionFailures: ExhaustedAdmission["evictionFailures"] = [];
     const attempted = new Set<string>();
     let remaining: number | undefined;
     while (true) {
-      request.signal?.throwIfAborted();
-      let charges = await readResourceCharges(registry, this.deps.inventory, request.signal);
+      let charges = await readResourceCharges(registry, this.deps.inventory, request, this.timer);
       if (rankedCount(charges, request.journalEntryId) > limit) {
         // Confirm with a fresh independent snapshot before eviction or refusal.
-        charges = await readResourceCharges(registry, this.deps.inventory, request.signal);
+        charges = await readResourceCharges(registry, this.deps.inventory, request, this.timer);
       }
       const usage = usageOf(charges);
       if (rankedCount(charges, request.journalEntryId) <= limit) {
@@ -368,14 +404,21 @@ export class RegistryManagedSlotResourceBudget implements ManagedSlotResourceBud
         kind: "exhausted",
         limit,
         usage,
-        retained: [],
+        retained: charges.flatMap((charge) =>
+          charge.pendingDeletion ? [charge.pendingDeletion] : [],
+        ),
         evictionFailures,
       };
-      if (!this.deps.eviction) {
+      // A persisted marker commits that unit of room even when native deletion must redrive.
+      // Do not destroy newer cache to replace room already committed by a failed/blocked delete.
+      const shortfall = rankedCount(charges, request.journalEntryId) - limit;
+      if (!this.deps.eviction || exhausted.retained.length >= shortfall) {
         return exhausted;
       }
+      checkAdmissionBudget(request, this.timer);
       const selection = await this.deps.eviction.selector.select(registry, {
         signal: request.signal,
+        deadlineMs: request.deadlineMs,
       });
       exhausted.retained = selection.skipped;
       // One attempt per initially observed free row, then one final read/selection iteration.
@@ -387,9 +430,9 @@ export class RegistryManagedSlotResourceBudget implements ManagedSlotResourceBud
         return exhausted;
       }
       remaining -= 1;
-      request.signal?.throwIfAborted();
+      checkAdmissionBudget(request, this.timer);
       attempted.add(resourceKey(candidate.platform, candidate.stableDeviceId));
-      const result = await this.evict(candidate, request.signal);
+      const result = await this.evict(candidate, request);
       if (result.kind === "absent") {
         evicted.push(candidate);
       }
@@ -405,12 +448,12 @@ export class RegistryManagedSlotResourceBudget implements ManagedSlotResourceBud
 
   private async evict(
     candidate: ManagedSlotEvictionCandidate,
-    signal?: AbortSignal,
+    options: { signal?: AbortSignal; deadlineMs?: number },
   ): Promise<ManagedSlotEvictionResult> {
     try {
-      return await this.deps.eviction!.evictor.evict(candidate, { signal });
+      return await this.deps.eviction!.evictor.evict(candidate, options);
     } catch (error) {
-      signal?.throwIfAborted();
+      options.signal?.throwIfAborted();
       logger.warn(
         `[ManagedSlots] Cache deletion remains unconfirmed: ${errorMessage(error)}`,
         error,

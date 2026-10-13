@@ -1,3 +1,9 @@
+/**
+ * Assembles the daemon's `daemon/acquireManagedSlots` (#11173 part b) from production parts: the
+ * host-wide slot registry, the reconciler over real inventory / provisionDevice / deleteDevice /
+ * pool claims, and the session manager's liveness ownership and managed-execution policy.
+ */
+
 import { freeDeviceBusyReason, type FreeDeviceBusyPool } from "./freeDeviceBusyReason";
 import {
   RegistryManagedSlotResourceBudget,
@@ -7,12 +13,7 @@ import {
   DefaultManagedSlotEvictionSelector,
   JournaledManagedSlotCacheEvictor,
 } from "./managedSlotCacheEviction";
-/**
- * Assembles the daemon's `daemon/acquireManagedSlots` (#11173 part b) from production parts: the
- * host-wide slot registry, the reconciler over real inventory / provisionDevice / deleteDevice /
- * pool claims, and the session manager's liveness ownership and managed-execution policy.
- */
-
+import type { DeviceInfo } from "../../models";
 import { MultiPlatformDeviceManager, type PlatformDeviceManager } from "../../devices/deviceUtils";
 import type { ExactIosRuntimeCatalog } from "../../devices/exactDeviceProvisioning";
 import {
@@ -45,6 +46,8 @@ import {
   DefaultManagedSpecMatcher,
   DefaultManagedSpecResolver,
   ManagedSlotReconciler,
+  type ManagedSlotDeviceProvisioner,
+  type ManagedSlotDeviceDeleter,
   type ManagedAndroidImageCatalog,
   type ManagedAndroidProfileCatalog,
 } from "./reconciler";
@@ -91,8 +94,10 @@ export interface DaemonManagedSlotTooling {
   iosRuntimeCatalog?: ExactIosRuntimeCatalog;
   /** Defaults to the process-wide boot admission gates. */
   checkBootCapacity?: ManagedSlotBootCapacityAssertion;
-  provisioner?: import("./reconciler").ManagedSlotDeviceProvisioner;
-  deleter?: import("./reconciler").ManagedSlotDeviceDeleter;
+  /** Native preparation port; defaults to the daemon tool workflow. */
+  provisioner?: ManagedSlotDeviceProvisioner;
+  /** Verified native deletion port; defaults to the daemon delete workflow. */
+  deleter?: ManagedSlotDeviceDeleter;
 }
 
 const sdkAndroidImageCatalog: ManagedAndroidImageCatalog = {
@@ -148,8 +153,7 @@ export function createDaemonManagedSlotAcquisition(
   options: DaemonManagedSlotAcquisitionOptions,
 ): DaemonManagedSlotAcquisitionHandle {
   const limit = parseManagedSlotMaxDevices(options.env);
-  const isBusy = (device: import("../../models").DeviceInfo) =>
-    freeDeviceBusyReason(options.pool, device);
+  const isBusy = (device: DeviceInfo) => freeDeviceBusyReason(options.pool, device);
   const invokeTool = options.invokeTool ?? defaultManagedSlotToolInvoker;
   const reconcilers = new WeakMap<SlotRegistry, ManagedSlotReconciler>();
   const redriveLoops = new WeakMap<SlotRegistry, SlotJournalRedriveLoop>();
@@ -168,15 +172,15 @@ export function createDaemonManagedSlotAcquisition(
               registry: async () => registry,
               policy: { limit: () => limit },
               inventory,
+              timer: options.timer,
               eviction: {
-                selector: new DefaultManagedSlotEvictionSelector({ inventory, claims, isBusy }),
-                evictor: {
-                  evict: (candidate, opts) =>
-                    new JournaledManagedSlotCacheEvictor(registry, reconciler!.journal).evict(
-                      candidate,
-                      opts,
-                    ),
-                },
+                selector: new DefaultManagedSlotEvictionSelector({
+                  inventory,
+                  claims,
+                  isBusy,
+                  timer: options.timer,
+                }),
+                evictor: new JournaledManagedSlotCacheEvictor(registry, () => journal),
               },
             });
       reconciler = new ManagedSlotReconciler({
@@ -217,6 +221,7 @@ export function createDaemonManagedSlotAcquisition(
         timer: options.timer,
         journal: { owner: options.journal.owner, inFlight: options.journal.inFlight },
       });
+      const journal: ManagedSlotJournal = reconciler.journal;
       reconcilers.set(registry, reconciler);
     }
     return reconciler;

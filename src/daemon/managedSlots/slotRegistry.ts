@@ -168,7 +168,8 @@ export interface ManagedSlotResourceSnapshot {
   managed: ManagedDeviceEntry[];
   free: FreeSlotDeviceRecord[];
   openJournal: SlotJournalEntry[];
-  scopes: SlotScopeRecord[];
+  /** Only invalidating scopes with reason abandoned can suppress a deleted replacement charge. */
+  abandonedScopeKeys: string[];
 }
 
 /** Exact identity, including the free incarnation of the device. */

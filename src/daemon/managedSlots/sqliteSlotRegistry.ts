@@ -905,10 +905,16 @@ export class SqliteSlotRegistry implements SlotRegistry {
   }
 
   async snapshotManagedDevices(): Promise<ManagedDeviceEntry[]> {
-    return (await this.snapshotManagedSlotResources()).managed;
+    return (await this.snapshotResources(false)).managed;
   }
 
   async snapshotManagedSlotResources(): Promise<ManagedSlotResourceSnapshot> {
+    return this.snapshotResources(true);
+  }
+
+  private async snapshotResources(
+    includeAbandonedScopes: boolean,
+  ): Promise<ManagedSlotResourceSnapshot> {
     const assignedQuery = this.db
       .selectFrom("slot_assignments")
       .innerJoin("slot_scopes", "slot_scopes.scope_key", "slot_assignments.scope_key")
@@ -985,26 +991,20 @@ export class SqliteSlotRegistry implements SlotRegistry {
         )
           .$castTo<string>()
           .as("pending"),
-        jsonArrayFrom(
-          this.db
-            .selectFrom("slot_scopes")
-            .select([
-              "scope_key",
-              "managed_host_scope",
-              "runner_namespace",
-              "runner_incarnation",
-              "state",
-              "invalidation_reason",
-              "created_at_ms",
-              "last_acquired_at_ms",
-              "last_released_at_ms",
-              "invalidating_at_ms",
-              "invalidated_at_ms",
-            ]),
-        )
-          .$castTo<string>()
-          .as("scopes"),
       ])
+      .$if(includeAbandonedScopes, (query) =>
+        query.select(
+          jsonArrayFrom(
+            this.db
+              .selectFrom("slot_scopes")
+              .select("scope_key")
+              .where("state", "=", "invalidating")
+              .where("invalidation_reason", "=", "abandoned"),
+          )
+            .$castTo<string>()
+            .as("abandonedScopeKeys"),
+        ),
+      )
       .executeTakeFirstOrThrow();
     // Decode only the aggregate arrays; target_json must remain a string for the journal codec.
     const assigned: Awaited<ReturnType<typeof assignedQuery.execute>> = JSON.parse(
@@ -1012,7 +1012,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
     );
     const free: FreeDeviceRow[] = JSON.parse(snapshot.free);
     const pendingRows: JournalRow[] = JSON.parse(snapshot.pending);
-    const scopeRows: ScopeRow[] = JSON.parse(snapshot.scopes);
+    const abandoned: Array<{ scope_key: string }> = JSON.parse(snapshot.abandonedScopeKeys ?? "[]");
     const pending = pendingRows.map(toJournalEntry);
     const entries: ManagedDeviceEntry[] = [
       ...assigned.flatMap((row): ManagedDeviceEntry[] =>
@@ -1044,7 +1044,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
       managed: [...entries, ...journalTargetEntries(pending, entries)],
       free: free.map(toFreeDevice),
       openJournal: pending,
-      scopes: scopeRows.map(toScope),
+      abandonedScopeKeys: abandoned.map((row) => row.scope_key),
     };
   }
 

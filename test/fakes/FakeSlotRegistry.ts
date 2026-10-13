@@ -548,12 +548,14 @@ export class FakeSlotRegistry implements SlotRegistry {
   async snapshotManagedSlotResources(): Promise<ManagedSlotResourceSnapshot> {
     // Capture every map before yielding; no concurrent mutation can tear the ledger.
     const free = [...this.free.values()].map((row) => structuredClone(row));
-    const scopes = [...this.scopes.values()].map((scope) => ({ ...scope }));
+    const abandonedScopeKeys = [...this.scopes.values()]
+      .filter((scope) => scope.state === "invalidating" && scope.invalidationReason === "abandoned")
+      .map((scope) => scope.scopeKey);
     const openJournal = [...this.journal.values()]
       .filter((entry) => isSlotJournalPhaseOpen(entry.phase))
       .map((entry) => structuredClone(entry));
     const managed = await this.snapshotManagedDevices();
-    return { managed, free, scopes, openJournal };
+    return { managed, free, abandonedScopeKeys, openJournal };
   }
 
   private deletionRow(row: FreeDeviceIdentity, owner?: SlotJournalOwner) {

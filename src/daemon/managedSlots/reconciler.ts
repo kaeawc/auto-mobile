@@ -1,7 +1,3 @@
-import type {
-  ManagedSlotResourceBudget,
-  ManagedSlotResourceAdmission,
-} from "./managedSlotResourceBudget";
 import { createHash } from "node:crypto";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import {
@@ -18,7 +14,12 @@ import {
   type IosDeviceSpecification,
   type ResolvedExactDeviceSpecification,
 } from "../../devices/exactDeviceProvisioning";
+import type {
+  ManagedSlotResourceBudget,
+  ManagedSlotResourceAdmission,
+} from "./managedSlotResourceBudget";
 import type { DeviceInfo } from "../../models";
+import type { ManagedSlotBudgetEvidence } from "../../models/managedSlotsResult";
 import type { FormFactor } from "../../models/DeviceMatchCriteria";
 import { androidProfileFormFactor } from "../../models/formFactor";
 import type { ManagedSlotDeviceFamily } from "../../server/provisionDeviceSpecSchemas";
@@ -449,10 +450,7 @@ export interface ManagedSlotReconcileFailure {
   /** Underlying provision failure, when the provision path refused. */
   provision?: { code: string; retryable: boolean };
   capacity?: ManagedSlotFailureCapacity;
-  budget?: Pick<
-    Extract<ManagedSlotResourceAdmission, { kind: "exhausted" }>,
-    "limit" | "usage" | "retained" | "evictionFailures"
-  >;
+  budget?: ManagedSlotBudgetEvidence;
 }
 
 /** Same `externalDevices` name and shape as the non-slot `capacity_exhausted` refusal (#11390). */
@@ -1956,8 +1954,11 @@ export class ManagedSlotReconciler {
     try {
       admission = await this.deps.resourceBudget!.admitCreation({
         journalEntryId: entry.id,
+        deadlineMs: context.request.deadlineMs,
         signal: context.request.signal,
       });
+      // Admission can consume the remaining preparation time even when it finds room.
+      this.checkBudget(context.request);
     } catch (error) {
       await this.settleFailedCreate(context, entry, true);
       // Cancellation retains its identity for the reconciler's existing handling.
@@ -1986,11 +1987,11 @@ export class ManagedSlotReconciler {
     entry: SlotJournalEntry,
     absenceProven = false,
   ): Promise<void> {
-    if (absenceProven) {
-      this.noteJournal(context, (await this.journal.close(entry, "rolled_back")).entry);
-      return;
-    }
     try {
+      if (absenceProven) {
+        this.noteJournal(context, (await this.journal.close(entry, "rolled_back")).entry);
+        return;
+      }
       const settled = await this.journal.settleCreation(entry, {
         adopt: false,
         deadlineMs: context.request.deadlineMs,

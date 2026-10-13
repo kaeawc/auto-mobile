@@ -1,8 +1,8 @@
-import { freeDeviceBusyReason } from "./freeDeviceBusyReason";
 import { MultiPlatformDeviceManager } from "../../devices/deviceUtils";
 import type { Timer } from "../../utils/SystemTimer";
 import type { DevicePool } from "../devicePool";
 import { defaultManagedSlotToolInvoker } from "./daemonManagedSlotAcquisition";
+import { freeDeviceBusyReason } from "./freeDeviceBusyReason";
 import { FreeDeviceReclaimer } from "./freeDeviceReclaimer";
 import { PoolManagedSlotDeviceStopper } from "./poolManagedSlotDeviceStopper";
 import {

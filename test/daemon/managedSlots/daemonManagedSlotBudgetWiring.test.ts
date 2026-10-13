@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { warmedTests } from "../../helpers/warmedTests";
+import { describe, expect, spyOn } from "bun:test";
 import { createDaemonManagedSlotAcquisition } from "../../../src/daemon/managedSlots/daemonManagedSlotAcquisition";
 import {
   MANAGED_SLOT_MAX_DEVICES_ENV,
@@ -92,7 +93,7 @@ function wiring(env: NodeJS.ProcessEnv) {
 
 describe("host total-resource limit wiring", () => {
   let warn: ReturnType<typeof spyOn> | undefined;
-  afterEach(() => {
+  const test = warmedTests(() => {
     warn?.mockRestore();
     warn = undefined;
   });

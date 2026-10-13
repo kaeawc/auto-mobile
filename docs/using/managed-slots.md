@@ -597,6 +597,11 @@ Set a positive safe integer to enforce it. Unset or empty leaves total-resource
 admission disabled; an invalid value warns once when the daemon is wired and is
 ignored. No consumer configuration exists to validate in aggregate (#12051).
 
+The limit is host-wide only when **every daemon on the host starts with the same
+value**. A daemon with the variable unset creates without admission and is not
+ordered against participating daemons. All daemons sharing the registry must run
+a build that understands the deletion marker: upgrade them together.
+
 The ledger counts active devices, assigned idle devices, cached free-pool images
 (including stopped images), creation reservations, deleting or cleanup-pending
 devices, and inventory orphans whose names start with `amslot-` and whose stable
@@ -618,6 +623,9 @@ scope (including abandoned but revivable scopes), open journal targets, stopping
 already deleting rows, held devices, foreign claims, incomplete discovery, pooled
 work, shutdown/startup leases, and restart-recovery reservations are protected.
 Only a listed device with the `amslot-` prefix can be deleted.
+Pending deletions count as committed room: admission evicts at most the shortfall
+not already covered by those markers. If pending deletions cover the shortfall,
+creation is refused until redrive confirms absence, without evicting newer cache.
 
 Before a cache deletion, a transaction marks its exact free row as deletion pending.
 That durable marker fences adoption and shutdown. Only authoritative absence removes
@@ -625,6 +633,13 @@ it. Failed or unconfirmed deletion remains charged as `deleting`, with retry bac
 the journal owner loop retries it even when that daemon's own limit is unset, taking
 over from a dead owner while leaving live foreign owners alone. No internal job queue
 is added for capacity refusals.
+A journaled delete is never reverted, even if its post-marking safety check finds
+the device transiently busy and the creation is refused. Redrive still deletes
+that marked cache when it becomes safe.
+
+Admission and eviction are bounded by the acquisition's preparation deadline.
+A delete journaled but not confirmed before that deadline stays charged and is
+finished by periodic redrive. A deadline passing during admission returns `timeout`.
 
 A full budget returns `managed_slot_budget_exhausted`, `retryable: true`, with no
 `retryAfterMs` because recovery has no time bound. Its `budget` evidence contains
@@ -632,6 +647,9 @@ A full budget returns `managed_slot_budget_exhausted`, `retryable: true`, with n
 entries with reasons, and `evictionFailures`. Reset or release managed slot scopes
 that are no longer needed, or raise `AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES`, then retry.
 This refusal is separate from `capacity_exhausted`, which concerns boot limits.
+`usage.total` includes the refused request's own `preparing` reservation, so it can
+read as the limit plus one or more. Pending deletions are named in `retained` with
+reason `deletion_pending`.
 
 ## Error codes
 

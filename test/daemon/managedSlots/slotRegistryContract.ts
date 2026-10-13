@@ -1990,6 +1990,18 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       expect(await registry.listAbandonedScopes()).toEqual([]);
     });
 
+    test("the resource snapshot exposes abandoned scope keys without unrelated scope history", async () => {
+      const abandoned = await readyScope(SCOPE_A1);
+      const reset = await readyScope(SCOPE_B1);
+      await readyScope({ ...SCOPE_A1, runnerNamespace: "untouched" });
+      await abandon(abandoned);
+      await registry.beginScopeInvalidation(reset, "operator_reset");
+      await registry.completeScopeInvalidation(reset);
+      const snapshot = await registry.snapshotManagedSlotResources();
+      expect(snapshot.abandonedScopeKeys).toEqual([abandoned]);
+      expect(snapshot).not.toHaveProperty("scopes");
+    });
+
     test("malformed slot keys and thresholds are rejected before storage", async () => {
       const scopeKey = await readyScope();
       await expect(registry.initSlot({ scopeKey, slotIndex: -1 }, INIT)).rejects.toThrow(

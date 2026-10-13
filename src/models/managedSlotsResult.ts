@@ -1,4 +1,3 @@
-import type { ManagedSlotReconcileFailure } from "../daemon/managedSlots/reconciler";
 /**
  * The managed-slot acquisition result (epic #11172, #11173 part b): what `daemon/acquireManagedSlots`
  * returns, and what the stdio proxy exposes as a snapshot in
@@ -46,15 +45,31 @@ export const MANAGED_SLOT_ACQUISITION_OWN_FAILURE_CODES = [
 export type ManagedSlotAcquisitionOwnFailureCode =
   (typeof MANAGED_SLOT_ACQUISITION_OWN_FAILURE_CODES)[number];
 
+/** Plain total-resource admission evidence, shared by daemon and proxy. */
+export interface ManagedSlotBudgetEvidence {
+  limit: number;
+  usage: {
+    total: number;
+    active: number;
+    assignedIdle: number;
+    cached: number;
+    preparing: number;
+    deleting: number;
+    orphaned: number;
+  };
+  retained: Array<{ platform: "android" | "ios"; stableDeviceId: string; reason: string }>;
+  evictionFailures: Array<{ platform: "android" | "ios"; stableDeviceId: string; message: string }>;
+}
+
 export interface ManagedSlotsFailure {
   code: string;
   retryable: boolean;
   message: string;
   nextAction: string;
   /** Boot-capacity details of a `capacity_exhausted` slot failure (#11390). */
-  /** Total-resource refusal evidence; retryable, without a bounded retry delay. */
-  budget?: ManagedSlotReconcileFailure["budget"];
   capacity?: { limit: number; booted: number; retryAfterMs: number; externalDevices?: string[] };
+  /** Total-resource refusal evidence; retryable, without a bounded retry delay. */
+  budget?: ManagedSlotBudgetEvidence;
 }
 
 export interface ManagedSlotDeviceEvidence {

@@ -702,6 +702,22 @@ The Android boot limit is shared by every daemon using the same adb server on on
 
 </div>
 
+`AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES` is host-wide only when every daemon on the
+host starts with the same value. An unset daemon creates without admission and
+is not ordered against participating daemons. Upgrade all daemons sharing the
+registry together to a build that understands the deletion marker.
+
+Total-resource admission and eviction use the acquisition's preparation deadline;
+a deadline passing during admission returns `timeout`. A deletion journaled but
+unconfirmed in time stays charged until periodic redrive finishes it. Pending
+deletions count as committed room, so only the shortfall not covered by markers
+can evict more cache. A journaled delete is never reverted, including when its
+creation was refused after a transient busy check. Unrelated cache is retained
+while there is headroom. In a budget refusal, `usage.total` includes the refused
+request's own `preparing` reservation and can read as the limit plus one or more.
+See [Total-resource capacity](managed-slots.md#total-resource-capacity) for accounting
+and recovery guidance.
+
 The daemon's passive device work is limited to devices with a session in this
 daemon. At startup, it warms iOS CtrlProxy only for rehydrated sessions. An
 explicit acquisition can also start a runner for its device. Previously an unset

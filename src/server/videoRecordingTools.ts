@@ -17,6 +17,7 @@ import { createJSONToolResponse } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
 import {
   getVideoRecordingMetadata,
+  initializeRecordingTeardownRedriveState,
   getStartupOrphanCaptures,
   interruptVideoRecording,
   getVideoRecordingOwnerRef,
@@ -965,7 +966,9 @@ async function tryStopStartupOrphan(
     }
     await interruptVideoRecording(recordingId);
     const metadata = await getVideoRecordingMetadata(recordingId);
-    if (!metadata) {
+    const { recordingRepository } = await initializeRecordingTeardownRedriveState();
+    const row = await recordingRepository.getRecording(recordingId);
+    if (!metadata || !row) {
       throw new ActionableError(
         `Stopped startup recorder ${recordingId} has no persisted metadata.`,
       );
@@ -975,7 +978,7 @@ async function tryStopStartupOrphan(
       count: 1,
       recordings: [
         {
-          ...stopResultEntry(metadata, orphan),
+          ...stopResultEntry(metadata, row),
           status: "interrupted",
           warning: "The capture was interrupted by a daemon restart and its recorder was stopped.",
         },

@@ -323,7 +323,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     }
     const adb = this.adbFactory.create(device);
     try {
-      const outcome = await this.signalDeviceRecorder(adb, descriptor, pid, 9);
+      const outcome = await this.signalDeviceRecorder(adb, descriptor, pid, 9, true);
       if (outcome === "not-ours") {
         return;
       }
@@ -527,23 +527,27 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     backendHandle: Pick<AndroidBackendHandle, "deviceTempPath">,
     pid: number,
     signal: 2 | 9,
+    orphan = false,
   ): Promise<"signalled" | "not-ours"> {
     let probe: ExecResult;
     try {
       probe = await this.readDeviceRecorderCmdline(adb, pid);
-      if (probe.error) {
-        throw new DeviceUnreachableError(
-          `Cannot reach device to inspect orphan recorder pid ${pid}; retry when the device answers.`,
-          { cause: probe.error },
-        );
-      }
     } catch (error) {
-      if (error instanceof DeviceUnreachableError) {
+      if (!orphan) {
         throw error;
       }
       throw new DeviceUnreachableError(
         `Cannot reach device to inspect orphan recorder pid ${pid}; retry when the device answers.`,
         { cause: error },
+      );
+    }
+    if (probe.error) {
+      if (!orphan) {
+        throw toActionableError(probe.error, `Could not inspect recorder pid ${pid}`);
+      }
+      throw new DeviceUnreachableError(
+        `Cannot reach device to inspect orphan recorder pid ${pid}; retry when the device answers.`,
+        { cause: probe.error },
       );
     }
     if (!isOwnRecorderCmdline(probe.stdout, backendHandle.deviceTempPath)) {

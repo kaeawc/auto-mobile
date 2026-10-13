@@ -60,7 +60,7 @@ describe("startup recorder redrive and a device pooled after it ran", () => {
   let spies: Array<{ mockRestore(): void }>;
   let incarnation: number | undefined;
   let listener: (deviceId: string) => void;
-  let processStarted: ((deviceId: string) => void) | undefined;
+  let processStarted: ((deviceId: string) => void | Promise<void>) | undefined;
   let kills: VideoCaptureTeardownDescriptor[];
   let owned: string[];
   let warnings: string[];
@@ -273,7 +273,7 @@ describe("startup recorder redrive and a device pooled after it ran", () => {
   });
 
   test.each([false, true])(
-    "started process acknowledges startup rows synchronously (independent retry=%s)",
+    "started process confirms startup rows before resolving (independent retry=%p)",
     async (independent) => {
       incarnation = 1;
       await start();
@@ -288,31 +288,31 @@ describe("startup recorder redrive and a device pooled after it ran", () => {
         );
       }
       expect(processStarted).toBeDefined();
-      processStarted!(DEVICE.deviceId);
+      await processStarted!(DEVICE.deviceId);
       expect(marker()).toBe(independent ? "recording-teardown" : undefined);
-      expect(kills).toEqual([]);
+      expect(kills).toEqual([DESCRIPTOR]);
       await step(0);
       expect((await repo.getRecording(ORPHAN_ROW.recordingId))?.captureTeardown).toBeUndefined();
       pool(2);
       expect(marker()).toBeUndefined();
       await step(1000);
-      expect(kills).toEqual([]);
+      expect(kills).toEqual([DESCRIPTOR]);
     },
   );
 
-  test("started process drops a session-held deferred startup row", async () => {
+  test("started process confirms a session-held deferred startup row", async () => {
     const holder = spyOn(manager, "getSessionForDevice").mockReturnValue("holder");
     const unbound = spyOn(manager, "onSessionDeviceUnbound");
     spies.push(holder, unbound);
     incarnation = 1;
     await start();
     expect(processStarted).toBeDefined();
-    processStarted!(DEVICE.deviceId);
+    await processStarted!(DEVICE.deviceId);
     holder.mockReturnValue(null);
     unbound.mock.calls[0]![0]("holder", DEVICE.deviceId);
     await step(0);
     expect(marker()).toBeUndefined();
-    expect(kills).toEqual([]);
+    expect(kills).toEqual([DESCRIPTOR]);
     expect((await repo.getRecording(ORPHAN_ROW.recordingId))?.captureTeardown).toBeUndefined();
   });
 
@@ -321,10 +321,110 @@ describe("startup recorder redrive and a device pooled after it ran", () => {
     await start();
     owned = [ORPHAN_ROW.recordingId];
     expect(processStarted).toBeDefined();
-    processStarted!(DEVICE.deviceId);
+    await processStarted!(DEVICE.deviceId);
     await step(1000);
     expect((await repo.getRecording(ORPHAN_ROW.recordingId))?.captureTeardown).toEqual(DESCRIPTOR);
     expect(kills).toEqual([]);
+  });
+
+  test("process start awaits proof that a restored recorder is stopped", async () => {
+    incarnation = 1;
+    const gate = Promise.withResolvers<void>();
+    deps.forceStopOrphanedCapture = async (_device, descriptor) => {
+      kills.push(descriptor);
+      await gate.promise;
+    };
+    await start();
+    let settled = false;
+    const confirmation = Promise.resolve(processStarted!(DEVICE.deviceId)).then(() => {
+      settled = true;
+    });
+    await step(0);
+    expect(kills).toEqual([DESCRIPTOR]);
+    expect(settled).toBe(false);
+    expect((await repo.getRecording(ORPHAN_ROW.recordingId))?.captureTeardown).toEqual(DESCRIPTOR);
+    expect(marker()).toBe("recording-teardown");
+    gate.resolve();
+    await confirmation;
+    expect(marker()).toBeUndefined();
+    expect(orphans!.list(DEVICE.deviceId)).toEqual([]);
+    expect((await repo.getRecording(ORPHAN_ROW.recordingId))?.captureTeardown).toBeUndefined();
+  });
+
+  test("unreachable process start retains its orphan and running recovery", async () => {
+    incarnation = 1;
+    deps.forceStopOrphanedCapture = async (_device, descriptor) => {
+      kills.push(descriptor);
+      throw new DeviceUnreachableError("device frozen");
+    };
+    await start();
+    await processStarted!(DEVICE.deviceId);
+    expect((await repo.getRecording(ORPHAN_ROW.recordingId))?.captureTeardown).toEqual(DESCRIPTOR);
+    expect(marker()).toBe("recording-teardown");
+    expect(orphans!.find(ORPHAN_ROW.recordingId)).toBeDefined();
+    expect(kills).toEqual([DESCRIPTOR]);
+    await step(1000);
+    expect(kills).toEqual([DESCRIPTOR, DESCRIPTOR]);
+    expect(
+      manager.getDeviceHealthRecovery(DEVICE.deviceId, 1, "recording-teardown").recovering,
+    ).toBe(true);
+    expect(warnings.some((message) => message.includes("Process-start teardown unconfirmed"))).toBe(
+      true,
+    );
+  });
+
+  test("pid-less process start before the hard limit keeps quarantine and its descriptor", async () => {
+    incarnation = 1;
+    const row = { ...UNCONFIRMABLE_ROW, startedAt: ORPHAN_ROW.startedAt };
+    await repo.insertRecording(row);
+    await redriveUnconfirmedCaptureTeardowns(manager, deps);
+    await processStarted!(DEVICE.deviceId);
+    expect((await repo.getRecording(row.recordingId))?.captureTeardown).toEqual(
+      row.captureTeardown,
+    );
+    expect(marker()).toBe("recording-teardown");
+    expect(orphans!.find(row.recordingId)).toBeDefined();
+    expect(kills).toEqual([]);
+  });
+
+  test("process start preserves hook-driven peer revalidation", async () => {
+    await start();
+    pool();
+    const read = spyOn(repo, "listRecordings").mockResolvedValue([]);
+    const update = spyOn(repo, "updateRecording");
+    spies.push(read, update);
+    await processStarted!(DEVICE.deviceId);
+    expect(read).toHaveBeenCalledWith({
+      hasCaptureTeardown: true,
+      excludeLiveDaemonSessionIds: deps.liveDaemonSessionIds,
+      deviceId: DEVICE.deviceId,
+    });
+    expect(kills).toEqual([]);
+    expect(update).not.toHaveBeenCalled();
+    expect(marker()).toBeUndefined();
+    expect(orphans!.list(DEVICE.deviceId)).toEqual([]);
+  });
+
+  test("process tracked during startup read still redrives the returned rows", async () => {
+    incarnation = 1;
+    await repo.insertRecording(ORPHAN_ROW);
+    const gate = Promise.withResolvers<void>();
+    const list = repo.listRecordings.bind(repo);
+    spies.push(
+      spyOn(repo, "listRecordings").mockImplementation(async (query) => {
+        await gate.promise;
+        return list(query);
+      }),
+    );
+    const startup = redriveUnconfirmedCaptureTeardowns(manager, deps);
+    await processStarted!(DEVICE.deviceId);
+    gate.resolve();
+    await startup;
+    expect(marker()).toBe("recording-teardown");
+    expect((await repo.getRecording(ORPHAN_ROW.recordingId))?.captureTeardown).toEqual(DESCRIPTOR);
+    await step();
+    expect(kills).toEqual([DESCRIPTOR]);
+    expect(marker()).toBeUndefined();
   });
 
   test("pool hook synchronously quarantines, then kills the exact orphan once", async () => {
@@ -412,6 +512,9 @@ describe("startup recorder redrive and a device pooled after it ran", () => {
       expect(marker()).toBe("recording-teardown");
       pool(2);
       expect(marker()).toBeUndefined();
+      expect(orphans!.list(DEVICE.deviceId)).toEqual([]);
+      expect(orphans!.find(UNCONFIRMABLE_ROW.recordingId)).toBeUndefined();
+      await expect(orphans!.stop(DEVICE.deviceId)).resolves.toBeUndefined();
       await step();
       pool(3);
       expect(marker()).toBeUndefined();
@@ -454,7 +557,13 @@ describe("startup recorder redrive and a device pooled after it ran", () => {
     expect(marker()).toBe("recording-teardown");
     pool(2);
     expect(marker()).toBe("recording-teardown");
-    await step(185_000);
+    expect(orphans!.find(row.recordingId)).toBeDefined();
+    await expect(orphans!.stop(DEVICE.deviceId)).rejects.toThrow("unconfirmed");
+    await step(184_999);
+    expect(orphans!.find(row.recordingId)).toBeDefined();
+    await step(1);
+    await orphans!.stop(DEVICE.deviceId);
+    expect(orphans!.list(DEVICE.deviceId)).toEqual([]);
     expect(marker()).toBeUndefined();
     expect(kills).toEqual([]);
     expect((await repo.getRecording(row.recordingId))?.captureTeardown).toBeUndefined();
@@ -511,6 +620,7 @@ describe("startup recorder redrive and a device pooled after it ran", () => {
     const mark = spyOn(manager, "markDeviceNeedsRecorderTeardown");
     spies.push(read, mark);
     expect(await redriveUnconfirmedCaptureTeardowns(manager, deps)).toBe(false);
+    expect(orphans).toBeUndefined();
     pool();
     await step();
     pool(2);

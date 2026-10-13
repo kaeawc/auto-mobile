@@ -1178,9 +1178,11 @@ export class DevicePool {
   private readonly criteriaMatcher: DeviceCriteriaMatcher;
   private readonly releaseSessionForDisconnectedDevice: DeviceDisconnectSessionReleaser;
   private readonly onDeviceReady: DeviceReadyListener | undefined;
-  private onDeviceProcessStarted: ((deviceId: string) => void) | undefined;
+  private onDeviceProcessStarted: ((deviceId: string) => void | Promise<void>) | undefined;
 
-  setDeviceProcessStartedListener(listener: ((deviceId: string) => void) | undefined): void {
+  setDeviceProcessStartedListener(
+    listener: ((deviceId: string) => void | Promise<void>) | undefined,
+  ): void {
     this.onDeviceProcessStarted = listener;
   }
   private readonly onDeviceIncarnationAssigned: DevicePoolDependencies["onDeviceIncarnationAssigned"];
@@ -5756,7 +5758,14 @@ export class DevicePool {
       !alreadyTracked &&
       this.emulatorProcessLifecycle.hasStartedDeviceProcess(device.deviceId, childProcess)
     ) {
-      this.onDeviceProcessStarted?.(device.deviceId);
+      try {
+        await this.onDeviceProcessStarted?.(device.deviceId);
+      } catch (error) {
+        logger.warn(
+          `[DevicePool] Device process-start listener failed for ${device.deviceId}`,
+          error,
+        );
+      }
     }
   }
 

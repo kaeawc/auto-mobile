@@ -39,7 +39,7 @@ export interface RecordingTeardownRedriveDeps {
     descriptor: VideoCaptureTeardownDescriptor,
   ): Promise<void>;
   onStartupOrphans?(handle: StartupOrphanCaptures): void;
-  onDeviceProcessStarted?(listener: (deviceId: string) => void): void;
+  onDeviceProcessStarted?(listener: (deviceId: string) => void | Promise<void>): void;
   onDeviceIncarnationAssigned?(listener: (deviceId: string) => void): void;
   now(): number;
   timer: Pick<Timer, "sleep" | "setTimeout" | "clearTimeout">;
@@ -72,7 +72,7 @@ export async function redriveUnconfirmedCaptureTeardowns(
   const pending = new Map<string, PendingRedrive>();
   const redrivenIncarnations = new Map<string, number>();
   let subscribedPending = false;
-  const startedDevices = new Set<string>();
+  const orphans = createStartupOrphanCaptures(byDevice, deps);
   const redriveDevice = (deviceId: string, hookDriven: boolean): void => {
     const incarnation = deps.getDeviceIncarnation(deviceId);
     const owned = new Set(deps.ownedCaptureIds());
@@ -110,19 +110,23 @@ export async function redriveUnconfirmedCaptureTeardowns(
   };
   // Install before the startup read yields: its loop handles devices added during the read.
   deps.onDeviceIncarnationAssigned?.((deviceId) => redriveDevice(deviceId, true));
-  deps.onDeviceProcessStarted?.((deviceId) => {
-    startedDevices.add(deviceId);
-    const owned = new Set(deps.ownedCaptureIds());
-    const records = (byDevice.get(deviceId) ?? []).filter((row) => !owned.has(row.recordingId));
-    byDevice.delete(deviceId);
-    pending.delete(deviceId);
-    for (const row of records) {
-      row.withdrawRetry?.();
-      // A new emulator process cannot contain the previous process's recorder.
-      // Invalidate locally before yielding, including any in-flight/deferred retry.
-      row.captureTeardown = undefined;
+  deps.onDeviceProcessStarted?.(async (deviceId) => {
+    if (orphans.list(deviceId).length === 0) {
+      return;
     }
-    void clearReplacedDescriptors(records, deps);
+    try {
+      // Quick-boot snapshots can restore a recorder: a new child is not teardown proof.
+      await raceWithDeadline(() => orphans.stop(deviceId), {
+        timer: deps.timer,
+        timeoutMs: INCOMPLETE_MARK_GRACE_MS,
+        label: `Process-start orphan recorder teardown on ${deviceId}`,
+      });
+    } catch (error) {
+      logger.warn(
+        `[RecordingTeardownRedrive] Process-start teardown unconfirmed on ${deviceId}`,
+        error,
+      );
+    }
   });
   let rows: VideoRecordingRecord[];
   try {
@@ -142,10 +146,6 @@ export async function redriveUnconfirmedCaptureTeardowns(
     if (!row.captureTeardown || owned.has(row.recordingId)) {
       continue;
     }
-    if (startedDevices.has(row.deviceId)) {
-      void clearReplacedDescriptors([row], deps);
-      continue;
-    }
     const group = byDevice.get(row.deviceId) ?? [];
     group.push({ ...row });
     byDevice.set(row.deviceId, group);
@@ -153,7 +153,7 @@ export async function redriveUnconfirmedCaptureTeardowns(
   for (const deviceId of byDevice.keys()) {
     redriveDevice(deviceId, false);
   }
-  deps.onStartupOrphans?.(createStartupOrphanCaptures(byDevice, deps));
+  deps.onStartupOrphans?.(orphans);
   return true;
 }
 
@@ -163,7 +163,10 @@ function createStartupOrphanCaptures(
 ): StartupOrphanCaptures {
   const retained = (deviceId: string) =>
     (byDevice.get(deviceId) ?? []).filter(
-      (row) => row.captureTeardown && !deps.ownedCaptureIds().includes(row.recordingId),
+      (row) =>
+        row.captureTeardown &&
+        !deps.ownedCaptureIds().includes(row.recordingId) &&
+        canRedriveCapture(row, deps.getDeviceIncarnation(deviceId)),
     );
   const reference = (row: RetainedCaptureRow) => ({
     recordingId: row.recordingId,
@@ -388,7 +391,7 @@ async function confirmRetainedCapture(
       return;
     }
     await confirmOrphanedCapture(row, deps, waitForExpiry);
-    // Process-start acknowledgement can retire this row while device confirmation yields.
+    // Identity replacement can retire this row while device confirmation yields.
     if (row.captureTeardown !== descriptor) {
       return;
     }

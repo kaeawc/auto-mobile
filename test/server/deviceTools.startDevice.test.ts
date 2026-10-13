@@ -2635,6 +2635,8 @@ describe("startDevice handler", () => {
     "held",
     "other-reason",
     "mixed-reasons",
+    "mixed-recovery",
+    "all-recovering",
     "aborted",
     "provisioned",
   ] as const)("recording quarantine cold boot cancellation (%s)", async (kind) => {
@@ -2658,6 +2660,12 @@ describe("startDevice handler", () => {
     ];
     if (kind === "mixed-reasons") {
       evidence.push({ ...evidence[0]!, reason: "clock" });
+    } else if (kind === "mixed-recovery" || kind === "all-recovering") {
+      evidence.push({
+        ...evidence[0]!,
+        deviceId: "emulator-5556",
+        recovering: kind === "all-recovering",
+      });
     }
     try {
       const settlement = cancelUnownedColdBootUnlessRetryable(
@@ -2670,11 +2678,13 @@ describe("startDevice handler", () => {
         new DeviceUnhealthyError(evidence, "recorder quarantine"),
         controller.signal,
       );
-      if (kind === "recovering") {
+      if (kind === "recovering" || kind === "all-recovering") {
         expect(settlement).toBeUndefined();
       }
       await settlement;
-      expect(kill).toHaveBeenCalledTimes(kind === "recovering" ? 0 : 1);
+      expect(kill).toHaveBeenCalledTimes(
+        kind === "recovering" || kind === "all-recovering" ? 0 : 1,
+      );
     } finally {
       kill.mockRestore();
     }

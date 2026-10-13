@@ -377,6 +377,21 @@ test("R6b owner stops its pre-restart recording by id", async () => {
   expect(payload.action).toBe("stop");
   expect(payload.count).toBe(1);
   expect(stops).toBe(1);
+  const orphanEntry = payload.recordings[0];
+  expect(orphanEntry.deviceId).toBe(device.deviceId);
+  expect(orphanEntry.platform).toBe(device.platform);
+  videoManager.setStartupOrphanCaptures(undefined);
+  const active = await startVideoRecording({ device, ownerSessionUuid: OWNER });
+  const normal = await outcome({
+    action: "stop",
+    recordingId: active.recordingId,
+    sessionUuid: OWNER,
+  });
+  expect(normal.error).toBeUndefined();
+  const normalEntry = JSON.parse(normal.response!.content[0].text).recordings[0];
+  expect(Object.keys(orphanEntry).sort()).toEqual(
+    [...Object.keys(normalEntry), "status", "warning"].sort(),
+  );
   expect(payload.recordings[0].status).toBe("interrupted");
   expect(payload.recordings[0].warning).toContain("daemon restart");
 });

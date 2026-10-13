@@ -153,7 +153,7 @@ test("later mark re-covers exhausted retries and cannot clear their marker", asy
 });
 
 test.each([false, true])(
-  "late retry during last attempt gets all three attempts (replacement=%s)",
+  "late retry during last attempt gets all three attempts (replacement=%p)",
   async (replacement) => {
     const gate = Promise.withResolvers<void>();
     let old = 0;
@@ -515,4 +515,27 @@ test("old disposer cannot remove a replacement or an independent keyed retry", a
   expect(marked()).toBeDefined();
   independent();
   expect(marked()).toBeUndefined();
+});
+
+test("shutdown ends idle unreachable re-arms with retries and marker retained", async () => {
+  let calls = 0;
+  mark(async () => {
+    calls++;
+    throw new DeviceUnreachableError("frozen device");
+  });
+  await step(3000);
+  expect(calls).toBe(3);
+  manager.stopAcceptingSessionCreations();
+  await step(30_000);
+  expect(calls).toBe(4);
+  expect(timer.getPendingSleepCount()).toBe(0);
+  expect(timer.getPendingTimeoutCount()).toBe(0);
+  expect(marked()).toBeDefined();
+  expect(manager.getDeviceHealthRecovery(deviceId, 1, "recording-teardown").recovering).toBe(false);
+  // The shutdown fence must keep the owed retry available to a later explicit mark.
+  mark(async () => {});
+  await step(1000);
+  expect(calls).toBe(5);
+  expect(marked()).toBeDefined();
+  expect(timer.getPendingSleepCount()).toBe(0);
 });

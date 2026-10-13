@@ -177,7 +177,13 @@ export async function recoverRecorderTeardowns(
       deps.drop();
       return retries.revision;
     }
-    attempt = revision !== retries.revision ? 1 : unreachable ? attempt : attempt + 1;
+    if (unreachable) {
+      if (!deps.acceptingSessions()) {
+        return retries.revision;
+      }
+      continue;
+    }
+    attempt = revision !== retries.revision ? 1 : attempt + 1;
     revision = retries.revision;
   }
   return revision;

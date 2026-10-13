@@ -319,6 +319,46 @@ describe("orphaned Android recorder teardown", () => {
       execute.mockRestore();
     }
   });
+  // Exercise the shared signal method used by live SIGINT/force-stop without launching a capture.
+  test.each(["thrown", "returned"])(
+    "live recorder probe retains its original error (%s)",
+    async (mode) => {
+      const { backend, client } = harness();
+      const cause = new Error("probe timed out");
+      const execute = spyOn(client, "executeCommand").mockImplementation(async () => {
+        if (mode === "thrown") {
+          throw cause;
+        }
+        return { stdout: "", stderr: "", error: cause };
+      });
+      const signal = backend as unknown as {
+        signalDeviceRecorder(
+          adb: typeof client,
+          descriptor: typeof descriptor,
+          pid: number,
+          signal: 2 | 9,
+        ): Promise<unknown>;
+      };
+      try {
+        for (const kind of [2, 9] as const) {
+          const error = await signal
+            .signalDeviceRecorder(client, descriptor, 4321, kind)
+            .catch((caught: unknown) => caught);
+          expect(error).not.toBeInstanceOf(DeviceUnreachableError);
+          if (mode === "thrown") {
+            expect(error).toBe(cause);
+          } else {
+            expect(error).toMatchObject({
+              message: "Could not inspect recorder pid 4321: probe timed out",
+              cause,
+            });
+          }
+        }
+      } finally {
+        execute.mockRestore();
+      }
+    },
+  );
   test("descriptor reads the pid learned after start", () => {
     const { backend } = harness();
     const devicePid: { pid?: number } = {};

@@ -4176,8 +4176,7 @@ function leavePreviouslyRunningBoot(boot: DeviceBootResult | undefined): boolean
 function coldBootRetryReason(failure: unknown): string | undefined {
   if (
     failure instanceof DeviceUnhealthyError &&
-    failure.recovering &&
-    failure.devices.every((device) => device.reason === "recording-teardown")
+    failure.devices.every((device) => device.recovering && device.reason === "recording-teardown")
   ) {
     return "recording-teardown";
   }

@@ -137,7 +137,7 @@ below are the defaults; the constants live in
   first heartbeat, any idle release or an owner-disconnect release, a read in flight
   neither holds nor extends the release (#11372, #11381). The same release cuts
   a read still running and answers it with the typed terminal refusal (#11384).
-- **Idle.** `DEFAULT_SESSION_IDLE_TIMEOUT_MS` (2 min) after the last control tool
+- **Idle.** Plain sessions use `DEFAULT_SESSION_IDLE_TIMEOUT_MS` (2 min) after the last control tool
   call ends. An idle release is terminal: the session UUID ends with it. The
   grace does not stretch it: a heartbeating session is released at the idle
   deadline. Heartbeats and reads (`observe`, `listDevices`, `doctor`,
@@ -145,7 +145,13 @@ below are the defaults; the constants live in
   call still in flight holds the release, until its request deadline plus 10 s
   (or the 30 min ceiling without a deadline). A read in flight never holds it;
   the release cuts the read with the typed terminal refusal `session_ownership_lost`.
-- **`idleReleaseAt`** is the idle deadline as wall-clock epoch milliseconds. The
+- **Managed executions.** Only `managed-execution` sessions are idle-exempt while
+  their owner lease is live or suspect. Owner exit, heartbeat loss and explicit release
+  end them; a hung but living owner with heartbeats holds indefinitely. A passed
+  persisted idle deadline does not prevent restart recovery; awaiting-owner and
+  device-restart windows still bound recovery. Other policies keep their idle behavior.
+- **`idleReleaseAt`** is the idle deadline as wall-clock epoch milliseconds, or `null`
+  for an exempt managed execution. Explicit null disables proxy-local idle fallback. The
   daemon computes it (session-clock instants are converted to wall time at the
   daemon boundary), reports it in the session hold diagnostics and the heartbeat
   acknowledgement, and clients should treat it as authoritative rather than

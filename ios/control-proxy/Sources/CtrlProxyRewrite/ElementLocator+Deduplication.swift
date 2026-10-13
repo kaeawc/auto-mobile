@@ -106,10 +106,20 @@ extension ElementLocator {
     )
         -> [UIElementInfo]
     {
-        var seenNoiseKeys: Set<String> = []
-        var result: [UIElementInfo] = []
+        cleanupXCTestUIKitNoiseIndices(parent: parent, children: children).map { children[$0] }
+    }
 
-        for child in children {
+    /// Original child indices retained by cleanup, in document order, for window-origin tracking.
+    nonisolated static func cleanupXCTestUIKitNoiseIndices(
+        parent: UIElementInfo,
+        children: [UIElementInfo]
+    )
+        -> [Int]
+    {
+        var seenNoiseKeys: Set<String> = []
+        var result: [Int] = []
+
+        for (index, child) in children.enumerated() {
             if isDuplicateLabel(child, of: parent) {
                 continue
             }
@@ -122,7 +132,7 @@ extension ElementLocator {
                 }
                 seenNoiseKeys.insert(key)
             }
-            result.append(child)
+            result.append(index)
         }
 
         return result

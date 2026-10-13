@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
 import { DaemonDisconnectError } from "../../src/daemon/DaemonDisconnectError";
 import { McpTimeoutError } from "../../src/daemon/McpTimeoutError";
-import { SessionSuspectError } from "../../src/daemon/sessionManager";
+import { SessionHeldByRecoveryError, SessionSuspectError } from "../../src/daemon/sessionManager";
 import { isTypedToolRefusal, shapeToolCallError } from "../../src/server/shapeToolCallError";
 import {
   DeviceAssignedToManagedSlotError,
@@ -18,6 +18,8 @@ import { logger } from "../../src/utils/logger";
 import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessService";
 import { typedRefusalFields } from "../../src/models/typedRefusalFields";
 
+import { DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS } from "../../src/daemon/deviceAcquisitionRefusals";
+
 const context = { toolName: "observe", source: "MCP" } as const;
 
 describe("shapeToolCallError", () => {
@@ -29,6 +31,24 @@ describe("shapeToolCallError", () => {
 
   afterEach(() => {
     errorSpy.mockRestore();
+  });
+
+  test("a recovery-held session is a typed retryable refusal on every tool boundary", () => {
+    const error = new SessionHeldByRecoveryError("session", "device");
+    expect(isTypedToolRefusal(error)).toBe(true);
+    for (const source of ["MCP", "ProxyServer"] as const) {
+      const result = shapeToolCallError(error, { ...context, source });
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        success: false,
+        error: error.message,
+        code: "session_held_by_recovery",
+        sessionUuid: "session",
+        deviceId: "device",
+        retryable: true,
+        retryAfterMs: DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS,
+      });
+    }
   });
 
   test("the managed-slot payload allowlist preserves each refusal on both tool boundaries", () => {

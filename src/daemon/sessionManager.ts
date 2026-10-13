@@ -113,7 +113,10 @@ import {
   type LivenessOwnerHold,
   type LivenessOwnerLeaseSnapshot,
 } from "./livenessOwnerLease";
-import { isReleaseVetoedByExecutions } from "./unsettledExecutionVeto";
+import {
+  isReleaseVetoedByExecutions,
+  UNSETTLED_EXECUTION_VETO_CEILING_MS,
+} from "./unsettledExecutionVeto";
 import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   getSessionHeartbeatCheckIntervalMs,
@@ -126,6 +129,7 @@ import {
   DeviceOwnedByOtherDaemonError,
   SESSION_NO_LONGER_OWNS_DEVICE_CODE,
   SESSION_REBINDING_CODE,
+  SESSION_HELD_BY_RECOVERY_CODE,
   SESSION_TERMINAL_RELEASE_IN_PROGRESS_CODE,
   SessionCreationTimeoutError,
   SessionReleasedDuringCreationError,
@@ -712,7 +716,11 @@ export class SessionTerminalReleaseInProgressError extends ActionableError {
   }
 }
 
-export { SESSION_NO_LONGER_OWNS_DEVICE_CODE, SESSION_REBINDING_CODE };
+export {
+  SESSION_NO_LONGER_OWNS_DEVICE_CODE,
+  SESSION_REBINDING_CODE,
+  SESSION_HELD_BY_RECOVERY_CODE,
+};
 export { SessionNoLongerOwnsDeviceError };
 
 /**
@@ -731,6 +739,25 @@ export class SessionRebindingError extends ActionableError {
         "retry shutdown after it settles.",
     );
     this.name = "SessionRebindingError";
+  }
+}
+
+/** A late control call waits for session-preserving recovery before judging idle expiry. */
+export class SessionHeldByRecoveryError extends ActionableError {
+  readonly code = SESSION_HELD_BY_RECOVERY_CODE;
+  readonly retryable = true;
+  readonly retryAfterMs = DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS;
+
+  constructor(
+    readonly sessionUuid: string,
+    readonly deviceId: string,
+  ) {
+    super(
+      `Session ${sessionUuid} is past its idle deadline and its device ${deviceId} is being recovered ` +
+        `(code ${SESSION_HELD_BY_RECOVERY_CODE}); retry after the recovery settles to receive ` +
+        "either the live session or the terminal idle answer.",
+    );
+    this.name = "SessionHeldByRecoveryError";
   }
 }
 
@@ -831,9 +858,13 @@ export interface SessionExecutionMetadata {
 type SessionClockExecution = SessionExecutionMetadata & { sessionClockStartTime: number };
 
 export interface ActiveSessionExecutionQuery {
+  /** Count only session-preserving recovery, without consulting tracked executions. */
+  recoveryOnly?: boolean;
   startedAtOrBefore?: number;
   /** Compare the start captured on the session clock, immune to wall-clock steps (#11290). */
   sessionClockStartedAtOrBefore?: number;
+  /** Admission only: count non-aborted work within its deadline or its undated allowance. */
+  liveOnSessionClock?: { at: number; undatedForMs: number };
   excludeExecutionId?: string;
   /** Count control calls only: reads never hold idle or owner-disconnect release (#11381). */
   excludeReads?: boolean;
@@ -4162,7 +4193,8 @@ export class SessionManager {
   /**
    * Resolve a session before a new tool execution is accepted. A timely control call still in
    * flight keeps the session in use, so another control call may join it after the idle deadline.
-   * Calls that all began late cannot revive the session by counting each other.
+   * Only live timely control work admits it: late or non-live calls end the idle session at once.
+   * Recovery alone preserves the hold and refuses the late call with a typed retryable answer.
    */
   getSessionForNewExecution(
     sessionId: string,
@@ -4187,13 +4219,13 @@ export class SessionManager {
     }
     const startedExecution = execution && this.executionOnSessionClock(execution);
     if (expireDespiteActiveExecution) {
-      if (this.isLateExecutionWhileEarlierWorkIsActive(session, startedExecution, true)) {
+      if (
+        this.isLateExecutionWhileEarlierWorkIsActive(session, startedExecution, "timely-control")
+      ) {
         return session;
       }
-      if (this.isLateExecutionWhileEarlierWorkIsActive(session, startedExecution)) {
-        throw new Error(
-          `Session ${sessionId} expired before this execution began while earlier work is still active.`,
-        );
+      if (this.isLateExecutionWhileEarlierWorkIsActive(session, startedExecution, "recovery")) {
+        throw new SessionHeldByRecoveryError(sessionId, session.assignedDevice);
       }
     }
     if (this.shouldExpireSession(session, expireDespiteActiveExecution, startedExecution)) {
@@ -12742,13 +12774,14 @@ export class SessionManager {
   }
 
   /**
-   * A late call while other control work or recovery holds the session. Only a timely control
-   * call admits new control work; the unbounded check preserves the hold without admission.
+   * A late call while control work or recovery holds the session. Only live timely control
+   * work admits it; recovery alone refuses control with a retryable answer. The unbounded view
+   * lets late reads use the held device sessionlessly without releasing any hold.
    */
   private isLateExecutionWhileEarlierWorkIsActive(
     session: Session,
     execution: SessionClockExecution | undefined,
-    timelyControlOnly = false,
+    hold: "any" | "timely-control" | "recovery" = "any",
   ): boolean {
     if (ignoresManagedExecutionIdleDeadline(session.livenessPolicy)) {
       return false;
@@ -12759,7 +12792,16 @@ export class SessionManager {
       this.sessionNow() > idleDeadline &&
       execution.sessionClockStartTime > idleDeadline &&
       this.activeSessionExecutionChecker(session.sessionId, {
-        ...(timelyControlOnly ? { sessionClockStartedAtOrBefore: idleDeadline } : {}),
+        ...(hold === "timely-control"
+          ? {
+              sessionClockStartedAtOrBefore: idleDeadline,
+              liveOnSessionClock: {
+                at: this.sessionNow(),
+                undatedForMs: UNSETTLED_EXECUTION_VETO_CEILING_MS,
+              },
+            }
+          : {}),
+        ...(hold === "recovery" ? { recoveryOnly: true } : {}),
         excludeExecutionId: execution.executionId,
         excludeReads: true,
       })

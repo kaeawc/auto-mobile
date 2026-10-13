@@ -36,8 +36,9 @@ describe("idle-expiry release cancels the executions it overrides (#10820)", () 
     cancelCalls = [];
     hung = undefined;
     // Wired the way the daemon wires the real tracker.
-    manager.setActiveSessionExecutionChecker((sessionId, query) =>
-      tracker.hasActiveSessionUuidExecutions(sessionId, query),
+    manager.setActiveSessionExecutionChecker(
+      (sessionId, query) =>
+        !query?.recoveryOnly && tracker.hasActiveSessionUuidExecutions(sessionId, query),
     );
     manager.setSessionExecutionDeadlineLookup((sessionId) =>
       tracker.getLatestSessionExecutionDeadlineMs(sessionId),

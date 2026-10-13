@@ -1,6 +1,17 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { z } from "zod/v4";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { ToolRegistry, type AuditRunnerInput } from "../../src/server/toolRegistry";
 import {
   registerAppTools,
@@ -40,10 +51,28 @@ import {
   isSessionlessDeviceRead,
   runWithToolSelectionContext,
 } from "../../src/features/toolSelection/toolSelectionContext";
-import { executionTracker } from "../../src/server/executionTracker";
+import {
+  executionTracker,
+  type ActiveExecution,
+  type SessionClockOffsetProvider,
+} from "../../src/server/executionTracker";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import {
+  getDeviceToolsDependencies,
+  resetDeviceToolsDependencies,
+} from "../../src/server/deviceTools";
+import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
+import { ResourceRegistry } from "../../src/server/resourceRegistry";
+import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
+import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { getDaemonStreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
+import { SessionToolBinding } from "../../src/server/SessionToolBinding";
+import { McpTestFixture } from "../fixtures/mcpTestFixture";
+import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import type { AppsQueryResourceContent } from "../../src/server/appResources";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { setDebugModeEnabled } from "../../src/utils/debug";
+import { getAbortSignal } from "../../src/utils/AbortContext";
 
 /**
  * Read-only tools on a device another session holds (#10830). Watching is allowed on any device
@@ -92,7 +121,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
   }
 
-  beforeEach(async () => {
+  async function setUpDevicePath(): Promise<void> {
     reowner = undefined;
     audited = [];
     recorded = [];
@@ -166,13 +195,14 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
           readPath: isSessionlessDeviceRead(),
           sessionUuid: args.sessionUuid,
         });
-        return { success: true };
+        return { content: [{ type: "text", text: JSON.stringify({ success: true }) }] };
       },
       { deviceReadOnly: true },
     );
-  });
+  }
+  beforeEach(setUpDevicePath);
 
-  afterEach(() => {
+  function tearDownDevicePath(): void {
     reowner?.close();
     expect(executionTracker.getActiveExecutionCount()).toBe(0);
     serverConfig.setEmbeddedSdkEnabled(false);
@@ -184,7 +214,8 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     sessionManager.stopCleanupTimer();
-  });
+  }
+  afterEach(tearDownDevicePath);
 
   test("a sessionless read with a held deviceId runs on the read-only path with no readiness", async () => {
     await call("readProbe", { platform: "android", deviceId: held.deviceId });
@@ -425,6 +456,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       sessionManager.setActiveSessionExecutionChecker(
         (sessionId, query) =>
           sessionId === agent &&
+          !query?.recoveryOnly &&
           query?.excludeExecutionId !== "earlier" &&
           (query?.sessionClockStartedAtOrBefore === undefined ||
             earlierStart <= query.sessionClockStartedAtOrBefore),
@@ -474,6 +506,406 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       expect(audited).toEqual([]);
       expect(devices.getEnsureDeviceReadyCalls()).toBe(0);
       expect(devices.getSetCurrentDeviceCalls()).toEqual(pinsBefore);
+    });
+  });
+
+  describe("late reads never bind through MCP ingress (#12113)", () => {
+    const connection = "late-read-connection";
+    let fixture: McpTestFixture;
+    let binding: SessionToolBinding;
+    let restoreServer: () => void;
+    let bindingLookup: ReturnType<typeof spyOn>;
+    let release: ReturnType<typeof spyOn>;
+    let executions: ActiveExecution[];
+    let session: NonNullable<ReturnType<SessionManager["peekSession"]>>;
+    let cancellations: string[];
+    let recovering: boolean;
+    let ingressHandler: Parameters<Server["setRequestHandler"]>[1];
+    let finishControl: (() => void) | undefined;
+    let pendingControl: Promise<unknown> | undefined;
+    let previousClockOffset: SessionClockOffsetProvider;
+    let previousFeatureFlags: FeatureFlagService | null;
+    let previousFlagNotifier: Parameters<FeatureFlagService["setToolListChangedNotifier"]>[0];
+    let previousResources: ReturnType<typeof ResourceRegistry.getAllResources>;
+    let previousTemplates: Map<string, ReturnType<typeof ResourceRegistry.getAllTemplates>[number]>;
+    let previousToolServers: unknown;
+    let previousResourceServers: unknown;
+    let previousBindingHandlers: unknown;
+    let previousReleaseListeners: Set<Parameters<typeof SessionReleaseBroadcaster.subscribe>[0]>;
+    let previousDeviceRemovalListeners: Set<(deviceId: string) => void>;
+
+    beforeAll(async () => {
+      previousClockOffset = Reflect.get(executionTracker, "sessionClockOffsetProvider");
+      previousFeatureFlags = Reflect.get(FeatureFlagService, "instance");
+      if (previousFeatureFlags) {
+        previousFlagNotifier = Reflect.get(previousFeatureFlags, "notifier");
+      }
+      previousResources = ResourceRegistry.getAllResources();
+      previousTemplates = new Map(ResourceRegistry["templates"]);
+      previousToolServers = new Set(ToolRegistry["servers"]);
+      previousResourceServers = new Set(ResourceRegistry["servers"]);
+      previousBindingHandlers = new Set(ToolRegistry["sessionBindingReleaseHandlers"]);
+      previousReleaseListeners = new Set(SessionReleaseBroadcaster["listeners"]);
+      previousDeviceRemovalListeners = new Set(getDaemonStreamDeviceLifecycleEmitter()["removed"]);
+      // Warm the real server/SDK setup outside the individual test budgets.
+      restoreServer = installHermeticServerFixture();
+      const warm = new McpTestFixture({ daemonMode: true });
+      await setUpDevicePath();
+      try {
+        runAuditedHandlers = true;
+        ToolRegistry.registerDeviceAware(
+          "ingressWarmup",
+          "Ingress warmup",
+          probeSchema,
+          async () => ({ success: true }),
+        );
+        await warm.setup();
+        await warm.client.callTool({ name: "ingressWarmup", arguments: { sessionUuid: agent } });
+      } finally {
+        await warm.teardown();
+        tearDownDevicePath();
+      }
+    });
+
+    afterAll(() => {
+      restoreServer();
+      // The fixture restores a manager it lazily created; retire both factory slots instead.
+      PlatformDeviceManagerFactory.reset();
+      const deviceToolsDependencies = getDeviceToolsDependencies();
+      resetDeviceToolsDependencies();
+      resetDbWriteBarrier();
+      // Match the neighbouring suite's identity restore; this tracker has no reset API.
+      Reflect.set(executionTracker, "sessionClockOffsetProvider", previousClockOffset);
+      DaemonState.getInstance().reset();
+      // Obtain the current shared prototype host's public disposer, then retire its lifecycle.
+      registerPrototypeTools()();
+      SessionReleaseBroadcaster.clearForTesting();
+      for (const listener of previousReleaseListeners) {
+        SessionReleaseBroadcaster.subscribe(listener);
+      }
+      // The stream emitter has no reset API; restore its existing listener set in place.
+      const removed = getDaemonStreamDeviceLifecycleEmitter()["removed"];
+      removed.clear();
+      for (const listener of previousDeviceRemovalListeners) {
+        getDaemonStreamDeviceLifecycleEmitter().onDeviceRemoved(listener);
+      }
+      ToolRegistry.clearTools();
+      ResourceRegistry.clearResources();
+      for (const resource of previousResources) {
+        ResourceRegistry["resources"].set(resource.uri, resource);
+      }
+      for (const [uri, template] of previousTemplates) {
+        ResourceRegistry["templates"].set(uri, template);
+      }
+      if (previousFeatureFlags) {
+        previousFeatureFlags.setToolListChangedNotifier(previousFlagNotifier);
+        expect(Reflect.get(previousFeatureFlags, "notifier")).toBe(previousFlagNotifier);
+      }
+      // FeatureFlagService has no singleton reset API; restore its pre-ingress identity.
+      Reflect.set(FeatureFlagService, "instance", previousFeatureFlags);
+      expect(Reflect.get(FeatureFlagService, "instance")).toBe(previousFeatureFlags);
+      expect(Reflect.get(PlatformDeviceManagerFactory, "instance")).toBeNull();
+      expect(Reflect.get(PlatformDeviceManagerFactory, "injectedManager")).toBeNull();
+      expect(Reflect.get(PlatformDeviceManagerFactory, "injectedAdbFactory")).toBeNull();
+      expect(executionTracker.getActiveExecutionCount()).toBe(0);
+      expect(Reflect.get(executionTracker, "sessionClockOffsetProvider")).toBe(previousClockOffset);
+      expect(DaemonState.getInstance().isInitialized()).toBe(false);
+      expect(ToolRegistry.getAllTools()).toHaveLength(0);
+      expect(getDbWriteBarrier().inFlightCount()).toBe(0);
+      expect(getDbWriteBarrier().isDraining()).toBe(false);
+      expect(getDeviceToolsDependencies()).not.toBe(deviceToolsDependencies);
+      expect(ResourceRegistry.getAllResources()).toEqual(previousResources);
+      expect(ResourceRegistry["templates"]).toEqual(previousTemplates);
+      // Closing the fixtures must unsubscribe their servers and binding closures, not mask leaks.
+      expect(ToolRegistry["servers"]).toEqual(previousToolServers);
+      expect(ResourceRegistry["servers"]).toEqual(previousResourceServers);
+      expect(ToolRegistry["sessionBindingReleaseHandlers"]).toEqual(previousBindingHandlers);
+      expect(SessionReleaseBroadcaster["listeners"]).toEqual(previousReleaseListeners);
+      expect(removed).toEqual(previousDeviceRemovalListeners);
+    });
+
+    beforeEach(async () => {
+      executions = [];
+      finishControl = undefined;
+      pendingControl = undefined;
+      runAuditedHandlers = true;
+      session = sessionManager.peekSession(agent)!;
+      cancellations = [];
+      recovering = false;
+      executionTracker.setSessionClockOffsetProvider(
+        (wallNowMs = Date.now()) => sessionManager.sessionNow() - wallNowMs,
+      );
+      sessionManager.setActiveSessionExecutionChecker((sessionId, query) => {
+        if (query?.recoveryOnly) {
+          return recovering;
+        }
+        return (
+          (recovering && query?.sessionClockStartedAtOrBefore === undefined) ||
+          executionTracker.hasActiveSessionUuidExecutions(sessionId, query)
+        );
+      });
+      sessionManager.setSessionExecutionDeadlineLookup((sessionId, query) =>
+        executionTracker.getLatestSessionExecutionDeadlineMs(sessionId, {
+          ...query,
+          onSessionClock: true,
+        }),
+      );
+      sessionManager.setExpiryReleaseExecutionCanceller((sessionId, cancellation, query) => {
+        cancellations.push(sessionId);
+        void executionTracker.cancelDeviceSessionExecutions(sessionId, cancellation, {
+          excludeExecutionId: query.excludeExecutionId,
+        });
+      });
+      const original = SessionToolBinding.prototype.effectiveSessionUuid;
+      bindingLookup = spyOn(
+        SessionToolBinding.prototype,
+        "effectiveSessionUuid",
+      ).mockImplementation(function (this: SessionToolBinding, ...args) {
+        binding = this;
+        return original.apply(this, args);
+      });
+      release = spyOn(sessionManager, "releaseSession");
+      fixture = new McpTestFixture({ daemonMode: true, sessionContext: { sessionId: connection } });
+      const registration = spyOn(Server.prototype, "setRequestHandler");
+      try {
+        await fixture.setup();
+        ingressHandler = registration.mock.calls.findLast(
+          ([schema]) => schema === CallToolRequestSchema,
+        )![1];
+      } finally {
+        registration.mockRestore();
+      }
+    });
+
+    afterEach(async () => {
+      finishControl?.();
+      await pendingControl;
+      for (const execution of executions) {
+        executionTracker.endExecution(execution.id);
+      }
+      await sessionManager.waitForSessionRelease(agent);
+      await fixture.teardown();
+      binding?.unbindSession(agent);
+      expect(binding?.boundDeviceSessionUuid(connection)).toBeUndefined();
+      bindingLookup.mockRestore();
+      release.mockRestore();
+      Reflect.set(executionTracker, "sessionClockOffsetProvider", previousClockOffset);
+      expect(Reflect.get(executionTracker, "sessionClockOffsetProvider")).toBe(previousClockOffset);
+      expect(executionTracker.getActiveExecutionCount()).toBe(0);
+      timer.reset();
+    });
+
+    const stamps = () => ({ lastUsedAt: session.lastUsedAt, expiresAt: session.expiresAt });
+    const goLate = () => timer.setCurrentTime(stamps().expiresAt + 1);
+    function hold(deadline?: number): ActiveExecution {
+      const execution = executionTracker.startExecution("controlProbe", undefined, agent);
+      const wallDeadline =
+        deadline === undefined
+          ? undefined
+          : execution.startTime + deadline - sessionManager.sessionNow();
+      executionTracker.setExecutionDeadline(execution.id, () => wallDeadline);
+      executions.push(execution);
+      return execution;
+    }
+    async function readWithoutBinding(): Promise<void> {
+      const before = stamps();
+      const result = await fixture.client.callTool({
+        name: "readProbe",
+        arguments: { sessionUuid: agent },
+      });
+      expect(result.isError ?? false).toBe(false);
+      expect(result.content).toEqual([
+        { type: "text", text: expect.stringContaining('"success":true') },
+      ]);
+      expect(binding.boundDeviceSessionUuid(connection)).toBeUndefined();
+      // Retain the object across teardown: neither read admission nor binding may credit it.
+      expect(stamps()).toEqual(before);
+    }
+    function expectNoRelease(): void {
+      expect(release).not.toHaveBeenCalled();
+      expect(cancellations).toEqual([]);
+      expect(sessionManager.hasSession(agent)).toBe(true);
+      expect(sessionManager.getReleasingSession(agent)).toBeNull();
+    }
+
+    function controlThroughIngress(signal: AbortSignal) {
+      return ingressHandler(
+        {
+          method: "tools/call",
+          params: { name: "controlProbe", arguments: { sessionUuid: agent } },
+        },
+        {
+          signal,
+          requestId: "control-request",
+          sendNotification: async () => {},
+          sendRequest: async () => {
+            throw new Error("Unexpected server request");
+          },
+        },
+      );
+    }
+
+    function startWedgedControl(signal: AbortSignal): Promise<AbortSignal | undefined> {
+      const entered = Promise.withResolvers<AbortSignal | undefined>();
+      const gate = Promise.withResolvers<void>();
+      finishControl = gate.resolve;
+      ToolRegistry.registerDeviceAware("controlProbe", "Control probe", probeSchema, async () => {
+        entered.resolve(getAbortSignal());
+        // Deliberately ignore cancellation: the body remains tracked until the gate opens.
+        await gate.promise;
+        return { success: true };
+      });
+      pendingControl = controlThroughIngress(signal);
+      return entered.promise;
+    }
+
+    test.each(["cancelled", "live"] as const)(
+      "a %s timely MCP control admits late control only while live",
+      async (state) => {
+        const cancelled = state === "cancelled";
+        const client = new AbortController();
+        const requestSignal = await startWedgedControl(client.signal);
+        if (cancelled) {
+          client.abort();
+        }
+        expect(requestSignal?.aborted).toBe(cancelled);
+        expect(executionTracker.hasActiveSessionUuidExecutions(agent, { excludeReads: true })).toBe(
+          true,
+        );
+        ToolRegistry.registerDeviceAware(
+          "lateControlProbe",
+          "Late control probe",
+          probeSchema,
+          async () => ({ success: true }),
+        );
+        goLate();
+        const result = await fixture.client.callTool({
+          name: "lateControlProbe",
+          arguments: { sessionUuid: agent },
+        });
+        expect(result.isError ?? false).toBe(cancelled);
+        if (cancelled) {
+          expect(JSON.parse((result.content as Array<{ text: string }>)[0].text)).toMatchObject({
+            error: { code: "session_ownership_lost", reason: "cleanup-expired", idle: true },
+          });
+          await sessionManager.waitForSessionRelease(agent);
+          expect(sessionManager.hasSession(agent)).toBe(false);
+          expect(sessionManager.getTerminalReleaseSnapshot(agent)?.releaseReason).toBe(
+            "cleanup-expired",
+          );
+        } else {
+          expectNoRelease();
+          expect(binding.boundDeviceSessionUuid(connection)).toBe(agent);
+        }
+      },
+    );
+
+    test("ended MCP control removes its client abort listener before a later execution", async () => {
+      const client = new AbortController();
+      const listeners = new Set<EventListenerOrEventListenerObject>();
+      const add = client.signal.addEventListener.bind(client.signal);
+      const remove = client.signal.removeEventListener.bind(client.signal);
+      client.signal.addEventListener = (type, listener, options) => {
+        if (type === "abort" && listener) {
+          expect(options).toEqual({ once: true });
+          listeners.add(listener);
+        }
+        add(type, listener, options);
+      };
+      client.signal.removeEventListener = (type, listener, options) => {
+        if (type === "abort" && listener) {
+          expect(listeners.delete(listener)).toBe(true);
+        }
+        remove(type, listener, options);
+      };
+      await startWedgedControl(client.signal);
+      expect(listeners.size).toBe(1);
+      finishControl!();
+      await pendingControl;
+      expect(listeners.size).toBe(0);
+      const later = hold(stamps().expiresAt + 60_000);
+      expect(() => client.abort()).not.toThrow();
+      expect(later.requestCancelled).toBeUndefined();
+      expect(later.abortController.signal.aborted).toBe(false);
+    });
+
+    test("with nothing in flight a late read succeeds without binding and starts lazy idle release", async () => {
+      goLate();
+      const before = stamps();
+      await readWithoutBinding();
+      expect(reads).toEqual([{ deviceId: held.deviceId, readPath: false, sessionUuid: undefined }]);
+      expect(devices.getLastOptions()?.intent).toBe("read");
+      expect({ lastUsedAt: session.lastUsedAt, expiresAt: session.expiresAt }).toEqual(before);
+      expect(release).toHaveBeenCalledTimes(1);
+      await sessionManager.cleanupExpiredSessions();
+      await sessionManager.waitForSessionRelease(agent);
+      expect(sessionManager.hasSession(agent)).toBe(false);
+      expect(sessionManager.getTerminalReleaseSnapshot(agent)?.releaseReason).toBe(
+        "cleanup-expired",
+      );
+      expect(cancellations).toEqual([]);
+    });
+
+    test("live timely control holds: late read succeeds without binding, release or cancellation", async () => {
+      const control = hold(stamps().expiresAt + 60_000);
+      goLate();
+      await readWithoutBinding();
+      expectNoRelease();
+      expect(control.abortController.signal.aborted).toBe(false);
+    });
+
+    test("recovery holds: late read succeeds without a retryable recovery failure or binding", async () => {
+      recovering = true;
+      goLate();
+      await readWithoutBinding();
+      expectNoRelease();
+    });
+
+    for (const kind of ["late", "non-live"] as const) {
+      test(`${kind} control holds: late read succeeds without binding or cutting the call`, async () => {
+        const expiry = stamps().expiresAt;
+        let control: ActiveExecution;
+        if (kind === "non-live") {
+          control = hold(expiry);
+          goLate();
+        } else {
+          goLate();
+          control = hold(expiry + 60_000);
+        }
+        await readWithoutBinding();
+        expectNoRelease();
+        expect(control.abortController.signal.aborted).toBe(false);
+      });
+    }
+
+    test("a read inside the idle window still binds without moving either stamp", async () => {
+      const before = stamps();
+      timer.advanceTime(1_000);
+      const result = await fixture.client.callTool({
+        name: "readProbe",
+        arguments: { sessionUuid: agent },
+      });
+      expect(result.isError ?? false).toBe(false);
+      expect(binding.boundDeviceSessionUuid(connection)).toBe(agent);
+      expect(stamps()).toEqual(before);
+      expectNoRelease();
+      await fixture.teardown();
+    });
+
+    test("a late control call still binds under live timely control work", async () => {
+      hold(stamps().expiresAt + 60_000);
+      ToolRegistry.registerDeviceAware("controlProbe", "Control probe", probeSchema, async () => ({
+        success: true,
+      }));
+      goLate();
+      const result = await fixture.client.callTool({
+        name: "controlProbe",
+        arguments: { sessionUuid: agent },
+      });
+      expect(result.isError ?? false).toBe(false);
+      expect(binding.boundDeviceSessionUuid(connection)).toBe(agent);
+      expectNoRelease();
+      await fixture.teardown();
     });
   });
 

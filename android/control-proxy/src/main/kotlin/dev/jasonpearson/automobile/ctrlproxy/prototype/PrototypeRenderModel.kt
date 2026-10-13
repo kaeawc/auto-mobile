@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -15,6 +16,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /** Immutable, device-free inputs for the Compose adapter. All numeric sizes remain dp. */
+@Immutable
 data class PrototypeRenderStyle(
   val source: PrototypeStyle,
   val background: Color?,
@@ -35,6 +37,7 @@ data class PrototypeRenderStyle(
   val overflow: TextOverflow = TextOverflow.Clip,
 )
 
+@Immutable
 data class PrototypeRenderNode(
   val role: String,
   val text: String,
@@ -68,6 +71,7 @@ data class PrototypeRenderNode(
   val contentDescription: String? = null,
 )
 
+@Immutable
 data class PrototypeRenderModel(
   val placement: PrototypePlacement,
   val opacityPercent: Int,
@@ -111,8 +115,14 @@ fun mapPrototypeSpec(
   pages: Map<String, Int> = emptyMap(),
 ): PrototypeRenderModel {
   guardPrototypeTree(spec.root)
-  val mapped = mapPrototypeNode(spec.root, spec.state.orEmpty(), pages, "root")
-  return PrototypeRenderModel(
+  return prototypeRenderModel(
+    spec,
+    PrototypeNodeMapping(spec.state.orEmpty(), pages).map(spec.root, "root"),
+  )
+}
+
+internal fun prototypeRenderModel(spec: PrototypeSpec, mapped: PrototypeRenderNode) =
+  PrototypeRenderModel(
     mapPrototypePlacement(spec.window.placement),
     spec.window.opacity,
     mapped,
@@ -122,141 +132,181 @@ fun mapPrototypeSpec(
     isDevicePersistent(spec),
     spec.motion,
   )
+
+/** Shared bottom-up mapping; the fresh public mapper uses no caches. */
+internal class PrototypeNodeMapping(
+  private val state: Map<String, PrototypeScalar>,
+  private val pages: Map<String, Int>,
+  private val cache: PrototypeRenderCache? = null,
+  private val previous: Map<String, PrototypeRenderNode> = emptyMap(),
+) {
+  val nodes = mutableMapOf<String, PrototypeRenderNode>()
+
+  fun map(
+    node: PrototypeNode,
+    path: String,
+    pagerState: Map<String, PrototypeScalar>? = null,
+  ): PrototypeRenderNode {
+    val localState =
+      if (node is PrototypePagerNode)
+        state +
+          mapOf(
+            "page" to PrototypeScalar.Numeric(((pages[node.id] ?: 0) + 1).toDouble()),
+            "pageCount" to PrototypeScalar.Numeric(node.children.size.toDouble()),
+          )
+      else pagerState ?: state
+    val inPager = node is PrototypePagerNode || pagerState != null
+    val entries = cache?.children(node, path) ?: validatedPrototypeChildren(node, path)
+    val role = prototypeNodeRole(node)
+    val text = prototypeNodeText(node, state, localState, inPager)
+    val children = entries.map { (child, childPath) ->
+      map(child, childPath, if (inPager) localState else null)
+    }
+    val pager =
+      when (node) {
+        is PrototypeTabBarNode -> node.pager
+        is PrototypeBottomNavNode -> node.pager
+        else -> null
+      }
+    val stateKey =
+      when (node) {
+        is PrototypeTabBarNode -> node.stateKey
+        is PrototypeBottomNavNode -> node.stateKey
+        else -> null
+      }
+    val items =
+      when (node) {
+        is PrototypeTabBarNode -> node.items
+        is PrototypeBottomNavNode -> node.items
+        else -> emptyList()
+      }
+    val selected =
+      pager?.let { pages[it] } ?: (state[stateKey] as? PrototypeScalar.Numeric)?.value?.toInt() ?: 0
+    val old = previous[path]
+    val resolved = resolvePrototypeStyle(node.style, node.styleWhen, localState)
+    val style =
+      old?.style?.takeIf { it.source === resolved || it.source == resolved }
+        ?: mapPrototypeStyle(resolved)
+    val mapped =
+      PrototypeRenderNode(
+        role,
+        text,
+        node.testTag,
+        node.visibleWhen?.holds(localState) ?: true,
+        style,
+        node.safeAreaPadding,
+        prototypeNodeIconName(node),
+        children,
+        node,
+        path,
+        (node as? PrototypePagerNode)?.let { pages[it.id] } ?: 0,
+        selected.coerceIn(0, (items.size - 1).coerceAtLeast(0)),
+        prototypeOpenWhen(node)?.let { state[it.key] == PrototypeScalar.BooleanValue(it.equals) }
+          ?: false,
+        checked =
+          (prototypeToggleKey(node) ?: prototypeListItemToggleKey(node))?.let {
+            state[it] == PrototypeScalar.BooleanValue(true)
+          } ?: false,
+        selectedValue =
+          prototypeSelectionKey(node)?.let { (state[it] as? PrototypeScalar.Text)?.value },
+        sliderValue =
+          prototypeNumberKey(node)?.let { (state[it] as? PrototypeScalar.Numeric)?.value } ?: 0.0,
+        supportingText =
+          (node as? PrototypeDialogNode)?.text?.let {
+            interpolatePrototypeText(it, localState, inPager)
+          },
+        hour = prototypeStateInt(state, (node as? PrototypeTimePickerNode)?.hourKey),
+        minute = prototypeStateInt(state, (node as? PrototypeTimePickerNode)?.minuteKey),
+        contentDescription =
+          node.contentDescription?.let { interpolatePrototypeText(it, localState, inPager) },
+      )
+    val shared = intern(mapped, old)
+    nodes[path] = shared
+    return shared
+  }
+
+  private fun intern(node: PrototypeRenderNode, old: PrototypeRenderNode?): PrototypeRenderNode {
+    if (old == null || node.style !== old.style) return node
+    if (node.source !== old.source && node.source != old.source) return node
+    if (node.children.size != old.children.size) return node
+    if (node.children.indices.any { node.children[it] !== old.children[it] }) return node
+    // Compare scalars without descending into protocol nodes or rendered children again.
+    return if (node.copy(source = old.source, children = old.children) == old) old else node
+  }
 }
 
-private fun mapPrototypeNode(
+internal fun validatedPrototypeChildren(
   node: PrototypeNode,
-  state: Map<String, PrototypeScalar>,
-  pages: Map<String, Int>,
   path: String,
-  pagerContext: Pair<Int, Int>? = null,
-): PrototypeRenderNode {
-  val context =
-    if (node is PrototypePagerNode) (pages[node.id] ?: 0) to node.children.size else pagerContext
-  val localState =
-    if (context == null) state
-    else
-      state +
-        mapOf(
-          "page" to PrototypeScalar.Numeric((context.first + 1).toDouble()),
-          "pageCount" to PrototypeScalar.Numeric(context.second.toDouble()),
-        )
+): List<PrototypeChildEntry> {
   requirePrototypeRenderSizes(node.style, path)
   node.styleWhen?.forEachIndexed { index, entry ->
     requirePrototypeRenderSizes(entry.style, "$path.styleWhen[$index]")
   }
-  val role =
-    when (node) {
-      is PrototypeBoxNode -> "box"
-      is PrototypeRowNode -> "row"
-      is PrototypeColumnNode -> "column"
-      is PrototypeTextNode -> "text"
-      is PrototypeImageNode -> "image"
-      is PrototypeIconNode -> "icon"
-      is PrototypeSpacerNode -> "spacer"
-      is PrototypeTextFieldNode -> "textField"
-      is PrototypeSwitchNode -> "switch"
-      is PrototypeCheckboxNode -> "checkbox"
-      is PrototypeButtonNode -> "button"
-      is PrototypeRadioGroupNode -> "radioGroup"
-      is PrototypeListItemNode -> "listItem"
-      is PrototypeSliderNode -> "slider"
-      is PrototypeChipNode -> "chip"
-      is PrototypeCardNode -> "card"
-      is PrototypeIconButtonNode -> "iconButton"
-      is PrototypeFabNode -> "fab"
-      is PrototypeSegmentedButtonNode -> "segmentedButton"
-      is PrototypeTopAppBarNode -> "topAppBar"
-      is PrototypeDividerNode -> "divider"
-      is PrototypeBadgeNode -> "badge"
-      is PrototypeProgressNode -> "progress"
-      is PrototypeDialogNode -> "dialog"
-      is PrototypeSnackbarNode -> "snackbar"
-      is PrototypeTimePickerNode -> "timePicker"
-      is PrototypeDatePickerNode -> "datePicker"
-      is PrototypeScrollNode -> "scroll"
-      is PrototypePagerNode -> "pager"
-      is PrototypeTabBarNode -> "tabBar"
-      is PrototypeBottomNavNode -> "bottomNav"
-      is PrototypeBottomSheetNode -> "bottomSheet"
-    }
-  val text =
-    when (node) {
-      is PrototypeTextNode -> interpolatePrototypeText(node.text, localState, context != null)
-      is PrototypeTextFieldNode -> (state[node.stateKey] as? PrototypeScalar.Text)?.value.orEmpty()
-      is PrototypeSwitchNode -> node.label.orEmpty()
-      is PrototypeCheckboxNode -> node.label.orEmpty()
-      is PrototypeButtonNode -> node.label
-      is PrototypeListItemNode -> node.headline
-      is PrototypeSliderNode -> node.label.orEmpty()
-      is PrototypeChipNode -> node.label
-      is PrototypeIconNode -> node.name
-      is PrototypeFabNode -> node.label.orEmpty()
-      is PrototypeTopAppBarNode -> interpolatePrototypeText(node.title, localState, context != null)
-      is PrototypeBadgeNode ->
-        node.text?.let { interpolatePrototypeText(it, localState, context != null) }.orEmpty()
-      is PrototypeDialogNode ->
-        node.title?.let { interpolatePrototypeText(it, localState, context != null) }.orEmpty()
-      is PrototypeSnackbarNode -> interpolatePrototypeText(node.text, localState, context != null)
-      else -> ""
-    }
-  val children =
-    prototypeChildEntries(node, path).map { (child, childPath) ->
-      mapPrototypeNode(child, state, pages, childPath, context)
-    }
-  val pager =
-    when (node) {
-      is PrototypeTabBarNode -> node.pager
-      is PrototypeBottomNavNode -> node.pager
-      else -> null
-    }
-  val stateKey =
-    when (node) {
-      is PrototypeTabBarNode -> node.stateKey
-      is PrototypeBottomNavNode -> node.stateKey
-      else -> null
-    }
-  val items =
-    when (node) {
-      is PrototypeTabBarNode -> node.items
-      is PrototypeBottomNavNode -> node.items
-      else -> emptyList()
-    }
-  val selected =
-    pager?.let { pages[it] } ?: (state[stateKey] as? PrototypeScalar.Numeric)?.value?.toInt() ?: 0
-  return PrototypeRenderNode(
-    role,
-    text,
-    node.testTag,
-    node.visibleWhen?.holds(localState) ?: true,
-    mapPrototypeStyle(resolvePrototypeStyle(node.style, node.styleWhen, localState)),
-    node.safeAreaPadding,
-    prototypeNodeIconName(node),
-    children,
-    node,
-    path,
-    (node as? PrototypePagerNode)?.let { pages[it.id] } ?: 0,
-    selected.coerceIn(0, (items.size - 1).coerceAtLeast(0)),
-    prototypeOpenWhen(node)?.let { state[it.key] == PrototypeScalar.BooleanValue(it.equals) }
-      ?: false,
-    checked =
-      (prototypeToggleKey(node) ?: prototypeListItemToggleKey(node))?.let {
-        state[it] == PrototypeScalar.BooleanValue(true)
-      } ?: false,
-    selectedValue =
-      prototypeSelectionKey(node)?.let { (state[it] as? PrototypeScalar.Text)?.value },
-    sliderValue =
-      prototypeNumberKey(node)?.let { (state[it] as? PrototypeScalar.Numeric)?.value } ?: 0.0,
-    supportingText =
-      (node as? PrototypeDialogNode)?.text?.let {
-        interpolatePrototypeText(it, localState, context != null)
-      },
-    hour = prototypeStateInt(state, (node as? PrototypeTimePickerNode)?.hourKey),
-    minute = prototypeStateInt(state, (node as? PrototypeTimePickerNode)?.minuteKey),
-    contentDescription =
-      node.contentDescription?.let { interpolatePrototypeText(it, localState, context != null) },
-  )
+  return prototypeChildEntries(node, path)
 }
+
+private fun prototypeNodeRole(node: PrototypeNode): String =
+  when (node) {
+    is PrototypeBoxNode -> "box"
+    is PrototypeRowNode -> "row"
+    is PrototypeColumnNode -> "column"
+    is PrototypeTextNode -> "text"
+    is PrototypeImageNode -> "image"
+    is PrototypeIconNode -> "icon"
+    is PrototypeSpacerNode -> "spacer"
+    is PrototypeTextFieldNode -> "textField"
+    is PrototypeSwitchNode -> "switch"
+    is PrototypeCheckboxNode -> "checkbox"
+    is PrototypeButtonNode -> "button"
+    is PrototypeRadioGroupNode -> "radioGroup"
+    is PrototypeListItemNode -> "listItem"
+    is PrototypeSliderNode -> "slider"
+    is PrototypeChipNode -> "chip"
+    is PrototypeCardNode -> "card"
+    is PrototypeIconButtonNode -> "iconButton"
+    is PrototypeFabNode -> "fab"
+    is PrototypeSegmentedButtonNode -> "segmentedButton"
+    is PrototypeTopAppBarNode -> "topAppBar"
+    is PrototypeDividerNode -> "divider"
+    is PrototypeBadgeNode -> "badge"
+    is PrototypeProgressNode -> "progress"
+    is PrototypeDialogNode -> "dialog"
+    is PrototypeSnackbarNode -> "snackbar"
+    is PrototypeTimePickerNode -> "timePicker"
+    is PrototypeDatePickerNode -> "datePicker"
+    is PrototypeScrollNode -> "scroll"
+    is PrototypePagerNode -> "pager"
+    is PrototypeTabBarNode -> "tabBar"
+    is PrototypeBottomNavNode -> "bottomNav"
+    is PrototypeBottomSheetNode -> "bottomSheet"
+  }
+
+private fun prototypeNodeText(
+  node: PrototypeNode,
+  state: Map<String, PrototypeScalar>,
+  localState: Map<String, PrototypeScalar>,
+  inPager: Boolean,
+): String =
+  when (node) {
+    is PrototypeTextNode -> interpolatePrototypeText(node.text, localState, inPager)
+    is PrototypeTextFieldNode -> (state[node.stateKey] as? PrototypeScalar.Text)?.value.orEmpty()
+    is PrototypeSwitchNode -> node.label.orEmpty()
+    is PrototypeCheckboxNode -> node.label.orEmpty()
+    is PrototypeButtonNode -> node.label
+    is PrototypeListItemNode -> node.headline
+    is PrototypeSliderNode -> node.label.orEmpty()
+    is PrototypeChipNode -> node.label
+    is PrototypeIconNode -> node.name
+    is PrototypeFabNode -> node.label.orEmpty()
+    is PrototypeTopAppBarNode -> interpolatePrototypeText(node.title, localState, inPager)
+    is PrototypeBadgeNode ->
+      node.text?.let { interpolatePrototypeText(it, localState, inPager) }.orEmpty()
+    is PrototypeDialogNode ->
+      node.title?.let { interpolatePrototypeText(it, localState, inPager) }.orEmpty()
+    is PrototypeSnackbarNode -> interpolatePrototypeText(node.text, localState, inPager)
+    else -> ""
+  }
 
 /** The icon a node draws as its whole content, which labels it when nothing else does. */
 private fun prototypeNodeIconName(node: PrototypeNode): String? =
@@ -350,9 +400,11 @@ private fun resolveInterpolation(
   return state[key]?.renderedText() ?: token
 }
 
+private val PROTOTYPE_COLOR_PATTERN = Regex("#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?")
+
 /** The settled design specifies AARRGGBB (alpha first), not CSS RRGGBBAA. */
 fun prototypeColor(value: String): Color {
-  require(value.matches(Regex("#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?"))) { "Invalid color: $value" }
+  require(value.matches(PROTOTYPE_COLOR_PATTERN)) { "Invalid color: $value" }
   val argb = value.drop(1).toLong(16)
   return Color(if (value.length == 7) argb or 0xff000000L else argb)
 }
@@ -584,6 +636,7 @@ internal fun isLayeredPrototypeAnchor(node: PrototypeRenderNode): Boolean =
  * outermost first). The layer keeps it composed while any of them animates out, so it fades with
  * them instead of vanishing when they hide (#10803).
  */
+@Immutable
 data class LayeredPrototypeAnchor(
   val node: PrototypeRenderNode,
   val ancestors: List<PrototypeRenderNode> = emptyList(),

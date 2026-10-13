@@ -412,7 +412,7 @@ internal fun PrototypeHostTheme(shown: PrototypeShownTheme?, content: @Composabl
   if (shown != null) {
     val appearance = PrototypeShownAppearance(shown.appearance.dark, shown.paletteKey)
     CompositionLocalProvider(LocalPrototypeShownAppearance provides appearance) {
-      PrototypeTheme(shown.root, shown.specTheme, content)
+      PrototypeTheme(shown.themeSpec, shown.specTheme, content)
     }
   } else {
     val dark = isSystemInDarkTheme()
@@ -435,18 +435,42 @@ internal fun PrototypeTheme(
   // A controller show resolved the mode already; only a standalone composition asks the device.
   val shown = LocalPrototypeShownAppearance.current
   val systemDark = if (shown == null) isSystemInDarkTheme() else shown.dark
+  val theme =
+    if (shown != null) prototypeThemeSpecFor(root, explicit, shown.dark)
+    else prototypeThemeSpec(root, systemDark, explicit)
+  PrototypeTheme(theme, explicit, content)
+}
+
+internal data class PrototypeResolvedPalette(
+  val theme: PrototypeThemeSpec,
+  val paletteKey: Int?,
+  val palette: PrototypePalette,
+)
+
+internal val LocalPrototypeResolvedPalette =
+  staticCompositionLocalOf<PrototypeResolvedPalette?> { null }
+
+@Composable
+private fun PrototypeTheme(
+  theme: PrototypeThemeSpec,
+  explicit: PrototypeSpecTheme?,
+  content: @Composable () -> Unit,
+) {
   val context = LocalContext.current
+  val paletteKey = LocalPrototypeShownAppearance.current?.paletteKey
+  val enclosing = LocalPrototypeResolvedPalette.current
   val palette =
-    // The shown palette key is part of the key, so a wallpaper change reads device colour again.
-    remember(root, explicit, shown, systemDark) {
-      val theme =
-        if (shown != null) prototypeThemeSpecFor(root, explicit, shown.dark)
-        else prototypeThemeSpec(root, systemDark, explicit)
-      PrototypePalette(
-        prototypeColorScheme(theme, prototypeDynamicScheme(context, theme)),
-        theme.dark,
-      )
-    }
+    if (enclosing != null && enclosing.theme == theme && enclosing.paletteKey == paletteKey)
+      enclosing.palette
+    else
+      remember(theme, paletteKey, context) {
+        PrototypePalette(
+          prototypeColorScheme(theme, prototypeDynamicScheme(context, theme)),
+          theme.dark,
+        )
+      }
+  val resolved =
+    remember(theme, paletteKey, palette) { PrototypeResolvedPalette(theme, paletteKey, palette) }
   val typography = remember(explicit) { prototypeTypography(explicit?.typography) }
   val shapes = remember(explicit) { prototypeShapes(explicit?.shapes) }
   MaterialTheme(colorScheme = palette.scheme, typography = typography, shapes = shapes) {
@@ -455,6 +479,7 @@ internal fun PrototypeTheme(
       LocalContentColor provides palette.scheme.onSurface,
       // The same resolved mode picks the side of every {light, dark} colour and image pair.
       LocalPrototypeDark provides palette.dark,
+      LocalPrototypeResolvedPalette provides resolved,
       content = content,
     )
   }

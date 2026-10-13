@@ -23,6 +23,9 @@
  * acquisition never waits for these retries.
  */
 
+import { classifySqliteError } from "../../db/databaseFailureClassification";
+import { ManagedSlotDiscoveryIncompleteError } from "./managedSlotRefusal";
+import { failure as reconcileFailure } from "./reconciler";
 import {
   MANAGED_EXECUTION_LIVENESS_POLICY,
   resolveManagedExecutionIdleTimeoutMs,
@@ -239,8 +242,26 @@ export class ManagedSlotAcquisition {
     }
     const deadlineMs =
       this.deps.timer.now() + (config.preparationTimeoutMs ?? DEFAULT_PROVISION_DEVICE_TIMEOUT_MS);
-    const registry = await this.deps.registry();
-    const admission = await this.admitScope(registry, identity, deadlineMs);
+    let registry: SlotRegistry;
+    let admission: ScopeAdmission;
+    try {
+      registry = await this.deps.registry();
+      admission = await this.admitScope(registry, identity, deadlineMs);
+    } catch (error) {
+      if (
+        classifySqliteError(error) !== "retryable" &&
+        !(error instanceof ManagedSlotDiscoveryIncompleteError)
+      ) {
+        throw error;
+      }
+      // Nothing has been handed out yet; the client can retry the whole scope admission.
+      return {
+        ...base(computeSlotScopeKey(identity)),
+        outcome: "failed",
+        slots: [],
+        failure: reconcileFailure("discovery_incomplete", errorMessage(error)),
+      };
+    }
     if (admission.kind === "failed") {
       return {
         ...base(computeSlotScopeKey(identity)),
@@ -444,6 +465,7 @@ export class ManagedSlotAcquisition {
           message: result.failure.message,
           nextAction: result.failure.nextAction,
           ...(result.failure.capacity ? { capacity: result.failure.capacity } : {}),
+          ...(result.failure.budget ? { budget: result.failure.budget } : {}),
         },
       };
     }

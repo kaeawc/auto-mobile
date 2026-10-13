@@ -194,7 +194,17 @@ describe("daemon managed-slot wiring: replacing a slot's device against boot cap
     const { acquisition } = createDaemonManagedSlotAcquisition({
       registry: async () => registry,
       sessions: new NoSessions(),
-      pool: { getAllDevices: () => [], assertNotClaimedByForeignDaemon: async () => {} },
+      pool: {
+        getAllDevices: () => [],
+        assertNotClaimedByForeignDaemon: async () => {},
+        isUnderShutdownReservation: () => false,
+        isDeviceLeasedForAndroidStartup: () => false,
+        restartReservationExclusions: () => ({
+          names: new Set<string>(),
+          ids: new Set<string>(),
+          resumeTargets: [],
+        }),
+      },
       owner: () => ({ daemonId: "daemon-1", pid: 1 }),
       timer,
       journal: {

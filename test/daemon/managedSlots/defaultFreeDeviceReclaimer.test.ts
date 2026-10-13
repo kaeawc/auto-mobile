@@ -29,6 +29,11 @@ function poolOf(
 ): FreeDeviceBusyPool {
   return {
     getAllDevices: () => devices,
+    restartReservationExclusions: () => ({
+      names: new Set<string>(),
+      ids: new Set<string>(),
+      resumeTargets: [],
+    }),
     isUnderShutdownReservation: () => over.shutdownReserved === true,
     isDeviceLeasedForAndroidStartup: () => over.startupLeased === true,
   };
@@ -64,6 +69,20 @@ describe("freeDeviceBusyReason", () => {
     expect(freeDeviceBusyReason(poolOf([pooled()], { startupLeased: true }), DEVICE)).toBe(
       "android startup lease",
     );
+  });
+
+  test("restart recovery reservations protect an AVD name and iOS UDID without a pooled runtime", () => {
+    const pool = poolOf([]);
+    pool.restartReservationExclusions = () => ({
+      names: new Set(["amslot-a"]),
+      ids: new Set(["UDID"]),
+      resumeTargets: [],
+    });
+    expect(freeDeviceBusyReason(pool, DEVICE)).toBe("restart recovery reservation");
+    expect(
+      freeDeviceBusyReason(pool, { platform: "ios", name: "amslot-ios", deviceId: "UDID" }),
+    ).toBe("restart recovery reservation");
+    expect(freeDeviceBusyReason(pool, { ...DEVICE, name: "another" })).toBeUndefined();
   });
 
   test("another device's runtime is ignored", () => {

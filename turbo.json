@@ -75,7 +75,8 @@
         "ios/auto-mobile-sdk/api/auto-mobile-sdk.api",
         "ios/control-proxy/Sources/**",
         "ios/control-proxy/Tests/**",
-        "ios/network-filter/Packaging/**"
+        "ios/network-filter/Packaging/**",
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgent/PrototypeRenderer.swift"
       ],
       "outputs": [],
       "outputLogs": "new-only",
@@ -120,7 +121,8 @@
         "ios/auto-mobile-sdk/api/auto-mobile-sdk.api",
         "ios/control-proxy/Sources/**",
         "ios/control-proxy/Tests/**",
-        "ios/network-filter/Packaging/**"
+        "ios/network-filter/Packaging/**",
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgent/PrototypeRenderer.swift"
       ],
       "outputs": [],
       "outputLogs": "new-only",
@@ -190,7 +192,8 @@
         "ios/auto-mobile-sdk/api/auto-mobile-sdk.api",
         "ios/control-proxy/Sources/**",
         "ios/control-proxy/Tests/**",
-        "ios/network-filter/Packaging/**"
+        "ios/network-filter/Packaging/**",
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgent/PrototypeRenderer.swift"
       ],
       "outputs": [],
       "outputLogs": "new-only",
@@ -298,7 +301,8 @@
         "ios/auto-mobile-sdk/api/auto-mobile-sdk.api",
         "ios/control-proxy/Sources/**",
         "ios/control-proxy/Tests/**",
-        "ios/network-filter/Packaging/**"
+        "ios/network-filter/Packaging/**",
+        "ios/prototype-agent/Sources/AutoMobilePrototypeAgent/PrototypeRenderer.swift"
       ],
       "outputs": ["coverage/**"],
       "outputLogs": "new-only",

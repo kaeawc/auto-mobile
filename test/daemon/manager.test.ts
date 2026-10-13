@@ -991,7 +991,7 @@ describe("DaemonManager acceptance-session restart", () => {
       ).resolves.toBe("restarted");
       expect(events).toEqual(["admitted", "committed", "signaled", "closed"]);
       expect(signaler.signals).toEqual([{ pid, signal: "SIGKILL" }]);
-      expect(startSpy).toHaveBeenCalledWith({ strictPort: true });
+      expect(startSpy).toHaveBeenCalledWith({ strictPort: true }, undefined, false);
       expect(existsSync(lockPath)).toBe(false);
     } finally {
       rpcSpy.mockRestore();

@@ -238,9 +238,13 @@ connection used for tools and resources:
    daemons on the host answer `slot_in_use` for it until the retry lands. The
    retry clears only that ended session's record; one a live execution holds
    again is left to that execution's own release. Failed acquisition back-out also
-   retries owed session release and owner clearing in the background, with eight
-   attempts at 250 ms doubling to 5 s, then every 30 s until it lands or the daemon
-   closes. It clears only the backed-out session's
+   retries owed session release and owner clearing in the background, at 25 ms
+   doubling to 1 s until it lands or the daemon closes; a step that does not finish
+   within 700 ms counts as a failed attempt. After an attempt waits on
+   a busy registry, retries of every owed cleanup wait at least as long as that
+   attempt took (at most 5 s), so even cleanup for several slots takes at most
+   about half the daemon's time for attempts lasting up to 5 s.
+   It clears only the backed-out session's
    record belonging to that daemon and preserves the device assignment. If the
    `settling` mark itself cannot be written, the slot keeps its owner record and
    the daemon keeps treating that owner as live for as long as the released work

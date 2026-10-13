@@ -9,8 +9,7 @@ import { readOptionalEnvPositiveInteger } from "../utils/envNumbers";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
-  SESSION_RELEASE_PERSIST_TIMEOUT_MS,
-  SESSION_RELEASE_TEARDOWN_CAP_MS,
+  SESSION_RELEASE_STUCK_DEADLINE_MS,
   getDefaultPreFirstHeartbeatGraceMs,
   getDefaultSessionHeartbeatTimeoutMs,
   type Session,
@@ -27,10 +26,7 @@ import {
   UnsettledExecutionVeto,
   type SessionExecutionProbeInput,
 } from "./unsettledExecutionVeto";
-import {
-  DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
-  SUSPECT_GRACE_MS,
-} from "./sessionLivenessWindows";
+import { getSessionHeartbeatCheckIntervalMs, SUSPECT_GRACE_MS } from "./sessionLivenessWindows";
 
 /**
  * Minimal view of the session store the heartbeat monitor needs.
@@ -158,19 +154,15 @@ export interface SessionHeartbeatMonitorConfig {
 /** Shared with the owner-disconnect release; see `./unsettledExecutionVeto` (#10712). */
 export { UNSETTLED_EXECUTION_VETO_CEILING_MS };
 
-const DEFAULT_CHECK_INTERVAL_MS = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
 /** How long shutdown waits for releases a scan started before giving up on them. */
 const REAP_STOP_TIMEOUT_MS = 5_000;
-/** Slack past a release's own worst case before it counts as stuck (#11058). */
-const STUCK_REAP_MARGIN_MS = 10_000;
 /**
  * How long a release may stay unsettled before the monitor reports it as stuck (#10704) and
  * forces it (#10963). Its session is skipped meanwhile, never released twice, but other sessions
  * are still judged on schedule. Above a release's own allowed worst case — the capped teardown
  * plus its two bounded writes (#11058) — so a release still within its bounds is never forced.
  */
-export const STUCK_REAP_WARN_MS =
-  SESSION_RELEASE_TEARDOWN_CAP_MS + 2 * SESSION_RELEASE_PERSIST_TIMEOUT_MS + STUCK_REAP_MARGIN_MS;
+export const STUCK_REAP_WARN_MS = SESSION_RELEASE_STUCK_DEADLINE_MS;
 const DEFAULT_INITIAL_GRACE_MS = 20_000;
 
 function readPositiveMsEnv(primaryName: string, legacyName: string): number | undefined {
@@ -245,13 +237,7 @@ export class SessionHeartbeatMonitor {
     private readonly timer: Timer = defaultTimer,
     config: SessionHeartbeatMonitorConfig = {},
   ) {
-    this.checkIntervalMs =
-      config.checkIntervalMs ??
-      readPositiveMsEnv(
-        "AUTOMOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS",
-        "AUTO_MOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS",
-      ) ??
-      DEFAULT_CHECK_INTERVAL_MS;
+    this.checkIntervalMs = config.checkIntervalMs ?? getSessionHeartbeatCheckIntervalMs();
     this.graceMs =
       config.graceMs ??
       readPositiveMsEnv(
@@ -431,7 +417,7 @@ export class SessionHeartbeatMonitor {
   /**
    * A tick that fires later than scheduled by more than the margin means the daemon's own event
    * loop stalled, so the owners' heartbeats could not have reached it for that long. Never reap
-   * on the strength of that: every session's lease is moved forward by exactly the lateness.
+   * on the strength of that alone: the source applies its lease forgiveness rules.
    */
   private forgiveOwnStall(): void {
     this.forgiveStallIfLate();
@@ -443,14 +429,14 @@ export class SessionHeartbeatMonitor {
    * overdue tick measures only what is still unaccounted for and nothing is forgiven twice.
    *
    * Sleep and stall are told apart by the wall clock running ahead of the monotonic one (#10699),
-   * not by length: a daemon stall of any length is forgiven in full (owners kept heartbeating and
-   * the daemon could not hear them), while host sleep of any length counts toward the idle
+   * not by length: a daemon stall of any length is forgiven in full for owners live at its start
+   * (the daemon could not hear them), while host sleep of any length counts toward the idle
    * deadline (owner policy) and only excuses the heartbeat lease, since no owner on a sleeping
    * host could heartbeat either. Where the monotonic clock runs through sleep (Windows, Linux) the
    * two cannot be told apart and length decides instead (`maxCredibleStallMs`).
    *
-   * The gap is forgiven narrowly (#11080): the source excuses a session's lease only when the gap
-   * began within one lease of that owner's last heartbeat, i.e. while the owner was still live.
+   * Full lease forgiveness requires an owner live at the gap start (#11080). The session source
+   * also grants capped awake-stall credit to an owner connected at that instant (#11992).
    * The gap is taken to begin as early as it can have: when the previous scan settled.
    */
   private forgiveStallIfLate(): void {
@@ -559,7 +545,13 @@ export class SessionHeartbeatMonitor {
       () => undefined,
     );
     this.reapsInFlight.set(sessionId, settled);
-    const tracked: TrackedRelease = { at: this.now(), reported: false };
+    const existing = this.reapStartedAt.get(sessionId);
+    // Keep sourceRelease so scans forget an ended release even while its join promise unwinds.
+    const tracked: TrackedRelease =
+      existing?.sourceRelease &&
+      this.sessions.isReleaseInProgress?.(sessionId, existing.at) === true
+        ? { ...existing }
+        : { at: this.now(), reported: false };
     this.reapStartedAt.set(sessionId, tracked);
     void settled.then(() => {
       if (this.reapsInFlight.get(sessionId) === settled) {

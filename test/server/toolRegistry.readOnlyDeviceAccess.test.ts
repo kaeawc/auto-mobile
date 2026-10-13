@@ -1,5 +1,5 @@
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry, type AuditRunnerInput } from "../../src/server/toolRegistry";
 import {
@@ -33,6 +33,8 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import type { BootedDevice } from "../../src/models";
 import { DaemonState } from "../../src/daemon/daemonState";
 import { SessionManager, TerminalSessionError } from "../../src/daemon/sessionManager";
+import { ManagedExecutionReowner } from "../../src/daemon/managedSlots/managedExecutionReowner";
+import { ManagedSlotOwnershipUnconfirmedError } from "../../src/daemon/managedSlots/managedSlotRefusal";
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   isSessionlessDeviceRead,
@@ -54,6 +56,8 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
   const held: BootedDevice = { name: "Pixel A", deviceId: "emulator-5554", platform: "android" };
   const free: BootedDevice = { name: "Pixel B", deviceId: "emulator-5556", platform: "android" };
   const agent = "agent-session";
+  // Probe registration shares one immutable schema instead of compiling equivalent parsers.
+  const probeSchema = z.object({}).passthrough();
 
   let audited: Array<{ name: string; deviceId: string }>;
   let recorded: string[];
@@ -70,6 +74,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
   let devices: FakeDeviceSessionManager;
   let timer: FakeTimer;
   let persistence: FakeDeviceSessionPersistence;
+  let reowner: ManagedExecutionReowner | undefined;
 
   const call = (name: string, args: Record<string, unknown>) =>
     ToolRegistry.getTool(name)!.handler(args);
@@ -88,6 +93,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
   }
 
   beforeEach(async () => {
+    reowner = undefined;
     audited = [];
     recorded = [];
     reads = [];
@@ -141,6 +147,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       createDevicePoolDependencies(sessionManager, "read-only-device-path", {
         timer,
         deviceManager: fakeDeviceUtils,
+        managedExecutionOwnership: () => reowner,
       }),
     );
     await pool.initializeWithDevices([held, free]);
@@ -152,7 +159,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     ToolRegistry.registerDeviceAware(
       "readProbe",
       "Read-only probe",
-      z.object({}).passthrough(),
+      probeSchema,
       async (device: BootedDevice, args: Record<string, unknown>) => {
         reads.push({
           deviceId: device.deviceId,
@@ -166,6 +173,8 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
   });
 
   afterEach(() => {
+    reowner?.close();
+    expect(executionTracker.getActiveExecutionCount()).toBe(0);
     serverConfig.setEmbeddedSdkEnabled(false);
     restorePipeline();
     resetListAppsToolDependencies();
@@ -215,12 +224,9 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
   });
 
   test("a sessionless control call on a free device uses control readiness and pins", async () => {
-    ToolRegistry.registerDeviceAware(
-      "controlProbe",
-      "Control probe",
-      z.object({}).passthrough(),
-      async () => ({ success: true }),
-    );
+    ToolRegistry.registerDeviceAware("controlProbe", "Control probe", probeSchema, async () => ({
+      success: true,
+    }));
     await call("controlProbe", { platform: "android", deviceId: free.deviceId });
     expect(devices.getEnsureDeviceReadyCalls()).toBe(1);
     expect(devices.getLastOptions()?.intent).toBeUndefined();
@@ -253,7 +259,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     ToolRegistry.registerDeviceAware(
       "observeProbe",
       "Observe-like probe",
-      z.object({}).passthrough(),
+      probeSchema,
       async (device: BootedDevice, args: Record<string, unknown>) => {
         reads.push({
           deviceId: device.deviceId,
@@ -282,12 +288,9 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
   });
 
   test("a control call naming an unissued session is still refused as unissued", async () => {
-    ToolRegistry.registerDeviceAware(
-      "controlProbe",
-      "Control probe",
-      z.object({}).passthrough(),
-      async () => ({ success: true }),
-    );
+    ToolRegistry.registerDeviceAware("controlProbe", "Control probe", probeSchema, async () => ({
+      success: true,
+    }));
     const error = await outcome("controlProbe", {
       sessionUuid: "observer-session",
       deviceId: free.deviceId,
@@ -295,6 +298,69 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
 
     expect((error as Error).message).toContain("observer-session");
     expect(audited).toEqual([]);
+  });
+
+  test.each([
+    { state: "unconfirmed", article: "an" },
+    { state: "lost", article: "a" },
+  ] as const)(
+    "$article $state managed session read watches without admission, readiness or use",
+    async ({ state }) => {
+      const recovered = Promise.withResolvers<void>();
+      reowner = new ManagedExecutionReowner({
+        registry: async () => ({
+          findExecutionAssignments: async () => [],
+          claimExecution: async () => {
+            throw new Error("must not claim");
+          },
+        }),
+        owner: () => ({ daemonId: "test", pid: 1 }),
+        timer,
+      });
+      if (state === "unconfirmed") {
+        reowner.noteRecovering(agent, recovered.promise);
+      } else {
+        await reowner.reown([agent], { rehydrated: true });
+      }
+      const admission = spyOn(sessionManager, "admitIssuedSessionForAutomation");
+      const mark = spyOn(executionTracker, "markSessionAdmitted");
+      try {
+        await call("readProbe", { sessionUuid: agent });
+        expect(reads).toEqual([
+          { deviceId: held.deviceId, readPath: true, sessionUuid: undefined },
+        ]);
+        expectNoReadiness();
+        expect(admission).not.toHaveBeenCalled();
+        expect(mark).not.toHaveBeenCalled();
+      } finally {
+        admission.mockRestore();
+        mark.mockRestore();
+        recovered.resolve();
+      }
+    },
+  );
+
+  test("gated control keeps its unconfirmed refusal and a foreign read keeps its explicit target", async () => {
+    const recovered = Promise.withResolvers<void>();
+    reowner = new ManagedExecutionReowner({
+      registry: async () => {
+        throw new Error("must not open");
+      },
+      owner: () => ({ daemonId: "test", pid: 1 }),
+      timer,
+    });
+    reowner.noteRecovering(agent, recovered.promise);
+    ToolRegistry.registerDeviceAware("controlProbe", "Control probe", probeSchema, async () => ({
+      success: true,
+    }));
+    expect(await outcome("controlProbe", { sessionUuid: agent })).toBeInstanceOf(
+      ManagedSlotOwnershipUnconfirmedError,
+    );
+    await call("readProbe", { sessionUuid: agent, deviceId: free.deviceId });
+    expect(reads).toEqual([{ deviceId: free.deviceId, readPath: true, sessionUuid: undefined }]);
+    expectNoReadiness();
+    reowner.close();
+    recovered.resolve();
   });
 
   describe("a session whose row expired while the daemon was down (#11361)", () => {
@@ -329,12 +395,9 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
 
     test("a control call naming it gets the typed terminal refusal with reason expired", async () => {
       await seedExpiredRow();
-      ToolRegistry.registerDeviceAware(
-        "controlProbe",
-        "Control probe",
-        z.object({}).passthrough(),
-        async () => ({ success: true }),
-      );
+      ToolRegistry.registerDeviceAware("controlProbe", "Control probe", probeSchema, async () => ({
+        success: true,
+      }));
       const error = await outcome("controlProbe", { sessionUuid: expired });
 
       expect(error).toBeInstanceOf(TerminalSessionError);
@@ -391,12 +454,9 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     });
 
     test("another session's control gets the same typed ownership refusal before and after the holder's deadline", async () => {
-      ToolRegistry.registerDeviceAware(
-        "controlProbe",
-        "Control probe",
-        z.object({}).passthrough(),
-        async () => ({ success: true }),
-      );
+      ToolRegistry.registerDeviceAware("controlProbe", "Control probe", probeSchema, async () => ({
+        success: true,
+      }));
       const deadline = sessionManager.getSession(agent)!.expiresAt;
       const args = { sessionUuid: other, deviceId: held.deviceId };
       const pinsBefore = devices.getSetCurrentDeviceCalls();
@@ -430,7 +490,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       ToolRegistry.registerDeviceAware(
         "controlProbe",
         "Control probe",
-        z.object({}).passthrough(),
+        probeSchema,
         async (_device: BootedDevice, args: Record<string, unknown>) => {
           if (args.thenRead) {
             // A control tool's own internal read, as a post-action observation makes one.

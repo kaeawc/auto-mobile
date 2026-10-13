@@ -677,6 +677,14 @@
         "retryable": false,
         "acquireNewSession": true
       }
+    },
+    "session_ownership_lost.released_managed_slot_ownership_lost": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true
+      }
     }
   }
 }

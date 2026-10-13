@@ -94,13 +94,16 @@ import { SingleFlight } from "../utils/cache/SingleFlight";
 import { errorMessage } from "../utils/describeUnknownError";
 import { effectiveLastToolActivity, sessionIdleDeadline } from "./sessionClocks";
 import { forgivenLeaseStart, leaseRunningAt, type StallForgivingLeases } from "./stallForgiveness";
+import {
+  daemonStallLeaseExtension,
+  type OwnerConnectedAtReader,
+} from "./connectedOwnerStallExcuse";
 import { onSessionClock } from "./sessionClockPersistence";
 import {
   judgedLeaseHeartbeat,
   hasMintBoundClaimLease,
   heartbeatLeasePastGrace,
   judgesOwnerHeartbeats,
-  ownerLeaseLiveAt,
   livenessLeaseState,
   livenessOwnerHold,
   sessionOwnerLeaseSnapshot,
@@ -113,6 +116,7 @@ import {
 import { isReleaseVetoedByExecutions } from "./unsettledExecutionVeto";
 import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
+  getSessionHeartbeatCheckIntervalMs,
   getSessionIdleTimeoutMs,
 } from "./sessionLivenessWindows";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -784,7 +788,7 @@ export class DaemonSessionCreationRejectedError extends ActionableError {
 
 /** Idle expiry has no caller to return the device; its diagnostic may name a heartbeat timeout. */
 export interface SessionReleaseOptions {
-  /** The serial no longer runs this session's device: drop saved state without device-side restores. */
+  /** The serial was replaced or this daemon no longer holds it: drop state without device writes. */
   deviceIdentityReplaced?: boolean;
   /** Device-restart release persistence, including a retry after a failed write. */
   releasePersisted?: Promise<void>;
@@ -807,6 +811,9 @@ export type SessionReleaseCallback = (
   options: SessionReleaseOptions,
 ) => void;
 export type SessionCreatedCallback = (session: Session) => void;
+export type ReleaseDeviceHold =
+  | { skipDeviceWrites: true }
+  | { settled: Promise<"teardown" | "skip-device-writes">; capMs: number };
 export interface SessionExecutionMetadata {
   executionId: string;
   /** When the call started, on the wall clock of the tracker that stamped it. */
@@ -942,6 +949,8 @@ interface SessionReleaseOperation extends PendingSessionRelease {
   commitFenced?: boolean;
   /** When the release started; bounds the retry hint for a bind it refuses (#10960). */
   startedAtMs?: number;
+  /** Ownership holds bound teardown from their cap while waiting, and from their end once settled. */
+  teardownStartsByMs?: number;
   /** Set for an idle release the manager started itself (#11481): see `getIdleReleasesInProgress`. */
   expiryOrigin?: SessionReleaseOptions["expiryOrigin"];
   /** The release's current stage, named when it is reported stuck (#10963). */
@@ -963,6 +972,7 @@ function releaseWasForced(operation: SessionReleaseOperation | undefined): boole
 /** Where an in-flight release is, for a stuck-release report (#10963). */
 export type SessionReleaseStage =
   | "awaiting-rebind"
+  | "awaiting-ownership"
   | "teardown"
   | "terminal-persist"
   | "finalize-persist";
@@ -1308,6 +1318,40 @@ export const SESSION_RELEASE_TEARDOWN_CAP_MS = 10_000;
  * the drain's daemon-shutdown fallback path.
  */
 export const SESSION_RELEASE_PERSIST_TIMEOUT_MS = 10_000;
+/** Slack beyond bounded teardown and both release writes before the monitor forces a release. */
+const SESSION_RELEASE_STUCK_MARGIN_MS = 10_000;
+export const SESSION_RELEASE_STUCK_DEADLINE_MS =
+  SESSION_RELEASE_TEARDOWN_CAP_MS +
+  2 * SESSION_RELEASE_PERSIST_TIMEOUT_MS +
+  SESSION_RELEASE_STUCK_MARGIN_MS;
+
+/**
+ * Force at the first scan at or after the stuck deadline measured from the release's own start,
+ * even when a monitor reap joins it: one interval, then the capped forced quarantine. A second
+ * interval allows a late timer tick so the advertised hint never understates the cleanup bound.
+ * Only monitor-tracked releases are forced; terminal explicit releases rely on their own stages.
+ */
+export function getSessionReleaseCleanupWorstCaseMs(env: NodeJS.ProcessEnv = process.env): number {
+  return (
+    SESSION_RELEASE_STUCK_DEADLINE_MS +
+    2 * getSessionHeartbeatCheckIntervalMs(env) +
+    SESSION_RELEASE_TEARDOWN_CAP_MS
+  );
+}
+
+/** Listener cleanup with no bound of its own; the manager caps it once its holder leaves. */
+export interface AbandonablePendingDeviceCleanup {
+  name: string;
+  leftover: string;
+  /** Fence late work before the device can be acquired again. */
+  abandon?: () => void;
+}
+
+interface PendingDeviceCleanupBound {
+  settlesBy?: number;
+  /** Present only until a manager-enforced cap starts. */
+  start?: () => void;
+}
 /** Logged reason when a release write outlives {@link SESSION_RELEASE_PERSIST_TIMEOUT_MS}. */
 export const RELEASE_PERSIST_TIMEOUT_REASON = "release-persist-timeout";
 /**
@@ -1617,15 +1661,17 @@ export class SessionManager {
   private readonly pendingDeviceCleanups: Map<string, Promise<void>> = new Map();
   /** Individual promises let an undo join every cleanup except the gate it still owns. */
   private readonly pendingDeviceCleanupWork = new Map<string, Set<Promise<unknown>>>();
-  /** The latest cap-bounded settle time of each device's pending cleanup, when one was given. */
-  private readonly pendingDeviceCleanupSettlesBy: Map<string, number> = new Map();
+  /** Bounds belong to individual promises and disappear as each settles. */
+  private readonly pendingDeviceCleanupBounds = new Map<string, Set<PendingDeviceCleanupBound>>();
   /**
    * Work started by the device's current acquisition (owner-less recording stop, #11041). It never
    * blocks the live holder, but counts as cleanup once the device has no owner again.
    */
   private readonly acquisitionDeviceCleanups: Map<string, Promise<void>> = new Map();
-  /** When each device's capped acquisition cleanups settle at the latest (#11616). */
-  private readonly acquisitionDeviceCleanupSettlesBy: Map<string, number> = new Map();
+  private readonly acquisitionDeviceCleanupBounds = new Map<
+    string,
+    Set<PendingDeviceCleanupBound>
+  >();
   /**
    * Active per-condition network TTLs (issue #6085 item 2), keyed by session id.
    * When a session degrades the network with an `expiresInSeconds`, a timer resets
@@ -2341,6 +2387,7 @@ export class SessionManager {
 
   private activeSessionExecutionChecker: ActiveSessionExecutionChecker = () => false;
   private livenessOwnerCallInFlightReader?: (ownerToken: string) => boolean;
+  private ownerConnectedAtReader?: OwnerConnectedAtReader;
   // No lookup means no known deadline: the veto falls back to the unsettled-execution ceiling.
   private sessionExecutionDeadlineLookup: SessionExecutionDeadlineLookup = () => undefined;
   // No canceller means nothing to abort: only the daemon tracks executions (#10820).
@@ -2559,6 +2606,7 @@ export class SessionManager {
     deviceId: string,
     frameInvalidation: "generation-only" | "full" = "generation-only",
   ): void {
+    this.armPendingDeviceCleanupCaps(deviceId);
     for (const callback of this.deviceOwnershipCallbacks) {
       try {
         callback(deviceId, frameInvalidation);
@@ -2624,21 +2672,104 @@ export class SessionManager {
   registerPendingDeviceCleanup(
     deviceId: string,
     cleanup: Promise<unknown>,
-    /** The cleanup's own cap, when it has one: it bounds the retry hint a refused bind gets. */
-    capMs?: number,
+    /** Numeric caps are trusted; only listener descriptors are manager-capped. */
+    bound?: number | AbandonablePendingDeviceCleanup,
   ): void {
-    if (capMs !== undefined) {
-      const settlesBy = this.sessionNow() + capMs;
-      const previous = this.pendingDeviceCleanupSettlesBy.get(deviceId) ?? 0;
-      this.pendingDeviceCleanupSettlesBy.set(deviceId, Math.max(previous, settlesBy));
+    if (bound === undefined) {
+      this.trackPendingDeviceCleanup(deviceId, [cleanup]);
+      return;
     }
+    const record: PendingDeviceCleanupBound = {};
+    if (typeof bound === "number") {
+      record.settlesBy = this.sessionNow() + bound;
+    } else {
+      cleanup = this.capPendingDeviceCleanup(deviceId, cleanup, record, bound);
+    }
+    this.trackDeviceCleanupBound(this.pendingDeviceCleanupBounds, deviceId, cleanup, record);
     this.trackPendingDeviceCleanup(deviceId, [cleanup]);
+    this.armPendingDeviceCleanupCaps(deviceId);
+  }
+
+  private trackDeviceCleanupBound(
+    registry: Map<string, Set<PendingDeviceCleanupBound>>,
+    deviceId: string,
+    cleanup: Promise<unknown>,
+    record: PendingDeviceCleanupBound,
+  ): void {
+    const records = registry.get(deviceId) ?? new Set<PendingDeviceCleanupBound>();
+    registry.set(deviceId, records);
+    records.add(record);
+    const remove = () => {
+      records.delete(record);
+      if (records.size === 0 && registry.get(deviceId) === records) {
+        registry.delete(deviceId);
+      }
+    };
+    void cleanup.then(remove, remove);
+  }
+
+  private armPendingDeviceCleanupCaps(deviceId: string): void {
+    if (this.getSessionForDevice(deviceId) !== null) {
+      return;
+    }
+    for (const record of this.pendingDeviceCleanupBounds.get(deviceId) ?? []) {
+      record.start?.();
+    }
+  }
+
+  private capPendingDeviceCleanup(
+    deviceId: string,
+    cleanup: Promise<unknown>,
+    record: PendingDeviceCleanupBound,
+    descriptor: AbandonablePendingDeviceCleanup,
+  ): Promise<void> {
+    const tracked = Promise.withResolvers<void>();
+    let settled = false;
+    const settle = () => {
+      settled = true;
+      record.start = undefined;
+      tracked.resolve();
+    };
+    // Both outcomes retire work; late failure after abandonment is already observed here.
+    void cleanup.then(settle, settle);
+    record.start = () => {
+      record.start = undefined;
+      if (settled) {
+        return;
+      }
+      record.settlesBy = this.sessionNow() + SESSION_RELEASE_TEARDOWN_CAP_MS;
+      void raceWithDeadline(cleanup, {
+        timer: this.timer,
+        timeoutMs: SESSION_RELEASE_TEARDOWN_CAP_MS,
+        unref: true,
+        label: descriptor.name,
+        onTimeout: () => {
+          try {
+            descriptor.abandon?.();
+          } catch (error) {
+            logger.warn(
+              `Failed to abandon ${descriptor.name} for ${deviceId}: ${errorMessage(error)}`,
+              error,
+            );
+          }
+          logger.warn(
+            `Abandoned ${descriptor.name} for ${deviceId} after ${SESSION_RELEASE_TEARDOWN_CAP_MS}ms; ` +
+              `the device is no longer held for it and may still carry ${descriptor.leftover}`,
+          );
+        },
+      }).then(settle, (error: unknown) => {
+        // The capped wait and raw rejection are observed; abandonment already named any leftover.
+        logger.debug(`Device cleanup wait ended for ${deviceId}: ${errorMessage(error)}`);
+        settle();
+      });
+    };
+    return tracked.promise;
   }
 
   /**
    * How long a bind refused by {@link hasDeviceCleanupInProgress} should wait before retrying
    * (#10960): the remaining time of the cleanup's cap or of the in-flight release's bounded
-   * teardown and persist phases, or a default polling hint when nothing bounds it. An acquisition
+   * forced-release worst case, or a default polling hint when nothing bounds it. An acquisition
    * cleanup counts once it quarantines the device, that is once its holder is gone (#11616).
    */
   getDeviceCleanupRetryAfterMs(deviceId: string): number {
@@ -2647,22 +2778,22 @@ export class SessionManager {
       .filter((release) => !release.forced && release.session.assignedDevice === deviceId)
       .map(
         (release) =>
-          (release.startedAtMs ?? now) +
-          SESSION_RELEASE_TEARDOWN_CAP_MS +
-          SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+          (release.teardownStartsByMs ?? release.startedAtMs ?? now) +
+          getSessionReleaseCleanupWorstCaseMs(),
       );
-    const cleanupBound = this.pendingDeviceCleanups.has(deviceId)
-      ? this.pendingDeviceCleanupSettlesBy.get(deviceId)
-      : undefined;
-    if (cleanupBound !== undefined) {
-      bounds.push(cleanupBound);
+    for (const record of this.pendingDeviceCleanupBounds.get(deviceId) ?? []) {
+      if (record.start) {
+        bounds.push(now + SESSION_RELEASE_TEARDOWN_CAP_MS);
+      } else if (record.settlesBy !== undefined) {
+        bounds.push(record.settlesBy);
+      }
     }
-    const acquisitionBound =
-      this.acquisitionDeviceCleanups.has(deviceId) && this.getSessionForDevice(deviceId) === null
-        ? this.acquisitionDeviceCleanupSettlesBy.get(deviceId)
-        : undefined;
-    if (acquisitionBound !== undefined) {
-      bounds.push(acquisitionBound);
+    if (this.getSessionForDevice(deviceId) === null) {
+      for (const record of this.acquisitionDeviceCleanupBounds.get(deviceId) ?? []) {
+        if (record.settlesBy !== undefined) {
+          bounds.push(record.settlesBy);
+        }
+      }
     }
     const remaining = Math.max(0, ...bounds.map((bound) => bound - now));
     return remaining > 0 ? remaining : DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS;
@@ -2681,9 +2812,9 @@ export class SessionManager {
     capMs?: number,
   ): void {
     if (capMs !== undefined) {
-      const settlesBy = this.sessionNow() + capMs;
-      const previous = this.acquisitionDeviceCleanupSettlesBy.get(deviceId) ?? 0;
-      this.acquisitionDeviceCleanupSettlesBy.set(deviceId, Math.max(previous, settlesBy));
+      this.trackDeviceCleanupBound(this.acquisitionDeviceCleanupBounds, deviceId, cleanup, {
+        settlesBy: this.sessionNow() + capMs,
+      });
     }
     const tracked = Promise.allSettled([cleanup]).then(() => undefined);
     const previous = this.acquisitionDeviceCleanups.get(deviceId);
@@ -2694,7 +2825,6 @@ export class SessionManager {
     void combined.then(() => {
       if (this.acquisitionDeviceCleanups.get(deviceId) === combined) {
         this.acquisitionDeviceCleanups.delete(deviceId);
-        this.acquisitionDeviceCleanupSettlesBy.delete(deviceId);
       }
     });
   }
@@ -2820,7 +2950,10 @@ export class SessionManager {
         this.restartReleasePersistence.set(fence, persistence);
         this.restartReleasePersistence.set(snapshot, persistence);
       }
-      this.notifySessionRelease(snapshot);
+      this.notifySessionRelease(snapshot, {
+        deviceIdentityReplaced:
+          operation.stage === "awaiting-ownership" || operation.options.deviceIdentityReplaced,
+      });
     }
     // The stuck release may never reach its own write: persist the release now (#11058), or a
     // restart would admit a terminally released UUID again.
@@ -2939,6 +3072,10 @@ export class SessionManager {
     this.livenessOwnerCallInFlightReader = reader;
   }
 
+  setOwnerConnectedAtReader(reader: OwnerConnectedAtReader | undefined): void {
+    this.ownerConnectedAtReader = reader;
+  }
+
   /** An owner's completed call restarts only its still-mint-bound claim leases. */
   restartMintBoundClaimLeases(ownerToken: string): void {
     const now = this.sessionNow();
@@ -3016,6 +3153,18 @@ export class SessionManager {
    */
   onSessionDeviceUnbound(callback: SessionDeviceUnboundCallback): void {
     this.deviceUnboundCallbacks.push(callback);
+  }
+
+  private managedExecutionRecoveryListener?: (
+    sessionId: string,
+    recovered: Promise<unknown>,
+  ) => void;
+  private readonly managedExecutionRecoveries = new Map<string, PromiseWithResolvers<void>>();
+
+  setManagedExecutionRecoveryListener(
+    listener: (sessionId: string, recovered: Promise<unknown>) => void,
+  ): void {
+    this.managedExecutionRecoveryListener = listener;
   }
 
   /**
@@ -3109,11 +3258,13 @@ export class SessionManager {
     };
 
     const creation: PendingSessionCreation = { promise: Promise.resolve(session) };
+    const settleRecovery = this.notifyManagedExecutionRecovery(session, persistedRecovery);
     creation.promise = this.persistAndPublishSession(
       session,
       creation,
       this.claimedIncarnation(persistedRecovery),
     );
+    settleRecovery(creation.promise);
     this.pendingSessionCreations.set(sessionId, creation);
     try {
       const created = await this.withinCreateDeadline(
@@ -3132,6 +3283,41 @@ export class SessionManager {
       if (this.pendingSessionCreations.get(sessionId) === creation) {
         this.pendingSessionCreations.delete(sessionId);
       }
+    }
+  }
+
+  /** Recovery alone has a completion signal; ordinary creation adds no promise turn. */
+  private notifyManagedExecutionRecovery(
+    session: Session,
+    persistedRecovery: DeviceSession | undefined,
+  ): (creation: Promise<Session>) => void {
+    if (!persistedRecovery || session.livenessPolicy !== MANAGED_EXECUTION_LIVENESS_POLICY) {
+      return () => {};
+    }
+    const { sessionId } = session;
+    const recovered = Promise.withResolvers<void>();
+    this.managedExecutionRecoveries.set(sessionId, recovered);
+    // A listener may throw or be absent; creation failure must still be handled on this signal.
+    void recovered.promise.catch((error: unknown) => {
+      logger.debug(`[SessionManager] Managed recovery ${sessionId} did not complete`, error);
+    });
+    try {
+      this.managedExecutionRecoveryListener?.(sessionId, recovered.promise);
+    } catch (error) {
+      logger.warn(`[SessionManager] Managed recovery hook failed for ${sessionId}`, error);
+    }
+    return (creation) => {
+      void creation.then(undefined, recovered.reject);
+    };
+  }
+
+  private settleManagedExecutionRecovery(sessionId: string, completed: boolean): void {
+    const recovered = this.managedExecutionRecoveries.get(sessionId);
+    this.managedExecutionRecoveries.delete(sessionId);
+    if (completed) {
+      recovered?.resolve();
+    } else {
+      recovered?.reject(new SessionReleasedDuringCreationError(sessionId));
     }
   }
 
@@ -4690,21 +4876,24 @@ export class SessionManager {
         shared.recoveryWait.resolve(undefined);
         await assign();
       }
+      const session = this.getSession(sessionId);
+      if (!session) {
+        throw new SessionReleasedDuringCreationError(sessionId);
+      }
+      // The live session's own clocks take over from here.
+      this.restartRecoveryActivityAt.delete(sessionId);
+      logger.info(
+        `[SessionManager] Successfully created session ${sessionId} with device ${session.assignedDevice}`,
+      );
+      this.settleManagedExecutionRecovery(sessionId, true);
+      return session;
     } finally {
+      // A successful recovery already resolved; every other exit rejects and drops its signal.
+      this.settleManagedExecutionRecovery(sessionId, false);
       if (this.pendingPersistedRecoveries.get(sessionId) === persisted) {
         this.pendingPersistedRecoveries.delete(sessionId);
       }
     }
-    const session = this.getSession(sessionId);
-    if (!session) {
-      throw new SessionReleasedDuringCreationError(sessionId);
-    }
-    // The live session's own clocks take over from here.
-    this.restartRecoveryActivityAt.delete(sessionId);
-    logger.info(
-      `[SessionManager] Successfully created session ${sessionId} with device ${session.assignedDevice}`,
-    );
-    return session;
   }
 
   /**
@@ -6010,6 +6199,13 @@ export class SessionManager {
     return await attempt();
   }
 
+  private releaseDeviceHold?: (sessionId: string) => ReleaseDeviceHold | undefined;
+
+  /** Resolve ownership once per new release, before teardown or device-side release listeners. */
+  setReleaseDeviceHold(resolver: (sessionId: string) => ReleaseDeviceHold | undefined): void {
+    this.releaseDeviceHold = resolver;
+  }
+
   private async releaseSessionAttempt(
     sessionId: string,
     releaseReason: string,
@@ -6033,6 +6229,7 @@ export class SessionManager {
       return await inFlightRelease.promise;
     }
 
+    const hold = this.releaseDeviceHold?.(sessionId);
     this.releasingSessions.add(session);
     const pendingRebind = this.pendingSessionRebinds.get(sessionId);
     const reason = this.createReleaseReasonState(sessionId, releaseReason);
@@ -6048,7 +6245,6 @@ export class SessionManager {
       expiryOrigin: options.expiryOrigin,
       forcedAbort: new AbortController(),
     };
-    this.markIdentityReplacedRelease(release);
     const run = () => {
       this.flushDeferredRebindCleanups({ sessionId });
       return release.forced
@@ -6063,12 +6259,7 @@ export class SessionManager {
           );
     };
     try {
-      if (pendingRebind?.session === session) {
-        release.stage = "awaiting-rebind";
-        release.promise = pendingRebind.promise.then(run, run);
-      } else {
-        release.promise = run();
-      }
+      release.promise = this.startReleaseWithDeviceHold(release, hold, pendingRebind, run);
       this.releasePromises.set(sessionId, release);
       this.activeReleasePromises.add(release);
       return await release.promise;
@@ -6079,6 +6270,59 @@ export class SessionManager {
         this.releasePromises.delete(sessionId);
       }
     }
+  }
+
+  /** Resolve the optional device hold without changing an ordinary release's promise turns. */
+  private startReleaseWithDeviceHold(
+    release: SessionReleaseOperation,
+    hold: ReleaseDeviceHold | undefined,
+    pendingRebind: PendingSessionRebind | undefined,
+    run: () => Promise<string | null>,
+  ): Promise<string | null> {
+    if (hold && "skipDeviceWrites" in hold) {
+      release.options.deviceIdentityReplaced = true;
+    }
+    this.markIdentityReplacedRelease(release);
+    if (hold && "settled" in hold) {
+      return this.startReleaseAwaitingOwnership(release, hold, pendingRebind, run);
+    }
+    if (pendingRebind?.session === release.session) {
+      release.stage = "awaiting-rebind";
+      return pendingRebind.promise.then(run, run);
+    }
+    return run();
+  }
+
+  /** Only held releases wait; the ordinary release path keeps its synchronous start. */
+  private startReleaseAwaitingOwnership(
+    release: SessionReleaseOperation,
+    hold: Extract<ReleaseDeviceHold, { settled: Promise<unknown> }>,
+    pendingRebind: PendingSessionRebind | undefined,
+    run: () => Promise<string | null>,
+  ): Promise<string | null> {
+    const { session } = release;
+    const sessionId = session.sessionId;
+    release.stage = "awaiting-ownership";
+    release.teardownStartsByMs = this.sessionNow() + hold.capMs;
+    const apply = (outcome: unknown) => {
+      release.teardownStartsByMs = this.sessionNow();
+      if (outcome !== "teardown") {
+        release.options.deviceIdentityReplaced = true;
+        this.markIdentityReplacedRelease(release);
+      }
+    };
+    return hold.settled
+      .then(apply, (error: unknown) => {
+        logger.warn(`[SessionManager] Release ownership hold failed for ${sessionId}`, error);
+        apply("skip-device-writes");
+      })
+      .then(() => {
+        if (pendingRebind?.session === session) {
+          release.stage = "awaiting-rebind";
+          return pendingRebind.promise.then(run, run);
+        }
+        return run();
+      });
   }
 
   /**
@@ -10396,7 +10640,6 @@ export class SessionManager {
     void cleanup.then(() => {
       if (this.pendingDeviceCleanups.get(deviceId) === cleanup) {
         this.pendingDeviceCleanups.delete(deviceId);
-        this.pendingDeviceCleanupSettlesBy.delete(deviceId);
       }
     });
   }
@@ -11867,13 +12110,14 @@ export class SessionManager {
    * `lostMs` (and never by `sleptMs`) through `idleStallForgivenAt`, so whether it survives a stall
    * no longer depends on which timer fires first afterwards (#10835).
    *
-   * `gapBeganAt`, when given, narrows the lease forgiveness (#11080): an owned session's lease is
-   * excused only when the gap began within one lease of its owner's last heartbeat
-   * ({@link ownerLeaseLiveAt}); its idle deadline is still moved as above. An owner whose lease
-   * had already run out before the gap was not heartbeating, so the gap hid nothing from the
-   * daemon; forgiving it anyway let a dead owner keep its device for as long as the daemon's scans
-   * kept arriving late. A live owner is forgiven in full however long the gap. Returns how many
-   * sessions were extended.
+   * `gapBeganAt`, when given, narrows full lease forgiveness (#11080) to owners live at the
+   * gap's start (`ownerLeaseLiveAt`). A live owner is forgiven in full however long the gap.
+   * An owned session whose socket was connected at that instant also receives awake-stall credit
+   * (#11992), capped in total between raw owner heartbeats at MAX_CREDIBLE_DAEMON_STALL_MS (30 s).
+   * Sleep contributes no credit to this extra rule. Without another owner heartbeat, even an
+   * always-open socket is released once its raw heartbeat age exceeds heartbeatTimeoutMs +
+   * SUSPECT_GRACE_MS + MAX_CREDIBLE_DAEMON_STALL_MS, plus one scan. With no late tick, the existing
+   * lease + grace + one scan bound is unchanged (10 s at defaults). Returns sessions considered.
    *
    * Observer registrations are excused the same gap under the same rule (#11554): it is handed
    * on as durations, because the observer registry keeps its own clock.
@@ -11887,6 +12131,8 @@ export class SessionManager {
     });
     let forgiven = 0;
     let leaseExtended = 0;
+    let connectedExtended = 0;
+    let connectedCreditMs = 0;
     let idleExtended = 0;
     for (const session of this.sessions.values()) {
       if (session.livenessPolicy === "cli-idle") {
@@ -11907,13 +12153,18 @@ export class SessionManager {
         continue;
       }
       this.forgiveMintBoundClaimLease(session, resumedAt, leaseLostMs, gapBeganAt);
-      if (ownerLeaseLiveAt(session, gapBeganAt)) {
-        // The lease that is judged (#11162): for a session judged on its owner's heartbeats, a
-        // non-owner's tool call must not move the forgiven lease start.
-        const leaseStart = judgedLeaseHeartbeat(session);
-        session.stallForgivenAt = forgivenLeaseStart(leaseStart, resumedAt, leaseLostMs);
-        leaseExtended += Number(session.stallForgivenAt > leaseStart);
+      const extension = daemonStallLeaseExtension(
+        session,
+        resumedAt,
+        { lostMs, sleptMs, gapBeganAt },
+        this.ownerConnectedAtReader,
+      );
+      if (extension.leaseStart !== undefined) {
+        session.stallForgivenAt = extension.leaseStart;
       }
+      leaseExtended += extension.leaseExtended;
+      connectedExtended += extension.connectedExtended;
+      connectedCreditMs += extension.connectedCreditMs;
       // Shift, never reset (#10662): a full window per late tick would let a session whose
       // owner is gone outlive its lease for as long as the ticks keep arriving late.
       const previousExpiry = session.expiresAt;
@@ -11933,6 +12184,7 @@ export class SessionManager {
     if (forgiven > 0) {
       logger.info(
         `Stall forgiveness: ${leaseExtended} session lease(s) extended by ${leaseLostMs}ms, ` +
+          `${connectedExtended} connected-owner lease(s) extended by ${connectedCreditMs}ms, ` +
           `${idleExtended} idle deadline(s) extended by ${lostMs}ms, of ${forgiven} session(s)`,
       );
     }

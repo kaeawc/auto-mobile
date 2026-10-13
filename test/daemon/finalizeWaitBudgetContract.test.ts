@@ -11,14 +11,17 @@ import {
   type RetryableDeviceAcquisitionError,
 } from "../../src/daemon/deviceAcquisitionRefusals";
 import {
-  SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+  getSessionReleaseCleanupWorstCaseMs,
+  SESSION_RELEASE_STUCK_DEADLINE_MS,
   SESSION_RELEASE_TEARDOWN_CAP_MS,
 } from "../../src/daemon/sessionManager";
+import { getSessionHeartbeatCheckIntervalMs } from "../../src/daemon/sessionLivenessWindows";
 import { readDeviceCleanupInProgressRefusal } from "../../src/server/deviceSessionResult";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
   defaultRecordingSessionCleanupDeps,
   registerRecordingSessionCleanup,
+  RECORDING_TEARDOWN_RETRY_BUDGET_MS,
 } from "../../src/server/recordingSessionCleanup";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { createDeviceSettingDefaultsAcquisitionReset } from "../../src/features/utility/DeviceSettingDefaults";
@@ -80,9 +83,13 @@ function registeredRecordingCapMs(deviceId: string): number | undefined {
       ownedDeviceGestureRecordingId: () => undefined,
       stopDeviceGestureRecording: async () => {},
       activeRecordingIdsForOwner: () => [],
+      retainedCaptureIdsForOwner: () => [],
       timer: new FakeTimer(),
       finalizeCapMs: defaultRecordingSessionCleanupDeps.finalizeCapMs,
       markVideoRecordingIncomplete: async () => {},
+      teardownRetryBackoff: defaultRecordingSessionCleanupDeps.teardownRetryBackoff,
+      teardownRetryBudgetMs: RECORDING_TEARDOWN_RETRY_BUDGET_MS,
+      markDeviceNeedsRecorderRecovery: () => {},
     },
   );
   unbound.forEach((callback) => callback("session-a", deviceId));
@@ -115,16 +122,27 @@ describe("finalize wait budget shared with the runners (#11360)", () => {
 
   test("the daemon's bounded cleanups never advertise more than the shared waitBudgetMs", () => {
     const { waitBudgetMs } = finalizeWait();
+    const interval = getSessionHeartbeatCheckIntervalMs({});
+    const releaseWorstCaseMs = getSessionReleaseCleanupWorstCaseMs({});
+    expect(releaseWorstCaseMs).toBe(
+      SESSION_RELEASE_STUCK_DEADLINE_MS + 2 * interval + SESSION_RELEASE_TEARDOWN_CAP_MS,
+    );
+    expect(releaseWorstCaseMs).toBeLessThanOrEqual(waitBudgetMs);
     const advertised = [
       registeredRecordingCapMs("emulator-5554"),
       registeredRecordingCapMs("2300914A-231E-4874-8F8A-40C3D2F1E24B"),
-      SESSION_RELEASE_TEARDOWN_CAP_MS + SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+      releaseWorstCaseMs,
     ];
-    // Both platforms' finalize cap plus the incomplete-mark grace, then the release phases.
-    expect(advertised).toEqual([125_000, 125_000, 20_000]);
+    // Both platforms' finalize cap plus incomplete-mark grace, then the forced-release worst case.
+    expect(advertised).toEqual([125_000, 125_000, 54_000]);
     expect(Math.max(...advertised.map((capMs) => capMs ?? Infinity))).toBeLessThanOrEqual(
       waitBudgetMs,
     );
+    for (const capMs of advertised.slice(0, 2)) {
+      expect((capMs ?? Infinity) + RECORDING_TEARDOWN_RETRY_BUDGET_MS).toBeLessThanOrEqual(
+        waitBudgetMs,
+      );
+    }
   });
 
   test("the three acquisition factories register caps within the shared waitBudgetMs", async () => {

@@ -772,6 +772,23 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       throw new Error("Missing backend handle for video recording.");
     }
 
+    if (options?.hostOnly) {
+      try {
+        await waitForExit(backendHandle.process, backendHandle.exitPromise, {
+          timeoutMs: 0,
+          forceKillTimeoutMs: PROCESS_EXIT_TIMEOUT_MS,
+          signal: "SIGKILL",
+          timer: this.timer,
+        });
+      } catch (error) {
+        throw new ActionableError(
+          `Failed to fully stop Android recording ${handle.recordingId}: host adb process cleanup failed: ${errorMessage(error)}`,
+          { cause: error },
+        );
+      }
+      return;
+    }
+
     const hostReapOutcome = waitForExit(backendHandle.process, backendHandle.exitPromise, {
       timeoutMs: 0,
       forceKillTimeoutMs: PROCESS_EXIT_TIMEOUT_MS,

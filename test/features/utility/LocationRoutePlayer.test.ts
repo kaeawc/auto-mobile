@@ -433,6 +433,7 @@ for (const replaced of [true, false]) {
         mockLocationClears: {
           markSet: () => {},
           clearLateSet: () => null,
+          abandonClear: () => {},
           retireDevice: () => {
             marker = false;
           },

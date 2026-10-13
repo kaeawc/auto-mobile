@@ -232,6 +232,8 @@ describe("rehydrated managed execution peer claim fence", () => {
       expect(
         warn.mock.calls.filter(([message]) => String(message).includes("no longer owns")),
       ).toHaveLength(1);
+      expect(warn.mock.calls).toHaveLength(2);
+      expect(info.mock.calls).toHaveLength(0);
       expect(await registry.getAssignment(key)).toMatchObject({
         execOwner: { sessionUuid: `${S2}-${PEERS[0]}` },
         generation: 1,
@@ -263,6 +265,9 @@ describe("rehydrated managed execution peer claim fence", () => {
       for (const pid of PEERS) {
         expect((await claimAs(pid)).kind).toBe("slot_in_use");
       }
+      expect(warn.mock.calls).toHaveLength(1);
+      expect(info.mock.calls).toHaveLength(1);
+      expect(info.mock.calls[0][0]).toContain("4 attempts");
     },
   );
 
@@ -493,6 +498,7 @@ describe("rehydrated managed execution peer claim fence", () => {
       owner: () => OWNER,
       timer,
     });
+    absent.noteRecovering(S, Promise.resolve());
     expect(await absent.reown([S], { rehydrated: true })).toEqual([]);
     expect(absent.automationRefusal(S)).toBeUndefined();
     absent.close();
@@ -662,6 +668,48 @@ describe("rehydrated managed execution peer claim fence", () => {
   });
 
   testWithFreshSlot(
+    "a background attempt interrupted before lookup cannot confirm ownership or release its hold",
+    async () => {
+      reowner.close();
+      const opened = Promise.withResolvers<SlotRegistry>();
+      const recovering = Promise.withResolvers<void>();
+      const confirmed: string[] = [];
+      let opens = 0;
+      reowner = new ManagedExecutionReowner({
+        registry: async () => (++opens === 1 ? faults.faulty : opened.promise),
+        owner: () => OWNER,
+        timer,
+        retryBackoff: exponentialBackoff({ initialDelayMs: 10, maxDelayMs: 40 }),
+        isSessionHeld: () => held,
+        onOwnershipConfirmed: (id) => {
+          confirmed.push(id);
+        },
+      });
+      faults.busy.claimExecution = 1;
+      await reowner.reown([S], { rehydrated: true });
+      const hold = reowner.releaseDeviceHold(S)!;
+      let settled: string | undefined;
+      void hold.settled!.then((outcome) => {
+        settled = outcome;
+      });
+      await advance(10);
+      expect(opens).toBe(2);
+      reowner.noteRecovering(S, recovering.promise);
+      opened.resolve(faults.faulty);
+      await drainMicrotasks(80);
+      expect(reowner.ownershipState(S)).toBe("unconfirmed");
+      expect(confirmed).toEqual([]);
+      expect(settled).toBeUndefined();
+      expect(faults.calls.findExecutionAssignments).toBe(1);
+      expect((await registry.getAssignment(key))?.execOwner?.daemonId).toBe("previous");
+      reowner.close();
+      expect(await hold.settled).toBe("skip-device-writes");
+      recovering.reject(new Error("interrupted recovery"));
+      await reowner.whenIdle();
+    },
+  );
+
+  testWithFreshSlot(
     "a session no longer held drops its gate and stops registry retries",
     async () => {
       faults.busy.claimExecution = 100;
@@ -703,6 +751,89 @@ describe("rehydrated managed execution peer claim fence", () => {
       await advance(10);
       await reowner.whenIdle();
       expect(reowner.automationRefusal("missing")?.message).toContain("no longer owns");
+    },
+  );
+  testWithFreshSlot(
+    "recovering before publication keeps its gate through early pruning and starts its own claim",
+    async () => {
+      held = false;
+      const recovered = Promise.withResolvers<void>();
+      reowner.noteRecovering(S, recovered.promise);
+      expect(reowner.ownershipState(S)).toBe("unconfirmed");
+      expect(reowner.automationRefusal(S)).toBeInstanceOf(ManagedSlotOwnershipUnconfirmedError);
+      await reowner.reown(["other"], { rehydrated: true });
+      expect(reowner.automationRefusal(S)).toBeInstanceOf(ManagedSlotOwnershipUnconfirmedError);
+      expect(faults.calls.findExecutionAssignments).toBeUndefined();
+      held = true;
+      recovered.resolve();
+      await drainMicrotasks(80);
+      await reowner.whenIdle();
+      expect(reowner.automationRefusal(S)).toBeUndefined();
+      expect(faults.calls.claimExecution).toBe(1);
+      await reowner.reown([S], { rehydrated: true });
+      expect(reowner.automationRefusal(S)).toBeUndefined();
+    },
+  );
+
+  testWithFreshSlot(
+    "a failed unpublished recovery drops its gate without registry work",
+    async () => {
+      held = false;
+      const recovered = Promise.withResolvers<void>();
+      reowner.noteRecovering(S, recovered.promise);
+      expect(reowner.automationRefusal(S)).toBeDefined();
+      recovered.reject(new Error("creation rolled back"));
+      await drainMicrotasks(80);
+      expect(reowner.ownershipState(S)).toBeUndefined();
+      expect(faults.calls.findExecutionAssignments).toBeUndefined();
+    },
+  );
+
+  testWithFreshSlot(
+    "a rejected recovery retains its gate only while a session is still held",
+    async () => {
+      const recovered = Promise.withResolvers<void>();
+      reowner.noteRecovering(S, recovered.promise);
+      recovered.reject(new Error("creation failed while another holder remained"));
+      await drainMicrotasks(80);
+      expect(reowner.ownershipState(S)).toBe("unconfirmed");
+      held = false;
+      expect(reowner.automationRefusal(S)).toBeUndefined();
+      reowner.close();
+      reowner.noteRecovering(S, Promise.resolve());
+      expect(reowner.ownershipState(S)).toBeUndefined();
+    },
+  );
+
+  testWithFreshSlot(
+    "only a marked confirmation notifies warm-up once; loss never does",
+    async () => {
+      reowner.close();
+      const confirmed: string[] = [];
+      const lost: string[] = [];
+      reowner = new ManagedExecutionReowner({
+        registry: async () => faults.faulty,
+        owner: () => OWNER,
+        timer,
+        isSessionHeld: () => held,
+        onOwnershipConfirmed: (id) => {
+          confirmed.push(id);
+        },
+        onOwnershipLost: (id) => {
+          lost.push(id);
+        },
+      });
+      await reowner.reown([S], { rehydrated: true });
+      await reowner.reown([S]);
+      expect(confirmed).toEqual([S]);
+      expect(warn.mock.calls).toHaveLength(0);
+      expect(info.mock.calls).toHaveLength(1);
+      await reowner.reown(["missing"], { rehydrated: true });
+      expect(confirmed).toEqual([S]);
+      expect(reowner.ownershipState("missing")).toBe("lost");
+      expect(lost).toEqual(["missing"]);
+      expect(warn.mock.calls).toHaveLength(1);
+      expect(info.mock.calls).toHaveLength(1);
     },
   );
 });

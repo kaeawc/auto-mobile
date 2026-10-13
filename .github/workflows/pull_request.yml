@@ -282,6 +282,12 @@ jobs:
               - 'test/daemon/desktopWireContract.test.ts'
               - 'test/daemon/helpers/desktopWireHarness.ts'
 
+              # The refusal corpus is replayed by a Kotlin desktop-core test. A TS-only
+              # PR that regenerates it must run that replay (#12166).
+              - 'test/fixtures/refusal-wire/**'
+              - 'scripts/generate-refusal-wire-fixtures.ts'
+              - 'test/daemon/refusalWireContract.test.ts'
+
       - name: "Check for IDE Plugin changes"
         id: filter-ide-plugin
         uses: dorny/paths-filter@v3

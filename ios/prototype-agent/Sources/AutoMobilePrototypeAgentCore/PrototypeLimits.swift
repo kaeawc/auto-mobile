@@ -14,6 +14,57 @@ enum PrototypeLimits {
     /// re-checks it on every state write; see `PrototypeStateValidator.specBytes`.
     static let maxSpecBytes = 1_048_576
 
+    static let maxDataDepth = 8
+    static let maxDataArrayItems = 500
+    static let maxDataPointerLength = 256
+    static let maxDataBytes = 262_144
+
+    /// Agent-side depth/array backstop, in the host's sorted UTF-16 member order. Data is depth 1.
+    /// The host's byte-cost rule is not duplicated: there is no Swift validator twin, and the
+    /// existing 1 MiB whole-spec byte cap still bounds the input.
+    static func guardData(_ data: [String: JSONValue]) throws {
+        try visitData(.object(data), path: "data", depth: 1)
+    }
+
+    private static func visitData(_ value: JSONValue, path: String, depth: Int) throws {
+        switch value {
+        case let .object(fields):
+            if depth > maxDataDepth { throw violation(path, "Data depth limit exceeded") }
+            for key in fields.keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
+                if let member = fields[key] {
+                    try visitData(member, path: dataMemberPath(path, key: key), depth: depth + 1)
+                }
+            }
+        case let .array(items):
+            if depth > maxDataDepth { throw violation(path, "Data depth limit exceeded") }
+            if items.count > maxDataArrayItems { throw violation(path, "Data array limit exceeded") }
+            for (index, member) in items.enumerated() {
+                try visitData(member, path: "\(path)[\(index)]", depth: depth + 1)
+            }
+        case let .number(number):
+            if !number.isFinite { throw violation(path, "Invalid data value") }
+        case .null: throw violation(path, "Invalid data value")
+        case .string, .bool: break
+        }
+    }
+
+    private static func dataMemberPath(_ path: String, key: String) -> String {
+        let scalars = key.unicodeScalars
+        func initial(_ scalar: Unicode.Scalar) -> Bool {
+            ("A" ... "Z").contains(scalar) || ("a" ... "z").contains(scalar) || scalar == "_"
+        }
+        if let first = scalars.first, initial(first),
+           scalars.allSatisfy({ initial($0) || ("0" ... "9").contains($0) })
+        {
+            return "\(path).\(key)"
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .withoutEscapingSlashes
+        // Encoding a Swift string cannot fail; retaining a fallback keeps this path total.
+        let encoded = (try? encoder.encode(key)).map { String(decoding: $0, as: UTF8.self) } ?? "\"\""
+        return "\(path)[\(encoded)]"
+    }
+
     /// Throws the first limit the tree breaks. `repeat` templates count once per instance, in the
     /// same traversal order and path spelling as the Android guard (`root.repeat[1].children[0]`).
     static func guardTree(_ root: JSONValue) throws {

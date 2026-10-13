@@ -40,7 +40,13 @@ final class PrototypeLimitsTests: XCTestCase {
         let definitions = try XCTUnwrap(contract?["definitions"] as? [String: Any])
         let repeatFields = try XCTUnwrap((definitions["repeat"] as? [String: Any])?["fields"] as? [String: Any])
         let items = try XCTUnwrap((repeatFields["items"] as? [String: Any])?["rule"] as? [String: Any])
-        XCTAssertEqual(PrototypeLimits.maxRepeatItems, items["max"] as? Int)
+        let options = try XCTUnwrap(items["options"] as? [[String: Any]])
+        let literal = try XCTUnwrap(options.first { $0["kind"] as? String == "array" })
+        XCTAssertEqual(PrototypeLimits.maxRepeatItems, literal["max"] as? Int)
+        XCTAssertEqual(PrototypeLimits.maxDataDepth, limits["MAX_PROTOTYPE_DATA_DEPTH"])
+        XCTAssertEqual(PrototypeLimits.maxDataArrayItems, limits["MAX_PROTOTYPE_DATA_ARRAY_ITEMS"])
+        XCTAssertEqual(PrototypeLimits.maxDataPointerLength, limits["MAX_PROTOTYPE_DATA_POINTER_LENGTH"])
+        XCTAssertEqual(PrototypeLimits.maxDataBytes, limits["MAX_PROTOTYPE_DATA_BYTES"])
     }
 
     func testExactLimitFixturesDecode() throws {

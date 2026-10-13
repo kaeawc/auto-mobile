@@ -69,17 +69,28 @@ enum PrototypeLimits {
     /// Throws the first limit the tree breaks. `repeat` templates count once per instance, in the
     /// same traversal order and path spelling as the Android guard (`root.repeat[1].children[0]`).
     static func guardTree(_ root: JSONValue) throws {
-        var count = 0
-        try visit(root, path: "root", depth: 1, count: &count)
+        var expandedCount = 0
+        try visit(root, path: "root", depth: 1, authored: false, count: &expandedCount)
     }
 
-    /// Runs only after guardTree has bounded the authored depth. Counts containers in pre-order,
-    /// including childless templates; missing or non-array pointers contribute no cells.
+    /// Known nonempty literal instances use the expanded budget. Unknown or empty templates use
+    /// an independent authored budget, visited once even inside a literal repeat's instances.
+    static func guardAuthoredTree(_ root: JSONValue) throws {
+        var expandedCount = 0
+        try visit(root, path: "root", depth: 1, authored: true, count: &expandedCount)
+        var authoredTemplateCount = 0
+        try visitAuthoredTemplates(root, path: "root", depth: 1, template: false, count: &authoredTemplateCount)
+    }
+
+    /// Runs after guardAuthoredTree has depth-checked every subtree the cell guard and resolver
+    /// traverse. Counts containers in pre-order, including childless templates; missing or
+    /// non-array pointers contribute no cells. The explicit depth check also bounds direct calls.
     static func guardRepeatPathCells(_ root: JSONValue, data: [String: JSONValue]?) throws {
         var repeats = PrototypeRepeatData(data: data)
         var total = 0
-        func visitCells(_ node: JSONValue, path: String) throws {
+        func visitCells(_ node: JSONValue, path: String, depth: Int) throws {
             guard case let .object(fields) = node else { return }
+            if depth > maxDepth { throw violation(path, "Tree depth limit exceeded") }
             if case let .object(spec)? = fields["repeat"],
                case let .object(source)? = spec["items"], let pointer = source["path"]?.stringValue
             {
@@ -89,43 +100,47 @@ enum PrototypeLimits {
                 }
             }
             if let child = fields["child"] {
-                try visitCells(child, path: "\(path).child")
+                try visitCells(child, path: "\(path).child", depth: depth + 1)
             } else if case let .array(children)? = fields["children"] {
                 for (index, child) in children.enumerated() {
-                    try visitCells(child, path: "\(path).children[\(index)]")
+                    try visitCells(child, path: "\(path).children[\(index)]", depth: depth + 1)
                 }
             }
         }
-        try visitCells(root, path: "root")
+        try visitCells(root, path: "root", depth: 1)
     }
 
-    private static func visit(_ node: JSONValue, path: String, depth: Int, count: inout Int) throws {
+    private static func visit(
+        _ node: JSONValue, path: String, depth: Int, authored: Bool, count: inout Int
+    )
+        throws
+    {
         guard case let .object(fields) = node else { return }
         count += 1
         if count > maxNodes { throw violation(path, "Node limit exceeded") }
         if depth > maxDepth { throw violation(path, "Tree depth limit exceeded") }
+        if authored, hasUncountedTemplate(fields) { return }
         if case let .array(children)? = fields["children"] {
             if case let .object(spec)? = fields["repeat"] {
-                if case .object? = spec["items"] {
-                    for (index, child) in children.enumerated() {
-                        try visit(child, path: "\(path).children[\(index)]", depth: depth + 1, count: &count)
-                    }
-                } else {
-                    try visitLiteralChildren(spec, children: children, path: path, depth: depth, count: &count)
-                }
+                try visitLiteralChildren(
+                    spec, children: children, path: path, depth: depth, authored: authored, count: &count
+                )
             } else {
                 for (index, child) in children.enumerated() {
-                    try visit(child, path: "\(path).children[\(index)]", depth: depth + 1, count: &count)
+                    try visit(
+                        child, path: "\(path).children[\(index)]", depth: depth + 1, authored: authored, count: &count
+                    )
                 }
             }
         }
         if let child = fields["child"] {
-            try visit(child, path: "\(path).child", depth: depth + 1, count: &count)
+            try visit(child, path: "\(path).child", depth: depth + 1, authored: authored, count: &count)
         }
     }
 
     private static func visitLiteralChildren(
-        _ spec: [String: JSONValue], children: [JSONValue], path: String, depth: Int, count: inout Int
+        _ spec: [String: JSONValue], children: [JSONValue], path: String, depth: Int,
+        authored: Bool, count: inout Int
     )
         throws
     {
@@ -137,9 +152,45 @@ enum PrototypeLimits {
                     child,
                     path: "\(path).repeat[\(item)].children[\(index)]",
                     depth: depth + 1,
+                    authored: authored,
                     count: &count
                 )
             }
+        }
+    }
+
+    private static func hasUncountedTemplate(_ fields: [String: JSONValue]) -> Bool {
+        guard case let .object(spec)? = fields["repeat"] else { return false }
+        guard case let .array(items)? = spec["items"] else { return true }
+        return items.isEmpty
+    }
+
+    /// Structural traversal, never instance expansion: all descendants of an uncounted template
+    /// consume this budget once, including nested repeats and single-child nodes.
+    private static func visitAuthoredTemplates(
+        _ node: JSONValue, path: String, depth: Int, template: Bool, count: inout Int
+    )
+        throws
+    {
+        guard case let .object(fields) = node else { return }
+        if template {
+            count += 1
+            if count > maxNodes { throw violation(path, "Node limit exceeded") }
+        }
+        if depth > maxDepth { throw violation(path, "Tree depth limit exceeded") }
+        let childTemplate = template || hasUncountedTemplate(fields)
+        if case let .array(children)? = fields["children"] {
+            for (index, child) in children.enumerated() {
+                try visitAuthoredTemplates(
+                    child, path: "\(path).children[\(index)]", depth: depth + 1,
+                    template: childTemplate, count: &count
+                )
+            }
+        }
+        if let child = fields["child"] {
+            try visitAuthoredTemplates(
+                child, path: "\(path).child", depth: depth + 1, template: childTemplate, count: &count
+            )
         }
     }
 

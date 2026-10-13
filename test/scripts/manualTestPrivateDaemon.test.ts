@@ -10,15 +10,16 @@ import {
   derivePrivateDaemonBatch,
   type PrivateDaemonBatchOptions,
 } from "../../scripts/manual-test/privateDaemonEnv";
+import { FakeTimer } from "../fakes/FakeTimer";
 const posixTest = process.platform === "win32" ? test.skip : test;
-const options: PrivateDaemonBatchOptions = {
+export const options: PrivateDaemonBatchOptions = {
   batchDir: resolve("/mt-batch"),
   count: 2,
   basePort: 3160,
   auxRoot: resolve("/mt-aux"),
   serverPath: resolve("/built/index.js"),
 };
-function parsed(args: string[]): PrivateDaemonCommand {
+export function parsed(args: string[]): PrivateDaemonCommand {
   const result = parsePrivateDaemonArgs(args);
   if ("help" in result) {
     throw new Error("Unexpected help");
@@ -28,7 +29,7 @@ function parsed(args: string[]): PrivateDaemonCommand {
   }
   return result;
 }
-function fixture() {
+export function fixture() {
   const files = new Map<string, string>();
   const writes: string[] = [],
     dirs: Array<[string, number]> = [],
@@ -43,6 +44,13 @@ function fixture() {
     }> = [];
   const launches: Array<{ command: string; args: string[]; env: Record<string, string> }> = [];
   const deps: PrivateDaemonCliDeps = {
+    timer: new FakeTimer(),
+    signalPid: () => {
+      throw new Error("Unexpected signal");
+    },
+    requestSocket: async () => {
+      throw new Error("socket unavailable");
+    },
     runtimePath: resolve("/fake/runtime"),
     repoRoot: resolve("/fake/repo"),
     removeFile: (path) => {
@@ -224,7 +232,7 @@ posixTest("start refuses any live pid before launching the batch", async () => {
   ).toBe(2);
   expect(f.launches).toEqual([]);
 });
-posixTest("stop only launches isolated daemon stop; status and env never launch", async () => {
+posixTest("gone stop, status and env never launch", async () => {
   const f = fixture();
   await runPrivateDaemonCommand({ op: "init", options }, f.deps);
   f.writes.length = 0;
@@ -235,7 +243,7 @@ posixTest("stop only launches isolated daemon stop; status and env never launch"
       f.deps,
     ),
   ).toBe(0);
-  expect(f.launches[0].args).toEqual([options.serverPath, "--daemon", "stop"]);
+  expect(f.launches).toEqual([]);
   expect(f.writes).toEqual([]);
   expect(f.dirs).toEqual([]);
   f.files.set(join(options.batchDir, "daemon1", "pid.txt"), "1234\n");
@@ -244,8 +252,7 @@ posixTest("stop only launches isolated daemon stop; status and env never launch"
     parsed(["env", "--batch-dir", options.batchDir, "--daemon", "1"]),
     f.deps,
   );
-  expect(f.launches).toHaveLength(1);
-  expect(f.launches[0].command).toBe(f.deps.runtimePath);
+  expect(f.launches).toHaveLength(0);
   expect(f.logs.at(-1)).toBe(join(options.batchDir, "daemon1", "env.sh"));
 });
 posixTest("tampered specs/default options are refused before a launch", async () => {
@@ -344,7 +351,7 @@ posixTest(
       parsed(["start", "--batch-dir", options.batchDir, "--daemon", "2", "--", "--debug"]),
       f.deps,
     );
-    expect(f.launches[1].args.slice(3)).toEqual([
+    expect(f.launches[0].args.slice(3)).toEqual([
       "--port",
       "3161",
       "--strict-port",
@@ -352,8 +359,8 @@ posixTest(
       "--tool-call-recording",
       "--debug",
     ]);
-    expect(f.launches[1].env.NOTE).toBe("private");
-    expect(JSON.parse(f.logs.at(-1)!).args).toEqual(f.launches[1].args.slice(3));
+    expect(f.launches[0].env.NOTE).toBe("private");
+    expect(JSON.parse(f.logs.at(-1)!).args).toEqual(f.launches[0].args.slice(3));
     expect(f.files.get(spec.plainPidFilePath)).toBe("1234\n");
   },
 );
@@ -364,12 +371,15 @@ posixTest(
     await runPrivateDaemonCommand({ op: "init", options }, f.deps);
     const spec = derivePrivateDaemonBatch(options)[0];
     f.files.set(spec.plainPidFilePath, "22\n");
+    f.files.set(spec.pidFilePath, '{"pid":22}');
+    f.deps.isPidAlive = () => true;
     f.deps.runCommand = async () => ({ exitCode: 7 });
     const stop = parsed(["stop", "--batch-dir", options.batchDir, "--daemon", "1"]);
-    expect(await runPrivateDaemonCommand(stop, f.deps)).toBe(7);
+    expect(await runPrivateDaemonCommand(stop, f.deps)).toBe(1);
     expect(f.files.get(spec.plainPidFilePath)).toBe("22\n");
     expect(f.removes).toEqual([]);
     f.files.delete(spec.plainPidFilePath);
+    f.deps.isPidAlive = () => false;
     f.deps.runCommand = async () => ({ exitCode: 0 });
     expect(await runPrivateDaemonCommand(stop, f.deps)).toBe(0);
   },

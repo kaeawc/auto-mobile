@@ -128,10 +128,8 @@ func swiftUIAlignment(_ name: String?) -> Alignment {
 /// A contract name without an SF equivalent uses the shared placeholder; unknown names draw no glyph.
 @MainActor
 func prototypeSymbol(_ name: String?, variant: String? = nil) -> String? {
-    switch PrototypeIconSymbolTable.shared.resolve(name, variant: variant) {
-    case let .symbol(symbol, fallback): return PrototypeSymbolAvailability.available(symbol, fallback: fallback)
-    case .placeholder: return prototypeIconSymbolPlaceholder
-    case .unknown: return nil
+    PrototypeIconSymbolTable.shared.symbolName(for: name, variant: variant) {
+        PrototypeSymbolAvailability.isAvailable($0)
     }
 }
 
@@ -140,13 +138,7 @@ func prototypeSymbol(_ name: String?, variant: String? = nil) -> String? {
 private enum PrototypeSymbolAvailability {
     private static var symbols: [String: Bool] = [:]
 
-    static func available(_ symbol: String, fallback: String?) -> String {
-        if isAvailable(symbol) { return symbol }
-        if let fallback, isAvailable(fallback) { return fallback }
-        return prototypeIconSymbolPlaceholder
-    }
-
-    private static func isAvailable(_ symbol: String) -> Bool {
+    static func isAvailable(_ symbol: String) -> Bool {
         if let cached = symbols[symbol] { return cached }
         let available = UIImage(systemName: symbol) != nil
         symbols[symbol] = available

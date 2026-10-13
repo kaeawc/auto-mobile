@@ -108,6 +108,9 @@ final class PrototypeIconSymbolsTests: XCTestCase {
         XCTAssertEqual(PrototypeIconVariant.allCases.map(\.rawValue), contract.definitions.iconVariant.values)
     }
 
+    /// Depends on the macOS host's CoreGlyphs metadata (`name_availability.plist`,
+    /// `symbol_restrictions.strings`) and deliberately fails rather than skips when it is missing:
+    /// it is the only availability proof without a simulator.
     @MainActor
     func testEverySymbolIsAvailableUnrestrictedAndDrawable() throws {
         let table = try table()
@@ -148,6 +151,29 @@ final class PrototypeIconSymbolsTests: XCTestCase {
                 )
             #endif
         }
+    }
+
+    func testEveryContractNameResolvesToANonEmptySymbolThroughTheFullChain() throws {
+        let table = try table()
+        let names = try contract().definitions.iconName.values
+        let shared = PrototypeIconSymbolTable.shared
+        XCTAssertEqual(table.mapped.count + table.unmapped.count, names.count)
+        for name in names {
+            let symbol = try XCTUnwrap(shared.symbolName(for: name) { _ in true }, name)
+            XCTAssertFalse(symbol.isEmpty, name)
+            XCTAssertEqual(symbol, table.mapped[name]?.symbol ?? table.placeholder, name)
+            XCTAssertEqual(shared.symbolName(for: name) { _ in false }, table.placeholder, name)
+        }
+    }
+
+    func testSymbolNameFallsBackFromChosenFormToDefaultToPlaceholder() throws {
+        let shared = PrototypeIconSymbolTable(data: "paired\theart\theart.fill\theart\nunmapped")
+        XCTAssertEqual(shared.symbolName(for: "paired", variant: "filled") { _ in true }, "heart.fill")
+        XCTAssertEqual(shared.symbolName(for: "paired", variant: "filled") { $0 != "heart.fill" }, "heart")
+        XCTAssertEqual(shared.symbolName(for: "paired", variant: "filled") { _ in false }, "questionmark.square")
+        XCTAssertEqual(shared.symbolName(for: "unmapped") { _ in false }, prototypeIconSymbolPlaceholder)
+        XCTAssertNil(shared.symbolName(for: "skew") { _ in true })
+        XCTAssertNil(shared.symbolName(for: nil) { _ in true })
     }
 
     func testLegacyDefaultsAreUnchanged() {

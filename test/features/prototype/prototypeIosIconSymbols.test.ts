@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import table from "../../../schemas/prototype-ios-icon-symbols.json";
 import contract from "../../../schemas/prototype-spec-contract.json";
-import { renderPrototypeIconSymbolData } from "../../../scripts/ios/generate-prototype-icon-symbols";
+import {
+  renderPrototypeIconSymbolData,
+  renderPrototypeIconSymbolDoc,
+} from "../../../scripts/ios/generate-prototype-icon-symbols";
 import { IOS_PROTOTYPE_MAPPED_ICON_NAMES } from "../../../src/features/prototype/prototypePlatformNotes";
 
 const compiled = readFileSync(
@@ -10,6 +13,10 @@ const compiled = readFileSync(
     "../../../ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
     import.meta.url,
   ),
+  "utf8",
+);
+const doc = readFileSync(
+  new URL("../../../ios/prototype-agent/ICON-SYMBOLS.md", import.meta.url),
   "utf8",
 );
 const names = contract.definitions.iconName.values;
@@ -20,6 +27,10 @@ const unmappedSet = new Set(table.unmapped);
 describe("canonical iOS icon symbols", () => {
   test("compiled Swift equals the generator output", () => {
     expect(compiled).toBe(renderPrototypeIconSymbolData(table));
+  });
+  test("checked-in ICON-SYMBOLS.md equals the generator output and lists every fallback", () => {
+    expect(doc).toBe(renderPrototypeIconSymbolDoc(table));
+    expect(table.unmapped.filter((name) => !doc.includes(`- \`${name}\`\n`))).toEqual([]);
   });
   test("mapped and unmapped partition the contract in contract order", () => {
     expect(mapped).toEqual(names.filter((name) => mappedSet.has(name)));

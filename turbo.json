@@ -77,6 +77,7 @@
         "ios/control-proxy/Tests/**",
         "ios/network-filter/Packaging/**",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
+        "ios/prototype-agent/ICON-SYMBOLS.md",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift"
       ],
       "outputs": [],
@@ -124,6 +125,7 @@
         "ios/control-proxy/Tests/**",
         "ios/network-filter/Packaging/**",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
+        "ios/prototype-agent/ICON-SYMBOLS.md",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift"
       ],
       "outputs": [],
@@ -196,6 +198,7 @@
         "ios/control-proxy/Tests/**",
         "ios/network-filter/Packaging/**",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
+        "ios/prototype-agent/ICON-SYMBOLS.md",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift"
       ],
       "outputs": [],
@@ -306,6 +309,7 @@
         "ios/control-proxy/Tests/**",
         "ios/network-filter/Packaging/**",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
+        "ios/prototype-agent/ICON-SYMBOLS.md",
         "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift"
       ],
       "outputs": ["coverage/**"],

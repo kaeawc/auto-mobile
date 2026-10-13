@@ -62,4 +62,18 @@ struct PrototypeIconSymbolTable: Sendable {
         }
         return .symbol(symbol, fallback: symbol == entry.symbol ? nil : entry.symbol)
     }
+
+    /// The symbol to draw: the chosen form if loadable, else the entry default, else the placeholder.
+    /// The placeholder itself is returned without an availability check. Names outside the contract
+    /// return nil.
+    func symbolName(for name: String?, variant: String? = nil, isAvailable: (String) -> Bool) -> String? {
+        switch resolve(name, variant: variant) {
+        case .unknown: return nil
+        case .placeholder: return prototypeIconSymbolPlaceholder
+        case let .symbol(symbol, fallback):
+            if isAvailable(symbol) { return symbol }
+            if let fallback, isAvailable(fallback) { return fallback }
+            return prototypeIconSymbolPlaceholder
+        }
+    }
 }

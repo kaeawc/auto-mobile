@@ -133,6 +133,7 @@ test/bats/fixtures/compose-compiler-report/**/*.json text eol=lf
 schemas/prototype-spec-contract.json text eol=lf
 schemas/prototype-ios-icon-symbols.json text eol=lf
 ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift text eol=lf
+ios/prototype-agent/ICON-SYMBOLS.md text eol=lf
 schemas/prototype-asset-contract.json text eol=lf
 
 # Real `ps -o lstart=` captures whose exact bytes (trailing padding) are asserted (issue #10116).

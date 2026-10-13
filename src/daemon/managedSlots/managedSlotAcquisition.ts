@@ -18,7 +18,9 @@
  *
  * Any failure after a session was handed out backs that session out again (slot execution owner
  * cleared, session released, the slot keeps its device). Unfinished cleanup is retained and retried
- * in the background; a failed acquisition never waits for these retries.
+ * in the background at 25 ms doubling to 1 s, with shared quiet time after a blocked attempt
+ * (up to 5 s), until it lands or the daemon closes; a failed
+ * acquisition never waits for these retries.
  */
 
 import {
@@ -36,7 +38,9 @@ import { DEFAULT_PROVISION_DEVICE_TIMEOUT_MS } from "../../utils/deviceTimeouts"
 import { exponentialBackoff, type BackoffPolicy } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { Timer } from "../../utils/SystemTimer";
+import { MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS } from "./managedExecutionRelease";
 import type {
   ManagedSlotReconcileRequest,
   ManagedSlotReconcileResult,
@@ -51,7 +55,6 @@ import {
   type SlotScopeIdentity,
   type SlotScopeRecord,
 } from "./slotRegistry";
-import { MANAGED_EXECUTION_SETTLEMENT_SLOW_POLL_MS } from "./managedExecutionRelease";
 import { SLOT_SCOPE_RESET_DEFAULT_WAIT_MS, type SlotScopeResetScopeResult } from "./slotScopeReset";
 
 export interface ManagedSlotAcquisitionSessions {
@@ -81,8 +84,6 @@ export interface ManagedSlotAcquisitionDependencies {
   owner: () => SlotProcessIdentity;
   timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
   backOutRetryBackoff?: BackoffPolicy;
-  backOutRetryMaxAttempts?: number;
-  backOutRetrySlowPollMs?: number;
   /**
    * The implicit reset of a superseded incarnation (`SlotScopeReset.resetSupersededScope`, #11174):
    * waits up to `waitMs` for the old scope's owners and cleanup to settle. Absent, or returning
@@ -135,16 +136,23 @@ type ScopeAdmission =
   | { kind: "ready"; scopeKey: string; revived: boolean }
   | { kind: "failed"; failure: ManagedSlotsFailure };
 
-export const MANAGED_SLOT_BACK_OUT_RETRY_INITIAL_DELAY_MS = 250;
-export const MANAGED_SLOT_BACK_OUT_RETRY_MAX_DELAY_MS = 5_000;
-export const MANAGED_SLOT_BACK_OUT_RETRY_MAX_ATTEMPTS = 8;
+export const MANAGED_SLOT_BACK_OUT_RETRY_INITIAL_DELAY_MS = 25;
+export const MANAGED_SLOT_BACK_OUT_RETRY_MAX_DELAY_MS = 1_000;
+/** The longest wait after an attempt that itself blocked. */
+export const MANAGED_SLOT_BACK_OUT_RETRY_MAX_BLOCKED_WAIT_MS = 5_000;
+/** A cleanup owed longer than this is warned about once: the registry has been unwritable that long. */
+export const MANAGED_SLOT_BACK_OUT_OWED_WARN_AFTER_MS = 5_000;
 
-/** Owed cleanup; gave_up means the bounded round ended, with attempts still counted slowly. */
+/** Owed cleanup, retried until it lands or the daemon closes. */
 export interface ManagedSlotBackOutCleanup {
   key: SlotKey;
   sessionUuid: string;
-  state: "retrying" | "gave_up";
+  /** Background retries made so far (the inline attempt is not counted). */
   attempts: number;
+  /** `timer.now()` when the inline attempt failed. */
+  owedSinceMs: number;
+  /** `timer.now() - owedSinceMs` at the time of the `pendingBackOutCleanups()` call. */
+  ageMs: number;
   ownerClearOwed: boolean;
   sessionReleaseOwed: boolean;
   lastError: string;
@@ -152,11 +160,24 @@ export interface ManagedSlotBackOutCleanup {
 
 export class ManagedSlotAcquisition {
   private closed = false;
+  private readonly closeController = new AbortController();
+  private readonly backOutSessionReleases = new WeakMap<ManagedSlotBackOutCleanup, Promise<void>>();
+  private readonly backOutOwnerReads = new WeakMap<
+    ManagedSlotBackOutCleanup,
+    ReturnType<SlotRegistry["getAssignment"]>
+  >();
+  private readonly backOutOwnerClears = new WeakMap<
+    ManagedSlotBackOutCleanup,
+    ReturnType<SlotRegistry["releaseExecution"]>
+  >();
+  private backOutQuietUntilMs = 0;
+  private backOutRetryTurn: Promise<void> = Promise.resolve();
   private readonly backOutCleanups = new Map<
     string,
     { registry: SlotRegistry; cleanup: ManagedSlotBackOutCleanup }
   >();
   private readonly background = new Set<Promise<void>>();
+  private readonly warnedBackOutCleanups = new WeakSet<ManagedSlotBackOutCleanup>();
   private readonly retryWaits = new Set<() => void>();
   private readonly retryBackoff = exponentialBackoff({
     initialDelayMs: MANAGED_SLOT_BACK_OUT_RETRY_INITIAL_DELAY_MS,
@@ -168,12 +189,13 @@ export class ManagedSlotAcquisition {
   /** Stop waits immediately; outstanding owner rows become dead when this process exits. */
   close(): void {
     this.closed = true;
+    this.closeController.abort();
     for (const cancel of this.retryWaits) {
       cancel();
     }
   }
 
-  /** Wait until no background task runs, including slow retries, which end on cleanup or close. */
+  /** Wait until no background task runs; owed cleanup ends on landing or close. */
   async whenIdle(): Promise<void> {
     while (this.background.size > 0) {
       await Promise.allSettled([...this.background]);
@@ -184,6 +206,7 @@ export class ManagedSlotAcquisition {
     return [...this.backOutCleanups.values()].map(({ cleanup }) => ({
       ...cleanup,
       key: { ...cleanup.key },
+      ageMs: this.deps.timer.now() - cleanup.owedSinceMs,
     }));
   }
 
@@ -482,11 +505,13 @@ export class ManagedSlotAcquisition {
 
   /** Undo a handed-out session: clear the slot's execution owner and release the session. */
   private async backOut(registry: SlotRegistry, key: SlotKey, sessionUuid: string): Promise<void> {
+    const startedMs = this.deps.timer.now();
     const cleanup: ManagedSlotBackOutCleanup = {
       key: { ...key },
       sessionUuid,
-      state: "retrying",
       attempts: 0,
+      owedSinceMs: this.deps.timer.now(),
+      ageMs: 0,
       ownerClearOwed: false,
       sessionReleaseOwed: false,
       lastError: "",
@@ -494,11 +519,12 @@ export class ManagedSlotAcquisition {
     try {
       await registry.releaseExecution(key, sessionUuid);
     } catch (error) {
+      cleanup.owedSinceMs = this.deps.timer.now();
       cleanup.ownerClearOwed = true;
       cleanup.lastError = errorMessage(error);
       if (!this.closed) {
-        logger.warn(
-          `[ManagedSlots] Clearing slot ${key.scopeKey}/${key.slotIndex}'s owner ${sessionUuid} failed: ${cleanup.lastError}`,
+        logger.info(
+          `[ManagedSlots] Clearing slot ${key.scopeKey}/${key.slotIndex}'s owner ${sessionUuid} failed: ${cleanup.lastError}; cleanup continues in the background`,
           error,
         );
       }
@@ -506,26 +532,28 @@ export class ManagedSlotAcquisition {
     try {
       await this.deps.sessions.releaseSession(sessionUuid);
     } catch (error) {
+      if (!cleanup.ownerClearOwed) {
+        cleanup.owedSinceMs = this.deps.timer.now();
+      }
       cleanup.sessionReleaseOwed = true;
       cleanup.lastError = errorMessage(error);
       if (!this.closed) {
-        logger.warn(
-          `[ManagedSlots] Releasing backed-out session ${sessionUuid} for slot ${key.scopeKey}/${key.slotIndex} failed: ${cleanup.lastError}`,
+        logger.info(
+          `[ManagedSlots] Releasing backed-out session ${sessionUuid} for slot ${key.scopeKey}/${key.slotIndex} failed: ${cleanup.lastError}; cleanup continues in the background`,
           error,
         );
       }
     }
     if (cleanup.ownerClearOwed || cleanup.sessionReleaseOwed) {
+      this.extendBackOutQuietPeriod(startedMs);
       this.retainBackOutCleanup(registry, cleanup);
     }
   }
 
   /**
-   * The owner row is the durable record: it names this process, so all daemons read it dead once
-   * this process exits. While it runs, keep owed cleanup here, including after a bounded round
-   * gives up: the same task continues slowly, keeping gave_up state and counting attempts.
-   * A slow timer failure leaves an inspectable gave_up entry with no task; its row dies with
-   * the process. No acquisition re-arms it.
+   * Keep each owed cleanup in one task, sharing quiet time after blocked attempts, capped at 5 s.
+   * A timer failure leaves an inspectable entry with no task; no acquisition re-arms it.
+   * The owner row names this process and becomes dead when the process exits.
    */
   private retainBackOutCleanup(registry: SlotRegistry, cleanup: ManagedSlotBackOutCleanup): void {
     const id = JSON.stringify([cleanup.key.scopeKey, cleanup.key.slotIndex, cleanup.sessionUuid]);
@@ -550,20 +578,11 @@ export class ManagedSlotAcquisition {
   ): void {
     const round: Promise<void> = this.retryBackOutCleanup(id, registry, cleanup)
       .catch((error: unknown) => {
-        // A bounded policy/timer failure gives up once, then the same task continues slowly.
-        this.giveUpBackOutCleanup(cleanup, errorMessage(error));
-      })
-      .then(async () => {
-        if (!this.closed && cleanup.state === "gave_up") {
-          await this.retryBackOutSlowly(id, registry, cleanup);
-        }
-      })
-      .catch((error: unknown) => {
-        // A broken slow timer cannot be redriven safely; keep the row until process exit.
+        // A broken timer cannot be redriven safely; keep the row until process exit.
         if (!this.closed) {
           cleanup.lastError = errorMessage(error);
           logger.warn(
-            `${this.backOutCleanupLabel(cleanup)} slow retry stopped; no task remains: ${cleanup.lastError}`,
+            `${this.backOutCleanupLabel(cleanup)} retry stopped; no task remains: ${cleanup.lastError}`,
             error,
           );
         }
@@ -577,42 +596,93 @@ export class ManagedSlotAcquisition {
     registry: SlotRegistry,
     cleanup: ManagedSlotBackOutCleanup,
   ): Promise<void> {
-    const backoff = this.deps.backOutRetryBackoff ?? this.retryBackoff;
-    const maxAttempts =
-      this.deps.backOutRetryMaxAttempts ?? MANAGED_SLOT_BACK_OUT_RETRY_MAX_ATTEMPTS;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      await this.waitForBackOutRetry(backoff.delayForAttempt(attempt));
+    for (let attempt = 1; !this.closed; attempt++) {
+      await this.waitForBackOutRetry(this.backOutRetryDelay(attempt));
       if (this.closed) {
         return;
       }
-      cleanup.attempts = attempt;
-      if (await this.retryBackOutOnce(registry, cleanup)) {
+      const landed = await this.pacedBackOutRetry(registry, cleanup, attempt);
+      if (landed) {
         this.backOutCleanups.delete(id);
+        if (!this.closed) {
+          logger.info(
+            `${this.backOutCleanupLabel(cleanup)} landed after ${this.deps.timer.now() - cleanup.owedSinceMs} ms (${cleanup.attempts} retries)`,
+          );
+        }
         return;
       }
       if (this.closed) {
         return;
       }
     }
-    this.giveUpBackOutCleanup(cleanup, cleanup.lastError);
   }
 
-  private async retryBackOutSlowly(
-    id: string,
+  private async pacedBackOutRetry(
     registry: SlotRegistry,
     cleanup: ManagedSlotBackOutCleanup,
-  ): Promise<void> {
-    const delayMs = this.deps.backOutRetrySlowPollMs ?? MANAGED_EXECUTION_SETTLEMENT_SLOW_POLL_MS;
-    while (!this.closed) {
-      await this.waitForBackOutRetry(delayMs);
+    attempt: number,
+  ): Promise<boolean> {
+    // Equal-time wakeups must not both enter the async ownership check before one extends quiet time.
+    const previous = this.backOutRetryTurn;
+    let finish!: () => void;
+    this.backOutRetryTurn = new Promise((resolve) => {
+      finish = resolve;
+    });
+    try {
+      await raceWithDeadline(previous, {
+        timer: this.deps.timer,
+        signal: this.closeController.signal,
+        label: "Back-out retry turn",
+      });
+      await this.waitForBackOutQuietPeriod();
       if (this.closed) {
-        return;
+        return false;
       }
-      cleanup.attempts++;
-      if (await this.retryBackOutOnce(registry, cleanup)) {
-        this.backOutCleanups.delete(id);
-        return;
+      cleanup.attempts = attempt;
+      const startedMs = this.deps.timer.now();
+      const landed = await this.retryBackOutOnce(registry, cleanup);
+      if (!landed && !this.closed) {
+        this.extendBackOutQuietPeriod(startedMs);
       }
+      return landed;
+    } finally {
+      finish();
+    }
+  }
+
+  private extendBackOutQuietPeriod(startedMs: number): void {
+    const endMs = this.deps.timer.now();
+    this.backOutQuietUntilMs = Math.max(
+      this.backOutQuietUntilMs,
+      endMs + Math.min(endMs - startedMs, MANAGED_SLOT_BACK_OUT_RETRY_MAX_BLOCKED_WAIT_MS),
+    );
+  }
+
+  private async waitForBackOutQuietPeriod(): Promise<void> {
+    while (!this.closed && this.deps.timer.now() < this.backOutQuietUntilMs) {
+      await this.waitForBackOutRetry(this.backOutQuietUntilMs - this.deps.timer.now());
+    }
+  }
+
+  private backOutRetryDelay(attempt: number): number {
+    try {
+      const delayMs = (this.deps.backOutRetryBackoff ?? this.retryBackoff).delayForAttempt(attempt);
+      if (!Number.isFinite(delayMs)) {
+        throw new Error(`Back-out backoff delay must be finite, got ${delayMs}`);
+      }
+      return Math.min(
+        Math.max(delayMs, MANAGED_SLOT_BACK_OUT_RETRY_INITIAL_DELAY_MS),
+        MANAGED_SLOT_BACK_OUT_RETRY_MAX_DELAY_MS,
+      );
+    } catch (error) {
+      // The 1 s cap keeps owed cleanup moving safely even when an injected policy breaks.
+      if (!this.closed) {
+        logger.debug(
+          `[ManagedSlots] Back-out backoff failed; using the 1 s cap: ${errorMessage(error)}`,
+          error,
+        );
+      }
+      return MANAGED_SLOT_BACK_OUT_RETRY_MAX_DELAY_MS;
     }
   }
 
@@ -640,20 +710,19 @@ export class ManagedSlotAcquisition {
   ): Promise<boolean> {
     try {
       if (cleanup.sessionReleaseOwed) {
-        await this.deps.sessions.releaseSession(cleanup.sessionUuid);
+        await this.retryBackOutStep(
+          cleanup,
+          this.backOutSessionReleases,
+          () => this.deps.sessions.releaseSession(cleanup.sessionUuid),
+          "session release",
+        );
         if (this.closed) {
           return false;
         }
         cleanup.sessionReleaseOwed = false;
       }
       if (cleanup.ownerClearOwed) {
-        const owner = (await registry.getAssignment(cleanup.key))?.execOwner;
-        if (this.closed) {
-          return false;
-        }
-        if (owner && this.isBackedOutOwner(owner, cleanup.sessionUuid)) {
-          await registry.releaseExecution(cleanup.key, cleanup.sessionUuid);
-        }
+        await this.retryBackOutOwnerClear(registry, cleanup);
         if (this.closed) {
           return false;
         }
@@ -669,13 +738,82 @@ export class ManagedSlotAcquisition {
     }
   }
 
+  private async retryBackOutStep<T>(
+    cleanup: ManagedSlotBackOutCleanup,
+    inFlight: WeakMap<ManagedSlotBackOutCleanup, Promise<T>>,
+    start: () => Promise<T>,
+    step: string,
+  ): Promise<T> {
+    const result = await raceWithDeadline(
+      () => {
+        let operation = inFlight.get(cleanup);
+        if (!operation) {
+          operation = start().then(undefined, (error: unknown) => {
+            // Propagate to the deadline race, which also observes late rejections.
+            inFlight.delete(cleanup);
+            throw error;
+          });
+          inFlight.set(cleanup, operation);
+        }
+        return operation;
+      },
+      {
+        timer: this.deps.timer,
+        timeoutMs: MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS,
+        signal: this.closeController.signal,
+        label: `${this.backOutCleanupLabel(cleanup)} ${step}`,
+      },
+    );
+    inFlight.delete(cleanup);
+    return result;
+  }
+
+  private async retryBackOutOwnerClear(
+    registry: SlotRegistry,
+    cleanup: ManagedSlotBackOutCleanup,
+  ): Promise<void> {
+    const clear = () =>
+      this.retryBackOutStep(
+        cleanup,
+        this.backOutOwnerClears,
+        () => registry.releaseExecution(cleanup.key, cleanup.sessionUuid),
+        "owner clear",
+      );
+    if (this.backOutOwnerClears.has(cleanup)) {
+      await clear();
+      return;
+    }
+    const read = () =>
+      this.retryBackOutStep(
+        cleanup,
+        this.backOutOwnerReads,
+        () => registry.getAssignment(cleanup.key),
+        "ownership read",
+      );
+    if (this.backOutOwnerReads.has(cleanup)) {
+      // An abandoned read may describe an older owner; consume it without using its result.
+      await read();
+    }
+    const owner = (await read())?.execOwner;
+    if (!this.closed && owner && this.isBackedOutOwner(owner, cleanup.sessionUuid)) {
+      await clear();
+    }
+  }
+
   private logBackOutRetryFailure(cleanup: ManagedSlotBackOutCleanup, error: unknown): void {
     const message = `${this.backOutCleanupLabel(cleanup)} retry failed: ${cleanup.lastError}`;
-    if (cleanup.state === "retrying" && cleanup.attempts === 1) {
-      logger.warn(message, error);
-    } else {
-      // Contention is already warned once; owed work continues in this task.
-      logger.debug(message, error);
+    // Shared-registry contention is expected; the task keeps the owed cleanup and retries it.
+    logger.debug(message, error);
+    const ageMs = this.deps.timer.now() - cleanup.owedSinceMs;
+    if (
+      ageMs > MANAGED_SLOT_BACK_OUT_OWED_WARN_AFTER_MS &&
+      !this.warnedBackOutCleanups.has(cleanup)
+    ) {
+      this.warnedBackOutCleanups.add(cleanup);
+      logger.warn(
+        `${this.backOutCleanupLabel(cleanup)} owed for ${ageMs} ms (${cleanup.attempts} retries): ${cleanup.lastError}; retries continue with waits capped at 5 s`,
+        error,
+      );
     }
   }
 
@@ -692,16 +830,5 @@ export class ManagedSlotAcquisition {
 
   private backOutCleanupLabel(cleanup: ManagedSlotBackOutCleanup): string {
     return `[ManagedSlots] Back-out cleanup for slot ${cleanup.key.scopeKey}/${cleanup.key.slotIndex} session ${cleanup.sessionUuid}`;
-  }
-
-  private giveUpBackOutCleanup(cleanup: ManagedSlotBackOutCleanup, lastError: string): void {
-    if (!this.closed) {
-      cleanup.lastError = lastError;
-      cleanup.state = "gave_up";
-      logger.warn(
-        `${this.backOutCleanupLabel(cleanup)} gave up after ${cleanup.attempts} attempts: ${lastError}; ` +
-          `cleanup continues every ${(this.deps.backOutRetrySlowPollMs ?? MANAGED_EXECUTION_SETTLEMENT_SLOW_POLL_MS) / 1_000} s until it lands or the daemon closes`,
-      );
-    }
   }
 }

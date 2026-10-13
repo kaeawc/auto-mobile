@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   ExecNetworkFilterBridge,
+  ExpiringControllerVersionMemory,
   NETWORK_FILTER_UPGRADE_COMMAND,
   type NetworkFilterRuleCommandResult,
 } from "../../../src/features/network-filter/NetworkFilterBridge";
@@ -52,6 +53,7 @@ describe("controller contract negotiation and shaping", () => {
   beforeEach(() => {
     exec = new ScriptedExec();
     bridge = new ExecNetworkFilterBridge({
+      versionMemory: new ExpiringControllerVersionMemory(),
       executor: new DefaultHostCommandExecutor(exec.exec),
       exists: () => true,
       deviceSet: () => "/fixture/Devices",
@@ -99,7 +101,7 @@ describe("controller contract negotiation and shaping", () => {
     });
   }
 
-  for (const loss of [undefined, 0, -1]) {
+  for (const loss of [undefined, 0]) {
     test(`loss ${loss} is omitted; integer shaping and lease fields round`, async () => {
       exec.answers.push(fixture("v4/rule-applied-shaped"));
       await bridge.apply(target, owner, 15000.6, {
@@ -264,6 +266,179 @@ describe("controller contract negotiation and shaping", () => {
     expect(exec.calls).toEqual([["status", "--contract-version", "4"], ["status"]]);
   });
 
+  for (const command of ["status", "reset", "renew"] as const) {
+    test(`shared memory skips a second fallback and expires for ${command}`, async () => {
+      const versionMemory = new ExpiringControllerVersionMemory();
+      let nowMs = 100;
+      const options = {
+        versionMemory,
+        now: () => nowMs,
+        executor: new DefaultHostCommandExecutor(exec.exec),
+        exists: () => true,
+        managedSimulators: async () => [],
+        deviceSet: () => "/fixture/Devices",
+      };
+      const first = new ExecNetworkFilterBridge(options);
+      const second = new ExecNetworkFilterBridge(options);
+      const invoke = () =>
+        command === "status"
+          ? second.status()
+          : command === "reset"
+            ? second.reset(target, owner)
+            : second.renew(target, owner, 15000);
+      const answer =
+        command === "status"
+          ? fixture("ready")
+          : JSON.stringify({
+              ...JSON.parse(fixture("rule-applied")),
+              rule: { outcome: command === "reset" ? "reset" : "renewed", installedRevision: 4 },
+            });
+      exec.legacy("status");
+      exec.answers.push(fixture("ready"));
+      await first.status();
+      nowMs += 59_999;
+      exec.answers.push(answer);
+      expect((await invoke()).contractVersion).toBe(3);
+      expect(exec.calls[2]?.slice(0, 3)).not.toContain("--contract-version");
+      nowMs += 1;
+      exec.legacy(command);
+      exec.answers.push(answer, answer);
+      expect((await invoke()).contractVersion).toBe(3);
+      expect(exec.calls[3]?.slice(0, 3)).toEqual([command, "--contract-version", "4"]);
+      expect(exec.calls[4]).not.toContain("--contract-version");
+      await invoke();
+      expect(exec.calls[5]).not.toContain("--contract-version");
+      expect(exec.calls).toHaveLength(6);
+    });
+  }
+
+  test("memory is keyed by controller path and an upgrade clears shared memory", async () => {
+    const versionMemory = new ExpiringControllerVersionMemory();
+    const options = {
+      versionMemory,
+      now: () => 0,
+      executor: new DefaultHostCommandExecutor(exec.exec),
+      exists: () => true,
+      managedSimulators: async () => [],
+      deviceSet: () => "/fixture/Devices",
+    };
+    const first = new ExecNetworkFilterBridge({ ...options, controllerPath: "/first" });
+    const second = new ExecNetworkFilterBridge({ ...options, controllerPath: "/first" });
+    const other = new ExecNetworkFilterBridge({ ...options, controllerPath: "/other" });
+    exec.legacy("status");
+    exec.answers.push(
+      fixture("ready"),
+      fixture("v4/ready"),
+      fixture("v4/rule-applied-shaped"),
+      fixture("v4/ready"),
+    );
+    await first.status();
+    await other.status();
+    expect(exec.calls[2]).toEqual(["status", "--contract-version", "4"]);
+    await second.apply(target, owner, 15000, shaping);
+    expect(exec.calls[3]?.slice(0, 3)).toEqual(["apply", "--contract-version", "4"]);
+    await first.status();
+    expect(exec.calls[4]).toEqual(["status", "--contract-version", "4"]);
+  });
+
+  test("legacy flag rejection is expected and never warns", async () => {
+    exec.legacy("status");
+    exec.answers.push(fixture("ready"));
+    expect((await bridge.status()).contractVersion).toBe(3);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  for (const noise of ["0", "null", '\"diagnostic\"', "{ not json", '{"message":"log"}']) {
+    test(`ignores diagnostic line ${noise}`, async () => {
+      exec.answers.push(noise + "\n" + fixture("v4/ready"));
+      expect((await bridge.snapshot()).snapshot).toEqual(JSON.parse(fixture("v4/ready")).snapshot);
+      expect(warn).not.toHaveBeenCalled();
+    });
+  }
+
+  for (const activity of [
+    {
+      ...JSON.parse(fixture("v4/ready")).snapshot.shapingActivity,
+      untrackedDataCallbacks: 18446744073709551615,
+    },
+    { ...JSON.parse(fixture("v4/ready")).snapshot.shapingActivity, newCounter: 0 },
+  ]) {
+    test(`invalid diagnostic activity is dropped: ${JSON.stringify(activity)}`, async () => {
+      const line = JSON.parse(fixture("v4/ready"));
+      line.snapshot.shapingActivity = activity;
+      exec.answers.push(JSON.stringify(line));
+      const result = await bridge.snapshot();
+      delete line.snapshot.shapingActivity;
+      expect(result.state).toBe("ready");
+      expect(result.snapshot).toEqual(line.snapshot);
+      expect(warn).toHaveBeenCalledTimes(1);
+    });
+  }
+
+  for (const [field, values] of [
+    ["delayMs", [NaN, -5, -0.1, 1e21, Infinity, Number.MAX_SAFE_INTEGER + 1]],
+    ["downloadKbps", [NaN, -5, -0.1, 1e21, Infinity, Number.MAX_SAFE_INTEGER + 1]],
+    ["uploadKbps", [NaN, -5, -0.1, 1e21, Infinity, Number.MAX_SAFE_INTEGER + 1]],
+    ["packetLossPercent", [NaN, -1, -3, Infinity, 101]],
+  ] as const) {
+    for (const value of values) {
+      test(`bridge rejects ${field}=${value} without exec`, async () => {
+        const result = await bridge.apply(target, owner, 15000, { ...shaping, [field]: value });
+        expect(result.state).toBe("unavailable");
+        expect(result.detail).toContain(field);
+        expect(result.rule).toBeUndefined();
+        expect(exec.calls).toHaveLength(0);
+      });
+    }
+  }
+
+  test("packet loss uses decimal notation even for subnormal values", async () => {
+    exec.answers.push(fixture("v4/rule-applied-shaped"));
+    await bridge.apply(target, owner, 15000, { ...shaping, packetLossPercent: Number.MIN_VALUE });
+    const args = exec.calls[0];
+    const loss = args[args.indexOf("--packet-loss-percent") + 1];
+    expect(loss).not.toContain("e");
+    expect(Number(loss)).toBe(Number.MIN_VALUE);
+  });
+
+  test("last controller line wins over earlier same-version non-ready answers and trailing noise", async () => {
+    exec.answers.push(fixture("v4/unavailable") + fixture("v4/ready") + "diagnostic\n");
+    expect((await bridge.snapshot()).snapshot).toEqual(JSON.parse(fixture("v4/ready")).snapshot);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  test("multiple legacy rejection lines never allow fallback", async () => {
+    exec.answers.push(
+      fixture("v3-app/status-contract-flag-rejected") +
+        fixture("v3-app/status-contract-flag-rejected"),
+    );
+    expect((await bridge.status()).state).toBe("unavailable");
+    expect(exec.calls).toHaveLength(1);
+  });
+
+  test("TTL expiry notices an upgraded controller on a reset-only bridge", async () => {
+    const versionMemory = new ExpiringControllerVersionMemory();
+    versionMemory.markLegacy("/controller", 0);
+    let nowMs = 59_999;
+    const resetOnly = new ExecNetworkFilterBridge({
+      versionMemory,
+      now: () => nowMs,
+      controllerPath: "/controller",
+      exists: () => true,
+      deviceSet: () => "/fixture/Devices",
+      executor: new DefaultHostCommandExecutor(exec.exec),
+    });
+    const rule = { outcome: "reset" };
+    exec.answers.push(JSON.stringify({ ...JSON.parse(fixture("rule-applied")), rule }));
+    await resetOnly.reset(target, owner);
+    expect(exec.calls[0]).not.toContain("--contract-version");
+    nowMs = 60_000;
+    exec.answers.push(JSON.stringify({ ...JSON.parse(fixture("v4/rule-applied")), rule }));
+    expect((await resetOnly.reset(target, owner)).contractVersion).toBe(4);
+    expect(exec.calls[1]?.slice(0, 3)).toEqual(["reset", "--contract-version", "4"]);
+    expect(versionMemory.isLegacy("/controller", nowMs)).toBe(false);
+  });
+
   for (const patch of [
     { state: "ready" },
     { version: 4 },
@@ -327,6 +502,7 @@ describe("controller contract negotiation and shaping", () => {
 
   test("errors preparing arguments become logged typed failures", async () => {
     const failing = new ExecNetworkFilterBridge({
+      versionMemory: new ExpiringControllerVersionMemory(),
       exists: () => true,
       managedSimulators: async () => {
         throw new Error("listing failed");

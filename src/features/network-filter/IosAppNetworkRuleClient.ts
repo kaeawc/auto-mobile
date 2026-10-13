@@ -1,3 +1,7 @@
+import {
+  networkFilterShapingRequestRejection,
+  networkFilterShapingRejectionDetail,
+} from "./NetworkFilterBridge";
 import { logger } from "../../utils/logger";
 import type {
   NetworkFilterBridge,
@@ -119,6 +123,15 @@ export class IosAppNetworkRuleClient {
     leaseMs: number,
     rollbackRevision: () => number,
   ): Promise<IosAppNetworkApplyResult> {
+    const rejection = networkFilterShapingRequestRejection(shaping);
+    if (rejection) {
+      return Promise.resolve({
+        kind: "refused",
+        outcome: "invalid_shaping",
+        rejection,
+        detail: networkFilterShapingRejectionDetail(rejection),
+      });
+    }
     return this.apply(rule, leaseMs, rollbackRevision, shaping);
   }
 

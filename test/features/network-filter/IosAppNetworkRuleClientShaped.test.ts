@@ -141,7 +141,128 @@ describe("shaped rule client and provider fake", () => {
         rejection,
       });
       expect(bridge.statusCalls).toBe(0);
+      expect(bridge.ruleCalls).toHaveLength(
+        "packetLossPercent" in request && request.packetLossPercent === 101 ? 0 : 1,
+      );
+      expect(bridge.activeRules()).toEqual([]);
+    });
+  }
+
+  for (const [field, component, values] of [
+    ["delayMs", "latency", [NaN, -5, -0.1, 1e21, Infinity, Number.MAX_SAFE_INTEGER + 1]],
+    [
+      "downloadKbps",
+      "downloadBandwidth",
+      [NaN, -5, -0.1, 1e21, Infinity, Number.MAX_SAFE_INTEGER + 1],
+    ],
+    ["uploadKbps", "uploadBandwidth", [NaN, -5, -0.1, 1e21, Infinity, Number.MAX_SAFE_INTEGER + 1]],
+    ["packetLossPercent", "packetLoss", [NaN, -1, -3, Infinity, 101]],
+  ] as const) {
+    for (const value of values) {
+      test(`client rejects ${field}=${value} before touching an installed rule`, async () => {
+        await client.applyShaped(rule, shaping, 15000, rollback);
+        const installed = bridge.activeRules();
+        bridge.ruleCalls.length = 0;
+        expect(
+          await client.applyShaped(
+            { ...rule, revision: 2 },
+            { ...shaping, [field]: value },
+            15000,
+            () => 3,
+          ),
+        ).toMatchObject({
+          kind: "refused",
+          outcome: "invalid_shaping",
+          rejection: { reason: "out_of_range", component },
+        });
+        expect(bridge.ruleCalls).toHaveLength(0);
+        expect(bridge.statusCalls).toBe(0);
+        expect(bridge.snapshotCalls).toBe(0);
+        expect(bridge.activeRules()).toEqual(installed);
+      });
+    }
+  }
+
+  test("fake alone rejects an invalid domain without executing or changing the installed rule", async () => {
+    await client.applyShaped(rule, shaping, 15000, rollback);
+    const installed = bridge.activeRules();
+    bridge.ruleCalls.length = 0;
+    const result = await bridge.apply(rule, { ...rule, revision: 2 }, 15000, {
+      ...shaping,
+      delayMs: NaN,
+    });
+    expect(result).toMatchObject({ state: "unavailable" });
+    expect(result.detail).toContain("delayMs");
+    expect(result.rule).toBeUndefined();
+    expect(bridge.ruleCalls).toHaveLength(0);
+    expect(bridge.activeRules()).toEqual(installed);
+  });
+
+  test("fake provider resolves rounded integer arguments like the real bridge", async () => {
+    expect(
+      await client.applyShaped(
+        rule,
+        { delayMs: 100.6, downloadKbps: 80.4, uploadKbps: 40.5 },
+        15000,
+        rollback,
+      ),
+    ).toMatchObject({
+      kind: "applied",
+      shaping: {
+        profile: {
+          outboundDelayMilliseconds: 51,
+          inboundDelayMilliseconds: 50,
+          inboundBytesPerSecond: 10000,
+          outboundBytesPerSecond: 5125,
+        },
+      },
+    });
+    expect(
+      await client.applyShaped(
+        rule,
+        { delayMs: 101, downloadKbps: 80, uploadKbps: 41 },
+        15000,
+        rollback,
+      ),
+    ).toMatchObject({ kind: "applied" });
+    expect(bridge.ruleCalls).toHaveLength(2);
+    expect(bridge.statusCalls).toBe(0);
+  });
+
+  for (const fence of ["another owner", "stale revision", "changed configuration"] as const) {
+    for (const refusal of ["unsupported_condition", "invalid_shaping"] as const) {
+      test(`shaping ${refusal} precedes ${fence} fencing`, async () => {
+        await client.applyShaped({ ...rule, revision: 4 }, shaping, 15000, () => 5);
+        const installed = bridge.activeRules();
+        bridge.supportsShaping = refusal !== "unsupported_condition";
+        const requestRule = {
+          ...rule,
+          owner: fence === "another owner" ? "other" : rule.owner,
+          revision: fence === "stale revision" ? 3 : 4,
+        };
+        expect(
+          await client.applyShaped(requestRule, { ...shaping, delayMs: 4001 }, 15000, () => 5),
+        ).toMatchObject({
+          kind: "refused",
+          outcome: refusal,
+        });
+        expect(bridge.ruleCalls).toHaveLength(2);
+        expect(bridge.statusCalls).toBe(0);
+        expect(bridge.activeRules()).toEqual(installed);
+      });
+    }
+  }
+
+  for (const state of ["installation_required", "approval_required", "unavailable"] as const) {
+    test(`legacy shaped apply requires upgrade before ${state}`, async () => {
+      bridge.controllerVersion = 3;
+      bridge.setState(state);
+      expect(await client.applyShaped(rule, shaping, 15000, rollback)).toMatchObject({
+        kind: "upgrade_required",
+        installedVersion: 3,
+      });
       expect(bridge.ruleCalls).toHaveLength(1);
+      expect(bridge.statusCalls).toBe(0);
       expect(bridge.activeRules()).toEqual([]);
     });
   }

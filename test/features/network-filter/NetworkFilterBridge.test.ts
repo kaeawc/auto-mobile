@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   DEFAULT_NETWORK_FILTER_CONTROLLER_PATH,
   ExecNetworkFilterBridge,
+  ExpiringControllerVersionMemory,
   NETWORK_FILTER_CONTRACT_VERSION,
   NETWORK_FILTER_LEGACY_CONTRACT_VERSION,
   NETWORK_FILTER_MAX_MANAGED_SIMULATORS,
@@ -76,6 +77,7 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
 
   const bridge = () =>
     new ExecNetworkFilterBridge({
+      versionMemory: new ExpiringControllerVersionMemory(),
       executor: new DefaultHostCommandExecutor(exec.exec),
       controllerPath: CONTROLLER,
       exists: (path) => installed && path === CONTROLLER,
@@ -208,7 +210,7 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
 
       expect(status.state).toBe(state);
       expect(status.contractVersion).toBe(NETWORK_FILTER_CONTRACT_VERSION);
-      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).not.toHaveBeenCalled();
     });
   }
 
@@ -328,7 +330,7 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
-  test("malformed JSON is unavailable and logged", async () => {
+  test("malformed JSON is diagnostic noise and gives no JSON result", async () => {
     exec.succeed("not json\n");
 
     const status = await bridge().status();
@@ -337,7 +339,7 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
       state: "unavailable",
       detail: "network-filter-controller status printed no JSON result.",
     });
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).not.toHaveBeenCalled();
   });
 
   test("an unknown state is unavailable and logged", async () => {
@@ -357,8 +359,10 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
   test("a result without a version is unavailable", async () => {
     exec.succeed('{"detail":"x","state":"ready"}\n');
 
-    expect((await bridge().status()).state).toBe("unavailable");
-    expect(warn).toHaveBeenCalledTimes(1);
+    const result = await bridge().status();
+    expect(result.state).toBe("unavailable");
+    expect(result.detail).toContain("printed no JSON result");
+    expect(warn).not.toHaveBeenCalled();
   });
 
   test("a timeout with no output is unavailable and logged, never thrown", async () => {

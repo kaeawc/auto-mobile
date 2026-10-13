@@ -1,5 +1,7 @@
 import {
   NETWORK_FILTER_CONTRACT_VERSION,
+  networkFilterShapingRequestRejection,
+  networkFilterShapingRejectionDetail,
   NETWORK_FILTER_UPGRADE_COMMAND,
   type NetworkFilterShapingRequest,
   type NetworkFilterShapingResolution,
@@ -111,6 +113,13 @@ export class FakeNetworkFilterBridge implements NetworkFilterBridge {
     leaseMs: number,
     shaping?: NetworkFilterShapingRequest,
   ): Promise<NetworkFilterRuleCommandResult> {
+    const rejection = shaping && networkFilterShapingRequestRejection(shaping);
+    if (rejection) {
+      return Promise.resolve({
+        state: "unavailable",
+        detail: networkFilterShapingRejectionDetail(rejection),
+      });
+    }
     return this.run({
       command: "apply",
       target,
@@ -141,10 +150,6 @@ export class FakeNetworkFilterBridge implements NetworkFilterBridge {
     if (typeof script === "object") {
       return script;
     }
-    if (this.result.state !== "ready") {
-      const { state, detail, contractVersion } = this.result;
-      return { state, detail, ...(contractVersion === undefined ? {} : { contractVersion }) };
-    }
     if (call.shaping && this.controllerVersion === 3) {
       return {
         state: "unavailable",
@@ -156,6 +161,10 @@ export class FakeNetworkFilterBridge implements NetworkFilterBridge {
           command: NETWORK_FILTER_UPGRADE_COMMAND,
         },
       };
+    }
+    if (this.result.state !== "ready") {
+      const { state, detail, contractVersion } = this.result;
+      return { state, detail, ...(contractVersion === undefined ? {} : { contractVersion }) };
     }
     const lostAnswer: NetworkFilterRuleCommandResult = {
       state: "unavailable",
@@ -204,6 +213,10 @@ export class FakeNetworkFilterBridge implements NetworkFilterBridge {
     key: string,
     existing?: NetworkFilterRuleStatus,
   ): NetworkFilterRuleResult {
+    const resolved = call.shaping ? this.resolveShaping(call.shaping) : undefined;
+    if (resolved && "outcome" in resolved) {
+      return resolved;
+    }
     if (existing && existing.owner !== call.ownership.owner) {
       return { outcome: "owned_by_another_session" };
     }
@@ -216,10 +229,6 @@ export class FakeNetworkFilterBridge implements NetworkFilterBridge {
       !this.sameConfiguration(call, key, existing)
     ) {
       return { outcome: "invalid_command" };
-    }
-    const resolved = call.shaping ? this.resolveShaping(call.shaping) : undefined;
-    if (resolved && "outcome" in resolved) {
-      return resolved;
     }
     const status = {
       target: {
@@ -263,9 +272,9 @@ export class FakeNetworkFilterBridge implements NetworkFilterBridge {
     return (
       existing.condition === "shaped" &&
       previous !== undefined &&
-      previous.delayMs === call.shaping.delayMs &&
-      previous.downloadKbps === call.shaping.downloadKbps &&
-      previous.uploadKbps === call.shaping.uploadKbps &&
+      Math.round(previous.delayMs) === Math.round(call.shaping.delayMs) &&
+      Math.round(previous.downloadKbps) === Math.round(call.shaping.downloadKbps) &&
+      Math.round(previous.uploadKbps) === Math.round(call.shaping.uploadKbps) &&
       (previous.packetLossPercent ?? 0) === (call.shaping.packetLossPercent ?? 0)
     );
   }
@@ -276,7 +285,9 @@ export class FakeNetworkFilterBridge implements NetworkFilterBridge {
     if (!this.supportsShaping) {
       return { outcome: "unsupported_condition" };
     }
-    const { delayMs, downloadKbps, uploadKbps } = request;
+    const delayMs = Math.round(request.delayMs);
+    const downloadKbps = Math.round(request.downloadKbps);
+    const uploadKbps = Math.round(request.uploadKbps);
     const loss = request.packetLossPercent ?? 0;
     const ranges = [
       { component: "latency", valid: Number.isInteger(delayMs) && delayMs >= 0 && delayMs <= 4000 },

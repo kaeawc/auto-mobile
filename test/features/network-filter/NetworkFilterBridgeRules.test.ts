@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   ExecNetworkFilterBridge,
+  ExpiringControllerVersionMemory,
   NETWORK_FILTER_CONTRACT_VERSION,
 } from "../../../src/features/network-filter/NetworkFilterBridge";
 import {
@@ -56,6 +57,7 @@ describe("ExecNetworkFilterBridge rule commands (#10264)", () => {
 
   const bridge = (installed = true) =>
     new ExecNetworkFilterBridge({
+      versionMemory: new ExpiringControllerVersionMemory(),
       executor: new DefaultHostCommandExecutor(exec.exec),
       controllerPath: CONTROLLER,
       exists: (path) => installed && path === CONTROLLER,

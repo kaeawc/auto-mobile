@@ -9,6 +9,7 @@ import {
   defaultRecordingSessionCleanupDeps,
   registerRecordingSessionCleanup,
   takeRecordingIdsFinalizedByRelease,
+  resetRecordingTeardownRecoveryNeeded,
   type RecordingSessionCleanupDeps,
   type RecordingAcquisitionDeps,
   type RecordingTeardownGiveUp,
@@ -97,6 +98,12 @@ class FakeSessionManager implements CleanupManager {
     await Promise.all(
       [...this.pendingCleanups, ...this.acquisitionCleanups].map((entry) => entry.cleanup),
     );
+  }
+
+  unbound(sessionId: string, deviceId: string): void {
+    for (const callback of this.unboundCallbacks) {
+      callback(sessionId, deviceId);
+    }
   }
 }
 
@@ -250,6 +257,8 @@ describe("registerRecordingSessionCleanup", () => {
   });
 
   afterEach(() => {
+    resetVideoRecordingManagerDependencies();
+    resetRecordingTeardownRecoveryNeeded();
     for (const sessionId of ["session-a", "session-b", "session-c"]) {
       takeRecordingIdsFinalizedByRelease(sessionId);
     }
@@ -396,9 +405,289 @@ describe("registerRecordingSessionCleanup", () => {
       manager.release("session-a", "SIM-1");
 
       await expect(manager.settle()).resolves.toBeUndefined();
-      expect(recordings.active.has("SIM-1")).toBe(true);
+      expect(recordings.active.has("SIM-1")).toBe(false);
+      expect(recordings.incomplete).toEqual(["rec-session-a"]);
+      expect(manager.pendingCleanups).toHaveLength(1);
+      expect(recordings.timer.getPendingTimeoutCount()).toBe(0);
       expect(warn.mock.calls.some(([message]) => String(message).includes("adb died"))).toBe(true);
     } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a fast device gesture stop rejection retries retained teardown and gives up at its budget", async () => {
+    const { manager, recordings } = setup();
+    recordings.deviceGestureRecording = { ownerSessionUuid: "session-a", deviceId: "SIM-1" };
+    recordings.teardownRetryBudgetMs = 3_000;
+    const stop = spyOn(recordings, "stopDeviceGestureRecording").mockRejectedValue(
+      new Error("gesture teardown unconfirmed"),
+    );
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      manager.release("session-a", "SIM-1");
+      await drainUntilQuiescent(recordings.timer);
+      expect(manager.pendingCleanups.map(({ capMs }) => capMs)).toEqual([125_000, 3_000]);
+      let settled = false;
+      const done = manager.settle().then(() => {
+        settled = true;
+      });
+      await recordings.timer.advanceTimeAsync(2_999, () => drainUntilQuiescent(recordings.timer));
+      expect(settled).toBe(false);
+      expect(recordings.giveUps).toEqual([]);
+      await recordings.timer.advanceTimeAsync(1, () => drainUntilQuiescent(recordings.timer));
+      await done;
+      expect(stop).toHaveBeenCalledTimes(4);
+      expect(recordings.giveUps).toEqual([
+        {
+          deviceId: "SIM-1",
+          sessionId: "session-a",
+          recordingIds: ["test-session-a"],
+          attempts: 2,
+          budgetMs: 3_000,
+        },
+      ]);
+      expect(
+        warn.mock.calls.some(([line]) => String(line).includes("gesture teardown unconfirmed")),
+      ).toBe(true);
+      expect(recordings.timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      stop.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  test("a non-cap stage rejection is warned and confirms retained teardown before settling", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-a");
+    let stageStarted = false;
+    const segments = spyOn(recordings, "stopSegmentedRecordings").mockImplementation(async () => {
+      stageStarted = true;
+    });
+    const isOwned = recordings.isDeviceGestureRecordingOwnedBy.bind(recordings);
+    const gesture = spyOn(recordings, "isDeviceGestureRecordingOwnedBy").mockImplementation(
+      (owner, deviceId) => {
+        if (stageStarted) {
+          stageStarted = false;
+          throw new Error("stage ownership read failed");
+        }
+        return isOwned(owner, deviceId);
+      },
+    );
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      manager.release("session-a", "SIM-1");
+      await expect(manager.settle()).resolves.toBeUndefined();
+      expect(recordings.incomplete).toEqual(["rec-session-a"]);
+      expect(recordings.active.size).toBe(0);
+      expect(
+        warn.mock.calls.some(([line]) => String(line).includes("stage ownership read failed")),
+      ).toBe(true);
+      expect(manager.pendingCleanups).toHaveLength(1);
+      expect(recordings.timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      segments.mockRestore();
+      gesture.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  test("a resolved stop that retains a capture pruned from stage state still force-stops it", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-a");
+    const stop = spyOn(recordings, "stopVideoRecording").mockResolvedValue(undefined);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      manager.release("session-a", "SIM-1");
+      await manager.settle();
+      expect(recordings.incomplete).toEqual(["rec-session-a"]);
+      expect(recordings.active.size).toBe(0);
+    } finally {
+      stop.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  for (const retained of [true, false]) {
+    test(`cap confirms a pruned video only while retained (${retained})`, async () => {
+      const { manager, recordings } = setup();
+      recordings.start("SIM-1", "session-a");
+      recordings.deviceGestureRecording = { ownerSessionUuid: "session-a", deviceId: "SIM-1" };
+      recordings.teardownRetryBudgetMs = 3_000;
+      const video = spyOn(recordings, "stopVideoRecording");
+      const retainedIds = spyOn(recordings, "retainedCaptureIdsForOwner");
+      if (retained) {
+        video.mockImplementation(async () => {
+          recordings.active.clear();
+        });
+        retainedIds.mockReturnValue(["rec-session-a"]);
+      }
+      const gesture = spyOn(recordings, "stopDeviceGestureRecording").mockImplementationOnce(
+        () => new Promise<void>(() => {}),
+      );
+      const force = spyOn(recordings, "markVideoRecordingIncomplete").mockRejectedValue(
+        new Error("video capture retained"),
+      );
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      try {
+        manager.release("session-a", "SIM-1");
+        await drainUntilQuiescent(recordings.timer);
+        expect(video).toHaveBeenCalledTimes(1);
+        expect(gesture).toHaveBeenCalledTimes(1);
+        let settled = false;
+        const done = manager.settle().then(() => {
+          settled = true;
+        });
+        await recordings.timer.advanceTimeAsync(120_000, () =>
+          drainUntilQuiescent(recordings.timer),
+        );
+        if (retained) {
+          expect(force).toHaveBeenCalledWith("rec-session-a");
+          expect(settled).toBe(false);
+          expect(manager.pendingCleanups.map(({ capMs }) => capMs)).toEqual([125_000, 3_000]);
+          await recordings.timer.advanceTimeAsync(2_999, () =>
+            drainUntilQuiescent(recordings.timer),
+          );
+          expect(settled).toBe(false);
+          expect(recordings.giveUps).toEqual([]);
+          await recordings.timer.advanceTimeAsync(1, () => drainUntilQuiescent(recordings.timer));
+          expect(force).toHaveBeenCalledTimes(3);
+          expect(recordings.giveUps).toEqual([
+            {
+              deviceId: "SIM-1",
+              sessionId: "session-a",
+              recordingIds: ["rec-session-a"],
+              attempts: 2,
+              budgetMs: 3_000,
+            },
+          ]);
+        } else {
+          expect(force).not.toHaveBeenCalled();
+          expect(recordings.giveUps).toEqual([]);
+          expect(manager.pendingCleanups).toHaveLength(1);
+        }
+        await done;
+        expect(recordings.timer.getPendingTimeoutCount()).toBe(0);
+      } finally {
+        video.mockRestore();
+        retainedIds.mockRestore();
+        gesture.mockRestore();
+        force.mockRestore();
+        warn.mockRestore();
+      }
+    });
+  }
+
+  test("release stops a new recording after unbound while the earlier stop hangs", async () => {
+    const { manager, recordings } = setup();
+    manager.holders.set("SIM-1", "session-a");
+    recordings.start("SIM-1", "session-a");
+    const video = spyOn(recordings, "stopVideoRecording").mockImplementationOnce(
+      () => new Promise<void>(() => {}),
+    );
+    let finishGestureStop!: () => void;
+    const gestureStopped = new Promise<void>((resolve) => {
+      finishGestureStop = resolve;
+    });
+    const gesture = spyOn(recordings, "stopDeviceGestureRecording").mockImplementationOnce(
+      async () => {
+        await gestureStopped;
+        recordings.testStops += 1;
+        recordings.deviceGestureRecording = null;
+      },
+    );
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      manager.unbound("session-a", "SIM-1");
+      await drainUntilQuiescent(recordings.timer);
+      expect(video).toHaveBeenCalledTimes(1);
+      expect(manager.getSessionForDevice("SIM-1")).toBe("session-a");
+      recordings.deviceGestureRecording = { ownerSessionUuid: "session-a", deviceId: "SIM-1" };
+      manager.release("session-a", "SIM-1");
+      await drainUntilQuiescent(recordings.timer);
+      expect(manager.pendingCleanups).toHaveLength(2);
+      expect(manager.pendingCleanups[0].cleanup).not.toBe(manager.pendingCleanups[1].cleanup);
+      expect(gesture).toHaveBeenCalledTimes(1);
+      const settled = new Set<Promise<unknown>>();
+      const done = Promise.all(
+        manager.pendingCleanups.map(({ cleanup }) => cleanup.then(() => settled.add(cleanup))),
+      );
+      await drainUntilQuiescent(recordings.timer);
+      expect(recordings.isDeviceGestureRecordingOwnedBy("session-a", "SIM-1")).toBe(true);
+      expect(recordings.testStops).toBe(0);
+      expect(manager.pendingCleanups.some(({ cleanup }) => !settled.has(cleanup))).toBe(true);
+      expect(settled.has(manager.pendingCleanups[1].cleanup)).toBe(false);
+      finishGestureStop();
+      await drainUntilQuiescent(recordings.timer);
+      expect(recordings.testStops).toBe(1);
+      expect(recordings.isDeviceGestureRecordingOwnedBy("session-a", "SIM-1")).toBe(false);
+      expect(settled.has(manager.pendingCleanups[1].cleanup)).toBe(true);
+      expect(settled.has(manager.pendingCleanups[0].cleanup)).toBe(false);
+      await recordings.timer.advanceTimeAsync(120_000, () => drainUntilQuiescent(recordings.timer));
+      await done;
+      expect(manager.pendingCleanups.every(({ cleanup }) => settled.has(cleanup))).toBe(true);
+      expect(recordings.timer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      video.mockRestore();
+      gesture.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  for (const other of [
+    { sessionId: "session-b", deviceId: "SIM-1" },
+    { sessionId: "session-a", deviceId: "SIM-2" },
+  ]) {
+    test(`confirmation is independent for ${other.sessionId}@${other.deviceId}`, async () => {
+      const { manager, recordings } = setup();
+      recordings.start("SIM-1", "session-a");
+      recordings.active.set("other", {
+        recordingId: "other-recording",
+        deviceId: other.deviceId,
+        ownerSessionUuid: other.sessionId,
+      });
+      recordings.hangStops = true;
+      manager.release("session-a", "SIM-1");
+      manager.unbound(other.sessionId, other.deviceId);
+      expect(manager.pendingCleanups).toHaveLength(2);
+      expect(manager.pendingCleanups[0].cleanup).not.toBe(manager.pendingCleanups[1].cleanup);
+      await recordings.timer.advanceTimeAsync(120_000, () => drainUntilQuiescent(recordings.timer));
+      await manager.settle();
+      expect(recordings.incomplete.toSorted()).toEqual(["other-recording", "rec-session-a"]);
+      expect(recordings.active.size).toBe(0);
+      expect(recordings.timer.getPendingTimeoutCount()).toBe(0);
+    });
+  }
+
+  test("a discovered capture pruned after a resolved stop remains eligible for confirmation", async () => {
+    const { manager, recordings } = setup();
+    recordings.start("SIM-1", "session-a");
+    const initial = spyOn(recordings, "activeRecordingIdsForOwner").mockReturnValue([]);
+    const retained = spyOn(recordings, "retainedCaptureIdsForOwner").mockReturnValue([
+      "rec-session-a",
+    ]);
+    const stop = spyOn(recordings, "stopVideoRecording").mockResolvedValue(undefined);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      manager.release("session-a", "SIM-1");
+      // After force-stop the owner has released the capture.
+      const force = spyOn(recordings, "markVideoRecordingIncomplete").mockImplementation(
+        async (id) => {
+          recordings.incomplete.push(id);
+          recordings.active.clear();
+          retained.mockReturnValue([]);
+        },
+      );
+      try {
+        await manager.settle();
+        expect(recordings.incomplete).toEqual(["rec-session-a"]);
+        expect(recordings.active.size).toBe(0);
+      } finally {
+        force.mockRestore();
+      }
+    } finally {
+      initial.mockRestore();
+      retained.mockRestore();
+      stop.mockRestore();
       warn.mockRestore();
     }
   });

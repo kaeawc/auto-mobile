@@ -1,0 +1,13 @@
+{
+  "code": "session_held_by_recovery",
+  "builder": "SessionHeldByRecoveryError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"Session 11111111-2222-4333-8444-555555555555 is past its idle deadline and its device emulator-5554 is being recovered (code session_held_by_recovery); retry after the recovery settles to receive either the live session or the terminal idle answer.\",\"code\":\"session_held_by_recovery\",\"sessionUuid\":\"11111111-2222-4333-8444-555555555555\",\"deviceId\":\"emulator-5554\",\"retryable\":true,\"retryAfterMs\":1000}"
+      }
+    ],
+    "isError": true
+  }
+}

@@ -1,3 +1,7 @@
+import {
+  networkFilterShapingRequestRejection,
+  networkFilterShapingRejectionDetail,
+} from "./NetworkFilterBridge";
 import { logger } from "../../utils/logger";
 import type {
   NetworkFilterBridge,
@@ -6,6 +10,9 @@ import type {
   NetworkFilterRuleOwnership,
   NetworkFilterRuleStatus,
   NetworkFilterRuleTarget,
+  NetworkFilterRuleResult,
+  NetworkFilterShapingRequest,
+  NetworkFilterShapingResolution,
   NetworkFilterState,
 } from "./NetworkFilterBridge";
 
@@ -32,9 +39,27 @@ export interface IosAppNetworkRuleCommandContext {
 
 export type IosAppNetworkApplyResult =
   /** The provider installed this revision (directly, or found it installed after an uncertain answer). */
-  | { kind: "applied"; installedRevision: number; leaseRemainingMs?: number; reconciled: boolean }
+  | {
+      kind: "applied";
+      installedRevision: number;
+      leaseRemainingMs?: number;
+      reconciled: boolean;
+      shaping?: NetworkFilterShapingResolution;
+    }
   /** The provider definitively refused it; nothing of this command is installed. */
-  | { kind: "refused"; outcome: NetworkFilterRuleOutcome; detail: string }
+  | {
+      kind: "refused";
+      outcome: NetworkFilterRuleOutcome;
+      detail: string;
+      rejection?: NetworkFilterRuleResult["rejection"];
+    }
+  | {
+      kind: "upgrade_required";
+      installedVersion: number;
+      requiredVersion: number;
+      command: string;
+      detail: string;
+    }
   /** The controller is not installed, approved or signed; nothing reached the provider. */
   | { kind: "not_ready"; state: NetworkFilterState; detail: string }
   /**
@@ -84,34 +109,61 @@ export class IosAppNetworkRuleClient {
    * `status` decides: the rule's exact revision installed means applied;
    * otherwise a reset with `rollbackRevision()` fences a late delivery.
    */
-  async applyOffline(
+  applyOffline(
     rule: IosAppNetworkRule,
     leaseMs: number,
     rollbackRevision: () => number,
   ): Promise<IosAppNetworkApplyResult> {
-    const result = await this.bridge.apply(target(rule), ownership(rule), leaseMs);
+    return this.apply(rule, leaseMs, rollbackRevision);
+  }
+
+  applyShaped(
+    rule: IosAppNetworkRule,
+    shaping: NetworkFilterShapingRequest,
+    leaseMs: number,
+    rollbackRevision: () => number,
+  ): Promise<IosAppNetworkApplyResult> {
+    const rejection = networkFilterShapingRequestRejection(shaping);
+    if (rejection) {
+      return Promise.resolve({
+        kind: "refused",
+        outcome: "invalid_shaping",
+        rejection,
+        detail: networkFilterShapingRejectionDetail(rejection),
+      });
+    }
+    return this.apply(rule, leaseMs, rollbackRevision, shaping);
+  }
+
+  private async apply(
+    rule: IosAppNetworkRule,
+    leaseMs: number,
+    rollbackRevision: () => number,
+    shaping?: NetworkFilterShapingRequest,
+  ): Promise<IosAppNetworkApplyResult> {
+    const result = await this.bridge.apply(target(rule), ownership(rule), leaseMs, shaping);
+    if (result.upgradeRequired) {
+      return { kind: "upgrade_required", ...result.upgradeRequired, detail: result.detail };
+    }
     if (result.rule) {
-      return result.rule.outcome === "applied"
-        ? {
-            kind: "applied",
-            installedRevision: result.rule.installedRevision ?? rule.revision,
-            ...(result.rule.leaseRemainingMilliseconds !== undefined
-              ? { leaseRemainingMs: result.rule.leaseRemainingMilliseconds }
-              : {}),
-            reconciled: false,
-          }
-        : { kind: "refused", outcome: result.rule.outcome, detail: result.detail };
+      return this.applyVerdict(rule, result.rule, result.detail);
     }
     if (DEFINITIVELY_UNREACHED.has(result.state)) {
       return { kind: "not_ready", state: result.state, detail: result.detail };
     }
     const installed = await this.installedRule(rule);
-    if (installed?.revision === rule.revision && installed.owner === rule.owner) {
+    const condition = shaping === undefined ? "offline" : "shaped";
+    if (
+      installed?.revision === rule.revision &&
+      installed.owner === rule.owner &&
+      installed.condition === condition
+    ) {
       return {
         kind: "applied",
         installedRevision: installed.revision,
         leaseRemainingMs: installed.leaseRemainingMilliseconds,
         reconciled: true,
+        ...(installed.condition === "shaped" ? { shaping: installed.shaping } : {}),
       };
     }
     const rollback = await this.bridge.reset(target(rule), {
@@ -125,6 +177,29 @@ export class IosAppNetworkRuleClient {
         `${rolledBack ? "confirmed" : `unconfirmed (${rollback.state}: ${rollback.detail})`}`,
     );
     return { kind: "failed", state: result.state, detail: result.detail, rolledBack };
+  }
+
+  private applyVerdict(
+    rule: IosAppNetworkRule,
+    verdict: NetworkFilterRuleResult,
+    detail: string,
+  ): IosAppNetworkApplyResult {
+    return verdict.outcome === "applied"
+      ? {
+          kind: "applied",
+          installedRevision: verdict.installedRevision ?? rule.revision,
+          ...(verdict.leaseRemainingMilliseconds !== undefined
+            ? { leaseRemainingMs: verdict.leaseRemainingMilliseconds }
+            : {}),
+          reconciled: false,
+          ...(verdict.shaping ? { shaping: verdict.shaping } : {}),
+        }
+      : {
+          kind: "refused",
+          outcome: verdict.outcome,
+          detail,
+          ...(verdict.rejection ? { rejection: verdict.rejection } : {}),
+        };
   }
 
   /** Remove this owner's rule. Never clears another session's rule. */

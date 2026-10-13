@@ -883,14 +883,15 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   }
 
   /**
-   * Best-effort `adb reconnect offline` for session-bound Android serial(s)
+   * Best-effort serial-scoped `adb -s <serial> reconnect` for session-bound Android serial(s)
    * seen stuck in ADB `offline`. See
    * {@link AndroidEmulatorClient.recoverOfflineDevices}.
    */
   async recoverAndroidOfflineDevices(
+    deviceIds: Iterable<string>,
     options: { timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<void> {
-    return this.emulator.recoverOfflineDevices(options);
+    return this.emulator.recoverOfflineDevices(deviceIds, options);
   }
 
   async getDeviceImagesDetailed(

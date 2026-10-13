@@ -4,9 +4,9 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
 
 /**
- * Memoises accessibility window types by window id. Thread-safe. The own-window filter does no
- * memo or prototype-state work for foreign packages. Prototype foreground tracking also memoises
- * foreign application windows' types, using positive entries only.
+ * Memoises accessibility window types by window id. Thread-safe. The own-window filter does no memo
+ * or prototype-state work for foreign packages. Prototype foreground tracking also memoises foreign
+ * application windows' types, using positive entries only.
  */
 internal class OwnWindowTypeMemo(
   private val nowMs: () -> Long,

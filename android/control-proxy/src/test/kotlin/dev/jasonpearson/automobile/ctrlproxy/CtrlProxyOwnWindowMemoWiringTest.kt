@@ -68,8 +68,9 @@ class CtrlProxyOwnWindowMemoWiringTest {
     @JvmStatic
     fun loadSource() {
       source =
-        KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText())
-          .filterNot { it.isWhitespace() }
+        KotlinSourceScan.maskLiteralsAndComments(locateCtrlProxySource().readText()).filterNot {
+          it.isWhitespace()
+        }
     }
 
     private fun locateCtrlProxySource(): File {

@@ -41,7 +41,7 @@ class OwnWindowTypeMemoTest {
       memo.windowType(FOREIGN_WINDOW_ID) {
         foreignResolutions++
         null
-      }
+      },
     )
     assertEquals(1, foreignResolutions) // Foreign events did not populate this id.
   }
@@ -89,7 +89,7 @@ class OwnWindowTypeMemoTest {
     }
     repeat(IMMEDIATE_NULL_COUNT) {
       assertNull(
-        memo.windowType(OWN_WINDOW_ID, retryUnresolvedImmediately = true, resolve = resolve)
+        memo.windowType(OWN_WINDOW_ID, retryUnresolvedImmediately = true, resolve = resolve),
       )
     }
     assertEquals(IMMEDIATE_NULL_COUNT, resolutions)
@@ -115,7 +115,7 @@ class OwnWindowTypeMemoTest {
       memo.windowType(OWN_WINDOW_ID, retryUnresolvedImmediately = true) {
         resolutions++
         null
-      }
+      },
     )
     assertEquals(
       AccessibilityWindowInfo.TYPE_APPLICATION,
@@ -139,7 +139,7 @@ class OwnWindowTypeMemoTest {
     assertNull(memo.windowType(OWN_WINDOW_ID, resolve = unresolved))
     now = RETRY_MS - 1
     assertNull(
-      memo.windowType(OWN_WINDOW_ID, retryUnresolvedImmediately = true, resolve = unresolved)
+      memo.windowType(OWN_WINDOW_ID, retryUnresolvedImmediately = true, resolve = unresolved),
     )
     assertEquals(2, resolutions)
     assertNull(memo.windowType(OWN_WINDOW_ID) { error("Original negative entry must remain") })
@@ -251,7 +251,7 @@ class OwnWindowTypeMemoTest {
       invalidatesOwnWindowTypes(
         windows,
         AccessibilityEvent.WINDOWS_CHANGE_ADDED or AccessibilityEvent.WINDOWS_CHANGE_BOUNDS,
-      )
+      ),
     )
     val harmless =
       AccessibilityEvent.WINDOWS_CHANGE_BOUNDS or
@@ -333,7 +333,7 @@ class OwnWindowTypeMemoTest {
       memo.windowType(OWN_WINDOW_ID) {
         resolutions++
         null
-      }
+      },
     )
     now--
     assertEquals(

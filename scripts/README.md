@@ -129,6 +129,15 @@ Regenerate the fixture by re-running the `observe` MCP tool against an Android
 home screen and re-committing the pretty-printed JSON; treat it as a frozen
 baseline and only refresh it deliberately when the observe output format changes.
 
+## Mac Runner Queue Watchdog
+
+`ci/mac-queue-watchdog.sh` reports self-hosted Mac jobs queued for 15 minutes
+in a PR run attempt. It is advisory, reads jobs with `gh api --paginate` and
+`jq`, and never cancels a run. `MAC_QUEUE_STUCK_SECONDS` and
+`MAC_QUEUE_POLL_SECONDS` configure the threshold and poll interval;
+`MAC_QUEUE_NOW_CMD` injects the clock for its BATS tests. Observation is bounded
+by 15 minutes plus two polls by default; the job's 20 minute timeout covers it.
+
 ## CI Failure-Rate and Step-Duration Measurement
 
 `scripts/ci/measure-ci.sh` turns the ad-hoc "how flaky is this job / how long

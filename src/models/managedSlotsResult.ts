@@ -57,7 +57,13 @@ export interface ManagedSlotBudgetEvidence {
     deleting: number;
     orphaned: number;
   };
-  retained: Array<{ platform: "android" | "ios"; stableDeviceId: string; reason: string }>;
+  retained: Array<{
+    platform: "android" | "ios";
+    stableDeviceId: string;
+    reason: string;
+    attempts?: number;
+    lastError?: string | null;
+  }>;
   evictionFailures: Array<{ platform: "android" | "ios"; stableDeviceId: string; message: string }>;
 }
 

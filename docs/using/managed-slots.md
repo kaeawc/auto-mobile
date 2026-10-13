@@ -677,14 +677,23 @@ scope (including abandoned but revivable scopes), open journal targets, stopping
 already deleting rows, held devices, foreign claims, incomplete discovery, pooled
 work, shutdown/startup leases, and restart-recovery reservations are protected.
 Only a listed device with the `amslot-` prefix can be deleted.
-Pending deletions count as committed room: admission evicts at most the shortfall
-not already covered by those markers. If pending deletions cover the shortfall,
-creation is refused until redrive confirms absence, without evicting newer cache.
+Pending deletions with fewer than 3 recorded attempts (failed or blocked) count as
+committed room: admission evicts at most the shortfall not already covered by those
+markers. If pending deletions cover the shortfall, creation is refused until redrive
+confirms absence or the marker reaches 3 recorded attempts (failed or blocked),
+without evicting newer cache. Markers with 3 or more recorded attempts (failed or
+blocked) do not count as committed room.
 
 Before a cache deletion, a transaction marks its exact free row as deletion pending.
 That durable marker fences adoption and shutdown. Only authoritative absence removes
-it. Failed or unconfirmed deletion remains charged as `deleting`, with retry backoff;
-the journal owner loop retries it even when that daemon's own limit is unset, taking
+it. Failed or unconfirmed deletion remains charged as `deleting` until its marker
+has 3 recorded attempts (failed or blocked). At 3 or more recorded attempts
+(failed or blocked), an unbound marker contributes no resource charge or reservation
+ranking; a device still bound to a slot remains charged. With the redrive backoff
+(1 s, 2 s, 4 s ...), a marker can reach 3 attempts in roughly 10 seconds, including
+attempts blocked by safety checks. The marker stays journaled and is still retried
+with backoff; the journal owner loop retries it even when that daemon's own limit is
+unset, taking
 over from a dead owner while leaving live foreign owners alone. No internal job queue
 is added for capacity refusals.
 A journaled delete is never reverted, even if its post-marking safety check finds
@@ -692,8 +701,9 @@ the device transiently busy and the creation is refused. Redrive still deletes
 that marked cache when it becomes safe.
 
 Admission and eviction are bounded by the acquisition's preparation deadline.
-A delete journaled but not confirmed before that deadline stays charged and is
-finished by periodic redrive. A deadline passing during admission returns `timeout`.
+A delete journaled but not confirmed before that deadline stays charged until
+3 recorded attempts (failed or blocked) and is finished by periodic redrive. A
+deadline passing during admission returns `timeout`.
 
 A full budget returns `managed_slot_budget_exhausted`, `retryable: true`, with no
 `retryAfterMs` because recovery has no time bound. Its `budget` evidence contains
@@ -703,7 +713,12 @@ that are no longer needed, or raise `AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES`, then 
 This refusal is separate from `capacity_exhausted`, which concerns boot limits.
 `usage.total` includes the refused request's own `preparing` reservation, so it can
 read as the limit plus one or more. Pending deletions are named in `retained` with
-reason `deletion_pending`.
+reason `deletion_pending` when they have fewer than 3 recorded attempts (failed or
+blocked) and `deletion_stuck` at 3 or more recorded attempts (failed or blocked).
+Both include `attempts` and `lastError` (a string or null). A stuck device still exists
+on the host and remains protected from adoption
+and eviction. Real device count can therefore exceed the limit by the number of
+stuck markers.
 
 ## Error codes
 

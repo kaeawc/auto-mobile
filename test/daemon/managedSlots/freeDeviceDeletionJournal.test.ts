@@ -343,7 +343,13 @@ describe("journaled free-pool deletion", () => {
     expect(selection).toEqual({
       candidates: [],
       skipped: [
-        { platform: "android", stableDeviceId: row.stableDeviceId, reason: "deletion_pending" },
+        {
+          platform: "android",
+          stableDeviceId: row.stableDeviceId,
+          reason: "deletion_pending",
+          attempts: 0,
+          lastError: null,
+        },
       ],
     });
     expect(await registry.findReclaimableFreeDevices({ thresholdMs: 0 })).toEqual([]);

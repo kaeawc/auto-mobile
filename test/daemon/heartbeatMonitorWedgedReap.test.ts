@@ -20,6 +20,138 @@ const SCAN_MS = DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS;
 const LEASE_MS = 5_000;
 const CLI_IDLE_MS = 20_000;
 
+describe("terminal source releases", () => {
+  const cleanups: (() => void)[] = [];
+  afterEach(() => {
+    for (const cleanup of cleanups.splice(0).reverse()) {
+      cleanup();
+    }
+  });
+
+  function harness() {
+    const timer = new FakeTimer();
+    const session: Session = {
+      sessionId: "terminal",
+      assignedDevice: "fake-device",
+      platform: "android",
+      createdAt: 0,
+      lastUsedAt: 0,
+      activityGeneration: 0,
+      expiresAt: 600_000,
+      cacheData: {},
+      lastHeartbeat: 0,
+      sessionTimeoutMs: 600_000,
+      heartbeatTimeoutMs: LEASE_MS,
+      heartbeatTimeoutSource: "custom",
+      hasReceivedHeartbeat: true,
+      ownership: "owned",
+      livenessPolicy: "heartbeat",
+    };
+    const state = { visible: false, startedAt: undefined as number | undefined, running: false };
+    const forcedAt: number[] = [];
+    const reapedAt: number[] = [];
+    const gate = Promise.withResolvers<void>();
+    const source: HeartbeatSessionSource = {
+      getAllSessions: () => (state.visible ? [session] : []),
+      cleanupExpiredSessions: () => {},
+      getTerminalReleasesInProgress: () =>
+        state.startedAt === undefined
+          ? []
+          : [
+              {
+                sessionId: session.sessionId,
+                startedAtMs: state.startedAt,
+              },
+            ],
+      isReleaseInProgress: (id, at) =>
+        state.running && id === session.sessionId && at === state.startedAt,
+      getReleaseStuckAtMs: () =>
+        state.startedAt === undefined ? undefined : state.startedAt + STUCK_REAP_WARN_MS + 1,
+    };
+    const monitor = new SessionHeartbeatMonitor(
+      source,
+      () => false,
+      async () => {
+        reapedAt.push(timer.now());
+        state.startedAt ??= timer.now();
+        state.running = true;
+        await gate.promise;
+      },
+      timer,
+      {
+        checkIntervalMs: SCAN_MS,
+        forceStuckRelease: async () => {
+          forcedAt.push(timer.now());
+        },
+      },
+    );
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    cleanups.push(() => {
+      gate.resolve();
+      void monitor.stop();
+      timer.reset();
+      warn.mockRestore();
+    });
+    monitor.start();
+    return { timer, session, state, forcedAt, reapedAt };
+  }
+
+  const flush = () => drainMicrotasks(20);
+
+  test("a terminal source release is forced once at its deadline and forgotten after it ends", async () => {
+    const h = harness();
+    h.state.startedAt = 0;
+    h.state.running = true;
+    await h.timer.advanceTimeAsync(STUCK_REAP_WARN_MS, flush);
+    expect(h.forcedAt).toEqual([]);
+    await h.timer.advanceTimeAsync(SCAN_MS, flush);
+    expect(h.forcedAt).toEqual([STUCK_REAP_WARN_MS + SCAN_MS]);
+    await h.timer.advanceTimeAsync(2 * SCAN_MS, flush);
+    expect(h.forcedAt).toHaveLength(1);
+    h.state.startedAt = undefined;
+    h.state.running = false;
+    await h.timer.advanceTimeAsync(SCAN_MS, flush);
+    // Reusing the id must receive a fresh tracked release and one fresh force.
+    const secondAt = h.timer.now();
+    h.state.startedAt = secondAt;
+    h.state.running = true;
+    await h.timer.advanceTimeAsync(STUCK_REAP_WARN_MS, flush);
+    expect(h.forcedAt).toHaveLength(1);
+    await h.timer.advanceTimeAsync(SCAN_MS, flush);
+    expect(h.forcedAt).toEqual([
+      STUCK_REAP_WARN_MS + SCAN_MS,
+      secondAt + STUCK_REAP_WARN_MS + SCAN_MS,
+    ]);
+    expect(h.reapedAt).toEqual([]);
+  });
+
+  for (const joined of [false, true]) {
+    test(`a heartbeat-timeout reap ${joined ? "joining" : "starting"} a terminal source release keeps its deadline and forces once`, async () => {
+      const h = harness();
+      h.state.visible = true;
+      if (joined) {
+        h.state.startedAt = 0;
+        h.state.running = true;
+      }
+      await h.timer.advanceTimeAsync(LEASE_MS + SUSPECT_GRACE_MS + SCAN_MS, flush);
+      // A terminal source entry must not freeze judgement at the release's start.
+      expect(h.reapedAt).toEqual([
+        Math.ceil((LEASE_MS + SUSPECT_GRACE_MS + 1) / SCAN_MS) * SCAN_MS,
+      ]);
+      const startedAt = h.state.startedAt!;
+      const deadline = startedAt + STUCK_REAP_WARN_MS + 1;
+      const dueScan = Math.ceil(deadline / SCAN_MS) * SCAN_MS;
+      await h.timer.advanceTimeAsync(dueScan - 1 - h.timer.now(), flush);
+      expect(h.forcedAt).toEqual([]);
+      await h.timer.advanceTimeAsync(1, flush);
+      expect(h.forcedAt).toEqual([dueScan]);
+      await h.timer.advanceTimeAsync(STUCK_REAP_WARN_MS + SCAN_MS, flush);
+      expect(h.forcedAt).toEqual([dueScan]);
+      expect(h.reapedAt).toHaveLength(1);
+    });
+  }
+});
+
 describe("a release that never settles (#10704)", () => {
   let timer: FakeTimer;
   let manager: SessionManager;
@@ -151,7 +283,10 @@ describe("monitor reap timestamps", () => {
     warn.mockRestore();
   });
 
-  function start(joinAt = timer.now()) {
+  function start(
+    joinAt = timer.now(),
+    getReleaseStuckAtMs?: (sessionId: string) => number | undefined,
+  ) {
     const source: HeartbeatSessionSource = {
       getAllSessions: () => (visible ? [session] : []),
       cleanupExpiredSessions: () => {},
@@ -160,6 +295,7 @@ describe("monitor reap timestamps", () => {
           ? []
           : [{ sessionId: session.sessionId, session, startedAtMs: sourceStartedAt }],
       isReleaseInProgress: (id, at) => id === session.sessionId && at === sourceStartedAt,
+      ...(getReleaseStuckAtMs ? { getReleaseStuckAtMs } : {}),
     };
     monitor = new SessionHeartbeatMonitor(
       source,
@@ -180,6 +316,22 @@ describe("monitor reap timestamps", () => {
   }
 
   const flush = () => drainMicrotasks(20);
+
+  test("a source deadline is forced on its first due scan instead of the fallback deadline", async () => {
+    sourceStartedAt = timer.now();
+    const deadline = sourceStartedAt + STUCK_REAP_WARN_MS + SCAN_MS + 1;
+    start(timer.now() + 2 * STUCK_REAP_WARN_MS, () => deadline);
+    await timer.advanceTimeAsync(STUCK_REAP_WARN_MS, flush);
+    expect(forcedAt).toEqual([]);
+    await timer.advanceTimeAsync(SCAN_MS, flush);
+    expect(forcedAt).toEqual([]);
+    await timer.advanceTimeAsync(1, flush);
+    expect(forcedAt).toEqual([]);
+    await timer.advanceTimeAsync(SCAN_MS - 1, flush);
+    expect(forcedAt).toEqual([deadline + SCAN_MS - 1]);
+    await timer.advanceTimeAsync(2 * SCAN_MS, flush);
+    expect(forcedAt).toHaveLength(1);
+  });
 
   test("a reap without a tracked source release starts its deadline at the joining scan", async () => {
     const origin = timer.now();

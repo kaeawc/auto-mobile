@@ -2,8 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
   SessionManager,
   TerminalSessionError,
+  SessionHeldByRecoveryError,
   type SessionExecutionMetadata,
 } from "../../src/daemon/sessionManager";
+import { DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS } from "../../src/daemon/deviceAcquisitionRefusals";
 import { hasActiveSessionExecution } from "../../src/daemon/toolCallActivity";
 import { sessionReleasedDuringCallPayload } from "../../src/server/deviceSessionResult";
 import { SESSION_IDLE_TIMEOUT_ENV } from "../../src/daemon/sessionLivenessWindows";
@@ -20,6 +22,10 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
+import {
+  UNSETTLED_EXECUTION_VETO_CEILING_MS,
+  UNSETTLED_EXECUTION_DEADLINE_GRACE_MS,
+} from "../../src/daemon/unsettledExecutionVeto";
 
 // #11105 item 2: request deadlines are stamped on the wall clock, the idle veto judges them on
 // the session clock. A wall step before a call starts must not end its veto early.
@@ -44,8 +50,9 @@ describe("idle-release veto under a wall-clock step (#11105)", () => {
     tracker.setSessionClockOffsetProvider(
       (wallNowMs = timer.now()) => manager.sessionNow() - wallNowMs,
     );
-    manager.setActiveSessionExecutionChecker((sessionId, query) =>
-      tracker.hasActiveSessionUuidExecutions(sessionId, query),
+    manager.setActiveSessionExecutionChecker(
+      (sessionId, query) =>
+        !query?.recoveryOnly && tracker.hasActiveSessionUuidExecutions(sessionId, query),
     );
     manager.setSessionExecutionDeadlineLookup((sessionId) =>
       tracker.getLatestSessionExecutionDeadlineMs(sessionId, { onSessionClock: true }),
@@ -179,13 +186,123 @@ describe("a new call's start is judged on the session clock (#11290)", () => {
     }
   }
 
-  function startLongCallHoldingTheSession(): void {
+  function startLongCallHoldingTheSession(): ActiveExecution {
     const earlier = tracker.startExecution("provision", undefined, SESSION);
     const deadline = timer.now() + 600_000;
     tracker.setExecutionDeadline(earlier.id, () => deadline);
+    return earlier;
   }
 
   for (const step of [0, -HOUR_MS]) {
+    for (const condition of ["aborted", "past request deadline"] as const) {
+      it(`admission liveness refuses late control behind timely work ${condition}, wall step ${step}`, async () => {
+        const earlier = startLongCallHoldingTheSession();
+        timer.stepWallClock(step);
+        timer.advanceTime(condition === "aborted" ? IDLE_MS + 1 : 600_001);
+        if (condition === "aborted") {
+          earlier.abortController.abort();
+        }
+        const read = tracker.startExecution("observe", undefined, SESSION);
+        tracker.markDeviceReadCall(read.id, read.toolName);
+        expect(manager.deviceHeldForLateRead(SESSION, metadataOf(read))).toBe(DEVICE);
+        await expect(
+          manager.admitIssuedSessionForAutomation(SESSION, metadataOf(read), {
+            access: "read-only",
+          }),
+        ).resolves.toBeUndefined();
+        expect(manager.getAllSessions()[0]?.expiresAt).toBe(IDLE_MS);
+        expect(releases).toEqual([]);
+        const late = tracker.startExecution("tapOn", undefined, SESSION);
+        const pending = manager.admitIssuedSessionForAutomation(SESSION, metadataOf(late));
+        await expect(pending).rejects.toBeInstanceOf(TerminalSessionError);
+        await expect(pending).rejects.toMatchObject({
+          release: { releaseReason: "cleanup-expired" },
+        });
+        expect(sessionReleasedDuringCallPayload(earlier.cancelReason)).toMatchObject({
+          error: { reason: "cleanup-expired", idle: true },
+        });
+        expect(late.abortController.signal.aborted).toBe(false);
+        await manager.waitForSessionRelease(SESSION);
+        expect(releases).toEqual(["cleanup-expired"]);
+        expect(manager.getSession(SESSION)).toBeNull();
+        tracker.endExecution(late.id);
+      });
+    }
+
+    it(`admission liveness bounds periodic late control behind wedged dated work, wall step ${step}`, async () => {
+      // Ends at the first control call after the wedged call stops being live; with no call,
+      // the sweep ends it by the wedged call's request deadline + 10 s grace.
+      const earlier = startLongCallHoldingTheSession();
+      timer.stepWallClock(step);
+      let expiresAt = IDLE_MS;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        timer.advanceTime(IDLE_MS + 1);
+        const late = tracker.startExecution("tapOn", undefined, SESSION);
+        if (attempt < 4) {
+          expect(admission(metadataOf(late))).toBe("admitted");
+          await manager.admitIssuedSessionForAutomation(SESSION, metadataOf(late));
+          const refreshed = manager.getAllSessions()[0]!.expiresAt;
+          expect(refreshed).toBeGreaterThan(expiresAt);
+          expect(refreshed).toBe(manager.sessionNow() + IDLE_MS);
+          expiresAt = refreshed;
+        } else {
+          const pending = manager.admitIssuedSessionForAutomation(SESSION, metadataOf(late));
+          await expect(pending).rejects.toBeInstanceOf(TerminalSessionError);
+          await expect(pending).rejects.toMatchObject({
+            release: { releaseReason: "cleanup-expired" },
+          });
+        }
+        tracker.endExecution(late.id);
+      }
+      await manager.waitForSessionRelease(SESSION);
+      expect(releases).toEqual(["cleanup-expired"]);
+      expect(manager.getTerminalReleaseSnapshot(SESSION)?.releaseReason).toBe("cleanup-expired");
+      expect(manager.getSession(SESSION)).toBeNull();
+      expect(sessionReleasedDuringCallPayload(earlier.cancelReason)).toMatchObject({
+        error: { reason: "cleanup-expired", idle: true },
+      });
+    });
+
+    it(`with no late control call, the sweep ends wedged work at its deadline plus grace, wall step ${step}`, async () => {
+      const earlier = startLongCallHoldingTheSession();
+      timer.stepWallClock(step);
+      timer.advanceTime(600_000 + UNSETTLED_EXECUTION_DEADLINE_GRACE_MS - 1);
+      manager.cleanupExpiredSessions();
+      expect(releases).toEqual([]);
+      expect(earlier.abortController.signal.aborted).toBe(false);
+      expect(manager.getAllSessions()[0]?.expiresAt).toBe(IDLE_MS);
+      timer.advanceTime(1);
+      manager.cleanupExpiredSessions();
+      await manager.waitForSessionRelease(SESSION);
+      expect(releases).toEqual(["cleanup-expired"]);
+      expect(manager.getTerminalReleaseSnapshot(SESSION)?.releaseReason).toBe("cleanup-expired");
+      expect(manager.getSession(SESSION)).toBeNull();
+      expect(sessionReleasedDuringCallPayload(earlier.cancelReason)).toMatchObject({
+        error: { reason: "cleanup-expired", idle: true },
+      });
+    });
+
+    it(`admission liveness of undated timely work ends 30 min after its own start, wall step ${step}`, async () => {
+      const earlier = tracker.startExecution("provision", undefined, SESSION);
+      timer.stepWallClock(step);
+      timer.advanceTime(UNSETTLED_EXECUTION_VETO_CEILING_MS);
+      const atCeiling = tracker.startExecution("tapOn", undefined, SESSION);
+      expect(admission(metadataOf(atCeiling))).toBe("admitted");
+      tracker.endExecution(atCeiling.id);
+      timer.advanceTime(1);
+      const afterCeiling = tracker.startExecution("tapOn", undefined, SESSION);
+      const pending = manager.admitIssuedSessionForAutomation(SESSION, metadataOf(afterCeiling));
+      await expect(pending).rejects.toBeInstanceOf(TerminalSessionError);
+      await expect(pending).rejects.toMatchObject({
+        release: { releaseReason: "cleanup-expired" },
+      });
+      expect(sessionReleasedDuringCallPayload(earlier.cancelReason)).toMatchObject({
+        error: { reason: "cleanup-expired", idle: true },
+      });
+      await manager.waitForSessionRelease(SESSION);
+      expect(releases).toEqual(["cleanup-expired"]);
+    });
+
     it(`admits a call begun after the idle deadline while timely control work holds the session, wall step ${step}`, async () => {
       startLongCallHoldingTheSession();
       timer.advanceTime(IDLE_MS + 80_000);
@@ -211,21 +328,6 @@ describe("a new call's start is judged on the session clock (#11290)", () => {
       timer.stepWallClock(step);
       const first = tracker.startExecution("tapOn", undefined, SESSION);
       const second = tracker.startExecution("tapOn", undefined, SESSION);
-      const admissionA = manager.admitIssuedSessionForAutomation(SESSION, metadataOf(first));
-      const admissionB = manager.admitIssuedSessionForAutomation(SESSION, metadataOf(second));
-      const outcomes = await Promise.allSettled([admissionA, admissionB]);
-      for (const outcome of outcomes) {
-        expect(outcome.status).toBe("rejected");
-        if (outcome.status !== "rejected") {
-          throw new Error("A late call was admitted");
-        }
-        expect(outcome.reason).toBeInstanceOf(Error);
-        expect(outcome.reason.message).toBe(
-          `Session ${SESSION} expired before this execution began while earlier work is still active.`,
-        );
-      }
-      expect(first.abortController.signal.aborted).toBe(false);
-      expect(second.abortController.signal.aborted).toBe(false);
       const read = tracker.startExecution("observe", undefined, SESSION);
       tracker.markDeviceReadCall(read.id, read.toolName);
       expect(manager.deviceHeldForLateRead(SESSION, metadataOf(read))).toBe(DEVICE);
@@ -236,8 +338,23 @@ describe("a new call's start is judged on the session clock (#11290)", () => {
       expect(manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
       expect(manager.getAllSessions()[0]?.expiresAt).toBe(IDLE_MS);
       expect(releases).toEqual([]);
-      manager.cleanupExpiredSessions();
-      expect(releases).toEqual([]);
+      const admissionA = manager.admitIssuedSessionForAutomation(SESSION, metadataOf(first));
+      const admissionB = manager.admitIssuedSessionForAutomation(SESSION, metadataOf(second));
+      const outcomes = await Promise.allSettled([admissionA, admissionB]);
+      for (const outcome of outcomes) {
+        expect(outcome.status).toBe("rejected");
+        if (outcome.status !== "rejected") {
+          throw new Error("A late call was admitted");
+        }
+        expect(outcome.reason).toBeInstanceOf(TerminalSessionError);
+        expect(outcome.reason).toMatchObject({ release: { releaseReason: "cleanup-expired" } });
+      }
+      expect(first.abortController.signal.aborted).toBe(false);
+      expect(sessionReleasedDuringCallPayload(second.cancelReason)).toMatchObject({
+        error: { reason: "cleanup-expired", idle: true },
+      });
+      await manager.waitForSessionRelease(SESSION);
+      expect(releases).toEqual(["cleanup-expired"]);
       tracker.endExecution(first.id);
       tracker.endExecution(second.id);
       manager.cleanupExpiredSessions();
@@ -265,42 +382,62 @@ describe("a new call's start is judged on the session clock (#11290)", () => {
     });
   }
 
-  for (const access of ["control", "read-only"] as const) {
-    it(`recovery alone preserves the held session for a late ${access} call without admitting it`, async () => {
-      manager.setActiveSessionExecutionChecker((sessionId, query) =>
-        hasActiveSessionExecution(
-          tracker,
-          manager,
-          { isSessionRecoveryInFlight: () => true },
-          sessionId,
-          query,
-        ),
-      );
-      timer.advanceTime(IDLE_MS + 1);
-      const late = tracker.startExecution(
-        access === "control" ? "tapOn" : "observe",
-        undefined,
-        SESSION,
-      );
-      if (access === "read-only") {
-        tracker.markDeviceReadCall(late.id, late.toolName);
-        expect(manager.deviceHeldForLateRead(SESSION, metadataOf(late))).toBe(DEVICE);
-        await expect(
-          manager.admitIssuedSessionForAutomation(SESSION, metadataOf(late), { access }),
-        ).resolves.toBeUndefined();
-      } else {
-        await expect(
-          manager.admitIssuedSessionForAutomation(SESSION, metadataOf(late)),
-        ).rejects.toThrow(
-          `Session ${SESSION} expired before this execution began while earlier work is still active.`,
+  for (const step of [0, -HOUR_MS]) {
+    for (const access of ["control", "read-only"] as const) {
+      it(`recovery alone preserves the held session for a late ${access} call without admitting it, wall step ${step}`, async () => {
+        let recovering = true;
+        manager.setActiveSessionExecutionChecker((sessionId, query) =>
+          hasActiveSessionExecution(
+            tracker,
+            manager,
+            { isSessionRecoveryInFlight: () => recovering },
+            sessionId,
+            query,
+          ),
         );
-      }
-      manager.cleanupExpiredSessions();
-      expect(manager.hasSession(SESSION)).toBe(true);
-      expect(manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
-      expect(manager.getAllSessions()[0]?.expiresAt).toBe(IDLE_MS);
-      expect(releases).toEqual([]);
-    });
+        timer.stepWallClock(step);
+        timer.advanceTime(IDLE_MS + 1);
+        const late = tracker.startExecution(
+          access === "control" ? "tapOn" : "observe",
+          undefined,
+          SESSION,
+        );
+        if (access === "read-only") {
+          tracker.markDeviceReadCall(late.id, late.toolName);
+          expect(manager.deviceHeldForLateRead(SESSION, metadataOf(late))).toBe(DEVICE);
+          await expect(
+            manager.admitIssuedSessionForAutomation(SESSION, metadataOf(late), { access }),
+          ).resolves.toBeUndefined();
+        } else {
+          const pending = manager.admitIssuedSessionForAutomation(SESSION, metadataOf(late));
+          await expect(pending).rejects.toBeInstanceOf(SessionHeldByRecoveryError);
+          await expect(pending).rejects.toMatchObject({
+            name: "SessionHeldByRecoveryError",
+            code: "session_held_by_recovery",
+            retryable: true,
+            retryAfterMs: DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS,
+            sessionUuid: SESSION,
+            deviceId: DEVICE,
+          });
+        }
+        manager.cleanupExpiredSessions();
+        expect(manager.hasSession(SESSION)).toBe(true);
+        expect(manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
+        expect(manager.getAllSessions()[0]?.expiresAt).toBe(IDLE_MS);
+        expect(releases).toEqual([]);
+        expect(late.abortController.signal.aborted).toBe(false);
+        if (access === "control") {
+          recovering = false;
+          const pending = manager.admitIssuedSessionForAutomation(SESSION, metadataOf(late));
+          await expect(pending).rejects.toBeInstanceOf(TerminalSessionError);
+          await expect(pending).rejects.toMatchObject({
+            release: { releaseReason: "cleanup-expired" },
+          });
+          await manager.waitForSessionRelease(SESSION);
+          expect(releases).toEqual(["cleanup-expired"]);
+        }
+      });
+    }
   }
 
   it("a control call begun exactly at the deadline admits later non-owner control without stamping activity", async () => {

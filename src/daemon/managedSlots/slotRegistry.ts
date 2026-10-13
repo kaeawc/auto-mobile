@@ -435,6 +435,8 @@ export function isSlotJournalPhaseOpen(phase: SlotJournalPhase): boolean {
 
 /** The exact devices an entry acts on, so recovery never confuses an old device with its successor. */
 export interface SlotJournalTarget {
+  /** Durable removal intent for the created device; once true, it can never be adopted. */
+  removalRequested?: true;
   /**
    * The platform the entry creates on, when it differs from the entry's (the slot's platform when
    * the entry was opened, which the old device lives on): a cross-platform replacement (#11232).

@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import {
-  SessionHeartbeatMonitor,
-  STUCK_REAP_WARN_MS,
-} from "../../src/daemon/SessionHeartbeatMonitor";
+import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
+import { getSessionHeartbeatCheckIntervalMs } from "../../src/daemon/sessionLivenessWindows";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
@@ -396,7 +394,7 @@ describe("owner heartbeats refused during a non-terminal release (#11691)", () =
   });
 
   test.each(REASONS)(
-    "a live owner's wedged %s release is forced at 40 seconds with its reason intact",
+    "a live owner's wedged %s release is forced at its recorded deadline with its reason intact",
     async (reason) => {
       restoreMs = 0;
       const gate = Promise.withResolvers<void>();
@@ -420,11 +418,15 @@ describe("owner heartbeats refused during a non-terminal release (#11691)", () =
         },
       );
       monitor.start();
-      for (let elapsed = 0; elapsed < STUCK_REAP_WARN_MS; elapsed += 2_000) {
+      const stuckAt = manager.getReleaseStuckAtMs(SESSION)!;
+      const scanMs = getSessionHeartbeatCheckIntervalMs();
+      const expectedForceAt = Math.ceil(stuckAt / scanMs) * scanMs;
+      for (let elapsed = 0; elapsed < expectedForceAt; elapsed += scanMs) {
+        expect(forcedAt).toEqual([]);
         expect((await heartbeat()).code).toBe("daemon_session_not_found");
-        await advance(2_000);
+        await advance(scanMs);
       }
-      expect(forcedAt).toEqual([40_000]);
+      expect(forcedAt).toEqual([expectedForceAt]);
       expect(manager.getSession(SESSION)).toBeNull();
       await assertReleased(reason);
       persistence.upsertGate = undefined;

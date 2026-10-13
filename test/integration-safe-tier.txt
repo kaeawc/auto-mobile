@@ -1,4 +1,7 @@
 # Classification of every *.integration.test.ts for local pre-push runs.
+# Windows CI also reads these tiers: unsafe files share one process;
+# everything else runs in safe shards beside it.
+# Windows CI runs the tiers concurrently WITHOUT isolated state paths; classify a file unsafe if it can touch a default or shared path.
 # Format: path | safe or unsafe | one-line reason naming the deciding construct.
 #
 # safe   = pure fakes over temp directories, in-memory DBs or loopback ephemeral

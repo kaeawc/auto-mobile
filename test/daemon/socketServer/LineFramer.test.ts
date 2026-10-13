@@ -138,3 +138,29 @@ describe("LineFramer", () => {
     expect(lines).toEqual([]);
   });
 });
+
+for (const newline of [false, true]) {
+  for (const split of [0, 5, 255, 300]) {
+    it(`overflow passes a bounded head for split ${split}, newline ${newline}`, () => {
+      const heads: Array<Buffer | undefined> = [];
+      const framer = new LineFramer(512, {
+        onLine: () => {
+          throw new Error("Oversized frame delivered");
+        },
+        onOverflow: (head?: Buffer) => heads.push(head),
+      });
+      const wire = Buffer.from('{"id":"owner","result":"' + "x".repeat(1_000));
+      framer.push(wire.subarray(0, split));
+      const tail = Buffer.concat([wire.subarray(split), Buffer.from(newline ? "\n" : "")]);
+      framer.push(tail);
+      expect(heads).toHaveLength(1);
+      expect(heads[0]).toEqual(wire.subarray(0, 256));
+      // The copied head must not retain the incoming chunk's memory.
+      wire.fill(0);
+      tail.fill(0);
+      expect(heads[0]?.toString()).toStartWith('{"id":"owner"');
+      framer.push("ignored\n");
+      expect(heads).toHaveLength(1);
+    });
+  }
+}

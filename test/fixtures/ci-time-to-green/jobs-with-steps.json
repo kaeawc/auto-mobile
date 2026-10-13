@@ -1,0 +1,404 @@
+{
+  "total_count": 14,
+  "jobs": [
+    {
+      "id": 115044548295,
+      "name": "Shell Changed Files",
+      "run_attempt": 1,
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-12T22:58:57Z",
+      "started_at": "2026-10-12T22:59:06Z",
+      "completed_at": "2026-10-12T22:59:25Z",
+      "labels": ["namespace-profile-auto-mobile"],
+      "runner_name": "nsc-runner-j8st0mj1pb98a",
+      "steps": [
+        {
+          "name": "Set up job",
+          "number": 1,
+          "conclusion": "success"
+        },
+        {
+          "name": "Set up runner",
+          "number": 2,
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 115044548473,
+      "name": "Detect Documentation-Only or SHA256-Only Changes",
+      "run_attempt": 1,
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-12T22:58:57Z",
+      "started_at": "2026-10-12T22:59:04Z",
+      "completed_at": "2026-10-12T22:59:21Z",
+      "labels": ["namespace-profile-auto-mobile-small"],
+      "runner_name": "nsc-runner-986f2i69j0l88",
+      "steps": [
+        {
+          "name": "Set up job",
+          "number": 1,
+          "conclusion": "success"
+        },
+        {
+          "name": "Set up runner",
+          "number": 2,
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 115044662211,
+      "name": "BATS Shell Tests (ubuntu-latest)",
+      "run_attempt": 1,
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-12T22:59:21Z",
+      "started_at": "2026-10-12T22:59:22Z",
+      "completed_at": "2026-10-12T23:04:31Z",
+      "labels": ["namespace-profile-auto-mobile"],
+      "runner_name": "nsc-runner-gpl8l5rnbp2ck",
+      "steps": [
+        {
+          "name": "Set up job",
+          "number": 1,
+          "conclusion": "success"
+        },
+        {
+          "name": "Set up runner",
+          "number": 2,
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 115044662237,
+      "name": "Fast Validation",
+      "run_attempt": 1,
+      "status": "completed",
+      "conclusion": "failure",
+      "created_at": "2026-10-12T22:59:21Z",
+      "started_at": "2026-10-12T22:59:33Z",
+      "completed_at": "2026-10-12T23:01:20Z",
+      "labels": ["namespace-profile-auto-mobile"],
+      "runner_name": "nsc-runner-nn7hk8emhqht4",
+      "steps": [
+        {
+          "name": "Set up job",
+          "number": 1,
+          "conclusion": "success"
+        },
+        {
+          "name": "Set up runner",
+          "number": 2,
+          "conclusion": "success"
+        },
+        {
+          "name": "Run fast validation checks",
+          "number": 15,
+          "conclusion": "failure"
+        },
+        {
+          "name": "Run offline lychee link check",
+          "number": 16,
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Check iOS version constant is in sync with package.json",
+          "number": 17,
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Post Install uv for documentation lock validation",
+          "number": 36,
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Post Setup Python for documentation lock validation",
+          "number": 37,
+          "conclusion": "skipped"
+        }
+      ]
+    },
+    {
+      "id": 115044662263,
+      "name": "Installer Minimal (macos-latest)",
+      "run_attempt": 1,
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-12T22:59:21Z",
+      "started_at": "2026-10-12T22:59:22Z",
+      "completed_at": "2026-10-12T22:59:34Z",
+      "labels": ["self-hosted", "automobile-mac"],
+      "runner_name": "mac",
+      "steps": [
+        {
+          "name": "Set up job",
+          "number": 1,
+          "conclusion": "success"
+        },
+        {
+          "name": "Skip installer validation",
+          "number": 2,
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Upload Logs",
+          "number": 8,
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Fail on error",
+          "number": 9,
+          "conclusion": "skipped"
+        }
+      ]
+    },
+    {
+      "id": 115044662265,
+      "name": "Installer Minimal (ubuntu-latest)",
+      "run_attempt": 1,
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-12T22:59:21Z",
+      "started_at": "2026-10-12T22:59:31Z",
+      "completed_at": "2026-10-12T22:59:47Z",
+      "labels": ["namespace-profile-auto-mobile-small"],
+      "runner_name": "nsc-runner-ebtrah3ldarsu",
+      "steps": [
+        {
+          "name": "Set up job",
+          "number": 1,
+          "conclusion": "success"
+        },
+        {
+          "name": "Set up runner",
+          "number": 2,
+          "conclusion": "success"
+        },
+        {
+          "name": "Skip installer validation",
+          "number": 3,
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Upload Logs",
+          "number": 9,
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Fail on error",
+          "number": 10,
+          "conclusion": "skipped"
+        }
+      ]
+    },
+    {
+      "id": 115044662266,
+      "name": "Node TypeScript Build and Test (ubuntu-latest)",
+      "run_attempt": 1,
+      "status": "completed",
+      "conclusion": "failure",
+      "created_at": "2026-10-12T22:59:21Z",
+      "started_at": "2026-10-12T22:59:36Z",
+      "completed_at": "2026-10-12T23:05:05Z",
+      "labels": ["namespace-profile-auto-mobile"],
+      "runner_name": "nsc-runner-nn2akpuh98c8k",
+      "steps": [
+        {
+          "name": "Set up job",
+          "number": 1,
+          "conclusion": "success"
+        },
+        {
+          "name": "Set up runner",
+          "number": 2,
+          "conclusion": "success"
+        },
+        {
+          "name": "Run complete unit lane",
+          "number": 13,
+          "conclusion": "failure"
+        },
+        {
+          "name": "Enforce 100ms budget for changed unit tests",
+          "number": 14,
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Measure cold module imports (advisory, #10429)",
+          "number": 16,
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Post Cache Turborepo",
+          "number": 33,
+          "conclusion": "skipped"
+        }
+      ]
+    },
+    {
+      "id": 115044662271,
+      "name": "Node Checks",
+      "run_attempt": 1,
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-12T22:59:21Z",
+      "started_at": "2026-10-12T22:59:33Z",
+      "completed_at": "2026-10-12T23:02:06Z",
+      "labels": ["namespace-profile-auto-mobile"],
+      "runner_name": "nsc-runner-4ti90mgs86lh8",
+      "steps": [
+        {
+          "name": "Set up job",
+          "number": 1,
+          "conclusion": "success"
+        },
+        {
+          "name": "Set up runner",
+          "number": 2,
+          "conclusion": "success"
+        },
+        {
+          "name": "Upload Heap Snapshots",
+          "number": 10,
+          "conclusion": "skipped"
+        }
+      ]
+    },
+    {
+      "id": 115044662301,
+      "name": "Node TypeScript Build and Test (windows-latest)",
+      "run_attempt": 1,
+      "status": "completed",
+      "conclusion": "failure",
+      "created_at": "2026-10-12T22:59:21Z",
+      "started_at": "2026-10-12T22:59:23Z",
+      "completed_at": "2026-10-12T23:11:26Z",
+      "labels": ["windows-latest"],
+      "runner_name": "GitHub Actions 1000653699",
+      "steps": [
+        {
+          "name": "Set up job",
+          "number": 1,
+          "conclusion": "success"
+        },
+        {
+          "name": "Skip Node TypeScript build and test",
+          "number": 2,
+          "conclusion": "skipped"
+        },
+        {
+          "name": "Run complete unit lane",
+          "number": 13,
+          "conclusion": "failure"
+        },
+        {
+          "name": "Post Cache Turborepo",
+          "number": 33,
+          "conclusion": "skipped"
+        }
+      ]
+    },
+    {
+      "id": 115044663147,
+      "name": "IDE Plugin",
+      "run_attempt": 1,
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-12T22:59:21Z",
+      "started_at": "2026-10-12T22:59:32Z",
+      "completed_at": "2026-10-12T22:59:36Z",
+      "labels": ["namespace-profile-auto-mobile-small"],
+      "runner_name": "nsc-runner-13p5sc8l8pqsm",
+      "steps": [
+        {
+          "name": "Set up job",
+          "number": 1,
+          "conclusion": "success"
+        },
+        {
+          "name": "Set up runner",
+          "number": 2,
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 115044664124,
+      "name": "Detekt",
+      "run_attempt": 1,
+      "status": "completed",
+      "conclusion": "skipped",
+      "created_at": "2026-10-12T22:59:22Z",
+      "started_at": "2026-10-12T22:59:22Z",
+      "completed_at": "2026-10-12T22:59:21Z",
+      "labels": ["ubuntu-latest"],
+      "runner_name": null,
+      "steps": []
+    },
+    {
+      "id": 115045243624,
+      "name": "iOS Build",
+      "run_attempt": 1,
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-12T23:01:20Z",
+      "started_at": "2026-10-12T23:01:21Z",
+      "completed_at": "2026-10-12T23:01:24Z",
+      "labels": ["namespace-profile-auto-mobile-small"],
+      "runner_name": "nsc-runner-6tofhptnlcrf0",
+      "steps": [
+        {
+          "name": "Set up job",
+          "number": 1,
+          "conclusion": "success"
+        },
+        {
+          "name": "Set up runner",
+          "number": 2,
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 115045244128,
+      "name": "SwiftLint",
+      "run_attempt": 1,
+      "status": "completed",
+      "conclusion": "skipped",
+      "created_at": "2026-10-12T23:01:20Z",
+      "started_at": "2026-10-12T23:01:20Z",
+      "completed_at": "2026-10-12T23:01:20Z",
+      "labels": ["self-hosted", "automobile-mac"],
+      "runner_name": null,
+      "steps": []
+    },
+    {
+      "id": 115046234265,
+      "name": "Shell Tests",
+      "run_attempt": 1,
+      "status": "completed",
+      "conclusion": "success",
+      "created_at": "2026-10-12T23:04:32Z",
+      "started_at": "2026-10-12T23:04:50Z",
+      "completed_at": "2026-10-12T23:04:53Z",
+      "labels": ["namespace-profile-auto-mobile-small"],
+      "runner_name": "nsc-runner-4p5fs83rn1k4k",
+      "steps": [
+        {
+          "name": "Set up job",
+          "number": 1,
+          "conclusion": "success"
+        },
+        {
+          "name": "Set up runner",
+          "number": 2,
+          "conclusion": "success"
+        }
+      ]
+    }
+  ]
+}

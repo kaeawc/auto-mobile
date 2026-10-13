@@ -153,6 +153,15 @@ dependencies {
   debugImplementation(libs.bundles.compose.ui.debug)
 }
 
+// Opt-in stability diagnostics for prototype renderer performance work.
+// scripts/android/compose-compiler-report.sh forces a compile and summarizes these reports.
+if (providers.gradleProperty("automobile.composeCompilerReports").orNull == "true") {
+  composeCompiler {
+    reportsDestination = layout.buildDirectory.dir("compose-compiler-reports")
+    metricsDestination = layout.buildDirectory.dir("compose-compiler-reports")
+  }
+}
+
 // Forward the prototype renderer screenshot and preview switches from the Gradle invocation to the
 // forked test JVM so `-Dscreenshot.record=true` (and friends) reach the tests. See
 // src/test/kotlin/.../prototype/screenshot/PrototypeScreenshotEnvironment.kt and

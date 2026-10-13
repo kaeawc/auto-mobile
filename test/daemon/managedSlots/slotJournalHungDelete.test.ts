@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
   ManagedSlotJournal,
-  SlotJournalInFlight,
   SLOT_JOURNAL_OVERDUE_DELETE_GRACE_MS,
   SLOT_JOURNAL_MAX_ABANDONED_DELETES,
+  SLOT_JOURNAL_STEP_BUDGET_MS,
+  SLOT_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS,
 } from "../../../src/daemon/managedSlots/slotJournal";
 import {
   ManagedSlotReconciler,
   DefaultManagedSpecResolver,
-  type ManagedSlotDeletionResult,
 } from "../../../src/daemon/managedSlots/reconciler";
 import { FakeSlotRegistry } from "../../fakes/FakeSlotRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -29,6 +29,16 @@ async function flush() {
   for (let i = 0; i < 150; i++) {
     await Promise.resolve();
   }
+}
+async function immediately<T>(operation: Promise<T>): Promise<T> {
+  let returned = false;
+  const result = operation.then((value) => {
+    returned = true;
+    return value;
+  });
+  await flush();
+  expect(returned).toBe(true);
+  return result;
 }
 async function harness(mode: "created" | "deleting" | "free" = "created") {
   const timer = new FakeTimer();
@@ -111,9 +121,11 @@ async function harness(mode: "created" | "deleting" | "free" = "created") {
 async function timeout(h: Awaited<ReturnType<typeof harness>>) {
   const drive = h.row
     ? h.journal.driveFreeDeviceDeletion(h.row, { deadlineMs: h.timer.now() + 10 })
-    : h.journal.driveDeletion((await h.registry.getSlotJournal(h.entry!.id))!, {
-        deadlineMs: h.timer.now() + 10,
-      });
+    : h.entry!.phase === "created"
+      ? h.journal.settleCreation(h.entry!, { adopt: false, deadlineMs: h.timer.now() + 10 })
+      : h.journal.driveDeletion((await h.registry.getSlotJournal(h.entry!.id))!, {
+          deadlineMs: h.timer.now() + 10,
+        });
   await flush();
   h.timer.advanceTime(h.row ? 10 : 15);
   await flush();
@@ -121,6 +133,119 @@ async function timeout(h: Awaited<ReturnType<typeof harness>>) {
 }
 
 describe("bounded abandoned journal deletes", () => {
+  for (const mode of ["deleting", "created"] as const) {
+    test(`${mode} public drives remain conservative beyond overdue grace`, async () => {
+      const h = await harness(mode);
+      h.deleter.beforeDelete = () => new Promise<void>(() => {});
+      await timeout(h);
+      h.timer.advanceTime(SLOT_JOURNAL_OVERDUE_DELETE_GRACE_MS + 1);
+      const before = await h.registry.listOpenSlotJournal(h.key);
+      const expected = {
+        kind: "blocked",
+        reason: "cleanup_pending",
+        message: "Removal of device 'device' is still in flight.",
+      };
+      expect(await immediately(h.journal.redriveSlot(h.key))).toMatchObject(expected);
+      const entry = before[0];
+      const step =
+        mode === "deleting" ? h.journal.driveDeletion(entry) : h.journal.settleCreation(entry);
+      expect(await immediately(step)).toMatchObject(expected);
+      expect(h.deleter.calls).toHaveLength(1);
+      expect(await h.registry.listOpenSlotJournal(h.key)).toEqual(before);
+      h.deleter.beforeDelete = undefined;
+      expect(await h.journal.runPass()).toMatchObject({
+        settled: [{ phase: mode === "deleting" ? "committed" : "rolled_back" }],
+      });
+      expect(h.deleter.calls).toHaveLength(2);
+    });
+  }
+
+  for (const mode of ["deleting", "created"] as const) {
+    test(`${mode} public step alone cannot abandon an overdue removal`, async () => {
+      const h = await harness(mode);
+      h.deleter.beforeDelete = () => new Promise<void>(() => {});
+      await timeout(h);
+      h.timer.advanceTime(SLOT_JOURNAL_OVERDUE_DELETE_GRACE_MS + 1);
+      const before = await h.registry.listOpenSlotJournal(h.key);
+      const step =
+        mode === "deleting"
+          ? h.journal.driveDeletion(before[0])
+          : h.journal.settleCreation(before[0]);
+      expect(await immediately(step)).toMatchObject({
+        kind: "blocked",
+        reason: "cleanup_pending",
+        message: "Removal of device 'device' is still in flight.",
+      });
+      expect(h.deleter.calls).toHaveLength(1);
+      expect(await h.registry.listOpenSlotJournal(h.key)).toEqual(before);
+    });
+  }
+
+  test("removal flag writes are bounded to six attempts", () => {
+    expect(SLOT_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS).toBe(6);
+  });
+
+  test("direct free deletion beyond overdue grace leaves attempts and retry to the pass", async () => {
+    const h = await harness("free");
+    h.deleter.beforeDelete = () => new Promise<void>(() => {});
+    await timeout(h);
+    h.timer.advanceTime(SLOT_JOURNAL_OVERDUE_DELETE_GRACE_MS + 1);
+    const before = await h.registry.listFreeDeviceDeletions();
+    expect(await immediately(h.journal.driveFreeDeviceDeletion(before[0]))).toEqual({
+      kind: "blocked",
+      message: "removal_in_flight",
+    });
+    expect(h.deleter.calls).toHaveLength(1);
+    expect(await h.registry.listFreeDeviceDeletions()).toEqual(before);
+    h.deleter.beforeDelete = undefined;
+    expect(await h.journal.runPass()).toMatchObject({
+      freeDeviceDeletions: [{ outcome: "absent" }],
+    });
+    expect(h.deleter.calls).toHaveLength(2);
+  });
+
+  test("direct free deletion remains blocked while the pass retry is pending", async () => {
+    const h = await harness("free");
+    h.deleter.beforeDelete = () => new Promise<void>(() => {});
+    await timeout(h);
+    h.timer.advanceTime(SLOT_JOURNAL_OVERDUE_DELETE_GRACE_MS + 1);
+    const pass = h.journal.runPass();
+    await flush();
+    expect(h.deleter.calls).toHaveLength(2);
+    const before = await h.registry.listFreeDeviceDeletions();
+    expect(await immediately(h.journal.driveFreeDeviceDeletion(before[0]))).toEqual({
+      kind: "blocked",
+      message: "removal_in_flight",
+    });
+    expect(h.deleter.calls).toHaveLength(2);
+    expect(await h.registry.listFreeDeviceDeletions()).toEqual(before);
+    h.timer.advanceTime(SLOT_JOURNAL_STEP_BUDGET_MS + 5);
+    expect(await pass).toMatchObject({ freeDeviceDeletions: [{ outcome: "failed" }] });
+  });
+
+  for (const mode of ["deleting", "created"] as const) {
+    test(`${mode} acquisition is blocked immediately while the pass retry is pending`, async () => {
+      const h = await harness(mode);
+      h.deleter.beforeDelete = () => new Promise<void>(() => {});
+      await timeout(h);
+      h.timer.advanceTime(SLOT_JOURNAL_OVERDUE_DELETE_GRACE_MS + 1);
+      const pass = h.journal.runPass();
+      await flush();
+      expect(h.deleter.calls).toHaveLength(2);
+      const before = await h.registry.listOpenSlotJournal(h.key);
+      expect(await immediately(h.journal.redriveSlot(h.key))).toMatchObject({
+        kind: "blocked",
+        reason: "cleanup_pending",
+        message: "Removal of device 'device' is still in flight.",
+      });
+      expect(await h.journal.runPass()).toMatchObject({ skipped: 1 });
+      expect(h.deleter.calls).toHaveLength(2);
+      expect(await h.registry.listOpenSlotJournal(h.key)).toEqual(before);
+      h.timer.advanceTime(SLOT_JOURNAL_STEP_BUDGET_MS + 5);
+      expect(await pass).toMatchObject({ blocked: [{ reason: "cleanup_pending" }] });
+    });
+  }
+
   test("free deletion blocks without an attempt within grace and discovers late absence", async () => {
     const h = await harness("free");
     const pending = Promise.withResolvers<void>();
@@ -144,19 +269,28 @@ describe("bounded abandoned journal deletes", () => {
   });
 
   test("late settlement of an abandoned token cannot clear its successor", async () => {
-    const tracker = new SlotJournalInFlight();
-    const old = Promise.withResolvers<ManagedSlotDeletionResult>();
-    const newer = Promise.withResolvers<ManagedSlotDeletionResult>();
-    const first = tracker.trackRemoval("ios", "device", () => old.promise);
-    tracker.markRemovalOverdue(first, 0);
-    expect(tracker.hasRemoval("ios", "device", SLOT_JOURNAL_OVERDUE_DELETE_GRACE_MS)).toBe(false);
-    const second = tracker.trackRemoval("ios", "device", () => newer.promise);
-    old.resolve({ kind: "absent" });
-    await first;
-    expect(tracker.hasRemoval("ios", "device")).toBe(true);
-    newer.resolve({ kind: "absent" });
-    await second;
-    expect(tracker.hasRemoval("ios", "device")).toBe(false);
+    const h = await harness("deleting");
+    const old = Promise.withResolvers<void>();
+    const newer = Promise.withResolvers<void>();
+    h.deleter.beforeDelete = () => (h.deleter.calls.length === 1 ? old.promise : newer.promise);
+    await timeout(h);
+    h.timer.advanceTime(SLOT_JOURNAL_OVERDUE_DELETE_GRACE_MS + 1);
+    const pass = h.journal.runPass();
+    await flush();
+    expect(h.deleter.calls).toHaveLength(2);
+    h.deleter.failWith = "late failure";
+    old.resolve();
+    await flush();
+    expect(h.journal.inFlight.hasRemoval("ios", "device")).toBe(true);
+    expect(await immediately(h.journal.redriveSlot(h.key))).toMatchObject({
+      kind: "blocked",
+      reason: "cleanup_pending",
+    });
+    h.deleter.failWith = undefined;
+    newer.resolve();
+    expect(await pass).toMatchObject({ settled: [{ phase: "committed" }] });
+    expect(h.journal.inFlight.hasRemoval("ios", "device")).toBe(false);
+    expect(h.deleter.calls).toHaveLength(2);
   });
 
   for (const mode of ["deleting", "free"] as const) {
@@ -190,7 +324,14 @@ describe("bounded abandoned journal deletes", () => {
     );
     h.deleter.beforeDelete = () => pending[h.deleter.calls.length - 1].promise;
     for (let i = 0; i < SLOT_JOURNAL_MAX_ABANDONED_DELETES; i++) {
-      await timeout(h);
+      if (i === 0) {
+        await timeout(h);
+      } else {
+        const pass = h.journal.runPass();
+        await flush();
+        h.timer.advanceTime(SLOT_JOURNAL_STEP_BUDGET_MS + 5);
+        await pass;
+      }
       h.timer.advanceTime(SLOT_JOURNAL_OVERDUE_DELETE_GRACE_MS);
     }
     expect(h.deleter.calls).toHaveLength(3);
@@ -205,7 +346,7 @@ describe("bounded abandoned journal deletes", () => {
     expect(h.deleter.calls).toHaveLength(4);
   });
 
-  for (const failures of [2, 8]) {
+  for (const failures of [2, SLOT_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS]) {
     test(`removal flag retries ${failures} busy writes and never adopts on exhaustion`, async () => {
       const h = await harness();
       const advance = h.registry.advanceSlotJournal.bind(h.registry);
@@ -219,13 +360,19 @@ describe("bounded abandoned journal deletes", () => {
       };
       const request = h.journal.requestRemoval(h.entry!);
       await flush();
-      for (let i = 0; i < 7; i++) {
+      for (let i = 0; i < SLOT_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS - 1; i++) {
         h.timer.advanceTime(Math.min(25 * 2 ** i, 1_000));
         await flush();
       }
       const returned = await request;
-      expect(calls).toBe(failures === 8 ? 8 : 3);
-      expect(returned.target.removalRequested).toBe(failures === 8 ? undefined : true);
+      expect(calls).toBe(
+        failures === SLOT_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS
+          ? SLOT_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS
+          : 3,
+      );
+      expect(returned.target.removalRequested).toBe(
+        failures === SLOT_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS ? undefined : true,
+      );
       h.registry.advanceSlotJournal = advance;
       expect(await h.journal.runPass()).toMatchObject({ settled: [{ phase: "rolled_back" }] });
       expect(h.deleter.calls).toHaveLength(1);
@@ -260,7 +407,7 @@ describe("bounded abandoned journal deletes", () => {
       deadlineMs: 20_000,
     });
     await flush();
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < SLOT_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS - 1; i++) {
       h.timer.advanceTime(Math.min(25 * 2 ** i, 1_000));
       await flush();
     }

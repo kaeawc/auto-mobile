@@ -720,7 +720,8 @@ Markers with 3 or more failed native deletes do not count as committed room.
 Before a cache deletion, a transaction marks its exact free row as deletion pending.
 That durable marker fences adoption and shutdown. Only authoritative absence removes
 it. A failed native delete is one that ran and did not confirm absence, including a
-delete that timed out. Blocked redrives and a passed preparation deadline never
+delete that timed out. A refusal before any native work (including an unregistered
+delete workflow), blocked redrives, and a passed preparation deadline never
 count as failed native deletes. Failed or unconfirmed deletion remains charged as
 `deleting` until its marker has 3 failed native deletes. At that threshold, an unbound
 marker contributes no resource charge or reservation ranking; a device still bound

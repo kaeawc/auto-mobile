@@ -270,7 +270,23 @@ export interface ManagedSlotDeletionTarget {
 
 export type ManagedSlotDeletionResult =
   | { kind: "absent"; evidence?: unknown }
-  | { kind: "failed"; message: string; evidence?: unknown };
+  | {
+      kind: "failed";
+      message: string;
+      evidence?: unknown;
+      notAttempted?: {
+        reason:
+          | "workflow_unavailable"
+          | "device_assigned_to_managed_slot"
+          | "device_owned_by_other_session"
+          | "device_owned_by_other_daemon"
+          | "inventory_incomplete"
+          | "booted_inventory_incomplete"
+          | "target_identity_conflict"
+          | "target_identity_unresolved"
+          | "target_not_destroyable";
+      };
+    };
 
 /** The verified permanent delete workflow (`deleteDevice`: stop, destroy, verify absence). */
 export interface ManagedSlotDeviceDeleter {
@@ -1850,7 +1866,10 @@ export class ManagedSlotReconciler {
         throw new ReconcileAbort(provisionFailure(error));
       }
       return await this.readyOrReleaseOnBusy(provisioned, async (release) => {
-        entry = await this.recordCreated(context, entry, provisioned);
+        if (provisioned.created && !this.isAutomationReady(provisioned)) {
+          this.journal.markRemovalIntended(entry);
+        }
+        entry = await this.recordCreated(context, entry, provisioned, release);
         if (!this.isAutomationReady(provisioned)) {
           return await this.discardUncommitted(
             context,
@@ -1954,15 +1973,31 @@ export class ManagedSlotReconciler {
     context: ReconcileContext,
     entry: SlotJournalEntry,
     provisioned: ManagedSlotProvisionedDevice,
+    release: () => Promise<void>,
   ): Promise<SlotJournalEntry> {
-    const recorded = await this.journal.advance(entry, {
-      expectedPhase: "creating",
-      phase: "created",
-      target: { newStableId: provisioned.device.stableId, newName: provisioned.device.name },
-    });
+    const recorded = await this.journal
+      .advance(entry, {
+        expectedPhase: "creating",
+        phase: "created",
+        target: {
+          newStableId: provisioned.device.stableId,
+          newName: provisioned.device.name,
+          ...(provisioned.created && !this.isAutomationReady(provisioned)
+            ? { removalRequested: true }
+            : {}),
+        },
+      })
+      .catch(async (error: unknown) => {
+        logger.warn(
+          `[ManagedSlots] recording created device failed: ${errorMessage(error)}`,
+          error,
+        );
+        await release();
+        throw error;
+      });
     if (recorded.kind !== "advanced") {
       // Another driver took the entry over and will settle the device by its recorded name.
-      await this.releaseSession(provisioned.sessionUuid);
+      await release();
       throw new ReconcileAbort(
         failure("concurrent_modification", "The slot's journal entry was taken over."),
       );
@@ -2043,10 +2078,17 @@ export class ManagedSlotReconciler {
     release: () => Promise<void>,
     reason: ManagedSlotReconcileFailure,
   ): Promise<never> {
-    if (provisioned.created) {
-      this.journal.markRemovalIntended(entry);
+    try {
+      if (provisioned.created) {
+        this.journal.markRemovalIntended(entry);
+        entry = await this.journal.requestRemoval(entry, {
+          deadlineMs: context.request.deadlineMs,
+          signal: context.request.signal,
+        });
+      }
+    } finally {
+      await release();
     }
-    await release();
     try {
       await this.cleanupUncommitted(context, provisioned, entry);
     } catch (error) {
@@ -2068,11 +2110,11 @@ export class ManagedSlotReconciler {
       this.noteJournal(context, (await this.journal.close(entry, "rolled_back")).entry);
       return;
     }
-    entry = await this.journal.requestRemoval(entry, {
-      deadlineMs: context.request.deadlineMs,
-      signal: context.request.signal,
-    });
     this.noteJournal(context, entry);
+    if (!entry.target.removalRequested && this.deps.timer.now() >= context.request.deadlineMs) {
+      // The first flag write was attempted; memory fences adoption until a later redrive.
+      return;
+    }
     // Losing a compare-and-set never licenses deleting the device the winner committed.
     const holder = await this.deps.registry.findDeviceHolder(
       context.request.platform,

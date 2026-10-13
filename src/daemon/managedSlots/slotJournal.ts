@@ -344,7 +344,7 @@ export class ManagedSlotJournal {
   private readonly isExecOwnerLive: SlotExecOwnerLiveness;
   private readonly backoff: BackoffPolicy;
   private readonly budgets: SlotJournalStageBudgets;
-  // Intent is in memory: death before a successful flag write leaves a later owner free to adopt.
+  // Memory bridges registry contention; only an unwritable flag can leave intent lost on death.
   private readonly removalIntents = new Set<number>();
   private readonly removalFlagPacing: RegistryRetryPacing;
 
@@ -391,8 +391,8 @@ export class ManagedSlotJournal {
     }
     this.markRemovalIntended(entry);
     if (options.deadlineMs !== undefined && this.deps.timer.now() >= options.deadlineMs) {
-      logger.warn(`[SlotJournal] Removal flag for entry ${entry.id} missed its deadline.`);
-      return entry;
+      // Even an expired request must attempt durability before releasing its created device.
+      return this.retryRemovalFlag(entry, new AbortController().signal, true);
     }
     const controller = new AbortController();
     const signal = options.signal
@@ -425,17 +425,19 @@ export class ManagedSlotJournal {
   private async retryRemovalFlag(
     entry: SlotJournalEntry,
     signal: AbortSignal,
+    singleAttempt = false,
   ): Promise<SlotJournalEntry> {
-    for (let attempt = 1; attempt <= SLOT_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS; attempt++) {
+    const maxAttempts = singleAttempt ? 1 : SLOT_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       signal.throwIfAborted();
-      const recorded = await this.tryRemovalFlag(entry, signal);
+      const recorded = await this.tryRemovalFlag(entry, signal, singleAttempt);
       if (recorded) {
         if (recorded.kind === "advanced" || recorded.kind === "journal_conflict") {
           this.removalIntents.delete(entry.id);
         }
         return recorded.kind === "advanced" ? recorded.entry : entry;
       }
-      if (attempt < SLOT_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS) {
+      if (attempt < maxAttempts) {
         await this.removalFlagPacing.wait(this.removalFlagPacing.delay(attempt), signal);
       }
     }
@@ -443,25 +445,24 @@ export class ManagedSlotJournal {
     return entry;
   }
 
-  private async tryRemovalFlag(entry: SlotJournalEntry, signal: AbortSignal) {
+  private async tryRemovalFlag(entry: SlotJournalEntry, signal: AbortSignal, immediate = false) {
     try {
-      return await this.removalFlagPacing.run(
-        () =>
-          this.advanceStep(
-            entry,
-            {
-              expectedPhase: entry.phase,
-              phase: entry.phase,
-              target: {
-                removalRequested: true,
-                ...(entry.target.newStableId ? { newStableId: entry.target.newStableId } : {}),
-              },
+      const write = () =>
+        this.advanceStep(
+          entry,
+          {
+            expectedPhase: entry.phase,
+            phase: entry.phase,
+            target: {
+              removalRequested: true,
+              ...(entry.target.newStableId ? { newStableId: entry.target.newStableId } : {}),
             },
-            signal,
-          ),
-        (result) => result.kind === "advanced",
-        signal,
-      );
+          },
+          signal,
+        );
+      return await (immediate
+        ? write()
+        : this.removalFlagPacing.run(write, (result) => result.kind === "advanced", signal));
     } catch (error) {
       if (classifySqliteError(error) !== "retryable") {
         // Preserve non-retryable errors; the in-memory intent still prevents adoption.
@@ -1077,7 +1078,14 @@ export class ManagedSlotJournal {
   }
 
   async advance(entry: SlotJournalEntry, input: Omit<AdvanceSlotJournalInput, "owner">) {
-    return this.advanceStep(entry, input);
+    const result = await this.advanceStep(entry, input);
+    if (
+      result.kind === "journal_conflict" ||
+      (result.kind === "advanced" && result.entry.target.removalRequested)
+    ) {
+      this.removalIntents.delete(entry.id);
+    }
+    return result;
   }
 
   private async advanceStep(
@@ -1724,7 +1732,11 @@ export class ManagedSlotJournal {
         },
         (error) => ({ kind: "failed", message: errorMessage(error) }),
       );
-      return { ...result, nativeDeleteFailed: operation !== undefined && result.kind !== "absent" };
+      return {
+        ...result,
+        nativeDeleteFailed:
+          operation !== undefined && result.kind === "failed" && !result.notAttempted,
+      };
     } finally {
       if (operation) {
         this.inFlight.markRemovalOverdue(operation, this.deps.timer.now());

@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import type { TeardownDeviceArgs, TeardownToolResponse } from "../../src/server/deviceTools";
+import {
+  createTeardownFailureResponse,
+  type TeardownDeviceArgs,
+  type TeardownToolResponse,
+} from "../../src/server/deviceTools";
 import { WorkflowManagedSlotDeviceDeleter } from "../../src/server/managedSlotDeviceDeleter";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -59,6 +63,51 @@ describe("WorkflowManagedSlotDeviceDeleter", () => {
 
   test("before the device tools are registered, deletion fails", async () => {
     const deleter = new WorkflowManagedSlotDeviceDeleter(timer, () => undefined);
-    expect((await deleter.deleteAndVerifyAbsence(target)).kind).toBe("failed");
+    expect(await deleter.deleteAndVerifyAbsence(target)).toMatchObject({
+      kind: "failed",
+      notAttempted: { reason: "workflow_unavailable" },
+    });
+  });
+  test.each([
+    "device_assigned_to_managed_slot",
+    "device_owned_by_other_session",
+    "device_owned_by_other_daemon",
+    "inventory_incomplete",
+    "booted_inventory_incomplete",
+    "target_identity_conflict",
+    "target_identity_unresolved",
+    "target_not_destroyable",
+  ])("pre-native refusal %s is not attempted", async (code) => {
+    const response = createTeardownFailureResponse(
+      { target: { platform: "android", isVirtual: true, stableId: "amslot-1" }, mode: "destroy" },
+      "precondition",
+      code,
+      "refused",
+    );
+    const deleter = new WorkflowManagedSlotDeviceDeleter(timer, () => async () => response);
+    expect(await deleter.deleteAndVerifyAbsence(target)).toMatchObject({
+      kind: "failed",
+      notAttempted: { reason: code },
+    });
+  });
+
+  test.each([
+    ["stop", "device_owned_by_other_session"],
+    ["destroy", "device_owned_by_other_daemon"],
+    ["verification", "device_assigned_to_managed_slot"],
+    ["precondition", "operation_cancelled"],
+    ["precondition", "operation_failed"],
+    ["precondition", "unknown_refusal"],
+  ] as const)("%s %s remains counted", async (phase, code) => {
+    const response = createTeardownFailureResponse(
+      { target: { platform: "android", isVirtual: true, stableId: "amslot-1" }, mode: "destroy" },
+      phase,
+      code,
+      "failed",
+    );
+    const deleter = new WorkflowManagedSlotDeviceDeleter(timer, () => async () => response);
+    const result = await deleter.deleteAndVerifyAbsence(target);
+    expect(result).toMatchObject({ kind: "failed" });
+    expect(result).not.toHaveProperty("notAttempted");
   });
 });

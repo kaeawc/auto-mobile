@@ -752,6 +752,18 @@ function* writeExclusiveLockFile(
   try {
     yield { op: "mkdir", path: dirname(path) };
     fileSystem.mkdir(dirname(path));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      // A parent occupied by a non-directory reads as held for pre-#12086 parity.
+      logger.debug(
+        `Lock parent already occupied at ${dirname(path)}: ${errorMessage(error)}`,
+        error,
+      );
+      return { acquired: false, generation: undefined };
+    }
+    throw toActionableError(error, `Failed to create exclusive lock file at ${path}`);
+  }
+  try {
     const generation = captureLockOwnerGeneration(options.ownerGeneration, pid);
     const content = formatLockContent(pid, options.ownerToken, options.metadata, generation);
     const publication = yield* publishFile(path, content, pid, fileSystem, options.idGenerator);

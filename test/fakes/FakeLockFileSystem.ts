@@ -71,7 +71,7 @@ export class FakeLockFileSystem implements LockFileSystem {
   mkdir(path: string): void {
     this.record("mkdir", path);
     if (this.files.has(path)) {
-      throw this.error("ENOTDIR", path);
+      throw this.error("EEXIST", path);
     }
     let parent = path;
     while (!this.directories.has(parent)) {

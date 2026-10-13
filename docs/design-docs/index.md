@@ -28,4 +28,5 @@ Start with [installation](../index.md#install), then see the
 acts, and returns updated state.
 
 Android contract design: [agent-authored prototype specification](plat/android/prototype-ux.md).
+Prototype diagnostics: [performance measurement](plat/android/prototype-performance-measurement.md).
 iOS simulator prototypes: [prototype agent](plat/ios/prototype-agent.md).

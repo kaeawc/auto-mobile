@@ -184,6 +184,11 @@ export interface LivenessScenarioOptions {
   /** Autolock acquisition with the 60 s window (AUTOMOBILE_DEVICE_POOL_AUTOLOCK). */
   autolock?: boolean;
   /**
+   * Set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS for daemon and proxy; the keeper runs at half
+   * this lease. For scenarios spanning tens of virtual minutes whose claim is cadence-independent.
+   */
+  ownerLeaseMs?: number;
+  /**
    * Give every daemon of the scenario the host's managed-slot registry: one in-memory registry
    * that outlives a daemon restart, as the registry file does (see
    * {@link LivenessScenario.holdAsManagedExecution}). Without it the host has no registry.
@@ -352,6 +357,8 @@ function matchingDaemonManager(): FakeDaemonManager {
 }
 
 const SCENARIO_ENV_KEYS = [
+  "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
+  "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
   "AUTOMOBILE_DEVICE_POOL_AUTOLOCK",
   "AUTO_MOBILE_DEVICE_POOL_AUTOLOCK",
   "AUTOMOBILE_DEVICE_POOL_TIMEOUT",
@@ -448,6 +455,7 @@ export class LivenessScenario {
   proxy!: DaemonMcpProxy;
   private readonly deviceNames: Record<string, string>;
   private readonly autolock: boolean;
+  private readonly ownerLeaseMs: number | undefined;
   private readonly freshConnectionIdPerDial: boolean;
   private readonly realStartAdmission: boolean;
   private readonly connectionIds = new Map<string, string>();
@@ -477,6 +485,7 @@ export class LivenessScenario {
     this.deviceIds = options.devices ?? ["emulator-5554"];
     this.deviceNames = options.deviceNames ?? {};
     this.autolock = options.autolock ?? false;
+    this.ownerLeaseMs = options.ownerLeaseMs;
     this.freshConnectionIdPerDial = options.freshConnectionIdPerDial ?? false;
     this.realStartAdmission = options.realStartAdmission ?? false;
     this.sharedDeviceClaims = options.sharedDeviceClaims ?? false;
@@ -511,6 +520,9 @@ export class LivenessScenario {
     for (const key of SCENARIO_ENV_KEYS) {
       this.savedEnv.set(key, process.env[key]);
       delete process.env[key];
+    }
+    if (this.ownerLeaseMs !== undefined) {
+      process.env.AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS = String(this.ownerLeaseMs);
     }
     if (this.autolock) {
       process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";

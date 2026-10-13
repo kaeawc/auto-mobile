@@ -1,4 +1,5 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { logger, LogLevel } from "../../src/utils/logger";
+import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
   AUTOLOCK_IDLE_WINDOW_MS,
   DEFAULT_IDLE_WINDOWS_MS,
@@ -495,4 +496,49 @@ describe("session expiry properties under clock discontinuities (#10670)", () =>
     LONG_STALLS,
     stallNeverReleasesActiveSession,
   );
+});
+
+describe("property replay logger isolation", () => {
+  test("a replay silences logging and restores the previous level", async () => {
+    const previousLevel = logger.getLogLevel();
+    const levels: LogLevel[] = [];
+    const info = spyOn(logger, "info").mockImplementation(() => {
+      levels.push(logger.getLogLevel());
+    });
+    try {
+      logger.setLogLevel(LogLevel.WARN);
+      await runSchedule(generateSchedule(1, ALIVE_WITH_DISCONTINUITIES), ORDER_SEED_A);
+      expect(levels.length).toBeGreaterThan(0);
+      expect(levels.every((level) => level === LogLevel.NONE)).toBe(true);
+      expect(logger.getLogLevel()).toBe(LogLevel.WARN);
+    } finally {
+      info.mockRestore();
+      logger.setLogLevel(previousLevel);
+    }
+    expect(logger.getLogLevel()).toBe(previousLevel);
+  });
+
+  test("a replay restores logging even when reading an instant throws", async () => {
+    const previousLevel = logger.getLogLevel();
+    const failure = new Error("throwing replay input");
+    let levelDuringReplay: LogLevel | undefined;
+    const instant: Instant = {
+      at: 1,
+      get events() {
+        levelDuringReplay = logger.getLogLevel();
+        throw failure;
+      },
+    };
+    try {
+      logger.setLogLevel(LogLevel.ERROR);
+      await expect(
+        runSchedule(generateSchedule(1, ALIVE_WITH_DISCONTINUITIES), ORDER_SEED_A, [instant]),
+      ).rejects.toBe(failure);
+      expect(levelDuringReplay).toBe(LogLevel.NONE);
+      expect(logger.getLogLevel()).toBe(LogLevel.ERROR);
+    } finally {
+      logger.setLogLevel(previousLevel);
+    }
+    expect(logger.getLogLevel()).toBe(previousLevel);
+  });
 });

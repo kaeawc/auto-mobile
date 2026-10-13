@@ -517,8 +517,49 @@ describe("daemon release wiring (#10975)", () => {
     }
   });
 
+  test("a configured owner lease sets the keeper cadence and restores the environment", async () => {
+    const keys = [
+      "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
+      "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
+    ] as const;
+    const previous = keys.map((key) => process.env[key]);
+    const ownerLeaseMs = 120_000;
+    try {
+      scenario = await LivenessScenario.start({ ownerLeaseMs });
+      expect(process.env[keys[0]]).toBe(String(ownerLeaseMs));
+      expect(process.env[keys[1]]).toBeUndefined();
+      const session = await scenario.acquire();
+      for (let interval = 0; interval < 4; interval++) {
+        const lastBeat = scenario.daemon.manager.getSession(session)!.lastOwnerHeartbeat!;
+        await scenario.idle(ownerLeaseMs / 2 - 1);
+        expect(scenario.daemon.manager.getSession(session)!.lastOwnerHeartbeat).toBe(lastBeat);
+        await scenario.idle(1);
+        expect(scenario.daemon.manager.getSession(session)!.lastOwnerHeartbeat).toBe(
+          lastBeat + ownerLeaseMs / 2,
+        );
+        expect(scenario.releases).toEqual([]);
+        // Keep the idle clock fresh; this pin concerns the owner's lease, not idle expiry.
+        await scenario.toolCall(session);
+      }
+      await scenario.stop();
+      expect(keys.map((key) => process.env[key])).toEqual(previous);
+    } finally {
+      await scenario?.stop();
+      keys.forEach((key, index) => {
+        const value = previous[index];
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      });
+    }
+    expect(keys.map((key) => process.env[key])).toEqual(previous);
+  });
+
   test("a never-settling call that carries no request deadline holds the session to the veto ceiling; past it the call is aborted and the device freed (#10820)", async () => {
-    scenario = await LivenessScenario.start();
+    // A 2-minute lease cuts keeper round trips (~75% of cost); the claim is about the real ceiling.
+    scenario = await LivenessScenario.start({ ownerLeaseMs: 120_000 });
     const session = await scenario.acquire();
     const startedAt = scenario.timer.now();
     // Straight to the daemon's MCP entry: no control socket stamped a deadline on the call.

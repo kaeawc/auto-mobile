@@ -210,6 +210,11 @@ actor PrototypeTransport {
         await withCheckedContinuation { delivery.yield(.flush($0)) }
     }
 
+    /// Test-only synchronization: joins a finished input's reader before flushing deliveries and outbound calls.
+    func waitForReader(_ id: Int) async {
+        await clients[id]?.reader.value
+    }
+
     func helloDeadline(_ id: Int) {
         guard var client = clients[id], client.gate.state == .awaitingHello else { return }
         perform(client.gate.fail(.helloTimeout), on: id, connection: client.connection)

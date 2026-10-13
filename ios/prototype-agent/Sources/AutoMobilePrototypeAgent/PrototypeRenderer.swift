@@ -885,7 +885,10 @@ struct PagerView: View {
 
     private var selection: Binding<Int> {
         Binding(
-            get: { model.pages[pagerId] ?? 0 },
+            get: {
+                _ = model.refusedChanges
+                return model.pages[pagerId] ?? 0
+            },
             set: { model.setPage(pagerId, $0) }
         )
     }
@@ -903,6 +906,7 @@ struct PagerView: View {
 
     var body: some View {
         if fills {
+            let _: Int = model.refusedChanges
             TabView(selection: selection) {
                 ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
                     NodeView(node: page, model: model)
@@ -917,7 +921,7 @@ struct PagerView: View {
             // Pages own the safe area themselves (safeAreaPadding), as on Android.
             .ignoresSafeArea()
         } else {
-            let index = min(selection.wrappedValue, max(pages.count - 1, 0))
+            let index = min(model.pages[pagerId] ?? 0, max(pages.count - 1, 0))
             if pages.indices.contains(index) {
                 NodeView(node: pages[index], model: model)
                     .environment(\.pagerContext, PagerContext(page: index, count: pages.count))

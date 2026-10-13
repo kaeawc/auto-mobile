@@ -59,11 +59,15 @@ struct PrototypeSliderView: View {
     let style: Style?
 
     var body: some View {
+        let _: Int = model.refusedChanges
         let lower = node.min ?? 0
         let upper = Swift.max(node.max ?? 1, lower + 0.000001)
         let key = node.stateKey ?? ""
         let value = Binding<Double>(
-            get: { Swift.min(Swift.max(model.state[key]?.numberValue ?? lower, lower), upper) },
+            get: {
+                _ = model.refusedChanges
+                return Swift.min(Swift.max(model.state[key]?.numberValue ?? lower, lower), upper)
+            },
             set: { raw in
                 let snapped = snapPrototypeSlider(raw, min: lower, max: upper, step: node.step)
                 model.slide(key: key, value: snapped, then: node.onTap ?? [])
@@ -592,6 +596,7 @@ struct PrototypeTimePickerView: View {
     let model: PrototypeModel
 
     var body: some View {
+        let _: Int = model.refusedChanges
         let hourKey = node.hourKey ?? ""
         let minuteKey = node.minuteKey ?? ""
         let hour = model.state[hourKey]?.intValue ?? 0
@@ -600,7 +605,10 @@ struct PrototypeTimePickerView: View {
         // `DatePicker` wheel is one unlabelled element to accessibility.
         HStack(spacing: 0) {
             wheel(PrototypeTime.hourLabel, selection: Binding(
-                get: { use24 ? hour : PrototypeTime.hour12(of: hour) },
+                get: {
+                    _ = model.refusedChanges
+                    return use24 ? hour : PrototypeTime.hour12(of: hour)
+                },
                 set: { picked in
                     commit(
                         hour: use24 ? picked : PrototypeTime.hour24(hour12: picked, pm: PrototypeTime.isPM(hour: hour)),
@@ -609,12 +617,18 @@ struct PrototypeTimePickerView: View {
                 }
             ), values: use24 ? Array(0 ..< 24) : Array(1 ... 12), format: use24 ? "%02d" : "%d")
             wheel(PrototypeTime.minuteLabel, selection: Binding(
-                get: { minute },
+                get: {
+                    _ = model.refusedChanges
+                    return minute
+                },
                 set: { commit(hour: hour, minute: $0) }
             ), values: Array(0 ..< 60), format: "%02d")
             if !use24 {
                 Picker(PrototypeTime.meridiemLabel, selection: Binding(
-                    get: { PrototypeTime.isPM(hour: hour) ? 1 : 0 },
+                    get: {
+                        _ = model.refusedChanges
+                        return PrototypeTime.isPM(hour: hour) ? 1 : 0
+                    },
                     set: { commit(
                         hour: PrototypeTime.hour24(hour12: PrototypeTime.hour12(of: hour), pm: $0 == 1),
                         minute: minute
@@ -667,10 +681,14 @@ struct PrototypeDatePickerView: View {
     let model: PrototypeModel
 
     var body: some View {
+        let _: Int = model.refusedChanges
         let key = node.stateKey ?? ""
         let bound = model.state[key]?.stringValue
         let selection = Binding<Date>(
-            get: { bound.flatMap(PrototypeDate.date(from:)) ?? PrototypeDate.range.lowerBound },
+            get: {
+                _ = model.refusedChanges
+                return bound.flatMap(PrototypeDate.date(from:)) ?? PrototypeDate.range.lowerBound
+            },
             set: { date in
                 let picked = PrototypeDate.string(from: date)
                 if picked != bound { model.choose(key: key, value: picked, then: node.onTap ?? []) }

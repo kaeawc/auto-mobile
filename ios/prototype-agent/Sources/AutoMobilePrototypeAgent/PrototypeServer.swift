@@ -10,6 +10,7 @@ final class PrototypeServer {
     private let configuration: PrototypeAgentConfiguration
     private let transport: PrototypeTransport
     private let delivery: PrototypeTransportDelivery
+    private let listenerQueue = DispatchQueue(label: "dev.jasonpearson.automobile.prototype-agent.listener")
     private var listener: NWListener?
     private var acceptor: Task<Void, Never>?
 
@@ -51,7 +52,7 @@ final class PrototypeServer {
                     await transport.accept(connection)
                 }
             }
-            listener.start(queue: .global(qos: .userInitiated))
+            listener.start(queue: listenerQueue)
             self.listener = listener
         } catch {
             NSLog("[AutoMobilePrototypeAgent] listener failed: %@", String(describing: error))

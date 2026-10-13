@@ -49,9 +49,12 @@ private final class TransportLog {
 private final class TransportBytes: @unchecked Sendable {
     private let lock = NSLock()
     private var data = Data()
+    private var cancellations = 0
 
     func append(_ bytes: Data) { lock.withLock { data.append(bytes) } }
+    func cancel() { lock.withLock { cancellations += 1 } }
     var snapshot: Data { lock.withLock { data } }
+    var cancelCount: Int { lock.withLock { cancellations } }
 }
 
 @MainActor
@@ -60,6 +63,7 @@ private final class TransportSocket {
     private let closed = AsyncStream<Void>.makeStream()
     private let storage = TransportBytes()
     var bytes: Data { storage.snapshot }
+    var cancelCount: Int { storage.cancelCount }
 
     var connection: PrototypeTransportConnection {
         let input = input
@@ -68,6 +72,7 @@ private final class TransportSocket {
         return PrototypeTransportConnection(chunks: input.stream, send: { data in
             storage.append(data)
         }, cancel: {
+            storage.cancel()
             input.continuation.finish()
             closed.continuation.yield(())
         })
@@ -96,6 +101,67 @@ final class PrototypeTransportTests: XCTestCase {
     }
 
     private func hello() throws -> Data { try line(["type": "hello", "token": token]) }
+
+    func testFinishedInputDisconnectsAuthenticatedReader() async throws {
+        let clock = TransportDeadline()
+        let transport = PrototypeTransport(token: token, sleep: { _ in await clock.sleep() })
+        let log = TransportLog()
+        let delivery = PrototypeTransportDelivery(transport: transport) { _, _ in log.append("request") }
+        delivery.onClientCountChanged = { log.append("count:\($0)") }
+        let socket = TransportSocket()
+        let id = await transport.accept(socket.connection)
+        try socket.input.continuation.yield(hello())
+        await log.waitFor(1)
+        await transport.flush()
+        XCTAssertEqual(log.turns, ["count:1"])
+        XCTAssertEqual(try socket.frames().first?["type"] as? String, "hello_result")
+        await clock.waitFor(1)
+
+        socket.input.continuation.finish()
+        await transport.waitForReader(id)
+        await transport.flush()
+        XCTAssertEqual(log.turns, ["count:1", "count:0"])
+        XCTAssertEqual(socket.cancelCount, 1)
+        let bytes = socket.bytes
+        delivery.broadcast(["type": "prototype_event", "sequence": 1])
+        await transport.flush()
+        XCTAssertEqual(socket.bytes, bytes)
+        XCTAssertEqual(log.turns, ["count:1", "count:0"])
+        await clock.release()
+        withExtendedLifetime(delivery) {}
+    }
+
+    func testThrowingInputDispatchesBufferedRequestBeforeDisconnect() async throws {
+        let clock = TransportDeadline()
+        let transport = PrototypeTransport(token: token, sleep: { _ in await clock.sleep() })
+        let log = TransportLog()
+        let delivery = PrototypeTransportDelivery(transport: transport) { message, _ in
+            log.append("request:\(message["requestId"] as? String ?? "")")
+        }
+        delivery.onClientCountChanged = { log.append("count:\($0)") }
+        let socket = TransportSocket()
+        let id = await transport.accept(socket.connection)
+        try socket.input.continuation.yield(hello())
+        await log.waitFor(1)
+        await transport.flush()
+        XCTAssertEqual(log.turns, ["count:1"])
+        XCTAssertEqual(try socket.frames().first?["type"] as? String, "hello_result")
+        await clock.waitFor(1)
+
+        try socket.input.continuation.yield(line(["requestId": "last"]))
+        socket.input.continuation.finish(throwing: CocoaError(.fileReadUnknown))
+        await transport.waitForReader(id)
+        await transport.flush()
+        XCTAssertEqual(log.turns, ["count:1", "request:last", "count:0"])
+        XCTAssertEqual(socket.cancelCount, 1)
+        let bytes = socket.bytes
+        delivery.broadcast(["type": "prototype_event", "sequence": 1])
+        await transport.flush()
+        XCTAssertEqual(socket.bytes, bytes)
+        XCTAssertEqual(log.turns, ["count:1", "request:last", "count:0"])
+        await clock.release()
+        withExtendedLifetime(delivery) {}
+    }
 
     func testThousandFramesChunkedInRequestAndSequenceOrder() async throws {
         let clock = TransportDeadline()

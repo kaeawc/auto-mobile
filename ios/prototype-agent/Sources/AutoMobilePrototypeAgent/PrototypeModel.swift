@@ -13,7 +13,8 @@ final class PrototypeModel {
     private(set) var pages: [String: Int] = [:]
     private(set) var appearance: PrototypeAppearance?
     private(set) var deviceDark = false
-    private var rejectedEditRevision = 0
+    /// Redraws controls that hold platform values when a transition leaves state and pages unchanged.
+    private var refusedChangeRevision = 0
     /// Receives the new value synchronously before it is stored or any transition side effects run.
     @ObservationIgnored var onSessionChange: ((PrototypeSession) -> Void)?
 
@@ -23,10 +24,10 @@ final class PrototypeModel {
         // of an unchanged (non-Equatable) spec merely by copying the session back.
         if replacingSpec || session.isShown != next.isShown { spec = next.spec }
         session = next
-        state = next.state
-        pages = next.pages
-        appearance = next.appearance
-        deviceDark = next.deviceDark
+        if state != next.state { state = next.state }
+        if pages != next.pages { pages = next.pages }
+        if appearance != next.appearance { appearance = next.appearance }
+        if deviceDark != next.deviceDark { deviceDark = next.deviceDark }
     }
 
     var safeInsets = UIEdgeInsets.zero
@@ -237,10 +238,15 @@ final class PrototypeModel {
     /// TTL while the prototype stays up.
     private func apply(activity: Bool = true, _ transition: (inout PrototypeSession) -> [PrototypeEvent]) {
         let wasShown = session.isShown
+        let previousState = session.state
+        let previousPages = session.pages
         // `transition` adds the `appearance_changed` a state or page change caused.
         var next = session
         let events = next.transition(transition)
         publish(next)
+        // A rejected edit (#11562) or no-op transition leaves the stored values unchanged;
+        // redraw value-holding controls so they show those values instead of the refused input.
+        if next.state == previousState, next.pages == previousPages { refusedChangeRevision += 1 }
         if session.isShown {
             if activity { idleTimer.arm() }
         } else {
@@ -271,18 +277,21 @@ final class PrototypeModel {
         return status
     }
 
+    /// Registers a view or binding's dependency on redraws after refused or no-op transitions.
+    var refusedChanges: Int {
+        refusedChangeRevision
+    }
+
     /// Typing goes through `change`, so every edit both updates state and emits `change`.
     func binding(forStateKey key: String) -> Binding<String> {
-        Binding(
+        _ = refusedChanges
+        return Binding(
             get: {
-                _ = self.rejectedEditRevision
+                _ = self.refusedChanges
                 return self.state[key]?.displayString ?? ""
             },
             set: { value in
                 self.apply { $0.change(key: key, value: .string(value)) }
-                // A rejected edit (#11562) leaves the state as it was; redraw so the field shows it
-                // again instead of the text that was refused.
-                if self.state[key] != .string(value) { self.rejectedEditRevision += 1 }
             }
         )
     }

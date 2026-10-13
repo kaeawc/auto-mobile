@@ -13,6 +13,8 @@
 import { sessionIdleDeadline } from "./sessionClocks";
 import type { Session } from "./sessionManager";
 import { unsettledExecutionVetoExpiresAt } from "./unsettledExecutionVeto";
+import { ignoresManagedExecutionIdleDeadline } from "./managedExecutionLiveness";
+import type { LivenessLeasePhase } from "./livenessOwnerLease";
 
 /** The kind of client holding a device session. */
 export type SessionHolderKind = "stdio-proxy" | "desktop" | "ide" | "cli" | "junit" | "unknown";
@@ -27,9 +29,9 @@ export interface SessionHoldDiagnostics {
    * session unless a new tool call arrives first. While a call is in flight its
    * veto pushes this out to the shared unsettled-execution bound (#10712, #10713):
    * the call's request deadline plus grace, or the fallback ceiling past the idle
-   * deadline when some call has no deadline.
+   * deadline when some call has no deadline. Null means an idle-exempt managed owner lease.
    */
-  idleReleaseAt: number;
+  idleReleaseAt: number | null;
   holderKind: SessionHolderKind;
   /** Tool executions in flight on this session; idle release waits for them. */
   activeExecutions: number;
@@ -90,7 +92,13 @@ export function classifySessionHolderKind(
  * suspect grace extends only the heartbeat lease, never the idle deadline (#11107). The instant
  * is `sessionIdleDeadline`, the same one the scan and a late call's admission judge (#11558).
  */
-export function idleReleaseAt(session: SessionHoldSnapshot): number {
+export function idleReleaseAt(
+  session: SessionHoldSnapshot,
+  leasePhase?: LivenessLeasePhase,
+): number | null {
+  if (ignoresManagedExecutionIdleDeadline(session.livenessPolicy, leasePhase)) {
+    return null;
+  }
   return sessionIdleDeadline(session);
 }
 
@@ -110,9 +118,10 @@ export interface IdleReleaseExecutionVeto {
 export function vetoedIdleReleaseAt(
   session: SessionHoldSnapshot,
   veto: IdleReleaseExecutionVeto | undefined,
-): number {
-  const idleDeadline = idleReleaseAt(session);
-  if (veto === undefined) {
+  leasePhase?: LivenessLeasePhase,
+): number | null {
+  const idleDeadline = idleReleaseAt(session, leasePhase);
+  if (idleDeadline === null || veto === undefined) {
     return idleDeadline;
   }
   return Math.max(
@@ -137,12 +146,14 @@ export function sessionHoldDiagnostics(
   activeExecutions: number,
   veto?: IdleReleaseExecutionVeto,
   toWall: SessionClockToWall = (ms) => ms,
+  leasePhase?: LivenessLeasePhase,
 ): SessionHoldDiagnostics {
+  const idleDeadline = vetoedIdleReleaseAt(session, veto, leasePhase);
   return {
     lastToolActivityAt: toWall(session.lastUsedAt),
     lastOwnerHeartbeatAt:
       session.lastOwnerHeartbeat === undefined ? null : toWall(session.lastOwnerHeartbeat),
-    idleReleaseAt: toWall(vetoedIdleReleaseAt(session, veto)),
+    idleReleaseAt: idleDeadline === null ? null : toWall(idleDeadline),
     holderKind: classifySessionHolderKind(session),
     activeExecutions,
   };

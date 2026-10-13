@@ -99,7 +99,7 @@ rejected) and happens before any daemon or device work.
 | `localSlotCapacity`    | integer >= 1           | Required. V1 accepts exactly `1`.                                                                                                                             |
 | `requests`             | array, at least 1      | Required. V1 accepts exactly one request. Duplicate `slotIndex` values are invalid.                                                                           |
 | `preparationTimeoutMs` | positive integer       | Optional. Upper bound is `MAX_PROVISION_DEVICE_TIMEOUT_MS`.                                                                                                   |
-| `idleTimeoutMs`        | integer 120000-3600000 | Optional. Idle window for the execution's sessions: 2 to 60 minutes. Default is the 2-minute idle window.                                                     |
+| `idleTimeoutMs`        | integer 120000-3600000 | Optional. Stored idle window: 2 to 60 minutes, default 2 minutes; live-owned executions are exempt.                                                           |
 | `executionOwnerPid`    | positive integer       | Optional. Supervising process whose exit ends the execution even while the proxy's parent lives (for example a wrapper shell). Defaults to the launch parent. |
 
 If `executionOwnerPid` is set, the proxy checks at startup that it names a
@@ -174,6 +174,20 @@ supplied config with `managed_slots_unsupported` instead of running unmanaged;
 on `main` it is `true`. A config with an unsupported `contractVersion` fails with
 `contract_unsupported`, and the version is checked before any other field so a
 newer contract's shape reports that code, not a schema error.
+
+Optional spec fields added after v1 are advertised as their own capability
+tokens. `deviceFamily` requires `managed-slots/v1.deviceFamily`
+(`MANAGED_SLOTS_V1_DEVICE_FAMILY_CAPABILITY`). A new proxy connected to an older
+daemon refuses a config using `deviceFamily` before sending the acquisition,
+with non-retryable `contract_unsupported`; the message names the field and the
+missing capability, and nothing is changed. Upgrade the daemon, or restart a
+stale running daemon when the proxy starts it automatically from the same
+installation; alternatively, remove `deviceFamily` from the config. A config
+without `deviceFamily` works unchanged against an older daemon. An older proxy
+connected to a newer daemon has nothing to negotiate: the older proxy's own
+schema rejects `deviceFamily` at launch as `managed_slot_config_invalid`. A raw
+socket client that skips the probe and sends an unknown spec key to a daemon
+still gets strict `managed_slot_config_invalid` naming the key.
 
 ## Lifecycle
 
@@ -270,7 +284,7 @@ connection used for tools and resources:
    other daemons on the host answer `slot_in_use` for it until the clear's
    retry lands, the draining daemon next claims the slot, or it exits.
    A release clears the execution owner and keeps the device assignment and spec,
-   whatever the release reason (explicit, heartbeat loss, idle). The generation
+   whatever the release reason (explicit or owner/heartbeat loss). The generation
    stays unchanged unless the slot enters `settling`; entering it to fence
    undrained work, an unconfirmed session release or unfinished cleanup advances
    it by one.
@@ -285,24 +299,35 @@ A managed-execution session uses the `managed-execution` liveness policy:
 - **Heartbeat.** Same lease as an ordinary heartbeat session: a 4 s lease plus a
   4 s suspect grace, so about 10 s after the last owner heartbeat the session is
   released. Tool calls from other callers do not keep a dead owner alive.
-- **Idle.** 2 minutes after the last control call ends, by default. The trusted
-  config may set a longer window with `idleTimeoutMs` (2 to 60 minutes); it can
-  never shorten it, and there is no exemption from idle. An out-of-range value
-  is refused as `managed_slot_config_invalid` rather than clamped. Reads and
-  heartbeats never extend the window. The effective window is reported as
-  `idleTimeoutMs` in the acquisition result.
-- **Idle release is terminal.** As for every session, the session UUID ends with
-  the idle release. A call on the managed connection after it is answered with
-  `managed_execution_ended` (`nextAction: relaunch_execution`, the release reason,
-  `idle: true` beside the reason,
-  `slotIndex` and `assignmentGeneration`; no recovery tools). Reads that name a
-  non-blank string `deviceId` still work; a read without one (including a
-  `device` label alone) is answered with
-  `managed_execution_ended` every time;
-  a direct daemon client sees `session_ownership_lost` with `idle: true`
-  (session-not-found answers also carry `idle: true`). The slot's device stays assigned. To continue, start a new
-  execution proxy on the same scoped slot; it reuses the device with a new
-  session.
+- **Idle exemption.** While the owner heartbeat lease is live or suspect, the execution
+  never idle-releases, even after 30 minutes or its declared `idleTimeoutMs`. A hung but
+  living owner with a healthy proxy heartbeat holds the slot indefinitely. Heartbeats and
+  reads still never move tool-activity clocks. The trusted config's `idleTimeoutMs`
+  (2 to 60 minutes, default 2 minutes) stays validated, stored and reported; it does not
+  end a live-owned execution. Out-of-range values remain `managed_slot_config_invalid`.
+  `session-info` and requested heartbeat reports give `idleReleaseAt: null`; the proxy
+  treats null as authoritative and never substitutes its local idle window.
+  Once the owner lease lapses, `session-info` reports a numeric `idleReleaseAt` again;
+  the release that follows is `heartbeat-timeout`, or `rehydration-owner-timeout` for a
+  rehydrated execution whose proxy never returns (no release if it returns), without an `idle` flag.
+- **Execution end is terminal.** Owner exit, heartbeat loss or explicit release ends the
+  UUID. A call on the managed connection then answers `managed_execution_ended`
+  (`nextAction: relaunch_execution`, release reason, `slotIndex` and
+  `assignmentGeneration`; no recovery tools). Heartbeat loss carries no `idle` flag.
+  Explicit deviceId reads still work; reads without a deviceId require a new execution.
+  The slot keeps its device assignment, so a new execution reuses it with a fresh UUID.
+- **Daemon restart.** A passed persisted idle deadline never prevents managed recovery.
+  A returning proxy reclaims the session; a proxy that never returns loses it under the
+  existing awaiting-owner timeout. Terminal releases, retention and the fixed
+  device-restart recovery window still apply. Plain sessions keep the 2-minute rule.
+  A managed row skipped because its device is unavailable at boot remains re-issuable
+  through the released-row retention window, rather than ending at its idle deadline.
+  Each later daemon start retries its device reservation while the row is recoverable;
+  failed rehydration frees that reservation immediately, while successful rehydration
+  holds the device until the proxy returns or the awaiting-owner timeout ends the session.
+  A rehydrated execution with unconfirmed slot ownership (registry busy) stays held
+  while its proxy heartbeats; control calls return `managed_slot_ownership_unconfirmed`
+  until ownership is confirmed or lost.
 - **Execution owner.** The proxy checks every second that its owner (by default
   the parent process that launched it, or `executionOwnerPid`) is running and,
   for the default owner, that it has not been re-parented. Either loss shuts the
@@ -406,9 +431,10 @@ is overridden. Request `deviceFamily` without screen overrides, or an explicit
 `deviceType` without `deviceFamily`. Other configuration fields such as
 `memoryMb` remain allowed with `deviceFamily`; screen overrides without
 `deviceFamily` remain supported.
-These constraint forms are refused rather than silently dropped. An older
-daemon rejects the unknown `deviceFamily` key as `managed_slot_config_invalid`
-because its schema is strict. The public `provisionDevice` tool does not accept
+These constraint forms are refused rather than silently dropped. `deviceFamily`
+requires daemon capability `managed-slots/v1.deviceFamily`; see
+[Version negotiation](#version-negotiation) for the early `contract_unsupported`
+refusal when it is absent. The public `provisionDevice` tool does not accept
 `deviceFamily`; this field belongs only to managed-slot requested constraints.
 
 Created devices are named `amslot-<scope prefix>-<slot>-g<n>-<suffix>`; treat
@@ -512,9 +538,9 @@ The initialize capability is a snapshot at connect. Resource reads add
 | `contractVersion`        | `1`.                                                                                                                                                                                                                                                                                                                                                       |
 | `scope`                  | `managedHostScope`, `runnerNamespace`, `runnerIncarnation`, `scopeKey` (null if it failed before the scope resolved), optional `revived`.                                                                                                                                                                                                                  |
 | `outcome`                | `"ready"` or `"failed"`.                                                                                                                                                                                                                                                                                                                                   |
-| `idleTimeoutMs`          | The idle window the sessions are held with.                                                                                                                                                                                                                                                                                                                |
+| `idleTimeoutMs`          | The validated, stored idle window; it never ends a live-owned execution.                                                                                                                                                                                                                                                                                   |
 | `slots[]`                | Per slot: `slotIndex`, `role`, `platform`, `assignmentGeneration`, `device` (`stableId`, `transportId`, `name`), `sessionUuid`, `requestedSpec`, `resolvedSpec`, `specFingerprint` (`version`, `hash`), `disposition`, `readiness` (`mode`, `status`), `lifecycle` (provision timing and the reconciler's decision trail), and `failure` on a failed slot. |
-| `slots[].executionEnded` | Optional `{ reason: string, idle?: true, nextAction: "relaunch_execution" }`, present only in the `automobile:managed-slots` resource after that slot's session was terminally released; `idle` is true after an idle release and absent otherwise.                                                                                                        |
+| `slots[].executionEnded` | Optional `{ reason: string, idle?: true, nextAction: "relaunch_execution" }`, present only in the `automobile:managed-slots` resource after that slot's session was terminally released; owner exit and heartbeat loss carry no `idle` flag; the optional field remains for older release evidence.                                                        |
 | `failure`                | Scope- or transport-level failure: `code`, `retryable`, `message`, `nextAction`. Per-slot failures sit on the slot entry.                                                                                                                                                                                                                                  |
 
 If acquisition fails, the proxy still serves MCP: `initialize` reports outcome
@@ -527,7 +553,8 @@ dead `executionOwnerPid`) are different: they are raised before the server
 starts, and the process exits with the typed code.
 
 Acquisition-level failure codes besides the reconciler's: `contract_unsupported`
-(the daemon does not advertise `managed-slots/v1`), `scope_invalidated`,
+(the daemon does not advertise `managed-slots/v1`, or a capability a config field
+requires), `scope_invalidated`,
 `scope_transition_pending`, `execution_policy_failed`, `daemon_unavailable`,
 `timeout` and `cancelled`.
 
@@ -660,7 +687,7 @@ reason `deletion_pending`.
 | Code                                | Retryable | Meaning                                                                                                                                                                                                                   |
 | ----------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `managed_slot_config_invalid`       | no        | Config is not valid JSON, fails the strict schema, has duplicate `slotIndex`, an out-of-range `idleTimeoutMs`, a dead `executionOwnerPid`, or is combined with `--initial-session-uuid` / `--no-proxy`.                   |
-| `contract_unsupported`              | no        | `contractVersion` is not supported by this build or daemon.                                                                                                                                                               |
+| `contract_unsupported`              | no        | `contractVersion` is not supported by this build or daemon, or the daemon lacks a capability a config field requires (`managed-slots/v1.deviceFamily`).                                                                   |
 | `managed_slot_group_unsupported`    | no        | `localSlotCapacity` or `requests` exceeds one slot and device.                                                                                                                                                            |
 | `managed_slots_unsupported`         | no        | A config was supplied but this build does not serve managed slots.                                                                                                                                                        |
 | `spec_unsupported`                  | no        | The requested spec is malformed, or names an Android image, iOS runtime or iOS device type this host has not installed; nothing was changed.                                                                              |

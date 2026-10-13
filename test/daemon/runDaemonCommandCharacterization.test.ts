@@ -333,62 +333,70 @@ describe("daemon command characterization with fake I/O", () => {
     },
   );
 
-  test("local session-info and heartbeat preserve field and mutation order", async () => {
-    const events: unknown[] = [];
-    const session = {
-      sessionId: "fake",
-      assignedDevice: "device",
-      createdAt: 1,
-      lastUsedAt: 2,
-      expiresAt: 3,
-      cacheData: { key: "value" },
-    };
-    const state = {
-      isInitialized: () => true,
-      getSessionManager: () => ({
-        getSession: () => {
-          events.push("get-session");
-          return session;
-        },
-        getReleasingSession: () => {
-          events.push("get-releasing");
-          return null;
-        },
-        recordHeartbeat: (id: string) => {
-          events.push(["heartbeat", id]);
-        },
-      }),
-    } as unknown as DaemonStateLike;
-    class Manager extends SafeDaemonManager {
-      override getDaemonState() {
-        return state;
-      }
-    }
-    const log = spyOn(console, "log").mockImplementation((text) => {
-      events.push(text);
-    });
-    try {
-      await runDaemonCommand("session-info", ["fake"], {}, Manager);
-      await runDaemonCommand("heartbeat", ["fake"], {}, Manager);
-      expect(events).toEqual([
-        "get-session",
-        JSON.stringify({
-          sessionId: "fake",
-          assignedDevice: "device",
-          createdAt: 1,
-          lastUsedAt: 2,
-          expiresAt: 3,
-          cacheSize: 15,
+  test.each(["heartbeat", "managed-execution"] as const)(
+    "local session-info and heartbeat preserve field and mutation order (%s)",
+    async (policy) => {
+      const events: unknown[] = [];
+      const session = {
+        sessionId: "fake",
+        assignedDevice: "device",
+        createdAt: 1,
+        lastUsedAt: 2,
+        expiresAt: 3,
+        cacheData: { key: "value" },
+        livenessPolicy: policy,
+      };
+      const state = {
+        isInitialized: () => true,
+        getSessionManager: () => ({
+          getSession: () => {
+            events.push("get-session");
+            return session;
+          },
+          getReleasingSession: () => {
+            events.push("get-releasing");
+            return null;
+          },
+          getIdleReleaseExecutionVeto: () => undefined,
+          getSessionLeaseState: () => ({ phase: "live", remainingMs: 4_000 }),
+          sessionClockToReportedWall: (ms: number) => ms + 1_000,
+          recordHeartbeat: (id: string) => {
+            events.push(["heartbeat", id]);
+          },
         }),
-        "get-session",
-        "get-releasing",
-        ["heartbeat", "fake"],
-        "Session fake heartbeat recorded",
-      ]);
-    } finally {
-      log.mockRestore();
-    }
-  });
+      } as unknown as DaemonStateLike;
+      class Manager extends SafeDaemonManager {
+        override getDaemonState() {
+          return state;
+        }
+      }
+      const log = spyOn(console, "log").mockImplementation((text) => {
+        events.push(text);
+      });
+      try {
+        await runDaemonCommand("session-info", ["fake"], {}, Manager);
+        await runDaemonCommand("heartbeat", ["fake"], {}, Manager);
+        expect(events).toEqual([
+          "get-session",
+          JSON.stringify({
+            sessionId: "fake",
+            assignedDevice: "device",
+            createdAt: 1,
+            lastUsedAt: 2,
+            expiresAt: 3,
+            cacheSize: 15,
+            idleReleaseAt: policy === "managed-execution" ? null : 1_003,
+          }),
+          "get-session",
+          "get-releasing",
+          ["heartbeat", "fake"],
+          "Session fake heartbeat recorded",
+        ]);
+      } finally {
+        log.mockRestore();
+      }
+    },
+  );
 
   test.each([false, true])(
     "status preserves recovery, identity and warning output (running=%s)",

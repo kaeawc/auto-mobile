@@ -152,6 +152,23 @@ describe("#10823: the daemon is authoritative for idle release", () => {
     expect("idle" in authoritative).toBe(false);
   });
 
+  test.each(["bound", "held"])(
+    "an explicit null idle deadline keeps the %s session past the proxy window",
+    async (binding) => {
+      daemonReportsIdleRelease = false;
+      await proxy.callTool("getAndroid", {});
+      daemonMethodResults.set("daemon/heartbeat", { sessionId: SESSION, idleReleaseAt: null });
+      if (binding === "held") {
+        await proxy.callTool("getApple", {});
+      }
+      await advance(PROXY_WINDOW_MS * 3);
+      await proxy.callTool("observe", { sessionUuid: SESSION });
+      const before = heartbeatCount();
+      await advance(INTERVAL_MS * 3);
+      expect(heartbeatCount()).toBeGreaterThan(before);
+    },
+  );
+
   test("a daemon window longer than the proxy's keeps the session through a pause past the proxy's window", async () => {
     await proxy.callTool("getAndroid", {});
     await advance(PROXY_WINDOW_MS + PROXY_WINDOW_MS / 2);

@@ -7,6 +7,8 @@ import {
   assertManagedSlotContractSupported,
   assertManagedSlotsSupported,
   daemonSupportsManagedSlots,
+  unmetManagedSlotConfigCapabilities,
+  MANAGED_SLOTS_V1_DEVICE_FAMILY_CAPABILITY,
   parseManagedSlotConfig,
   parseManagedSlotConfigSource,
   resolveManagedSlotConfig,
@@ -395,5 +397,65 @@ describe("resolveManagedSlotConfig precedence", () => {
         }),
       ),
     ).toBe("managed_slot_config_invalid");
+  });
+});
+
+describe("managed slot config field capabilities", () => {
+  test("base fields need no additive capability", () => {
+    expect(unmetManagedSlotConfigCapabilities(parseManagedSlotConfig(validConfig), [])).toEqual([]);
+  });
+
+  test.each(["android", "ios"] as const)("deviceFamily needs its capability on %s", (platform) => {
+    const config = parseManagedSlotConfig({
+      ...validConfig,
+      requests: [
+        {
+          ...androidRequest,
+          platform,
+          requestedSpec: { runtime: "runtime", deviceFamily: "phone" },
+        },
+      ],
+    });
+    expect(unmetManagedSlotConfigCapabilities(config, [])).toEqual([
+      {
+        field: "requests.0.requestedSpec.deviceFamily",
+        capability: "managed-slots/v1.deviceFamily",
+      },
+    ]);
+    expect(
+      unmetManagedSlotConfigCapabilities(config, [MANAGED_SLOTS_V1_DEVICE_FAMILY_CAPABILITY]),
+    ).toEqual([]);
+  });
+
+  test("reports only the first request using deviceFamily", () => {
+    const base = parseManagedSlotConfig(validConfig);
+    const family = {
+      ...base.requests[0]!,
+      requestedSpec: { runtime: "runtime", deviceFamily: "tablet" as const },
+    };
+    expect(
+      unmetManagedSlotConfigCapabilities(
+        { ...base, requests: [base.requests[0]!, family, family] },
+        [],
+      ),
+    ).toEqual([
+      {
+        field: "requests.1.requestedSpec.deviceFamily",
+        capability: "managed-slots/v1.deviceFamily",
+      },
+    ]);
+  });
+
+  test.each(["android", "ios"] as const)("strictly rejects unknown spec keys on %s", (platform) => {
+    const parse = () =>
+      parseManagedSlotConfig({
+        ...validConfig,
+        requests: [
+          { ...androidRequest, platform, requestedSpec: { runtime: "runtime", futureKey: true } },
+        ],
+      });
+    expect(parse).toThrow(ManagedSlotConfigError);
+    expect(codeOf(parse)).toBe("managed_slot_config_invalid");
+    expect(parse).toThrow('requests.0.requestedSpec: Unrecognized key: "futureKey"');
   });
 });

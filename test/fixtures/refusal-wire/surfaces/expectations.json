@@ -98,14 +98,15 @@
         }
       }
     },
-    "socket-frame.managed_slot_ownership_lost": {
-      "expected": "fail",
+    "socket-frame.session_ownership_lost.managed_slot_ownership_lost_at_gate": {
+      "expected": "acquire-new-session",
       "fields": {
-        "code": "managed_slot_ownership_lost",
+        "code": "session_ownership_lost",
         "retryable": false,
-        "acquireNewSession": false,
+        "acquireNewSession": true,
         "details": {
-          "sessionUuid": "11111111-2222-4333-8444-555555555555"
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "reason": "managed-slot-ownership-lost"
         }
       }
     },
@@ -541,6 +542,48 @@
         "details": {
           "sessionUuid": "11111111-2222-4333-8444-555555555555",
           "reason": "managed-slot-ownership-lost"
+        }
+      }
+    },
+    "socket-frame.device_unhealthy": {
+      "expected": "retry",
+      "fields": {
+        "code": "device_unhealthy",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 12863,
+        "details": {
+          "deviceId": "emulator-5554",
+          "reason": "network-condition",
+          "recovering": true,
+          "devices": [
+            {
+              "deviceId": "emulator-5554",
+              "reason": "network-condition",
+              "recovering": true,
+              "retryAfterMs": 12863
+            }
+          ]
+        }
+      }
+    },
+    "socket-frame.device_unhealthy.permanent": {
+      "expected": "fail",
+      "fields": {
+        "code": "device_unhealthy",
+        "retryable": false,
+        "acquireNewSession": false,
+        "details": {
+          "deviceId": "emulator-5554",
+          "reason": "network-condition",
+          "recovering": false,
+          "devices": [
+            {
+              "deviceId": "emulator-5554",
+              "reason": "network-condition",
+              "recovering": false
+            }
+          ]
         }
       }
     },

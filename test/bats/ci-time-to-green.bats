@@ -36,6 +36,8 @@ case "$path" in
     jq -c '{total_count: 1, workflow_runs: [.]}' "$GH_STUB_FIXTURES/run.json"
     ;;
   */jobs\?*) cat "$GH_STUB_FIXTURES/jobs.json" ;;
+  */commits/*/statuses*) cat "$GH_STUB_FIXTURES/commit-statuses.json" ;;
+  */pulls\?*) cat "$GH_STUB_FIXTURES/pulls-list.json" ;;
   */commits/*/pulls) jq -c '[{number, head}]' "$GH_STUB_FIXTURES/pull.json" ;;
   */pulls/*/files*) cat "$GH_STUB_FIXTURES/pull-files.json" ;;
   */pulls/*) cat "$GH_STUB_FIXTURES/pull.json" ;;
@@ -47,6 +49,7 @@ esac
 STUB
   chmod +x "$TEST_ROOT/bin/gh"
   export PATH="$TEST_ROOT/bin:$PATH"
+  export TMPDIR="$TEST_ROOT"
   export AUTOMOBILE_DATA_DIR="$TEST_ROOT/data"
   export AUTOMOBILE_LOG_DIR="$TEST_ROOT/logs"
 }

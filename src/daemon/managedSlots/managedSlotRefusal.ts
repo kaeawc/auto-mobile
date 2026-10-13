@@ -1,3 +1,4 @@
+import { SessionReleasedDuringCallError } from "../sessionReleasedDuringCall";
 import { ActionableError } from "../../models/ActionableError";
 import type { ManagedDeviceEntry, SlotPlatform } from "./slotRegistry";
 
@@ -43,17 +44,11 @@ export class ManagedSlotOwnershipUnconfirmedError extends ActionableError {
   }
 }
 
-export class ManagedSlotOwnershipLostError extends ActionableError {
-  readonly code = "managed_slot_ownership_lost";
-  readonly retryable = false;
-
-  constructor(readonly sessionUuid: string) {
-    super(`Session '${sessionUuid}' no longer owns its managed slot; acquire a new session.`);
+export class ManagedSlotOwnershipLostError extends SessionReleasedDuringCallError {
+  constructor(sessionUuid: string) {
+    super(sessionUuid, "managed-slot-ownership-lost");
+    this.message = `Session ${sessionUuid} is terminal after managed-slot-ownership-lost and cannot be reused. Acquire a new device with getAndroid or getApple.`;
     this.name = "ManagedSlotOwnershipLostError";
-  }
-
-  toPayload(): Record<string, unknown> {
-    return { code: this.code, sessionUuid: this.sessionUuid, retryable: this.retryable };
   }
 }
 

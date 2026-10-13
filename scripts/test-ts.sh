@@ -7,8 +7,12 @@
 #               per shard; the rest run with --isolate, in sequential
 #               processes of AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE files
 #               (0 = one process) so no isolated process ages (#10583).
+#               Windows: AUTOMOBILE_UNIT_TEST_WORKERS concurrent --shard
+#               processes (1 keeps the single-process lane).
 #   changed     Unit tests affected by worktree/ref changes (local feedback).
 #   integration Real-I/O *.integration.test.ts tests.
+#               Windows: AUTOMOBILE_INTEGRATION_TEST_WORKERS concurrent
+#               processes (default 3; 1 keeps the single-process lane).
 #   stress      Explicit test/stress/** tests.
 #   coverage    Complete unit lane with LCOV coverage.
 #   all         Unit, host integration, then stress.
@@ -621,6 +625,97 @@ finish_unit_shard() {
   fi
 }
 
+# Windows uses Bun's native file selection to avoid the 32,767-character
+# command-line limit. No POSIX watchdog or infra retry is used in these lanes.
+# These helpers share the calling lane's local arrays through dynamic scoping.
+launch_windows_test_process() {
+  local label="$1" name="$2" index="${#pids[@]}"
+  shift 2
+  if [[ "${TEST_TS_PRINT_CMD:-}" == 1 ]]; then
+    printf '%q ' "$@"
+    printf '\n'
+    return 0
+  fi
+  labels[index]="$label"
+  log_names[index]="$name"
+  starts[index]="$(date +%s)"
+  "$@" > "$shard_root/$name.log" 2>&1 &
+  pids[index]=$!
+}
+
+reap_windows_test_processes() {
+  local index status rc=0
+  for ((index = 0; index < ${#pids[@]}; index += 1)); do
+    status=0
+    wait "${pids[$index]}" || status=$?
+    printf 'test-ts: %s wall=%ss status=%s\n' \
+      "${labels[$index]}" "$(($(date +%s) - starts[index]))" "$status"
+    if [[ "$rc" -eq 0 && "$status" -ne 0 ]]; then
+      rc="$status"
+    fi
+  done
+  for ((index = 0; index < ${#pids[@]}; index += 1)); do
+    printf '\n==> %s\n' "${labels[$index]}"
+    cat "$shard_root/${log_names[$index]}.log"
+  done
+  return "$rc"
+}
+
+run_windows_unit_shards() {
+  local shard shard_root="${AUTOMOBILE_TEST_TS_SCRATCH_DIR:-$ROOT/scratch}/test-ts-unit-shards"
+  local pids=() labels=() log_names=() starts=()
+  if [[ "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then
+    rm -rf "$shard_root"
+    mkdir -p "$shard_root"
+  fi
+  for ((shard = 1; shard <= unit_workers; shard += 1)); do
+    launch_windows_test_process "unit shard $shard/$unit_workers" "shard-$shard" \
+      "${unit_args[@]}" "--shard=$shard/$unit_workers"
+  done
+  reap_windows_test_processes
+}
+
+run_windows_integration_shards() {
+  local workers="${AUTOMOBILE_INTEGRATION_TEST_WORKERS:-3}"
+  local tier_file="${AUTOMOBILE_INTEGRATION_SAFE_TIER_FILE:-$ROOT/test/integration-safe-tier.txt}"
+  local shard safe_workers path
+  local shard_root="${AUTOMOBILE_TEST_TS_SCRATCH_DIR:-$ROOT/scratch}/test-ts-integration-shards"
+  local pids=() labels=() log_names=() starts=() unsafe_paths=() ignore_args=()
+  validate_positive_integer "AUTOMOBILE_INTEGRATION_TEST_WORKERS" "$workers"
+  if [[ "$workers" -eq 1 ]]; then
+    run_test_command "${integration_args[@]}" .integration.test.ts
+    return $?
+  fi
+  if [[ ! -f "$tier_file" ]]; then
+    echo "Safe-tier list not found: ${tier_file}" >&2
+    return 2
+  fi
+  # shellcheck source=scripts/lib/integration-safe-tier.sh disable=SC1091
+  source "$ROOT/scripts/lib/integration-safe-tier.sh"
+  while IFS= read -r path; do
+    if [[ -f "$path" ]]; then
+      unsafe_paths+=("$path")
+      ignore_args+=(--path-ignore-patterns "$path")
+    fi
+  done < <(integration_tier_paths "$tier_file" unsafe)
+  if [[ "${TEST_TS_PRINT_CMD:-}" != 1 ]]; then
+    rm -rf "$shard_root"
+    mkdir -p "$shard_root"
+  fi
+  safe_workers="$workers"
+  if [[ "${#unsafe_paths[@]}" -gt 0 ]]; then
+    safe_workers=$((workers - 1))
+    launch_windows_test_process "integration unsafe" unsafe \
+      "${integration_args[@]}" "${unsafe_paths[@]+"${unsafe_paths[@]}"}"
+  fi
+  for ((shard = 1; shard <= safe_workers; shard += 1)); do
+    launch_windows_test_process "integration safe $shard/$safe_workers" "safe-$shard" \
+      "${integration_args[@]}" "${ignore_args[@]+"${ignore_args[@]}"}" \
+      "--shard=$shard/$safe_workers" .integration.test.ts
+  done
+  reap_windows_test_processes
+}
+
 run_unit_shards() {
   local shard_mode="$1"
   local changed_ref="${2:-}"
@@ -828,6 +923,8 @@ case "$mode" in
     elif [[ "${#unit_test_paths[@]}" -eq 0 && "$has_test_targets" -eq 1 ]]; then
       echo "No unit test paths were selected." >&2
       exit 2
+    elif [[ "${#unit_test_paths[@]}" -eq 0 && "${#passthrough_args[@]}" -eq 0 && "$runner_os" == "Windows" && "$unit_workers" -gt 1 && -z "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" ]]; then
+      run_windows_unit_shards
     elif [[ "${#unit_test_paths[@]}" -eq 0 && "${#passthrough_args[@]}" -eq 0 && "$runner_os" != "Windows" ]]; then
       run_unit_shards unit
     else
@@ -922,10 +1019,10 @@ case "$mode" in
           fi
         done
       fi
-      if [[ "$runner_os" == "Windows" || "$coverage_requested" == true || "$long_lived" == true ]]; then
-        # The Windows lane already passes as one process, and its shell does not
-        # use the POSIX watchdog needed for the stalled Unix transport suite.
-        # Coverage also stays in one process so Bun writes a complete LCOV
+      if [[ "$runner_os" == "Windows" && "$has_test_targets" -eq 0 && "$coverage_requested" == false && "$long_lived" == false && "${#passthrough_args[@]}" -eq 0 && -z "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" ]]; then
+        run_windows_integration_shards
+      elif [[ "$runner_os" == "Windows" || "$coverage_requested" == true || "$long_lived" == true ]]; then
+        # Coverage stays in one process so Bun writes a complete LCOV
         # report rather than overwriting the transport suite's first report.
         if [[ "$has_test_targets" -eq 0 ]]; then
           run_test_command "${integration_args[@]}" ".integration.test.ts" \

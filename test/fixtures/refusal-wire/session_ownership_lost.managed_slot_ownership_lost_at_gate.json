@@ -1,0 +1,13 @@
+{
+  "code": "session_ownership_lost.managed_slot_ownership_lost_at_gate",
+  "builder": "ManagedSlotOwnershipLostError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"error\":{\"code\":\"session_ownership_lost\",\"message\":\"Session 11111111-2222-4333-8444-555555555555 is terminal after managed-slot-ownership-lost and cannot be reused. Acquire a new device with getAndroid or getApple.\",\"sessionUuid\":\"11111111-2222-4333-8444-555555555555\",\"reason\":\"managed-slot-ownership-lost\",\"retryable\":false,\"nextAction\":\"acquire_new_session\",\"recovery\":{\"action\":\"acquire_replacement_session\",\"tools\":[\"getAndroid\",\"getApple\"]}}}"
+      }
+    ],
+    "isError": true
+  }
+}

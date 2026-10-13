@@ -14,6 +14,7 @@
 #
 # Usage:
 #   ../scripts/android/run-emulator-suites.sh <ctrl-proxy-apk>
+#   ../scripts/android/run-emulator-suites.sh --prebuild
 #
 # Environment (test seams):
 #   GRADLE_CMD         Gradle wrapper (default: ./gradlew)
@@ -24,10 +25,14 @@
 
 set -euo pipefail
 
-ctrl_proxy_apk="${1:?usage: run-emulator-suites.sh <ctrl-proxy-apk>}"
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 gradle_cmd="${GRADLE_CMD:-./gradlew}"
+if [[ "${1:-}" == --prebuild ]]; then
+  # These are the build (non-test) tasks the two suites would otherwise run
+  # after the emulator is up. :junit-runner:test dependsOn :control-proxy:assembleDebug.
+  exec "$gradle_cmd" :junit-runner:testClasses :control-proxy:assembleDebug :playground:app:assembleDebug :playground:app:compileDebugUnitTestKotlin --stacktrace
+fi
+ctrl_proxy_apk="${1:?usage: run-emulator-suites.sh <ctrl-proxy-apk> (or --prebuild)}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 reset_daemon_cmd="${RESET_DAEMON_CMD:-${script_dir}/reset-daemon-before-retry.sh}"
 permission_cmd="${PERMISSION_CMD:-${script_dir}/verify-sdk-ctrl-proxy-permission-contract.sh}"
 nav_graph_cmd="${NAV_GRAPH_CMD:-${script_dir}/navigation-graph-sdk-event-integration.sh}"
@@ -37,7 +42,19 @@ junit_status=0
 playground_status=0
 
 echo "=== JUnit Runner emulator suite ==="
-"$gradle_cmd" :junit-runner:test --stacktrace --info || junit_status=$?
+# Main's kotlin-code-coverage donor caches a device-less result in the borrowed
+# Gradle home (#11578/#11631); rerun this task against the emulator every time.
+junit_log="$(mktemp)"
+trap 'rm -f "$junit_log"' EXIT
+"$gradle_cmd" :junit-runner:test --rerun --stacktrace --info 2>&1 | tee "$junit_log" || junit_status=${PIPESTATUS[0]}
+if [[ "$junit_status" -eq 0 ]]; then
+  outcome="$(sed -nE 's/^> Task :junit-runner:test (FROM-CACHE|UP-TO-DATE|SKIPPED|NO-SOURCE)$/\1/p' "$junit_log")"
+  if [[ -n "$outcome" ]]; then
+    outcome="${outcome%%$'\n'*}"
+    echo "error: :junit-runner:test did not execute against the emulator (${outcome}); the JUnit Runner emulator suite result is not valid" >&2
+    junit_status=1
+  fi
+fi
 
 echo "=== Resetting AutoMobile daemon between suites ==="
 "$reset_daemon_cmd"

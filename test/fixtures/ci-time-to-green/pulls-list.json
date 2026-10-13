@@ -1,0 +1,54 @@
+[
+  {
+    "number": 12126,
+    "state": "closed",
+    "merged_at": "2026-10-13T02:36:46Z",
+    "updated_at": "2026-10-13T02:39:46Z",
+    "head": {
+      "sha": "c630613d581ff84d6358fd42e1e2eae69fefbb25",
+      "ref": "work/12054-device-family-capability",
+      "repo": {
+        "full_name": "kaeawc/auto-mobile"
+      }
+    }
+  },
+  {
+    "number": 12124,
+    "state": "closed",
+    "merged_at": "2026-10-13T02:23:41Z",
+    "updated_at": "2026-10-13T02:26:50Z",
+    "head": {
+      "sha": "75ce2d30bcd4d8ea78cc9a7f76188c5f405971c9",
+      "ref": "work/managed-execution-idle-exempt-11340",
+      "repo": {
+        "full_name": "kaeawc/auto-mobile"
+      }
+    }
+  },
+  {
+    "number": 12123,
+    "state": "closed",
+    "merged_at": "2026-10-13T01:58:27Z",
+    "updated_at": "2026-10-13T02:01:24Z",
+    "head": {
+      "sha": "30d6cd68693b9c1fa0d0dc90fb5f72b6d20c084d",
+      "ref": "work/managed-slot-budget-wire-12051",
+      "repo": {
+        "full_name": "kaeawc/auto-mobile"
+      }
+    }
+  },
+  {
+    "number": 12122,
+    "state": "closed",
+    "merged_at": "2026-10-13T01:36:25Z",
+    "updated_at": "2026-10-13T01:39:22Z",
+    "head": {
+      "sha": "a125411ea766c0afefc4897f97a526542f31ca8e",
+      "ref": "work/ci-case-sensitive-import",
+      "repo": {
+        "full_name": "kaeawc/auto-mobile"
+      }
+    }
+  }
+]

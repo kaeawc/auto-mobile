@@ -243,9 +243,20 @@ keep everything else isolated.
   run under the shard's single watchdog. JUnit goes to `shard-N-shared.xml` and
   `shard-N.xml`, and the timing gate already globs `*.xml`. Chunked shards
   (`AUTOMOBILE_UNIT_TEST_CHUNK_FILES`, nightly macOS) chunk each group
-  separately and never mix them. The changed lane, coverage, explicit file
-  targets and Windows are unchanged. `AUTOMOBILE_UNIT_SHARED_PROCESS=0`
-  restores the all-isolated lane.
+  separately and never mix them. The changed lane, coverage and explicit file
+  targets are unchanged. `AUTOMOBILE_UNIT_SHARED_PROCESS=0`
+  restores the all-isolated lane. Windows unit tests run in concurrent Bun
+  `--shard` processes without isolation; `AUTOMOBILE_UNIT_TEST_WORKERS=1`
+  restores the single command. Windows host integration runs all existing
+  unsafe-tier files in one isolated process beside safe shards that also include
+  unlisted files; `AUTOMOBILE_INTEGRATION_TEST_WORKERS=1` restores its single command.
+  Unlike `scripts/prepush-integration-safe.sh`, Windows integration processes are
+  not given isolated `AUTOMOBILE_*` state paths, so a safe-tier file that falls
+  back to a default path can meet the unsafe process; fix a Windows-only flake
+  that appears only with concurrency in the test or reclassify the file `unsafe`,
+  with `AUTOMOBILE_INTEGRATION_TEST_WORKERS=1` as the kill switch.
+  Any passthrough argument or non-empty `AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS`
+  keeps both Windows lanes in a single process.
 - **Timing probe.** A shared process runs the preloads once. The probe
   therefore records one entry per shared process, labelled through
   `AUTOMOBILE_TEST_TIMING_GROUP_LABEL`, for example

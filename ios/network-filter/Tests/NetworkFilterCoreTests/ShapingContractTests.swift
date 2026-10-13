@@ -136,7 +136,9 @@ final class ShapingContractTests: XCTestCase {
         XCTAssertEqual(mixed.rules?.count, 2)
         XCTAssertTrue(
             mixed.limitations
-                .contains("Shaped rules are carried configuration; this build does not enforce them.")
+                .contains(
+                    "Shaped rules are enforced on NEW flows of the attributed app only; established flows are not shaped."
+                )
         )
         let legacy = try snapshot(3)
         XCTAssertEqual(legacy.version, 3)

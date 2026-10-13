@@ -1,9 +1,9 @@
 # Simulator network filter
 
 Backend for iOS Simulator `networkCondition` (#6298). It reports flow identity
-and, since #10264, applies one condition: a leased **offline** rule for one
-explicitly named app on one simulator. It cannot apply latency, bandwidth or
-packet-loss rules (#10265). Simulator attribution, signed installation,
+and applies leased **offline**, latency and bandwidth rules for one explicitly
+named app on one simulator (#10264, #10265). Packet loss remains unapplied.
+Simulator attribution, signed installation,
 authenticated XPC at runtime, and network isolation still require native
 integration evidence from the signed run (#10263).
 
@@ -22,14 +22,14 @@ integration evidence from the signed run (#10263).
   identifier and their own signing team.
 - With no active rule, every new socket flow receives `allow()` without any
   lookup. The callback copies audit tokens into a lock-protected history of at
-  most 128 entries. It never reads payloads, records network addresses, or
+  most 128 entries. This fast path never reads payloads, records network addresses, or
   pauses a flow.
 - Snapshots use Security's audit-token lookup for both source-app and
   source-process code metadata. Complete audit tokens retain process generation;
   bundle identifiers and PIDs are not interpreted as simulator identity.
   Missing/malformed tokens and failed metadata lookup remain unattributed.
-- Per-simulator attribution (#10589) runs at snapshot time, never in the flow
-  callback. `SimulatorFlowResolver` maps each flow's audit tokens to one
+- Per-simulator attribution (#10589) runs at snapshot time for diagnostics
+  and at new-flow time while a rule is active. `SimulatorFlowResolver` maps each flow's audit tokens to one
   simulator (device set and UDID), app executable and process generation (pid
   plus pid version, never the pid alone), through a fakeable `ProcessTable`
   (`DarwinProcessTable` uses `proc_pidpath_audittoken`, `proc_pidinfo`
@@ -56,9 +56,8 @@ integration evidence from the signed run (#10263).
   including whether the sandboxed provider may read other processes' paths and
   `launchd_sim` arguments, and whether `launchd_sim` names a custom device set in
   the same (realpath) form the host passes.
-- Restart discards the diagnostic history and every rule. There is no
-  persisted impairment, delayed flow verdict, control-channel bypass, or
-  target-app instrumentation.
+- Restart ends every rule and settles paused flows once with allow. There is
+  no persisted impairment, control-channel bypass, or target-app instrumentation.
 
 ### Leased per-app offline (#10264)
 
@@ -100,8 +99,7 @@ integration evidence from the signed run (#10263).
   rule was reset, replaced or expired meanwhile, the flow is re-checked once
   against the current rule and otherwise allowed.
 - Only **new** socket flows are dropped. Established connections were allowed
-  before the rule existed and the provider has no data callbacks, so they keep
-  working until they close; the app sees the outage on its next connection.
+  before the rule existed, so they keep working until they close; the app sees the outage on its next connection.
 - A sibling simulator running the same bundle, a native Mac app with the same
   identifier, and the daemon's own control connections are never selected,
   because they are not attributed to the rule's simulator and app.
@@ -298,14 +296,14 @@ isolation gate before broadening scope or implementing degraded profiles."
 | Leased offline/reset | Implemented and unit-tested with a fake clock (#10264). Natively: new connections of the target fail and established ones continue; lease expiry, daemon termination, extension restart and sleep/wake each end the impairment within one lease |
 | Session lifecycle | Implemented with fakes (#10264): restore target carries simulator UDID, owner generation and rule revision; rollback, uncertain IPC reconciliation, release, rebind and TTL expiry. Natively unverified |
 | Tool read-back | Implemented (#10264): app scope, revision, lease and partial coverage read from the provider; acknowledgement is reported, traffic behaviour is not claimed as verified |
-| Latency/bandwidth | Only after isolation gate: documented directional units and app-aggregate budget; concurrent transfer measurements, UDP pause bound, unsupported effect reporting |
+| Latency/bandwidth | Core scheduler and provider glue implemented and unit-tested (#10265). Native isolation, concurrent transfers, byte windows, UDP pause bounds and sleep/wake remain unverified (#10263) |
 
 For each native test, retain provider snapshots and fixture observations with
 the simulator IDs, process generations, request/revision, expected behavior,
 observed result, and host/control-plane health. Successful diagnostic unit tests
 are not native isolation evidence. Do not close #6298 on this preparation alone.
 
-## Shaping core (#10265, carried but not enforced)
+## Shaping data path (#10265, native effects unverified)
 
 `NetworkFilterCore` contains a Foundation-only `ShapingProfile` and `FlowShaper`.
 The controller and version-4 XPC contract now carry shaping requests and
@@ -315,17 +313,18 @@ with the scheduler using a fake monotonic clock. Shaped rules share offline's
 ownership/generation/revision fencing, capacity, renewal, expiry and tombstones.
 Identical apply redelivery refreshes the lease; a differing condition or request
 at the installed revision returns `invalid_command`. Newer revisions can replace
-offline with shaped configuration or vice versa. Drop evaluation and commit only
-consider offline rules: a shaped rule alone never performs attribution lookups.
+offline with shaped configuration or vice versa. Evaluation snapshots cover both
+kinds of target, while drop commit remains offline-only. A shaped rule alone
+triggers attribution; only attributed new socket flows of its app are shaped.
 
-The provider uses the default `supportsShaping: false`. It refuses every shaped
-apply with `unsupported_condition` before validation, lease sweeping or any
-mutation; it never reports a shaped apply as applied. A shaping-capable store
-resolves requests in the provider-side Core and reports `invalid_shaping` when
-out of range or nothing is applicable. The scheduler is still unwired to provider
-data callbacks and timers. No shaping is enforced by this build, and no network
-effects have been verified against controlled traffic; configuration acknowledgements
-are not traffic evidence. The native isolation gate above still applies.
+The provider constructs its store with `supportsShaping: true`, resolves
+requests in Core, and reports `invalid_shaping` when out of range or nothing is
+applicable. The default Core store still refuses shaping with
+`unsupported_condition`. Shaped rules are enforced on **NEW flows** of the
+attributed app only; established flows are not shaped. The unsigned provider
+compiles, but every data-path NetworkExtension assumption and all traffic
+effects remain unverified until the signed run (#10263). Configuration
+acknowledgements are not traffic evidence. The native isolation gate above still applies.
 
 Outbound means app to remote (upload); inbound means remote to app (download).
 One target is one app on one simulator (`NetworkRuleTarget`). Host requests use
@@ -383,7 +382,7 @@ These releases are visible in `debtReleases`; when D is zero the bound has
 exactly one grant of slack. Counters reset on ticket changes, so measuring D
 across replacements requires accumulating the observed tickets' debt releases.
 
-The caller owns one timer per pause and calls `resume` at its deadline. The
+`FlowShapingCoordinator` owns one timer per pause and calls `resume` at its deadline. The
 non-optional `ResumeOutcome` distinguishes `.settled(ResumeDecision)` (apply the
 verdict once), `.alreadySettled` (no outstanding matching pause: settled, foreign
 or unknown token), and `.notDue(resumeAtNanoseconds:)` (same-ticket pause still
@@ -407,7 +406,7 @@ immediately, while a paused flow retains an allow latch and its token until
 `resume`, `settleStale`, `flowEnded` or `removeAll` settles it with allow and
 forgets it, regardless of any intervening rule installation. Reset, replacement
 or a latched allow can settle before the deadline. Rule-source lock order is
-**shaper lock, then rule source**; the source must never call back into the shaper.
+**coordinator lock → shaper lock → rule source**; the source must never call back into the shaper.
 
 An unexpected callback while paused never adds a second pause: at most one
 positive callback passes one grant as debt and leaves the original pause valid,
@@ -446,6 +445,58 @@ so old tokens cannot match new work. Codable status is sorted by device set,
 simulator UDID and bundle ID, and reports the current ticket, tracked/paused
 flows, directional bytes and held bursts, over-budget drops, refusals, paused
 callbacks and debt releases.
+
+### Adapter lifecycle and diagnostics
+
+The thread-safe Core adapter owns no payloads, at most 256 pending handlers,
+256 filter-direction records and 256 first-completion records (oldest forgotten
+first). A filtered flow ends after all requested directions complete; a pause
+before its first filter verdict assumes both directions. Stale records left by
+idle eviction are bounded and disappear on end, allow, drop or stop.
+
+Claiming a handler under the coordinator lock gives exactly-once delivery for
+timers, rule reset/expiry/replacement, completion, drop and stop. Handlers and
+scheduler calls run outside all coordinator locks. Every delivery is queued at
+`max(now, pausedAt + 10 ms)`, never on the callback's stack. Rules changed hooks
+re-check every pause immediately: same-ticket early resumes stay pending; new
+tickets settle using the current profile, with data release charged as debt.
+A one-second tick sweeps expired rules and resumes due tokens even when their
+individual timer was lost or late. One tick remains outstanding until it fires;
+it stops repeating when nothing is pending and restarts on the next pause.
+Stop invalidates the tick and all tokens; stale scheduled work does nothing.
+
+`DispatchPauseScheduler` uses a private serial queue and `asyncAfter(wallDeadline:)`.
+Wall deadlines count sleep like macOS `CLOCK_MONOTONIC`, whereas Dispatch's default
+deadline does not. A wall-clock step can wake early or late; monotonic deadline
+re-checks reschedule early wakes and the tick backs up late wakes. The Dispatch
+scheduler also re-checks its monotonic deadline before executing any work, so
+an early wall wake cannot bypass minimum-age handler delivery. Backwards
+readings are clamped, and restart drops rules rather than restoring impairment.
+
+Version-4 snapshots optionally expose top-level `shapingActivity`: `flows`
+(the shaper's per-ticket counters), `untrackedDataCallbacks`, `pendingPauses`,
+`filteredFlows`, `completionRecords`, `tickOutstanding`, `orphanedPauses` and
+`unexpectedSecondPause`. Version 3 never includes this field. Flow-history
+attribution and its reasons report coverage gaps; unattributed flows remain allowed.
+
+### UNVERIFIED NetworkExtension assumptions
+
+The call sites compile unsigned. These assumptions require the signed run (#10263):
+
+1. A paused flow receives no further data callbacks in either direction until
+   resumed. If it does, the scheduler passes one debt grant, then drops the flow.
+2. `passBytes` smaller than the offered count is honoured; the next callback offers
+   the remaining bytes up to `peekBytes`. Datagram flows accept a whole datagram's
+   byte count.
+3. `resumeFlow(_:with:)` accepts pass/peek data verdicts for data pauses and
+   filter-data, allow or drop verdicts for new-flow pauses. Resumes are attempted
+   at least 10 ms after the pause verdict is returned.
+4. UDP flows survive pauses up to 8 s (Apple documents 10 s).
+5. Wall-deadline wake-ups fire promptly after sleep; the one-second tick bounds
+   the damage if they do not.
+6. `NEFilterFlow.identifier` is stable for a flow's lifetime and unique among live flows.
+7. Stream data-complete callbacks arrive for both directions; otherwise 60 s idle
+   eviction frees the slot on a later admission.
 
 ## References
 

@@ -1,3 +1,4 @@
+import { PROTOTYPE_PLATFORM_DIFFERENCES } from "./prototypePlatformNotes";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_THEME_MODES_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import {
@@ -188,6 +189,17 @@ export function searchIcons(query: string): { total: number; names: string[] } {
   return { total: matches.length, names: matches.slice(0, ICON_LOOKUP_LIMIT) };
 }
 
+function renderPlatformDifferences(): string {
+  return [
+    "## Platform differences",
+    "",
+    ...PROTOTYPE_PLATFORM_DIFFERENCES.map(
+      ({ construct, platform, effect, capability, detail }) =>
+        `- \`${construct}\`: ${platform}, ${effect}. ${detail} A successful show lists affected paths under \`platformNotes\`; lifted by \`${capability}\`.`,
+    ),
+  ].join("\n");
+}
+
 /** The full authoring guide: hand-written prose around sections generated from the contract. */
 export function renderPrototypeGuide(): string {
   return [
@@ -201,6 +213,7 @@ export function renderPrototypeGuide(): string {
     renderTheme(),
     GUIDE_APPEARANCE,
     renderIcons(),
+    renderPlatformDifferences(),
     GUIDE_ERRORS,
   ].join("\n\n");
 }

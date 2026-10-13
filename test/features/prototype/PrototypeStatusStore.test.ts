@@ -161,6 +161,67 @@ describe("InMemoryPrototypeStatusStore appearance", () => {
     payload,
   });
 
+  test("a crossing show separates presence from its result and consumes the marker", () => {
+    const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+    store.beginShowDispatch(scope.deviceId, "panel");
+    store.recordEvent(scope, change(1, { mode: "dark", source: "system" }));
+    const result = store.record(scope, "show", { id: "panel" }, { ...ok, appearance: light });
+    expect(result.appearance).toEqual(light);
+    expect(store.status(scope).lastResult?.appearance).toEqual(light);
+    expect(store.status(scope).prototypes[0]).not.toHaveProperty("appearance");
+    store.record(scope, "show", { id: "panel" }, { ...ok, appearance: light });
+    expect(store.status(scope).prototypes[0]?.appearance).toEqual(light);
+  });
+
+  test("a host-refused sibling leaves the in-flight show's crossing marker intact", () => {
+    const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+    store.beginShowDispatch(scope.deviceId, "panel");
+    store.record(scope, "show", { id: "panel" }, { success: false, error: "refused" });
+    store.recordEvent(scope, change(1, { mode: "dark", source: "system" }));
+    const result = store.record(scope, "show", { id: "panel" }, { ...ok, appearance: light });
+    expect(result.appearance).toEqual(light);
+    expect(store.status(scope).lastResult?.appearance).toEqual(light);
+    expect(store.status(scope).prototypes[0]).not.toHaveProperty("appearance");
+  });
+
+  test.each(["same", "other-id", "other-device"])(
+    "dispatch crossings are device/id keyed across sessions: %s",
+    (crossing) => {
+      const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+      const showing = { ...scope, sessionUuid: "b" };
+      store.beginShowDispatch(scope.deviceId, "panel");
+      store.recordEvent(
+        { deviceId: crossing === "other-device" ? "other" : scope.deviceId, sessionUuid: "a" },
+        {
+          ...change(1, { mode: "dark", source: "system" }),
+          id: crossing === "other-id" ? "other" : "panel",
+        },
+      );
+      store.startShow(showing);
+      store.record(showing, "show", { id: "panel" }, { ...ok, appearance: light });
+      if (crossing === "same") {
+        expect(store.status(showing).prototypes[0]).not.toHaveProperty("appearance");
+      } else {
+        expect(store.status(showing).prototypes[0]?.appearance).toEqual(light);
+      }
+    },
+  );
+
+  test.each(["device", "session"])("clear %s drops an armed crossed marker", (clear) => {
+    const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+    const owned = { ...scope, sessionUuid: "a" };
+    store.record(owned, "show", { id: "panel" }, ok);
+    store.beginShowDispatch(scope.deviceId, "panel");
+    store.recordEvent(owned, change(1, { mode: "dark", source: "system" }));
+    if (clear === "device") {
+      store.clearDevice(scope.deviceId);
+    } else {
+      store.clearSession("a");
+    }
+    store.record(owned, "show", { id: "panel" }, { ...ok, appearance: light });
+    expect(store.status(owned).prototypes[0]?.appearance).toEqual(light);
+  });
+
   test("a successful show and an adopt cache the reported appearance; absence stays absent", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());
     expect(store.record(scope, "show", { id: "panel" }, ok)).not.toHaveProperty("appearance");

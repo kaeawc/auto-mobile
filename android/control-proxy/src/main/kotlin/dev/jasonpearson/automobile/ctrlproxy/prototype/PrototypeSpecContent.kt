@@ -353,12 +353,16 @@ private fun RenderPrototypeVisibility(
   windowRoot: Boolean,
 ) {
   // Retention membership can change while shown; move the content with its remembered state.
-  val content =
-    remember(interact, weightAxis, windowRoot) {
-      movableContentOf<PrototypeRenderNode, Modifier> { n, m ->
-        RenderPrototypeNodeContent(n, interact, m, weightAxis, windowRoot)
-      }
+  val currentInteract by rememberUpdatedState(interact)
+  val content = remember {
+    movableContentOf<PrototypeRenderNode, Modifier, PrototypeWeightAxis?, Boolean> {
+      n,
+      m,
+      axis,
+      root ->
+      RenderPrototypeNodeContent(n, currentInteract, m, axis, root)
     }
+  }
   val history = remember { RetainedVisibilityHistory() }
   if (node.identity in LocalPrototypeRetainedSubtrees.current) {
     PrototypeRetainedVisibility(
@@ -367,10 +371,11 @@ private fun RenderPrototypeVisibility(
       history = history,
       modifier = parentModifier,
     ) {
-      content(node, Modifier)
+      content(node, Modifier, weightAxis, windowRoot)
     }
     return
   }
+  if (node.visible) history.clearSettledHidden()
   CompositionLocalProvider(
     LocalPrototypeShowEpoch provides LocalPrototypeShowEpoch.current + history.epoch,
   ) {
@@ -381,10 +386,12 @@ private fun RenderPrototypeVisibility(
         enter = prototypeEnterTransition(node.source?.transition),
         exit = prototypeExitTransition(node.source?.transition),
       ) {
-        ProvideAnchorFade(none = node.source?.transition == "none") { content(node, Modifier) }
+        ProvideAnchorFade(none = node.source?.transition == "none") {
+          content(node, Modifier, weightAxis, windowRoot)
+        }
       }
     } else if (node.visible) {
-      content(node, parentModifier)
+      content(node, parentModifier, weightAxis, windowRoot)
     }
   }
 }

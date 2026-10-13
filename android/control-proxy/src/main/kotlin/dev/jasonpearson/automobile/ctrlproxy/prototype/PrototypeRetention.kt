@@ -110,6 +110,11 @@ internal class RetainedVisibilityHistory {
   var settledHidden = false
   var epoch = 0
 
+  /** Clears a settled hide after the subtree is shown outside retention. */
+  fun clearSettledHidden() {
+    settledHidden = false
+  }
+
   fun update(visible: Boolean, hidden: Boolean) {
     if (visible && settledHidden && shown) epoch++
     shown = shown || visible

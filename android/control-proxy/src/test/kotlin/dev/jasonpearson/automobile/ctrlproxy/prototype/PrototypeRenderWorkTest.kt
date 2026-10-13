@@ -580,14 +580,18 @@ class PrototypeRenderWorkTest {
       .config[SemanticsProperties.VerticalScrollAxisRange]
       .value()
 
-  private fun scrollSubtreeSpec(rows: Int) =
+  private fun scrollSubtreeSpec(
+    rows: Int,
+    transition: String = "none",
+    motion: String? = "none",
+  ) =
     spec(
       PrototypeBoxNode(
         children =
           listOf(
             PrototypeBoxNode(
               visibleWhen = shownCondition,
-              transition = "none",
+              transition = transition,
               children =
                 listOf(
                   PrototypeScrollNode(
@@ -608,7 +612,19 @@ class PrototypeRenderWorkTest {
             ),
           ),
       ),
+      motion,
     )
+
+  private fun weightedScrollSubtreeSpec(rows: Int, weight: Double? = null): PrototypeSpec {
+    val authored = scrollSubtreeSpec(rows)
+    val box = (authored.root as PrototypeBoxNode).children.single() as PrototypeBoxNode
+    return authored.copy(
+      root =
+        PrototypeColumnNode(
+          children = listOf(box.copy(style = PrototypeStyle(weight = weight))),
+        ),
+    )
+  }
 
   private fun scrollDown(): Float {
     compose.onNodeWithTag("scroll", useUnmergedTree = true).performSemanticsAction(
@@ -621,8 +637,12 @@ class PrototypeRenderWorkTest {
   }
 
   private fun assertScrollKeptAfterReplace(runtime: PrototypeRuntime, rows: Int) {
+    assertScrollKeptAfterReplace(runtime, scrollSubtreeSpec(rows))
+  }
+
+  private fun assertScrollKeptAfterReplace(runtime: PrototypeRuntime, replacement: PrototypeSpec) {
     val before = scrollDown()
-    compose.runOnIdle { runtime.replace(scrollSubtreeSpec(rows)) }
+    compose.runOnIdle { runtime.replace(replacement) }
     repeat(2) { compose.mainClock.advanceTimeByFrame() }
     settle()
     // Scroll state is remembered above the row children: keeping it proves no subtree disposal.
@@ -639,6 +659,65 @@ class PrototypeRenderWorkTest {
   fun `a visible scroll keeps its state when replacement shrinks its subtree from 24 to 23 nodes`() {
     val runtime = show(scrollSubtreeSpec(21))
     assertScrollKeptAfterReplace(runtime, rows = 20)
+  }
+
+  @Test
+  fun `a never retained scroll keeps its state when replacement adds or removes weight`() {
+    val runtime = show(weightedScrollSubtreeSpec(5))
+    assertScrollKeptAfterReplace(runtime, weightedScrollSubtreeSpec(5, weight = 1.0))
+    assertScrollKeptAfterReplace(runtime, weightedScrollSubtreeSpec(5))
+  }
+
+  @Test
+  fun `a retained scroll keeps its state when replacement adds or removes weight`() {
+    val runtime = show(weightedScrollSubtreeSpec(21))
+    assertScrollKeptAfterReplace(runtime, weightedScrollSubtreeSpec(21, weight = 1.0))
+    assertScrollKeptAfterReplace(runtime, weightedScrollSubtreeSpec(21))
+  }
+
+  @Test
+  fun `a visible fade scroll keeps its state when motion enabled replacement enters retention`() {
+    val runtime = show(scrollSubtreeSpec(20, transition = "fade", motion = null))
+    assertScrollKeptAfterReplace(runtime, scrollSubtreeSpec(21, transition = "fade", motion = null))
+  }
+
+  @Test
+  fun `a visible fade scroll keeps its state when motion enabled replacement leaves retention`() {
+    val runtime = show(scrollSubtreeSpec(21, transition = "fade", motion = null))
+    assertScrollKeptAfterReplace(runtime, scrollSubtreeSpec(20, transition = "fade", motion = null))
+  }
+
+  @Test
+  fun `a visible none scroll keeps its state when motion enabled replacement enters retention`() {
+    val runtime = show(scrollSubtreeSpec(20, motion = null))
+    assertScrollKeptAfterReplace(runtime, scrollSubtreeSpec(21, motion = null))
+  }
+
+  @Test
+  fun `a visible none scroll keeps its state when motion enabled replacement leaves retention`() {
+    val runtime = show(scrollSubtreeSpec(21, motion = null))
+    assertScrollKeptAfterReplace(runtime, scrollSubtreeSpec(20, motion = null))
+  }
+
+  @Test
+  fun `a scroll shown outside retention keeps its state when replacement reenters retention`() {
+    val runtime = show(scrollSubtreeSpec(21))
+    runtime.setShown(false)
+    settle()
+    assertEquals(0, shown("scroll", unmerged = false))
+    val hidden = scrollSubtreeSpec(20)
+    compose.runOnIdle {
+      runtime.replace(
+        hidden.copy(
+          state = hidden.state.orEmpty() + ("show" to PrototypeScalar.BooleanValue(false)),
+        ),
+      )
+    }
+    repeat(2) { compose.mainClock.advanceTimeByFrame() }
+    settle()
+    assertEquals(0, shown("scroll", unmerged = false))
+    runtime.setShown(true)
+    assertScrollKeptAfterReplace(runtime, rows = 21)
   }
 
   @Test

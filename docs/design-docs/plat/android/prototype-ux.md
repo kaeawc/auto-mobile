@@ -136,6 +136,11 @@ No data means every path is missing. `/a/` accesses the empty key inside `a`.
   not count. After the three path-source checks, exceeding this budget fails at
   `<node>.repeat.items.path` with `Repeat path cell limit exceeded`, before template projection.
   Cell counts and immutable projected lists are cached by pointer within each validation call.
+- `MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH` (16384 UTF-16 code units) bounds the sum of
+  replacement lengths per bindable field at each substitution stage: data in text-kind fields,
+  then repeat in every bindable field for each item, including repeat placeholders inserted by
+  data. Literal characters and unresolved repeat placeholders contribute zero; state placeholders
+  are not validated because state can change after show.
 - `{data:/pointer}` binds only the text-kind fields repeat already binds: text, button/FAB labels,
   segmented option labels, app bar title/navigation/action labels, dialog title/text/button labels,
   and snackbar text/action label. Missing, object or array values become empty text. Other braces
@@ -221,6 +226,7 @@ depth precedes array length, then children; the byte check runs last.
 | Pointer field | `Invalid pointer value` |
 | `<node>.repeat.items` | `Invalid union value` for neither array nor object |
 | `<node>.repeat.items.path` (in this order) | `Repeat path does not resolve to an array`; `Repeat path resolves to more than 128 items`; `Repeat path item <i> is not an object`; `Repeat path cell limit exceeded` |
+| Authored bindable field, e.g. `root.children[0].text` or `root.children[0].onTap[0].name` | `Substituted text length limit exceeded` (after unknown repeat fields, before bound key/empty emit checks) |
 | Referencing template string | `Unknown repeat field "x"` (non-scalar members count as absent) |
 | `<node>.repeat.items.path` | `Bound state key "<k>" is invalid (repeat item <i>)`; literal repeats keep `<node>.repeat.items[i]` without the suffix |
 | `<node>.repeat.key` | `Unknown repeat field "<key>"`; `Duplicate repeat key "<text>" (items <i> and <j>)`, first colliding pair |

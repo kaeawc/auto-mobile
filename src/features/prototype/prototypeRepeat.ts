@@ -90,11 +90,42 @@ function invalidBoundKey(key: string, path: string, scope: Scope): RepeatError |
   return undefined;
 }
 
+/** Count each placeholder once, then evaluate field multiplicities per item. */
+function repeatTextTooLong(text: string, scope: Scope): boolean {
+  const fields = new Map<string, number>();
+  let indices = 0;
+  for (const segment of templateSegments(text, scope.binding)) {
+    if (segment.kind === "index") {
+      indices++;
+    } else if (segment.kind === "field") {
+      fields.set(segment.name, (fields.get(segment.name) ?? 0) + 1);
+    }
+  }
+  for (let index = 0; index < scope.items.length; index++) {
+    let length = indices * String(index).length;
+    if (length > contract.limits.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH) {
+      return true;
+    }
+    const item = scope.items[index];
+    for (const [name, count] of fields) {
+      if (!Object.hasOwn(item, name)) {
+        continue;
+      }
+      length += count * renderScalar(item[name]).length;
+      if (length > contract.limits.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function fieldError(
   value: unknown,
   path: string,
   kind: FieldKind,
   scope: Scope,
+  data: PrototypeRepeatData,
 ): RepeatError | undefined {
   if (typeof value !== "string") {
     return undefined;
@@ -103,6 +134,10 @@ function fieldError(
   if (unknown) {
     return unknown;
   }
+  const resolved = kind === "text" ? data.text(value) : value;
+  if (resolved === undefined || repeatTextTooLong(resolved, scope)) {
+    return fail(path, "Substituted text length limit exceeded");
+  }
   if (kind === "emitName") {
     return emptyEmitName(value, path, scope);
   }
@@ -110,23 +145,35 @@ function fieldError(
 }
 
 /** The first error among a template node's own bindable fields, in visiting order. */
-function checkOwnFields(node: Raw, path: string, scope: Scope): RepeatError | undefined {
+function checkOwnFields(
+  node: Raw,
+  path: string,
+  scope: Scope,
+  data: PrototypeRepeatData,
+): RepeatError | undefined {
   let first: RepeatError | undefined;
   mapBindableFields(node, path, (value, fieldPath, kind, dataCondition) => {
     if (dataCondition && typeof value === "string" && hasPlaceholder(value, scope.binding)) {
       first ??= fail(fieldPath, "Repeat placeholder in a data condition operand is not supported");
       return value;
     }
-    first ??= fieldError(value, fieldPath, kind, scope);
+    first ??= fieldError(value, fieldPath, kind, scope, data);
     return value;
   });
   return first;
 }
 
 /** Outside every template a state key is literal, so a placeholder there is an invalid key. */
-function checkLiteralKeys(node: Raw, path: string): RepeatError | undefined {
+function checkLiteralKeys(
+  node: Raw,
+  path: string,
+  data: PrototypeRepeatData,
+): RepeatError | undefined {
   let first: RepeatError | undefined;
   mapBindableFields(node, path, (value, fieldPath, kind) => {
+    if (kind === "text" && typeof value === "string" && data.text(value) === undefined) {
+      first ??= fail(fieldPath, "Substituted text length limit exceeded");
+    }
     if (kind === "key" && typeof value === "string" && !STATE_KEY.test(value)) {
       first ??= fail(fieldPath, "State key placeholder outside a repeat template");
     }
@@ -188,7 +235,9 @@ function templateErrors(
       return fail(path, "Pager cannot appear inside a repeat template");
     }
   }
-  const own = scope ? checkOwnFields(node, path, scope) : checkLiteralKeys(node, path);
+  const own = scope
+    ? checkOwnFields(node, path, scope, state.data)
+    : checkLiteralKeys(node, path, state.data);
   if (own) {
     return own;
   }

@@ -367,3 +367,100 @@ describe("data-bound repeats", () => {
     });
   });
 });
+
+describe("substituted text length", () => {
+  const error = (path: string) => ({
+    success: false,
+    error: { path, message: "Substituted text length limit exceeded" },
+  });
+  const text = (value: string) => ({ type: "text", text: value });
+  test("data amplification is rejected without building the replacement", () => {
+    const input = { ...spec(text("{data:/b}".repeat(80_000))), data: { b: "x".repeat(200_000) } };
+    expect(validatePrototypeSpec(input)).toEqual(error("root.text"));
+  });
+  test.each([16_384, 16_385])("data boundary %i", (length) => {
+    const input = { ...spec(text("{data:/b}")), data: { b: "x".repeat(length) } };
+    expect(validatePrototypeSpec(input)).toEqual(
+      length === 16_384 ? expect.objectContaining({ success: true }) : error("root.text"),
+    );
+  });
+  test.each([
+    ["text", text("{item.b}{item.b}"), "text"],
+    [
+      "emit",
+      { ...text("tap"), onTap: [{ type: "emit", name: "{item.b}{item.b}" }] },
+      "onTap[0].name",
+    ],
+    [
+      "operand",
+      { ...text("tap"), onTap: [{ type: "setState", key: "k", value: "{item.b}{item.b}" }] },
+      "onTap[0].value",
+    ],
+  ] as const)("repeat %s is capped", (_name, child, field) => {
+    expect(
+      validatePrototypeSpec({
+        ...spec(list([child], [{ b: "x".repeat(8193) }])),
+        state: { k: "" },
+      }),
+    ).toEqual(error(`root.children[0].${field}`));
+  });
+  test("repeat key amplification uses the fixed error before binding", () => {
+    const child = { ...text("tap"), onTap: [{ type: "toggle", key: "{item.b}".repeat(2000) }] };
+    expect(validatePrototypeSpec(spec(list([child], [{ b: "x".repeat(100_000) }])))).toEqual(
+      error("root.children[0].onTap[0].key"),
+    );
+  });
+  test("repeat counts index and each item's own rendered length", () => {
+    expect(
+      validatePrototypeSpec(
+        spec(
+          list(
+            [text("{index}".repeat(8193))],
+            Array.from({ length: 11 }, () => ({})),
+          ),
+        ),
+      ),
+    ).toEqual(error("root.children[0].text"));
+    expect(
+      validatePrototypeSpec(
+        spec(list([text("{item.b}{item.b}")], [{ b: "s" }, { b: "x".repeat(8193) }])),
+      ),
+    ).toEqual(error("root.children[0].text"));
+  });
+  test("data cascades into repeat and path items use the same bound", () => {
+    const root = list([text("{data:/t}")], [{ b: "x".repeat(8193) }]);
+    expect(validatePrototypeSpec({ ...spec(root), data: { t: "{item.b}{item.b}" } })).toEqual(
+      error("root.children[0].text"),
+    );
+    expect(
+      validatePrototypeSpec({
+        ...spec({
+          ...root,
+          repeat: { items: { path: "/rows" }, as: "item" },
+          children: [text("{item.b}{item.b}")],
+        }),
+        data: { rows: [{ b: "x".repeat(8193) }] },
+      }),
+    ).toEqual(error("root.children[0].text"));
+  });
+  test("literal characters and mutable state replacements do not count", () => {
+    for (const input of [
+      spec(text("x".repeat(20_000))),
+      { ...spec(text("x".repeat(20_000) + "{data:/s}")), data: { s: "short" } },
+      { ...spec(text("{b}".repeat(1000))), state: { b: "x".repeat(100_000) } },
+    ]) {
+      expect(validatePrototypeSpec(input).success).toBe(true);
+    }
+  });
+  test("unknown authored repeat fields win before the length error", () => {
+    expect(
+      validatePrototypeSpec({
+        ...spec(list([text("{item.missing}{data:/b}")], [{}])),
+        data: { b: "x".repeat(16_385) },
+      }),
+    ).toEqual({
+      success: false,
+      error: { path: "root.children[0].text", message: 'Unknown repeat field "missing"' },
+    });
+  });
+});

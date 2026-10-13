@@ -141,6 +141,12 @@ are rejected; a missing text path renders empty.
   \`{item.x}\`, \`{index}\` or \`{key}\` inside it bind afterwards exactly like authored text.
   Data values cannot be escaped; inserted strings are never scanned again for data placeholders.
   Pointers are untouched by component props.
+- \`MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH\` (16384) bounds the sum of replacement UTF-16
+  lengths per bindable field at each stage: data in text-kind fields, then repeat in all bindable
+  fields for every item, including repeat placeholders inserted by data. Literal characters and
+  unresolved repeat placeholders contribute zero. State placeholders are not validated because
+  state can change after show. Exceeding the cap fails at the authored field path with
+  \`Substituted text length limit exceeded\`.
 - A condition uses exactly one of \`key\`, \`data\`, \`all\`, \`any\`, \`not\`. A data condition has exactly
   one comparison: \`equals\` (same scalar type and value), \`notEquals\` (its inverse, including missing
   or non-scalar), \`gt\` or \`lt\` (numbers only, otherwise false). \`equals\`/\`notEquals\` operands are

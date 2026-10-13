@@ -593,7 +593,12 @@ describe("managed slot journal redrive", () => {
       const [entry] = await registry.listOpenSlotJournal(key);
       expect(entry).toMatchObject({ phase: "deleting", attempts: 9 });
       // Not due yet: the pass skips it rather than hammering the delete.
-      expect(await journal.runPass()).toEqual({ settled: [], blocked: [], skipped: 1 });
+      expect(await journal.runPass()).toEqual({
+        settled: [],
+        blocked: [],
+        skipped: 1,
+        freeDeviceDeletions: [],
+      });
 
       deleter.failWith = undefined;
       timer.advanceTime(60_000);
@@ -662,7 +667,12 @@ describe("managed slot journal redrive", () => {
       const journal = daemon("daemon-2").journal;
 
       // Daemon 1 is alive: its drain still guards the slot.
-      expect(await journal.runPass()).toEqual({ settled: [], blocked: [], skipped: 1 });
+      expect(await journal.runPass()).toEqual({
+        settled: [],
+        blocked: [],
+        skipped: 1,
+        freeDeviceDeletions: [],
+      });
 
       liveDaemons.delete("daemon-1");
       claims.claims.set(deviceId, { kind: "held", reason: "rehydrated session" });
@@ -702,7 +712,7 @@ describe("managed slot journal redrive", () => {
         {
           runPass: async () => {
             passes += 1;
-            return { settled: [], blocked: [], skipped: 0 };
+            return { settled: [], blocked: [], skipped: 0, freeDeviceDeletions: [] };
           },
         },
         timer,
@@ -755,7 +765,12 @@ describe("managed slot journal redrive", () => {
       inFlight,
     });
 
-    expect(await sameProcess.runPass()).toEqual({ settled: [], blocked: [], skipped: 1 });
+    expect(await sameProcess.runPass()).toEqual({
+      settled: [],
+      blocked: [],
+      skipped: 1,
+      freeDeviceDeletions: [],
+    });
     expect(deleter.calls).toHaveLength(1);
   });
 });

@@ -693,6 +693,22 @@
         "retryable": false,
         "acquireNewSession": true
       }
+    },
+    "managed_slot_acquisition_failed.managed_slot_budget_exhausted.budget": {
+      "expected": "fail",
+      "fields": {
+        "code": "managed_slot_acquisition_failed",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
+    "managed_slot_acquisition_failed.managed_slot_budget_exhausted": {
+      "expected": "fail",
+      "fields": {
+        "code": "managed_slot_acquisition_failed",
+        "retryable": false,
+        "acquireNewSession": false
+      }
     }
   }
 }

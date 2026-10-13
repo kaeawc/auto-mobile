@@ -85,6 +85,7 @@ describe("the idle window counts from the end of the last tool call", () => {
     releases = [];
     manager.setActiveSessionExecutionChecker(
       (_id, query) =>
+        !query?.recoveryOnly &&
         inFlight &&
         query?.excludeExecutionId !== "earlier" &&
         (query?.sessionClockStartedAtOrBefore === undefined ||
@@ -243,8 +244,8 @@ describe("the idle window counts from the end of the last tool call", () => {
 
   it("a late control call joins timely work and the last end restarts the idle window", async () => {
     const tracker = new ExecutionTracker(timer, new FakeIdGenerator());
-    manager.setActiveSessionExecutionChecker((id, query) =>
-      tracker.hasActiveSessionUuidExecutions(id, query),
+    manager.setActiveSessionExecutionChecker(
+      (id, query) => !query?.recoveryOnly && tracker.hasActiveSessionUuidExecutions(id, query),
     );
     tracker.onSessionExecutionEnded((sessionUuids, end) => {
       for (const sessionUuid of sessionUuids) {

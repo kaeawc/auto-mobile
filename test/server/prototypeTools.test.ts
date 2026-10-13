@@ -229,7 +229,9 @@ describe("prototype MCP tool", () => {
       reply.resolve({ success: true });
       await first;
       expect(prototypeTextFieldBindings.forDevice(device.deviceId)).toBeUndefined();
-    } finally { show.mockRestore(); }
+    } finally {
+      show.mockRestore();
+    }
   });
 
   test("a spec with components is expanded on the host before it is sent (#11053)", async () => {

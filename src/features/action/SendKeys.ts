@@ -3252,7 +3252,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
 
     if (operation === "replace") {
-      const textLength = this.eventOnlyReplacementTextLength(focusResult.hierarchy);
+      const textLength = getFocusedTextLength(focusResult.hierarchy, undefined, true);
       if (textLength === undefined) {
         return {
           success: false,
@@ -3260,12 +3260,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
             "eventOnly replacement requires a known focused text length; use a11y replacement instead",
         };
       }
-      const clearResult = await this.clearEventOnlyForReplace(
-        textLength,
-        signal,
-        display,
-        this.targetLayer !== "prototype",
-      );
+      const clearResult = await this.clearEventOnlyForReplace(textLength, signal, display);
       if (!clearResult.success) {
         return clearResult;
       }
@@ -3297,21 +3292,10 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     );
   }
 
-  private eventOnlyReplacementTextLength(
-    hierarchy: Parameters<typeof getFocusedTextLength>[0],
-  ): number | undefined {
-    const length = getFocusedTextLength(hierarchy, undefined, true);
-    if (length !== undefined || this.targetLayer !== "prototype") {
-      return length;
-    }
-    return 0;
-  }
-
   private async clearEventOnlyForReplace(
     count: number,
     signal?: AbortSignal,
     display?: string,
-    verify = true,
   ): Promise<TextActionResult> {
     let deleted = false;
     try {
@@ -3325,11 +3309,6 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
         },
         supportsKeyCombination,
       );
-      // Prototype type commands verify the complete replacement after typing. Clear-only callers
-      // keep the focused-field check, while an unreadable prototype must still receive the text.
-      if (!verify) {
-        return { success: true };
-      }
       const verification = await verifyKeyEventClear(
         () =>
           this.observer.execute({

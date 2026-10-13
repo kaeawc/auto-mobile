@@ -1546,7 +1546,8 @@ async function performMutation(
       accepted: false,
       sent: ordering.sent,
     });
-    throw toActionableError(error, "Prototype mutation failed");
+    // Rethrow the original error to preserve abort and ActionableError identity after binding cleanup.
+    throw error;
   } finally {
     settleGeneration(ordering);
   }

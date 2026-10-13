@@ -23,6 +23,7 @@ import {
   observationOf,
 } from "../../helpers/prototypeWindowCapture";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeDisplayTransitionReader } from "../../fakes/FakeDisplayTransitionReader";
 import { TapOnElement, tapResolvedLayer } from "../../../src/features/action/TapOnElement";
 import { FakePrototypeAgentClient } from "../../fakes/FakePrototypeAgentClient";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
@@ -803,23 +804,56 @@ for (const mode of ["eventLast", "eventAll", "eventOnly"] as const) {
   });
 }
 
-for (const mode of ["eventLast", "eventAll", "eventOnly"] as const) {
+for (const mode of ["eventLast", "eventAll"] as const) {
   test(`prototype ${mode} replacement proceeds without readable focus`, async () => {
     const h = harness("android", { focused: false });
-    const result = await h.run("prototype", [{ action: "type", text: "a", mode, operation: "replace" }]);
+    const clear = h.client.clear;
+    const clearing = spyOn(h.client, "clear").mockImplementation(async () => {
+      expect(h.deliveries).toEqual([]);
+      return clear();
+    });
+    const result = await h.run("prototype", [
+      { action: "type", text: "a", mode, operation: "replace" },
+    ]);
     expect(h.deliveries.length).toBeGreaterThan(0);
+    expect(clearing).toHaveBeenCalledTimes(1);
     expect(result.success).toBe(true);
     expect(result.warning).toContain("not verified against the prototype");
   });
 }
 
+test("prototype eventOnly replacement refuses without readable focus before dispatch", async () => {
+  const h = harness("android", { focused: false });
+  const result = await h.run("prototype", [
+    { action: "type", text: "a", mode: "eventOnly", operation: "replace" },
+  ]);
+  expect(result.success).toBe(false);
+  expect(result.error).toContain("requires a known focused text length");
+  expect(h.deliveries).toEqual([]);
+  expect(h.committed).toEqual([]);
+  expect(h.clientCalls).toEqual([]);
+  expect(h.adb.getExecutedCommands().some((command) => command.includes("input "))).toBe(false);
+});
+
 test("display-routed Android focus applies the inferred prototype layer", async () => {
-  const h = harness("android", { focus: { focus: async () => ({ success: true, layer: "prototype" }) } });
+  const h = harness("android");
+  const transitions = new FakeDisplayTransitionReader();
   h.observer.execute = async () => ({
     ...androidFrame(h.committed.length ? "Rb one" : "old"),
-    display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+    display: { key: "0", role: "unknown", posture: "unknown", generation: transitions.generation },
+    displayRevision: transitions.fullRevision,
   });
-  const result = await h.action.execute(commands, { elementId: "ptf" }, undefined, undefined, "0");
+  const observation = await h.observer.execute();
+  const action = new SendKeys(android, h.adbFactory, {
+    observer: h.observer,
+    executor: h.executor,
+    timer: h.timer,
+    displayTransitions: transitions,
+    lastRenderedObservation: () => observation,
+    timestampProvider: { now: async () => 1 },
+    focuser: { focus: async () => ({ success: true, layer: "prototype" }) },
+  });
+  const result = await action.execute(commands, { elementId: "ptf" }, undefined, undefined, "0");
   expect(h.committed).toEqual(["Rb one"]);
   expect(result.success).toBe(true);
   expect(result.commands[0]?.imeFailure).toBeUndefined();

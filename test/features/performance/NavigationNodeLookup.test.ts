@@ -3,7 +3,7 @@ import {
   NavigationNodeLookup,
   resetNavigationNodeLookup,
 } from "../../../src/features/performance/NavigationNodeLookup";
-import { NavigationRepository } from "../../../src/db/NavigationRepository";
+import { NavigationRepository } from "../../../src/db/navigationRepository";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 // Mock NavigationRepository

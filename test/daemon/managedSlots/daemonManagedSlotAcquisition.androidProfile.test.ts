@@ -60,7 +60,17 @@ async function harness(assigned = true) {
   const { acquisition } = createDaemonManagedSlotAcquisition({
     registry: async () => registry,
     sessions: new NoSessions(),
-    pool: { getAllDevices: () => [], assertNotClaimedByForeignDaemon: async () => {} },
+    pool: {
+      getAllDevices: () => [],
+      assertNotClaimedByForeignDaemon: async () => {},
+      isUnderShutdownReservation: () => false,
+      isDeviceLeasedForAndroidStartup: () => false,
+      restartReservationExclusions: () => ({
+        names: new Set<string>(),
+        ids: new Set<string>(),
+        resumeTargets: [],
+      }),
+    },
     owner: () => ({ daemonId: "daemon", pid: 1 }),
     timer,
     journal: {

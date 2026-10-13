@@ -46,6 +46,13 @@ import Foundation
 /// the reference `PerfProvider.track`.
 @MainActor
 public final class ElementLocator: ElementLocating, HierarchyExtracting {
+    /// Generic class names that are typically structural wrappers
+    nonisolated static let structuralClassNames: Set<String> = [
+        "UIView",
+        "UIImageView",
+        "UIWindow",
+    ]
+
     #if canImport(XCTest) && os(iOS)
         private let logger = Logger(subsystem: "dev.jasonpearson.automobile", category: "ElementLocator")
 
@@ -61,13 +68,6 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
 
         /// Maximum depth to traverse (prevent infinite recursion)
         static let maxDepth = 30
-
-        /// Generic class names that are typically structural wrappers
-        static let structuralClassNames: Set<String> = [
-            "UIView",
-            "UIImageView",
-            "UIWindow",
-        ]
 
         /// Element types whose internal UIKit subviews produce same-type nested children
         /// in the XCUITest accessibility tree. These are collapsed during hierarchy building

@@ -61,7 +61,7 @@ final class PrototypeModel {
     }
 
     /// Window-space rects that accept touches; everything else passes through to the app.
-    @ObservationIgnored var hitRects: [String: CGRect] = [:]
+    @ObservationIgnored var hitRects = PrototypeHitRects()
 
     @ObservationIgnored var onEvent: (([String: Any]) -> Void)?
     @ObservationIgnored var onVisibilityChange: ((Bool) -> Void)?
@@ -257,7 +257,7 @@ final class PrototypeModel {
             onEvent?(event.wireObject(timestamp: timestamp))
         }
         if wasShown, !session.isShown {
-            hitRects = [:]
+            hitRects.removeAll()
             onVisibilityChange?(false)
         }
     }

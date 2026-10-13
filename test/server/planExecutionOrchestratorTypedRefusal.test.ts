@@ -140,6 +140,21 @@ for (const recovering of [true, false]) {
       success: false,
       error: "DeviceUnhealthyError: unhealthy",
       ...expected,
+      deviceId: "fake-device",
     });
   });
 }
+
+test("#12112 a cleanup refusal keeps the plan deviceId at top level", async () => {
+  execute.mockRejectedValue(
+    new acquisitionRefusals.DeviceCleanupInProgressError("emulator-9999", 1000),
+  );
+  expect(await run()).toMatchObject({
+    success: false,
+    code: "device_cleanup_in_progress",
+    retryable: true,
+    retryAfterMs: 1000,
+    deviceId: "fake-device",
+    platform: "android",
+  });
+});

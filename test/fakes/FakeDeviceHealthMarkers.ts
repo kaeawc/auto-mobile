@@ -17,14 +17,19 @@ export class FakeDeviceHealthMarkers implements DeviceHealthMarkers {
     incarnation: number,
     reason?: DeviceHealthReason,
   ): DeviceHealthMarker | undefined {
+    const markers = this.list(deviceId, incarnation);
+    return reason ? markers.find((marker) => marker.reason === reason) : markers[0];
+  }
+
+  list(deviceId: string, incarnation: number): readonly DeviceHealthMarker[] {
     const entry = this.entries.get(deviceId);
     if (entry?.incarnation !== incarnation) {
       if (entry && entry.incarnation < incarnation) {
         this.entries.delete(deviceId);
       }
-      return undefined;
+      return [];
     }
-    return reason ? entry.markers.find((marker) => marker.reason === reason) : entry.markers[0];
+    return [...entry.markers];
   }
 
   mark(deviceId: string, incarnation: number, reason: DeviceHealthReason): DeviceHealthMarker {

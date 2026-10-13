@@ -7073,17 +7073,32 @@ export class DevicePool {
           "bring up a fresh device.",
       );
     const evidence = devices.flatMap((device) => {
-      const marker = this.getDeviceHealthMarker(device.id);
       const incarnation = this.getDeviceIncarnation(device.id);
-      return marker && incarnation !== undefined
-        ? [
-            {
-              deviceId: device.id,
-              reason: marker.reason,
-              ...this.sessionManager.getDeviceHealthRecovery(device.id, incarnation, marker.reason),
-            },
-          ]
-        : [];
+      if (incarnation === undefined) {
+        return [];
+      }
+      const markers = this.deviceHealthMarkers.list(device.id, incarnation);
+      const oldest = markers[0];
+      if (!oldest) {
+        return [];
+      }
+      const recoveries = markers.map((marker) =>
+        this.sessionManager.getDeviceHealthRecovery(device.id, incarnation, marker.reason),
+      );
+      const recovering = recoveries.every((recovery) => recovery.recovering);
+      const bounds = recoveries.flatMap((recovery) =>
+        recovery.retryAfterMs === undefined ? [] : [recovery.retryAfterMs],
+      );
+      return [
+        {
+          deviceId: device.id,
+          reason: oldest.reason,
+          recovering,
+          ...(recovering && bounds.length === recoveries.length
+            ? { retryAfterMs: Math.max(...bounds) }
+            : {}),
+        },
+      ];
     });
     const error = new DeviceUnhealthyError(
       evidence,

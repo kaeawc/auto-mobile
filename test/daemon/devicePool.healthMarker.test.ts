@@ -879,6 +879,128 @@ test("#12112 a cleanup gate skips ticks without consuming an attempt", async () 
   expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
 });
 
+test("#12112 shutdown still dispatches recovery on an idle device's first tick", async () => {
+  const h = await harness();
+  h.manager.stopAcceptingSessionCreations();
+  let calls = 0;
+  h.manager.markDeviceNeedsAppCleanup(
+    device.deviceId,
+    async () => {
+      calls++;
+    },
+    21000,
+  );
+  expect(await typedAllocationError(h)).toMatchObject({ recovering: true, retryAfterMs: 133000 });
+  await h.timer.advanceTimeAsync(1000, flush);
+  expect(calls).toBe(1);
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
+});
+
+test("#12112 a newer held marker makes a recovering device non-retryable", async () => {
+  const h = await harness();
+  h.manager.markDeviceNeedsAppCleanup(
+    device.deviceId,
+    async () => {
+      throw new Error("cleanup unavailable");
+    },
+    21000,
+  );
+  await h.timer.advanceTimeAsync(137, flush);
+  const incarnation = h.pool.getDeviceIncarnation(device.deviceId)!;
+  h.markers.mark(device.deviceId, incarnation, "network-condition");
+  expect(h.manager.getDeviceHealthRecovery(device.deviceId, incarnation, "app-cleanup")).toEqual({
+    recovering: true,
+    retryAfterMs: 132863,
+  });
+  expect(
+    h.manager.getDeviceHealthRecovery(device.deviceId, incarnation, "network-condition"),
+  ).toEqual({ recovering: false });
+  const error = await typedAllocationError(h);
+  expect(error).toMatchObject({
+    reason: "app-cleanup",
+    retryable: false,
+    recovering: false,
+    devices: [{ deviceId: device.deviceId, reason: "app-cleanup", recovering: false }],
+  });
+  expect(error).not.toHaveProperty("retryAfterMs", expect.any(Number));
+  expect(error).not.toHaveProperty("devices.0.retryAfterMs", expect.any(Number));
+});
+
+test("#12112 multiple recovering markers use the largest remaining device bound", async () => {
+  const h = await harness();
+  await abandon(h, "network-condition");
+  const startedAt = h.timer.now();
+  h.manager.markDeviceNeedsAppCleanup(
+    device.deviceId,
+    async () => {
+      throw new Error("cleanup unavailable");
+    },
+    21000,
+  );
+  await h.timer.advanceTimeAsync(137, flush);
+  const incarnation = h.pool.getDeviceIncarnation(device.deviceId)!;
+  expect(
+    h.manager.getDeviceHealthRecovery(device.deviceId, incarnation, "network-condition"),
+  ).toEqual({ recovering: true, retryAfterMs: 12863 });
+  const remainingBound = startedAt + 133000 - h.timer.now();
+  expect(h.manager.getDeviceHealthRecovery(device.deviceId, incarnation, "app-cleanup")).toEqual({
+    recovering: true,
+    retryAfterMs: remainingBound,
+  });
+  expect(await typedAllocationError(h)).toMatchObject({
+    reason: "network-condition",
+    retryable: true,
+    recovering: true,
+    retryAfterMs: remainingBound,
+    devices: [
+      {
+        deviceId: device.deviceId,
+        reason: "network-condition",
+        recovering: true,
+        retryAfterMs: remainingBound,
+      },
+    ],
+  });
+});
+
+test("#12112 a bounded marker plus pending clock recovery has no device bound", async () => {
+  const h = await harness();
+  await h.pool.bindOrReuseDeviceSession("old", device.deviceId, "android");
+  h.manager.markDeviceNeedsAppCleanup(
+    device.deviceId,
+    async () => {
+      throw new Error("cleanup unavailable");
+    },
+    21000,
+  );
+  setRestoreState(h.manager, "clock");
+  await h.manager.releaseSession("old");
+  await h.pool.releaseDevice(device.deviceId, "old");
+  // Isolate per-marker evidence from the pool's cleanup gate while the clock stays pending.
+  h.manager.setDeviceHealthMarkers(
+    h.markers,
+    (id) => h.pool.getDeviceIncarnation(id),
+    () => true,
+  );
+  const incarnation = h.pool.getDeviceIncarnation(device.deviceId)!;
+  expect(h.manager.getDeviceHealthRecovery(device.deviceId, incarnation, "app-cleanup")).toEqual({
+    recovering: true,
+    retryAfterMs: 133000,
+  });
+  expect(h.manager.getDeviceHealthRecovery(device.deviceId, incarnation, "clock")).toEqual({
+    recovering: true,
+  });
+  const error = await typedAllocationError(h);
+  expect(error).toMatchObject({
+    reason: "app-cleanup",
+    retryable: true,
+    recovering: true,
+    devices: [{ deviceId: device.deviceId, reason: "app-cleanup", recovering: true }],
+  });
+  expect(error).not.toHaveProperty("retryAfterMs", expect.any(Number));
+  expect(error).not.toHaveProperty("devices.0.retryAfterMs", expect.any(Number));
+});
+
 for (const retirement of ["bump", "remove", "shutdown", "clear"] as const) {
   test(`#12112 ${retirement} ends recovery while ticks are skipped`, async () => {
     const h = await harness();

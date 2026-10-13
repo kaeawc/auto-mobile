@@ -2357,9 +2357,6 @@ export class SessionManager {
       for (let attempt = 1; attempt <= 3;) {
         this.healthRecoveryDeadlines.set(key, this.timer.now() + remainingBudget(attempt, true));
         await this.timer.sleep(delays[attempt - 1]!);
-        if (!this.acceptingSessionCreations) {
-          return;
-        }
         if (
           !(await this.waitForIdentityReplacement(target.deviceId, generation)) ||
           !this.restoreIncarnationIsCurrent(target)
@@ -2372,6 +2369,9 @@ export class SessionManager {
           return;
         }
         if (!health.canRecover(target.deviceId)) {
+          if (!this.acceptingSessionCreations) {
+            return;
+          }
           continue;
         }
         const timeout = new Error("Device health recovery timed out");

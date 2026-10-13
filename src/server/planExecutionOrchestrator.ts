@@ -622,10 +622,10 @@ export class PlanExecutionOrchestrator {
         executedSteps: 0,
         totalSteps: 0,
         error: `${error}`,
-        platform: this.device.platform,
-        deviceId: this.device.deviceId,
         ...planRefusalFields(error),
         ...planShutdownInterruptionFields(this.signal),
+        platform: this.device.platform,
+        deviceId: this.device.deviceId,
         ...healthSummaryField(failureHealth),
       };
 

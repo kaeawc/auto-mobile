@@ -767,8 +767,9 @@ another daemon holds it. Clients may wait and retry.
 A health marker refuses acquisition with `device_unhealthy` for every health
 reason (#12112). `devices` lists the unhealthy candidates in selection order,
 with each device's `deviceId`, oldest unresolved `reason`, and `recovering` state.
+A device is recovering only when every unresolved marker has a running recovery, and its bound is the largest marker bound only when all are computable.
 A single device also has top-level `deviceId` and `reason`. `retryable` and
-`recovering` are true while any listed recovery is running; `retryAfterMs`, when
+`recovering` are true while any listed device is recovering; `retryAfterMs`, when
 present, is the smallest remaining recovery bound, rounded up to at least 1 ms.
 Recovery waiting for a live owner, cleanup, identity replacement, or a timed-out
 command to settle has no computable bound; clock retries are also unbounded.
@@ -778,6 +779,7 @@ the marker kept, the refusal is non-retryable: replace the device with
 runners' device-wait code tables. Healthy candidates remain eligible; reads
 remain allowed on marked devices. Skipped recovery ticks re-arm the same
 attempt, and only a dispatched restore consumes one of the three attempts.
+In a plan failure result, top-level `deviceId` and `platform` identify the plan's device, while `devices[]` identifies the refused devices and top-level `reason`, `recovering`, `code`, `retryable`, and any `retryAfterMs` retain the refusal evidence.
 
 An exact Android acquisition also waits up to 5 s when adb still lists its
 transport as `offline` or `unauthorized` (#11713). If it stays transitional,

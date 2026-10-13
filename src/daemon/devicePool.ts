@@ -10941,7 +10941,9 @@ export class DevicePool {
   /**
    * Refuse a generic caller's control of a device a managed slot holds (#11174, #11178), with a
    * fresh registry read: `device_assigned_to_managed_slot`, not retryable. Only the slot's own
-   * live execution session passes; no force flag overrides it.
+   * live execution session passes; no force flag overrides it. On a failed read, a session already
+   * holding the device in this pool passes first; other sessions get retryable discovery failure
+   * when a retained entry refuses them. Plain callers keep the retained fail-closed verdict.
    */
   async assertNotAssignedToManagedSlot(input: {
     action: string;
@@ -10985,21 +10987,25 @@ export class DevicePool {
     input: Parameters<DevicePool["assertNotAssignedToManagedSlot"]>[0],
     error: ManagedSlotDiscoveryIncompleteError,
   ): void {
-    const holder = this.managedSlotExclusion?.holderOf(
-      this.managedRefFor(input.deviceId, input.platform, input.stableIds),
-    );
-    if (holder) {
-      const refusal = this.managedSlotRefusalFor(input);
-      if (refusal) {
-        throw refusal;
-      }
-      return;
-    }
+    // A failed read cannot revoke a device this session already holds, even if the retained
+    // snapshot predates its slot claim. Current successful reads still judge the registry first.
     if (
       input.requesterSessionUuid &&
       this.devices.get(input.deviceId)?.sessionId === input.requesterSessionUuid
     ) {
       return;
+    }
+    const holder = this.managedSlotExclusion?.holderOf(
+      this.managedRefFor(input.deviceId, input.platform, input.stableIds),
+    );
+    if (holder) {
+      const refusal = this.managedSlotRefusalFor(input);
+      if (!refusal) {
+        return;
+      }
+      // A session's retained refusal may name a previous execution; only a current read can
+      // refuse it permanently. Plain callers still fail closed on known managed devices.
+      throw input.requesterSessionUuid ? error : refusal;
     }
     throw error;
   }

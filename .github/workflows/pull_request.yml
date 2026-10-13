@@ -1918,7 +1918,9 @@ jobs:
     # Ubuntu build-and-test job below. It also runs the Windows unit, host
     # integration and stress lanes (#10894): they were separate Windows jobs,
     # each paying a slow Windows checkout + bun install. Budget: lint/build
-    # (~25) + unit lane cap (26) + integration and stress (~20).
+    # (~25) + unit lane cap (26) + integration and stress (~20). The Windows
+    # unit lane runs as concurrent --shard processes; host integration runs
+    # one unsafe process beside safe shards, within this same required job.
     timeout-minutes: 70
     env:
       RUN_MCP_BUILD_TEST: ${{ needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true' }}
@@ -2038,8 +2040,10 @@ jobs:
         env:
           AUTOMOBILE_TEST_MODE: "true"
           # 2 x (720s shard budget + 60s attempt overhead): a shard that times
-          # out or is killed by a signal is retried once (#10583). The per-file
-          # wall timeout stays off on Windows.
+          # out or is killed by a signal is retried once on Unix (#10583).
+          # Windows shards have no watchdog or retry; this lane timeout env
+          # has no effect there. The job timeout-minutes is the only cap, and
+          # each shard's log is uploaded on failure or cancellation.
           AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS: "1560"
         run: bash scripts/test-ts.sh unit
 
@@ -2072,7 +2076,11 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: mcp-build-test-logs-${{ matrix.os }}
-          path: ci-logs/*.log
+          path: |
+            ci-logs/*.log
+            scratch/test-ts-unit-shards/**
+            scratch/test-ts-integration-shards/**
+          if-no-files-found: ignore
           retention-days: 7
 
   # =============================================================================

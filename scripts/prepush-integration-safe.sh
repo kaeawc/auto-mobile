@@ -83,17 +83,12 @@ if [[ ! -f "$tier_file" ]]; then
   exit 2
 fi
 
-# Lines are "path | safe|unsafe | reason"; '#' lines and blanks are ignored.
+# shellcheck source=scripts/lib/integration-safe-tier.sh disable=SC1091
+source "$ROOT/scripts/lib/integration-safe-tier.sh"
 safe_files=()
-while IFS= read -r line; do
-  [[ -n "$line" && "$line" != \#* ]] || continue
-  path="${line%% | *}"
-  rest="${line#* | }"
-  tier="${rest%% | *}"
-  if [[ "$tier" == safe ]]; then
-    safe_files+=("$path")
-  fi
-done < "$tier_file"
+while IFS= read -r path; do
+  safe_files+=("$path")
+done < <(integration_tier_paths "$tier_file" safe)
 
 if [[ "${#safe_files[@]}" -eq 0 ]]; then
   echo "No safe integration files listed in ${tier_file}." >&2

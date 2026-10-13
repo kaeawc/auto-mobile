@@ -114,7 +114,7 @@ final class PrototypeAnchorTests: XCTestCase {
     func testAFullscreenLayerBelowTheDismissBarSubtractsTheBarOnce() {
         // iPhone 17: a 62 pt top inset, so the fullscreen content area (and its anchor layer)
         // starts 106 pt down the window; the window itself sits at the screen origin.
-        let barHeight = PrototypeHostChrome(placementType: "fullscreen").dismissBarHeight(safeTop: 62)
+        let barHeight = PrototypeHostChrome(placementType: "fullscreen", chrome: "bar").dismissBarHeight(safeTop: 62)
         let cover = PrototypeAnchor(bounds: general, alignment: .cover)
         XCTAssertEqual(
             cover.layerRect(nodeWidth: 0, nodeHeight: 0, rightToLeft: false, layerOriginX: 0, layerOriginY: barHeight),

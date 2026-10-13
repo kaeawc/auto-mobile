@@ -7,20 +7,28 @@ import android.util.Log
 import android.view.Display
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.WindowManager
+import android.view.accessibility.AccessibilityManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -30,7 +38,10 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.compose.ui.semantics.dismiss
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.setViewTreeLifecycleOwner
@@ -42,6 +53,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -62,6 +74,7 @@ const val DEFAULT_MAX_HIDDEN_MILLIS = 5_000L
 
 /** Frames awaited after hiding: the one that applies the hide, then one drawn without it. */
 internal const val HIDE_CONFIRM_FRAMES = 2
+private const val ESCAPE_PILL_TOP_PADDING_DP = 8
 
 /**
  * A capture taken by [PrototypeHost.withHiddenForCapture]. [prototypeExcluded] is true when no
@@ -71,9 +84,10 @@ internal const val HIDE_CONFIRM_FRAMES = 2
 data class PrototypeHiddenCapture<T>(val value: T, val prototypeExcluded: Boolean)
 
 /**
- * Opacity is a whole-view integer percentage; invalid values throw IllegalArgumentException.
- * [displayId] is the Android logical display the window attaches to; the default display keeps the
- * service context. A request for another display shows there or throws, and never falls back.
+ * Opacity is an integer percentage; invalid values throw IllegalArgumentException. Windows with
+ * host dismiss controls stay opaque and fade only authored content. [displayId] is the Android
+ * logical display the window attaches to; the default display keeps the service context. A request
+ * for another display shows there or throws, and never falls back.
  */
 data class PrototypeRequest(
   val placement: PrototypePlacement = PrototypePlacement.Floating(),
@@ -86,8 +100,8 @@ data class PrototypeRequest(
    */
   val layer: PrototypeWindowLayer = PrototypeWindowLayer.SYSTEM,
   /**
-   * The prototype outlives its host session (#10494), so host chrome always shows a close control
-   * that a person holding the device can use, whatever the placement.
+   * The prototype outlives its host session (#10494); non-fullscreen windows carry a close control.
+   * The controller defaults persistent fullscreen specs to the bar unless chrome is explicit.
    */
   val persistent: Boolean = false,
   /**
@@ -95,6 +109,8 @@ data class PrototypeRequest(
    * its mode and follow its changes. Null draws baseline chrome in the device's mode.
    */
   val theme: StateFlow<PrototypeShownTheme>? = null,
+  /** Direct host callers retain the legacy bar; the controller resolves the spec default. */
+  val chrome: PrototypeWindowChrome = PrototypeWindowChrome.BAR,
   val onHostDismiss: suspend () -> Unit = {},
   val content: @Composable () -> Unit = { PrototypeTestContent() },
 ) {
@@ -221,6 +237,10 @@ class DefaultPrototypeHost(
     else NoPrototypeBackCallbackRegistrar
   },
   private val frames: PrototypeFrameWaiter = ChoreographerPrototypeFrameWaiter,
+  private val escapeSchedulerFactory: (View) -> PrototypeEscapeScheduler =
+    ::viewPrototypeEscapeScheduler,
+  private val escapeTouchSlop: (Context) -> Int = { ViewConfiguration.get(it).scaledTouchSlop },
+  private val dispatchToContent: ((MotionEvent) -> Boolean)? = null,
 ) : PrototypeHost {
   private class Window(
     val view: PrototypeComposeView,
@@ -344,12 +364,20 @@ class DefaultPrototypeHost(
   ): Boolean {
     val owner = PrototypeWindowOwner()
     val view =
-      PrototypeComposeView(target.context, ::backDecision, ::dismissFromBack).apply {
-        setViewTreeLifecycleOwner(owner)
-        setViewTreeSavedStateRegistryOwner(owner)
-        setViewTreeViewModelStoreOwner(owner)
-        setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
-      }
+      PrototypeComposeView(
+          target.context,
+          ::backDecision,
+          ::dismissFromBack,
+          escapeSchedulerFactory,
+          escapeTouchSlop(target.context),
+          dispatchToContent,
+        )
+        .apply {
+          setViewTreeLifecycleOwner(owner)
+          setViewTreeSavedStateRegistryOwner(owner)
+          setViewTreeViewModelStoreOwner(owner)
+          setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+        }
     val added =
       Window(
         view,
@@ -365,6 +393,7 @@ class DefaultPrototypeHost(
       target.windowManager.addView(view, params)
     } catch (error: Exception) {
       Log.e(TAG, "Failed to add prototype", error)
+      view.releaseEscape()
       owner.destroy()
       view.disposeComposition()
       return false
@@ -386,6 +415,7 @@ class DefaultPrototypeHost(
       // The old display may already be gone, taking its windows with it; nothing else to undo.
       Log.w(TAG, "Superseded prototype was already removed", error)
     }
+    old.view.releaseEscape()
     old.back.release()
     old.owner.destroy()
     old.view.disposeComposition()
@@ -394,12 +424,14 @@ class DefaultPrototypeHost(
   private fun applyContent(current: Window) {
     val request = current.request
     // Fullscreen chrome never inherits spec opacity, styles, clipping or modal sheets.
-    current.view.alpha = prototypeHostChrome(request).windowAlpha
+    val chrome = prototypeHostChrome(request)
+    current.view.alpha = chrome.windowAlpha
+    current.view.configureEscape(chrome.escape)
     val target = current.target
     val geometry = windowGeometry(current)
     current.view.setContent {
       CompositionLocalProvider(LocalPrototypeWindowGeometry provides geometry) {
-        PrototypeWindowContent(request) {
+        PrototypeWindowContent(request, current.view.escapeState) {
           prototypeInsetFloor(request.placement, target.density(), target.navigationBarBottomPx())
         }
       }
@@ -524,6 +556,7 @@ class DefaultPrototypeHost(
     touchThroughToken = null
     window = null
     placement = null
+    current.view.releaseEscape()
     current.back.release()
     current.owner.destroy()
     current.view.disposeComposition()
@@ -696,8 +729,69 @@ internal class PrototypeComposeView(
   context: Context,
   private val decide: (KeyEvent) -> PrototypeBackDecision,
   private val onBack: () -> Unit,
+  escapeSchedulerFactory: (View) -> PrototypeEscapeScheduler = ::viewPrototypeEscapeScheduler,
+  touchSlop: Int = ViewConfiguration.get(context).scaledTouchSlop,
+  private val dispatchToContent: ((MotionEvent) -> Boolean)? = null,
 ) : AbstractComposeView(context) {
   private val content = mutableStateOf<(@Composable () -> Unit)?>(null)
+  val escapeState = PrototypeEscapeState()
+  private var escapeActive = false
+  private var lastTouch: MotionEvent? = null
+  private val escapeTracker =
+    PrototypeEscapeTracker(touchSlop, escapeSchedulerFactory(this)) {
+      // Recognition happens on the view thread, even if stationary fingers produce no MOVE.
+      lastTouch?.let { event ->
+        val cancel = MotionEvent.obtain(event)
+        cancel.action = MotionEvent.ACTION_CANCEL
+        try {
+          dispatchContent(cancel)
+        } finally {
+          cancel.recycle()
+        }
+      }
+      escapeState.reveal()
+    }
+
+  fun configureEscape(active: Boolean) {
+    // In-place content/opacity changes must not interrupt a hold, swallow or pill timeout.
+    if (escapeActive == active) return
+    releaseEscape()
+    escapeActive = active
+  }
+
+  fun releaseEscape() {
+    escapeActive = false
+    escapeTracker.reset()
+    lastTouch?.recycle()
+    lastTouch = null
+    escapeState.hide()
+  }
+
+  override fun onDetachedFromWindow() {
+    escapeTracker.reset()
+    lastTouch?.recycle()
+    lastTouch = null
+    escapeState.hide()
+    super.onDetachedFromWindow()
+  }
+
+  override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+    if (!escapeActive) return dispatchContent(event)
+    lastTouch?.recycle()
+    lastTouch = MotionEvent.obtain(event)
+    val swallow = escapeTracker.sample(prototypeEscapeAction(event), prototypeEscapePointers(event))
+    val handled = if (swallow) true else dispatchContent(event)
+    if (
+      event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL
+    ) {
+      lastTouch?.recycle()
+      lastTouch = null
+    }
+    return handled
+  }
+
+  private fun dispatchContent(event: MotionEvent): Boolean =
+    dispatchToContent?.invoke(event) ?: super.dispatchTouchEvent(event)
 
   override var shouldCreateCompositionOnAttachedToWindow: Boolean = false
     private set
@@ -726,6 +820,37 @@ internal class PrototypeComposeView(
     }
 }
 
+/** A view-local scheduler: no global handler survives removal of the window. */
+private fun viewPrototypeEscapeScheduler(view: View) = PrototypeEscapeScheduler { millis, block ->
+  val callback = Runnable { block() }
+  view.postDelayed(callback, millis)
+  return@PrototypeEscapeScheduler {
+    view.removeCallbacks(callback)
+    Unit
+  }
+}
+
+private fun prototypeEscapeAction(event: MotionEvent): PrototypeEscapeAction =
+  when (event.actionMasked) {
+    MotionEvent.ACTION_DOWN -> PrototypeEscapeAction.DOWN
+    MotionEvent.ACTION_POINTER_DOWN -> PrototypeEscapeAction.POINTER_DOWN
+    MotionEvent.ACTION_POINTER_UP -> PrototypeEscapeAction.POINTER_UP
+    MotionEvent.ACTION_UP -> PrototypeEscapeAction.UP
+    MotionEvent.ACTION_CANCEL -> PrototypeEscapeAction.CANCEL
+    else -> PrototypeEscapeAction.MOVE
+  }
+
+private fun prototypeEscapePointers(event: MotionEvent): List<PrototypeEscapePointer> {
+  if (
+    event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL
+  ) {
+    return emptyList()
+  }
+  return (0 until event.pointerCount)
+    .filterNot { event.actionMasked == MotionEvent.ACTION_POINTER_UP && it == event.actionIndex }
+    .map { PrototypeEscapePointer(event.getPointerId(it), event.getX(it), event.getY(it)) }
+}
+
 /** Temporary hard-coded content until the spec renderer supplies the request slot. */
 @Composable
 fun PrototypeTestContent() {
@@ -733,16 +858,17 @@ fun PrototypeTestContent() {
 }
 
 /**
- * Host chrome is computed from placement and persistence only, outside the author-controlled render
- * tree. [closeVisible] is the compact close control a persistent non-fullscreen prototype carries
- * (fullscreen already has the dismiss row), so nobody holding the device is left without a way to
- * remove a prototype that outlived its session.
+ * Host chrome is computed from window options, outside the author-controlled render tree.
+ * [closeVisible] is the compact close control a persistent non-fullscreen prototype carries.
+ * Fullscreen has a dismiss row or [escape], whose pill and accessibility action let a person remove
+ * even a prototype that outlived its session.
  */
 data class PrototypeHostChrome(
   val dismissVisible: Boolean,
   val windowAlpha: Float,
   val contentAlpha: Float,
   val closeVisible: Boolean = false,
+  val escape: Boolean = false,
 )
 
 fun prototypeHostChrome(request: PrototypeRequest): PrototypeHostChrome {
@@ -752,16 +878,18 @@ fun prototypeHostChrome(request: PrototypeRequest): PrototypeHostChrome {
   val opaqueWindow = fullscreen || close
   val opacity = request.opacityPercent / 100f
   return PrototypeHostChrome(
-    fullscreen,
+    fullscreen && request.chrome == PrototypeWindowChrome.BAR,
     if (opaqueWindow) 1f else opacity,
     if (opaqueWindow) opacity else 1f,
     closeVisible = close,
+    escape = fullscreen && request.chrome == PrototypeWindowChrome.NONE,
   )
 }
 
 @Composable
 internal fun PrototypeWindowContent(
   request: PrototypeRequest,
+  escapeState: PrototypeEscapeState = remember { PrototypeEscapeState() },
   insetFloor: () -> PrototypeInsetFloor,
 ) {
   // Read again when the configuration changes (rotation), which is when the bar moves.
@@ -770,7 +898,17 @@ internal fun PrototypeWindowContent(
   val chrome = prototypeHostChrome(request)
   val scope = rememberCoroutineScope()
   val shown = request.theme?.collectAsState()?.value
-  PrototypeHostTheme(shown) { PrototypeChrome(request, chrome, floor, scope) }
+  val touchExploration = prototypeTouchExplorationEnabled()
+  val revealCounter = escapeState.revealCounter
+  LaunchedEffect(revealCounter, chrome.escape, touchExploration) {
+    if (chrome.escape && escapeState.revealed && !touchExploration) {
+      delay(PROTOTYPE_ESCAPE_PILL_MILLIS)
+      escapeState.hide()
+    }
+  }
+  PrototypeHostTheme(shown) {
+    PrototypeChrome(request, chrome, floor, scope, escapeState.revealed || touchExploration)
+  }
 }
 
 @Composable
@@ -779,6 +917,7 @@ private fun PrototypeChrome(
   chrome: PrototypeHostChrome,
   floor: PrototypeInsetFloor,
   scope: CoroutineScope,
+  escapeVisible: Boolean,
 ) {
   val fullscreen = request.placement as? PrototypePlacement.Fullscreen
   if (chrome.dismissVisible) {
@@ -821,6 +960,8 @@ private fun PrototypeChrome(
         }
       }
     }
+  } else if (chrome.escape) {
+    PrototypeChromelessContent(request, chrome, floor, scope, escapeVisible)
   } else if (chrome.closeVisible) {
     Box {
       // Not `alpha`, which clips to this wrap-content box: anchored nodes are drawn outside it.
@@ -839,4 +980,78 @@ private fun PrototypeChrome(
     }
   } else
     Box { CompositionLocalProvider(LocalPrototypeInsetFloor provides floor) { request.content() } }
+}
+
+/** Observe TalkBack changes for this composition, and release the platform listener with it. */
+@Composable
+private fun prototypeTouchExplorationEnabled(): Boolean {
+  val context = LocalContext.current
+  val manager =
+    remember(context) {
+      context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+    }
+  var enabled by remember(manager) { mutableStateOf(manager.isTouchExplorationEnabled) }
+  DisposableEffect(manager) {
+    val listener = AccessibilityManager.TouchExplorationStateChangeListener { enabled = it }
+    manager.addTouchExplorationStateChangeListener(listener)
+    enabled = manager.isTouchExplorationEnabled
+    onDispose { manager.removeTouchExplorationStateChangeListener(listener) }
+  }
+  return enabled
+}
+
+@Composable
+private fun PrototypeChromelessContent(
+  request: PrototypeRequest,
+  chrome: PrototypeHostChrome,
+  floor: PrototypeInsetFloor,
+  scope: CoroutineScope,
+  escapeVisible: Boolean,
+) {
+  val fullscreen = request.placement as PrototypePlacement.Fullscreen
+  // Keep dismiss semantics on an unfaded host wrapper, accessible even at opacity zero.
+  Box(
+    Modifier.fillMaxSize().semantics {
+      dismiss(label = "Dismiss AutoMobile prototype") {
+        scope.launch { request.onHostDismiss() }
+        true
+      }
+    },
+  ) {
+    Box(
+      Modifier.fillMaxSize()
+        .clipToBounds()
+        .alpha(chrome.contentAlpha)
+        .background(
+          prototypeThemedScrim(fullscreen.scrim, fullscreen.scrimSpec) ?: Color.Transparent,
+        ),
+    ) {
+      CompositionLocalProvider(
+        LocalPrototypeFillsWindow provides true,
+        LocalPrototypeInsetFloor provides floor,
+      ) {
+        request.content()
+      }
+    }
+    if (escapeVisible) {
+      Box(
+        Modifier.align(Alignment.TopCenter)
+          .windowInsetsPadding(
+            WindowInsets.systemBars
+              .union(WindowInsets.displayCutout)
+              .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
+          )
+          .padding(top = ESCAPE_PILL_TOP_PADDING_DP.dp),
+      ) {
+        val colors = prototypeCloseColors(MaterialTheme.colorScheme)
+        TextButton(
+          onClick = { scope.launch { request.onHostDismiss() } },
+          modifier = Modifier.background(colors.background, CircleShape),
+          colors = ButtonDefaults.textButtonColors(contentColor = colors.content),
+        ) {
+          Text("Dismiss AutoMobile prototype", style = MaterialTheme.typography.labelMedium)
+        }
+      }
+    }
+  }
 }

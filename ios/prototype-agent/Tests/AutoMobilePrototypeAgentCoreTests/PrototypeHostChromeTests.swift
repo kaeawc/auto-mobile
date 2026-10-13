@@ -25,18 +25,39 @@ final class PrototypeHostChromeTests: XCTestCase {
     // MARK: Dismiss bar (D2)
 
     func testFullscreenReservesABarOnlyAsTallAsTheControlBelowTheTopInset() {
-        let chrome = PrototypeHostChrome(placementType: "fullscreen")
+        let chrome = PrototypeHostChrome(placementType: "fullscreen", chrome: "bar")
+        XCTAssertFalse(chrome.escape)
         XCTAssertTrue(chrome.reservesDismissBar)
         XCTAssertEqual(chrome.dismissBarHeight(safeTop: 62), 62 + 44)
         XCTAssertEqual(chrome.contentSafeTop(safeTop: 62), 0, "the bar already clears the status bar")
     }
 
+    func testFullscreenDefaultsToChromelessAndKeepsTheRealTopInset() {
+        for type in ["fullscreen", "unknown"] {
+            for value: String? in [nil, "none"] {
+                let chrome = PrototypeHostChrome(placementType: type, chrome: value)
+                XCTAssertFalse(chrome.reservesDismissBar)
+                XCTAssertTrue(chrome.escape)
+                XCTAssertEqual(chrome.dismissBarHeight(safeTop: 62), 0)
+                XCTAssertEqual(chrome.contentSafeTop(safeTop: 62), 62)
+            }
+            let bar = PrototypeHostChrome(placementType: type, chrome: "bar")
+            XCTAssertTrue(bar.reservesDismissBar)
+            XCTAssertFalse(bar.escape)
+            XCTAssertEqual(bar.dismissBarHeight(safeTop: 62), 106)
+            XCTAssertEqual(bar.contentSafeTop(safeTop: 62), 0)
+        }
+    }
+
     func testFloatingAndSheetKeepTheChipAndTheirTopInset() {
         for type in ["floating", "sheet"] {
-            let chrome = PrototypeHostChrome(placementType: type)
-            XCTAssertFalse(chrome.reservesDismissBar, type)
-            XCTAssertEqual(chrome.dismissBarHeight(safeTop: 62), 0, type)
-            XCTAssertEqual(chrome.contentSafeTop(safeTop: 62), 62, type)
+            for value: String? in [nil, "none", "bar"] {
+                let chrome = PrototypeHostChrome(placementType: type, chrome: value)
+                XCTAssertFalse(chrome.reservesDismissBar, type)
+                XCTAssertFalse(chrome.escape, type)
+                XCTAssertEqual(chrome.dismissBarHeight(safeTop: 62), 0, type)
+                XCTAssertEqual(chrome.contentSafeTop(safeTop: 62), 62, type)
+            }
         }
     }
 

@@ -26,7 +26,8 @@ import { FakeTimer } from "../../fakes/FakeTimer";
  * gates, ledger and collector. A listing reports the fleet as it was when it STARTED and may end
  * in any order, so a decision can rest on a listing older than any boot that began after it.
  * Boots always succeed and nothing shuts down, so the number of admissions granted is the number
- * of devices running: it must never pass the limit.
+ * of devices running: it must never pass the limit. Larger walks are partitioned by breadth-first
+ * roots into disjoint tests; every order is still replayed against a fresh real gate.
  *
  * #11564 adds an emulator started outside AutoMobile: its qemu process runs before adb lists it,
  * it takes a slot no admission accounts for, and it may exit and give the slot back.
@@ -182,6 +183,57 @@ async function exploreEveryOrder(
   };
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
     await descend(next);
+  }
+  return result;
+}
+
+/** Breadth-first partition: terminal and violating nodes remain roots even before `depth`. */
+async function walkRoots(
+  create: () => Scenario,
+  limit: number,
+  prefix: string[],
+  depth: number,
+): Promise<string[][]> {
+  const pending = [prefix];
+  const roots: string[][] = [];
+  for (let index = 0; index < pending.length; index++) {
+    const path = pending[index];
+    const scenario = create();
+    for (const action of path) {
+      await scenario.run(action);
+    }
+    const enabled = scenario.enabled();
+    if (
+      scenario.admitted() > limit ||
+      scenario.admittedPastLimit.length > 0 ||
+      enabled.length === 0 ||
+      path.length - prefix.length === depth
+    ) {
+      roots.push(path);
+    } else {
+      pending.push(...enabled.map((action) => [...path, action]));
+    }
+  }
+  return roots;
+}
+
+/** Modulo partitions are disjoint and cover every root, including any interior violation. */
+async function exploreSlice(
+  create: () => Scenario,
+  limit: number,
+  prefix: string[],
+  depth: number,
+  part: number,
+  parts: number,
+): Promise<Exploration> {
+  const roots = await walkRoots(create, limit, prefix, depth);
+  const result: Exploration = { orders: 0, overLimit: [], wrongFinalCount: [], unexpected: [] };
+  for (let index = part; index < roots.length; index += parts) {
+    const explored = await exploreEveryOrder(create, limit, roots[index]);
+    result.orders += explored.orders;
+    result.overLimit.push(...explored.overLimit);
+    result.wrongFinalCount.push(...explored.wrongFinalCount);
+    result.unexpected.push(...explored.unexpected);
   }
   return result;
 }
@@ -626,25 +678,78 @@ function androidScenario(shape: Shape): Scenario {
   };
 }
 
-/** Android shapes with the orders each one walks: a changed count means the walk changed. */
-const EXTERNAL_SHAPES: Array<[Shape, number]> = [
-  [{ limit: 1, admitters: 1, external: "any", startup: "none" }, 1199],
-  [{ limit: 1, admitters: 2, external: "lists", noReader: true, startup: "validation" }, 498],
-  [{ limit: 1, admitters: 2, external: "exits", noReader: true, startup: "validation" }, 519],
-  [{ limit: 2, admitters: 2, external: "lists", noReader: true, startup: "none" }, 1103],
-  [{ limit: 2, admitters: 2, external: "exits", noReader: true, startup: "none" }, 1193],
+interface Slices {
+  depth: number;
+  orders: number[];
+}
+
+type PinnedShape = [Shape, number, Slices?];
+
+const BASE_SHAPE: Shape = { limit: 1, admitters: 2, startup: "validation" };
+const BASE_WALKS = [
+  ["iOS", iosScenario, 336, { depth: 3, orders: [54, 90, 72, 60, 60] }],
+  ["Android", androidScenario, 648, { depth: 4, orders: [58, 70, 68, 90, 78, 78, 38, 50, 60, 58] }],
+] as const;
+
+/** Total and measured per-slice order pins: changing a count means the walk changed. */
+const EXTERNAL_SHAPES: PinnedShape[] = [
+  [
+    { limit: 1, admitters: 1, external: "any", startup: "none" },
+    1199,
+    { depth: 4, orders: [137, 126, 185, 143, 173, 87, 113, 106, 129] },
+  ],
+  [
+    { limit: 1, admitters: 2, external: "lists", noReader: true, startup: "validation" },
+    498,
+    { depth: 3, orders: [156, 126, 123, 93] },
+  ],
+  [
+    { limit: 1, admitters: 2, external: "exits", noReader: true, startup: "validation" },
+    519,
+    { depth: 4, orders: [139, 138, 133, 109] },
+  ],
+  [
+    { limit: 2, admitters: 2, external: "lists", noReader: true, startup: "none" },
+    1103,
+    { depth: 4, orders: [110, 158, 174, 198, 127, 78, 90, 168] },
+  ],
+  [
+    { limit: 2, admitters: 2, external: "exits", noReader: true, startup: "none" },
+    1193,
+    { depth: 4, orders: [135, 144, 145, 110, 131, 147, 103, 137, 141] },
+  ],
   // The smallest shape where a launcher that is not a qemu process yet could be taken for the
   // external emulator's process: both run, and the second admission has to be refused.
-  [{ limit: 2, admitters: 2, external: "stays", noReader: true, startup: "launcher" }, 1137],
+  [
+    { limit: 2, admitters: 2, external: "stays", noReader: true, startup: "launcher" },
+    1137,
+    { depth: 4, orders: [70, 175, 140, 144, 111, 140, 146, 144, 8, 39, 8, 12] },
+  ],
 ];
 
-const STARTUP_SHAPES: Array<[Shape, number]> = [
+const STARTUP_SHAPES: PinnedShape[] = [
   // The smallest shape with the double count: one boot spawned and still validating, one slot
   // free, and a second admission that has to be granted.
-  [{ limit: 2, admitters: 2, noReader: true, startup: "all" }, 462],
-  [{ limit: 2, admitters: 2, noReader: true, earlyExit: true, startup: "validation" }, 287],
-  [{ limit: 2, admitters: 2, noReader: true, earlyExit: true, startup: "launcher" }, 287],
-  [{ limit: 1, admitters: 2, earlyExit: true, startup: "validation" }, 1056],
+  [
+    { limit: 2, admitters: 2, noReader: true, startup: "all" },
+    462,
+    { depth: 3, orders: [126, 126, 126, 84] },
+  ],
+  [
+    { limit: 2, admitters: 2, noReader: true, earlyExit: true, startup: "validation" },
+    287,
+    { depth: 2, orders: [160, 127] },
+  ],
+  [
+    { limit: 2, admitters: 2, noReader: true, earlyExit: true, startup: "launcher" },
+    287,
+    { depth: 2, orders: [160, 127] },
+  ],
+  [
+    { limit: 1, admitters: 2, earlyExit: true, startup: "validation" },
+    1056,
+    { depth: 4, orders: [162, 188, 119, 146, 126, 169, 146] },
+  ],
 ];
 
 /** `count` boots are admitted and none has spawned, beside an unlisted external emulator if any. */
@@ -677,19 +782,23 @@ function besideExternal(
 
 /**
  * Shapes whose samples read adb and the process table in separate steps (#11588), with the
- * orders each one walks. Larger ones hold too (checked by hand) and take too long to keep: one
+ * total and per-slice orders each one walks. Larger ones hold too (checked by hand) and take too long to keep: one
  * admission, a reader and an external emulator ("any") against a limit of one (158,380 orders),
  * the hole's shape beside a reader (12,600), two admissions with no external emulator from an
  * empty fleet against a limit of two (6,864), the hole's shape with every startup step, early
  * exits and the external emulator's whole life (41,216), and a limit of three with launcher
  * steps and the external emulator being listed (92,400).
  */
-const SPLIT_READ_SHAPES: Array<[Shape, number]> = [
+const SPLIT_READ_SHAPES: PinnedShape[] = [
   [
     { limit: 1, admitters: 1, external: "any", noReader: true, startup: "none", reads: "split" },
     155,
   ],
-  [{ limit: 1, admitters: 2, noReader: true, startup: "none", reads: "split" }, 700],
+  [
+    { limit: 1, admitters: 2, noReader: true, startup: "none", reads: "split" },
+    700,
+    { depth: 3, orders: [184, 166, 184, 166] },
+  ],
   // The smallest shape with the hole: the external emulator and one admitted boot fill a limit of
   // two, the boot spawns and is listed between the second sample's two reads, and the second
   // admission has to be refused.
@@ -698,9 +807,17 @@ const SPLIT_READ_SHAPES: Array<[Shape, number]> = [
   [besideExternal(2, { external: "stays", earlyExit: true, startup: "launcher" }), 102],
   // The external emulator may be listed, or exit and free its slot, between the reads too.
   [besideExternal(2, { external: "lists", startup: "none" }), 210],
-  [besideExternal(2, { external: "exits", startup: "none" }), 285],
+  [
+    besideExternal(2, { external: "exits", startup: "none" }),
+    285,
+    { depth: 3, orders: [150, 135] },
+  ],
   // The same hole one slot up: two admitted boots and the external emulator fill a limit of three.
-  [besideExternal(3, { external: "stays", startup: "none" }), 840],
+  [
+    besideExternal(3, { external: "stays", startup: "none" }),
+    840,
+    { depth: 4, orders: [160, 172, 170, 172, 166] },
+  ],
   // No external emulator: a boot whose process shows, or that is listed, between the reads counts
   // once, and the free slot is granted.
   [
@@ -733,7 +850,7 @@ function twoExternals(shape: Pick<Shape, "limit" | "admitters" | "reads">): Shap
 }
 
 /** Two admissions from only the first external emulator against a limit of three hold too (4,200 orders, checked by hand). */
-const TWO_EXTERNAL_SHAPES: Array<[Shape, number]> = [
+const TWO_EXTERNAL_SHAPES: PinnedShape[] = [
   // The smallest shape: both external emulators fill a limit of two and the boot is refused.
   [twoExternals({ limit: 2, admitters: 1, reads: "adbFirst" }), 7],
   // One slot up, beside a boot admitted before the second external emulator starts.
@@ -767,8 +884,11 @@ async function expectEveryOrderHolds(
   limit: number,
   orders: number,
   prefix: string[] = [],
+  slice?: { depth: number; part: number; parts: number },
 ): Promise<void> {
-  const result = await exploreEveryOrder(create, limit, prefix);
+  const result = slice
+    ? await exploreSlice(create, limit, prefix, slice.depth, slice.part, slice.parts)
+    : await exploreEveryOrder(create, limit, prefix);
 
   // The first few orders are enough to reproduce; hundreds would drown the report.
   expect(result.overLimit.slice(0, 5)).toEqual([]);
@@ -778,51 +898,69 @@ async function expectEveryOrderHolds(
   expect(result.orders).toBe(orders);
 }
 
+/** Small walks keep their original test; larger walks pin every measured slice separately. */
+function testWalk(
+  name: string,
+  create: () => Scenario,
+  shape: Shape,
+  total: number,
+  slices?: Slices,
+): void {
+  if (!slices) {
+    test(name, async () => {
+      await expectEveryOrderHolds(create, shape.limit, total, shape.prefix);
+    });
+    return;
+  }
+  const { depth, orders } = slices;
+  for (const [part, count] of orders.entries()) {
+    test(`${name}, orders part ${part + 1} of ${orders.length}`, async () => {
+      await expectEveryOrderHolds(create, shape.limit, count, shape.prefix, {
+        depth,
+        part,
+        parts: orders.length,
+      });
+    });
+  }
+}
+
 describe("boot capacity gates never admit past the limit in any interleaving (#11537)", () => {
   // Three admissions against a limit of two also hold (40,492 iOS and 73,260 Android orders,
   // checked by hand), but take seconds; this shape already contains every failing order found.
-  const shape: Shape = { limit: 1, admitters: 2, startup: "validation" };
-  for (const [platform, create, orders] of [
-    ["iOS", iosScenario, 336],
-    ["Android", androidScenario, 648],
-  ] as const) {
-    test(`${platform}: two admissions and a reader against a limit of one`, async () => {
-      await expectEveryOrderHolds(() => create(shape), shape.limit, orders);
-    });
+  for (const [platform, create, orders, slices] of BASE_WALKS) {
+    testWalk(
+      `${platform}: two admissions and a reader against a limit of one`,
+      () => create(BASE_SHAPE),
+      BASE_SHAPE,
+      orders,
+      { depth: slices.depth, orders: [...slices.orders] },
+    );
   }
 });
 
 describe("an external emulator adb has not listed takes a slot in any interleaving (#11564)", () => {
   // The smallest shape with the hole: a limit of two holds the external emulator and one admitted
   // boot that has not spawned, and the second admission has to be refused.
-  for (const [shape, orders] of EXTERNAL_SHAPES) {
-    test(describeShape(shape), async () => {
-      await expectEveryOrderHolds(() => androidScenario(shape), shape.limit, orders);
-    });
+  for (const [shape, orders, slices] of EXTERNAL_SHAPES) {
+    testWalk(describeShape(shape), () => androidScenario(shape), shape, orders, slices);
   }
 });
 
 describe("a spawned emulator still validating its startup takes one slot in any interleaving (#11564)", () => {
-  for (const [shape, orders] of STARTUP_SHAPES) {
-    test(describeShape(shape), async () => {
-      await expectEveryOrderHolds(() => androidScenario(shape), shape.limit, orders);
-    });
+  for (const [shape, orders, slices] of STARTUP_SHAPES) {
+    testWalk(describeShape(shape), () => androidScenario(shape), shape, orders, slices);
   }
 });
 
 describe("a boot listed after the process table was read still counts beside an external emulator (#11588)", () => {
-  for (const [shape, orders] of SPLIT_READ_SHAPES) {
-    test(describeShape(shape), async () => {
-      await expectEveryOrderHolds(() => androidScenario(shape), shape.limit, orders, shape.prefix);
-    });
+  for (const [shape, orders, slices] of SPLIT_READ_SHAPES) {
+    testWalk(describeShape(shape), () => androidScenario(shape), shape, orders, slices);
   }
 });
 
 describe("two external emulators, one in each read, are two when adb is read first (#11588)", () => {
-  for (const [shape, orders] of TWO_EXTERNAL_SHAPES) {
-    test(describeShape(shape), async () => {
-      await expectEveryOrderHolds(() => androidScenario(shape), shape.limit, orders, shape.prefix);
-    });
+  for (const [shape, orders, slices] of TWO_EXTERNAL_SHAPES) {
+    testWalk(describeShape(shape), () => androidScenario(shape), shape, orders, slices);
   }
 
   // Why the source orders its reads: with the process table read first, no count over the two
@@ -835,5 +973,48 @@ describe("two external emulators, one in each read, are two when adb is read fir
     expect(result.overLimit).toContain(
       "externalStart > start:0 > ps:0 > secondExternal > adb:0 > end:0",
     );
+  });
+});
+
+describe("interleaving slices preserve the exhaustive walk", () => {
+  test("every entry's slice pins sum to its unchanged total", () => {
+    for (const [, , total, slices] of BASE_WALKS) {
+      expect(slices.orders.reduce((sum, count) => sum + count, 0)).toBe(total);
+    }
+    for (const [, total, slices] of [
+      ...EXTERNAL_SHAPES,
+      ...STARTUP_SHAPES,
+      ...SPLIT_READ_SHAPES,
+      ...TWO_EXTERNAL_SHAPES,
+    ]) {
+      expect((slices?.orders ?? [total]).reduce((sum, count) => sum + count, 0)).toBe(total);
+    }
+  });
+
+  test("slicing a holding split-read shape preserves all orders without violations", async () => {
+    const [shape, total] = SPLIT_READ_SHAPES[0];
+    const create = () => androidScenario(shape);
+    const unsliced = await exploreEveryOrder(create, shape.limit, shape.prefix);
+    const slices = [];
+    for (let part = 0; part < 3; part++) {
+      slices.push(await exploreSlice(create, shape.limit, shape.prefix ?? [], 2, part, 3));
+    }
+    expect(unsliced.orders).toBe(total);
+    expect(slices.reduce((sum, slice) => sum + slice.orders, 0)).toBe(unsliced.orders);
+    expect(unsliced.overLimit).toEqual([]);
+    expect(slices.flatMap((slice) => slice.overLimit)).toEqual([]);
+  });
+
+  test("slicing preserves every order and interior violation of the failing split-read shape", async () => {
+    const shape = twoExternals({ limit: 2, admitters: 1, reads: "split" });
+    const create = () => androidScenario(shape);
+    const unsliced = await exploreEveryOrder(create, shape.limit, shape.prefix);
+    const slices = [];
+    // Past the violating admission: it must become a root rather than disappear on expansion.
+    for (let part = 0; part < 3; part++) {
+      slices.push(await exploreSlice(create, shape.limit, shape.prefix ?? [], 6, part, 3));
+    }
+    expect(slices.reduce((sum, slice) => sum + slice.orders, 0)).toBe(unsliced.orders);
+    expect(slices.flatMap((slice) => slice.overLimit).sort()).toEqual(unsliced.overLimit.sort());
   });
 });

@@ -40,7 +40,6 @@ import {
   DeviceOutsideManagedSlotsError,
   ManagedSlotDiscoveryIncompleteError,
   ManagedSlotOwnershipUnconfirmedError,
-  ManagedSlotOwnershipLostError,
 } from "../daemon/managedSlots/managedSlotRefusal";
 import {
   RetryableDeviceAcquisitionError,
@@ -164,8 +163,7 @@ function hasSelfDescribedRefusalPayload(
   | DeviceGestureRecordingStartUnheldError
   | AppNotRunningError
   | ManagedSlotDiscoveryIncompleteError
-  | ManagedSlotOwnershipUnconfirmedError
-  | ManagedSlotOwnershipLostError {
+  | ManagedSlotOwnershipUnconfirmedError {
   return (
     error instanceof PlanExecutionInProgressError ||
     error instanceof AmbiguousDeviceTargetError ||
@@ -177,8 +175,7 @@ function hasSelfDescribedRefusalPayload(
     error instanceof DeviceGestureRecordingStartUnheldError ||
     error instanceof AppNotRunningError ||
     error instanceof ManagedSlotDiscoveryIncompleteError ||
-    error instanceof ManagedSlotOwnershipUnconfirmedError ||
-    error instanceof ManagedSlotOwnershipLostError
+    error instanceof ManagedSlotOwnershipUnconfirmedError
   );
 }
 

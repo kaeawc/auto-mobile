@@ -153,12 +153,12 @@
         "retryAfterMs": 2000
       }
     },
-    "managed_slot_ownership_lost": {
-      "expected": "fail",
+    "session_ownership_lost.managed_slot_ownership_lost_at_gate": {
+      "expected": "acquire-new-session",
       "fields": {
-        "code": "managed_slot_ownership_lost",
+        "code": "session_ownership_lost",
         "retryable": false,
-        "acquireNewSession": false
+        "acquireNewSession": true
       }
     },
     "managed_execution_ended": {

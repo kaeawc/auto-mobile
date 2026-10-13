@@ -98,14 +98,15 @@
         }
       }
     },
-    "socket-frame.managed_slot_ownership_lost": {
-      "expected": "fail",
+    "socket-frame.session_ownership_lost.managed_slot_ownership_lost_at_gate": {
+      "expected": "acquire-new-session",
       "fields": {
-        "code": "managed_slot_ownership_lost",
+        "code": "session_ownership_lost",
         "retryable": false,
-        "acquireNewSession": false,
+        "acquireNewSession": true,
         "details": {
-          "sessionUuid": "11111111-2222-4333-8444-555555555555"
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "reason": "managed-slot-ownership-lost"
         }
       }
     },

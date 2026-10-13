@@ -678,9 +678,25 @@ interactive after the last host client disconnects (USB unplugged, adb or the
 daemon gone) and after session end, has no idle timeout, and keeps its uploaded
 assets. `setPage`, `setState`, text fields and the `dismiss` action keep working
 offline. It goes away only through its own close control (the fullscreen dismiss
-row, or a Close button on sheet and floating windows), an explicit `dismiss`, a
+row or revealed pill on a capable device, or a Close button on sheet and floating windows), an explicit `dismiss`, a
 replacing `show`, or the CtrlProxy service stopping. Host-side status and event
 buffers are still cleared on session release.
+
+`spec.window.chrome` is `none` (default) or `bar`, fullscreen only, on a device
+advertising `prototype_window_chrome_v1`. With `none` the prototype fills the window
+including under the status bar; use `safeAreaPadding` on the top edge of a
+`topAppBar` or top content. Relative sheet detents use the full window height.
+A host-owned two-finger long press (about 1 s) reveals a dismiss pill for 5 s;
+tapping it dismisses with reason `user`. `window.persistence: "device"` defaults
+to `bar`. Accessibility services can dismiss without the gesture (a dismiss
+action on Android, the VoiceOver escape gesture on iOS), and the pill stays
+visible while TalkBack, VoiceOver or Switch Control is on. On a CtrlProxy or
+iOS agent built before the capability the bar is
+kept, explicit `none` is refused before showing, and omitted chrome or `bar`
+succeeds. `lastResult.chrome` reports what a successful fullscreen show draws
+and is retained in host-local status; it is absent on sheet/floating windows,
+dismiss, failed show and adopted prototypes. Agent dismiss, replacing show,
+authored dismiss, the session idle TTL and last-client disconnect still work.
 
 With no host connected, a persisted prototype's events (tap `emit`s, page changes,
 text input, a close) are kept on the device, the most recent 200, dropping the

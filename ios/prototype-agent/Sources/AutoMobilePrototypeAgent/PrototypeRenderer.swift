@@ -281,8 +281,7 @@ struct NodeView: View {
         case "spacer":
             Color.clear.frame(width: 0, height: 0)
         case "textField":
-            TextField(node.placeholder ?? "", text: model.binding(forStateKey: node.stateKey ?? ""))
-                .textFieldStyle(.roundedBorder)
+            PrototypeTextFieldView(node: node, model: model)
         case "switch":
             switchView
         case "checkbox":

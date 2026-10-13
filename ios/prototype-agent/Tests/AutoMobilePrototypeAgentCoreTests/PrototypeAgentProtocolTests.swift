@@ -9,6 +9,11 @@ private func line(_ object: [String: Any]) throws -> Data {
 }
 
 final class PrototypeAgentConfigurationTests: XCTestCase {
+    func testWindowChromeCapability() {
+        XCTAssertEqual(PrototypeAgentProtocol.windowChromeCapability, "prototype_window_chrome_v1")
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.windowChromeCapability))
+    }
+
     func testReadsPortAndTokenFromEnvironment() {
         let result = PrototypeAgentConfiguration.from(environment: [
             "AUTOMOBILE_PROTOTYPE_PORT": "51234",

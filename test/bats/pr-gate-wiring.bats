@@ -147,22 +147,17 @@ wiring_requires_yq() {
   [[ "$(yq -r '.jobs."junit-runner-unit-tests".name' "$WF")" == "Run JUnit Runner Unit Tests" ]]
 }
 
-@test "emulator lanes fail fast on compile errors through the build jobs (#10890)" {
+@test "emulator lane starts without waiting for the build jobs that compile its modules (#10890, #11578)" {
   wiring_requires_yq
   [[ -z "$(job_block android-emulator-compile-smoke)" ]]
-  # Each module the removed compile smoke compiled is compiled by a build job
-  # the emulator lanes depend on.
+  # Each module the removed compile smoke compiled still has a build job's
+  # independent compile signal, concurrent with the emulator lane.
   [[ "$(job_block build-android-control-proxy)" == *":control-proxy:assembleDebug"* ]]
   [[ "$(job_block build-playground-app)" == *":playground:app:assembleDebug"* ]]
   [[ "$(job_block build-playground-app)" == *":playground:app:compileDebugUnitTestKotlin"* ]]
   [[ "$(job_block junit-runner-unit-tests)" == *'gradle-tasks: ":junit-runner:test"'* ]]
-  local job needs
-  for job in android-emulator-tests; do
-    needs="$(yq -r ".jobs.\"${job}\".needs[]" "$WF")"
-    [[ $'\n'"$needs"$'\n' == *$'\n'"build-android-control-proxy"$'\n'* ]]
-    [[ $'\n'"$needs"$'\n' == *$'\n'"build-playground-app"$'\n'* ]]
-    [[ $'\n'"$needs"$'\n' == *$'\n'"junit-runner-unit-tests"$'\n'* ]]
-  done
+  [ "$(yq -r '.jobs."android-emulator-tests".needs | [.] | flatten | .[]' "$WF")" = "detect-changes" ]
+  [ "$(yq -r '.jobs."android-emulator-tests".if' "$WF")" = "needs.detect-changes.outputs.android_should_run == 'true'" ]
   # The SDK Debug Inspector Consumer guard the smoke carried stays on PRs.
   [[ "$(job_block jvm-consumer-checks)" == *"validate-sdk-debug-inspector-consumer.sh --skip-publish"* ]]
 }
@@ -653,14 +648,17 @@ wiring_requires_yq() {
 }
 
 
-@test "emulator prebuild overlaps boot and release stays off its needs path (#11578)" {
+@test "emulator prebuild overlaps boot, builds the CtrlProxy APK it installs, and release stays off its needs path (#11578)" {
   wiring_requires_yq
   local job tasks
   [ "$(yq -r '.jobs."android-emulator-tests".steps[] | select(.uses == "./.github/actions/android-emulator") | .with."prebuild-script"' "$WF")" = "../scripts/android/run-emulator-suites.sh --prebuild" ]
+  [ "$(yq -r '[.jobs."android-emulator-tests".steps[] | select((.uses // "") | test("^actions/download-artifact@"))] | length' "$WF")" -eq 0 ]
+  grep -F 'exec "$gradle_cmd" :junit-runner:testClasses :control-proxy:assembleDebug' scripts/android/run-emulator-suites.sh
+  [ "$(yq -r '.jobs."android-emulator-tests".steps[] | select(.uses == "./.github/actions/android-emulator") | .with."accessibility-apk-path"' "$WF")" = "control-proxy/build/outputs/apk/debug/control-proxy-debug.apk" ]
   while IFS= read -r job; do
     tasks="$(yq -r ".jobs.\"$job\".steps[]? | .with.\"gradle-tasks\" // \"\"" "$WF")"
     [[ "$tasks" != *":control-proxy:assembleRelease"* ]] || return 1
-  done < <(yq -r '.jobs."android-emulator-tests".needs[]' "$WF")
+  done < <(yq -r '.jobs."android-emulator-tests".needs | [.] | flatten | .[]' "$WF")
   tasks="$(yq -r '.jobs."jvm-consumer-checks".steps[] | select(.uses == "./.github/actions/gradle-task-run" and .with."release-keystore-base64" != null) | .with."gradle-tasks"' "$WF")"
   [[ "$tasks" == *":control-proxy:assembleRelease"* ]]
 }

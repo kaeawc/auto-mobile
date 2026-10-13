@@ -8,6 +8,7 @@ import {
   repeatKeyInstances,
   type KeyInstance,
 } from "./prototypeRepeat";
+import { isPrototypeDataPointer } from "./prototypeData";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
 import { prototypeSpecSchema, type PrototypeSpec, MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
 
@@ -252,9 +253,9 @@ function formConstraint(
   }
   for (const [trigger, dependents] of Object.entries(rule.dependents ?? {})) {
     const present = dependents.filter((key) => Object.hasOwn(data, key));
-    if (!Object.hasOwn(data, trigger)) {
+    if (!trigger.split("|").some((key) => Object.hasOwn(data, key))) {
       if (present.length > 0) {
-        return fail(keyPath(path, present[0]), `Requires ${trigger}`);
+        return fail(keyPath(path, present[0]), `Requires ${trigger.split("|").join(" or ")}`);
       }
     } else if (present.length !== 1) {
       const target = present[1] ?? dependents[0];
@@ -328,6 +329,7 @@ const primitiveChecks: Record<string, (value: unknown, rule: Rule) => boolean> =
     typeof value === "string" &&
     (rule.empty === true || value.length > 0) &&
     (!rule.nonblank || value.trim().length > 0),
+  pointer: isPrototypeDataPointer,
   key: (value) => typeof value === "string" && /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(value),
   boundKey: (value) => typeof value === "string" && BOUND_STATE_KEY_PATTERN.test(value),
   color: (value) => typeof value === "string" && /^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(value),
@@ -373,6 +375,56 @@ function jsonCost(value: unknown, depth = 0): number {
     entries.reduce((sum, [key, child]) => sum + bytes(key) + 1 + jsonCost(child, depth + 1), 0)
   );
 }
+/** Data uses the emit payload cost after its own stricter depth-first walk. */
+export function prototypeDataError(value: unknown): PrototypeValidationError | undefined {
+  if (!object(value)) {
+    return fail("data", "Expected object");
+  }
+  return (
+    walkDataValue(value, "data", 1) ??
+    (jsonCost(value) > contract.limits.MAX_PROTOTYPE_DATA_BYTES
+      ? fail("data", "Data byte limit exceeded")
+      : undefined)
+  );
+}
+
+function dataChildren(value: unknown, path: string): { value: unknown; path: string }[] {
+  if (Array.isArray(value)) {
+    return value.map((child, index) => ({ value: child, path: `${path}[${index}]` }));
+  }
+  const data = object(value) ?? {};
+  return Object.keys(data)
+    .sort()
+    .map((key) => ({ value: data[key], path: keyPath(path, key) }));
+}
+
+function walkDataValue(
+  value: unknown,
+  path: string,
+  depth: number,
+): PrototypeValidationError | undefined {
+  if (!Array.isArray(value) && !object(value)) {
+    return primitiveChecks.scalar(value, { kind: "scalar" })
+      ? undefined
+      : fail(path, "Invalid data value");
+  }
+  if (depth > contract.limits.MAX_PROTOTYPE_DATA_DEPTH) {
+    return fail(path, "Data depth limit exceeded");
+  }
+  if (Array.isArray(value) && value.length > contract.limits.MAX_PROTOTYPE_DATA_ARRAY_ITEMS) {
+    return fail(path, "Data array limit exceeded");
+  }
+  for (const child of dataChildren(value, path)) {
+    const error = walkDataValue(child.value, child.path, depth + 1);
+    if (error) {
+      return error;
+    }
+  }
+  return undefined;
+}
+function visitData(value: unknown): PrototypeValidationError | undefined {
+  return prototypeDataError(value);
+}
 function visitChoice(
   value: unknown,
   rule: Rule,
@@ -382,6 +434,9 @@ function visitChoice(
 ): PrototypeValidationError | undefined {
   const options = rule.options ?? [];
   const candidates = options.filter((option) => {
+    if (option.kind === "array") {
+      return Array.isArray(value);
+    }
     if (option.kind === "object") {
       return object(value) !== undefined;
     }
@@ -409,6 +464,7 @@ function walk(
   depth: number,
 ): PrototypeValidationError | undefined {
   const handlers: Record<string, typeof visitObject> = {
+    data: visitData,
     ref: visitReference,
     tagged: visitTagged,
     object: visitObject,

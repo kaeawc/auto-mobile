@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "id": "orders",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "onTap": [
+        {
+          "type": "toggle",
+          "key": "liked"
+        }
+      ]
+    },
+    "data": {
+      "liked": false
+    }
+  },
+  "expectedPath": "root.onTap[0].key"
+}

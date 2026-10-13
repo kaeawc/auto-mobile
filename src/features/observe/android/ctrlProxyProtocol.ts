@@ -527,6 +527,8 @@ export interface PrototypeResult {
 
 /** One prototype the device reported to `inspect_prototypes`. `id` is the prototype id (its spec id). */
 export interface PrototypeStatusEntry {
+  /** Agent-owned read-only content of the shown spec; absent when it has none. */
+  data?: import("../../prototype/prototypeSpec").PrototypeData;
   id: string;
   /** True for `window.persistence: "device"`. */
   persistent: boolean;
@@ -974,6 +976,9 @@ export const PROTOTYPE_SHOW_IN_PLACE_CAPABILITY = "prototype_show_in_place_v1";
  * them, so the node would silently render at its normal position.
  */
 export const PROTOTYPE_ANCHOR_CAPABILITY = "prototype_anchor_v1";
+
+/** Resolves read-only prototype data, JSON Pointer bindings and stable repeat keys. */
+export const PROTOTYPE_DATA_MODEL_CAPABILITY = "prototype_data_model_v1";
 
 /**
  * Advertised by a CtrlProxy or iOS prototype agent whose renderer resolves the per-mode spec forms

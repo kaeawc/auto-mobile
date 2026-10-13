@@ -1,0 +1,417 @@
+{
+  "spec": {
+    "id": "orders",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": {
+          "path": "/orders"
+        },
+        "as": "item"
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "{item.title}"
+        }
+      ]
+    },
+    "data": {
+      "orders": [
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        },
+        {
+          "title": "a"
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.repeat.items.path"
+}

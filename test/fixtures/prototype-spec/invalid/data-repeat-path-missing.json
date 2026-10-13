@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "orders",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": {
+          "path": "/orders"
+        },
+        "as": "item"
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "{item.title}"
+        }
+      ]
+    },
+    "data": {}
+  },
+  "expectedPath": "root.repeat.items.path"
+}

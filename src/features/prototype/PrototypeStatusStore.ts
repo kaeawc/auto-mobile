@@ -1,3 +1,4 @@
+import type { PrototypeData } from "./prototypeSpec";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
 import type { PrototypeEvent, PrototypeResult } from "../observe/android/ctrlProxyProtocol";
@@ -9,6 +10,7 @@ import {
 
 export type PrototypeMutation = "show" | "dismiss";
 export interface PrototypeLastResult {
+  data?: PrototypeData;
   id?: string;
   all?: true;
   lastAction: PrototypeMutation;
@@ -45,6 +47,7 @@ export interface PrototypeEventState {
   lastKnown: true;
 }
 export interface AdoptedPrototype {
+  data?: PrototypeData;
   id: string;
   persistent?: boolean;
   suspended?: boolean;
@@ -87,6 +90,7 @@ export interface PrototypeStatusStore {
     target: { id?: string; all?: true },
     result: PrototypeResult,
     displayId?: number,
+    data?: PrototypeData,
   ): PrototypeLastResult;
 }
 interface StoredPrototypeStatus extends PrototypeScope {
@@ -94,6 +98,16 @@ interface StoredPrototypeStatus extends PrototypeScope {
   lastResult?: PrototypeLastResult;
   snapshot?: PrototypeEventState & { id: string };
   pendingSnapshot?: PrototypeEventState & { id: string };
+}
+
+function shownData(
+  action: PrototypeMutation,
+  result: PrototypeResult,
+  data: PrototypeData | undefined,
+): { data?: PrototypeData } {
+  return action === "show" && result.success && data !== undefined
+    ? { data: structuredClone(data) }
+    : {};
 }
 
 /**
@@ -117,6 +131,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     return {
       prototypes: Array.from(stored?.shown.values() ?? [], (entry) => ({
         ...entry,
+        ...(entry.data === undefined ? {} : { data: structuredClone(entry.data) }),
         ...(snapshot && snapshot.id === entry.id
           ? {
               pages: { ...snapshot.pages },
@@ -133,7 +148,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     for (const stored of this.scopes.values()) {
       const entry = stored.deviceId === deviceId ? stored.shown.get(id) : undefined;
       if (entry) {
-        return { ...entry };
+        return structuredClone(entry);
       }
     }
     return undefined;
@@ -166,7 +181,10 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       timestamp: this.clock.now(),
     };
     stored.lastResult = entry;
-    stored.shown.set(prototype.id, entry);
+    stored.shown.set(prototype.id, {
+      ...entry,
+      ...shownData("show", { success: true }, prototype.data),
+    });
     stored.pendingSnapshot = undefined;
     stored.snapshot = {
       id: prototype.id,
@@ -221,6 +239,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     target: { id?: string; all?: true },
     result: PrototypeResult,
     displayId?: number,
+    data?: PrototypeData,
   ): PrototypeLastResult {
     const key = JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]);
     const existing = this.scopes.get(key);
@@ -231,7 +250,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
         : undefined;
     const entry = this.createResult(action, target, result, displayId ?? shownDisplay);
     if (!existing && !result.success) {
-      return { ...entry };
+      return structuredClone(entry);
     }
     const stored = existing ?? {
       ...scope,
@@ -239,9 +258,9 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       lastResult: entry,
     };
     stored.lastResult = entry;
-    this.updatePresence(stored, entry);
+    this.updatePresence(stored, { ...entry, ...shownData(action, result, data) });
     this.remember(key, stored);
-    return { ...entry };
+    return structuredClone(entry);
   }
 
   /** Re-insert so Map order tracks recency, then evict the oldest scopes past the cap. */

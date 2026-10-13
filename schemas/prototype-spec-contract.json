@@ -7,7 +7,11 @@
     "MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES": 4096,
     "MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH": 24,
     "MAX_PROTOTYPE_SELECTOR_DEPTH": 8,
-    "MAX_PROTOTYPE_CONDITION_DEPTH": 8
+    "MAX_PROTOTYPE_CONDITION_DEPTH": 8,
+    "MAX_PROTOTYPE_DATA_BYTES": 262144,
+    "MAX_PROTOTYPE_DATA_DEPTH": 8,
+    "MAX_PROTOTYPE_DATA_ARRAY_ITEMS": 500,
+    "MAX_PROTOTYPE_DATA_POINTER_LENGTH": 256
   },
   "definitions": {
     "offset": {
@@ -97,9 +101,9 @@
     },
     "condition": {
       "kind": "object",
-      "exactlyOne": ["key", "all", "any", "not"],
+      "exactlyOne": ["key", "data", "all", "any", "not"],
       "dependents": {
-        "key": ["equals", "notEquals", "gt", "lt"]
+        "key|data": ["equals", "notEquals", "gt", "lt"]
       },
       "fields": {
         "key": {
@@ -164,6 +168,12 @@
           "rule": {
             "kind": "ref",
             "name": "condition"
+          },
+          "optional": true
+        },
+        "data": {
+          "rule": {
+            "kind": "pointer"
           },
           "optional": true
         }
@@ -4836,6 +4846,12 @@
             "name": "node"
           },
           "optional": false
+        },
+        "data": {
+          "rule": {
+            "kind": "data"
+          },
+          "optional": true
         }
       }
     },
@@ -7587,16 +7603,32 @@
       "fields": {
         "items": {
           "rule": {
-            "kind": "array",
-            "item": {
-              "kind": "map",
-              "item": {
-                "kind": "scalar"
+            "kind": "choice",
+            "options": [
+              {
+                "kind": "array",
+                "item": {
+                  "kind": "map",
+                  "item": {
+                    "kind": "scalar"
+                  }
+                },
+                "min": 1,
+                "max": 128,
+                "unique": false
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "path": {
+                    "rule": {
+                      "kind": "pointer"
+                    },
+                    "optional": false
+                  }
+                }
               }
-            },
-            "min": 1,
-            "max": 128,
-            "unique": false
+            ]
           },
           "optional": false
         },
@@ -7605,6 +7637,12 @@
             "kind": "key"
           },
           "optional": false
+        },
+        "key": {
+          "rule": {
+            "kind": "key"
+          },
+          "optional": true
         }
       }
     },

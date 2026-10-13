@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   AndroidEmulatorClient,
   AndroidEmulatorUnavailableError,
+  isMissingExecutableError,
 } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import {
   parseAvdConfig,
@@ -430,18 +431,22 @@ describe("AndroidEmulatorClient listAvds", () => {
   test.each([
     { label: "killed process", killed: true },
     { label: "signal termination", signal: "SIGTERM" },
-    { label: "timeout", message: "Command timed out: ENOENT" },
+    { label: "timeout", name: "TimeoutError", message: "Command timed out: ENOENT" },
     { label: "timeout code", code: "ETIMEDOUT" },
     { label: "cancellation code", code: "ABORT_ERR" },
     { label: "cancellation", name: "AbortError" },
-    { label: "cancelled command", message: "Command cancelled: ENOENT" },
-    { label: "daemon cwd", message: "ENOENT: current working directory unavailable" },
-  ])("missing absolute path does not override $label", async (overrides) => {
+    { label: "cancelled command", name: "AbortError", message: "Command cancelled: ENOENT" },
+    {
+      label: "daemon cwd",
+      path: import.meta.path,
+      message: "ENOENT: current working directory unavailable",
+    },
+  ])("spawn failure stays untyped for $label", async (overrides) => {
     // Safety variants of the captured spawn error, not additional host-process probes.
     const fixture = { ...absoluteMissing, ...overrides };
     const client = clientRejecting(
       Object.assign(new Error(fixture.message), fixture),
-      absoluteMissing.path,
+      fixture.path,
     );
     await expect(client.listAvds()).rejects.not.toBeInstanceOf(AndroidEmulatorUnavailableError);
   });
@@ -465,10 +470,10 @@ describe("AndroidEmulatorClient listAvds", () => {
   test("missing executable retains the typed unavailable error and existing message", async () => {
     const client = new AndroidEmulatorClient(
       async () => {
-        throw Object.assign(new Error("spawn emulator ENOENT"), {
+        throw Object.assign(new Error("spawn amprobe-emulator-not-on-path ENOENT"), {
           code: "ENOENT",
-          path: "emulator",
-          syscall: "spawn emulator",
+          path: "amprobe-emulator-not-on-path",
+          syscall: "spawn amprobe-emulator-not-on-path",
         });
       },
       null,
@@ -476,7 +481,10 @@ describe("AndroidEmulatorClient listAvds", () => {
       undefined,
       noAvdConfigReader,
     );
-    Object.assign(client, { emulatorPath: "emulator", ensureEmulatorPath: async () => "emulator" });
+    Object.assign(client, {
+      emulatorPath: "amprobe-emulator-not-on-path",
+      ensureEmulatorPath: async () => "amprobe-emulator-not-on-path",
+    });
     await expect(client.listAvds()).rejects.toBeInstanceOf(AndroidEmulatorUnavailableError);
     await expect(client.listAvds()).rejects.toThrow("Android emulator not found.");
   });
@@ -503,5 +511,76 @@ describe("AndroidEmulatorClient listAvds", () => {
     await expect(client.listAvds()).rejects.toThrow(
       message.includes("/bin/sh") ? "daemon working directory" : "Android emulator not found.",
     );
+  });
+});
+
+describe("isMissingExecutableError structured evidence", () => {
+  test("installed bare executable with captured deleted-cwd failure stays untyped", () => {
+    const error = Object.assign(new Error("ENOENT: no such file or directory, posix_spawn 'ls'"), {
+      code: "ENOENT",
+      path: "ls",
+    });
+    expect(isMissingExecutableError(error, "ls", true)).toBe(false);
+  });
+
+  test.each([
+    "/Users/abortiz/Library/Android/sdk/emulator/emulator",
+    "/Users/timeout/Library/Android/sdk/emulator/emulator",
+  ])("missing absolute executable ignores message path components: %s", (path) => {
+    const error = Object.assign(
+      new Error(`ENOENT: no such file or directory, posix_spawn '${path}'`),
+      { code: "ENOENT", path },
+    );
+    expect(isMissingExecutableError(error, path, false)).toBe(true);
+  });
+
+  test("missing absolute executable with EMFILE stays untyped", () => {
+    const path = "/amprobe-emulator-not-on-path";
+    const error = Object.assign(new Error(`spawn ${path} EMFILE`), { code: "EMFILE", path });
+    expect(isMissingExecutableError(error, path, false)).toBe(false);
+  });
+
+  test.each([
+    { label: "Bun missing bare name", path: "amprobe-emulator-not-on-path" },
+    { label: "missing absolute path", path: "/amprobe-emulator-not-on-path" },
+  ])("$label is typed", ({ path }) => {
+    const error = Object.assign(new Error(`Executable not found in $PATH: "${path}"`), {
+      code: "ENOENT",
+      path,
+    });
+    expect(isMissingExecutableError(error, path, false)).toBe(true);
+  });
+
+  test.each([
+    { label: "numeric exit", code: 1 },
+    { label: "missing code", code: undefined },
+    { label: "numeric-looking string exit", code: "1" },
+    { label: "killed", killed: true },
+    { label: "signal", signal: "SIGTERM" },
+    { label: "abort", name: "AbortError" },
+    { label: "timeout", name: "TimeoutError" },
+    { label: "timeout code", code: "ETIMEDOUT" },
+    { label: "cancellation code", code: "ABORT_ERR" },
+    { label: "different executable", path: "another-executable" },
+  ])("$label stays untyped even when the absolute executable is absent", (overrides) => {
+    const path = "/amprobe-emulator-not-on-path";
+    const error = Object.assign(new Error("spawn ENOENT"), { code: "ENOENT", path }, overrides);
+    expect(isMissingExecutableError(error, path, false)).toBe(false);
+  });
+
+  test("non-Error values stay untyped", () => {
+    expect(isMissingExecutableError({ code: "ENOENT" }, "emulator", false)).toBe(false);
+  });
+
+  test("ENOENT with an existing absolute executable or bad shebang stays untyped", () => {
+    const path = "/installed-sdk/emulator/emulator";
+    const error = Object.assign(new Error(`spawn ${path} ENOENT`), { code: "ENOENT", path });
+    expect(isMissingExecutableError(error, path, true)).toBe(false);
+  });
+
+  test("ENOENT without a path is typed only when the executable is absent", () => {
+    const error = Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" });
+    expect(isMissingExecutableError(error, "amprobe-emulator-not-on-path", false)).toBe(true);
+    expect(isMissingExecutableError(error, "amprobe-emulator-not-on-path", true)).toBe(false);
   });
 });

@@ -848,16 +848,19 @@ const execAsync = async (
   );
 };
 
+// Keep the runtime API typed locally; this project does not include Bun's ambient types.
+declare const Bun: { which(name: string): string | null };
+
 /** Offline discovery failed; callers must retain the prior episode state. */
 export class AndroidOfflineProbeError extends ActionableError {}
 
 export class AndroidEmulatorUnavailableError extends ActionableError {}
 
 /** Classify spawn failures without mistaking a running/stopped process for missing tooling. */
-function isMissingExecutableError(
+export function isMissingExecutableError(
   error: unknown,
   resolvedPath: string,
-  pathExists: boolean,
+  executableExists: boolean,
 ): boolean {
   if (!(error instanceof Error)) {
     return false;
@@ -868,21 +871,13 @@ function isMissingExecutableError(
     killed?: boolean;
     signal?: string | null;
   };
-  if (
-    typeof failure.code === "number" ||
-    failure.killed ||
-    failure.signal ||
-    ["AbortError", "TimeoutError"].includes(failure.name) ||
-    /^(?:ETIMEDOUT|ABORT_ERR|ERR_CANCELED|ERR_CANCELLED)$/.test(String(failure.code)) ||
-    /timed out|timeout|cancel|abort|getcwd|current (?:working )?directory|^Command failed:/i.test(
-      failure.message,
-    )
-  ) {
-    return false;
-  }
   return (
-    (failure.code === "ENOENT" && (failure.path === undefined || failure.path === resolvedPath)) ||
-    (isAbsolute(resolvedPath) && !pathExists)
+    failure.code === "ENOENT" &&
+    !failure.killed &&
+    !failure.signal &&
+    !["AbortError", "TimeoutError"].includes(failure.name) &&
+    (failure.path === undefined || failure.path === resolvedPath) &&
+    !executableExists
   );
 }
 
@@ -1980,9 +1975,11 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       // Check if the error is because emulator is not found
       const errorMsg = errorMessage(error);
       const daemonWorkingDirectoryFailure = this.isLikelyDaemonWorkingDirectoryFailure(errorMsg);
+      const executableExists = (path: string): boolean =>
+        isAbsolute(path) ? existsSync(path) : Bun.which(path) !== null;
       const missingExecutable =
         !daemonWorkingDirectoryFailure &&
-        isMissingExecutableError(error, this.emulatorPath, existsSync(this.emulatorPath));
+        isMissingExecutableError(error, this.emulatorPath, executableExists(this.emulatorPath));
       const missingEmulator =
         missingExecutable || /No such file or directory|command not found|ENOENT/.test(errorMsg);
       if (missingEmulator && daemonWorkingDirectoryFailure) {

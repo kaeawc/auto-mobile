@@ -72,6 +72,61 @@ final class SdkHierarchyClientTests: XCTestCase {
         XCTAssertNil(hierarchy)
     }
 
+    func testFreshResultDecodesHierarchyOn200() async {
+        let stub = StubHTTPTransport(status: 200, body: Self.hierarchyJSON)
+        guard case let .hierarchy(hierarchy) = await makeClient(stub).fetchFreshHierarchyResult() else {
+            return XCTFail("Expected decoded hierarchy")
+        }
+        XCTAssertEqual(hierarchy.bundleId, "com.example.app")
+        XCTAssertEqual(hierarchy.timestamp, 7)
+        XCTAssertEqual(stub.recordedRequests.first?.url?.path, "/hierarchy/fresh")
+    }
+
+    func testFreshResultReportsTimeout() async {
+        let result = await makeClient(StubHTTPTransport([.timedOut])).fetchFreshHierarchyResult()
+        guard case let .failed(failure) = result else { return XCTFail("Expected timeout failure") }
+        XCTAssertEqual(failure, .timedOut)
+        XCTAssertEqual(failure.reason, "SDK hierarchy request timed out")
+    }
+
+    func testFetchFreshHierarchyNilOnTimeout() async {
+        let hierarchy = await makeClient(StubHTTPTransport([.timedOut])).fetchFreshHierarchy()
+        XCTAssertNil(hierarchy)
+    }
+
+    func testFreshResultIsUnavailableWithoutHTTPResponse() async {
+        // transportError throws URLError(.cannotConnectToHost), which remains unavailable.
+        for outcome in [StubOutcome.transportError, .connectionLost, .nonHTTPResponse] {
+            guard case .unavailable = await makeClient(StubHTTPTransport([outcome])).fetchFreshHierarchyResult() else {
+                return XCTFail("Expected unavailable for \(outcome)")
+            }
+        }
+    }
+
+    func testFreshResultReportsNon200Status() async {
+        let result = await makeClient(StubHTTPTransport(status: 404, body: Self.hierarchyJSON))
+            .fetchFreshHierarchyResult()
+        guard case let .failed(failure) = result else { return XCTFail("Expected HTTP failure") }
+        XCTAssertEqual(failure, .httpStatus(404))
+        XCTAssertTrue(failure.reason.contains("404"))
+    }
+
+    func testFreshResultReportsMalformedJSON() async {
+        let result = await makeClient(StubHTTPTransport(status: 200, body: Data("not json".utf8)))
+            .fetchFreshHierarchyResult()
+        guard case let .failed(.undecodable(reason)) = result else { return XCTFail("Expected decoding failure") }
+        XCTAssertFalse(reason.isEmpty)
+        XCTAssertTrue(reason.contains("dataCorrupted"))
+    }
+
+    func testFreshResultReportsMissingRequiredKey() async {
+        let body = Data(#"{"bundleId":"com.example.app","screenScale":3,"screenWidth":393,"screenHeight":852}"#.utf8)
+        let result = await makeClient(StubHTTPTransport(status: 200, body: body)).fetchFreshHierarchyResult()
+        guard case let .failed(.undecodable(reason)) = result else { return XCTFail("Expected decoding failure") }
+        XCTAssertTrue(reason.contains("timestamp"), reason)
+        XCTAssertTrue(reason.contains("keyNotFound"), reason)
+    }
+
     // MARK: - /health routing + availability
 
     func testFetchServerInfoUsesHealthTransportOnly() async {

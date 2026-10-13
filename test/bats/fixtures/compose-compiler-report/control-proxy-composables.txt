@@ -1,0 +1,42 @@
+restartable skippable scheme("[androidx.compose.ui.UiComposable]") fun dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.ui.KeyRow(
+  row: List<KeyboardKey>
+  presentation: KeyboardPresentation
+  stable modifier: Modifier
+)
+restartable skippable scheme("[androidx.compose.ui.UiComposable]") fun dev.jasonpearson.automobile.ctrlproxy.ime.keyboard.ui.KeyCap(
+  key: KeyboardKey
+  presentation: KeyboardPresentation
+  stable modifier: Modifier
+)
+restartable skippable scheme("[androidx.compose.ui.UiComposable]") fun dev.jasonpearson.automobile.ctrlproxy.prototype.NavigationPlaceholder()
+restartable skippable scheme("[androidx.compose.ui.UiComposable]") fun dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAnchorLayer(
+  anchors: List<LayeredPrototypeAnchor>
+  stable interact: Function1<PrototypeInteraction, Unit>
+)
+restartable skippable scheme("[androidx.compose.ui.UiComposable]") fun dev.jasonpearson.automobile.ctrlproxy.prototype.RenderPrototypeNode(
+  stable node: PrototypeRenderNode
+  stable interact: Function1<PrototypeInteraction, Unit>
+  stable parentModifier: Modifier? = @static <expression>
+  stable weightAxis: PrototypeWeightAxis? = @static null
+  stable windowRoot: Boolean = @static false
+  stable anchorLayer: Boolean = @static false
+)
+restartable skippable scheme("[androidx.compose.ui.UiComposable]") fun dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeNavigationTab(
+  unstable item: PrototypeItem
+  stable selected: Boolean
+  stable select: Function0<Unit>
+)
+restartable skippable scheme("[0, [0]]") fun dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeTheme(
+  stable root: PrototypeRenderNode
+  unstable explicit: PrototypeSpecTheme? = @static null
+  stable content: Function2<Composer, Int, Unit>
+)
+restartable skippable scheme("[0, [0]]") fun dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeTheme(
+  unstable theme: PrototypeThemeSpec
+  unstable explicit: PrototypeSpecTheme?
+  stable content: Function2<Composer, Int, Unit>
+)
+fun dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeThemedColor(
+  stable literal: Color?
+  unstable spec: PrototypeModeValue?
+): Color?

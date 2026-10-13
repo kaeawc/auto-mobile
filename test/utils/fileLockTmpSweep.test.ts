@@ -1,3 +1,4 @@
+import * as fileLock from "../../src/utils/fileLock";
 import { describe, expect, spyOn, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
@@ -45,6 +46,138 @@ function exact(fs: FakeLockFileSystem): void {
 }
 
 describe("own publication tmp sweep", () => {
+  test("cached directory candidates carry over across lock basenames", () => {
+    const f = setup();
+    const other = "/locks/other.lock";
+    f.fs.seed(tmp(1), "old", 0);
+    f.fs.seed(tmp(2, other), "old", 0);
+    expect(tryAcquireExclusiveLock(LOCK, f.options)).toBe(true);
+    expect(f.fs.exists(tmp(1))).toBe(false);
+    expect(f.fs.exists(tmp(2, other))).toBe(true);
+    f.fs.operations.length = 0;
+    expect(tryAcquireExclusiveLock(other, f.options)).toBe(true);
+    expect(f.fs.exists(tmp(2, other))).toBe(false);
+    expect(f.fs.operations.filter(({ op }) => op === "list")).toHaveLength(0);
+  });
+
+  test("new litter waits for the next interval listing", () => {
+    const f = setup();
+    expect(tryAcquireExclusiveLock(LOCK, f.options)).toBe(true);
+    releaseExclusiveLock(LOCK, PID, "mine", f.fs);
+    f.fs.seed(tmp(1), "old", 0);
+    f.clock.advanceTime(299_999);
+    f.fs.operations.length = 0;
+    expect(tryAcquireExclusiveLock(LOCK, f.options)).toBe(true);
+    expect(f.fs.exists(tmp(1))).toBe(true);
+    expect(f.fs.operations.filter(({ op }) => op === "list")).toHaveLength(0);
+    releaseExclusiveLock(LOCK, PID, "mine", f.fs);
+    f.clock.advanceTime(1);
+    expect(tryAcquireExclusiveLock(LOCK, f.options)).toBe(true);
+    expect(f.fs.exists(tmp(1))).toBe(false);
+    expect(f.fs.operations.filter(({ op }) => op === "list")).toHaveLength(1);
+  });
+
+  test("young cached candidates age into cleanup without listing", () => {
+    const f = setup();
+    f.fs.seed(tmp(1), "young");
+    expect(tryAcquireExclusiveLock(LOCK, f.options)).toBe(true);
+    expect(f.fs.exists(tmp(1))).toBe(true);
+    releaseExclusiveLock(LOCK, PID, "mine", f.fs);
+    f.clock.advanceTime(RECLAIM_GUARD_ABANDON_AGE_MS + 1);
+    f.fs.operations.length = 0;
+    expect(tryAcquireExclusiveLock(LOCK, f.options)).toBe(true);
+    expect(f.fs.exists(tmp(1))).toBe(false);
+    expect(f.fs.operations.filter(({ op }) => op === "list")).toHaveLength(0);
+  });
+
+  test("64 sorted candidates drain eight per acquire; overflow waits for interval", () => {
+    const f = setup();
+    const paths = Array.from({ length: 70 }, (_, i) => tmp(i)).sort();
+    for (const path of [...paths].reverse()) {
+      f.fs.seed(path, "old", 0);
+    }
+    for (let i = 0; i < 9; i++) {
+      f.fs.operations.length = 0;
+      expect(tryAcquireExclusiveLock(LOCK, f.options)).toBe(true);
+      const removed = f.fs.operations.filter(
+        ({ op, path }) => op === "unlink" && paths.includes(path),
+      );
+      expect(removed.map(({ path }) => path)).toEqual(paths.slice(i * 8, Math.min(i * 8 + 8, 64)));
+      expect(f.fs.operations.filter(({ op }) => op === "list")).toHaveLength(i === 0 ? 1 : 0);
+      releaseExclusiveLock(LOCK, PID, "mine", f.fs);
+    }
+    expect(f.fs.paths()).toEqual(paths.slice(64));
+    f.clock.advanceTime(300_000);
+    expect(tryAcquireExclusiveLock(LOCK, f.options)).toBe(true);
+    expect(f.fs.paths()).toEqual([LOCK]);
+    expect(fileLock.OWN_TMP_SWEEP_CANDIDATE_LIMIT).toBe(64);
+  });
+
+  test("directory cache evicts oldest insertion at 64 keys", () => {
+    const f = setup();
+    const cycle = (index: number) => {
+      const lock = `/locks-${index}/resource.lock`;
+      f.fs.operations.length = 0;
+      expect(tryAcquireExclusiveLock(lock, f.options)).toBe(true);
+      releaseExclusiveLock(lock, PID, "mine", f.fs);
+      return f.fs.operations.filter(({ op }) => op === "list").length;
+    };
+    for (let i = 0; i < 65; i++) {
+      expect(cycle(i)).toBe(1);
+    }
+    expect(cycle(64)).toBe(0);
+    expect(cycle(63)).toBe(0);
+    expect(cycle(0)).toBe(1);
+    expect(fileLock.OWN_TMP_SWEEP_DIRECTORY_LIMIT).toBe(64);
+  });
+
+  test("non-listing acquires never stat or unlink foreign or non-publication files", () => {
+    const f = setup();
+    const paths = [tmp(1, LOCK, 202), `${LOCK}.101.reclaim`];
+    for (const path of paths) {
+      f.fs.seed(path, "keep", 0);
+    }
+    expect(tryAcquireExclusiveLock(LOCK, f.options)).toBe(true);
+    releaseExclusiveLock(LOCK, PID, "mine", f.fs);
+    f.fs.operations.length = 0;
+    expect(tryAcquireExclusiveLock(LOCK, f.options)).toBe(true);
+    expect(f.fs.operations.filter(({ op }) => op === "list")).toHaveLength(0);
+    expect(f.fs.operations.filter(({ path }) => paths.includes(path))).toEqual([]);
+    for (const path of paths) {
+      expect(f.fs.readText(path)).toBe("keep");
+    }
+  });
+
+  test.each(["stat", "unlink"] as const)(
+    "cached candidates with failed %s are dropped",
+    (operation) => {
+      const f = setup();
+      const path = tmp(1);
+      f.fs.seed(path, "old", 0);
+      let attempts = 0;
+      const failure = spyOn(f.fs, operation).mockImplementation((candidate: string) => {
+        if (candidate === path) {
+          attempts++;
+          throw Object.assign(new Error("unreadable"), { code: "EACCES" });
+        }
+        return operation === "stat"
+          ? FakeLockFileSystem.prototype.stat.call(f.fs, candidate)
+          : FakeLockFileSystem.prototype.unlink.call(f.fs, candidate);
+      });
+      try {
+        expect(tryAcquireExclusiveLock(LOCK, f.options)).toBe(true);
+        releaseExclusiveLock(LOCK, PID, "mine", f.fs);
+        f.fs.operations.length = 0;
+        expect(tryAcquireExclusiveLock(LOCK, f.options)).toBe(true);
+        expect(attempts).toBe(1);
+        expect(f.fs.operations.filter(({ op }) => op === "list")).toHaveLength(0);
+        expect(f.fs.exists(path)).toBe(true);
+      } finally {
+        failure.mockRestore();
+      }
+    },
+  );
+
   test("sweeps tmps using the lock path's literal directory prefix", () => {
     const f = setup();
     const lock = "/locks//resource.lock";
@@ -164,6 +297,8 @@ describe("own publication tmp sweep", () => {
       throw Object.assign(new Error(code), { code });
     });
     try {
+      expect(tryAcquireExclusiveLock(LOCK, f.options)).toBe(true);
+      releaseExclusiveLock(LOCK, PID, "mine", f.fs);
       expect(tryAcquireExclusiveLock(LOCK, f.options)).toBe(true);
       expect(list).toHaveBeenCalledTimes(1);
       exact(f.fs);

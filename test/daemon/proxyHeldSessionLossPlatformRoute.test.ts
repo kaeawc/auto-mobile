@@ -114,7 +114,9 @@ function setUp(initialSessionUuid?: string, livenessOwnerToken?: string): void {
       }
       return withRoutedSessionMeta(
         { content: [{ type: "text", text: "ok" }] },
-        name === "observe" ? undefined : args.sessionUuid,
+        name === "observe"
+          ? undefined
+          : (args.sessionUuid ?? (args.deviceId === IOS.deviceId ? IOS.sessionUuid : undefined)),
       );
     },
     onCallDaemonMethod: (method, args) => {
@@ -252,12 +254,41 @@ test("reads and Android controls preserve an eviction loss", async () => {
   await forwarded();
 });
 
+for (const route of ["named control", "named read", "deviceId control"] as const) {
+  test(`successful ${route} clears only the alive evicted session's loss`, async () => {
+    await evictIos();
+    expect(ended.has(IOS.sessionUuid)).toBe(false);
+    await forwarded(
+      route === "named read" ? "observe" : "homeScreen",
+      route === "deviceId control" ? { deviceId: IOS.deviceId } : { sessionUuid: IOS.sessionUuid },
+      route === "deviceId control" ? undefined : IOS.sessionUuid,
+    );
+    await forwarded();
+    // Idle eviction stops protection (#10657); a successful answer does not re-hold it.
+    client.callDaemonMethodCalls.length = 0;
+    await advance(INTERVAL_MS);
+    expect(
+      client.callDaemonMethodCalls.some(
+        (call) => call.method === "daemon/heartbeat" && call.params.sessionId === IOS.sessionUuid,
+      ),
+    ).toBe(false);
+  });
+}
+
+test("pin: a successful named Android call preserves the iOS eviction loss", async () => {
+  await evictIos();
+  await forwarded("homeScreen", { sessionUuid: ANDROID.sessionUuid }, ANDROID.sessionUuid);
+  await refused(IOS, "replay-lease-expired");
+  await forwarded();
+});
+
 for (const selection of ["named", "acquired"] as const) {
   test(`${selection} selection clears an eviction loss`, async () => {
     await evictIos();
     if (selection === "named") {
       release(IOS, "cleanup-expired");
-      await proxy.callTool("homeScreen", { sessionUuid: IOS.sessionUuid });
+      const answer = await proxy.callTool("homeScreen", { sessionUuid: IOS.sessionUuid });
+      expect(answer).toMatchObject({ isError: true });
       await forwarded();
     } else {
       apple = { ...IOS, sessionUuid: "ios-reacquired" };

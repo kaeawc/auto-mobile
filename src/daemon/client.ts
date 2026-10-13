@@ -887,24 +887,25 @@ export class DaemonClient {
     logger.warn("Dropped daemon frame: invalid response or notification envelope");
   }
 
-  private overflowingResponseId(head?: Buffer): string | undefined {
+  /** Owner request id, null for a positively unrelated frame, undefined for an unreadable head. */
+  private overflowingResponseId(head?: Buffer): string | null | undefined {
     const prefix = head?.toString("utf8");
-    if (!prefix?.startsWith('{"id":"')) {
-      return undefined;
-    }
-    const end = prefix.indexOf('"', 7);
-    if (end === -1) {
+    if (!prefix?.startsWith('{"')) {
       return undefined;
     }
     try {
-      const response: unknown = JSON.parse(prefix.slice(0, end + 1) + "}");
-      return response !== null &&
-        typeof response === "object" &&
-        "id" in response &&
-        typeof response.id === "string" &&
-        this.pendingRequests.has(response.id)
-        ? response.id
-        : undefined;
+      const keyEnd = this.overflowStringEnd(prefix, 1);
+      const key: unknown = JSON.parse(prefix.slice(1, keyEnd + 1));
+      if (key !== "id") {
+        return null;
+      }
+      if (!prefix.slice(keyEnd + 1).startsWith(':"')) {
+        return undefined;
+      }
+      const idStart = keyEnd + 2;
+      const idEnd = this.overflowStringEnd(prefix, idStart);
+      const id: string = JSON.parse(prefix.slice(idStart, idEnd + 1));
+      return this.pendingRequests.has(id) ? id : null;
     } catch {
       // An incomplete or invalid id is expected in a bounded head; attribute nothing.
       logger.debug("Oversized daemon frame head contained no complete response id");
@@ -912,12 +913,26 @@ export class DaemonClient {
     }
   }
 
+  /** Locate a quoted key/id's end; JSON.parse validates its escapes and contents. */
+  private overflowStringEnd(prefix: string, start: number): number {
+    for (let index = start + 1; index < prefix.length; index++) {
+      if (prefix[index] === "\\") {
+        index++;
+      } else if (prefix[index] === '"') {
+        return index;
+      }
+    }
+    return -1;
+  }
+
   private handleInboundOverflow(head?: Buffer): void {
     const error = new DaemonFrameTooLargeError(this.maxInboundFrameBytes);
     logger.warn(error.message);
+    const attribution = this.overflowingResponseId(head);
     const owner =
-      this.overflowingResponseId(head) ??
-      (this.pendingRequests.size === 1 ? this.pendingRequests.keys().next().value : undefined);
+      attribution === undefined && this.pendingRequests.size === 1
+        ? this.pendingRequests.keys().next().value
+        : attribution;
     const socket = this.socket;
     for (const [requestId, pending] of this.pendingRequests) {
       this.timer.clearTimeout(pending.timeout);

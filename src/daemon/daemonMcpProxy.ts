@@ -4720,7 +4720,7 @@ export class DaemonMcpProxy {
         signal,
         label: `Daemon tool ${name}`,
       });
-      this.creditRoutedSession(result);
+      this.creditRoutedSession(result, forwardedSessionUuid);
       if (result?.isError) {
         // Provisioning retains its usable device session when optional resource
         // configuration fails. Own that result-minted session before returning
@@ -5617,8 +5617,17 @@ export class DaemonMcpProxy {
    * (#11348). A binding declared in a call's args is credited too: it is not heartbeated, but its
    * replay lease follows its use (#4610).
    */
-  private creditRoutedSession(result: unknown): void {
+  private creditRoutedSession(result: unknown, forwardedSessionUuid: string | undefined): void {
     const routed = routedSessionUuidFromResult(result);
+    // A non-terminal answer supersedes only that session's pending idle loss. Reads
+    // have no routed-use echo, so use their forwarded UUID without restarting protection.
+    const answeredSessionUuid = routed ?? forwardedSessionUuid;
+    if (
+      answeredSessionUuid !== undefined &&
+      readTerminalSessionRefusal(result)?.sessionUuid !== answeredSessionUuid
+    ) {
+      this.pendingHeldSessionPlatformLosses.delete(answeredSessionUuid);
+    }
     if (routed !== undefined) {
       this.noteSessionRestoredByCall(routed);
       this.creditSessionUse(routed);

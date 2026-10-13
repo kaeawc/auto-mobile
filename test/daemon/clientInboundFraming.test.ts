@@ -458,45 +458,66 @@ for (const reconnectBeforeClose of [false, true]) {
   });
 }
 
-for (const head of [
-  '{"id":"p","type":"mcp_response","success":true,"result":"',
-  '{"id":"fake-1","type":"mcp_response","success":true,"result":"',
-  '{"id":"not-pending","type":"mcp_response","success":true,"result":"',
-  '{"type":"daemon_notification","method":"notice","data":"',
-  '{"id":"unterminated',
-  '{"id":"bad\\escape","result":"',
-]) {
-  test(`overflow attribution uses only a complete pending response id: ${head}`, async () => {
-    const { client, timer, socket, request } = setup(128);
-    const warn = spyOn(logger, "warn").mockImplementation(() => {});
-    const first = request();
-    const second = request();
-    try {
-      // Split the id itself across chunks, as a socket read may do.
-      client.simulateIncomingDataForTesting(Buffer.from(head.slice(0, 5)));
-      client.simulateIncomingDataForTesting(Buffer.from(head.slice(5) + "x".repeat(129)));
-      const firstAnswer = await first;
-      const secondAnswer = await second;
-      const ownsSecond = head.startsWith('{"id":"fake-1"');
-      const owner = ownsSecond ? secondAnswer : firstAnswer;
-      const sibling = ownsSecond ? firstAnswer : secondAnswer;
-      expect(sibling).toBeInstanceOf(DaemonUnavailableError);
-      expect(sibling.message).toStartWith("Daemon socket connection lost:");
-      expect(sibling.cause).toBeInstanceOf(DaemonFrameTooLargeError);
-      if (head.startsWith('{"id":"p"') || ownsSecond) {
-        expect(owner).toBeInstanceOf(DaemonFrameTooLargeError);
-        expect(sibling.cause).toBe(owner);
-      } else {
-        expect(owner).toBeInstanceOf(DaemonUnavailableError);
-        expect(owner.cause).toBe(sibling.cause);
+for (const pendingCount of [1, 2]) {
+  for (const head of [
+    '{"id":"p","type":"mcp_response","success":true,"result":"',
+    '{"id":"fake-1","type":"mcp_response","success":true,"result":"',
+    '{"id":"not-pending","type":"mcp_response","success":true,"result":"',
+    '{"type":"daemon_notification","method":"notice","data":"',
+    '{"id":"unterminated',
+    '{"id":"bad\\escape","result":"',
+    '{"unterminated',
+    '{"bad\\escape":"notice","data":"',
+  ]) {
+    test(`overflow attribution uses only a complete pending response id (${pendingCount} pending): ${head}`, async () => {
+      const { client, timer, socket, request } = setup(128);
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const first = request();
+      const second = pendingCount === 2 ? request() : undefined;
+      try {
+        // Split the id itself across chunks, as a socket read may do.
+        client.simulateIncomingDataForTesting(Buffer.from(head.slice(0, 5)));
+        client.simulateIncomingDataForTesting(Buffer.from(head.slice(5) + "x".repeat(129)));
+        const firstAnswer = await first;
+        if (pendingCount === 1) {
+          const unreadable = [
+            '{"id":"unterminated',
+            '{"id":"bad\\escape","result":"',
+            '{"unterminated',
+            '{"bad\\escape":"notice","data":"',
+          ].includes(head);
+          if (head.startsWith('{"id":"p"') || unreadable) {
+            expect(firstAnswer).toBeInstanceOf(DaemonFrameTooLargeError);
+          } else {
+            expect(firstAnswer).toBeInstanceOf(DaemonUnavailableError);
+            expect(firstAnswer.cause).toBeInstanceOf(DaemonFrameTooLargeError);
+          }
+          expect(timer.getPendingTimeoutCount()).toBe(0);
+          expect(socket.destroyed).toBe(true);
+          return;
+        }
+        const secondAnswer = await second;
+        const ownsSecond = head.startsWith('{"id":"fake-1"');
+        const owner = ownsSecond ? secondAnswer : firstAnswer;
+        const sibling = ownsSecond ? firstAnswer : secondAnswer;
+        expect(sibling).toBeInstanceOf(DaemonUnavailableError);
+        expect(sibling.message).toStartWith("Daemon socket connection lost:");
+        expect(sibling.cause).toBeInstanceOf(DaemonFrameTooLargeError);
+        if (head.startsWith('{"id":"p"') || ownsSecond) {
+          expect(owner).toBeInstanceOf(DaemonFrameTooLargeError);
+          expect(sibling.cause).toBe(owner);
+        } else {
+          expect(owner).toBeInstanceOf(DaemonUnavailableError);
+          expect(owner.cause).toBe(sibling.cause);
+        }
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+        expect(socket.destroyed).toBe(true);
+      } finally {
+        await client.close();
+        warn.mockRestore();
       }
-      expect(timer.getPendingTimeoutCount()).toBe(0);
-      expect(socket.destroyed).toBe(true);
-    } finally {
-      await client.close();
-      warn.mockRestore();
-    }
-  });
+    });
+  }
 }
 
 test("one pending call keeps the frame error for an unattributed overflow", async () => {

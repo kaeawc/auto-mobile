@@ -6,6 +6,7 @@ import SwiftUI
 /// layer's own screen origin (the window's screen origin plus the layer's position in the window,
 /// which is below the dismiss bar for a fullscreen prototype), so its touch target and accessibility
 /// frame are where it is drawn. Only the window and the content area clip it.
+@MainActor
 struct PrototypeAnchorLayer: View {
     /// A `sheet` placement's edge and height: the layer draws and takes touches only inside that
     /// strip of the window, as Android clips everything outside a sheet window (#10912).
@@ -17,7 +18,7 @@ struct PrototypeAnchorLayer: View {
     }
 
     let entries: [PrototypeAnchoredNode]
-    @ObservedObject var model: PrototypeModel
+    let model: PrototypeModel
     var sheet: Sheet?
     @Environment(\.layoutDirection) private var direction
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

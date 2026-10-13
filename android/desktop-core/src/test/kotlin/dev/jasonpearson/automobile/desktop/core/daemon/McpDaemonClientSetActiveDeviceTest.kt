@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -90,14 +91,24 @@ class McpDaemonClientSetActiveDeviceTest {
   @Test
   fun `every captured terminal refusal is a released session in either payload shape`() {
     val terminal = RefusalWireFixtures.all().filter { it.acquireNewSession }
-    // Top-level (session_terminal_release_in_progress) and nested-under-error shapes both exist.
-    assertEquals(
+    // Top-level codes: session_terminal_release_in_progress, session_released_during_creation.
+    // Check a code subset so future codes and <code>.<variant> cases are exercised by the loop.
+    val requiredCodes =
       setOf(
         "session_ownership_lost",
         "no_active_device_session",
         "session_terminal_release_in_progress",
-      ),
-      terminal.map { it.name }.toSet(),
+        "session_released_during_creation",
+      )
+    val codes = terminal.map { it.code }.toSet()
+    assertTrue(
+      codes.containsAll(requiredCodes),
+      "Missing terminal refusal codes: ${requiredCodes - codes}",
+    )
+    assertTrue(
+      terminal.any { it.payload["error"] is JsonObject } &&
+        terminal.any { it.payload["error"] !is JsonObject },
+      "Terminal refusals must include both nested-under-error and top-level payload shapes",
     )
     terminal.forEach { case ->
       assertEquals(

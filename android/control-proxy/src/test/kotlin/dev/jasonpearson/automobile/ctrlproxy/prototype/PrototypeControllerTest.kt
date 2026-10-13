@@ -60,6 +60,48 @@ class PrototypeControllerTest {
   }
 
   @Test
+  fun `controller applies chrome defaults and explicit overrides to the host request`() = runTest {
+    val windows =
+      listOf(
+        PrototypeWindow(PrototypeFullscreenPlacement()) to PrototypeWindowChrome.NONE,
+        PrototypeWindow(PrototypeFullscreenPlacement(), persistence = "device") to
+          PrototypeWindowChrome.BAR,
+        PrototypeWindow(PrototypeFullscreenPlacement(), chrome = "bar") to
+          PrototypeWindowChrome.BAR,
+        PrototypeWindow(PrototypeFullscreenPlacement(), persistence = "device", chrome = "none") to
+          PrototypeWindowChrome.NONE,
+      )
+    windows.forEachIndexed { index, (window, expected) ->
+      controller.show("show-$index", spec().copy(window = window))
+      assertResult("show-$index", true)
+      assertEquals(expected, host.requests.last().chrome)
+    }
+  }
+
+  @Test
+  fun `agent dismiss removes a chromeless prototype and emits agent reason`() = runTest {
+    controller.show("show", spec())
+    assertEquals(PrototypeWindowChrome.NONE, host.requests.last().chrome)
+    controller.dismiss("dismiss", "panel", null)
+    assertResult("dismiss", true)
+    assertFalse(host.isShowing)
+    assertEquals(listOf("show", "dismiss"), host.calls)
+    assertEquals(PrototypeEventKind.DISMISSED, events.single().kind)
+    assertEquals(Json.parseToJsonElement("""{"reason":"agent"}"""), events.single().payload)
+  }
+
+  @Test
+  fun `chromeless escape uses host dismiss and emits user reason`() = runTest {
+    controller.show("show", spec())
+    assertEquals(PrototypeWindowChrome.NONE, host.requests.last().chrome)
+    host.requests.last().onHostDismiss()
+    assertFalse(host.isShowing)
+    assertEquals(listOf("show", "dismiss"), host.calls)
+    assertEquals(PrototypeEventKind.DISMISSED, events.single().kind)
+    assertEquals(Json.parseToJsonElement("""{"reason":"user"}"""), events.single().payload)
+  }
+
+  @Test
   fun `show same-id show and dismiss dispatch through the real message handler`() = runTest {
     val actions =
       object : NoOpCtrlProxyActions() {

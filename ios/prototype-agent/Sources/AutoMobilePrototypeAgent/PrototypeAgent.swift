@@ -117,8 +117,34 @@ final class PrototypeAgent: NSObject {
         }
         model.onSessionChange?(model.session)
         observeKeyboard()
+        observeAssistiveEscape()
         server.start()
         self.server = server
+    }
+
+    /// Selector delivery matches keyboard notifications and stays on the UIKit main actor.
+    private func observeAssistiveEscape() {
+        syncAssistiveEscape()
+        for name in [
+            UIAccessibility.voiceOverStatusDidChangeNotification,
+            UIAccessibility.switchControlStatusDidChangeNotification,
+        ] {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(assistiveEscapeChanged(_:)),
+                name: name,
+                object: nil
+            )
+        }
+    }
+
+    @objc
+    private func assistiveEscapeChanged(_: Notification) {
+        syncAssistiveEscape()
+    }
+
+    private func syncAssistiveEscape() {
+        model.assistiveEscapeVisible = UIAccessibility.isVoiceOverRunning || UIAccessibility.isSwitchControlRunning
     }
 
     // MARK: Keyboard
@@ -459,11 +485,19 @@ final class PrototypeAgent: NSObject {
     }
 }
 
+/// Shared gate for the root view and controller; focused SwiftUI nodes can reach either chain.
+@MainActor
+private func performPrototypeAccessibilityEscape(_ model: PrototypeModel?) -> Bool {
+    guard let model, model.hasEscape else { return false }
+    model.dismiss(reason: .user)
+    return true
+}
+
 /// The prototype window's root: the page's hosting view with the top layer's above it (see
 /// `PrototypeHostLayer`). Each lays out the whole window the same way and draws only its own layer,
 /// so their `.global` frames, and the hit rects reported from them, are both window coordinates.
 @MainActor
-final class PrototypeLayersViewController: UIViewController {
+final class PrototypeLayersViewController: UIViewController, UIGestureRecognizerDelegate {
     private let model: PrototypeModel
     private let page: UIHostingController<PrototypeRootView>
     private let top: UIHostingController<PrototypeRootView>
@@ -501,12 +535,46 @@ final class PrototypeLayersViewController: UIViewController {
             host.didMove(toParent: self)
         }
         (view as? PrototypeLayersView)?.hosts = (page.view, top.view)
+        // One recognizer on the shared ancestor sees touches before authored hosting views;
+        // recognition cancels their touch stream. Single-touch gestures cannot recognize it.
+        let escape = UILongPressGestureRecognizer(target: self, action: #selector(escapeHeld(_:)))
+        escape.numberOfTouchesRequired = 2
+        escape.minimumPressDuration = PrototypeEscapeReveal.holdSeconds
+        escape.cancelsTouchesInView = true
+        escape.delaysTouchesBegan = false
+        escape.delaysTouchesEnded = false
+        escape.delegate = self
+        view.addGestureRecognizer(escape)
+    }
+
+    func gestureRecognizerShouldBegin(_: UIGestureRecognizer) -> Bool {
+        model.hasEscape
+    }
+
+    func gestureRecognizer(
+        _: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith _: UIGestureRecognizer
+    )
+        -> Bool
+    {
+        true
+    }
+
+    @objc
+    private func escapeHeld(_ gesture: UILongPressGestureRecognizer) {
+        if gesture.state == .began { model.revealEscape() }
+    }
+
+    override func accessibilityPerformEscape() -> Bool {
+        performPrototypeAccessibilityEscape(model) || super.accessibilityPerformEscape()
     }
 
     /// Sets the UIKit flags an open dialog needs: the page leaves the accessibility tree and the top
     /// layer is modal, so the XCUITest snapshot lists only the dialog and the host dismiss control.
     func apply(_ flags: PrototypeHostAccessibility) {
         loadViewIfNeeded()
+        (view as? PrototypeLayersView)?.accessibilityIdentifier = flags.windowMarked
+            ? PrototypeHostChrome.windowMarkerIdentifier : nil
         page.view.accessibilityElementsHidden = flags.pageElementsHidden
         top.view.accessibilityViewIsModal = flags.topIsModal
     }
@@ -522,6 +590,8 @@ private final class PrototypeLayersView: UIView {
     init(model: PrototypeModel) {
         self.model = model
         super.init(frame: .zero)
+        // Keep both hosts' children; apply(flags) marks only a chromeless fullscreen session.
+        isAccessibilityElement = false
     }
 
     @available(*, unavailable)
@@ -529,12 +599,18 @@ private final class PrototypeLayersView: UIView {
         fatalError("init(coder:) is not supported")
     }
 
+    override func accessibilityPerformEscape() -> Bool {
+        performPrototypeAccessibilityEscape(model) || super.accessibilityPerformEscape()
+    }
+
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard let model, let hosts,
               let owner = model.hitRects.layer(at: convert(point, to: nil))
         else { return nil }
         let target = owner == .top ? hosts.top : hosts.page
-        return target.hitTest(convert(point, to: target), with: event)
+        // Opacity-zero authored content may decline the accepted touch. Keep the fullscreen
+        // escape recognizer's ancestor in the touch chain; this path is not yet device-verified.
+        return target.hitTest(convert(point, to: target), with: event) ?? (model.hasEscape ? self : nil)
     }
 }
 
@@ -559,7 +635,7 @@ struct PrototypeRootView: View {
             ?? .container
         ZStack {
             if let spec = model.spec {
-                let chrome = PrototypeHostChrome(placementType: spec.window.placement.type)
+                let chrome = PrototypeHostChrome(placementType: spec.window.placement.type, chrome: spec.window.chrome)
                 let opacity = Double(spec.window.opacity ?? 100) / 100
                 if chrome.reservesDismissBar {
                     // Like Android's fullscreen window: the bar takes the top of the screen and the
@@ -598,10 +674,18 @@ struct PrototypeRootView: View {
                     anchorLayer(spec).opacity(opacity).prototypeLayerAccessibility(pageAccessibility)
                 } else {
                     PrototypeModalLayer(model: model).opacity(opacity)
-                    dismissControl(glyph: Color(chip.glyph), fill: Color(chip.fill))
-                        .padding(.top, model.safeInsets.top)
-                        .padding(.trailing, max(model.safeInsets.right, 8))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    if chrome.escape {
+                        if model.escapeRevealed || model.assistiveEscapeVisible {
+                            dismissPill(glyph: Color(chip.glyph), fill: Color(chip.fill))
+                                .padding(.top, model.safeInsets.top + 8)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        }
+                    } else {
+                        dismissControl(glyph: Color(chip.glyph), fill: Color(chip.fill))
+                            .padding(.top, model.safeInsets.top)
+                            .padding(.trailing, max(model.safeInsets.right, 8))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    }
                 }
             }
         }
@@ -712,6 +796,28 @@ struct PrototypeRootView: View {
         .accessibilityIdentifier("automobile-prototype-dismiss")
         .accessibilityLabel("Dismiss prototype")
         .reportFrame(key: "dismiss", model: model)
+    }
+
+    /// Drawn above the modal layer without authored opacity, including under assistive technology.
+    private func dismissPill(glyph: Color, fill: Color) -> some View {
+        Button {
+            model.dismiss(reason: .user)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "xmark")
+                Text("Dismiss prototype")
+            }
+            .font(.system(size: 13, weight: .bold))
+            .foregroundColor(glyph)
+            .padding(.horizontal, 16)
+            .frame(minHeight: PrototypeHostChrome.controlSide)
+            .background(Capsule().fill(fill))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("automobile-prototype-dismiss")
+        .accessibilityLabel("Dismiss prototype")
+        .reportFrame(key: "escape", model: model)
     }
 
     /// The fullscreen dismiss bar: it clears the status bar and cutout, holds only the control, and

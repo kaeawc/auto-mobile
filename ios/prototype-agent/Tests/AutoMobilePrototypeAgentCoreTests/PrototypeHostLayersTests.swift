@@ -22,12 +22,30 @@ final class PrototypeHostLayersTests: XCTestCase {
     // MARK: Hit-rect ownership
 
     func testHostChromeModalsAndModalAnchorsBelongToTheTopLayer() {
-        for key in ["dismiss", "dismissBar", "modal.0", "modal.3", "anchor.modal0.child", "anchor.modal1.children[2]"] {
+        for key in [
+            "dismiss",
+            "dismissBar",
+            "escape",
+            "modal.0",
+            "modal.3",
+            "anchor.modal0.child",
+            "anchor.modal1.children[2]",
+        ] {
             XCTAssertEqual(PrototypeHostLayer(hitRectKey: key), .top, key)
         }
         for key in ["content", "anchor.root", "anchor.root.children[4]"] {
             XCTAssertEqual(PrototypeHostLayer(hitRectKey: key), .page, key)
         }
+    }
+
+    func testEscapeRectRemainsOwnedWhenAnOutgoingDismissRectIsRemoved() {
+        let pill = CGRect(x: 120, y: 60, width: 160, height: 44)
+        var rects = ["escape": pill, "dismiss": pill]
+        rects["dismiss"] = nil
+        XCTAssertEqual(PrototypeHostLayer.owner(of: CGPoint(x: 200, y: 80), hitRects: rects), .top)
+        rects = ["escape": pill, "dismiss": pill]
+        rects["escape"] = nil
+        XCTAssertEqual(PrototypeHostLayer.owner(of: CGPoint(x: 200, y: 80), hitRects: rects), .top)
     }
 
     func testTheTopLayerTakesATouchWhereItsRectOverlapsThePage() {
@@ -59,12 +77,17 @@ final class PrototypeHostLayersTests: XCTestCase {
         try session.show(dialogSpec(placement: "fullscreen"))
         XCTAssertEqual(
             PrototypeHostAccessibility(session: session, windowShown: true),
-            PrototypeHostAccessibility(pageElementsHidden: false, topIsModal: false, coversApp: true)
+            PrototypeHostAccessibility(
+                pageElementsHidden: false,
+                topIsModal: false,
+                coversApp: true,
+                windowMarked: true
+            )
         )
         _ = session.change(key: "open", value: .bool(true))
         XCTAssertEqual(
             PrototypeHostAccessibility(session: session, windowShown: true),
-            PrototypeHostAccessibility(pageElementsHidden: true, topIsModal: true, coversApp: true)
+            PrototypeHostAccessibility(pageElementsHidden: true, topIsModal: true, coversApp: true, windowMarked: true)
         )
     }
 
@@ -79,6 +102,37 @@ final class PrototypeHostLayersTests: XCTestCase {
             PrototypeHostAccessibility(session: session, windowShown: true),
             PrototypeHostAccessibility(pageElementsHidden: true, topIsModal: true, coversApp: true)
         )
+    }
+
+    func testWindowMarkerTracksOnlyShownChromelessFullscreenSessions() throws {
+        var session = PrototypeSession()
+        for placement in ["fullscreen", "sheet", "floating"] {
+            for chrome in ["none", "bar", "none"] {
+                try session.show(spec("""
+                {"id":"marker","window":{"placement":{"type":"\(placement)"},"chrome":"\(chrome)"},
+                 "root":{"type":"text","text":"Marker"}}
+                """))
+                XCTAssertEqual(
+                    PrototypeHostAccessibility(session: session, windowShown: true).windowMarked,
+                    placement == "fullscreen" && chrome == "none"
+                )
+                XCTAssertFalse(PrototypeHostAccessibility(session: session, windowShown: false).windowMarked)
+                if placement == "fullscreen" {
+                    XCTAssertEqual(
+                        PrototypeHostAccessibility(session: session, windowShown: true),
+                        PrototypeHostAccessibility(
+                            pageElementsHidden: false, topIsModal: false, coversApp: true,
+                            windowMarked: chrome == "none"
+                        )
+                    )
+                }
+            }
+        }
+        // A replacing show must reapply even when the other accessibility flags are unchanged.
+        try session.show(dialogSpec(placement: "fullscreen"))
+        XCTAssertTrue(PrototypeHostAccessibility(session: session, windowShown: true).windowMarked)
+        _ = session.dismiss(reason: .user)
+        XCTAssertFalse(PrototypeHostAccessibility(session: session, windowShown: true).windowMarked)
     }
 
     func testAHiddenWindowOrNoSpecSetsNothing() throws {

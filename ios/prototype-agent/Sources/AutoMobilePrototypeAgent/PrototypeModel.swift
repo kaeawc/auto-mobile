@@ -15,6 +15,9 @@ final class PrototypeModel {
     private(set) var pages: [String: Int] = [:]
     private(set) var appearance: PrototypeAppearance?
     private(set) var deviceDark = false
+    private(set) var escapeRevealed = false
+    /// VoiceOver and Switch Control need a dismiss button without the two-finger hold.
+    var assistiveEscapeVisible = false
     /// Redraws controls that hold platform values when a transition leaves state and pages unchanged.
     private var refusedChangeRevision = 0
     /// Receives the new value synchronously before it is stored or any transition side effects run.
@@ -26,6 +29,7 @@ final class PrototypeModel {
         // of an unchanged (non-Equatable) spec merely by copying the session back.
         if replacingSpec || session.isShown != next.isShown { spec = next.spec }
         session = next
+        escapeReveal.sync(hasEscape: hasEscape, shown: next.isShown)
         if state != next.state { state = next.state }
         if pages != next.pages { pages = next.pages }
         if appearance != next.appearance { appearance = next.appearance }
@@ -81,6 +85,20 @@ final class PrototypeModel {
         self?.dismiss(reason: .ttl)
     }
 
+    /// A reveal is not idle-TTL activity; the injected clock only controls pill visibility.
+    @ObservationIgnored private lazy var escapeReveal = PrototypeEscapeReveal(clock: clock) { [weak self] visible in
+        self?.escapeRevealed = visible
+    }
+
+    var hasEscape: Bool {
+        guard let spec else { return false }
+        return PrototypeHostChrome(placementType: spec.window.placement.type, chrome: spec.window.chrome).escape
+    }
+
+    func revealEscape() {
+        escapeReveal.reveal()
+    }
+
     @ObservationIgnored private let clock: PrototypeClock
 
     init(clock: PrototypeClock = SystemPrototypeClock()) {
@@ -100,11 +118,12 @@ final class PrototypeModel {
         snackbarTimeouts.sync(openModals: open)
     }
 
-    /// The safe-area insets `safeAreaPadding` sees inside the spec: a fullscreen spec sits below the
-    /// host dismiss bar, which already clears the top inset.
+    /// The real safe-area insets, except an explicit dismiss bar already clears the top inset.
     var contentSafeInsets: UIEdgeInsets {
         var insets = safeInsets
-        let chrome = PrototypeHostChrome(placementType: spec?.window.placement.type ?? "fullscreen")
+        let chrome = PrototypeHostChrome(
+            placementType: spec?.window.placement.type ?? "fullscreen", chrome: spec?.window.chrome
+        )
         insets.top = chrome.contentSafeTop(safeTop: insets.top)
         return insets
     }

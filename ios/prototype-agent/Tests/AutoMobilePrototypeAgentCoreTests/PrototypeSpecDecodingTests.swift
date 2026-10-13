@@ -2,6 +2,45 @@
 import XCTest
 
 final class PrototypeSpecDecodingTests: XCTestCase {
+    func testWindowChromeDecodesOrNamesTheInvalidField() throws {
+        for placement in ["fullscreen", "sheet", "floating"] {
+            for value: String? in [nil, "none", "bar"] {
+                var window: [String: Any] = ["placement": ["type": placement]]
+                if let value { window["chrome"] = value }
+                let data = try JSONSerialization.data(withJSONObject: window)
+                XCTAssertEqual(try JSONDecoder().decode(WindowSpec.self, from: data).chrome, value)
+            }
+        }
+        XCTAssertThrowsError(try JSONDecoder().decode(WindowSpec.self, from: Data(
+            #"{"placement":{"type":"fullscreen"},"chrome":"hidden"}"#.utf8
+        ))) { error in
+            guard case let DecodingError.dataCorrupted(context) = error else {
+                return XCTFail("Expected a window.chrome validation error, got \(error)")
+            }
+            XCTAssertTrue(context.debugDescription.contains("window.chrome"))
+        }
+    }
+
+    func testNullWindowChromeDecodesAsAbsent() throws {
+        let data = Data(#"{"placement":{"type":"fullscreen"},"chrome":null}"#.utf8)
+        XCTAssertNil(try JSONDecoder().decode(WindowSpec.self, from: data).chrome)
+    }
+
+    func testNonStringWindowChromeFailsNamingItsPath() {
+        for value in ["1", "true"] {
+            let data = Data("""
+            {"id":"chrome","window":{"placement":{"type":"fullscreen"},"chrome":\(value)},
+             "root":{"type":"text","text":"Chrome"}}
+            """.utf8)
+            XCTAssertThrowsError(try JSONDecoder().decode(PrototypeSpec.self, from: data)) { error in
+                guard case let DecodingError.typeMismatch(_, context) = error else {
+                    return XCTFail("Expected a window.chrome type error, got \(error)")
+                }
+                XCTAssertEqual(context.codingPath.map(\.stringValue).joined(separator: "."), "window.chrome")
+            }
+        }
+    }
+
     private func condition(_ json: String) throws -> Condition {
         try JSONDecoder().decode(Condition.self, from: Data(json.utf8))
     }

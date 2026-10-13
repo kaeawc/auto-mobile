@@ -179,9 +179,7 @@ describe("emulator readiness ADB work budget", () => {
       ).rejects.toThrow();
 
       expect(adb.snapshotCalls.length).toBeGreaterThanOrEqual(3);
-      expect(
-        adb.getExecutedCommands().filter((command) => command.includes("reconnect offline")),
-      ).toHaveLength(0);
+      expect(adb.getExecutedArgv().filter((argv) => argv.includes("reconnect"))).toHaveLength(0);
     } finally {
       if (previousPollingInterval === undefined) {
         delete process.env.EMULATOR_POLLING_INTERVAL_MS;

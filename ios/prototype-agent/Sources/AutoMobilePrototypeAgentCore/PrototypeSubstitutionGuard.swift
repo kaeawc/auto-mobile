@@ -59,7 +59,9 @@ private struct PrototypeSubstitutionGuard {
 
     private mutating func field(
         _ fields: [String: JSONValue], _ key: String, path: String, text: Bool = false, scope: Scope?
-    ) throws {
+    )
+        throws
+    {
         guard let authored = fields[key]?.stringValue else { return }
         let fieldPath = "\(path).\(key)"
         var bound = authored
@@ -90,7 +92,9 @@ private struct PrototypeSubstitutionGuard {
 
     private mutating func repeatText(
         _ text: String, path: String, scope: Scope, dataRecognized: Bool
-    ) throws {
+    )
+        throws
+    {
         let segments = PrototypeRepeat.segments(text, alias: scope.alias)
         let counts = segments.reduce(into: (indices: 0, fields: [String: Int]())) { counts, segment in
             switch segment {

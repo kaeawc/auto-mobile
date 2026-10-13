@@ -349,7 +349,7 @@ final class PrototypeLimitsTests: XCTestCase {
             "state": .object(["b": .string(String(repeating: "x", count: 20000))]),
             "root": .object(["type": .string("text"), "text": .string(String(repeating: "{b}", count: 1000))]),
         ])
-        XCTAssertNil(rejection(try JSONEncoder().encode(stateSpec)))
+        XCTAssertNil(try rejection(JSONEncoder().encode(stateSpec)))
     }
 
     func testDataAmplificationIsRefusedBeforeBinding() throws {
@@ -357,7 +357,7 @@ final class PrototypeLimitsTests: XCTestCase {
             "type": .string("text"), "text": .string(String(repeating: "{data:/b}", count: 80000)),
         ])
         XCTAssertEqual(
-            try rejection(pathRepeatSpec(root, data: ["b": .string(String(repeating: "x", count: 200000))])),
+            try rejection(pathRepeatSpec(root, data: ["b": .string(String(repeating: "x", count: 200_000))])),
             "root.text: Substituted text length limit exceeded"
         )
     }
@@ -396,7 +396,10 @@ final class PrototypeLimitsTests: XCTestCase {
             "type": .string("text"), "text": .string(String(repeating: "{index}", count: 8193)),
         ])
         let root = literalRepeat(child, items: Array(repeating: .object([:]), count: 11))
-        XCTAssertEqual(try rejection(pathRepeatSpec(root)), "root.children[0].text: Substituted text length limit exceeded")
+        XCTAssertEqual(
+            try rejection(pathRepeatSpec(root)),
+            "root.children[0].text: Substituted text length limit exceeded"
+        )
         let emoji = JSONValue.object(["b": .string(String(repeating: "😀", count: 8193))])
         let text = JSONValue.object(["type": .string("text"), "text": .string("{i.b}")])
         XCTAssertEqual(

@@ -79,7 +79,10 @@ final class PrototypeInterpolationTests: XCTestCase {
             "{b}ok"
         )
         let literal = String(repeating: "x", count: 20000)
-        XCTAssertEqual(interpolatePrototypeText(literal + "{s}", state: ["s": .string("ok")], pager: nil), literal + "ok")
+        XCTAssertEqual(
+            interpolatePrototypeText(literal + "{s}", state: ["s": .string("ok")], pager: nil),
+            literal + "ok"
+        )
     }
 
     func testInterpolationBudgetCountsUTF16AndPagerValues() {

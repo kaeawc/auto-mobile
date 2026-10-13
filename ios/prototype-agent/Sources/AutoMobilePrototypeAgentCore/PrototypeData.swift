@@ -166,7 +166,9 @@ enum PrototypeDataText {
     /// Recognition is independent of rendered length: empty replacements still rebuild text.
     static func substitutionLength(
         _ text: String, data: [String: JSONValue]?
-    ) -> (recognized: Bool, length: Int) {
+    )
+        -> (recognized: Bool, length: Int)
+    {
         var recognized = false
         var length = 0
         scan(Array(text.utf16)) { _, _, pointer in

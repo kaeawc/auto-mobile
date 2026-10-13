@@ -41,6 +41,7 @@ final class PrototypeThemeModesTests: XCTestCase {
             "get_prototype_status", "prototype_show_in_place_v1", "prototype_anchor_v1", "hide_for_capture",
             "restore_after_capture", "screenshot_hide_prototype_v1", "prototype_inspect_v1",
             "prototype_theme_modes_v1", "prototype_appearance_v1", "prototype_window_chrome_v1",
+            "prototype_icon_sf_symbols_v1",
         ])
     }
 
@@ -349,5 +350,26 @@ final class PrototypeThemeModesTests: XCTestCase {
         XCTAssertEqual(dark.scrim(roleInLight), PrototypePalette.baselineDark["inverseSurface"])
         // The alpha belongs to the scrim slots only: the same role elsewhere is the plain colour.
         try XCTAssertEqual(dark.resolve("scrim"), hex("#000000"))
+    }
+
+    func testNavigationVisualUsesSquareForUnknownIconsAndPreservesAbsentVisual() throws {
+        func item(_ json: String) throws -> NavItem {
+            try JSONDecoder().decode(NavItem.self, from: Data(json.utf8))
+        }
+        XCTAssertEqual(try item(#"{"label":"Absent"}"#).visual(dark: false, available: []), .none)
+        XCTAssertEqual(try item(#"{"label":"Skew","icon":"skew"}"#).visual(dark: false, available: []), .placeholder)
+        XCTAssertEqual(
+            try item(#"{"label":"Unmapped","icon":"android"}"#).visual(dark: false, available: []),
+            .icon("android")
+        )
+        XCTAssertEqual(try item(#"{"label":"Mapped","icon":"home"}"#).visual(dark: false, available: []), .icon("home"))
+        XCTAssertEqual(
+            try item(#"{"label":"Image","icon":"skew","image":"asset"}"#).visual(dark: false, available: ["asset"]),
+            .image("asset")
+        )
+        XCTAssertEqual(
+            try item(#"{"label":"Missing","image":"asset"}"#).visual(dark: false, available: []),
+            .placeholder
+        )
     }
 }

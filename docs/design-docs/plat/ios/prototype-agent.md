@@ -40,8 +40,8 @@ screenshots (#10943, #10988) and the renderer and accessibility fixes that follo
 | Foreground scoping to the shown-over app                                              | Not needed: the agent lives in the app, so backgrounding the app hides its window                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Accessibility identifier fallback (`node.id`)                                         | Uses `testTag ?? id`, including `<id>.<part>` for composite parts; host reports `platformNotes`, lifted by `prototype_identifier_test_tag_only_v1`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Bottom sheet swipe-dismiss and detent dragging                                        | Opens at the first detent; no drag or swipe-dismiss; host reports `platformNotes`, lifted by `prototype_bottom_sheet_drag_v1`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| Built-in icon coverage                                                                | 55 Material names mapped to SF Symbols; others draw a placeholder; host reports `platformNotes`, lifted by `prototype_icon_set_material_v1`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Icon node `variant`                                                                   | Ignored; uses the one SF Symbol for the name; host reports `platformNotes`, lifted by `prototype_icon_variant_v1`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Built-in icon coverage                                                                | Mapped and explicitly unmapped contract names are listed in `schemas/prototype-ios-icon-symbols.json`; unmapped names draw `questionmark.square`. Advertises `prototype_icon_sf_symbols_v1`; host reports affected paths and names under `platformNotes`.                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Icon node `variant`                                                                   | Filled/outlined use their SF Symbol form where the table has it; absent forms and rounded/sharp/twoTone draw the default symbol. With no variant, the default SF Symbol is often outlined; use `variant: "filled"` for the closest Android match where available. Runtime lookup tries the chosen form, the default symbol if different, then `questionmark.square`. Host reports substitutions in `platformNotes`.                                                                                                                                                                                                                                                  |
 
 ## Open decisions
 
@@ -176,7 +176,7 @@ is simulator-only and device launches will fail to load it.
 ## Differences from Android
 
 - Successful iOS shows report affected spec paths in `platformNotes` for identifier fallback,
-  bottom-sheet swipe-dismiss/detents, unmapped built-in icons, and ignored icon variants;
+  bottom-sheet swipe-dismiss/detents, unmapped built-in icons, and substituted icon variants;
   the authoring guide lists the differences and the capabilities that lift them.
 
 - Numbers in `{key}` text and `repeat` bindings render exactly as the host's `renderScalar` does
@@ -404,20 +404,20 @@ emits, and the `<testTag>.<part>` identifiers of composite parts. The tap semant
 UIKit-free core (`PrototypeComponents.swift`), so the `simulate_tap` test hook performs the same
 transition as a real tap, including on a part identifier.
 
-| Node                            | iOS drawing                                                                                                      |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `switch`, `checkbox`            | One toggle element with a SwiftUI-drawn track (no `UISwitch`); a checkbox is a button that reads as selected     |
-| `button`                        | `.borderedProminent` filled, `.bordered` tonal/outlined/elevated, `.borderless` text; optional leading SF Symbol |
-| `slider`                        | `Slider` with `step` snapping, one adjustable element labelled by `label`                                        |
-| `chip`                          | Rounded button; a filter chip toggles its key and reads as selected                                              |
-| `card`                          | Rounded container, filled, elevated (shadow) or outlined                                                         |
-| `radioGroup`, `segmentedButton` | One button per option, identified `<testTag>.<value>`, with a selected trait                                     |
-| `listItem`                      | One row element; a toggle when it has a trailing switch or checkbox                                              |
-| `iconButton`, `fab`             | Icon buttons labelled by `contentDescription`, a FAB's `label`, else the icon                                    |
-| `topAppBar`                     | Header title; `<testTag>.navigation` and `<testTag>.actions.<index>` buttons                                     |
-| `divider`, `badge`, `progress`  | Hairline, dot or count capsule, determinate `ProgressView` or ring, indeterminate sweep                          |
-| `timePicker`, `datePicker`      | Wheel `DatePicker` (one `change` per edit), graphical `DatePicker` in UTC days                                   |
-| `dialog`, `snackbar`            | Drawn above the author tree inside the prototype window; `<testTag>.confirm`, `.dismiss`, `.action`              |
+| Node                            | iOS drawing                                                                                                                               |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `switch`, `checkbox`            | One toggle element with a SwiftUI-drawn track (no `UISwitch`); a checkbox is a button that reads as selected                              |
+| `button`                        | `.borderedProminent` filled, `.bordered` tonal/outlined/elevated, `.borderless` text; optional leading SF Symbol from the canonical table |
+| `slider`                        | `Slider` with `step` snapping, one adjustable element labelled by `label`                                                                 |
+| `chip`                          | Rounded button; a filter chip toggles its key and reads as selected                                                                       |
+| `card`                          | Rounded container, filled, elevated (shadow) or outlined                                                                                  |
+| `radioGroup`, `segmentedButton` | One button per option, identified `<testTag>.<value>`, with a selected trait                                                              |
+| `listItem`                      | One row element; a toggle when it has a trailing switch or checkbox                                                                       |
+| `iconButton`, `fab`             | Icon buttons labelled by `contentDescription`, a FAB's `label`, else the icon                                                             |
+| `topAppBar`                     | Header title; `<testTag>.navigation` and `<testTag>.actions.<index>` buttons                                                              |
+| `divider`, `badge`, `progress`  | Hairline, dot or count capsule, determinate `ProgressView` or ring, indeterminate sweep                                                   |
+| `timePicker`, `datePicker`      | Wheel `DatePicker` (one `change` per edit), graphical `DatePicker` in UTC days                                                            |
+| `dialog`, `snackbar`            | Drawn above the author tree inside the prototype window; `<testTag>.confirm`, `.dismiss`, `.action`                                       |
 
 A segmented `Picker` cannot carry per-segment accessibility identifiers, so segmented buttons
 are drawn as a row of buttons. A dialog's scrim covers the whole window (below the dismiss
@@ -430,7 +430,21 @@ is inert to touches; `accessibilityHidden` alone did not keep it out of the XCUI
 accessibility container, so a page whose only element is one node reports that node at its own
 frame, not the whole page's (#10898). Opening or closing a dialog drops keyboard focus in the prototype unless the
 dialog holds a text field; a child taller than the screen scrolls. Material icon names map to
-SF Symbols; a name without a mapping draws a placeholder.
+SF Symbols using `schemas/prototype-ios-icon-symbols.json` (the authoritative mapped/unmapped
+lists, minimum iOS 17.0). An unmapped contract name draws the same `questionmark.square` symbol in every
+icon slot. Filled/outlined icon-node variants use their form where the table has one; otherwise,
+and for rounded/sharp/twoTone, the default symbol is drawn. With no variant, iOS draws the name's
+default SF Symbol, which is often the outline form; pass `variant: "filled"` on an `icon` node for
+the closest match to Android where the table has a filled form. The agent advertises
+`prototype_icon_sf_symbols_v1` and the host reports affected paths in `platformNotes`. Container
+variants on buttons remain container styles. Unknown names from host/agent skew draw no glyph:
+icon nodes draw their authored background or placeholder fill; navigation items draw a placeholder
+square; other controls omit the icon and its spacing. A navigation item with neither icon nor image
+keeps its existing `.none` visual. Runtime lookup tries the chosen form, then the entry's default
+symbol if different, then `questionmark.square` if neither is available.
+
+Material parity remains a future option behind `prototype_icon_set_material_v1` and
+`prototype_icon_variant_v1`; this agent advertises neither capability and draws no Material artwork.
 
 A snackbar that sets `durationMs` closes itself that long after it opens, by writing `!equals` to
 its `openWhen` key like any other close (a plain timer behind an injectable `PrototypeClock`).

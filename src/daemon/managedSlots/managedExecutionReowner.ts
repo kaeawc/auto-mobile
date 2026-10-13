@@ -137,7 +137,7 @@ export class ManagedExecutionReowner {
         }
       },
       (error: unknown) => {
-        // Failed creation publishes no usable session; the creation path reports the failure.
+        // Failed recovery leaves no usable session; the recovery path reports the failure.
         logger.debug(`[ManagedSlots] Recovery of ${sessionUuid} failed before re-owning`, error);
         this.recovering.delete(sessionUuid);
         this.isPresent(sessionUuid);
@@ -462,7 +462,7 @@ export class ManagedExecutionReowner {
   }
 
   private async reownSession(sessionUuid: string, stopped: AbortSignal): Promise<ReownAttempt> {
-    const result: ReownAttempt = { assignments: [], outcome: "confirmed" };
+    const result: ReownAttempt = { assignments: [], outcome: "retry" };
     if (!this.canAttempt(sessionUuid, stopped)) {
       return result;
     }
@@ -471,13 +471,14 @@ export class ManagedExecutionReowner {
       return result;
     }
     const found = await registry.findExecutionAssignments(sessionUuid);
+    result.outcome = "confirmed";
     if (found.length === 0) {
       result.outcome = "lost";
     }
     const owner = this.deps.owner();
     for (const assignment of found) {
       if (!this.canAttempt(sessionUuid, stopped)) {
-        break;
+        return { ...result, outcome: "retry" };
       }
       if (assignment.execOwner && journalOwnersEqual(assignment.execOwner, owner)) {
         continue;
@@ -498,7 +499,7 @@ export class ManagedExecutionReowner {
         throw error;
       }
       if (!this.canAttempt(sessionUuid, stopped)) {
-        break;
+        return { ...result, outcome: "retry" };
       }
       if (claimed.kind === "claimed") {
         result.assignments.push(claimed.assignment);

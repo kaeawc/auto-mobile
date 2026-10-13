@@ -3036,6 +3036,7 @@ export class SessionManager {
     sessionId: string,
     recovered: Promise<unknown>,
   ) => void;
+  private readonly managedExecutionRecoveries = new Map<string, PromiseWithResolvers<void>>();
 
   setManagedExecutionRecoveryListener(
     listener: (sessionId: string, recovered: Promise<unknown>) => void,
@@ -3162,7 +3163,7 @@ export class SessionManager {
     }
   }
 
-  /** Recovery alone has a publication signal; ordinary creation adds no promise turn. */
+  /** Recovery alone has a completion signal; ordinary creation adds no promise turn. */
   private notifyManagedExecutionRecovery(
     session: Session,
     persistedRecovery: DeviceSession | undefined,
@@ -3172,9 +3173,10 @@ export class SessionManager {
     }
     const { sessionId } = session;
     const recovered = Promise.withResolvers<void>();
+    this.managedExecutionRecoveries.set(sessionId, recovered);
     // A listener may throw or be absent; creation failure must still be handled on this signal.
     void recovered.promise.catch((error: unknown) => {
-      logger.debug(`[SessionManager] Managed recovery ${sessionId} did not publish`, error);
+      logger.debug(`[SessionManager] Managed recovery ${sessionId} did not complete`, error);
     });
     try {
       this.managedExecutionRecoveryListener?.(sessionId, recovered.promise);
@@ -3182,8 +3184,18 @@ export class SessionManager {
       logger.warn(`[SessionManager] Managed recovery hook failed for ${sessionId}`, error);
     }
     return (creation) => {
-      void creation.then(() => recovered.resolve(), recovered.reject);
+      void creation.then(undefined, recovered.reject);
     };
+  }
+
+  private settleManagedExecutionRecovery(sessionId: string, completed: boolean): void {
+    const recovered = this.managedExecutionRecoveries.get(sessionId);
+    this.managedExecutionRecoveries.delete(sessionId);
+    if (completed) {
+      recovered?.resolve();
+    } else {
+      recovered?.reject(new SessionReleasedDuringCreationError(sessionId));
+    }
   }
 
   /**
@@ -4740,21 +4752,24 @@ export class SessionManager {
         shared.recoveryWait.resolve(undefined);
         await assign();
       }
+      const session = this.getSession(sessionId);
+      if (!session) {
+        throw new SessionReleasedDuringCreationError(sessionId);
+      }
+      // The live session's own clocks take over from here.
+      this.restartRecoveryActivityAt.delete(sessionId);
+      logger.info(
+        `[SessionManager] Successfully created session ${sessionId} with device ${session.assignedDevice}`,
+      );
+      this.settleManagedExecutionRecovery(sessionId, true);
+      return session;
     } finally {
+      // A successful recovery already resolved; every other exit rejects and drops its signal.
+      this.settleManagedExecutionRecovery(sessionId, false);
       if (this.pendingPersistedRecoveries.get(sessionId) === persisted) {
         this.pendingPersistedRecoveries.delete(sessionId);
       }
     }
-    const session = this.getSession(sessionId);
-    if (!session) {
-      throw new SessionReleasedDuringCreationError(sessionId);
-    }
-    // The live session's own clocks take over from here.
-    this.restartRecoveryActivityAt.delete(sessionId);
-    logger.info(
-      `[SessionManager] Successfully created session ${sessionId} with device ${session.assignedDevice}`,
-    );
-    return session;
   }
 
   /**

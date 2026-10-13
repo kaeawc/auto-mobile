@@ -668,6 +668,48 @@ describe("rehydrated managed execution peer claim fence", () => {
   });
 
   testWithFreshSlot(
+    "a background attempt interrupted before lookup cannot confirm ownership or release its hold",
+    async () => {
+      reowner.close();
+      const opened = Promise.withResolvers<SlotRegistry>();
+      const recovering = Promise.withResolvers<void>();
+      const confirmed: string[] = [];
+      let opens = 0;
+      reowner = new ManagedExecutionReowner({
+        registry: async () => (++opens === 1 ? faults.faulty : opened.promise),
+        owner: () => OWNER,
+        timer,
+        retryBackoff: exponentialBackoff({ initialDelayMs: 10, maxDelayMs: 40 }),
+        isSessionHeld: () => held,
+        onOwnershipConfirmed: (id) => {
+          confirmed.push(id);
+        },
+      });
+      faults.busy.claimExecution = 1;
+      await reowner.reown([S], { rehydrated: true });
+      const hold = reowner.releaseDeviceHold(S)!;
+      let settled: string | undefined;
+      void hold.settled!.then((outcome) => {
+        settled = outcome;
+      });
+      await advance(10);
+      expect(opens).toBe(2);
+      reowner.noteRecovering(S, recovering.promise);
+      opened.resolve(faults.faulty);
+      await drainMicrotasks(80);
+      expect(reowner.ownershipState(S)).toBe("unconfirmed");
+      expect(confirmed).toEqual([]);
+      expect(settled).toBeUndefined();
+      expect(faults.calls.findExecutionAssignments).toBe(1);
+      expect((await registry.getAssignment(key))?.execOwner?.daemonId).toBe("previous");
+      reowner.close();
+      expect(await hold.settled).toBe("skip-device-writes");
+      recovering.reject(new Error("interrupted recovery"));
+      await reowner.whenIdle();
+    },
+  );
+
+  testWithFreshSlot(
     "a session no longer held drops its gate and stops registry retries",
     async () => {
       faults.busy.claimExecution = 100;

@@ -16,7 +16,7 @@ import { FakeDeviceSessionRepository } from "../../fakes/FakeDeviceSessionReposi
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
+import { drainMicrotasks, drainUntil } from "../../helpers/fakeTimerStepping";
 
 const ID = "recovered-managed";
 const DEVICE = "ios-held";
@@ -100,12 +100,12 @@ describe("managed execution recovery is gated before publication", () => {
   }
 
   test.each(["startup", "on-demand"] as const)(
-    "%s recovery invokes the hook before the session is live and gives its publication promise",
+    "%s recovery invokes the hook before the session is live and signals completed recovery",
     async (path) => {
       const { sessions, timer } = await persisted();
       const gate = Promise.withResolvers<void>();
       let called = false;
-      let published = false;
+      let recoveryCompleted = false;
       const reowner = new ManagedExecutionReowner({
         registry: async () => {
           await gate.promise;
@@ -127,7 +127,7 @@ describe("managed execution recovery is gated before publication", () => {
         reowner.noteRecovering(id, recovered);
         expect(reowner.automationRefusal(id)).toBeInstanceOf(ManagedSlotOwnershipUnconfirmedError);
         void recovered.then(() => {
-          published = sessions.getSession(id) !== null;
+          recoveryCompleted = sessions.getSession(id) !== null;
         });
       });
       if (path === "startup") {
@@ -136,12 +136,127 @@ describe("managed execution recovery is gated before publication", () => {
         await sessions.getOrCreateSession(ID, assigner(sessions), "ios", undefined, true);
       }
       expect(called).toBe(true);
-      expect(published).toBe(true);
+      expect(recoveryCompleted).toBe(true);
       expect(reowner.automationRefusal(ID)).toBeInstanceOf(ManagedSlotOwnershipUnconfirmedError);
       gate.resolve();
       await reowner.whenIdle();
     },
   );
+
+  for (const path of ["startup", "on-demand"] as const) {
+    test.each(["complete", "refused", "released", "aborted"] as const)(
+      `${path} recovery waits for assignment after publication: %s`,
+      async (outcome) => {
+        const { sessions, timer } = await persisted();
+        const assignment = Promise.withResolvers<void>();
+        const controller = new AbortController();
+        const calls: string[] = [];
+        let signal: "pending" | "fulfilled" | "rejected" = "pending";
+        const record: SlotAssignmentRecord = {
+          scopeKey: "scope",
+          slotIndex: 0,
+          role: "app",
+          platform: "ios",
+          generation: 1,
+          stableDeviceId: DEVICE,
+          deviceName: DEVICE,
+          requestedSpec: {},
+          resolvedSpec: {},
+          specFingerprint: "fp",
+          state: "ready",
+          execOwner: { daemonId: "previous", pid: 2, sessionUuid: ID },
+          settler: null,
+          updatedAtMs: timer.now(),
+        };
+        const reowner = new ManagedExecutionReowner({
+          registry: async () => {
+            calls.push("registry");
+            return {
+              findExecutionAssignments: async () => {
+                calls.push("lookup");
+                return [record];
+              },
+              claimExecution: async (_key, _binding, owner) => {
+                calls.push("claim");
+                record.execOwner = owner;
+                return { kind: "claimed", assignment: record };
+              },
+            };
+          },
+          owner: () => ({ daemonId: "current", pid: 1 }),
+          timer,
+          isSessionHeld: (id) => sessions.isLiveManagedExecutionSession(id),
+        });
+        reowners.push(reowner);
+        sessions.setManagedExecutionRecoveryListener((id, recovered) => {
+          expect(sessions.getSession(id)).toBeNull();
+          reowner.noteRecovering(id, recovered);
+          void recovered.then(
+            () => {
+              signal = "fulfilled";
+            },
+            () => {
+              signal = "rejected";
+            },
+          );
+        });
+        const normal = assigner(sessions);
+        const delayed: SessionDeviceAssigner = {
+          async assignDeviceToSession(id, platform, target) {
+            const device = await normal.assignDeviceToSession(id, platform, target);
+            await assignment.promise;
+            if (outcome === "refused" || outcome === "aborted") {
+              // Model the pool's rollback without acquiring or writing a real device.
+              await sessions.releaseSession(id, "allocation-rollback");
+              controller.signal.throwIfAborted();
+              throw new Error("device claim refused");
+            }
+            if (outcome === "released") {
+              await sessions.releaseSession(id, "allocation-rollback");
+            }
+            return device;
+          },
+        };
+        const recovery =
+          path === "startup"
+            ? sessions.rehydratePersistedSessions(delayed)
+            : sessions.getOrCreateSession(ID, delayed, "ios", undefined, true);
+        // Observe failures immediately; startup reports them in its batch summary.
+        const finished = recovery.then(
+          () => "fulfilled",
+          () => "rejected",
+        );
+        await drainUntil(() => sessions.getSession(ID) !== null, { description: "publication" });
+        await drainMicrotasks(80);
+        expect(signal).toBe("pending");
+        expect(reowner.ownershipState(ID)).toBe("unconfirmed");
+        await reowner.reown([ID], { rehydrated: true });
+        expect(calls).toEqual([]);
+        expect(record.execOwner?.daemonId).toBe("previous");
+        if (outcome === "aborted") {
+          controller.abort(new Error("assignment aborted"));
+        }
+        assignment.resolve();
+        expect(await finished).toBe(
+          path === "on-demand" && outcome !== "complete" ? "rejected" : "fulfilled",
+        );
+        await drainMicrotasks(80);
+        await reowner.whenIdle();
+        expect(Reflect.get(sessions, "managedExecutionRecoveries").size).toBe(0);
+        if (outcome === "complete") {
+          expect(signal).toBe("fulfilled");
+          expect(calls).toEqual(["registry", "lookup", "claim"]);
+          expect(record.execOwner?.daemonId).toBe("current");
+        } else {
+          expect(signal).toBe("rejected");
+          expect(sessions.getSession(ID)).toBeNull();
+          expect(reowner.ownershipState(ID)).toBeUndefined();
+          expect(calls).toEqual([]);
+          expect(record.execOwner?.daemonId).toBe("previous");
+        }
+      },
+    );
+  }
 
   test("a fresh managed acquisition and a recovered heartbeat session never invoke the hook", async () => {
     const { sessions, persistence } = await persisted(false);
@@ -157,9 +272,10 @@ describe("managed execution recovery is gated before publication", () => {
     expect((await persistence.getSession?.("fresh"))?.liveness_policy).toBe("managed-execution");
   });
 
-  test("the creation promise rejects after rollback and drops the unpublished gate", async () => {
+  test("creation failure rejects the recovery signal and drops the unpublished gate", async () => {
     const { sessions, persistence, timer } = await persisted();
     let opened = false;
+    let signalRejected = false;
     const reowner = new ManagedExecutionReowner({
       registry: async () => {
         opened = true;
@@ -170,16 +286,45 @@ describe("managed execution recovery is gated before publication", () => {
       isSessionHeld: (id) => sessions.isLiveManagedExecutionSession(id),
     });
     reowners.push(reowner);
-    sessions.setManagedExecutionRecoveryListener((id, recovered) =>
-      reowner.noteRecovering(id, recovered),
-    );
+    sessions.setManagedExecutionRecoveryListener((id, recovered) => {
+      reowner.noteRecovering(id, recovered);
+      void recovered.then(undefined, () => {
+        signalRejected = true;
+      });
+    });
     persistence.failure = "create";
-    await expect(
-      sessions.getOrCreateSession(ID, assigner(sessions), "ios", undefined, true),
-    ).rejects.toThrow("persist create failed");
+    const finishAssignment = Promise.withResolvers<void>();
+    const normal = assigner(sessions);
+    const recovery = sessions.getOrCreateSession(
+      ID,
+      {
+        async assignDeviceToSession(id, platform, target) {
+          try {
+            return await normal.assignDeviceToSession(id, platform, target);
+          } catch (error) {
+            // Keep recovery pending to prove creation failure rejects its signal immediately.
+            await finishAssignment.promise;
+            throw error;
+          }
+        },
+      },
+      "ios",
+      undefined,
+      true,
+    );
+    const failure = recovery.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await drainUntil(() => signalRejected, { description: "creation failure signal" });
     expect(sessions.getSession(ID)).toBeNull();
+    expect(signalRejected).toBe(true);
+    expect(Reflect.get(sessions, "managedExecutionRecoveries").size).toBe(1);
     expect(reowner.automationRefusal(ID)).toBeUndefined();
     expect(opened).toBe(false);
+    finishAssignment.resolve();
+    expect(await failure).toMatchObject({ message: "persist create failed" });
+    expect(Reflect.get(sessions, "managedExecutionRecoveries").size).toBe(0);
   });
 
   test("a throwing recovery listener is warned and cannot roll back creation", async () => {

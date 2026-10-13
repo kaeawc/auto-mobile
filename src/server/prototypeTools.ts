@@ -75,7 +75,7 @@ import {
   MAX_PROTOTYPE_COMPONENT_DEPTH,
   prototypeSpecForDevice,
 } from "../features/prototype/prototypeComponents";
-import { STATE_KEY, record } from "../features/prototype/prototypeTemplate";
+import { STATE_KEY } from "../features/prototype/prototypeTemplate";
 import {
   hasElementAnchors,
   hasPrototypeAnchors,
@@ -1709,7 +1709,7 @@ function commitMutation(
     target,
     result,
     placed.displayId,
-    prototypeSpecSchema.shape.data.parse(record(args.spec)?.data),
+    args.action === "show" ? (args.spec as PrototypeSpec | undefined)?.data : undefined,
   );
   if (target.id && events.isDismissed(scope, target.id)) {
     store.dismissed(scope, target.id);

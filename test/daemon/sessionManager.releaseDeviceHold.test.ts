@@ -144,7 +144,7 @@ describe("session release device ownership hold", () => {
   });
 
   test("unconfirmed release waits, then restores with a bound from hold end", async () => {
-    const { manager, timer, writes } = await harness();
+    const { manager, timer, writes, session } = await harness();
     const hold = Promise.withResolvers<"teardown" | "skip-device-writes">();
     manager.setReleaseDeviceHold(() => ({ settled: hold.promise, capMs: 10_000 }));
     const release = manager.releaseSession(SESSION);
@@ -152,7 +152,7 @@ describe("session release device ownership hold", () => {
     expect(writes).toEqual([]);
     expect(manager.hasDeviceCleanupInProgress(DEVICE)).toBe(true);
     expect(manager.getDeviceCleanupRetryAfterMs(DEVICE)).toBe(
-      10_000 + getSessionReleaseCleanupWorstCaseMs(),
+      10_000 + getSessionReleaseCleanupWorstCaseMs(undefined, session.cacheData),
     );
     timer.advanceTime(700);
     hold.resolve("teardown");
@@ -304,13 +304,13 @@ describe("session release device ownership hold", () => {
   );
 
   test("retry hint includes the remaining hold and resets at confirmation without moving startedAtMs", async () => {
-    const { manager, timer, behavior } = await harness();
+    const { manager, timer, behavior, session } = await harness();
     const hold = Promise.withResolvers<"teardown" | "skip-device-writes">();
     const teardown = Promise.withResolvers<void>();
     behavior.gate = teardown.promise;
     manager.setReleaseDeviceHold(() => ({ settled: hold.promise, capMs: 10_000 }));
     const release = manager.releaseSession(SESSION, "daemon-shutdown");
-    const base = getSessionReleaseCleanupWorstCaseMs();
+    const base = getSessionReleaseCleanupWorstCaseMs(undefined, session.cacheData);
     timer.advanceTime(1_200);
     expect(manager.getDeviceCleanupRetryAfterMs(DEVICE)).toBe(8_800 + base);
     expect(manager.getNonTerminalReleasesInProgress()[0].startedAtMs).toBe(1_000);
@@ -325,7 +325,7 @@ describe("session release device ownership hold", () => {
   });
 
   test("ordinary release keeps its original hint and synchronous teardown path", async () => {
-    const { manager, timer, behavior, writes } = await harness();
+    const { manager, timer, behavior, writes, session } = await harness();
     const teardown = Promise.withResolvers<void>();
     behavior.gate = teardown.promise;
     let resolves = 0;
@@ -334,7 +334,7 @@ describe("session release device ownership hold", () => {
       return undefined;
     });
     const release = manager.releaseSession(SESSION);
-    const base = getSessionReleaseCleanupWorstCaseMs();
+    const base = getSessionReleaseCleanupWorstCaseMs(undefined, session.cacheData);
     expect(manager.getDeviceCleanupRetryAfterMs(DEVICE)).toBe(base);
     timer.advanceTime(700);
     expect(manager.getDeviceCleanupRetryAfterMs(DEVICE)).toBe(base - 700);

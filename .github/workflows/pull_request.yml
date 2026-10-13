@@ -3048,6 +3048,10 @@ jobs:
       # Run AutoMobile tests that require emulator
       - uses: ./.github/actions/android-emulator
         with:
+          # Compile suite prerequisites while the emulator boots and dexopt
+          # settles (#11578). Await the prebuild before running either suite;
+          # a failed prebuild leaves the suites to build their own prerequisites.
+          prebuild-script: "../scripts/android/run-emulator-suites.sh --prebuild"
           script: "../scripts/android/run-emulator-suites.sh control-proxy/build/outputs/apk/debug/control-proxy-debug.apk"
           working-directory: "./android/"
           accessibility-apk-path: control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
@@ -3172,10 +3176,10 @@ jobs:
           report_paths: "**/build/test-results/**/*.xml"
 
   # JVM Consumer Checks (#10894): one Gradle runner slot for the JUnitRunner
-  # library build, the SDK Debug Inspector Consumer publication + apiCheck guard
-  # and the JUnit Runner Kotlin 2.2 consumer compatibility check, which used to
-  # be three jobs each paying checkout + Gradle setup. Each check runs even when
-  # an earlier one failed.
+  # library build, CtrlProxy release build (#11578), SDK Debug Inspector Consumer
+  # publication + apiCheck guard and JUnit Runner Kotlin 2.2 consumer compatibility
+  # check. The original checks used to be three jobs each paying checkout +
+  # Gradle setup. Each check runs even when an earlier one failed.
   jvm-consumer-checks:
     timeout-minutes: 40
     name: "JVM Consumer Checks"
@@ -3201,7 +3205,9 @@ jobs:
 
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":junitRunner:assemble"
+          # Moved from Build CtrlProxy APK (#11578); the release variant from
+          # #5228 still gates every Android PR through this required check.
+          gradle-tasks: ":junitRunner:assemble :control-proxy:assembleRelease"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ env.GRADLE_BUILD_ACTION_CACHE_KEY_JOB }}"
           reuse-configuration-cache: true
@@ -3279,7 +3285,9 @@ jobs:
 
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":control-proxy:assembleDebug :control-proxy:assembleRelease :video-server:d8Dex"
+          # JVM Consumer Checks compiles the release variant, keeping it off
+          # the emulator lane's needs path (#11578).
+          gradle-tasks: ":control-proxy:assembleDebug :video-server:d8Dex"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true

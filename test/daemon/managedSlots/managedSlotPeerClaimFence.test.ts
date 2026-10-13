@@ -225,10 +225,14 @@ describe("rehydrated managed execution peer claim fence", () => {
       expect((await claimAs(PEERS[0]!)).kind).toBe("claimed");
       await advance(25);
       await reowner.whenIdle();
-      expect(reowner.automationRefusal(S)?.message).toContain("no longer owns");
+      expect(reowner.automationRefusal(S)?.message).toContain(
+        "terminal after managed-slot-ownership-lost",
+      );
       expect(reowner.automationRefusal(S)).toBeInstanceOf(ManagedSlotOwnershipLostError);
       await reowner.reown([S]);
-      expect(reowner.automationRefusal(S)?.message).toContain("no longer owns");
+      expect(reowner.automationRefusal(S)?.message).toContain(
+        "terminal after managed-slot-ownership-lost",
+      );
       expect(
         warn.mock.calls.filter(([message]) => String(message).includes("no longer owns")),
       ).toHaveLength(1);
@@ -399,7 +403,9 @@ describe("rehydrated managed execution peer claim fence", () => {
         expect((await claimAs(PEERS[0]!)).kind).toBe("claimed");
       };
       await reowner.reown([S], { rehydrated: true });
-      expect(reowner.automationRefusal(S)?.message).toContain("no longer owns");
+      expect(reowner.automationRefusal(S)?.message).toContain(
+        "terminal after managed-slot-ownership-lost",
+      );
       expect(timer.getPendingTimeouts()).toEqual([]);
       await reowner.reown([S]);
       expect(warn.mock.calls).toHaveLength(1);
@@ -549,7 +555,9 @@ describe("rehydrated managed execution peer claim fence", () => {
       expect((await claimAs(PEERS[0]!)).kind).toBe("claimed");
       await advance(25);
       await reowner.whenIdle();
-      expect(reowner.automationRefusal(S)?.message).toContain("no longer owns");
+      expect(reowner.automationRefusal(S)?.message).toContain(
+        "terminal after managed-slot-ownership-lost",
+      );
       expect(timer.getPendingTimeouts()).toEqual([]);
     },
   );
@@ -605,7 +613,9 @@ describe("rehydrated managed execution peer claim fence", () => {
     expect((await claimAs(PEERS[0]!)).kind).toBe("claimed");
     await advance(25);
     await reowner.whenIdle();
-    expect(reowner.automationRefusal(S)?.message).toContain("no longer owns");
+    expect(reowner.automationRefusal(S)?.message).toContain(
+      "terminal after managed-slot-ownership-lost",
+    );
   });
 
   testWithFreshSlot(
@@ -750,7 +760,9 @@ describe("rehydrated managed execution peer claim fence", () => {
       expect(reowner.automationRefusal("missing")).toBeDefined();
       await advance(25);
       await reowner.whenIdle();
-      expect(reowner.automationRefusal("missing")?.message).toContain("no longer owns");
+      expect(reowner.automationRefusal("missing")?.message).toContain(
+        "terminal after managed-slot-ownership-lost",
+      );
     },
   );
   testWithFreshSlot(

@@ -4,7 +4,11 @@ import {
   DaemonMcpProxy,
   DaemonSessionStalledError,
 } from "../../src/daemon/daemonMcpProxy";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import {
+  DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
+  DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
+  DAEMON_VERSION,
+} from "../../src/daemon/constants";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import type { LivenessHandover } from "../../src/daemon/proxyLivenessRecovery";
 import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
@@ -40,6 +44,8 @@ let heartbeatError: unknown;
 let appleResultOverride: unknown;
 let silentIos: boolean;
 let thrownNamedAnswer: boolean;
+let iosIdleReleaseAt: number | undefined;
+let tokenOwned: Device[];
 let ended: Map<string, string>;
 let handovers: LivenessHandover[];
 let spies: Array<ReturnType<typeof spyOn>>;
@@ -58,7 +64,7 @@ function deviceResult(device: Device) {
   };
 }
 
-function setUp(initialSessionUuid?: string): void {
+function setUp(initialSessionUuid?: string, livenessOwnerToken?: string): void {
   timer = new FakeTimer();
   apple = IOS;
   android = ANDROID;
@@ -69,6 +75,8 @@ function setUp(initialSessionUuid?: string): void {
   appleResultOverride = undefined;
   silentIos = false;
   thrownNamedAnswer = false;
+  iosIdleReleaseAt = undefined;
+  tokenOwned = [];
   client = new FakeDaemonClient({
     onCallTool: (_name, args) => {
       const reason = ended.get(args.sessionUuid);
@@ -106,16 +114,30 @@ function setUp(initialSessionUuid?: string): void {
       }
       return withRoutedSessionMeta(
         { content: [{ type: "text", text: "ok" }] },
-        name === "observe" ? undefined : args.sessionUuid,
+        name === "observe"
+          ? undefined
+          : (args.sessionUuid ?? (args.deviceId === IOS.deviceId ? IOS.sessionUuid : undefined)),
       );
     },
     onCallDaemonMethod: (method, args) => {
+      if (method === DAEMON_TOKEN_OWNED_SESSIONS_METHOD) {
+        return {
+          sessions: tokenOwned.map((device) => ({
+            ...device,
+            sessionId: device.sessionUuid,
+            lastUsedAt: timer.now(),
+          })),
+        };
+      }
       if (method === "daemon/heartbeat" && args.sessionId === IOS.sessionUuid) {
         if (heartbeatError) {
           throw heartbeatError;
         }
         if (silentIos) {
           return new Promise<never>(() => {});
+        }
+        if (iosIdleReleaseAt !== undefined) {
+          return { idleReleaseAt: iosIdleReleaseAt };
         }
       }
       return undefined;
@@ -132,6 +154,7 @@ function setUp(initialSessionUuid?: string): void {
     idGenerator: new FakeIdGenerator(),
     heartbeatTimeoutMs: 10_000,
     heartbeatIntervalMs: INTERVAL_MS,
+    ...(livenessOwnerToken ? { livenessOwnerToken } : {}),
     ...(initialSessionUuid ? { initialSessionUuid } : {}),
   });
   proxy.onLivenessHandover((handover) => handovers.push(handover));
@@ -174,6 +197,11 @@ async function refused(session = IOS, reason = "device-killed"): Promise<void> {
   );
   expect(answer).toBeInstanceOf(DaemonBoundSessionExpiredError);
   expect(answer).toMatchObject({ sessionUuid: session.sessionUuid, reason });
+  if (reason === "cleanup-expired" || reason === "replay-lease-expired") {
+    expect(sessionOwnershipLostPayload(answer as DaemonBoundSessionExpiredError).error.idle).toBe(
+      true,
+    );
+  }
   expect(client.callToolCalls).toHaveLength(before);
 }
 async function forwarded(
@@ -187,6 +215,88 @@ async function forwarded(
   expect(client.callToolCalls.at(-1)?.params.sessionUuid).toBe(sessionUuid);
 }
 const advance = (ms: number) => timer.advanceTimeAsync(ms, () => drainUntilQuiescent(timer));
+
+async function evictIos(daemonConfirmed = false): Promise<void> {
+  if (daemonConfirmed) {
+    iosIdleReleaseAt = timer.now() + DAEMON_BOUND_SESSION_REPLAY_TTL_MS;
+  }
+  await acquireBoth();
+  await advance(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - INTERVAL_MS);
+  await forwarded("homeScreen", { platform: "android" }, ANDROID.sessionUuid);
+  await advance(INTERVAL_MS * 3);
+}
+
+for (const daemonConfirmed of [false, true]) {
+  test(`held idle eviction reports ${daemonConfirmed ? "cleanup-expired" : "replay-lease-expired"} once with idle wire evidence`, async () => {
+    await evictIos(daemonConfirmed);
+    await refused(IOS, daemonConfirmed ? "cleanup-expired" : "replay-lease-expired");
+    await forwarded();
+  });
+}
+
+for (const notificationBeforeConsumption of [false, true]) {
+  test(`a late eviction release ${notificationBeforeConsumption ? "before" : "after"} consumption yields exactly one report`, async () => {
+    await evictIos();
+    if (notificationBeforeConsumption) {
+      release(IOS, "cleanup-expired");
+    }
+    await refused(IOS, notificationBeforeConsumption ? "cleanup-expired" : "replay-lease-expired");
+    release(IOS, "cleanup-expired");
+    await forwarded();
+  });
+}
+
+test("reads and Android controls preserve an eviction loss", async () => {
+  await evictIos();
+  await forwarded("observe");
+  await forwarded("homeScreen", { platform: "android" }, ANDROID.sessionUuid);
+  await refused(IOS, "replay-lease-expired");
+  await forwarded();
+});
+
+for (const route of ["named control", "named read", "deviceId control"] as const) {
+  test(`successful ${route} clears only the alive evicted session's loss`, async () => {
+    await evictIos();
+    expect(ended.has(IOS.sessionUuid)).toBe(false);
+    await forwarded(
+      route === "named read" ? "observe" : "homeScreen",
+      route === "deviceId control" ? { deviceId: IOS.deviceId } : { sessionUuid: IOS.sessionUuid },
+      route === "deviceId control" ? undefined : IOS.sessionUuid,
+    );
+    await forwarded();
+    // Idle eviction stops protection (#10657); a successful answer does not re-hold it.
+    client.callDaemonMethodCalls.length = 0;
+    await advance(INTERVAL_MS);
+    expect(
+      client.callDaemonMethodCalls.some(
+        (call) => call.method === "daemon/heartbeat" && call.params.sessionId === IOS.sessionUuid,
+      ),
+    ).toBe(false);
+  });
+}
+
+test("pin: a successful named Android call preserves the iOS eviction loss", async () => {
+  await evictIos();
+  await forwarded("homeScreen", { sessionUuid: ANDROID.sessionUuid }, ANDROID.sessionUuid);
+  await refused(IOS, "replay-lease-expired");
+  await forwarded();
+});
+
+for (const selection of ["named", "acquired"] as const) {
+  test(`${selection} selection clears an eviction loss`, async () => {
+    await evictIos();
+    if (selection === "named") {
+      release(IOS, "cleanup-expired");
+      const answer = await proxy.callTool("homeScreen", { sessionUuid: IOS.sessionUuid });
+      expect(answer).toMatchObject({ isError: true });
+      await forwarded();
+    } else {
+      apple = { ...IOS, sessionUuid: "ios-reacquired" };
+      await proxy.callTool("getApple", {});
+      await forwarded("homeScreen", { platform: "ios" }, apple.sessionUuid);
+    }
+  });
+}
 
 for (const reason of ["device-killed", "cleanup-expired"]) {
   test(`held terminal ${reason} is refused once, then forwarded sessionless`, async () => {
@@ -242,6 +352,28 @@ test("a new acquisition clears every loss of its platform", async () => {
   await forwarded("homeScreen", { platform: "ios" }, apple.sessionUuid);
 });
 
+test("a mint released while the previous keeper stops preserves the older platform loss", async () => {
+  await acquireBoth();
+  release();
+  apple = { ...IOS, sessionUuid: "ios-never-published", deviceId: "SIM-2" };
+  const clearInterval = timer.clearInterval.bind(timer);
+  const stop = spyOn(timer, "clearInterval").mockImplementationOnce((handle) => {
+    clearInterval(handle);
+    release(apple, "heartbeat-timeout");
+  });
+  try {
+    await expect(proxy.callTool("getApple", {})).rejects.toMatchObject({
+      name: "DaemonBoundSessionExpiredError",
+      sessionUuid: apple.sessionUuid,
+      reason: "heartbeat-timeout",
+    });
+    await refused();
+    await forwarded();
+  } finally {
+    stop.mockRestore();
+  }
+});
+
 test("a new acquisition clears an older loss before the acquired session is held and lost", async () => {
   await acquireBoth();
   release();
@@ -258,6 +390,15 @@ test("setActiveDevice clears the loss for the platform named by the call", async
   release();
   selected = { sessionUuid: "ios-new", deviceId: "SIM-2" };
   await proxy.callTool("setActiveDevice", { ...selected, platform: "ios" });
+  await forwarded();
+});
+
+test("setActiveDevice returning known Android preserves the loss for its named iOS platform", async () => {
+  await acquireBoth();
+  release();
+  selected = ANDROID;
+  await proxy.callTool("setActiveDevice", { platform: "ios", deviceId: ANDROID.deviceId });
+  await refused();
   await forwarded();
 });
 
@@ -507,6 +648,49 @@ test("a second notification cannot enqueue the same session twice", async () => 
   await forwarded();
 });
 
+test.each(["session claimed", "holdPreviousBinding", "updateBoundSessionUuid"])(
+  "%s clears only its UUID, preserving another platform and another same-platform loss",
+  async (path) => {
+    await proxy.close();
+    setUp(undefined, "stable-owner");
+    await proxy.callTool("getApple", {});
+    const sibling = { ...IOS, sessionUuid: "ios-sibling", deviceId: "SIM-2" };
+    apple = sibling;
+    await proxy.callTool("getApple", {});
+    await proxy.callTool("getAndroid", {});
+    apple = { sessionUuid: "neutral-default", deviceId: "neutral" };
+    await proxy.callTool("getApple", {});
+    release();
+    release(sibling);
+    release(ANDROID);
+    ended.delete(IOS.sessionUuid);
+    if (path === "session claimed") {
+      tokenOwned = [IOS];
+      client.emitConnectionClosed();
+      await proxy.callTool("listDevices", {});
+      expect(
+        client.callDaemonMethodCalls.filter(
+          (call) => call.method === DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
+        ),
+      ).toHaveLength(2);
+      // Lose the claimed session before a platform call can clear its siblings. A generic
+      // release preserves an existing reason, distinguishing the token-claim UUID delete.
+      release(IOS, "released");
+    } else {
+      // Both binding clears and the final selection clear overlap here. The session's
+      // platform was forgotten, so this selection clears only its UUID, never its siblings.
+      selected = { sessionUuid: IOS.sessionUuid, deviceId: IOS.deviceId };
+      await proxy.callTool("setActiveDevice", { deviceId: selected.deviceId });
+    }
+    await refused(ANDROID);
+    await refused(sibling);
+    if (path === "session claimed") {
+      await refused(IOS, "released");
+    }
+    await forwarded();
+  },
+);
+
 test("notification release snapshot and fallback reason are preserved", async () => {
   await acquireBoth();
   const snapshot = {
@@ -549,6 +733,47 @@ test("exhausting a held owner-conflict leash reports the default path's reason",
   await refused(IOS, "liveness-owner-conflict");
   await forwarded();
 });
+
+for (const tool of ["observe", "listDevices"] as const) {
+  test(`a successful named ${tool} preserves an exhausted held owner-conflict loss`, async () => {
+    await acquireBoth();
+    heartbeatError = Object.assign(new Error("Other owner"), { code: "liveness_owner_conflict" });
+    await advance(40_000);
+    await forwarded(tool, { sessionUuid: IOS.sessionUuid }, IOS.sessionUuid);
+    await refused(IOS, "liveness-owner-conflict");
+    await forwarded();
+  });
+}
+
+test("a successful named read preserves a held keeper not-found ended loss", async () => {
+  await acquireBoth();
+  heartbeatError = Object.assign(new Error("Session not found"), {
+    code: DAEMON_SESSION_NOT_FOUND_CODE,
+    releaseReason: "device-killed",
+  });
+  await advance(INTERVAL_MS);
+  await forwarded("observe", { sessionUuid: IOS.sessionUuid }, IOS.sessionUuid);
+  await refused(IOS, "device-killed");
+  await forwarded();
+});
+
+test("a successful named read preserves a held release notification loss", async () => {
+  await acquireBoth();
+  client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, IOS.sessionUuid, "device-killed");
+  await forwarded("observe", { sessionUuid: IOS.sessionUuid }, IOS.sessionUuid);
+  await refused(IOS, "device-killed");
+  await forwarded();
+});
+
+for (const reason of ["cleanup-expired", "released"] as const) {
+  test(`a successful named read preserves an eviction loss confirmed by ${reason}`, async () => {
+    await evictIos();
+    client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, IOS.sessionUuid, reason);
+    await forwarded("observe", { sessionUuid: IOS.sessionUuid }, IOS.sessionUuid);
+    await refused(IOS, reason === "released" ? "replay-lease-expired" : reason);
+    await forwarded();
+  });
+}
 
 test("pin: a held not-found stop without a terminal reason does not report a loss", async () => {
   await acquireBoth();

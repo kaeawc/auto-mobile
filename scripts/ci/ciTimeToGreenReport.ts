@@ -16,6 +16,8 @@ export interface JobFact {
   startedAt: string | null;
   completedAt: string | null;
   labels: string[];
+  runnerName: string | null;
+  failedStep: string | null;
 }
 
 export interface RunFact {
@@ -42,13 +44,26 @@ export interface PrFact {
   prType: PrType;
 }
 
+export interface ExternalJobFact {
+  provider: "circleci";
+  name: string;
+  sha: string;
+  createdAt: string;
+  completedAt: string | null;
+  state: string;
+  macos: boolean;
+}
+
 export interface Bundle {
+  externalJobs?: ExternalJobFact[];
   meta: {
     repo: string;
     since: string;
     until: string;
     requiredChecks: string[];
     prRunsOnly: boolean;
+    circleci?: boolean;
+    circleciScope?: "pr-heads" | "pr-heads+main-pushes";
   };
   runs: RunFact[];
   prs: PrFact[];
@@ -56,6 +71,17 @@ export interface Bundle {
 
 export const HOSTED_CAP = 40;
 export const SELF_HOSTED_MAC_CAP = 3;
+export const NAMESPACE_VCPU_CAP = 32;
+export const CIRCLECI_MACOS_CAP = 1;
+export const DEFAULT_NAMESPACE_VCPUS: Record<string, number> = {
+  "namespace-profile-auto-mobile": 4,
+  "namespace-profile-auto-mobile-small": 2,
+  "namespace-profile-auto-mobile-macos": 6,
+};
+
+export interface ReportOptions {
+  namespaceVcpus?: Record<string, number>;
+}
 
 const FAILED = new Set(["failure", "timed_out", "startup_failure"]);
 const GREEN = new Set(["success", "skipped"]);
@@ -242,6 +268,21 @@ export interface CheckFailureRate {
   rate: number;
 }
 
+export interface CheckAttemptRow {
+  check: string;
+  executed: number;
+  firstAttemptFailures: number;
+  passRate: number | null;
+  durationMs: { p50: number | null; p90: number | null };
+  queueMs: { p50: number | null };
+}
+export interface FailingStepRow {
+  job: string;
+  step: string;
+  failures: number;
+  required: boolean;
+}
+
 export interface TypeBreakdown {
   shas: number;
   green: number;
@@ -285,6 +326,8 @@ export interface Report {
     passed: number;
     rate: number | null;
     topFailingChecks: CheckFailureRate[];
+    byCheck: CheckAttemptRow[];
+    topFailingSteps: FailingStepRow[];
   };
   requiredChecksMissing: { check: string; shasWithoutJob: number }[];
   concurrency: {
@@ -292,7 +335,10 @@ export interface Report {
     overall: ConcurrencyPool;
     githubHosted: ConcurrencyPool;
     namespace: ConcurrencyPool;
-    selfHostedMac: ConcurrencyPool;
+    selfHostedMac: ConcurrencyPool & { runners: string[]; capUnit: "machines" };
+    namespaceVcpu: { peak: number; peakAt: string | null; cap: 32; unknownProfiles: string[] };
+    namespaceProfiles: { profile: string; vcpu: number | null; peakJobs: number; jobs: number }[];
+    circleciMacos: ConcurrencyPool & { fetched: boolean; scope?: Bundle["meta"]["circleciScope"] };
   };
   queueTime: QueueRow[];
 }
@@ -338,46 +384,74 @@ function breakdown(records: readonly ShaRecord[]): TypeBreakdown {
   };
 }
 
-function firstAttemptFailures(
-  bundle: Bundle,
-  includedShas: ReadonlySet<string>,
-): CheckFailureRate[] {
-  const required = new Set(bundle.meta.requiredChecks);
-  const tallies = new Map<string, { executed: number; failed: number }>();
-  for (const run of bundle.runs) {
-    if (run.event !== "pull_request" || !includedShas.has(run.headSha)) {
-      continue;
-    }
-    for (const job of run.jobs) {
-      if (!required.has(job.name) || job.runAttempt !== 1 || !job.conclusion) {
-        continue;
-      }
-      if (job.conclusion !== "success" && !FAILED.has(job.conclusion)) {
-        continue;
-      }
-      const tally = tallies.get(job.name) ?? { executed: 0, failed: 0 };
-      tally.executed += 1;
-      tally.failed += FAILED.has(job.conclusion) ? 1 : 0;
-      tallies.set(job.name, tally);
-    }
-  }
-  return [...tallies]
-    .map(([check, tally]) => ({
-      check,
-      executed: tally.executed,
-      firstAttemptFailures: tally.failed,
-      rate: tally.failed / tally.executed,
-    }))
-    .filter((row) => row.firstAttemptFailures > 0)
+function attemptJobs(bundle: Bundle, includedShas: ReadonlySet<string>): JobFact[] {
+  return bundle.runs
+    .filter((run) => run.event === "pull_request" && includedShas.has(run.headSha))
+    .flatMap((run) => run.jobs)
+    .filter((job) => job.runAttempt === 1);
+}
+
+function elapsed(start: string | null, end: string | null): number[] {
+  const from = ms(start);
+  const to = ms(end);
+  return from === null || to === null || to < from ? [] : [to - from];
+}
+
+function checkAttempts(bundle: Bundle, jobs: readonly JobFact[]): CheckAttemptRow[] {
+  return bundle.meta.requiredChecks
+    .map((check) => {
+      const executed = jobs.filter(
+        (job) =>
+          job.name === check &&
+          job.conclusion &&
+          (job.conclusion === "success" || FAILED.has(job.conclusion)),
+      );
+      const failures = executed.filter((job) => FAILED.has(job.conclusion ?? "")).length;
+      const durations = executed.flatMap((job) => elapsed(job.startedAt, job.completedAt));
+      const queues = executed.flatMap((job) => elapsed(job.createdAt, job.startedAt));
+      return {
+        check,
+        executed: executed.length,
+        firstAttemptFailures: failures,
+        passRate: rate(executed.length - failures, executed.length),
+        durationMs: { p50: percentile(durations, 50), p90: percentile(durations, 90) },
+        queueMs: { p50: percentile(queues, 50) },
+      };
+    })
     .sort(
       (a, b) => b.firstAttemptFailures - a.firstAttemptFailures || a.check.localeCompare(b.check),
+    );
+}
+
+function failingSteps(jobs: readonly JobFact[], required: readonly string[]): FailingStepRow[] {
+  const rows = new Map<string, FailingStepRow>();
+  for (const job of jobs) {
+    if (!FAILED.has(job.conclusion ?? "")) {
+      continue;
+    }
+    const step = job.failedStep ?? "(no failed step recorded)";
+    const key = JSON.stringify([job.name, step]);
+    const row = rows.get(key) ?? {
+      job: job.name,
+      step,
+      failures: 0,
+      required: required.includes(job.name),
+    };
+    row.failures += 1;
+    rows.set(key, row);
+  }
+  return [...rows.values()]
+    .sort(
+      (a, b) =>
+        b.failures - a.failures || a.job.localeCompare(b.job) || a.step.localeCompare(b.step),
     )
-    .slice(0, 15);
+    .slice(0, 10);
 }
 
 interface Interval {
   start: number;
   end: number;
+  weight?: number;
 }
 
 /** Peak simultaneous intervals; an interval ending at t does not overlap one starting at t. */
@@ -386,8 +460,8 @@ export function peakConcurrency(intervals: readonly Interval[]): {
   peakAtMs: number | null;
 } {
   const events = intervals.flatMap((interval) => [
-    { at: interval.start, delta: 1 },
-    { at: interval.end, delta: -1 },
+    { at: interval.start, delta: interval.weight ?? 1 },
+    { at: interval.end, delta: -(interval.weight ?? 1) },
   ]);
   events.sort((a, b) => a.at - b.at || a.delta - b.delta);
   let current = 0;
@@ -416,17 +490,25 @@ function pool(intervals: readonly Interval[], cap: number | null): ConcurrencyPo
 export type RunnerPool = "github-hosted" | "namespace" | "self-hosted-mac" | "self-hosted-other";
 
 export function runnerPool(labels: readonly string[]): RunnerPool {
+  if (labels.some((label) => label.startsWith("namespace-"))) {
+    return "namespace";
+  }
   if (labels.includes("self-hosted")) {
     return labels.some((label) => /mac/i.test(label)) ? "self-hosted-mac" : "self-hosted-other";
   }
-  return labels.some((label) => label.startsWith("namespace-")) ? "namespace" : "github-hosted";
+  return "github-hosted";
 }
 
 function runnerIntervals(bundle: Bundle) {
   const windowStart = ms(bundle.meta.since) ?? 0;
-  const windowEnd = ms(bundle.meta.until) ?? Date.now();
-  const rows: { pool: RunnerPool; interval: Interval; labels: string; queueMs: number | null }[] =
-    [];
+  const windowEnd = ms(bundle.meta.until) ?? 0;
+  const rows: {
+    pool: RunnerPool;
+    interval: Interval;
+    labels: string;
+    queueMs: number | null;
+    profile: string | null;
+  }[] = [];
   for (const run of bundle.runs) {
     for (const job of run.jobs) {
       const started = ms(job.startedAt);
@@ -437,6 +519,7 @@ function runnerIntervals(bundle: Bundle) {
       const created = ms(job.createdAt);
       rows.push({
         pool: runnerPool(job.labels),
+        profile: job.labels.find((label) => label.startsWith("namespace-")) ?? null,
         interval: {
           start: Math.max(started, windowStart),
           end: Math.min(Math.max(ended, started), windowEnd),
@@ -449,8 +532,55 @@ function runnerIntervals(bundle: Bundle) {
   return rows.filter((row) => row.interval.end > row.interval.start);
 }
 
-function concurrencyReport(bundle: Bundle): Report["concurrency"] & { queue: QueueRow[] } {
+function namespaceConcurrency(rows: ReturnType<typeof runnerIntervals>, options: ReportOptions) {
+  const vcpus = { ...DEFAULT_NAMESPACE_VCPUS, ...options.namespaceVcpus };
+  const namespace = rows.filter((row) => row.pool === "namespace");
+  const profiles = [
+    ...new Set(namespace.flatMap((row) => (row.profile === null ? [] : [row.profile]))),
+  ].sort();
+  const weighted = pool(
+    namespace.map((row) => ({ ...row.interval, weight: vcpus[row.profile ?? ""] ?? 0 })),
+    NAMESPACE_VCPU_CAP,
+  );
+  return {
+    namespaceVcpu: {
+      peak: weighted.peak,
+      peakAt: weighted.peakAt,
+      cap: NAMESPACE_VCPU_CAP,
+      unknownProfiles: profiles.filter((profile) => vcpus[profile] === undefined),
+    },
+    namespaceProfiles: profiles.map((profile) => {
+      const intervals = namespace
+        .filter((row) => row.profile === profile)
+        .map((row) => row.interval);
+      return {
+        profile,
+        vcpu: vcpus[profile] ?? null,
+        peakJobs: pool(intervals, null).peak,
+        jobs: intervals.length,
+      };
+    }),
+  };
+}
+
+function circleciIntervals(bundle: Bundle): Interval[] {
+  const start = ms(bundle.meta.since) ?? 0;
+  const end = ms(bundle.meta.until) ?? 0;
+  return (bundle.externalJobs ?? [])
+    .filter((job) => job.macos)
+    .map((job) => ({
+      start: Math.max(ms(job.createdAt) ?? end, start),
+      end: Math.min(ms(job.completedAt) ?? end, end),
+    }))
+    .filter((interval) => interval.end > interval.start);
+}
+
+function concurrencyReport(
+  bundle: Bundle,
+  options: ReportOptions,
+): Report["concurrency"] & { queue: QueueRow[] } {
   const rows = runnerIntervals(bundle);
+  const namespace = namespaceConcurrency(rows, options);
   const of = (names: readonly RunnerPool[]) =>
     rows.filter((row) => names.includes(row.pool)).map((row) => row.interval);
   const queues = new Map<string, number[]>();
@@ -467,7 +597,27 @@ function concurrencyReport(bundle: Bundle): Report["concurrency"] & { queue: Que
     ),
     githubHosted: pool(of(["github-hosted"]), HOSTED_CAP),
     namespace: pool(of(["namespace"]), null),
-    selfHostedMac: pool(of(["self-hosted-mac"]), SELF_HOSTED_MAC_CAP),
+    selfHostedMac: {
+      ...pool(of(["self-hosted-mac"]), SELF_HOSTED_MAC_CAP),
+      capUnit: "machines",
+      runners: [
+        ...new Set(
+          bundle.runs
+            .flatMap((run) => run.jobs)
+            .filter((job) => runnerPool(job.labels) === "self-hosted-mac")
+            .flatMap((job) => {
+              const name = job.runnerName?.trim();
+              return name ? [name] : [];
+            }),
+        ),
+      ].sort(),
+    },
+    ...namespace,
+    circleciMacos: {
+      ...pool(circleciIntervals(bundle), CIRCLECI_MACOS_CAP),
+      fetched: bundle.meta.circleci === true,
+      ...(bundle.meta.circleciScope ? { scope: bundle.meta.circleciScope } : {}),
+    },
     queue: [...queues]
       .map(([labels, values]) => ({
         labels,
@@ -480,7 +630,11 @@ function concurrencyReport(bundle: Bundle): Report["concurrency"] & { queue: Que
   };
 }
 
-export function buildReport(bundle: Bundle, prTypeFilter: PrType | null = null): Report {
+export function buildReport(
+  bundle: Bundle,
+  prTypeFilter: PrType | null = null,
+  options: ReportOptions = {},
+): Report {
   const all = computeShaRecords(bundle);
   const records = prTypeFilter ? all.filter((record) => record.prType === prTypeFilter) : all;
   const count = (outcome: ShaOutcome) =>
@@ -534,7 +688,9 @@ export function buildReport(bundle: Bundle, prTypeFilter: PrType | null = null):
     }))
     .filter((row) => row.shasWithoutJob > 0);
 
-  const { queue, ...concurrency } = concurrencyReport(bundle);
+  const { queue, ...concurrency } = concurrencyReport(bundle, options);
+  const jobs = attemptJobs(bundle, eligibleShas);
+  const byCheck = checkAttempts(bundle, jobs);
   return {
     window: { since: bundle.meta.since, until: bundle.meta.until },
     requiredChecks: bundle.meta.requiredChecks,
@@ -559,7 +715,17 @@ export function buildReport(bundle: Bundle, prTypeFilter: PrType | null = null):
       eligible: eligible.length,
       passed,
       rate: rate(passed, eligible.length),
-      topFailingChecks: firstAttemptFailures(bundle, eligibleShas),
+      byCheck,
+      topFailingSteps: failingSteps(jobs, bundle.meta.requiredChecks),
+      topFailingChecks: byCheck
+        .filter((row) => row.firstAttemptFailures > 0)
+        .slice(0, 15)
+        .map((row) => ({
+          check: row.check,
+          executed: row.executed,
+          firstAttemptFailures: row.firstAttemptFailures,
+          rate: row.firstAttemptFailures / row.executed,
+        })),
     },
     requiredChecksMissing: missing,
     concurrency,
@@ -579,14 +745,54 @@ function table(header: readonly string[], rows: readonly (readonly string[])[]):
   return [
     `| ${header.join(" | ")} |`,
     `| ${header.map(() => "---").join(" | ")} |`,
-    ...rows.map((row) => `| ${row.join(" | ")} |`),
+    ...rows.map(
+      (row) =>
+        `| ${row.map((cell) => cell.replaceAll("|", "\\|").replaceAll("\n", " ")).join(" | ")} |`,
+    ),
   ];
 }
 
-function poolRow(name: string, pool: ConcurrencyPool): string[] {
+function poolRow(name: string, pool: ConcurrencyPool, note = ""): string[] {
   const cap = pool.cap === null ? "-" : `${pool.cap}`;
   const over = pool.cap !== null && pool.peak > pool.cap ? " (OVER CAP)" : "";
-  return [name, `${pool.peak}${over}`, cap, pool.peakAt ?? "-", `${pool.jobs}`];
+  return [name, `${pool.peak}${over}`, cap, pool.peakAt ?? "-", `${pool.jobs}`, note];
+}
+
+function concurrencyRows(concurrency: Report["concurrency"]): string[][] {
+  const vcpu = concurrency.namespaceVcpu;
+  const circle = concurrency.circleciMacos;
+  const note = vcpu.unknownProfiles.length
+    ? `lower bound: unknown profile ${vcpu.unknownProfiles.join(", ")}`
+    : "";
+  return [
+    poolRow("all runners", concurrency.overall),
+    poolRow("github-hosted (jobs)", concurrency.githubHosted),
+    [
+      "self-hosted mac (jobs)",
+      `${concurrency.selfHostedMac.peak}`,
+      `${concurrency.selfHostedMac.cap} machines`,
+      concurrency.selfHostedMac.peakAt ?? "-",
+      `${concurrency.selfHostedMac.jobs}`,
+      `${concurrency.selfHostedMac.runners.length} runner processes: ${concurrency.selfHostedMac.runners.join(", ")}`,
+    ],
+    poolRow("namespace (jobs)", concurrency.namespace),
+    poolRow("namespace (vCPU)", { ...vcpu, jobs: concurrency.namespace.jobs }, note),
+    ...concurrency.namespaceProfiles.map((row) =>
+      poolRow(`${row.profile} (${row.vcpu ?? "unknown"} vCPU each)`, {
+        peak: row.peakJobs,
+        peakAt: null,
+        cap: null,
+        jobs: row.jobs,
+      }),
+    ),
+    circle.fetched
+      ? poolRow(
+          "circleci macos (queued or running)",
+          circle,
+          `from commit statuses of iOS/mixed/unknown PR heads${circle.scope === "pr-heads+main-pushes" ? " and main pushes" : ""}; nightly pipeline not visible`,
+        )
+      : ["circleci macos (queued or running)", "-", `${circle.cap}`, "-", "-", "not fetched"],
+  ];
 }
 
 export function renderMarkdown(report: Report): string {
@@ -654,29 +860,45 @@ export function renderMarkdown(report: Report): string {
     ``,
     `Per PR (first push to first green SHA): n=${report.perPrTimeToGreenMs.n}, p50 ${minutes(report.perPrTimeToGreenMs.p50)}, p90 ${minutes(report.perPrTimeToGreenMs.p90)}, max ${minutes(report.perPrTimeToGreenMs.max)} min; ${report.perPrTimeToGreenMs.prsNeverGreen} PRs never reached green in the window.`,
     ``,
-    `## Top failing required checks on attempt 1`,
+    `## Required checks on attempt 1`,
     ``,
     ...table(
-      ["check", "attempt-1 runs", "failures", "failure rate"],
-      report.firstAttempt.topFailingChecks.map((row) => [
+      ["check", "runs", "failures", "pass rate", "p50 min", "p90 min", "queue p50 min"],
+      report.firstAttempt.byCheck.map((row) => [
         row.check,
         `${row.executed}`,
         `${row.firstAttemptFailures}`,
-        percent(row.rate),
+        percent(row.passRate),
+        minutes(row.durationMs.p50),
+        minutes(row.durationMs.p90),
+        minutes(row.queueMs.p50),
+      ]),
+    ),
+    ``,
+    `## Top failing job/step pairs on attempt 1`,
+    ``,
+    ...table(
+      ["job", "step", "failures", "required"],
+      report.firstAttempt.topFailingSteps.map((row) => [
+        row.job,
+        row.step,
+        `${row.failures}`,
+        `${row.required}`,
       ]),
     ),
     ``,
     `## Peak runner concurrency${report.concurrency.prRunsOnly ? " (pull_request runs only)" : " (all workflows)"}`,
     ``,
     ...table(
-      ["pool", "peak jobs", "cap", "peak at (UTC)", "jobs"],
-      [
-        poolRow("all runners", report.concurrency.overall),
-        poolRow("github-hosted", report.concurrency.githubHosted),
-        poolRow("namespace", report.concurrency.namespace),
-        poolRow("self-hosted mac", report.concurrency.selfHostedMac),
-      ],
+      ["pool", "peak", "cap", "peak at (UTC)", "jobs", "note"],
+      concurrencyRows(report.concurrency),
     ),
+    ...(report.concurrency.prRunsOnly
+      ? [
+          "",
+          "Only pull_request runs were fetched, so peaks understate total demand against the caps.",
+        ]
+      : []),
     ``,
     `## Queue time (created to started, minutes)`,
     ``,

@@ -46,11 +46,12 @@ for (const newline of [false, true]) {
       client.simulateIncomingDataForTesting(Buffer.from("x".repeat(65) + (newline ? "\n" : "")));
       expect(socket.destroyed).toBe(true);
       const error = await first;
-      expect(error).toBeInstanceOf(ActionableError);
-      expect(error).not.toBeInstanceOf(DaemonUnavailableError);
-      expect(error).toBeInstanceOf(DaemonFrameTooLargeError);
-      expect(error.message).toContain("64 bytes");
-      expect(await second).toBe(error);
+      expect(error.cause).toBeInstanceOf(ActionableError);
+      expect(error).toBeInstanceOf(DaemonUnavailableError);
+      expect(error.message).toStartWith("Daemon socket connection lost:");
+      expect(error.cause).toBeInstanceOf(DaemonFrameTooLargeError);
+      expect(error.cause.message).toContain("64 bytes");
+      expect(await second).toMatchObject({ name: "DaemonUnavailableError", cause: error.cause });
       expect(timer.getPendingTimeoutCount()).toBe(0);
       expect(remove).toHaveBeenCalled();
       expect((client as unknown as { connected: boolean }).connected).toBe(false);
@@ -264,9 +265,9 @@ test("overflow preserves the frame error when a connection-closed handler closes
     try {
       client.simulateIncomingDataForTesting(Buffer.from("x".repeat(129)));
       const error = await first;
-      expect(error).toBeInstanceOf(DaemonFrameTooLargeError);
-      expect(error).not.toBeInstanceOf(DaemonUnavailableError);
-      expect(await second).toBe(error);
+      expect(error).toBeInstanceOf(DaemonUnavailableError);
+      expect(error.cause).toBeInstanceOf(DaemonFrameTooLargeError);
+      expect(await second).toMatchObject({ name: "DaemonUnavailableError", cause: error.cause });
       expect(client.hasPendingRequestForTesting("p")).toBe(false);
       expect(client.hasPendingRequestForTesting("q")).toBe(false);
       expect(socket.destroyed).toBe(true);
@@ -302,9 +303,9 @@ test("overflow destroys the socket and rejects requests even when a connection-c
       );
       expect(socket.destroyed).toBe(true);
       const error = await first;
-      expect(error).toBeInstanceOf(DaemonFrameTooLargeError);
-      expect(error).not.toBeInstanceOf(DaemonUnavailableError);
-      expect(await second).toBe(error);
+      expect(error).toBeInstanceOf(DaemonUnavailableError);
+      expect(error.cause).toBeInstanceOf(DaemonFrameTooLargeError);
+      expect(await second).toMatchObject({ name: "DaemonUnavailableError", cause: error.cause });
       expect(client.hasPendingRequestForTesting("p")).toBe(false);
       expect(client.hasPendingRequestForTesting("q")).toBe(false);
       expect(timer.getPendingTimeoutCount()).toBe(0);
@@ -456,3 +457,78 @@ for (const reconnectBeforeClose of [false, true]) {
     });
   });
 }
+
+for (const pendingCount of [1, 2]) {
+  for (const head of [
+    '{"id":"p","type":"mcp_response","success":true,"result":"',
+    '{"id":"fake-1","type":"mcp_response","success":true,"result":"',
+    '{"id":"not-pending","type":"mcp_response","success":true,"result":"',
+    '{"type":"daemon_notification","method":"notice","data":"',
+    '{"id":"unterminated',
+    '{"id":"bad\\escape","result":"',
+    '{"unterminated',
+    '{"bad\\escape":"notice","data":"',
+  ]) {
+    test(`overflow attribution uses only a complete pending response id (${pendingCount} pending): ${head}`, async () => {
+      const { client, timer, socket, request } = setup(128);
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      const first = request();
+      const second = pendingCount === 2 ? request() : undefined;
+      try {
+        // Split the id itself across chunks, as a socket read may do.
+        client.simulateIncomingDataForTesting(Buffer.from(head.slice(0, 5)));
+        client.simulateIncomingDataForTesting(Buffer.from(head.slice(5) + "x".repeat(129)));
+        const firstAnswer = await first;
+        if (pendingCount === 1) {
+          const unreadable = [
+            '{"id":"unterminated',
+            '{"id":"bad\\escape","result":"',
+            '{"unterminated',
+            '{"bad\\escape":"notice","data":"',
+          ].includes(head);
+          if (head.startsWith('{"id":"p"') || unreadable) {
+            expect(firstAnswer).toBeInstanceOf(DaemonFrameTooLargeError);
+          } else {
+            expect(firstAnswer).toBeInstanceOf(DaemonUnavailableError);
+            expect(firstAnswer.cause).toBeInstanceOf(DaemonFrameTooLargeError);
+          }
+          expect(timer.getPendingTimeoutCount()).toBe(0);
+          expect(socket.destroyed).toBe(true);
+          return;
+        }
+        const secondAnswer = await second;
+        const ownsSecond = head.startsWith('{"id":"fake-1"');
+        const owner = ownsSecond ? secondAnswer : firstAnswer;
+        const sibling = ownsSecond ? firstAnswer : secondAnswer;
+        expect(sibling).toBeInstanceOf(DaemonUnavailableError);
+        expect(sibling.message).toStartWith("Daemon socket connection lost:");
+        expect(sibling.cause).toBeInstanceOf(DaemonFrameTooLargeError);
+        if (head.startsWith('{"id":"p"') || ownsSecond) {
+          expect(owner).toBeInstanceOf(DaemonFrameTooLargeError);
+          expect(sibling.cause).toBe(owner);
+        } else {
+          expect(owner).toBeInstanceOf(DaemonUnavailableError);
+          expect(owner.cause).toBe(sibling.cause);
+        }
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+        expect(socket.destroyed).toBe(true);
+      } finally {
+        await client.close();
+        warn.mockRestore();
+      }
+    });
+  }
+}
+
+test("one pending call keeps the frame error for an unattributed overflow", async () => {
+  const { client, request } = setup(64);
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  const result = request();
+  try {
+    client.simulateIncomingDataForTesting(Buffer.from("x".repeat(65)));
+    expect(await result).toBeInstanceOf(DaemonFrameTooLargeError);
+  } finally {
+    await client.close();
+    warn.mockRestore();
+  }
+});

@@ -18,7 +18,7 @@ export type ManagedSlotDispositionName = "created" | "reused" | "adopted" | "rep
  * Typed failure. `code` is either a reconciler code (`discovery_incomplete`, `slot_in_use`,
  * `capacity_exhausted`, ...) or an acquisition-level one:
  *
- * - `contract_unsupported`: the daemon does not advertise `managed-slots/v1`.
+ * - `contract_unsupported`: the daemon does not advertise `managed-slots/v1`, or does not advertise a capability a config field needs (`managed-slots/v1.deviceFamily`).
  * - `scope_invalidated`: this runner incarnation was reset; it never accepts work again.
  * - `scope_transition_pending`: a newer incarnation is waiting for the old one's owners/cleanup.
  * - `execution_policy_failed`: the session could not be put on the managed-execution policy.

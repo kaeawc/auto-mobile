@@ -1591,6 +1591,31 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
         expect(afterAdvance?.target.newPlatform).toBe("ios");
       });
 
+      test("removal intent survives a journal target round-trip and later advance", async () => {
+        const key = { scopeKey: await readyScope(), slotIndex: 0 };
+        await boundSlot(key, "avd-1");
+        const opened = await registry.openSlotJournal(key, {
+          kind: "replace",
+          phase: "creating",
+          owner: OWNER_1,
+          target: { ...TARGET, removalRequested: true },
+          assignment: { kind: "state", expected: BOUND, state: "provisioning" },
+        });
+        if (opened.kind !== "opened") {
+          throw new Error(`journal not opened: ${opened.kind}`);
+        }
+        expect((await registry.listOpenSlotJournal(key))[0]?.target.removalRequested).toBe(true);
+        expect(
+          await registry.advanceSlotJournal(opened.entry.id, {
+            owner: OWNER_1,
+            expectedPhase: "creating",
+            phase: "created",
+            target: { newStableId: "new" },
+          }),
+        ).toMatchObject({ kind: "advanced", entry: { target: { removalRequested: true } } });
+        expect((await registry.listOpenSlotJournal(key))[0]?.target.removalRequested).toBe(true);
+      });
+
       test("a stale binding refuses to open and writes nothing", async () => {
         const key = { scopeKey: await readyScope(), slotIndex: 0 };
         await boundSlot(key, "avd-1");

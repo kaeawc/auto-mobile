@@ -166,8 +166,15 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
     finishRestore();
     await manager.waitForSessionRelease(SESSION);
 
-    expect(await register()).toEqual(idleRefusal);
-    expect(registry.list()).toEqual([]);
+    const release = spyOn(manager, "releaseSession");
+    try {
+      expect(await register()).toEqual(idleRefusal);
+      expect(registry.list()).toEqual([]);
+      expect(release).not.toHaveBeenCalled();
+      expect(manager.getReleasingSession(SESSION)).toBeNull();
+    } finally {
+      release.mockRestore();
+    }
   });
 
   test("the lookup that starts idle release refuses immediately before the fence", async () => {
@@ -199,13 +206,28 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
       expireWithoutLookup();
       finishRead.resolve();
       const answer = await registerBeforeFence(registration);
-      // The persisted-release fallback now sees the read-only idle end before another live
-      // lookup starts teardown. Registration still refuses it without creating an observer.
-      expect(restoreStarted).toBe(false);
-      expect(manager.getTerminalReleaseSnapshot(SESSION)).toBeUndefined();
-      expect(await heartbeat()).toEqual(idleNotFound);
-      expectPreFenceRestore();
       expect(answer).toEqual(idleRefusal);
+      expectPreFenceRestore();
+      expect(await heartbeat()).toEqual(idleNotFound);
+      expect(await sessionInfo()).toEqual(idleNotFound);
+      const control = manager.admitIssuedSessionForAutomation(SESSION, {
+        executionId: "late-control",
+        startTime: timer.now(),
+      });
+      expect(
+        await Promise.race([
+          control.then(
+            () => "accepted",
+            () => "rejected",
+          ),
+          drainMicrotasks(100).then(() => "pending"),
+        ]),
+      ).toBe("pending");
+      finishRestore();
+      await expectIdleControlRefusal(control);
+      expect(await heartbeat()).toEqual(idleNotFound);
+      expect(await sessionInfo()).toEqual(idleNotFound);
+      expect(await register()).toEqual(idleRefusal);
       expect(registry.list()).toEqual([]);
       expect(expired).toHaveBeenCalledTimes(1);
     } finally {
@@ -392,6 +414,9 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
     expireWithoutLookup();
     expect(manager.peekTerminalAnswerForEndedSession(SESSION)).toBeUndefined();
     expect(await manager.getReleasedSessionReason(SESSION)).toBeUndefined();
+    expect(await register()).toMatchObject({ success: true, result: { accepted: true } });
+    expect(registry.list()).toEqual([]);
+    expect(manager.getReleasingSession(SESSION)).toBeNull();
     expect(await heartbeat()).toMatchObject({ success: true });
     expect(await sessionInfo()).toMatchObject({ success: true, result: { sessionId: SESSION } });
     expect(restoreStarted).toBe(false);

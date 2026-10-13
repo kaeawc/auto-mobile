@@ -3,6 +3,7 @@ import { commitAcquisition, type AcquisitionReceipt } from "../../src/daemon/acq
 import { DevicePool } from "../../src/daemon/devicePool";
 import {
   SESSION_CREATE_WAIT_TIMEOUT_MS,
+  SESSION_RELEASE_TEARDOWN_CAP_MS,
   SessionManager,
   type SessionCacheData,
 } from "../../src/daemon/sessionManager";
@@ -101,7 +102,10 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
     timer.reset();
   });
 
-  const poolWith = async (booted: BootedDevice[]): Promise<DevicePool> => {
+  const poolWith = async (
+    booted: BootedDevice[],
+    overrides: Parameters<typeof createDevicePoolDependencies>[2] = {},
+  ): Promise<DevicePool> => {
     const devices = new FakeDeviceManager();
     devices.bootedDevices = booted;
     const pool = new DevicePool(
@@ -110,6 +114,7 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
         deviceManager: devices,
         retryExecutor: new DefaultRetryExecutor(timer),
         installedAppsRepository: new FakeInstalledAppsRepository(),
+        ...overrides,
       }),
     );
     await pool.initializeWithDevices(booted);
@@ -164,12 +169,17 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
     screenReader: { platform: "android", previousEnabled: false },
   } satisfies SessionCacheData;
 
-  const androidPool = async (): Promise<DevicePool> => {
-    const pool = await poolWith([
-      { deviceId: AVD_A, name: "avd-a", platform: "android" },
-      { deviceId: AVD_B, name: "avd-b", platform: "android" },
-      { deviceId: "emulator-5558", name: "avd-c", platform: "android" },
-    ]);
+  const androidPool = async (
+    overrides: Parameters<typeof createDevicePoolDependencies>[2] = {},
+  ): Promise<DevicePool> => {
+    const pool = await poolWith(
+      [
+        { deviceId: AVD_A, name: "avd-a", platform: "android" },
+        { deviceId: AVD_B, name: "avd-b", platform: "android" },
+        { deviceId: "emulator-5558", name: "avd-c", platform: "android" },
+      ],
+      overrides,
+    );
     await pool.bindOrReuseDeviceSession("held", AVD_A, "android");
     sessions.updateSessionCache("held", structuredClone(androidOverrides));
     return pool;
@@ -333,6 +343,63 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
     expect(sessions.getSession("held")!.cacheData).toEqual({});
     expect(pool.getDevice(AVD_A)).toMatchObject({ sessionId: "held", status: "busy" });
     expect(pool.getDevice(AVD_B)).toMatchObject({ sessionId: null, status: "idle" });
+  });
+
+  test("undo crossing the hard deadline during bind-back keeps restored override records absent", async () => {
+    const entered = Promise.withResolvers<void>();
+    const bindBack = Promise.withResolvers<number>();
+    const pool = await androidPool({
+      cancelDeviceSessionExecutions: {
+        cancelDeviceExecutions: async (deviceId) => {
+          if (deviceId === AVD_B) {
+            entered.resolve();
+            return await bindBack.promise;
+          }
+          return 0;
+        },
+      },
+    });
+    const routingCache = {
+      displayPin: "main",
+      deviceReadiness: "automationReady",
+      lastObserveTime: 123,
+      lastRenderedDisplayGeneration: 2,
+      lastRenderedDisplayKey: "main",
+    } satisfies SessionCacheData;
+    sessions.updateSessionCache("held", routingCache);
+    const receipt = await bind(pool, AVD_B);
+    const undo = pool.releaseUndeliveredAcquisition(receipt);
+    await entered.promise;
+    expect(receipt.deferredRebindCleanup!.retained).toBe(true);
+    expect(restoredKeepAwake).toEqual([]);
+    expect(restoredSettings).toEqual([]);
+
+    timer.advanceTime(SESSION_CREATE_WAIT_TIMEOUT_MS + SESSION_RELEASE_TEARDOWN_CAP_MS + 1);
+    await settled(receipt);
+    expect(receipt.deferredRebindCleanup!.retained).toBe(false);
+    expectAndroidRestoredOnce();
+
+    bindBack.resolve(0);
+    await undo;
+    expect(sessions.getSession("held")).toMatchObject({
+      assignedDevice: AVD_A,
+      platform: "android",
+    });
+    const cache = sessions.getSession("held")!.cacheData;
+    for (const key of [
+      "keepScreenAwake",
+      "biometricEnrollment",
+      "networkCondition",
+      "clock",
+      "rotation",
+      "screenReader",
+    ] as const) {
+      expect(cache).not.toHaveProperty(key);
+    }
+    expect(cache).toEqual(routingCache);
+    expect(pool.getDevice(AVD_A)).toMatchObject({ sessionId: "held", status: "busy" });
+    expect(pool.getDevice(AVD_B)).toMatchObject({ sessionId: null, status: "idle" });
+    expectAndroidRestoredOnce();
   });
 
   test("another session took A after cleanup: undo keeps B and never restores A again", async () => {

@@ -1,3 +1,4 @@
+import { isTypedToolRefusal } from "../../src/server/shapeToolCallError";
 import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, sep } from "node:path";
@@ -748,6 +749,59 @@ beforeAll(async () => {
 });
 
 describe("refusal wire contract", () => {
+  test("#12112 all health refusal variants have typed payloads without a new-session remedy", () => {
+    for (const stem of [
+      "device_unhealthy",
+      "device_unhealthy.recovering_unbounded",
+      "device_unhealthy.permanent",
+      "device_unhealthy.all_candidates",
+    ]) {
+      const fixture = fixtures.find((fixture) => fixture.code === stem)!;
+      const payload = JSON.parse(fixture.result.content[0].text);
+      expect(payload).toMatchObject({
+        success: false,
+        error: expect.any(String),
+        code: "device_unhealthy",
+        recovering: stem !== "device_unhealthy.permanent",
+        retryable: stem !== "device_unhealthy.permanent",
+      });
+      expect(Array.isArray(payload.devices)).toBe(true);
+      expect(payload).not.toHaveProperty("nextAction");
+      expect(acquisitionRefusals.RETRYABLE_DEVICE_ACQUISITION_CODES.has(payload.code)).toBe(false);
+      if (stem.endsWith("all_candidates")) {
+        expect(payload).not.toHaveProperty("deviceId");
+        expect(payload).not.toHaveProperty("reason");
+        expect(payload.devices).toEqual([
+          {
+            deviceId: "emulator-5554",
+            reason: "network-condition",
+            recovering: true,
+            retryAfterMs: 12863,
+          },
+          { deviceId: "emulator-5556", reason: "app-cleanup", recovering: false },
+        ]);
+      } else {
+        expect(payload.deviceId).toBe("emulator-5554");
+        expect(payload.reason).toBe("network-condition");
+        expect(payload.devices).toHaveLength(1);
+      }
+      if (stem === "device_unhealthy" || stem.endsWith("all_candidates")) {
+        expect(payload.retryAfterMs).toBe(12863);
+      } else {
+        expect(payload).not.toHaveProperty("retryAfterMs");
+      }
+    }
+    expect(drivenErrorClasses.has(acquisitionRefusals.DeviceUnhealthyError)).toBe(true);
+    expect(
+      isTypedToolRefusal(
+        new acquisitionRefusals.DeviceUnhealthyError(
+          [{ deviceId: "device", reason: "future-reason", recovering: false }],
+          "unhealthy",
+        ),
+      ),
+    ).toBe(true);
+  });
+
   test("platform ambiguity names the held sessions without retry or recovery guidance", () => {
     const fixture = fixtures.find((fixture) => fixture.code === "ambiguous_session_selector")!;
     expect(fixture.result.isError).toBe(true);

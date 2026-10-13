@@ -65,7 +65,7 @@ describe("selectOfflineRecoveryCandidates", () => {
     // AndroidEmulatorClient's own fresh-provision readiness wait
     // (maybeRecoverFreshOffline) already owns bounded offline recovery for a
     // serial mid-startup, on its own 15s threshold. The monitor must not race
-    // a second concurrent 'adb reconnect offline' against that dispatch.
+    // a second concurrent 'adb -s <serial> reconnect' against that dispatch.
     const targets = selectOfflineRecoveryCandidates(
       new Set(["emulator-5554"]),
       new Set(["emulator-5554"]),
@@ -226,6 +226,34 @@ test("monitor dispatches only in-session offline targets", async () => {
   await monitor.run();
   await monitor.stop();
   expect(received).toEqual([["emulator-5554", "emulator-5558"]]);
+});
+
+test("monitor reconnects an emulator's listed-offline serial and ignores foreign rows", async () => {
+  const received: string[][] = [];
+  const probes: string[][] = [];
+  class ListedOfflineManager extends FakeDeviceManager {
+    async getAndroidOfflineDeviceIds() {
+      return new Set<string>();
+    }
+    async getAndroidListedDeviceStates(ids: Iterable<string>) {
+      probes.push([...ids]);
+      return new Map([
+        ["emulator-5554", "offline"],
+        ["emulator-5556", "offline"],
+      ]);
+    }
+    async recoverAndroidOfflineDevices(ids: Iterable<string>) {
+      received.push([...ids]);
+    }
+  }
+  const { monitor } = monitorHarness(new ListedOfflineManager());
+  try {
+    await monitor.run();
+    expect(probes).toEqual([["emulator-5554"]]);
+    expect(received).toEqual([["emulator-5554"]]);
+  } finally {
+    await monitor.stop();
+  }
 });
 
 test.each(["emulator-5554", "localhost:5555"])(

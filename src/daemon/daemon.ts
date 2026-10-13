@@ -730,7 +730,7 @@ export class Daemon {
   private confirmedDisconnectedDeviceIds: Set<string> = new Set();
   private forceDisconnectedDeviceIds: Set<string> = new Set();
   private forceDisconnectedDeviceGenerations: Map<string, number> = new Map();
-  // Serials that already had one bounded 'adb reconnect offline' this offline
+  // Serials that already had one bounded 'adb -s <serial> reconnect' this offline
   // episode (#7536). Pruned each sweep by pruneStaleOfflineRecoveryAttempts so
   // a later episode for the same serial gets a fresh attempt.
   private offlineRecoveryAttemptedDeviceIds: Set<string> = new Set();
@@ -3884,7 +3884,11 @@ export class Daemon {
               // shot per offline episode; failures are logged and swallowed
               // inside recoverAndroidOfflineDevices so a probe or recovery
               // hiccup here never blocks the miss-count/disconnect path below.
-              await deviceManager.recoverAndroidOfflineDevices(dispatchTargets);
+              const offlineTransportIds = dispatchTargets.flatMap((deviceId) => {
+                const transports = listed.offlineTransportIds?.get(deviceId);
+                return transports?.size ? [...transports] : [deviceId];
+              });
+              await deviceManager.recoverAndroidOfflineDevices(offlineTransportIds);
               // Reconnect may restore the transport during this await. Never use
               // the pre-recovery absence for miss counting or ADB-reset detection.
               discovery = await this.discoverAndReconcile(deviceManager, {
@@ -4062,6 +4066,7 @@ export class Daemon {
     candidatePlatforms: Map<string, "android" | "ios">,
   ): Promise<{
     offlineDeviceIds?: Set<string>;
+    offlineTransportIds?: Map<string, Set<string>>;
     transitionalAdbDeviceIds?: Set<string>;
     listedNonDeviceIds?: Set<string>;
   }> {
@@ -4085,7 +4090,17 @@ export class Daemon {
         aliasOwners.get(id) ?? id,
         state,
       ]);
+      const offlineTransportIds = new Map<string, Set<string>>();
+      for (const [id, state] of listedStates) {
+        const canonicalId = aliasOwners.get(id) ?? id;
+        if (state === "offline" && missingAndroidCandidateIds.has(canonicalId)) {
+          const transports = offlineTransportIds.get(canonicalId) ?? new Set<string>();
+          transports.add(id);
+          offlineTransportIds.set(canonicalId, transports);
+        }
+      }
       return {
+        offlineTransportIds,
         listedNonDeviceIds: new Set(candidateStates.map(([id]) => id)),
         offlineDeviceIds: new Set(
           candidateStates.filter(([, state]) => state === "offline").map(([id]) => id),

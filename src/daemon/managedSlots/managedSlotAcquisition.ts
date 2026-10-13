@@ -38,7 +38,9 @@ import { DEFAULT_PROVISION_DEVICE_TIMEOUT_MS } from "../../utils/deviceTimeouts"
 import { exponentialBackoff, type BackoffPolicy } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
+import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { Timer } from "../../utils/SystemTimer";
+import { MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS } from "./managedExecutionRelease";
 import type {
   ManagedSlotReconcileRequest,
   ManagedSlotReconcileResult,
@@ -158,6 +160,16 @@ export interface ManagedSlotBackOutCleanup {
 
 export class ManagedSlotAcquisition {
   private closed = false;
+  private readonly closeController = new AbortController();
+  private readonly backOutSessionReleases = new WeakMap<ManagedSlotBackOutCleanup, Promise<void>>();
+  private readonly backOutOwnerReads = new WeakMap<
+    ManagedSlotBackOutCleanup,
+    ReturnType<SlotRegistry["getAssignment"]>
+  >();
+  private readonly backOutOwnerClears = new WeakMap<
+    ManagedSlotBackOutCleanup,
+    ReturnType<SlotRegistry["releaseExecution"]>
+  >();
   private backOutQuietUntilMs = 0;
   private backOutRetryTurn: Promise<void> = Promise.resolve();
   private readonly backOutCleanups = new Map<
@@ -177,6 +189,7 @@ export class ManagedSlotAcquisition {
   /** Stop waits immediately; outstanding owner rows become dead when this process exits. */
   close(): void {
     this.closed = true;
+    this.closeController.abort();
     for (const cancel of this.retryWaits) {
       cancel();
     }
@@ -615,8 +628,12 @@ export class ManagedSlotAcquisition {
     this.backOutRetryTurn = new Promise((resolve) => {
       finish = resolve;
     });
-    await previous;
     try {
+      await raceWithDeadline(previous, {
+        timer: this.deps.timer,
+        signal: this.closeController.signal,
+        label: "Back-out retry turn",
+      });
       await this.waitForBackOutQuietPeriod();
       if (this.closed) {
         return false;
@@ -693,20 +710,19 @@ export class ManagedSlotAcquisition {
   ): Promise<boolean> {
     try {
       if (cleanup.sessionReleaseOwed) {
-        await this.deps.sessions.releaseSession(cleanup.sessionUuid);
+        await this.retryBackOutStep(
+          cleanup,
+          this.backOutSessionReleases,
+          () => this.deps.sessions.releaseSession(cleanup.sessionUuid),
+          "session release",
+        );
         if (this.closed) {
           return false;
         }
         cleanup.sessionReleaseOwed = false;
       }
       if (cleanup.ownerClearOwed) {
-        const owner = (await registry.getAssignment(cleanup.key))?.execOwner;
-        if (this.closed) {
-          return false;
-        }
-        if (owner && this.isBackedOutOwner(owner, cleanup.sessionUuid)) {
-          await registry.releaseExecution(cleanup.key, cleanup.sessionUuid);
-        }
+        await this.retryBackOutOwnerClear(registry, cleanup);
         if (this.closed) {
           return false;
         }
@@ -719,6 +735,68 @@ export class ManagedSlotAcquisition {
         this.logBackOutRetryFailure(cleanup, error);
       }
       return false;
+    }
+  }
+
+  private async retryBackOutStep<T>(
+    cleanup: ManagedSlotBackOutCleanup,
+    inFlight: WeakMap<ManagedSlotBackOutCleanup, Promise<T>>,
+    start: () => Promise<T>,
+    step: string,
+  ): Promise<T> {
+    const result = await raceWithDeadline(
+      () => {
+        let operation = inFlight.get(cleanup);
+        if (!operation) {
+          operation = start().then(undefined, (error: unknown) => {
+            // Propagate to the deadline race, which also observes late rejections.
+            inFlight.delete(cleanup);
+            throw error;
+          });
+          inFlight.set(cleanup, operation);
+        }
+        return operation;
+      },
+      {
+        timer: this.deps.timer,
+        timeoutMs: MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS,
+        signal: this.closeController.signal,
+        label: `${this.backOutCleanupLabel(cleanup)} ${step}`,
+      },
+    );
+    inFlight.delete(cleanup);
+    return result;
+  }
+
+  private async retryBackOutOwnerClear(
+    registry: SlotRegistry,
+    cleanup: ManagedSlotBackOutCleanup,
+  ): Promise<void> {
+    const clear = () =>
+      this.retryBackOutStep(
+        cleanup,
+        this.backOutOwnerClears,
+        () => registry.releaseExecution(cleanup.key, cleanup.sessionUuid),
+        "owner clear",
+      );
+    if (this.backOutOwnerClears.has(cleanup)) {
+      await clear();
+      return;
+    }
+    const read = () =>
+      this.retryBackOutStep(
+        cleanup,
+        this.backOutOwnerReads,
+        () => registry.getAssignment(cleanup.key),
+        "ownership read",
+      );
+    if (this.backOutOwnerReads.has(cleanup)) {
+      // An abandoned read may describe an older owner; consume it without using its result.
+      await read();
+    }
+    const owner = (await read())?.execOwner;
+    if (!this.closed && owner && this.isBackedOutOwner(owner, cleanup.sessionUuid)) {
+      await clear();
     }
   }
 

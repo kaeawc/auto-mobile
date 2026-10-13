@@ -239,7 +239,8 @@ connection used for tools and resources:
    retry clears only that ended session's record; one a live execution holds
    again is left to that execution's own release. Failed acquisition back-out also
    retries owed session release and owner clearing in the background, at 25 ms
-   doubling to 1 s until it lands or the daemon closes. After an attempt waits on
+   doubling to 1 s until it lands or the daemon closes; a step that does not finish
+   within 700 ms counts as a failed attempt. After an attempt waits on
    a busy registry, retries of every owed cleanup wait at least as long as that
    attempt took (at most 5 s), so even cleanup for several slots takes at most
    about half the daemon's time for attempts lasting up to 5 s.

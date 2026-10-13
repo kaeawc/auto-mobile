@@ -341,9 +341,290 @@ describe("ManagedSlotAcquisition back-out retry", () => {
 
   async function tick(ms = 25): Promise<void> {
     timer.advanceTime(ms);
-    // Two group-slot retries share the registry's serialized transaction queue.
-    await drainMicrotasks(60);
+    // Two group-slot retries share serialized transactions and per-step deadline races.
+    await drainMicrotasks(120);
   }
+
+  async function hangGroupRelease() {
+    busy = 2;
+    sessions.refuse = "session-2";
+    sessions.releaseFailures = 1;
+    // Put slot 0 last so its failed hand-off retains cleanup before slot 1's group unwind.
+    expect(
+      (
+        await acquisition.acquire(
+          {
+            ...CONFIG,
+            requests: [{ ...CONFIG.requests[0]!, slotIndex: 1 }, ...CONFIG.requests],
+          },
+          OPTIONS,
+        )
+      ).outcome,
+    ).toBe("failed");
+    expect(acquisition.pendingBackOutCleanups().map((entry) => entry.key.slotIndex)).toEqual([
+      0, 1,
+    ]);
+    const pending = Promise.withResolvers<void>();
+    const release = sessions.releaseSession.bind(sessions);
+    const calls: string[] = [];
+    sessions.releaseSession = (session) => {
+      calls.push(session);
+      return session === "session-2" ? pending.promise : release(session);
+    };
+    return { pending, calls, release };
+  }
+
+  scenario("hung session release frees the shared turn and never piles up calls", async () => {
+    const { pending, calls } = await hangGroupRelease();
+    try {
+      const otherKey = { ...KEY, slotIndex: 1 };
+      const before = (await registry.getAssignment(otherKey))!;
+      await tick();
+      await tick(700);
+      expect(acquisition.pendingBackOutCleanups()[0]).toMatchObject({
+        key: KEY,
+        sessionReleaseOwed: true,
+        lastError: expect.stringContaining("session release timed out after 700ms"),
+      });
+      // The failed attempt also owes 700 ms of shared quiet time.
+      await tick(700);
+      expect(await registry.getAssignment(otherKey)).toMatchObject({
+        execOwner: null,
+        stableDeviceId: before.stableDeviceId,
+      });
+      expect(acquisition.pendingBackOutCleanups()).toHaveLength(1);
+      for (let event = 0; event < 12; event++) {
+        await tick(timer.getMsUntilNextDueEvent()!);
+      }
+      expect(calls).toEqual(["session-2"]);
+      expect(acquisition.pendingBackOutCleanups()[0]!.attempts).toBeGreaterThan(3);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(debug.mock.calls.some(([message]) => String(message).includes("retry failed"))).toBe(
+        true,
+      );
+    } finally {
+      acquisition.close();
+      pending.resolve();
+      await drainMicrotasks(100);
+    }
+  });
+
+  scenario("close wakes a hung release and the cleanup queued behind it immediately", async () => {
+    const { pending, calls } = await hangGroupRelease();
+    const reads = spyOn(registry, "getAssignment");
+    try {
+      await tick();
+      expect(acquisition.pendingBackOutCleanups().map((entry) => entry.attempts)).toEqual([1, 0]);
+      const before = {
+        reads: reads.mock.calls.length,
+        clears: clearCalls.length,
+        debug: debug.mock.calls.length,
+        info: info.mock.calls.length,
+        warn: warn.mock.calls.length,
+      };
+      let idle = false;
+      void acquisition.whenIdle().then(() => {
+        idle = true;
+      });
+      acquisition.close();
+      await drainMicrotasks(100);
+      expect(idle).toBe(true);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      pending.resolve();
+      await tick(60_000);
+      expect(calls).toEqual(["session-2"]);
+      expect(reads).toHaveBeenCalledTimes(before.reads);
+      expect(clearCalls).toHaveLength(before.clears);
+      expect(debug).toHaveBeenCalledTimes(before.debug);
+      expect(info).toHaveBeenCalledTimes(before.info);
+      expect(warn).toHaveBeenCalledTimes(before.warn);
+    } finally {
+      acquisition.close();
+      pending.resolve();
+      await drainMicrotasks(100);
+      reads.mockRestore();
+    }
+  });
+
+  scenario("late session release leaves this daemon's newly acquired owner untouched", async () => {
+    const { pending, calls } = await hangGroupRelease();
+    try {
+      await tick();
+      await tick(700);
+      expect(acquisition.pendingBackOutCleanups()[0]!.lastError).toContain(
+        "session release timed out after 700ms",
+      );
+      sessions.refuse = undefined;
+      // The old release committed, but its acknowledgement is still hung.
+      sessions.live.delete("session-2");
+      const next = await acquisition.acquire(CONFIG, OPTIONS);
+      expect(next.outcome).toBe("ready");
+      expect(next.slots[0]!.sessionUuid).toBe("session-3");
+      const clears = clearCalls.length;
+      pending.resolve();
+      await tick(700);
+      await acquisition.whenIdle();
+      expect(await registry.getAssignment(KEY)).toMatchObject({
+        execOwner: { ...OWNER, sessionUuid: "session-3" },
+      });
+      expect(clearCalls.slice(clears).filter((call) => call.session === "session-2")).toEqual([]);
+      expect(calls).toEqual(["session-2"]);
+      expect(acquisition.pendingBackOutCleanups()).toEqual([]);
+    } finally {
+      acquisition.close();
+      pending.resolve();
+      await drainMicrotasks(100);
+    }
+  });
+
+  scenario(
+    "late session rejection is observed and a fresh release lands on the next attempt",
+    async () => {
+      const { pending, calls, release } = await hangGroupRelease();
+      try {
+        await tick();
+        await tick(700);
+        pending.reject(new Error("late session failure"));
+        await drainMicrotasks(100);
+        sessions.releaseSession = (session) => {
+          calls.push(session);
+          return release(session);
+        };
+        await tick(700);
+        await acquisition.whenIdle();
+        expect(calls).toEqual(["session-2", "session-2"]);
+        expect(acquisition.pendingBackOutCleanups()).toEqual([]);
+        expect(await registry.getAssignment(KEY)).toMatchObject({ execOwner: null });
+      } finally {
+        acquisition.close();
+        pending.resolve();
+        await drainMicrotasks(100);
+      }
+    },
+  );
+
+  scenario(
+    "hung ownership read is reused but its late stale result never authorizes a write",
+    async () => {
+      busy = 1;
+      await fail("refused");
+      const stale = (await registry.getAssignment(KEY))!;
+      const pending = Promise.withResolvers<typeof stale>();
+      const getAssignment = registry.getAssignment.bind(registry);
+      const reads = spyOn(registry, "getAssignment").mockImplementationOnce(() => pending.promise);
+      try {
+        await tick();
+        await tick(700);
+        expect(acquisition.pendingBackOutCleanups()[0]!.lastError).toContain(
+          "ownership read timed out after 700ms",
+        );
+        for (const delay of [700, 700, 700]) {
+          await tick(delay);
+        }
+        expect(reads).toHaveBeenCalledTimes(1);
+        expect(clearCalls).toHaveLength(1);
+        sessions.live.add("replacement");
+        expect(
+          (await registry.claimExecution(KEY, stale, { ...OWNER, sessionUuid: "replacement" }))
+            .kind,
+        ).toBe("claimed");
+        pending.resolve(stale);
+        await drainMicrotasks(120);
+        await acquisition.whenIdle();
+        expect(reads).toHaveBeenCalledTimes(2);
+        expect(clearCalls).toHaveLength(1);
+        expect((await getAssignment(KEY))?.execOwner?.sessionUuid).toBe("replacement");
+        expect(acquisition.pendingBackOutCleanups()).toEqual([]);
+      } finally {
+        acquisition.close();
+        pending.resolve(stale);
+        await drainMicrotasks(100);
+        reads.mockRestore();
+      }
+    },
+  );
+
+  scenario(
+    "hung owner clear is reused and its conditional late write preserves a new owner",
+    async () => {
+      busy = 1;
+      await fail("refused");
+      const binding = (await registry.getAssignment(KEY))!;
+      const pending = Promise.withResolvers<void>();
+      const releaseExecution = registry.releaseExecution.bind(registry);
+      const clears = spyOn(registry, "releaseExecution").mockImplementationOnce(
+        async (key, session) => {
+          await pending.promise;
+          return releaseExecution(key, session);
+        },
+      );
+      const reads = spyOn(registry, "getAssignment");
+      try {
+        await tick();
+        await tick(700);
+        expect(acquisition.pendingBackOutCleanups()[0]!.lastError).toContain(
+          "owner clear timed out after 700ms",
+        );
+        for (const delay of [700, 700, 700]) {
+          await tick(delay);
+        }
+        expect(clears).toHaveBeenCalledTimes(1);
+        expect(reads).toHaveBeenCalledTimes(1);
+        sessions.live.add("replacement");
+        expect(
+          (await registry.claimExecution(KEY, binding, { ...OWNER, sessionUuid: "replacement" }))
+            .kind,
+        ).toBe("claimed");
+        pending.resolve();
+        await drainMicrotasks(120);
+        await acquisition.whenIdle();
+        expect(clears).toHaveBeenCalledTimes(1);
+        expect((await registry.getAssignment(KEY))?.execOwner?.sessionUuid).toBe("replacement");
+        expect(acquisition.pendingBackOutCleanups()).toEqual([]);
+      } finally {
+        acquisition.close();
+        pending.resolve();
+        await drainMicrotasks(100);
+        clears.mockRestore();
+        reads.mockRestore();
+      }
+    },
+  );
+
+  scenarios(
+    ["getAssignment", "releaseExecution"] as const,
+    (step) => `close aborts hung ${step} without late calls or logs`,
+    async (step) => {
+      busy = 1;
+      await fail("refused");
+      const pending = Promise.withResolvers<never>();
+      const hung = spyOn(registry, step).mockImplementation(() => pending.promise);
+      try {
+        await tick();
+        expect(hung).toHaveBeenCalledTimes(1);
+        const clears = clearCalls.length;
+        const logCounts = [debug, info, warn].map((log) => log.mock.calls.length);
+        acquisition.close();
+        let idle = false;
+        void acquisition.whenIdle().then(() => {
+          idle = true;
+        });
+        await drainMicrotasks(100);
+        expect(idle).toBe(true);
+        expect(timer.getPendingTimeoutCount()).toBe(0);
+        pending.reject(new Error("late registry rejection after close"));
+        await tick(60_000);
+        expect(hung).toHaveBeenCalledTimes(1);
+        expect(clearCalls).toHaveLength(clears);
+        expect([debug, info, warn].map((log) => log.mock.calls.length)).toEqual(logCounts);
+      } finally {
+        acquisition.close();
+        pending.reject(new Error("registry fixture teardown"));
+        await drainMicrotasks(100);
+        hung.mockRestore();
+      }
+    },
+  );
 
   scenario(
     "transient busy write lands at 25 ms without delaying the acquisition answer",
@@ -708,7 +989,12 @@ describe("ManagedSlotAcquisition back-out retry", () => {
       if (later) {
         await fail("refused");
       }
-      const timers = spyOn(timer, "setTimeout").mockImplementation(() => {
+      const scheduleDeadline = timer.setTimeout.bind(timer);
+      const timers = spyOn(timer, "setTimeout").mockImplementation((callback, delay) => {
+        // Fail cadence timers, while allowing the newly bounded steps to arm their deadlines.
+        if (delay === 700) {
+          return scheduleDeadline(callback, delay);
+        }
         throw new Error("retry timer failed");
       });
       try {

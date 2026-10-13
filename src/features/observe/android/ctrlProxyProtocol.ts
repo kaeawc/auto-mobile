@@ -29,7 +29,7 @@
  *   same treatment separately.
  */
 
-import type { PrototypeSpec, PrototypeJson } from "../../prototype/prototypeSpec";
+import type { PrototypeSpec, PrototypeJson, PrototypeData } from "../../prototype/prototypeSpec";
 import type { HighlightShape } from "../../../models/VisualHighlight";
 import type { ImeAction } from "../../../models/ImeAction";
 import type { NetworkMockRuleSync } from "../../../server/networkMockRules";
@@ -528,7 +528,7 @@ export interface PrototypeResult {
 /** One prototype the device reported to `inspect_prototypes`. `id` is the prototype id (its spec id). */
 export interface PrototypeStatusEntry {
   /** Agent-owned read-only content of the shown spec; absent when it has none. */
-  data?: import("../../prototype/prototypeSpec").PrototypeData;
+  data?: PrototypeData;
   id: string;
   /** True for `window.persistence: "device"`. */
   persistent: boolean;

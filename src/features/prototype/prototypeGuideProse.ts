@@ -86,6 +86,8 @@ export const GUIDE_DATA = `## Data
 \`data\` is agent-owned, read-only content: nested objects, arrays, strings, finite numbers and
 booleans, without null. \`state\` remains the user-owned scalar map; actions only write declared
 state keys. Only a new full show replaces data. See the generated Limits table.
+The data byte limit uses the \`emit.payload\` cost: every number costs 32 bytes regardless of
+its digits, so numeric-heavy data reaches the limit before its serialized size does.
 
 Pointers are nonempty RFC 6901 paths relative to data, beginning with \`/\`; decode \`~1\` as \`/\`
 and \`~0\` as \`~\`. Object keys are exact own members; array indices are \`0\` or a positive decimal
@@ -114,8 +116,10 @@ are rejected; a missing text path renders empty.
 - \`{data:/pointer}\` binds only the text-kind fields repeat already binds: text, button/FAB labels,
   segmented option labels, app bar title/navigation/action labels, dialog title/text/button labels,
   and snackbar text/action label. Missing, object or array values become empty text. Other braces
-  stay literal. Data binds in authored text before repeat, then state; inserted strings are never
-  scanned again for data placeholders. Pointers are untouched by component props.
+  stay literal. A data string is inserted as plain text before repeat and state binding, so
+  \`{item.x}\`, \`{index}\` or \`{key}\` inside it bind afterwards exactly like authored text.
+  Data values cannot be escaped; inserted strings are never scanned again for data placeholders.
+  Pointers are untouched by component props.
 - A condition uses exactly one of \`key\`, \`data\`, \`all\`, \`any\`, \`not\`. A data condition has exactly
   one comparison: \`equals\` (same scalar type and value), \`notEquals\` (its inverse, including missing
   or non-scalar), \`gt\` or \`lt\` (numbers only, otherwise false). \`equals\`/\`notEquals\` operands are

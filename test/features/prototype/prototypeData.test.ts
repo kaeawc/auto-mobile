@@ -111,6 +111,13 @@ test("placeholder grammar is a plain scan and malformed braces are literal", () 
   ).toEqual(["/a", "/b", "/a~1b"]);
   expect(prototypeDataPlaceholders("{item.title} {key} data:/a")).toEqual([]);
 });
+test("placeholder scan bounds pointer lengths and skips long runs of literal braces", () => {
+  const pointer = "/" + "a".repeat(255);
+  expect(prototypeDataPlaceholders(`{data:${pointer}}`)).toEqual([pointer]);
+  expect(prototypeDataPlaceholders(`{data:${pointer}a}`)).toEqual([]);
+  expect(prototypeDataPlaceholders("{data:/a")).toEqual([]);
+  expect(prototypeDataPlaceholders("{".repeat(50_000) + "{data:/a}")).toEqual(["/a"]);
+});
 test("projection keeps named finite scalars and preserves special own keys", () => {
   const source = JSON.parse(
     '{"id":7,"title":"Latte","active":true,"__proto__":"own","a b":1,"details":{},"values":[],"empty":null}',

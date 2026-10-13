@@ -420,12 +420,19 @@ internal object PrototypeRepeatValidator {
       return fail(at, "Unknown repeat field ${JsonPrimitive(key)}")
     }
     val seen = mutableMapOf<String, Int>()
+    val numbers = mutableMapOf<Double, Int>()
     for ((index, item) in scope.items.withIndex()) {
-      val text = PrototypeRepeatTemplate.rendered(item.getValue(key).jsonPrimitive)
-      val first = seen.putIfAbsent(text, index)
+      val value = item.getValue(key).jsonPrimitive
+      val text = PrototypeRepeatTemplate.rendered(value)
+      val number = value.takeUnless { it.isString }?.doubleOrNull?.takeIf { it.isFinite() }
+      val first = listOfNotNull(seen[text], number?.let { numbers[it] }).minOrNull()
       if (first != null) {
-        return fail(at, "Duplicate repeat key ${JsonPrimitive(text)} (items $first and $index)")
+        val original =
+          PrototypeRepeatTemplate.rendered(scope.items[first].getValue(key).jsonPrimitive)
+        return fail(at, "Duplicate repeat key ${JsonPrimitive(original)} (items $first and $index)")
       }
+      seen[text] = index
+      if (number != null) numbers[number] = index
     }
     return null
   }

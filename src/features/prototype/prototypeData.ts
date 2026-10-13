@@ -46,8 +46,19 @@ export function prototypeDataPlaceholders(text: string): string[] {
   const pointers: string[] = [];
   let cursor = 0;
   while (cursor < text.length) {
-    const close = text[cursor] === "{" ? text.indexOf("}", cursor + 1) : -1;
-    const inner = close < 0 ? "" : text.slice(cursor + 1, close);
+    if (text[cursor] !== "{" || !text.startsWith("data:", cursor + 1)) {
+      cursor++;
+      continue;
+    }
+    const end = Math.min(
+      text.length,
+      cursor + 2 + 5 + contract.limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH,
+    );
+    let close = cursor + 1;
+    while (close < end && text[close] !== "}") {
+      close++;
+    }
+    const inner = close === end ? "" : text.slice(cursor + 1, close);
     const pointer = inner.startsWith("data:") ? inner.slice(5) : "";
     if (isPrototypeDataPointer(pointer)) {
       pointers.push(pointer);

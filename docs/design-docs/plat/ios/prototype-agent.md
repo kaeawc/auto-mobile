@@ -452,5 +452,7 @@ State interpolation then uses the ordinary expanded tree. `repeat.key` is accept
 resolution, but rows retain positional identity until keyed patching (#11675).
 
 Data stays agent-owned and read-only; inspect/status report it next to state, events do not.
+Two data keys that are canonically equivalent Unicode strings collapse into one on iOS because
+Swift dictionary keys compare by canonical equivalence, unlike the host and Android.
 The agent re-checks data depth and array limits in the host's traversal order. It does not duplicate
 the host validator's data byte-cost rule; the existing 1 MiB whole-spec byte cap still bounds input.

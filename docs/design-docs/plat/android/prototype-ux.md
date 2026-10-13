@@ -95,7 +95,10 @@ Limits come from `schemas/prototype-spec-contract.json`: `MAX_PROTOTYPE_DATA_BYT
 `MAX_PROTOTYPE_DATA_DEPTH` (8), `MAX_PROTOTYPE_DATA_ARRAY_ITEMS` (500), and
 `MAX_PROTOTYPE_DATA_POINTER_LENGTH` (256 UTF-16 code units). Data is depth 1; only containers add
 depth. The byte cost reuses the emit payload cost: 32 bytes per number, compact JSON UTF-8 for
-strings/booleans/keys, punctuation and separators.
+strings/booleans/keys, punctuation and separators. Every number costs 32 bytes regardless of its
+digits, so numeric-heavy data reaches the byte limit before its serialized size does.
+
+The shared Kotlin validator and resolver ship in `:protocol`, but CtrlProxy does not advertise `prototype_data_model_v1` yet (renderer wiring follows separately), so until it does the host refuses every data-model spec on Android; the iOS prototype agent advertises it.
 
 Pointers are nonempty RFC 6901 paths relative to data, matching `^(?:/(?:[^~/]|~[01])*)+$`.
 Split after the leading slash; decode `~1` to `/`, then `~0` to `~`. Resolution follows exact own
@@ -130,8 +133,10 @@ No data means every path is missing. `/a/` accesses the empty key inside `a`.
 - `{data:/pointer}` binds only the text-kind fields repeat already binds: text, button/FAB labels,
   segmented option labels, app bar title/navigation/action labels, dialog title/text/button labels,
   and snackbar text/action label. Missing, object or array values become empty text. Other braces
-  stay literal. Data binds in authored text before repeat, then state; inserted strings are never
-  scanned again for data placeholders. Pointers are untouched by component props.
+  stay literal. A data string is inserted as plain text before repeat and state binding, so
+  `{item.x}`, `{index}` or `{key}` inside it bind afterwards exactly like authored text.
+  Data values cannot be escaped; inserted strings are never scanned again for data placeholders.
+  Pointers are untouched by component props.
 - A condition uses exactly one of `key`, `data`, `all`, `any`, `not`. A data condition has exactly
   one comparison: `equals` (same scalar type and value), `notEquals` (its inverse, including missing
   or non-scalar), `gt` or `lt` (numbers only, otherwise false). `equals`/`notEquals` operands are
@@ -164,6 +169,9 @@ It never binds state keys, operands, emit names/payloads or content descriptions
 normally (integral numbers without a decimal point or exponent); missing/object/array values
 render empty. Bind authored data text first, repeat placeholders second, state interpolation
 last. Inserted data strings and repeat item values are never rescanned for data placeholders.
+A data string is inserted as plain text: repeat placeholders (`{item.x}`, `{index}`) and state
+placeholders (`{key}`) inside it bind afterwards exactly like authored text. Data values cannot
+be escaped.
 Component props are never bound in `repeat.items.path` or a condition's `data`; `repeat.key`
 passes through expansion unchanged.
 

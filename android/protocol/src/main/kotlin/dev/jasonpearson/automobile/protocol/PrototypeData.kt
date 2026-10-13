@@ -108,7 +108,7 @@ internal object PrototypeDataText {
     val found = mutableListOf<Placeholder>()
     var cursor = 0
     while (cursor < text.length) {
-      val close = if (text[cursor] == '{') text.indexOf('}', cursor + 1) else -1
+      val close = closingBrace(text, cursor)
       val inner = if (close < 0) "" else text.substring(cursor + 1, close)
       val pointer = if (inner.startsWith("data:")) inner.substring("data:".length) else ""
       if (PrototypeDataPointer.isValid(pointer)) {
@@ -119,6 +119,16 @@ internal object PrototypeDataText {
       }
     }
     return found
+  }
+
+  private fun closingBrace(text: String, cursor: Int): Int {
+    if (text[cursor] != '{' || !text.startsWith("data:", cursor + 1)) return -1
+    val end =
+      minOf(text.length, cursor + 2 + 5 + PrototypeSpecValidator.MAX_PROTOTYPE_DATA_POINTER_LENGTH)
+    for (index in cursor + 1 until end) {
+      if (text[index] == '}') return index
+    }
+    return -1
   }
 
   fun hasBinding(text: String): Boolean = placeholders(text).isNotEmpty()

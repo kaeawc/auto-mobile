@@ -122,6 +122,54 @@
               }
             }
           ]
+        },
+        {
+          "type": "text",
+          "text": "negative zero",
+          "visibleWhen": {
+            "data": "/zero",
+            "equals": 0
+          }
+        },
+        {
+          "type": "text",
+          "text": "numeric value",
+          "visibleWhen": {
+            "data": "/n",
+            "equals": 7.0
+          }
+        },
+        {
+          "type": "text",
+          "text": "boolean versus number",
+          "visibleWhen": {
+            "data": "/b",
+            "equals": 1
+          }
+        },
+        {
+          "type": "text",
+          "text": "string versus boolean",
+          "visibleWhen": {
+            "data": "/trueString",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "object not equals",
+          "visibleWhen": {
+            "data": "/object",
+            "notEquals": 1
+          }
+        },
+        {
+          "type": "text",
+          "text": "string is not numeric",
+          "visibleWhen": {
+            "data": "/s",
+            "gt": 0
+          }
         }
       ]
     },
@@ -129,7 +177,10 @@
       "n": 7,
       "s": "hello",
       "b": true,
-      "array": []
+      "array": [],
+      "zero": -0.0,
+      "object": {},
+      "trueString": "true"
     },
     "state": {
       "open": false
@@ -238,6 +289,48 @@
             }
           }
         ]
+      },
+      {
+        "type": "text",
+        "text": "negative zero",
+        "visibleWhen": {
+          "all": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "numeric value",
+        "visibleWhen": {
+          "all": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "boolean versus number",
+        "visibleWhen": {
+          "any": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "string versus boolean",
+        "visibleWhen": {
+          "any": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "object not equals",
+        "visibleWhen": {
+          "all": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "string is not numeric",
+        "visibleWhen": {
+          "any": []
+        }
       }
     ]
   }

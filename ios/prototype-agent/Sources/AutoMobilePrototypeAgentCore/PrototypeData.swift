@@ -22,9 +22,20 @@ enum PrototypeDataPointer {
 
     static func tokens(_ pointer: String) -> [String] {
         guard isValid(pointer) else { return [] }
-        return pointer.utf16.dropFirst().split(separator: 47, omittingEmptySubsequences: false).map {
-            String(decoding: $0, as: UTF16.self)
-                .replacingOccurrences(of: "~1", with: "/").replacingOccurrences(of: "~0", with: "~")
+        return pointer.utf16.dropFirst().split(separator: 47, omittingEmptySubsequences: false).map { token in
+            let units = Array(token)
+            var decoded: [UInt16] = []
+            var cursor = 0
+            while cursor < units.count {
+                if units[cursor] == 126, cursor + 1 < units.count {
+                    decoded.append(units[cursor + 1] == 49 ? 47 : 126)
+                    cursor += 2
+                } else {
+                    decoded.append(units[cursor])
+                    cursor += 1
+                }
+            }
+            return String(decoding: decoded, as: UTF16.self)
         }
     }
 
@@ -64,8 +75,9 @@ enum PrototypeDataValues {
     }
 
     static func holds(_ condition: [String: JSONValue], data: [String: JSONValue]?) -> Bool {
-        guard case let .string(pointer)? = condition["data"] else { return false }
-        let value = PrototypeDataPointer.resolve(data, pointer: pointer)
+        let value = condition["data"]?.stringValue.flatMap {
+            PrototypeDataPointer.resolve(data, pointer: $0)
+        }
         func equal(_ operand: JSONValue) -> Bool {
             guard let value, isScalar(value), isScalar(operand) else { return false }
             if case let .string(left) = value, case let .string(right) = operand {
@@ -90,8 +102,10 @@ enum PrototypeDataText {
         var cursor = 0
         var literalStart = 0
         while cursor < units.count {
+            let end = min(units.count, cursor + 2 + 5 + PrototypeLimits.maxDataPointerLength)
             if units[cursor] == 123,
-               let close = units[(cursor + 1)...].firstIndex(of: 125)
+               units[(cursor + 1) ..< end].starts(with: [100, 97, 116, 97, 58]),
+               let close = units[(cursor + 1) ..< end].firstIndex(of: 125)
             {
                 let inner = units[(cursor + 1) ..< close]
                 let pointer = inner.starts(with: [100, 97, 116, 97, 58])

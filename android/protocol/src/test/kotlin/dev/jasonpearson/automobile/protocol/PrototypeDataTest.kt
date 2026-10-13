@@ -179,6 +179,39 @@ class PrototypeDataTest {
   }
 
   @Test
+  fun `placeholder scan bounds pointer lengths and literal braces`() {
+    val key = "a".repeat(255)
+    val data = buildJsonObject {
+      put(key, "bound")
+      put("a", "one")
+    }
+    assertEquals("bound", PrototypeDataText.bind("{data:/$key}", data))
+    val overlong = "{data:/${key}a}"
+    assertFalse(PrototypeDataText.hasBinding(overlong))
+    assertEquals(overlong, PrototypeDataText.bind(overlong, data))
+    assertEquals("{data:/a", PrototypeDataText.bind("{data:/a", data))
+    val braces = "{".repeat(50_000)
+    assertEquals(braces + "one", PrototypeDataText.bind(braces + "{data:/a}", data))
+  }
+
+  @Test
+  fun `repeat keys compare nonintegral numbers by value`() {
+    for ((items, text) in
+      listOf(
+        """[{"id":1.5},{"id":1.50}]""" to "1.5",
+        """[{"id":0.5},{"id":5e-1}]""" to "0.5",
+      )) {
+      val input =
+        """{"id":"numbers","window":{"placement":{"type":"fullscreen"}},"root":{"type":"column","repeat":{"items":$items,"as":"item","key":"id"},"children":[]}}"""
+      val result = PrototypeSpecValidator.validate(input)
+      assertTrue(result is PrototypeSpecValidation.Failure, result.toString())
+      val error = (result as PrototypeSpecValidation.Failure).error
+      assertEquals("root.repeat.key", error.path)
+      assertEquals("Duplicate repeat key \"$text\" (items 0 and 1)", error.message)
+    }
+  }
+
+  @Test
   fun `data limits are loaded from the shared contract`() {
     val limits =
       Json.parseToJsonElement(
@@ -219,6 +252,7 @@ class PrototypeDataTest {
           """{"data":"/b","equals":true}""" to true,
           """{"data":"/b","equals":1}""" to false,
           """{"data":"/missing","notEquals":1}""" to true,
+          """{"data":5,"notEquals":1}""" to true,
           """{"data":"/missing","equals":1}""" to false,
           """{"data":"/object","equals":"object"}""" to false,
           """{"data":"/array","equals":0}""" to false,

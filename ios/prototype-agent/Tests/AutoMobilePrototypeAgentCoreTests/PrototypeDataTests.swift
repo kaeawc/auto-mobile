@@ -106,9 +106,10 @@ final class PrototypeDataTests: XCTestCase {
         let dataOnly = try JSONDecoder().decode([PrototypeAction].self, from: Data("""
         [{"type":"setState","key":"orders","value":"changed"}]
         """.utf8))
-        XCTAssertTrue(session.run(dataOnly).isEmpty)
-        XCTAssertNil(session.state["orders"])
+        _ = session.run(dataOnly)
+        XCTAssertEqual(session.state["orders"], .string("changed"))
         XCTAssertEqual(session.data, spec.data)
+        XCTAssertEqual(session.data?["orders"], .array([.object(["id": .number(7)])]))
         let plain = try JSONDecoder().decode(PrototypeSpec.self, from: Data("""
         {"id":"plain","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Hi"}}
         """.utf8))
@@ -179,6 +180,47 @@ final class PrototypeDataTests: XCTestCase {
         XCTAssertEqual(PrototypeDataPointer.tokens("/\u{0301}/"), ["\u{0301}", ""])
         XCTAssertEqual(PrototypeDataPointer.tokens("/"), [""])
         XCTAssertNil(PrototypeDataPointer.resolve(["é": .number(1)], pointer: "/e\u{0301}"))
+    }
+
+    func testPointerUnescapingUsesExactUTF16Units() {
+        let cases = [("/a~1\u{0301}", "a/\u{0301}"), ("/~0\u{0301}", "~\u{0301}"), ("/~01", "~1")]
+        for (pointer, expected) in cases {
+            let tokens = PrototypeDataPointer.tokens(pointer)
+            XCTAssertEqual(tokens.count, 1)
+            XCTAssertTrue(tokens.first?.utf16.elementsEqual(expected.utf16) == true)
+        }
+    }
+
+    func testPlaceholderScanBoundsPointerLengthsAndLiteralBraces() {
+        let key = String(repeating: "a", count: 255)
+        let data: [String: JSONValue] = [key: .string("bound"), "a": .string("one")]
+        XCTAssertEqual(PrototypeDataText.bind("{data:/\(key)}", data: data), "bound")
+        let overlong = "{data:/\(key)a}"
+        XCTAssertEqual(PrototypeDataText.bind(overlong, data: data), overlong)
+        XCTAssertEqual(PrototypeDataText.bind("{data:/a", data: data), "{data:/a")
+        let braces = String(repeating: "{", count: 50000)
+        XCTAssertEqual(PrototypeDataText.bind(braces + "{data:/a}", data: data), braces + "one")
+    }
+
+    func testNonStringDataPointerNotEqualsFoldsToTrue() throws {
+        let root: JSONValue = .object([
+            "type": .string("text"), "text": .string("x"),
+            "visibleWhen": .object(["data": .number(5), "notEquals": .number(1)]),
+        ])
+        let resolved = try object(PrototypeDataResolver.resolveRoot(root, data: [:]))
+        XCTAssertEqual(resolved["visibleWhen"], .object(["all": .array([])]))
+    }
+
+    func testDataMustDecodeAsAnObject() {
+        for data in [JSONValue.null, .array([])] {
+            let spec: JSONValue = .object([
+                "id": .string("invalidData"),
+                "window": .object(["placement": .object(["type": .string("fullscreen")])]),
+                "data": data,
+                "root": .object(["type": .string("text"), "text": .string("x")]),
+            ])
+            XCTAssertThrowsError(try JSONDecoder().decode(PrototypeSpec.self, from: encoded(spec)))
+        }
     }
 
     func testResolverBackstopsMissingNonArrayAndNonObjectRepeatItems() throws {

@@ -1,5 +1,6 @@
+import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { logger, LogLevel } from "../../src/utils/logger";
-import { beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import {
   AUTOLOCK_IDLE_WINDOW_MS,
   DEFAULT_IDLE_WINDOWS_MS,
@@ -499,26 +500,25 @@ describe("session expiry properties under clock discontinuities (#10670)", () =>
 });
 
 describe("property replay logger isolation", () => {
-  test("a replay silences logging and restores the previous level", async () => {
+  test("a replay leaves no log write waiting for a real event-loop turn", async () => {
     const previousLevel = logger.getLogLevel();
-    const levels: LogLevel[] = [];
-    const info = spyOn(logger, "info").mockImplementation(() => {
-      levels.push(logger.getLogLevel());
-    });
     try {
-      logger.setLogLevel(LogLevel.WARN);
+      logger.setLogLevel(LogLevel.INFO);
       await runSchedule(generateSchedule(1, ALIVE_WITH_DISCONTINUITIES), ORDER_SEED_A);
-      expect(levels.length).toBeGreaterThan(0);
-      expect(levels.every((level) => level === LogLevel.NONE)).toBe(true);
-      expect(logger.getLogLevel()).toBe(LogLevel.WARN);
+      let settled = false;
+      void logger.flush().then(() => {
+        settled = true;
+      });
+      await drainMicrotasks(100);
+      expect(settled).toBe(true);
+      expect(logger.getLogLevel()).toBe(LogLevel.INFO);
     } finally {
-      info.mockRestore();
       logger.setLogLevel(previousLevel);
     }
     expect(logger.getLogLevel()).toBe(previousLevel);
   });
 
-  test("a replay restores logging even when reading an instant throws", async () => {
+  test("a throwing replay leaves no log write waiting for a real event-loop turn", async () => {
     const previousLevel = logger.getLogLevel();
     const failure = new Error("throwing replay input");
     let levelDuringReplay: LogLevel | undefined;
@@ -530,12 +530,18 @@ describe("property replay logger isolation", () => {
       },
     };
     try {
-      logger.setLogLevel(LogLevel.ERROR);
+      logger.setLogLevel(LogLevel.INFO);
       await expect(
         runSchedule(generateSchedule(1, ALIVE_WITH_DISCONTINUITIES), ORDER_SEED_A, [instant]),
       ).rejects.toBe(failure);
-      expect(levelDuringReplay).toBe(LogLevel.NONE);
-      expect(logger.getLogLevel()).toBe(LogLevel.ERROR);
+      let settled = false;
+      void logger.flush().then(() => {
+        settled = true;
+      });
+      await drainMicrotasks(100);
+      expect(settled).toBe(true);
+      expect(levelDuringReplay).toBe(LogLevel.INFO);
+      expect(logger.getLogLevel()).toBe(LogLevel.INFO);
     } finally {
       logger.setLogLevel(previousLevel);
     }

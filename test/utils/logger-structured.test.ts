@@ -1,8 +1,11 @@
+import { useRealLogSinks } from "../helpers/realLogSinks";
 import { describe, expect, test, spyOn } from "bun:test";
 import fs, { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+useRealLogSinks();
 
 let importCounter = 0;
 

@@ -138,7 +138,7 @@ function managedEndedRelayedResult<T>(
     : result;
 }
 
-function brokerSessionEndedPayload(
+export function brokerSessionEndedPayload(
   session: SessionBrokerResult,
   sessionUuid: string | undefined,
   reason: string,
@@ -160,6 +160,7 @@ function brokerSessionEndedPayload(
       requestId: session.requestId,
       sessionUuid: session.sessionUuid,
       reason,
+      ...idleReleaseField(reason),
       retryable: false,
       nextAction: "relaunch_session_request",
     },

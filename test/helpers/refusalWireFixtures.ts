@@ -3,6 +3,7 @@ import { StageSessionDownloadsRefusal } from "../../src/server/downloadsFixtureS
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { ManagedSlotConfigError } from "../../src/models/managedSlotConfig";
+import { SessionConfigError } from "../../src/models/sessionConfig";
 import { AndroidBootedDeviceDiscoveryIncompleteError } from "../../src/models/BootedDeviceDiscoveryIncompleteError";
 import { DeviceShutdownTimeoutError } from "../../src/models/DeviceShutdownTimeoutError";
 import { IosHomeLaunchTimeoutError } from "../../src/models/IosHomeLaunchTimeoutError";
@@ -1166,6 +1167,10 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
   Error["constructor"],
   string
 >([
+  [
+    SessionConfigError,
+    "launcher validation error; the prepare-session handler translates it to session_config_invalid, covered by handler tests but not yet a captured refusal fixture",
+  ],
   [
     HostBootAdmissionRegistryError,
     "internal host-lock failure; AndroidBootAdmissionGate maps it to discovery_incomplete before the wire",

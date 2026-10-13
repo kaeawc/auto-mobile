@@ -2,6 +2,7 @@ import { expect, spyOn, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  brokerSessionEndedPayload,
   livenessHandoverNotificationPayloads,
   managedEndedPayload,
   managedSlotsResourceView,
@@ -108,6 +109,30 @@ const surfaces: Surface[] = [
       }
       return JSON.parse(content.text).error;
     },
+  },
+  {
+    name: "session broker tool result",
+    builders: ["src/server/proxyServer.ts#brokerSessionEndedPayload"],
+    reasonKey: "reason",
+    holder: (reason) =>
+      brokerSessionEndedPayload(
+        {
+          contractVersion: 1,
+          requestId: "broker-request",
+          outcome: "ready",
+          sessionUuid: SESSION,
+          cleanupPending: false,
+          profile: {
+            platform: "ios",
+            metadataState: "current",
+            simulatorDeviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
+            runtimeId: "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
+            osVersion: "26.5",
+          },
+        },
+        SESSION,
+        reason,
+      )!.error,
   },
   {
     name: "managed tool result",

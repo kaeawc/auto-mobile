@@ -20,6 +20,7 @@ import { FakeObserverSessionRegistry } from "../fakes/FakeObserverSessionRegistr
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
+import { drainUntil } from "../helpers/fakeTimerStepping";
 import { DAEMON_SESSION_NOT_FOUND_CODE, type DaemonRequest } from "../../src/daemon/types";
 import { sessionReleaseReasonTraits } from "../../src/daemon/releaseReasons";
 import { SESSION_OWNERSHIP_LOST_CODE } from "../../src/daemon/sessionReleasedDuringCall";
@@ -338,6 +339,10 @@ describe("registration-only daemon requests", () => {
       state,
     );
     try {
+      await drainUntil(
+        () => timer.getPendingTimeouts().includes(SESSION_RELEASE_DRAIN_TIMEOUT_MS),
+        { description: "registration waiting for the session release deadline" },
+      );
       timer.advanceTime(SESSION_RELEASE_DRAIN_TIMEOUT_MS);
       expect(await registration).toEqual({
         success: false,

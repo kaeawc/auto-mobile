@@ -251,14 +251,17 @@ describe("ToolRegistry autolock session enforcement", () => {
   test("an abort during device discovery prevents further scans", async () => {
     setAutolock(true);
     fakeDeviceSessionManager.setConnectedDevices([androidA]);
+    const scanStarted = Promise.withResolvers<void>();
     let finishScan!: (devices: BootedDevice[]) => void;
-    fakeDeviceSessionManager.setDetectConnectedPlatformsHook(
-      () => new Promise((resolve) => (finishScan = resolve)),
-    );
+    fakeDeviceSessionManager.setDetectConnectedPlatformsHook(() => {
+      scanStarted.resolve();
+      return new Promise((resolve) => (finishScan = resolve));
+    });
     const tool = registerTool("autolockAbortedDeviceScan");
     const controller = new AbortController();
 
     const call = tool.handler({ platform: "android" }, undefined, controller.signal);
+    await scanStarted.promise;
     expect(fakeDeviceSessionManager.getDetectConnectedPlatformsCallCount()).toBe(1);
     expect(fakeDeviceSessionManager.getDetectConnectedPlatformsSignals()).toEqual([
       controller.signal,

@@ -168,6 +168,22 @@ enable/disable conflicts fail startup. Repeatable `--enable-tool` and
 `--disable-tool` flags override these environment values; persisted
 `setToolEnabled` choices override startup defaults.
 
+## Experimental session broker
+
+<div class="environment-variable-table" markdown>
+
+| Variable                           | Use and accepted values                                                                                                                                                                          | Default                     |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------- |
+| `AUTOMOBILE_SESSION_BROKER_CONFIG` | Operator-owned JSON configuration file path, resolved relative to daemon launch directory. Enables the experimental session-only broker and supplies private caps and device defaults.           | unset; ordinary daemon mode |
+| `AUTOMOBILE_SESSION_CONFIG`        | Consumer session request as inline JSON or a JSON file path. `--session-config` takes precedence. Cannot be combined with managed-slot configuration, `--initial-session-uuid`, or `--no-proxy`. | unset; ordinary proxy mode  |
+
+</div>
+
+These are separate operator and consumer inputs. A session requester does not
+need the provider's capacity or pool configuration. See
+[the session broker experiment](../design-docs/session-broker-experiment.md)
+for their versioned formats and release obligations.
+
 ## Session heartbeat timeout
 
 <div class="environment-variable-table" markdown>

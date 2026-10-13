@@ -30,16 +30,39 @@ function testFiles(dir: string): string[] {
   });
 }
 
+const files = testFiles(TEST).sort();
+// Eight buckets peaked at 12.53 ms locally; use sixteen for headroom below 12 ms.
+// Raise the count as the tree grows, keeping each content-read test within that budget.
+const BUCKET_COUNT = 16;
+const buckets = Array.from({ length: BUCKET_COUNT }, (_, index) =>
+  files.slice(
+    Math.floor((index * files.length) / BUCKET_COUNT),
+    Math.floor(((index + 1) * files.length) / BUCKET_COUNT),
+  ),
+);
+
 describe("test files that initialize DaemonState reset it (issue #11614)", () => {
-  test("every unit test file that publishes onto DaemonState also resets it", () => {
-    const offenders = testFiles(TEST)
-      .filter((file) => {
-        const source = readFileSync(file, "utf8");
-        return INITIALIZES.test(source) && !RESETS.test(source);
-      })
-      .map((file) => relative(ROOT, file).split(sep).join("/"));
-    expect(offenders).toEqual([]);
+  test("the buckets cover the complete, non-trivial unit test listing exactly once", () => {
+    expect(files.length).toBeGreaterThan(1000);
+    expect(files.map((file) => relative(ROOT, file).split(sep).join("/"))).toContain(
+      "test/lint/daemonStateResetInTests.test.ts",
+    );
+    expect(buckets.flat()).toEqual(files);
+    expect(new Set(buckets.flat()).size).toBe(files.length);
   });
+
+  test.each(buckets.map((bucket, index) => ({ bucket, index })))(
+    "every unit test file that publishes onto DaemonState also resets it (bucket $index)",
+    ({ bucket }) => {
+      const offenders = bucket
+        .filter((file) => {
+          const source = readFileSync(file, "utf8");
+          return INITIALIZES.test(source) && !RESETS.test(source);
+        })
+        .map((file) => relative(ROOT, file).split(sep).join("/"));
+      expect(offenders).toEqual([]);
+    },
+  );
 
   test("the scan recognises the initializing and resetting spellings", () => {
     expect(INITIALIZES.test("const d = new Daemon({}, undefined);")).toBe(true);

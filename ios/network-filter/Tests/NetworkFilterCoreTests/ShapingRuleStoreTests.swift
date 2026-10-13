@@ -115,7 +115,7 @@ final class ShapingRuleStoreTests: XCTestCase {
         XCTAssertNotNil(store.evaluationSnapshot())
         XCTAssertEqual(store.execute(apply(revision: 3)).outcome, .invalidCommand)
         XCTAssertEqual(store.execute(apply(revision: 4)).outcome, .applied)
-        XCTAssertNil(store.evaluationSnapshot())
+        XCTAssertEqual(store.evaluationSnapshot()?.shapedTargets, [RuleFixtures.target])
     }
 
     func testShapedOwnershipFencingRenewResetAndRemoveAll() {
@@ -169,20 +169,24 @@ final class ShapingRuleStoreTests: XCTestCase {
         XCTAssertEqual(store.execute(apply(target: overflow)).outcome, .capacityExceeded)
     }
 
-    func testShapedRuleCannotCommitADropAndPolicyDoesNoLookup() {
+    func testShapedRuleCannotCommitADropAndPolicyAttributes() {
         _ = store.execute(RuleFixtures.apply(RuleFixtures.ownership(revision: 1)))
         let old = store.currentTicket(for: RuleFixtures.target)!
         _ = store.execute(apply(revision: 2))
         XCTAssertFalse(store.commitDrop(old))
         XCTAssertFalse(store.commitDrop(store.shapingRule(for: RuleFixtures.target)!.ticket))
-        XCTAssertNil(store.evaluationSnapshot())
+        XCTAssertEqual(store.evaluationSnapshot()?.shapedTargets, [RuleFixtures.target])
         let table = FakeProcessTable()
         let identities = FakeIdentityResolver()
+        identities.identifiers[501] = RuleFixtures.bundleId
         let token = table.add(pid: 501, parent: 400, path: CapturedSimulator.appExecutable())
         let policy = AppFlowPolicy(store: store, processTable: table, identityResolver: identities)
-        XCTAssertEqual(policy.verdict(sourceAppAuditToken: nil, sourceProcessAuditToken: token), .allow)
-        XCTAssertEqual(table.tokenLookups, 0)
-        XCTAssertEqual(identities.lookups, 0)
+        XCTAssertEqual(
+            policy.verdict(sourceAppAuditToken: nil, sourceProcessAuditToken: token),
+            .shape(RuleFixtures.target)
+        )
+        XCTAssertGreaterThan(table.tokenLookups, 0)
+        XCTAssertEqual(identities.lookups, 1)
         XCTAssertEqual(store.activeRules().first?.droppedFlows, 0)
     }
 
@@ -217,5 +221,24 @@ final class ShapingRuleStoreTests: XCTestCase {
                 .allow
             )
         }
+    }
+}
+
+extension ShapingRuleStoreTests {
+    func testEvaluationSnapshotCombinesOfflineAndShapedSimulators() {
+        let offline = RuleFixtures.apply(RuleFixtures.ownership(revision: 1))
+        let shapedTarget = NetworkRuleTarget(simulator: RuleFixtures.sibling, bundleId: RuleFixtures.bundleId)!
+        XCTAssertEqual(store.execute(offline).outcome, .applied)
+        XCTAssertEqual(store.execute(apply(target: shapedTarget)).outcome, .applied)
+        XCTAssertEqual(store.evaluationSnapshot().map { Set($0.tickets.keys) }, [RuleFixtures.target])
+        XCTAssertEqual(store.evaluationSnapshot()?.shapedTargets, [shapedTarget])
+        XCTAssertEqual(store.evaluationSnapshot()?.managedSimulators, [RuleFixtures.simulator, RuleFixtures.sibling])
+        _ = store.execute(RuleFixtures.reset(RuleFixtures.ownership(revision: 2)))
+        XCTAssertEqual(store.evaluationSnapshot()?.tickets.count, 0)
+        XCTAssertEqual(store.evaluationSnapshot()?.managedSimulators, [RuleFixtures.sibling])
+        XCTAssertEqual(store.execute(RuleFixtures.reset(
+            RuleFixtures.ownership(revision: 2), target: shapedTarget
+        )).outcome, .reset)
+        XCTAssertNil(store.evaluationSnapshot())
     }
 }

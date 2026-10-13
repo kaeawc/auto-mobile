@@ -500,8 +500,11 @@ internal object AutoMobilePlanExecutor {
           parsed = parsed.copy(errorMessage = deviceOwnedGiveUpMessage(parsed, deviceOwnedWaitMs))
           break
         }
+        val waitLead =
+          if (parsed.code in RECOVERY_CODES) "Device is being recovered (${parsed.code})"
+          else "Device is held by another session"
         println(
-          "Device is held by another session; waiting ${delayMs}ms before retrying " +
+          "$waitLead; waiting ${delayMs}ms before retrying " +
             "(wait ${deviceOwnedWaits + 1}): $errorMessage",
         )
         if (holdForRecovery) releaseHeldSession(sessionUuid)
@@ -532,6 +535,10 @@ internal object AutoMobilePlanExecutor {
       Thread.sleep(retryBackoffMs)
     }
 
+    val failureMessage =
+      if (parsed.code in RECOVERY_CODES) parsed.errorMessage
+      else response.error ?: parsed.errorMessage
+
     // The daemon reports whether it actually kept the failed attempt's session (#11091): a plan
     // with derived device-label sessions is always released, so recovery would drive a device
     // this runner no longer holds. Fail now, with nothing to release.
@@ -539,7 +546,7 @@ internal object AutoMobilePlanExecutor {
       return sessionNotHeldFailure(
         sessionUuid = attemptSessionUuid,
         output = outputPayload,
-        errorOutput = response.error ?: parsed.errorMessage,
+        errorOutput = failureMessage,
         toolResults = toolResults,
       )
     }
@@ -550,7 +557,7 @@ internal object AutoMobilePlanExecutor {
       buildFailedStepContext(response, json, planContent, options.device, secretValues)
         ?.copy(sessionUuid = attemptSessionUuid)
     return handleFailure(
-      result = CommandResult(1, outputPayload, response.error ?: parsed.errorMessage),
+      result = CommandResult(1, outputPayload, failureMessage),
       options = options,
       toolResults = toolResults,
       failedStepContext = failedStepContext,
@@ -903,9 +910,16 @@ internal object AutoMobilePlanExecutor {
     if (!response.success) {
       // A failed frame carries the typed refusal fields at the top level (#11544).
       val code = (response.code as? JsonPrimitive)?.takeIf { it.isString }?.content
+      val details = response.details as? JsonObject ?: JsonObject(emptyMap())
+      val recovering = details["recovering"] == JsonPrimitive(true)
+      val devices = unhealthyDevices(details, recovering)
       return ParsedToolResult(
         false,
-        response.error ?: "Daemon returned failure",
+        if (code == DEVICE_UNHEALTHY_CODE)
+          unhealthyFailureMessage(response.error ?: "Daemon returned failure", recovering, devices)
+        else response.error ?: "Daemon returned failure",
+        recovering = recovering,
+        unhealthyDevices = devices,
         retryable = response.retryable == JsonPrimitive(true),
         code = code,
         daemonMessage = response.error,
@@ -955,6 +969,9 @@ internal object AutoMobilePlanExecutor {
     success: Boolean,
   ): ParsedToolResult {
     val errorObject = parsed["error"] as? JsonObject
+    val recovering = (errorObject?.get("recovering") ?: parsed["recovering"]) == JsonPrimitive(true)
+    val devices =
+      unhealthyDevices(JsonObject(parsed + (errorObject ?: JsonObject(emptyMap()))), recovering)
     val retryable =
       errorObject?.get("retryable") == JsonPrimitive(true) ||
         parsed["retryable"] == JsonPrimitive(true)
@@ -970,10 +987,19 @@ internal object AutoMobilePlanExecutor {
         ((errorObject?.get("code") ?: parsed["code"]) as? JsonPrimitive)
           ?.takeIf { it.isString }
           ?.content
-      val daemonMessage = (parsed["error"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+      val daemonMessage =
+        (if (code in RECOVERY_CODES) errorObject?.get("message") as? JsonPrimitive else null)
+          ?.takeIf { it.isString }
+          ?.content ?: (parsed["error"] as? JsonPrimitive)?.takeIf { it.isString }?.content
       return ParsedToolResult(
         false,
-        planFailureMessage(parsed, isError),
+        if (code == DEVICE_UNHEALTHY_CODE)
+          unhealthyFailureMessage(
+            daemonMessage ?: "Daemon refused the request",
+            recovering,
+            devices,
+          )
+        else planFailureMessage(parsed, isError),
         retryable,
         code,
         daemonMessage,
@@ -983,6 +1009,8 @@ internal object AutoMobilePlanExecutor {
             JsonPrimitive(false) -> false
             else -> null
           },
+        recovering = recovering,
+        unhealthyDevices = devices,
         acquireNewSession = acquireNewSession,
         retryAfterMs = retryAfterHintMs(errorObject?.get("retryAfterMs") ?: parsed["retryAfterMs"]),
       )
@@ -1042,12 +1070,50 @@ internal object AutoMobilePlanExecutor {
     val retryable: Boolean,
     val acquireNewSession: Boolean,
     val retryAfterMs: Long?,
+    val recovering: Boolean,
   )
 
   internal fun refusalEvidence(response: DaemonResponse, json: Json): RefusalEvidence =
     parseDaemonToolResult(response, json).let {
-      RefusalEvidence(it.code, it.retryable, it.acquireNewSession, it.retryAfterMs)
+      RefusalEvidence(it.code, it.retryable, it.acquireNewSession, it.retryAfterMs, it.recovering)
     }
+
+  private data class UnhealthyDevice(
+    val deviceId: String,
+    val reason: String,
+    val recovering: Boolean,
+  )
+
+  private fun unhealthyDevices(payload: JsonObject, recovering: Boolean): List<UnhealthyDevice> {
+    fun device(objectValue: JsonObject, state: Boolean): UnhealthyDevice? {
+      val id =
+        (objectValue["deviceId"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+      val reason =
+        (objectValue["reason"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+      return UnhealthyDevice(id, reason, state)
+    }
+    val devices = payload["devices"] as? JsonArray
+    if (devices != null)
+      return devices.mapNotNull {
+        val entry = it as? JsonObject ?: return@mapNotNull null
+        device(entry, entry["recovering"] == JsonPrimitive(true))
+      }
+    return listOfNotNull(device(payload, recovering))
+  }
+
+  private fun unhealthyDevicesMessage(devices: List<UnhealthyDevice>): String =
+    "Unhealthy devices: " +
+      devices.joinToString(", ") {
+        "${it.deviceId} (${it.reason}, ${if (it.recovering) "recovering" else "not recovering"})"
+      }
+
+  private fun unhealthyFailureMessage(
+    message: String,
+    recovering: Boolean,
+    devices: List<UnhealthyDevice>,
+  ): String =
+    "$DEVICE_UNHEALTHY_CODE: $message\n${unhealthyDevicesMessage(devices)}" +
+      (if (!recovering) "\nReplace the device with killDevice then startDevice." else "")
 
   private fun planFailureMessage(payload: JsonObject, isError: Boolean): String {
     val errorObject = payload["error"] as? JsonObject
@@ -1355,6 +1421,14 @@ internal object AutoMobilePlanExecutor {
   /** Typed code for a bind refused while the device is under a kill reservation (#11088). */
   internal const val DEVICE_SHUTTING_DOWN_CODE = "device_shutting_down"
 
+  /** Typed code for acquisition refused because device health is marked unhealthy (#12112). */
+  internal const val DEVICE_UNHEALTHY_CODE = "device_unhealthy"
+
+  /** Typed code for a call refused while its session's device is recovering (#12113). */
+  internal const val SESSION_HELD_BY_RECOVERY_CODE = "session_held_by_recovery"
+
+  private val RECOVERY_CODES = setOf(DEVICE_UNHEALTHY_CODE, SESSION_HELD_BY_RECOVERY_CODE)
+
   /** Refusals the runner waits out with the bounded held-device wait. */
   private val DEVICE_WAIT_CODES =
     setOf(
@@ -1370,15 +1444,19 @@ internal object AutoMobilePlanExecutor {
   internal const val CAPACITY_EXHAUSTED_CODE = "capacity_exhausted"
   internal const val DISCOVERY_INCOMPLETE_CODE = "discovery_incomplete"
 
-  private val RETRYABLE_WAIT_CODES = setOf(CAPACITY_EXHAUSTED_CODE, DISCOVERY_INCOMPLETE_CODE)
+  private val RETRYABLE_WAIT_CODES =
+    setOf(CAPACITY_EXHAUSTED_CODE, DISCOVERY_INCOMPLETE_CODE, SESSION_HELD_BY_RECOVERY_CODE)
 
   /**
    * Whether the runner waits out this refusal within the bounded device wait: the held-device codes
-   * always, capacity and discovery refusals only when the daemon says they are retryable.
+   * always, capacity, discovery and session recovery only when retryable. Unhealthy devices also
+   * require an explicit recovering boolean.
    */
   private fun waitsForDevice(parsed: ParsedToolResult): Boolean {
     val code = parsed.code ?: return false
-    return code in DEVICE_WAIT_CODES || (parsed.retryable && code in RETRYABLE_WAIT_CODES)
+    return code in DEVICE_WAIT_CODES ||
+      (parsed.retryable &&
+        (code in RETRYABLE_WAIT_CODES || (code == DEVICE_UNHEALTHY_CODE && parsed.recovering)))
   }
 
   private const val DEVICE_OWNED_INITIAL_DELAY_MS = 500L
@@ -1453,8 +1531,19 @@ internal object AutoMobilePlanExecutor {
   private const val RELEASE_SESSION_METHOD = "daemon/releaseSession"
   private const val RELEASE_SESSION_TIMEOUT_MS = 10_000L
 
-  private fun deviceOwnedGiveUpMessage(parsed: ParsedToolResult, waitedMs: Long): String =
-    (when (parsed.code) {
+  private fun deviceOwnedGiveUpMessage(parsed: ParsedToolResult, waitedMs: Long): String {
+    if (parsed.code in RECOVERY_CODES) {
+      val lead =
+        if (parsed.code == DEVICE_UNHEALTHY_CODE) "Device is still being recovered"
+        else "Session's device is still being recovered"
+      return "$lead (${parsed.code})" +
+        (parsed.daemonMessage?.let { ": $it" } ?: "") +
+        (if (parsed.code == DEVICE_UNHEALTHY_CODE)
+          "\n${unhealthyDevicesMessage(parsed.unhealthyDevices)}"
+        else "") +
+        "\nThe runner waited ${waitedMs}ms for the recovery to finish."
+    }
+    return (when (parsed.code) {
       DEVICE_CLEANUP_IN_PROGRESS_CODE ->
         "Device is still finishing its previous session's cleanup ($DEVICE_CLEANUP_IN_PROGRESS_CODE)"
       DEVICE_OWNED_BY_OTHER_DAEMON_CODE ->
@@ -1468,6 +1557,7 @@ internal object AutoMobilePlanExecutor {
       "\nThe runner waited ${waitedMs}ms for it to be released. Another test attempt or tool " +
       "session is using this device; give each concurrent test its own device, or run them " +
       "serially."
+  }
 
   private fun isTransientError(errorMessage: String?): Boolean {
     if (errorMessage.isNullOrBlank()) return false
@@ -1508,5 +1598,7 @@ internal object AutoMobilePlanExecutor {
     val retryAfterMs: Long? = null,
     /** A typed failed frame said `retryable: false`: the daemon's final verdict (#11544). */
     val terminal: Boolean = false,
+    val recovering: Boolean = false,
+    val unhealthyDevices: List<UnhealthyDevice> = emptyList(),
   )
 }

@@ -57,6 +57,7 @@ final class ControllerContractTests: XCTestCase {
             let data = try JSONEncoder().encode(snapshot)
             let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
             XCTAssertEqual(object["version"] as? Int, 3)
+            XCTAssertNil(object["shapingActivity"])
             XCTAssertEqual(object["mode"] as? String, rules.isEmpty ? "allow_only" : "app_offline")
             let encodedRules = try XCTUnwrap(object["rules"] as? [[String: Any]])
             XCTAssertEqual(encodedRules.count, rules.count)
@@ -199,7 +200,15 @@ final class ControllerContractTests: XCTestCase {
             shaping: resolution
         )
         let probe = IdentityProbe(resolver: FakeIdentityResolver(), processTable: FakeProcessTable())
-        let mixed = probe.snapshot(managedSimulators: [offline.target.simulator], rules: [offline, shaped], version: 4)
+        let clock = FakeMonotonicClock()
+        let coordinator = FlowShapingCoordinator(
+            shaper: FlowShaper(clock: clock, ruleSource: FakeShapingRuleSource()),
+            clock: clock, scheduler: FakePauseScheduler()
+        )
+        let mixed = probe.snapshot(
+            managedSimulators: [offline.target.simulator], rules: [offline, shaped], version: 4,
+            shapingActivity: coordinator.status()
+        )
         var results: [String: ControllerResult] = [:]
         for (name, result) in try fixtureResults() where name != "shaping-requires-contract-4" {
             results[name] = ControllerResult(
@@ -240,6 +249,9 @@ final class ControllerContractTests: XCTestCase {
         XCTAssertEqual(decoded.version, 4)
         XCTAssertEqual(decoded.snapshot?.version, 4)
         XCTAssertEqual(decoded.snapshot?.mode, "app_mixed")
+        XCTAssertEqual(decoded.snapshot?.shapingActivity?.pendingPauses, 0)
+        XCTAssertEqual(decoded.snapshot?.shapingActivity?.orphanedPauses, 0)
+        XCTAssertEqual(decoded.snapshot?.shapingActivity?.untrackedDataCallbacks, 0)
         XCTAssertEqual(decoded.snapshot?.rules?.last?.shaping?.unapplied, [.packetLoss])
         XCTAssertEqual(try decoded.encodedLine(), data)
     }

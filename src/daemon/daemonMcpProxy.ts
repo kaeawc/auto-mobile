@@ -8008,11 +8008,11 @@ export class DaemonMcpProxy {
       this.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
     }
     const platform = getDevicePlatformFromResult(result);
-    if (platform) {
-      this.sessionPlatforms.set(mintedSessionUuid, platform);
-    }
-    this.clearHeldSessionLossesForSelection(mintedSessionUuid);
     if (mintedSessionUuid === this.boundSessionUuid) {
+      if (platform) {
+        this.sessionPlatforms.set(mintedSessionUuid, platform);
+      }
+      this.clearHeldSessionLossesForSelection(mintedSessionUuid);
       return;
     }
     this.rememberSessionDevice(mintedSessionUuid, getDeviceIdFromResult(result));
@@ -8034,6 +8034,10 @@ export class DaemonMcpProxy {
       this.syncHeartbeatKeeper();
       throw new DaemonBoundSessionExpiredError(mintedSessionUuid, releasedWhileStopping);
     }
+    if (platform) {
+      this.sessionPlatforms.set(mintedSessionUuid, platform);
+    }
+    this.clearHeldSessionLossesForSelection(mintedSessionUuid);
     this.terminalBoundSession = undefined;
     this.holdPreviousBinding(mintedSessionUuid);
     this.boundSessionUuid = mintedSessionUuid;

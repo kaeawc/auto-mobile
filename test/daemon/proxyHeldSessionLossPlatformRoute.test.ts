@@ -242,6 +242,28 @@ test("a new acquisition clears every loss of its platform", async () => {
   await forwarded("homeScreen", { platform: "ios" }, apple.sessionUuid);
 });
 
+test("a mint released while the previous keeper stops preserves the older platform loss", async () => {
+  await acquireBoth();
+  release();
+  apple = { ...IOS, sessionUuid: "ios-never-published", deviceId: "SIM-2" };
+  const clearInterval = timer.clearInterval.bind(timer);
+  const stop = spyOn(timer, "clearInterval").mockImplementationOnce((handle) => {
+    clearInterval(handle);
+    release(apple, "heartbeat-timeout");
+  });
+  try {
+    await expect(proxy.callTool("getApple", {})).rejects.toMatchObject({
+      name: "DaemonBoundSessionExpiredError",
+      sessionUuid: apple.sessionUuid,
+      reason: "heartbeat-timeout",
+    });
+    await refused();
+    await forwarded();
+  } finally {
+    stop.mockRestore();
+  }
+});
+
 test("a new acquisition clears an older loss before the acquired session is held and lost", async () => {
   await acquireBoth();
   release();

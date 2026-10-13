@@ -317,6 +317,6 @@ private final class ScriptedRotateElementLocator: ElementLocating {
     func trackObservedBundleId(_: String) {}
     func switchForegroundApp(bundleId: String) { foregroundBundleId = bundleId }
     func getAppState(bundleId _: String) -> ObservedAppState { .notRunning }
-    func awaitAppState(bundleId _: String, expectedState _: AppStateExpectation) -> Bool { true }
+    func awaitAppState(bundleId _: String, expectedState _: AppStateExpectation) async -> Bool { true }
     func refreshForegroundBundleId() -> String? { foregroundBundleId }
 }

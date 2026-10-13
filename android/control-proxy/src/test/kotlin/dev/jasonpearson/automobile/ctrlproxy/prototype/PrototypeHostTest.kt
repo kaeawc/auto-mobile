@@ -20,6 +20,7 @@ import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -39,6 +40,13 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
 class PrototypeHostTest {
+  private val originalTraceSink = PrototypeTrace.sink
+
+  @After
+  fun restoreTraceSink() {
+    PrototypeTrace.sink = originalTraceSink
+  }
+
   companion object {
     private const val HOLD_BEFORE_UPDATE_MILLIS = 900L
     private const val HOLD_REMAINING_MILLIS = 100L
@@ -106,6 +114,20 @@ class PrototypeHostTest {
 
   private fun chromelessRequest() =
     PrototypeRequest(PrototypePlacement.Fullscreen(), chrome = PrototypeWindowChrome.NONE)
+
+  @Test
+  fun `show traces one balanced host section including a blocked early return`() = runTest {
+    val trace = FakePrototypeTraceSink()
+    PrototypeTrace.sink = trace
+    assertTrue(host.show())
+    assertEquals(listOf("begin:Prototype.host.show", "end:Prototype.host.show"), trace.events)
+    assertTrue(trace.openSections.isEmpty())
+    trace.events.clear()
+    blocked = true
+    assertFalse(host.show())
+    assertEquals(listOf("begin:Prototype.host.show", "end:Prototype.host.show"), trace.events)
+    assertTrue(trace.openSections.isEmpty())
+  }
 
   private fun beginHold(view: View) {
     assertTrue(touch(view, MotionEvent.ACTION_DOWN))

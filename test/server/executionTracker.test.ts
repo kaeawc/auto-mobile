@@ -550,7 +550,7 @@ describe("ExecutionTracker", function () {
   );
 
   for (const membership of ["explicit", "resolved", "provisional"] as const) {
-    test.each(["aborted", "dated", "undated"] as const)(
+    test.each(["aborted", "client-cancelled", "dated", "undated"] as const)(
       `admission liveness filters ${membership} control work once %s, preserving unfiltered holds`,
       (condition) => {
         const timer = new FakeTimer();
@@ -585,6 +585,10 @@ describe("ExecutionTracker", function () {
         expect(active(admissionQuery)).toBe(true);
         if (condition === "aborted") {
           execution.abortController.abort();
+        } else if (condition === "client-cancelled") {
+          tracker.markRequestCancelled(execution.id);
+          expect(execution.abortController.signal.aborted).toBe(false);
+          expect(execution.cancelReason).toBeUndefined();
         } else {
           liveOnSessionClock.at = condition === "dated" ? 15 : 25;
           expect(active(admissionQuery)).toBe(true);
@@ -602,6 +606,19 @@ describe("ExecutionTracker", function () {
       },
     );
   }
+
+  test("markRequestCancelled ignores unknown and ended executions", () => {
+    const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator());
+    const ended = tracker.startExecution("tapOn", undefined, "holder");
+    tracker.endExecution(ended.id);
+    const later = tracker.startExecution("tapOn", undefined, "holder");
+
+    expect(() => tracker.markRequestCancelled("unknown")).not.toThrow();
+    expect(() => tracker.markRequestCancelled(ended.id)).not.toThrow();
+    expect(ended.requestCancelled).toBeUndefined();
+    expect(later.requestCancelled).toBeUndefined();
+    expect(tracker.getActiveExecutionCount()).toBe(1);
+  });
 
   test("tracks an implicit execution under its resolved autolock session", function () {
     const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["execution-1"]));

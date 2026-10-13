@@ -31,7 +31,11 @@ import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
-import { executionTracker, sessionExecutionMetadataOf } from "./executionTracker";
+import {
+  executionTracker,
+  sessionExecutionMetadataOf,
+  subscribeRequestCancellation,
+} from "./executionTracker";
 import { withAdmittedSessionEcho } from "./routedSessionEcho";
 import { withForeignOwnedSessionMeta } from "./routedSessionMeta";
 import { holdsOwnerHeartbeatLease } from "../daemon/managedExecutionLiveness";
@@ -1475,11 +1479,17 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     const endExecutionOnce = (): void => {
       if (!executionEnded) {
         executionEnded = true;
+        unsubscribeRequestCancellation();
         executionTracker.endExecution(execution.id);
       }
     };
     const requestSignal = combineRequestAbortSignals(
       execution.abortController.signal,
+      extra.signal,
+    );
+    const unsubscribeRequestCancellation = subscribeRequestCancellation(
+      executionTracker,
+      execution.id,
       extra.signal,
     );
     const handlerParams =

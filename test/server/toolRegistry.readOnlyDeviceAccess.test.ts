@@ -10,6 +10,8 @@ import {
   test,
 } from "bun:test";
 import { z } from "zod/v4";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { ToolRegistry, type AuditRunnerInput } from "../../src/server/toolRegistry";
 import {
   registerAppTools,
@@ -56,6 +58,7 @@ import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import type { AppsQueryResourceContent } from "../../src/server/appResources";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { setDebugModeEnabled } from "../../src/utils/debug";
+import { getAbortSignal } from "../../src/utils/AbortContext";
 
 /**
  * Read-only tools on a device another session holds (#10830). Watching is allowed on any device
@@ -104,7 +107,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     expect(devices.getSetCurrentDeviceCalls()).toEqual([]);
   }
 
-  beforeEach(async () => {
+  async function setUpDevicePath(): Promise<void> {
     reowner = undefined;
     audited = [];
     recorded = [];
@@ -182,9 +185,10 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       },
       { deviceReadOnly: true },
     );
-  });
+  }
+  beforeEach(setUpDevicePath);
 
-  afterEach(() => {
+  function tearDownDevicePath(): void {
     reowner?.close();
     expect(executionTracker.getActiveExecutionCount()).toBe(0);
     serverConfig.setEmbeddedSdkEnabled(false);
@@ -196,7 +200,8 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     ToolRegistry.clearTools();
     DaemonState.getInstance().reset();
     sessionManager.stopCleanupTimer();
-  });
+  }
+  afterEach(tearDownDevicePath);
 
   test("a sessionless read with a held deviceId runs on the read-only path with no readiness", async () => {
     await call("readProbe", { platform: "android", deviceId: held.deviceId });
@@ -501,19 +506,37 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     let session: NonNullable<ReturnType<SessionManager["peekSession"]>>;
     let cancellations: string[];
     let recovering: boolean;
+    let ingressHandler: Parameters<Server["setRequestHandler"]>[1];
+    let finishControl: (() => void) | undefined;
+    let pendingControl: Promise<unknown> | undefined;
 
     beforeAll(async () => {
       // Warm the real server/SDK setup outside the individual test budgets.
       restoreServer = installHermeticServerFixture();
       const warm = new McpTestFixture({ daemonMode: true });
-      await warm.setup();
-      await warm.teardown();
+      await setUpDevicePath();
+      try {
+        runAuditedHandlers = true;
+        ToolRegistry.registerDeviceAware(
+          "ingressWarmup",
+          "Ingress warmup",
+          probeSchema,
+          async () => ({ success: true }),
+        );
+        await warm.setup();
+        await warm.client.callTool({ name: "ingressWarmup", arguments: { sessionUuid: agent } });
+      } finally {
+        await warm.teardown();
+        tearDownDevicePath();
+      }
     });
 
     afterAll(() => restoreServer());
 
     beforeEach(async () => {
       executions = [];
+      finishControl = undefined;
+      pendingControl = undefined;
       runAuditedHandlers = true;
       session = sessionManager.peekSession(agent)!;
       cancellations = [];
@@ -552,10 +575,20 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       });
       release = spyOn(sessionManager, "releaseSession");
       fixture = new McpTestFixture({ daemonMode: true, sessionContext: { sessionId: connection } });
-      await fixture.setup();
+      const registration = spyOn(Server.prototype, "setRequestHandler");
+      try {
+        await fixture.setup();
+        ingressHandler = registration.mock.calls.findLast(
+          ([schema]) => schema === CallToolRequestSchema,
+        )![1];
+      } finally {
+        registration.mockRestore();
+      }
     });
 
     afterEach(async () => {
+      finishControl?.();
+      await pendingControl;
       for (const execution of executions) {
         executionTracker.endExecution(execution.id);
       }
@@ -602,6 +635,107 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       expect(sessionManager.hasSession(agent)).toBe(true);
       expect(sessionManager.getReleasingSession(agent)).toBeNull();
     }
+
+    function controlThroughIngress(signal: AbortSignal) {
+      return ingressHandler(
+        {
+          method: "tools/call",
+          params: { name: "controlProbe", arguments: { sessionUuid: agent } },
+        },
+        {
+          signal,
+          requestId: "control-request",
+          sendNotification: async () => {},
+          sendRequest: async () => {
+            throw new Error("Unexpected server request");
+          },
+        },
+      );
+    }
+
+    function startWedgedControl(signal: AbortSignal): Promise<AbortSignal | undefined> {
+      const entered = Promise.withResolvers<AbortSignal | undefined>();
+      const gate = Promise.withResolvers<void>();
+      finishControl = gate.resolve;
+      ToolRegistry.registerDeviceAware("controlProbe", "Control probe", probeSchema, async () => {
+        entered.resolve(getAbortSignal());
+        // Deliberately ignore cancellation: the body remains tracked until the gate opens.
+        await gate.promise;
+        return { success: true };
+      });
+      pendingControl = controlThroughIngress(signal);
+      return entered.promise;
+    }
+
+    test.each(["cancelled", "live"] as const)(
+      "a %s timely MCP control admits late control only while live",
+      async (state) => {
+        const cancelled = state === "cancelled";
+        const client = new AbortController();
+        const requestSignal = await startWedgedControl(client.signal);
+        if (cancelled) {
+          client.abort();
+        }
+        expect(requestSignal?.aborted).toBe(cancelled);
+        expect(executionTracker.hasActiveSessionUuidExecutions(agent, { excludeReads: true })).toBe(
+          true,
+        );
+        ToolRegistry.registerDeviceAware(
+          "lateControlProbe",
+          "Late control probe",
+          probeSchema,
+          async () => ({ success: true }),
+        );
+        goLate();
+        const result = await fixture.client.callTool({
+          name: "lateControlProbe",
+          arguments: { sessionUuid: agent },
+        });
+        expect(result.isError ?? false).toBe(cancelled);
+        if (cancelled) {
+          expect(JSON.parse((result.content as Array<{ text: string }>)[0].text)).toMatchObject({
+            error: { code: "session_ownership_lost", reason: "cleanup-expired", idle: true },
+          });
+          await sessionManager.waitForSessionRelease(agent);
+          expect(sessionManager.hasSession(agent)).toBe(false);
+          expect(sessionManager.getTerminalReleaseSnapshot(agent)?.releaseReason).toBe(
+            "cleanup-expired",
+          );
+        } else {
+          expectNoRelease();
+          expect(binding.boundDeviceSessionUuid(connection)).toBe(agent);
+        }
+      },
+    );
+
+    test("ended MCP control removes its client abort listener before a later execution", async () => {
+      const client = new AbortController();
+      const listeners = new Set<EventListenerOrEventListenerObject>();
+      const add = client.signal.addEventListener.bind(client.signal);
+      const remove = client.signal.removeEventListener.bind(client.signal);
+      client.signal.addEventListener = (type, listener, options) => {
+        if (type === "abort" && listener) {
+          expect(options).toEqual({ once: true });
+          listeners.add(listener);
+        }
+        add(type, listener, options);
+      };
+      client.signal.removeEventListener = (type, listener, options) => {
+        if (type === "abort" && listener) {
+          expect(listeners.delete(listener)).toBe(true);
+        }
+        remove(type, listener, options);
+      };
+      await startWedgedControl(client.signal);
+      expect(listeners.size).toBe(1);
+      finishControl!();
+      await pendingControl;
+      expect(listeners.size).toBe(0);
+      const later = hold(stamps().expiresAt + 60_000);
+      expect(() => client.abort()).not.toThrow();
+      expect(later.requestCancelled).toBeUndefined();
+      expect(later.abortController.signal.aborted).toBe(false);
+    });
 
     test("with nothing in flight a late read succeeds without binding and starts lazy idle release", async () => {
       goLate();

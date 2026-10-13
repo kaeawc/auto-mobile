@@ -43,6 +43,8 @@ export interface ActiveExecution {
    * observability is unreliable on some runtimes under load (macOS CI Bun flake, issue #3909).
    */
   cancelReason?: Error;
+  /** Client cancellation only removes this call's admission liveness, not its release veto. */
+  requestCancelled?: boolean;
   /**
    * Devices this execution's session has left (a `setActiveDevice` rebind), with the rebind
    * reason. Binding the execution to one of them is refused (#9958).
@@ -186,7 +188,11 @@ function isLiveOnSessionClock(
   execution: ActiveExecution | undefined,
   live: NonNullable<ActiveExecutionQuery["liveOnSessionClock"]>,
 ): boolean {
-  if (execution === undefined || execution.abortController.signal.aborted) {
+  if (
+    execution === undefined ||
+    execution.requestCancelled === true ||
+    execution.abortController.signal.aborted
+  ) {
     return false;
   }
   const deadline = executionDeadlineMs(execution, true);
@@ -706,6 +712,14 @@ export class ExecutionTracker {
     const execution = this.executions.get(executionId);
     if (execution) {
       execution.readOnlySessionAccess = true;
+    }
+  }
+
+  /** Record client cancellation without changing daemon-owned cancellation semantics. */
+  markRequestCancelled(executionId: string): void {
+    const execution = this.executions.get(executionId);
+    if (execution) {
+      execution.requestCancelled = true;
     }
   }
 
@@ -1239,6 +1253,21 @@ export class ExecutionTracker {
       execution.abortController.abort();
     }
   }
+}
+
+/** Follow client cancellation for admission only; the caller unsubscribes when the call ends. */
+export function subscribeRequestCancellation(
+  tracker: Pick<ExecutionTracker, "markRequestCancelled">,
+  executionId: string,
+  signal: AbortSignal,
+): () => void {
+  const markCancelled = () => tracker.markRequestCancelled(executionId);
+  if (signal.aborted) {
+    markCancelled();
+  } else {
+    signal.addEventListener("abort", markCancelled, { once: true });
+  }
+  return () => signal.removeEventListener("abort", markCancelled);
 }
 
 export const executionTracker = new ExecutionTracker();

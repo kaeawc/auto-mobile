@@ -32,7 +32,7 @@ final class PassthroughWindow: UIWindow {
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard let model, model.spec != nil,
-              model.hitRects.values.contains(where: { $0.contains(point) }) else { return nil }
+              model.hitRects.contains(point) else { return nil }
         return super.hitTest(point, with: event)
     }
 
@@ -605,7 +605,7 @@ private final class PrototypeLayersView: UIView {
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard let model, let hosts,
-              let owner = PrototypeHostLayer.owner(of: convert(point, to: nil), hitRects: model.hitRects)
+              let owner = model.hitRects.layer(at: convert(point, to: nil))
         else { return nil }
         let target = owner == .top ? hosts.top : hosts.page
         // Opacity-zero authored content may decline the accepted touch. Keep the fullscreen
@@ -845,18 +845,53 @@ extension View {
             .accessibilityHidden(layer == .collapsed)
     }
 
-    /// Keeps `model.hitRects[key]` at this view's window frame while it is on screen.
+    /// Reports this view's window frame while it is on screen.
     /// With `clip`, only the part of the frame inside it takes touches; `enabled: false` withdraws
     /// the rect while the view stays on screen (an anchored node fading out with its ancestor).
+    @MainActor
     func reportFrame(key: String, model: PrototypeModel, clip: CGRect? = nil, enabled: Bool = true) -> some View {
-        onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
-            let touchable = clip.map { frame.intersection($0) } ?? frame
-            model.hitRects[key] = enabled && !touchable.isNull && !touchable.isEmpty ? touchable : nil
-        }
-        .onChange(of: enabled) { _, now in
-            if !now { model.hitRects[key] = nil }
-        }
-        .onDisappear { model.hitRects[key] = nil }
+        modifier(PrototypeFrameReporter(key: key, model: model, clip: clip, enabled: enabled))
+    }
+}
+
+@MainActor
+private struct PrototypeFrameReporter: ViewModifier {
+    private struct Configuration: Equatable {
+        let key: String
+        let clip: CGRect?
+        let enabled: Bool
+    }
+
+    let key: String
+    let model: PrototypeModel
+    let clip: CGRect?
+    let enabled: Bool
+    // Branches sharing a key still have distinct view lifetimes (#12207).
+    @State private var owner = PrototypeHitRectOwner()
+    @State private var frame: CGRect?
+
+    private var configuration: Configuration { Configuration(key: key, clip: clip, enabled: enabled) }
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                self.frame = frame
+                report(frame, configuration: configuration)
+            }
+            .onChange(of: configuration) { old, now in
+                if old.key != now.key { model.hitRects.withdraw(key: old.key, owner: owner) }
+                // Use all new inputs, even when they change together without a geometry update.
+                if let frame { report(frame, configuration: now) }
+            }
+            .onDisappear { model.hitRects.withdraw(key: key, owner: owner) }
+    }
+
+    private func report(_ frame: CGRect, configuration: Configuration) {
+        let touchable = configuration.clip.map { frame.intersection($0) } ?? frame
+        model.hitRects.report(
+            configuration.enabled && !touchable.isNull && !touchable.isEmpty ? touchable : nil,
+            key: configuration.key, owner: owner
+        )
     }
 }
 

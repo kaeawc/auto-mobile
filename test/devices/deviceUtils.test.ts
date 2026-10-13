@@ -1871,10 +1871,12 @@ describe("MultiPlatformDeviceManager Android offline recovery delegation (#7536)
   });
 
   test("recoverAndroidOfflineDevices delegates to the emulator client", async () => {
-    let called = false;
+    let receivedIds: Iterable<string> | undefined;
+    let receivedOptions: { timeoutMs?: number; signal?: AbortSignal } | undefined;
     const fakeEmulator = createFakeAndroidEmulator({
-      recoverOfflineDevices: async () => {
-        called = true;
+      recoverOfflineDevices: async (ids, options) => {
+        receivedIds = ids;
+        receivedOptions = options;
       },
     });
     const manager = new MultiPlatformDeviceManager(
@@ -1883,9 +1885,11 @@ describe("MultiPlatformDeviceManager Android offline recovery delegation (#7536)
       fakeEmulator,
     );
 
-    await manager.recoverAndroidOfflineDevices();
-
-    expect(called).toBe(true);
+    const ids = new Set(["emulator-5554", "emulator-5558"]);
+    const options = { timeoutMs: 1234, signal: new AbortController().signal };
+    await manager.recoverAndroidOfflineDevices(ids, options);
+    expect(receivedIds).toBe(ids);
+    expect(receivedOptions).toBe(options);
   });
 });
 

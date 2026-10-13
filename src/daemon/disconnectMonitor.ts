@@ -189,7 +189,7 @@ export function pruneStaleOfflineRecoveryAttempts(
 
 /**
  * Session-bound serials seen ADB `offline` this sweep that have not yet had
- * a bounded `adb reconnect offline` recovery attempt this episode (#7536).
+ * a bounded `adb -s <serial> reconnect` recovery attempt this episode (#7536).
  * Recovery is one-shot per episode: once a serial is marked attempted (by the
  * caller, using this function's return value), it is not retried again until
  * {@link pruneStaleOfflineRecoveryAttempts} clears it — either because the
@@ -201,7 +201,7 @@ export function pruneStaleOfflineRecoveryAttempts(
  * readiness wait (`maybeRecoverFreshOffline`, #7054/#7078) already owns
  * bounded offline recovery for that serial on its own 15s threshold, so this
  * monitor-level reconnect would be redundant at best and, at worst, a second
- * concurrent `adb reconnect offline` racing the readiness wait's own dispatch.
+ * concurrent `adb -s <serial> reconnect` racing the readiness wait's own dispatch.
  */
 export function selectOfflineRecoveryCandidates(
   offlineDeviceIds: ReadonlySet<string>,

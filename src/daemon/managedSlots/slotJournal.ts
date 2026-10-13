@@ -1,3 +1,4 @@
+import { classifySqliteError } from "../../db/databaseFailureClassification";
 import type { DeviceInfo } from "../../models";
 import {
   androidManagedSlotSpecSchema,
@@ -23,6 +24,7 @@ import type {
   ManagedSlotRequestedSpec,
   ManagedSpecMatcher,
 } from "./reconciler";
+import { RegistryRetryPacing } from "./registryRetryPacing";
 import { deviceStableId } from "./slotDeviceIdentity";
 import { defaultSlotExecOwnerLiveness } from "./slotOwnerLiveness";
 import {
@@ -76,6 +78,17 @@ export const SLOT_JOURNAL_CLAIM_BUDGET_MS = 10_000;
 export const SLOT_JOURNAL_MATCH_BUDGET_MS = 10_000;
 export const SLOT_JOURNAL_DELETE_GRACE_MS = 5_000;
 export const SLOT_JOURNAL_STOP_BUDGET_MS = 100;
+export const SLOT_JOURNAL_OVERDUE_DELETE_GRACE_MS = 1_000;
+export const SLOT_JOURNAL_MAX_ABANDONED_DELETES = 3;
+export const SLOT_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS = 8;
+export const SLOT_JOURNAL_REGISTRY_RETRY_INITIAL_DELAY_MS = 25;
+export const SLOT_JOURNAL_REGISTRY_RETRY_MAX_DELAY_MS = 1_000;
+export const SLOT_JOURNAL_REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS = 5_000;
+
+interface RemovalOperation {
+  overdueAtMs?: number;
+  abandoned: boolean;
+}
 
 export interface SlotJournalStageBudgets {
   discoveryMs: number;
@@ -112,10 +125,43 @@ export const DEFAULT_SLOT_JOURNAL_BACKOFF = exponentialBackoff({
 /** Entries some code in this process is driving right now; a redrive leaves them alone. */
 export class SlotJournalInFlight {
   private readonly ids = new Set<number>();
-  private readonly removals = new Set<string>();
+  private readonly removals = new Map<string, Set<RemovalOperation>>();
+  private readonly operations = new WeakMap<Promise<ManagedSlotDeletionResult>, RemovalOperation>();
+  private readonly warned = new Set<string>();
 
-  hasRemoval(platform: SlotJournalEntry["platform"], stableId: string): boolean {
-    return this.removals.has(JSON.stringify([platform, stableId]));
+  hasRemoval(platform: SlotJournalEntry["platform"], stableId: string, nowMs?: number): boolean {
+    const key = JSON.stringify([platform, stableId]);
+    const records = this.removals.get(key);
+    if (!records) {
+      return false;
+    }
+    for (const record of records) {
+      if (
+        nowMs !== undefined &&
+        record.overdueAtMs !== undefined &&
+        nowMs - record.overdueAtMs >= SLOT_JOURNAL_OVERDUE_DELETE_GRACE_MS
+      ) {
+        record.abandoned = true;
+      }
+    }
+    const abandoned = [...records].filter((record) => record.abandoned).length;
+    if (abandoned >= SLOT_JOURNAL_MAX_ABANDONED_DELETES) {
+      if (!this.warned.has(key)) {
+        this.warned.add(key);
+        logger.warn(
+          `[SlotJournal] Removal of '${stableId}' reached the pending abandoned delete bound.`,
+        );
+      }
+      return true;
+    }
+    return [...records].some((record) => !record.abandoned);
+  }
+
+  markRemovalOverdue(operation: Promise<ManagedSlotDeletionResult>, nowMs: number): void {
+    const record = this.operations.get(operation);
+    if (record && record.overdueAtMs === undefined) {
+      record.overdueAtMs = nowMs;
+    }
   }
 
   trackRemoval(
@@ -124,10 +170,30 @@ export class SlotJournalInFlight {
     operation: () => Promise<ManagedSlotDeletionResult>,
   ): Promise<ManagedSlotDeletionResult> {
     const key = JSON.stringify([platform, stableId]);
-    this.removals.add(key);
-    return Promise.resolve()
+    const records = this.removals.get(key) ?? new Set<RemovalOperation>();
+    const record: RemovalOperation = { abandoned: false };
+    records.add(record);
+    this.removals.set(key, records);
+    const promise = Promise.resolve()
       .then(operation)
-      .finally(() => this.removals.delete(key));
+      .finally(() => {
+        if (record.abandoned) {
+          logger.debug(`[SlotJournal] Abandoned removal of '${stableId}' settled late.`);
+        }
+        records.delete(record);
+        this.operations.delete(promise);
+        if (records.size === 0) {
+          this.removals.delete(key);
+        }
+        if (
+          [...records].filter((pending) => pending.abandoned).length <
+          SLOT_JOURNAL_MAX_ABANDONED_DELETES
+        ) {
+          this.warned.delete(key);
+        }
+      });
+    this.operations.set(promise, record);
+    return promise;
   }
   add(id: number): void {
     this.ids.add(id);
@@ -263,8 +329,17 @@ export class ManagedSlotJournal {
   private readonly isExecOwnerLive: SlotExecOwnerLiveness;
   private readonly backoff: BackoffPolicy;
   private readonly budgets: SlotJournalStageBudgets;
+  // Intent is in memory: death before a successful flag write leaves a later owner free to adopt.
+  private readonly removalIntents = new Set<number>();
+  private readonly removalFlagPacing: RegistryRetryPacing;
 
   constructor(private readonly deps: ManagedSlotJournalDependencies) {
+    this.removalFlagPacing = new RegistryRetryPacing({
+      timer: deps.timer,
+      initialDelayMs: SLOT_JOURNAL_REGISTRY_RETRY_INITIAL_DELAY_MS,
+      maxDelayMs: SLOT_JOURNAL_REGISTRY_RETRY_MAX_DELAY_MS,
+      maxBlockedWaitMs: SLOT_JOURNAL_REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS,
+    });
     this.inFlight = deps.inFlight ?? new SlotJournalInFlight();
     this.isOwnerLive = deps.isOwnerLive ?? defaultSlotExecOwnerLiveness;
     this.isExecOwnerLive = deps.isExecOwnerLive ?? defaultSlotExecOwnerLiveness;
@@ -280,6 +355,107 @@ export class ManagedSlotJournal {
 
   get owner(): SlotJournalOwner {
     return this.deps.owner;
+  }
+
+  private removalIntended(entry: SlotJournalEntry): boolean {
+    return entry.target.removalRequested === true || this.removalIntents.has(entry.id);
+  }
+
+  markRemovalIntended(entry: SlotJournalEntry): void {
+    if (!entry.target.removalRequested) {
+      this.removalIntents.add(entry.id);
+    }
+  }
+
+  async requestRemoval(
+    entry: SlotJournalEntry,
+    options: { deadlineMs?: number; signal?: AbortSignal } = {},
+  ): Promise<SlotJournalEntry> {
+    if (entry.target.removalRequested) {
+      return entry;
+    }
+    this.markRemovalIntended(entry);
+    if (options.deadlineMs !== undefined && this.deps.timer.now() >= options.deadlineMs) {
+      logger.warn(`[SlotJournal] Removal flag for entry ${entry.id} missed its deadline.`);
+      return entry;
+    }
+    const controller = new AbortController();
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, controller.signal])
+      : controller.signal;
+    try {
+      return await raceWithDeadline(() => this.retryRemovalFlag(entry, signal), {
+        timer: this.deps.timer,
+        timeoutMs:
+          options.deadlineMs === undefined
+            ? undefined
+            : Math.max(0, options.deadlineMs - this.deps.timer.now()),
+        signal,
+        label: `removal flag for entry ${entry.id}`,
+        onTimeout: () => controller.abort(),
+      });
+    } catch (error) {
+      if (!signal.aborted) {
+        // Preserve non-retryable registry failures for the caller's classification.
+        throw error;
+      }
+      logger.warn(
+        `[SlotJournal] Removal flag for entry ${entry.id} interrupted: ${errorMessage(error)}`,
+        error,
+      );
+      return entry;
+    }
+  }
+
+  private async retryRemovalFlag(
+    entry: SlotJournalEntry,
+    signal: AbortSignal,
+  ): Promise<SlotJournalEntry> {
+    for (let attempt = 1; attempt <= SLOT_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS; attempt++) {
+      signal.throwIfAborted();
+      const recorded = await this.tryRemovalFlag(entry, signal);
+      if (recorded) {
+        if (recorded.kind === "advanced" || recorded.kind === "journal_conflict") {
+          this.removalIntents.delete(entry.id);
+        }
+        return recorded.kind === "advanced" ? recorded.entry : entry;
+      }
+      if (attempt < SLOT_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS) {
+        await this.removalFlagPacing.wait(this.removalFlagPacing.delay(attempt), signal);
+      }
+    }
+    logger.warn(`[SlotJournal] Removal flag for entry ${entry.id} exhausted registry retries.`);
+    return entry;
+  }
+
+  private async tryRemovalFlag(entry: SlotJournalEntry, signal: AbortSignal) {
+    try {
+      return await this.removalFlagPacing.run(
+        () =>
+          this.advanceStep(
+            entry,
+            {
+              expectedPhase: entry.phase,
+              phase: entry.phase,
+              target: {
+                removalRequested: true,
+                ...(entry.target.newStableId ? { newStableId: entry.target.newStableId } : {}),
+              },
+            },
+            signal,
+          ),
+        (result) => result.kind === "advanced",
+        signal,
+      );
+    } catch (error) {
+      if (classifySqliteError(error) !== "retryable") {
+        // Preserve non-retryable errors; the in-memory intent still prevents adoption.
+        throw error;
+      }
+      // Expected SQLite contention is retried on the shared pacing before any deletion.
+      logger.debug(`[SlotJournal] Removal flag deferred: ${errorMessage(error)}`, error);
+      return undefined;
+    }
   }
 
   /**
@@ -463,6 +639,9 @@ export class ManagedSlotJournal {
     if (this.freeDeletionInFlight.has(key)) {
       return { kind: "lost" };
     }
+    if (this.inFlight.hasRemoval(row.platform, row.stableDeviceId, this.deps.timer.now())) {
+      return { kind: "blocked", message: "removal_in_flight" };
+    }
     this.freeDeletionInFlight.add(key);
     try {
       checkCancellation(options.signal);
@@ -549,6 +728,9 @@ export class ManagedSlotJournal {
     options: { signal?: AbortSignal; deadlineMs?: number },
   ): Promise<FreeDeviceDeletionDriveResult> {
     const { signal } = options;
+    if (this.inFlight.hasRemoval(row.platform, row.stableDeviceId, this.deps.timer.now())) {
+      return { kind: "blocked", message: "removal_in_flight" };
+    }
     const fence = await this.freeDeletionFence(row, signal);
     if (fence) {
       return fence;
@@ -817,7 +999,7 @@ export class ManagedSlotJournal {
     checkCancellation(signal);
     const current = assignment !== null && sameBinding(assignment, entry.binding);
     const spec = recordedSpec(entry);
-    if (options.adopt && !entry.target.removalRequested && current && spec) {
+    if (options.adopt && !this.removalIntended(entry) && current && spec) {
       const match = await this.boundedStage(
         () => this.deps.matcher.matches(device, spec),
         {
@@ -858,6 +1040,7 @@ export class ManagedSlotJournal {
     signal?: AbortSignal,
   ): Promise<Extract<Step, { kind: "settled" }>> {
     const closed = await this.advanceStep(entry, { expectedPhase: entry.phase, phase }, signal);
+    this.removalIntents.delete(entry.id);
     return { kind: "settled", entry: closed.kind === "advanced" ? closed.entry : entry };
   }
 
@@ -1174,6 +1357,9 @@ export class ManagedSlotJournal {
     stableId: string,
     signal?: AbortSignal,
   ): Promise<Step> {
+    if (this.removalIntended(entry)) {
+      return this.removeCreated(entry, device, stableId, undefined, signal);
+    }
     // Readiness is unproven after an interruption: bind as `provisioning`; the acquisition's reuse
     // path re-provisions it to automation readiness before anyone may claim it.
     const adopted = await this.advanceStep(
@@ -1215,6 +1401,7 @@ export class ManagedSlotJournal {
     signal?: AbortSignal,
   ): Promise<Step> {
     if (!entry.target.removalRequested) {
+      this.markRemovalIntended(entry);
       const recorded = await this.advanceStep(
         entry,
         {
@@ -1224,6 +1411,9 @@ export class ManagedSlotJournal {
         },
         signal,
       );
+      if (recorded.kind === "advanced" || recorded.kind === "journal_conflict") {
+        this.removalIntents.delete(entry.id);
+      }
       if (recorded.kind !== "advanced") {
         return blocked(
           entry,
@@ -1271,6 +1461,7 @@ export class ManagedSlotJournal {
       },
       signal,
     );
+    this.removalIntents.delete(entry.id);
     return { kind: "settled", entry: closed.kind === "advanced" ? closed.entry : entry };
   }
 
@@ -1350,8 +1541,16 @@ export class ManagedSlotJournal {
 
   private entryRemovalInFlight(entry: SlotJournalEntry): boolean {
     return (
-      this.inFlight.hasRemoval(entry.platform, entry.target.oldStableId ?? "") ||
-      this.inFlight.hasRemoval(journalCreationPlatform(entry), entry.target.newStableId ?? "")
+      this.inFlight.hasRemoval(
+        entry.platform,
+        entry.target.oldStableId ?? "",
+        this.deps.timer.now(),
+      ) ||
+      this.inFlight.hasRemoval(
+        journalCreationPlatform(entry),
+        entry.target.newStableId ?? "",
+        this.deps.timer.now(),
+      )
     );
   }
 
@@ -1441,7 +1640,7 @@ export class ManagedSlotJournal {
     platform: SlotJournalEntry["platform"],
     stableId: string,
   ): Extract<Step, { kind: "blocked" }> | undefined {
-    if (!this.inFlight.hasRemoval(platform, stableId)) {
+    if (!this.inFlight.hasRemoval(platform, stableId, this.deps.timer.now())) {
       return undefined;
     }
     // No new attempt/backoff: each finite pass checks once, so this cannot spin. A timeout
@@ -1450,28 +1649,43 @@ export class ManagedSlotJournal {
     return blocked(entry, "cleanup_pending", `Removal of device '${stableId}' is still in flight.`);
   }
 
-  private deleteDevice(
+  private async deleteDevice(
     target: Parameters<ManagedSlotDeviceDeleter["deleteAndVerifyAbsence"]>[0],
     cancel?: AbortSignal,
     hardDeadlineMs?: number,
   ): Promise<ManagedSlotDeletionResult> {
-    return this.boundedStage<ManagedSlotDeletionResult>(
-      (signal) =>
-        this.inFlight.trackRemoval(target.platform, target.stableId, () =>
-          this.deps.deleter.deleteAndVerifyAbsence({ ...target, signal }),
-        ),
-      {
-        label: `deleting '${target.stableId}'`,
-        timeoutMs: Math.max(
-          0,
-          Math.min(target.deadlineMs + this.budgets.deleteGraceMs, hardDeadlineMs ?? Infinity) -
-            this.deps.timer.now(),
-        ),
-        signal: target.signal,
-        cancel,
-      },
-      (error) => ({ kind: "failed", message: errorMessage(error) }),
-    );
+    if (this.inFlight.hasRemoval(target.platform, target.stableId, this.deps.timer.now())) {
+      return {
+        kind: "failed",
+        message: `Removal of device '${target.stableId}' is still in flight.`,
+      };
+    }
+    let operation: Promise<ManagedSlotDeletionResult> | undefined;
+    try {
+      return await this.boundedStage<ManagedSlotDeletionResult>(
+        (signal) => {
+          operation = this.inFlight.trackRemoval(target.platform, target.stableId, () =>
+            this.deps.deleter.deleteAndVerifyAbsence({ ...target, signal }),
+          );
+          return operation;
+        },
+        {
+          label: `deleting '${target.stableId}'`,
+          timeoutMs: Math.max(
+            0,
+            Math.min(target.deadlineMs + this.budgets.deleteGraceMs, hardDeadlineMs ?? Infinity) -
+              this.deps.timer.now(),
+          ),
+          signal: target.signal,
+          cancel,
+        },
+        (error) => ({ kind: "failed", message: errorMessage(error) }),
+      );
+    } finally {
+      if (operation) {
+        this.inFlight.markRemovalOverdue(operation, this.deps.timer.now());
+      }
+    }
   }
 }
 

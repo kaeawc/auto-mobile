@@ -559,7 +559,7 @@ describe("bounded journal provider stages (#12056)", () => {
       h.deleter.deleteAndVerifyAbsence = FakeDeleter.prototype.deleteAndVerifyAbsence.bind(
         h.deleter,
       );
-      h.timer.advanceTime(BACKOFF);
+      h.timer.advanceTime(cancellation === "parked" ? BACKOFF - 1 : BACKOFF);
       if (cancellation === "parked") {
         expect(await h.journal.redriveSlot(h.key)).toMatchObject({
           kind: "blocked",

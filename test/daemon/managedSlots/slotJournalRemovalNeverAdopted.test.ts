@@ -101,7 +101,7 @@ describe("a removal the journal stopped waiting for", () => {
       expect(inventory.has(createdId)).toBe(true);
 
       // Acquisition 2, once the entry's backoff is due. The device now reaches readiness.
-      timer.advanceTime(BACKOFF_MS);
+      timer.advanceTime(BACKOFF_MS - 1);
       provisioner.readinessStatus = "automation_ready";
       const second = await reconciler.reconcile(request(timer.now() + 60_000));
 
@@ -398,7 +398,7 @@ describe("created-device removal intent", () => {
       failure: { code: "cleanup_pending" },
     });
     for (let drive = 0; drive < 2; drive++) {
-      h.timer.advanceTime(BACKOFF_MS);
+      h.timer.advanceTime(BACKOFF_MS / 3);
       expect(await reconciler.reconcile(request())).toMatchObject({
         outcome: "failed",
         failure: { code: "cleanup_pending", retryable: true },

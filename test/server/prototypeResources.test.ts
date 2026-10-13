@@ -79,6 +79,30 @@ describe("automobile:prototype resource", () => {
     expect(searchIcons("  ").names).toEqual([]);
   });
 
+  test("runtime cost follows icons, precedes validation errors and cites the runtime issues", () => {
+    const guide = renderPrototypeGuide();
+    const icons = guide.indexOf("## Icons");
+    const cost = guide.indexOf("## Runtime cost");
+    const errors = guide.indexOf("## Common validation errors");
+    expect(icons).toBeGreaterThanOrEqual(0);
+    expect(cost).toBeGreaterThan(icons);
+    expect(errors).toBeGreaterThan(cost);
+    const section = guide.slice(cost, errors);
+    for (const issue of [
+      "#12133",
+      "#12134",
+      "#12135",
+      "#12136",
+      "#12138",
+      "#12139",
+      "#12140",
+      "#12160",
+      "#12162",
+    ]) {
+      expect(section).toContain(issue);
+    }
+  });
+
   test("the guide's JSON examples are valid specs", () => {
     const blocks = [...renderPrototypeGuide().matchAll(/```json\n([\s\S]*?)```/g)].map((m) =>
       JSON.parse(m[1]),

@@ -16,7 +16,9 @@ import org.robolectric.annotation.GraphicsMode
  * `control-proxy/src/test/resources/screenshots/prototype/`, recorded on the Linux reference OS.
  *
  * Baselines are recorded with the `Record Desktop Screenshot Baselines` workflow (module
- * `control-proxy`); until then each test is `pending = true`.
+ * `control-proxy`, test filter `*Prototype*ScreenshotTest`, covering this class and
+ * `PrototypeHostChromeScreenshotTest`); a case whose baseline is missing or stale is marked
+ * `pending` until recorded.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -28,7 +30,7 @@ class PrototypeSpecContentScreenshotTest {
   }
 
   // Pending: #11298 changed the image placeholder colours (surfaceVariant instead of LightGray), so
-  // this baseline must be re-recorded on Linux from an LFS-enabled plain-git clone.
+  // this baseline must be re-recorded by the Linux workflow described above.
   /** Every node type and style token in one fullscreen tree. */
   @Test
   fun fullscreenAllNodes() =
@@ -39,7 +41,7 @@ class PrototypeSpecContentScreenshotTest {
     )
 
   // Pending: #11298 changed the image placeholder colours (surfaceVariant instead of LightGray), so
-  // this baseline must be re-recorded on Linux from an LFS-enabled plain-git clone.
+  // this baseline must be re-recorded by the Linux workflow described above.
   /** Tab bar, pager with a scrolled text page, text field and a closed bottom sheet. */
   @Test
   fun tabbedPagerWithTextField() =
@@ -116,8 +118,7 @@ class PrototypeSpecContentScreenshotTest {
     )
 
   // Pending: renderPrototype now honours spec.theme (#11217), so the theme-bearing baselines must
-  // be
-  // re-recorded on Linux from an LFS-enabled plain-git clone, then pending dropped.
+  // be re-recorded by the Linux workflow described above, then pending dropped.
   /** Text style roles under a scaled typography theme. */
   @Test
   fun textStyleRole() =
@@ -187,8 +188,86 @@ class PrototypeSpecContentScreenshotTest {
       pending = true,
     )
 
+  // Theme fixtures over component content (#11217): the shared
+  // theme-*.json fixtures are a single text node, so each theme is also drawn over a component
+  // fixture.
+
+  /** Dark seed scheme on buttons, checkbox and switch. */
+  @Test
+  fun themeSeedControls() =
+    prototypeScreenshotTest(
+      "theme_seed_controls",
+      validPrototypeFixture("material-controls", themeFrom = "theme-seed"),
+      pending = true,
+    )
+
+  /** Dark seed scheme on a slider, chips and a card. */
+  @Test
+  fun themeSeedSliderChipCard() =
+    prototypeScreenshotTest(
+      "theme_seed_slider_chip_card",
+      validPrototypeFixture("material-slider-chip-card", themeFrom = "theme-seed"),
+      pending = true,
+    )
+
+  /** Dark seed scheme on role-coloured boxes. */
+  @Test
+  fun themeSeedColorRoles() =
+    prototypeScreenshotTest(
+      "theme_seed_color_roles",
+      validPrototypeFixture("color-role-and-corner-tokens", themeFrom = "theme-seed"),
+      pending = true,
+    )
+
+  /** Scaled serif type and large corners on buttons, checkbox and switch. */
+  @Test
+  fun themeTypographyShapesControls() =
+    prototypeScreenshotTest(
+      "theme_typography_shapes_controls",
+      validPrototypeFixture("material-controls", themeFrom = "theme-typography-shapes"),
+      pending = true,
+    )
+
+  /** Scaled serif type and large corners on a slider, chips and a card. */
+  @Test
+  fun themeTypographyShapesSliderChipCard() =
+    prototypeScreenshotTest(
+      "theme_typography_shapes_slider_chip_card",
+      validPrototypeFixture("material-slider-chip-card", themeFrom = "theme-typography-shapes"),
+      pending = true,
+    )
+
+  /** Device dynamic colour on components on a light device. */
+  @Test
+  @Config(qualifiers = "+notnight")
+  fun themeDeviceControlsLight() =
+    prototypeScreenshotTest(
+      "theme_device_controls_light",
+      validPrototypeFixture("material-controls", themeFrom = "theme-device"),
+      pending = true,
+    )
+
+  /** Device dynamic colour on components on a dark device. */
+  @Test
+  @Config(qualifiers = "+night")
+  fun themeDeviceControlsDark() =
+    prototypeScreenshotTest(
+      "theme_device_controls_dark",
+      validPrototypeFixture("material-controls", themeFrom = "theme-device"),
+      pending = true,
+    )
+
+  /** Flat role overrides with an explicit light mode. */
+  @Test
+  fun themeRoleOverrides() =
+    prototypeScreenshotTest(
+      "theme_role_overrides",
+      validPrototypeFixture("theme-role-overrides"),
+      pending = true,
+    )
+
   // Dark-mode gallery (#11217). The specs carry no theme, so the `+night` device decides; every
-  // case is pending until recorded on Linux from an LFS-enabled plain-git clone.
+  // case is pending until recorded by the Linux workflow described above.
 
   /** Every node type on a dark device; the unresolved image assets draw their placeholders. */
   @Test
@@ -268,7 +347,7 @@ class PrototypeSpecContentScreenshotTest {
 
   // Per-mode colours (#11219): `{light, dark}` pairs in a style colour, border, shadow and gradient
   // stop, role-named stops, and the `theme.colors.light` / `theme.colors.dark` maps. Pending until
-  // recorded on Linux from an LFS-enabled plain-git clone (#11319).
+  // recorded by the Linux workflow described above (#11319).
 
   /** The per-mode colour fixture on a light device: every pair draws its light side. */
   @Test

@@ -15,6 +15,11 @@ import { defaultTimer } from "../../../src/utils/SystemTimer";
 import { logger } from "../../../src/utils/logger";
 import { useScratchRoot } from "../../helpers/scratchRoot";
 
+import {
+  bindFileBackedDbHarness,
+  WINDOWS_FILE_DB_TEST_TIMEOUT_MS,
+} from "../../db/withFileBackedDb";
+
 const SCOPE = { managedHostScope: "test", runnerNamespace: "busy", runnerIncarnation: "one" };
 
 describe("registry busy bound (real SQLite)", () => {
@@ -206,4 +211,47 @@ describe("registry busy bound (real SQLite)", () => {
       }
     }
   });
+});
+
+describe("migrated registry open (real SQLite file)", () => {
+  const getHarness = bindFileBackedDbHarness();
+
+  test(
+    "opening a migrated registry never issues BEGIN IMMEDIATE or close maintenance",
+    async () => {
+      const dbPath = join(await getHarness().makeTempDbDir("am-slots-"), "slots.sqlite");
+      const migrated = await openSqliteSlotRegistry({ dbPath });
+      await migrated.close();
+      const prepare = Database.prototype.prepare;
+      const statements: string[] = [];
+      const query = spyOn(Database.prototype, "prepare").mockImplementation(function (
+        this: Database,
+        sql: string,
+      ) {
+        statements.push(sql);
+        return prepare.call(this, sql);
+      });
+      const exec = spyOn(Database.prototype, "exec");
+      const close = spyOn(Database.prototype, "close");
+      try {
+        const opened = await openSqliteSlotRegistry({ dbPath });
+        try {
+          expect(statements).not.toContain(BEGIN_TRANSACTION_SQL);
+          expect(await opened.listFreeDevices()).toEqual([]);
+        } finally {
+          await opened.close();
+        }
+        expect(exec.mock.calls.map(([sql]) => sql)).not.toContain("PRAGMA optimize;");
+        expect(exec.mock.calls.map(([sql]) => sql)).not.toContain(
+          "PRAGMA wal_checkpoint(TRUNCATE);",
+        );
+        expect(close).toHaveBeenCalledTimes(1);
+      } finally {
+        query.mockRestore();
+        exec.mockRestore();
+        close.mockRestore();
+      }
+    },
+    WINDOWS_FILE_DB_TEST_TIMEOUT_MS,
+  );
 });

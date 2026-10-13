@@ -2,6 +2,8 @@ package dev.jasonpearson.automobile.protocol
 
 import kotlin.math.abs
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.*
 
 /** Canonical errors are computed from JSON structure, never from decoder exception strings. */
@@ -11,6 +13,11 @@ sealed class PrototypeSpecValidation {
   data class Success(val spec: PrototypeSpec) : PrototypeSpecValidation()
 
   data class Failure(val error: PrototypeSpecError) : PrototypeSpecValidation()
+}
+
+/** Prepared rules for successive states of one unchanged spec structure. */
+fun interface PrototypeStateWriteValidator {
+  fun validate(state: Map<String, PrototypeScalar>): PrototypeSpecError?
 }
 
 object PrototypeSpecValidator {
@@ -52,7 +59,9 @@ object PrototypeSpecValidator {
   private fun variants(name: String) =
     definitions.getValue(name).jsonObject.getValue("variants").jsonObject.keys
 
-  fun validate(input: String): PrototypeSpecValidation {
+  fun validate(input: String): PrototypeSpecValidation = validate(input, Context())
+
+  private fun validate(input: String, context: Context): PrototypeSpecValidation {
     if (input.toByteArray(Charsets.UTF_8).size > MAX_PROTOTYPE_SPEC_BYTES) {
       return PrototypeSpecValidation.Failure(fail("", "Spec byte limit exceeded"))
     }
@@ -60,13 +69,72 @@ object PrototypeSpecValidator {
     return try {
       val element = json.parseToJsonElement(input)
       if (!validNumberTokens(element)) PrototypeSpecValidation.Failure(fail("", "Invalid JSON"))
-      else validateElement(element)
+      else validateElement(element, context)
     } catch (_: SerializationException) {
       PrototypeSpecValidation.Failure(fail("", "Invalid JSON"))
     } catch (_: IllegalArgumentException) {
       PrototypeSpecValidation.Failure(fail("", "Invalid JSON"))
     }
   }
+
+  /** The caller supplies the same compact encoder it uses for full-spec writes. */
+  fun prepareStateWrites(spec: PrototypeSpec, encoder: Json): PrototypeStateWriteValidator {
+    val encoded =
+      try {
+        encoder.encodeToString(PrototypeSpec.serializer(), spec)
+      } catch (_: IllegalArgumentException) {
+        // An unserializable base may become serializable when the write replaces its state.
+        // Defer to the full write path, which preserves its original exception or validation error.
+        return fullStateWrites(spec, encoder)
+      }
+    val context = Context()
+    if (validate(encoded, context) !is PrototypeSpecValidation.Success) {
+      return fullStateWrites(spec, encoder)
+    }
+    val value = checkNotNull(context.root).jsonObject
+    val checked = checkNotNull(context.stateBindings)
+    // Only bindings can change their verdict. Static-only nodes/actions passed full validation.
+    checked.nodes.removeAll { boundKeys(it.value).isEmpty() }
+    checked.actions.removeAll { it.value.text("type") !in stateWriteActionTypes }
+    val serializer = MapSerializer(String.serializer(), PrototypeScalar.serializer())
+    // An omitted state adds its field name and comma; a present state replaces only its value.
+    // Compact serialization preserves all non-state bytes, including UTF-8 and escaped strings.
+    val fixedBytes =
+      encoded.toByteArray(Charsets.UTF_8).size -
+        (value["state"]?.toString()?.toByteArray(Charsets.UTF_8)?.size ?: -",\"state\":".length)
+    val stateRule =
+      definitions
+        .getValue("spec")
+        .jsonObject
+        .getValue("fields")
+        .jsonObject
+        .getValue("state")
+        .jsonObject
+        .getValue("rule")
+        .jsonObject
+    return PrototypeStateWriteValidator { state ->
+      // Encoding first preserves serialization exceptions, including non-finite numbers.
+      val encodedState = encoder.encodeToString(serializer, state)
+      if (fixedBytes + encodedState.toByteArray(Charsets.UTF_8).size > MAX_PROTOTYPE_SPEC_BYTES) {
+        fail("", "Spec byte limit exceeded")
+      } else {
+        val stored = json.parseToJsonElement(encodedState)
+        if (!validNumberTokens(stored)) fail("", "Invalid JSON")
+        else
+          walk(stored, stateRule, "state", Context(), 0)
+            ?: checkedStateErrors(checked, buildJsonObject { put("state", stored) })
+      }
+    }
+  }
+
+  private val stateWriteActionTypes = setOf("setState", "toggle", "increment", "decrement")
+
+  private fun fullStateWrites(spec: PrototypeSpec, encoder: Json) =
+    PrototypeStateWriteValidator { state ->
+      (validate(encoder.encodeToString(PrototypeSpec.serializer(), spec.copy(state = state)))
+          as? PrototypeSpecValidation.Failure)
+        ?.error
+    }
 
   // JsonElement's tree parser retains unquoted literals; validate number tokens
   // structurally instead of relying on primitive coercion or exception messages.
@@ -130,8 +198,8 @@ object PrototypeSpecValidator {
     }
   }
 
-  private fun validateElement(value: JsonElement): PrototypeSpecValidation {
-    val context = Context()
+  private fun validateElement(value: JsonElement, context: Context): PrototypeSpecValidation {
+    context.root = value
     val error =
       walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
         ?: PrototypeRepeatValidator.validate(value)
@@ -199,6 +267,12 @@ object PrototypeSpecValidator {
    */
   private fun stateTypeErrors(value: JsonElement, context: Context): PrototypeSpecError? {
     val data = value as? JsonObject ?: JsonObject(emptyMap())
+    val checked = stateInstances(value, context)
+    context.stateBindings = checked
+    return checkedStateErrors(checked, data)
+  }
+
+  private fun stateInstances(value: JsonElement, context: Context): Context {
     val scopes = PrototypeRepeatValidator.scopes(value)
     fun List<Located>.instances() = flatMap { located ->
       val templated = PrototypeRepeatValidator.operandTemplated(scopes, located.value, located.path)
@@ -210,15 +284,30 @@ object PrototypeSpecValidator {
     val checked = Context()
     checked.nodes.addAll(context.nodes.instances())
     checked.actions.addAll(context.actions.instances())
-    return bindingErrors(checked, data)
+    checked.indexControls()
+    return checked
+  }
+
+  private fun checkedStateErrors(checked: Context, data: JsonObject): PrototypeSpecError? =
+    bindingErrors(checked, data)
       ?: listItemBindingErrors(checked, data)
       ?: sheetBindingErrors(checked, data)
       ?: stateActionErrors(checked, data)
-  }
 
   private class Context {
+    var root: JsonElement? = null
+    var stateBindings: Context? = null
     val nodes = mutableListOf<Located>()
     val actions = mutableListOf<Located>()
+    var controlsByKey: Map<String, List<Located>> = emptyMap()
+
+    fun indexControls() {
+      controlsByKey =
+        nodes
+          .flatMap { node -> boundKeys(node.value).distinct().map { it to node } }
+          .groupBy({ it.first }, { it.second })
+    }
+
     var images = 0
     var selectorDepth = 0
     var conditionDepth = 0
@@ -798,7 +887,7 @@ object PrototypeSpecValidator {
     val key = action.value.text("key") ?: return null
     val written = action.value["value"] as? JsonPrimitive
     if (written == null || action.operandTemplated) return null
-    val controls = context.nodes.filter { key in boundKeys(it.value) }
+    val controls = context.controlsByKey[key].orEmpty()
     if (controls.map { it.value.text("type") }.toSet().size != 1) return null
     val after = JsonObject(state + (key to written))
     for (control in controls) {

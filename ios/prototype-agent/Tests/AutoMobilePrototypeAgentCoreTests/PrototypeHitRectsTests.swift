@@ -28,22 +28,84 @@ final class PrototypeHitRectsTests: XCTestCase {
         assertSheet(rects)
     }
 
+    func testLateOutgoingReportCannotTakeOverIncomingRect() {
+        var rects = PrototypeHitRects()
+        let outgoing = PrototypeHitRectOwner()
+        let incoming = PrototypeHitRectOwner()
+        rects.report(fullscreen, key: "content", owner: outgoing)
+        rects.report(sheet, key: "content", owner: incoming)
+        // An outgoing geometry callback may arrive after the replacement's callback (#12207).
+        rects.report(fullscreen, key: "content", owner: outgoing)
+        rects.withdraw(key: "content", owner: outgoing)
+
+        assertSheet(rects)
+    }
+
+    func testBothOwnersHoldContentUntilTheirOwnWithdrawal() {
+        var rects = PrototypeHitRects()
+        let outgoing = PrototypeHitRectOwner()
+        let incoming = PrototypeHitRectOwner()
+        rects.report(floating, key: "content", owner: outgoing)
+        rects.report(sheet, key: "content", owner: incoming)
+        let outgoingPoint = CGPoint(x: 250, y: 350)
+        let incomingPoint = CGPoint(x: 20, y: 700)
+        XCTAssertTrue(rects.contains(outgoingPoint))
+        XCTAssertEqual(rects.layer(at: outgoingPoint), .page)
+        XCTAssertTrue(rects.contains(incomingPoint))
+        XCTAssertEqual(rects.layer(at: incomingPoint), .page)
+
+        rects.withdraw(key: "content", owner: outgoing)
+        XCTAssertFalse(rects.contains(outgoingPoint))
+        XCTAssertNil(rects.layer(at: outgoingPoint))
+        assertSheet(rects)
+    }
+
+    func testTopLayerWinsOverPageAndOutsidePassesThrough() {
+        for key in ["modal.0", "dismiss"] {
+            var rects = PrototypeHitRects()
+            rects.report(fullscreen, key: "content", owner: PrototypeHitRectOwner())
+            rects.report(floating, key: key, owner: PrototypeHitRectOwner())
+            let overlap = CGPoint(x: 250, y: 350)
+            XCTAssertTrue(rects.contains(overlap))
+            XCTAssertEqual(rects.layer(at: overlap), .top)
+            XCTAssertEqual(rects.layer(at: CGPoint(x: 20, y: 20)), .page)
+            let outside = CGPoint(x: 450, y: 900)
+            XCTAssertFalse(rects.contains(outside))
+            XCTAssertNil(rects.layer(at: outside))
+        }
+    }
+
+    func testOwnerCanReportAgainAfterBeingDisabled() {
+        var rects = PrototypeHitRects()
+        let owner = PrototypeHitRectOwner()
+        rects.report(sheet, key: "content", owner: owner)
+        rects.report(nil, key: "content", owner: owner)
+        XCTAssertFalse(rects.contains(CGPoint(x: 20, y: 700)))
+        XCTAssertNil(rects.layer(at: CGPoint(x: 20, y: 700)))
+
+        rects.report(sheet, key: "content", owner: owner)
+        assertSheet(rects)
+    }
+
     func testRapidReplacementsIgnoreEachLateOutgoingWithdrawal() {
         var rects = PrototypeHitRects()
-        let owners = (0..<4).map { _ in PrototypeHitRectOwner() }
+        let owners = (0 ..< 4).map { _ in PrototypeHitRectOwner() }
         let frames = [fullscreen, sheet, floating, fullscreen]
         rects.report(frames[0], key: "content", owner: owners[0])
-        for index in 1..<owners.count {
+        for index in 1 ..< owners.count {
             rects.report(frames[index], key: "content", owner: owners[index])
             rects.withdraw(key: "content", owner: owners[index - 1])
-            XCTAssertEqual(rects.rects, ["content": frames[index]])
-            XCTAssertTrue(rects.contains(CGPoint(x: frames[index].midX, y: frames[index].midY)))
+            for point in [CGPoint(x: 20, y: 20), CGPoint(x: 20, y: 700), CGPoint(x: 250, y: 350)] {
+                let contains = frames[index].contains(point)
+                XCTAssertEqual(rects.contains(point), contains)
+                XCTAssertEqual(rects.layer(at: point), contains ? .page : nil)
+            }
         }
     }
 
     func testRapidReplacementsIgnoreTwoStaleWithdrawalsArrivingTogether() {
         var rects = PrototypeHitRects()
-        let owners = (0..<4).map { _ in PrototypeHitRectOwner() }
+        let owners = (0 ..< 4).map { _ in PrototypeHitRectOwner() }
         rects.report(fullscreen, key: "content", owner: owners[0])
         rects.report(sheet, key: "content", owner: owners[1])
         rects.report(floating, key: "content", owner: owners[2])
@@ -52,8 +114,9 @@ final class PrototypeHitRectsTests: XCTestCase {
         rects.withdraw(key: "content", owner: owners[0])
         rects.withdraw(key: "content", owner: owners[1])
 
-        XCTAssertEqual(rects.rects, ["content": fullscreen])
         XCTAssertTrue(rects.contains(CGPoint(x: 20, y: 20)))
+        XCTAssertTrue(rects.contains(CGPoint(x: 20, y: 700)))
+        XCTAssertEqual(rects.layer(at: CGPoint(x: 20, y: 20)), .page)
     }
 
     func testDismissChipSurvivesBarBranchWithdrawalAndBelongsToTopLayer() {
@@ -66,9 +129,10 @@ final class PrototypeHitRectsTests: XCTestCase {
         rects.withdraw(key: "dismiss", owner: bar)
 
         let point = CGPoint(x: 370, y: 50)
-        XCTAssertEqual(rects.rects, ["dismiss": chipRect])
         XCTAssertTrue(rects.contains(point))
-        XCTAssertEqual(PrototypeHostLayer.owner(of: point, hitRects: rects.rects), .top)
+        XCTAssertEqual(rects.layer(at: point), .top)
+        XCTAssertFalse(rects.contains(CGPoint(x: 370, y: 100)))
+        XCTAssertNil(rects.layer(at: CGPoint(x: 370, y: 100)))
     }
 
     func testModalReplacementIgnoresOutgoingBranchWithdrawal() {
@@ -79,8 +143,10 @@ final class PrototypeHitRectsTests: XCTestCase {
         rects.report(sheet, key: "modal.0", owner: snackbar)
         rects.withdraw(key: "modal.0", owner: dialog)
 
-        XCTAssertEqual(rects.rects, ["modal.0": sheet])
-        XCTAssertEqual(PrototypeHostLayer.owner(of: CGPoint(x: 20, y: 700), hitRects: rects.rects), .top)
+        XCTAssertTrue(rects.contains(CGPoint(x: 20, y: 700)))
+        XCTAssertEqual(rects.layer(at: CGPoint(x: 20, y: 700)), .top)
+        XCTAssertFalse(rects.contains(CGPoint(x: 20, y: 20)))
+        XCTAssertNil(rects.layer(at: CGPoint(x: 20, y: 20)))
     }
 
     func testOwnerWithdrawalClearsItsOwnKey() {
@@ -89,8 +155,8 @@ final class PrototypeHitRectsTests: XCTestCase {
         rects.report(sheet, key: "content", owner: owner)
         rects.withdraw(key: "content", owner: owner)
 
-        XCTAssertTrue(rects.rects.isEmpty)
         XCTAssertFalse(rects.contains(CGPoint(x: 20, y: 700)))
+        XCTAssertNil(rects.layer(at: CGPoint(x: 20, y: 700)))
     }
 
     func testNilReportFromOwnerClearsItsOwnKey() {
@@ -99,7 +165,8 @@ final class PrototypeHitRectsTests: XCTestCase {
         rects.report(sheet, key: "content", owner: owner)
         rects.report(nil, key: "content", owner: owner)
 
-        XCTAssertTrue(rects.rects.isEmpty)
+        XCTAssertFalse(rects.contains(CGPoint(x: 20, y: 700)))
+        XCTAssertNil(rects.layer(at: CGPoint(x: 20, y: 700)))
     }
 
     func testNonOwnerNilReportAndWithdrawalLeaveRectUntouched() {
@@ -108,9 +175,9 @@ final class PrototypeHitRectsTests: XCTestCase {
         let stale = PrototypeHitRectOwner()
         rects.report(sheet, key: "content", owner: owner)
         rects.report(nil, key: "content", owner: stale)
-        XCTAssertEqual(rects.rects, ["content": sheet])
+        assertSheet(rects)
         rects.withdraw(key: "content", owner: stale)
-        XCTAssertEqual(rects.rects, ["content": sheet])
+        assertSheet(rects)
     }
 
     func testLaterReportFromSameOwnerReplacesRect() {
@@ -128,8 +195,10 @@ final class PrototypeHitRectsTests: XCTestCase {
         rects.report(fullscreen, key: "content", owner: stale)
         rects.report(floating, key: "dismiss", owner: PrototypeHitRectOwner())
         rects.removeAll()
-        XCTAssertTrue(rects.rects.isEmpty)
         XCTAssertFalse(rects.contains(CGPoint(x: 20, y: 20)))
+        XCTAssertNil(rects.layer(at: CGPoint(x: 20, y: 20)))
+        XCTAssertFalse(rects.contains(CGPoint(x: 250, y: 350)))
+        XCTAssertNil(rects.layer(at: CGPoint(x: 250, y: 350)))
         rects.report(sheet, key: "content", owner: PrototypeHitRectOwner())
         rects.withdraw(key: "content", owner: stale)
 
@@ -145,9 +214,15 @@ final class PrototypeHitRectsTests: XCTestCase {
         rects.withdraw(key: "anchor.old", owner: owner)
         rects.report(floating, key: "anchor.new", owner: owner)
 
-        XCTAssertEqual(rects.rects, ["anchor.old": sheet, "anchor.new": floating])
+        XCTAssertTrue(rects.contains(CGPoint(x: 20, y: 700)))
+        XCTAssertEqual(rects.layer(at: CGPoint(x: 20, y: 700)), .page)
+        XCTAssertTrue(rects.contains(CGPoint(x: 250, y: 350)))
+        XCTAssertEqual(rects.layer(at: CGPoint(x: 250, y: 350)), .page)
+        XCTAssertFalse(rects.contains(CGPoint(x: 20, y: 20)))
         rects.withdraw(key: "anchor.new", owner: owner)
-        XCTAssertEqual(rects.rects, ["anchor.old": sheet])
+        assertSheet(rects)
+        XCTAssertFalse(rects.contains(CGPoint(x: 250, y: 350)))
+        XCTAssertNil(rects.layer(at: CGPoint(x: 250, y: 350)))
     }
 
     func testEachOwnerHasUniqueIdentity() {
@@ -157,10 +232,9 @@ final class PrototypeHitRectsTests: XCTestCase {
     private func assertSheet(_ rects: PrototypeHitRects, file: StaticString = #filePath, line: UInt = #line) {
         let inside = CGPoint(x: 20, y: 700)
         let outside = CGPoint(x: 20, y: 300)
-        XCTAssertEqual(rects.rects, ["content": sheet], file: file, line: line)
         XCTAssertTrue(rects.contains(inside), file: file, line: line)
-        XCTAssertEqual(PrototypeHostLayer.owner(of: inside, hitRects: rects.rects), .page, file: file, line: line)
+        XCTAssertEqual(rects.layer(at: inside), .page, file: file, line: line)
         XCTAssertFalse(rects.contains(outside), file: file, line: line)
-        XCTAssertNil(PrototypeHostLayer.owner(of: outside, hitRects: rects.rects), file: file, line: line)
+        XCTAssertNil(rects.layer(at: outside), file: file, line: line)
     }
 }

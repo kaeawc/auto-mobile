@@ -4,14 +4,18 @@ import XCTest
 final class PrototypeRefusedEditTests: XCTestCase {
     private func shown(
         state: String = #"{"query":"ok"}"#,
-        children: String = #"{"type":"textField","stateKey":"query"}"#
-    ) throws -> PrototypeSession {
+        children: String = #"{"type":"textField","stateKey":"query"}"#,
+        specBytes: Int? = nil
+    )
+        throws -> PrototypeSession
+    {
         var session = PrototypeSession()
         try session.show(
             JSONDecoder().decode(PrototypeSpec.self, from: Data("""
             {"id":"p","window":{"placement":{"type":"fullscreen"}},"state":\(state),
              "root":{"type":"column","children":[\(children)]}}
-            """.utf8))
+            """.utf8)),
+            specBytes: specBytes
         )
         return session
     }
@@ -21,17 +25,17 @@ final class PrototypeRefusedEditTests: XCTestCase {
             state: #"{"d":"2026-10-13"}"#,
             children: #"{"type":"textField","stateKey":"d"},{"type":"datePicker","stateKey":"d"}"#
         )
-        var draft = PrototypeTextDraft(stored: try XCTUnwrap(session.state["d"]?.displayString))
+        var draft = try PrototypeTextDraft(stored: XCTUnwrap(session.state["d"]?.displayString))
         XCTAssertEqual(draft.text, "2026-10-13")
         for typed in ["2026-10-13X", "2026-10-139"] {
             let before = session
             draft.type(typed)
             XCTAssertEqual(draft.text, typed)
-            XCTAssertTrue(draft.needsCommit(stored: try XCTUnwrap(session.state["d"]?.displayString)))
+            XCTAssertTrue(try draft.needsCommit(stored: XCTUnwrap(session.state["d"]?.displayString)))
             XCTAssertTrue(session.change(key: "d", value: .string(draft.text)).isEmpty)
             XCTAssertEqual(session.state["d"], .string("2026-10-13"))
             XCTAssertTrue(PrototypeRefusedChange.leftValuesUnchanged(before: before, after: session))
-            XCTAssertTrue(draft.settle(stored: try XCTUnwrap(session.state["d"]?.displayString)))
+            XCTAssertTrue(try draft.settle(stored: XCTUnwrap(session.state["d"]?.displayString)))
             XCTAssertEqual(draft.text, "2026-10-13")
             XCTAssertFalse(draft.needsCommit(stored: "2026-10-13"))
         }
@@ -40,7 +44,7 @@ final class PrototypeRefusedEditTests: XCTestCase {
     func testAcceptedTextNeedsNoRewriteOrSecondCommit() throws {
         var session = try shown()
         let before = session
-        var draft = PrototypeTextDraft(stored: try XCTUnwrap(session.state["query"]?.displayString))
+        var draft = try PrototypeTextDraft(stored: XCTUnwrap(session.state["query"]?.displayString))
         draft.type("typed")
         XCTAssertTrue(draft.needsCommit(stored: "ok"))
         let events = session.change(key: "query", value: .string(draft.text))
@@ -55,30 +59,44 @@ final class PrototypeRefusedEditTests: XCTestCase {
     }
 
     func testOversizeTextSettlesToLastAcceptedEdit() throws {
-        var session = try shown()
-        var draft = PrototypeTextDraft(stored: try XCTUnwrap(session.state["query"]?.displayString))
+        // Growing "ok" to "accepted" fills the cap; one more byte is refused without a huge string.
+        var session = try shown(specBytes: PrototypeLimits.maxSpecBytes - 6)
+        var draft = try PrototypeTextDraft(stored: XCTUnwrap(session.state["query"]?.displayString))
         draft.type("accepted")
         XCTAssertEqual(session.change(key: "query", value: .string(draft.text)).count, 1)
-        XCTAssertFalse(draft.settle(stored: try XCTUnwrap(session.state["query"]?.displayString)))
+        XCTAssertFalse(try draft.settle(stored: XCTUnwrap(session.state["query"]?.displayString)))
         let before = session
-        draft.type(String(repeating: "x", count: PrototypeLimits.maxSpecBytes + 1))
+        draft.type("accepted!")
         XCTAssertTrue(draft.needsCommit(stored: "accepted"))
         XCTAssertTrue(session.change(key: "query", value: .string(draft.text)).isEmpty)
         XCTAssertEqual(session.state["query"], .string("accepted"))
         XCTAssertTrue(PrototypeRefusedChange.leftValuesUnchanged(before: before, after: session))
-        XCTAssertTrue(draft.settle(stored: try XCTUnwrap(session.state["query"]?.displayString)))
+        XCTAssertTrue(try draft.settle(stored: XCTUnwrap(session.state["query"]?.displayString)))
         XCTAssertEqual(draft.text, "accepted")
         XCTAssertFalse(draft.needsCommit(stored: "accepted"))
     }
 
     func testExternalStateChangeRewritesIdleDraft() throws {
         var session = try shown()
-        var draft = PrototypeTextDraft(stored: try XCTUnwrap(session.state["query"]?.displayString))
+        var draft = try PrototypeTextDraft(stored: XCTUnwrap(session.state["query"]?.displayString))
         XCTAssertFalse(draft.needsCommit(stored: "ok"))
         XCTAssertEqual(session.setStates([("query", .string("external"))]).count, 1)
-        XCTAssertTrue(draft.settle(stored: try XCTUnwrap(session.state["query"]?.displayString)))
+        XCTAssertTrue(try draft.settle(stored: XCTUnwrap(session.state["query"]?.displayString)))
         XCTAssertEqual(draft.text, "external")
         XCTAssertFalse(draft.needsCommit(stored: "external"))
+    }
+
+    func testKeyChangeSettlesDraftToNewKeysStoredValue() throws {
+        let session = try shown(
+            state: #"{"a":"first","b":"second"}"#,
+            children: #"{"type":"textField","stateKey":"a"},{"type":"textField","stateKey":"b"}"#
+        )
+        var draft = try PrototypeTextDraft(stored: XCTUnwrap(session.state["a"]?.displayString))
+        XCTAssertEqual(draft.text, "first")
+        let stored = try XCTUnwrap(session.state["b"]?.displayString)
+        XCTAssertTrue(draft.settle(stored: stored))
+        XCTAssertEqual(draft.text, "second")
+        XCTAssertFalse(draft.needsCommit(stored: stored))
     }
 
     func testSliderRedrawRuleForRefusalClampAndAcceptedEdit() throws {

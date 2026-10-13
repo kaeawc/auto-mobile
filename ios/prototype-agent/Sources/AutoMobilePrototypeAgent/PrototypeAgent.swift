@@ -531,7 +531,7 @@ private final class PrototypeLayersView: UIView {
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard let model, let hosts,
-              let owner = PrototypeHostLayer.owner(of: convert(point, to: nil), hitRects: model.hitRects.rects)
+              let owner = model.hitRects.layer(at: convert(point, to: nil))
         else { return nil }
         let target = owner == .top ? hosts.top : hosts.page
         return target.hitTest(convert(point, to: target), with: event)
@@ -750,6 +750,12 @@ extension View {
 
 @MainActor
 private struct PrototypeFrameReporter: ViewModifier {
+    private struct Configuration: Equatable {
+        let key: String
+        let clip: CGRect?
+        let enabled: Bool
+    }
+
     let key: String
     let model: PrototypeModel
     let clip: CGRect?
@@ -758,28 +764,27 @@ private struct PrototypeFrameReporter: ViewModifier {
     @State private var owner = PrototypeHitRectOwner()
     @State private var frame: CGRect?
 
+    private var configuration: Configuration { Configuration(key: key, clip: clip, enabled: enabled) }
+
     func body(content: Content) -> some View {
         content
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
                 self.frame = frame
-                report(frame)
+                report(frame, configuration: configuration)
             }
-            .onChange(of: key) { old, _ in
-                model.hitRects.withdraw(key: old, owner: owner)
-                // A new key needs a report even when the geometry did not change.
-                if let frame { report(frame) }
-            }
-            .onChange(of: enabled) { _, now in
-                if !now { model.hitRects.withdraw(key: key, owner: owner) }
+            .onChange(of: configuration) { old, now in
+                if old.key != now.key { model.hitRects.withdraw(key: old.key, owner: owner) }
+                // Use all new inputs, even when they change together without a geometry update.
+                if let frame { report(frame, configuration: now) }
             }
             .onDisappear { model.hitRects.withdraw(key: key, owner: owner) }
     }
 
-    private func report(_ frame: CGRect) {
-        let touchable = clip.map { frame.intersection($0) } ?? frame
+    private func report(_ frame: CGRect, configuration: Configuration) {
+        let touchable = configuration.clip.map { frame.intersection($0) } ?? frame
         model.hitRects.report(
-            enabled && !touchable.isNull && !touchable.isEmpty ? touchable : nil,
-            key: key, owner: owner
+            configuration.enabled && !touchable.isNull && !touchable.isEmpty ? touchable : nil,
+            key: configuration.key, owner: owner
         )
     }
 }

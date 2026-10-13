@@ -5,19 +5,21 @@ struct PrototypeHitRectOwner: Hashable, Sendable {
     private let id = UUID()
 }
 
-/// Remembers the last reporter so an outgoing branch cannot clear its replacement's rect (#12207).
+/// Keeps each view's rect until its own withdrawal, regardless of report order (#12207).
 struct PrototypeHitRects: Sendable {
-    private struct Entry: Sendable {
-        let rect: CGRect
-        let owner: PrototypeHitRectOwner
-    }
-
-    private var entries: [String: Entry] = [:]
-
-    var rects: [String: CGRect] { entries.mapValues(\.rect) }
+    private var entries: [String: [PrototypeHitRectOwner: CGRect]] = [:]
 
     func contains(_ point: CGPoint) -> Bool {
-        entries.values.contains { $0.rect.contains(point) }
+        entries.values.contains { $0.values.contains { $0.contains(point) } }
+    }
+
+    func layer(at point: CGPoint) -> PrototypeHostLayer? {
+        var layer: PrototypeHostLayer?
+        for (key, rects) in entries where rects.values.contains(where: { $0.contains(point) }) {
+            if PrototypeHostLayer(hitRectKey: key) == .top { return .top }
+            layer = .page
+        }
+        return layer
     }
 
     mutating func report(_ rect: CGRect?, key: String, owner: PrototypeHitRectOwner) {
@@ -25,12 +27,12 @@ struct PrototypeHitRects: Sendable {
             withdraw(key: key, owner: owner)
             return
         }
-        entries[key] = Entry(rect: rect, owner: owner)
+        entries[key, default: [:]][owner] = rect
     }
 
     mutating func withdraw(key: String, owner: PrototypeHitRectOwner) {
-        guard entries[key]?.owner == owner else { return }
-        entries[key] = nil
+        entries[key]?[owner] = nil
+        if entries[key]?.isEmpty == true { entries[key] = nil }
     }
 
     mutating func removeAll() {

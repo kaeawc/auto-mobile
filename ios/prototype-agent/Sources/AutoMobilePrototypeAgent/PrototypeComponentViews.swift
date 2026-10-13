@@ -66,6 +66,8 @@ struct PrototypeTextFieldView: View {
         TextField(node.placeholder ?? "", text: Binding(get: { draft.text }, set: { draft.type($0) }))
             .textFieldStyle(.roundedBorder)
             .onChange(of: draft.text) { _, _ in
+                // A settle may have updated state since this body captured its display value (#12206).
+                let stored = model.state[key]?.displayString ?? ""
                 if draft.needsCommit(stored: stored) {
                     model.change(key: key, value: draft.text)
                     draft.settle(stored: model.state[key]?.displayString ?? "")

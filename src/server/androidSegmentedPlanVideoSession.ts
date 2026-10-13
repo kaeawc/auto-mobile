@@ -796,13 +796,13 @@ export class AndroidSegmentedPlanVideoSession {
 
   private rememberReplacementStartFailure(error: unknown, signal: AbortSignal): void {
     if (signal.aborted) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        // A confirmed aborted-start rollback is expected and owns no new capture.
-        logger.debug("[SegmentedPlanVideo] Replacement start cancelled", error);
-      } else {
+      if (error instanceof AggregateError) {
         const warning = `Cancelled replacement start cleanup failed: ${errorMessage(error)}`;
         logger.warn(`[SegmentedPlanVideo] ${warning}`, error);
         this.rememberWarning(warning);
+      } else {
+        // A cancelled start without a rollback failure is expected and owns no new capture.
+        logger.debug("[SegmentedPlanVideo] Replacement start cancelled", error);
       }
       return;
     }

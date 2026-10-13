@@ -70,6 +70,88 @@ async function sessionWithTwoCompletedAndOneActive() {
 }
 
 describe("AndroidSegmentedPlanVideoSession.finalizeWithoutDevice", () => {
+  test.each(["custom abort reason", "aborted rollback failure", "non-aborted start failure"])(
+    "replacement start warning classification (%s)",
+    async (mode) => {
+      const timer = new FakeTimer();
+      const controller = new AbortController();
+      const reason = new Error("plan device lost");
+      const rollbackError = new Error("host reap failed");
+      const rollback = mock(async (_id: string) => {});
+      if (mode === "aborted rollback failure") {
+        rollback.mockRejectedValue(rollbackError);
+      }
+      const session = new AndroidSegmentedPlanVideoSession({
+        device,
+        outputNamePrefix: "classification",
+        timer,
+        segmentRotateAfterMs: 1000,
+        startVideoRecording: async (request) => {
+          if (request.outputName === "classification-seg1") {
+            if (mode === "non-aborted start failure") {
+              throw new Error("replacement rejected");
+            }
+            controller.abort(reason);
+            try {
+              request.abortSignal?.throwIfAborted();
+            } catch (error) {
+              try {
+                await rollback(request.outputName);
+              } catch (cleanupError) {
+                throw new AggregateError(
+                  [error, cleanupError],
+                  "plan device lost; recording rollback failed: host reap failed",
+                );
+              }
+              throw error;
+            }
+          }
+          return {
+            recordingId: request.outputName!,
+            outputPath: "/host/capture.mp4",
+            fileName: "capture.mp4",
+            startedAt: "",
+            config,
+          };
+        },
+        stopVideoRecording: async (id) => ({ metadata: metadata(id!), evictedRecordingIds: [] }),
+        rollbackVideoRecordingStart: rollback,
+      });
+      try {
+        await session.startFirstSegment();
+        timer.advanceTime(1000);
+        let rejection: unknown;
+        await session
+          .onBeforePlanStep({ stepIndex: 1, totalSteps: 2, signal: controller.signal })
+          .catch((error: unknown) => {
+            rejection = error;
+          });
+        expect(rejection).toBe(mode === "non-aborted start failure" ? undefined : reason);
+        expect(rollback).toHaveBeenCalledTimes(mode === "non-aborted start failure" ? 0 : 1);
+        const result = await session.finalize();
+        expect(result.recordingIds).toEqual(["classification"]);
+        const expectedWarnings =
+          mode === "custom abort reason"
+            ? []
+            : mode === "aborted rollback failure"
+              ? [
+                  "Cancelled replacement start cleanup failed: plan device lost; recording rollback failed: host reap failed",
+                ]
+              : [
+                  "Video truncated: failed to start next segment after classification: replacement rejected",
+                ];
+        expect(result.warnings).toBeUndefined();
+        expect([
+          ...(result.warnings ?? []),
+          ...result.metadata.flatMap((entry) => entry.warnings ?? []),
+        ]).toEqual(expectedWarnings);
+        expect(result.metadata.map((entry) => entry.warnings ?? [])).toEqual([expectedWarnings]);
+      } finally {
+        timer.reset();
+      }
+    },
+  );
+
   for (const mode of [
     "late success",
     "aborted start",
@@ -114,7 +196,14 @@ describe("AndroidSegmentedPlanVideoSession.finalizeWithoutDevice", () => {
               replacementRequest = request;
               await gate.promise;
               if (!lateSuccess) {
-                await rollback(active.recordingId, request.rollbackOptions?.());
+                try {
+                  await rollback(active.recordingId, request.rollbackOptions?.());
+                } catch (rollbackError) {
+                  throw new AggregateError(
+                    [request.abortSignal?.reason, rollbackError],
+                    "recording rollback failed: host reap failed",
+                  );
+                }
                 request.abortSignal?.throwIfAborted();
               }
             }

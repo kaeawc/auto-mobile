@@ -53,13 +53,12 @@ class PhoneManager extends FakeDeviceManager {
   async getAndroidOfflineDeviceIds(): Promise<Set<string>> {
     return new Set();
   }
-  async recoverAndroidOfflineDevices(): Promise<void> {}
+  async recoverAndroidOfflineDevices(_ids: Iterable<string>): Promise<void> {}
 }
 
-async function harness(initial: string[]) {
+async function harness(initial: string[], manager = new PhoneManager()) {
   const timer = new FakeTimer();
   timers.push(timer);
-  const manager = new PhoneManager();
   manager.bootedDevices = await adbDevices(timer, ...initial);
   const probe = new FakeAdbExecutor();
   probe.setCommandResponse("getprop ro.serialno", createExecResult(USB, ""));
@@ -148,6 +147,53 @@ describe("disconnect monitor folds a re-ported wireless transport (#11133)", () 
 });
 
 describe("listed-state probe follows a held phone's alias serials (#11133)", () => {
+  test.each([
+    ["alias only", [WIFI]],
+    ["canonical only", [USB]],
+    ["both transports", [USB, WIFI]],
+  ] as const)(
+    "reconnects listed-offline %s once per canonical episode",
+    async (_label, offline) => {
+      const received: string[][] = [];
+      const probes: string[][] = [];
+      class RecordingManager extends PhoneManager {
+        async getAndroidListedDeviceStates(ids: Iterable<string>): Promise<Map<string, string>> {
+          probes.push([...ids]);
+          // Return the full listing to exercise rejection of unrelated offline rows.
+          return new Map(this.androidListedDeviceStates);
+        }
+        async recoverAndroidOfflineDevices(ids: Iterable<string>): Promise<void> {
+          received.push([...ids]);
+        }
+      }
+      const h = await harness([USB, WIFI], new RecordingManager());
+      expect(h.canonical).toBe(USB);
+      h.manager.bootedDevices = [];
+      h.manager.androidListedDeviceStates = new Map([
+        [USB, "unauthorized"],
+        [WIFI, "authorizing"],
+        ...offline.map((id): [string, string] => [id, "offline"]),
+        ["192.168.1.99:40000", "offline"],
+      ]);
+      try {
+        await h.monitor.run();
+        expect(probes).toEqual([[USB, WIFI]]);
+        expect(received).toEqual([[...offline]]);
+        expect(h.daemon.offlineRecoveryAttemptedDeviceIds).toEqual(new Set([USB]));
+        expect([...h.daemon.offlineRecoveryAttemptedIncarnations.keys()]).toEqual([USB]);
+        expect([...h.daemon.offlineEpisodes.keys()]).toEqual([USB]);
+        expect(h.daemon.deviceDisconnectMisses.size).toBe(0);
+        await h.monitor.run();
+        expect(received).toEqual([[...offline]]);
+        expect(h.cleanups).toEqual([]);
+        expect(h.pool.getDevice(USB)?.sessionId).toBe("owner");
+        expect(h.timer.getSleepHistory()).toEqual([]);
+      } finally {
+        await h.monitor.stop();
+      }
+    },
+  );
+
   test.each(["offline", "authorizing"])(
     "USB unplugged while the Wi-Fi alias is %s keeps the session on the first sweep",
     async (state) => {

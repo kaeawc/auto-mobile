@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { UNSETTLED_EXECUTION_VETO_CEILING_MS } from "../../src/daemon/unsettledExecutionVeto";
+import { executionTracker } from "../../src/server/executionTracker";
 import {
   IDLE_WINDOW_MS,
   LivenessScenario,
@@ -36,6 +37,36 @@ afterEach(async () => {
 });
 
 describe("unsettled-execution veto across a wall-clock step (#11162)", () => {
+  test("stopping a scenario restores the process tracker's default session clock offset", async () => {
+    scenario = await LivenessScenario.start();
+    scenario.timer.simulateSleepCountingMonotonicClock();
+    scenario.timer.stepWallClock(HOUR_MS);
+
+    const sessionId = "clock-offset-probe-session";
+    const running = executionTracker.startExecution("probe", "conn-probe", sessionId);
+    try {
+      executionTracker.setExecutionDeadline(running.id, () => 1_000);
+      expect(
+        executionTracker.getLatestSessionExecutionDeadlineMs(sessionId, { onSessionClock: true }),
+      ).toBe(1_000 - HOUR_MS);
+    } finally {
+      executionTracker.endExecution(running.id);
+    }
+
+    await scenario.stop();
+    scenario = undefined;
+
+    const stopped = executionTracker.startExecution("probe", "conn-probe", sessionId);
+    try {
+      executionTracker.setExecutionDeadline(stopped.id, () => 1_000);
+      expect(
+        executionTracker.getLatestSessionExecutionDeadlineMs(sessionId, { onSessionClock: true }),
+      ).toBe(1_000);
+    } finally {
+      executionTracker.endExecution(stopped.id);
+    }
+  });
+
   test("a forward step does not release a silent owner's session mid-call; the call's end does", async () => {
     scenario = await LivenessScenario.start();
     // Where the monotonic clock runs through sleep (Linux, Windows) the session clock ignores a

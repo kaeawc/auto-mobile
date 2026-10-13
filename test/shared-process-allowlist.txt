@@ -254,7 +254,6 @@ test/daemon/toolCallDeviceIdentity.test.ts
 test/daemon/undeliveredRebindRevertsOverrides.test.ts
 test/daemon/undeliveredRebindStrandedByOwnRestore.test.ts
 test/daemon/unsettledExecutionVeto.test.ts
-test/daemon/unsettledExecutionVetoWallClockStep.test.ts
 test/daemon/videoRecordingSocketServerAuth.test.ts
 test/daemon/videoStreamDeviceResolution.test.ts
 test/daemon/videoStreamFraming.test.ts
@@ -1122,7 +1121,6 @@ test/utils/android-cmdline-tools/AndroidEmulatorClient-getBootedDevices.test.ts
 test/utils/android-cmdline-tools/AndroidEmulatorClient-heldStateProbeMissingAdb.test.ts
 test/utils/android-cmdline-tools/AndroidEmulatorClient-inventoryEnrichment.test.ts
 test/utils/android-cmdline-tools/AndroidEmulatorClient-killIdentity.test.ts
-test/utils/android-cmdline-tools/AndroidEmulatorClient-offlineRecovery.test.ts
 test/utils/android-cmdline-tools/AndroidEmulatorClient-readinessDiagnostics.test.ts
 test/utils/android-cmdline-tools/AndroidEmulatorClient-resolveRunningAvdName.test.ts
 test/utils/android-cmdline-tools/AndroidPrerequisiteDetector.test.ts

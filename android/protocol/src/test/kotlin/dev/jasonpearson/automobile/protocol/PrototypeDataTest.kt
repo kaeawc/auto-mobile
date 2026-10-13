@@ -492,6 +492,46 @@ class PrototypeDataTest {
   }
 
   @Test
+  fun `data resolved text is charged per repeat item`() {
+    val child = substitutionText("{data:/b}")
+    val root = buildJsonObject {
+      put("type", "column")
+      put(
+        "repeat",
+        buildJsonObject {
+          put("as", "i")
+          put("items", JsonArray(List(128) { buildJsonObject {} }))
+        },
+      )
+      put("children", JsonArray(listOf(child)))
+    }
+    val data = buildJsonObject { put("b", "x".repeat(16375)) }
+    assertSubstitutionValid(substitutionSpec(root, data = data))
+    val crossed = JsonObject(root + ("children" to JsonArray(listOf(child, child))))
+    assertEquals(
+      PrototypeSpecError("root.children[1].text", "Substituted text total limit exceeded"),
+      PrototypeRepeatValidator.validate(substitutionSpec(crossed, data = data)),
+    )
+  }
+
+  @Test
+  fun `literal text inside a repeat is not charged`() {
+    val child = substitutionText("x".repeat(16384))
+    val root = buildJsonObject {
+      put("type", "column")
+      put(
+        "repeat",
+        buildJsonObject {
+          put("as", "i")
+          put("items", JsonArray(List(128) { buildJsonObject {} }))
+        },
+      )
+      put("children", JsonArray(listOf(child, child)))
+    }
+    assertSubstitutionValid(substitutionSpec(root))
+  }
+
+  @Test
   fun `repeat total charges each item in order`() {
     val root = buildJsonObject {
       put("type", "column")

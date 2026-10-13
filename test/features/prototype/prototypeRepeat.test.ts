@@ -471,6 +471,46 @@ describe("substituted text total", () => {
     success: false,
     error: { path, message: "Substituted text total limit exceeded" },
   });
+  test.each([1, 2])("data-resolved text is charged per repeat item with %i fields", (count) => {
+    const input = {
+      ...spec(
+        list(
+          Array.from({ length: count }, () => text("{data:/b}")),
+          Array.from({ length: 128 }, () => ({})),
+          "i",
+        ),
+      ),
+      data: { b: "x".repeat(16375) },
+    };
+    const result = validatePrototypeSpec(input);
+    if (count === 1) {
+      expect(result.success).toBe(true);
+    } else {
+      expect(result).toEqual(totalError("root.children[1].text"));
+    }
+  });
+  test("literal text inside a repeat is not charged", () => {
+    const input = spec(
+      list(
+        [text("x".repeat(16384)), text("x".repeat(16384))],
+        Array.from({ length: 128 }, () => ({})),
+        "i",
+      ),
+    );
+    expect(validatePrototypeSpec(input).success).toBe(true);
+  });
+  test("data outside a repeat is charged once at the exact total", () => {
+    const input = JSON.parse(
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../fixtures/prototype-spec/valid/substituted-text-total-exact.json",
+        ),
+        "utf8",
+      ),
+    );
+    expect(validatePrototypeSpec(input).success).toBe(true);
+  });
   test("condition operands reach exactly the total", () => {
     const operand = { key: "k", equals: "{item.b}y" };
     const child = {

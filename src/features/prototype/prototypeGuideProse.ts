@@ -149,8 +149,9 @@ are rejected; a missing text path renders empty.
   \`Substituted text length limit exceeded\`.
   \`MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL\` (4194304) also bounds rebuilt text per validation: each
   recognized data stage and each repeat item charges authored stage length plus replacement length,
-  including literal units and placeholder tokens. Stages without placeholders and state placeholders
-  are not charged. Crossing the total fails at that field with \`Substituted text total limit exceeded\`.
+  including literal units and placeholder tokens. Inside a repeat, a data-resolved field is also
+  charged once per item, even without repeat placeholders. Purely literal fields and state
+  placeholders are not charged. Crossing the total fails at that field with \`Substituted text total limit exceeded\`.
   During state interpolation, a replacement that would exceed the per-call substitution limit stays
   as written, and later placeholders may still substitute.
 - A condition uses exactly one of \`key\`, \`data\`, \`all\`, \`any\`, \`not\`. A data condition has exactly

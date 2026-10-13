@@ -376,6 +376,7 @@ internal object PrototypeRepeatValidator {
     path: String,
     scope: Scope,
     state: RepeatState,
+    dataRecognized: Boolean,
   ): PrototypeSpecError? {
     val fields = mutableMapOf<String, Int>()
     var indices = 0
@@ -386,7 +387,7 @@ internal object PrototypeRepeatValidator {
         is PrototypeRepeatSegment.Literal -> Unit
       }
     }
-    if (indices == 0 && fields.isEmpty()) return null
+    if (!dataRecognized && indices == 0 && fields.isEmpty()) return null
     for ((index, item) in scope.items.withIndex()) {
       var length = indices.toLong() * index.toString().length
       if (length > PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH)
@@ -434,13 +435,18 @@ internal object PrototypeRepeatValidator {
     unknownField(authored, path, scope)?.let {
       return it
     }
+    var dataRecognized = false
     val resolved =
-      if (kind == PrototypeBindableKind.TEXT) state.data.text(text) { chargeText(state, it) }
+      if (kind == PrototypeBindableKind.TEXT)
+        state.data.text(text) {
+          dataRecognized = true
+          chargeText(state, it)
+        }
       else text
     if (resolved == null) return dataTextError(path, state)
     val segments =
       if (resolved == text) authored else PrototypeRepeatTemplate.segments(resolved, scope.alias)
-    repeatTextError(resolved, segments, path, scope, state)?.let {
+    repeatTextError(resolved, segments, path, scope, state, dataRecognized)?.let {
       return it
     }
     return when (kind) {

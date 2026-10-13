@@ -63,18 +63,22 @@ private struct PrototypeSubstitutionGuard {
         guard let authored = fields[key]?.stringValue else { return }
         let fieldPath = "\(path).\(key)"
         var bound = authored
+        var dataRecognized = false
         if text {
             let substitution = PrototypeDataText.substitutionLength(authored, data: data)
             if substitution.length > PrototypeLimits.maxSubstitutedTextLength {
                 throw PrototypeLimits.violation(fieldPath, "Substituted text length limit exceeded")
             }
             if substitution.recognized {
+                dataRecognized = true
                 try charge(authored.utf16.count + substitution.length, path: fieldPath)
                 // Outside a repeat no intermediate text needs to be built by this guard.
                 if scope != nil { bound = PrototypeDataText.bind(authored, data: data) }
             }
         }
-        if let scope { try repeatText(bound, path: fieldPath, scope: scope) }
+        if let scope {
+            try repeatText(bound, path: fieldPath, scope: scope, dataRecognized: dataRecognized)
+        }
     }
 
     private mutating func charge(_ length: Int, path: String) throws {
@@ -84,7 +88,9 @@ private struct PrototypeSubstitutionGuard {
         }
     }
 
-    private mutating func repeatText(_ text: String, path: String, scope: Scope) throws {
+    private mutating func repeatText(
+        _ text: String, path: String, scope: Scope, dataRecognized: Bool
+    ) throws {
         let segments = PrototypeRepeat.segments(text, alias: scope.alias)
         let counts = segments.reduce(into: (indices: 0, fields: [String: Int]())) { counts, segment in
             switch segment {
@@ -93,7 +99,7 @@ private struct PrototypeSubstitutionGuard {
             case .literal: break
             }
         }
-        guard counts.indices != 0 || !counts.fields.isEmpty else { return }
+        guard dataRecognized || counts.indices != 0 || !counts.fields.isEmpty else { return }
         let textLength = text.utf16.count
         for (index, item) in scope.items.enumerated() {
             var length = counts.indices * String(index).utf16.count

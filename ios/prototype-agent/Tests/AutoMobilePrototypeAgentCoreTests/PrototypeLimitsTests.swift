@@ -508,4 +508,47 @@ final class PrototypeLimitsTests: XCTestCase {
             try PrototypeLimits.guardSubstitutedText(literalRepeat(twice, items: [oversized]), data: nil)
         }
     }
+
+    func testSharedDataInRepeatTotalFixture() throws {
+        let wrapper = try JSONDecoder().decode(
+            JSONValue.self, from: data("invalid/substituted-text-total-data-in-repeat-limit.json")
+        )
+        guard case let .object(fields) = wrapper else { return XCTFail("Expected fixture object") }
+        let spec = try JSONEncoder().encode(XCTUnwrap(fields["spec"]))
+        let path = try XCTUnwrap(fields["expectedPath"]?.stringValue)
+        let message = try XCTUnwrap(fields["expectedMessage"]?.stringValue)
+        XCTAssertEqual(rejection(spec), "\(path): \(message)")
+    }
+
+    func testDataResolvedTextIsChargedPerRepeatItem() throws {
+        let child: JSONValue = .object(["type": .string("text"), "text": .string("{data:/b}")])
+        let data: [String: JSONValue] = ["b": .string(String(repeating: "x", count: 16375))]
+        guard case var .object(root) = literalRepeat(child, items: Array(repeating: .object([:]), count: 128)) else {
+            return XCTFail("Missing root")
+        }
+        try PrototypeLimits.guardSubstitutedText(.object(root), data: data)
+        root["children"] = .array([child, child])
+        assertLimit("root.children[1].text: Substituted text total limit exceeded") {
+            try PrototypeLimits.guardSubstitutedText(.object(root), data: data)
+        }
+    }
+
+    func testLiteralTextInsideARepeatIsNotCharged() throws {
+        let child: JSONValue = .object([
+            "type": .string("text"), "text": .string(String(repeating: "x", count: 16384)),
+        ])
+        guard case var .object(root) = literalRepeat(child, items: Array(repeating: .object([:]), count: 128)) else {
+            return XCTFail("Missing root")
+        }
+        root["children"] = .array([child, child])
+        try PrototypeLimits.guardSubstitutedText(.object(root), data: nil)
+    }
+
+    func testDataOutsideARepeatIsChargedOnceAtTheExactTotal() throws {
+        let spec = try JSONDecoder().decode(JSONValue.self, from: data("valid/substituted-text-total-exact.json"))
+        guard case let .object(fields) = spec, case let .object(data)? = fields["data"] else {
+            return XCTFail("Expected spec and data objects")
+        }
+        try PrototypeLimits.guardSubstitutedText(XCTUnwrap(fields["root"]), data: data)
+    }
 }

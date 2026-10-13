@@ -102,17 +102,21 @@ function repeatTextError(
   path: string,
   scope: Scope,
   state: RepeatState,
+  dataRecognized: boolean,
 ): RepeatError | undefined {
   const fields = new Map<string, number>();
   let indices = 0;
+  let recognized = dataRecognized;
   for (const segment of segments) {
     if (segment.kind === "index") {
+      recognized = true;
       indices++;
     } else if (segment.kind === "field") {
+      recognized = true;
       fields.set(segment.name, (fields.get(segment.name) ?? 0) + 1);
     }
   }
-  if (indices + fields.size === 0) {
+  if (!recognized) {
     return undefined;
   }
   for (let index = 0; index < scope.items.length; index++) {
@@ -170,13 +174,19 @@ function fieldError(
   if (unknown) {
     return unknown;
   }
+  let dataRecognized = false;
   const resolved =
-    kind === "text" ? state.data.text(value, (length) => chargeText(state, length)) : value;
+    kind === "text"
+      ? state.data.text(value, (length) => {
+          dataRecognized = true;
+          return chargeText(state, length);
+        })
+      : value;
   if (resolved === undefined) {
     return dataTextError(path, state);
   }
   const segments = resolved === value ? authored : templateSegments(resolved, scope.binding);
-  const repeated = repeatTextError(resolved, segments, path, scope, state);
+  const repeated = repeatTextError(resolved, segments, path, scope, state, dataRecognized);
   if (repeated) {
     return repeated;
   }

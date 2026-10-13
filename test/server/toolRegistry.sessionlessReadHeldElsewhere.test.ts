@@ -14,6 +14,7 @@ import { isSessionlessDeviceRead } from "../../src/features/toolSelection/toolSe
 import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
+import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
@@ -94,6 +95,7 @@ describe("a sessionless read never readies a device held outside this daemon's s
     devices = DeviceSessionManager.createInstance(
       new FakeDeviceClientProvider(adb, deviceUtils, new FakeSimctl() as unknown as SimCtlClient, {
         window,
+        ctrlProxyManager: new FakeCtrlProxyManager(),
       }),
       { create: () => adb },
       {

@@ -11,6 +11,8 @@
  * {@link runAsManagedSlotReconciler}, which the generic-exclusion guard accepts for this slot only.
  */
 
+import { AndroidEmulatorUnavailableError } from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
+import { SimctlUnavailableError } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import type { DeviceInfo } from "../../models";
 import {
   ProvisionDeviceError,
@@ -303,6 +305,14 @@ export class DeviceManagerSlotInventory implements ManagedSlotInventory {
       return { complete: true, devices };
     } catch (error) {
       options.signal?.throwIfAborted();
+      if (
+        (platform === "android" && error instanceof AndroidEmulatorUnavailableError) ||
+        (platform === "ios" && error instanceof SimctlUnavailableError)
+      ) {
+        // An optional platform's lister is expected to be absent on single-platform hosts.
+        logger.debug(`[ManagedSlots] ${platform} toolchain not installed: ${errorMessage(error)}`);
+        return { complete: false, devices: [], toolchain: "not_installed" };
+      }
       // Incomplete discovery is never authoritative absence; the reconciler refuses to act on it.
       logger.warn(
         `[ManagedSlots] ${platform} device inventory failed: ${errorMessage(error)}`,

@@ -1032,6 +1032,7 @@ export class Daemon {
     // Free-pool devices unadopted for an hour are shut down, image kept (#11337).
     this.freeDeviceReclaimer ??= this.freeDeviceReclaimerFactory({
       registry: () => this.openManagedSlotRegistry(),
+      journalFor: (registry) => this.managedSlotAcquisition?.journalFor(registry),
       registryExists: () => this.managedSlotRegistryExists(),
       pool: this.devicePool,
       executions: this.sessionManager,

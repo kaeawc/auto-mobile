@@ -769,7 +769,13 @@ export class ManagedSlotJournal {
     );
     return deletion.kind === "absent"
       ? this.completeFreeDeletion(row, signal)
-      : this.recordFreeDeletionFailure(row, "failed", deletion.message, signal);
+      : this.recordFreeDeletionFailure(
+          row,
+          "failed",
+          deletion.message,
+          signal,
+          deletion.nativeDeleteFailed,
+        );
   }
 
   /** Selection and claims can yield to an older daemon that ignores deletion markers. */
@@ -846,13 +852,13 @@ export class ManagedSlotJournal {
     kind: "blocked" | "failed",
     message: string,
     signal?: AbortSignal,
+    nativeDeleteFailed = false,
   ): Promise<FreeDeviceDeletionDriveResult> {
     checkCancellation(signal);
-    const recorded = await this.deps.registry.recordFreeDeviceDeletionAttempt(
-      row,
-      this.owner,
-      this.attemptAfter(row.deletion!, message),
-    );
+    const recorded = await this.deps.registry.recordFreeDeviceDeletionAttempt(row, this.owner, {
+      ...this.attemptAfter(row.deletion!, message),
+      nativeDeleteFailed,
+    });
     checkCancellation(signal);
     return recorded ? { kind, message } : { kind: "lost" };
   }
@@ -1690,7 +1696,7 @@ export class ManagedSlotJournal {
     target: Parameters<ManagedSlotDeviceDeleter["deleteAndVerifyAbsence"]>[0],
     cancel?: AbortSignal,
     hardDeadlineMs?: number,
-  ): Promise<ManagedSlotDeletionResult> {
+  ): Promise<ManagedSlotDeletionResult & { nativeDeleteFailed?: boolean }> {
     if (this.inFlight.removalBlocked(target.platform, target.stableId)) {
       return {
         kind: "failed",
@@ -1699,7 +1705,7 @@ export class ManagedSlotJournal {
     }
     let operation: Promise<ManagedSlotDeletionResult> | undefined;
     try {
-      return await this.boundedStage<ManagedSlotDeletionResult>(
+      const result = await this.boundedStage<ManagedSlotDeletionResult>(
         (signal) => {
           operation = this.inFlight.trackRemoval(target.platform, target.stableId, () =>
             this.deps.deleter.deleteAndVerifyAbsence({ ...target, signal }),
@@ -1718,6 +1724,7 @@ export class ManagedSlotJournal {
         },
         (error) => ({ kind: "failed", message: errorMessage(error) }),
       );
+      return { ...result, nativeDeleteFailed: operation !== undefined && result.kind !== "absent" };
     } finally {
       if (operation) {
         this.inFlight.markRemovalOverdue(operation, this.deps.timer.now());

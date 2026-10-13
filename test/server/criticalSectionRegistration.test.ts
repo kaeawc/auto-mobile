@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { registerMcpTools } from "../../src/server/index";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
@@ -12,42 +12,50 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
  * Pin both so neither can silently regress into the interactive tool surface.
  */
 describe("criticalSection / barrier registration + plan-only discovery gate", () => {
-  beforeEach(() => {
-    ToolRegistry.clearTools();
-  });
-
   afterAll(() => {
     // Leave a clean registry for any later suite in the same process.
     ToolRegistry.clearTools();
   });
 
-  test("stdio mode registers neither criticalSection nor barrier at all", () => {
-    registerMcpTools(false);
+  // Tests only read the registry (getTool, getToolForPlan, advertised names); nothing here mutates it, and Bun does not interleave another file's hooks/tests.
+  describe("stdio mode", () => {
+    beforeAll(() => {
+      ToolRegistry.clearTools();
+      registerMcpTools(false);
+    });
 
-    // Sanity: non-gated tools are present, so registration actually ran.
-    expect(ToolRegistry.getTool("observe")).toBeDefined();
+    test("stdio mode registers neither criticalSection nor barrier at all", () => {
+      // Sanity: non-gated tools are present, so registration actually ran.
+      expect(ToolRegistry.getTool("observe")).toBeDefined();
 
-    // Not registered in stdio mode — absent from both discovery and plan lookup.
-    expect(ToolRegistry.getTool("criticalSection")).toBeUndefined();
-    expect(ToolRegistry.getTool("barrier")).toBeUndefined();
-    expect(ToolRegistry.getToolForPlan("criticalSection")).toBeUndefined();
-    expect(ToolRegistry.getToolForPlan("barrier")).toBeUndefined();
+      // Not registered in stdio mode — absent from both discovery and plan lookup.
+      expect(ToolRegistry.getTool("criticalSection")).toBeUndefined();
+      expect(ToolRegistry.getTool("barrier")).toBeUndefined();
+      expect(ToolRegistry.getToolForPlan("criticalSection")).toBeUndefined();
+      expect(ToolRegistry.getToolForPlan("barrier")).toBeUndefined();
+    });
   });
 
-  test("daemon mode registers them plan-only: hidden from discovery, resolvable for plans", () => {
-    registerMcpTools(true);
+  describe("daemon mode", () => {
+    let advertised: string[];
+    beforeAll(() => {
+      ToolRegistry.clearTools();
+      registerMcpTools(true);
+      advertised = ToolRegistry.getToolDefinitions().map((t) => t.name);
+    });
 
-    // Hidden from normal MCP discovery (getTool honors the plan-only gate)...
-    expect(ToolRegistry.getTool("criticalSection")).toBeUndefined();
-    expect(ToolRegistry.getTool("barrier")).toBeUndefined();
+    test("daemon mode registers them plan-only: hidden from discovery, resolvable for plans", () => {
+      // Hidden from normal MCP discovery (getTool honors the plan-only gate)...
+      expect(ToolRegistry.getTool("criticalSection")).toBeUndefined();
+      expect(ToolRegistry.getTool("barrier")).toBeUndefined();
 
-    // ...and therefore absent from the advertised tools/list.
-    const advertised = ToolRegistry.getToolDefinitions().map((t) => t.name);
-    expect(advertised).not.toContain("criticalSection");
-    expect(advertised).not.toContain("barrier");
+      // ...and therefore absent from the advertised tools/list.
+      expect(advertised).not.toContain("criticalSection");
+      expect(advertised).not.toContain("barrier");
 
-    // ...but still resolvable for plan execution (they are planExecutable).
-    expect(ToolRegistry.getToolForPlan("criticalSection")).toBeDefined();
-    expect(ToolRegistry.getToolForPlan("barrier")).toBeDefined();
+      // ...but still resolvable for plan execution (they are planExecutable).
+      expect(ToolRegistry.getToolForPlan("criticalSection")).toBeDefined();
+      expect(ToolRegistry.getToolForPlan("barrier")).toBeDefined();
+    });
   });
 });

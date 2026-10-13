@@ -59,7 +59,7 @@ public struct ProbeSnapshot: Codable {
     public let discardedFlows: UInt64
     /// Version 2: the simulators the host allowed attribution to for this read-back.
     public let managedSimulators: [ManagedSimulator]?
-    /// Version 3: the leased rules the provider enforces right now (#10264).
+    /// Version 3 reports offline rules; version 4 also carries shaped configuration.
     public let rules: [NetworkRuleStatus]?
     public let flows: [ProbeFlow]
     public let limitations: [String]
@@ -68,13 +68,21 @@ public struct ProbeSnapshot: Codable {
 /// Flow-identity diagnostics. Rules are applied by `NetworkRuleStore` and
 /// `AppFlowPolicy`; this type only records and reports.
 public final class IdentityProbe {
-    /// Version 3 adds `rules` and the `app_offline` mode (#10264).
-    public static let version = 3
+    /// Version 4 carries shaped rules; version 3 read-backs omit them.
+    public static let version = 4
+    public static let supportedVersions = [3, 4]
     /// No rule is active: every flow is allowed.
     public static let allowOnlyMode = "allow_only"
     /// At least one leased per-app offline rule is active.
     public static let appOfflineMode = "app_offline"
-    public static let modes = [allowOnlyMode, appOfflineMode]
+    public static let appShapedMode = "app_shaped"
+    public static let appMixedMode = "app_mixed"
+    public static let modes = [allowOnlyMode, appOfflineMode, appShapedMode, appMixedMode]
+
+    public static func modes(for version: Int) -> [String] {
+        version == 3 ? [allowOnlyMode, appOfflineMode] : modes
+    }
+
     public static let capacity = 128
     private let resolver: ProbeIdentityResolver
     private let attributionResolver: SimulatorFlowResolver
@@ -108,7 +116,8 @@ public final class IdentityProbe {
     /// and every failed lookup, is reported as unattributed.
     public func snapshot(
         managedSimulators: [ManagedSimulator] = [],
-        rules: [NetworkRuleStatus] = []
+        rules: [NetworkRuleStatus] = [],
+        version: Int = IdentityProbe.version
     )
         -> ProbeSnapshot
     {
@@ -132,28 +141,43 @@ public final class IdentityProbe {
                 )
             )
         }
+        let offline = rules.filter { $0.condition == .offline }
+        let shapedCount = rules.count - offline.count
+        let visible = version == 3 ? offline : rules
+        let mode: String
+        if visible.isEmpty { mode = Self.allowOnlyMode }
+        else if shapedCount == 0 || version == 3 { mode = Self.appOfflineMode }
+        else { mode = offline.isEmpty ? Self.appShapedMode : Self.appMixedMode }
+        var limitations = Self.offlineLimitations
+        if version == 3, shapedCount > 0 {
+            limitations.append("Omitted \(shapedCount) shaped rule(s): contract version 3 supports only offline rules.")
+        } else if version == 4 {
+            limitations.append("Shaped rules are carried configuration; this build does not enforce them.")
+            limitations.append("No network effects have been verified against controlled traffic probes.")
+        }
         return ProbeSnapshot(
-            version: Self.version,
+            version: version,
             backend: "macos_network_extension",
-            mode: rules.isEmpty ? Self.allowOnlyMode : Self.appOfflineMode,
+            mode: mode,
             observedFlows: observedFlows,
             discardedFlows: discardedFlows,
             managedSimulators: managedSimulators,
-            rules: rules,
+            rules: visible,
             flows: flows,
-            limitations: [
-                "Simulator attribution methods are unverified on a signed run (#10263).",
-                "Offline rules drop new socket flows of one attributed app; established connections continue " +
-                    "until they close, and unattributed or conflicting flows are always allowed.",
-                "Flow history is attributed at read-back: a process that exited since its flow is reported " +
-                    "as unattributed. Offline verdicts are attributed when each flow arrives.",
-                "New socket flows only; non-socket traffic is not filtered.",
-                "Code metadata may be absent if a process exits before snapshot collection.",
-                "The newest 128 flow identities are retained; no payloads or network addresses are collected.",
-            ]
+            limitations: limitations
         )
     }
 
+    private static let offlineLimitations = [
+        "Simulator attribution methods are unverified on a signed run (#10263).",
+        "Offline rules drop new socket flows of one attributed app; established connections continue " +
+            "until they close, and unattributed or conflicting flows are always allowed.",
+        "Flow history is attributed at read-back: a process that exited since its flow is reported " +
+            "as unattributed. Offline verdicts are attributed when each flow arrives.",
+        "New socket flows only; non-socket traffic is not filtered.",
+        "Code metadata may be absent if a process exits before snapshot collection.",
+        "The newest 128 flow identities are retained; no payloads or network addresses are collected.",
+    ]
     private func identity(_ token: Data?) -> ProbeProcessIdentity? {
         token.map { ProbeProcessIdentity(auditToken: $0, code: resolver.resolve(auditToken: $0)) }
     }

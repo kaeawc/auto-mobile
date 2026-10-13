@@ -1,0 +1,114 @@
+[
+  {
+    "name": "idle",
+    "description": "Count frames rendered during three seconds with no input.",
+    "repeat": 1,
+    "settleMs": 600,
+    "steps": [],
+    "durationMs": 3000
+  },
+  {
+    "name": "tab-switch",
+    "description": "Switch all four state-selected tab bodies and return to Tab 1.",
+    "repeat": 5,
+    "settleMs": 600,
+    "steps": [
+      {
+        "tool": "tapOn",
+        "text": "Tab 2"
+      },
+      {
+        "tool": "tapOn",
+        "text": "Tab 3"
+      },
+      {
+        "tool": "tapOn",
+        "text": "Tab 4"
+      },
+      {
+        "tool": "tapOn",
+        "text": "Tab 1"
+      }
+    ]
+  },
+  {
+    "name": "section-collapse",
+    "description": "Collapse and reopen the forty-node section.",
+    "repeat": 4,
+    "settleMs": 600,
+    "steps": [
+      {
+        "tool": "tapOn",
+        "text": "Toggle section"
+      },
+      {
+        "tool": "tapOn",
+        "text": "Toggle section"
+      }
+    ]
+  },
+  {
+    "name": "pager-swipe",
+    "description": "Swipe the pager left and right.",
+    "repeat": 4,
+    "settleMs": 600,
+    "steps": [
+      {
+        "tool": "swipeOn",
+        "text": "Benchmark pager",
+        "direction": "left"
+      },
+      {
+        "tool": "swipeOn",
+        "text": "Benchmark pager",
+        "direction": "right"
+      }
+    ]
+  },
+  {
+    "name": "scroll",
+    "description": "Scroll the 150-row list down and back up.",
+    "repeat": 4,
+    "settleMs": 600,
+    "steps": [
+      {
+        "tool": "swipeOn",
+        "text": "Benchmark list",
+        "direction": "up"
+      },
+      {
+        "tool": "swipeOn",
+        "text": "Benchmark list",
+        "direction": "down"
+      }
+    ]
+  },
+  {
+    "name": "overlay-open",
+    "description": "Open and close the fullscreen overlay.",
+    "repeat": 1,
+    "settleMs": 600,
+    "steps": [
+      {
+        "tool": "tapOn",
+        "text": "Open overlay"
+      },
+      {
+        "tool": "tapOn",
+        "text": "Close overlay"
+      }
+    ]
+  },
+  {
+    "name": "three-write-tap",
+    "description": "Perform three state writes in one action list.",
+    "repeat": 5,
+    "settleMs": 600,
+    "steps": [
+      {
+        "tool": "tapOn",
+        "text": "three-write tap"
+      }
+    ]
+  }
+]

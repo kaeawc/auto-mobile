@@ -1,0 +1,1 @@
+{"detail":"Provider answered apply: invalid_shaping.","rule":{"outcome":"invalid_shaping","rejection":{"component":"latency","reason":"out_of_range"}},"state":"ready","version":4}

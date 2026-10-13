@@ -16,7 +16,7 @@ integration evidence from the signed run (#10263).
   Controller output distinguishes `installation_required`, `approval_required`,
   `unavailable`, and `ready`. Ready means the provider replied over
   authenticated XPC, not that any traffic behavior has been verified.
-- Version 3 Codable/XPC snapshots and rule commands (version 1 and 2
+- Version 4 Codable/XPC snapshots and rule commands, negotiating version 3 by default (version 1 and 2
   snapshots still decode).
   Both peers require an Apple-signed executable with the expected bundle
   identifier and their own signing team.
@@ -161,7 +161,7 @@ After placing the signed app in `/Applications`, invoke its executable:
 "/Applications/AutoMobile Network Identity Probe.app/Contents/MacOS/network-filter-controller" snapshot
 ```
 
-### Controller JSON contract (version 3)
+### Controller JSON contract (versions 3 and 4)
 
 Every command prints exactly one line of JSON on stdout, then exits. The daemon
 runs the installed controller as a subprocess and parses this line
@@ -170,16 +170,62 @@ the provider, which only accepts peers signed by its own team. The types live in
 `Sources/NetworkFilterCore/ControllerContract.swift`.
 
 ```json
-{"detail":"…","snapshot":{…},"state":"ready","version":2}
+{"detail":"…","snapshot":{…},"state":"ready","version":3}
 ```
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `version` | integer | `ControllerContract.version`, currently `3` (version 2 added attribution; version 3 adds the rule commands, `rule`, and the snapshot's `rules`; there is no fallback). Bump it whenever a field changes meaning or a required field is added or removed; the daemon reports any other version as `unavailable`. It is independent of the snapshot's own `version`. |
+| `version` | integer | Negotiated invocation version: newest `4`, supported `[3, 4]`, default `3`. The unchanged daemon understands only `3` and reports any other version as `unavailable`. The provider snapshot must carry the same negotiated version. |
 | `state` | string | `installation_required`, `approval_required`, `unavailable`, or `ready`. |
 | `detail` | string | Human-readable reason or next step. |
-| `snapshot` | object, optional | `status`/`snapshot` when `ready`: the provider's snapshot, with its own `version`, its `mode` (`allow_only` or `app_offline`) and the active `rules`. |
-| `rule` | object, optional | `apply`/`reset`/`renew` when `ready`: the provider's definitive `outcome`, `installedRevision` and `leaseRemainingMilliseconds`. Absent whenever the outcome is unknown. |
+| `snapshot` | object, optional | `status`/`snapshot` when `ready`: the provider's snapshot, with its own `version`, its `mode` (`allow_only` or `app_offline` in version 3; also `app_shaped` and `app_mixed` in version 4) and the visible active `rules`. |
+| `rule` | object, optional | `apply`/`reset`/`renew` when `ready`: the provider's definitive `outcome`, `installedRevision` and `leaseRemainingMilliseconds`; version 4 can also carry a `shaping` resolution or an `invalid_shaping` rejection. Absent whenever the outcome is unknown. |
+
+Every command accepts `--contract-version <n>` only immediately after its name:
+`network-filter-controller <command> --contract-version <n> …`. The value must
+be exactly `3` or `4`. Omitting it uses version 3, so the version-3 host works
+unchanged with a controller built from this package. Explicit version 3 is
+byte-compatible with the previous encoder. A missing, malformed or unsupported
+value prints one version-4 `unavailable` line naming supported versions and exits 2.
+The detail retains the historical wording "Invalid or repeated --contract-version"
+for fixture compatibility. A later occurrence is passed unchanged to the command's
+parser, as a value where expected or its usual unexpected argument error; it does
+not negotiate or count as repeated negotiation. All other endings, including
+argument errors, installation requirements and the 8-second timeout, carry the
+negotiated version. The controller passes that version over XPC; the provider
+accepts 3 and 4.
+
+In this build, version-3 `activate` ignores trailing arguments; version-4
+`activate` rejects any arguments after the negotiation pair with an `activate`
+usage error. An installed version-3 controller rejects `--contract-version 4`
+as an unknown flag for `status`, `snapshot`, `apply`, `reset` and `renew`, printing
+its own version-3 `unavailable` line. Its `activate` instead ignores the arguments,
+performs activation and answers with version-3 lines. A host that needs version 4
+must check the version of every returned line and never assume the flag was honoured.
+
+Version-3 snapshots omit shaped rules, use only `allow_only`/`app_offline`, and
+append one limitation stating the omitted count and that version 3 supports only
+offline rules. Version-3 XPC shaped commands return `invalid_command`.
+
+Version-4 `apply` accepts `--delay-ms <n>`, `--down-kbps <n>`, `--up-kbps <n>`
+and `--packet-loss-percent <x>`. Any one flag makes a shaped request, with omitted
+values zero; no shaping flags means offline. Reset/renew, repeated flags and
+non-numeric values reject these flags. Version 3 rejects them with an argument
+error requiring `--contract-version 4`. Integral fields use unsigned integers;
+loss accepts finite decimals. Range and applicability validation belongs to the
+provider, never the controller.
+
+The wire condition remains `"condition":"offline"` with no `shaping` sibling,
+or `"condition":"shaped"` with a required `shaping` sibling. Commands carry the
+unresolved `ShapingRequest`; statuses and shaped applied results carry a
+`ShapingResolution` with `profile`, `applied` and `unapplied` component arrays.
+Profile field names state directional milliseconds and bytes per second.
+`applied` names effects accepted into configuration, not behavior verified by
+traffic. Non-zero loss remains `unapplied:["packetLoss"]`: consumers must report
+that fidelity gap as partial. Missing/invalid shaped siblings fail decoding.
+`invalid_shaping` carries either `rejection:{"reason":"out_of_range","component":"latency"}`
+(or the rejected component), or `rejection:{"reason":"nothing_to_apply","unapplied":["packetLoss"]}`
+(the array is empty for an all-zero request). Rejections leave state unchanged.
 
 Commands: `activate`, `status`, `snapshot` (`status` and `snapshot` are
 read-only and take repeatable `--managed <device-set-path> <udid>` pairs naming
@@ -258,6 +304,148 @@ For each native test, retain provider snapshots and fixture observations with
 the simulator IDs, process generations, request/revision, expected behavior,
 observed result, and host/control-plane health. Successful diagnostic unit tests
 are not native isolation evidence. Do not close #6298 on this preparation alone.
+
+## Shaping core (#10265, carried but not enforced)
+
+`NetworkFilterCore` contains a Foundation-only `ShapingProfile` and `FlowShaper`.
+The controller and version-4 XPC contract now carry shaping requests and
+resolutions, and `NetworkRuleStore` can carry resolved profiles when constructed
+with `supportsShaping: true`. The store is a `ShapingRuleSource`, tested together
+with the scheduler using a fake monotonic clock. Shaped rules share offline's
+ownership/generation/revision fencing, capacity, renewal, expiry and tombstones.
+Identical apply redelivery refreshes the lease; a differing condition or request
+at the installed revision returns `invalid_command`. Newer revisions can replace
+offline with shaped configuration or vice versa. Drop evaluation and commit only
+consider offline rules: a shaped rule alone never performs attribution lookups.
+
+The provider uses the default `supportsShaping: false`. It refuses every shaped
+apply with `unsupported_condition` before validation, lease sweeping or any
+mutation; it never reports a shaped apply as applied. A shaping-capable store
+resolves requests in the provider-side Core and reports `invalid_shaping` when
+out of range or nothing is applicable. The scheduler is still unwired to provider
+data callbacks and timers. No shaping is enforced by this build, and no network
+effects have been verified against controlled traffic; configuration acknowledgements
+are not traffic evidence. The native isolation gate above still applies.
+
+Outbound means app to remote (upload); inbound means remote to app (download).
+One target is one app on one simulator (`NetworkRuleTarget`). Host requests use
+added **round-trip** integral milliseconds (0...4000), integral decimal kilobits
+per second (1000 bits; zero is unlimited, otherwise 8...1000000), and finite
+loss percent (0...100, including fractional values).
+Resolution splits delay into outbound `ceil(delay/2)` and inbound the remainder,
+and converts each rate to bytes per second with `kbit/s * 125`. Profiles validate
+both construction and decoding: each directional delay is 0...2000 ms, each
+optional directional rate is 1000...125000000 bytes/s, and at least one effect
+is required. Non-zero packet loss is always reported as unapplied; a content
+filter drop cannot prove packet-loss emulation. Loss-only and all-zero requests
+are rejected, and out-of-range components are named in the rejection.
+
+All flows of a target share one reservation timeline **per direction**; upload
+and download budgets are independent. For a rate-limited stream, one grant is
+`min(availableBytes, clamp(rate/10, 1...1048576))` bytes (at most 100 ms of
+budget). Unlimited directions do not clamp grant size. Granted datagrams are
+always whole and charged in full. Directional data peek windows use that quantum, or
+65536 bytes for an unlimited direction. New-flow verdicts have a single peek
+value, so they use the smallest shaped directional quantum. FIFO reservation
+order lets concurrent transfers share the aggregate rate without multiplying it.
+
+For every rate-limited grant, `slotStart = max(now, nextFree)` and
+`nextFree = slotStart + ceil(bytes * 1e9 / rate)`. Integer arithmetic rounds up
+and uses full-width multiplication/division; unrepresentable times saturate,
+and an exhausted timeline or unrepresentable delay deadline drops further work
+rather than wrapping into an early release. Idle time or sleep earns no budget
+credit: the first slot is available immediately and the next waits a full slot.
+Backwards clock readings are clamped to the last observed reading, so time never underflows.
+
+Latency is a **burst-start hold**, per flow and direction: first data, or data
+after neither arrival nor release for at least the profile's smallest non-zero
+directional delay, receives that direction's hold. Continuous chunks are not
+held again. Direction activity is recorded only for granted or reserved data,
+never for a dropped callback. Known limitation: the burst-start hold repeats on
+every request/response exchange only when the profile delays both directions
+(as `ShapingProfile.resolve` produces for any delay of 2 ms or more) or the
+exchange period is at least the quiet gap; a profile that delays a single
+direction holds a fast ping-pong once. New stream connections additionally hold
+their new-flow verdict for one added round trip; datagram new-flow verdicts are not held.
+`releaseAt = max(now + hold, slotStart)`; charging the timeline at `slotStart`
+allows another flow's slot to proceed while this flow is still held.
+
+For any window of duration T on a rate-limited target/direction, released bytes
+are bounded by `rate * (T + directional delay) + (1 + D) grants`; cumulatively from rule
+start the bound is `rate * T + (1 + D) grants`. For differently sized datagrams,
+use the largest grant in the relevant release/reservation history as the grant
+size. D counts debt releases in that window: an old paused decision settled
+under a different ticket, or an unexpected data callback while already paused.
+Each immediately passes one grant and advances the current timeline by its full
+duration. The bound is at most one callback debt release per outstanding pause,
+plus one debt release per paused data decision settled under a different ticket.
+These releases are visible in `debtReleases`; when D is zero the bound has
+exactly one grant of slack. Counters reset on ticket changes, so measuring D
+across replacements requires accumulating the observed tickets' debt releases.
+
+The caller owns one timer per pause and calls `resume` at its deadline. The
+non-optional `ResumeOutcome` distinguishes `.settled(ResumeDecision)` (apply the
+verdict once), `.alreadySettled` (no outstanding matching pause: settled, foreign
+or unknown token), and `.notDue(resumeAtNanoseconds:)` (same-ticket pause still
+pending: call again at that deadline). Resume verdicts cannot contain another
+pause. For an outstanding pause that has not latched allow, resume re-reads the
+rule: no rule allows and forgets the flow; a due same-ticket pause releases its
+reservation; a different ticket discards the old decision and immediately
+passes bytes re-clamped to the current stream quantum, charged as debt with no
+new hold (or filters a paused new flow under the current profile). A due pause,
+replacement or removed rule always settles; if the current timeline cannot be
+created at capacity, resume settles with allow and forgets the flow.
+
+A ticket change inherits each direction's `nextFree` from the previous target
+timeline and resets counters; a direction that is no longer rate-limited ignores
+its inherited budget. Replacements therefore earn no fresh first slot.
+Same-ticket lease renewals preserve both budgets and counters. A timeline pruned
+because its target had no rule starts fresh if that target is later admitted.
+Data callbacks also re-check the rule. Once allow is returned for a tracked
+flow, subsequent data decisions can only allow: an unpaused flow is forgotten
+immediately, while a paused flow retains an allow latch and its token until
+`resume`, `settleStale`, `flowEnded` or `removeAll` settles it with allow and
+forgets it, regardless of any intervening rule installation. Reset, replacement
+or a latched allow can settle before the deadline. Rule-source lock order is
+**shaper lock, then rule source**; the source must never call back into the shaper.
+
+An unexpected callback while paused never adds a second pause: at most one
+positive callback passes one grant as debt and leaves the original pause valid,
+across both directions and intervening ticket changes. A second positive
+callback drops, counts an over-budget drop, and forgets the flow; its old token
+then returns `.alreadySettled`. Empty/negative available-byte callbacks pass
+zero with the directional peek window and no charge, and do not consume this
+debt allowance; callbacks while paused are still counted. An allow latch takes
+precedence over all of these data decisions. No payload data is buffered.
+Each flow retains at most one reservation and one timer token. Stream waits are
+limited to 30 seconds; datagram waits to 8 seconds, below Apple's ten-second UDP
+pause limit. A longer required pause drops without reserving or charging bytes.
+A positive rate-limited datagram data callback also drops, uncharged and counted
+as over-budget, when its own `ceil(bytes * 1e9 / rate)` exceeds 8 seconds, even on an idle timeline
+or during a pause. Exactly 8 seconds of budget is permitted.
+The 256-flow cap and stream quantum bound normal stream waits below 30 seconds
+only when no datagram flow shares that target's direction; a wait above the
+limit drops the flow. Every data drop forgets the flow and invalidates its
+outstanding pause, with no activity or charge from the rejected callback;
+charges from previously accepted grants remain on the shared timeline.
+
+There are at most 256 tracked flows and 64 timelines. At flow capacity, admission
+evicts the least recently active unpaused flow idle for at least 60 seconds
+(UUID order breaks ties); otherwise it drops and counts a refusal. At timeline
+capacity, it prunes targets without a rule before refusing a new target. Data
+for an unknown/ended/evicted flow allows and increments the separate
+`untrackedDataCallbacks` accessor. Refused-only targets have a bounded 64-entry
+FIFO diagnostic history, migrated into their timeline if subsequently admitted.
+
+`settleStale` allows paused flows with no current rule or with an allow latch,
+and prunes timelines of targets without a rule. `flowEnded` and `removeAll` also
+settle outstanding pauses with allow; all return settlements exactly once, and stale sweeps and provider-stop results
+are sorted by ascending pause ID. A resume of an already settled pause returns
+`.alreadySettled`. Stop clears flows, timelines and counters, but pause IDs and the clock clamp persist
+so old tokens cannot match new work. Codable status is sorted by device set,
+simulator UDID and bundle ID, and reports the current ticket, tracked/paused
+flows, directional bytes and held bursts, over-budget drops, refusals, paused
+callbacks and debt releases.
 
 ## References
 

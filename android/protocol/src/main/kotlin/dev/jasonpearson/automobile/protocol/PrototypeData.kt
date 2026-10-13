@@ -27,19 +27,19 @@ object PrototypeDataPointer {
     if (!isValid(pointer)) return null
     var value: JsonElement? = data
     for (token in tokens(pointer)) {
-      value = when (val current = value) {
-        is JsonObject -> current[token]
-        is JsonArray -> arrayIndex(token)?.let { current.getOrNull(it) }
-        else -> null
-      }
+      value =
+        when (val current = value) {
+          is JsonObject -> current[token]
+          is JsonArray -> arrayIndex(token)?.let { current.getOrNull(it) }
+          else -> null
+        }
     }
     return value
   }
 
   private fun arrayIndex(token: String): Int? =
     if (
-      token == "0" ||
-        (token.isNotEmpty() && token[0] in '1'..'9' && token.all { it in '0'..'9' })
+      token == "0" || (token.isNotEmpty() && token[0] in '1'..'9' && token.all { it in '0'..'9' })
     )
       token.toIntOrNull()
     else null
@@ -48,7 +48,8 @@ object PrototypeDataPointer {
 /** Shared projection and scalar semantics; rendering is the existing repeat renderer. */
 internal object PrototypeDataValues {
   fun isScalar(value: JsonElement?): Boolean =
-    value is JsonPrimitive && value != JsonNull &&
+    value is JsonPrimitive &&
+      value != JsonNull &&
       (value.isString || value.booleanOrNull != null || value.doubleOrNull?.isFinite() == true)
 
   fun project(item: JsonObject): JsonObject =
@@ -91,7 +92,10 @@ internal object PrototypeDataValues {
   ): Boolean {
     val left = (value as? JsonPrimitive)?.takeUnless { it.isString }?.doubleOrNull
     val right = (operand as? JsonPrimitive)?.takeUnless { it.isString }?.doubleOrNull
-    return left != null && right != null && left.isFinite() && right.isFinite() &&
+    return left != null &&
+      right != null &&
+      left.isFinite() &&
+      right.isFinite() &&
       comparison(left, right)
   }
 }
@@ -134,14 +138,17 @@ internal object PrototypeDataText {
 object PrototypeDataResolver {
   fun resolveRoot(root: JsonObject, data: JsonObject?): JsonObject {
     val own = textFields(root, data)
-    val resolved = JsonObject(own.mapValues { (key, value) ->
-      when (key) {
-        "repeat" -> resolveRepeat(value, data)
-        "visibleWhen" -> resolveCondition(value, data)
-        "styleWhen" -> resolveStyles(value, data)
-        else -> value
-      }
-    })
+    val resolved =
+      JsonObject(
+        own.mapValues { (key, value) ->
+          when (key) {
+            "repeat" -> resolveRepeat(value, data)
+            "visibleWhen" -> resolveCondition(value, data)
+            "styleWhen" -> resolveStyles(value, data)
+            else -> value
+          }
+        },
+      )
     return mapChildren(resolved) { resolveRoot(it, data) }
   }
 
@@ -158,8 +165,12 @@ object PrototypeDataResolver {
     val source = repeat["items"] as? JsonObject ?: return value
     val pointer = (source["path"] as? JsonPrimitive)?.content.orEmpty()
     val array = PrototypeDataPointer.resolve(data, pointer) as? JsonArray
-    val items = array.orEmpty().filterIsInstance<JsonObject>()
-      .take(PrototypeSpecValidator.maxRepeatItems).map(PrototypeDataValues::project)
+    val items =
+      array
+        .orEmpty()
+        .filterIsInstance<JsonObject>()
+        .take(PrototypeSpecValidator.maxRepeatItems)
+        .map(PrototypeDataValues::project)
     return JsonObject(repeat + ("items" to JsonArray(items)))
   }
 
@@ -169,23 +180,27 @@ object PrototypeDataResolver {
       val form = if (PrototypeDataValues.holds(condition, data)) "all" else "any"
       return buildJsonObject { put(form, JsonArray(emptyList())) }
     }
-    return JsonObject(condition.mapValues { (key, member) ->
-      when (key) {
-        "not" -> resolveCondition(member, data)
-        "all",
-        "any" -> JsonArray((member as? JsonArray).orEmpty().map { resolveCondition(it, data) })
-        else -> member
-      }
-    })
+    return JsonObject(
+      condition.mapValues { (key, member) ->
+        when (key) {
+          "not" -> resolveCondition(member, data)
+          "all",
+          "any" -> JsonArray((member as? JsonArray).orEmpty().map { resolveCondition(it, data) })
+          else -> member
+        }
+      },
+    )
   }
 
   private fun resolveStyles(value: JsonElement, data: JsonObject?): JsonElement =
-    JsonArray((value as? JsonArray).orEmpty().map { entry ->
-      val style = entry as? JsonObject
-      val condition = style?.get("when")
-      if (style == null || condition == null) entry
-      else JsonObject(style + ("when" to resolveCondition(condition, data)))
-    })
+    JsonArray(
+      (value as? JsonArray).orEmpty().map { entry ->
+        val style = entry as? JsonObject
+        val condition = style?.get("when")
+        if (style == null || condition == null) entry
+        else JsonObject(style + ("when" to resolveCondition(condition, data)))
+      },
+    )
 
   private fun textFields(node: JsonObject, data: JsonObject?): JsonObject {
     val replacements = mutableMapOf<String, JsonElement>()
@@ -205,48 +220,68 @@ object PrototypeDataResolver {
     value: JsonElement,
     path: String,
     replacements: Map<String, JsonElement>,
-  ): JsonElement = replacements[path] ?: when (value) {
-    is JsonObject ->
-      JsonObject(value.mapValues { (key, member) ->
-        replaceFields(member, "$path.$key", replacements)
-      })
-    is JsonArray ->
-      JsonArray(value.mapIndexed { index, member ->
-        replaceFields(member, "$path[$index]", replacements)
-      })
-    else -> value
-  }
+  ): JsonElement =
+    replacements[path]
+      ?: when (value) {
+        is JsonObject ->
+          JsonObject(
+            value.mapValues { (key, member) ->
+              replaceFields(member, "$path.$key", replacements)
+            },
+          )
+        is JsonArray ->
+          JsonArray(
+            value.mapIndexed { index, member ->
+              replaceFields(member, "$path[$index]", replacements)
+            },
+          )
+        else -> value
+      }
 
   private fun mapChildren(node: JsonObject, transform: (JsonObject) -> JsonObject): JsonObject {
     val child = node["child"] as? JsonObject
     if (child != null) return JsonObject(node + ("child" to transform(child)))
     val children = node["children"] as? JsonArray ?: return node
-    return JsonObject(node + ("children" to JsonArray(children.map { entry ->
-      if (entry is JsonObject) transform(entry) else entry
-    })))
+    return JsonObject(
+      node +
+        ("children" to
+          JsonArray(
+            children.map { entry ->
+              if (entry is JsonObject) transform(entry) else entry
+            },
+          )),
+    )
   }
 
   private fun conditionBound(value: JsonElement?): Boolean {
     val condition = value as? JsonObject ?: return false
-    return condition.containsKey("data") || conditionBound(condition["not"]) ||
+    return condition.containsKey("data") ||
+      conditionBound(condition["not"]) ||
       listOf("all", "any").any { form ->
         (condition[form] as? JsonArray).orEmpty().any(::conditionBound)
       }
   }
 
   private fun hasBindings(node: JsonObject): Boolean {
-    val textBound = PrototypeBindableFields.first<Boolean>(node, "") { value, _, kind ->
-      val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content
-      if (kind == PrototypeBindableKind.TEXT && text?.let(PrototypeDataText::hasBinding) == true) true
-      else null
-    } == true
-    val stylesBound = (node["styleWhen"] as? JsonArray).orEmpty().any {
-      conditionBound((it as? JsonObject)?.get("when"))
-    }
-    val own = (node["repeat"] as? JsonObject)?.get("items") is JsonObject || textBound ||
-      conditionBound(node["visibleWhen"]) || stylesBound
+    val textBound =
+      PrototypeBindableFields.first<Boolean>(node, "") { value, _, kind ->
+        val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content
+        if (kind == PrototypeBindableKind.TEXT && text?.let(PrototypeDataText::hasBinding) == true)
+          true
+        else null
+      } == true
+    val stylesBound =
+      (node["styleWhen"] as? JsonArray).orEmpty().any {
+        conditionBound((it as? JsonObject)?.get("when"))
+      }
+    val own =
+      (node["repeat"] as? JsonObject)?.get("items") is JsonObject ||
+        textBound ||
+        conditionBound(node["visibleWhen"]) ||
+        stylesBound
     val child = node["child"] as? JsonObject
-    val nested = if (child != null) hasBindings(child)
+    val nested =
+      if (child != null) hasBindings(child)
       else
         (node["children"] as? JsonArray).orEmpty().filterIsInstance<JsonObject>().any(::hasBindings)
     return own || nested

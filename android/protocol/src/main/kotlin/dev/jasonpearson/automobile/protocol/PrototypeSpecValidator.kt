@@ -55,9 +55,22 @@ object PrototypeSpecValidator {
   val MAX_PROTOTYPE_DATA_ARRAY_ITEMS: Int = limit("MAX_PROTOTYPE_DATA_ARRAY_ITEMS")
   val MAX_PROTOTYPE_DATA_POINTER_LENGTH: Int = limit("MAX_PROTOTYPE_DATA_POINTER_LENGTH")
   internal val maxRepeatItems: Int =
-    definitions.getValue("repeat").jsonObject.getValue("fields").jsonObject
-      .getValue("items").jsonObject.getValue("rule").jsonObject.getValue("options").jsonArray
-      .first { it.jsonObject.text("kind") == "array" }.jsonObject.getValue("max").jsonPrimitive.int
+    definitions
+      .getValue("repeat")
+      .jsonObject
+      .getValue("fields")
+      .jsonObject
+      .getValue("items")
+      .jsonObject
+      .getValue("rule")
+      .jsonObject
+      .getValue("options")
+      .jsonArray
+      .first { it.jsonObject.text("kind") == "array" }
+      .jsonObject
+      .getValue("max")
+      .jsonPrimitive
+      .int
   val nodeTypes: Set<String> = variants("node")
   val actionTypes: Set<String> = variants("action")
   val placementTypes: Set<String> = variants("placement")
@@ -496,7 +509,11 @@ object PrototypeSpecValidator {
       val fields = names.jsonArray.map { it.jsonPrimitive.content }
       val present = fields.filter { data.containsKey(it) }
       if (trigger.split("|").none { data.containsKey(it) }) {
-        if (present.isNotEmpty()) return fail(keyPath(path, present.first()), "Requires ${trigger.split("|").joinToString(" or ")}")
+        if (present.isNotEmpty())
+          return fail(
+            keyPath(path, present.first()),
+            "Requires ${trigger.split("|").joinToString(" or ")}",
+          )
       } else if (present.size != 1) {
         return fail(
           keyPath(path, present.getOrNull(1) ?: fields.first()),

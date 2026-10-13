@@ -385,10 +385,13 @@ internal object PrototypeRepeatValidator {
     val repeat = node["repeat"] as? JsonObject ?: return null
     val alias = repeat.text("as") ?: return null
     val source = repeat["items"] as? JsonObject
-    val resolved = source?.text("path")?.let { PrototypeDataPointer.resolve(data, it) }
-      ?: repeat["items"]
-    val items = (resolved as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
-      .map { if (source != null) PrototypeDataValues.project(it) else it }
+    val resolved =
+      source?.text("path")?.let { PrototypeDataPointer.resolve(data, it) } ?: repeat["items"]
+    val items =
+      (resolved as? JsonArray)
+        .orEmpty()
+        .mapNotNull { it as? JsonObject }
+        .map { if (source != null) PrototypeDataValues.project(it) else it }
     return Scope(path, alias, items, source != null)
   }
 
@@ -400,8 +403,9 @@ internal object PrototypeRepeatValidator {
     val source = (node["repeat"] as? JsonObject)?.get("items") as? JsonObject ?: return null
     val pointer = source.text("path") ?: return null
     val at = "$path.repeat.items.path"
-    val items = PrototypeDataPointer.resolve(data, pointer) as? JsonArray
-      ?: return fail(at, "Repeat path does not resolve to an array")
+    val items =
+      PrototypeDataPointer.resolve(data, pointer) as? JsonArray
+        ?: return fail(at, "Repeat path does not resolve to an array")
     val maximum = PrototypeSpecValidator.maxRepeatItems
     if (items.size > maximum) return fail(at, "Repeat path resolves to more than $maximum items")
     val invalid = items.indexOfFirst { it !is JsonObject }
@@ -439,7 +443,9 @@ internal object PrototypeRepeatValidator {
     }
     val own = if (scope != null) checkOwnFields(node, path, scope) else checkLiteralKeys(node, path)
     if (own != null) return own
-    repeatSourceError(node, path, data)?.let { return it }
+    repeatSourceError(node, path, data)?.let {
+      return it
+    }
     val ownScope = scopeOf(node, path, data)
     val childScope = ownScope ?: scope
     for (child in childrenOf(node, path)) {

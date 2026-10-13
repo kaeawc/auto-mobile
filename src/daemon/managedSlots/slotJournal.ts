@@ -726,7 +726,7 @@ export class ManagedSlotJournal {
           expectedPhase: "deleting",
           phase: "deleting",
           assignment: { kind: "state", expected: entry.binding, state: "cleanup_pending" },
-          attempt: this.attemptAfter(entry, deletion.message),
+          attempt: this.attemptAfter(entry, deletion.message, this.entryRemovalInFlight(entry)),
         },
         signal,
       );
@@ -1341,25 +1341,30 @@ export class ManagedSlotJournal {
         expectedPhase: entry.phase,
         phase,
         ...(target ? { target } : {}),
-        attempt: this.attemptAfter(entry, message),
+        attempt: this.attemptAfter(entry, message, this.entryRemovalInFlight(entry)),
       },
       signal,
     );
     return blocked(recorded.kind === "advanced" ? recorded.entry : entry, reason, message);
   }
 
+  private entryRemovalInFlight(entry: SlotJournalEntry): boolean {
+    return (
+      this.inFlight.hasRemoval(entry.platform, entry.target.oldStableId ?? "") ||
+      this.inFlight.hasRemoval(journalCreationPlatform(entry), entry.target.newStableId ?? "")
+    );
+  }
+
   private attemptAfter(
     entry: Pick<SlotJournalEntry, "attempts">,
     error: string,
+    removalInFlight = false,
   ): { error: string; nextAttemptAtMs: number } {
     return {
       error,
       nextAttemptAtMs:
         this.deps.timer.now() +
-        (this.inFlight.hasRemoval(entry.platform, entry.target.oldStableId ?? "") ||
-        this.inFlight.hasRemoval(journalCreationPlatform(entry), entry.target.newStableId ?? "")
-          ? 0
-          : this.backoff.delayForAttempt(entry.attempts + 1)),
+        (removalInFlight ? 0 : this.backoff.delayForAttempt(entry.attempts + 1)),
     };
   }
 

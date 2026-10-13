@@ -40,7 +40,7 @@ export const MANAGED_SLOT_CONFIG_ENV = "AUTOMOBILE_MANAGED_SLOT_CONFIG";
 /** Initial support is exactly one slot and one device per group. */
 export const MAX_MANAGED_SLOT_GROUP_SIZE = 1;
 
-/** The 2-minute default; a trusted config may lengthen but never shorten the idle window. */
+/** Stored 2-minute default; validated overrides remain accepted but never end a live-owned execution. */
 export const MIN_MANAGED_SLOT_IDLE_TIMEOUT_MS = MIN_CONFIGURED_SESSION_IDLE_TIMEOUT_MS;
 export const MAX_MANAGED_SLOT_IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 
@@ -105,6 +105,7 @@ export const managedSlotConfigSchema = z
       .positive()
       .max(MAX_PROVISION_DEVICE_TIMEOUT_MS)
       .optional(),
+    /** Stored/reported idle window (2–60 minutes); a non-lapsed managed owner lease exempts release. */
     idleTimeoutMs: z
       .number()
       .int()

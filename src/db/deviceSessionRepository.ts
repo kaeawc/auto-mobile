@@ -1,3 +1,7 @@
+import {
+  MANAGED_EXECUTION_LIVENESS_POLICY,
+  ignoresManagedExecutionIdleDeadline,
+} from "../daemon/managedExecutionLiveness";
 import { sql, type ExpressionBuilder, type Kysely } from "kysely";
 import { getDatabase } from "./database";
 import type { Database, DeviceSession, DeviceSessionStatus, NewDeviceSession } from "./types";
@@ -45,7 +49,8 @@ export { isRecoverableDaemonReleaseReason };
 export function isRecoverableDeviceSession(session: DeviceSession, nowMs: number): boolean {
   const retentionCutoffMs = nowMs - DEVICE_SESSION_RETENTION_MAX_AGE_MS;
   return (
-    session.expires_at_ms > nowMs &&
+    (ignoresManagedExecutionIdleDeadline(session.liveness_policy) ||
+      session.expires_at_ms > nowMs) &&
     (session.released_at_ms === null || session.released_at_ms >= retentionCutoffMs)
   );
 }
@@ -61,13 +66,27 @@ export function persistedSessionExpiryReason(
     session.released_at_ms !== null
   ) {
     const windowEnd = session.released_at_ms + DEFAULT_DEVICE_READY_TIMEOUT_MS;
-    if (windowEnd < session.expires_at_ms && nowMs >= windowEnd) {
+    if (
+      (ignoresManagedExecutionIdleDeadline(session.liveness_policy) ||
+        windowEnd < session.expires_at_ms) &&
+      nowMs >= windowEnd
+    ) {
       return "restart-recovery-timeout";
     }
   }
-  return session.expires_at_ms <= nowMs || session.release_reason === "expired"
+  return (!ignoresManagedExecutionIdleDeadline(session.liveness_policy) &&
+    session.expires_at_ms <= nowMs) ||
+    session.release_reason === "expired"
     ? "expired"
     : undefined;
+}
+
+/** SQL form of the shared managed-execution idle-deadline exception (legacy null is plain). */
+function hasApplicableIdleDeadline(eb: ExpressionBuilder<Database, "device_sessions">) {
+  return eb.or([
+    eb("liveness_policy", "is", null),
+    eb("liveness_policy", "!=", MANAGED_EXECUTION_LIVENESS_POLICY),
+  ]);
 }
 
 /** SQL form of {@link isRecoverableDaemonReleaseReason} on `device_sessions.release_reason`. */
@@ -926,10 +945,17 @@ export class DeviceSessionRepository {
         update = update
           .where("release_reason", "like", `${DEVICE_RESTART_RELEASE_REASON_PREFIX}_%`)
           .where("released_at_ms", "<=", handoff.releasedAtOrBeforeMs)
-          .where("expires_at_ms", ">", sql<number>`released_at_ms + ${handoff.recoveryWindowMs}`);
+          .where((eb) =>
+            eb.or([
+              eb("liveness_policy", "=", MANAGED_EXECUTION_LIVENESS_POLICY),
+              eb("expires_at_ms", ">", sql<number>`released_at_ms + ${handoff.recoveryWindowMs}`),
+            ]),
+          );
       }
       if (onlyIfExpiredAtMs !== undefined) {
-        update = update.where("expires_at_ms", "<=", onlyIfExpiredAtMs);
+        update = update
+          .where((eb) => hasApplicableIdleDeadline(eb))
+          .where("expires_at_ms", "<=", onlyIfExpiredAtMs);
       }
       if (onlyIfOwnedByDaemon !== undefined) {
         update = update.where("daemon_session_id", "=", onlyIfOwnedByDaemon);
@@ -1028,7 +1054,11 @@ export class DeviceSessionRepository {
         // (#11132). With no live peer it is always reclaimed.
         const nullOwner = eb("daemon_session_id", "is", null);
         const reclaimableNullOwner = hasLivePeer
-          ? eb.and([nullOwner, eb("expires_at_ms", "<=", releasedAtMs)])
+          ? eb.and([
+              nullOwner,
+              hasApplicableIdleDeadline(eb),
+              eb("expires_at_ms", "<=", releasedAtMs),
+            ])
           : nullOwner;
         return eb.or([reclaimableNullOwner, deadOwner]);
       })
@@ -1061,7 +1091,7 @@ export class DeviceSessionRepository {
       .where((eb) => hasRecoverableReleaseReason(eb))
       .where((eb) =>
         eb.or([
-          eb("expires_at_ms", "<=", nowMs),
+          eb.and([hasApplicableIdleDeadline(eb), eb("expires_at_ms", "<=", nowMs)]),
           eb.and([
             eb("release_reason", "like", `${DEVICE_RESTART_RELEASE_REASON_PREFIX}_%`),
             eb("released_at_ms", "<=", nowMs - DEFAULT_DEVICE_READY_TIMEOUT_MS),
@@ -1110,7 +1140,12 @@ export class DeviceSessionRepository {
           eb("released_at_ms", ">=", nowMs - DEVICE_SESSION_RETENTION_MAX_AGE_MS),
         ]),
       )
-      .where("expires_at_ms", ">", nowMs)
+      .where((eb) =>
+        eb.or([
+          eb("liveness_policy", "=", MANAGED_EXECUTION_LIVENESS_POLICY),
+          eb("expires_at_ms", ">", nowMs),
+        ]),
+      )
       .where((eb) =>
         eb.or([
           eb("release_reason", "not like", `${DEVICE_RESTART_RELEASE_REASON_PREFIX}_%`),

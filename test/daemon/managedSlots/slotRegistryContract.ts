@@ -2070,6 +2070,7 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
             deletion: {
               owner,
               attempts: 0,
+              failedDeletes: 0,
               lastError: null,
               startedAtMs: timer.now(),
               nextAttemptAtMs: timer.now(),
@@ -2100,8 +2101,20 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
         ).toBe(true);
         expect((await registry.listFreeDeviceDeletions())[0].deletion).toMatchObject({
           attempts: 1,
+          failedDeletes: 0,
           lastError: "retry",
           nextAttemptAtMs: timer.now() + 500,
+        });
+        expect(
+          await registry.recordFreeDeviceDeletionAttempt(row, owner, {
+            error: "native failed",
+            nextAttemptAtMs: 8,
+            nativeDeleteFailed: true,
+          }),
+        ).toBe(true);
+        expect((await registry.listFreeDeviceDeletions())[0].deletion).toMatchObject({
+          attempts: 2,
+          failedDeletes: 1,
         });
         expect(
           await registry.completeFreeDeviceDeletion({ ...row, fromScopeKey: "other" }, owner),
@@ -2115,6 +2128,7 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
         await registry.beginFreeDeviceDeletion(row, owner);
         await registry.recordFreeDeviceDeletionAttempt(row, owner, {
           error: "retry",
+          nativeDeleteFailed: true,
           nextAttemptAtMs: 9,
         });
         expect(await registry.claimFreeDeviceDeletion(row, next, owner)).toBe(false);
@@ -2122,6 +2136,7 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
         expect((await registry.listFreeDeviceDeletions())[0].deletion).toMatchObject({
           owner: next,
           attempts: 1,
+          failedDeletes: 1,
           lastError: "retry",
           nextAttemptAtMs: 9,
         });

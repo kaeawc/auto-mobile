@@ -1,5 +1,5 @@
 import { warmedTests } from "../../helpers/warmedTests";
-import { afterAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { ManagedSlotJournal } from "../../../src/daemon/managedSlots/slotJournal";
 import {
   DefaultManagedSlotEvictionSelector,
@@ -46,7 +46,7 @@ describe("journaled free-pool deletion", () => {
     await registry.close();
   });
 
-  function journal(owner = OWNER, busy?: () => string | undefined) {
+  function journal(owner = OWNER, busy?: () => string | undefined, backoff?: number) {
     return new ManagedSlotJournal({
       registry,
       inventory,
@@ -57,6 +57,7 @@ describe("journaled free-pool deletion", () => {
       owner,
       isOwnerLive: (who) => liveOwners.has(who.pid),
       isBusy: busy,
+      backoff,
       stageBudgets: { discoveryMs: 10, claimMs: 10, deleteGraceMs: 5 },
     });
   }
@@ -122,6 +123,7 @@ describe("journaled free-pool deletion", () => {
     expect(deleter.stableIds()).toEqual(["amslot-second"]);
     expect((await registry.listFreeDeviceDeletions())[0].deletion).toMatchObject({
       attempts: 1,
+      failedDeletes: 0,
       nextAttemptAtMs: 1_000,
     });
   });
@@ -180,6 +182,7 @@ describe("journaled free-pool deletion", () => {
       expect(deleter.calls).toEqual([]);
       expect((await registry.listFreeDeviceDeletions())[0].deletion).toMatchObject({
         attempts: 1,
+        failedDeletes: 0,
         nextAttemptAtMs: 1_000,
       });
       expect(
@@ -343,7 +346,14 @@ describe("journaled free-pool deletion", () => {
     expect(selection).toEqual({
       candidates: [],
       skipped: [
-        { platform: "android", stableDeviceId: row.stableDeviceId, reason: "deletion_pending" },
+        {
+          platform: "android",
+          stableDeviceId: row.stableDeviceId,
+          reason: "deletion_pending",
+          attempts: 0,
+          failedDeletes: 0,
+          lastError: null,
+        },
       ],
     });
     expect(await registry.findReclaimableFreeDevices({ thresholdMs: 0 })).toEqual([]);
@@ -364,6 +374,119 @@ describe("journaled free-pool deletion", () => {
     expect(await pending).toEqual({ kind: "blocked", message: "discovery_incomplete" });
     expect((await registry.listFreeDeviceDeletions())[0].deletion?.attempts).toBe(1);
     expect(deleter.calls).toEqual([]);
+  });
+
+  test("passed preparation deadlines record attempts without failed native deletes", async () => {
+    const row = await marked();
+    const driver = journal();
+    expect(await driver.driveFreeDeviceDeletion(row, { deadlineMs: timer.now() })).toEqual({
+      kind: "failed",
+      message: "preparation_deadline_passed",
+    });
+    const deadlineDriver = journal(OWNER, () => {
+      timer.advanceTime(1);
+      return undefined;
+    });
+    expect(
+      await deadlineDriver.driveFreeDeviceDeletion(row, { deadlineMs: timer.now() + 1 }),
+    ).toEqual({
+      kind: "failed",
+      message: "preparation_deadline_passed",
+    });
+    expect((await registry.listFreeDeviceDeletions())[0].deletion).toMatchObject({
+      attempts: 2,
+      failedDeletes: 0,
+    });
+    expect(deleter.calls).toEqual([]);
+  });
+
+  test("three native failures become stuck and takeover preserves the counter", async () => {
+    const row = await marked();
+    const driver = journal();
+    deleter.failWith = "native failed";
+    for (let count = 1; count <= 3; count += 1) {
+      expect(await driver.driveFreeDeviceDeletion(row)).toEqual({
+        kind: "failed",
+        message: "native failed",
+      });
+      expect((await registry.listFreeDeviceDeletions())[0].deletion).toMatchObject({
+        attempts: count,
+        failedDeletes: count,
+      });
+    }
+    expect(await registry.claimFreeDeviceDeletion(row, OWNER, OTHER)).toBe(true);
+    expect((await registry.listFreeDeviceDeletions())[0].deletion).toMatchObject({
+      owner: OTHER,
+      failedDeletes: 3,
+    });
+    expect(
+      await new DefaultManagedSlotEvictionSelector({ inventory, claims }).select(registry, {}),
+    ).toMatchObject({
+      candidates: [],
+      skipped: [{ reason: "deletion_stuck", attempts: 3, failedDeletes: 3 }],
+    });
+    expect(await registry.findReclaimableFreeDevices({ thresholdMs: 0 })).toEqual([]);
+  });
+
+  test("the native chokepoint in-flight refusal adds no failed delete", async () => {
+    const row = await marked();
+    const driver = journal();
+    const fence = spyOn(driver.inFlight, "removalBlocked")
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    try {
+      expect(await driver.driveFreeDeviceDeletion(row)).toEqual({
+        kind: "failed",
+        message: `Removal of device '${row.stableDeviceId}' is still in flight.`,
+      });
+      expect(deleter.calls).toEqual([]);
+      expect((await registry.listFreeDeviceDeletions())[0].deletion).toMatchObject({
+        attempts: 1,
+        failedDeletes: 0,
+      });
+    } finally {
+      fence.mockRestore();
+    }
+  });
+
+  test("generic registry errors record a retry without a failed native delete", async () => {
+    const row = await marked();
+    const read = spyOn(registry, "listFreeDeviceDeletions").mockRejectedValueOnce(
+      new Error("registry unreadable"),
+    );
+    try {
+      expect(await journal().driveFreeDeviceDeletion(row)).toEqual({
+        kind: "failed",
+        message: "registry unreadable",
+      });
+      expect(deleter.calls).toEqual([]);
+      expect((await registry.listFreeDeviceDeletions())[0].deletion).toMatchObject({
+        attempts: 1,
+        failedDeletes: 0,
+      });
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  test("a hung native delete records one failure and in-flight passes record none", async () => {
+    const row = await marked();
+    const driver = journal(OWNER, undefined, 0);
+    deleter.beforeDelete = () => new Promise<void>(() => {});
+    const pending = driver.driveFreeDeviceDeletion(row, { deadlineMs: timer.now() + 20 });
+    await flushMicrotasks();
+    expect(deleter.calls).toHaveLength(1);
+    timer.advanceTime(20);
+    expect(await pending).toMatchObject({ kind: "failed" });
+    const before = await registry.listFreeDeviceDeletions();
+    expect(before[0].deletion).toMatchObject({ attempts: 1, failedDeletes: 1 });
+    for (let pass = 0; pass < 2; pass += 1) {
+      expect(await driver.runPass()).toMatchObject({
+        freeDeviceDeletions: [{ outcome: "blocked", message: "removal_in_flight" }],
+      });
+    }
+    expect(await registry.listFreeDeviceDeletions()).toEqual(before);
+    expect(deleter.calls).toHaveLength(1);
   });
 
   test("drive cancellation records no failed attempt and permits later redrive", async () => {

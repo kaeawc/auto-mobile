@@ -90,7 +90,7 @@ describe("managed-slot safe LRU cache selection", () => {
     const row = await cache();
     await registry.beginFreeDeviceStop({ ...row, claimedBy: "dead" }, { thresholdMs: 0 });
     timer.advanceTime(1_000_000);
-    inventory.complete = false; // S1 wins over later checks
+    inventory.devices = []; // Stopping protects even a verified-absent row.
     await skip("stopping");
   });
 
@@ -121,7 +121,7 @@ describe("managed-slot safe LRU cache selection", () => {
         },
       });
       expect(opened.kind).toBe("opened");
-      inventory.complete = false; // S2 wins over incomplete discovery
+      inventory.devices = []; // Journal ownership also protects absent rows.
       await skip("journal_open");
     },
   );
@@ -194,10 +194,52 @@ describe("managed-slot safe LRU cache selection", () => {
     await skip("discovery_incomplete");
   });
 
-  test("a device missing from complete inventory skips not_in_inventory", async () => {
+  test("verified-absent candidates precede older listed devices without consulting claims or busy", async () => {
+    await cache("amslot-old");
+    timer.advanceTime(1);
+    const missing = await cache();
+    inventory.devices = inventory.devices.filter((device) => device.name !== "amslot-a");
+    claims.beforeDescribe = async () => {};
+    claims.sessionsOn = (device) => {
+      expect(device.name).not.toBe("amslot-a");
+      return [];
+    };
+    claims.describe = async (device) => {
+      expect(device.name).not.toBe("amslot-a");
+      return { kind: "free" };
+    };
+    const selected = await selector({
+      isBusy: (device) => {
+        expect(device.name).not.toBe("amslot-a");
+        return undefined;
+      },
+    }).select(registry, {});
+    expect(selected.candidates.map((row) => row.stableDeviceId)).toEqual([
+      "amslot-a",
+      "amslot-old",
+    ]);
+    expect(selected.candidates[0]).toMatchObject({
+      platform: missing.platform,
+      stableDeviceId: missing.stableDeviceId,
+      fromScopeKey: missing.fromScopeKey,
+      freedAtMs: missing.freedAtMs,
+      name: "amslot-a",
+      absent: true,
+      lastUsedAtMs: missing.freedAtMs,
+    });
+  });
+
+  test("a not-installed toolchain never proves a free row absent", async () => {
     await cache();
+    inventory.list = async () => ({ complete: false, devices: [], toolchain: "not_installed" });
+    await skip("discovery_incomplete");
+  });
+
+  test("an absent row with a deletion marker stays pending", async () => {
+    const row = await cache();
     inventory.devices = [];
-    await skip("not_in_inventory");
+    await registry.beginFreeDeviceDeletion(row, { daemonId: "d", pid: 1 });
+    expect((await selector().select(registry, {})).skipped[0]?.reason).toBe("deletion_pending");
   });
 
   test("an external name skips not_daemon_created", async () => {

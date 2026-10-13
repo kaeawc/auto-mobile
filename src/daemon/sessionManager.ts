@@ -1,3 +1,4 @@
+import { RecorderTeardownRetries, recoverRecorderTeardowns } from "./recorderTeardownRecovery";
 import { ignoresManagedExecutionIdleDeadline } from "./managedExecutionLiveness";
 import type { DeferredRebindCleanup } from "./acquisitionReceipt";
 import type { TimingData } from "../utils/PerformanceTracker";
@@ -2287,6 +2288,11 @@ export class SessionManager {
     }
   }
 
+  private readonly recorderTeardownRetries = new Map<
+    string,
+    { deviceId: string; incarnation: number; retries: RecorderTeardownRetries }
+  >();
+
   private readonly healthRecoveries = new Map<string, Promise<void>>();
   private readonly healthRecoveryDeadlines = new Map<string, number | undefined>();
 
@@ -2296,6 +2302,7 @@ export class SessionManager {
     incarnation: number,
     reason: DeviceHealthReason,
   ): { recovering: boolean; retryAfterMs?: number } {
+    this.pruneRecorderTeardownRetries();
     if (this.deviceHealth?.incarnation(deviceId) !== incarnation) {
       return { recovering: false };
     }
@@ -2360,13 +2367,94 @@ export class SessionManager {
     deviceId: string,
     retry: () => Promise<void>,
     retryTimeoutMs: number,
+    retryKey?: string,
   ): void {
-    this.abandonRestore(
-      { deviceId, incarnation: this.deviceHealth?.incarnation(deviceId) },
-      "recording-teardown",
-      retry,
-      retryTimeoutMs,
-    );
+    this.pruneRecorderTeardownRetries();
+    const health = this.deviceHealth;
+    const incarnation = health?.incarnation(deviceId);
+    if (!health || incarnation === undefined) {
+      logger.warn(
+        `Recorder teardown on ${deviceId} has no pool incarnation; cannot key health marker`,
+      );
+      return;
+    }
+    const target = { deviceId, incarnation };
+    const key = `${deviceId}#${incarnation}:recording-teardown`;
+    const retries = this.recorderTeardownRetries.get(key)?.retries ?? new RecorderTeardownRetries();
+    this.recorderTeardownRetries.set(key, { ...target, retries });
+    retries.add(retry, retryTimeoutMs, retryKey);
+    health.markers.mark(deviceId, incarnation, "recording-teardown");
+    this.healthRecoveryDeadlines.set(key, undefined);
+    if (this.healthRecoveries.has(key)) {
+      return;
+    }
+    this.startRecorderTeardownRecovery(target, retries);
+  }
+
+  private startRecorderTeardownRecovery(
+    target: { deviceId: string; incarnation: number },
+    retries: RecorderTeardownRetries,
+  ): void {
+    const { deviceId, incarnation } = target;
+    const health = this.deviceHealth!;
+    const key = `${deviceId}#${incarnation}:recording-teardown`;
+    let completedRevision: number | undefined;
+    const generation = this.replacedRestoreGenerations.get(deviceId) ?? 0;
+    const recovery = runWithAbortSignal(undefined, () =>
+      recoverRecorderTeardowns(retries, {
+        timer: this.timer,
+        delays: [1, 2, 3].map((attempt) => health.backoff.delayForAttempt(attempt)),
+        isCurrent: async () =>
+          (await this.waitForIdentityReplacement(deviceId, generation)) &&
+          this.restoreIncarnationIsCurrent(target) &&
+          this.recorderTeardownRetries.get(key)?.retries === retries &&
+          !!health.markers.get(deviceId, incarnation, "recording-teardown"),
+        canRecover: () => health.canRecover(deviceId),
+        acceptingSessions: () => this.acceptingSessionCreations,
+        dispatch: (work) => this.dispatchDeviceRestore(deviceId, work, generation),
+        publishDeadline: (deadline) => this.healthRecoveryDeadlines.set(key, deadline),
+        clear: () => this.clearRestoreHealth(target, "recording-teardown"),
+        drop: () => {
+          if (this.recorderTeardownRetries.get(key)?.retries === retries) {
+            this.recorderTeardownRetries.delete(key);
+          }
+        },
+      }),
+    ).then((revision) => {
+      completedRevision = revision;
+    });
+    this.healthRecoveries.set(key, recovery);
+    void recovery
+      .catch((error: unknown) => {
+        logger.warn(`Recorder teardown recovery failed on ${deviceId}`, error);
+      })
+      .finally(() => {
+        if (this.healthRecoveries.get(key) === recovery) {
+          this.healthRecoveries.delete(key);
+          this.healthRecoveryDeadlines.delete(key);
+          this.pruneRecorderTeardownRetries();
+          const pending = this.recorderTeardownRetries.get(key);
+          // A mark can arrive after the loop ended but before this promise's finalizer.
+          if (
+            completedRevision !== undefined &&
+            pending &&
+            (pending.retries !== retries || pending.retries.revision !== completedRevision)
+          ) {
+            this.startRecorderTeardownRecovery(target, pending.retries);
+          }
+        }
+      });
+  }
+
+  private pruneRecorderTeardownRetries(): void {
+    for (const [key, entry] of this.recorderTeardownRetries) {
+      if (
+        !this.restoreIncarnationIsCurrent(entry) ||
+        !this.deviceHealth?.markers.get(entry.deviceId, entry.incarnation, "recording-teardown")
+      ) {
+        this.recorderTeardownRetries.delete(key);
+      }
+    }
   }
 
   private restoreIncarnationIsCurrent(target: {

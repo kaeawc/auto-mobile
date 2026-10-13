@@ -47,21 +47,23 @@ const recorderRecoveryNeeded = new Map<string, RecordingTeardownGiveUp[]>();
 export function recordingTeardownRecoveryNeeded(
   deviceId: string,
 ): RecordingTeardownGiveUp | undefined {
-  const giveUps = recorderRecoveryNeeded.get(deviceId);
-  if (!giveUps) {
-    return undefined;
-  }
-  const active = new Set(listOwnedActiveVideoRecordingIds());
-  const retained = giveUps.filter((giveUp) => {
-    const gestureId = ownedDeviceGestureRecordingId(giveUp.sessionId, deviceId);
-    return giveUp.recordingIds.some((id) => active.has(id) || id === gestureId);
-  });
+  return pruneRecorderRecoveryNeeded(deviceId)[0];
+}
+
+function pruneRecorderRecoveryNeeded(
+  deviceId: string,
+  deps: RecordingSessionCleanupDeps = defaultRecordingSessionCleanupDeps,
+): RecordingTeardownGiveUp[] {
+  const retained = (recorderRecoveryNeeded.get(deviceId) ?? []).filter(
+    (giveUp) =>
+      unconfirmedRecordingIds(deps, giveUp.sessionId, deviceId, giveUp.recordingIds).length > 0,
+  );
   if (retained.length > 0) {
     recorderRecoveryNeeded.set(deviceId, retained);
-    return retained[0];
+  } else {
+    recorderRecoveryNeeded.delete(deviceId);
   }
-  recorderRecoveryNeeded.delete(deviceId);
-  return undefined;
+  return retained;
 }
 
 /** Test/reset seam: recovery must not leak across manager incarnations. */
@@ -188,6 +190,7 @@ export function createRecorderTeardownRecoveryMarker(
       giveUp.deviceId,
       () => retryGivenUpRecordings(giveUp.deviceId, deps),
       INCOMPLETE_MARK_GRACE_MS,
+      "release-give-ups",
     );
   };
 }
@@ -196,7 +199,7 @@ async function retryGivenUpRecordings(
   deviceId: string,
   deps: RecordingSessionCleanupDeps,
 ): Promise<void> {
-  // Health recovery deduplicates by device/reason. Include later give-ups in that same retry.
+  // One keyed retry includes every retained release-time give-up on this device.
   const giveUps = recorderRecoveryNeeded.get(deviceId) ?? [];
   for (const giveUp of giveUps) {
     const retained = unconfirmedRecordingIds(deps, giveUp.sessionId, deviceId, giveUp.recordingIds);
@@ -206,7 +209,7 @@ async function retryGivenUpRecordings(
       deps.ownedDeviceGestureRecordingId(giveUp.sessionId, deviceId),
     );
   }
-  const remaining = (recorderRecoveryNeeded.get(deviceId) ?? []).flatMap((giveUp) =>
+  const remaining = pruneRecorderRecoveryNeeded(deviceId, deps).flatMap((giveUp) =>
     unconfirmedRecordingIds(deps, giveUp.sessionId, deviceId, giveUp.recordingIds),
   );
   if (remaining.length > 0) {

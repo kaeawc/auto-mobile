@@ -23,7 +23,7 @@ import {
   observationOf,
 } from "../../helpers/prototypeWindowCapture";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import { TapOnElement, tapResolvedLayer } from "../../../src/features/action/TapOnElement";
 import { FakePrototypeAgentClient } from "../../fakes/FakePrototypeAgentClient";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
@@ -633,7 +633,9 @@ for (const changed of [false, true]) {
     expect(order).toEqual(
       changed ? ["read", "dispatch", "read"] : ["read", "dispatch", "read", "read", "read"],
     );
-    if (!changed) expect(result.error).toContain('holds "10"');
+    if (!changed) {
+      expect(result.error).toContain('holds "10"');
+    }
   });
 }
 
@@ -684,15 +686,62 @@ for (const platform of ["android", "ios"] as const) {
         timestampProvider: { now: async () => 1 },
       });
       const result = await action.execute(commands, { elementId: "ptf" });
-      if (platform === "android") expect(result.error).toBeUndefined();
+      if (platform === "android") {
+        expect(result.error).toBeUndefined();
+      }
       expect(result.success).toBe(platform === "android");
-      if (platform === "ios") expect(result.error).toContain('state key "name" holds "old"');
+      if (platform === "ios") {
+        expect(result.error).toContain('state key "name" holds "old"');
+      }
     } finally {
       interaction.mockRestore();
       capability.mockRestore();
     }
   });
 }
+
+test("no-prototype focus reports no layer and implicit sendKeys makes no prototype read", async () => {
+  const h = harness("ios");
+  const frame = typedObservation("Rb one");
+  const reader: PrototypeTextTargetReader = {
+    read: async () => ({ kind: "unverifiable", reason: "unused" }),
+  };
+  const read = spyOn(reader, "read");
+  const interaction = spyOn(TapOnElement.prototype, "observedInteraction").mockImplementation(
+    async (block) => block(recordObservationRead(frame)),
+  );
+  const capability = spyOn(IOSCtrlProxyClient.prototype, "getSupportedCommands").mockResolvedValue(
+    [],
+  );
+  const execute = TapOnElement.prototype.execute;
+  const focus = spyOn(TapOnElement.prototype, "execute").mockImplementation(async function (
+    this: TapOnElement,
+    options,
+  ) {
+    const result = await execute.call(this, options);
+    expect(result.success).toBe(true);
+    expect(result[tapResolvedLayer]).toBeUndefined();
+    return result;
+  });
+  try {
+    const action = new SendKeys(ios, h.adbFactory, {
+      executor: h.executor,
+      observer: { execute: async () => frame },
+      timer: h.timer,
+      prototypeTextTarget: reader,
+      timestampProvider: { now: async () => 1 },
+    });
+    const result = await action.execute(commands, { text: "Email" });
+    expect(result.success).toBe(true);
+    expect(focus).toHaveBeenCalledTimes(1);
+    expect(read).not.toHaveBeenCalled();
+  } finally {
+    focus.mockRestore();
+    capability.mockRestore();
+    interaction.mockRestore();
+    read.mockRestore();
+  }
+});
 
 for (const platform of ["android", "ios"] as const) {
   test(`${platform} resolved app adds no reads and explicit app overrides resolved prototype`, async () => {
@@ -753,3 +802,25 @@ for (const mode of ["eventLast", "eventAll", "eventOnly"] as const) {
     expect(result.warning).toContain("not verified against the prototype");
   });
 }
+
+for (const mode of ["eventLast", "eventAll", "eventOnly"] as const) {
+  test(`prototype ${mode} replacement proceeds without readable focus`, async () => {
+    const h = harness("android", { focused: false });
+    const result = await h.run("prototype", [{ action: "type", text: "a", mode, operation: "replace" }]);
+    expect(h.deliveries.length).toBeGreaterThan(0);
+    expect(result.success).toBe(true);
+    expect(result.warning).toContain("not verified against the prototype");
+  });
+}
+
+test("display-routed Android focus applies the inferred prototype layer", async () => {
+  const h = harness("android", { focus: { focus: async () => ({ success: true, layer: "prototype" }) } });
+  h.observer.execute = async () => ({
+    ...androidFrame(h.committed.length ? "Rb one" : "old"),
+    display: { key: "0", role: "unknown", posture: "unknown", generation: 0 },
+  });
+  const result = await h.action.execute(commands, { elementId: "ptf" }, undefined, undefined, "0");
+  expect(h.committed).toEqual(["Rb one"]);
+  expect(result.success).toBe(true);
+  expect(result.commands[0]?.imeFailure).toBeUndefined();
+});

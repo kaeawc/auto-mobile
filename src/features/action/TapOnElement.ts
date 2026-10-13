@@ -128,6 +128,7 @@ import {
 } from "./prototypeTapUnderSystemBars";
 import {
   assertAppGestureNotUnderPrototype,
+  hasOwnPrototype,
   scopeHierarchyForSelector,
   scopeHierarchyToLayer,
 } from "../observe/hierarchyLayer";
@@ -410,15 +411,22 @@ function resolvedElementLayer(
   element: Element,
   platform: "android" | "ios",
 ): HierarchyLayer | undefined {
+  if (!hasOwnPrototype(hierarchy)) {
+    return undefined;
+  }
   hierarchy = selectionHierarchyFor(element, hierarchy, platform);
   const source = getHierarchyNodeSource(element);
-  if (!source) return undefined;
+  if (!source) {
+    return undefined;
+  }
   const parser = new DefaultElementParser();
   for (const layer of ["prototype", "app"] as const) {
     const entries = parser.flattenViewHierarchy(scopeHierarchyToLayer(hierarchy, layer), {
       includeWindows: true,
     });
-    if (entries.some((entry) => getHierarchyNodeSource(entry.element) === source)) return layer;
+    if (entries.some((entry) => getHierarchyNodeSource(entry.element) === source)) {
+      return layer;
+    }
   }
   return undefined;
 }

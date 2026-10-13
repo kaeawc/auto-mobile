@@ -1,3 +1,10 @@
+import { OrphanRecorderActiveError } from "../../src/server/orphanRecorderRefusal";
+import * as videoManager from "../../src/server/videoRecordingManager";
+import { redriveUnconfirmedCaptureTeardowns } from "../../src/server/recordingTeardownRedrive";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
+import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
+import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../src/features/video";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { afterEach, beforeAll, beforeEach, expect, spyOn, test } from "bun:test";
 import { promises as fsPromises } from "node:fs";
@@ -104,6 +111,8 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  videoManager.setStartupOrphanCaptures(undefined);
+  expect(videoManager.getStartupOrphanCaptures()).toBeUndefined();
   setRecordingRequesterResolverForTesting(undefined);
   resetVideoRecordingManagerDependencies();
   resetSegmentedSessions();
@@ -305,4 +314,210 @@ test("a held id without an in-memory owner entry falls back to its interrupted r
   await expectRefused(recordingId, { sessionUuid: OTHER });
   await expectRealStop(recordingId, { sessionUuid: OWNER });
   expect(heldVideoRecordingOwner(recordingId)).toBeUndefined();
+});
+
+const orphanDescriptor = {
+  kind: "android-screenrecord" as const,
+  devicePid: 42,
+  deviceTempPath: "/sdcard/orphan.mp4",
+};
+async function insertStartupRow(status: "recording" | "interrupted" = "recording") {
+  await repository.insertRecording({
+    recordingId: "startup-orphan",
+    deviceId: device.deviceId,
+    platform: "android",
+    ownerSessionUuid: OWNER,
+    recorderDaemonSessionId: "previous-daemon",
+    status,
+    fileName: "orphan.mp4",
+    filePath: "/unused/orphan.mp4",
+    format: "mp4",
+    sizeBytes: 0,
+    createdAt: new Date(0).toISOString(),
+    startedAt: new Date(0).toISOString(),
+    lastAccessedAt: new Date(0).toISOString(),
+    config: DEFAULT_VIDEO_RECORDING_CONFIG,
+    captureTeardown: orphanDescriptor,
+  });
+}
+async function retainStartupOrphan(forceStop: () => Promise<void>) {
+  await insertStartupRow();
+  const manager = new SessionManager(
+    timer,
+    new FakeDeviceSessionPersistence(),
+    () => new FakeDbWriteBarrier(),
+  );
+  manager.stopCleanupTimer();
+  const holder = spyOn(manager, "getSessionForDevice").mockReturnValue(OWNER);
+  spies.push(holder);
+  await redriveUnconfirmedCaptureTeardowns(manager, {
+    onStartupOrphans: (handle) => videoManager.setStartupOrphanCaptures(handle),
+    recordingRepository: repository,
+    liveDaemonSessionIds: new Set(),
+    ownedCaptureIds: () => service.listActiveRecordingIds(),
+    getDevice: () => device,
+    getDeviceIncarnation: () => 1,
+    now: () => timer.now(),
+    timer,
+    forceStopOrphanedCapture: forceStop,
+  });
+}
+test("R6b owner stops its pre-restart recording by id", async () => {
+  let stops = 0;
+  await retainStartupOrphan(async () => {
+    stops++;
+  });
+  const { error, response } = await outcome({
+    action: "stop",
+    recordingId: "startup-orphan",
+    sessionUuid: OWNER,
+  });
+  expect(error?.message).toBeUndefined();
+  const payload = JSON.parse(response!.content[0].text);
+  expect(payload.action).toBe("stop");
+  expect(payload.count).toBe(1);
+  expect(stops).toBe(1);
+  const orphanEntry = payload.recordings[0];
+  expect(orphanEntry.deviceId).toBe(device.deviceId);
+  expect(orphanEntry.platform).toBe(device.platform);
+  videoManager.setStartupOrphanCaptures(undefined);
+  const active = await startVideoRecording({ device, ownerSessionUuid: OWNER });
+  const normal = await outcome({
+    action: "stop",
+    recordingId: active.recordingId,
+    sessionUuid: OWNER,
+  });
+  expect(normal.error).toBeUndefined();
+  const normalEntry = JSON.parse(normal.response!.content[0].text).recordings[0];
+  expect(Object.keys(orphanEntry).sort()).toEqual(
+    [...Object.keys(normalEntry), "status", "warning"].sort(),
+  );
+  expect(payload.recordings[0].status).toBe("interrupted");
+  expect(payload.recordings[0].warning).toContain("daemon restart");
+});
+test("R6b start stops the startup orphan before starting one capture", async () => {
+  const order: string[] = [];
+  let orphanActive = true;
+  await retainStartupOrphan(async () => {
+    order.push("orphan-stop");
+    orphanActive = false;
+  });
+  const start = backend.start.bind(backend);
+  spies.push(
+    spyOn(backend, "start").mockImplementation(async (config) => {
+      order.push("start");
+      return start(config);
+    }),
+  );
+  await startVideoRecording({ device, ownerSessionUuid: OTHER });
+  expect(order).toEqual(["orphan-stop", "start"]);
+  expect(Number(orphanActive) + service.listActiveRecordingIds().length).toBe(1);
+});
+for (const status of ["recording", "interrupted"] as const) {
+  test(`R6b failed stop preserves a foreign ${status} descriptor`, async () => {
+    await videoManager.initializeRecordingTeardownRedriveState();
+    await insertStartupRow(status);
+    const result = await outcome({
+      action: "stop",
+      recordingId: "startup-orphan",
+      sessionUuid: OWNER,
+    });
+    if (status === "recording") {
+      expect(result.error).toBeDefined();
+    } else {
+      expect(result.error).toBeUndefined();
+      expect(JSON.parse(result.response!.content[0].text).alreadyStopped).toBe(true);
+    }
+    expect((await repository.getRecording("startup-orphan"))?.captureTeardown).toEqual(
+      orphanDescriptor,
+    );
+  });
+  test(`R6b start preflight preserves a foreign ${status} descriptor`, async () => {
+    await videoManager.initializeRecordingTeardownRedriveState();
+    await insertStartupRow(status);
+    await startVideoRecording({ device, ownerSessionUuid: OWNER });
+    expect((await repository.getRecording("startup-orphan"))?.captureTeardown).toEqual(
+      orphanDescriptor,
+    );
+  });
+}
+
+test("R6b unknown-id manager stop preserves an interrupted descriptor", async () => {
+  await videoManager.initializeRecordingTeardownRedriveState();
+  await insertStartupRow("interrupted");
+  await expect(videoManager.stopVideoRecording("startup-orphan")).rejects.toThrow(
+    "No active recording found for id",
+  );
+  expect((await repository.getRecording("startup-orphan"))?.captureTeardown).toEqual(
+    orphanDescriptor,
+  );
+});
+
+test("R6b unconfirmed startup orphan refuses a new capture", async () => {
+  await retainStartupOrphan(async () => {
+    throw new Error("PID still alive");
+  });
+  const start = startVideoRecording({ device, ownerSessionUuid: OWNER });
+  await expect(start).rejects.toBeInstanceOf(OrphanRecorderActiveError);
+  await expect(start).rejects.toMatchObject({
+    code: "orphan_recorder_active",
+    retryable: true,
+    deviceId: device.deviceId,
+    recordingIds: ["startup-orphan"],
+  });
+  expect(backend.startCalls).toEqual([]);
+});
+test("R6b another session cannot stop a startup orphan", async () => {
+  let stops = 0;
+  await retainStartupOrphan(async () => {
+    stops++;
+  });
+  const { error } = await outcome({
+    action: "stop",
+    recordingId: "startup-orphan",
+    sessionUuid: OTHER,
+  });
+  expect(error?.code).toBe(DEVICE_OWNED_BY_OTHER_SESSION_CODE);
+  expect(stops).toBe(0);
+});
+test("R6b unconfirmed owner stop returns the typed orphan refusal", async () => {
+  await retainStartupOrphan(async () => {
+    throw new Error("PID still alive");
+  });
+  const { error } = await outcome({
+    action: "stop",
+    recordingId: "startup-orphan",
+    sessionUuid: OWNER,
+  });
+  expect(error).toMatchObject({
+    code: "orphan_recorder_active",
+    retryable: true,
+    deviceId: device.deviceId,
+    recordingIds: ["startup-orphan"],
+  });
+  expect((await repository.getRecording("startup-orphan"))?.captureTeardown).toEqual(
+    orphanDescriptor,
+  );
+});
+
+// Pins: descriptors belonging to captures started by this process still follow teardown proof.
+test("R6b confirmed stop clears this process's descriptor", async () => {
+  Object.assign(backend, { describeCaptureTeardown: () => orphanDescriptor });
+  const active = await startVideoRecording({ device, ownerSessionUuid: OWNER });
+  expect((await repository.getRecording(active.recordingId))?.captureTeardown).toEqual(
+    orphanDescriptor,
+  );
+  await videoManager.stopVideoRecording(active.recordingId);
+  expect((await repository.getRecording(active.recordingId))?.captureTeardown).toBeUndefined();
+  expect(service.listActiveRecordingIds()).toEqual([]);
+});
+test("R6b unconfirmed stop refreshes this process's descriptor", async () => {
+  const refreshed = { ...orphanDescriptor, devicePid: 43 };
+  Object.assign(backend, { describeCaptureTeardown: () => refreshed });
+  const active = await startVideoRecording({ device, ownerSessionUuid: OWNER });
+  await repository.updateRecording(active.recordingId, { captureTeardown: orphanDescriptor });
+  spies.push(spyOn(backend, "stop").mockRejectedValue(new Error("device offline")));
+  await expect(videoManager.stopVideoRecording(active.recordingId)).rejects.toThrow();
+  expect((await repository.getRecording(active.recordingId))?.captureTeardown).toEqual(refreshed);
+  expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
 });

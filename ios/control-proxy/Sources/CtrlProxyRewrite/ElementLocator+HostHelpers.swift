@@ -249,6 +249,17 @@ extension ElementLocator {
     }
 
     nonisolated static func copying(_ element: UIElementInfo, node: [UIElementInfo]?) -> UIElementInfo {
+        copying(element, node: node, extras: element.extras)
+    }
+
+    /// Replace extras without losing any other wire fields when copying a hierarchy node.
+    nonisolated static func copying(
+        _ element: UIElementInfo,
+        node: [UIElementInfo]?,
+        extras: [String: String]?
+    )
+        -> UIElementInfo
+    {
         UIElementInfo(
             text: element.text,
             value: element.value,
@@ -275,7 +286,7 @@ extension ElementLocator {
             errorMessage: element.errorMessage,
             hintText: element.hintText,
             viewId: element.viewId,
-            extras: element.extras,
+            extras: extras,
             actions: element.actions,
             node: node
         )

@@ -425,6 +425,7 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       sessionManager.setActiveSessionExecutionChecker(
         (sessionId, query) =>
           sessionId === agent &&
+          !query?.recoveryOnly &&
           query?.excludeExecutionId !== "earlier" &&
           (query?.sessionClockStartedAtOrBefore === undefined ||
             earlierStart <= query.sessionClockStartedAtOrBefore),

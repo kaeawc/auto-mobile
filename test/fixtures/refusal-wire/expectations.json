@@ -578,6 +578,15 @@
         "acquireNewSession": true
       }
     },
+    "session_held_by_recovery": {
+      "expected": "retry",
+      "fields": {
+        "code": "session_held_by_recovery",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 1000
+      }
+    },
     "session_rebinding": {
       "expected": "retry",
       "fields": {

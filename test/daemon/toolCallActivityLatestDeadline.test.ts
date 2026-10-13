@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { latestSessionExecutionDeadlineMs } from "../../src/daemon/toolCallActivity";
+import {
+  hasActiveSessionExecution,
+  latestSessionExecutionDeadlineMs,
+} from "../../src/daemon/toolCallActivity";
 
 // The idle-release veto asks this on every lookup of a session past its idle deadline. A derived
 // `${base}:${label}` session counts its base session's executions too (#10712).
@@ -72,4 +75,48 @@ describe("latestSessionExecutionDeadlineMs", () => {
     expect(latest(BASE)).toBe(Number.POSITIVE_INFINITY);
     expect(asked).toEqual([]);
   });
+});
+
+describe("hasActiveSessionExecution recovery-only queries", () => {
+  test.each([false, true])(
+    "recoveryOnly counts recovery alone (%s), without asking the tracker",
+    (recovering) => {
+      const asked: unknown[] = [];
+      const tracker = {
+        hasActiveSessionUuidExecutions: (_id: string, query?: unknown) => {
+          asked.push(query);
+          return true;
+        },
+        hasActiveAutolockSessionExecutions: (_id: string, query?: unknown) => {
+          asked.push(query);
+          return true;
+        },
+      };
+      const recoveryQueries: string[] = [];
+      const pool = {
+        isSessionRecoveryInFlight: (id: string) => {
+          recoveryQueries.push(id);
+          return recovering;
+        },
+      };
+      expect(
+        hasActiveSessionExecution(
+          tracker,
+          { getDeviceLabels: () => ({ tablet: DERIVED }) },
+          pool,
+          DERIVED,
+          { recoveryOnly: true },
+        ),
+      ).toBe(recovering);
+      expect(recoveryQueries).toEqual([DERIVED]);
+      expect(asked).toEqual([]);
+      expect(
+        hasActiveSessionExecution(tracker, { getDeviceLabels: () => undefined }, pool, BASE, {
+          recoveryOnly: false,
+          excludeReads: true,
+        }),
+      ).toBe(true);
+      expect(asked).toEqual(recovering ? [] : [{ excludeReads: true }]);
+    },
+  );
 });

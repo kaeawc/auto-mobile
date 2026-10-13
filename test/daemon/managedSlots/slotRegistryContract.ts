@@ -1094,6 +1094,7 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
           state: "free",
           stopClaimedBy: null,
           stopClaimedAtMs: null,
+          deletion: null,
         });
         expect(await registry.findReclaimableFreeDevices()).toHaveLength(1);
 
@@ -2014,6 +2015,18 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       expect(await registry.listAbandonedScopes()).toEqual([]);
     });
 
+    test("the resource snapshot exposes abandoned scope keys without unrelated scope history", async () => {
+      const abandoned = await readyScope(SCOPE_A1);
+      const reset = await readyScope(SCOPE_B1);
+      await readyScope({ ...SCOPE_A1, runnerNamespace: "untouched" });
+      await abandon(abandoned);
+      await registry.beginScopeInvalidation(reset, "operator_reset");
+      await registry.completeScopeInvalidation(reset);
+      const snapshot = await registry.snapshotManagedSlotResources();
+      expect(snapshot.abandonedScopeKeys).toEqual([abandoned]);
+      expect(snapshot).not.toHaveProperty("scopes");
+    });
+
     test("malformed slot keys and thresholds are rejected before storage", async () => {
       const scopeKey = await readyScope();
       await expect(registry.initSlot({ scopeKey, slotIndex: -1 }, INIT)).rejects.toThrow(
@@ -2025,6 +2038,164 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       await expect(registry.findAbandonedScopes({ thresholdMs: -1 })).rejects.toThrow(
         "non-negative",
       );
+    });
+    describe("free-device deletion journal", () => {
+      const owner = { daemonId: "one", pid: 11, processGenerationToken: "generation-one" };
+      const next = { daemonId: "two", pid: 12, processGenerationToken: "generation-two" };
+      async function freeRow(id = "amslot-delete") {
+        const scopeKey = await readyScope({ ...SCOPE_A1, runnerNamespace: id });
+        await boundSlot({ scopeKey, slotIndex: 0 }, id);
+        await registry.beginScopeInvalidation(scopeKey, "operator_reset");
+        await registry.completeScopeInvalidation(scopeKey);
+        return (await registry.listFreeDevices()).find((row) => row.stableDeviceId === id)!;
+      }
+      test("begin is exact-row CAS, persists its owner and rejects a second begin", async () => {
+        const row = await freeRow();
+        expect(
+          await registry.beginFreeDeviceDeletion({ ...row, freedAtMs: row.freedAtMs + 1 }, owner),
+        ).toMatchObject({ kind: "not_evictable" });
+        expect(
+          await registry.beginFreeDeviceDeletion({ ...row, fromScopeKey: "other" }, owner),
+        ).toMatchObject({ kind: "not_evictable" });
+        expect(await registry.beginFreeDeviceDeletion(row, owner)).toMatchObject({
+          kind: "begun",
+          row: {
+            deletion: {
+              owner,
+              attempts: 0,
+              lastError: null,
+              startedAtMs: timer.now(),
+              nextAttemptAtMs: timer.now(),
+            },
+          },
+        });
+        expect(await registry.beginFreeDeviceDeletion(row, next)).toMatchObject({
+          kind: "not_evictable",
+        });
+        expect(await registry.listFreeDeviceDeletions()).toHaveLength(1);
+      });
+      test("attempt and completion require the exact owner including its process token", async () => {
+        const row = await freeRow();
+        await registry.beginFreeDeviceDeletion(row, owner);
+        const impostor = { ...owner, processGenerationToken: "reused-pid" };
+        expect(
+          await registry.recordFreeDeviceDeletionAttempt(row, impostor, {
+            error: "bad",
+            nextAttemptAtMs: 3,
+          }),
+        ).toBe(false);
+        expect(await registry.completeFreeDeviceDeletion(row, impostor)).toBe(false);
+        expect(
+          await registry.recordFreeDeviceDeletionAttempt(row, owner, {
+            error: "retry",
+            nextAttemptAtMs: timer.now() + 500,
+          }),
+        ).toBe(true);
+        expect((await registry.listFreeDeviceDeletions())[0].deletion).toMatchObject({
+          attempts: 1,
+          lastError: "retry",
+          nextAttemptAtMs: timer.now() + 500,
+        });
+        expect(
+          await registry.completeFreeDeviceDeletion({ ...row, fromScopeKey: "other" }, owner),
+        ).toBe(false);
+        expect(await registry.completeFreeDeviceDeletion(row, owner)).toBe(true);
+        expect(await registry.completeFreeDeviceDeletion(row, owner)).toBe(false);
+        expect(await registry.listFreeDeviceDeletions()).toEqual([]);
+      });
+      test("claim is owner CAS and preserves the deletion commitment and retry", async () => {
+        const row = await freeRow();
+        await registry.beginFreeDeviceDeletion(row, owner);
+        await registry.recordFreeDeviceDeletionAttempt(row, owner, {
+          error: "retry",
+          nextAttemptAtMs: 9,
+        });
+        expect(await registry.claimFreeDeviceDeletion(row, next, owner)).toBe(false);
+        expect(await registry.claimFreeDeviceDeletion(row, owner, next)).toBe(true);
+        expect((await registry.listFreeDeviceDeletions())[0].deletion).toMatchObject({
+          owner: next,
+          attempts: 1,
+          lastError: "retry",
+          nextAttemptAtMs: 9,
+        });
+        expect(await registry.completeFreeDeviceDeletion(row, owner)).toBe(false);
+        expect(await registry.completeFreeDeviceDeletion(row, next)).toBe(true);
+      });
+      test("list orders retries and marked rows remain excluded, never stoppable or adoptable", async () => {
+        const first = await freeRow("amslot-first");
+        const second = await freeRow("amslot-second");
+        for (const row of [first, second]) {
+          await registry.beginFreeDeviceDeletion(row, owner);
+        }
+        await registry.recordFreeDeviceDeletionAttempt(first, owner, {
+          error: "retry",
+          nextAttemptAtMs: timer.now() + 500,
+        });
+        expect((await registry.listFreeDeviceDeletions()).map((row) => row.stableDeviceId)).toEqual(
+          [second.stableDeviceId, first.stableDeviceId],
+        );
+        expect(await registry.findReclaimableFreeDevices({ thresholdMs: 0 })).toEqual([]);
+        expect(
+          await registry.beginFreeDeviceStop(
+            { ...first, claimedBy: "stopper" },
+            { thresholdMs: 0 },
+          ),
+        ).toEqual({ kind: "not_reclaimable" });
+        const key = { scopeKey: await readyScope(SCOPE_B1), slotIndex: 0 };
+        await registry.initSlot(key, INIT);
+        expect(
+          await registry.commitBinding(
+            key,
+            { generation: 0, stableDeviceId: null },
+            readyBinding(first.stableDeviceId, 1),
+          ),
+        ).toEqual({ kind: "free_device_stopping" });
+        const opened = await registry.openSlotJournal(key, {
+          kind: "create",
+          phase: "creating",
+          owner,
+          target: {
+            oldStableId: null,
+            oldName: null,
+            newStableId: first.stableDeviceId,
+            newName: first.stableDeviceId,
+            requestedSpec: SPEC,
+            resolvedSpec: SPEC,
+            specFingerprint: "fp",
+          },
+          assignment: {
+            kind: "state",
+            expected: { generation: 0, stableDeviceId: null },
+            state: "provisioning",
+          },
+        });
+        if (opened.kind !== "opened") {
+          throw new Error(opened.kind);
+        }
+        expect(
+          await registry.advanceSlotJournal(opened.entry.id, {
+            owner,
+            expectedPhase: "creating",
+            phase: "committed",
+            assignment: {
+              kind: "commit",
+              expected: opened.entry.binding,
+              next: readyBinding(first.stableDeviceId, 1),
+            },
+          }),
+        ).toEqual({ kind: "free_device_stopping" });
+        expect(await registry.listFreeDeviceDeletions()).toHaveLength(2);
+        expect(
+          (await registry.snapshotManagedDevices()).filter((entry) => entry.holder === "free"),
+        ).toHaveLength(2);
+      });
+      test("deletion metadata returned by list cannot mutate the stored owner", async () => {
+        const row = await freeRow();
+        await registry.beginFreeDeviceDeletion(row, owner);
+        const copy = (await registry.listFreeDevices())[0];
+        copy.deletion!.owner.daemonId = "tampered";
+        expect((await registry.listFreeDevices())[0].deletion!.owner.daemonId).toBe(owner.daemonId);
+      });
     });
   });
 }

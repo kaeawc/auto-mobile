@@ -1,8 +1,8 @@
 import { MultiPlatformDeviceManager } from "../../devices/deviceUtils";
-import type { DeviceInfo } from "../../models";
 import type { Timer } from "../../utils/SystemTimer";
 import type { DevicePool } from "../devicePool";
 import { defaultManagedSlotToolInvoker } from "./daemonManagedSlotAcquisition";
+import { freeDeviceBusyReason } from "./freeDeviceBusyReason";
 import { FreeDeviceReclaimer } from "./freeDeviceReclaimer";
 import { PoolManagedSlotDeviceStopper } from "./poolManagedSlotDeviceStopper";
 import {
@@ -26,45 +26,7 @@ export type FreeDeviceReclaimerFactory = (deps: {
   claimedBy: string;
 }) => FreeDeviceReclaimerHandle | undefined;
 
-export type FreeDeviceBusyPool = Pick<
-  DevicePool,
-  "getAllDevices" | "isUnderShutdownReservation" | "isDeviceLeasedForAndroidStartup"
->;
-
-/**
- * Why a free-pool device must not be shut down right now, or undefined when it is quiet: a pooled
- * runtime that is not idle (an in-flight boot or control call, or an errored one), one a session
- * holds, one under a shutdown reservation, or an Android startup lease. The pool never reserves a
- * managed-slot (free-pool) device for restart recovery (the slot wins), and that predicate is
- * private to the pool, so it is not consulted here.
- */
-export function freeDeviceBusyReason(
-  pool: FreeDeviceBusyPool,
-  device: Pick<DeviceInfo, "platform" | "name" | "deviceId">,
-): string | undefined {
-  const runtime = pool
-    .getAllDevices()
-    .find(
-      (pooled) =>
-        pooled.platform === device.platform &&
-        (device.platform === "android"
-          ? (pooled.avdName ?? pooled.name) === device.name
-          : pooled.id === device.deviceId),
-    );
-  if (!runtime) {
-    return undefined;
-  }
-  if (runtime.status !== "idle") {
-    return `pooled runtime is ${runtime.status}`;
-  }
-  if (runtime.sessionId !== null) {
-    return "a session holds the runtime";
-  }
-  if (pool.isUnderShutdownReservation(runtime.id)) {
-    return "shutdown reservation";
-  }
-  return pool.isDeviceLeasedForAndroidStartup(runtime.id) ? "android startup lease" : undefined;
-}
+export { freeDeviceBusyReason, type FreeDeviceBusyPool } from "./freeDeviceBusyReason";
 
 /**
  * The daemon's free-pool reclaim sweep (#11337): a device unadopted for an hour is shut down and

@@ -1,0 +1,63 @@
+{
+  "surface": "managed-slots-result",
+  "name": "managed_slot_budget_exhausted.budget",
+  "builder": "reconciler failure in ManagedSlotsResult",
+  "payload": {
+    "contractVersion": 1,
+    "scope": {
+      "managedHostScope": "host",
+      "runnerNamespace": "ns",
+      "runnerIncarnation": "inc",
+      "scopeKey": null
+    },
+    "outcome": "failed",
+    "slots": [
+      {
+        "slotIndex": 0,
+        "role": "primary",
+        "platform": "android",
+        "assignmentGeneration": null,
+        "device": null,
+        "sessionUuid": null,
+        "requestedSpec": null,
+        "resolvedSpec": null,
+        "specFingerprint": null,
+        "disposition": null,
+        "readiness": null,
+        "lifecycle": null,
+        "failure": {
+          "code": "managed_slot_budget_exhausted",
+          "retryable": true,
+          "message": "Total-resource capacity is exhausted.",
+          "nextAction": "Reset or release managed slot scopes that are no longer needed, or raise AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES, then retry.",
+          "budget": {
+            "limit": 2,
+            "usage": {
+              "total": 3,
+              "active": 1,
+              "assignedIdle": 0,
+              "cached": 0,
+              "preparing": 1,
+              "deleting": 1,
+              "orphaned": 0
+            },
+            "retained": [
+              {
+                "platform": "android",
+                "stableDeviceId": "amslot-kept",
+                "reason": "deletion_pending"
+              }
+            ],
+            "evictionFailures": [
+              {
+                "platform": "android",
+                "stableDeviceId": "amslot-kept",
+                "message": "delete failed"
+              }
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

@@ -119,6 +119,8 @@ export interface FreeSlotDeviceRecord {
    * slot may adopt it and boots it (#11337).
    */
   state: FreeDeviceState;
+  /** Durable deletion commitment; only verified absence removes this row. */
+  deletion: FreeDeviceDeletion | null;
   /** The daemon driving a `stopping` shutdown; null in every other state. */
   stopClaimedBy: string | null;
   /** When that claim was made (registry clock); null in every other state. */
@@ -141,6 +143,59 @@ export function isStaleFreeDeviceStopClaim(
     device.state === "stopping" &&
     (device.stopClaimedAtMs === null ||
       nowMs - device.stopClaimedAtMs >= FREE_DEVICE_STOP_CLAIM_STALE_MS)
+  );
+}
+
+export interface FreeDeviceDeletion {
+  owner: SlotJournalOwner;
+  startedAtMs: number;
+  attempts: number;
+  lastError: string | null;
+  nextAttemptAtMs: number;
+}
+
+export type FreeDeviceIdentity = Pick<
+  FreeSlotDeviceRecord,
+  "platform" | "stableDeviceId" | "fromScopeKey" | "freedAtMs"
+> & { /** Non-authoritative listed name: used only to protect journal targets. */ name?: string };
+
+export type BeginFreeDeviceDeletionResult =
+  | { kind: "begun"; row: FreeSlotDeviceRecord }
+  | { kind: "not_evictable"; reason: string };
+
+/** One statement's consistent view of the total-resource ledger. */
+export interface ManagedSlotResourceSnapshot {
+  managed: ManagedDeviceEntry[];
+  free: FreeSlotDeviceRecord[];
+  openJournal: SlotJournalEntry[];
+  /** Only invalidating scopes with reason abandoned can suppress a deleted replacement charge. */
+  abandonedScopeKeys: string[];
+}
+
+/** Exact identity, including the free incarnation of the device. */
+export function sameFreeDevice(a: FreeDeviceIdentity, b: FreeDeviceIdentity): boolean {
+  return (
+    a.platform === b.platform &&
+    a.stableDeviceId === b.stableDeviceId &&
+    a.fromScopeKey === b.fromScopeKey &&
+    a.freedAtMs === b.freedAtMs
+  );
+}
+
+/** Open journal targets protect both the stable identity and the listed name. */
+export function journalNamesFreeDevice(
+  entry: SlotJournalEntry,
+  row: Pick<FreeDeviceIdentity, "platform" | "stableDeviceId" | "name">,
+): boolean {
+  return (
+    (entry.platform === row.platform &&
+      [entry.target.oldStableId, entry.target.oldName].some(
+        (id) => id === row.stableDeviceId || (row.name !== undefined && id === row.name),
+      )) ||
+    (journalCreationPlatform(entry) === row.platform &&
+      [entry.target.newStableId, entry.target.newName].some(
+        (id) => id === row.stableDeviceId || (row.name !== undefined && id === row.name),
+      ))
   );
 }
 
@@ -573,6 +628,23 @@ export interface SlotRegistry {
    */
   snapshotManagedDevices(): Promise<ManagedDeviceEntry[]>;
   listFreeDevices(): Promise<FreeSlotDeviceRecord[]>;
+  snapshotManagedSlotResources(): Promise<ManagedSlotResourceSnapshot>;
+  beginFreeDeviceDeletion(
+    row: FreeDeviceIdentity,
+    owner: SlotJournalOwner,
+  ): Promise<BeginFreeDeviceDeletionResult>;
+  recordFreeDeviceDeletionAttempt(
+    row: FreeDeviceIdentity,
+    owner: SlotJournalOwner,
+    attempt: { error: string; nextAttemptAtMs: number },
+  ): Promise<boolean>;
+  completeFreeDeviceDeletion(row: FreeDeviceIdentity, owner: SlotJournalOwner): Promise<boolean>;
+  claimFreeDeviceDeletion(
+    row: FreeDeviceIdentity,
+    expectedOwner: SlotJournalOwner,
+    nextOwner: SlotJournalOwner,
+  ): Promise<boolean>;
+  listFreeDeviceDeletions(): Promise<FreeSlotDeviceRecord[]>;
 
   /**
    * valid → invalidating. Idempotent; blocks new acquisitions immediately. An explicit reset of a

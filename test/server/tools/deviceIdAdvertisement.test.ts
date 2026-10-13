@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { registerMcpTools } from "../../../src/server";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 
@@ -17,19 +17,19 @@ function propertiesFor(tool: AdvertisedTool): Record<string, unknown> {
 }
 
 describe("advertised deviceId schema", () => {
-  beforeEach(() => {
+  let definitions: AdvertisedTool[];
+  // Tests only read definitions, getTool, and schema.parse; nothing here mutates the registry, and Bun does not interleave another file's hooks/tests.
+  beforeAll(() => {
     ToolRegistry.clearTools();
+    registerMcpTools(false);
+    definitions = ToolRegistry.getToolDefinitions();
   });
 
-  afterEach(() => {
+  afterAll(() => {
     ToolRegistry.clearTools();
   });
 
   test("exposes observe deviceId and hides it on other executor-routed tools", () => {
-    registerMcpTools(false);
-
-    const definitions = ToolRegistry.getToolDefinitions();
-
     expect(propertiesFor(getTool(definitions, "observe")).deviceId).toBeDefined();
     for (const toolName of ["tapOn", "swipeOn", "changeLocalization"]) {
       expect(
@@ -54,8 +54,6 @@ describe("advertised deviceId schema", () => {
   });
 
   test("keeps executor-injected deviceId accepted by runtime validation", () => {
-    registerMcpTools(false);
-
     const observeTool = ToolRegistry.getTool("observe");
     expect(observeTool, "observe should be registered").toBeDefined();
 

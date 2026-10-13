@@ -263,6 +263,153 @@ describe("managed-slot total-resource budget", () => {
     return { kind: "absent" };
   }
 
+  async function markedCache(attempts: number, failedDeletes = attempts) {
+    await cache("amslot-stuck");
+    const row = (await registry.listFreeDevices())[0];
+    const owner = { daemonId: "delete-owner", pid: 7 };
+    expect((await registry.beginFreeDeviceDeletion(row, owner)).kind).toBe("begun");
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      expect(
+        await registry.recordFreeDeviceDeletionAttempt(row, owner, {
+          error: "native delete failed",
+          nativeDeleteFailed: attempt < failedDeletes,
+          nextAttemptAtMs: timer.now() + 1_000,
+        }),
+      ).toBe(true);
+    }
+    return (await registry.listFreeDevices())[0];
+  }
+
+  test.each([false, true])(
+    "ten blocked attempts stay charged and committed (eviction=%s)",
+    async (eviction) => {
+      await markedCache(10, 0);
+      await cache("amslot-eligible");
+      expect(await usage()).toMatchObject({ total: 2, deleting: 1, cached: 1 });
+      const mine = await creation("amslot-new");
+      expect(await budget(2, eviction).admitCreation({ journalEntryId: mine.id })).toMatchObject({
+        kind: "exhausted",
+        usage: { total: 3, deleting: 1 },
+        retained: [{ reason: "deletion_pending", attempts: 10, failedDeletes: 0 }],
+      });
+      expect(evictor.calls).toEqual([]);
+    },
+  );
+
+  test.each([2, 3])("slot-bound deletion remains charged at %s attempts", async (attempts) => {
+    await markedCache(attempts);
+    const snapshot = await registry.snapshotManagedSlotResources();
+    const device = snapshot.managed[0];
+    expect(
+      computeManagedSlotResourceUsage({
+        ...snapshot,
+        managed: [{ ...device, holder: "slot" }, device],
+      }),
+    ).toEqual({
+      total: 1,
+      active: 0,
+      assignedIdle: 0,
+      cached: 0,
+      preparing: 0,
+      deleting: 1,
+      orphaned: 0,
+    });
+  });
+
+  test("stuck deletion admits creation without charging or changing the marked inventory row", async () => {
+    const row = await markedCache(3);
+    const mine = await creation("amslot-new");
+    expect(await budget(1, true).admitCreation({ journalEntryId: mine.id })).toMatchObject({
+      kind: "admitted",
+      usage: { total: 1, deleting: 0, cached: 0, orphaned: 0 },
+      evicted: [],
+    });
+    expect(await registry.listFreeDevices()).toEqual([row]);
+    expect(evictor.calls).toEqual([]);
+    const selector = new DefaultManagedSlotEvictionSelector({
+      inventory,
+      claims: new FakeClaims(),
+    });
+    expect(await selector.select(registry, {})).toMatchObject({
+      candidates: [],
+      skipped: [
+        {
+          reason: "deletion_stuck",
+          attempts: 3,
+          failedDeletes: 3,
+          lastError: "native delete failed",
+        },
+      ],
+    });
+    expect(
+      computeManagedSlotResourceUsage({
+        managed: await registry.snapshotManagedDevices(),
+        openJournal: await registry.listOpenSlotJournal(),
+      }),
+    ).toMatchObject({ total: 2, cached: 1 }); // Missing free rows retain the original accounting.
+  });
+
+  test.each([false, true])(
+    "two failed deletion attempts remain charged with evidence (eviction=%s)",
+    async (eviction) => {
+      await markedCache(2);
+      const mine = await creation("amslot-new");
+      expect(await budget(1, eviction).admitCreation({ journalEntryId: mine.id })).toMatchObject({
+        kind: "exhausted",
+        usage: { total: 2, deleting: 1 },
+        retained: [
+          {
+            stableDeviceId: "amslot-stuck",
+            reason: "deletion_pending",
+            attempts: 2,
+            failedDeletes: 2,
+            lastError: "native delete failed",
+          },
+        ],
+      });
+      expect(evictor.calls).toEqual([]);
+    },
+  );
+
+  test("stuck deletion is not committed room and another cached row is evicted", async () => {
+    const row = await markedCache(3);
+    await cache("amslot-eligible");
+    await assignManagedSlotDevice(registry, "android", "active", "active", "exec");
+    const mine = await creation("amslot-new");
+    evictor.action = absent;
+    expect(await budget(2, true).admitCreation({ journalEntryId: mine.id })).toMatchObject({
+      kind: "admitted",
+      usage: { total: 2, deleting: 0, orphaned: 0 },
+      evicted: [{ stableDeviceId: "amslot-eligible" }],
+    });
+    expect(evictor.calls.map((device) => device.stableDeviceId)).toEqual(["amslot-eligible"]);
+    expect(await registry.listFreeDevices()).toEqual([row]);
+  });
+
+  test.each([false, true])(
+    "stuck deletion remains in exhaustion evidence (eviction=%s)",
+    async (eviction) => {
+      const row = await markedCache(3);
+      await assignManagedSlotDevice(registry, "android", "active", "active", "exec");
+      const mine = await creation("amslot-new");
+      expect(await budget(1, eviction).admitCreation({ journalEntryId: mine.id })).toMatchObject({
+        kind: "exhausted",
+        usage: { total: 2, deleting: 0, orphaned: 0 },
+        retained: [
+          {
+            stableDeviceId: "amslot-stuck",
+            reason: "deletion_stuck",
+            attempts: 3,
+            failedDeletes: 3,
+            lastError: "native delete failed",
+          },
+        ],
+      });
+      expect(await registry.listFreeDevices()).toEqual([row]);
+      expect(evictor.calls).toEqual([]);
+    },
+  );
+
   test("no limit admits without ever reading the registry", async () => {
     const admission = new RegistryManagedSlotResourceBudget({
       inventory,
@@ -713,5 +860,34 @@ describe("managed-slot total-resource budget", () => {
         openJournal: [{ ...entry, phase: "committed" }],
       }).total,
     ).toBe(0);
+  });
+
+  test("a missing toolchain contributes zero orphans while the other platform is counted", async () => {
+    const limited = new RegistryManagedSlotResourceBudget({
+      registry: async () => registry,
+      policy: { limit: () => 2 },
+      timer,
+      inventory: {
+        list: async (platform) =>
+          platform === "ios"
+            ? { complete: false, devices: [], toolchain: "not_installed" }
+            : { complete: true, devices: [{ platform: "android", name: "amslot-orphan" }] },
+      },
+    });
+    const entry = await creation("amslot-new");
+    expect(await limited.admitCreation({ journalEntryId: entry.id })).toMatchObject({
+      kind: "admitted",
+      usage: { orphaned: 1, total: 2 },
+    });
+  });
+
+  test("a plain incomplete platform keeps orphan usage unknown", async () => {
+    const limited = new RegistryManagedSlotResourceBudget({
+      registry: async () => registry,
+      policy: { limit: () => 2 },
+      timer,
+      inventory: { list: async (platform) => ({ complete: platform === "android", devices: [] }) },
+    });
+    expect(await limited.admitCreation({ journalEntryId: 1 })).toMatchObject({ kind: "unknown" });
   });
 });

@@ -803,6 +803,8 @@ refusal fails at once with each device's reason. Healthy candidates remain
 eligible; reads remain allowed on marked devices. Skipped recovery ticks re-arm
 the same attempt, and only a dispatched restore consumes one of the three
 attempts.
+Recorder teardown composes all unconfirmed retries for the device incarnation; new or replaced retries get a fresh attempt budget, and a later mark also retries work left unconfirmed after exhaustion. Recorder rows from a successful startup read remain tracked when discovery pools a device later or assigns it a new incarnation: quarantine is synchronous before binding, and late redrive rechecks local and peer ownership before device commands; a descriptor with no pid and no finite expiry quarantines one incarnation only. A failed startup read leaves the descriptors for the next daemon start.
+
 In a plan failure result, top-level `deviceId` and `platform` identify the plan's device, while `devices[]` identifies the refused devices and top-level `reason`, `recovering`, `code`, `retryable`, and any `retryAfterMs` retain the refusal evidence.
 
 An exact Android acquisition also waits up to 5 s when adb still lists its

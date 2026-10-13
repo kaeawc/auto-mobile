@@ -1,3 +1,4 @@
+import { prototypePlatformNotes } from "../features/prototype/prototypePlatformNotes";
 import { TelemetryRecorder } from "../features/telemetry/TelemetryRecorder";
 import { z } from "zod/v4";
 import { z as specZ, type ZodTypeAny } from "zod";
@@ -570,6 +571,28 @@ export const prototypeOutputSchema = z.object({
     )
     .optional(),
   lastResult: lastResultSchema.optional(),
+  platformNotes: z
+    .array(
+      z.object({
+        platform: z.literal("ios"),
+        construct: z.enum([
+          "node.id",
+          "bottomSheet.dismissOnSwipe",
+          "bottomSheet.detents",
+          "icon.name",
+          "icon.variant",
+        ]),
+        effect: z.enum(["ignored", "substituted"]),
+        paths: z.array(z.string()).max(20),
+        total: z.number().int().positive().optional(),
+        values: z.array(z.string()).optional(),
+        detail: z.string(),
+      }),
+    )
+    .optional()
+    .describe(
+      "Successful show on iOS only: platform and construct identify the difference; effect says ignored or substituted; paths list affected fields in the component-expanded, anchor-resolved device spec in tree order, capped at 20, including bottomSheet.dismissOnSwipe when absent and defaulted; total is the full count only when capped; values are distinct sorted placeholder icon names for icon.name; detail explains iOS and Android behavior. Absent when nothing applies or the show failed.",
+    ),
   event: prototypeEventOutputSchema.optional(),
   timedOut: z
     .literal(true)
@@ -1251,9 +1274,9 @@ function clearMutationEvents(
   target: { id?: string; all?: true },
   action: PrototypeMutation,
   success: boolean,
-  previouslyShown: boolean,
+  clearFailedShow: boolean,
 ): void {
-  if ((action === "dismiss" && success) || (action === "show" && !success && !previouslyShown)) {
+  if ((action === "dismiss" && success) || (action === "show" && !success && clearFailedShow)) {
     events.dismiss(scope.deviceId, target.id);
   }
 }
@@ -1379,6 +1402,7 @@ async function performMutation(
     target,
     generation: takenGeneration,
     sent: false,
+    startedFreshEvents: false,
   };
   try {
     const generation = takenGeneration;
@@ -1423,6 +1447,7 @@ async function performMutation(
           // Last step before dispatch: a refusal, a failed upload, a lost race or a failed grant
           // must leave the event epoch of a prototype still on screen alone (#11394).
           startFreshShowEvents(events, scope, source, { target, args, inPlace });
+          ordering.startedFreshEvents = args.action === "show" && !inPlace;
           if (args.action === "show" && target.id) {
             dependencies.store.beginShowDispatch(scope.deviceId, target.id);
           }
@@ -1442,6 +1467,7 @@ async function performMutation(
           placed,
           inPlace,
           previouslyShown,
+          startedFreshEvents: ordering.startedFreshEvents,
         });
     return {
       success: result.success,
@@ -1449,11 +1475,30 @@ async function performMutation(
       lastResult,
       ...(stage.uploaded.length > 0 ? { uploadedAssets: stage.uploaded } : {}),
       ...anchorsOutput(resolved),
+      ...platformNotesOutput(sendArgs, device, prototypeTarget, result.success),
       ...missingAssetsOutput(result, [warning, placed.warning], legacy),
     };
   } finally {
     settleGeneration(ordering);
   }
+}
+
+/** Notes describe the expanded, anchor-resolved spec actually sent to the device. */
+function platformNotesOutput(
+  args: z.infer<typeof prototypeSchema>,
+  device: BootedDevice,
+  target: PrototypeTarget,
+  success: boolean,
+): Pick<PrototypeOutput, "platformNotes"> {
+  if (args.action !== "show" || !success || device.platform !== "ios") {
+    return {};
+  }
+  const notes = prototypePlatformNotes(
+    args.spec as PrototypeSpec,
+    "ios",
+    (capability) => target.ios?.supportsCapability(capability) === true,
+  );
+  return notes.length > 0 ? { platformNotes: notes } : {};
 }
 
 /**
@@ -1501,6 +1546,8 @@ interface ShowOrdering {
   generation: number | undefined;
   /** Set once the show is issued to the device: a show that may be on screen is never withdrawn. */
   sent: boolean;
+  /** This call created the fresh event epoch; unsent refusals must not clear another call's. */
+  startedFreshEvents: boolean;
 }
 
 function withdrawGeneration(ordering: ShowOrdering): void {
@@ -1597,12 +1644,23 @@ function commitMutation(
   dependencies: PrototypeHandlerDependencies,
   scope: PrototypeScope,
   source: PrototypeEventSource,
-  outcome: CommitOutcome & { inPlace: boolean; previouslyShown: boolean },
+  outcome: CommitOutcome & {
+    inPlace: boolean;
+    previouslyShown: boolean;
+    startedFreshEvents: boolean;
+  },
 ): PrototypeLastResult {
   const { store, events } = dependencies;
   const { args, target, result, placed, inPlace, previouslyShown } = outcome;
   settleShowEvents(events, scope, source, { target, inPlace, success: result.success });
-  clearMutationEvents(events, scope, target, args.action, result.success, previouslyShown);
+  clearMutationEvents(
+    events,
+    scope,
+    target,
+    args.action,
+    result.success,
+    outcome.startedFreshEvents && !previouslyShown,
+  );
   if (args.action === "show" && result.success && target.id) {
     events.replaceShown(scope.deviceId, target.id);
   }

@@ -789,6 +789,8 @@ export class Daemon {
   private readonly acceptanceDiscoveryCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
   private shutdownHandlersRegistered: boolean = false;
   private shutdownInProgress: boolean = false;
+  /** Redrives retained startup recorder descriptors when a device incarnation is assigned. */
+  private recorderDeviceIncarnationListener?: (deviceId: string) => void;
   /** Live peer daemon ids captured at startup, consulted by the appearance sweep (#11158). */
   private startupLiveDaemonSessionIds: ReadonlySet<string> = new Set();
   private shutdownSessionReleasesDrained = true;
@@ -1030,6 +1032,7 @@ export class Daemon {
     // Free-pool devices unadopted for an hour are shut down, image kept (#11337).
     this.freeDeviceReclaimer ??= this.freeDeviceReclaimerFactory({
       registry: () => this.openManagedSlotRegistry(),
+      journalFor: (registry) => this.managedSlotAcquisition?.journalFor(registry),
       registryExists: () => this.managedSlotRegistryExists(),
       pool: this.devicePool,
       executions: this.sessionManager,
@@ -1279,6 +1282,7 @@ export class Daemon {
         this.deviceDataStreamServer?.invalidateDeviceFrames(deviceId);
         getDaemonStreamDeviceLifecycleEmitter().deviceIdentityChanged(deviceId);
       },
+      onDeviceIncarnationAssigned: (deviceId) => this.recorderDeviceIncarnationListener?.(deviceId),
       onDeviceRemoved: (deviceId, platform) => {
         getDaemonStreamDeviceLifecycleEmitter().deviceRemoved(deviceId);
         stopLocationRouteForRemovedDevice(deviceId);
@@ -1713,6 +1717,9 @@ export class Daemon {
               [...state.liveDaemonSessionIds].filter((id) => id !== this.daemonSessionId),
             ),
             ownedCaptureIds: () => state.videoRecorderService.listActiveRecordingIds(),
+            onDeviceIncarnationAssigned: (listener) => {
+              this.recorderDeviceIncarnationListener = listener;
+            },
             getDeviceIncarnation: (id) => this.devicePool.getDeviceIncarnation(id),
             getDevice: (id) => {
               const device = this.devicePool.getDevice(id);

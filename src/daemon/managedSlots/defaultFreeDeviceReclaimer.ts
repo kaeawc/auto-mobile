@@ -10,6 +10,8 @@ import {
   PoolManagedSlotDeviceClaims,
 } from "./managedSlotReconcilerPorts";
 import type { LiveExecutionSessions } from "./slotOwnerLiveness";
+import type { ManagedSlotJournal } from "./slotJournal";
+import { JournaledManagedSlotCacheEvictor } from "./managedSlotCacheEviction";
 import type { SlotRegistry } from "./slotRegistry";
 
 /** What the daemon starts and stops; undefined means no sweep runs. */
@@ -17,6 +19,7 @@ export type FreeDeviceReclaimerHandle = Pick<FreeDeviceReclaimer, "start" | "sto
 
 export type FreeDeviceReclaimerFactory = (deps: {
   registry: () => Promise<SlotRegistry>;
+  journalFor?: (registry: SlotRegistry) => ManagedSlotJournal | undefined;
   /** False while the host registry does not exist; the sweep then never creates it. */
   registryExists: () => boolean;
   pool: DevicePool;
@@ -37,6 +40,7 @@ export { freeDeviceBusyReason, type FreeDeviceBusyPool } from "./freeDeviceBusyR
 export const createDefaultFreeDeviceReclaimer: FreeDeviceReclaimerFactory = ({
   registry,
   registryExists,
+  journalFor,
   pool,
   executions,
   timer,
@@ -45,8 +49,14 @@ export const createDefaultFreeDeviceReclaimer: FreeDeviceReclaimerFactory = ({
   if (process.env.NODE_ENV === "test") {
     return undefined;
   }
+  let evictor: JournaledManagedSlotCacheEvictor | undefined;
   return new FreeDeviceReclaimer({
-    registry,
+    registry: async () => {
+      const resolved = await registry();
+      evictor = createAbsentRowEvictor(resolved, journalFor);
+      return resolved;
+    },
+    absentRowEvictor: () => evictor,
     registryExists,
     inventory: new DeviceManagerSlotInventory(new MultiPlatformDeviceManager()),
     claims: new PoolManagedSlotDeviceClaims(pool, executions),
@@ -56,3 +66,12 @@ export const createDefaultFreeDeviceReclaimer: FreeDeviceReclaimerFactory = ({
     timer,
   });
 };
+
+/** Resolve the acquisition journal lazily per sweep; discovery alone cannot release a row. */
+export function createAbsentRowEvictor(
+  registry: SlotRegistry,
+  journalFor: ((registry: SlotRegistry) => ManagedSlotJournal | undefined) | undefined,
+): JournaledManagedSlotCacheEvictor | undefined {
+  const journal = journalFor?.(registry);
+  return journal ? new JournaledManagedSlotCacheEvictor(registry, () => journal) : undefined;
+}

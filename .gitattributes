@@ -23,6 +23,7 @@ test/fixtures/android-window-policy/*.txt text eol=lf
 test/fixtures/ios-devicectl/*.json text eol=lf
 test/fixtures/observe-output/ios-overlay-window/*.json text eol=lf
 test/fixtures/network-filter-controller/*.json text eol=lf
+test/fixtures/network-filter-controller/v4/*.json text eol=lf
 test/fixtures/desktop-wire/*.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-injected.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-not-injected.json text eol=lf
@@ -125,6 +126,8 @@ test/fixtures/android-display/fold-pixel10pf-api36/fold-*-hinge-angle0.txt -text
 
 # Shared prototype specs: preserve byte limits and path parity on Windows.
 test/fixtures/prototype-spec/**/*.json text eol=lf
+test/bats/fixtures/compose-compiler-report/**/*.txt text eol=lf
+test/bats/fixtures/compose-compiler-report/**/*.json text eol=lf
 schemas/prototype-spec-contract.json text eol=lf
 schemas/prototype-asset-contract.json text eol=lf
 

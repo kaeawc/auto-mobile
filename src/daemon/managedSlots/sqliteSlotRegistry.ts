@@ -178,6 +178,7 @@ interface SlotFreeDevicesTable {
   deletion_owner_process_token: string | null;
   deletion_started_at_ms: number | null;
   deletion_attempts: number | null;
+  deletion_failed_deletes: number | null;
   deletion_last_error: string | null;
   deletion_next_attempt_at_ms: number | null;
 }
@@ -316,6 +317,7 @@ function toFreeDevice(row: FreeDeviceRow): FreeSlotDeviceRecord {
             },
             startedAtMs: row.deletion_started_at_ms!,
             attempts: row.deletion_attempts!,
+            failedDeletes: row.deletion_failed_deletes ?? 0,
             lastError: row.deletion_last_error,
             nextAttemptAtMs: row.deletion_next_attempt_at_ms!,
           },
@@ -1013,6 +1015,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
               "deletion_owner_process_token",
               "deletion_started_at_ms",
               "deletion_attempts",
+              "deletion_failed_deletes",
               "deletion_last_error",
               "deletion_next_attempt_at_ms",
             ]),
@@ -1299,6 +1302,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
           deletion_owner_process_token: owner.processGenerationToken ?? null,
           deletion_started_at_ms: this.timer.now(),
           deletion_attempts: 0,
+          deletion_failed_deletes: 0,
           deletion_last_error: null,
           deletion_next_attempt_at_ms: this.timer.now(),
         })
@@ -1319,7 +1323,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
   async recordFreeDeviceDeletionAttempt(
     row: FreeDeviceIdentity,
     owner: SlotJournalOwner,
-    attempt: { error: string; nextAttemptAtMs: number },
+    attempt: { error: string; nextAttemptAtMs: number; nativeDeleteFailed?: boolean },
   ): Promise<boolean> {
     return this.db.transaction().execute(async (trx) => {
       const current = await this.ownsFreeDeletion(trx, row, owner);
@@ -1330,6 +1334,8 @@ export class SqliteSlotRegistry implements SlotRegistry {
         .updateTable("slot_free_devices")
         .set({
           deletion_attempts: current.deletion.attempts + 1,
+          deletion_failed_deletes:
+            current.deletion.failedDeletes + Number(attempt.nativeDeleteFailed === true),
           deletion_last_error: attempt.error,
           deletion_next_attempt_at_ms: attempt.nextAttemptAtMs,
         })

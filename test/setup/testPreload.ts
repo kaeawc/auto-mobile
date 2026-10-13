@@ -109,6 +109,11 @@ testOverrides.bootAdmissionGatesDisabled = true;
 // files keep the real capture. Bun.main is read at each call: it follows the running file.
 testOverrides.processGenerationCaptureDisabled = () => isUnitTestPath(Bun.main);
 
+// Unit tests may yield only microtasks: queued log lines retain heap until real I/O runs,
+// making a collection land on an innocent test (#12159). Sink assertions opt in with
+// useRealLogSinks(); integration and stress files keep real sinks. Read Bun.main lazily.
+testOverrides.logSinksDisabled = () => isUnitTestPath(Bun.main);
+
 // Emulator launch tests must never create real TCP probes. Individual tests
 // inject unavailable ports when exercising allocation behavior.
 testOverrides.hostPortAvailabilityChecker = {

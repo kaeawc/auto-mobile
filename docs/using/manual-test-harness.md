@@ -17,6 +17,11 @@ protocol or its evidence assertions.
   with the initialized private environment.
 - Never use `pkill` or `killall`. Stop only daemons you started, using
   `private-daemon.ts stop` for that batch and daemon number.
+- Stop batch devices with `shutdown-devices` through the daemon's own kill path.
+  When the daemon is dead, use the PID reported by `devices`/`shutdown-devices`
+  after checking the AVD name against the protected list. Never use `adb emu`
+  console commands to stop a device under load: `adb emu kill` hung in batch
+  20261013a. Record protected devices with `init --protect`.
 - Never delete an AVD, simulator, or directory. Keep batch evidence and devices.
 - For `startDevice`, use `avdName` (Android) or `deviceId` (UDID/serial);
   `name` alone is a matcher and is refused.
@@ -52,7 +57,8 @@ bun scripts/manual-test/private-daemon.ts stop --batch-dir "$B" --daemon 1
 ```
 
 `init` writes `batch.json`, each `daemonN/env.sh`, and executable generated
-`bin/amN|proxyN|frameN|auxN` wrappers without starting a process. `amN daemon …`
+`bin/amN|proxyN|frameN|auxN` wrappers without starting a process. Repeat
+`init --protect NAME_OR_ID` to record non-batch devices that teardown must refuse. `amN daemon …`
 uses the selected private daemon; `amN cli …` performs a one-shot product CLI
 call with `--cli`. The private socket and PID path variables sourced from
 `env.sh` let the CLI find the selected private daemon. `proxyN`, `frameN` and
@@ -67,8 +73,16 @@ accepted. Restarts reuse recorded env and argv; `start -- …` adds one-off argv
 The harness owns `--port` and `--strict-port`.
 
 `start` refuses a recorded live PID, then mirrors the daemon's JSON PID to
-`daemonN/pid.txt`. `stop` targets one manifest daemon and removes `pid.txt` on
-success; a failed stop preserves it. `status` reports JSON/plain PID agreement
+`daemonN/pid.txt`. `stop` confirms identity through `ide/status` on the private
+control socket, sends SIGTERM to the recorded PID, and waits up to `--wait-ms`
+(default 30000). It prints one JSON line with `outcome` `stopped`, `still-alive`,
+or `gone-before-signal` and `via` `signal`, `product-cli`, or `none`. When identity
+is not confirmed, it delegates to the product CLI; `amN daemon stop` remains
+the product stop path. The harness sends no SIGKILL. Exit 1 means `still-alive`
+and preserves `pid.txt`; successful stop removes that mirror. `stop --wait-ms 0`
+signals and reports `still-alive` unless the daemon is already gone.
+
+`status` reports JSON/plain PID agreement
 (`pidTxt` is `ok`, `missing`, or `stale`), process liveness, socket response,
 port and env file. `status --devices` appends host inventories and the daemon's
 own view, with `daemonDevicesMethod: "daemon/availableDevices"`. Status is
@@ -140,6 +154,150 @@ managed-slot registry live there. `init --split-adb-coordination` is only for
 scenarios whose daemons must not see each other's coordination state. A split
 registry made batch 20261012a report a false 7-of-6 capacity finding (#11905).
 It does not create separate adb servers or make host capacity independent.
+
+## Host preflight and staggered boots
+
+`preflight --batch-dir "$B" [--strict]` reports platform, power source and charge,
+system-wide sleep assertions, lid state and clamshell sleep behavior, the three
+load averages, CPU count, and free/total memory bytes. macOS reads `pmset -g batt`,
+`pmset -g assertions`, and `ioreg`; other platforms report those sections as
+unsupported. Failed readers carry `unavailable` reasons. Memory is reported
+without warnings. The command needs a private batch path, but no `batch.json`.
+It prints one JSON document and exits 0; `--strict` exits 1 when warnings exist.
+
+`init` after writing the batch and `start` before launch run the same checks as
+warnings, record `shared/preflight-<ms>.json`, and print `PREFLIGHT WARNING:`
+lines plus the caffeinate command when warnings exist. Failed preflight readers
+or recording never refuse initialization or change the daemon launch result.
+
+```bash
+bun scripts/manual-test/private-daemon.ts preflight --batch-dir "$B" --strict
+nohup caffeinate -dims > /dev/null 2>&1 & echo $! > "$B"/shared/caffeinate.pid
+```
+
+The report prints that exact caffeinate invocation with the batch path shell
+quoted. Keep AC attached and the lid open or an external display connected:
+caffeinate cannot prevent a clamshell sleep on battery. A host sleep expires
+every idle session on wake, so timings across a sleep are invalid (batch
+20261013a, #12212). Discard timings measured during a host load spike as well.
+
+Every role calls `boot-gate` before starting or provisioning a device. The role
+must match `^[A-Za-z0-9._-]{1,64}$`. Defaults are `--max-concurrent 1` (range 1–8),
+`--max-load` twice the host CPU count, `--min-interval-ms 30000`,
+`--timeout-ms 600000`, and `--poll-ms 2000`. A role takes the first free shared
+slot, waits for 1-minute load strictly below the threshold and the interval
+since the last grant, then records `shared/boot-gate/last-grant.json`. The
+canonical file-lock primitive reclaims slots left by dead holders.
+`--min-interval-ms` is best-effort when `--max-concurrent` is above 1 because
+separate slot holders can read the same last grant. A `boot-gate` killed by a
+signal leaves its slot lock to be reclaimed once its PID is gone.
+
+```bash
+# Gate alone: exits immediately after a grant; no slot is held beyond exit.
+bun scripts/manual-test/private-daemon.ts boot-gate --batch-dir "$B" --role A1
+# Each role wraps its own boot to hold its slot for the whole command.
+bun scripts/manual-test/private-daemon.ts boot-gate --batch-dir "$B" --role A1 -- "$B/bin/proxy1" call --dir "$B/sessions/a1" startDevice '{"platform":"android","avdName":"manual-test-avd"}' < /dev/null
+bun scripts/manual-test/private-daemon.ts boot-gate --batch-dir "$B" --role A2 -- "$B/bin/proxy2" call --dir "$B/sessions/a2" startDevice '{"platform":"android","avdName":"manual-test-avd-2"}' < /dev/null
+```
+
+Roles may drive their own devices in parallel after boot; never assign two
+actors to one device. Without a wrapped command, only load and the minimum
+interval stagger boots; the JSON grant includes a note explaining that the
+slot ends at exit. With `-- COMMAND ARG...`, the slot stays held until the
+command finishes, including on failure, and the harness propagates its exit
+code. Command tokens retain the caller's environment and are not daemon flags.
+An empty `--` is refused. A grant prints one JSON line with `role`, `outcome`,
+`slot`, `waitedMs`, `loadAverage1m`, and `maxLoad`. A timeout prints those timing
+fields and `waitingFor` (`slot`, `load`, or `interval`), releases any held slot,
+never runs the command, and exits 2. Gate-only success exits 0; usage/guard/I/O
+also exits 2. An initialized batch is required.
+
+## Devices and teardown
+
+`devices --batch-dir "$B" [--daemon K] [--timeout-ms 30000]` lists only running
+devices with a nonempty runtime device ID and lifecycle `booting`, `booted`, or
+`shutting-down`. Its JSON contains `batchDir`, `protectedDevices`, baseline
+availability, daemon liveness/errors, and device rows: `deviceId`, `name`,
+`identity.stableId`, `platform`, `isVirtual`, `seenByDaemons`, `pid` (and optional
+`pidReason`), `provenance`, `protected`, `poolStatus`, and `heldBy` when exposed.
+Optional `bootedBy: "daemon<N>"` identifies the booting daemon from `MT_DAEMON`;
+`processAvdName` is the process command's `-avd` argument. `seenByDaemons` records
+visibility, not boot ownership. iOS and physical devices have a null PID.
+
+Positive evidence is the `MT_BATCH`/`MT_DAEMON` environment an emulator inherits
+from its private daemon. The harness reads it with `ps eww -o command= -p <pid>`
+for the one Android console-port listener PID that `lsof` resolved (5000 ms per
+probe). This inherited environment has not yet been observed on a live batch.
+Missing PID, failed/empty process reads and every iOS simulator have no process
+evidence. Provenance is:
+
+- `batch-booted`: the process carries exactly this batch's `MT_BATCH` marker.
+- `foreign`: the process environment was read without this batch's marker,
+  regardless of the baseline.
+- `preexisting`: no process evidence and the runtime ID is in the first-start
+  baseline (`shared/host-devices-at-start.json`).
+- `batch-inferred`: no process evidence and the runtime ID is absent from a
+  recorded baseline for its platform.
+- `unknown`: no process evidence and the platform baseline is missing/unavailable,
+  or two daemon rows conflict.
+
+Baseline recording is best-effort. A failed directory/file write prints one
+`BASELINE WARNING:` explaining that provenance will be unknown without process
+evidence; it never changes the launch result.
+
+`shutdown-devices --batch-dir "$B"` stops by default only unprotected virtual
+devices with positive `batch-booted` evidence. It reports unprotected
+`batch-inferred` devices as `inferred-not-stopped` and exits 1; check that the
+batch started them, then name them by exact device ID (serial/UDID) with `--device ID`.
+A unique name may select a `batch-booted` device. An ambiguous selector stops
+nothing and reports `ambiguous` for every match; a separate unambiguous selector
+(such as its exact ID) still applies to a matched device.
+Every iOS simulator needs this check and selector. `foreign`, `preexisting`,
+`unknown`, and physical devices are never sent a frame, even when named.
+Use `--daemon K` to restrict the view or `--dry-run` to report without stopping.
+The per-request `--timeout-ms` defaults to 60000. Protection matches any of
+`deviceId`, `name`, `identity.stableId`, or `processAvdName`. An empty or
+`Unknown (<serial>)` Android name without a process AVD name is refused when the
+protected list is nonempty. `heldBy: "other_daemon"` is refused locally;
+`managed_slot` targets go to the daemon, which refuses them itself. The harness
+asks a listing daemon's `killDevice` without `force` and never signals a device
+process.
+
+| Outcome                | Meaning                                                                                                     |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `stopped`              | Shutdown succeeded, or `device_already_stopped` confirmed the goal state; the daemon's message is retained. |
+| `refused`              | The daemon refused, with its code/message.                                                                  |
+| `failed`               | The request failed; no retry of a possibly completed mutation.                                              |
+| `timeout`              | The request deadline expired.                                                                               |
+| `protected`            | The target matches protection or its name cannot be safely checked.                                         |
+| `not-batch-booted`     | The target is physical, foreign, preexisting, or unknown; selectors cannot override this.                   |
+| `inferred-not-stopped` | Check the inferred device and name it by exact device ID (serial/UDID) with `--device`.                     |
+| `held-by-other-daemon` | The inventory reports another daemon holding it; no frame is sent.                                          |
+| `ambiguous`            | Multiple devices match; this selector stops nothing. Name each target by device ID (serial/UDID).           |
+| `not-found`            | No device in the selected view matches the explicit selector.                                               |
+| `dry-run`              | An eligible target would be stopped.                                                                        |
+| `daemon-dead`          | No selected daemon produced an inventory to stop the snapshotted target.                                    |
+
+Every result row includes `provenance` and `bootedBy` when known. Shutdown exits
+0 when every target is `stopped`/`dry-run` (including no targets) and every selected
+daemon produced an inventory; otherwise it exits 1. Inventory refusals,
+unparseable replies and transport failures add top-level
+`daemonErrors: [{name,error}]`, while devices from healthy daemons are still
+processed. A daemon whose socket replies is `alive: true` even if that reply
+cannot be parsed. `devices` exits 1 only when no daemon produced an inventory.
+
+Without inventories, `devices`/`shutdown-devices` use `shared/devices-last.json`
+to report unprotected `batch-booted` and `batch-inferred` snapshot devices and
+refreshed PID evidence, with exit 1 and no shutdown frames. Selectors restrict
+that fallback, ambiguous selectors return `ambiguous`, and missing selectors return
+`not-found`. Explicitly selected protected, foreign, preexisting, or unknown
+snapshot devices retain their refusal result rows. Run `devices` or
+`shutdown-devices` **before** `stop` so a snapshot exists. Check the reported AVD
+name against the protected list before manually stopping by PID when the daemon
+is dead; never use `adb emu` console commands under load (#12202).
+
+Teardown order: `shutdown-devices`, then `stop` each batch daemon, then stop the
+batch's caffeinate process using its recorded `shared/caffeinate.pid`.
 
 ## Persistent stdio-proxy sessions
 
@@ -338,8 +496,10 @@ full evidence rather than treating exit 0 as device-side proof.
 All three client CLIs support `--help`, `-h`, `help` and `<subcommand> --help`
 on stdout with exit 0. Their help lists every accepted command/flag, defaults,
 examples and exit codes. Parse errors go to stderr with a `--help` pointer and
-exit 2. Private-daemon exits 0 on success/status, 2 on usage/guard/I/O failures,
-and propagates the product lifecycle command's exit code. Proxy exits 0 on
+exit 2. Private-daemon exits 0 on success/status; 1 for a typed non-success outcome
+(daemon still alive, a device not stopped, inventory errors, or `preflight --strict` with warnings);
+2 for usage/guard/I/O or a `boot-gate` wait deadline. `start` still propagates the
+product launch command's exit code. `boot-gate -- COMMAND` exits with the command's code. Proxy exits 0 on
 success/status, 1 on a failed/refused response, 2 on usage/guard/wait deadline,
 3 when serve loses its transport and 4 when serve initialization fails.
 

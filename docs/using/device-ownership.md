@@ -843,6 +843,17 @@ kill naming a device the session has left with `session_no_longer_owns_device`
 (`retryable: false`, no `nextAction`; check who holds the device before killing
 it, a new session would not help).
 
+A control call that begins after the idle deadline can join a live timely control
+call. Other late calls or tracked work that is aborted or past its request deadline
+cannot admit it: the session ends immediately with `session_ownership_lost`, reason
+`cleanup-expired`, `idle: true` and `nextAction: "acquire_new_session"`.
+If session-preserving device recovery is in flight, the hold and idle deadline
+stay unchanged instead. The late control call receives `session_held_by_recovery`
+with `sessionUuid`, `deviceId`, `retryable: true` and `retryAfterMs: 1000`.
+Retry after recovery settles; the retry receives either the live session or the
+terminal idle answer. A late read behind any hold still runs sessionlessly on the
+held device without releasing or refreshing the session.
+
 ## Device status in listings
 
 `listDevices`, the `automobile:devices/booted` resources, `daemon/availableDevices`

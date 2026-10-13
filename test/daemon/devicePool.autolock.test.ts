@@ -568,7 +568,7 @@ describe("DevicePool autolock", () => {
 
     it("keeps routing an expired autolock to its session while older work holds the veto (#10956)", async () => {
       await initializeLiveAndroidDevice();
-      sessionManager.setActiveSessionExecutionChecker(() => true);
+      sessionManager.setActiveSessionExecutionChecker((_id, query) => !query?.recoveryOnly);
 
       const sessionId = await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
       timer.advanceTime(61 * 1000);
@@ -710,6 +710,7 @@ describe("DevicePool autolock", () => {
       const earlierStart = timer.now();
       sessionManager.setActiveSessionExecutionChecker(
         (_sessionId, query) =>
+          !query?.recoveryOnly &&
           query?.excludeExecutionId !== "earlier" &&
           (query?.sessionClockStartedAtOrBefore === undefined ||
             earlierStart <= query.sessionClockStartedAtOrBefore),

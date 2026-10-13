@@ -109,6 +109,8 @@ export { SESSION_NO_LONGER_OWNS_DEVICE_CODE } from "./sessionNoLongerOwnsDevice"
  * caller (not a client loop) decides whether to kill again (#11189).
  */
 export const SESSION_REBINDING_CODE = "session_rebinding";
+/** A late tool call waits for recovery; this is not an acquisition refusal. */
+export const SESSION_HELD_BY_RECOVERY_CODE = "session_held_by_recovery";
 
 /** Wire codes of acquisition refusals a client should wait out rather than fail on. */
 export const RETRYABLE_DEVICE_ACQUISITION_CODES: ReadonlySet<string> = new Set([

@@ -92,6 +92,7 @@ import {
   UnissuedSessionError,
   SessionRecoveryIdentityLossError,
   SessionRebindingError,
+  SessionHeldByRecoveryError,
   SessionSuspectError,
   SessionTerminalReleaseInProgressError,
   TerminalSessionError,
@@ -561,6 +562,11 @@ const BUILDERS: readonly FixtureEntry[] = [
     "session_rebinding",
     "SessionRebindingError via shapeToolCallError",
     () => shaped(new SessionRebindingError(SESSION)),
+  ],
+  [
+    "session_held_by_recovery",
+    "SessionHeldByRecoveryError via shapeToolCallError",
+    () => shaped(new SessionHeldByRecoveryError(SESSION, DEVICE)),
   ],
   [
     "daemon_session_suspect",

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { promises as fsPromises } from "node:fs";
 import type { SessionManager } from "../../src/daemon/sessionManager";
-import { VideoRecorderService } from "../../src/features/video";
+import { VideoCaptureFinalizationError, VideoRecorderService } from "../../src/features/video";
 import { AndroidSegmentedPlanVideoSession } from "../../src/server/androidSegmentedPlanVideoSession";
 import * as recordingCleanup from "../../src/server/recordingSessionCleanup";
 import { sequenceBackoff } from "../../src/utils/Backoff";
@@ -17,6 +17,7 @@ import {
   startVideoRecording,
   stopVideoRecording,
   markVideoRecordingIncomplete,
+  interruptVideoRecording,
   VideoRecordingTeardownUnconfirmedError,
 } from "../../src/server/videoRecordingManager";
 import { ProcessTeardownUnconfirmedError } from "../../src/utils/ChildProcessTracker";
@@ -89,6 +90,8 @@ describe("recording teardown ownership", () => {
   let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
   let info: ReturnType<typeof spyOn<typeof logger, "info">>;
   let stat: ReturnType<typeof spyOn<typeof fsPromises, "stat">>;
+  let backendStop: ReturnType<typeof spyOn<typeof backend, "stop">>;
+  let extraSpies: Array<{ mockRestore(): void }>;
 
   beforeEach(async () => {
     timer = new FakeTimer();
@@ -96,8 +99,9 @@ describe("recording teardown ownership", () => {
     repository = new FakeVideoRecordingRepository();
     manager = new FakeSessionManager();
     graceful = Promise.withResolvers<void>();
+    extraSpies = [];
     const stop = backend.stop.bind(backend);
-    spyOn(backend, "stop").mockImplementation(async (handle) => {
+    backendStop = spyOn(backend, "stop").mockImplementation(async (handle) => {
       await graceful.promise;
       return stop(handle);
     });
@@ -112,6 +116,7 @@ describe("recording teardown ownership", () => {
       securePermissions: new FakeSecurePermissions(false),
       archiveRoot: "/unused/fake-video",
       now: () => new Date(timer.now()),
+      fileSystem: { rm: async () => {} },
     });
     await setVideoRecordingManagerDependencies({
       videoRecorderService: service,
@@ -136,6 +141,10 @@ describe("recording teardown ownership", () => {
     warn.mockRestore();
     info.mockRestore();
     stat.mockRestore();
+    backendStop.mockRestore();
+    for (const spy of extraSpies) {
+      spy.mockRestore();
+    }
   });
 
   test("give-up marks health before retry cleanup settles and retries only retained captures", async () => {
@@ -185,6 +194,171 @@ describe("recording teardown ownership", () => {
     await timer.advanceTimeAsync(ms, () => drainUntilQuiescent(timer));
     await drainUntilQuiescent(timer);
   };
+
+  for (const [label, failure] of [
+    ["teardown unconfirmed", teardownError()],
+    ["plain error", new Error("stop failed without teardown proof")],
+  ] as const) {
+    test(`a release-time stop that rejects with ${label} keeps quarantine until force-stop confirms teardown`, async () => {
+      const active = await start();
+      backendStop.mockRejectedValue(failure);
+      const forced = Promise.withResolvers<void>();
+      extraSpies.push(
+        spyOn(backend, "forceStop").mockImplementation(async (handle) => {
+          backend.forceStopCalls.push(handle);
+          await forced.promise;
+        }),
+      );
+      try {
+        manager.releaseA();
+        await advance(0);
+        expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
+        expect((await repository.getRecording(active.recordingId))?.status).toBe("recording");
+        expect(manager.registrations[0].settled).toBe(false);
+        expect(backend.forceStopCalls).toEqual([backend.startResults[0]]);
+        forced.resolve();
+        await advance(0);
+        expect(manager.registrations[0].settled).toBe(true);
+      } finally {
+        forced.resolve();
+        await advance(0);
+      }
+    });
+  }
+
+  test("a fast unconfirmed stop force-stops once and retains an owner-retrievable incomplete artifact", async () => {
+    const active = await start();
+    backendStop.mockRejectedValue(teardownError());
+    manager.releaseA();
+    await advance(0);
+    expect(backend.forceStopCalls).toEqual([backend.startResults[0]]);
+    expect(manager.registrations.map(({ capMs, settled }) => ({ capMs, settled }))).toEqual([
+      { capMs: 125_000, settled: true },
+    ]);
+    expect(service.listActiveRecordingIds()).toEqual([]);
+    expect((await repository.getRecording(active.recordingId))?.status).toBe("incomplete");
+    expect(
+      await getVideoRecordingMetadata(active.recordingId, { ownerSessionUuid: "session-a" }),
+    ).toMatchObject({ recordingId: active.recordingId, sizeBytes: 9 });
+    expect(
+      await getVideoRecordingMetadata(active.recordingId, { ownerSessionUuid: "session-b" }),
+    ).toBeNull();
+    expect(recordingCleanup.recordingTeardownRecoveryNeeded(device.deviceId)).toBeUndefined();
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(timer.getPendingIntervalCount()).toBe(0);
+    expect(warn.mock.calls.filter(([line]) => String(line).includes("force-stopping"))).toEqual([
+      [expect.stringContaining(`on ${device.deviceId}`)],
+    ]);
+    expect(
+      warn.mock.calls.some(
+        ([line]) =>
+          String(line).includes("session-a") &&
+          String(line).includes(active.recordingId) &&
+          String(line).includes("force-stopping"),
+      ),
+    ).toBe(true);
+  });
+
+  test("after a fast unconfirmed stop teardown retries and records recorder recovery at the budget", async () => {
+    const active = await start();
+    backendStop.mockRejectedValue(teardownError());
+    backend.setForceStopFailures(Array.from({ length: 40 }, teardownError));
+    manager.releaseA();
+    await advance(0);
+    expect(manager.registrations.map(({ capMs }) => capMs)).toEqual([125_000, 25_000]);
+    expect(manager.registrations[1].previousSettled).toBe(false);
+    expect(manager.registrations.every(({ settled }) => !settled)).toBe(true);
+    for (const [delay, count] of [
+      [1_000, 2],
+      [2_000, 3],
+      [4_000, 4],
+      [8_000, 5],
+      [8_000, 6],
+    ]) {
+      await advance(delay);
+      expect(backend.forceStopCalls).toHaveLength(count);
+    }
+    await advance(1_999);
+    expect(recordingCleanup.recordingTeardownRecoveryNeeded(device.deviceId)).toBeUndefined();
+    expect(manager.registrations.every(({ settled }) => !settled)).toBe(true);
+    await advance(1);
+    expect(recordingCleanup.recordingTeardownRecoveryNeeded(device.deviceId)).toEqual({
+      deviceId: device.deviceId,
+      sessionId: "session-a",
+      recordingIds: [active.recordingId],
+      attempts: 5,
+      budgetMs: 25_000,
+    });
+    expect(manager.registrations.every(({ settled }) => settled)).toBe(true);
+    expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
+    expect((await repository.getRecording(active.recordingId))?.status).toBe("recording");
+    await advance(125_000);
+    expect(backend.forceStopCalls.length).toBeGreaterThan(0);
+  });
+
+  test("a fast unconfirmed stop settles at the first backoff retry without touching session B's capture", async () => {
+    const active = await start();
+    backendStop.mockRejectedValue(teardownError());
+    backend.setForceStopFailures([teardownError()]);
+    manager.releaseA();
+    await advance(0);
+    expect(manager.registrations.map(({ capMs }) => capMs)).toEqual([125_000, 25_000]);
+    expect(manager.registrations[1].previousSettled).toBe(false);
+    await advance(999);
+    expect(backend.forceStopCalls).toHaveLength(1);
+    expect(manager.registrations.every(({ settled }) => !settled)).toBe(true);
+    await advance(1);
+    expect(manager.registrations.every(({ settled }) => settled)).toBe(true);
+    expect((await repository.getRecording(active.recordingId))?.status).toBe("incomplete");
+    expect(recordingCleanup.recordingTeardownRecoveryNeeded(device.deviceId)).toBeUndefined();
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(timer.getPendingIntervalCount()).toBe(0);
+    const second = await start("session-b");
+    await advance(150_000);
+    expect(service.listActiveRecordingIds()).toEqual([second.recordingId]);
+    expect(backend.forceStopCalls).toEqual([backend.startResults[0], backend.startResults[0]]);
+  });
+
+  test("release force-stops a retained capture whose row was already interrupted", async () => {
+    const active = await start();
+    await interruptVideoRecording(active.recordingId);
+    expect((await repository.getRecording(active.recordingId))?.status).toBe("interrupted");
+    expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
+    manager.releaseA();
+    await advance(0);
+    expect(backend.forceStopCalls).toEqual([backend.startResults[0]]);
+    expect(service.listActiveRecordingIds()).toEqual([]);
+    expect(manager.registrations).toHaveLength(1);
+    expect(manager.registrations[0].settled).toBe(true);
+    expect((await repository.getRecording(active.recordingId))?.status).toBe("interrupted");
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("a fast failure with confirmed teardown settles without force-stop", async () => {
+    const active = await start();
+    backendStop.mockRejectedValue(new VideoCaptureFinalizationError("capture exited; pull failed"));
+    manager.releaseA();
+    await advance(0);
+    expect(service.listActiveRecordingIds()).toEqual([]);
+    expect((await repository.getRecording(active.recordingId))?.status).toBe("interrupted");
+    expect(backend.forceStopCalls).toEqual([]);
+    expect(manager.registrations).toHaveLength(1);
+    expect(manager.registrations[0].settled).toBe(true);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("a normal successful release stop completes without force-stop", async () => {
+    const active = await start();
+    graceful.resolve();
+    manager.releaseA();
+    await advance(0);
+    expect(service.listActiveRecordingIds()).toEqual([]);
+    expect((await repository.getRecording(active.recordingId))?.status).toBe("completed");
+    expect(backend.forceStopCalls).toEqual([]);
+    expect(manager.registrations).toHaveLength(1);
+    expect(manager.registrations[0].settled).toBe(true);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
 
   test("a wedged segmented handle settles at the cap when its capture force-stop succeeds", async () => {
     const active = await start();
@@ -530,10 +704,12 @@ describe("recording teardown ownership", () => {
     const giveUps = registerRetries([1_000]);
     const forcing = Promise.withResolvers<void>();
     const forceStop = backend.forceStop.bind(backend);
-    spyOn(backend, "forceStop").mockImplementation(async (handle) => {
-      await forcing.promise;
-      await forceStop(handle);
-    });
+    extraSpies.push(
+      spyOn(backend, "forceStop").mockImplementation(async (handle) => {
+        await forcing.promise;
+        await forceStop(handle);
+      }),
+    );
     manager.releaseA();
     await advance(124_999);
     expect(manager.registrations).toHaveLength(1);
@@ -598,7 +774,9 @@ describe("recording teardown ownership", () => {
     const active = await start();
     const failure = teardownError();
     backend.setForceStopFailures([failure]);
-    spyOn(repository, "getRecording").mockRejectedValueOnce(new Error("fake safety read failed"));
+    extraSpies.push(
+      spyOn(repository, "getRecording").mockRejectedValueOnce(new Error("fake safety read failed")),
+    );
     await expect(markVideoRecordingIncomplete(active.recordingId)).rejects.toBeInstanceOf(
       VideoRecordingTeardownUnconfirmedError,
     );

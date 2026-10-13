@@ -58,6 +58,7 @@ import {
   assertDaemonNamespaceMatchesState,
 } from "../sharedNamespaceGuard";
 import {
+  abandonBrokerSessionRequest,
   queryBrokerSessionRequestStatus,
   releaseBrokerSession,
   sessionBrokerCommandArgsAreValid,
@@ -1001,13 +1002,17 @@ async function runSessionBrokerCommand(
     const result =
       command === "session-request-status"
         ? await queryBrokerSessionRequestStatus(args, createClient)
-        : await releaseBrokerSession(args, createClient);
+        : command === "abandon-session-request"
+          ? await abandonBrokerSessionRequest(args, createClient)
+          : await releaseBrokerSession(args, createClient);
     console.log(JSON.stringify(result));
   } catch (error) {
     const context =
       command === "session-request-status"
         ? "Failed to query broker session request status"
-        : "Failed to release broker session";
+        : command === "abandon-session-request"
+          ? "Failed to abandon broker session request"
+          : "Failed to release broker session";
     exitWithDaemonQueryFailure(new DaemonCommandRefusal(context, error), true);
   }
 }
@@ -1204,6 +1209,12 @@ const STRICT_DAEMON_COMMANDS: Partial<Record<string, DaemonCommandFlagSpec>> = {
     booleanFlags: [DAEMON_JSON_FLAG],
     positionals: 1,
   },
+  "abandon-session-request": {
+    launchFlags: false,
+    valueFlags: ["--liveness-owner-token"],
+    booleanFlags: [DAEMON_JSON_FLAG],
+    positionals: 1,
+  },
   "release-broker-session": {
     launchFlags: false,
     valueFlags: ["--liveness-owner-token"],
@@ -1211,6 +1222,12 @@ const STRICT_DAEMON_COMMANDS: Partial<Record<string, DaemonCommandFlagSpec>> = {
     positionals: 1,
   },
 };
+
+function isSessionBrokerCommand(command: string): command is SessionBrokerCliCommand {
+  return ["session-request-status", "abandon-session-request", "release-broker-session"].includes(
+    command,
+  );
+}
 
 /**
  * The usage error for a no-argument daemon command given a stray positional word or an unknown
@@ -1226,15 +1243,12 @@ export function daemonCommandArgumentError(command: string, args: string[]): str
   }
   const invalid = invalidDaemonCommandArgument(args, spec);
   if (!invalid) {
-    if (
-      (command === "session-request-status" || command === "release-broker-session") &&
-      !sessionBrokerCommandArgsAreValid(command, args)
-    ) {
+    if (isSessionBrokerCommand(command) && !sessionBrokerCommandArgsAreValid(command, args)) {
       return sessionBrokerCommandUsage(command);
     }
     return undefined;
   }
-  if (command === "session-request-status" || command === "release-broker-session") {
+  if (isSessionBrokerCommand(command)) {
     return sessionBrokerCommandUsage(command);
   }
   if (invalid.kind === "positional") {
@@ -1260,6 +1274,7 @@ function printDaemonUsageError(message: string): void {
     console.log("  session-info <id>     Get information about a session");
     console.log("  release-session <id>  Release a session and free its device");
     console.log("  session-request-status <request-id> --liveness-owner-token <token> --json");
+    console.log("  abandon-session-request <request-id> --liveness-owner-token <token> --json");
     console.log("  release-broker-session <session-uuid> --liveness-owner-token <token> --json");
     console.log(
       "  (status, available-devices, active-sessions, session-info and release-session accept --json)",
@@ -1299,6 +1314,7 @@ const NAMESPACE_GUARDED_DAEMON_COMMANDS = new Set([
   "restart-admitted",
   "restart-acceptance-session",
   "release-session",
+  "abandon-session-request",
   "release-broker-session",
   "release-liveness-ownership",
   "reset-slot-scope",
@@ -1350,6 +1366,8 @@ export async function runDaemonCommand(
     "release-session": () => releaseDaemonSession(args, manager),
     "session-request-status": () =>
       runSessionBrokerCommand("session-request-status", args, manager),
+    "abandon-session-request": () =>
+      runSessionBrokerCommand("abandon-session-request", args, manager),
     "release-broker-session": () =>
       runSessionBrokerCommand("release-broker-session", args, manager),
     heartbeat: () => recordDaemonHeartbeat(args, manager),

@@ -7,6 +7,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { parseBooleanFlagValue, readValueOperand, splitFlagToken } from "../../utils/flagTokens";
 import { z } from "zod";
 import {
+  DAEMON_ABANDON_SESSION_REQUEST_METHOD,
   DAEMON_RELEASE_BROKER_SESSION_METHOD,
   DAEMON_SESSION_REQUEST_STATUS_METHOD,
 } from "../sessionBrokerProxyAcquisition";
@@ -15,7 +16,10 @@ export const SESSION_BROKER_STATUS_TIMEOUT_MS = 5_000;
 /** CLI request budget leaves room for long native reset and release paths. */
 export const SESSION_BROKER_RELEASE_TIMEOUT_MS = 240_000;
 
-export type SessionBrokerCliCommand = "session-request-status" | "release-broker-session";
+export type SessionBrokerCliCommand =
+  | "session-request-status"
+  | "abandon-session-request"
+  | "release-broker-session";
 
 export interface SessionBrokerCommandClient {
   connect(): Promise<void>;
@@ -43,7 +47,7 @@ interface SessionBrokerArgumentState {
 const sessionUuid = z.string().uuid();
 
 export function sessionBrokerCommandUsage(command: SessionBrokerCliCommand): string {
-  const identity = command === "session-request-status" ? "<request-id>" : "<session-uuid>";
+  const identity = command === "release-broker-session" ? "<session-uuid>" : "<request-id>";
   return `Usage: ${command} ${identity} --liveness-owner-token <token> --json`;
 }
 
@@ -223,6 +227,30 @@ export async function queryBrokerSessionRequestStatus(
     );
     if (!isStatusResult(result, parsed.identity)) {
       throw new ActionableError("Invalid daemon session-request-status result");
+    }
+    return result;
+  } catch (error) {
+    throw redactError(error, parsed.livenessOwnerToken);
+  }
+}
+
+export async function abandonBrokerSessionRequest(
+  args: string[],
+  createClient: SessionBrokerCommandClientFactory,
+): Promise<SessionBrokerResult> {
+  const parsed = parseSessionBrokerCommandArgs("abandon-session-request", args);
+  try {
+    const result = await callExistingDaemon(
+      createClient,
+      DAEMON_ABANDON_SESSION_REQUEST_METHOD,
+      {
+        requestId: parsed.identity,
+        livenessOwnerToken: parsed.livenessOwnerToken,
+      },
+      SESSION_BROKER_RELEASE_TIMEOUT_MS,
+    );
+    if (!isStatusResult(result, parsed.identity)) {
+      throw new ActionableError("Invalid daemon abandon-session-request result");
     }
     return result;
   } catch (error) {

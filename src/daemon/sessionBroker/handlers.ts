@@ -10,6 +10,7 @@ const prepareParams = z.object({ config: z.unknown(), livenessOwnerToken: ownerT
 const statusParams = z
   .object({ requestId: z.string().min(1), livenessOwnerToken: ownerToken })
   .strict();
+const abandonParams = statusParams;
 const releaseParams = z
   .object({ sessionId: z.string().uuid(), livenessOwnerToken: ownerToken })
   .strict();
@@ -85,6 +86,25 @@ export async function handleBrokerSessionStatus(
         code: "session_request_not_found",
         error: "No committed session request has that identity",
       };
+}
+
+export async function handleAbandonBrokerSessionRequest(
+  request: DaemonRequest,
+  state: DaemonStateAccess,
+): Promise<DaemonMethodResult> {
+  const service = state.getSessionBrokerService?.();
+  if (!service) {
+    return unavailable();
+  }
+  const parsed = abandonParams.safeParse(request.params);
+  if (!parsed.success) {
+    return { success: false, error: "requestId and livenessOwnerToken are required" };
+  }
+  const result = await service.broker.abandon(
+    parsed.data.requestId,
+    parsed.data.livenessOwnerToken,
+  );
+  return { success: true, result: { ...result } };
 }
 
 export async function handleReleaseBrokerSession(

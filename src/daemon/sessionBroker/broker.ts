@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import {
   matchSessionDevice,
   normalizeSessionDeviceRequirement,
@@ -15,12 +14,12 @@ import type {
   SessionBrokerResult,
 } from "../../models/sessionBrokerResult";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { stableStringify } from "../../utils/stableStringify";
 import { logger } from "../../utils/logger";
 import type { SlotProcessIdentity } from "../managedSlots/slotRegistry";
 import type { BrokerLimits } from "./admission";
 import type { SessionBrokerDevicePort } from "./devicePort";
 import { nativeProfile, poolProfile } from "./profile";
+import { SESSION_REQUEST_ABANDONED_CODE, sessionRequestFingerprint } from "./requestIdentity";
 import type { SqliteSessionBrokerStore } from "./sqliteStore";
 import {
   destructionTicket,
@@ -87,10 +86,6 @@ function sameProcess(left: SlotProcessIdentity, right: SlotProcessIdentity): boo
   );
 }
 
-function requestFingerprint(config: unknown, livenessOwnerToken: string): string {
-  return createHash("sha256").update(stableStringify({ config, livenessOwnerToken })).digest("hex");
-}
-
 /**
  * Owns one acquisition-to-release lifecycle behind the consumer's fresh session UUID.
  * Requests are reserved before native work. Every unsuccessful acquisition becomes terminal and
@@ -102,7 +97,10 @@ function requestFingerprint(config: unknown, livenessOwnerToken: string): string
 export class SessionBroker {
   private readonly releases = new Map<string, Promise<SessionBrokerReleaseResult>>();
   private readonly preparations = new Map<string, number>();
-  private readonly preparationOwners = new Map<Promise<SessionBrokerResult>, AbortController>();
+  private readonly preparationOwners = new Map<
+    Promise<SessionBrokerResult>,
+    { controller: AbortController; requestId: string }
+  >();
   private stopping = false;
 
   constructor(private readonly options: SessionBrokerOptions) {}
@@ -118,7 +116,7 @@ export class SessionBroker {
     const controller = new AbortController();
     const ownedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
     const pending = this.prepareOnce(config, livenessOwnerToken, ownedSignal);
-    this.preparationOwners.set(pending, controller);
+    this.preparationOwners.set(pending, { controller, requestId: config.requestId });
     void pending.then(
       () => this.preparationOwners.delete(pending),
       () => this.preparationOwners.delete(pending),
@@ -132,68 +130,109 @@ export class SessionBroker {
     signal: AbortSignal,
   ): Promise<SessionBrokerResult> {
     let admitted = false;
-    const fingerprint = requestFingerprint(config, livenessOwnerToken);
+    const fingerprint = sessionRequestFingerprint(config, livenessOwnerToken);
     this.preparations.set(config.requestId, (this.preparations.get(config.requestId) ?? 0) + 1);
     try {
       const previous = await this.options.store.getRequest(config.requestId);
       if (previous) {
-        if (previous.fingerprint !== fingerprint) {
-          return failedResult(
-            config,
-            failureFor(
-              new ActionableError(
-                "Session request identity was already used with different parameters",
-              ),
-            ),
-          );
-        }
-        // Receipt replay does not depend on today's runtime catalog or default configuration.
-        return this.result(previous);
+        return this.replay(previous, config, fingerprint, livenessOwnerToken, signal);
       }
       const input = await this.admissionInput(config, fingerprint, signal);
       const admission = await this.options.store.admit(input);
       if (admission.kind === "existing" || admission.kind === "refused") {
-        return this.result(admission.request);
+        return this.resultUnlessAborted(admission.request, signal);
       }
       admitted = true;
       return await this.prepareAdmission(admission, input, config, livenessOwnerToken, signal);
     } catch (error) {
-      const failure = failureFor(error);
-      if (admitted) {
-        const ticket = await this.options.store.fail(
-          config.requestId,
-          this.options.owner,
-          failure.message,
-          failure.code,
-        );
-        if (ticket) {
-          await this.tryCleanup(ticket);
-        }
-        const request = await this.options.store.getRequest(config.requestId);
-        if (request) {
-          return { ...(await this.result(request)), failure };
-        }
+      return this.handlePreparationFailure(
+        config,
+        livenessOwnerToken,
+        fingerprint,
+        admitted,
+        error,
+      );
+    } finally {
+      this.finishPreparation(config.requestId);
+    }
+  }
+
+  private async handlePreparationFailure(
+    config: SessionConfig,
+    livenessOwnerToken: string,
+    fingerprint: string,
+    admitted: boolean,
+    error: unknown,
+  ): Promise<SessionBrokerResult> {
+    const failure = failureFor(error);
+    if (admitted) {
+      const ticket = await this.options.store.fail(
+        config.requestId,
+        this.options.owner,
+        failure.message,
+        failure.code,
+      );
+      if (ticket) {
+        await this.tryCleanup(ticket);
+      }
+      const request = await this.options.store.getRequest(config.requestId);
+      if (!request) {
         throw new ActionableError(
           "Admitted session request lost its durable receipt; cleanup cannot be acknowledged",
         );
       }
-      // Catalog/default resolution can fail before admission. Retain that terminal identity too:
-      // a changed host catalog must not turn its replay into a new native acquisition.
-      // An independently committed receipt wins; never overwrite an acquisition from a sibling
-      // caller. A persistence failure is an RPC error, not a claimed durable terminal result.
-      const receipt = await this.options.store.recordPreAdmissionFailure(
-        { requestId: config.requestId, fingerprint, parameters: config, owner: this.options.owner },
-        failure,
-      );
-      return this.result(receipt);
-    } finally {
-      const remaining = (this.preparations.get(config.requestId) ?? 1) - 1;
-      if (remaining === 0) {
-        this.preparations.delete(config.requestId);
-      } else {
-        this.preparations.set(config.requestId, remaining);
-      }
+      const result = await this.result(request);
+      return request.errorCode === SESSION_REQUEST_ABANDONED_CODE ? result : { ...result, failure };
     }
+    // Catalog/default resolution can fail before admission. Retain that terminal identity too:
+    // a changed host catalog must not turn its replay into a new native acquisition.
+    // An independently committed receipt wins; never overwrite an acquisition from a sibling
+    // caller. A persistence failure is an RPC error, not a claimed durable terminal result.
+    const independentlyCommitted = await this.options.store.getRequest(config.requestId);
+    if (
+      independentlyCommitted?.errorCode === SESSION_REQUEST_ABANDONED_CODE &&
+      this.consumerOwns(independentlyCommitted, livenessOwnerToken)
+    ) {
+      return this.result(independentlyCommitted);
+    }
+    const receipt = await this.options.store.recordPreAdmissionFailure(
+      { requestId: config.requestId, fingerprint, parameters: config, owner: this.options.owner },
+      failure,
+    );
+    return this.result(receipt);
+  }
+
+  private finishPreparation(requestId: string): void {
+    const remaining = (this.preparations.get(requestId) ?? 1) - 1;
+    if (remaining === 0) {
+      this.preparations.delete(requestId);
+    } else {
+      this.preparations.set(requestId, remaining);
+    }
+  }
+
+  /** Receipt replay does not depend on today's runtime catalog or default configuration. */
+  private replay(
+    previous: BrokerRequestRecord,
+    config: SessionConfig,
+    fingerprint: string,
+    livenessOwnerToken: string,
+    signal: AbortSignal,
+  ): Promise<SessionBrokerResult> | SessionBrokerResult {
+    const ownedAbandonment =
+      previous.errorCode === SESSION_REQUEST_ABANDONED_CODE &&
+      this.consumerOwns(previous, livenessOwnerToken);
+    if (previous.fingerprint !== fingerprint && !ownedAbandonment) {
+      return failedResult(
+        config,
+        failureFor(
+          new ActionableError(
+            "Session request identity was already used with different parameters",
+          ),
+        ),
+      );
+    }
+    return this.resultUnlessAborted(previous, signal);
   }
 
   private async admissionInput(
@@ -252,7 +291,7 @@ export class SessionBroker {
       this.options.owner,
       prepared.sessionId,
     );
-    return this.result(request);
+    return this.resultUnlessAborted(request, signal);
   }
 
   async status(requestId: string): Promise<SessionBrokerResult | undefined> {
@@ -270,6 +309,27 @@ export class SessionBroker {
     }
     this.assertConsumerOwner(request, ownerToken);
     return this.result(request);
+  }
+
+  async abandon(requestId: string, ownerToken: string): Promise<SessionBrokerResult> {
+    if (this.stopping) {
+      throw new ActionableError("Session broker is stopping");
+    }
+    const abandonment = await this.options.store.abandon(requestId, this.options.owner, ownerToken);
+    for (const preparation of this.preparationOwners.values()) {
+      if (preparation.requestId === requestId) {
+        preparation.controller.abort(
+          new ActionableError("Session request was abandoned by its liveness owner"),
+        );
+      }
+    }
+    if (abandonment.request.sessionId) {
+      await this.drainAbandonedSession(abandonment.request.sessionId);
+    }
+    if (abandonment.ticket && !this.hasPendingPreparation(requestId)) {
+      await this.tryCleanup(abandonment.ticket);
+    }
+    return this.result((await this.options.store.getRequest(requestId)) ?? abandonment.request);
   }
 
   async ownedSessionRequest(
@@ -290,9 +350,16 @@ export class SessionBroker {
   }
 
   private assertConsumerOwner(request: BrokerRequestRecord, ownerToken: string): void {
-    if (!ownerToken || request.fingerprint !== requestFingerprint(request.parameters, ownerToken)) {
+    if (!this.consumerOwns(request, ownerToken)) {
       throw new ActionableError("Session request belongs to another liveness owner");
     }
+  }
+
+  private consumerOwns(request: BrokerRequestRecord, ownerToken: string): boolean {
+    return (
+      Boolean(ownerToken) &&
+      request.fingerprint === sessionRequestFingerprint(request.parameters, ownerToken)
+    );
   }
 
   release(sessionUuid: string): Promise<SessionBrokerReleaseResult> {
@@ -317,8 +384,8 @@ export class SessionBroker {
 
   async close(): Promise<void> {
     this.stopping = true;
-    for (const controller of this.preparationOwners.values()) {
-      controller.abort(new ActionableError("Session broker is stopping"));
+    for (const preparation of this.preparationOwners.values()) {
+      preparation.controller.abort(new ActionableError("Session broker is stopping"));
     }
     await Promise.allSettled([...this.preparationOwners.keys()]);
     const requests = await this.options.store.listRequests();
@@ -348,7 +415,10 @@ export class SessionBroker {
       }
     }
     for (const resource of await this.options.store.listResources()) {
-      if (resource.state === "destroying") {
+      if (
+        resource.state === "destroying" &&
+        (!resource.requestId || !this.hasPendingPreparation(resource.requestId))
+      ) {
         await this.tryCleanup(destructionTicket(resource));
       }
     }
@@ -374,8 +444,19 @@ export class SessionBroker {
       if (request.state === "releasing" && request.sessionId) {
         await this.release(request.sessionId);
       }
+      await this.redriveAbandonedSession(request);
     }
     await this.options.store.recoverRequest(request.requestId, this.options.owner);
+  }
+
+  private async redriveAbandonedSession(request: BrokerRequestRecord): Promise<void> {
+    if (
+      request.state === "failed" &&
+      request.errorCode === SESSION_REQUEST_ABANDONED_CODE &&
+      request.sessionId
+    ) {
+      await this.drainAbandonedSession(request.sessionId);
+    }
   }
 
   private async releaseOnce(sessionUuid: string): Promise<SessionBrokerReleaseResult> {
@@ -408,6 +489,21 @@ export class SessionBroker {
       await this.tryCleanup(ticket);
     }
     return this.releaseStatus(request, sessionUuid);
+  }
+
+  private async drainAbandonedSession(sessionUuid: string): Promise<void> {
+    try {
+      const inFlightRelease = this.releases.get(sessionUuid);
+      if (inFlightRelease) {
+        await inFlightRelease;
+      } else {
+        await this.options.devices.release(sessionUuid);
+      }
+    } catch (error) {
+      logger.warn(
+        `Abandoned session ${sessionUuid} release remains pending: ${errorMessage(error)}`,
+      );
+    }
   }
 
   private async drainAndReset(
@@ -469,11 +565,6 @@ export class SessionBroker {
 
   private async result(request: BrokerRequestRecord): Promise<SessionBrokerResult> {
     const resource = await this.requestResource(request);
-    const cleanupPending =
-      resource?.requestId === request.requestId &&
-      (resource.state === "destroying" ||
-        resource.state === "resetting" ||
-        resource.state === "unknown");
     return {
       contractVersion: 1,
       requestId: request.requestId,
@@ -487,7 +578,7 @@ export class SessionBroker {
               : "pending",
       sessionUuid: request.sessionId,
       profile: resource ? nativeProfile(resource) : null,
-      cleanupPending: Boolean(cleanupPending),
+      cleanupPending: this.cleanupIsPending(request, resource),
       ...(request.error
         ? {
             failure: {
@@ -498,6 +589,32 @@ export class SessionBroker {
           }
         : {}),
     };
+  }
+
+  private cleanupIsPending(
+    request: BrokerRequestRecord,
+    resource: BrokerResourceRecord | undefined,
+  ): boolean {
+    const durableCleanupPending =
+      resource?.requestId === request.requestId &&
+      ["destroying", "resetting", "unknown"].includes(resource.state);
+    const preparationPending =
+      request.errorCode === SESSION_REQUEST_ABANDONED_CODE &&
+      this.hasPendingPreparation(request.requestId);
+    return Boolean(durableCleanupPending || preparationPending);
+  }
+
+  private async resultUnlessAborted(
+    request: BrokerRequestRecord,
+    signal: AbortSignal,
+  ): Promise<SessionBrokerResult> {
+    const result = await this.result(request);
+    signal.throwIfAborted();
+    return result;
+  }
+
+  private hasPendingPreparation(requestId: string): boolean {
+    return (this.preparations.get(requestId) ?? 0) > 0;
   }
 
   private async destroy(resource: BrokerResourceRecord): Promise<boolean> {

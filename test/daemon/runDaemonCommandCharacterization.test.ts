@@ -57,6 +57,10 @@ describe("daemon command characterization with fake I/O", () => {
           ["stdout", "  session-request-status <request-id> --liveness-owner-token <token> --json"],
           [
             "stdout",
+            "  abandon-session-request <request-id> --liveness-owner-token <token> --json",
+          ],
+          [
+            "stdout",
             "  release-broker-session <session-uuid> --liveness-owner-token <token> --json",
           ],
           [

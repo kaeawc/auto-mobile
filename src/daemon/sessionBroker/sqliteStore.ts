@@ -5,7 +5,14 @@ import type { SlotRegistryDatabase } from "../managedSlots/sqliteSlotRegistry";
 import type { SlotExecOwnerLiveness, SlotProcessIdentity } from "../managedSlots/slotRegistry";
 import { chooseIdleEvictions, selectAdmission, type BrokerLimits } from "./admission";
 import {
+  abandonedRequestIdentity,
+  SESSION_REQUEST_ABANDONED_CODE,
+  SESSION_REQUEST_ABANDONED_MESSAGE,
+  sessionRequestFingerprint,
+} from "./requestIdentity";
+import {
   destructionTicket,
+  type BrokerAbandonment,
   type BrokerAdmission,
   type BrokerAdmissionInput,
   type BrokerRequestRecord,
@@ -191,6 +198,74 @@ export class SqliteSessionBrokerStore {
         .returningAll()
         .executeTakeFirstOrThrow();
       return this.reserve(trx, requestRecord(row), input);
+    });
+  }
+
+  /**
+   * Atomically consumes an uncommitted identity or terminalizes its current allocation. The
+   * consumer token is checked against the original parameters, while an absent identity gets an
+   * internal token-bound receipt that a later prepare cannot turn into an allocation.
+   */
+  async abandon(
+    requestId: string,
+    owner: SlotProcessIdentity,
+    livenessOwnerToken: string,
+  ): Promise<BrokerAbandonment> {
+    if (!requestId.trim() || !livenessOwnerToken) {
+      throw new ActionableError("Session request identity and liveness owner token are required");
+    }
+    return this.db.transaction().execute(async (trx) => {
+      const previous = await this.readRequest(trx, requestId);
+      if (!previous) {
+        const tombstone = abandonedRequestIdentity(livenessOwnerToken);
+        const row = await trx
+          .insertInto("session_broker_requests")
+          .values({
+            request_id: requestId,
+            fingerprint: tombstone.fingerprint,
+            parameters_json: JSON.stringify(tombstone.parameters),
+            owner_json: JSON.stringify(owner),
+            state: "failed",
+            resource_id: null,
+            session_id: null,
+            error: SESSION_REQUEST_ABANDONED_MESSAGE,
+            error_code: SESSION_REQUEST_ABANDONED_CODE,
+          })
+          .returningAll()
+          .executeTakeFirstOrThrow();
+        return { request: requestRecord(row) };
+      }
+      if (
+        previous.fingerprint !== sessionRequestFingerprint(previous.parameters, livenessOwnerToken)
+      ) {
+        throw new ActionableError("Session request belongs to another liveness owner");
+      }
+      if (previous.state === "released" || previous.state === "failed") {
+        return {
+          request: previous,
+          ...(await this.currentDestructionTicket(trx, previous)),
+        };
+      }
+      if (!sameOwner(previous.owner, owner)) {
+        throw new ActionableError("Session request belongs to another daemon process generation");
+      }
+      let ticket: DestructionTicket | undefined;
+      if (previous.resourceId) {
+        const resource = await this.ownedResource(trx, previous);
+        if (resource.state !== "destroyed") {
+          const destroying =
+            resource.state === "destroying"
+              ? resource
+              : await this.updateResource(trx, resource, { state: "destroying" });
+          ticket = destructionTicket(destroying);
+        }
+      }
+      const request = await this.updateRequest(trx, requestId, {
+        state: "failed",
+        error: SESSION_REQUEST_ABANDONED_MESSAGE,
+        error_code: SESSION_REQUEST_ABANDONED_CODE,
+      });
+      return { request, ...(ticket ? { ticket } : {}) };
     });
   }
 
@@ -573,6 +648,19 @@ export class SqliteSessionBrokerStore {
       .where("request_id", "=", requestId)
       .executeTakeFirst();
     return row && requestRecord(row);
+  }
+
+  private async currentDestructionTicket(
+    db: Executor,
+    request: BrokerRequestRecord,
+  ): Promise<Pick<BrokerAbandonment, "ticket">> {
+    if (!request.resourceId) {
+      return {};
+    }
+    const resource = await this.readResource(db, request.resourceId);
+    return resource?.requestId === request.requestId && resource.state === "destroying"
+      ? { ticket: destructionTicket(resource) }
+      : {};
   }
 
   private async openJournal(db: Executor, resource: BrokerResourceRecord) {

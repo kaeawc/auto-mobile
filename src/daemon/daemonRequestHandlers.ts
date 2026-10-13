@@ -3,6 +3,7 @@ import type { SessionBrokerService } from "./sessionBroker/service";
 import type { SessionBrokerProtocolErrorCode } from "../models/sessionBrokerResult";
 import { SESSION_BROKER_CAPABILITY } from "./sessionBroker/hostConfig";
 import {
+  handleAbandonBrokerSessionRequest,
   bindBrokerRegistration,
   handlePrepareBrokerSession,
   handleBrokerSessionStatus,
@@ -795,6 +796,10 @@ const INITIALIZED_DAEMON_METHOD_HANDLERS: ReadonlyMap<string, InitializedDaemonM
       "daemon/sessionRequestStatus",
       (request, state, _executions, _signal, context) =>
         handleBrokerSessionStatus(request, state, context.socketSessionId),
+    ],
+    [
+      "daemon/abandonSessionRequest",
+      (request, state) => handleAbandonBrokerSessionRequest(request, state),
     ],
     ["daemon/releaseBrokerSession", (request, state) => handleReleaseBrokerSession(request, state)],
     [DAEMON_REGISTER_SESSION_METHOD, handleRegisterSession],

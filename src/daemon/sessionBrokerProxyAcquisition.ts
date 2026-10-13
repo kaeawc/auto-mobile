@@ -13,6 +13,7 @@ import { McpTimeoutError } from "./McpTimeoutError";
 
 export const DAEMON_PREPARE_SESSION_METHOD = "daemon/prepareSession";
 export const DAEMON_SESSION_REQUEST_STATUS_METHOD = "daemon/sessionRequestStatus";
+export const DAEMON_ABANDON_SESSION_REQUEST_METHOD = "daemon/abandonSessionRequest";
 export const DAEMON_RELEASE_BROKER_SESSION_METHOD = "daemon/releaseBrokerSession";
 
 const DAEMON_CAPABILITIES_METHOD = "daemon/capabilities";

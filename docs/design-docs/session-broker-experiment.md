@@ -217,6 +217,7 @@ The daemon protocol is:
 
 - `daemon/prepareSession`: `{config, livenessOwnerToken}`.
 - `daemon/sessionRequestStatus`: `{requestId, livenessOwnerToken}`.
+- `daemon/abandonSessionRequest`: `{requestId, livenessOwnerToken}`.
 - `daemon/releaseBrokerSession`: `{sessionId, livenessOwnerToken}`.
 - Reconnect registration: `{sessionId, clientName, sessionBroker:
   {requestId, livenessOwnerToken}}`.
@@ -236,13 +237,20 @@ socket protocol:
 
 ```text
 auto-mobile --daemon session-request-status <request-id> --liveness-owner-token <token> --json
+auto-mobile --daemon abandon-session-request <request-id> --liveness-owner-token <token> --json
 auto-mobile --daemon release-broker-session <session-uuid> --liveness-owner-token <token> --json
 auto-mobile --daemon session-info <session-uuid> --json
 ```
 
 These commands only contact the existing daemon. Status preserves terminal
 failures and pending cleanup as reported; successful command execution does not
-mean acquisition succeeded. Release has a 240-second request budget and returns
+mean acquisition succeeded. Abandonment consumes the original request identity,
+including one the daemon has not seen yet, and returns its terminal failed receipt;
+late preparation cannot allocate from that identity. Its receipt keeps
+`cleanupPending: true` while an original prepare is still running or durable native
+cleanup remains. `cleanupPending: false` therefore means no local prepare remains
+and the assignment/journal has confirmed native absence. Abandonment and release
+have a 240-second request budget. Release returns
 `released`, `cleanup_pending`, or `unknown_session`. An unknown session is not
 cleanup proof. Query the original request receipt after an ambiguous release.
 Session info supplies the currently bound native device as descriptive metadata;

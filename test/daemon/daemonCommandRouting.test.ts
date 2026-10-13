@@ -15,6 +15,7 @@ describe("daemon command routing around the server bootstrap", () => {
     "session-info",
     "release-session",
     "session-request-status",
+    "abandon-session-request",
     "release-broker-session",
     "release-liveness-ownership",
     "no-such-command",

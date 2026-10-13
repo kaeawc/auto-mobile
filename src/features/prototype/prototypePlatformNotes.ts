@@ -18,7 +18,8 @@ export interface PrototypePlatformNote {
   platform: "ios";
   construct: PrototypePlatformNoteConstruct;
   effect: PrototypePlatformNoteEffect;
-  /** Authored occurrences in tree order, capped at 20. */
+  /** Paths in the component-expanded, anchor-resolved device spec, in tree order, capped at 20.
+   * Includes bottomSheet.dismissOnSwipe even when the field is absent and defaulted. */
   paths: string[];
   /** Total occurrences when more than the cap were found. */
   total?: number;

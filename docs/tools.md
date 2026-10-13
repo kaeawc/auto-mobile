@@ -688,7 +688,10 @@ including under the status bar; use `safeAreaPadding` on the top edge of a
 `topAppBar` or top content. Relative sheet detents use the full window height.
 A host-owned two-finger long press (about 1 s) reveals a dismiss pill for 5 s;
 tapping it dismisses with reason `user`. `window.persistence: "device"` defaults
-to `bar`. Device support ships separately: without the capability the bar is
+to `bar`. Accessibility services can dismiss without the gesture (a dismiss
+action on Android, the VoiceOver escape gesture on iOS), and the pill stays
+visible while TalkBack, VoiceOver or Switch Control is on. On a CtrlProxy or
+iOS agent built before the capability the bar is
 kept, explicit `none` is refused before showing, and omitted chrome or `bar`
 succeeds. `lastResult.chrome` reports what a successful fullscreen show draws
 and is retained in host-local status; it is absent on sheet/floating windows,

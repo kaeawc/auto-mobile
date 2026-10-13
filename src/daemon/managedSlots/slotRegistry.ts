@@ -150,6 +150,7 @@ export interface FreeDeviceDeletion {
   owner: SlotJournalOwner;
   startedAtMs: number;
   attempts: number;
+  failedDeletes: number;
   lastError: string | null;
   nextAttemptAtMs: number;
 }
@@ -636,7 +637,7 @@ export interface SlotRegistry {
   recordFreeDeviceDeletionAttempt(
     row: FreeDeviceIdentity,
     owner: SlotJournalOwner,
-    attempt: { error: string; nextAttemptAtMs: number },
+    attempt: { error: string; nextAttemptAtMs: number; nativeDeleteFailed?: boolean },
   ): Promise<boolean>;
   completeFreeDeviceDeletion(row: FreeDeviceIdentity, owner: SlotJournalOwner): Promise<boolean>;
   claimFreeDeviceDeletion(

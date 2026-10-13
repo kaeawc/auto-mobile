@@ -1,7 +1,13 @@
+import { FakeSlotRegistry } from "../../fakes/FakeSlotRegistry";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import { ManagedSlotJournal } from "../../../src/daemon/managedSlots/slotJournal";
+import { FakeInventory, FakeClaims, FakeMatcher, FakeDeleter } from "./fixtures/reconcilerFakes";
+import { assignManagedSlotDevice } from "./managedSlotFixtures";
 import { describe, expect, test } from "bun:test";
 import type { PooledDevice } from "../../../src/daemon/devicePool";
 import {
   createDefaultFreeDeviceReclaimer,
+  createAbsentRowEvictor,
   freeDeviceBusyReason,
   type FreeDeviceBusyPool,
 } from "../../../src/daemon/managedSlots/defaultFreeDeviceReclaimer";
@@ -107,5 +113,43 @@ describe("createDefaultFreeDeviceReclaimer", () => {
         claimedBy: "d",
       }),
     ).toBeUndefined();
+  });
+  test("absent-row wiring requires the acquisition journal and uses that registry", async () => {
+    const timer = new FakeTimer();
+    const registry = new FakeSlotRegistry(timer, () => false);
+    expect(createAbsentRowEvictor(registry, undefined)).toBeUndefined();
+    expect(createAbsentRowEvictor(registry, () => undefined)).toBeUndefined();
+    const inventory = new FakeInventory();
+    const journal = new ManagedSlotJournal({
+      registry,
+      timer,
+      inventory,
+      claims: new FakeClaims(),
+      matcher: new FakeMatcher(),
+      deleter: new FakeDeleter(inventory),
+      owner: { daemonId: "d", pid: 1 },
+      isOwnerLive: () => false,
+      isExecOwnerLive: () => false,
+    });
+    const evictor = createAbsentRowEvictor(registry, (source) => {
+      expect(source).toBe(registry);
+      return journal;
+    });
+    const key = await assignManagedSlotDevice(registry, "android", "amslot-gone");
+    await registry.beginScopeInvalidation(key.scopeKey, "operator_reset");
+    await registry.completeScopeInvalidation(key.scopeKey);
+    const [row] = await registry.listFreeDevices();
+    expect(
+      await evictor!.evict(
+        {
+          ...row!,
+          name: row!.stableDeviceId,
+          lastUsedAtMs: row!.freedAtMs,
+          absent: true,
+        },
+        {},
+      ),
+    ).toEqual({ kind: "absent" });
+    expect(await registry.listFreeDevices()).toEqual([]);
   });
 });

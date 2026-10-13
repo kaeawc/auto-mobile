@@ -837,7 +837,19 @@ describe("refusal wire contract", () => {
     expect(surfaceFields(surface)).toMatchObject({
       code: "managed_slot_budget_exhausted",
       retryable: true,
-      budget: { limit: 2, usage: { orphaned: 0 }, retained: [{ reason: "deletion_pending" }] },
+      budget: {
+        limit: 2,
+        usage: { orphaned: 0 },
+        retained: [
+          { reason: "deletion_pending", attempts: 2, failedDeletes: 1, lastError: "delete failed" },
+          {
+            reason: "deletion_stuck",
+            attempts: 5,
+            failedDeletes: 3,
+            lastError: "native delete keeps failing",
+          },
+        ],
+      },
     });
     expect(surfaceFields(surface)).not.toHaveProperty("retryAfterMs");
   });

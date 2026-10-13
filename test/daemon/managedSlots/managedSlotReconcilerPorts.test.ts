@@ -1,3 +1,5 @@
+import { AndroidEmulatorUnavailableError } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import { SimctlUnavailableError } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { describe, expect, test } from "bun:test";
 import {
   DeviceManagerSlotInventory,
@@ -157,6 +159,25 @@ describe("ToolManagedSlotProvisioner", () => {
 });
 
 describe("DeviceManagerSlotInventory", () => {
+  test.each([
+    ["android", new AndroidEmulatorUnavailableError("missing emulator")],
+    ["ios", new SimctlUnavailableError("missing simctl")],
+  ] as const)(
+    "%s missing-toolchain error is incomplete with explicit availability evidence",
+    async (platform, error) => {
+      const inventory = new DeviceManagerSlotInventory({
+        listDeviceImages: async () => {
+          throw error;
+        },
+      });
+      expect(await inventory.list(platform, {})).toEqual({
+        complete: false,
+        devices: [],
+        toolchain: "not_installed",
+      });
+    },
+  );
+
   test("a failed listing is incomplete, never empty-and-complete", async () => {
     const inventory = new DeviceManagerSlotInventory({
       listDeviceImages: async () => {

@@ -8,13 +8,15 @@ import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import type { ManagedSlotBudgetEvidence } from "../../models/managedSlotsResult";
-import type {
-  ManagedSlotCacheEvictor,
-  ManagedSlotEvictionCandidate,
-  ManagedSlotEvictionRegistry,
-  ManagedSlotEvictionResult,
-  ManagedSlotEvictionSelector,
-  ManagedSlotEvictionSkip,
+import {
+  isStuckFreeDeviceDeletion,
+  managedSlotDeletionSkip,
+  type ManagedSlotCacheEvictor,
+  type ManagedSlotEvictionCandidate,
+  type ManagedSlotEvictionRegistry,
+  type ManagedSlotEvictionResult,
+  type ManagedSlotEvictionSelector,
+  type ManagedSlotEvictionSkip,
 } from "./managedSlotCacheEviction";
 import {
   isSlotJournalPhaseOpen,
@@ -106,7 +108,6 @@ interface LedgerInput {
 interface ResourceCharge {
   category: Exclude<keyof ManagedSlotResourceUsage, "total">;
   journal?: SlotJournalEntry;
-  pendingDeletion?: ManagedSlotEvictionSkip;
 }
 
 function resourceKey(platform: SlotPlatform, stableDeviceId: string): string {
@@ -148,8 +149,38 @@ function categoryOf(
   return device.execSessionUuid !== null ? "active" : "assignedIdle";
 }
 
+function chargeManagedDevice(
+  device: ManagedDeviceEntry,
+  deleting: ReadonlySet<string>,
+  free: readonly FreeSlotDeviceRecord[],
+  journal: readonly SlotJournalEntry[],
+  slotBound: ReadonlySet<string>,
+): ResourceCharge[] {
+  const row =
+    device.holder === "free"
+      ? free.find(
+          (entry) =>
+            entry.platform === device.platform && entry.stableDeviceId === device.stableDeviceId,
+        )
+      : undefined;
+  if (
+    !slotBound.has(resourceKey(device.platform, device.stableDeviceId)) &&
+    isStuckFreeDeviceDeletion(row?.deletion)
+  ) {
+    return [];
+  }
+  return [
+    { category: categoryOf(device, deleting, free), journal: creationJournalFor(device, journal) },
+  ];
+}
+
 function resourceCharges(input: LedgerInput): ResourceCharge[] {
   const journal = input.openJournal.filter((entry) => isSlotJournalPhaseOpen(entry.phase));
+  const slotBound = new Set(
+    input.managed
+      .filter((device) => device.holder === "slot")
+      .map((device) => resourceKey(device.platform, device.stableDeviceId)),
+  );
   const deleting = new Set(
     journal
       .filter(
@@ -177,22 +208,9 @@ function resourceCharges(input: LedgerInput): ResourceCharge[] {
       .map((device) => [resourceKey(device.platform, device.stableDeviceId), device]),
   );
   const seen = new Set(distinct.keys());
-  const charges: ResourceCharge[] = [...distinct.values()].map((device) => ({
-    category: categoryOf(device, deleting, input.free ?? []),
-    journal: creationJournalFor(device, journal),
-    pendingDeletion: input.free?.some(
-      (row) =>
-        row.platform === device.platform &&
-        row.stableDeviceId === device.stableDeviceId &&
-        row.deletion !== null,
-    )
-      ? {
-          platform: device.platform,
-          stableDeviceId: device.stableDeviceId,
-          reason: "deletion_pending",
-        }
-      : undefined,
-  }));
+  const charges = [...distinct.values()].flatMap((device) =>
+    chargeManagedDevice(device, deleting, input.free ?? [], journal, slotBound),
+  );
 
   for (const entry of journal) {
     if (
@@ -284,13 +302,16 @@ async function readResourceCharges(
   inventory: ManagedSlotInventory,
   request: { signal?: AbortSignal; deadlineMs?: number },
   timer: Pick<Timer, "now">,
-): Promise<ResourceCharge[]> {
+): Promise<{ charges: ResourceCharge[]; retained: ManagedSlotEvictionSkip[] }> {
   checkAdmissionBudget(request, timer);
   const snapshot = await registry.snapshotManagedSlotResources();
   const devices: DeviceInfo[] = [];
   for (const platform of ["android", "ios"] as const) {
     checkAdmissionBudget(request, timer);
     const listing = await inventory.list(platform, { signal: request.signal });
+    if (!listing.complete && listing.toolchain === "not_installed") {
+      continue;
+    }
     if (!listing.complete) {
       throw new ActionableError(
         `${platform} inventory is incomplete; total-resource usage is unknown.`,
@@ -298,7 +319,13 @@ async function readResourceCharges(
     }
     devices.push(...listing.devices);
   }
-  return resourceCharges({ ...snapshot, inventory: devices });
+  return {
+    charges: resourceCharges({ ...snapshot, inventory: devices }),
+    retained: snapshot.free.flatMap((row) => {
+      const skip = managedSlotDeletionSkip(row);
+      return skip ? [skip] : [];
+    }),
+  };
 }
 
 function checkAdmissionBudget(
@@ -391,11 +418,12 @@ export class RegistryManagedSlotResourceBudget implements ManagedSlotResourceBud
     const attempted = new Set<string>();
     let remaining: number | undefined;
     while (true) {
-      let charges = await readResourceCharges(registry, this.deps.inventory, request, this.timer);
-      if (rankedCount(charges, request.journalEntryId) > limit) {
+      let ledger = await readResourceCharges(registry, this.deps.inventory, request, this.timer);
+      if (rankedCount(ledger.charges, request.journalEntryId) > limit) {
         // Confirm with a fresh independent snapshot before eviction or refusal.
-        charges = await readResourceCharges(registry, this.deps.inventory, request, this.timer);
+        ledger = await readResourceCharges(registry, this.deps.inventory, request, this.timer);
       }
+      const { charges, retained } = ledger;
       const usage = usageOf(charges);
       if (rankedCount(charges, request.journalEntryId) <= limit) {
         return { kind: "admitted", enforced: true, limit, usage, evicted };
@@ -404,15 +432,15 @@ export class RegistryManagedSlotResourceBudget implements ManagedSlotResourceBud
         kind: "exhausted",
         limit,
         usage,
-        retained: charges.flatMap((charge) =>
-          charge.pendingDeletion ? [charge.pendingDeletion] : [],
-        ),
+        retained,
         evictionFailures,
       };
-      // A persisted marker commits that unit of room even when native deletion must redrive.
-      // Do not destroy newer cache to replace room already committed by a failed/blocked delete.
+      // Counted markers commit room while native deletion redrives; stuck markers do not.
       const shortfall = rankedCount(charges, request.journalEntryId) - limit;
-      if (!this.deps.eviction || exhausted.retained.length >= shortfall) {
+      if (
+        !this.deps.eviction ||
+        retained.filter((row) => !isStuckFreeDeviceDeletion(row)).length >= shortfall
+      ) {
         return exhausted;
       }
       checkAdmissionBudget(request, this.timer);

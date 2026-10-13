@@ -214,7 +214,7 @@ interface OfflineTracker {
   deviceId: string | null;
   since: number | null;
   state?: TargetReadinessState;
-  /** A bounded `adb reconnect offline` recovery has been dispatched during this readiness invocation (monotonic once set). */
+  /** A bounded `adb -s <serial> reconnect` recovery has been dispatched during this readiness invocation (monotonic once set). */
   recoveryAttempted?: boolean;
 }
 
@@ -394,8 +394,8 @@ export interface AndroidEmulatorReadinessOptions {
   /**
    * The device was just created by a fresh provision, so its first boot is a
    * genuine cold boot (no quick-boot snapshot to restore). When its serial sits
-   * in ADB `offline` past a bounded threshold, attempt one `adb reconnect
-   * offline` re-detect, then continue readiness polling through the caller's
+   * in ADB `offline` past a bounded threshold, attempt one `adb -s <serial> reconnect`
+   * re-detect, then continue readiness polling through the caller's
    * timeout. A quick-boot-after-shutdown restore leaves this unset and skips
    * that recovery attempt.
    */
@@ -1403,7 +1403,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
    *
    * `recoveryAttempted` is deliberately NOT reset: it is MONOTONIC for the
    * lifetime of a single `waitForEmulatorReady` invocation. A probe gap after
-   * the one-shot `adb reconnect offline` has been dispatched must not wipe that
+   * the one-shot `adb -s <serial> reconnect` has been dispatched must not wipe that
    * history, or a later re-confirmed offline would issue a SECOND reconnect.
    */
   private clearOfflineTracker(tracker: OfflineTracker): void {
@@ -1465,7 +1465,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
 
   /**
    * Bounded recovery for a fresh-provision cold boot whose serial is stuck in
-   * ADB `offline`. Runs at most one `adb reconnect offline` re-detect once the
+   * ADB `offline`. Runs at most one `adb -s <serial> reconnect` re-detect once the
    * serial has been offline past {@link FRESH_OFFLINE_RECOVERY_THRESHOLD_MS}.
    * The recovery never terminates readiness: normal polling continues until the
    * caller's deadline or a terminal emulator failure (issue #7078).
@@ -1543,7 +1543,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     return Math.min(currentDelayMs, thresholdDelayMs);
   }
 
-  /** Dispatch the single bounded `adb reconnect offline` re-detect for a stuck fresh boot. */
+  /** Dispatch the single bounded `adb -s <serial> reconnect` re-detect for a stuck fresh boot. */
   private async dispatchFreshOfflineReconnect(
     tracker: OfflineTracker,
     deviceId: string,
@@ -1560,22 +1560,22 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     );
     logger.warn(
       `Fresh provision '${avdName}' target ${deviceId} has been ADB-offline for ` +
-        `${now - offlineSince}ms; attempting 'adb reconnect offline' recovery`,
+        `${now - offlineSince}ms; attempting 'adb -s ${deviceId} reconnect' recovery`,
     );
     try {
-      await this.issueReconnectOffline(commandTimeoutMs, signal);
+      await this.issueReconnectOffline(deviceId, commandTimeoutMs, signal);
     } catch (error) {
       this.throwIfReadinessAborted(signal);
       // Best-effort recovery: readiness polling continues through its deadline.
       logger.warn(
-        `'adb reconnect offline' recovery for ${deviceId} failed: ${errorMessage(error)}`,
+        `'adb -s ${deviceId} reconnect' recovery for ${deviceId} failed: ${errorMessage(error)}`,
         error,
       );
     }
   }
 
   /**
-   * Issue exactly one adb reconnect offline re-detect. Shared by the
+   * Issue exactly one adb -s <serial> reconnect re-detect. Shared by the
    * fresh-provision readiness recovery ({@link dispatchFreshOfflineReconnect})
    * and the disconnect monitor's in-session offline recovery
    * ({@link recoverOfflineDevices}, #7536): noRetry keeps the real AdbClient
@@ -1583,10 +1583,14 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
    * executions), so one logical recovery issues exactly one reconnect command
    * (#7054).
    */
-  private async issueReconnectOffline(timeoutMs: number, signal: AbortSignal | undefined) {
+  private async issueReconnectOffline(
+    deviceId: string,
+    timeoutMs: number,
+    signal: AbortSignal | undefined,
+  ) {
     await this.adbFactory
       .create(null)
-      .executeCommand("reconnect offline", timeoutMs, undefined, true, signal);
+      .execute(["-s", deviceId, "reconnect"], { timeoutMs, noRetry: true, signal });
   }
 
   /**
@@ -1649,25 +1653,33 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
 
   /**
    * Bounded, best-effort recovery for session-bound serial(s) the disconnect
-   * monitor observed stuck in ADB offline (#7536). adb reconnect offline
-   * has no per-serial target — it re-detects every currently offline
-   * device — so one dispatch covers every candidate returned by
-   * {@link getOfflineDeviceIdsAmong}. Never throws except on abort: recovery
-   * failure here must not fail or block the disconnect monitor's sweep.
+   * monitor observed stuck in ADB offline (#7536). Each distinct serial gets
+   * one host-serial reconnect, accepted even for an offline transport. Dispatch
+   * concurrently so the sweep stays bounded by a single command timeout.
+   * Never throws except on abort: a serial's recovery failure must not prevent
+   * recovery of the others or fail the disconnect monitor's sweep.
    */
   async recoverOfflineDevices(
+    deviceIds: Iterable<string>,
     options: { timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<void> {
+    this.throwIfReadinessAborted(options.signal);
     const timeoutMs = options.timeoutMs ?? FRESH_OFFLINE_RECOVERY_COMMAND_TIMEOUT_MS;
-    try {
-      await this.issueReconnectOffline(timeoutMs, options.signal);
-    } catch (error) {
-      this.throwIfReadinessAborted(options.signal);
-      logger.warn(
-        `'adb reconnect offline' recovery for in-session offline device(s) failed: ${errorMessage(error)}`,
-        error,
-      );
-    }
+    await Promise.all(
+      [...new Set(deviceIds)].map(async (deviceId) => {
+        try {
+          await this.issueReconnectOffline(deviceId, timeoutMs, options.signal);
+        } catch (error) {
+          this.throwIfReadinessAborted(options.signal);
+          // Best-effort recovery: other serials and the disconnect sweep continue.
+          logger.warn(
+            `'adb -s ${deviceId} reconnect' recovery for in-session offline device failed: ${errorMessage(error)}`,
+            error,
+          );
+        }
+      }),
+    );
+    this.throwIfReadinessAborted(options.signal);
   }
 
   private targetReadinessState(targetState: AdbDeviceState | undefined): TargetReadinessState {

@@ -1178,6 +1178,13 @@ export class DevicePool {
   private readonly criteriaMatcher: DeviceCriteriaMatcher;
   private readonly releaseSessionForDisconnectedDevice: DeviceDisconnectSessionReleaser;
   private readonly onDeviceReady: DeviceReadyListener | undefined;
+  private onDeviceProcessStarted: ((deviceId: string) => void | Promise<void>) | undefined;
+
+  setDeviceProcessStartedListener(
+    listener: ((deviceId: string) => void | Promise<void>) | undefined,
+  ): void {
+    this.onDeviceProcessStarted = listener;
+  }
   private readonly onDeviceIncarnationAssigned: DevicePoolDependencies["onDeviceIncarnationAssigned"];
   private readonly onDeviceRemoved: DeviceRemovedListener | undefined;
   private readonly onDeviceStateChanged: DeviceStateChangedListener | undefined;
@@ -5742,7 +5749,24 @@ export class DevicePool {
     device: BootedDevice,
     childProcess: ChildProcess | null | undefined,
   ): Promise<void> {
-    return this.emulatorProcessLifecycle.trackStartedDeviceProcess(device, childProcess);
+    const alreadyTracked = this.emulatorProcessLifecycle.hasStartedDeviceProcess(
+      device.deviceId,
+      childProcess,
+    );
+    await this.emulatorProcessLifecycle.trackStartedDeviceProcess(device, childProcess);
+    if (
+      !alreadyTracked &&
+      this.emulatorProcessLifecycle.hasStartedDeviceProcess(device.deviceId, childProcess)
+    ) {
+      try {
+        await this.onDeviceProcessStarted?.(device.deviceId);
+      } catch (error) {
+        logger.warn(
+          `[DevicePool] Device process-start listener failed for ${device.deviceId}`,
+          error,
+        );
+      }
+    }
   }
 
   hasStartedDeviceProcess(

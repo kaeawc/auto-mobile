@@ -173,7 +173,10 @@ import {
   RunnerReadinessError,
   SystemUiAnrRecoveryRequiredError,
 } from "../ctrlProxy/RunnerReadinessService";
-import { DeviceTransportOfflineError } from "../daemon/deviceAcquisitionRefusals";
+import {
+  DeviceTransportOfflineError,
+  DeviceUnhealthyError,
+} from "../daemon/deviceAcquisitionRefusals";
 import { DeviceLostError } from "../models/DeviceLostError";
 import {
   DEFAULT_RUNNER_PROVISION_TIMEOUT_MS,
@@ -4171,6 +4174,12 @@ function leavePreviouslyRunningBoot(boot: DeviceBootResult | undefined): boolean
 }
 
 function coldBootRetryReason(failure: unknown): string | undefined {
+  if (
+    failure instanceof DeviceUnhealthyError &&
+    failure.devices.every((device) => device.recovering && device.reason === "recording-teardown")
+  ) {
+    return "recording-teardown";
+  }
   return failure instanceof DeviceTransportOfflineError
     ? failure.code
     : failure instanceof RunnerReadinessError &&

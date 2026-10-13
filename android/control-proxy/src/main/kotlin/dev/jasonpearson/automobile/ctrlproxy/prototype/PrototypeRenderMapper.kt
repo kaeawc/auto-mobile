@@ -44,15 +44,17 @@ internal class PrototypeRenderMapper {
           return@synchronized model
         }
       }
-      val static = cache?.takeIf { it.root === spec.root } ?: PrototypeRenderCache(spec.root)
-      val mapping = PrototypeNodeMapping(spec.state.orEmpty(), pages, static, previousNodes)
-      val model = prototypeRenderModel(spec, mapping.map(spec.root, "root"))
-      cache = static
-      previousSpec = spec
-      previousPages = pages
-      previousModel = model
-      previousNodes = mapping.nodes
-      passes++
-      model
+      PrototypeTrace.section(PrototypeTrace.MAP_RENDER_TREE) {
+        val static = cache?.takeIf { it.root === spec.root } ?: PrototypeRenderCache(spec.root)
+        val mapping = PrototypeNodeMapping(spec.state.orEmpty(), pages, static, previousNodes)
+        val model = prototypeRenderModel(spec, mapping.map(spec.root, "root"))
+        cache = static
+        previousSpec = spec
+        previousPages = pages
+        previousModel = model
+        previousNodes = mapping.nodes
+        passes++
+        model
+      }
     }
 }

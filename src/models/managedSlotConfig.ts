@@ -23,6 +23,16 @@ export const MANAGED_SLOT_SUPPORTED_CONTRACT_VERSIONS: readonly number[] = [1];
 /** Capability token the daemon advertises in `daemon/capabilities` for contract version 1. */
 export const MANAGED_SLOTS_V1_CAPABILITY = "managed-slots/v1";
 
+/** Capability token: the daemon's managed-slot requested spec accepts the optional `deviceFamily` (#12054). */
+export const MANAGED_SLOTS_V1_DEVICE_FAMILY_CAPABILITY = "managed-slots/v1.deviceFamily";
+
+/** A config field that needs a daemon capability newer than `managed-slots/v1`. */
+export interface ManagedSlotConfigCapabilityRequirement {
+  /** Config path of the first use, e.g. `requests.0.requestedSpec.deviceFamily`. */
+  field: string;
+  capability: string;
+}
+
 /**
  * True once the proxy consumes a parsed managed slot config (acquisition wiring, #11173 part b):
  * the daemon advertises {@link MANAGED_SLOTS_V1_CAPABILITY} and serves `daemon/acquireManagedSlots`,
@@ -134,6 +144,30 @@ export const managedSlotConfigSchema = z
 
 export type ManagedSlotRequest = z.infer<typeof managedSlotRequestSchema>;
 export type ManagedSlotConfig = z.infer<typeof managedSlotConfigSchema>;
+
+/**
+ * Requirements of `config` that the daemon's advertised `daemon/capabilities` list does not meet.
+ * Empty for a config that uses only base `managed-slots/v1` fields, whatever the daemon advertises.
+ */
+export function unmetManagedSlotConfigCapabilities(
+  config: ManagedSlotConfig,
+  capabilities: readonly string[],
+): ManagedSlotConfigCapabilityRequirement[] {
+  if (capabilities.includes(MANAGED_SLOTS_V1_DEVICE_FAMILY_CAPABILITY)) {
+    return [];
+  }
+  const index = config.requests.findIndex(
+    (request) => request.requestedSpec.deviceFamily !== undefined,
+  );
+  return index === -1
+    ? []
+    : [
+        {
+          field: `requests.${index}.requestedSpec.deviceFamily`,
+          capability: MANAGED_SLOTS_V1_DEVICE_FAMILY_CAPABILITY,
+        },
+      ];
+}
 
 const contractVersionProbeSchema = z.object({ contractVersion: z.unknown() }).loose();
 

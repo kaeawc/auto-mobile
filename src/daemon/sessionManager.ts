@@ -1,3 +1,4 @@
+import { ignoresManagedExecutionIdleDeadline } from "./managedExecutionLiveness";
 import type { DeferredRebindCleanup } from "./acquisitionReceipt";
 import type { TimingData } from "../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
@@ -1497,7 +1498,9 @@ function restartRecoveryDeadlineFromPersisted(
     return undefined;
   }
   const restartWindowEnd = persisted.released_at_ms + DEVICE_RESTART_RECOVERY_WINDOW_MS;
-  return callerInFlight ? restartWindowEnd : Math.min(persisted.expires_at_ms, restartWindowEnd);
+  return callerInFlight || ignoresManagedExecutionIdleDeadline(persisted.liveness_policy)
+    ? restartWindowEnd
+    : Math.min(persisted.expires_at_ms, restartWindowEnd);
 }
 
 /** The persisted handoff's fixed window; idle activity never moves this deadline. */
@@ -3914,7 +3917,7 @@ export class SessionManager {
       return this.terminalizeRestartRecoveryHandoff(persisted, onlyIfOwnedByDaemon);
     }
     if (
-      persisted.expires_at_ms > now ||
+      persistedSessionExpiryReason(persisted, now) === undefined ||
       (persisted.release_reason &&
         (isTerminalReleaseReason(persisted.release_reason) ||
           sessionReleaseReasonTraits(persisted.release_reason).releasedBeforeHandout))
@@ -4088,7 +4091,8 @@ export class SessionManager {
       return undefined;
     }
     const reason = this.isRowOwnedByLivePeer(persisted)
-      ? persisted.expires_at_ms <= this.sessionNow()
+      ? !ignoresManagedExecutionIdleDeadline(persisted.liveness_policy) &&
+        persisted.expires_at_ms <= this.sessionNow()
         ? "expired"
         : undefined
       : persistedSessionExpiryReason(persisted, this.sessionNow());
@@ -6095,9 +6099,10 @@ export class SessionManager {
 
   /**
    * Whether this daemon holds `sessionId` as a live managed slot execution (#11275): present, on
-   * the `managed-execution` policy, not expired and not being released. A session rehydrated after
-   * a restart and still waiting for its proxy counts: the heartbeat monitor releases it if the proxy
-   * never returns. Side-effect free: an expired session is reported dead, never released here.
+   * the `managed-execution` policy and not being released. The stored idle deadline does not
+   * decide managed liveness; a lapsed owner lease stays live until the heartbeat path actually
+   * releases the session. A rehydrated session waiting for its proxy counts until released too.
+   * Side-effect free apart from the stall probe every lookup runs.
    */
   isLiveManagedExecutionSession(sessionId: string): boolean {
     const session = this.getSessionInternal(sessionId, false, undefined, false);
@@ -12592,6 +12597,10 @@ export class SessionManager {
    * Check if session is expired
    */
   private isSessionExpired(session: Session): boolean {
+    // Owner loss, including a lapsed lease, belongs to the heartbeat monitor.
+    if (ignoresManagedExecutionIdleDeadline(session.livenessPolicy)) {
+      return false;
+    }
     // A CLI-owned session (#6870) is governed solely by the wall-clock idle
     // policy `SessionHeartbeatMonitor` applies, which releases it as
     // `cli-idle-timeout`. The ordinary expiry deadline must not release it
@@ -12713,6 +12722,9 @@ export class SessionManager {
     session: Session,
     execution?: SessionClockExecution,
   ): boolean {
+    if (ignoresManagedExecutionIdleDeadline(session.livenessPolicy)) {
+      return false;
+    }
     // A lookup that carries no execution (routing resolution: autolock, setActiveDevice, the
     // lifecycle ownership check) is not a call that arrived after the deadline; it only asks who
     // holds the device. It must respect the unsettled-execution veto exactly as the idle sweep
@@ -12738,6 +12750,9 @@ export class SessionManager {
     execution: SessionClockExecution | undefined,
     timelyControlOnly = false,
   ): boolean {
+    if (ignoresManagedExecutionIdleDeadline(session.livenessPolicy)) {
+      return false;
+    }
     const idleDeadline = sessionIdleDeadline(session);
     return (
       execution !== undefined &&

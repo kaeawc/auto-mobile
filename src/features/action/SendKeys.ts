@@ -410,6 +410,8 @@ interface SendKeysCommandExecution {
 
 export interface SendKeysCommandExecutor {
   setTargetLayer?(layer: HierarchyLayer | undefined): void;
+  /** The focuser reported the target as a password field; honoured for prototype-layer targets. */
+  setTargetPasswordField?(passwordField: boolean): void;
   isPasswordTarget?(): boolean;
   resetCaretState?(): void;
   withImeSpan?(action: () => Promise<SendKeysCommandExecution>): Promise<SendKeysCommandExecution>;
@@ -669,9 +671,23 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   /** Set while a type command targets a password field: diagnostics never name its characters. */
   private typingPasswordField = false;
   private targetLayer: HierarchyLayer | undefined;
+  private targetPasswordField = false;
 
   setTargetLayer(layer: HierarchyLayer | undefined): void {
     this.targetLayer = layer;
+  }
+
+  setTargetPasswordField(passwordField: boolean): void {
+    this.targetPasswordField = passwordField;
+  }
+
+  private isPasswordRouting(routedPassword: boolean | undefined): boolean {
+    return routedPassword === true || this.knownPrototypePasswordTarget();
+  }
+
+  /** A prototype password field may not be flagged focused, so the focuser's verdict is trusted. */
+  private knownPrototypePasswordTarget(): boolean {
+    return this.targetLayer === "prototype" && this.targetPasswordField;
   }
 
   isPasswordTarget(): boolean {
@@ -874,10 +890,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
           error: validationError,
         };
       }
+      this.typingPasswordField = this.knownPrototypePasswordTarget();
       const routing = await this.resolveAutoPasswordMode(requestedMode, operation, signal, display);
       resolvedMode = routing.mode;
       baseResult.resolvedMode = this.reportedMode(resolvedMode);
-      this.typingPasswordField = routing.passwordField === true;
+      this.typingPasswordField = this.isPasswordRouting(routing.passwordField);
       // After the mode update, so a refusal reports the key-event route it was checked for.
       await this.verifyPasswordRouting(routing, command.text, signal);
       const autoImeFallback = getAutoImeFallback(
@@ -3584,6 +3601,7 @@ export class SendKeys {
     );
     this.effectiveTargetLayer = options?.layer;
     this.executor.setTargetLayer?.(this.effectiveTargetLayer);
+    this.executor.setTargetPasswordField?.(false);
     const result = await this.executeFocused(
       commands,
       selector,
@@ -4111,6 +4129,7 @@ export class SendKeys {
     this.effectiveTargetLayer = options.layer ?? result.layer ?? this.effectiveTargetLayer;
     this.executor.setTargetLayer?.(this.effectiveTargetLayer);
     this.focusedPasswordTarget ||= result.passwordField === true;
+    this.executor.setTargetPasswordField?.(this.focusedPasswordTarget);
     this.prototypeTargetIdentifiers = [
       ...this.prototypeTargetIdentifiers,
       ...(result.identifiers ?? []),

@@ -190,18 +190,38 @@ test("a custom reader exception warns without failing acknowledged typing", asyn
   });
 });
 
-for (const text of [" ", "0x0", "0", "-3", "1.50"]) {
-  test(`numeric truth only accepts decimal ${JSON.stringify(text)}`, async () => {
+const numericCases: Array<[string, number, string, boolean]> = [
+  [" ", 0, "0", false],
+  ["0x0", 0, "0", false],
+  ["0", 0, "0", true],
+  ["-3", -3, "-3", true],
+  ["1.50", 1.5, "1.5", true],
+  [".5", 0.5, "0.5", true],
+  ["1.", 1, "1", true],
+  ["+5", 5, "5", true],
+  ["5\n", 5, "5", true],
+  ["-0", 0, "0", true],
+  ["", 0, "0", false],
+  ["1e3", 1000, "1000", false],
+  ["+", 0, "0", false],
+  [".", 0, "0", false],
+  [" 5", 5, "5", false],
+  ["5 ", 5, "5", false],
+  ["1 0", 10, "10", false],
+  ["Infinity", Infinity, "inf", false],
+  ["NaN", 0, "0", false],
+];
+for (const [text, numericValue, value, accepted] of numericCases) {
+  test(`numeric truth ${accepted ? "accepts" : "rejects"} ${JSON.stringify(text)}`, async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const numericValue = text === "-3" ? -3 : text === "1.50" ? 1.5 : 0;
     const result = await verifyPrototypeTextTarget({
       reader: {
         read: async () => ({
           kind: "value",
           source: "state",
           stateKey: "name",
-          value: String(numericValue),
+          value,
           numericValue,
         }),
       },
@@ -211,7 +231,7 @@ for (const text of [" ", "0x0", "0", "-3", "1.50"]) {
       timer,
       settleMs: 1,
     });
-    expect(result.success).toBe(text !== " " && text !== "0x0");
+    expect(result.success).toBe(accepted);
   });
 }
 

@@ -596,6 +596,47 @@ for (const mode of ["eventLast", "eventAll", "eventOnly"] as const) {
   });
 }
 
+function keyEventArgv(h: ReturnType<typeof harness>): string[] {
+  return h.adb
+    .getExecutedArgv()
+    .map((args) => args.join(" "))
+    .filter((line) => line.startsWith("shell input keyevent"));
+}
+
+for (const mode of ["eventAll", "eventOnly", "eventLast"] as const) {
+  test(`prototype ${mode} password target not flagged focused uses the redacted key path`, async () => {
+    const h = harness("android", { focused: false, secure: true });
+    const result = await h.run("prototype", [{ action: "type", text: "ab1", mode }]);
+    expect(result.success).toBe(true);
+    expect(h.deliveries.filter((d) => d.kind === "keyevent" || d.kind === "inputText")).toEqual([]);
+    expect(h.adb.getExecutedCommands().filter((c) => c.includes("input text"))).toEqual([]);
+    expect(keyEventArgv(h).length).toBe(mode === "eventLast" ? 1 : 3);
+    expect(JSON.stringify(result)).not.toContain("ab1");
+  });
+}
+
+test("prototype eventAll non-password target keeps the ordinary path", async () => {
+  const plain = harness("android", { focused: false });
+  const second = await plain.run("prototype", [{ action: "type", text: "ab1", mode: "eventAll" }]);
+  expect(second.success).toBe(true);
+  expect(keyEventArgv(plain)).toEqual([]);
+  expect(plain.deliveries.length).toBeGreaterThan(0);
+});
+
+test("prototype password flag resets between executes on one executor", async () => {
+  let secure = true;
+  const h = harness("android", {
+    focused: false,
+    focus: { focus: async () => ({ success: true, passwordField: secure }) },
+  });
+  const input = [{ action: "type" as const, text: "ab1", mode: "eventAll" as const }];
+  await h.run("prototype", input);
+  expect(h.deliveries.filter((d) => d.kind === "keyevent" || d.kind === "inputText")).toEqual([]);
+  secure = false;
+  await h.run("prototype", input);
+  expect(h.deliveries.some((d) => d.kind === "keyevent" || d.kind === "inputText")).toBe(true);
+});
+
 for (const platform of ["android", "ios"] as const) {
   test(`${platform} implicit resolved prototype uses prototype truth`, async () => {
     const r = iosReader(["old", "old", "old", "old"]);

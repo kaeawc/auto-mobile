@@ -260,8 +260,8 @@ function holdsText(
     (text.endsWith("\n") && matches(text.slice(0, -1))) ||
     (reading.source === "state" &&
       reading.numericValue !== undefined &&
-      /^-?\d+(?:\.\d+)?$/.test(text) &&
-      Number(text) === reading.numericValue)
+      /^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(text.endsWith("\n") ? text.slice(0, -1) : text) &&
+      Number(text.trim()) === reading.numericValue)
   );
 }
 

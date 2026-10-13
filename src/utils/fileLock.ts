@@ -424,14 +424,19 @@ function* claimLockMarker(
   path: string,
   marker: string,
   fileSystem: LockFileSystem,
+  warnOnFailure = false,
 ): Steps<boolean> {
   try {
     yield { op: "rename", path };
     fileSystem.rename(path, marker);
     return true;
   } catch (error) {
-    // A concurrent release may have removed the instance; a failed claim means retrying.
-    logger.debug(`Lock rename failed at ${path}: ${errorMessage(error)}`, error);
+    if (warnOnFailure && (error as NodeJS.ErrnoException).code !== "ENOENT") {
+      logger.warn(`Lock rename failed at ${path}: ${errorMessage(error)}`, error);
+    } else {
+      // A concurrent release may have removed the instance; a failed claim means retrying.
+      logger.debug(`Lock rename failed at ${path}: ${errorMessage(error)}`, error);
+    }
     return false;
   }
 }
@@ -728,9 +733,13 @@ function* sampleRetainedLock(
     yield { op: "stat", path };
     identity = fileSystem.stat(path);
   } catch (error) {
-    // Only ENOENT proves absence; all other failures conservatively block acquisition.
-    logger.debug(`Retained lock stat failed at ${path}: ${errorMessage(error)}`, error);
-    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : "unreadable";
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      // Absence is the normal uncontended path; no retained owner needs arbitration.
+      logger.debug(`Retained lock absent at ${path}: ${errorMessage(error)}`);
+      return "absent";
+    }
+    logger.warn(`Retained lock stat failed at ${path}: ${errorMessage(error)}`, error);
+    return "unreadable";
   }
   const raw = yield* readText(path, fileSystem);
   return raw === undefined ? "unreadable" : { ...identity, raw };
@@ -816,6 +825,7 @@ function* checkRetainedLock(
   options: ExclusiveLockOptions,
   generation: string | undefined,
   reclaimed: LockSample | undefined,
+  publishedContent: string,
 ): Steps<boolean> {
   const fileSystem = options.fileSystem ?? nodeLockFileSystem;
   const retained = yield* sampleRetainedLock(`${path}.displaced`, fileSystem);
@@ -836,8 +846,31 @@ function* checkRetainedLock(
       return true;
     }
   }
+  if (yield* isRetainedPublication(path, retained, publishedContent, fileSystem)) {
+    yield* completeRetainedLock(path, fileSystem);
+    return true;
+  }
   // Back out only P; F remains the retained owner's authority throughout COMPLETE.
-  yield* releaseLockPath(path, options.pid ?? process.pid, options.ownerToken, fileSystem);
+  yield* releaseLockPath(path, options.pid ?? process.pid, options.ownerToken, fileSystem, true);
+  yield* completeRetainedLock(path, fileSystem);
+  return false;
+}
+
+function* isRetainedPublication(
+  path: string,
+  retained: LockSample | "unreadable",
+  publishedContent: string,
+  fileSystem: LockFileSystem,
+): Steps<boolean> {
+  if (typeof retained === "string" || retained.raw !== publishedContent) {
+    return false;
+  }
+  // An older same-owner F while this publication was itself displaced remains an
+  // ambiguous corner of the private-marker in-flight residual.
+  return (yield* readText(path, fileSystem)) !== publishedContent;
+}
+
+function* completeRetainedLock(path: string, fileSystem: LockFileSystem): Steps<void> {
   try {
     yield { op: "link", path };
     fileSystem.link(`${path}.displaced`, path);
@@ -845,7 +878,6 @@ function* checkRetainedLock(
     // Occupation, owner release or unavailable links safely leave F authoritative.
     logger.debug(`Retained lock completion skipped at ${path}: ${errorMessage(error)}`, error);
   }
-  return false;
 }
 
 function* cleanupFile(path: string, fileSystem: LockFileSystem): Steps<void> {
@@ -1022,7 +1054,7 @@ function* releaseRetainedLock(
     return;
   }
   const marker = `${path}.${pid}.release.${++releaseMarkerCounter}`;
-  if (!(yield* claimLockMarker(retained, marker, fileSystem))) {
+  if (!(yield* claimLockMarker(retained, marker, fileSystem, true))) {
     return;
   }
   const claimed = yield* readText(marker, fileSystem);
@@ -1041,15 +1073,19 @@ function* releaseLockPath(
   pid: number,
   ownerToken: string | undefined,
   fileSystem: LockFileSystem,
+  backOut = false,
 ): Steps<void> {
   let content: string;
   try {
     yield { op: "readText", path: lockFilePath };
     content = fileSystem.readText(lockFilePath).trim();
   } catch (error) {
-    // Lock file is already gone (released concurrently, or never existed); there is
-    // nothing left to release, so returning is a no-op, not a failure.
-    logger.debug(`src/utils/fileLock.ts fallback failed: ${error}`, error);
+    if (backOut && (error as NodeJS.ErrnoException).code !== "ENOENT") {
+      logger.warn(`Lock back-out read failed at ${lockFilePath}: ${errorMessage(error)}`);
+    } else {
+      // Already gone or unreadable; a real release preserves its historical no-op behaviour.
+      logger.debug(`src/utils/fileLock.ts fallback failed: ${error}`, error);
+    }
     return;
   }
 
@@ -1069,8 +1105,12 @@ function* releaseLockPath(
     yield { op: "rename", path: lockFilePath };
     fileSystem.rename(lockFilePath, releaseMarker);
   } catch (error) {
-    // Already gone (released or taken over and removed); nothing of ours remains.
-    logger.debug(`src/utils/fileLock.ts: release rename found no lock: ${error}`);
+    if (backOut && (error as NodeJS.ErrnoException).code !== "ENOENT") {
+      logger.warn(`Lock back-out rename failed at ${lockFilePath}: ${errorMessage(error)}`);
+    } else {
+      // Already gone or unclaimable; a real release preserves its historical no-op behaviour.
+      logger.debug(`src/utils/fileLock.ts: release rename found no lock: ${error}`);
+    }
     return;
   }
   let claimed: LockContent | undefined;
@@ -1084,6 +1124,15 @@ function* releaseLockPath(
     yield* restoreDisplacedLock(lockFilePath, releaseMarker, fileSystem);
     return;
   }
+  yield* unlinkReleasedMarker(lockFilePath, releaseMarker, fileSystem, backOut);
+}
+
+function* unlinkReleasedMarker(
+  lockFilePath: string,
+  releaseMarker: string,
+  fileSystem: LockFileSystem,
+  backOut: boolean,
+): Steps<void> {
   try {
     yield { op: "unlink", path: releaseMarker };
     fileSystem.unlink(releaseMarker);
@@ -1091,6 +1140,10 @@ function* releaseLockPath(
     logger.warn(
       `src/utils/fileLock.ts: failed to release exclusive lock at ${lockFilePath}: ${errorMessage(error)}`,
     );
+    if (backOut) {
+      // A doomed publication must stay private; restoring it would strand a live non-holder at P.
+      return;
+    }
     // The lock could not be deleted, so put it back rather than strand it under
     // the marker name; linking never clobbers a lock someone took meanwhile.
     try {
@@ -1189,7 +1242,7 @@ function* writeExclusiveLockFile(
     if (!published) {
       return { acquired: false, generation, swept: sweep };
     }
-    const acquired = yield* checkRetainedLock(path, options, generation, reclaimed);
+    const acquired = yield* checkRetainedLock(path, options, generation, reclaimed, content);
     return { acquired, generation, swept: sweep, blocked: !acquired };
   } catch (error) {
     // Genuine IO failures are not contention (#3623).

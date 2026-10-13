@@ -528,3 +528,122 @@ test.each(["link", "openExclusive", "writeFile", "rename", "unlink"] as const)(
     expect(() => fs.link(PATH, F)).toThrow(expect.objectContaining({ code: "ENOTSUP" }));
   },
 );
+
+test.each(["atomic", "legacy-wx"] as const)(
+  "own publication retained before the post-check is held, not self-blocked (%s)",
+  (publication) => {
+    const f = fixture(raw(101));
+    f.live.add(707);
+    const stale = new Racer(releaseExclusiveLockSteps(PATH, 101, "owner-101", f.fs));
+    stale.until((s) => s.op === "rename" && s.path === PATH);
+    expect(takeOverExclusiveLock(PATH, { pid: 101, token: "owner-101" }, f.options(707))).toBe(
+      true,
+    );
+    releaseExclusiveLock(PATH, 707, "owner-707", f.fs);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      if (publication === "legacy-wx") {
+        f.fs.linkError = "ENOTSUP";
+      }
+      const acquirer = f.acquire(303);
+      acquirer.until((s) => s.op === "stat" && s.path === F);
+      f.fs.failure = (op, path) =>
+        path === PATH
+          ? op === "link"
+            ? "ENOTSUP"
+            : op === "openExclusive"
+              ? "ENOSPC"
+              : undefined
+          : undefined;
+      stale.finish();
+      expect(f.fs.readText(F)).toBe(raw(303));
+      expect(f.fs.exists(PATH)).toBe(false);
+      f.fs.failure = undefined;
+      f.fs.linkError = undefined;
+      expect(acquirer.finish()).toBe(true);
+      expect(f.acquire(404).finish()).toBe(false);
+      expect(f.fs.readText(PATH)).toBe(raw(303));
+      releaseExclusiveLock(PATH, 303, "owner-303", f.fs);
+      expect(f.fs.paths()).toEqual([]);
+      expect(f.acquire(404).finish()).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  },
+);
+
+test("same-owner older instance at F with the new publication still at P backs out", () => {
+  const f = fixture(raw(303));
+  f.fs.rename(PATH, F);
+  const old = f.fs.stat(F);
+  const acquirer = new Racer(
+    acquireExclusiveLockSteps(PATH, { ...f.options(303), reclaimOwnPid: true }),
+  );
+  expect(acquirer.finish()).toBe(false); // #2947: the matching in-process incarnation is held.
+  expect(f.fs.stat(PATH)).toEqual(old);
+  expect(f.fs.stat(F)).toEqual(old);
+});
+
+test("back-out whose marker unlink fails leaves P free and warns", () => {
+  const f = retained();
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  f.fs.operations.length = 0;
+  f.fs.failure = (op, path) => {
+    if (op === "unlink" && path.includes(".303.release.")) {
+      return "EPERM";
+    }
+    if (op === "link" && path === PATH && !f.fs.paths().includes(PATH)) {
+      // Let publication succeed; deny COMPLETE so the free P can be inspected.
+      return f.fs.paths().some((name) => name.includes(".303.release.")) ? "ENOTSUP" : undefined;
+    }
+    return undefined;
+  };
+  try {
+    expect(f.acquire(303).finish()).toBe(false);
+    expect(f.fs.exists(PATH)).toBe(false);
+    const marker = f.fs.paths().find((name) => name.includes(".303.release."));
+    expect(marker).toBeDefined();
+    expect(f.fs.readText(marker!)).toBe(raw(303));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(PATH));
+    expect(f.fs.operations.filter((op) => op.op === "link" && op.path === PATH)).toHaveLength(2);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test.each(["rename", "readText"] as const)(
+  "back-out whose claim %s fails warns and reports not acquired",
+  (op) => {
+    const f = retained();
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const acquirer = f.acquire(303);
+    acquirer.until((s) => s.op === "stat" && s.path === F);
+    f.fs.failure = (actual, path) => (actual === op && path === PATH ? "EPERM" : undefined);
+    try {
+      expect(acquirer.finish()).toBe(false);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(PATH));
+      f.fs.failure = undefined;
+      expect(f.fs.readText(PATH)).toBe(raw(303));
+    } finally {
+      f.fs.failure = undefined;
+      warn.mockRestore();
+    }
+  },
+);
+
+test.each(["stat", "rename"] as const)("retained %s failure warns naming F", (op) => {
+  const f = retained();
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  f.fs.failure = (actual, path) => (actual === op && path === F ? "EACCES" : undefined);
+  try {
+    if (op === "stat") {
+      expect(f.acquire(303).finish()).toBe(false);
+    } else {
+      releaseExclusiveLock(PATH, 101, "owner-101", f.fs);
+    }
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining(F), expect.anything());
+    expect(f.fs.readText(F)).toBe(raw(101));
+  } finally {
+    warn.mockRestore();
+  }
+});

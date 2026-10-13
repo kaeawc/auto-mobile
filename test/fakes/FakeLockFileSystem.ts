@@ -152,11 +152,19 @@ export class FakeLockFileSystem implements LockFileSystem {
 
   readText(path: string): string {
     this.record("readText", path);
+    const failure = this.failure?.("readText", path);
+    if (failure) {
+      throw this.error(failure, path);
+    }
     return this.file(path).raw;
   }
 
   stat(path: string): { ino: number; mtimeMs: number } {
     this.record("stat", path);
+    const failure = this.failure?.("stat", path);
+    if (failure) {
+      throw this.error(failure, path);
+    }
     const { ino, mtimeMs } = this.file(path);
     return { ino, mtimeMs };
   }

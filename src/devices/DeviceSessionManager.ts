@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { CtrlProxyForwardOwnershipUnreadableError } from "../features/observe/android/foreignCtrlProxyForwardEvidence";
 import {
   describeDevices,
   explicitReadTargetPlatform,
@@ -101,6 +103,7 @@ import {
   isUnresolvedAndroidEmulatorName,
 } from "./deviceIdentityEvidence";
 import { isAndroidEmulatorSerial } from "../utils/androidSerial";
+import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
 import { throwIfProvisionedDeviceTransportRetired } from "../utils/provisionedDeviceTransportFence";
 import { deviceReadinessLockKey, withDeviceReadinessLock } from "../utils/deviceReadinessLock";
 
@@ -252,6 +255,8 @@ export class DefaultDeviceClientProvider implements DeviceClientProvider {
     return RealObserveScreen.defaultObserveScreenCache;
   }
 }
+
+class AndroidForwardReadinessConflictError extends ActionableError {}
 
 /**
  * Interface for device session management
@@ -754,11 +759,23 @@ export class DeviceSessionManager implements DeviceSessionManager {
     }
   }
 
+  private readonly checkedAndroidOwnership = new AsyncLocalStorage<Set<string>>();
+
   /**
    * Ensure a device is ready for the specified platform and return its ID
    * Throws an error if both Android and iOS devices are connected when auto-detecting platform
    */
   public async ensureDeviceReady(
+    platform: SomePlatform,
+    providedDeviceId?: string,
+    options?: DeviceReadyOptions,
+  ): Promise<BootedDevice> {
+    return this.checkedAndroidOwnership.run(new Set(), () =>
+      this.ensureDeviceReadyInCall(platform, providedDeviceId, options),
+    );
+  }
+
+  private async ensureDeviceReadyInCall(
     platform: SomePlatform,
     providedDeviceId?: string,
     options?: DeviceReadyOptions,
@@ -921,6 +938,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     // (owner decision 2026-10-12, #11964). CtrlProxy accessibility settings are part of readiness above.
     options?.signal?.throwIfAborted();
     if (options?.intent !== "read") {
+      await this.assertAndroidSelectionAvailable(selectedDevice, deviceSource, options?.signal);
       this.setCurrentDevice(selectedDevice, resolvedPlatform);
       if (deviceSource !== "current") {
         await applyAppearanceOnConnect(
@@ -934,6 +952,22 @@ export class DeviceSessionManager implements DeviceSessionManager {
     }
     logger.info(`[DeviceSessionManager] Using ${deviceSource} device: ${selectedDevice.deviceId}`);
     return selectedDevice;
+  }
+
+  private async assertAndroidSelectionAvailable(
+    device: BootedDevice,
+    deviceSource: "provided" | "current" | "auto",
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (
+      device.platform !== "android" ||
+      deviceSource === "current" ||
+      this.checkedAndroidOwnership.getStore()?.has(device.deviceId)
+    ) {
+      return;
+    }
+    await this.provider.getAndroidCtrlProxyManager(device).assertNotDrivenByOtherDaemon?.(signal);
+    signal?.throwIfAborted();
   }
 
   private assertCreatedIosReservation(
@@ -1612,19 +1646,27 @@ export class DeviceSessionManager implements DeviceSessionManager {
     const perf = createPerformanceTracker(true);
     perf.serial("ensureAccessibilityService");
     const state = { didSetup: false, needsSetup: false };
+    let accessibilityClient: AndroidCtrlProxy | undefined;
 
     try {
       const skipCtrlProxyDownload = this.skipCtrlProxyDownload(options);
       this.warnDeprecatedAccessibilityOptions(options);
 
-      const accessibilityClient = this.provider.getAndroidCtrlProxyClient(device);
+      const manager = this.provider.getAndroidCtrlProxyManager(device);
+      accessibilityClient = this.provider.getAndroidCtrlProxyClient(device);
       if (accessibilityClient.isConnected()) {
         if (await this.verifyConnectedAndroidService(deviceId, accessibilityClient, perf)) {
+          options?.signal?.throwIfAborted();
+          // This process already drives the responsive socket; no readiness write is needed.
+          this.checkedAndroidOwnership.getStore()?.add(deviceId);
           return;
         }
       }
 
-      const manager = this.provider.getAndroidCtrlProxyManager(device);
+      await manager.assertNotDrivenByOtherDaemon?.(options?.signal);
+      options?.signal?.throwIfAborted();
+      this.checkedAndroidOwnership.getStore()?.add(deviceId);
+
       const verifyCompatibilityWhenSkipping = async (): Promise<void> => {
         const isCompatible = await manager.isVersionCompatible();
         if (isCompatible) {
@@ -1658,6 +1700,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
             {
               skipCtrlProxyDownload,
               verifyCompatibilityWhenSkipping,
+              signal: options?.signal,
             },
           )
         ) {
@@ -1683,6 +1726,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
             {
               skipCtrlProxyDownload,
               verifyCompatibilityWhenSkipping,
+              signal: options?.signal,
             },
           )
         ) {
@@ -1699,10 +1743,29 @@ export class DeviceSessionManager implements DeviceSessionManager {
 
       if (state.needsSetup || !isInstalled) {
         options?.signal?.throwIfAborted();
-        await this.setupAndroidService(deviceId, manager, accessibilityClient, perf, state);
+        await this.setupAndroidService(
+          deviceId,
+          manager,
+          accessibilityClient,
+          perf,
+          state,
+          options?.signal,
+        );
       }
     } catch (error) {
+      options?.signal?.throwIfAborted();
       const errorMsg = errorMessage(error);
+      if (
+        options?.intent === "read" &&
+        (error instanceof DeviceOwnedByOtherDaemonError ||
+          error instanceof CtrlProxyForwardOwnershipUnreadableError ||
+          error instanceof AndroidForwardReadinessConflictError)
+      ) {
+        logger.warn(
+          `[DeviceSessionManager] Skipping CtrlProxy readiness for read on ${deviceId}: ${errorMsg}`,
+        );
+        return;
+      }
       logger.error(`[DeviceSessionManager] Failed to setup accessibility service: ${errorMsg}`);
       // Rethrow ActionableErrors to preserve their specific error messages, and cancellation so
       // readiness does not go on to pin and configure the device (#10905).
@@ -1788,9 +1851,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
     compatibility: {
       skipCtrlProxyDownload: boolean | undefined;
       verifyCompatibilityWhenSkipping: () => Promise<void>;
+      signal?: AbortSignal;
     },
   ): Promise<boolean> {
-    const { skipCtrlProxyDownload, verifyCompatibilityWhenSkipping } = compatibility;
+    const { skipCtrlProxyDownload, verifyCompatibilityWhenSkipping, signal } = compatibility;
     logger.info(
       `[DeviceSessionManager] Accessibility service already enabled for ${deviceId}, verifying WebSocket connection`,
     );
@@ -1807,6 +1871,12 @@ export class DeviceSessionManager implements DeviceSessionManager {
         `[DeviceSessionManager] Accessibility service enabled and connected for ${deviceId}, verifying version compatibility`,
       );
     } else {
+      await this.throwAndroidForwardConflictIfPresent(
+        deviceId,
+        manager,
+        accessibilityClient,
+        signal,
+      );
       // Service claims to be installed but WebSocket won't connect - cache is stale
       logger.warn(
         `[DeviceSessionManager] Accessibility service cache stale for ${deviceId} - marked as installed/enabled but WebSocket failed. Resetting setup state and forcing reinstall.`,
@@ -1826,9 +1896,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
     compatibility: {
       skipCtrlProxyDownload: boolean | undefined;
       verifyCompatibilityWhenSkipping: () => Promise<void>;
+      signal?: AbortSignal;
     },
   ): Promise<boolean> {
-    const { skipCtrlProxyDownload, verifyCompatibilityWhenSkipping } = compatibility;
+    const { skipCtrlProxyDownload, verifyCompatibilityWhenSkipping, signal } = compatibility;
     logger.info(
       `[DeviceSessionManager] Accessibility service installed but not enabled for ${deviceId}, enabling now`,
     );
@@ -1847,6 +1918,12 @@ export class DeviceSessionManager implements DeviceSessionManager {
         accessibilityClient.waitForConnection(),
       );
       if (!enableConnected) {
+        await this.throwAndroidForwardConflictIfPresent(
+          deviceId,
+          manager,
+          accessibilityClient,
+          signal,
+        );
         logger.warn(
           `[DeviceSessionManager] WebSocket connection failed after enabling for ${deviceId}, will attempt full setup`,
         );
@@ -1862,6 +1939,12 @@ export class DeviceSessionManager implements DeviceSessionManager {
         );
       }
     } catch (error) {
+      if (
+        error instanceof DeviceOwnedByOtherDaemonError ||
+        accessibilityClient.isLastConnectionFailureForwardingLeaseConflict?.()
+      ) {
+        throw error;
+      }
       const errorMsg = errorMessage(error);
       logger.warn(`[DeviceSessionManager] Failed to enable accessibility service: ${errorMsg}`);
       if (skipCtrlProxyDownload) {
@@ -1878,9 +1961,16 @@ export class DeviceSessionManager implements DeviceSessionManager {
     accessibilityClient: AndroidCtrlProxy,
     perf: ReturnType<typeof createPerformanceTracker>,
     state: { didSetup: boolean },
+    signal?: AbortSignal,
   ): Promise<void> {
     const setup = await manager.setup(false, perf);
     if (!setup.success) {
+      if (
+        setup.cause instanceof DeviceOwnedByOtherDaemonError ||
+        setup.cause instanceof CtrlProxyForwardOwnershipUnreadableError
+      ) {
+        throw setup.cause;
+      }
       throw new ActionableError(setup.error ?? setup.message);
     }
     state.didSetup = true;
@@ -1895,6 +1985,14 @@ export class DeviceSessionManager implements DeviceSessionManager {
     const connected = await perf.track("waitForConnection", () =>
       accessibilityClient.waitForConnection(),
     );
+    if (!connected) {
+      await this.throwAndroidForwardConflictIfPresent(
+        deviceId,
+        manager,
+        accessibilityClient,
+        signal,
+      );
+    }
     if (connected) {
       // Verify service is actually ready to respond (not just WebSocket connected)
       logger.info(
@@ -1909,6 +2007,23 @@ export class DeviceSessionManager implements DeviceSessionManager {
         );
       }
     }
+  }
+
+  private async throwAndroidForwardConflictIfPresent(
+    deviceId: string,
+    manager: CtrlProxyManager,
+    client: AndroidCtrlProxy,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (!client.isLastConnectionFailureForwardingLeaseConflict?.()) {
+      return;
+    }
+    await manager.assertNotDrivenByOtherDaemon?.(signal);
+    signal?.throwIfAborted();
+    throw new AndroidForwardReadinessConflictError(
+      client.getLastConnectionFailureMessage?.() ??
+        `CtrlProxy forwarding lease conflict for Android device ${deviceId}`,
+    );
   }
 
   private hasCurrentReadinessDevice(platform: SomePlatform, resolvedPlatform: Platform): boolean {

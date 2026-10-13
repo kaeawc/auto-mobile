@@ -1,3 +1,4 @@
+import { OrphanRecorderActiveError } from "./orphanRecorderRefusal";
 import { toActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
@@ -16,6 +17,9 @@ import { createJSONToolResponse } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
 import {
   getVideoRecordingMetadata,
+  initializeRecordingTeardownRedriveState,
+  getStartupOrphanCaptures,
+  interruptVideoRecording,
   getVideoRecordingOwnerRef,
   heldVideoRecordingOwner,
   IOS_MAX_DURATION_SECONDS,
@@ -937,6 +941,53 @@ async function finalizedStopResponse(
   });
 }
 
+async function tryStopStartupOrphan(
+  recordingId: string,
+  ownerSessionUuid?: string,
+  requesterMcpSessionId?: string,
+) {
+  if (heldVideoRecordingOwner(recordingId) !== undefined) {
+    return undefined;
+  }
+  const orphans = getStartupOrphanCaptures();
+  const orphan = orphans?.find(recordingId);
+  if (orphan) {
+    assertActiveRecordingOwner({
+      recordingId,
+      deviceId: orphan.deviceId,
+      recordingOwner: orphan.ownerSessionUuid,
+      requesterSessionUuid: ownerSessionUuid,
+      requesterMcpSessionId,
+    });
+    try {
+      await orphans!.stop(orphan.deviceId, recordingId);
+    } catch (error) {
+      throw new OrphanRecorderActiveError(orphan.deviceId, [recordingId], error);
+    }
+    await interruptVideoRecording(recordingId);
+    const metadata = await getVideoRecordingMetadata(recordingId);
+    const { recordingRepository } = await initializeRecordingTeardownRedriveState();
+    const row = await recordingRepository.getRecording(recordingId);
+    if (!metadata || !row) {
+      throw new ActionableError(
+        `Stopped startup recorder ${recordingId} has no persisted metadata.`,
+      );
+    }
+    return createJSONToolResponse({
+      action: "stop",
+      count: 1,
+      recordings: [
+        {
+          ...stopResultEntry(metadata, row),
+          status: "interrupted",
+          warning: "The capture was interrupted by a daemon restart and its recorder was stopped.",
+        },
+      ],
+    });
+  }
+  return undefined;
+}
+
 async function stopRecordingById(
   recordingId: string,
   ownerSessionUuid?: string,
@@ -953,6 +1004,14 @@ async function stopRecordingById(
 
   const results: Array<Record<string, unknown>> = [];
   const evictedRecordingIds: string[] = [];
+  const stoppedOrphan = await tryStopStartupOrphan(
+    recordingId,
+    ownerSessionUuid,
+    requesterMcpSessionId,
+  );
+  if (stoppedOrphan) {
+    return stoppedOrphan;
+  }
   const heldOwner = heldVideoRecordingOwner(recordingId);
   const activeRecords = await listActiveVideoRecordings();
   const matching = activeRecords.find((record) => record.recordingId === recordingId);

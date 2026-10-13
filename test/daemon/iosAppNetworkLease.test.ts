@@ -3,11 +3,13 @@ import {
   IosAppNetworkLeases,
   type IosAppNetworkRuleRestorer,
 } from "../../src/daemon/iosAppNetworkLease";
-import type {
-  IosAppNetworkRenewResult,
-  IosAppNetworkRule,
+import {
+  IosAppNetworkRuleClient,
+  type IosAppNetworkRenewResult,
+  type IosAppNetworkRule,
 } from "../../src/features/network-filter/IosAppNetworkRuleClient";
 import { logger } from "../../src/utils/logger";
+import { FakeNetworkFilterBridge } from "../fakes/FakeNetworkFilterBridge";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const RULE: IosAppNetworkRule = {
@@ -160,6 +162,92 @@ describe("IosAppNetworkLeases (#10264)", () => {
     await advance(15_000);
 
     expect(restorer.renewals).toEqual([]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+});
+
+describe("shaped lease lifecycle through bridge and client", () => {
+  let timer: FakeTimer;
+  let bridge: FakeNetworkFilterBridge;
+  let client: IosAppNetworkRuleClient;
+  let leases: IosAppNetworkLeases;
+  let current: boolean;
+  let warn: ReturnType<typeof spyOn<typeof logger, "warn">>;
+
+  beforeEach(async () => {
+    timer = new FakeTimer();
+    bridge = new FakeNetworkFilterBridge();
+    bridge.setState("ready");
+    client = new IosAppNetworkRuleClient(bridge);
+    await client.applyShaped(
+      RULE,
+      { delayMs: 100, downloadKbps: 80, uploadKbps: 40 },
+      15000,
+      () => 3,
+    );
+    leases = new IosAppNetworkLeases(
+      timer,
+      () => ({
+        reset: async (rule) => {
+          await client.reset(rule);
+        },
+        renew: (rule, leaseMs) => client.renew(rule, leaseMs),
+      }),
+      { leaseMs: 15000, renewIntervalMs: 5000 },
+    );
+    current = true;
+    warn = spyOn(logger, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    leases.stopAll();
+    warn.mockRestore();
+  });
+
+  test("shaped rule renews every interval without changing its resolution", async () => {
+    const resolution = bridge.activeRules()[0];
+    leases.start("session-a", RULE, () => current);
+    await timer.advanceTimeAsync(15000, drain);
+    expect(bridge.ruleCalls.map((call) => [call.command, call.leaseMs])).toEqual([
+      ["apply", 15000],
+      ["renew", 15000],
+      ["renew", 15000],
+      ["renew", 15000],
+    ]);
+    expect(bridge.activeRules()[0]).toEqual(resolution);
+    expect(leases.active("session-a")).toEqual(RULE);
+  });
+
+  test("release stops shaped renewal and reset removes the rule", async () => {
+    leases.start("session-a", RULE, () => current);
+    current = false;
+    expect(await client.reset({ ...RULE, revision: 3 })).toEqual({
+      kind: "reset",
+      reconciled: false,
+    });
+    await timer.advanceTimeAsync(15000, drain);
+    expect(bridge.ruleCalls.map((call) => call.command)).toEqual(["apply", "reset"]);
+    expect(bridge.activeRules()).toEqual([]);
+    expect(leases.active("session-a")).toBeUndefined();
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("refused renew ends shaped renewal", async () => {
+    leases.start("session-a", RULE, () => current);
+    bridge.expireAll();
+    await timer.advanceTimeAsync(10000, drain);
+    expect(bridge.ruleCalls.map((call) => call.command)).toEqual(["apply", "renew"]);
+    expect(leases.active("session-a")).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  test("shaped renewal stops after one unconfirmed lease window", async () => {
+    bridge.ruleScripts.push("dropped", "dropped", "dropped");
+    leases.start("session-a", RULE, () => current);
+    await timer.advanceTimeAsync(10000, drain);
+    expect(leases.active("session-a")).toEqual(RULE);
+    await timer.advanceTimeAsync(5000, drain);
+    expect(leases.active("session-a")).toBeUndefined();
+    expect(bridge.ruleCalls.filter((call) => call.command === "renew")).toHaveLength(3);
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 });

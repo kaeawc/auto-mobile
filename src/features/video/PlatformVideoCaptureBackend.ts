@@ -1,3 +1,4 @@
+import { DeviceUnreachableError } from "../../models/DeviceUnreachableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { ActionableError, toActionableError, BootedDevice, ExecResult } from "../../models";
 import { defaultTimer } from "../../utils/SystemTimer";
@@ -322,7 +323,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     }
     const adb = this.adbFactory.create(device);
     try {
-      const outcome = await this.signalDeviceRecorder(adb, descriptor, pid, 9);
+      const outcome = await this.signalDeviceRecorder(adb, descriptor, pid, 9, true);
       if (outcome === "not-ours") {
         return;
       }
@@ -526,10 +527,28 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     backendHandle: Pick<AndroidBackendHandle, "deviceTempPath">,
     pid: number,
     signal: 2 | 9,
+    orphan = false,
   ): Promise<"signalled" | "not-ours"> {
-    const probe = await this.readDeviceRecorderCmdline(adb, pid);
+    let probe: ExecResult;
+    try {
+      probe = await this.readDeviceRecorderCmdline(adb, pid);
+    } catch (error) {
+      if (!orphan) {
+        throw error;
+      }
+      throw new DeviceUnreachableError(
+        `Cannot reach device to inspect orphan recorder pid ${pid}; retry when the device answers.`,
+        { cause: error },
+      );
+    }
     if (probe.error) {
-      throw toActionableError(probe.error, `Could not inspect recorder pid ${pid}`);
+      if (!orphan) {
+        throw toActionableError(probe.error, `Could not inspect recorder pid ${pid}`);
+      }
+      throw new DeviceUnreachableError(
+        `Cannot reach device to inspect orphan recorder pid ${pid}; retry when the device answers.`,
+        { cause: probe.error },
+      );
     }
     if (!isOwnRecorderCmdline(probe.stdout, backendHandle.deviceTempPath)) {
       logger.warn(

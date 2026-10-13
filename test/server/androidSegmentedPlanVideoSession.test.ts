@@ -88,6 +88,30 @@ function makePendingStopSession() {
 }
 
 describe("AndroidSegmentedPlanVideoSession rotation stop deadline", () => {
+  test("live capture ids include pending stops and the replacement segment without exposing archives", async () => {
+    const { session, timer, pendingStop } = makePendingStopSession();
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await session.startFirstSegment();
+      expect(session.liveCaptureIds).toEqual(["id-bounded"]);
+      timer.advanceTime(1000);
+      const rotation = session.onBeforePlanStep();
+      timer.advanceTime(rotationStopBudgetMs);
+      await rotation;
+      expect(session.liveCaptureIds).toEqual(["id-bounded", "id-bounded-seg1"]);
+      pendingStop.resolve({
+        metadata: makeStopMetadata("id-bounded", "/tmp/id-bounded.mp4"),
+        evictedRecordingIds: [],
+      });
+      await session.finalize();
+      expect(session.liveCaptureIds).toEqual(["id-bounded"]);
+      await session.abort();
+      expect(session.liveCaptureIds).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test("a stop completing within the budget preserves both segments and clears its deadline", async () => {
     const { session, timer, pendingStop, start, stop } = makePendingStopSession();
     await session.startFirstSegment();

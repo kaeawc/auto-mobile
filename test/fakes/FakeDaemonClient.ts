@@ -197,12 +197,12 @@ export class FakeDaemonClient implements DaemonClientLike {
     }
   }
 
-  async subscribeToNotifications(): Promise<void> {
+  async subscribeToNotifications(options?: { signal?: AbortSignal }): Promise<void> {
     this.subscribeToNotificationsCalls += 1;
     if (this.shouldFailSubscribe) {
       throw new Error("Unsupported daemon method: daemon/subscribe-notifications");
     }
-    await this.daemon?.subscribeToNotifications?.();
+    await this.daemon?.subscribeToNotifications?.(options);
   }
 
   /**

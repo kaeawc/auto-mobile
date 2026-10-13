@@ -47,6 +47,7 @@ describe("managed proxy re-bind after its slot session ended (#11399)", () => {
   let sessionManager: SessionManager;
   let scopes: ManagedConnectionScopes;
   let state: DaemonStateAccess;
+  let reconnectFixturePending = false;
 
   async function initializeSessions() {
     timer = new FakeTimer();
@@ -72,8 +73,7 @@ describe("managed proxy re-bind after its slot session ended (#11399)", () => {
   }
 
   beforeEach(async () => {
-    // The single reconnect scenario builds its acquisition fixture once in beforeAll.
-    if (!proxy) {
+    if (!reconnectFixturePending) {
       await initializeSessions();
     }
   });
@@ -158,6 +158,15 @@ describe("managed proxy re-bind after its slot session ended (#11399)", () => {
         localSlotCapacity: 1,
         requests: [{ slotIndex: 1, role: "primary", platform: "android", requestedSpec: {} }],
       });
+      reconnectFixturePending = true;
+    });
+    beforeEach(() => {
+      if (!reconnectFixturePending) {
+        throw new Error(
+          "Reconnect fixture already consumed; another test needs its own proxy fixture",
+        );
+      }
+      reconnectFixturePending = false;
     });
     test("a tokenless reconnect is claimed by the keeper and binds without another connection", async () => {
       // A successor can rehydrate a managed row without a persisted owner token.

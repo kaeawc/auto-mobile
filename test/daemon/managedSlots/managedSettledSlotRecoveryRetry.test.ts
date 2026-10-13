@@ -49,16 +49,28 @@ async function makeHarness() {
   await registry.updateSlotState(key, { generation: 1, stableDeviceId: "device" }, "settling", {
     settler: { daemonId: "dead", pid: 100 },
   });
-  const behavior = { failures: 0, until: 0, blocked: 0, openFailures: 0, hangOpen: false };
+  const behavior = {
+    failures: 0,
+    until: 0,
+    blocked: 0,
+    openFailures: 0,
+    hangOpen: false,
+    hangRead: false,
+  };
   const calls: Array<{ at: number; end: number }> = [];
   const opens: number[] = [];
   const open = Promise.withResolvers<FakeSlotRegistry>();
+  const read =
+    Promise.withResolvers<Awaited<ReturnType<FakeSlotRegistry["recoverSettledSlots"]>>>();
   const faulty = new Proxy(registry, {
     get(target, property) {
       if (property === "recoverSettledSlots") {
         return async () => {
           const call = { at: timer.now(), end: timer.now() };
           calls.push(call);
+          if (behavior.hangRead) {
+            return read.promise;
+          }
           if (behavior.failures-- > 0 || timer.now() < behavior.until) {
             timer.setCurrentTime(timer.now() + behavior.blocked);
             call.end = timer.now();
@@ -122,6 +134,7 @@ async function makeHarness() {
     calls,
     opens,
     open,
+    read,
     warn,
     info,
     debug,
@@ -428,4 +441,98 @@ test("wired recovery and re-own pacers alternate blocking failures on the daemon
   h.release.close();
   await recovery;
   await reowner.whenIdle();
+});
+
+test("a hung registry open yields its shared turn after 700 ms without reopening", async () => {
+  const h = await harness(true);
+  h.behavior.hangOpen = true;
+  const recovery = h.release.recoverSettledSlots();
+  await h.step(0);
+  const confirmed: number[] = [];
+  const reowner = new ManagedExecutionReowner({
+    registry: async () => h.faulty,
+    owner: () => ({ daemonId: "new", pid: 200 }),
+    timer: h.timer,
+    isSessionHeld: () => true,
+    onOwnershipConfirmed: () => {
+      confirmed.push(h.timer.now());
+    },
+  });
+  cleanups.push(async () => {
+    reowner.close();
+    await reowner.whenIdle();
+  });
+  const reown = reowner.reown(["session-a"], { rehydrated: true });
+  await h.step(699);
+  expect(h.debug).not.toHaveBeenCalled();
+  expect(confirmed).toEqual([]);
+  await h.step(1);
+  expect(h.debug.mock.calls[0]?.[0]).toContain("timed out after 700ms");
+  // The failed turn adds 700 ms of shared quiet time before the queued re-owner runs.
+  await h.step(700);
+  expect(confirmed).toEqual([1_400]);
+  expect(reowner.automationRefusal("session-a")).toBeUndefined();
+  await reown;
+  await h.step(5_000);
+  expect(h.opens).toEqual([0]);
+  expect(h.warn).toHaveBeenCalledTimes(1);
+  h.release.close();
+  expect(await recovery).toEqual([]);
+});
+
+test("a recovery read settling after its deadline is consumed without a second read", async () => {
+  const h = await harness();
+  h.behavior.hangRead = true;
+  let result: unknown;
+  const recovery = h.release.recoverSettledSlots().then((value) => {
+    result = value;
+  });
+  await h.step(700);
+  expect(h.debug.mock.calls[0]?.[0]).toContain("timed out after 700ms");
+  const landed = await h.registry.recoverSettledSlots();
+  h.read.resolve(landed);
+  await h.step(700);
+  expect(result).toEqual(landed);
+  expect(h.calls).toHaveLength(1);
+  expect(h.opens).toEqual([0]);
+  await recovery;
+});
+
+test("a retained recovery rejection is observed quietly then a fresh attempt succeeds", async () => {
+  const h = await harness();
+  h.behavior.hangRead = true;
+  let result: unknown;
+  const recovery = h.release.recoverSettledSlots().then((value) => {
+    result = value;
+  });
+  await h.step(700);
+  expect(h.debug.mock.calls[0]?.[0]).toContain("timed out after 700ms");
+  h.behavior.hangRead = false;
+  h.read.reject(new Error("late recovery read rejection"));
+  await h.step(750);
+  expect(h.debug.mock.calls[1]?.[0]).toContain("late recovery read rejection");
+  expect(result).toHaveLength(1);
+  expect(h.calls).toHaveLength(2);
+  expect(h.opens).toEqual([0, 1_450]);
+  expect(h.warn).not.toHaveBeenCalled();
+  await recovery;
+});
+
+test("close releases retained recovery immediately and a late rejection has no logs", async () => {
+  const h = await harness();
+  h.behavior.hangRead = true;
+  const recovery = h.release.recoverSettledSlots();
+  await h.step(700);
+  expect(h.debug).toHaveBeenCalledTimes(1);
+  const logs = [h.debug.mock.calls.length, h.warn.mock.calls.length, h.info.mock.calls.length];
+  h.release.close();
+  expect(await recovery).toEqual([]);
+  await h.release.whenIdle();
+  h.read.reject(new Error("recovery rejected after close"));
+  await h.step(10_000);
+  expect([h.debug.mock.calls.length, h.warn.mock.calls.length, h.info.mock.calls.length]).toEqual(
+    logs,
+  );
+  expect(h.calls).toHaveLength(1);
+  expect(h.timer.getPendingTimeoutCount()).toBe(0);
 });

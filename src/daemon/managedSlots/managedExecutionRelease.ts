@@ -1195,7 +1195,7 @@ export class ManagedExecutionRelease {
     return { done: false };
   }
 
-  /** Startup recovery has no settlement deadline or slow cadence; drain defaults stay unchanged. */
+  /** Startup recovery bounds each shared turn, retaining late reads; drain defaults stay unchanged. */
   private async retryRecoveryStep<T>(
     what: string,
     step: () => Promise<T>,
@@ -1203,10 +1203,38 @@ export class ManagedExecutionRelease {
     const sinceMs = this.options.timer.now();
     let attempts = 0;
     let warned = false;
+    let pending: Promise<T> | undefined;
     while (!this.closed) {
       attempts++;
       try {
-        const value = await this.recoveryPacing.run(step, () => true);
+        const value = await this.recoveryPacing.run(
+          async () => {
+            let timedOut = false;
+            try {
+              return await raceWithDeadline(
+                () => {
+                  pending ??= step();
+                  return pending;
+                },
+                {
+                  timer: this.options.timer,
+                  timeoutMs: MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS,
+                  signal: this.closing.signal,
+                  label: what,
+                  onTimeout: () => {
+                    timedOut = true;
+                  },
+                },
+              );
+            } finally {
+              // A timed-out read may already have landed; consume it on the next shared turn.
+              if (!timedOut) {
+                pending = undefined;
+              }
+            }
+          },
+          () => true,
+        );
         if (this.closed) {
           return { done: false };
         }

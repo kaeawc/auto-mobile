@@ -89,6 +89,10 @@ export class RegistryRetryPacing {
     }
   }
 
+  /**
+   * Callers must bound their operation: its FIFO turn is shared by every pacer on this timer.
+   * Close cancels the wait, but a hung unbounded operation otherwise blocks every successor.
+   */
   async run<T>(
     operation: () => Promise<T>,
     succeeded: (result: T) => boolean,

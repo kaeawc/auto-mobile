@@ -734,6 +734,47 @@ test("exhausting a held owner-conflict leash reports the default path's reason",
   await forwarded();
 });
 
+for (const tool of ["observe", "listDevices"] as const) {
+  test(`a successful named ${tool} preserves an exhausted held owner-conflict loss`, async () => {
+    await acquireBoth();
+    heartbeatError = Object.assign(new Error("Other owner"), { code: "liveness_owner_conflict" });
+    await advance(40_000);
+    await forwarded(tool, { sessionUuid: IOS.sessionUuid }, IOS.sessionUuid);
+    await refused(IOS, "liveness-owner-conflict");
+    await forwarded();
+  });
+}
+
+test("a successful named read preserves a held keeper not-found ended loss", async () => {
+  await acquireBoth();
+  heartbeatError = Object.assign(new Error("Session not found"), {
+    code: DAEMON_SESSION_NOT_FOUND_CODE,
+    releaseReason: "device-killed",
+  });
+  await advance(INTERVAL_MS);
+  await forwarded("observe", { sessionUuid: IOS.sessionUuid }, IOS.sessionUuid);
+  await refused(IOS, "device-killed");
+  await forwarded();
+});
+
+test("a successful named read preserves a held release notification loss", async () => {
+  await acquireBoth();
+  client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, IOS.sessionUuid, "device-killed");
+  await forwarded("observe", { sessionUuid: IOS.sessionUuid }, IOS.sessionUuid);
+  await refused(IOS, "device-killed");
+  await forwarded();
+});
+
+for (const reason of ["cleanup-expired", "released"] as const) {
+  test(`a successful named read preserves an eviction loss confirmed by ${reason}`, async () => {
+    await evictIos();
+    client.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, IOS.sessionUuid, reason);
+    await forwarded("observe", { sessionUuid: IOS.sessionUuid }, IOS.sessionUuid);
+    await refused(IOS, reason === "released" ? "replay-lease-expired" : reason);
+    await forwarded();
+  });
+}
+
 test("pin: a held not-found stop without a terminal reason does not report a loss", async () => {
   await acquireBoth();
   heartbeatError = Object.assign(new Error("Session not found"), {

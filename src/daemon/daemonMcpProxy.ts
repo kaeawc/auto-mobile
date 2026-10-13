@@ -1496,7 +1496,12 @@ export class DaemonMcpProxy {
   /** Held terminal losses awaiting one platform-only control answer, in loss order (#12090). */
   private readonly pendingHeldSessionPlatformLosses = new Map<
     string,
-    { platform: "android" | "ios"; reason: string; release?: SessionReleaseSnapshot }
+    {
+      platform: "android" | "ios";
+      reason: string;
+      release?: SessionReleaseSnapshot;
+      proxyJudged?: true;
+    }
   >();
   /** Bounded per-session recovery when heartbeat acknowledgements stop (#10053). */
   private readonly livenessRecovery: LivenessRecovery;
@@ -5072,11 +5077,13 @@ export class DaemonMcpProxy {
     sessionUuid: string,
     reason = "released",
     release?: SessionReleaseSnapshot,
+    proxyJudged?: true,
   ): void {
     const pending = this.pendingHeldSessionPlatformLosses.get(sessionUuid);
     if (pending) {
       pending.reason = reason === "released" ? pending.reason : reason;
       pending.release = release ?? pending.release;
+      pending.proxyJudged = proxyJudged;
       return;
     }
     const platform = this.sessionPlatforms.get(sessionUuid);
@@ -5089,7 +5096,12 @@ export class DaemonMcpProxy {
     ) {
       return;
     }
-    this.pendingHeldSessionPlatformLosses.set(sessionUuid, { platform, reason, release });
+    this.pendingHeldSessionPlatformLosses.set(sessionUuid, {
+      platform,
+      reason,
+      release,
+      proxyJudged,
+    });
   }
 
   private recordHeldSessionNotFoundLoss(sessionUuid: string, outcome: NotFoundAnswerOutcome): void {
@@ -5619,11 +5631,13 @@ export class DaemonMcpProxy {
    */
   private creditRoutedSession(result: unknown, forwardedSessionUuid: string | undefined): void {
     const routed = routedSessionUuidFromResult(result);
-    // A non-terminal answer supersedes only that session's pending idle loss. Reads
-    // have no routed-use echo, so use their forwarded UUID without restarting protection.
+    // A non-terminal answer clears only that session's proxy-judged idle eviction;
+    // daemon-confirmed losses survive. Reads have no routed-use echo, so use their
+    // forwarded UUID without restarting protection.
     const answeredSessionUuid = routed ?? forwardedSessionUuid;
     if (
       answeredSessionUuid !== undefined &&
+      this.pendingHeldSessionPlatformLosses.get(answeredSessionUuid)?.proxyJudged === true &&
       readTerminalSessionRefusal(result)?.sessionUuid !== answeredSessionUuid
     ) {
       this.pendingHeldSessionPlatformLosses.delete(answeredSessionUuid);
@@ -7170,7 +7184,12 @@ export class DaemonMcpProxy {
         logger.info(
           `[DaemonMcpProxy] Held session ${sessionUuid} was not used for ${this.boundSessionReplayTtlMs}ms; no longer heartbeating it`,
         );
-        this.recordHeldSessionTerminalLoss(sessionUuid, this.idleSessionReleaseReason(sessionUuid));
+        this.recordHeldSessionTerminalLoss(
+          sessionUuid,
+          this.idleSessionReleaseReason(sessionUuid),
+          undefined,
+          true,
+        );
         this.dropHeldSession(sessionUuid);
       }
     }

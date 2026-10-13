@@ -841,6 +841,7 @@ async function querySessionInfo(rawArgs: string[], manager: DaemonManager): Prom
       // Running inside daemon process
       const sessionManager = daemonState.getSessionManager();
       const session = requireDaemonSession(sessionManager, sessionId);
+      // Match socket session-info: the shared vetoed deadline is reported on the wall clock.
       const idleDeadline = vetoedIdleReleaseAt(
         session,
         sessionManager.getIdleReleaseExecutionVeto(sessionId),

@@ -117,8 +117,13 @@ describe("an idle release is terminal (#11258)", () => {
           },
           { isInitialized: () => true, getSessionManager: () => manager } as DaemonStateAccess,
         );
-        manager.cleanupExpiredSessions();
+        if (path === "sweep") {
+          manager.cleanupExpiredSessions();
+        } else {
+          expect(manager.getSession(SESSION)).not.toBeNull();
+        }
         expect(manager.getSession(SESSION)).not.toBeNull();
+        expect(origins).toEqual([]);
         expect(journal.recorded).toEqual([]);
         expect((await persistence.getSession!(SESSION))?.release_reason).toBeNull();
         return;

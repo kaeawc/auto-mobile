@@ -293,6 +293,8 @@ A managed-execution session uses the `managed-execution` liveness policy:
   end a live-owned execution. Out-of-range values remain `managed_slot_config_invalid`.
   `session-info` and requested heartbeat reports give `idleReleaseAt: null`; the proxy
   treats null as authoritative and never substitutes its local idle window.
+  Once the owner lease lapses, `session-info` reports a numeric `idleReleaseAt` again;
+  the release that follows is `heartbeat-timeout`, without an `idle` flag.
 - **Execution end is terminal.** Owner exit, heartbeat loss or explicit release ends the
   UUID. A call on the managed connection then answers `managed_execution_ended`
   (`nextAction: relaunch_execution`, release reason, `slotIndex` and
@@ -303,6 +305,14 @@ A managed-execution session uses the `managed-execution` liveness policy:
   A returning proxy reclaims the session; a proxy that never returns loses it under the
   existing awaiting-owner timeout. Terminal releases, retention and the fixed
   device-restart recovery window still apply. Plain sessions keep the 2-minute rule.
+  A managed row skipped because its device is unavailable at boot remains re-issuable
+  through the released-row retention window, rather than ending at its idle deadline.
+  Each later daemon start retries its device reservation while the row is recoverable;
+  failed rehydration frees that reservation immediately, while successful rehydration
+  holds the device until the proxy returns or the awaiting-owner timeout ends the session.
+  A rehydrated execution with unconfirmed slot ownership (registry busy) stays held
+  while its proxy heartbeats; control calls return `managed_slot_ownership_unconfirmed`
+  until ownership is confirmed or lost.
 - **Execution owner.** The proxy checks every second that its owner (by default
   the parent process that launched it, or `executionOwnerPid`) is running and,
   for the default owner, that it has not been re-parented. Either loss shuts the

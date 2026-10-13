@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
-import { SessionManager, type Session } from "../../src/daemon/sessionManager";
+import {
+  SessionManager,
+  SessionSuspectError,
+  TerminalSessionError,
+  type Session,
+} from "../../src/daemon/sessionManager";
 import { idleReleaseAt } from "../../src/daemon/sessionHoldDiagnostics";
 import {
   DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS,
@@ -10,6 +15,8 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeTimer } from "../fakes/FakeTimer";
 import { SeededRandom } from "../fakes/SeededRandom";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
+import { releasedSessionNotFoundFields } from "../../src/daemon/types";
 
 // One source of truth for "when does this session idle-expire" (#11558). Three things answer it:
 // the scan that releases an idle session, the lazy-expiry check when a new control call is
@@ -161,7 +168,7 @@ class IdleWorld {
 
   /** What the client is told, on the session clock. */
   private reported(): number | null {
-    return idleReleaseAt(this.session);
+    return idleReleaseAt(this.session, this.manager.getSessionLeaseState(SESSION)?.phase);
   }
 
   private fail(message: string): never {
@@ -179,6 +186,8 @@ class IdleWorld {
       if (this.session.livenessPolicy !== "managed-execution") {
         this.fail("unexpected idle exemption");
       }
+      expect(this.manager.getSessionLeaseState(SESSION)?.phase).not.toBe("lapsed");
+      expect(this.held).toBe(true);
       return;
     }
     const earliest = this.anchor + IDLE_MS + this.stalledMs - this.stallCount * SCAN_MS;
@@ -344,6 +353,90 @@ async function runSchedule(kind: SessionKind, seed: number): Promise<{ idleRelea
 }
 
 describe("the scan, a late call's admission and idleReleaseAt give one idle deadline (#11558)", () => {
+  for (const phase of ["live", "suspect", "lapsed"] as const) {
+    test.each(["lookup", "late call", "sweep", "monitor", "report"] as const)(
+      `managed execution with ${phase} lease at %s never ends as idle cleanup`,
+      async (seam) => {
+        const timer = new FakeTimer();
+        const manager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+        manager.stopCleanupTimer();
+        const releases: string[] = [];
+        manager.onSessionRelease((_id, _device, reason) => {
+          releases.push(reason);
+        });
+        const monitor = new SessionHeartbeatMonitor(
+          manager,
+          () => false,
+          async (id, reason) => {
+            await manager.releaseSession(id, reason);
+          },
+          timer,
+        );
+        try {
+          const session = await manager.createSession(SESSION, DEVICE, "android");
+          await manager.adoptManagedExecutionLivenessPolicy(SESSION);
+          await manager.claimLivenessOwnership(SESSION, "managed-owner");
+          timer.setCurrentTime(session.expiresAt + 1);
+          manager.recordHeartbeat(SESSION, "managed-owner");
+          const age =
+            phase === "live"
+              ? 0
+              : session.heartbeatTimeoutMs + (phase === "suspect" ? 1 : SUSPECT_GRACE_MS + 1);
+          timer.setCurrentTime(timer.now() + age);
+          expect(manager.getSessionLeaseState(SESSION)?.phase).toBe(phase);
+          const reported = () =>
+            idleReleaseAt(session, manager.getSessionLeaseState(SESSION)?.phase);
+          expect(reported()).toBe(phase === "lapsed" ? session.expiresAt : null);
+          if (seam === "lookup") {
+            expect(manager.getSession(SESSION)).toBe(session);
+          } else if (seam === "late call") {
+            const call = manager.getOrCreateSession(SESSION, undefined, undefined, {
+              executionId: "late-call",
+              startTime: timer.now(),
+            });
+            if (phase === "suspect") {
+              await expect(call).rejects.toBeInstanceOf(SessionSuspectError);
+            } else if (phase === "lapsed") {
+              await expect(call).rejects.toBeInstanceOf(TerminalSessionError);
+            } else {
+              expect(await call).toBe(session);
+            }
+          } else if (seam === "sweep") {
+            manager.cleanupExpiredSessions();
+          } else if (seam === "monitor") {
+            await monitor.tick();
+            await drainMicrotasks(20);
+          } else {
+            expect(reported()).toBe(phase === "lapsed" ? session.expiresAt : null);
+          }
+          if (phase !== "lapsed") {
+            expect(reported()).toBeNull();
+            expect(manager.hasSession(SESSION)).toBe(true);
+            expect(releases).toEqual([]);
+          } else {
+            // Every seam defers owner loss to the heartbeat path, even past the idle deadline.
+            if (seam !== "monitor" && seam !== "late call") {
+              expect(manager.hasSession(SESSION)).toBe(true);
+              expect(releases).toEqual([]);
+              await monitor.tick();
+            }
+            await manager.waitForSessionRelease(SESSION);
+            expect(manager.hasSession(SESSION)).toBe(false);
+            expect(releases).toEqual(["heartbeat-timeout"]);
+            const fields = releasedSessionNotFoundFields(
+              await manager.getReleasedSessionReason(SESSION),
+            );
+            expect(fields).toMatchObject({ releaseReason: "heartbeat-timeout" });
+            expect(fields).not.toHaveProperty("idle");
+          }
+        } finally {
+          await monitor.stop();
+          manager.stopCleanupTimer();
+        }
+      },
+    );
+  }
+
   test.each([
     { name: "late call", callFirst: true },
     { name: "monitor", callFirst: false },

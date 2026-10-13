@@ -1,6 +1,10 @@
 import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { SessionManager, TerminalSessionError } from "../../../src/daemon/sessionManager";
 import {
+  handleDaemonRequest,
+  type DaemonStateAccess,
+} from "../../../src/daemon/daemonRequestHandlers";
+import {
   ManagedExecutionReowner,
   MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS,
 } from "../../../src/daemon/managedSlots/managedExecutionReowner";
@@ -13,6 +17,7 @@ import { openSqliteSlotRegistry } from "../../../src/daemon/managedSlots/sqliteS
 import { InFlightSlotReservations } from "../../../src/daemon/managedSlots/slotOwnerLiveness";
 import type { SlotRegistry } from "../../../src/daemon/managedSlots/slotRegistry";
 import { fixedBackoff } from "../../../src/utils/Backoff";
+import { SUSPECT_GRACE_MS } from "../../../src/daemon/livenessOwnerLease";
 import { logger } from "../../../src/utils/logger";
 import { sessionOwnershipLostPayload } from "../../../src/server/deviceSessionResult";
 import { FakeDbWriteBarrier } from "../../fakes/FakeDbWriteBarrier";
@@ -462,7 +467,7 @@ describe("managed ownership release", () => {
   });
 
   test.each(["retry-tick", "gate-check", "none"] as const)(
-    "idle expiry preserves the release gate after %s",
+    "owner lease lapse preserves the release gate after %s",
     async (trigger) => {
       for (const proof of ["cap", "confirmed"] as const) {
         const h = await harness();
@@ -470,7 +475,19 @@ describe("managed ownership release", () => {
         await h.reowner.reown([SESSION], { rehydrated: true });
         const session = h.manager.getSession(SESSION)!;
         h.manager.setRotation(session, { accelerometerRotation: 1, userRotation: 0 });
-        h.timer.setCurrentTime(session.expiresAt + 1);
+        expect(
+          await handleDaemonRequest(
+            {
+              id: "owner-heartbeat",
+              type: "daemon_request",
+              method: "daemon/heartbeat",
+              params: { sessionId: SESSION },
+            },
+            { isInitialized: () => true, getSessionManager: () => h.manager } as DaemonStateAccess,
+          ),
+        ).toMatchObject({ success: true });
+        h.timer.setCurrentTime(h.timer.now() + session.heartbeatTimeoutMs + SUSPECT_GRACE_MS + 1);
+        expect(h.manager.getSessionLeaseState(SESSION)?.phase).toBe("lapsed");
         if (trigger === "retry-tick") {
           h.timer.advanceTime(2_000);
           await drainMicrotasks(40);
@@ -478,7 +495,7 @@ describe("managed ownership release", () => {
           expect(h.reowner.automationRefusal(SESSION)).toBeDefined();
         }
         expect(h.manager.isLiveManagedExecutionSession(SESSION)).toBe(false);
-        const release = h.manager.releaseSession(SESSION, "idle-timeout", true);
+        const release = h.manager.releaseSession(SESSION, "heartbeat-timeout", true);
         await drainMicrotasks(40);
         expect(h.writes).toEqual([]);
         expect(h.reowner.isReleaseHeld(SESSION)).toBe(true);

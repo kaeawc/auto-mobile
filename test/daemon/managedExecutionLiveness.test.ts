@@ -24,6 +24,7 @@ import {
 } from "../../src/models/managedSlotConfig";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 
 // #11340: managed executions stay held while their owner lease is non-lapsed.
 // The configured idle window stays stored; heartbeats and reads never move activity clocks.
@@ -253,6 +254,26 @@ describe("managed-execution session liveness", () => {
     });
   });
 
+  test("managed liveness reads the lease without reaping or probing a stall", async () => {
+    await manager.adoptManagedExecutionLivenessPolicy(SESSION);
+    const probe = { calls: 0 };
+    manager.setStallProbe(() => {
+      probe.calls++;
+    });
+    const original = manager.getAllSessions()[0]!;
+    expect(manager.isLiveManagedExecutionSession(SESSION)).toBe(true);
+    timer.advanceTime(original.heartbeatTimeoutMs + 1);
+    expect(manager.getSessionLeaseState(SESSION)?.phase).toBe("suspect");
+    expect(manager.isLiveManagedExecutionSession(SESSION)).toBe(true);
+    timer.advanceTime(SUSPECT_GRACE_MS);
+    expect(manager.getSessionLeaseState(SESSION)?.phase).toBe("lapsed");
+    expect(manager.isLiveManagedExecutionSession(SESSION)).toBe(false);
+    expect(manager.hasSession(SESSION)).toBe(true);
+    expect(probe.calls).toBe(0);
+    expect(releases).toEqual([]);
+    expect((await persistence.getSession!(SESSION))?.release_reason).toBeNull();
+  });
+
   test("adopting the policy is not use: the deadline is anchored on the last tool activity", async () => {
     const lastToolActivity = manager.getSession(SESSION)!.lastUsedAt;
     timer.advanceTime(MINUTE);
@@ -386,6 +407,9 @@ describe("managed-execution session liveness", () => {
       });
       if (policy === "managed-execution") {
         expect(manager.getSession(SESSION)?.ownership).toBe("awaiting-owner");
+        timer.advanceTime(NO_HEARTBEAT_RELEASE_BUDGET_MS + 1);
+        expect(manager.getSessionLeaseState(SESSION)?.phase).toBe("lapsed");
+        expect(manager.isLiveManagedExecutionSession(SESSION)).toBe(true);
         expect(await heartbeat()).toMatchObject({ success: true });
         await manager.getOrCreateSession(SESSION, undefined, undefined, {
           executionId: "restart-control",

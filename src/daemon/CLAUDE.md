@@ -310,6 +310,8 @@ in `src/daemon/sessionClocks.ts` (#11558). The idle sweep, the heartbeat monitor
 `idleReleaseAt` all read it; never compare `expiresAt` or `lastUsedAt` with the
 clock directly in a new idle judgement. `test/daemon/idleExpiryOneSourceOfTruth.test.ts`
 holds the three to one instant for every session kind.
+Managed executions ignore that idle deadline: owner loss ends them through the heartbeat path,
+and `idleReleaseAt` is null while the judged owner lease is live or suspect.
 
 Release reasons are classified in one place, `src/daemon/releaseReasons.ts`
 (#11258): a typed `Record` tags each reason `idle`, `expiry`, `terminal` and

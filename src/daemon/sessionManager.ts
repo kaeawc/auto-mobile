@@ -947,6 +947,8 @@ interface SessionReleaseOperation extends PendingSessionRelease {
   /** Owner proof received during this release; never advances session activity or idle clocks. */
   ownerHeartbeatDuringRelease?: number;
   commitFenced?: boolean;
+  /** A declined commit fence keeps the session live; its rewrite has no forced-release bound. */
+  commitDeclined?: boolean;
   /** When the release started; bounds the retry hint for a bind it refuses (#10960). */
   startedAtMs?: number;
   /** Captured before teardown can clear state: first attempts, two writes and scheduling slack. */
@@ -2815,7 +2817,10 @@ export class SessionManager {
   getDeviceCleanupRetryAfterMs(deviceId: string): number {
     const now = this.sessionNow();
     const bounds = Array.from(this.activeReleasePromises)
-      .filter((release) => !release.forced && release.session.assignedDevice === deviceId)
+      .filter(
+        (release) =>
+          !release.forced && !release.commitDeclined && release.session.assignedDevice === deviceId,
+      )
       .map(
         (release) =>
           (release.teardownStartsByMs ?? release.startedAtMs ?? now) +
@@ -2941,6 +2946,7 @@ export class SessionManager {
       .filter(
         (release) =>
           !release.forced &&
+          !release.commitDeclined &&
           release.expiryOrigin === undefined &&
           isTerminalReleaseReason(release.reason.value),
       )
@@ -2969,7 +2975,8 @@ export class SessionManager {
   /** The unforced release's absolute stuck deadline on the session clock, if still in flight. */
   getReleaseStuckAtMs(sessionId: string): number | undefined {
     const release = Array.from(this.activeReleasePromises).find(
-      (release) => !release.forced && release.session.sessionId === sessionId,
+      (release) =>
+        !release.forced && !release.commitDeclined && release.session.sessionId === sessionId,
     );
     return release
       ? (release.teardownStartsByMs ?? release.startedAtMs ?? this.sessionNow()) +
@@ -3000,7 +3007,12 @@ export class SessionManager {
     sessionId: string,
   ): { deviceId: string; stage: SessionReleaseStage | undefined } | undefined {
     const operation = this.releasePromises.get(sessionId);
-    if (!operation || operation.forced || !this.activeReleasePromises.has(operation)) {
+    if (
+      !operation ||
+      operation.forced ||
+      operation.commitDeclined ||
+      !this.activeReleasePromises.has(operation)
+    ) {
       return undefined;
     }
     const { session } = operation;
@@ -5789,11 +5801,7 @@ export class SessionManager {
     const gate = Promise.withResolvers<void>();
     let state: "deferred" | "started" | "cancelled" | "rebound" = "deferred";
     let resolved = false;
-    const capMs =
-      SESSION_CREATE_WAIT_TIMEOUT_MS +
-      SESSION_RELEASE_TEARDOWN_CAP_MS +
-      getSessionReleaseStuckDeadlineMs(oldView.cacheData) -
-      SESSION_RELEASE_STUCK_DEADLINE_MS;
+    const capMs = SESSION_CREATE_WAIT_TIMEOUT_MS + SESSION_RELEASE_TEARDOWN_CAP_MS;
     const incarnation = this.deviceHealth?.incarnation(oldView.assignedDevice);
     const mayRestore = () => {
       const holder = this.getSessionForDevice(oldView.assignedDevice);
@@ -5833,16 +5841,22 @@ export class SessionManager {
         settle();
         return;
       }
-      void runOutsideRequestContext(async () => {
-        const pending = await this.restoreRebindOverrides(oldView, mayRestore);
-        await Promise.allSettled(pending);
-      }).then(settle, (error: unknown) => {
-        logger.warn(
-          `Deferred rebind cleanup failed on ${oldView.assignedDevice}: ${errorMessage(error)}`,
-          error,
-        );
-        settle();
-      });
+      const run = Promise.resolve()
+        .then(() =>
+          runOutsideRequestContext(async () => {
+            const pending = await this.restoreRebindOverrides(oldView, mayRestore);
+            this.trackPendingTeardownCleanup(oldView.assignedDevice, pending);
+            await Promise.allSettled(pending);
+          }),
+        )
+        .catch((error: unknown) => {
+          logger.warn(
+            `Deferred rebind cleanup failed on ${oldView.assignedDevice}: ${errorMessage(error)}`,
+            error,
+          );
+        });
+      this.registerPendingDeviceCleanup(oldView.assignedDevice, run);
+      settle();
     };
     const cleanup: DeferredRebindCleanup = {
       settled: gate.promise,
@@ -5883,21 +5897,18 @@ export class SessionManager {
       },
     };
     // Start deferred restores at the creation wait; cancellation only clears this soft timer.
-    // The advertised hard deadline opens quarantine even if restores or undo never settle.
+    // At the hard deadline an unfinished undo hands quarantine to the restores, too.
     const bound = this.timer.setTimeout(cleanup.commit, SESSION_CREATE_WAIT_TIMEOUT_MS);
     bound.unref?.();
     const deadline = this.timer.setTimeout(() => {
-      const phase =
-        state === "cancelled"
-          ? "retained by an undo"
-          : state === "started"
-            ? "restores started"
-            : "deferred";
-      logger.warn(
-        `Deferred rebind cleanup deadline on ${oldView.assignedDevice} after ${capMs}ms ` +
-          `(${phase}): device is no longer held for this cleanup and may still carry the rebound session's overrides`,
-      );
-      settle();
+      if (state === "cancelled") {
+        logger.warn(
+          `Deferred rebind cleanup deadline on ${oldView.assignedDevice} after ${capMs}ms: undo did not finish in time`,
+        );
+        start(true);
+      } else {
+        start();
+      }
     }, capMs);
     deadline.unref?.();
     this.deferredRebindCleanups.set(cleanup, {
@@ -6904,6 +6915,8 @@ export class SessionManager {
       // can overtake a device-loss eviction. Fence before the terminal snapshot
       // is persisted so a declined release leaves no terminal trace behind.
       if (releaseSuperseded(shouldCommit)) {
+        // releaseSessionAttempt always supplies its operation before entering teardown.
+        operation!.commitDeclined = true;
         return this.abandonSupersededRelease(sessionId, deviceId, pendingCleanup);
       }
       const releasedAtMs = this.sessionNow();
@@ -6954,6 +6967,7 @@ export class SessionManager {
       // the live session keeps routing, and the terminal row it wrote is
       // rewritten live so a restart rehydrates it (#11206).
       if (releaseSuperseded(shouldCommit)) {
+        operation!.commitDeclined = true;
         return await this.abandonReleaseSupersededAfterPersist(
           session,
           releaseSnapshot,
@@ -7214,6 +7228,12 @@ export class SessionManager {
       async () => {
         pendingSetups =
           setups.length > 0 ? (await this.waitForSessionSetup(sessionId, setups)).pending : null;
+        if (operation) {
+          operation.stuckDeadlineMs = Math.max(
+            operation.stuckDeadlineMs,
+            getSessionReleaseStuckDeadlineMs(session.cacheData),
+          );
+        }
         return { pending: pendingSetups, setup: true };
       },
       async () => ({

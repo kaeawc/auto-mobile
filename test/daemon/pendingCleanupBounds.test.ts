@@ -93,6 +93,7 @@ const flush = () => drainMicrotasks(100);
 async function deferredRebindHarness(
   state: SessionCacheData = { networkCondition: { initialProfile: "none" } },
   wedged?: "network and clock" | "clock",
+  restorers?: DeviceStateRestorerFactories,
 ) {
   const calls: string[] = [];
   const clockSignals: Array<AbortSignal | undefined> = [];
@@ -120,6 +121,7 @@ async function deferredRebindHarness(
         calls.push("screenReader");
       },
     }),
+    ...restorers,
   });
   dispose.push(() => {
     restore.resolve();
@@ -140,93 +142,234 @@ async function deferredRebindHarness(
   const bound = h.manager.getDeviceCleanupRetryAfterMs(android.deviceId);
   const deadlineWarnings = () =>
     h.warn.mock.calls.filter(([message]) => message.includes("Deferred rebind cleanup deadline"));
-  return { ...h, cleanup, calls, clockSignals, bound, pendingTimeouts, deadlineWarnings };
+  return { ...h, cleanup, calls, clockSignals, bound, pendingTimeouts, deadlineWarnings, restore };
 }
 
-async function expectDeferredRebindDeadline(
-  h: Awaited<ReturnType<typeof deferredRebindHarness>>,
-  state: string,
-) {
-  await h.timer.advanceTimeAsync(h.bound - 1, flush);
-  expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(true);
-  expect(() => h.pool.assertDeviceCleanupComplete(android.deviceId)).toThrow(
-    DeviceCleanupInProgressError,
-  );
-  expect(h.deadlineWarnings()).toHaveLength(0);
-  await h.timer.advanceTimeAsync(1, flush);
-  expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(false);
-  expect(() => h.pool.assertDeviceCleanupComplete(android.deviceId)).not.toThrow();
-  expect(h.deadlineWarnings()).toHaveLength(1);
-  expect(h.deadlineWarnings()[0]?.[0]).toContain(android.deviceId);
-  expect(h.deadlineWarnings()[0]?.[0]).toContain(`${h.bound}ms`);
-  expect(h.deadlineWarnings()[0]?.[0]).toContain(state);
-  expect(h.deadlineWarnings()[0]?.[0]).toContain("no longer held");
-  expect(h.deadlineWarnings()[0]?.[0]).toContain("may still carry");
-}
+const gateCap = releaseBudgets.SESSION_CREATE_WAIT_TIMEOUT_MS + cap;
 
 for (const wedged of ["network and clock", "clock"] as const) {
-  test(`deferred rebind deadline opens quarantine with a wedged ${wedged} restore`, async () => {
+  test(`deferred rebind hands off quarantine before a wedged ${wedged} restore`, async () => {
     const h = await deferredRebindHarness(
       {
-        ...(wedged === "network and clock" && {
-          networkCondition: { initialProfile: "none" },
-        }),
+        ...(wedged === "network and clock" && { networkCondition: { initialProfile: "none" } }),
         clock: { initialAutomaticTime: 1, clockChangedByUs: true, rootedByUs: false },
       },
       wedged,
     );
     h.cleanup.commit();
+    let gateSettled = false;
+    void h.cleanup.settled.then(() => {
+      gateSettled = true;
+    });
+    expect(h.cleanup.cancel()).toBe(false);
+    const pending = h.manager.getPendingDeviceCleanup(android.deviceId);
+    let pendingSettled = false;
+    void pending?.then(() => {
+      pendingSettled = true;
+    });
     await flush();
-    expect(h.calls).toEqual([wedged === "clock" ? "clock" : "network"]);
-    await expectDeferredRebindDeadline(h, "restores started");
-    await h.cleanup.settled;
-    expect(h.calls).toContain("clock");
-    expect(h.clockSignals).toHaveLength(1);
-    expect(h.clockSignals[0]).toBeDefined();
+    expect(gateSettled).toBe(true);
+    expect(pendingSettled).toBe(false);
+    await h.timer.advanceTimeAsync(gateCap + 10_000, flush);
+    expect(pendingSettled).toBe(false);
+    expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(true);
+    expect(() => h.pool.assertDeviceCleanupComplete(android.deviceId)).toThrow(
+      DeviceCleanupInProgressError,
+    );
+    expect(h.manager.getDeviceCleanupRetryAfterMs(android.deviceId)).toBe(1_000);
     expect(h.clockSignals[0]?.aborted).toBe(false);
-    const callsAtDeadline = [...h.calls];
-    h.cleanup.commit();
-    h.cleanup.finish("failed");
+    expect(h.deadlineWarnings()).toHaveLength(0);
+    h.restore.resolve();
+    await pending;
     await flush();
-    expect(h.calls).toEqual(callsAtDeadline);
-    expect(h.deadlineWarnings()).toHaveLength(1);
+    expect(pendingSettled).toBe(true);
+    expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(false);
   });
 }
 
-test("deferred rebind deadline opens a retained undo without starting late restores", async () => {
-  const h = await deferredRebindHarness();
+test("retained undo deadline starts quarantined restores and rejects late outcomes", async () => {
+  const h = await deferredRebindHarness(
+    { clock: { initialAutomaticTime: 1, clockChangedByUs: true, rootedByUs: false } },
+    "clock",
+  );
+  expect(h.bound).toBe(gateCap);
   expect(h.cleanup.cancel()).toBe(true);
-  await expectDeferredRebindDeadline(h, "retained by an undo");
-  await h.cleanup.settled;
-  expect(h.cleanup.retained).toBe(true);
-  h.cleanup.commit();
-  h.cleanup.finish("failed");
-  await flush();
-  expect(h.cleanup.retained).toBe(true);
-  h.cleanup.finish("rebound");
-  await flush();
+  await h.timer.advanceTimeAsync(gateCap - 1, flush);
+  expect(h.manager.getDeviceCleanupRetryAfterMs(android.deviceId)).toBe(1);
   expect(h.calls).toEqual([]);
+  await h.timer.advanceTimeAsync(1, flush);
+  await h.cleanup.settled;
+  expect(h.cleanup.retained).toBe(false);
+  expect(h.calls).toEqual(["clock"]);
+  expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(true);
   expect(h.deadlineWarnings()).toHaveLength(1);
-  expect(h.timer.getPendingTimeoutCount()).toBe(h.pendingTimeouts);
+  expect(h.deadlineWarnings()[0]?.[0]).toContain(android.deviceId);
+  expect(h.deadlineWarnings()[0]?.[0]).toContain(`${gateCap}ms`);
+  expect(h.deadlineWarnings()[0]?.[0]).toContain("undo did not finish in time");
+  h.cleanup.finish("failed");
+  h.cleanup.finish("rebound");
+  h.cleanup.commit();
+  await flush();
+  expect(h.cleanup.retained).toBe(false);
+  expect(h.calls).toEqual(["clock"]);
+  expect(h.deadlineWarnings()).toHaveLength(1);
 });
 
-for (const [state, extra] of [
-  [{}, 0],
-  [
-    { clock: { initialAutomaticTime: 1, clockChangedByUs: true, rootedByUs: false } },
-    releaseBudgets.CLOCK_RESTORE_TIMEOUT_MS,
-  ],
-  [{ rotation: { accelerometerRotation: 1, userRotation: 0 } }, 1_000],
-  [{ screenReader: { platform: "android", previousEnabled: false } }, 35_000],
-] satisfies Array<[SessionCacheData, number]>) {
-  test(`deferred rebind advertises and enforces its ${extra}ms own-state budget`, async () => {
-    const h = await deferredRebindHarness(state);
-    expect(h.bound).toBe(releaseBudgets.SESSION_CREATE_WAIT_TIMEOUT_MS + cap + extra);
-    expect(h.cleanup.cancel()).toBe(true);
-    await expectDeferredRebindDeadline(h, "retained by an undo");
+for (const retained of [false, true]) {
+  test(`empty deferred gate ${retained ? "retained" : "orphaned"} admits its device within its bound`, async () => {
+    const h = await deferredRebindHarness({});
+    expect(h.bound).toBe(gateCap);
+    if (retained) {
+      expect(h.cleanup.cancel()).toBe(true);
+    }
+    await h.timer.advanceTimeAsync(1_000, flush);
+    expect(h.manager.getDeviceCleanupRetryAfterMs(android.deviceId)).toBe(gateCap - 1_000);
+    await h.timer.advanceTimeAsync(gateCap - 1_000, flush);
+    await h.cleanup.settled;
+    expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(false);
+    expect(() => h.pool.assertDeviceCleanupComplete(android.deviceId)).not.toThrow();
+    h.cleanup.finish("failed");
+    h.cleanup.finish("rebound");
+    h.cleanup.commit();
+    await flush();
     expect(h.calls).toEqual([]);
   });
 }
+
+for (const kind of ["screenReader", "clock"] as const) {
+  test(`orphaned rebind quarantines every failing ${kind} dispatch until its own cleanup ends`, async () => {
+    const safe: boolean[] = [];
+    let failing = true;
+    const state: SessionCacheData =
+      kind === "clock"
+        ? { clock: { initialAutomaticTime: 1, clockChangedByUs: true, rootedByUs: false } }
+        : { screenReader: { platform: "android", previousEnabled: false } };
+    const h = await deferredRebindHarness(state, undefined, {
+      [kind]: () => ({
+        restore: async () => {
+          safe.push(h.manager.hasDeviceCleanupInProgress(android.deviceId));
+          if (kind === "screenReader") {
+            await h.timer.sleep(30_000);
+          }
+          if (failing) {
+            throw new Error("restore not confirmed");
+          }
+        },
+      }),
+    });
+    const observe = async () => {
+      await flush();
+      if (h.manager.getPendingDeviceCleanup(android.deviceId)) {
+        expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(true);
+        expect(() => h.pool.assertDeviceCleanupComplete(android.deviceId)).toThrow(
+          DeviceCleanupInProgressError,
+        );
+      }
+    };
+    await h.timer.advanceTimeAsync(gateCap + 25_000, observe);
+    expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(true);
+    expect(() => h.pool.assertDeviceCleanupComplete(android.deviceId)).toThrow(
+      DeviceCleanupInProgressError,
+    );
+    if (kind === "screenReader") {
+      await h.timer.advanceTimeAsync(65_000, observe);
+    }
+    if (kind === "clock") {
+      failing = false;
+    }
+    await h.timer.advanceTimeAsync(160_000, observe);
+    expect(safe.length).toBeGreaterThan(1);
+    expect(safe.every(Boolean)).toBe(true);
+    expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(false);
+  });
+}
+
+test("shutdown flush waits for the deferred restore handoff", async () => {
+  const h = await deferredRebindHarness(
+    { clock: { initialAutomaticTime: 1, clockChangedByUs: true, rootedByUs: false } },
+    "clock",
+  );
+  let drained = false;
+  const drain = h.manager.drainPendingDeviceCleanups(1_000).then((value) => {
+    drained = true;
+    return value;
+  });
+  await flush();
+  expect(drained).toBe(false);
+  await h.timer.advanceTimeAsync(1_000, flush);
+  expect(await drain).toBe(false);
+  expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(true);
+});
+
+test("cancel after handoff joins the restore run and its pending retry", async () => {
+  const retry = Promise.withResolvers<void>();
+  let calls = 0;
+  const h = await deferredRebindHarness(
+    { clock: { initialAutomaticTime: 1, clockChangedByUs: true, rootedByUs: false } },
+    undefined,
+    {
+      clock: () => ({
+        restore: async () => {
+          calls++;
+          if (calls === 1) {
+            throw new Error("first attempt failed");
+          }
+          await retry.promise;
+        },
+      }),
+    },
+  );
+  dispose.push(() => retry.resolve());
+  h.cleanup.commit();
+  let gateSettled = false;
+  void h.cleanup.settled.then(() => {
+    gateSettled = true;
+  });
+  expect(h.cleanup.cancel()).toBe(false);
+  const pending = h.manager.getPendingDeviceCleanup(android.deviceId);
+  let settled = false;
+  void pending?.then(() => {
+    settled = true;
+  });
+  await flush();
+  expect(calls).toBe(1);
+  expect(gateSettled).toBe(true);
+  expect(settled).toBe(false);
+  await h.timer.advanceTimeAsync(1_000, flush);
+  expect(calls).toBe(2);
+  expect(settled).toBe(false);
+  expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(true);
+  retry.resolve();
+  await pending;
+  await flush();
+  expect(settled).toBe(true);
+  expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(false);
+});
+
+test("a deferred restore handoff keeps a capped pending retry's actual remaining bound", async () => {
+  const retry = Promise.withResolvers<void>();
+  let calls = 0;
+  dispose.push(() => retry.resolve());
+  const h = await deferredRebindHarness(undefined, undefined, {
+    networkCondition: () => ({
+      restore: async () => {
+        calls++;
+        if (calls === 1) {
+          throw new Error("network restore failed");
+        }
+        await retry.promise;
+      },
+    }),
+  });
+  h.cleanup.commit();
+  await flush();
+  expect(h.manager.getDeviceCleanupRetryAfterMs(android.deviceId)).toBe(cap);
+  await h.timer.advanceTimeAsync(2_000, flush);
+  expect(h.manager.getDeviceCleanupRetryAfterMs(android.deviceId)).toBe(cap - 2_000);
+  expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(true);
+  await h.timer.advanceTimeAsync(cap - 2_000, flush);
+  expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(false);
+});
 
 test("deferred rebind settled restores open immediately and clear every gate timeout", async () => {
   const h = await deferredRebindHarness();
@@ -1290,4 +1433,180 @@ test("an explicit release with a live owner meets the advertised cleanup bound w
   expect(force).toHaveBeenCalledTimes(1);
   expect(h.manager.getSession("old")).toBeNull();
   expect(h.manager.getTerminalReleaseSnapshot("old")?.releaseReason).toBe("explicit-release");
+});
+
+test("late screen-reader setup grows the stuck budget before its first restore", async () => {
+  const restored = Promise.withResolvers<void>();
+  let signal: AbortSignal | undefined;
+  const h = harness(undefined, {
+    screenReader: () => ({
+      restore: async (_state, abort) => {
+        signal = abort;
+        await restored.promise;
+      },
+    }),
+  });
+  const session = await h.manager.createSession(
+    "late",
+    android.deviceId,
+    "android",
+    600_000,
+    600_000,
+  );
+  const setupGate = Promise.withResolvers<void>();
+  const setup = h.manager.trackScreenReaderSessionSetup(session, async () => {
+    await setupGate.promise;
+    h.manager.setScreenReader(session, { platform: "android", previousEnabled: false });
+  });
+  const force = spyOn(h.manager, "forceStuckRelease");
+  dispose.push(() => force.mockRestore());
+  const monitor = new SessionHeartbeatMonitor(
+    h.manager,
+    () => false,
+    async () => {},
+    h.timer,
+    {
+      forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id),
+    },
+  );
+  monitor.start();
+  dispose.push(() => void monitor.stop());
+  const start = h.timer.now();
+  const release = h.manager.releaseSession("late", "explicit-release");
+  await flush();
+  expect(h.manager.getReleaseStuckAtMs("late")).toBe(
+    start + releaseBudgets.SESSION_RELEASE_STUCK_DEADLINE_MS,
+  );
+  await h.timer.advanceTimeAsync(500, flush);
+  setupGate.resolve();
+  await setup;
+  await flush();
+  expect(h.manager.getReleaseStuckAtMs("late")).toBe(
+    start + releaseBudgets.SESSION_RELEASE_STUCK_DEADLINE_MS + SCREEN_READER_RESTORE_TIMEOUT_MS,
+  );
+  await h.timer.advanceTimeAsync(25_000, flush);
+  expect(force).not.toHaveBeenCalled();
+  expect(signal).toBeDefined();
+  expect(signal?.aborted).toBe(false);
+  restored.resolve();
+  expect(await release).toBe(android.deviceId);
+  expect(h.manager.getReleaseStuckAtMs("late")).toBeUndefined();
+});
+
+test("declined final commit fence cannot force a parked live-row rewrite", async () => {
+  const persistence = new FakeDeviceSessionPersistence();
+  const h = harness(persistence);
+  const session = await h.manager.createSession(
+    "kept",
+    android.deviceId,
+    "android",
+    600_000,
+    600_000,
+  );
+  const rewrite = Promise.withResolvers<void>();
+  const upsert = spyOn(persistence, "upsertActiveSession").mockImplementation(
+    () => rewrite.promise,
+  );
+  const force = spyOn(h.manager, "forceStuckRelease");
+  dispose.push(() => {
+    upsert.mockRestore();
+    force.mockRestore();
+  });
+  const monitor = new SessionHeartbeatMonitor(
+    h.manager,
+    () => false,
+    async () => {},
+    h.timer,
+    {
+      forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id),
+    },
+  );
+  monitor.start();
+  dispose.push(() => void monitor.stop());
+  let checks = 0;
+  const release = h.manager.releaseSessionUnlessSuperseded(
+    "kept",
+    `device-disconnected:${android.deviceId}`,
+    () => ++checks < 2,
+  );
+  await flush();
+  expect(checks).toBe(2);
+  expect(upsert).toHaveBeenCalledTimes(1);
+  expect(h.manager.getTerminalReleasesInProgress()).toEqual([]);
+  expect(h.manager.getReleaseStuckAtMs("kept")).toBeUndefined();
+  expect(h.manager.getDeviceCleanupRetryAfterMs(android.deviceId)).toBe(1_000);
+  expect(h.manager.isReleaseInProgress("kept", h.timer.now())).toBe(true);
+  await h.timer.advanceTimeAsync(25_000, flush);
+  expect(force).not.toHaveBeenCalled();
+  expect(h.manager.forceStuckRelease("kept")).toBeUndefined();
+  expect(h.manager.getSession("kept")).toBe(session);
+  expect(h.manager.getSessionForDevice(android.deviceId)).toBe("kept");
+  rewrite.resolve();
+  expect(await release).toEqual({ superseded: true });
+  expect(h.manager.getTerminalReleaseSnapshot("kept")).toBeUndefined();
+});
+
+test("an undecided commit fence still forces wedged teardown at its deadline", async () => {
+  const gate = Promise.withResolvers<void>();
+  let signal: AbortSignal | undefined;
+  const h = harness(undefined, {
+    screenReader: () => ({
+      restore: async (_state, abort) => {
+        signal = abort;
+        await gate.promise;
+      },
+    }),
+  });
+  const session = await h.manager.createSession(
+    "wedged-fence",
+    android.deviceId,
+    "android",
+    600_000,
+    600_000,
+  );
+  h.manager.setScreenReader(session, { platform: "android", previousEnabled: false });
+  // Simulate a lost first-attempt timeout callback: the monitor's independent stuck timer
+  // must still fence a release that has not reached either commit check.
+  const scheduleFakeTimeout = h.timer.setTimeout.bind(h.timer);
+  const timeout = spyOn(h.timer, "setTimeout").mockImplementation((callback, ms) =>
+    scheduleFakeTimeout(ms === SCREEN_READER_RESTORE_TIMEOUT_MS ? () => {} : callback, ms),
+  );
+  const force = spyOn(h.manager, "forceStuckRelease");
+  dispose.push(() => {
+    gate.resolve();
+    timeout.mockRestore();
+    force.mockRestore();
+  });
+  const monitor = new SessionHeartbeatMonitor(
+    h.manager,
+    () => false,
+    async () => {},
+    h.timer,
+    {
+      forceStuckRelease: (id) => forceStuckSessionRelease(h.manager, h.pool, id),
+    },
+  );
+  monitor.start();
+  dispose.push(() => void monitor.stop());
+  let fenceChecks = 0;
+  const release = h.manager.releaseSessionUnlessSuperseded(
+    "wedged-fence",
+    `device-disconnected:${android.deviceId}`,
+    () => {
+      fenceChecks++;
+      return true;
+    },
+  );
+  await flush();
+  const deadline = h.manager.getReleaseStuckAtMs("wedged-fence")!;
+  await h.timer.advanceTimeAsync(deadline - 1 - h.timer.now(), flush);
+  expect(force).not.toHaveBeenCalled();
+  await h.timer.advanceTimeAsync(1, flush);
+  await monitor.tick();
+  expect(force).toHaveBeenCalledTimes(1);
+  expect(fenceChecks).toBe(0);
+  expect(signal?.aborted).toBe(true);
+  expect(h.manager.getSessionForDevice(android.deviceId)).toBeNull();
+  gate.resolve();
+  await release;
 });

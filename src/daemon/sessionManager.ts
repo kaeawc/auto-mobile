@@ -5772,6 +5772,12 @@ export class SessionManager {
   ): DeferredRebindCleanup {
     const gate = Promise.withResolvers<void>();
     let state: "deferred" | "started" | "cancelled" | "rebound" = "deferred";
+    let resolved = false;
+    const capMs =
+      SESSION_CREATE_WAIT_TIMEOUT_MS +
+      SESSION_RELEASE_TEARDOWN_CAP_MS +
+      getSessionReleaseStuckDeadlineMs(oldView.cacheData) -
+      SESSION_RELEASE_STUCK_DEADLINE_MS;
     const incarnation = this.deviceHealth?.incarnation(oldView.assignedDevice);
     const mayRestore = () => {
       const holder = this.getSessionForDevice(oldView.assignedDevice);
@@ -5787,8 +5793,17 @@ export class SessionManager {
       this.iosAppNetworkLeases.stop(leaseKey);
       this.deferredRebindCleanups.delete(cleanup);
     };
+    const settle = () => {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      finish();
+      this.timer.clearTimeout(deadline);
+      gate.resolve();
+    };
     const start = (failedUndo = false) => {
-      if (state !== "deferred" && !(failedUndo && state === "cancelled")) {
+      if (resolved || (state !== "deferred" && !(failedUndo && state === "cancelled"))) {
         return;
       }
       state = "started";
@@ -5799,18 +5814,18 @@ export class SessionManager {
         logger.warn(
           `Not restoring rebound device ${oldView.assignedDevice}: runtime changed or reassigned`,
         );
-        gate.resolve();
+        settle();
         return;
       }
       void runOutsideRequestContext(async () => {
         const pending = await this.restoreRebindOverrides(oldView, mayRestore);
         await Promise.allSettled(pending);
-      }).then(gate.resolve, (error: unknown) => {
+      }).then(settle, (error: unknown) => {
         logger.warn(
           `Deferred rebind cleanup failed on ${oldView.assignedDevice}: ${errorMessage(error)}`,
           error,
         );
-        gate.resolve();
+        settle();
       });
     };
     const cleanup: DeferredRebindCleanup = {
@@ -5830,10 +5845,13 @@ export class SessionManager {
         return true;
       },
       finish: (outcome) => {
+        if (resolved) {
+          return;
+        }
         if (state === "cancelled") {
           if (outcome === "rebound") {
             state = "rebound";
-            gate.resolve();
+            settle();
           } else {
             // Only failed undo may restart cancelled restores, using the same old-device view.
             start(true);
@@ -5848,9 +5866,24 @@ export class SessionManager {
         }
       },
     };
-    // Reuse the creation/release-finalization wait (32s); an orphaned receipt cannot reserve A forever.
+    // Start deferred restores at the creation wait; cancellation only clears this soft timer.
+    // The advertised hard deadline opens quarantine even if restores or undo never settle.
     const bound = this.timer.setTimeout(cleanup.commit, SESSION_CREATE_WAIT_TIMEOUT_MS);
     bound.unref?.();
+    const deadline = this.timer.setTimeout(() => {
+      const phase =
+        state === "cancelled"
+          ? "retained by an undo"
+          : state === "started"
+            ? "restores started"
+            : "deferred";
+      logger.warn(
+        `Deferred rebind cleanup deadline on ${oldView.assignedDevice} after ${capMs}ms ` +
+          `(${phase}): device is no longer held for this cleanup and may still carry the rebound session's overrides`,
+      );
+      settle();
+    }, capMs);
+    deadline.unref?.();
     this.deferredRebindCleanups.set(cleanup, {
       sessionId: oldView.sessionId,
       deviceId: oldView.assignedDevice,
@@ -5862,11 +5895,7 @@ export class SessionManager {
         () => state === "deferred" && this.getSessionForDevice(oldView.assignedDevice) === null,
       );
     }
-    this.registerPendingDeviceCleanup(
-      oldView.assignedDevice,
-      gate.promise,
-      SESSION_CREATE_WAIT_TIMEOUT_MS + SESSION_RELEASE_TEARDOWN_CAP_MS,
-    );
+    this.registerPendingDeviceCleanup(oldView.assignedDevice, gate.promise, capMs);
     return cleanup;
   }
 

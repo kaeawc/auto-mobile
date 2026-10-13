@@ -8,6 +8,7 @@ import {
   SESSION_RELEASE_TEARDOWN_CAP_MS,
   getSessionReleaseCleanupWorstCaseMs,
   type DeviceStateRestorerFactories,
+  type SessionCacheData,
 } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { DeviceCleanupInProgressError } from "../../src/daemon/deviceAcquisitionRefusals";
@@ -40,6 +41,7 @@ import type { DeviceSessionRecord } from "../../src/db/deviceSessionRepository";
 import { ExecutionTracker } from "../../src/server/executionTracker";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { UNSETTLED_EXECUTION_DEADLINE_GRACE_MS } from "../../src/daemon/unsettledExecutionVeto";
+import type { DeferredRebindCleanup } from "../../src/daemon/acquisitionReceipt";
 
 const device = {
   deviceId: "12345678-1234-1234-1234-123456789ABC",
@@ -87,6 +89,181 @@ function harness(
 }
 type Harness = ReturnType<typeof harness>;
 const flush = () => drainMicrotasks(100);
+
+async function deferredRebindHarness(
+  state: SessionCacheData = { networkCondition: { initialProfile: "none" } },
+  wedged?: "network and clock" | "clock",
+) {
+  const calls: string[] = [];
+  const clockSignals: Array<AbortSignal | undefined> = [];
+  const restore = Promise.withResolvers<void>();
+  const h = harness(undefined, {
+    networkCondition: () => ({
+      restore: async () => {
+        calls.push("network");
+        if (wedged === "network and clock") {
+          await restore.promise;
+        }
+      },
+    }),
+    clock: () => ({
+      restore: async (_state, signal) => {
+        calls.push("clock");
+        clockSignals.push(signal);
+        if (wedged) {
+          await restore.promise;
+        }
+      },
+    }),
+    screenReader: () => ({
+      restore: async () => {
+        calls.push("screenReader");
+      },
+    }),
+  });
+  dispose.push(() => {
+    restore.resolve();
+    defaultDeviceClockRestoreRegistry.retire(android.deviceId);
+  });
+  await h.manager.createSession("rebound", android.deviceId, "android", 600_000, 600_000);
+  h.manager.updateSessionCache("rebound", state);
+  const pendingTimeouts = h.timer.getPendingTimeoutCount();
+  let cleanup: DeferredRebindCleanup | undefined;
+  await h.manager.rebindSession("rebound", "emulator-5556", "android", {
+    deferCleanup: (value) => {
+      cleanup = value;
+    },
+  });
+  if (!cleanup) {
+    throw new Error("Rebind did not provide deferred cleanup");
+  }
+  const bound = h.manager.getDeviceCleanupRetryAfterMs(android.deviceId);
+  const deadlineWarnings = () =>
+    h.warn.mock.calls.filter(([message]) => message.includes("Deferred rebind cleanup deadline"));
+  return { ...h, cleanup, calls, clockSignals, bound, pendingTimeouts, deadlineWarnings };
+}
+
+async function expectDeferredRebindDeadline(
+  h: Awaited<ReturnType<typeof deferredRebindHarness>>,
+  state: string,
+) {
+  await h.timer.advanceTimeAsync(h.bound - 1, flush);
+  expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(true);
+  expect(() => h.pool.assertDeviceCleanupComplete(android.deviceId)).toThrow(
+    DeviceCleanupInProgressError,
+  );
+  expect(h.deadlineWarnings()).toHaveLength(0);
+  await h.timer.advanceTimeAsync(1, flush);
+  expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(false);
+  expect(() => h.pool.assertDeviceCleanupComplete(android.deviceId)).not.toThrow();
+  expect(h.deadlineWarnings()).toHaveLength(1);
+  expect(h.deadlineWarnings()[0]?.[0]).toContain(android.deviceId);
+  expect(h.deadlineWarnings()[0]?.[0]).toContain(`${h.bound}ms`);
+  expect(h.deadlineWarnings()[0]?.[0]).toContain(state);
+  expect(h.deadlineWarnings()[0]?.[0]).toContain("no longer held");
+  expect(h.deadlineWarnings()[0]?.[0]).toContain("may still carry");
+}
+
+for (const wedged of ["network and clock", "clock"] as const) {
+  test(`deferred rebind deadline opens quarantine with a wedged ${wedged} restore`, async () => {
+    const h = await deferredRebindHarness(
+      {
+        ...(wedged === "network and clock" && {
+          networkCondition: { initialProfile: "none" },
+        }),
+        clock: { initialAutomaticTime: 1, clockChangedByUs: true, rootedByUs: false },
+      },
+      wedged,
+    );
+    h.cleanup.commit();
+    await flush();
+    expect(h.calls).toEqual([wedged === "clock" ? "clock" : "network"]);
+    await expectDeferredRebindDeadline(h, "restores started");
+    await h.cleanup.settled;
+    expect(h.calls).toContain("clock");
+    expect(h.clockSignals).toHaveLength(1);
+    expect(h.clockSignals[0]).toBeDefined();
+    expect(h.clockSignals[0]?.aborted).toBe(false);
+    const callsAtDeadline = [...h.calls];
+    h.cleanup.commit();
+    h.cleanup.finish("failed");
+    await flush();
+    expect(h.calls).toEqual(callsAtDeadline);
+    expect(h.deadlineWarnings()).toHaveLength(1);
+  });
+}
+
+test("deferred rebind deadline opens a retained undo without starting late restores", async () => {
+  const h = await deferredRebindHarness();
+  expect(h.cleanup.cancel()).toBe(true);
+  await expectDeferredRebindDeadline(h, "retained by an undo");
+  await h.cleanup.settled;
+  expect(h.cleanup.retained).toBe(true);
+  h.cleanup.commit();
+  h.cleanup.finish("failed");
+  await flush();
+  expect(h.cleanup.retained).toBe(true);
+  h.cleanup.finish("rebound");
+  await flush();
+  expect(h.calls).toEqual([]);
+  expect(h.deadlineWarnings()).toHaveLength(1);
+  expect(h.timer.getPendingTimeoutCount()).toBe(h.pendingTimeouts);
+});
+
+for (const [state, extra] of [
+  [{}, 0],
+  [
+    { clock: { initialAutomaticTime: 1, clockChangedByUs: true, rootedByUs: false } },
+    releaseBudgets.CLOCK_RESTORE_TIMEOUT_MS,
+  ],
+  [{ rotation: { accelerometerRotation: 1, userRotation: 0 } }, 1_000],
+  [{ screenReader: { platform: "android", previousEnabled: false } }, 35_000],
+] satisfies Array<[SessionCacheData, number]>) {
+  test(`deferred rebind advertises and enforces its ${extra}ms own-state budget`, async () => {
+    const h = await deferredRebindHarness(state);
+    expect(h.bound).toBe(releaseBudgets.SESSION_CREATE_WAIT_TIMEOUT_MS + cap + extra);
+    expect(h.cleanup.cancel()).toBe(true);
+    await expectDeferredRebindDeadline(h, "retained by an undo");
+    expect(h.calls).toEqual([]);
+  });
+}
+
+test("deferred rebind settled restores open immediately and clear every gate timeout", async () => {
+  const h = await deferredRebindHarness();
+  h.cleanup.commit();
+  await h.cleanup.settled;
+  await flush();
+  expect(h.calls).toEqual(["network"]);
+  expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(false);
+  expect(h.timer.getPendingTimeoutCount()).toBe(h.pendingTimeouts);
+  await h.timer.advanceTimeAsync(h.bound, flush);
+  expect(h.deadlineWarnings()).toHaveLength(0);
+});
+
+test("deferred rebind soft timer still commits restores at the creation wait", async () => {
+  const h = await deferredRebindHarness();
+  await h.timer.advanceTimeAsync(releaseBudgets.SESSION_CREATE_WAIT_TIMEOUT_MS - 1, flush);
+  expect(h.calls).toEqual([]);
+  expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(true);
+  await h.timer.advanceTimeAsync(1, flush);
+  await h.cleanup.settled;
+  expect(h.calls).toEqual(["network"]);
+  expect(h.timer.getPendingTimeoutCount()).toBe(h.pendingTimeouts);
+  expect(h.deadlineWarnings()).toHaveLength(0);
+});
+
+test("deferred rebind successful undo opens the gate and clears the hard deadline", async () => {
+  const h = await deferredRebindHarness();
+  expect(h.cleanup.cancel()).toBe(true);
+  h.cleanup.finish("rebound");
+  await h.cleanup.settled;
+  await flush();
+  expect(h.manager.hasDeviceCleanupInProgress(android.deviceId)).toBe(false);
+  expect(h.timer.getPendingTimeoutCount()).toBe(h.pendingTimeouts);
+  await h.timer.advanceTimeAsync(h.bound, flush);
+  expect(h.calls).toEqual([]);
+  expect(h.deadlineWarnings()).toHaveLength(0);
+});
 
 for (const [reason, forced] of [
   ["cleanup-expired", false],

@@ -29,7 +29,7 @@ object PrototypeSpecValidator {
       "^[\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]*$",
     )
   private val numberTokenPattern = Regex("^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$")
-  private val json = Json { ignoreUnknownKeys = false }
+  internal val json = Json { ignoreUnknownKeys = false }
   private val contract: JsonObject =
     json
       .parseToJsonElement(
@@ -50,6 +50,14 @@ object PrototypeSpecValidator {
   val MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH: Int = limit("MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH")
   val MAX_PROTOTYPE_SELECTOR_DEPTH: Int = limit("MAX_PROTOTYPE_SELECTOR_DEPTH")
   val MAX_PROTOTYPE_CONDITION_DEPTH: Int = limit("MAX_PROTOTYPE_CONDITION_DEPTH")
+  val MAX_PROTOTYPE_DATA_BYTES: Int = limit("MAX_PROTOTYPE_DATA_BYTES")
+  val MAX_PROTOTYPE_DATA_DEPTH: Int = limit("MAX_PROTOTYPE_DATA_DEPTH")
+  val MAX_PROTOTYPE_DATA_ARRAY_ITEMS: Int = limit("MAX_PROTOTYPE_DATA_ARRAY_ITEMS")
+  val MAX_PROTOTYPE_DATA_POINTER_LENGTH: Int = limit("MAX_PROTOTYPE_DATA_POINTER_LENGTH")
+  internal val maxRepeatItems: Int =
+    definitions.getValue("repeat").jsonObject.getValue("fields").jsonObject
+      .getValue("items").jsonObject.getValue("rule").jsonObject.getValue("options").jsonArray
+      .first { it.jsonObject.text("kind") == "array" }.jsonObject.getValue("max").jsonPrimitive.int
   val nodeTypes: Set<String> = variants("node")
   val actionTypes: Set<String> = variants("action")
   val placementTypes: Set<String> = variants("placement")
@@ -344,6 +352,7 @@ object PrototypeSpecValidator {
       "array" -> visitArray(value, rule, path, context, depth)
       "map" -> visitMap(value, rule, path, context, depth)
       "choice" -> visitChoice(value, rule, path, context, depth)
+      "data" -> dataError(value)
       else ->
         if (primitiveValid(value, rule)) null
         else
@@ -486,8 +495,8 @@ object PrototypeSpecValidator {
     for ((trigger, names) in dependents) {
       val fields = names.jsonArray.map { it.jsonPrimitive.content }
       val present = fields.filter { data.containsKey(it) }
-      if (!data.containsKey(trigger)) {
-        if (present.isNotEmpty()) return fail(keyPath(path, present.first()), "Requires $trigger")
+      if (trigger.split("|").none { data.containsKey(it) }) {
+        if (present.isNotEmpty()) return fail(keyPath(path, present.first()), "Requires ${trigger.split("|").joinToString(" or ")}")
       } else if (present.size != 1) {
         return fail(
           keyPath(path, present.getOrNull(1) ?: fields.first()),
@@ -555,6 +564,7 @@ object PrototypeSpecValidator {
     val options = rule.getValue("options").jsonArray.map { it.jsonObject }
     val candidates = options.filter { option ->
       when (option.text("kind")) {
+        "array" -> value is JsonArray
         "object" -> value is JsonObject
         "number" -> value is JsonPrimitive && !value.isString && value.doubleOrNull != null
         else -> value is JsonPrimitive && value.isString
@@ -586,6 +596,7 @@ object PrototypeSpecValidator {
           (!rule.flag("nonblank") || !blankTextPattern.matches(text))
       "key" -> text != null && stateKeyPattern.matches(text)
       "boundKey" -> text != null && PrototypeRepeatTemplate.isBoundKey(text)
+      "pointer" -> text != null && PrototypeDataPointer.isValid(text)
       "color" -> text != null && colorPattern.matches(text)
       "number" -> numberValid(value, rule)
       "boolean" -> primitive != null && !primitive.isString && primitive.booleanOrNull != null
@@ -598,6 +609,33 @@ object PrototypeSpecValidator {
         text != null && rule.getValue("values").jsonArray.any { it.jsonPrimitive.content == text }
       "json" -> jsonCost(value) <= rule.number("maxBytes", Double.POSITIVE_INFINITY)
       else -> false
+    }
+  }
+
+  private fun dataError(value: JsonElement): PrototypeSpecError? {
+    if (value !is JsonObject) return fail("data", "Expected object")
+    return walkDataValue(value, "data", 1)
+      ?: if (jsonCost(value) > MAX_PROTOTYPE_DATA_BYTES) fail("data", "Data byte limit exceeded")
+      else null
+  }
+
+  private fun dataChildren(value: JsonElement, path: String): List<Pair<JsonElement, String>> =
+    when (value) {
+      is JsonObject -> value.keys.sorted().map { value.getValue(it) to keyPath(path, it) }
+      is JsonArray -> value.mapIndexed { index, child -> child to "$path[$index]" }
+      else -> emptyList()
+    }
+
+  private fun walkDataValue(value: JsonElement, path: String, depth: Int): PrototypeSpecError? {
+    if (value !is JsonObject && value !is JsonArray) {
+      return if (PrototypeDataValues.isScalar(value)) null else fail(path, "Invalid data value")
+    }
+    if (depth > MAX_PROTOTYPE_DATA_DEPTH) return fail(path, "Data depth limit exceeded")
+    if (value is JsonArray && value.size > MAX_PROTOTYPE_DATA_ARRAY_ITEMS) {
+      return fail(path, "Data array limit exceeded")
+    }
+    return dataChildren(value, path).firstNotNullOfOrNull { (child, childPath) ->
+      walkDataValue(child, childPath, depth + 1)
     }
   }
 

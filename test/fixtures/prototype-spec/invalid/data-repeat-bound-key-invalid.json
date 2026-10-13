@@ -29,5 +29,6 @@
       ]
     }
   },
-  "expectedPath": "root.repeat.items.path"
+  "expectedPath": "root.repeat.items.path",
+  "expectedMessage": "Bound state key \"liked_bad-key\" is invalid (repeat item 0)"
 }

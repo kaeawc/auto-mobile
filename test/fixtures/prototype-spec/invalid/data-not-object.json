@@ -12,5 +12,6 @@
     },
     "data": []
   },
-  "expectedPath": "data"
+  "expectedPath": "data",
+  "expectedMessage": "Expected object"
 }

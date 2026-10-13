@@ -17,5 +17,6 @@
       "n": 1
     }
   },
-  "expectedPath": "root.visibleWhen.equals"
+  "expectedPath": "root.visibleWhen.equals",
+  "expectedMessage": "Exactly one of equals, notEquals, gt, lt is required"
 }

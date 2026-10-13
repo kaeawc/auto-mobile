@@ -19,5 +19,6 @@
       "n": 1
     }
   },
-  "expectedPath": "root.visibleWhen.key"
+  "expectedPath": "root.visibleWhen.key",
+  "expectedMessage": "Exactly one of key, data, all, any, not is required"
 }

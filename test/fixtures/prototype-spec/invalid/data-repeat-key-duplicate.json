@@ -43,5 +43,6 @@
       ]
     }
   },
-  "expectedPath": "root.repeat.key"
+  "expectedPath": "root.repeat.key",
+  "expectedMessage": "Duplicate repeat key \"7\" (items 0 and 1)"
 }

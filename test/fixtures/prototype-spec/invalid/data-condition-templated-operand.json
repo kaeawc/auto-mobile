@@ -39,5 +39,6 @@
       ]
     }
   },
-  "expectedPath": "root.children[0].visibleWhen.equals"
+  "expectedPath": "root.children[0].visibleWhen.equals",
+  "expectedMessage": "Repeat placeholder in a data condition operand is not supported"
 }

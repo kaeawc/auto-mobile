@@ -35,5 +35,6 @@
       ]
     }
   },
-  "expectedPath": "root.repeat.key"
+  "expectedPath": "root.repeat.key",
+  "expectedMessage": "Unknown repeat field \"details\""
 }

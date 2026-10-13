@@ -35,5 +35,6 @@
       ]
     }
   },
-  "expectedPath": "root.repeat.items.extra"
+  "expectedPath": "root.repeat.items.extra",
+  "expectedMessage": "Unknown property"
 }

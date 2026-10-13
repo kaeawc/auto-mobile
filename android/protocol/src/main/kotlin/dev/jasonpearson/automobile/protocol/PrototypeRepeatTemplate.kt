@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.jsonPrimitive
 
 /** One piece of a string with `{as.field}` / `{index}` placeholders resolved into segments. */
 sealed interface PrototypeRepeatSegment {
@@ -118,6 +119,7 @@ object PrototypeRepeatTemplate {
 internal enum class PrototypeBindableKind {
   TEXT,
   OPERAND,
+  DATA_OPERAND,
   EMIT_NAME,
   KEY,
 }
@@ -153,10 +155,13 @@ internal object PrototypeBindableFields {
       field(condition, "key", path, PrototypeBindableKind.KEY)?.let {
         return it
       }
-      field(condition, "equals", path, PrototypeBindableKind.OPERAND)?.let {
+      val operandKind =
+        if (condition.containsKey("data")) PrototypeBindableKind.DATA_OPERAND
+        else PrototypeBindableKind.OPERAND
+      field(condition, "equals", path, operandKind)?.let {
         return it
       }
-      field(condition, "notEquals", path, PrototypeBindableKind.OPERAND)?.let {
+      field(condition, "notEquals", path, operandKind)?.let {
         return it
       }
       condition(condition["not"], "$path.not")?.let {
@@ -265,7 +270,12 @@ internal object PrototypeBindableFields {
  */
 internal object PrototypeRepeatValidator {
   /** A repeat container's path, its alias and its items. */
-  data class Scope(val path: String, val alias: String, val items: List<JsonObject>)
+  data class Scope(
+    val path: String,
+    val alias: String,
+    val items: List<JsonObject>,
+    val pathBound: Boolean = false,
+  )
 
   private data class Child(val node: JsonObject, val path: String)
 
@@ -275,7 +285,9 @@ internal object PrototypeRepeatValidator {
 
   fun validate(spec: JsonElement): PrototypeSpecError? {
     val root = (spec as? JsonObject)?.get("root") as? JsonObject ?: return null
-    return templateErrors(root, "root", null) ?: expandedErrors(root, "root", Budget(), null)
+    val data = (spec as? JsonObject)?.get("data") as? JsonObject
+    return templateErrors(root, "root", null, data)
+      ?: expandedErrors(root, "root", Budget(), null, data)
   }
 
   private fun fail(path: String, message: String) = PrototypeSpecError(path, message)
@@ -316,8 +328,10 @@ internal object PrototypeRepeatValidator {
       val bound = PrototypeRepeatTemplate.bind(key, scope.alias, item, index)
       if (!stateKeyPattern.matches(bound)) {
         return fail(
-          "${scope.path}.repeat.items[$index]",
-          "Bound state key ${JsonPrimitive(bound)} is invalid",
+          if (scope.pathBound) "${scope.path}.repeat.items.path"
+          else "${scope.path}.repeat.items[$index]",
+          "Bound state key ${JsonPrimitive(bound)} is invalid" +
+            if (scope.pathBound) " (repeat item $index)" else "",
         )
       }
     }
@@ -331,6 +345,9 @@ internal object PrototypeRepeatValidator {
     scope: Scope,
   ): PrototypeSpecError? {
     val text = value.string() ?: return null
+    if (kind == PrototypeBindableKind.DATA_OPERAND && hasPlaceholder(text, scope.alias)) {
+      return fail(path, "Repeat placeholder in a data condition operand is not supported")
+    }
     unknownField(text, path, scope)?.let {
       return it
     }
@@ -364,14 +381,57 @@ internal object PrototypeRepeatValidator {
     }
   }
 
-  private fun scopeOf(node: JsonObject, path: String): Scope? {
+  private fun scopeOf(node: JsonObject, path: String, data: JsonObject?): Scope? {
     val repeat = node["repeat"] as? JsonObject ?: return null
     val alias = repeat.text("as") ?: return null
-    val items = (repeat["items"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
-    return Scope(path, alias, items)
+    val source = repeat["items"] as? JsonObject
+    val resolved = source?.text("path")?.let { PrototypeDataPointer.resolve(data, it) }
+      ?: repeat["items"]
+    val items = (resolved as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
+      .map { if (source != null) PrototypeDataValues.project(it) else it }
+    return Scope(path, alias, items, source != null)
   }
 
-  private fun templateErrors(node: JsonObject, path: String, scope: Scope?): PrototypeSpecError? {
+  private fun repeatSourceError(
+    node: JsonObject,
+    path: String,
+    data: JsonObject?,
+  ): PrototypeSpecError? {
+    val source = (node["repeat"] as? JsonObject)?.get("items") as? JsonObject ?: return null
+    val pointer = source.text("path") ?: return null
+    val at = "$path.repeat.items.path"
+    val items = PrototypeDataPointer.resolve(data, pointer) as? JsonArray
+      ?: return fail(at, "Repeat path does not resolve to an array")
+    val maximum = PrototypeSpecValidator.maxRepeatItems
+    if (items.size > maximum) return fail(at, "Repeat path resolves to more than $maximum items")
+    val invalid = items.indexOfFirst { it !is JsonObject }
+    return if (invalid < 0) null else fail(at, "Repeat path item $invalid is not an object")
+  }
+
+  private fun repeatKeyError(node: JsonObject, path: String, scope: Scope?): PrototypeSpecError? {
+    val key = (node["repeat"] as? JsonObject)?.text("key") ?: return null
+    if (scope == null) return null
+    val at = "$path.repeat.key"
+    if (scope.items.any { !it.containsKey(key) }) {
+      return fail(at, "Unknown repeat field ${JsonPrimitive(key)}")
+    }
+    val seen = mutableMapOf<String, Int>()
+    for ((index, item) in scope.items.withIndex()) {
+      val text = PrototypeRepeatTemplate.rendered(item.getValue(key).jsonPrimitive)
+      val first = seen.putIfAbsent(text, index)
+      if (first != null) {
+        return fail(at, "Duplicate repeat key ${JsonPrimitive(text)} (items $first and $index)")
+      }
+    }
+    return null
+  }
+
+  private fun templateErrors(
+    node: JsonObject,
+    path: String,
+    scope: Scope?,
+    data: JsonObject?,
+  ): PrototypeSpecError? {
     if (scope != null) {
       if (node.containsKey("repeat")) return fail("$path.repeat", "Nested repeat is not supported")
       if (node.text("type") == "pager")
@@ -379,13 +439,15 @@ internal object PrototypeRepeatValidator {
     }
     val own = if (scope != null) checkOwnFields(node, path, scope) else checkLiteralKeys(node, path)
     if (own != null) return own
-    val childScope = scopeOf(node, path) ?: scope
+    repeatSourceError(node, path, data)?.let { return it }
+    val ownScope = scopeOf(node, path, data)
+    val childScope = ownScope ?: scope
     for (child in childrenOf(node, path)) {
-      templateErrors(child.node, child.path, childScope)?.let {
+      templateErrors(child.node, child.path, childScope, data)?.let {
         return it
       }
     }
-    return null
+    return repeatKeyError(node, path, ownScope)
   }
 
   private fun imageUses(node: JsonObject): Int =
@@ -401,6 +463,7 @@ internal object PrototypeRepeatValidator {
     path: String,
     budget: Budget,
     repeatPath: String?,
+    data: JsonObject?,
   ): PrototypeSpecError? {
     val at = repeatPath ?: path
     if (++budget.nodes > PrototypeSpecValidator.MAX_PROTOTYPE_NODES)
@@ -408,11 +471,11 @@ internal object PrototypeRepeatValidator {
     budget.images += imageUses(node)
     if (budget.images > PrototypeSpecValidator.MAX_PROTOTYPE_IMAGES)
       return fail(at, "Expanded image limit exceeded")
-    val scope = scopeOf(node, path)
+    val scope = scopeOf(node, path, data)
     val nestedPath = if (scope != null) "$path.repeat" else repeatPath
     repeat(scope?.items?.size ?: 1) {
       for (child in childrenOf(node, path)) {
-        expandedErrors(child.node, child.path, budget, nestedPath)?.let {
+        expandedErrors(child.node, child.path, budget, nestedPath, data)?.let {
           return it
         }
       }
@@ -423,9 +486,10 @@ internal object PrototypeRepeatValidator {
   /** Every repeat container in the spec, outermost first. */
   fun scopes(spec: JsonElement): List<Scope> {
     val root = (spec as? JsonObject)?.get("root") as? JsonObject ?: return emptyList()
+    val data = (spec as? JsonObject)?.get("data") as? JsonObject
     val scopes = mutableListOf<Scope>()
     fun collect(node: JsonObject, path: String) {
-      scopeOf(node, path)?.let(scopes::add)
+      scopeOf(node, path, data)?.let(scopes::add)
       for (child in childrenOf(node, path)) collect(child.node, child.path)
     }
     collect(root, "root")

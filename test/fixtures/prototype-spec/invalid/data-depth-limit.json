@@ -30,5 +30,6 @@
       }
     }
   },
-  "expectedPath": "data.a.a.a.a.a.a.a.a"
+  "expectedPath": "data.a.a.a.a.a.a.a.a",
+  "expectedMessage": "Data depth limit exceeded"
 }

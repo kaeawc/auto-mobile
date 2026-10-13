@@ -19,5 +19,6 @@
       "n": 1
     }
   },
-  "expectedPath": "root.visibleWhen.gt"
+  "expectedPath": "root.visibleWhen.gt",
+  "expectedMessage": "Exactly one of equals, notEquals, gt, lt is required"
 }

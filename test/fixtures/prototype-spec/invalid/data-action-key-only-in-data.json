@@ -20,5 +20,6 @@
       "liked": false
     }
   },
-  "expectedPath": "root.onTap[0].key"
+  "expectedPath": "root.onTap[0].key",
+  "expectedMessage": "Toggle requires a boolean state key"
 }

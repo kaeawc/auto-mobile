@@ -18,5 +18,6 @@
       "n": 1
     }
   },
-  "expectedPath": "root.visibleWhen.data"
+  "expectedPath": "root.visibleWhen.data",
+  "expectedMessage": "Invalid pointer value"
 }

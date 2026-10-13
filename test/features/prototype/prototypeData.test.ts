@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import pointers from "../../fixtures/prototype-spec/data/pointers.json";
 import {
   isPrototypeDataPointer,
@@ -216,4 +218,17 @@ test.each([
     success: false,
     error: { path: `root.visibleWhen.${field}`, message },
   });
+});
+
+const resolveDirectory = join(import.meta.dir, "../../fixtures/prototype-spec/data/resolve");
+const resolveFixtures = readdirSync(resolveDirectory)
+  .filter((name) => name.endsWith(".json"))
+  .sort()
+  .map((name) => ({
+    name,
+    spec: (JSON.parse(readFileSync(join(resolveDirectory, name), "utf8")) as { spec: unknown })
+      .spec,
+  }));
+test.each(resolveFixtures)("resolver fixture $name is a valid authored spec", ({ spec }) => {
+  expect(validatePrototypeSpec(spec).success).toBe(true);
 });

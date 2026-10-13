@@ -21,5 +21,6 @@
     },
     "data": {}
   },
-  "expectedPath": "root.repeat.items"
+  "expectedPath": "root.repeat.items",
+  "expectedMessage": "Invalid union value"
 }

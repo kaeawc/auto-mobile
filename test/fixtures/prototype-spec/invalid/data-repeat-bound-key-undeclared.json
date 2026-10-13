@@ -34,5 +34,6 @@
       ]
     }
   },
-  "expectedPath": "root.children[0].stateKey"
+  "expectedPath": "root.children[0].stateKey",
+  "expectedMessage": "Toggle control requires a boolean state key (repeat item 0)"
 }

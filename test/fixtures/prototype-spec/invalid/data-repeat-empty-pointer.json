@@ -23,5 +23,6 @@
     },
     "data": {}
   },
-  "expectedPath": "root.repeat.items.path"
+  "expectedPath": "root.repeat.items.path",
+  "expectedMessage": "Invalid pointer value"
 }

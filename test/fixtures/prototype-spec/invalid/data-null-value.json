@@ -14,5 +14,6 @@
       "a": null
     }
   },
-  "expectedPath": "data.a"
+  "expectedPath": "data.a",
+  "expectedMessage": "Invalid data value"
 }

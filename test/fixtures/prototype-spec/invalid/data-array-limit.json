@@ -32,5 +32,6 @@
       ]
     }
   },
-  "expectedPath": "data.a"
+  "expectedPath": "data.a",
+  "expectedMessage": "Data array limit exceeded"
 }

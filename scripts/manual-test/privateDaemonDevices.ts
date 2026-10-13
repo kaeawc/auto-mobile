@@ -5,6 +5,16 @@ import type { PrivateDaemonCliDeps } from "./private-daemon";
 import type { PrivateDaemonBatchOptions, PrivateDaemonSpec } from "./privateDaemonEnv";
 import { androidDevices, iosDevices, definedEnv } from "./privateDaemonStatus";
 import { errorMessage } from "../../src/utils/describeUnknownError";
+import {
+  classifyDevice,
+  matchesProtection,
+  nameEvidenceMissing,
+  parseProcessEvidence,
+  type DeviceIdentity,
+  type DeviceProvenance,
+  type ProcessEvidence,
+} from "./privateDaemonDeviceEvidence";
+export { classifyDevice } from "./privateDaemonDeviceEvidence";
 
 const platformSchema = z.enum(["android", "ios"]);
 const hostInventorySchema = z.union([z.array(z.string()), z.object({ unavailable: z.string() })]);
@@ -14,27 +24,6 @@ const baselineSchema = z.object({
   ios: hostInventorySchema,
 });
 export type HostBaseline = z.infer<typeof baselineSchema>;
-interface DeviceIdentity {
-  deviceId: string;
-  name: string;
-  platform: "android" | "ios";
-}
-export function classifyDevice(
-  device: DeviceIdentity,
-  baseline: HostBaseline | undefined,
-  protectedDevices: string[],
-): { provenance: "preexisting" | "batch-booted" | "unknown"; protected: boolean } {
-  const inventory = baseline?.[device.platform];
-  const provenance = Array.isArray(inventory)
-    ? inventory.includes(device.deviceId)
-      ? "preexisting"
-      : "batch-booted"
-    : "unknown";
-  return {
-    provenance,
-    protected: protectedDevices.includes(device.deviceId) || protectedDevices.includes(device.name),
-  };
-}
 export function parseLsofPid(stdout: string): { pid: number | null; pidReason?: string } {
   const lines = stdout.split(/\r?\n/).filter((line) => line.startsWith("p"));
   const pids = lines.map((line) => (/^p[1-9]\d*$/.test(line) ? Number(line.slice(1)) : NaN));
@@ -75,6 +64,33 @@ async function devicePid(
     return { pid: null, pidReason: errorMessage(error) };
   }
 }
+async function processEvidence(
+  device: BatchDevice,
+  batchDir: string,
+  deps: PrivateDaemonCliDeps,
+): Promise<ProcessEvidence | undefined> {
+  if (device.pid === null) {
+    return undefined;
+  }
+  try {
+    const result = await deps.runCapture(
+      "ps",
+      ["eww", "-o", "command=", "-p", String(device.pid)],
+      definedEnv(deps.env),
+      5000,
+    );
+    if (result.exitCode !== 0 || !result.stdout.trim()) {
+      device.pidReason =
+        result.stderr || `ps returned no environment evidence (exit ${result.exitCode})`;
+      return undefined;
+    }
+    return parseProcessEvidence(result.stdout, batchDir);
+  } catch (error) {
+    // Optional environment evidence cannot block inventory or authorize shutdown by inference.
+    device.pidReason = errorMessage(error);
+    return undefined;
+  }
+}
 function baselinePath(batchDir: string): string {
   return join(batchDir, "shared/host-devices-at-start.json");
 }
@@ -104,6 +120,16 @@ export async function recordHostBaseline(
   batchDir: string,
   deps: PrivateDaemonCliDeps,
 ): Promise<void> {
+  try {
+    await writeHostBaseline(batchDir, deps);
+  } catch (error) {
+    // Best-effort baseline recording cannot change the daemon launch result; warn about the evidence gap.
+    deps.log(
+      `BASELINE WARNING: Host baseline could not be recorded (${errorMessage(error)}); provenance will be unknown without process evidence.`,
+    );
+  }
+}
+async function writeHostBaseline(batchDir: string, deps: PrivateDaemonCliDeps): Promise<void> {
   const path = baselinePath(batchDir);
   if (deps.exists(path)) {
     return;
@@ -119,7 +145,13 @@ export async function recordHostBaseline(
 }
 function readBaseline(batchDir: string, deps: PrivateDaemonCliDeps): HostBaseline | undefined {
   const path = baselinePath(batchDir);
-  return deps.exists(path) ? baselineSchema.parse(JSON.parse(deps.readFile(path))) : undefined;
+  try {
+    return deps.exists(path) ? baselineSchema.parse(JSON.parse(deps.readFile(path))) : undefined;
+  } catch (error) {
+    // Unreadable baseline evidence must not prevent healthy inventories; retain its unavailable reason.
+    const unavailable = { unavailable: errorMessage(error) };
+    return { android: unavailable, ios: unavailable };
+  }
 }
 // The product toolEnvelopePayload helper imports its logger, so this module reads the same
 // structuredContent/first JSON text precedence locally with zod.
@@ -240,7 +272,10 @@ const deviceSchema = z.object({
   seenByDaemons: z.array(z.string()),
   pid: z.number().int().positive().nullable(),
   pidReason: z.string().optional(),
-  provenance: z.enum(["batch-booted", "preexisting", "unknown"]),
+  provenance: z.enum(["batch-booted", "foreign", "preexisting", "batch-inferred", "unknown"]),
+  bootedBy: z.string().optional(),
+  processAvdName: z.string().optional(),
+  identity: z.object({ stableId: z.string() }).optional(),
   protected: z.boolean(),
   poolStatus: z.enum(["idle", "assigned", "error"]).nullable().optional(),
   heldBy: z.enum(["managed_slot", "other_daemon"]).optional(),
@@ -270,12 +305,24 @@ function baselineSummary(baseline: HostBaseline | undefined): DeviceView["baseli
     ios: status("ios"),
   };
 }
+function identitiesConflict(
+  previous: BatchDevice,
+  row: z.infer<typeof descriptionSchema>,
+): boolean {
+  return (
+    previous.name !== row.name ||
+    previous.platform !== row.platform ||
+    previous.isVirtual !== row.isVirtual ||
+    previous.identity?.stableId !== row.identity.stableId
+  );
+}
 function mergeRows(
   rows: z.infer<typeof listSchema>["devices"],
   name: string,
   devices: Map<string, BatchDevice>,
   baseline: HostBaseline | undefined,
   protectedDevices: string[],
+  conflicts: Set<string>,
 ): void {
   for (const row of rows) {
     const deviceId = row.runtime.deviceId;
@@ -288,18 +335,24 @@ function mergeRows(
     const previous = devices.get(deviceId);
     if (previous) {
       previous.seenByDaemons.push(name);
-      previous.protected ||= protectedDevices.includes(row.name);
+      previous.protected ||= matchesProtection({ ...row, deviceId }, protectedDevices);
+      if (row.runtime.heldBy === "other_daemon") {
+        previous.heldBy = "other_daemon";
+      }
       // Conflicting identities cannot authorize shutdown from either daemon's label.
-      if (
-        previous.name !== row.name ||
-        previous.platform !== row.platform ||
-        previous.isVirtual !== row.isVirtual
-      ) {
+      if (identitiesConflict(previous, row)) {
         previous.provenance = "unknown";
+        conflicts.add(deviceId);
       }
       continue;
     }
-    const device = { deviceId, name: row.name, platform: row.platform, isVirtual: row.isVirtual };
+    const device = {
+      deviceId,
+      name: row.name,
+      platform: row.platform,
+      isVirtual: row.isVirtual,
+      identity: row.identity,
+    };
     devices.set(deviceId, {
       ...device,
       seenByDaemons: [name],
@@ -326,29 +379,29 @@ async function buildDeviceView(
     devices: [],
   };
   const devices = new Map<string, BatchDevice>();
+  const conflicts = new Set<string>();
   for (const spec of specs) {
     try {
-      const reply = toolReply(
-        await deps.requestSocket(spec.socketPath, {
-          method: "tools/call",
-          params: { name: "listDevices", arguments: {} },
-          timeoutMs,
-        }),
-      );
-      view.daemons.push({
-        name: spec.name,
-        alive: true,
-        ...(reply.refusal ? { error: reply.refusal.message } : {}),
+      const response = await deps.requestSocket(spec.socketPath, {
+        method: "tools/call",
+        params: { name: "listDevices", arguments: {} },
+        timeoutMs,
       });
-      if (!reply.refusal) {
-        mergeRows(
-          listSchema.parse(reply.payload).devices,
-          spec.name,
-          devices,
-          baseline,
-          protectedDevices,
-        );
+      const daemon: DeviceView["daemons"][number] = { name: spec.name, alive: true };
+      view.daemons.push(daemon);
+      const reply = toolReply(response);
+      if (reply.refusal) {
+        daemon.error = reply.refusal.message;
+        continue;
       }
+      mergeRows(
+        listSchema.parse(reply.payload).devices,
+        spec.name,
+        devices,
+        baseline,
+        protectedDevices,
+        conflicts,
+      );
     } catch (error) {
       // A dead socket or invalid inventory is diagnostic evidence, not a reason to lose other views.
       const existing = view.daemons.find((daemon) => daemon.name === spec.name);
@@ -361,6 +414,16 @@ async function buildDeviceView(
   }
   for (const device of devices.values()) {
     Object.assign(device, await devicePid(device, deps));
+    const evidence = await processEvidence(device, options.batchDir, deps);
+    if (evidence?.processAvdName) {
+      device.processAvdName = evidence.processAvdName;
+    }
+    const classified = classifyDevice(device, baseline, protectedDevices, evidence);
+    device.provenance = conflicts.has(device.deviceId) ? "unknown" : classified.provenance;
+    device.protected ||= classified.protected;
+    if (classified.bootedBy) {
+      device.bootedBy = classified.bootedBy;
+    }
   }
   view.devices = [...devices.values()];
   return view;
@@ -381,11 +444,17 @@ type DeviceOutcome =
   | "timeout"
   | "protected"
   | "not-batch-booted"
+  | "inferred-not-stopped"
+  | "held-by-other-daemon"
   | "not-found"
   | "dry-run"
   | "daemon-dead";
-interface DeviceResult extends Omit<DeviceIdentity, "platform"> {
+interface DeviceResult {
+  deviceId: string;
+  name: string;
   platform: DeviceIdentity["platform"] | null;
+  provenance: DeviceProvenance;
+  bootedBy?: string;
   pid: number | null;
   outcome: DeviceOutcome;
   daemon?: string;
@@ -395,22 +464,29 @@ interface DeviceResult extends Omit<DeviceIdentity, "platform"> {
 function refusal(
   device: BatchDevice,
   protectedDevices: string[],
+  explicit = false,
 ): Pick<DeviceResult, "outcome" | "message"> | undefined {
-  if (
-    device.protected ||
-    protectedDevices.includes(device.deviceId) ||
-    protectedDevices.includes(device.name)
-  ) {
+  if (device.protected || matchesProtection(device, protectedDevices)) {
     return { outcome: "protected" };
   }
-  if (!device.name && protectedDevices.length) {
+  if (nameEvidenceMissing(device) && protectedDevices.length) {
     return {
       outcome: "protected",
       message: "Device name could not be read; cannot check it against the protected list.",
     };
   }
-  if (!device.isVirtual || device.provenance !== "batch-booted") {
+  if (device.heldBy === "other_daemon") {
+    return { outcome: "held-by-other-daemon", message: "Device is held by another daemon." };
+  }
+  if (!device.isVirtual || !["batch-booted", "batch-inferred"].includes(device.provenance)) {
     return { outcome: "not-batch-booted" };
+  }
+  if (device.provenance === "batch-inferred" && !explicit) {
+    return {
+      outcome: "inferred-not-stopped",
+      message:
+        "Check that this device was started by the batch, then name it explicitly with --device.",
+    };
   }
   return undefined;
 }
@@ -423,6 +499,8 @@ function resultRow(
     name: device.name,
     platform: device.platform,
     pid: device.pid,
+    provenance: device.provenance,
+    ...(device.bootedBy ? { bootedBy: device.bootedBy } : {}),
     ...result,
   };
 }
@@ -433,7 +511,10 @@ function selectedDevices(
   if (!selectors.length) {
     return {
       devices: view.devices.filter(
-        (device) => device.isVirtual && device.provenance === "batch-booted" && !device.protected,
+        (device) =>
+          device.isVirtual &&
+          ["batch-booted", "batch-inferred"].includes(device.provenance) &&
+          !device.protected,
       ),
       missing: [],
     };
@@ -453,6 +534,7 @@ function selectedDevices(
         name: selector,
         platform: null,
         pid: null,
+        provenance: "unknown",
         outcome: "not-found",
         message: "No selected daemon lists this device.",
       });
@@ -488,7 +570,13 @@ async function killDevice(
         timeoutMs,
       }),
     );
-    return reply.refusal ? { ...row, outcome: "refused", ...reply.refusal } : row;
+    return reply.refusal
+      ? {
+          ...row,
+          outcome: reply.refusal.code === "device_already_stopped" ? "stopped" : "refused",
+          ...reply.refusal,
+        }
+      : row;
   } catch (error) {
     // Never retry a possibly completed device mutation; report the transport failure to the operator.
     return { ...row, outcome: rejectionOutcome(error), message: errorMessage(error) };
@@ -503,11 +591,13 @@ async function shutdownDevices(
   const selected = selectedDevices(view, command.deviceSelectors ?? []);
   const results = selected.missing;
   for (const device of selected.devices) {
-    const denied = refusal(device, view.protectedDevices);
+    const denied = refusal(device, view.protectedDevices, Boolean(command.deviceSelectors?.length));
     const spec = specs.find(
       (spec) =>
         device.seenByDaemons.includes(spec.name) &&
-        view.daemons.some((daemon) => daemon.name === spec.name && daemon.alive),
+        view.daemons.some(
+          (daemon) => daemon.name === spec.name && daemon.alive && daemon.error === undefined,
+        ),
     );
     if (denied) {
       results.push(resultRow(device, denied));
@@ -519,12 +609,19 @@ async function shutdownDevices(
       results.push(resultRow(device, { outcome: "daemon-dead" }));
     }
   }
-  deps.log(JSON.stringify({ results }));
-  return results.every((result) => result.outcome === "stopped" || result.outcome === "dry-run")
+  const daemonErrors = inventoryErrors(view);
+  deps.log(JSON.stringify({ results, ...(daemonErrors.length ? { daemonErrors } : {}) }));
+  return !daemonErrors.length &&
+    results.every((result) => result.outcome === "stopped" || result.outcome === "dry-run")
     ? 0
     : 1;
 }
 const snapshotSchema = z.object({ batchDir: z.string(), devices: z.array(deviceSchema) });
+function inventoryErrors(view: DeviceView): Array<{ name: string; error: string }> {
+  return view.daemons.flatMap((daemon) =>
+    daemon.error === undefined ? [] : [{ name: daemon.name, error: daemon.error }],
+  );
+}
 async function deadDaemonFallback(
   view: DeviceView,
   specs: PrivateDaemonSpec[],
@@ -536,7 +633,10 @@ async function deadDaemonFallback(
     deps.log(
       JSON.stringify({
         results: [],
-        message: "No selected daemon answered and no devices-last.json snapshot is available.",
+        daemonErrors: inventoryErrors(view),
+        daemons: view.daemons,
+        message:
+          "No selected daemon produced an inventory and no devices-last.json snapshot is available.",
       }),
     );
     return 1;
@@ -556,18 +656,22 @@ async function deadDaemonFallback(
   );
   const results = selected.missing;
   for (const device of selected.devices) {
-    if (refusal(device, view.protectedDevices)) {
+    const denied = refusal(device, view.protectedDevices, true);
+    if (denied && denied.outcome !== "held-by-other-daemon") {
       continue;
     }
     Object.assign(device, await devicePid(device, deps));
     results.push(
-      resultRow(device, {
-        outcome: "daemon-dead",
-        message: `No daemon can stop this device. After checking its name against the protected list, stop it by PID${device.platform === "ios" ? ` or xcrun simctl shutdown ${device.deviceId}` : ""}.`,
-      }),
+      resultRow(
+        device,
+        denied ?? {
+          outcome: "daemon-dead",
+          message: `No daemon can stop this device. After checking its name against the protected list, stop it by PID${device.platform === "ios" ? ` or xcrun simctl shutdown ${device.deviceId}` : ""}.`,
+        },
+      ),
     );
   }
-  deps.log(JSON.stringify({ results }));
+  deps.log(JSON.stringify({ results, daemonErrors: inventoryErrors(view), daemons: view.daemons }));
   return 1;
 }
 export async function privateDaemonDevices(
@@ -577,7 +681,7 @@ export async function privateDaemonDevices(
   deps: PrivateDaemonCliDeps,
 ): Promise<number> {
   const view = await buildDeviceView(options, specs, command.timeoutMs, deps);
-  if (!view.daemons.some((daemon) => daemon.alive)) {
+  if (!view.daemons.some((daemon) => daemon.alive && daemon.error === undefined)) {
     return deadDaemonFallback(view, specs, command, deps);
   }
   deps.mkdir(join(options.batchDir, "shared"), 0o700);

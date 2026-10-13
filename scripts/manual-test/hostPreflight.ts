@@ -66,13 +66,8 @@ export function buildHostPreflightReport(
   stats: HostStats,
   sections: HostSections,
 ): HostPreflightReport {
-  const warnings: string[] = [];
   const { power, sleep, lid } = sections;
-  if (!("unavailable" in power) && power.source === "battery") {
-    warnings.push(
-      `Host is on battery (${power.chargePercent === undefined ? "charge unknown" : `${power.chargePercent}% charge`}); attach AC power before the batch.`,
-    );
-  }
+  const warnings = powerWarnings(power, stats.platform);
   if (!("unavailable" in sleep) && !sleep.preventUserIdleSystemSleep) {
     warnings.push(
       "Idle system sleep is not prevented; run the printed caffeinate command before the batch.",
@@ -99,6 +94,19 @@ export function buildHostPreflightReport(
     warnings,
     caffeinate: `nohup caffeinate -dims > /dev/null 2>&1 & echo $! > ${shellQuote(batchDir)}/shared/caffeinate.pid`,
   };
+}
+function powerWarnings(power: HostPower, platform: string): string[] {
+  if ("unavailable" in power) {
+    return [];
+  }
+  if (platform === "darwin" && power.source === "unknown") {
+    return ["Host power source could not be determined; verify AC power before the batch."];
+  }
+  return power.source === "battery"
+    ? [
+        `Host is on battery (${power.chargePercent === undefined ? "charge unknown" : `${power.chargePercent}% charge`}); attach AC power before the batch.`,
+      ]
+    : [];
 }
 function lidWarnings(lid: HostLid): string[] {
   const warnings: string[] = [];

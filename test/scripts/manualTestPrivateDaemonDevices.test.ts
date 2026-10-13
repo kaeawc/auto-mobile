@@ -1,15 +1,34 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
 import { join } from "node:path";
-import { fixture, options, parsed } from "./manualTestPrivateDaemonFixture";
+import { fixture, options as baseOptions, parsed } from "./manualTestPrivateDaemonFixture";
 import { runPrivateDaemonCommand } from "../../scripts/manual-test/private-daemon";
 import { derivePrivateDaemonBatch } from "../../scripts/manual-test/privateDaemonEnv";
+import type { HostBaseline } from "../../scripts/manual-test/privateDaemonDevices";
+import type {
+  DeviceProvenance,
+  ProcessEvidence,
+} from "../../scripts/manual-test/privateDaemonDeviceEvidence";
 // Load the captured fixture as a text asset; command tests never use host filesystem APIs.
 const capture: { default: unknown } = await import(
   new URL("../fixtures/manual-test-host/lsof-console-port-listener.txt", import.meta.url).href,
   { with: { type: "text" } }
 );
 const lsofCapture = z.string().parse(capture.default);
+const batchCapture: { default: unknown } = await import(
+  new URL("../fixtures/manual-test-host/ps-eww-batch-env.txt", import.meta.url).href,
+  { with: { type: "text" } }
+);
+const emulatorCapture: { default: unknown } = await import(
+  new URL(
+    "../fixtures/android-boot-admission/ps-snapshot-one-running-emulator.txt",
+    import.meta.url,
+  ).href,
+  { with: { type: "text" } }
+);
+const psCapture = z.string().parse(batchCapture.default);
+const avdCapture = z.string().parse(emulatorCapture.default);
+const options = { ...baseOptions, batchDir: "/private/mt batch" };
 const baselinePath = join(options.batchDir, "shared/host-devices-at-start.json");
 const snapshotPath = join(options.batchDir, "shared/devices-last.json");
 function row(
@@ -27,7 +46,7 @@ function row(
       deviceId: id,
       lifecycle: { state: "booted" },
       poolStatus: "idle",
-      heldBy: undefined,
+      heldBy: undefined as "managed_slot" | "other_daemon" | undefined,
     },
   };
 }
@@ -45,7 +64,10 @@ async function deviceFixture(protectedDevices: string[] = []) {
     JSON.stringify({ recordedAt: "2026-10-13T00:00:00.000Z", android: ["preexisting"], ios: [] }),
   );
   const frames: Array<{ path: string; method: string; params?: unknown; timeoutMs: number }> = [];
-  f.deps.runCapture = async () => ({ exitCode: 0, stdout: lsofCapture, stderr: "" });
+  f.deps.runCapture = async (cmd, args, env, timeoutMs) => {
+    f.captures.push({ command: cmd, args, env, timeoutMs });
+    return { exitCode: 0, stdout: cmd === "ps" ? psCapture : lsofCapture, stderr: "" };
+  };
   f.deps.requestSocket = async (path, request) => {
     frames.push({ path, ...request });
     return {
@@ -64,6 +86,361 @@ function command(op: string, ...flags: string[]) {
 function document(f: { logs: string[] }) {
   return JSON.parse(f.logs.at(-1)!);
 }
+function inventoryRows(
+  f: Awaited<ReturnType<typeof deviceFixture>>,
+  devices: ReturnType<typeof row>[],
+) {
+  const request = f.deps.requestSocket;
+  f.deps.requestSocket = async (path, frame) => {
+    if ((frame.params as { name: string }).name === "listDevices") {
+      f.frames.push({ path, ...frame });
+      return { success: true, result: { structuredContent: { devices } } };
+    }
+    return request(path, frame);
+  };
+}
+function killFrames(f: Awaited<ReturnType<typeof deviceFixture>>) {
+  return f.frames.filter((frame) => (frame.params as { name: string }).name === "killDevice");
+}
+
+test("F1 process evidence reads real captures without splitting a batch path containing spaces", async () => {
+  const { parseProcessEvidence } =
+    await import("../../scripts/manual-test/privateDaemonDeviceEvidence");
+  expect(parseProcessEvidence(psCapture, "/private/mt batch")).toEqual({
+    batchMarker: true,
+    daemonIndex: 2,
+  });
+  for (const batchDir of ["/private/mt", "/private/mt batch2", "/absent"]) {
+    expect(parseProcessEvidence(psCapture, batchDir)).toMatchObject({
+      batchMarker: false,
+      daemonIndex: 2,
+    });
+  }
+  expect(parseProcessEvidence(avdCapture, options.batchDir)).toEqual({
+    batchMarker: false,
+    processAvdName: "amslot-039fd12f-0-g1-5e7e5f80",
+  });
+  expect(parseProcessEvidence(psCapture.split(" MT_DAEMON=")[0], options.batchDir)).toEqual({
+    batchMarker: true,
+  });
+});
+test("F1 positive and negative evidence override baseline; missing evidence uses all baseline states", async () => {
+  const { classifyDevice } = await import("../../scripts/manual-test/privateDaemonDevices");
+  const device = { deviceId: "id", name: "avd", platform: "android" as const };
+  const cases: Array<[HostBaseline | undefined, ProcessEvidence | undefined, DeviceProvenance]> = [
+    [{ android: [], ios: [] }, { batchMarker: true, daemonIndex: 2 }, "batch-booted"],
+    [{ android: ["id"], ios: [] }, { batchMarker: true }, "batch-booted"],
+    [{ android: [], ios: [] }, { batchMarker: false }, "foreign"],
+    [{ android: ["id"], ios: [] }, { batchMarker: false }, "foreign"],
+    [{ android: ["id"], ios: [] }, undefined, "preexisting"],
+    [{ android: [], ios: [] }, undefined, "batch-inferred"],
+    [undefined, undefined, "unknown"],
+    [{ android: { unavailable: "unreadable" }, ios: [] }, undefined, "unknown"],
+  ];
+  for (const [baseline, evidence, provenance] of cases) {
+    expect(classifyDevice(device, baseline, [], evidence).provenance).toBe(provenance);
+  }
+});
+test("F1 default shutdown stops only positive emulator and reports inferred simulator", async () => {
+  const f = await deviceFixture();
+  inventoryRows(f, [row(), row("sim", "simulator", "ios")]);
+  expect(await runPrivateDaemonCommand(command("shutdown-devices"), f.deps)).toBe(1);
+  expect(killFrames(f)).toHaveLength(1);
+  expect(document(f).results).toMatchObject([
+    { outcome: "stopped", provenance: "batch-booted", bootedBy: "daemon2" },
+    {
+      outcome: "inferred-not-stopped",
+      provenance: "batch-inferred",
+      message: expect.stringContaining("--device"),
+    },
+  ]);
+});
+test("F1 explicitly checked inferred simulator receives exactly one frame", async () => {
+  const f = await deviceFixture();
+  inventoryRows(f, [row("sim", "simulator", "ios")]);
+  expect(
+    await runPrivateDaemonCommand(command("shutdown-devices", "--device", "sim"), f.deps),
+  ).toBe(0);
+  expect(killFrames(f)).toHaveLength(1);
+  expect(killFrames(f)[0].params).toEqual({
+    name: "killDevice",
+    arguments: { device: { deviceId: "sim", name: "simulator", platform: "ios" } },
+  });
+  expect(document(f).results[0]).toMatchObject({
+    outcome: "stopped",
+    provenance: "batch-inferred",
+  });
+});
+test.each(["foreign", "preexisting"])("F1 explicit %s never receives a frame", async (kind) => {
+  const f = await deviceFixture();
+  if (kind === "foreign") {
+    f.deps.runCapture = async (cmd) => ({
+      exitCode: 0,
+      stdout: cmd === "ps" ? avdCapture : lsofCapture,
+      stderr: "",
+    });
+  } else {
+    f.deps.runCapture = async () => {
+      throw new Error("unreadable");
+    };
+    f.files.set(baselinePath, JSON.stringify({ android: ["emulator-5556"], ios: [] }));
+  }
+  expect(
+    await runPrivateDaemonCommand(command("shutdown-devices", "--device", "batch-avd"), f.deps),
+  ).toBe(1);
+  expect(killFrames(f)).toEqual([]);
+  expect(document(f).results[0]).toMatchObject({ outcome: "not-batch-booted", provenance: kind });
+});
+test.each(["reject", "nonzero", "empty"])("F1 ps %s leaves an evidence gap", async (kind) => {
+  const f = await deviceFixture();
+  const capture = f.deps.runCapture;
+  f.deps.runCapture = async (...args) => {
+    if (args[0] !== "ps") {
+      return capture(...args);
+    }
+    if (kind === "reject") {
+      throw new Error("ps unreadable");
+    }
+    return { exitCode: kind === "nonzero" ? 1 : 0, stdout: "", stderr: "ps unreadable" };
+  };
+  expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);
+  expect(document(f).devices[0]).toMatchObject({
+    provenance: "batch-inferred",
+    pid: 75134,
+    pidReason: expect.any(String),
+  });
+});
+test("F1 conflicting daemon identities remain unknown despite positive process evidence", async () => {
+  const f = await deviceFixture();
+  f.deps.requestSocket = async (path) => ({
+    success: true,
+    result: {
+      structuredContent: {
+        devices: [
+          row(
+            "emulator-5556",
+            path === derivePrivateDaemonBatch(options)[0].socketPath ? "batch-avd" : "different",
+          ),
+        ],
+      },
+    },
+  });
+  expect(
+    await runPrivateDaemonCommand(command("shutdown-devices", "--device", "emulator-5556"), f.deps),
+  ).toBe(1);
+  expect(document(f).results[0]).toMatchObject({
+    outcome: "not-batch-booted",
+    provenance: "unknown",
+  });
+});
+test.each([false, true])(
+  "F2 held-by-other-daemon is refused before frame (explicit=%s)",
+  async (explicit) => {
+    const f = await deviceFixture();
+    inventoryRows(f, [{ ...row(), runtime: { ...row().runtime, heldBy: "other_daemon" } }]);
+    expect(
+      await runPrivateDaemonCommand(
+        command("shutdown-devices", ...(explicit ? ["--device", "batch-avd"] : [])),
+        f.deps,
+      ),
+    ).toBe(1);
+    expect(document(f).results[0]).toMatchObject({
+      outcome: "held-by-other-daemon",
+      provenance: "batch-booted",
+    });
+    expect(killFrames(f)).toEqual([]);
+  },
+);
+test.each(["stableId", "processAvdName", "placeholder"])(
+  "F3 protection by %s sends no frame",
+  async (kind) => {
+    const avd = "amslot-039fd12f-0-g1-5e7e5f80";
+    const f = await deviceFixture([kind === "processAvdName" ? avd : "protected-avd"]);
+    const device = row(
+      "emulator-5556",
+      kind === "placeholder" ? "Unknown (emulator-5556)" : "batch-avd",
+    );
+    if (kind === "stableId") {
+      device.identity.stableId = "protected-avd";
+    }
+    if (kind === "processAvdName") {
+      f.deps.runCapture = async (cmd) => ({
+        exitCode: 0,
+        stdout: cmd === "ps" ? avdCapture : lsofCapture,
+        stderr: "",
+      });
+    }
+    inventoryRows(f, [device]);
+    expect(
+      await runPrivateDaemonCommand(
+        command("shutdown-devices", "--device", "emulator-5556"),
+        f.deps,
+      ),
+    ).toBe(1);
+    expect(document(f).results[0].outcome).toBe("protected");
+    if (kind === "placeholder") {
+      expect(document(f).results[0].message).toContain("could not be read");
+    }
+    expect(killFrames(f)).toEqual([]);
+    if (kind === "processAvdName") {
+      expect(JSON.parse(f.files.get(snapshotPath)!).devices[0]).toMatchObject({
+        processAvdName: avd,
+      });
+    }
+  },
+);
+test.each(["refusal", "malformed", "payload", "transport"])(
+  "F4 partial %s inventory keeps healthy teardown but exits 1",
+  async (kind) => {
+    const f = await deviceFixture();
+    const request = f.deps.requestSocket;
+    f.deps.requestSocket = async (path, frame) => {
+      if (path === derivePrivateDaemonBatch(options)[0].socketPath) {
+        if (kind === "transport") {
+          throw new Error("transport error");
+        }
+        if (kind === "payload") {
+          return { success: true, result: { structuredContent: { invalid: true } } };
+        }
+        return kind === "refusal"
+          ? { success: false, error: "inventory refused" }
+          : { invalid: true };
+      }
+      return request(path, frame);
+    };
+    expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);
+    expect(document(f).daemons[0]).toMatchObject({
+      name: "P1",
+      alive: kind !== "transport",
+      error: expect.any(String),
+    });
+    expect(await runPrivateDaemonCommand(command("shutdown-devices"), f.deps)).toBe(1);
+    expect(killFrames(f)).toHaveLength(1);
+    expect(document(f)).toMatchObject({
+      daemonErrors: [{ name: "P1", error: expect.any(String) }],
+      results: [{ outcome: "stopped" }],
+    });
+  },
+);
+test("F1 positive evidence works without a baseline even when multiple daemons list the same device", async () => {
+  const f = await deviceFixture();
+  f.files.delete(baselinePath);
+  expect(await runPrivateDaemonCommand(command("shutdown-devices"), f.deps)).toBe(0);
+  expect(document(f).results[0]).toMatchObject({
+    outcome: "stopped",
+    provenance: "batch-booted",
+    bootedBy: "daemon2",
+  });
+});
+test("F1 fallback includes positive and inferred snapshots without sending anything", async () => {
+  const f = await deviceFixture();
+  inventoryRows(f, [row(), row("sim", "simulator", "ios")]);
+  expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);
+  f.frames.length = 0;
+  f.deps.requestSocket = async () => {
+    throw new Error("daemon dead");
+  };
+  expect(await runPrivateDaemonCommand(command("shutdown-devices"), f.deps)).toBe(1);
+  expect(document(f).results).toMatchObject([
+    { outcome: "daemon-dead", provenance: "batch-booted", bootedBy: "daemon2" },
+    { outcome: "daemon-dead", provenance: "batch-inferred" },
+  ]);
+  expect(killFrames(f)).toEqual([]);
+});
+test("F2 fallback still reports unprotected snapshot devices held by another daemon", async () => {
+  const f = await deviceFixture();
+  inventoryRows(f, [{ ...row(), runtime: { ...row().runtime, heldBy: "other_daemon" } }]);
+  expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);
+  f.deps.requestSocket = async () => {
+    throw new Error("daemon dead");
+  };
+  expect(await runPrivateDaemonCommand(command("shutdown-devices"), f.deps)).toBe(1);
+  expect(document(f).results[0]).toMatchObject({
+    provenance: "batch-booted",
+    outcome: "held-by-other-daemon",
+  });
+  expect(killFrames(f)).toEqual([]);
+});
+test("F2 another daemon's hold is retained when only the second view exposes it", async () => {
+  const f = await deviceFixture();
+  const request = f.deps.requestSocket;
+  f.deps.requestSocket = async (path, frame) => {
+    if (path === derivePrivateDaemonBatch(options)[1].socketPath) {
+      return {
+        success: true,
+        result: {
+          structuredContent: {
+            devices: [{ ...row(), runtime: { ...row().runtime, heldBy: "other_daemon" } }],
+          },
+        },
+      };
+    }
+    return request(path, frame);
+  };
+  expect(await runPrivateDaemonCommand(command("shutdown-devices"), f.deps)).toBe(1);
+  expect(document(f).results[0].outcome).toBe("held-by-other-daemon");
+  expect(killFrames(f)).toEqual([]);
+});
+test("F2 managed-slot inventory reaches the product refusal", async () => {
+  const f = await deviceFixture();
+  inventoryRows(f, [{ ...row(), runtime: { ...row().runtime, heldBy: "managed_slot" } }]);
+  const request = f.deps.requestSocket;
+  f.deps.requestSocket = async (path, frame) => {
+    if ((frame.params as { name: string }).name !== "killDevice") {
+      return request(path, frame);
+    }
+    f.frames.push({ path, ...frame });
+    return { success: false, code: "managed_slot", error: "managed slot refused" };
+  };
+  expect(await runPrivateDaemonCommand(command("shutdown-devices"), f.deps)).toBe(1);
+  expect(killFrames(f)).toHaveLength(1);
+  expect(document(f).results[0]).toMatchObject({ outcome: "refused", code: "managed_slot" });
+});
+test.each([
+  ["devices", "inventory refused"],
+  ["shutdown-devices", "inventory refused"],
+  ["devices", ""],
+  ["shutdown-devices", ""],
+])("F4 all refusing inventories make %s exit 1 (message=%s)", async (op, error) => {
+  const f = await deviceFixture();
+  f.deps.requestSocket = async () => ({ success: false, error });
+  expect(await runPrivateDaemonCommand(command(op), f.deps)).toBe(1);
+  expect(document(f).daemonErrors).toEqual([
+    { name: "P1", error },
+    { name: "P2", error },
+  ]);
+});
+test("F6 product already-stopped nested text error is stopped and keeps message", async () => {
+  const f = await deviceFixture();
+  const request = f.deps.requestSocket;
+  f.deps.requestSocket = async (path, frame) => {
+    if ((frame.params as { name: string }).name === "listDevices") {
+      return request(path, frame);
+    }
+    return {
+      success: true,
+      result: {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              success: false,
+              message: "Emulator is not running",
+              error: { code: "device_already_stopped", message: "Emulator is not running" },
+            }),
+          },
+        ],
+      },
+    };
+  };
+  expect(await runPrivateDaemonCommand(command("shutdown-devices"), f.deps)).toBe(0);
+  expect(document(f).results[0]).toMatchObject({
+    outcome: "stopped",
+    code: "device_already_stopped",
+    message: "Emulator is not running",
+  });
+});
 
 test.each(["", "keep-avd", "SIM-UDID"])("protection manifest roundtrip %s", async (protect) => {
   const f = fixture();
@@ -158,7 +535,7 @@ test("pure classifier covers both platforms and missing/unavailable baseline", a
       protected: true,
     });
     expect(classifyDevice(device, { android: [], ios: [] }, ["name"])).toEqual({
-      provenance: "batch-booted",
+      provenance: "batch-inferred",
       protected: true,
     });
     expect(classifyDevice(device, undefined, [])).toEqual({
@@ -193,9 +570,18 @@ test("devices merges daemon views, resolves PID and writes snapshot", async () =
     pid: 75134,
     seenByDaemons: ["P1", "P2"],
     provenance: "batch-booted",
+    bootedBy: "daemon2",
     protected: false,
   });
   expect(JSON.parse(f.files.get(snapshotPath)!)).toEqual(doc);
+  expect(f.captures.filter((call) => call.command === "ps")).toEqual([
+    {
+      command: "ps",
+      args: ["eww", "-o", "command=", "-p", "75134"],
+      env: expect.any(Object),
+      timeoutMs: 5000,
+    },
+  ]);
   expect(doc.baseline).toEqual({
     recordedAt: "2026-10-13T00:00:00.000Z",
     android: "recorded",
@@ -266,6 +652,9 @@ test.each(["preexisting", "unknown", "physical", "empty-name"])(
   "unsafe %s target never gets kill frame",
   async (kind) => {
     const f = await deviceFixture(kind === "empty-name" ? ["protected-avd"] : []);
+    f.deps.runCapture = async () => {
+      throw new Error("no process evidence");
+    };
     if (kind === "unknown") {
       f.files.delete(baselinePath);
     }
@@ -362,6 +751,9 @@ test("dry run and zero targets succeed, explicit missing target fails", async ()
   ).toBe(1);
   expect(document(f).results[0].outcome).toBe("not-found");
   f.files.set(baselinePath, JSON.stringify({ android: ["emulator-5556"], ios: [] }));
+  f.deps.runCapture = async () => {
+    throw new Error("no process evidence");
+  };
   expect(await runPrivateDaemonCommand(command("shutdown-devices"), f.deps)).toBe(0);
   expect(document(f).results).toEqual([]);
 });

@@ -7,6 +7,62 @@ import {
 import { derivePrivateDaemonBatch } from "../../scripts/manual-test/privateDaemonEnv";
 import { fixture, options, parsed } from "./manualTestPrivateDaemonFixture";
 const posixTest = process.platform === "win32" ? test.skip : test;
+test.each(["mkdir", "writeFile"])(
+  "F5 failing baseline %s preserves launch result",
+  async (kind) => {
+    const f = fixture();
+    await runPrivateDaemonCommand({ op: "init", options }, f.deps);
+    const mkdir = f.deps.mkdir;
+    f.deps.mkdir = (path, mode) => {
+      if (kind === "mkdir" && path === join(options.batchDir, "shared")) {
+        throw new Error("baseline mkdir failed");
+      }
+      mkdir(path, mode);
+    };
+    const write = f.deps.writeFile;
+    f.deps.writeFile = (path, text) => {
+      if (kind === "writeFile" && path.endsWith("host-devices-at-start.json")) {
+        throw new Error("baseline write failed");
+      }
+      write(path, text);
+    };
+    f.deps.runCommand = async (command, args, env) => {
+      f.launches.push({ command, args, env });
+      return { exitCode: 7 };
+    };
+    expect(
+      await runPrivateDaemonCommand(parsed(["start", "--batch-dir", options.batchDir]), f.deps),
+    ).toBe(7);
+    expect(f.launches).toHaveLength(1);
+    expect(f.logs.filter((line) => line.startsWith("BASELINE WARNING:"))).toEqual([
+      expect.stringContaining("provenance will be unknown"),
+    ]);
+  },
+);
+test("F8 help documents evidence, refusals, launch exit codes and gate limitations", () => {
+  const help = parsePrivateDaemonArgs(["--help"]);
+  if (!("help" in help)) {
+    throw new Error("Expected help");
+  }
+  for (const text of [
+    "batch-inferred",
+    "foreign",
+    "bootedBy",
+    "processAvdName",
+    "ps eww",
+    "not yet been observed on a live batch",
+    "inferred-not-stopped",
+    "held-by-other-daemon",
+    "daemonErrors",
+    "device_already_stopped",
+    "start propagates",
+    "--wait-ms 0",
+    "best-effort",
+    "PID is gone",
+  ]) {
+    expect(help.help).toContain(text);
+  }
+});
 posixTest("parses each command and exact start passthrough", () => {
   expect(
     parsed([

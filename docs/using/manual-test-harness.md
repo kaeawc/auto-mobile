@@ -79,7 +79,8 @@ control socket, sends SIGTERM to the recorded PID, and waits up to `--wait-ms`
 or `gone-before-signal` and `via` `signal`, `product-cli`, or `none`. When identity
 is not confirmed, it delegates to the product CLI; `amN daemon stop` remains
 the product stop path. The harness sends no SIGKILL. Exit 1 means `still-alive`
-and preserves `pid.txt`; successful stop removes that mirror.
+and preserves `pid.txt`; successful stop removes that mirror. `stop --wait-ms 0`
+signals and reports `still-alive` unless the daemon is already gone.
 
 `status` reports JSON/plain PID agreement
 (`pidTxt` is `ok`, `missing`, or `stale`), process liveness, socket response,
@@ -187,6 +188,9 @@ must match `^[A-Za-z0-9._-]{1,64}$`. Defaults are `--max-concurrent 1` (range 1â
 slot, waits for 1-minute load strictly below the threshold and the interval
 since the last grant, then records `shared/boot-gate/last-grant.json`. The
 canonical file-lock primitive reclaims slots left by dead holders.
+`--min-interval-ms` is best-effort when `--max-concurrent` is above 1 because
+separate slot holders can read the same last grant. A `boot-gate` killed by a
+signal leaves its slot lock to be reclaimed once its PID is gone.
 
 ```bash
 # Gate alone: exits immediately after a grant; no slot is held beyond exit.
@@ -214,47 +218,77 @@ also exits 2. An initialized batch is required.
 devices with a nonempty runtime device ID and lifecycle `booting`, `booted`, or
 `shutting-down`. Its JSON contains `batchDir`, `protectedDevices`, baseline
 availability, daemon liveness/errors, and device rows: `deviceId`, `name`,
-`platform`, `isVirtual`, `seenByDaemons`, `pid` (and optional `pidReason`),
-`provenance`, `protected`, `poolStatus`, and `heldBy` when exposed.
+`identity.stableId`, `platform`, `isVirtual`, `seenByDaemons`, `pid` (and optional
+`pidReason`), `provenance`, `protected`, `poolStatus`, and `heldBy` when exposed.
+Optional `bootedBy: "daemon<N>"` identifies the booting daemon from `MT_DAEMON`;
+`processAvdName` is the process command's `-avd` argument. `seenByDaemons` records
+visibility, not boot ownership. iOS and physical devices have a null PID.
 
-The product keeps no record of which daemon booted a device and exposes no
-emulator PID. `batch-booted` means a running virtual device in the daemon's
-`listDevices` view that was not in the host inventory recorded at the batch's
-first `start` (`shared/host-devices-at-start.json`). A device someone else boots
-after that start is indistinguishable, so protect it with `init --protect`.
-`preexisting` means its runtime ID was in that baseline; `unknown` means the
-baseline is missing/unavailable or daemon identities conflict. Unknown
-provenance is never shut down. `seenByDaemons` names daemons that list a device,
-not who booted it. `pid` is the Android emulator's console-port listener from
-`lsof`; iOS and physical devices have a null PID.
+Positive evidence is the `MT_BATCH`/`MT_DAEMON` environment an emulator inherits
+from its private daemon. The harness reads it with `ps eww -o command= -p <pid>`
+for the one Android console-port listener PID that `lsof` resolved (5000 ms per
+probe). This inherited environment has not yet been observed on a live batch.
+Missing PID, failed/empty process reads and every iOS simulator have no process
+evidence. Provenance is:
 
-`shutdown-devices --batch-dir "$B"` targets batch-booted, unprotected virtual
-devices. Repeat `--device ID_OR_NAME` to select explicit targets, use `--daemon K`
-to restrict the view, or `--dry-run` to report without stopping. The per-request
-`--timeout-ms` defaults to 60000. It asks a listing daemon's `killDevice` without
-`force`, so held and managed-slot devices return `refused`. The harness never
-signals a device process.
+- `batch-booted`: the process carries exactly this batch's `MT_BATCH` marker.
+- `foreign`: the process environment was read without this batch's marker,
+  regardless of the baseline.
+- `preexisting`: no process evidence and the runtime ID is in the first-start
+  baseline (`shared/host-devices-at-start.json`).
+- `batch-inferred`: no process evidence and the runtime ID is absent from a
+  recorded baseline for its platform.
+- `unknown`: no process evidence and the platform baseline is missing/unavailable,
+  or two daemon rows conflict.
 
-| Outcome            | Meaning                                                                   |
-| ------------------ | ------------------------------------------------------------------------- |
-| `stopped`          | The daemon accepted the kill request.                                     |
-| `refused`          | The daemon refused, with its code/message.                                |
-| `failed`           | The request failed; no retry of a possibly completed mutation.            |
-| `timeout`          | The request deadline expired.                                             |
-| `protected`        | The target is on the protected list or cannot be safely checked.          |
-| `not-batch-booted` | The target is physical, preexisting, or has unknown provenance.           |
-| `not-found`        | No device in the selected view matches the explicit selector.             |
-| `dry-run`          | An eligible target would be stopped.                                      |
-| `daemon-dead`      | No selected daemon can stop the snapshotted target; inspect PID evidence. |
+Baseline recording is best-effort. A failed directory/file write prints one
+`BASELINE WARNING:` explaining that provenance will be unknown without process
+evidence; it never changes the launch result.
 
-Shutdown exits 0 when every target is `stopped`/`dry-run` (including no targets),
-and 1 for other outcomes. If no daemon answers, `devices`/`shutdown-devices`
-use `shared/devices-last.json` to report eligible snapshot devices and refreshed
-PID evidence, with exit 1. Shutdown selectors still restrict that fallback and
-missing selectors return `not-found`. Run `devices` or `shutdown-devices`
-**before** `stop` so a snapshot exists. Check the reported AVD name against the
-protected list before manually stopping by PID when the daemon is dead; never
-use `adb emu` console commands under load (#12202).
+`shutdown-devices --batch-dir "$B"` stops by default only unprotected virtual
+devices with positive `batch-booted` evidence. It reports unprotected
+`batch-inferred` devices as `inferred-not-stopped` and exits 1; check that the
+batch started them, then name them explicitly with `--device ID_OR_NAME`.
+Every iOS simulator needs this check and selector. `foreign`, `preexisting`,
+`unknown`, and physical devices are never sent a frame, even when named.
+Use `--daemon K` to restrict the view or `--dry-run` to report without stopping.
+The per-request `--timeout-ms` defaults to 60000. Protection matches any of
+`deviceId`, `name`, `identity.stableId`, or `processAvdName`. An empty or
+`Unknown (<serial>)` Android name without a process AVD name is refused when the
+protected list is nonempty. `heldBy: "other_daemon"` is refused locally;
+`managed_slot` targets go to the daemon, which refuses them itself. The harness
+asks a listing daemon's `killDevice` without `force` and never signals a device
+process.
+
+| Outcome                | Meaning                                                                                                     |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `stopped`              | Shutdown succeeded, or `device_already_stopped` confirmed the goal state; the daemon's message is retained. |
+| `refused`              | The daemon refused, with its code/message.                                                                  |
+| `failed`               | The request failed; no retry of a possibly completed mutation.                                              |
+| `timeout`              | The request deadline expired.                                                                               |
+| `protected`            | The target matches protection or its name cannot be safely checked.                                         |
+| `not-batch-booted`     | The target is physical, foreign, preexisting, or unknown; selectors cannot override this.                   |
+| `inferred-not-stopped` | Check the inferred device and name it with `--device`.                                                      |
+| `held-by-other-daemon` | The inventory reports another daemon holding it; no frame is sent.                                          |
+| `not-found`            | No device in the selected view matches the explicit selector.                                               |
+| `dry-run`              | An eligible target would be stopped.                                                                        |
+| `daemon-dead`          | No selected daemon produced an inventory to stop the snapshotted target.                                    |
+
+Every result row includes `provenance` and `bootedBy` when known. Shutdown exits
+0 when every target is `stopped`/`dry-run` (including no targets) and every selected
+daemon produced an inventory; otherwise it exits 1. Inventory refusals,
+unparseable replies and transport failures add top-level
+`daemonErrors: [{name,error}]`, while devices from healthy daemons are still
+processed. A daemon whose socket replies is `alive: true` even if that reply
+cannot be parsed. `devices` exits 1 only when no daemon produced an inventory.
+
+Without inventories, `devices`/`shutdown-devices` use `shared/devices-last.json`
+to report unprotected `batch-booted` and `batch-inferred` snapshot devices and
+refreshed PID evidence, with exit 1 and no shutdown frames. Selectors restrict
+that fallback and missing selectors return `not-found`. Run `devices` or
+`shutdown-devices` **before** `stop` so a snapshot exists. Check the reported AVD
+name against the protected list before manually stopping by PID when the daemon
+is dead; never use `adb emu` console commands under load (#12202).
 
 Teardown order: `shutdown-devices`, then `stop` each batch daemon, then stop the
 batch's caffeinate process using its recorded `shared/caffeinate.pid`.
@@ -457,9 +491,9 @@ All three client CLIs support `--help`, `-h`, `help` and `<subcommand> --help`
 on stdout with exit 0. Their help lists every accepted command/flag, defaults,
 examples and exit codes. Parse errors go to stderr with a `--help` pointer and
 exit 2. Private-daemon exits 0 on success/status; 1 for a typed non-success outcome
-(daemon still alive, a device not stopped, or `preflight --strict` with warnings);
-2 for usage/guard/I/O or a `boot-gate` wait deadline. `boot-gate -- COMMAND`
-exits with the command's code. Proxy exits 0 on
+(daemon still alive, a device not stopped, inventory errors, or `preflight --strict` with warnings);
+2 for usage/guard/I/O or a `boot-gate` wait deadline. `start` still propagates the
+product launch command's exit code. `boot-gate -- COMMAND` exits with the command's code. Proxy exits 0 on
 success/status, 1 on a failed/refused response, 2 on usage/guard/wait deadline,
 3 when serve loses its transport and 4 when serve initialization fails.
 

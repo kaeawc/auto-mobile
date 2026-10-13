@@ -64,6 +64,7 @@ test("garbage is unknown or unavailable without throwing", () => {
   expect(parseIoregClamshell("garbage")).toHaveProperty("unavailable");
 });
 test.each([
+  ["unknown", { power: { source: "unknown" } }, "could not be determined"],
   ["battery", { power: { source: "battery", chargePercent: 12 } }, "12%"],
   [
     "idle",

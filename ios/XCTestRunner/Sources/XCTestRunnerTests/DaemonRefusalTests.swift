@@ -323,6 +323,209 @@ final class DaemonRefusalTests: XCTestCase {
         XCTAssertTrue(scheduler.delays.isEmpty)
     }
 
+    private var recoveryFixtureDirectory: URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("test/fixtures/refusal-wire")
+    }
+
+    private func recoveryFixtureText(_ file: URL) throws -> String {
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+        let result = try XCTUnwrap(root["result"] as? [String: Any])
+        let content = try XCTUnwrap(result["content"] as? [[String: Any]])
+        return try XCTUnwrap(content.first?["text"] as? String)
+    }
+
+    private func assertUnhealthyMessage(_ message: String, refusal: Refusal) {
+        XCTAssertTrue(message.contains("device_unhealthy"), message)
+        XCTAssertTrue(message.contains(refusal.message), message)
+        let rendered = refusal.unhealthyDevices.map {
+            "\($0.deviceId) (\($0.reason), \($0.recovering ? "recovering" : "not recovering"))"
+        }.joined(separator: ", ")
+        XCTAssertFalse(refusal.unhealthyDevices.isEmpty)
+        XCTAssertTrue(message.contains("Unhealthy devices: \(rendered)"), message)
+    }
+
+    func testRecoveryCorpusWaitsWithoutRetriesAndPermanentHealthFailuresIncludeReasons() async throws {
+        let files = try FileManager.default.contentsOfDirectory(
+            at: recoveryFixtureDirectory,
+            includingPropertiesForKeys: nil
+        )
+        .filter { $0.pathExtension == "json" && $0.lastPathComponent != "expectations.json" }
+        var hinted = false
+        var unbounded = false
+        var permanent = false
+        for file in files {
+            let text = try recoveryFixtureText(file)
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+            let envelope = object["error"] as? [String: Any]
+            let code = (envelope?["code"] ?? object["code"]) as? String
+            guard code == "device_unhealthy" || code == "session_held_by_recovery" else { continue }
+            let recovering = ((envelope?["recovering"] ?? object["recovering"]) as? Bool) == true
+            let retryable = ((envelope?["retryable"] ?? object["retryable"]) as? Bool) == true
+            let waits = retryable && (code == "session_held_by_recovery" || recovering)
+            let hint = ((envelope?["retryAfterMs"] ?? object["retryAfterMs"]) as? NSNumber)?.intValue
+            let refusal = try XCTUnwrap(Refusal.parse(text))
+            XCTAssertEqual(refusal.waitsForDevice, waits, file.lastPathComponent)
+            XCTAssertEqual(refusal.recovering, recovering, file.lastPathComponent)
+            if code == "device_unhealthy" {
+                let entries = try XCTUnwrap((envelope?["devices"] ?? object["devices"]) as? [[String: Any]])
+                let expectedDevices = try entries.map { entry in
+                    try Refusal.UnhealthyDevice(
+                        deviceId: XCTUnwrap(entry["deviceId"] as? String),
+                        reason: XCTUnwrap(entry["reason"] as? String),
+                        recovering: (entry["recovering"] as? Bool) == true
+                    )
+                }
+                XCTAssertEqual(refusal.unhealthyDevices, expectedDevices, file.lastPathComponent)
+            }
+            let client = RefusalMCPClient()
+            client.executePlanReplies = [text, successPayload]
+            let scheduler = RecordingScheduler()
+            let executor = makeExecutor(client: client, scheduler: scheduler, retryCount: waits ? 0 : 2)
+            if waits {
+                let result = try await executor.execute(sessionUuid: "first")
+                XCTAssertTrue(result.success)
+                XCTAssertEqual(scheduler.delays, [Double(max(500, hint ?? 0)) / 1000], file.lastPathComponent)
+                XCTAssertEqual(client.executePlanSessions.count, 2)
+                if code == "device_unhealthy" {
+                    hinted = hinted || hint != nil
+                    unbounded = unbounded || hint == nil
+                }
+            } else {
+                do {
+                    _ = try await executor.execute(sessionUuid: "first")
+                    XCTFail("expected permanent refusal: \(file.lastPathComponent)")
+                } catch {
+                    if code == "device_unhealthy" {
+                        assertUnhealthyMessage(String(describing: error), refusal: refusal)
+                        XCTAssertTrue(
+                            String(describing: error)
+                                .contains("Replace the device with killDevice then startDevice.")
+                        )
+                    }
+                }
+                XCTAssertTrue(scheduler.delays.isEmpty)
+                XCTAssertEqual(client.executePlanSessions.count, 1)
+                permanent = permanent || (code == "device_unhealthy" && !recovering)
+            }
+        }
+        XCTAssertTrue(hinted && unbounded && permanent)
+    }
+
+    func testRecoveryGiveUpSpendsExactlyTheBoundedBudgetAndReportsRecovery() async throws {
+        for (name, lead) in [
+            ("device_unhealthy", "Device is still being recovered"),
+            ("session_held_by_recovery", "Session's device is still being recovered"),
+        ] {
+            let text = try recoveryFixtureText(recoveryFixtureDirectory.appendingPathComponent("\(name).json"))
+            let refusal = try XCTUnwrap(Refusal.parse(text))
+            let client = RefusalMCPClient()
+            client.executePlanReplies = Array(repeating: text, count: 30)
+            let scheduler = RecordingScheduler()
+            let executor = makeExecutor(client: client, scheduler: scheduler, retryCount: 0)
+            do {
+                _ = try await executor.execute(sessionUuid: "first")
+                XCTFail("expected recovery wait to give up")
+            } catch let AutoMobilePlanExecutor.ExecutorError.deviceUnavailable(message) {
+                XCTAssertTrue(message.hasPrefix("\(lead) (\(name))"), message)
+                XCTAssertTrue(message.contains("The runner waited 30000ms for the recovery to finish."), message)
+                if name == "device_unhealthy" { assertUnhealthyMessage(message, refusal: refusal) }
+            }
+            XCTAssertEqual(scheduler.delays.reduce(0, +), 30, accuracy: 0.001)
+            XCTAssertEqual(client.executePlanSessions.count, scheduler.delays.count + 1)
+        }
+    }
+
+    func testFailedHealthFramesWaitOrFailWithReasonsFromDetails() async throws {
+        let files = try FileManager.default.contentsOfDirectory(
+            at: recoveryFixtureDirectory.appendingPathComponent("surfaces"),
+            includingPropertiesForKeys: nil
+        ).filter { $0.lastPathComponent.hasPrefix("socket-frame.") && $0.pathExtension == "json" }
+        var waitingUnhealthy = false
+        var nonWaitingUnhealthy = false
+        for file in files {
+            let root = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
+            let frame = try XCTUnwrap(root["payload"] as? [String: Any])
+            let code = frame["code"] as? String
+            guard code == "device_unhealthy" || code == "session_held_by_recovery" else { continue }
+            let refusal = try XCTUnwrap(Refusal.parse(frame))
+            let details = frame["details"] as? [String: Any]
+            let waits = (frame["retryable"] as? Bool) == true &&
+                (code == "session_held_by_recovery" || (details?["recovering"] as? Bool) == true)
+            let hint = (frame["retryAfterMs"] as? NSNumber)?.intValue
+            if code == "device_unhealthy" {
+                waitingUnhealthy = waitingUnhealthy || waits
+                nonWaitingUnhealthy = nonWaitingUnhealthy || !waits
+            }
+            let client = RefusalMCPClient()
+            client.executePlanErrors = [.refused(refusal)]
+            client.executePlanReplies = [successPayload]
+            let scheduler = RecordingScheduler()
+            let executor = makeExecutor(client: client, scheduler: scheduler, retryCount: waits ? 0 : 2)
+            if waits {
+                let result = try await executor.execute(sessionUuid: "first")
+                XCTAssertTrue(result.success)
+                XCTAssertEqual(scheduler.delays, [Double(max(500, hint ?? 0)) / 1000])
+                XCTAssertEqual(client.executePlanSessions.count, 2)
+            } else {
+                do {
+                    _ = try await executor.execute(sessionUuid: "first")
+                    XCTFail("expected permanent failed frame")
+                } catch {
+                    if code == "device_unhealthy" {
+                        assertUnhealthyMessage(String(describing: error), refusal: refusal)
+                        XCTAssertTrue(
+                            String(describing: error)
+                                .contains("Replace the device with killDevice then startDevice.")
+                        )
+                    }
+                }
+                XCTAssertTrue(scheduler.delays.isEmpty)
+                XCTAssertEqual(client.executePlanSessions.count, 1)
+            }
+        }
+        XCTAssertTrue(waitingUnhealthy && nonWaitingUnhealthy)
+    }
+
+    func testRecoveringRequiresAStrictBooleanAndHealthFieldsUseEnvelopeThenPayloadThenDetails() throws {
+        let text = try recoveryFixtureText(recoveryFixtureDirectory.appendingPathComponent("device_unhealthy.json"))
+        var payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+        payload["recovering"] = "true"
+        XCTAssertFalse(try XCTUnwrap(Refusal.parse(payload)).recovering)
+        payload.removeValue(forKey: "recovering")
+        XCTAssertFalse(try XCTUnwrap(Refusal.parse(payload)).recovering)
+        payload["details"] = ["recovering": true]
+        XCTAssertTrue(try XCTUnwrap(Refusal.parse(payload)).recovering)
+        payload["recovering"] = false
+        payload["retryable"] = false
+        XCTAssertFalse(try XCTUnwrap(Refusal.parse(payload)).recovering)
+        let original = try XCTUnwrap(Refusal.parse(text))
+        let devices = try XCTUnwrap(payload.removeValue(forKey: "devices") as? [[String: Any]])
+        payload["error"] = ["message": original.message, "recovering": true, "devices": devices]
+        let enveloped = try XCTUnwrap(Refusal.parse(payload))
+        XCTAssertTrue(enveloped.recovering)
+        XCTAssertEqual(enveloped.unhealthyDevices, original.unhealthyDevices)
+        payload["error"] = original.message
+        payload["recovering"] = true
+        XCTAssertEqual(try XCTUnwrap(Refusal.parse(payload)).unhealthyDevices, original.unhealthyDevices)
+    }
+
+    func testDefaultRecoveringKeepsTheExistingPublicInitializerFromWaiting() {
+        let refusal = Refusal(
+            code: "device_unhealthy",
+            message: "unhealthy",
+            retryable: true,
+            nextAction: nil,
+            retryAfterMs: nil
+        )
+        XCTAssertFalse(refusal.waitsForDevice)
+    }
+
     // MARK: - Helpers
 
     private func makeExecutor(

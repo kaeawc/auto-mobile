@@ -22,28 +22,45 @@ public protocol ProbeBridge {
     func rule(version: Int, command: Data, reply: @escaping (Data?, String?) -> Void)
 }
 
+/// Lock order: service lock → coordinator lock → shaper lock → store lock.
+/// Stop holds the service lock through onStop, making rule removal and pause
+/// settlement atomic with commands/startup. The coordinator never calls the
+/// service; onRulesChanged and shapingActivity run outside the service lock.
 public final class ProbeService: NSObject, ProbeBridge {
     private let probe: IdentityProbe
     private let rules: NetworkRuleStore
-    private let lock = NSLock()
+    // Internal so lifecycle tests can pin the lock held across the stop hook.
+    let lock = NSLock()
     private var active = false
     private var generation: UInt64 = 0
+    private let onRulesChanged: (() -> Void)?
+    private let onStop: (() -> Void)?
+    private let shapingActivity: (() -> ShapingActivity?)?
 
-    public init(probe: IdentityProbe, rules: NetworkRuleStore) {
+    public init(
+        probe: IdentityProbe, rules: NetworkRuleStore,
+        onRulesChanged: (() -> Void)? = nil, onStop: (() -> Void)? = nil,
+        shapingActivity: (() -> ShapingActivity?)? = nil
+    ) {
         self.probe = probe
         self.rules = rules
+        self.onRulesChanged = onRulesChanged
+        self.onStop = onStop
+        self.shapingActivity = shapingActivity
     }
 
     @discardableResult
     public func stopOrBeginStartup() -> UInt64 {
         lock.lock()
-        defer { lock.unlock() }
         active = false
         generation &+= 1
         // A stopped or restarting filter must not resurrect an impairment the
         // host may have stopped renewing: every rule ends here.
         rules.removeAll()
-        return generation
+        onStop?()
+        let current = generation
+        lock.unlock()
+        return current
     }
 
     public func finishStartup(generation expected: UInt64, succeeded: Bool) -> Bool {
@@ -75,7 +92,10 @@ public final class ProbeService: NSObject, ProbeBridge {
         }
         do {
             let data = try JSONEncoder().encode(
-                probe.snapshot(managedSimulators: simulators, rules: rules.activeRules(), version: version)
+                probe.snapshot(
+                    managedSimulators: simulators, rules: rules.activeRules(), version: version,
+                    shapingActivity: version == 4 ? shapingActivity?() : nil
+                )
             )
             lock.lock()
             let current = active && revision == generation
@@ -101,18 +121,21 @@ public final class ProbeService: NSObject, ProbeBridge {
         }
         lock.lock()
         let started = active
-        lock.unlock()
         // An inactive provider applies nothing, so its answer is definitive: the
         // controller retries this startup state like a read-back.
         guard started else {
+            lock.unlock()
             reply(nil, ProbeReadbackStartupState.inactiveProviderMessage)
             return
         }
         let result: NetworkRuleResult
         if version == 3, let condition = decoded.condition, condition != .offline {
             result = NetworkRuleResult(outcome: .invalidCommand)
+            lock.unlock()
         } else {
             result = rules.execute(decoded)
+            lock.unlock()
+            onRulesChanged?()
         }
         guard let data = try? JSONEncoder().encode(result) else {
             reply(nil, "Unable to encode network rule result")

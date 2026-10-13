@@ -264,6 +264,7 @@ describe("handleDaemonRequest", () => {
           "daemon/registerSession",
           // Advertised once the proxy acquires managed slots (#11173).
           "managed-slots/v1",
+          "managed-slots/v1.deviceFamily",
         ],
       },
     });

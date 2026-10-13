@@ -175,6 +175,20 @@ on `main` it is `true`. A config with an unsupported `contractVersion` fails wit
 `contract_unsupported`, and the version is checked before any other field so a
 newer contract's shape reports that code, not a schema error.
 
+Optional spec fields added after v1 are advertised as their own capability
+tokens. `deviceFamily` requires `managed-slots/v1.deviceFamily`
+(`MANAGED_SLOTS_V1_DEVICE_FAMILY_CAPABILITY`). A new proxy connected to an older
+daemon refuses a config using `deviceFamily` before sending the acquisition,
+with non-retryable `contract_unsupported`; the message names the field and the
+missing capability, and nothing is changed. Upgrade the daemon, or restart a
+stale running daemon when the proxy starts it automatically from the same
+installation; alternatively, remove `deviceFamily` from the config. A config
+without `deviceFamily` works unchanged against an older daemon. An older proxy
+connected to a newer daemon has nothing to negotiate: the older proxy's own
+schema rejects `deviceFamily` at launch as `managed_slot_config_invalid`. A raw
+socket client that skips the probe and sends an unknown spec key to a daemon
+still gets strict `managed_slot_config_invalid` naming the key.
+
 ## Lifecycle
 
 Acquisition happens before the MCP `initialize` response, on the same STDIO
@@ -417,9 +431,10 @@ is overridden. Request `deviceFamily` without screen overrides, or an explicit
 `deviceType` without `deviceFamily`. Other configuration fields such as
 `memoryMb` remain allowed with `deviceFamily`; screen overrides without
 `deviceFamily` remain supported.
-These constraint forms are refused rather than silently dropped. An older
-daemon rejects the unknown `deviceFamily` key as `managed_slot_config_invalid`
-because its schema is strict. The public `provisionDevice` tool does not accept
+These constraint forms are refused rather than silently dropped. `deviceFamily`
+requires daemon capability `managed-slots/v1.deviceFamily`; see
+[Version negotiation](#version-negotiation) for the early `contract_unsupported`
+refusal when it is absent. The public `provisionDevice` tool does not accept
 `deviceFamily`; this field belongs only to managed-slot requested constraints.
 
 Created devices are named `amslot-<scope prefix>-<slot>-g<n>-<suffix>`; treat
@@ -538,7 +553,8 @@ dead `executionOwnerPid`) are different: they are raised before the server
 starts, and the process exits with the typed code.
 
 Acquisition-level failure codes besides the reconciler's: `contract_unsupported`
-(the daemon does not advertise `managed-slots/v1`), `scope_invalidated`,
+(the daemon does not advertise `managed-slots/v1`, or a capability a config field
+requires), `scope_invalidated`,
 `scope_transition_pending`, `execution_policy_failed`, `daemon_unavailable`,
 `timeout` and `cancelled`.
 
@@ -671,7 +687,7 @@ reason `deletion_pending`.
 | Code                                | Retryable | Meaning                                                                                                                                                                                                                   |
 | ----------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `managed_slot_config_invalid`       | no        | Config is not valid JSON, fails the strict schema, has duplicate `slotIndex`, an out-of-range `idleTimeoutMs`, a dead `executionOwnerPid`, or is combined with `--initial-session-uuid` / `--no-proxy`.                   |
-| `contract_unsupported`              | no        | `contractVersion` is not supported by this build or daemon.                                                                                                                                                               |
+| `contract_unsupported`              | no        | `contractVersion` is not supported by this build or daemon, or the daemon lacks a capability a config field requires (`managed-slots/v1.deviceFamily`).                                                                   |
 | `managed_slot_group_unsupported`    | no        | `localSlotCapacity` or `requests` exceeds one slot and device.                                                                                                                                                            |
 | `managed_slots_unsupported`         | no        | A config was supplied but this build does not serve managed slots.                                                                                                                                                        |
 | `spec_unsupported`                  | no        | The requested spec is malformed, or names an Android image, iOS runtime or iOS device type this host has not installed; nothing was changed.                                                                              |

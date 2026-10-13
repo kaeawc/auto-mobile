@@ -71,6 +71,7 @@ import {
 import {
   MANAGED_SLOTS_PROXY_WIRED,
   MANAGED_SLOTS_V1_CAPABILITY,
+  MANAGED_SLOTS_V1_DEVICE_FAMILY_CAPABILITY,
   ManagedSlotConfigError,
   parseManagedSlotConfig,
   type ManagedSlotConfigErrorCode,
@@ -705,7 +706,9 @@ export async function handleDaemonRequest(
           INPUT_TYPE_TEXT_APPEND_CAPABILITY,
           INPUT_GESTURE_STREAM_CAPABILITY,
           DAEMON_REGISTER_SESSION_METHOD,
-          ...(MANAGED_SLOTS_PROXY_WIRED ? [MANAGED_SLOTS_V1_CAPABILITY] : []),
+          ...(MANAGED_SLOTS_PROXY_WIRED
+            ? [MANAGED_SLOTS_V1_CAPABILITY, MANAGED_SLOTS_V1_DEVICE_FAMILY_CAPABILITY]
+            : []),
         ],
       },
     };

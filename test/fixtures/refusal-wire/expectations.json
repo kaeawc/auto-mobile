@@ -1,6 +1,10 @@
 {
   "description": "How a runner must classify each typed daemon refusal in this directory (<code>.json, generated from the real TypeScript builders by scripts/generate-refusal-wire-fixtures.ts). wait = wait for the device within the bounded device wait; acquire-new-session = retry under a fresh session UUID; retry = ordinary bounded retry; fail = fail the attempt. Precedence when a runner derives it: wait, then acquire-new-session (nextAction), then retry (retryable: true), else fail. knownGaps maps a runner (kotlin, swift) to the disposition it currently produces instead of the expected one, so the suite stays green while the gap is tracked; a gap that starts matching the expectation fails the suite until the entry is removed. fields is what a runner must read from the fixture's wire payload: the typed code, retryable, whether nextAction is acquire_new_session, a positive retryAfterMs hint, and (capacity refusals) the externalDevices that count against the limit. A field absent from a row is absent on the wire. session_held_by_recovery waits when retryable; device_unhealthy waits only when retryable and recovering are true. fields.recovering pins the wire boolean when present.",
   "codes": {
+    "prototype_suspended": {
+      "expected": "fail",
+      "fields": { "code": "prototype_suspended", "retryable": false, "acquireNewSession": false }
+    },
     "ambiguous_session_selector": {
       "expected": "fail",
       "fields": {

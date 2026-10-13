@@ -14,6 +14,7 @@ import { ACQUIRE_NEW_SESSION_NEXT_ACTION } from "../models/deviceSessionRecovery
 import { BootCapacityExhaustedError } from "../models/BootCapacityExhaustedError";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import { typedRefusalFields } from "../models/typedRefusalFields";
+import { PrototypeSuspendedError } from "../features/prototype/prototypeSuspended";
 import { DAEMON_SESSION_SUSPECT_CODE } from "../daemon/types";
 import {
   recoveryIdentityLoss,
@@ -220,6 +221,18 @@ function typedRefusalPayload(error: unknown): Record<string, unknown> | undefine
         ? { nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION }
         : {}),
       ...(typeof error.retryAfterMs === "number" ? { retryAfterMs: error.retryAfterMs } : {}),
+    };
+  }
+  return prototypeSuspendedPayload(error);
+}
+
+function prototypeSuspendedPayload(error: unknown): Record<string, unknown> | undefined {
+  if (error instanceof PrototypeSuspendedError) {
+    return {
+      code: error.code,
+      retryable: error.retryable,
+      nextAction: error.nextAction,
+      details: error.details,
     };
   }
   return undefined;

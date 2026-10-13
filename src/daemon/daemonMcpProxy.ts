@@ -5100,9 +5100,9 @@ export class DaemonMcpProxy {
 
   private clearHeldSessionLossesForSelection(sessionUuid: string, callPlatform?: unknown): void {
     this.pendingHeldSessionPlatformLosses.delete(sessionUuid);
-    this.clearHeldSessionPlatformLosses(this.sessionPlatforms.get(sessionUuid));
-    if (callPlatform === "android" || callPlatform === "ios") {
-      this.clearHeldSessionPlatformLosses(callPlatform);
+    const platform = this.sessionPlatforms.get(sessionUuid) ?? callPlatform;
+    if (platform === "android" || platform === "ios") {
+      this.clearHeldSessionPlatformLosses(platform);
     }
   }
 

@@ -362,6 +362,15 @@ test("setActiveDevice clears the loss for the platform named by the call", async
   await forwarded();
 });
 
+test("setActiveDevice returning known Android preserves the loss for its named iOS platform", async () => {
+  await acquireBoth();
+  release();
+  selected = ANDROID;
+  await proxy.callTool("setActiveDevice", { platform: "ios", deviceId: ANDROID.deviceId });
+  await refused();
+  await forwarded();
+});
+
 test("setActiveDevice reselecting the lost UUID clears its own loss without a platform", async () => {
   await acquireBoth();
   release();

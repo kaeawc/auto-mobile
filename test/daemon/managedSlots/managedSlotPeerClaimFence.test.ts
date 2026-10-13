@@ -223,7 +223,7 @@ describe("rehydrated managed execution peer claim fence", () => {
       expect(reowner.automationRefusal(S)?.message).toContain("not recorded");
       await attempt;
       expect((await claimAs(PEERS[0]!)).kind).toBe("claimed");
-      await advance(10);
+      await advance(25);
       await reowner.whenIdle();
       expect(reowner.automationRefusal(S)?.message).toContain("no longer owns");
       expect(reowner.automationRefusal(S)).toBeInstanceOf(ManagedSlotOwnershipLostError);
@@ -232,7 +232,7 @@ describe("rehydrated managed execution peer claim fence", () => {
       expect(
         warn.mock.calls.filter(([message]) => String(message).includes("no longer owns")),
       ).toHaveLength(1);
-      expect(warn.mock.calls).toHaveLength(2);
+      expect(warn.mock.calls).toHaveLength(1);
       expect(info.mock.calls).toHaveLength(0);
       expect(await registry.getAssignment(key)).toMatchObject({
         execOwner: { sessionUuid: `${S2}-${PEERS[0]}` },
@@ -246,14 +246,14 @@ describe("rehydrated managed execution peer claim fence", () => {
     async () => {
       faults.busy.claimExecution = 3;
       await reowner.reown([S], { rehydrated: true });
-      expect(timer.getPendingTimeouts()).toEqual([10]);
+      expect(timer.getPendingTimeouts()).toEqual([25]);
       expect(faults.calls.claimExecution).toBe(1);
-      await advance(9);
+      await advance(24);
       expect(faults.calls.claimExecution).toBe(1);
       await advance(1);
-      expect(timer.getPendingTimeouts()).toEqual([20]);
+      expect(timer.getPendingTimeouts()).toEqual([25]);
       expect(reowner.automationRefusal(S)).toBeDefined();
-      await advance(20);
+      await advance(25);
       expect(timer.getPendingTimeouts()).toEqual([40]);
       expect(reowner.automationRefusal(S)).toBeDefined();
       await advance(40);
@@ -265,7 +265,7 @@ describe("rehydrated managed execution peer claim fence", () => {
       for (const pid of PEERS) {
         expect((await claimAs(pid)).kind).toBe("slot_in_use");
       }
-      expect(warn.mock.calls).toHaveLength(1);
+      expect(warn.mock.calls).toHaveLength(0);
       expect(info.mock.calls).toHaveLength(1);
       expect(info.mock.calls[0][0]).toContain("4 attempts");
     },
@@ -278,7 +278,7 @@ describe("rehydrated managed execution peer claim fence", () => {
       await reowner.reown([S], { rehydrated: true });
       expect(reowner.automationRefusal(S)).toBeDefined();
       expect(faults.calls.claimExecution).toBeUndefined();
-      await advance(10);
+      await advance(25);
       await reowner.whenIdle();
       expect(reowner.automationRefusal(S)).toBeUndefined();
       for (const pid of PEERS) {
@@ -296,7 +296,7 @@ describe("rehydrated managed execution peer claim fence", () => {
       for (const pid of PEERS) {
         expect((await claimAs(pid)).kind).toBe("slot_in_use");
       }
-      await advance(10);
+      await advance(25);
       await reowner.whenIdle();
       expect(reowner.automationRefusal(S)).toBeUndefined();
       expect(faults.calls.claimExecution).toBe(1);
@@ -344,7 +344,7 @@ describe("rehydrated managed execution peer claim fence", () => {
       faults.busy.claimExecution = 1;
       await reowner.reown([S], { rehydrated: true });
       expect((await claimAs(PEERS[0]!)).kind).toBe("claimed");
-      await advance(10);
+      await advance(25);
       await reowner.whenIdle();
       const fresh = await registry.getAssignment(key);
       await drain.releaseExecution(S);
@@ -436,7 +436,7 @@ describe("rehydrated managed execution peer claim fence", () => {
       };
       expect(await reowner.reown([S], { rehydrated: true })).toEqual([]);
       expect(reowner.automationRefusal(S)).toBeDefined();
-      await advance(10);
+      await advance(25);
       await reowner.whenIdle();
       expect(reowner.automationRefusal(S)).toBeUndefined();
       expect(await registry.getAssignment(second)).toMatchObject({
@@ -477,8 +477,8 @@ describe("rehydrated managed execution peer claim fence", () => {
       });
       await reowner.reown([S], { rehydrated: true });
       expect(reowner.automationRefusal(S)).toBeDefined();
-      expect(timer.getPendingTimeouts()).toEqual([250]);
-      await advance(249);
+      expect(timer.getPendingTimeouts()).toEqual([25]);
+      await advance(24);
       expect(opens).toBe(1);
       await advance(1);
       await reowner.whenIdle();
@@ -522,8 +522,8 @@ describe("rehydrated managed execution peer claim fence", () => {
       };
       await reowner.reown([S], { rehydrated: true });
       expect(reowner.automationRefusal(S)).toBeDefined();
-      expect(timer.getPendingTimeouts()).toEqual([10]);
-      await advance(10);
+      expect(timer.getPendingTimeouts()).toEqual([25]);
+      await advance(25);
       await reowner.whenIdle();
       expect(reowner.automationRefusal(S)).toBeUndefined();
       for (const pid of PEERS) {
@@ -538,7 +538,7 @@ describe("rehydrated managed execution peer claim fence", () => {
       await registry.updateSlotState(key, BINDING, "settling", { settler: PREVIOUS });
       await reowner.reown([S], { rehydrated: true });
       expect(reowner.automationRefusal(S)).toBeDefined();
-      expect(timer.getPendingTimeouts()).toEqual([10]);
+      expect(timer.getPendingTimeouts()).toEqual([25]);
       for (const pid of PEERS) {
         expect((await claimAs(pid)).kind).toBe("slot_not_ready");
       }
@@ -547,7 +547,7 @@ describe("rehydrated managed execution peer claim fence", () => {
       judge = viewOf(OWNER.pid);
       expect(reowner.automationRefusal(S)).toBeDefined();
       expect((await claimAs(PEERS[0]!)).kind).toBe("claimed");
-      await advance(10);
+      await advance(25);
       await reowner.whenIdle();
       expect(reowner.automationRefusal(S)?.message).toContain("no longer owns");
       expect(timer.getPendingTimeouts()).toEqual([]);
@@ -558,16 +558,16 @@ describe("rehydrated managed execution peer claim fence", () => {
     await registry.updateSlotState(key, BINDING, "settling", { settler: PREVIOUS });
     await reowner.reown([S], { rehydrated: true });
     expect(reowner.automationRefusal(S)).toBeDefined();
-    await advance(10);
-    await drainUntil(() => timer.getPendingTimeouts()[0] === 20, {
+    await advance(25);
+    await drainUntil(() => timer.getPendingTimeouts()[0] === 25, {
       description: "the second slot_not_ready attempt to schedule its backoff",
     });
     expect(reowner.automationRefusal(S)).toBeDefined();
-    expect(timer.getPendingTimeouts()).toEqual([20]);
+    expect(timer.getPendingTimeouts()).toEqual([25]);
     const assignment = (await registry.getAssignment(key))!;
     await registry.updateSlotState(key, { ...BINDING, generation: assignment.generation }, "ready");
     expect(reowner.automationRefusal(S)).toBeDefined();
-    await advance(20);
+    await advance(25);
     await reowner.whenIdle();
     expect(reowner.automationRefusal(S)).toBeUndefined();
     expect(await registry.getAssignment(key)).toMatchObject({
@@ -584,8 +584,8 @@ describe("rehydrated managed execution peer claim fence", () => {
       faults.busy.claimExecution = 1;
       await reowner.reown([S]);
       expect(reowner.automationRefusal(S)).toBeDefined();
-      expect(timer.getPendingTimeouts()).toEqual([10]);
-      await advance(10);
+      expect(timer.getPendingTimeouts()).toEqual([25]);
+      await advance(25);
       await reowner.whenIdle();
       expect(reowner.automationRefusal(S)).toBeUndefined();
       for (const pid of PEERS) {
@@ -598,12 +598,12 @@ describe("rehydrated managed execution peer claim fence", () => {
     await registry.updateSlotState(key, BINDING, "settling", { settler: PREVIOUS });
     await reowner.reown([S]);
     expect(reowner.automationRefusal(S)).toBeDefined();
-    expect(timer.getPendingTimeouts()).toEqual([10]);
+    expect(timer.getPendingTimeouts()).toEqual([25]);
     judge = viewOf(PEERS[0]!);
     await registry.recoverSettledSlots(key.scopeKey);
     judge = viewOf(OWNER.pid);
     expect((await claimAs(PEERS[0]!)).kind).toBe("claimed");
-    await advance(10);
+    await advance(25);
     await reowner.whenIdle();
     expect(reowner.automationRefusal(S)?.message).toContain("no longer owns");
   });
@@ -652,7 +652,7 @@ describe("rehydrated managed execution peer claim fence", () => {
     },
   );
 
-  testWithFreshSlot("an inline failure after close is debug logged without warning", async () => {
+  testWithFreshSlot("an inline failure after close is not logged", async () => {
     const debug = spyOn(logger, "debug").mockImplementation(() => {});
     try {
       faults.hooks.afterLookup = () => reowner.close();
@@ -660,7 +660,7 @@ describe("rehydrated managed execution peer claim fence", () => {
       await reowner.reown([S], { rehydrated: true });
       await reowner.whenIdle();
       expect(warn.mock.calls).toEqual([]);
-      expect(debug.mock.calls).toHaveLength(1);
+      expect(debug.mock.calls).toHaveLength(0);
       expect(reowner.automationRefusal(S)).toBeDefined();
     } finally {
       debug.mockRestore();
@@ -692,7 +692,7 @@ describe("rehydrated managed execution peer claim fence", () => {
       void hold.settled!.then((outcome) => {
         settled = outcome;
       });
-      await advance(10);
+      await advance(25);
       expect(opens).toBe(2);
       reowner.noteRecovering(S, recovering.promise);
       opened.resolve(faults.faulty);
@@ -717,7 +717,7 @@ describe("rehydrated managed execution peer claim fence", () => {
       held = false;
       expect(reowner.automationRefusal(S)).toBeUndefined();
       const calls = { ...faults.calls };
-      await advance(10);
+      await advance(25);
       await reowner.whenIdle();
       expect(faults.calls).toEqual(calls);
       expect(timer.getPendingTimeouts()).toEqual([]);
@@ -732,7 +732,7 @@ describe("rehydrated managed execution peer claim fence", () => {
       await reowner.reown([S]);
       expect(reowner.automationRefusal(S)).toBeUndefined();
       const calls = { ...faults.calls };
-      await advance(10);
+      await advance(25);
       await reowner.whenIdle();
       expect(faults.calls).toEqual(calls);
       for (const pid of PEERS) {
@@ -748,7 +748,7 @@ describe("rehydrated managed execution peer claim fence", () => {
       await reowner.reown(["missing", S], { rehydrated: true });
       expect(reowner.automationRefusal(S)).toBeUndefined();
       expect(reowner.automationRefusal("missing")).toBeDefined();
-      await advance(10);
+      await advance(25);
       await reowner.whenIdle();
       expect(reowner.automationRefusal("missing")?.message).toContain("no longer owns");
     },

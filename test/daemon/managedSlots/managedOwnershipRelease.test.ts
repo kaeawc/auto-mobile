@@ -536,7 +536,7 @@ describe("managed ownership release", () => {
       expect(h.reowner.automationRefusal(SESSION)).toBeDefined();
       h.behavior.busy = false;
       await drainMicrotasks(40);
-      h.timer.advanceTime(2_000);
+      await h.timer.advanceTimeAsync(2_000, () => drainMicrotasks(100));
       await drainUntil(() => h.confirmed.length > 0, {
         description: "claim after superseded release",
       });

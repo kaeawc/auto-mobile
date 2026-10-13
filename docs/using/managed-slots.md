@@ -329,6 +329,12 @@ record is cleared. A dead record alone never keeps a slot in use; a live session
 held by the current daemon can still do so while re-owning catches up. The `pid`
 in `reset-slot-scope` pending `liveOwners` evidence is this recorded daemon PID.
 
+While re-owning is unconfirmed, control calls refuse with
+`managed_slot_ownership_unconfirmed` and `retryAfterMs: 1000`; retries start at
+25 ms, double to a 1 s cap, and continue while the session remains unconfirmed.
+Attempts share quiet time after a blocked registry call (capped at 5 s), with
+asynchronous waits bounded at 700 ms; failures warn once after 5 s of unconfirmed ownership.
+
 Values are the defaults in `src/daemon/sessionLivenessWindows.ts`; see
 [Device ownership](device-ownership.md#when-a-session-is-released) for the
 general release rules.

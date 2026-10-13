@@ -5073,14 +5073,19 @@ export class DaemonMcpProxy {
     reason = "released",
     release?: SessionReleaseSnapshot,
   ): void {
+    const pending = this.pendingHeldSessionPlatformLosses.get(sessionUuid);
+    if (pending) {
+      pending.reason = reason === "released" ? pending.reason : reason;
+      pending.release = release ?? pending.release;
+      return;
+    }
     const platform = this.sessionPlatforms.get(sessionUuid);
     const handedOver = this.stallHandovers.get(sessionUuid);
     if (
       platform === undefined ||
       sessionUuid === this.boundSessionUuid ||
       sessionUuid === this.terminalBoundSession?.sessionUuid ||
-      (!this.otherHeldSessions.has(sessionUuid) && (!handedOver || handedOver.restore.bound)) ||
-      this.pendingHeldSessionPlatformLosses.has(sessionUuid)
+      (!this.otherHeldSessions.has(sessionUuid) && (!handedOver || handedOver.restore.bound))
     ) {
       return;
     }
@@ -5679,10 +5684,13 @@ export class DaemonMcpProxy {
    * through noteDaemonIdleEvidence, then the CLI closes without another tool call.
    */
   private retireIdleBinding(sessionUuid: string): void {
-    const reason = this.daemonIdleReports.has(sessionUuid)
+    this.fenceBoundSessionUuid(sessionUuid, this.idleSessionReleaseReason(sessionUuid));
+  }
+
+  private idleSessionReleaseReason(sessionUuid: string): string {
+    return this.daemonIdleReports.has(sessionUuid)
       ? IDLE_WINDOW_RELEASE_REASON
       : REPLAY_LEASE_EXPIRED_REASON;
-    this.fenceBoundSessionUuid(sessionUuid, reason);
   }
 
   private fenceBoundSessionUuid(
@@ -7153,6 +7161,7 @@ export class DaemonMcpProxy {
         logger.info(
           `[DaemonMcpProxy] Held session ${sessionUuid} was not used for ${this.boundSessionReplayTtlMs}ms; no longer heartbeating it`,
         );
+        this.recordHeldSessionTerminalLoss(sessionUuid, this.idleSessionReleaseReason(sessionUuid));
         this.dropHeldSession(sessionUuid);
       }
     }

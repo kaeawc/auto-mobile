@@ -4,7 +4,7 @@ import {
   DaemonMcpProxy,
   DaemonSessionStalledError,
 } from "../../src/daemon/daemonMcpProxy";
-import { DAEMON_VERSION } from "../../src/daemon/constants";
+import { DAEMON_BOUND_SESSION_REPLAY_TTL_MS, DAEMON_VERSION } from "../../src/daemon/constants";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import type { LivenessHandover } from "../../src/daemon/proxyLivenessRecovery";
 import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
@@ -40,6 +40,7 @@ let heartbeatError: unknown;
 let appleResultOverride: unknown;
 let silentIos: boolean;
 let thrownNamedAnswer: boolean;
+let iosIdleReleaseAt: number | undefined;
 let ended: Map<string, string>;
 let handovers: LivenessHandover[];
 let spies: Array<ReturnType<typeof spyOn>>;
@@ -69,6 +70,7 @@ function setUp(initialSessionUuid?: string): void {
   appleResultOverride = undefined;
   silentIos = false;
   thrownNamedAnswer = false;
+  iosIdleReleaseAt = undefined;
   client = new FakeDaemonClient({
     onCallTool: (_name, args) => {
       const reason = ended.get(args.sessionUuid);
@@ -116,6 +118,9 @@ function setUp(initialSessionUuid?: string): void {
         }
         if (silentIos) {
           return new Promise<never>(() => {});
+        }
+        if (iosIdleReleaseAt !== undefined) {
+          return { idleReleaseAt: iosIdleReleaseAt };
         }
       }
       return undefined;
@@ -174,6 +179,11 @@ async function refused(session = IOS, reason = "device-killed"): Promise<void> {
   );
   expect(answer).toBeInstanceOf(DaemonBoundSessionExpiredError);
   expect(answer).toMatchObject({ sessionUuid: session.sessionUuid, reason });
+  if (reason === "cleanup-expired" || reason === "replay-lease-expired") {
+    expect(sessionOwnershipLostPayload(answer as DaemonBoundSessionExpiredError).error.idle).toBe(
+      true,
+    );
+  }
   expect(client.callToolCalls).toHaveLength(before);
 }
 async function forwarded(
@@ -187,6 +197,59 @@ async function forwarded(
   expect(client.callToolCalls.at(-1)?.params.sessionUuid).toBe(sessionUuid);
 }
 const advance = (ms: number) => timer.advanceTimeAsync(ms, () => drainUntilQuiescent(timer));
+
+async function evictIos(daemonConfirmed = false): Promise<void> {
+  if (daemonConfirmed) {
+    iosIdleReleaseAt = timer.now() + DAEMON_BOUND_SESSION_REPLAY_TTL_MS;
+  }
+  await acquireBoth();
+  await advance(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - INTERVAL_MS);
+  await forwarded("homeScreen", { platform: "android" }, ANDROID.sessionUuid);
+  await advance(INTERVAL_MS * 3);
+}
+
+for (const daemonConfirmed of [false, true]) {
+  test(`held idle eviction reports ${daemonConfirmed ? "cleanup-expired" : "replay-lease-expired"} once with idle wire evidence`, async () => {
+    await evictIos(daemonConfirmed);
+    await refused(IOS, daemonConfirmed ? "cleanup-expired" : "replay-lease-expired");
+    await forwarded();
+  });
+}
+
+for (const notificationBeforeConsumption of [false, true]) {
+  test(`a late eviction release ${notificationBeforeConsumption ? "before" : "after"} consumption yields exactly one report`, async () => {
+    await evictIos();
+    if (notificationBeforeConsumption) {
+      release(IOS, "cleanup-expired");
+    }
+    await refused(IOS, notificationBeforeConsumption ? "cleanup-expired" : "replay-lease-expired");
+    release(IOS, "cleanup-expired");
+    await forwarded();
+  });
+}
+
+test("reads and Android controls preserve an eviction loss", async () => {
+  await evictIos();
+  await forwarded("observe");
+  await forwarded("homeScreen", { platform: "android" }, ANDROID.sessionUuid);
+  await refused(IOS, "replay-lease-expired");
+  await forwarded();
+});
+
+for (const selection of ["named", "acquired"] as const) {
+  test(`${selection} selection clears an eviction loss`, async () => {
+    await evictIos();
+    if (selection === "named") {
+      release(IOS, "cleanup-expired");
+      await proxy.callTool("homeScreen", { sessionUuid: IOS.sessionUuid });
+      await forwarded();
+    } else {
+      apple = { ...IOS, sessionUuid: "ios-reacquired" };
+      await proxy.callTool("getApple", {});
+      await forwarded("homeScreen", { platform: "ios" }, apple.sessionUuid);
+    }
+  });
+}
 
 for (const reason of ["device-killed", "cleanup-expired"]) {
   test(`held terminal ${reason} is refused once, then forwarded sessionless`, async () => {

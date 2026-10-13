@@ -4,7 +4,11 @@ import {
   DaemonMcpProxy,
   DaemonSessionStalledError,
 } from "../../src/daemon/daemonMcpProxy";
-import { DAEMON_BOUND_SESSION_REPLAY_TTL_MS, DAEMON_VERSION } from "../../src/daemon/constants";
+import {
+  DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
+  DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
+  DAEMON_VERSION,
+} from "../../src/daemon/constants";
 import { DAEMON_SESSION_NOT_FOUND_CODE } from "../../src/daemon/types";
 import type { LivenessHandover } from "../../src/daemon/proxyLivenessRecovery";
 import { sessionOwnershipLostPayload } from "../../src/server/deviceSessionResult";
@@ -41,6 +45,7 @@ let appleResultOverride: unknown;
 let silentIos: boolean;
 let thrownNamedAnswer: boolean;
 let iosIdleReleaseAt: number | undefined;
+let tokenOwned: Device[];
 let ended: Map<string, string>;
 let handovers: LivenessHandover[];
 let spies: Array<ReturnType<typeof spyOn>>;
@@ -59,7 +64,7 @@ function deviceResult(device: Device) {
   };
 }
 
-function setUp(initialSessionUuid?: string): void {
+function setUp(initialSessionUuid?: string, livenessOwnerToken?: string): void {
   timer = new FakeTimer();
   apple = IOS;
   android = ANDROID;
@@ -71,6 +76,7 @@ function setUp(initialSessionUuid?: string): void {
   silentIos = false;
   thrownNamedAnswer = false;
   iosIdleReleaseAt = undefined;
+  tokenOwned = [];
   client = new FakeDaemonClient({
     onCallTool: (_name, args) => {
       const reason = ended.get(args.sessionUuid);
@@ -112,6 +118,15 @@ function setUp(initialSessionUuid?: string): void {
       );
     },
     onCallDaemonMethod: (method, args) => {
+      if (method === DAEMON_TOKEN_OWNED_SESSIONS_METHOD) {
+        return {
+          sessions: tokenOwned.map((device) => ({
+            ...device,
+            sessionId: device.sessionUuid,
+            lastUsedAt: timer.now(),
+          })),
+        };
+      }
       if (method === "daemon/heartbeat" && args.sessionId === IOS.sessionUuid) {
         if (heartbeatError) {
           throw heartbeatError;
@@ -137,6 +152,7 @@ function setUp(initialSessionUuid?: string): void {
     idGenerator: new FakeIdGenerator(),
     heartbeatTimeoutMs: 10_000,
     heartbeatIntervalMs: INTERVAL_MS,
+    ...(livenessOwnerToken ? { livenessOwnerToken } : {}),
     ...(initialSessionUuid ? { initialSessionUuid } : {}),
   });
   proxy.onLivenessHandover((handover) => handovers.push(handover));
@@ -591,6 +607,49 @@ test("a second notification cannot enqueue the same session twice", async () => 
   await refused();
   await forwarded();
 });
+
+test.each(["session claimed", "holdPreviousBinding", "updateBoundSessionUuid"])(
+  "%s clears only its UUID, preserving another platform and another same-platform loss",
+  async (path) => {
+    await proxy.close();
+    setUp(undefined, "stable-owner");
+    await proxy.callTool("getApple", {});
+    const sibling = { ...IOS, sessionUuid: "ios-sibling", deviceId: "SIM-2" };
+    apple = sibling;
+    await proxy.callTool("getApple", {});
+    await proxy.callTool("getAndroid", {});
+    apple = { sessionUuid: "neutral-default", deviceId: "neutral" };
+    await proxy.callTool("getApple", {});
+    release();
+    release(sibling);
+    release(ANDROID);
+    ended.delete(IOS.sessionUuid);
+    if (path === "session claimed") {
+      tokenOwned = [IOS];
+      client.emitConnectionClosed();
+      await proxy.callTool("listDevices", {});
+      expect(
+        client.callDaemonMethodCalls.filter(
+          (call) => call.method === DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
+        ),
+      ).toHaveLength(2);
+      // Lose the claimed session before a platform call can clear its siblings. A generic
+      // release preserves an existing reason, distinguishing the token-claim UUID delete.
+      release(IOS, "released");
+    } else {
+      // Both binding clears and the final selection clear overlap here. The session's
+      // platform was forgotten, so this selection clears only its UUID, never its siblings.
+      selected = { sessionUuid: IOS.sessionUuid, deviceId: IOS.deviceId };
+      await proxy.callTool("setActiveDevice", { deviceId: selected.deviceId });
+    }
+    await refused(ANDROID);
+    await refused(sibling);
+    if (path === "session claimed") {
+      await refused(IOS, "released");
+    }
+    await forwarded();
+  },
+);
 
 test("notification release snapshot and fallback reason are preserved", async () => {
   await acquireBoth();

@@ -90,10 +90,10 @@ export function captureFidelityTruncationReasons(reasons: readonly string[] | un
 }
 
 /** Omit legacy wire nulls only where the hierarchy output contract requires an array/object. */
-export function normalizeHierarchyOptionalFields<T extends ViewHierarchyResult | undefined>(
+export function normalizeHierarchyOptionalFields<T extends ViewHierarchyResult | null | undefined>(
   hierarchy: T,
 ): T {
-  if (hierarchy === undefined) {
+  if (hierarchy === undefined || hierarchy === null) {
     return hierarchy;
   }
   const normalized = { ...hierarchy };

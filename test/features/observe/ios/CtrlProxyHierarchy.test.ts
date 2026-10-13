@@ -52,6 +52,7 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
   const subject = new CtrlProxyHierarchy(stubContext);
 
   test("omits null inset fields from a captured runner hierarchy", () => {
+    // Only systemInsets and insets are overwritten with the runner's null sentinel on an otherwise captured runner payload.
     const wire = Object.assign(structuredClone(capturedWire), { systemInsets: null, insets: null });
     const result = subject.convertToViewHierarchyResult(wire as XCTestHierarchy);
     expect(Object.hasOwn(result, "systemInsets")).toBe(false);

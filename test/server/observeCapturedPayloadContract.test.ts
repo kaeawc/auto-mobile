@@ -6,9 +6,19 @@ import type {
   AccessibilityHierarchy,
   HierarchyDelegateContext,
 } from "../../src/features/observe/android/types";
-import { scopeObserveResultToLayer } from "../../src/features/observe/hierarchyLayer";
+import {
+  hasOwnPrototype,
+  scopeObserveResultToLayer,
+} from "../../src/features/observe/hierarchyLayer";
 import { sanitizeObserveResult } from "../../src/features/observe/output/ObserveResultOutput";
+import { normalizeHierarchyOptionalFields } from "../../src/features/observe/truncationReasons";
 import type { ObserveResult } from "../../src/models/ObserveResult";
+import {
+  finalizeToolResponse,
+  type ObservationArtifactWriter,
+  type ObservationArtifactWriteInput,
+} from "../../src/server/finalizeToolResponse";
+import { createStructuredToolResponse, getStructuredPayload } from "../../src/utils/toolUtils";
 import {
   observeResultSchema,
   observeToolResultSchema,
@@ -77,8 +87,38 @@ function assertContract(out: ObserveResult): void {
   }
   expect(nulls).toEqual([]);
 }
-const modes = ["skeleton", "full", "raw"] as const;
+// resolveObserveProjection maps raw:true to project:"full"; rawViewHierarchy holds a JSON string the schema does not structurally validate.
+const modes = ["skeleton", "full"] as const;
 const layers = [undefined, "app", "prototype"] as const;
+
+class CapturedObservationArtifactWriter implements ObservationArtifactWriter {
+  writes: ObservationArtifactWriteInput[] = [];
+
+  writeJsonArtifact(input: ObservationArtifactWriteInput) {
+    this.writes.push(input);
+    return {
+      artifact: {
+        path: `/tmp/auto-mobile/${input.tool}-${this.writes.length}.json`,
+        format: "json" as const,
+        payload: input.payload,
+        bytes: Buffer.byteLength(input.serialized!),
+        tool: input.tool,
+        resourceUri: `automobile:tool-output/${input.tool}-${this.writes.length}`,
+      },
+    };
+  }
+}
+
+// The smallest Android captures (tied at 67,707 finalized structured bytes) plus a launcher
+// without a prototype and both overlays. Default context has no artifact writer: assert inline.
+const finalizedCaptures = captures.filter(
+  ({ name }) =>
+    name === "android-launcher/launcher-home-emulator-5600.json" ||
+    name === "android-focus/playground-text-field-pre-tap.json" ||
+    name === "identify-interactions/playground-text-fields.json" ||
+    name.startsWith("android-overlay-window/"),
+);
+
 for (const mode of modes) {
   for (const layer of layers) {
     describe(`${mode} / ${layer ?? "all layers"}`, () => {
@@ -87,7 +127,7 @@ for (const mode of modes) {
           const originalReasons = observation.viewHierarchy?.truncationReasons;
           const scoped = scopeObserveResultToLayer(observation, layer, platform);
           const out = sanitizeObserveResult(scoped, {
-            project: mode === "raw" ? "full" : mode,
+            project: mode,
             dropElements: true,
             compact: true,
           });
@@ -103,7 +143,7 @@ for (const mode of modes) {
         test(`per-display and embedded output: ${name}`, () => {
           const scoped = scopeObserveResultToLayer(observation, layer, platform);
           const out = sanitizeObserveResult(scoped, {
-            project: mode === "raw" ? "full" : mode,
+            project: mode,
             dropElements: true,
             compact: true,
           });
@@ -121,7 +161,7 @@ for (const mode of modes) {
           const scoped = scopeObserveResultToLayer(observationOf(hierarchy), layer, "android");
           assertContract(
             sanitizeObserveResult(scoped, {
-              project: mode === "raw" ? "full" : mode,
+              project: mode,
               dropElements: true,
               compact: true,
             }),
@@ -131,6 +171,17 @@ for (const mode of modes) {
     });
   }
 }
+test("captured observation without a hierarchy keeps the key absent", () => {
+  const observation = { ...captures[0].observation };
+  delete observation.viewHierarchy;
+  const out = sanitizeObserveResult(observation, { project: "full" });
+  expect(Object.hasOwn(out, "viewHierarchy")).toBe(false);
+});
+
+test("hierarchy normalization preserves undefined", () => {
+  expect(normalizeHierarchyOptionalFields(undefined)).toBeUndefined();
+});
+
 test("captured truncation array survives full output and lifts into skeleton", () => {
   // Only reasons change: no committed capture currently advertises a device truncation.
   const hierarchy = subject.convertToViewHierarchyResult({
@@ -196,5 +247,59 @@ test("legacy captured output omits schema-declared null objects without mutating
   for (const window of out.viewHierarchy!.windows ?? []) {
     expect(Object.hasOwn(window, "bounds")).toBe(false);
     expect(Object.hasOwn(window, "hierarchy")).toBe(false);
+  }
+});
+
+describe("captured observations through the real post-handler hook", () => {
+  for (const { name, observation } of finalizedCaptures) {
+    const prototypeShowing = name.startsWith("android-overlay-window/");
+    for (const layer of prototypeShowing ? layers : [undefined]) {
+      const label = `${name} / ${layer ?? "all layers"}`;
+      // Scope immutable fixture input once; every case still runs the real response finalizer.
+      const scoped = scopeObserveResultToLayer(observation, layer, "android");
+      for (const project of ["full", undefined] as const) {
+        test(`finalized inline ${project ?? "default skeleton"}: ${label}`, () => {
+          expect(hasOwnPrototype(observation.viewHierarchy!)).toBe(prototypeShowing);
+          expect(observation.viewHierarchy?.truncationReasons).toBeNull();
+          const response = finalizeToolResponse(createStructuredToolResponse(scoped), {
+            name: "observe",
+            sessionUuid: "s1",
+            args: project === undefined ? {} : { project },
+          });
+          // Same structured-content accessor as finalizeToolResponse.test.ts's local helper.
+          const payload = getStructuredPayload(response);
+          expect(payload).toBeDefined();
+          expect(Object.hasOwn(payload!, "artifact")).toBe(false);
+          expect(observeToolResultSchema.safeParse(payload).success).toBe(true);
+          if (project === "full") {
+            expect(Object.hasOwn(payload!, "viewHierarchy")).toBe(true);
+            expect(Object.hasOwn(payload!.viewHierarchy!, "truncationReasons")).toBe(false);
+          } else {
+            expect(Object.hasOwn(payload!, "skeleton")).toBe(true);
+            expect(Object.hasOwn(payload!, "viewHierarchy")).toBe(false);
+          }
+        });
+      }
+      test(`finalized full artifact: ${label}`, () => {
+        const writer = new CapturedObservationArtifactWriter();
+        const response = finalizeToolResponse(createStructuredToolResponse(scoped), {
+          name: "observe",
+          sessionUuid: "s1",
+          args: { project: "full" },
+          artifactMode: "always",
+          artifactWriter: writer,
+        });
+        const payload = getStructuredPayload(response);
+        expect(payload).toBeDefined();
+        expect(Object.hasOwn(payload!, "artifact")).toBe(true);
+        expect(Object.hasOwn(payload!, "viewHierarchy")).toBe(false);
+        expect(observeToolResultSchema.safeParse(payload).success).toBe(true);
+        expect(writer.writes).toHaveLength(1);
+        expect(writer.writes[0].serialized).toBeDefined();
+        const written = observeResultSchema.parse(JSON.parse(writer.writes[0].serialized!));
+        expect(written.viewHierarchy).toBeDefined();
+        expect(Object.hasOwn(written.viewHierarchy!, "truncationReasons")).toBe(false);
+      });
+    }
   }
 });

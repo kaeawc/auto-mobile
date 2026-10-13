@@ -112,7 +112,10 @@ import {
   type LivenessOwnerHold,
   type LivenessOwnerLeaseSnapshot,
 } from "./livenessOwnerLease";
-import { isReleaseVetoedByExecutions } from "./unsettledExecutionVeto";
+import {
+  isReleaseVetoedByExecutions,
+  UNSETTLED_EXECUTION_VETO_CEILING_MS,
+} from "./unsettledExecutionVeto";
 import {
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS,
   getSessionHeartbeatCheckIntervalMs,
@@ -833,6 +836,8 @@ export interface ActiveSessionExecutionQuery {
   startedAtOrBefore?: number;
   /** Compare the start captured on the session clock, immune to wall-clock steps (#11290). */
   sessionClockStartedAtOrBefore?: number;
+  /** Admission only: count non-aborted work within its deadline or its undated allowance. */
+  liveOnSessionClock?: { at: number; undatedForMs: number };
   excludeExecutionId?: string;
   /** Count control calls only: reads never hold idle or owner-disconnect release (#11381). */
   excludeReads?: boolean;
@@ -12730,7 +12735,15 @@ export class SessionManager {
       this.sessionNow() > idleDeadline &&
       execution.sessionClockStartTime > idleDeadline &&
       this.activeSessionExecutionChecker(session.sessionId, {
-        ...(timelyControlOnly ? { sessionClockStartedAtOrBefore: idleDeadline } : {}),
+        ...(timelyControlOnly
+          ? {
+              sessionClockStartedAtOrBefore: idleDeadline,
+              liveOnSessionClock: {
+                at: this.sessionNow(),
+                undatedForMs: UNSETTLED_EXECUTION_VETO_CEILING_MS,
+              },
+            }
+          : {}),
         excludeExecutionId: execution.executionId,
         excludeReads: true,
       })

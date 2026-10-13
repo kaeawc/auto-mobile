@@ -549,6 +549,60 @@ describe("ExecutionTracker", function () {
     },
   );
 
+  for (const membership of ["explicit", "resolved", "provisional"] as const) {
+    test.each(["aborted", "dated", "undated"] as const)(
+      `admission liveness filters ${membership} control work once %s, preserving unfiltered holds`,
+      (condition) => {
+        const timer = new FakeTimer();
+        const tracker = new ExecutionTracker(timer, new FakeIdGenerator());
+        tracker.setAutolockSessionResolver({ autolockSessionForMcpSession: () => "holder" });
+        tracker.setSessionClockOffsetProvider(
+          (wallNowMs = timer.now()) => timer.monotonicNow() - wallNowMs,
+        );
+        timer.advanceTime(5);
+        timer.stepWallClock(-3_600_000);
+        const execution = tracker.startExecution(
+          "tapOn",
+          undefined,
+          membership === "explicit" ? "holder" : undefined,
+          undefined,
+          membership === "provisional" ? "holder" : undefined,
+        );
+        if (membership === "resolved") {
+          tracker.setResolvedAutolockSessionUuid(execution.id, "holder");
+        }
+        if (condition !== "undated") {
+          const deadline = timer.now() + 10;
+          tracker.setExecutionDeadline(execution.id, () => deadline);
+        }
+        const holdQuery = { sessionClockStartedAtOrBefore: 5, excludeReads: true };
+        const liveOnSessionClock = { at: 5, undatedForMs: 20 };
+        const admissionQuery = { ...holdQuery, liveOnSessionClock };
+        const active = (query: typeof holdQuery | typeof admissionQuery) =>
+          membership === "explicit"
+            ? tracker.hasActiveSessionUuidExecutions("holder", query)
+            : tracker.hasActiveAutolockSessionExecutions("holder", query);
+        expect(active(admissionQuery)).toBe(true);
+        if (condition === "aborted") {
+          execution.abortController.abort();
+        } else {
+          liveOnSessionClock.at = condition === "dated" ? 15 : 25;
+          expect(active(admissionQuery)).toBe(true);
+          liveOnSessionClock.at++;
+        }
+        expect(active(holdQuery)).toBe(true);
+        expect(active(admissionQuery)).toBe(false);
+        // Liveness alone is a filter too: it must bypass the unfiltered fast path.
+        expect(
+          membership === "explicit"
+            ? tracker.hasActiveSessionUuidExecutions("holder", { liveOnSessionClock })
+            : tracker.hasActiveAutolockSessionExecutions("holder", { liveOnSessionClock }),
+        ).toBe(false);
+        expect(tracker.hasActiveDeviceSessionExecutions("holder")).toBe(true);
+      },
+    );
+  }
+
   test("tracks an implicit execution under its resolved autolock session", function () {
     const tracker = new ExecutionTracker(new FakeTimer(), new FakeIdGenerator(["execution-1"]));
     const execution = tracker.startExecution("tapOn", "mcp-session");

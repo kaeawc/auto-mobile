@@ -152,6 +152,8 @@ export interface ActiveExecutionQuery {
   startedAtOrBefore?: number;
   /** Bound the captured session-clock start rather than its wall-clock counterpart (#11290). */
   sessionClockStartedAtOrBefore?: number;
+  /** Admission only: count non-aborted work within its deadline or its undated allowance. */
+  liveOnSessionClock?: { at: number; undatedForMs: number };
   excludeExecutionId?: string;
   /** Same session filter as {@link ExecutionCancellationOptions.onlySessionUuid}. */
   onlySessionUuid?: string;
@@ -179,34 +181,59 @@ function executionDeadlineMs(execution: ActiveExecution, onSessionClock?: boolea
   return onSessionClock ? wallDeadline + (execution.sessionClockOffsetMs ?? 0) : wallDeadline;
 }
 
-/** Whether `query` leaves this execution out by id, session-clock start or as a read. */
+/** Admission liveness uses the captured deadline clock, never a later wall-clock offset. */
+function isLiveOnSessionClock(
+  execution: ActiveExecution | undefined,
+  live: NonNullable<ActiveExecutionQuery["liveOnSessionClock"]>,
+): boolean {
+  if (execution === undefined || execution.abortController.signal.aborted) {
+    return false;
+  }
+  const deadline = executionDeadlineMs(execution, true);
+  const liveUntil = Number.isFinite(deadline)
+    ? deadline
+    : execution.sessionClockStartTime + live.undatedForMs;
+  return live.at <= liveUntil;
+}
+
+/** Whether `query` leaves this execution out by id, session-clock start, liveness or as a read. */
 function isExcludedByQuery(
   executionId: string,
   execution: ActiveExecution | undefined,
   query: ActiveExecutionQuery | undefined,
 ): boolean {
-  if (executionId === query?.excludeExecutionId) {
+  if (query === undefined) {
+    return false;
+  }
+  if (executionId === query.excludeExecutionId) {
     return true;
   }
   if (
-    query?.sessionClockStartedAtOrBefore !== undefined &&
+    query.sessionClockStartedAtOrBefore !== undefined &&
     (execution === undefined ||
       execution.sessionClockStartTime > query.sessionClockStartedAtOrBefore)
   ) {
     return true;
   }
-  return query?.excludeReads === true && execution !== undefined && isReadExecution(execution);
+  if (query.liveOnSessionClock && !isLiveOnSessionClock(execution, query.liveOnSessionClock)) {
+    return true;
+  }
+  return query.excludeReads === true && execution !== undefined && isReadExecution(execution);
 }
 
 /** Whether `query` filters nothing, so any tracked execution answers it. */
 function isUnfilteredQuery(query: ActiveExecutionQuery | undefined): boolean {
+  if (query === undefined) {
+    return true;
+  }
   return (
-    query?.startedAtOrBefore === undefined &&
-    query?.sessionClockStartedAtOrBefore === undefined &&
-    query?.excludeExecutionId === undefined &&
-    query?.onlyToolName === undefined &&
-    query?.onlySessionUuid === undefined &&
-    !query?.excludeReads
+    query.startedAtOrBefore === undefined &&
+    query.sessionClockStartedAtOrBefore === undefined &&
+    query.liveOnSessionClock === undefined &&
+    query.excludeExecutionId === undefined &&
+    query.onlyToolName === undefined &&
+    query.onlySessionUuid === undefined &&
+    !query.excludeReads
   );
 }
 

@@ -20,6 +20,10 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { ProgressExtendableDeadline } from "../../src/daemon/mcpRequestTimeout";
+import {
+  UNSETTLED_EXECUTION_DEADLINE_GRACE_MS,
+  UNSETTLED_EXECUTION_VETO_CEILING_MS,
+} from "../../src/daemon/unsettledExecutionVeto";
 
 // #11105 item 2: request deadlines are stamped on the wall clock, the idle veto judges them on
 // the session clock. A wall step before a call starts must not end its veto early.
@@ -179,13 +183,98 @@ describe("a new call's start is judged on the session clock (#11290)", () => {
     }
   }
 
-  function startLongCallHoldingTheSession(): void {
+  function startLongCallHoldingTheSession(): ActiveExecution {
     const earlier = tracker.startExecution("provision", undefined, SESSION);
     const deadline = timer.now() + 600_000;
     tracker.setExecutionDeadline(earlier.id, () => deadline);
+    return earlier;
   }
 
   for (const step of [0, -HOUR_MS]) {
+    for (const condition of ["aborted", "past request deadline"] as const) {
+      it(`admission liveness refuses late control behind timely work ${condition}, wall step ${step}`, async () => {
+        const earlier = startLongCallHoldingTheSession();
+        timer.stepWallClock(step);
+        timer.advanceTime(condition === "aborted" ? IDLE_MS + 1 : 600_001);
+        if (condition === "aborted") {
+          earlier.abortController.abort();
+        }
+        const expiresAt = manager.getAllSessions()[0]?.expiresAt;
+        const late = tracker.startExecution("tapOn", undefined, SESSION);
+        expect(admission(metadataOf(late))).toBe("refused");
+        const pending = manager.admitIssuedSessionForAutomation(SESSION, metadataOf(late));
+        await expect(pending).rejects.toMatchObject({
+          constructor: Error,
+          message: `Session ${SESSION} expired before this execution began while earlier work is still active.`,
+        });
+        expect(manager.getAllSessions()[0]?.expiresAt).toBe(expiresAt);
+        expect(releases).toEqual([]);
+        tracker.endExecution(late.id);
+      });
+    }
+
+    it(`admission liveness bounds periodic late control behind wedged dated work, wall step ${step}`, async () => {
+      // Ends no later than max(last admitted call's idle deadline, A's request deadline + 10 s grace);
+      // an undated A stops admitting 30 min after its own start.
+      const earlier = startLongCallHoldingTheSession();
+      timer.stepWallClock(step);
+      let expiresAt = IDLE_MS;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        timer.advanceTime(IDLE_MS + 1);
+        const late = tracker.startExecution("tapOn", undefined, SESSION);
+        if (attempt < 4) {
+          expect(admission(metadataOf(late))).toBe("admitted");
+          await manager.admitIssuedSessionForAutomation(SESSION, metadataOf(late));
+          const refreshed = manager.getAllSessions()[0]!.expiresAt;
+          expect(refreshed).toBeGreaterThan(expiresAt);
+          expect(refreshed).toBe(manager.sessionNow() + IDLE_MS);
+          expiresAt = refreshed;
+        } else {
+          expect(admission(metadataOf(late))).toBe("refused");
+          await expect(
+            manager.admitIssuedSessionForAutomation(SESSION, metadataOf(late)),
+          ).rejects.toMatchObject({
+            constructor: Error,
+            message: `Session ${SESSION} expired before this execution began while earlier work is still active.`,
+          });
+          expect(manager.getAllSessions()[0]?.expiresAt).toBe(expiresAt);
+        }
+        tracker.endExecution(late.id);
+      }
+      const releaseAt = 600_000 + UNSETTLED_EXECUTION_DEADLINE_GRACE_MS;
+      timer.advanceTime(releaseAt - manager.sessionNow() - 1);
+      const refused = tracker.startExecution("tapOn", undefined, SESSION);
+      expect(admission(metadataOf(refused))).toBe("refused");
+      expect(manager.getAllSessions()[0]?.expiresAt).toBe(expiresAt);
+      tracker.endExecution(refused.id);
+      manager.cleanupExpiredSessions();
+      expect(releases).toEqual([]);
+      expect(earlier.abortController.signal.aborted).toBe(false);
+      timer.advanceTime(1);
+      manager.cleanupExpiredSessions();
+      await manager.waitForSessionRelease(SESSION);
+      expect(releases).toEqual(["cleanup-expired"]);
+      expect(manager.getTerminalReleaseSnapshot(SESSION)?.releaseReason).toBe("cleanup-expired");
+      expect(manager.getSession(SESSION)).toBeNull();
+      expect(sessionReleasedDuringCallPayload(earlier.cancelReason)).toMatchObject({
+        error: { reason: "cleanup-expired", idle: true },
+      });
+    });
+
+    it(`admission liveness of undated timely work ends 30 min after its own start, wall step ${step}`, () => {
+      const earlier = tracker.startExecution("provision", undefined, SESSION);
+      timer.stepWallClock(step);
+      timer.advanceTime(UNSETTLED_EXECUTION_VETO_CEILING_MS);
+      const atCeiling = tracker.startExecution("tapOn", undefined, SESSION);
+      expect(admission(metadataOf(atCeiling))).toBe("admitted");
+      tracker.endExecution(atCeiling.id);
+      timer.advanceTime(1);
+      const afterCeiling = tracker.startExecution("tapOn", undefined, SESSION);
+      expect(admission(metadataOf(afterCeiling))).toBe("refused");
+      expect(manager.getAllSessions()[0]?.expiresAt).toBe(IDLE_MS);
+      expect(earlier.abortController.signal.aborted).toBe(false);
+    });
+
     it(`admits a call begun after the idle deadline while timely control work holds the session, wall step ${step}`, async () => {
       startLongCallHoldingTheSession();
       timer.advanceTime(IDLE_MS + 80_000);

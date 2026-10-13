@@ -541,12 +541,6 @@ const BUILDERS: readonly FixtureEntry[] = [
       ),
   ],
   [
-    "managed_execution_ended.released_cleanup_expired",
-    "managedEndedPayload",
-    () =>
-      jsonResult(managedEndedPayload(readyManagedSlotsResult(SESSION), SESSION, "cleanup-expired")),
-  ],
-  [
     "session_terminal_release_in_progress",
     "SessionTerminalReleaseInProgressError via shapeToolCallError",
     () =>

@@ -83,10 +83,121 @@ beforeAll(async () => {
   await warm.toolCall(session);
   await warm.idleUntilReleased(session, IDLE_WINDOW_MS + RELEASE_SLACK_MS);
   await warm.stop();
+  // Warm only the managed registry/policy/proxy setup; the rows below run their own scenarios.
+  const managedWarm = await LivenessScenario.start({ managedSlots: true });
+  const managed = await managedWarm.acquire();
+  await managedWarm.holdAsManagedExecution(managed);
+  await managedWarm.proxy.holdManagedExecutionSession(managed);
+  await managedWarm.daemonRestart();
+  await managedWarm.idle(KEEPER_INTERVAL_MS);
+  await managedWarm.stop();
 });
 
 afterEach(async () => {
   await scenario.stop();
+});
+
+describe("managed execution owner exemption (#11340)", () => {
+  test("managed execution idle 30 min with live owner is held", async () => {
+    scenario = await LivenessScenario.start({ managedSlots: true });
+    const managed = await scenario.acquire();
+    await scenario.holdAsManagedExecution(managed);
+    await scenario.proxy.holdManagedExecutionSession(managed);
+    const original = scenario.daemon.manager.getSession(managed)!;
+    const clocks = [original.lastUsedAt, original.expiresAt];
+    // This sleep-pausing clock counts a forward wall-only jump as sleep, without interval replay.
+    scenario.timer.stepWallClock(30 * 60_000);
+    await scenario.idle(KEEPER_INTERVAL_MS);
+    scenario.daemon.manager.cleanupExpiredSessions();
+    expect(scenario.daemon.manager.sessionNow()).toBeGreaterThan(original.expiresAt);
+    expectHeld(managed);
+    expect(scenario.daemon.manager.getAllSessions().some((s) => s.sessionId === managed)).toBe(
+      true,
+    );
+    expect([original.lastUsedAt, original.expiresAt]).toEqual(clocks);
+    expect(await scenario.daemonMethod("daemon/sessionInfo", { sessionId: managed })).toMatchObject(
+      {
+        success: true,
+        result: { idleReleaseAt: null },
+      },
+    );
+    await scenario.toolCall(managed);
+    expect(scenario.driven.at(-1)?.sessionUuid).toBe(managed);
+    expect(scenario.releases).toEqual([]);
+  });
+
+  test("managed execution heartbeat loss releases at lease plus grace", async () => {
+    scenario = await LivenessScenario.start({ managedSlots: true });
+    const managed = await scenario.acquire();
+    await scenario.holdAsManagedExecution(managed);
+    await scenario.proxy.holdManagedExecutionSession(managed);
+    await scenario.idle(KEEPER_INTERVAL_MS);
+    expectHeld(managed);
+    const lastBeat = scenario.daemon.manager.getSession(managed)!.lastOwnerHeartbeat!;
+    scenario.dropHeartbeats = true;
+    await scenario.idle(NO_HEARTBEAT_BUDGET_MS + SCAN_MS);
+    const release = scenario.releaseOf(managed)!;
+    expect(release.reason).toBe("heartbeat-timeout");
+    expect(release.at - lastBeat).toBeGreaterThan(
+      DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS + SUSPECT_GRACE_MS,
+    );
+    expect(release.at - lastBeat).toBeLessThanOrEqual(NO_HEARTBEAT_BUDGET_MS);
+    expectFreed();
+    const info = await scenario.daemonMethod("daemon/sessionInfo", { sessionId: managed });
+    expect(info).toMatchObject({ success: false, releaseReason: "heartbeat-timeout" });
+    expect(info).not.toHaveProperty("idle");
+  });
+
+  test("plain session in the same daemon idle-releases at 2 minutes", async () => {
+    scenario = await LivenessScenario.start({ managedSlots: true, devices: [DEVICE_A, DEVICE_B] });
+    const startedAt = scenario.timer.now();
+    const plain = await scenario.acquire(DEVICE_B);
+    const managed = await scenario.acquire(DEVICE_A);
+    await scenario.holdAsManagedExecution(managed);
+    await scenario.proxy.holdManagedExecutionSession(managed);
+    scenario.timer.stepWallClock(IDLE_WINDOW_MS + 1);
+    await scenario.idleUntilReleased(plain, RELEASE_SLACK_MS);
+    const release = scenario.releaseOf(plain)!;
+    expect(release.reason).toBe("cleanup-expired");
+    expect(release.at - startedAt).toBeGreaterThan(IDLE_WINDOW_MS);
+    expect(release.at - startedAt).toBeLessThanOrEqual(IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+    expectFreed(DEVICE_B);
+    expectHeld(managed, DEVICE_A);
+  });
+
+  test("a managed execution reclaims after restarting beyond its persisted idle deadline", async () => {
+    scenario = await LivenessScenario.start({ managedSlots: true });
+    const managed = await scenario.acquire();
+    await scenario.holdAsManagedExecution(managed);
+    await scenario.proxy.holdManagedExecutionSession(managed);
+    scenario.timer.stepWallClock(30 * 60_000);
+    await scenario.idle(KEEPER_INTERVAL_MS);
+    expectHeld(managed);
+    await scenario.daemonRestart();
+    await scenario.idle(KEEPER_INTERVAL_MS);
+    await scenario.toolCall(managed);
+    expectHeld(managed);
+    expect(scenario.driven.at(-1)?.sessionUuid).toBe(managed);
+    expect(scenario.releases).toEqual([]);
+  });
+
+  test("a managed execution whose proxy never returns ends on the existing owner path", async () => {
+    scenario = await LivenessScenario.start({ managedSlots: true });
+    const absent = await scenario.acquire();
+    await scenario.holdAsManagedExecution(absent);
+    await scenario.proxy.holdManagedExecutionSession(absent);
+    scenario.timer.stepWallClock(30 * 60_000);
+    await scenario.idle(KEEPER_INTERVAL_MS);
+    expectHeld(absent);
+    scenario.dropHeartbeats = true;
+    await scenario.daemonRestart();
+    await scenario.idle(NO_HEARTBEAT_BUDGET_MS + SCAN_MS);
+    expect(scenario.releaseOf(absent)?.reason).toBe("rehydration-owner-timeout");
+    expectFreed();
+    const info = await scenario.daemonMethod("daemon/sessionInfo", { sessionId: absent });
+    expect(info).toMatchObject({ success: false, releaseReason: "rehydration-owner-timeout" });
+    expect(info).not.toHaveProperty("idle");
+  });
 });
 
 /** Held and bound to its pool entry, with the owner-liveness heartbeats still arriving. */

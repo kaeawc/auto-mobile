@@ -20,11 +20,11 @@ import {
   ManagedSlotOwnershipLostError,
   ManagedSlotOwnershipUnconfirmedError,
 } from "./managedSlotRefusal";
-import { DefaultRetryExecutor } from "../../utils/retry/RetryExecutor";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { ReleaseDeviceHold } from "../sessionManager";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
-import { MANAGED_EXECUTION_REGISTRY_RETRY_BACKOFF } from "./managedExecutionRelease";
+import { MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS } from "./managedExecutionRelease";
+import { RegistryRetryPacing } from "./registryRetryPacing";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import {
@@ -61,7 +61,17 @@ export interface ManagedExecutionReownerDependencies {
   deviceOf?: (sessionUuid: string) => string | null;
 }
 
-export const MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS = 10_000;
+const OLD_REGISTRY_BUSY_WRITE_MS = 3_300;
+// The 4 s cap is measured on the daemon's timer, not a full-attempt guarantee when queued.
+// A synchronous registry write crossing the cap delays it by at most that write;
+// device writes are skipped then, and the cap-derived cleanup hint is short by that delay.
+// Busy writes now fail in ~300 ms (#12123); the previous worst-case 3.3 s is headroom.
+export const MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS =
+  MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS + OLD_REGISTRY_BUSY_WRITE_MS;
+export const MANAGED_EXECUTION_REOWN_RETRY_INITIAL_DELAY_MS = 25;
+export const MANAGED_EXECUTION_REOWN_RETRY_MAX_DELAY_MS = 1_000;
+export const MANAGED_EXECUTION_REOWN_RETRY_MAX_BLOCKED_WAIT_MS = 5_000;
+export const MANAGED_EXECUTION_REOWN_WARN_AFTER_MS = 5_000;
 type HoldOutcome = "teardown" | "skip-device-writes";
 interface ReleaseHold {
   settled: Promise<HoldOutcome>;
@@ -74,6 +84,7 @@ type OwnershipState = "unconfirmed" | "lost";
 type ReownAttempt = {
   assignments: SlotAssignmentRecord[];
   outcome: "confirmed" | "retry" | "lost";
+  error?: Error;
 };
 
 export class ManagedExecutionReowner {
@@ -82,20 +93,30 @@ export class ManagedExecutionReowner {
   private readonly recoveredSessions = new Set<string>();
   private readonly ownership = new Map<string, OwnershipState>();
   private readonly attempts = new Map<string, Promise<ReownAttempt>>();
+  /** A deadline abandons the waiter, never the operation or its late result. */
+  private readonly registryOpens = new Map<string, Promise<ManagedExecutionReownRegistry>>();
+  private readonly ownerReads = new Map<string, Promise<SlotAssignmentRecord[]>>();
+  private readonly ownerClaims = new Map<string, Promise<ClaimExecutionResult>>();
   private readonly background = new Map<string, Promise<void>>();
+  /** Only a retry waiting for backoff/quiet/a turn can consume a hold's one expedite. */
+  private readonly retryExpedites = new Map<string, AbortController>();
   private readonly closing = new AbortController();
   private readonly releaseHolds = new Map<string, ReleaseHold>();
   private readonly episodes = new Map<
     string,
-    { attempts: number; warned: boolean; stop: AbortController }
+    { attempts: number; warned: boolean; sinceMs: number; stop: AbortController }
   >();
-  private readonly retry: DefaultRetryExecutor;
-  private readonly backoff: BackoffPolicy;
+  private readonly pacing: RegistryRetryPacing;
   private closed = false;
 
   constructor(private readonly deps: ManagedExecutionReownerDependencies) {
-    this.retry = new DefaultRetryExecutor(deps.timer);
-    this.backoff = deps.retryBackoff ?? MANAGED_EXECUTION_REGISTRY_RETRY_BACKOFF;
+    this.pacing = new RegistryRetryPacing({
+      timer: deps.timer ?? defaultTimer,
+      initialDelayMs: MANAGED_EXECUTION_REOWN_RETRY_INITIAL_DELAY_MS,
+      maxDelayMs: MANAGED_EXECUTION_REOWN_RETRY_MAX_DELAY_MS,
+      maxBlockedWaitMs: MANAGED_EXECUTION_REOWN_RETRY_MAX_BLOCKED_WAIT_MS,
+      backoff: deps.retryBackoff,
+    });
   }
 
   /**
@@ -129,6 +150,7 @@ export class ManagedExecutionReowner {
     this.recovering.set(sessionUuid, recovered);
     this.recoveredSessions.add(sessionUuid);
     this.ownership.set(sessionUuid, "unconfirmed");
+    this.episode(sessionUuid);
     void recovered.then(
       () => {
         this.recovering.delete(sessionUuid);
@@ -138,7 +160,9 @@ export class ManagedExecutionReowner {
       },
       (error: unknown) => {
         // Failed recovery leaves no usable session; the recovery path reports the failure.
-        logger.debug(`[ManagedSlots] Recovery of ${sessionUuid} failed before re-owning`, error);
+        if (!this.closed) {
+          logger.debug(`[ManagedSlots] Recovery of ${sessionUuid} failed before re-owning`, error);
+        }
         this.recovering.delete(sessionUuid);
         this.isPresent(sessionUuid);
       },
@@ -180,8 +204,15 @@ export class ManagedExecutionReowner {
         ),
       };
       this.releaseHolds.set(sessionUuid, hold);
+      this.expediteRetry(sessionUuid);
     }
     return { settled: hold.settled, capMs: MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS };
+  }
+
+  private expediteRetry(id: string): void {
+    if (this.canAttempt(id)) {
+      this.retryExpedites.get(id)?.abort();
+    }
   }
 
   isReleaseHeld(sessionUuid: string): boolean {
@@ -226,23 +257,43 @@ export class ManagedExecutionReowner {
   private episode(id: string) {
     let episode = this.episodes.get(id);
     if (!episode) {
-      episode = { attempts: 0, warned: false, stop: new AbortController() };
+      episode = {
+        attempts: 0,
+        warned: false,
+        sinceMs: (this.deps.timer ?? defaultTimer).now(),
+        stop: new AbortController(),
+      };
       this.episodes.set(id, episode);
     }
     return episode;
   }
 
   private logUnconfirmed(id: string, message: string, error?: unknown): void {
+    if (this.closed) {
+      return;
+    }
     const episode = this.episode(id);
-    const log = episode.warned ? logger.debug : logger.warn;
-    episode.warned = true;
-    log(message, error);
+    // Busy writes and unready slots are expected while the retained session recovers.
+    logger.debug(message, error);
+    const ageMs = (this.deps.timer ?? defaultTimer).now() - episode.sinceMs;
+    if (
+      this.ownership.get(id) === "unconfirmed" &&
+      !episode.warned &&
+      ageMs > MANAGED_EXECUTION_REOWN_WARN_AFTER_MS
+    ) {
+      episode.warned = true;
+      logger.warn(
+        `[ManagedSlots] Session ${id} ownership unconfirmed for ${ageMs} ms (${episode.attempts} attempts): ${errorMessage(error)}; retries continue`,
+        error,
+      );
+    }
   }
 
   private markUnconfirmed(ids: readonly string[]): void {
     for (const id of ids) {
       if (this.isPresent(id) && !this.ownership.has(id)) {
         this.ownership.set(id, "unconfirmed");
+        this.episode(id).sinceMs = (this.deps.timer ?? defaultTimer).now();
       }
     }
   }
@@ -259,16 +310,19 @@ export class ManagedExecutionReowner {
       }
       this.settleOwnership(id, attempt.outcome);
       if (attempt.outcome === "retry") {
-        this.retryInBackground(id, new Error("managed slot ownership unconfirmed"));
+        this.logRetry(id, attempt.error);
+        this.retryInBackground(id);
       }
       return attempt.assignments;
     } catch (error) {
       if (!this.canAttempt(id, episode.stop.signal)) {
         // A closed or resolved episode cannot act on a late registry result.
-        logger.debug(
-          `[ManagedSlots] Re-owning managed execution ${id} failed after resolution or close`,
-          error,
-        );
+        if (!this.closed) {
+          logger.debug(
+            `[ManagedSlots] Re-owning managed execution ${id} failed after resolution`,
+            error,
+          );
+        }
         return [];
       }
       this.logUnconfirmed(
@@ -276,7 +330,7 @@ export class ManagedExecutionReowner {
         `[ManagedSlots] Re-owning managed execution ${id} failed: ${errorMessage(error)}`,
         error,
       );
-      this.retryInBackground(id, error);
+      this.retryInBackground(id);
       return [];
     }
   }
@@ -307,6 +361,10 @@ export class ManagedExecutionReowner {
       episode.stop.abort();
     }
     this.closing.abort();
+    this.pacing.close();
+    this.registryOpens.clear();
+    this.ownerReads.clear();
+    this.ownerClaims.clear();
   }
 
   async whenIdle(): Promise<void> {
@@ -343,7 +401,14 @@ export class ManagedExecutionReowner {
     this.recoveredSessions.delete(id);
     this.episodes.get(id)?.stop.abort();
     this.episodes.delete(id);
+    this.forgetRegistrySteps(id);
     return false;
+  }
+
+  private forgetRegistrySteps(id: string): void {
+    this.registryOpens.delete(id);
+    this.ownerReads.delete(id);
+    this.ownerClaims.delete(id);
   }
 
   private pruneReleasedSessions(): void {
@@ -361,9 +426,10 @@ export class ManagedExecutionReowner {
       return;
     }
     if (outcome === "confirmed") {
+      this.forgetRegistrySteps(id);
       this.ownership.delete(id);
       logger.info(
-        `[ManagedSlots] Session ${id} ownership confirmed after ${this.episode(id).attempts} attempts; re-owned by daemon ${this.deps.owner().daemonId}.`,
+        `[ManagedSlots] Session ${id} ownership confirmed after ${(this.deps.timer ?? defaultTimer).now() - this.episode(id).sinceMs} ms (${this.episode(id).attempts} attempts); re-owned by daemon ${this.deps.owner().daemonId}.`,
       );
       this.resolveHold(id, "teardown");
       this.episodes.get(id)?.stop.abort();
@@ -371,6 +437,7 @@ export class ManagedExecutionReowner {
       this.notifyOwnership(id, "confirmed");
     }
     if (outcome === "lost") {
+      this.forgetRegistrySteps(id);
       this.ownership.set(id, "lost");
       logger.warn(
         `[ManagedSlots] Session '${id}' no longer owns its managed slot; acquire a new session.`,
@@ -395,82 +462,206 @@ export class ManagedExecutionReowner {
     return this.canAttempt(id) && this.ownership.get(id) === "unconfirmed";
   }
 
-  private retryInBackground(id: string, initialFailure: unknown): void {
+  private logRetry(
+    id: string,
+    failure: unknown = new Error("managed slot ownership unconfirmed"),
+  ): void {
+    this.logUnconfirmed(
+      id,
+      `[ManagedSlots] Re-owning managed execution ${id} failed; retrying: ${errorMessage(failure)}`,
+      failure,
+    );
+  }
+
+  private retryInBackground(id: string): void {
     if (!this.needsRetry(id) || this.background.has(id)) {
       return;
     }
-    const work = this.retry
-      .execute(
-        async (attempt) => {
-          if (!this.needsRetry(id)) {
-            return;
-          }
-          // The inline attempt already failed: feed it to the executor to wait before the next call.
-          if (attempt === 1) {
-            throw initialFailure;
-          }
-          const result = await this.attempt(id);
-          this.settleOwnership(id, result.outcome);
-          if (result.outcome === "retry") {
-            throw new Error("managed slot ownership unconfirmed");
-          }
-        },
-        {
-          maxAttempts: Number.MAX_SAFE_INTEGER,
-          signal: AbortSignal.any([this.closing.signal, this.episode(id).stop.signal]),
-          shouldRetry: () => this.needsRetry(id),
-          delays: this.backoff,
-          onRetry: (error, attempt) => {
-            if (attempt > 1 && !this.closed) {
-              this.logUnconfirmed(
-                id,
-                `[ManagedSlots] Re-owning managed execution ${id} failed; retrying: ${error.message}`,
-                error,
-              );
-            }
-          },
-          expectedFailure: {
-            reason: "the re-owner stopped or no longer holds an unconfirmed session",
-          },
-        },
-      )
-      .then(() => {
-        this.pruneReleasedSessions();
-      })
-      .finally(() => {
-        this.background.delete(id);
-      });
+    const work = this.retryLoop(id).finally(() => {
+      this.background.delete(id);
+    });
     this.background.set(id, work);
   }
 
-  private attempt(id: string): Promise<ReownAttempt> {
+  private async retryLoop(id: string): Promise<void> {
+    const stopped = this.episode(id).stop.signal;
+    for (let retry = 1; this.needsRetry(id); retry++) {
+      const expedite = new AbortController();
+      this.retryExpedites.set(id, expedite);
+      try {
+        await this.pacing.wait(this.pacing.delay(retry), stopped, expedite.signal);
+        if (!this.needsRetry(id)) {
+          return;
+        }
+        const result = await this.attempt(id, expedite.signal);
+        if (!this.canAttempt(id, stopped)) {
+          return;
+        }
+        this.settleOwnership(id, result.outcome);
+        if (result.outcome === "retry") {
+          this.logRetry(id, result.error);
+        }
+      } catch (error) {
+        // Contention/deadlines retain the gate for another turn. Silence after cancel/close
+        // is deliberate, pinned by "close wakes a retry wait and suppresses all later logs and calls".
+        const admitted = this.canAttempt(id, stopped);
+        if (!admitted && !this.closed && !stopped.aborted) {
+          // Recovery admission or an ended hold makes this best-effort retry unnecessary.
+          logger.debug(
+            `[ManagedSlots] Re-own retry no longer admitted for ${id}: ${errorMessage(error)}`,
+          );
+        }
+        if (!admitted) {
+          return;
+        }
+        this.logRetry(id, error);
+      } finally {
+        this.retryExpedites.delete(id);
+      }
+    }
+  }
+
+  private attempt(id: string, expedited?: AbortSignal): Promise<ReownAttempt> {
     const pending = this.attempts.get(id);
     if (pending) {
       return pending;
     }
     const episode = this.episode(id);
-    episode.attempts++;
-    const work = raceWithDeadline(this.reownSession(id, episode.stop.signal), {
-      timer: this.deps.timer ?? defaultTimer,
-      signal: AbortSignal.any([this.closing.signal, episode.stop.signal]),
-      label: `Re-owning session ${id}`,
-    }).finally(() => {
-      this.attempts.delete(id);
-    });
+    const work = this.pacing
+      .run(
+        async () => {
+          this.retryExpedites.delete(id);
+          if (!this.canAttempt(id, episode.stop.signal)) {
+            return { assignments: [], outcome: "retry" } satisfies ReownAttempt;
+          }
+          episode.attempts++;
+          return await this.boundedAttempt(id, episode.stop.signal);
+        },
+        (result) => result.outcome !== "retry",
+        episode.stop.signal,
+        expedited,
+      )
+      .finally(() => {
+        this.attempts.delete(id);
+      });
     this.attempts.set(id, work);
     return work;
   }
 
-  private async reownSession(sessionUuid: string, stopped: AbortSignal): Promise<ReownAttempt> {
+  private async boundedAttempt(id: string, stopped: AbortSignal): Promise<ReownAttempt> {
+    const attemptStop = new AbortController();
+    const signal = AbortSignal.any([this.closing.signal, stopped, attemptStop.signal]);
+    try {
+      return await raceWithDeadline(() => this.reownSession(id, signal, stopped), {
+        timer: this.deps.timer ?? defaultTimer,
+        timeoutMs: MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS,
+        signal,
+        onTimeout: () => attemptStop.abort(new Error(`Re-owning session ${id} attempt timed out`)),
+        label: `Re-owning session ${id}`,
+      });
+    } finally {
+      // Stop continuations between registry calls; a late open must not fill the quiet period.
+      attemptStop.abort();
+    }
+  }
+
+  private async registryStep<T>(
+    id: string,
+    pending: Map<string, Promise<T>>,
+    start: () => Promise<T>,
+    signal: AbortSignal,
+  ): Promise<T> {
+    let observed = false;
+    try {
+      return await raceWithDeadline(
+        () => {
+          let operation = pending.get(id);
+          if (!operation) {
+            operation = start();
+            pending.set(id, operation);
+          }
+          // SingleFlight removes settled flights, but a late result must stay until a turn observes it.
+          return operation.then(
+            (value) => {
+              observed = !signal.aborted;
+              return value;
+            },
+            (error: unknown) => {
+              observed = !signal.aborted;
+              throw error;
+            },
+          );
+        },
+        {
+          timer: this.deps.timer ?? defaultTimer,
+          signal,
+          label: `Re-owning session ${id} registry step`,
+        },
+      );
+    } finally {
+      if (observed) {
+        pending.delete(id);
+      }
+    }
+  }
+
+  private async readCurrentAssignments(
+    sessionUuid: string,
+    registry: ManagedExecutionReownRegistry,
+    stopped: AbortSignal,
+  ): Promise<SlotAssignmentRecord[]> {
+    // Consume an abandoned write/read before checking current ownership; its old result is not proof.
+    const retainedClaim = this.ownerClaims.get(sessionUuid);
+    if (retainedClaim) {
+      const claimed = await this.registryStep(
+        sessionUuid,
+        this.ownerClaims,
+        () => retainedClaim,
+        stopped,
+      );
+      if (!this.closed) {
+        logger.debug(
+          `[ManagedSlots] Session ${sessionUuid} retained claim completed (${claimed.kind}); checking current ownership`,
+        );
+      }
+    }
+    const read = () =>
+      this.registryStep(
+        sessionUuid,
+        this.ownerReads,
+        () => registry.findExecutionAssignments(sessionUuid),
+        stopped,
+      );
+    if (this.ownerReads.has(sessionUuid)) {
+      await read();
+      if (!this.closed) {
+        logger.debug(
+          `[ManagedSlots] Session ${sessionUuid} retained ownership read completed; checking current ownership`,
+        );
+      }
+    }
+    return await read();
+  }
+
+  private async reownSession(
+    sessionUuid: string,
+    stopped: AbortSignal,
+    episodeStop: AbortSignal,
+  ): Promise<ReownAttempt> {
     const result: ReownAttempt = { assignments: [], outcome: "retry" };
+    const registry = await this.registryStep(
+      sessionUuid,
+      this.registryOpens,
+      () => this.deps.registry(),
+      stopped,
+    );
     if (!this.canAttempt(sessionUuid, stopped)) {
       return result;
     }
-    const registry = await this.deps.registry();
+    const found = await this.readCurrentAssignments(sessionUuid, registry, stopped);
     if (!this.canAttempt(sessionUuid, stopped)) {
       return result;
     }
-    const found = await registry.findExecutionAssignments(sessionUuid);
     result.outcome = "confirmed";
     if (found.length === 0) {
       result.outcome = "lost";
@@ -485,15 +676,21 @@ export class ManagedExecutionReowner {
       }
       let claimed: ClaimExecutionResult;
       try {
-        claimed = await registry.claimExecution(
-          { scopeKey: assignment.scopeKey, slotIndex: assignment.slotIndex },
-          { generation: assignment.generation, stableDeviceId: assignment.stableDeviceId },
-          { ...owner, sessionUuid },
-          { supersedesSessionUuid: sessionUuid },
+        claimed = await this.registryStep(
+          sessionUuid,
+          this.ownerClaims,
+          () =>
+            registry.claimExecution(
+              { scopeKey: assignment.scopeKey, slotIndex: assignment.slotIndex },
+              { generation: assignment.generation, stableDeviceId: assignment.stableDeviceId },
+              { ...owner, sessionUuid },
+              { supersedesSessionUuid: sessionUuid },
+            ),
+          stopped,
         );
       } catch (error) {
         // The read proved a foreign owner, and a failed write cannot confirm this daemon's fence.
-        if (this.canAttempt(sessionUuid, stopped)) {
+        if (this.canAttempt(sessionUuid, episodeStop)) {
           this.markUnconfirmed([sessionUuid]);
         }
         throw error;
@@ -527,10 +724,8 @@ export class ManagedExecutionReowner {
     if (kind !== "slot_in_use" && result.outcome !== "lost") {
       result.outcome = "retry";
     }
-    this.logUnconfirmed(
-      sessionUuid,
-      `[ManagedSlots] Slot ${assignment.slotIndex} of ${assignment.scopeKey} was not re-owned ` +
-        `for session ${sessionUuid}: ${kind}`,
+    result.error = new Error(
+      `Slot ${assignment.slotIndex} of ${assignment.scopeKey} was not re-owned for session ${sessionUuid}: ${kind}`,
     );
   }
 }

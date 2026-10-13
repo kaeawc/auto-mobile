@@ -8,7 +8,7 @@
     "error": "Session '11111111-2222-4333-8444-555555555555' slot ownership is not recorded for this daemon yet (the managed slot registry is busy or the slot is not ready); retry shortly.",
     "code": "managed_slot_ownership_unconfirmed",
     "retryable": true,
-    "retryAfterMs": 2000,
+    "retryAfterMs": 1000,
     "details": {
       "sessionUuid": "11111111-2222-4333-8444-555555555555"
     }

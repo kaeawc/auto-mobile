@@ -1,8 +1,15 @@
 import * as fs from "fs";
+import { sortedReaddirSync } from "./io";
 
-/** Synchronous operations used by the exclusive-lock protocol. */
+/**
+ * Synchronous operations used by the exclusive-lock protocol.
+ * Every file the lock protocol creates is 0600; markers are renames of those files;
+ * directories are created with the process default.
+ */
 export interface LockFileSystem {
   mkdir(path: string): void;
+  /** Entry names, without the directory prefix. */
+  list(directory: string): string[];
   openExclusive(path: string): number;
   write(fd: number, content: string): void;
   close(fd: number): void;
@@ -16,11 +23,16 @@ export interface LockFileSystem {
   exists(path: string): boolean;
 }
 
-/** Resolve fs methods at call time so existing namespace spies still observe them. */
+/**
+ * Resolve fs methods at call time so existing namespace spies still observe them.
+ * Every file the lock protocol creates is 0600; markers are renames of those files;
+ * directories are created with the process default.
+ */
 export const nodeLockFileSystem: LockFileSystem = {
   mkdir: (path) => {
     fs.mkdirSync(path, { recursive: true });
   },
+  list: (directory) => sortedReaddirSync(directory),
   openExclusive: (path) => fs.openSync(path, "wx", 0o600),
   write: (fd, content) => fs.writeFileSync(fd, content),
   close: (fd) => fs.closeSync(fd),

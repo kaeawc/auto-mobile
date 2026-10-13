@@ -1995,7 +1995,17 @@ export class DaemonMcpProxy {
       await attempt();
     } catch (error) {
       // Establishment stays available; retry only while this socket still holds the execution.
-      this.managedConnectionRebind.start({ attempt, stillWanted }, error);
+      this.managedConnectionRebind.start(
+        {
+          attempt,
+          stillWanted,
+          describe: () => {
+            const binding = currentBinding();
+            return `${binding?.scopeKey ?? "unknown scope"} sessions ${binding?.sessionUuids.join(", ") ?? "unknown"}`;
+          },
+        },
+        error,
+      );
     }
   }
 

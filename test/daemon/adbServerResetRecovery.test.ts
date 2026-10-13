@@ -1899,7 +1899,7 @@ describe("managed slot ownership automation admission", () => {
         code: "managed_slot_ownership_unconfirmed",
         sessionUuid: "resumed",
         retryable: true,
-        retryAfterMs: 2_000,
+        retryAfterMs: 1_000,
       });
       const lost = new ManagedSlotOwnershipLostError("resumed");
       expect(lost).toMatchObject({

@@ -55,6 +55,24 @@ internal val LocalPrototypeTextEpochs = compositionLocalOf<Map<String, Int>> { e
 
 internal val LocalPrototypeCompositionProbe = staticCompositionLocalOf<((String) -> Unit)?> { null }
 
+/** Renderer work a test can count; see [LocalPrototypeRenderWorkProbe]. */
+internal enum class PrototypeRenderWork {
+  /** A container composed with the size-animation modifier applied. Key: node identity. */
+  SIZE_ANIMATION,
+  /** An image node composed through `BoxWithConstraints` (a subcomposition). Key: node identity. */
+  IMAGE_SUBCOMPOSITION,
+  /** A decoded image handed to a new painter. Key: asset id. */
+  IMAGE_BITMAP_WRAP,
+  /** A coroutine launched to load an image. Key: asset id. */
+  IMAGE_LOAD_LAUNCH,
+  /** An icon name resolved by `prototypeIcon` for an `icon` node. Key: node identity. */
+  ICON_LOOKUP,
+}
+
+/** Null outside tests, like [LocalPrototypeCompositionProbe]. */
+internal val LocalPrototypeRenderWorkProbe =
+  staticCompositionLocalOf<((PrototypeRenderWork, String) -> Unit)?> { null }
+
 val PrototypeRole = SemanticsPropertyKey<String>("PrototypeRole")
 
 /** Compose owns gesture mechanics only; all authored state/actions go through the pure runtime. */
@@ -66,6 +84,7 @@ internal fun PrototypeRuntimeContent(
   interact: suspend (PrototypeInteraction) -> Unit,
 ) {
   val snapshot by runtime.snapshots.collectAsState()
+  val imageVersion = images?.version?.collectAsState()?.value
   val resolver = LocalContext.current.contentResolver
   val durationScale by rememberAnimatorDurationScale(resolver)
   val motion = prototypeMotionEnabled(snapshot.spec.motion, durationScale)
@@ -85,14 +104,11 @@ internal fun PrototypeRuntimeContent(
       CompositionLocalProvider(
         LocalPrototypeTextEpochs provides snapshot.textEpochs,
         LocalPrototypeImageCache provides images,
+        LocalPrototypeImageVersion provides imageVersion,
         LocalPrototypeFontCache provides fonts,
         LocalPrototypeMotion provides motion,
       ) {
-        PrototypeSpecContent(
-          runtime.renderModel(snapshot).root,
-          snapshot.spec.theme,
-          send,
-        )
+        PrototypeSpecContent(runtime.renderModel(snapshot).root, snapshot.spec.theme, send)
       }
     }
   }
@@ -107,7 +123,10 @@ fun PrototypeSpecContent(
 ) {
   PrototypeTheme(root, theme) {
     val anchorLocals = remember { PrototypeAnchorLocals() }
-    CompositionLocalProvider(LocalPrototypeAnchorLocals provides anchorLocals) {
+    CompositionLocalProvider(
+      LocalPrototypeAnchorLocals provides anchorLocals,
+      LocalPrototypeRetainedSubtrees provides remember(root) { prototypeRetainedSubtrees(root) },
+    ) {
       val fillsWindow = LocalPrototypeFillsWindow.current
       Box(Modifier.semantics { testTagsAsResourceId = true }) {
         val modals = remember(root) { modalPrototypeSheets(root) }
@@ -300,6 +319,16 @@ private fun RenderPrototypeNode(
     CaptureAnchorLocals(node.identity)
     return
   }
+  if (node.identity in LocalPrototypeRetainedSubtrees.current) {
+    PrototypeRetainedVisibility(
+      node.visible,
+      fade = LocalPrototypeMotion.current && node.source?.transition == "fade",
+      modifier = parentModifier,
+    ) {
+      RenderPrototypeNodeContent(node, interact, weightAxis = weightAxis, windowRoot = windowRoot)
+    }
+    return
+  }
   // Only `visibleWhen` nodes animate; wrapping every node would add a layout to each one.
   if (LocalPrototypeMotion.current && node.source?.visibleWhen != null) {
     // The row/column weight rides on the animated container: it is the Row/Column's direct child.
@@ -328,8 +357,17 @@ private fun RenderPrototypeNodeContent(
 ) {
   LocalPrototypeCompositionProbe.current?.invoke(node.identity)
   val modifier = parentModifier.then(prototypeNodeModifier(node, interact, weightAxis, windowRoot))
-  // Containers whose children can appear, disappear or change animate their size with them.
-  val containerModifier = modifier.prototypeAnimateSize(LocalPrototypeMotion.current)
+  // Only box/row/column with repeat or a direct visibleWhen child animate and clip their size.
+  // Look through card/scroll/pager only; nested box/row/column own the animation their parent
+  // follows.
+  // Others neither spring for text/style/image-load changes nor clip children with motion.
+  val animatesSize =
+    LocalPrototypeMotion.current &&
+      (node.role == "box" || node.role == "row" || node.role == "column") &&
+      prototypeContainerAnimatesSize(node)
+  val containerModifier = modifier.prototypeAnimateSize(animatesSize)
+  if (animatesSize)
+    LocalPrototypeRenderWorkProbe.current?.invoke(PrototypeRenderWork.SIZE_ANIMATION, node.identity)
   when (node.role) {
     "box" ->
       Box(containerModifier, contentAlignment = node.style.alignment) {
@@ -401,7 +439,13 @@ private fun RenderPrototypeNodeContent(
       )
     }
     "icon" -> {
-      val icon = prototypeIcon(node.iconName, (node.source as? PrototypeIconNode)?.variant)
+      val variant = (node.source as? PrototypeIconNode)?.variant
+      val probe = LocalPrototypeRenderWorkProbe.current
+      val icon =
+        remember(node.iconName, variant) {
+          probe?.invoke(PrototypeRenderWork.ICON_LOOKUP, node.identity)
+          prototypeIcon(node.iconName, variant)
+        }
       if (icon != null)
         Icon(
           icon,
@@ -423,7 +467,7 @@ private fun RenderPrototypeNodeContent(
     }
     "image" -> PrototypeImageContent(node, modifier)
     "scroll" -> {
-      val scroll = rememberScrollState()
+      val scroll = key(LocalPrototypeShowEpoch.current) { rememberScrollState() }
       val source = node.source as? PrototypeScrollNode
       val scrolling =
         if (source?.axis == "horizontal") modifier.horizontalScroll(scroll)
@@ -520,6 +564,7 @@ private fun RenderPrototypeTextField(
   )
 }
 
+/** Keeps at most one page before and one after current, only with fill and bounded height. */
 @Composable
 private fun RenderPrototypePager(
   node: PrototypeRenderNode,
@@ -547,8 +592,30 @@ private fun RenderPrototypePager(
   val pageModifier =
     Modifier.then(if (fill.width) Modifier.fillMaxWidth() else Modifier)
       .then(if (fill.height) Modifier.fillMaxHeight() else Modifier)
-  HorizontalPager(pager, modifier) { page ->
-    Box(pageModifier) { RenderPrototypeNode(node.children[page], interact) }
+  var boundedHeight by remember { mutableStateOf(false) }
+  val pagerModifier = modifier.layout { measurable, constraints ->
+    if (boundedHeight != constraints.hasBoundedHeight) boundedHeight = constraints.hasBoundedHeight
+    val placeable = measurable.measure(constraints)
+    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+  }
+  val keepNeighbours = fill.height && boundedHeight
+  HorizontalPager(
+    pager,
+    pagerModifier,
+    beyondViewportPageCount = if (keepNeighbours) 1 else 0,
+    key = { node.children[it].identity },
+  ) { page ->
+    val onScreen by
+      remember(pager, page) {
+        derivedStateOf {
+          page == pager.currentPage ||
+            (pager.currentPageOffsetFraction > 0f && page == pager.currentPage + 1) ||
+            (pager.currentPageOffsetFraction < 0f && page == pager.currentPage - 1)
+        }
+      }
+    Box(pageModifier.then(if (onScreen) Modifier else Modifier.clearAndSetSemantics {})) {
+      RenderPrototypeNode(node.children[page], interact)
+    }
   }
 }
 
@@ -609,9 +676,7 @@ private fun PrototypeNavigationTab(item: PrototypeItem, selected: Boolean, selec
     selected,
     select,
     text = { Text(item.label) },
-    icon = {
-      if (item.icon != null || item.image != null) PrototypeNavigationIcon(item)
-    },
+    icon = { if (item.icon != null || item.image != null) PrototypeNavigationIcon(item) },
   )
 }
 
@@ -1017,12 +1082,7 @@ private fun prototypeGradientBrush(gradient: PrototypeGradient, palette: Prototy
         }
         is PrototypeRadialGradient -> {
           val (colors, positions) = prototypeGradientStops(gradient.stops, palette)
-          RadialGradientShader(
-            size.center,
-            hypot(size.width, size.height) / 2f,
-            colors,
-            positions,
-          )
+          RadialGradientShader(size.center, hypot(size.width, size.height) / 2f, colors, positions)
         }
       }
   }

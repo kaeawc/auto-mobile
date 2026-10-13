@@ -46,6 +46,37 @@ struct ComponentColors {
     var switchThumb: Color { role("onPrimary", .white) }
 }
 
+/// A draft changes before validation, so a refused edit can rewrite the focused platform field
+/// in a later SwiftUI update (#12206), even when the model's stored string never changed.
+@MainActor
+struct PrototypeTextFieldView: View {
+    let node: PrototypeNode
+    let model: PrototypeModel
+    @State private var draft: PrototypeTextDraft
+
+    init(node: PrototypeNode, model: PrototypeModel) {
+        self.node = node
+        self.model = model
+        _draft = State(initialValue: PrototypeTextDraft(stored: model.state[node.stateKey ?? ""]?.displayString ?? ""))
+    }
+
+    var body: some View {
+        let key = node.stateKey ?? ""
+        let stored = model.state[key]?.displayString ?? ""
+        TextField(node.placeholder ?? "", text: Binding(get: { draft.text }, set: { draft.type($0) }))
+            .textFieldStyle(.roundedBorder)
+            .onChange(of: draft.text) { _, _ in
+                if draft.needsCommit(stored: stored) {
+                    model.change(key: key, value: draft.text)
+                    draft.settle(stored: model.state[key]?.displayString ?? "")
+                }
+            }
+            .onChange(of: stored) { _, value in
+                draft.settle(stored: value)
+            }
+    }
+}
+
 // MARK: Slider, chip, card
 
 /// A labelled slider bound to a number. The visible label is hidden from accessibility because it

@@ -238,15 +238,14 @@ final class PrototypeModel {
     /// TTL while the prototype stays up.
     private func apply(activity: Bool = true, _ transition: (inout PrototypeSession) -> [PrototypeEvent]) {
         let wasShown = session.isShown
-        let previousState = session.state
-        let previousPages = session.pages
+        let previous = session
         // `transition` adds the `appearance_changed` a state or page change caused.
         var next = session
         let events = next.transition(transition)
         publish(next)
         // A rejected edit (#11562) or no-op transition leaves the stored values unchanged;
         // redraw value-holding controls so they show those values instead of the refused input.
-        if next.state == previousState, next.pages == previousPages { refusedChangeRevision += 1 }
+        if PrototypeRefusedChange.leftValuesUnchanged(before: previous, after: next) { refusedChangeRevision += 1 }
         if session.isShown {
             if activity { idleTimer.arm() }
         } else {
@@ -283,16 +282,7 @@ final class PrototypeModel {
     }
 
     /// Typing goes through `change`, so every edit both updates state and emits `change`.
-    func binding(forStateKey key: String) -> Binding<String> {
-        _ = refusedChanges
-        return Binding(
-            get: {
-                _ = self.refusedChanges
-                return self.state[key]?.displayString ?? ""
-            },
-            set: { value in
-                self.apply { $0.change(key: key, value: .string(value)) }
-            }
-        )
+    func change(key: String, value: String) {
+        apply { $0.change(key: key, value: .string(value)) }
     }
 }

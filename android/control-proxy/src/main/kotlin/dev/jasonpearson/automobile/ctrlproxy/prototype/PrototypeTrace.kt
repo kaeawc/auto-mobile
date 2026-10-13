@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.os.Build
 import android.os.Trace
+import java.util.concurrent.atomic.AtomicInteger
 
 internal interface PrototypeTraceSink {
   fun isEnabled(): Boolean
@@ -9,6 +10,10 @@ internal interface PrototypeTraceSink {
   fun begin(name: String)
 
   fun end()
+
+  fun beginAsync(name: String, cookie: Int)
+
+  fun endAsync(name: String, cookie: Int)
 }
 
 /**
@@ -23,6 +28,11 @@ internal object PrototypeTrace {
   const val MAP_PROTOTYPE_SPEC = "Prototype.mapPrototypeSpec"
   const val COMPOSE = "Prototype.compose"
   const val NODE = "Prototype.node"
+  const val INTERACT = "Prototype.interact"
+  const val SYNC_APPEARANCE = "Prototype.syncAppearance"
+  const val HOST_SHOW = "Prototype.host.show"
+
+  private val asyncCookie = AtomicInteger()
 
   @Volatile var sink: PrototypeTraceSink = FrameworkPrototypeTraceSink
 
@@ -36,6 +46,18 @@ internal object PrototypeTrace {
       traceSink.end()
     }
   }
+
+  suspend inline fun <T> asyncSection(name: String, block: () -> T): T {
+    val traceSink = sink
+    if (!traceSink.isEnabled()) return block()
+    val cookie = asyncCookie.getAndIncrement()
+    traceSink.beginAsync(name, cookie)
+    try {
+      return block()
+    } finally {
+      traceSink.endAsync(name, cookie)
+    }
+  }
 }
 
 private object FrameworkPrototypeTraceSink : PrototypeTraceSink {
@@ -44,4 +66,12 @@ private object FrameworkPrototypeTraceSink : PrototypeTraceSink {
   override fun begin(name: String) = Trace.beginSection(name)
 
   override fun end() = Trace.endSection()
+
+  override fun beginAsync(name: String, cookie: Int) {
+    if (Build.VERSION.SDK_INT >= 29) Trace.beginAsyncSection(name, cookie)
+  }
+
+  override fun endAsync(name: String, cookie: Int) {
+    if (Build.VERSION.SDK_INT >= 29) Trace.endAsyncSection(name, cookie)
+  }
 }

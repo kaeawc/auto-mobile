@@ -608,10 +608,16 @@ export class AndroidSegmentedPlanVideoSession {
         this.hostOnlyFinalization ? { hostOnly: true, deviceWide: false } : undefined,
     });
     if (this.hostOnlyFinalization) {
-      await this.rollbackVideoRecordingStartFn(recording.recordingId, {
-        hostOnly: true,
-        deviceWide: false,
-      });
+      try {
+        await this.rollbackVideoRecordingStartFn(recording.recordingId, {
+          hostOnly: true,
+          deviceWide: false,
+        });
+      } catch (error) {
+        const warning = `Host-only rollback of late segment ${recording.recordingId} failed: ${errorMessage(error)}`;
+        logger.warn(`[SegmentedPlanVideo] ${warning}`, error);
+        this.rememberWarning(warning);
+      }
       throw new DOMException("Segment start completed after host-only finalization", "AbortError");
     }
     this.recordedPhysicalDisplayId ??= recording.physicalDisplayId;
@@ -780,21 +786,31 @@ export class AndroidSegmentedPlanVideoSession {
       signal.throwIfAborted();
       await this.startSegment(signal);
     } catch (error) {
-      if (signal.aborted) {
-        // An aborted start is rolled back by its owner and is not a capture defect.
-        logger.debug("[SegmentedPlanVideo] Replacement start cancelled", error);
-      } else {
-        this.consecutiveStartFailures += 1;
-        this.lastStartFailureAtMs = this.timer.now();
-        this.rememberWarning(
-          `Video truncated: failed to start next segment after ${this.completedRecordingIds.at(-1) ?? "gap"}: ${errorMessage(error)}`,
-        );
-      }
+      this.rememberReplacementStartFailure(error, signal);
     } finally {
       if (this.rotationAbortController === rotationAbortController) {
         this.rotationAbortController = undefined;
       }
     }
+  }
+
+  private rememberReplacementStartFailure(error: unknown, signal: AbortSignal): void {
+    if (signal.aborted) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        // A confirmed aborted-start rollback is expected and owns no new capture.
+        logger.debug("[SegmentedPlanVideo] Replacement start cancelled", error);
+      } else {
+        const warning = `Cancelled replacement start cleanup failed: ${errorMessage(error)}`;
+        logger.warn(`[SegmentedPlanVideo] ${warning}`, error);
+        this.rememberWarning(warning);
+      }
+      return;
+    }
+    this.consecutiveStartFailures += 1;
+    this.lastStartFailureAtMs = this.timer.now();
+    this.rememberWarning(
+      `Video truncated: failed to start next segment after ${this.completedRecordingIds.at(-1) ?? "gap"}: ${errorMessage(error)}`,
+    );
   }
 
   /**

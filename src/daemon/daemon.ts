@@ -1674,7 +1674,9 @@ export class Daemon {
           const backend = new PlatformVideoCaptureBackend();
           return await redriveUnconfirmedCaptureTeardowns(this.sessionManager, {
             recordingRepository: state.recordingRepository,
-            liveDaemonSessionIds: state.liveDaemonSessionIds,
+            liveDaemonSessionIds: new Set(
+              [...state.liveDaemonSessionIds].filter((id) => id !== this.daemonSessionId),
+            ),
             ownedCaptureIds: () => state.videoRecorderService.listActiveRecordingIds(),
             getDeviceIncarnation: (id) => this.devicePool.getDeviceIncarnation(id),
             getDevice: (id) => {
@@ -1686,6 +1688,7 @@ export class Daemon {
             forceStopOrphanedCapture: (device, descriptor) =>
               backend.forceStopOrphanedCapture(device, descriptor),
             now: () => this.timer.now(),
+            timer: this.timer,
           });
         } catch (error) {
           logger.warn(

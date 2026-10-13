@@ -11,6 +11,7 @@ import type {
   VideoCaptureTeardownDescriptor,
 } from "../../src/features/video/VideoRecorderService";
 import { HybridVideoCaptureBackend } from "../../src/features/video/HybridVideoCaptureBackend";
+import { AndroidSegmentedPlanVideoSession } from "../../src/server/androidSegmentedPlanVideoSession";
 import * as videoManager from "../../src/server/videoRecordingManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
@@ -23,7 +24,7 @@ import { FakeSecurePermissions } from "../fakes/FakeSecurePermissions";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { logger } from "../../src/utils/logger";
 import { ProcessTeardownUnconfirmedError } from "../../src/utils/ChildProcessTracker";
-import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
+import { drainUntil, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 
 const device = { deviceId: "fake-device", name: "Fake", platform: "android" as const };
 const descriptor = {
@@ -93,12 +94,178 @@ describe("restart recorder teardown redrive", () => {
         _descriptor: VideoCaptureTeardownDescriptor,
       ) => {},
       now: () => timer.now(),
+      timer,
     };
   }
   async function step(ms: number) {
     await timer.advanceTimeAsync(ms, () => drainUntilQuiescent(timer));
     await drainUntilQuiescent(timer);
   }
+  function heldDevice() {
+    const holder = spyOn(manager, "getSessionForDevice").mockReturnValue("holder");
+    const release = spyOn(manager, "onSessionRelease");
+    const unbound = spyOn(manager, "onSessionDeviceUnbound");
+    const pending = spyOn(manager, "registerPendingDeviceCleanup");
+    const mark = spyOn(manager, "markDeviceNeedsRecorderTeardown");
+    const fire = (options: { upgradeOnly?: boolean; deviceIdentityReplaced?: boolean } = {}) => {
+      holder.mockReturnValue(null);
+      release.mock.calls[0]?.[0](
+        "holder",
+        device.deviceId,
+        "idle-timeout",
+        {
+          sessionId: "holder",
+          deviceId: device.deviceId,
+          releaseReason: "idle-timeout",
+          releasedAtMs: timer.now(),
+          terminal: false,
+          heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: false, timeoutMs: 0, ageMs: 0 },
+        },
+        options,
+      );
+    };
+    const restore = () => {
+      for (const spy of [holder, release, unbound, pending, mark]) {
+        spy.mockRestore();
+      }
+    };
+    return { release, unbound, pending, mark, fire, restore };
+  }
+  test("held startup defers once, then release confirms under pending cleanup without marking", async () => {
+    await repo.insertRecording(row);
+    const held = heldDevice();
+    const d = deps();
+    const kill = spyOn(d, "forceStopOrphanedCapture");
+    try {
+      await (await redriveModule()).redriveUnconfirmedCaptureTeardowns(manager, d);
+      expect(held.mark).not.toHaveBeenCalled();
+      expect(kill).not.toHaveBeenCalled();
+      expect(held.release).toHaveBeenCalledTimes(1);
+      expect(held.unbound).toHaveBeenCalledTimes(1);
+      held.fire({ upgradeOnly: true });
+      expect(held.pending).not.toHaveBeenCalled();
+      held.fire();
+      expect(held.pending.mock.calls[0]?.[0]).toBe(device.deviceId);
+      expect(held.pending.mock.calls[0]?.[2]).toBe(5_000);
+      await held.pending.mock.calls[0]?.[1];
+      expect(kill).toHaveBeenCalledTimes(1);
+      expect((await repo.getRecording("rec"))?.captureTeardown).toBeUndefined();
+      expect(held.mark).not.toHaveBeenCalled();
+      held.fire();
+      held.unbound.mock.calls[0]?.[0]("holder", device.deviceId);
+      expect(held.pending).toHaveBeenCalledTimes(1);
+      expect(kill).toHaveBeenCalledTimes(1);
+    } finally {
+      held.restore();
+    }
+  });
+  test.each(["failure", "deadline"] as const)(
+    "held release %s marks before cleanup settles, then health retry clears",
+    async (mode) => {
+      await repo.insertRecording(row);
+      const held = heldDevice();
+      const d = deps();
+      const gate = Promise.withResolvers<void>();
+      const kill = spyOn(d, "forceStopOrphanedCapture").mockImplementationOnce(() =>
+        mode === "deadline" ? gate.promise : Promise.reject(new Error("release unconfirmed")),
+      );
+      try {
+        await (await redriveModule()).redriveUnconfirmedCaptureTeardowns(manager, d);
+        expect(held.mark).not.toHaveBeenCalled();
+        held.unbound.mock.calls[0]?.[0]("holder", device.deviceId);
+        const cleanup = held.pending.mock.calls[0]?.[1];
+        expect(cleanup).toBeDefined();
+        const settled = cleanup!.then(() => {
+          expect(markers.get(device.deviceId, 1)?.reason).toBe("recording-teardown");
+        });
+        if (mode === "deadline") {
+          await step(5_000);
+        }
+        await settled;
+        await step(1_000);
+        gate.resolve();
+        expect(kill).toHaveBeenCalledTimes(2);
+        expect(markers.get(device.deviceId, 1)).toBeUndefined();
+        expect((await repo.getRecording("rec"))?.captureTeardown).toBeUndefined();
+      } finally {
+        gate.resolve();
+        held.restore();
+      }
+    },
+  );
+  test("identity-replaced held release clears only host descriptors and consumes pending rows", async () => {
+    await repo.insertRecording(row);
+    const held = heldDevice();
+    const d = deps();
+    const kill = spyOn(d, "forceStopOrphanedCapture");
+    try {
+      await (await redriveModule()).redriveUnconfirmedCaptureTeardowns(manager, d);
+      expect(held.mark).not.toHaveBeenCalled();
+      held.fire({ deviceIdentityReplaced: true });
+      await drainUntilQuiescent(timer);
+      expect((await repo.getRecording("rec"))?.captureTeardown).toBeUndefined();
+      held.fire();
+      expect(kill).not.toHaveBeenCalled();
+      expect(held.pending).not.toHaveBeenCalled();
+      expect(held.mark).not.toHaveBeenCalled();
+    } finally {
+      held.restore();
+    }
+  });
+  test("pid-less restart at 30 seconds waits through expiry and clears at 185 seconds", async () => {
+    await repo.insertRecording({
+      ...row,
+      captureTeardown: { ...descriptor, devicePid: undefined },
+    });
+    timer.setCurrentTime(30_000);
+    const d = deps();
+    const kill = spyOn(d, "forceStopOrphanedCapture");
+    const mark = spyOn(manager, "markDeviceNeedsRecorderTeardown");
+    await (await redriveModule()).redriveUnconfirmedCaptureTeardowns(manager, d);
+    expect(mark.mock.calls[0]?.[2]).toBe(160_000);
+    expect(markers.get(device.deviceId, 1)).toBeDefined();
+    await step(154_999);
+    expect(markers.get(device.deviceId, 1)).toBeDefined();
+    await step(1);
+    expect(markers.get(device.deviceId, 1)).toBeUndefined();
+    expect((await repo.getRecording("rec"))?.captureTeardown).toBeUndefined();
+    expect(kill).not.toHaveBeenCalled();
+    mark.mockRestore();
+  });
+  test("pid-less held release fails its short attempt then waits in health recovery", async () => {
+    await repo.insertRecording({
+      ...row,
+      captureTeardown: { ...descriptor, devicePid: undefined },
+    });
+    timer.setCurrentTime(30_000);
+    const held = heldDevice();
+    try {
+      await (await redriveModule()).redriveUnconfirmedCaptureTeardowns(manager, deps());
+      expect(held.mark).not.toHaveBeenCalled();
+      held.fire();
+      await held.pending.mock.calls[0]?.[1];
+      expect(held.mark.mock.calls[0]?.[2]).toBe(160_000);
+      await step(155_000);
+      expect(markers.get(device.deviceId, 1)).toBeUndefined();
+      expect((await repo.getRecording("rec"))?.captureTeardown).toBeUndefined();
+    } finally {
+      held.restore();
+    }
+  });
+  test("unparsable pid-less start holds the marker and descriptor after retries", async () => {
+    await repo.insertRecording({
+      ...row,
+      startedAt: "invalid",
+      captureTeardown: { ...descriptor, devicePid: undefined },
+    });
+    const d = deps();
+    const kill = spyOn(d, "forceStopOrphanedCapture");
+    await (await redriveModule()).redriveUnconfirmedCaptureTeardowns(manager, d);
+    await step(3_600_000);
+    expect(markers.get(device.deviceId, 1)).toBeDefined();
+    expect((await repo.getRecording("rec"))?.captureTeardown).toBeDefined();
+    expect(kill).not.toHaveBeenCalled();
+  });
   test("restart redrive marks before returning and clears descriptor and health only after confirmed orphan kill", async () => {
     await repo.insertRecording(row);
     const d = deps();
@@ -241,7 +408,7 @@ describe("durable capture ownership", () => {
     backend.descriptor = descriptor;
     expect(service.getCaptureTeardown(active.recordingId)).toEqual(descriptor);
   });
-  test.each(["stop", "force-stop", "force-stop-only", "abandon", "rollback"] as const)(
+  test.each(["stop", "force-stop", "force-stop-only", "rollback"] as const)(
     "retained %s refreshes the durable descriptor",
     async (mode: "stop" | "force-stop" | "force-stop-only" | "abandon" | "rollback") => {
       const active = await start();
@@ -284,6 +451,130 @@ describe("durable capture ownership", () => {
       expect(service.getCaptureTeardown(active.recordingId)).toBeUndefined();
     },
   );
+  test.each(["incomplete", "interrupt"] as const)(
+    "confirmed terminal-row %s clears descriptor",
+    async (mode) => {
+      const active = await start();
+      await repo.updateRecording(active.recordingId, { status: "interrupted" });
+      if (mode === "incomplete") {
+        await videoManager.markVideoRecordingIncomplete(active.recordingId);
+      } else {
+        await service.forceStopRecording(active.recordingId);
+        await videoManager.interruptVideoRecording(active.recordingId);
+      }
+      expect(service.listActiveRecordingIds()).toEqual([]);
+      expect((await repo.getRecording(active.recordingId))?.captureTeardown).toBeUndefined();
+    },
+  );
+  test("failed host-only abandon clears descriptor while retaining capture ownership", async () => {
+    const active = await start();
+    backend.setForceStopFailures([new ProcessTeardownUnconfirmedError("host reap failed")]);
+    await expect(
+      videoManager.abandonVideoRecordingOnReplacedDevice(active.recordingId),
+    ).rejects.toThrow();
+    expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
+    expect((await repo.getRecording(active.recordingId))?.captureTeardown).toBeUndefined();
+  });
+  test.each(["safety", "force-stop", "incomplete", "stop"] as const)(
+    "retained host-only rollback keeps later %s host-only",
+    async (mode) => {
+      const active = await start();
+      backend.setForceStopFailures([new ProcessTeardownUnconfirmedError("host rollback failed")]);
+      await expect(
+        videoManager.rollbackVideoRecordingStart(active.recordingId, {
+          hostOnly: true,
+          deviceWide: false,
+        }),
+      ).rejects.toThrow();
+      expect((await repo.getRecording(active.recordingId))?.captureTeardown).toBeUndefined();
+      expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
+      if (mode === "safety") {
+        await timer.advanceTimeAsync(5_000, () => drainUntilQuiescent(timer));
+      }
+      if (mode === "force-stop") {
+        await videoManager.forceStopVideoRecording(active.recordingId);
+      }
+      if (mode === "incomplete") {
+        await videoManager.markVideoRecordingIncomplete(active.recordingId);
+      }
+      if (mode === "stop") {
+        await videoManager.stopVideoRecording(active.recordingId);
+      }
+      expect(backend.forceStopOptionsCalls).toHaveLength(2);
+      expect(backend.forceStopOptionsCalls.every((options) => options?.hostOnly === true)).toBe(
+        true,
+      );
+      expect(backend.stopCalls).toEqual([]);
+      expect(service.listActiveRecordingIds()).toEqual([]);
+    },
+  );
+  test("late segmented host-only rollback rejection logs and remembers warning without adopting capture", async () => {
+    const gate = Promise.withResolvers<void>();
+    let replacementReady = false;
+    const session = new AndroidSegmentedPlanVideoSession({
+      device,
+      outputNamePrefix: "segments",
+      timer,
+      segmentRotateAfterMs: 1_000,
+      startVideoRecording: async (request) => {
+        const active = await videoManager.startVideoRecording(request);
+        if (request.outputName === "segments-seg1") {
+          replacementReady = true;
+          await gate.promise;
+        }
+        return active;
+      },
+    });
+    try {
+      await session.startFirstSegment();
+      timer.advanceTime(1_000);
+      const rotation = session.onBeforePlanStep();
+      await drainUntil(() => replacementReady, { description: "late segment acquired" });
+      await session.finalizeWithoutDevice({ hostOnly: true });
+      backend.setForceStopFailures([new ProcessTeardownUnconfirmedError("host reap failed")]);
+      gate.resolve();
+      await rotation;
+      expect(warn.mock.calls.some((call) => String(call[0]).includes("host reap failed"))).toBe(
+        true,
+      );
+      expect(
+        session
+          .completedResult()
+          .metadata.flatMap((entry) => entry.warnings ?? [])
+          .join(" "),
+      ).toContain("host reap failed");
+      expect(session.liveCaptureIds).toEqual([]);
+      expect(service.listActiveRecordingIds()).toEqual(["fake-1"]);
+      expect((await repo.getRecording("fake-1"))?.captureTeardown).toBeUndefined();
+      await videoManager.forceStopVideoRecording("fake-1");
+      expect(backend.forceStopOptionsCalls.every((options) => options?.hostOnly === true)).toBe(
+        true,
+      );
+    } finally {
+      gate.resolve();
+    }
+  });
+  test("start catch retains host-only teardown after aborted start rollback rejects", async () => {
+    const controller = new AbortController();
+    const insert = repo.insertRecording.bind(repo);
+    spyOn(repo, "insertRecording").mockImplementation(async (record) => {
+      await insert(record);
+      controller.abort();
+    });
+    backend.setForceStopFailures([new ProcessTeardownUnconfirmedError("host rollback failed")]);
+    await expect(
+      videoManager.startVideoRecording({
+        device,
+        ownerSessionUuid: "owner",
+        abortSignal: controller.signal,
+        rollbackOptions: () => ({ hostOnly: true, deviceWide: false }),
+      }),
+    ).rejects.toThrow("recording rollback failed");
+    expect((await repo.getRecording("rec"))?.captureTeardown).toBeUndefined();
+    await videoManager.forceStopVideoRecording("rec");
+    expect(backend.forceStopOptionsCalls.every((options) => options?.hostOnly === true)).toBe(true);
+    expect(backend.stopCalls).toEqual([]);
+  });
   test("failed descriptor refresh logs without masking the original stop error", async () => {
     const active = await start();
     spyOn(backend, "stop").mockRejectedValue(

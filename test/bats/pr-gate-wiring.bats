@@ -609,3 +609,45 @@ wiring_requires_yq() {
   done < <(yq -r '.jobs | to_entries[] | select(.value."runs-on" | tostring | contains("automobile-mac")) | .key' "$WF")
   [ "$count" -eq 10 ]
 }
+
+@test "installer minimal filters scripts/install.sh, package.json, android/gradle/libs.versions.toml, and the PR workflow (#11580)" {
+  wiring_requires_yq
+  run yq -r '.jobs."detect-changes".steps[] | select(.id == "filter-installer") | (.with.filters | from_yaml | .installer[])' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'scripts/install.sh\npackage.json\nandroid/gradle/libs.versions.toml\n.github/workflows/pull_request.yml' ]
+  [ "$(yq -r '.jobs."detect-changes".outputs.installer_changed' "$WF")" = '${{ steps.filter-installer.outputs.installer }}' ]
+  [ "$(yq -r '.jobs."installer-minimal".env.RUN_INSTALLER' "$WF")" = "\${{ needs.detect-changes.outputs.installer_changed == 'true' }}" ]
+  [ "$(yq -r '.jobs."detect-changes".steps[] | select(.id == "filter-installer") | .uses' "$WF")" = 'dorny/paths-filter@v3' ]
+}
+
+@test "installer no-op macOS leg routes to Linux while keeping its check name (#11580)" {
+  wiring_requires_yq
+  local routing
+  routing="$(yq -r '.jobs."installer-minimal"."runs-on"' "$WF")"
+  [[ "$routing" == *"(matrix.os == 'macos-latest' && needs.detect-changes.outputs.installer_changed == 'true' &&"* ]]
+  [[ "$routing" == *"((matrix.os == 'ubuntu-latest' || needs.detect-changes.outputs.installer_changed != 'true') && vars.NAMESPACE_RUNNERS_DISABLED != 'true'"* ]]
+  [[ "$routing" == *"|| (needs.detect-changes.outputs.installer_changed != 'true') && 'ubuntu-latest' || matrix.os"* ]]
+  [ "$(yq -r '.jobs."installer-minimal".name' "$WF")" = 'Installer Minimal (${{ matrix.os }})' ]
+}
+
+@test "Mac queue watchdog is an advisory Linux sibling with no dependents (#11580)" {
+  wiring_requires_yq
+  local condition routing
+  condition="$(yq -r '.jobs."mac-runner-queue".if' "$WF")"
+  [[ "$condition" == "always() && !cancelled() && needs.detect-changes.result == 'success' &&"* ]]
+  [[ "$condition" == *"github.event.pull_request.user.login == 'kaeawc'"* ]]
+  [[ "$condition" == *"github.event.pull_request.head.repo.full_name == github.repository"* ]]
+  [[ "$condition" == *"vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true' && ("* ]]
+  local output_name
+  for output_name in ios_should_run prototype_simulator_should_run installer_changed desktop_app_changed desktop_core_changed; do
+    [[ "$condition" == *"needs.detect-changes.outputs.$output_name == 'true'"* ]]
+  done
+  [[ "$condition" == *"needs.detect-changes.outputs.sha256_only != 'true'"* ]]
+  routing="$(yq -r '.jobs."mac-runner-queue"."runs-on"' "$WF")"
+  [ "$routing" = 'ubuntu-latest' ]
+  [ "$(yq -r '.jobs."mac-runner-queue".needs[]' "$WF")" = $'detect-changes\nfast-validation' ]
+  # This includes every roll-up gate: no required job can inherit the advisory red.
+  run yq -r '[.jobs[] | .needs // [] | (if type == "!!str" then [.] else . end) | .[] | select(. == "mac-runner-queue")] | length' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" -eq 0 ]
+}

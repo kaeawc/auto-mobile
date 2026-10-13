@@ -39,6 +39,7 @@ jobs:
       desktop_app_changed: ${{ steps.filter-desktop-app.outputs.desktop_app }}
       android_changed: ${{ steps.filter-android.outputs.android }}
       kotlin_changed: ${{ steps.filter-kotlin.outputs.kotlin }}
+      installer_changed: ${{ steps.filter-installer.outputs.installer }}
       ios_changed: ${{ steps.filter-ios.outputs.ios }}
       ts_changed: ${{ steps.filter-ts.outputs.ts }}
       format_changed: ${{ steps.filter-format.outputs.format }}
@@ -53,6 +54,20 @@ jobs:
         uses: actions/checkout@v6
         with:
           lfs: false
+
+      # Minimal installs the PUBLISHED npm package, but checkout inputs include
+      # scripts/install.sh, package.json, android/gradle/libs.versions.toml (the
+      # compileSdk advisory), and this workflow. merge.yml runs it on every main push.
+      - name: "Check for installer inputs"
+        id: filter-installer
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            installer:
+              - 'scripts/install.sh'
+              - 'package.json'
+              - 'android/gradle/libs.versions.toml'
+              - '.github/workflows/pull_request.yml'
 
       - name: "Check for documentation-only changes"
         id: filter
@@ -1223,10 +1238,12 @@ jobs:
   installer-minimal:
     timeout-minutes: 20
     name: "Installer Minimal (${{ matrix.os }})"
-    runs-on: ${{ (matrix.os == 'macos-latest' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('["self-hosted","automobile-mac"]') || (matrix.os == 'ubuntu-latest' && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository) && 'namespace-profile-auto-mobile-small' || matrix.os }}
+    # Only an active installer macOS leg uses a Mac; both no-op legs report from Linux.
+    runs-on: ${{ (matrix.os == 'macos-latest' && needs.detect-changes.outputs.installer_changed == 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true') && fromJSON('["self-hosted","automobile-mac"]') || ((matrix.os == 'ubuntu-latest' || needs.detect-changes.outputs.installer_changed != 'true') && vars.NAMESPACE_RUNNERS_DISABLED != 'true' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository) && 'namespace-profile-auto-mobile-small' || (needs.detect-changes.outputs.installer_changed != 'true') && 'ubuntu-latest' || matrix.os }}
     needs: detect-changes
     env:
-      RUN_INSTALLER: ${{ needs.detect-changes.outputs.docs_only != 'true' }}
+      # Docs-only PRs cannot match installer inputs, subsuming the old docs_only condition.
+      RUN_INSTALLER: ${{ needs.detect-changes.outputs.installer_changed == 'true' }}
       # Keep this job from touching any daemon on the runner. The product default
       # remains to migrate stale daemons for users.
       AUTOMOBILE_SKIP_STALE_DAEMON_MIGRATION: "true"
@@ -1240,7 +1257,8 @@ jobs:
     steps:
       - name: "Skip installer validation"
         if: env.RUN_INSTALLER != 'true'
-        run: echo "Skipping installer validation for documentation-only changes"
+        run: |
+          echo "Skipping installer validation: no installer input changed (scripts/install.sh, package.json, android/gradle/libs.versions.toml, .github/workflows/pull_request.yml)"
 
       - name: "Isolate self-hosted installer home"
         if: env.RUN_INSTALLER == 'true' && runner.environment == 'self-hosted'
@@ -1337,6 +1355,31 @@ jobs:
         if: always() && runner.environment == 'self-hosted'
         shell: bash
         run: rm -rf -- "$RUNNER_TEMP/installer-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+
+  # Wait for fast-validation: iOS Mac jobs are created when it finishes.
+  # Advisory (NOT a required check): reports queue health and never cancels anything.
+  # Watches existing self-hosted jobs and exits once none is queued. Later Prototype
+  # Simulator (needs ios-xcode-build) is deliberately unwatched to avoid holding
+  # Linux for the whole Mac phase; it is advisory and follows a heavy-pool job.
+  mac-runner-queue:
+    name: "Mac Runner Queue"
+    # Hosted image ships gh, jq and coreutils timeout; no other PR job uses gh, so Namespace is unproven.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [detect-changes, fast-validation]
+    if: always() && !cancelled() && needs.detect-changes.result == 'success' && github.event.pull_request.user.login == 'kaeawc' && github.event.pull_request.head.repo.full_name == github.repository && vars.AUTOMOBILE_MAC_POOLS_ENABLED == 'true' && (needs.detect-changes.outputs.ios_should_run == 'true' || needs.detect-changes.outputs.prototype_simulator_should_run == 'true' || needs.detect-changes.outputs.installer_changed == 'true' || ((needs.detect-changes.outputs.desktop_app_changed == 'true' || needs.detect-changes.outputs.desktop_core_changed == 'true') && needs.detect-changes.outputs.sha256_only != 'true'))
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: scripts/ci/mac-queue-watchdog.sh
+          sparse-checkout-cone-mode: false
+          lfs: false
+
+      - name: "Watch self-hosted Mac queue"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci/mac-queue-watchdog.sh
 
   # =============================================================================
   # Node Checks (#10894)
@@ -2351,6 +2394,11 @@ jobs:
         run: |
           isolated_home="$RUNNER_TEMP/swift-coverage-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           mkdir -p "$isolated_home/tmp" "$isolated_home/config" "$isolated_home/data"
+          mkdir -p "$RUNNER_TEMP/automobile-swiftpm-cache" "$isolated_home/Library/Caches"
+          ln -s "$RUNNER_TEMP/automobile-swiftpm-cache" "$isolated_home/Library/Caches/org.swift.swiftpm"
+          if [[ ! "$GITHUB_WORKSPACE/../../_temp/automobile-swiftpm-cache" -ef "$RUNNER_TEMP/automobile-swiftpm-cache" ]]; then
+            echo '::warning::SwiftPM cache path does not resolve to RUNNER_TEMP; the dependency cache will not be saved (#11580).'
+          fi
           {
             echo "HOME=$isolated_home"
             echo "TMPDIR=$isolated_home/tmp"
@@ -2376,13 +2424,15 @@ jobs:
         shell: bash
         run: echo "version=$(xcodebuild -version | awk '/^Xcode / { print $2; exit }')" >> "$GITHUB_OUTPUT"
 
+      # Same literal on every runner process shares one cache entry; it must name
+      # the same directory as $RUNNER_TEMP/automobile-swiftpm-cache.
       - name: "Cache Swift coverage dependencies"
         uses: actions/cache@v5
         id: cache-swift-coverage
         with:
           path: |
-            ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm/cache
+            ${{ runner.environment == 'self-hosted' && '../../_temp/automobile-swiftpm-cache' || '~/Library/Caches/org.swift.swiftpm' }}
+            ${{ runner.environment != 'self-hosted' && '~/.swiftpm/cache' || '' }}
           key: ${{ runner.os }}-${{ runner.environment }}-spm-swift-coverage-${{ steps.coverage-xcode-version.outputs.version }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.environment }}-spm-swift-coverage-${{ steps.coverage-xcode-version.outputs.version }}-
@@ -2404,6 +2454,8 @@ jobs:
           path: coverage/swift-coverage-badge.json
           retention-days: 7
 
+      # #11580: removing the isolated home removes only the cache symlink;
+      # $RUNNER_TEMP/automobile-swiftpm-cache survives for the cache post-step save.
       - name: "Remove isolated Swift coverage home"
         if: always() && runner.environment == 'self-hosted'
         shell: bash
@@ -2446,6 +2498,11 @@ jobs:
         run: |
           isolated_home="$RUNNER_TEMP/swift-packages-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           mkdir -p "$isolated_home/tmp" "$isolated_home/config" "$isolated_home/data"
+          mkdir -p "$RUNNER_TEMP/automobile-swiftpm-cache" "$isolated_home/Library/Caches"
+          ln -s "$RUNNER_TEMP/automobile-swiftpm-cache" "$isolated_home/Library/Caches/org.swift.swiftpm"
+          if [[ ! "$GITHUB_WORKSPACE/../../_temp/automobile-swiftpm-cache" -ef "$RUNNER_TEMP/automobile-swiftpm-cache" ]]; then
+            echo '::warning::SwiftPM cache path does not resolve to RUNNER_TEMP; the dependency cache will not be saved (#11580).'
+          fi
           {
             echo "HOME=$isolated_home"
             echo "TMPDIR=$isolated_home/tmp"
@@ -2473,13 +2530,14 @@ jobs:
         shell: bash
         run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}"
 
+      # Same runner-independent literal and RUNNER_TEMP directory as the coverage cache above.
       - name: "Cache Swift package dependencies"
         uses: actions/cache@v5
         id: cache-swift-packages
         with:
           path: |
-            ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm/cache
+            ${{ runner.environment == 'self-hosted' && '../../_temp/automobile-swiftpm-cache' || '~/Library/Caches/org.swift.swiftpm' }}
+            ${{ runner.environment != 'self-hosted' && '~/.swiftpm/cache' || '' }}
           key: ${{ runner.os }}-${{ runner.environment }}-spm-swift-packages-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.environment }}-spm-swift-packages-${{ matrix.config.xcode }}-
@@ -2534,6 +2592,8 @@ jobs:
       - name: "Test Swift Packages"
         run: ./scripts/ios/swift-test.sh
 
+      # #11580: removing the isolated home removes only the cache symlink;
+      # $RUNNER_TEMP/automobile-swiftpm-cache survives for the cache post-step save.
       - name: "Remove isolated Swift Packages home"
         if: always() && runner.environment == 'self-hosted'
         shell: bash
@@ -2570,6 +2630,11 @@ jobs:
         run: |
           isolated_home="$RUNNER_TEMP/xcode-build-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           mkdir -p "$isolated_home/tmp" "$isolated_home/config" "$isolated_home/data"
+          mkdir -p "$RUNNER_TEMP/automobile-swiftpm-cache" "$isolated_home/Library/Caches"
+          ln -s "$RUNNER_TEMP/automobile-swiftpm-cache" "$isolated_home/Library/Caches/org.swift.swiftpm"
+          if [[ ! "$GITHUB_WORKSPACE/../../_temp/automobile-swiftpm-cache" -ef "$RUNNER_TEMP/automobile-swiftpm-cache" ]]; then
+            echo '::warning::SwiftPM cache path does not resolve to RUNNER_TEMP; the dependency cache will not be saved (#11580).'
+          fi
           {
             echo "HOME=$isolated_home"
             echo "TMPDIR=$isolated_home/tmp"
@@ -2597,13 +2662,14 @@ jobs:
         shell: bash
         run: bash scripts/ci/select-self-hosted-xcode.sh "${{ matrix.config.xcode }}"
 
+      # Same runner-independent literal and RUNNER_TEMP directory as the coverage cache above.
       - name: "Cache Xcode Swift package dependencies"
         uses: actions/cache@v5
         id: cache-xcode-spm
         with:
           path: |
-            ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm/cache
+            ${{ runner.environment == 'self-hosted' && '../../_temp/automobile-swiftpm-cache' || '~/Library/Caches/org.swift.swiftpm' }}
+            ${{ runner.environment != 'self-hosted' && '~/.swiftpm/cache' || '' }}
           key: ${{ runner.os }}-${{ runner.environment }}-spm-xcode-build-${{ matrix.config.xcode }}-${{ hashFiles('Package.swift', 'ios/**/Package.swift') }}
           # The second prefix is the Playground leg's key from before the two
           # legs were merged (#11580); both legs resolved the same packages.
@@ -2678,6 +2744,8 @@ jobs:
           ./scripts/ios/xcode-build.sh CtrlProxy
           echo "build took ${SECONDS}s"
 
+      # #11580: removing the isolated home removes only the cache symlink;
+      # $RUNNER_TEMP/automobile-swiftpm-cache survives for the cache post-step save.
       - name: "Remove isolated Xcode build home"
         if: always() && runner.environment == 'self-hosted'
         shell: bash
@@ -2811,6 +2879,11 @@ jobs:
         run: |
           isolated_home="$RUNNER_TEMP/root-spm-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           mkdir -p "$isolated_home/tmp" "$isolated_home/config" "$isolated_home/data"
+          mkdir -p "$RUNNER_TEMP/automobile-swiftpm-cache" "$isolated_home/Library/Caches"
+          ln -s "$RUNNER_TEMP/automobile-swiftpm-cache" "$isolated_home/Library/Caches/org.swift.swiftpm"
+          if [[ ! "$GITHUB_WORKSPACE/../../_temp/automobile-swiftpm-cache" -ef "$RUNNER_TEMP/automobile-swiftpm-cache" ]]; then
+            echo '::warning::SwiftPM cache path does not resolve to RUNNER_TEMP; the dependency cache will not be saved (#11580).'
+          fi
           {
             echo "HOME=$isolated_home"
             echo "TMPDIR=$isolated_home/tmp"
@@ -2842,13 +2915,14 @@ jobs:
         shell: bash
         run: bash scripts/ci/select-self-hosted-xcode.sh "26.5"
 
+      # Same runner-independent literal and RUNNER_TEMP directory as the coverage cache above.
       - name: "Cache root Swift package dependencies"
         uses: actions/cache@v5
         id: cache-root-spm
         with:
           path: |
-            ~/Library/Caches/org.swift.swiftpm
-            ~/.swiftpm/cache
+            ${{ runner.environment == 'self-hosted' && '../../_temp/automobile-swiftpm-cache' || '~/Library/Caches/org.swift.swiftpm' }}
+            ${{ runner.environment != 'self-hosted' && '~/.swiftpm/cache' || '' }}
           key: ${{ runner.os }}-${{ runner.environment }}-spm-root-package-26.5-${{ hashFiles('Package.swift') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.environment }}-spm-root-package-26.5-
@@ -2863,6 +2937,8 @@ jobs:
           swift build -c release 2>&1
           echo "build took ${SECONDS}s"
 
+      # #11580: removing the isolated home removes only the cache symlink;
+      # $RUNNER_TEMP/automobile-swiftpm-cache survives for the cache post-step save.
       - name: "Remove isolated root SPM home"
         if: always() && runner.environment == 'self-hosted'
         shell: bash

@@ -109,6 +109,35 @@ minutes until they were cancelled (#11580).
 | `automobile-mac`       | SwiftLint, Swift Code Coverage, Build Desktop App (macos-latest), Installer Minimal (macos-latest), Swift Packages, Build Root SPM Package |
 | `automobile-mac-heavy` | Build Xcode Projects (Playground, CtrlProxy), Prototype Simulator iOS 26, iOS Playground Tests (label-forced fallback only)                |
 
+- Installer Minimal's macOS leg uses a Mac only when `scripts/install.sh`,
+  `package.json`, `android/gradle/libs.versions.toml`, or
+  `.github/workflows/pull_request.yml` changed (#11580).
+  Otherwise its no-op leg reports from Linux with the same required check name.
+  The minimal installer installs the published npm package but also reads the
+  checkout's compileSdk TOML during the initial SDK advisory, before applying
+  the preset, when adb and an SDK path are detected (including non-interactive
+  mode). The main-push installer remains unconditional.
+- The four PR SwiftPM build/coverage jobs cache dependencies in
+  `$RUNNER_TEMP/automobile-swiftpm-cache` on the Mac, symlinked from the isolated
+  home's `Library/Caches/org.swift.swiftpm`. Home cleanup removes only the link,
+  leaving the directory available for the cache post-step to save (#11580).
+  The cache action uses the workspace-relative literal
+  `../../_temp/automobile-swiftpm-cache`: the same literal on every runner process
+  shares one cache entry and must resolve to `$RUNNER_TEMP/automobile-swiftpm-cache`.
+  Each isolate step warns if the directories differ, without failing the job.
+  Hosted runners keep their existing two cache paths; DerivedData is unchanged.
+- `Mac Runner Queue` is an advisory Linux watchdog, with a 15 minute queue-age
+  threshold and 30 second polls. It waits for Fast Validation before observing
+  Mac jobs on GitHub-hosted `ubuntu-latest`, which provides gh, jq, and timeout.
+  It watches self-hosted jobs that exist while it runs and exits once none is
+  queued. Later Prototype Simulator (`needs: ios-xcode-build`) is deliberately
+  unwatched so Linux is not held for the whole Mac phase; that job is advisory
+  and starts after a heavy-pool job has just run. A red result names queued jobs
+  and their pools: no runner in that pool is online or the pool is saturated. Set `AUTOMOBILE_MAC_POOLS_ENABLED`
+  to any value other than `true` and re-run the workflow to use hosted macOS.
+  The watchdog never cancels jobs and no required gate depends on it. API errors
+  remain warnings and observation is bounded to 15 minutes plus two polls; the
+  job's 20 minute timeout covers it (#11580).
 - The heavy pool has exactly one runner process, so xcodebuild and simulator
   jobs never overlap, and each job owns the simulators it creates. Heavy jobs
   have tight `timeout-minutes` (25, or 30 for the Playground fallback).

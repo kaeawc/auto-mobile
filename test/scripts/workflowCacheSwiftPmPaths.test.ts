@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { load } from "js-yaml";
 import {
   loadAllJobSteps,
+  loadJobSteps,
   type WorkflowDefinition,
   type WorkflowStep,
 } from "../helpers/workflowSteps";
@@ -72,6 +73,47 @@ describe("workflow cache paths", () => {
 
       expect(cacheStepCount).toBeGreaterThan(0);
       expect(collectForbiddenCachePaths(entries)).toEqual([]);
+    });
+  }
+
+  for (const jobId of [
+    "swift-code-coverage",
+    "ios-swift-packages",
+    "ios-xcode-build",
+    "ios-spm-root-package-build",
+  ]) {
+    test(`${jobId} keeps the self-hosted dependency cache alive after home cleanup`, () => {
+      const steps = loadJobSteps(".github/workflows/pull_request.yml", jobId);
+      const cache = steps.find((step) => String(step.with?.path).includes("org.swift.swiftpm"));
+      expect(cache?.uses).toBe("actions/cache@v5");
+      expect(cache?.with?.path).toBe(
+        "${{ runner.environment == 'self-hosted' && '../../_temp/automobile-swiftpm-cache' || '~/Library/Caches/org.swift.swiftpm' }}\n" +
+          "${{ runner.environment != 'self-hosted' && '~/.swiftpm/cache' || '' }}\n",
+      );
+      const isolate = steps.find((step) => step.name?.startsWith("Isolate self-hosted"));
+      expect(isolate?.if).toBe("runner.environment == 'self-hosted'");
+      expect(isolate?.run).toContain(
+        'mkdir -p "$RUNNER_TEMP/automobile-swiftpm-cache" "$isolated_home/Library/Caches"',
+      );
+      expect(isolate?.run).toContain(
+        'ln -s "$RUNNER_TEMP/automobile-swiftpm-cache" "$isolated_home/Library/Caches/org.swift.swiftpm"',
+      );
+      expect(isolate?.run).toContain(
+        'if [[ ! "$GITHUB_WORKSPACE/../../_temp/automobile-swiftpm-cache" -ef "$RUNNER_TEMP/automobile-swiftpm-cache" ]]; then',
+      );
+      expect(isolate?.run).toContain(
+        "echo '::warning::SwiftPM cache path does not resolve to RUNNER_TEMP; the dependency cache will not be saved (#11580).'",
+      );
+      const cleanup = steps.find((step) => step.name?.startsWith("Remove isolated"));
+      expect(cleanup?.run).toMatch(
+        /^rm -rf -- "\$RUNNER_TEMP\/[a-z-]+-home-\$GITHUB_RUN_ID-\$GITHUB_RUN_ATTEMPT"$/,
+      );
+      expect(cleanup?.run).not.toContain("automobile-swiftpm-cache");
+      expect(steps.indexOf(isolate!)).toBeLessThan(steps.indexOf(cache!));
+      expect(steps.indexOf(cache!)).toBeLessThan(steps.indexOf(cleanup!));
+      for (const path of collectCachePaths(steps.map((step) => ({ jobId, step }))).entries) {
+        expect(path).not.toContain("-home-");
+      }
     });
   }
 

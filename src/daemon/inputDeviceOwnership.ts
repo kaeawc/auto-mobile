@@ -371,11 +371,12 @@ export async function assertControlNotOnForeignDaemonDevice(input: {
   deviceId: string;
   platform: "android" | "ios";
   gate: ForeignDaemonClaimGate;
+  remedy?: string;
 }): Promise<void> {
   await input.gate.assertNotClaimedByForeignDaemon?.(
     input.deviceId,
     input.platform,
-    undefined,
+    input.remedy,
     FOREIGN_DAEMON_CLAIM_SNAPSHOT_MAX_AGE_MS,
   );
 }

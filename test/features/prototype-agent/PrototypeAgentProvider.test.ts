@@ -231,9 +231,24 @@ describe("PrototypeAgentProvider", () => {
   });
 
   test("overlapping downloads use distinct partials and both end with one valid dylib", async () => {
+    const bothEntered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const download = downloader.download.bind(downloader);
+    let entered = 0;
+    downloader.download = async (url, destination, signal) => {
+      entered++;
+      if (entered === 2) {
+        bothEntered.resolve();
+      }
+      await release.promise;
+      await download(url, destination, signal);
+    };
     const a = makeProvider({ idGenerator: new FakeIdGenerator(["a1"]) });
     const b = makeProvider({ idGenerator: new FakeIdGenerator(["b1"]) });
-    const results = await Promise.all([a.ensure(), b.ensure()]);
+    const pending = [a.ensure(), b.ensure()];
+    await bothEntered.promise;
+    release.resolve();
+    const results = await Promise.all(pending);
     expect(results.map((r) => r.path)).toEqual([dylibPath(), dylibPath()]);
     expect([...downloader.downloadedDestinations].sort()).toEqual([
       `${dylibPath()}.a1.download`,

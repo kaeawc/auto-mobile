@@ -789,6 +789,8 @@ export class Daemon {
   private readonly acceptanceDiscoveryCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
   private shutdownHandlersRegistered: boolean = false;
   private shutdownInProgress: boolean = false;
+  /** Redrives retained startup recorder descriptors when a device incarnation is assigned. */
+  private recorderDeviceIncarnationListener?: (deviceId: string) => void;
   /** Live peer daemon ids captured at startup, consulted by the appearance sweep (#11158). */
   private startupLiveDaemonSessionIds: ReadonlySet<string> = new Set();
   private shutdownSessionReleasesDrained = true;
@@ -1279,6 +1281,7 @@ export class Daemon {
         this.deviceDataStreamServer?.invalidateDeviceFrames(deviceId);
         getDaemonStreamDeviceLifecycleEmitter().deviceIdentityChanged(deviceId);
       },
+      onDeviceIncarnationAssigned: (deviceId) => this.recorderDeviceIncarnationListener?.(deviceId),
       onDeviceRemoved: (deviceId, platform) => {
         getDaemonStreamDeviceLifecycleEmitter().deviceRemoved(deviceId);
         stopLocationRouteForRemovedDevice(deviceId);
@@ -1713,6 +1716,9 @@ export class Daemon {
               [...state.liveDaemonSessionIds].filter((id) => id !== this.daemonSessionId),
             ),
             ownedCaptureIds: () => state.videoRecorderService.listActiveRecordingIds(),
+            onDeviceIncarnationAssigned: (listener) => {
+              this.recorderDeviceIncarnationListener = listener;
+            },
             getDeviceIncarnation: (id) => this.devicePool.getDeviceIncarnation(id),
             getDevice: (id) => {
               const device = this.devicePool.getDevice(id);

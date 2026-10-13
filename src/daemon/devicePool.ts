@@ -973,6 +973,7 @@ export interface DevicePoolDependencies {
   androidDeviceReboot?: AndroidDeviceReboot;
   recoveryPolicy?: DeviceRecoveryPolicy;
   onDeviceRemoved?: DeviceRemovedListener;
+  onDeviceIncarnationAssigned?: (deviceId: string, incarnation: number) => void;
   onDeviceStateChanged?: DeviceStateChangedListener;
   onDeviceFramesInvalidated?: (deviceId: string) => void;
   emulatorLossIncidentStore?: EmulatorLossIncidentStore;
@@ -1177,6 +1178,7 @@ export class DevicePool {
   private readonly criteriaMatcher: DeviceCriteriaMatcher;
   private readonly releaseSessionForDisconnectedDevice: DeviceDisconnectSessionReleaser;
   private readonly onDeviceReady: DeviceReadyListener | undefined;
+  private readonly onDeviceIncarnationAssigned: DevicePoolDependencies["onDeviceIncarnationAssigned"];
   private readonly onDeviceRemoved: DeviceRemovedListener | undefined;
   private readonly onDeviceStateChanged: DeviceStateChangedListener | undefined;
   private readonly onDeviceFramesInvalidated: ((deviceId: string) => void) | undefined;
@@ -1364,6 +1366,7 @@ export class DevicePool {
     androidDeviceReboot,
     recoveryPolicy,
     onDeviceRemoved,
+    onDeviceIncarnationAssigned,
     onDeviceStateChanged,
     onDeviceFramesInvalidated,
     emulatorLossIncidentStore = new InMemoryEmulatorLossIncidentStore(timer),
@@ -1414,9 +1417,8 @@ export class DevicePool {
       shutdownReservationsPort,
       deviceShutdownReservationsFactory,
     );
-    const missingDevicePort: MissingDeviceLivenessPoolPort = this.createMissingDevicePort();
     this.missingDeviceLiveness = createMissingDeviceLiveness(
-      missingDevicePort,
+      this.createMissingDevicePort(),
       missingDeviceLivenessFactory,
     );
     const refreshPort: DevicePoolRefreshPort = this.createRefreshPort();
@@ -1433,6 +1435,7 @@ export class DevicePool {
     this.criteriaMatcher = criteriaMatcher;
     this.onDeviceReady = onDeviceReady;
     this.onDeviceRemoved = onDeviceRemoved;
+    this.onDeviceIncarnationAssigned = onDeviceIncarnationAssigned;
     this.onDeviceStateChanged = onDeviceStateChanged;
     this.onDeviceFramesInvalidated = onDeviceFramesInvalidated;
     this.cancelDeviceSessionExecutions = cancelDeviceSessionExecutions ?? (async () => 0);
@@ -1807,6 +1810,7 @@ export class DevicePool {
       getIntentionalShutdowns: () => this.intentionalShutdowns,
       seedLastUsedAt: (now) => this.seedLastUsedAt(now),
       nextDeviceIncarnation: () => this.nextDeviceIncarnation(),
+      notifyDeviceIncarnationAssigned: (id) => this.notifyDeviceIncarnationAssigned(id),
       setDeviceSessionTracking: (id, now) => this.setDeviceSessionTracking(id, now),
       clearAutoStartSuppressionForBootedDevice: (device) =>
         this.clearAutoStartSuppressionForBootedDevice(device),
@@ -2262,6 +2266,7 @@ export class DevicePool {
         ...(device.observedAt !== undefined ? { nameObservedAt: device.observedAt } : {}),
         incarnation: this.nextDeviceIncarnation(),
       });
+      this.notifyDeviceIncarnationAssigned(device.deviceId);
       this.deviceSessionStarts.set(device.deviceId, now);
       await this.setDeviceSessionTracking(device.deviceId, now);
     }
@@ -2392,6 +2397,7 @@ export class DevicePool {
         ...identityEvidenceFields(identityEvidence),
         incarnation: this.nextDeviceIncarnation(),
       });
+      this.notifyDeviceIncarnationAssigned(device.deviceId);
       this.recordSourceAndroidAvd(device.deviceId, sourceImage);
       this.deviceSessionStarts.set(device.deviceId, now);
       this.refreshMissingDeviceMisses.delete(device.deviceId);
@@ -2664,6 +2670,16 @@ export class DevicePool {
 
   isCurrentDisconnectedDevice(device: PooledDevice): Promise<CurrentDisconnectStatus> {
     return this.disconnectHandler.isCurrentDisconnectedDevice(device);
+  }
+
+  /** Notify only after the new entry is synchronously visible to allocators. */
+  private notifyDeviceIncarnationAssigned(deviceId: string): void {
+    const incarnation = this.devices.get(deviceId)!.incarnation;
+    try {
+      this.onDeviceIncarnationAssigned?.(deviceId, incarnation);
+    } catch (error) {
+      logger.warn(`Device incarnation listener failed on ${deviceId}`, error);
+    }
   }
 
   /** Assign the next monotonic incarnation id for a newly pooled connection. */

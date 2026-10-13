@@ -67,4 +67,31 @@ final class PrototypeInterpolationTests: XCTestCase {
         XCTAssertEqual(interpolatePrototypeText("{a}\u{301}", state: state, pager: nil), "A\u{301}")
         XCTAssertEqual(interpolatePrototypeText("}\u{301}{a}", state: state, pager: nil), "}\u{301}A")
     }
+
+    func testInterpolationClampsEachResolvedPlaceholder() {
+        let exact = String(repeating: "x", count: 16384)
+        XCTAssertEqual(interpolatePrototypeText("{b}", state: ["b": .string(exact)], pager: nil), exact)
+        XCTAssertEqual(interpolatePrototypeText("{b}", state: ["b": .string(exact + "x")], pager: nil), "{b}")
+        let half = String(repeating: "x", count: 8193)
+        XCTAssertEqual(interpolatePrototypeText("{b}{b}", state: ["b": .string(half)], pager: nil), half + "{b}")
+        XCTAssertEqual(
+            interpolatePrototypeText("{b}{s}", state: ["b": .string(exact + "x"), "s": .string("ok")], pager: nil),
+            "{b}ok"
+        )
+        let literal = String(repeating: "x", count: 20000)
+        XCTAssertEqual(interpolatePrototypeText(literal + "{s}", state: ["s": .string("ok")], pager: nil), literal + "ok")
+    }
+
+    func testInterpolationBudgetCountsUTF16AndPagerValues() {
+        let value = String(repeating: "😀", count: 8192)
+        XCTAssertEqual(interpolatePrototypeText("{b}", state: ["b": .string(value)], pager: nil), value)
+        XCTAssertEqual(interpolatePrototypeText("{b}", state: ["b": .string(value + "x")], pager: nil), "{b}")
+        XCTAssertEqual(
+            interpolatePrototypeText(
+                "{b}{page}{s}", state: ["b": .string(value), "s": .string("x")],
+                pager: PagerPosition(page: 0, count: 1)
+            ),
+            value + "{page}{s}"
+        )
+    }
 }

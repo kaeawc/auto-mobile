@@ -326,4 +326,18 @@ final class PrototypeDataTests: XCTestCase {
         XCTAssertEqual(cache.items("/é"), .array([.object(["id": .number(1)])]))
         XCTAssertEqual(cache.items("/e\u{0301}"), .array([]))
     }
+
+    func testDataCountingSharesBindingGrammarAndCountsOnlyReplacementUTF16() {
+        let exact = String(repeating: "😀", count: 8192)
+        let data: [String: JSONValue] = ["b": .string(exact), "s": .string("x"), "object": .object([:])]
+        XCTAssertFalse(PrototypeDataText.exceedsSubstitutionLimit("{data:/b}", data: data))
+        XCTAssertTrue(PrototypeDataText.exceedsSubstitutionLimit("{data:/b}{data:/s}", data: data))
+        XCTAssertEqual(PrototypeDataText.bind("{data:/b}", data: data), exact)
+        let ignored = "{data:bad}{data:/missing}{data:/object}"
+        XCTAssertFalse(PrototypeDataText.exceedsSubstitutionLimit(ignored, data: data))
+        XCTAssertEqual(PrototypeDataText.bind(ignored, data: data), "{data:bad}")
+        let literal = String(repeating: "x", count: 20000) + "{data:/s}"
+        XCTAssertFalse(PrototypeDataText.exceedsSubstitutionLimit(literal, data: data))
+        XCTAssertEqual(PrototypeDataText.bind(literal, data: data), String(repeating: "x", count: 20001))
+    }
 }

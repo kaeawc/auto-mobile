@@ -11,6 +11,7 @@ enum PrototypeLimits {
     static let maxDepth = 24
     static let maxRepeatItems = 128
     static let maxRepeatPathCells = 65536
+    static let maxSubstitutedTextLength = 16384
     /// `MAX_PROTOTYPE_SPEC_BYTES`: the UTF-8 size of the whole spec, current state included. Android
     /// re-checks it on every state write; see `PrototypeStateValidator.specBytes`.
     static let maxSpecBytes = 1_048_576
@@ -76,6 +77,7 @@ enum PrototypeLimits {
     /// Known nonempty literal instances use the expanded budget. Unknown or empty templates use
     /// an independent authored budget, visited once even inside a literal repeat's instances.
     static func guardAuthoredTree(_ root: JSONValue) throws {
+        try guardObjectChildren(root, path: "root", depth: 1)
         var expandedCount = 0
         try visit(root, path: "root", depth: 1, authored: true, count: &expandedCount)
         var authoredTemplateCount = 0
@@ -108,6 +110,22 @@ enum PrototypeLimits {
             }
         }
         try visitCells(root, path: "root", depth: 1)
+    }
+
+    /// Checks authored edges once, leaving depth and node errors to the existing visits.
+    private static func guardObjectChildren(_ node: JSONValue, path: String, depth: Int) throws {
+        guard depth <= maxDepth, case let .object(fields) = node else { return }
+        func child(_ value: JSONValue, at childPath: String) throws {
+            guard depth < maxDepth else { return }
+            guard case .object = value else { throw violation(childPath, "Expected object") }
+            try guardObjectChildren(value, path: childPath, depth: depth + 1)
+        }
+        if let value = fields["child"] { try child(value, at: "\(path).child") }
+        if case let .array(children)? = fields["children"] {
+            for (index, value) in children.enumerated() {
+                try child(value, at: "\(path).children[\(index)]")
+            }
+        }
     }
 
     private static func visit(
@@ -194,7 +212,7 @@ enum PrototypeLimits {
         }
     }
 
-    private static func violation(_ path: String, _ message: String) -> DecodingError {
+    static func violation(_ path: String, _ message: String) -> DecodingError {
         .dataCorrupted(.init(codingPath: [], debugDescription: "\(path): \(message)"))
     }
 }

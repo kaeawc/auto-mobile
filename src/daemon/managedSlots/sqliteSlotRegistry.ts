@@ -1,8 +1,12 @@
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { Kysely, type Generated, type Selectable, type Transaction } from "kysely";
+import { jsonArrayFrom } from "kysely/helpers/sqlite";
+import { Kysely, type Generated, type Selectable, type Transaction, SqliteAdapter } from "kysely";
 import { BunSqliteDialect } from "../../db/bunSqliteDialect";
 import { SQLITE_BUSY_TIMEOUT_MS } from "../../db/database";
+import { classifySqliteError } from "../../db/databaseFailureClassification";
+import { errorMessage } from "../../utils/describeUnknownError";
+import { ManagedSlotDiscoveryIncompleteError } from "./managedSlotRefusal";
 import { isInMemoryDatabasePath } from "../../db/migrationLock";
 import { ActionableError } from "../../models/ActionableError";
 import { ensureSecureDirectorySync, getAdbServerScopedAutoMobileDir } from "../../utils/tempDir";
@@ -11,6 +15,11 @@ import { defaultSlotExecOwnerLiveness } from "./slotOwnerLiveness";
 import { migrateSlotRegistry } from "./slotRegistryMigrations";
 import {
   isAbandonedScope,
+  sameFreeDevice,
+  journalNamesFreeDevice,
+  type FreeDeviceIdentity,
+  type BeginFreeDeviceDeletionResult,
+  type ManagedSlotResourceSnapshot,
   isSlotJournalPhaseOpen,
   journalOwnersEqual,
   journalTargetEntries,
@@ -164,6 +173,13 @@ interface SlotFreeDevicesTable {
   state: Generated<FreeDeviceState>;
   stop_claimed_by: string | null;
   stop_claimed_at_ms: number | null;
+  deletion_owner_daemon_id: string | null;
+  deletion_owner_pid: number | null;
+  deletion_owner_process_token: string | null;
+  deletion_started_at_ms: number | null;
+  deletion_attempts: number | null;
+  deletion_last_error: string | null;
+  deletion_next_attempt_at_ms: number | null;
 }
 
 interface SlotJournalTable {
@@ -289,6 +305,20 @@ function toFreeDevice(row: FreeDeviceRow): FreeSlotDeviceRecord {
     state: row.state,
     stopClaimedBy: row.stop_claimed_by,
     stopClaimedAtMs: row.stop_claimed_at_ms,
+    deletion:
+      row.deletion_owner_daemon_id === null
+        ? null
+        : {
+            owner: {
+              daemonId: row.deletion_owner_daemon_id,
+              pid: row.deletion_owner_pid!,
+              processGenerationToken: row.deletion_owner_process_token,
+            },
+            startedAtMs: row.deletion_started_at_ms!,
+            attempts: row.deletion_attempts!,
+            lastError: row.deletion_last_error,
+            nextAttemptAtMs: row.deletion_next_attempt_at_ms!,
+          },
   };
 }
 
@@ -412,16 +442,25 @@ export interface OpenSqliteSlotRegistryOptions extends SqliteSlotRegistryOptions
 
 /**
  * bun:sqlite waits for a busy lock synchronously, blocking this daemon's event loop (heartbeat
- * lease handling included) for up to the busy timeout per attempt of the dialect's bounded retry.
- * Registry transactions are a few short statements, so the registry waits far less than the
- * per-daemon DB's {@link SQLITE_BUSY_TIMEOUT_MS} and surfaces contention as a retryable busy error
- * instead of stalling (#11242 item 9). Keep registry transactions short and off the heartbeat path.
+ * lease handling included). A busy write waits one nominal 250ms busy_timeout, with no dialect retry or
+ * backoff. Opening a migrated WAL registry uses reads only and never waits for a peer writer.
+ * An open that must migrate can wait one timeout at BEGIN IMMEDIATE (or the first initialization
+ * PRAGMA/bookkeeping write for a new file); failure closes without further lock waits. Close skips
+ * optimize/checkpoint maintenance and adds no busy_timeout wait. SQLite's sleep granularity plus
+ * statement, filesystem and error-handling overhead mean these are not hard wall-clock deadlines;
+ * waiting for another opener's migration file lock yields asynchronously. A healthy
+ * peer's few short statements and FULL-sync commit (one fsync) have room to finish, while a slow
+ * disk or prolonged lock yields a retryable refusal well below the per-daemon DB's
+ * {@link SQLITE_BUSY_TIMEOUT_MS}. Callers retry after yielding the event loop. Two connections in
+ * one process cannot release each other's lock during this synchronous wait; waiting longer only
+ * stalls them. A single uncontended connection never waits. Keep transactions short (#12104).
  */
-export const MANAGED_SLOT_REGISTRY_BUSY_TIMEOUT_MS = Math.min(1_000, SQLITE_BUSY_TIMEOUT_MS);
+export const MANAGED_SLOT_REGISTRY_BUSY_TIMEOUT_MS = Math.min(250, SQLITE_BUSY_TIMEOUT_MS);
 
 /** The slice of a bun:sqlite handle this module touches before handing it to the dialect. */
 interface RegistrySqliteHandle {
   exec(sql: string): void;
+  close(): void;
 }
 
 function openRegistrySqlite(dbPath: string): RegistrySqliteHandle {
@@ -429,13 +468,45 @@ function openRegistrySqlite(dbPath: string): RegistrySqliteHandle {
   const { Database } = require("bun:sqlite") as {
     Database: new (path: string) => RegistrySqliteHandle;
   };
-  const sqliteDb = new Database(dbPath);
-  sqliteDb.exec(`PRAGMA busy_timeout = ${MANAGED_SLOT_REGISTRY_BUSY_TIMEOUT_MS};`);
-  sqliteDb.exec("PRAGMA journal_mode = WAL;");
-  // Assignment authority must survive power loss; writes are rare, so pay for the fsync.
-  sqliteDb.exec("PRAGMA synchronous = FULL;");
-  sqliteDb.exec("PRAGMA foreign_keys = ON;");
+  // The shared driver still finalizes statements, rejects queued work and closes the handle.
+  // Only this registry handle skips its close-time maintenance: both PRAGMAs can each wait a
+  // fresh busy_timeout behind a peer writer, even after a failed open. SQLite's automatic WAL
+  // checkpoints and durable FULL-sync commits suffice; explicit shutdown truncation is optional.
+  class RegistryDatabase extends Database {
+    override exec(sql: string): void {
+      if (sql === "PRAGMA optimize;" || sql === "PRAGMA wal_checkpoint(TRUNCATE);") {
+        return;
+      }
+      super.exec(sql);
+    }
+  }
+  const sqliteDb = new RegistryDatabase(dbPath);
+  try {
+    sqliteDb.exec(`PRAGMA busy_timeout = ${MANAGED_SLOT_REGISTRY_BUSY_TIMEOUT_MS};`);
+    sqliteDb.exec("PRAGMA journal_mode = WAL;");
+    // Assignment authority must survive power loss; writes are rare, so pay for the fsync.
+    sqliteDb.exec("PRAGMA synchronous = FULL;");
+    sqliteDb.exec("PRAGMA foreign_keys = ON;");
+  } catch (error) {
+    sqliteDb.close();
+    throw error;
+  }
   return sqliteDb;
+}
+
+// SQLite supports transactional DDL. Kysely's default SQLite adapter opts out; here a busy
+// migration must roll back its ALTERs AND migration records before a factory retries the open.
+// Kept registry-local so the per-daemon database retains its existing migration behavior.
+class RegistrySqliteAdapter extends SqliteAdapter {
+  override get supportsTransactionalDdl(): boolean {
+    return true;
+  }
+}
+
+class RegistrySqliteDialect extends BunSqliteDialect {
+  override createAdapter(): SqliteAdapter {
+    return new RegistrySqliteAdapter();
+  }
 }
 
 /**
@@ -451,12 +522,23 @@ export async function openSqliteSlotRegistry(
     ensureSecureDirectorySync(dirname(dbPath));
   }
   const db = new Kysely<SlotRegistryDatabase>({
-    dialect: new BunSqliteDialect({ database: () => openRegistrySqlite(dbPath) }),
+    dialect: new RegistrySqliteDialect({
+      database: () => openRegistrySqlite(dbPath),
+      // Applies to BEGIN and autocommit statements: fail fast so the owning operation can retry
+      // the whole unit. Migration DDL is atomic and opens are serialized by a file lock;
+      // a busy open is forgotten by factories and refused retryably. Transaction bodies already
+      // never retry. Initialization PRAGMAs use raw exec, outside dialect retry; close maintenance
+      // is disabled on the registry handle so a failed open adds no more busy waits.
+      retry: { maxAttempts: 1 },
+    }),
   });
   try {
     await migrateSlotRegistry(db, dbPath);
   } catch (error) {
     await db.destroy();
+    if (classifySqliteError(error) === "retryable") {
+      throw new ManagedSlotDiscoveryIncompleteError(errorMessage(error));
+    }
     throw error;
   }
   return new SqliteSlotRegistry(db, options);
@@ -878,7 +960,17 @@ export class SqliteSlotRegistry implements SlotRegistry {
   }
 
   async snapshotManagedDevices(): Promise<ManagedDeviceEntry[]> {
-    const assigned = await this.db
+    return (await this.snapshotResources(false)).managed;
+  }
+
+  async snapshotManagedSlotResources(): Promise<ManagedSlotResourceSnapshot> {
+    return this.snapshotResources(true);
+  }
+
+  private async snapshotResources(
+    includeAbandonedScopes: boolean,
+  ): Promise<ManagedSlotResourceSnapshot> {
+    const assignedQuery = this.db
       .selectFrom("slot_assignments")
       .innerJoin("slot_scopes", "slot_scopes.scope_key", "slot_assignments.scope_key")
       .select([
@@ -896,10 +988,87 @@ export class SqliteSlotRegistry implements SlotRegistry {
           eb("slot_scopes.state", "<>", "invalidated"),
           eb("slot_scopes.invalidation_reason", "=", "abandoned"),
         ]),
+      );
+
+    // SQLite pins one read snapshot for this single statement (including every subquery).
+    // The dialect's transaction() uses BEGIN IMMEDIATE, so it must not be used for this read.
+    const snapshot = await this.db
+      .selectNoFrom([
+        jsonArrayFrom(assignedQuery).$castTo<string>().as("assigned"),
+        jsonArrayFrom(
+          this.db
+            .selectFrom("slot_free_devices")
+            .select([
+              "platform",
+              "stable_device_id",
+              "spec_fingerprint",
+              "from_scope_key",
+              "freed_at_ms",
+              "state",
+              "stop_claimed_by",
+              "stop_claimed_at_ms",
+              "deletion_owner_daemon_id",
+              "deletion_owner_pid",
+              "deletion_owner_process_token",
+              "deletion_started_at_ms",
+              "deletion_attempts",
+              "deletion_last_error",
+              "deletion_next_attempt_at_ms",
+            ]),
+        )
+          .$castTo<string>()
+          .as("free"),
+        jsonArrayFrom(
+          this.db
+            .selectFrom("slot_journal")
+            .select([
+              "id",
+              "scope_key",
+              "slot_index",
+              "kind",
+              "phase",
+              "platform",
+              "from_generation",
+              "to_generation",
+              "binding_generation",
+              "binding_stable_device_id",
+              "target_json",
+              "owner_daemon_id",
+              "owner_pid",
+              "owner_process_token",
+              "attempts",
+              "last_error",
+              "next_attempt_at_ms",
+              "created_at_ms",
+              "updated_at_ms",
+            ])
+            .where("phase", "not in", SLOT_JOURNAL_TERMINAL_PHASES),
+        )
+          .$castTo<string>()
+          .as("pending"),
+      ])
+      .$if(includeAbandonedScopes, (query) =>
+        query.select(
+          jsonArrayFrom(
+            this.db
+              .selectFrom("slot_scopes")
+              .select("scope_key")
+              .where("state", "=", "invalidating")
+              .where("invalidation_reason", "=", "abandoned"),
+          )
+            .$castTo<string>()
+            .as("abandonedScopeKeys"),
+        ),
       )
-      .execute();
-    const free = await this.db.selectFrom("slot_free_devices").selectAll().execute();
-    const pending = await this.listOpenSlotJournal();
+      .executeTakeFirstOrThrow();
+    // Decode only the aggregate arrays; target_json must remain a string for the journal codec.
+    const assigned: Awaited<ReturnType<typeof assignedQuery.execute>> = JSON.parse(
+      snapshot.assigned,
+    );
+    const free: FreeDeviceRow[] = JSON.parse(snapshot.free);
+    const pendingRows: JournalRow[] = JSON.parse(snapshot.pending);
+    const abandoned: Array<{ scope_key: string }> = JSON.parse(snapshot.abandonedScopeKeys ?? "[]");
+    const pending = pendingRows.map(toJournalEntry);
     const entries: ManagedDeviceEntry[] = [
       ...assigned.flatMap((row): ManagedDeviceEntry[] =>
         row.stable_device_id === null
@@ -926,7 +1095,12 @@ export class SqliteSlotRegistry implements SlotRegistry {
         execSessionUuid: null,
       })),
     ];
-    return [...entries, ...journalTargetEntries(pending, entries)];
+    return {
+      managed: [...entries, ...journalTargetEntries(pending, entries)],
+      free: free.map(toFreeDevice),
+      openJournal: pending,
+      abandonedScopeKeys: abandoned.map((row) => row.scope_key),
+    };
   }
 
   async listFreeDevices(): Promise<FreeSlotDeviceRecord[]> {
@@ -1070,7 +1244,147 @@ export class SqliteSlotRegistry implements SlotRegistry {
       .selectAll()
       .where("freed_at_ms", "<=", cutoffMs)
       .where("state", "<>", "stopped")
+      .where("deletion_owner_daemon_id", "is", null)
       .orderBy("freed_at_ms")
+      .execute();
+    return rows.map(toFreeDevice);
+  }
+
+  private freeRow(trx: Executor, row: FreeDeviceIdentity) {
+    return trx
+      .selectFrom("slot_free_devices")
+      .selectAll()
+      .where("platform", "=", row.platform)
+      .where("stable_device_id", "=", row.stableDeviceId)
+      .where("from_scope_key", "=", row.fromScopeKey)
+      .where("freed_at_ms", "=", row.freedAtMs)
+      .executeTakeFirst();
+  }
+
+  async beginFreeDeviceDeletion(
+    row: FreeDeviceIdentity,
+    owner: SlotJournalOwner,
+  ): Promise<BeginFreeDeviceDeletionResult> {
+    return this.db.transaction().execute(async (trx): Promise<BeginFreeDeviceDeletionResult> => {
+      const current = await this.freeRow(trx, row);
+      if (!current || !sameFreeDevice(toFreeDevice(current), row)) {
+        return { kind: "not_evictable", reason: "row_moved" };
+      }
+      if (current.deletion_owner_daemon_id !== null || current.state === "stopping") {
+        return { kind: "not_evictable", reason: "deletion_pending_or_stopping" };
+      }
+      const bound = await trx
+        .selectFrom("slot_assignments")
+        .select("scope_key")
+        .where("platform", "=", row.platform)
+        .where("stable_device_id", "=", row.stableDeviceId)
+        .executeTakeFirst();
+      if (bound) {
+        return { kind: "not_evictable", reason: "assigned" };
+      }
+      const journal = await trx
+        .selectFrom("slot_journal")
+        .selectAll()
+        .where("phase", "not in", SLOT_JOURNAL_TERMINAL_PHASES)
+        .execute();
+      if (journal.some((entry) => journalNamesFreeDevice(toJournalEntry(entry), row))) {
+        return { kind: "not_evictable", reason: "journal_open" };
+      }
+      const marked = await trx
+        .updateTable("slot_free_devices")
+        .set({
+          deletion_owner_daemon_id: owner.daemonId,
+          deletion_owner_pid: owner.pid,
+          deletion_owner_process_token: owner.processGenerationToken ?? null,
+          deletion_started_at_ms: this.timer.now(),
+          deletion_attempts: 0,
+          deletion_last_error: null,
+          deletion_next_attempt_at_ms: this.timer.now(),
+        })
+        .where("platform", "=", row.platform)
+        .where("stable_device_id", "=", row.stableDeviceId)
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      return { kind: "begun", row: toFreeDevice(marked) };
+    });
+  }
+
+  private async ownsFreeDeletion(trx: Executor, row: FreeDeviceIdentity, owner: SlotJournalOwner) {
+    const found = await this.freeRow(trx, row);
+    const record = found && toFreeDevice(found);
+    return record?.deletion && journalOwnersEqual(record.deletion.owner, owner) ? record : null;
+  }
+
+  async recordFreeDeviceDeletionAttempt(
+    row: FreeDeviceIdentity,
+    owner: SlotJournalOwner,
+    attempt: { error: string; nextAttemptAtMs: number },
+  ): Promise<boolean> {
+    return this.db.transaction().execute(async (trx) => {
+      const current = await this.ownsFreeDeletion(trx, row, owner);
+      if (!current?.deletion) {
+        return false;
+      }
+      await trx
+        .updateTable("slot_free_devices")
+        .set({
+          deletion_attempts: current.deletion.attempts + 1,
+          deletion_last_error: attempt.error,
+          deletion_next_attempt_at_ms: attempt.nextAttemptAtMs,
+        })
+        .where("platform", "=", row.platform)
+        .where("stable_device_id", "=", row.stableDeviceId)
+        .execute();
+      return true;
+    });
+  }
+
+  async completeFreeDeviceDeletion(
+    row: FreeDeviceIdentity,
+    owner: SlotJournalOwner,
+  ): Promise<boolean> {
+    return this.db.transaction().execute(async (trx) => {
+      if (!(await this.ownsFreeDeletion(trx, row, owner))) {
+        return false;
+      }
+      await trx
+        .deleteFrom("slot_free_devices")
+        .where("platform", "=", row.platform)
+        .where("stable_device_id", "=", row.stableDeviceId)
+        .execute();
+      return true;
+    });
+  }
+
+  async claimFreeDeviceDeletion(
+    row: FreeDeviceIdentity,
+    expectedOwner: SlotJournalOwner,
+    nextOwner: SlotJournalOwner,
+  ): Promise<boolean> {
+    return this.db.transaction().execute(async (trx) => {
+      if (!(await this.ownsFreeDeletion(trx, row, expectedOwner))) {
+        return false;
+      }
+      await trx
+        .updateTable("slot_free_devices")
+        .set({
+          deletion_owner_daemon_id: nextOwner.daemonId,
+          deletion_owner_pid: nextOwner.pid,
+          deletion_owner_process_token: nextOwner.processGenerationToken ?? null,
+        })
+        .where("platform", "=", row.platform)
+        .where("stable_device_id", "=", row.stableDeviceId)
+        .execute();
+      return true;
+    });
+  }
+
+  async listFreeDeviceDeletions(): Promise<FreeSlotDeviceRecord[]> {
+    const rows = await this.db
+      .selectFrom("slot_free_devices")
+      .selectAll()
+      .where("deletion_owner_daemon_id", "is not", null)
+      .orderBy("deletion_next_attempt_at_ms")
       .execute();
     return rows.map(toFreeDevice);
   }
@@ -1085,6 +1399,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
     const claimed = await this.db
       .updateTable("slot_free_devices")
       .set({ state: "stopping", stop_claimed_by: claim.claimedBy, stop_claimed_at_ms: nowMs })
+      .where("deletion_owner_daemon_id", "is", null)
       .where("platform", "=", claim.platform)
       .where("stable_device_id", "=", claim.stableDeviceId)
       .where("freed_at_ms", "=", claim.freedAtMs)
@@ -1442,6 +1757,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
   ): Promise<FreeSlotDeviceRecord | "stopping" | null> {
     const taken = await trx
       .deleteFrom("slot_free_devices")
+      .where("deletion_owner_daemon_id", "is", null)
       .where("platform", "=", platform)
       .where("stable_device_id", "=", stableDeviceId)
       .where((eb) =>
@@ -1495,6 +1811,7 @@ export class SqliteSlotRegistry implements SlotRegistry {
               state: "free",
               stopClaimedBy: null,
               stopClaimedAtMs: null,
+              deletion: null,
             },
           ],
     );

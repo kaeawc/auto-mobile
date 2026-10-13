@@ -17,9 +17,21 @@ public struct SystemMonotonicClock: MonotonicClock {
     }
 }
 
-/// The only condition the provider applies (#10264). Latency and bandwidth are #10265.
-public enum NetworkRuleCondition: String, Codable {
+/// Installed configuration: only offline participates in drop evaluation.
+public enum NetworkRuleCondition: Equatable {
     case offline
+    case shaped(ShapingProfile)
+}
+
+/// Requests remain unresolved until the provider validates them. Keeping this
+/// distinct from installed conditions permits typed rejection of invalid profiles.
+public enum NetworkRuleCommandCondition: Equatable {
+    case offline
+    case shaped(ShapingRequest)
+}
+
+private enum RuleWireCondition: String, Codable {
+    case offline, shaped
 }
 
 /// One app on one managed simulator. The bundle identifier only selects flows
@@ -102,7 +114,7 @@ public struct NetworkRuleCommand: Codable, Equatable {
     public let target: NetworkRuleTarget
     public let ownership: NetworkRuleOwnership
     /// `apply` only.
-    public let condition: NetworkRuleCondition?
+    public let condition: NetworkRuleCommandCondition?
     /// `apply` and `renew`.
     public let leaseMilliseconds: UInt64?
 
@@ -110,7 +122,7 @@ public struct NetworkRuleCommand: Codable, Equatable {
         kind: NetworkRuleCommandKind,
         target: NetworkRuleTarget,
         ownership: NetworkRuleOwnership,
-        condition: NetworkRuleCondition? = nil,
+        condition: NetworkRuleCommandCondition? = nil,
         leaseMilliseconds: UInt64? = nil
     ) {
         self.kind = kind
@@ -118,6 +130,38 @@ public struct NetworkRuleCommand: Codable, Equatable {
         self.ownership = ownership
         self.condition = condition
         self.leaseMilliseconds = leaseMilliseconds
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, target, ownership, condition, shaping, leaseMilliseconds
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decode(NetworkRuleCommandKind.self, forKey: .kind)
+        target = try container.decode(NetworkRuleTarget.self, forKey: .target)
+        ownership = try container.decode(NetworkRuleOwnership.self, forKey: .ownership)
+        leaseMilliseconds = try container.decodeIfPresent(UInt64.self, forKey: .leaseMilliseconds)
+        switch try container.decodeIfPresent(RuleWireCondition.self, forKey: .condition) {
+        case .offline: condition = .offline
+        case .shaped: condition = try .shaped(container.decode(ShapingRequest.self, forKey: .shaping))
+        case nil: condition = nil
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(target, forKey: .target)
+        try container.encode(ownership, forKey: .ownership)
+        try container.encodeIfPresent(leaseMilliseconds, forKey: .leaseMilliseconds)
+        switch condition {
+        case .offline: try container.encode(RuleWireCondition.offline, forKey: .condition)
+        case let .shaped(request):
+            try container.encode(RuleWireCondition.shaped, forKey: .condition)
+            try container.encode(request, forKey: .shaping)
+        case nil: break
+        }
     }
 }
 
@@ -138,6 +182,33 @@ public enum NetworkRuleOutcome: String, Codable {
     case invalidLease = "invalid_lease"
     case invalidCommand = "invalid_command"
     case capacityExceeded = "capacity_exceeded"
+    case unsupportedCondition = "unsupported_condition"
+    case invalidShaping = "invalid_shaping"
+}
+
+/// Explicit units and components survive rejection without installing a rule.
+public struct NetworkShapingRejection: Codable, Equatable {
+    public enum Reason: String, Codable {
+        case outOfRange = "out_of_range"
+        case nothingToApply = "nothing_to_apply"
+    }
+
+    public let reason: Reason
+    public let component: ShapingComponent?
+    public let unapplied: [ShapingComponent]?
+
+    public init(_ rejection: ShapingRejection) {
+        switch rejection {
+        case let .outOfRange(component):
+            reason = .outOfRange
+            self.component = component
+            unapplied = nil
+        case let .nothingToApply(unapplied):
+            reason = .nothingToApply
+            component = nil
+            self.unapplied = unapplied
+        }
+    }
 }
 
 public struct NetworkRuleResult: Codable, Equatable {
@@ -145,15 +216,21 @@ public struct NetworkRuleResult: Codable, Equatable {
     /// The revision now installed for this target by the same owner and generation, if any.
     public let installedRevision: UInt64?
     public let leaseRemainingMilliseconds: UInt64?
+    public let shaping: ShapingResolution?
+    public let rejection: NetworkShapingRejection?
 
     public init(
         outcome: NetworkRuleOutcome,
         installedRevision: UInt64? = nil,
-        leaseRemainingMilliseconds: UInt64? = nil
+        leaseRemainingMilliseconds: UInt64? = nil,
+        shaping: ShapingResolution? = nil,
+        rejection: NetworkShapingRejection? = nil
     ) {
         self.outcome = outcome
         self.installedRevision = installedRevision
         self.leaseRemainingMilliseconds = leaseRemainingMilliseconds
+        self.shaping = shaping
+        self.rejection = rejection
     }
 }
 
@@ -166,6 +243,66 @@ public struct NetworkRuleStatus: Codable, Equatable {
     public let condition: NetworkRuleCondition
     public let leaseRemainingMilliseconds: UInt64
     public let droppedFlows: UInt64
+    public let shaping: ShapingResolution?
+
+    public init(
+        target: NetworkRuleTarget, owner: String, ownerGeneration: UInt64, revision: UInt64,
+        condition: NetworkRuleCondition, leaseRemainingMilliseconds: UInt64, droppedFlows: UInt64,
+        shaping: ShapingResolution? = nil
+    ) {
+        self.target = target
+        self.owner = owner
+        self.ownerGeneration = ownerGeneration
+        self.revision = revision
+        self.condition = condition
+        self.leaseRemainingMilliseconds = leaseRemainingMilliseconds
+        self.droppedFlows = droppedFlows
+        self.shaping = shaping
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case target, owner, ownerGeneration, revision, condition, leaseRemainingMilliseconds, droppedFlows, shaping
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        target = try container.decode(NetworkRuleTarget.self, forKey: .target)
+        owner = try container.decode(String.self, forKey: .owner)
+        ownerGeneration = try container.decode(UInt64.self, forKey: .ownerGeneration)
+        revision = try container.decode(UInt64.self, forKey: .revision)
+        leaseRemainingMilliseconds = try container.decode(UInt64.self, forKey: .leaseRemainingMilliseconds)
+        droppedFlows = try container.decode(UInt64.self, forKey: .droppedFlows)
+        switch try container.decode(RuleWireCondition.self, forKey: .condition) {
+        case .offline:
+            condition = .offline
+            shaping = nil
+        case .shaped:
+            let resolution = try container.decode(ShapingResolution.self, forKey: .shaping)
+            condition = .shaped(resolution.profile)
+            shaping = resolution
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(target, forKey: .target)
+        try container.encode(owner, forKey: .owner)
+        try container.encode(ownerGeneration, forKey: .ownerGeneration)
+        try container.encode(revision, forKey: .revision)
+        try container.encode(leaseRemainingMilliseconds, forKey: .leaseRemainingMilliseconds)
+        try container.encode(droppedFlows, forKey: .droppedFlows)
+        switch condition {
+        case .offline: try container.encode(RuleWireCondition.offline, forKey: .condition)
+        case let .shaped(profile):
+            guard let shaping, shaping.profile == profile else {
+                throw EncodingError.invalidValue(condition, .init(
+                    codingPath: encoder.codingPath, debugDescription: "Shaped status needs its resolution"
+                ))
+            }
+            try container.encode(RuleWireCondition.shaped, forKey: .condition)
+            try container.encode(shaping, forKey: .shaping)
+        }
+    }
 }
 
 /// Identifies the exact rule a pending verdict was computed against. A delayed
@@ -196,7 +333,7 @@ public struct NetworkRuleEvaluationSnapshot {
 /// - Removing a rule (reset or expiry) leaves a tombstone of its owner,
 ///   generation and revision, so a late `apply` from a released generation, or
 ///   a delayed retry of an older revision, is refused instead of re-installed.
-public final class NetworkRuleStore {
+public final class NetworkRuleStore: ShapingRuleSource {
     public static let minimumLeaseMilliseconds: UInt64 = 1000
     public static let maximumLeaseMilliseconds: UInt64 = 60000
     public static let maximumRules = 64
@@ -205,6 +342,8 @@ public final class NetworkRuleStore {
     private struct Rule {
         let ownership: NetworkRuleOwnership
         let condition: NetworkRuleCondition
+        let request: NetworkRuleCommandCondition
+        let shaping: ShapingResolution?
         var expiresAt: UInt64
         var droppedFlows: UInt64
 
@@ -226,23 +365,35 @@ public final class NetworkRuleStore {
     }
 
     private let clock: MonotonicClock
+    private let supportsShaping: Bool
     private let lock = NSLock()
     private var rules: [NetworkRuleTarget: Rule] = [:]
     private var tombstones: [TombstoneKey: Tombstone] = [:]
     private var tombstoneOrder: [TombstoneKey] = []
 
-    public init(clock: MonotonicClock) {
+    public init(clock: MonotonicClock, supportsShaping: Bool = false) {
         self.clock = clock
+        self.supportsShaping = supportsShaping
     }
 
     public func execute(_ command: NetworkRuleCommand) -> NetworkRuleResult {
         lock.lock()
         defer { lock.unlock() }
+        // Rejected shaping must not even sweep leases or create tombstones.
+        var resolution: ShapingResolution?
+        if command.kind == .apply, case let .shaped(request) = command.condition {
+            guard supportsShaping else { return NetworkRuleResult(outcome: .unsupportedCondition) }
+            switch ShapingProfile.resolve(request) {
+            case let .success(value): resolution = value
+            case let .failure(rejection):
+                return NetworkRuleResult(outcome: .invalidShaping, rejection: NetworkShapingRejection(rejection))
+            }
+        }
         let now = clock.nowNanoseconds()
         sweep(now: now)
         switch command.kind {
         case .apply:
-            return apply(command, now: now)
+            return apply(command, resolution: resolution, now: now)
         case .reset:
             return reset(command.target, command.ownership)
         case .renew:
@@ -264,20 +415,22 @@ public final class NetworkRuleStore {
                 revision: rule.ownership.revision,
                 condition: rule.condition,
                 leaseRemainingMilliseconds: (rule.expiresAt - now) / 1_000_000,
-                droppedFlows: rule.droppedFlows
+                droppedFlows: rule.droppedFlows,
+                shaping: rule.shaping
             )
         }
         .sorted { ($0.target.simulator.udid, $0.target.bundleId) < ($1.target.simulator.udid, $1.target.bundleId) }
     }
 
-    /// `nil` when no rule is active, so the common case allows a flow without any lookup.
+    /// `nil` when no offline rule is active: shaped configuration never triggers
+    /// attribution or a drop in this build.
     public func evaluationSnapshot() -> NetworkRuleEvaluationSnapshot? {
         lock.lock()
         defer { lock.unlock() }
         sweep(now: clock.nowNanoseconds())
         guard !rules.isEmpty else { return nil }
         var tickets: [NetworkRuleTarget: NetworkRuleTicket] = [:]
-        for (target, rule) in rules {
+        for (target, rule) in rules where rule.condition == .offline {
             tickets[target] = NetworkRuleTicket(
                 target: target,
                 owner: rule.ownership.owner,
@@ -285,7 +438,7 @@ public final class NetworkRuleStore {
                 revision: rule.ownership.revision
             )
         }
-        return NetworkRuleEvaluationSnapshot(tickets: tickets)
+        return tickets.isEmpty ? nil : NetworkRuleEvaluationSnapshot(tickets: tickets)
     }
 
     /// Commits a drop computed outside the lock. Returns `false`, and counts
@@ -295,7 +448,11 @@ public final class NetworkRuleStore {
         lock.lock()
         defer { lock.unlock() }
         sweep(now: clock.nowNanoseconds())
-        guard var rule = rules[ticket.target], rule.ticket == (ticket.owner, ticket.ownerGeneration, ticket.revision)
+        guard var rule = rules[ticket.target], rule.condition == .offline, rule.ticket == (
+            ticket.owner,
+            ticket.ownerGeneration,
+            ticket.revision
+        )
         else { return false }
         rule.droppedFlows &+= 1
         rules[ticket.target] = rule
@@ -312,15 +469,34 @@ public final class NetworkRuleStore {
         rules.removeAll()
     }
 
-    /// The ticket of the rule active for `target` right now, if any.
+    /// The ticket of the offline rule active for `target` right now, if any.
     public func currentTicket(for target: NetworkRuleTarget) -> NetworkRuleTicket? {
         evaluationSnapshot()?.tickets[target]
     }
 
+    /// Takes only the store lock and never calls out: the shaper may safely
+    /// consult this source while holding its own lock.
+    public func shapingRule(for target: NetworkRuleTarget) -> ShapingRule? {
+        lock.lock()
+        defer { lock.unlock() }
+        sweep(now: clock.nowNanoseconds())
+        guard let rule = rules[target], case let .shaped(profile) = rule.condition else { return nil }
+        return ShapingRule(ticket: NetworkRuleTicket(
+            target: target, owner: rule.ownership.owner,
+            ownerGeneration: rule.ownership.ownerGeneration, revision: rule.ownership.revision
+        ), profile: profile)
+    }
+
     // MARK: - Commands (lock held)
 
-    private func apply(_ command: NetworkRuleCommand, now: UInt64) -> NetworkRuleResult {
-        guard command.condition != nil else { return NetworkRuleResult(outcome: .invalidCommand) }
+    private func apply(
+        _ command: NetworkRuleCommand,
+        resolution: ShapingResolution?,
+        now: UInt64
+    )
+        -> NetworkRuleResult
+    {
+        guard let condition = command.condition else { return NetworkRuleResult(outcome: .invalidCommand) }
         guard let lease = Self.validLease(command.leaseMilliseconds) else {
             return NetworkRuleResult(outcome: .invalidLease)
         }
@@ -339,6 +515,9 @@ public final class NetworkRuleStore {
             {
                 return installedRefusal(.staleRevision, existing, now: now)
             }
+            if existing.ownership == ownership, existing.request != condition {
+                return NetworkRuleResult(outcome: .invalidCommand)
+            }
         } else if rules.count >= Self.maximumRules {
             return NetworkRuleResult(outcome: .capacityExceeded)
         }
@@ -347,7 +526,9 @@ public final class NetworkRuleStore {
         let dropped = rules[target].map { $0.ownership == ownership ? $0.droppedFlows : 0 } ?? 0
         let rule = Rule(
             ownership: ownership,
-            condition: command.condition ?? .offline,
+            condition: resolution.map { .shaped($0.profile) } ?? .offline,
+            request: condition,
+            shaping: resolution,
             expiresAt: now + lease * 1_000_000,
             droppedFlows: dropped
         )
@@ -355,7 +536,8 @@ public final class NetworkRuleStore {
         return NetworkRuleResult(
             outcome: .applied,
             installedRevision: ownership.revision,
-            leaseRemainingMilliseconds: lease
+            leaseRemainingMilliseconds: lease,
+            shaping: resolution
         )
     }
 

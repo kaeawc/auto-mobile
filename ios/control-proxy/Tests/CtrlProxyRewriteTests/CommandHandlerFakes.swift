@@ -13,9 +13,15 @@ final class RewriteFakeElementLocator: ElementLocating, HierarchyExtracting {
     private(set) var filteringRequests: [Bool] = []
     var hierarchy: ViewHierarchy
     var onCapture: (() throws -> Void)?
+    private let appStateWaiter: AppStateWaiter
 
-    init(hierarchy: ViewHierarchy = RewriteFakeElementLocator.defaultHierarchy) {
+    init(
+        hierarchy: ViewHierarchy = RewriteFakeElementLocator.defaultHierarchy,
+        appStateClock: any Clock<Duration> = KeyboardTestClock(),
+        appStateProbe: (any AppStateProbing)? = nil
+    ) {
         self.hierarchy = hierarchy
+        appStateWaiter = AppStateWaiter(clock: appStateClock, probe: appStateProbe ?? ScriptedAppStateProbe())
     }
 
     static var defaultHierarchy: ViewHierarchy {
@@ -43,7 +49,10 @@ final class RewriteFakeElementLocator: ElementLocating, HierarchyExtracting {
     func trackObservedBundleId(_: String) {}
     func switchForegroundApp(bundleId: String) { foregroundBundleId = bundleId }
     func getAppState(bundleId _: String) -> ObservedAppState { appState }
-    func awaitAppState(bundleId _: String, expectedState _: AppStateExpectation) -> Bool { true }
+    func awaitAppState(bundleId: String, expectedState: AppStateExpectation) async -> Bool {
+        await appStateWaiter.awaitAppState(bundleId: bundleId, expectedState: expectedState)
+    }
+
     func refreshForegroundBundleId() -> String? { foregroundBundleId }
 }
 

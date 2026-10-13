@@ -51,11 +51,16 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
 
     /// Fetch the latest cached hierarchy from the SDK (fast, no main-thread work in the target app).
     public func fetchHierarchy() async -> SdkViewHierarchy? {
-        await fetchDecoded(path: "/hierarchy")
+        await optionalHierarchy(path: "/hierarchy")
     }
 
     /// Request a fresh hierarchy walk from the SDK (slower, involves main-thread work in the target app).
     public func fetchFreshHierarchy() async -> SdkViewHierarchy? {
+        await optionalHierarchy(path: "/hierarchy/fresh")
+    }
+
+    /// Callers of the typed result log failures with their own continuation context.
+    public func fetchFreshHierarchyResult() async -> SdkHierarchyFetchResult {
         await fetchDecoded(path: "/hierarchy/fresh")
     }
 
@@ -167,9 +172,42 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
 
     // MARK: - Private
 
-    private func fetchDecoded(path: String) async -> SdkViewHierarchy? {
-        guard let data = await getData(path: path, transport: transport) else { return nil }
-        return try? JSONDecoder().decode(SdkViewHierarchy.self, from: data)
+    private func optionalHierarchy(path: String) async -> SdkViewHierarchy? {
+        switch await fetchDecoded(path: path) {
+        case let .hierarchy(hierarchy): return hierarchy
+        case .unavailable: return nil
+        case let .failed(failure):
+            Logger(subsystem: "dev.jasonpearson.automobile", category: "SdkHierarchyClient")
+                .warning("SDK hierarchy fetch failed: \(failure.reason, privacy: .public)")
+            return nil
+        }
+    }
+
+    private func fetchDecoded(path: String) async -> SdkHierarchyFetchResult {
+        let data: Data
+        do {
+            let (body, response) = try await SdkEndpointResolver.requestData(
+                for: URLRequest(url: baseURL.appendingPathComponent(path)),
+                transport: transport, resolver: endpointResolver
+            )
+            guard let http = response as? HTTPURLResponse else { return .unavailable }
+            guard http.statusCode == 200 else { return .failed(.httpStatus(http.statusCode)) }
+            data = body
+        } catch let error as URLError where error.code == .timedOut {
+            return .failed(.timedOut)
+        } catch let error as SdkEndpointError {
+            Self.logEndpointError(error)
+            return .unavailable
+        } catch {
+            // Apps without the SDK commonly refuse the connection.
+            return .unavailable
+        }
+        do {
+            return try .hierarchy(JSONDecoder().decode(SdkViewHierarchy.self, from: data))
+        } catch {
+            // DecodingError's description includes its case, coding path and missing key.
+            return .failed(.undecodable(reason: String(describing: error)))
+        }
     }
 
     /// GET `path`; return the body only on HTTP 200, matching the reference's

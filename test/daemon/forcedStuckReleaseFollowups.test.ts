@@ -7,6 +7,9 @@ import {
   SESSION_RELEASE_PERSIST_TIMEOUT_MS,
   SESSION_RELEASE_TEARDOWN_CAP_MS,
   SESSION_SETUP_DRAIN_TIMEOUT_MS,
+  KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS,
+  BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS,
+  NETWORK_CONDITION_RESTORE_TIMEOUT_MS,
   SessionManager,
   TerminalSessionError,
   type KeepScreenAwakeRestorer,
@@ -140,7 +143,8 @@ describe("a forced stuck release stops touching the device (#11058 item 1)", () 
       const release = h.manager.releaseSession("a", "daemon-shutdown");
       await flush();
       expect(h.persistence.releaseWrites).toEqual(["a:released:daemon-shutdown"]);
-      await h.timer.advanceTimeAsync(5_000, flush);
+      const forceAfterMs = SESSION_RELEASE_PERSIST_TIMEOUT_MS / 2;
+      await h.timer.advanceTimeAsync(forceAfterMs, flush);
 
       expect(h.manager.forceStuckRelease("a")).toEqual({
         deviceId: first.deviceId,
@@ -150,11 +154,14 @@ describe("a forced stuck release stops touching the device (#11058 item 1)", () 
       expect(h.manager.getDeviceCleanupRetryAfterMs(first.deviceId)).toBe(
         SESSION_RELEASE_TEARDOWN_CAP_MS,
       );
-      await h.timer.advanceTimeAsync(4_000, flush);
+      const elapsedAfterForceMs = SESSION_RELEASE_PERSIST_TIMEOUT_MS - forceAfterMs - 1;
+      await h.timer.advanceTimeAsync(elapsedAfterForceMs, flush);
       expect(h.manager.hasDeviceCleanupInProgress(first.deviceId)).toBe(true);
-      expect(h.manager.getDeviceCleanupRetryAfterMs(first.deviceId)).toBe(6_000);
+      expect(h.manager.getDeviceCleanupRetryAfterMs(first.deviceId)).toBe(
+        SESSION_RELEASE_TEARDOWN_CAP_MS - elapsedAfterForceMs,
+      );
       // The persist deadline can settle the release sooner; the advertised cap is an upper bound.
-      await h.timer.advanceTimeAsync(SESSION_RELEASE_TEARDOWN_CAP_MS - 4_000, flush);
+      await h.timer.advanceTimeAsync(SESSION_RELEASE_TEARDOWN_CAP_MS - elapsedAfterForceMs, flush);
       await flush();
       expect(h.manager.hasDeviceCleanupInProgress(first.deviceId)).toBe(false);
 
@@ -244,7 +251,11 @@ describe("a forced stuck release stops touching the device (#11058 item 1)", () 
 describe("the force threshold and its fence (#11058 item 2)", () => {
   test("a release within its own worst case is never forced", () => {
     expect(STUCK_REAP_WARN_MS).toBeGreaterThan(
-      SESSION_RELEASE_TEARDOWN_CAP_MS + 2 * SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+      SESSION_SETUP_DRAIN_TIMEOUT_MS +
+        KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS +
+        BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS +
+        NETWORK_CONDITION_RESTORE_TIMEOUT_MS +
+        2 * SESSION_RELEASE_PERSIST_TIMEOUT_MS,
     );
   });
 

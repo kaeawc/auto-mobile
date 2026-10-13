@@ -85,6 +85,7 @@ import { deviceReadinessRank, type DeviceReadinessLevel } from "../devices/Devic
 import {
   getCliSessionIdleTimeoutMs as resolveCliSessionIdleTimeoutMs,
   MAX_CLI_SESSION_IDLE_TIMEOUT_MS,
+  SESSION_RELEASE_DRAIN_TIMEOUT_MS,
   sanitizeCliSessionIdleTimeoutMs as sanitizeRequestedCliIdleTimeoutMs,
 } from "./constants";
 import { isAndroidEmulatorSerial, isAndroidTransportAddressSerial } from "../utils/androidSerial";
@@ -948,6 +949,8 @@ interface SessionReleaseOperation extends PendingSessionRelease {
   commitFenced?: boolean;
   /** When the release started; bounds the retry hint for a bind it refuses (#10960). */
   startedAtMs?: number;
+  /** Captured before teardown can clear state: first attempts, two writes and scheduling slack. */
+  stuckDeadlineMs: number;
   /** Ownership holds bound teardown from their cap while waiting, and from their end once settled. */
   teardownStartsByMs?: number;
   /** Set for an idle release the manager started itself (#11481): see `getIdleReleasesInProgress`. */
@@ -1228,14 +1231,14 @@ export interface RebindSessionOptions {
   deferCleanup?: (cleanup: DeferredRebindCleanup) => void;
 }
 
-const KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS = 1_000;
+export const KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS = 1_000;
 /**
  * A failed keep-awake restore leaves a physical device that never sleeps, so — like the network
  * restorer — it is retried inside the pending cleanup, then handed to health recovery (#11145).
  */
 const KEEP_SCREEN_AWAKE_RESTORE_RETRY_ATTEMPTS = 2;
 const KEEP_SCREEN_AWAKE_RESTORE_RETRY_DELAY_MS = 250;
-const BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS = 1_000;
+export const BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS = 1_000;
 /**
  * A failed restore leaves the simulator holding session-modified enrollment, so
  * the device must not return to the idle pool on the strength of one attempt.
@@ -1244,7 +1247,7 @@ const BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS = 1_000;
  */
 const BIOMETRIC_ENROLLMENT_RESTORE_RETRY_ATTEMPTS = 2;
 const BIOMETRIC_ENROLLMENT_RESTORE_RETRY_DELAY_MS = 250;
-const NETWORK_CONDITION_RESTORE_TIMEOUT_MS = 1_000;
+export const NETWORK_CONDITION_RESTORE_TIMEOUT_MS = 1_000;
 /**
  * Clock restore ends with `adb unroot`, which restarts adbd: the device goes offline and the
  * restore only finishes once it reconnects (a few seconds on an emulator). The network path's
@@ -1299,13 +1302,11 @@ function isNonRetryableRotationRestoreError(error: unknown): boolean {
 }
 export const SESSION_SETUP_DRAIN_TIMEOUT_MS = 1_000;
 /**
- * Overall budget for the restores one release runs through the ambient signal
- * (keep-awake, biometric, network), measured from the start of the drain with the
- * injected Timer. Release teardown runs under its own signal, not the caller's, so
- * this bound is what stops a wedged device command from holding the device
- * quarantined; the screen-reader, clock and rotation restores keep their own budgets
- * and abandon mechanisms. Sized well above the three 1 s attempts plus their 250 ms
- * retries, below the screen-reader budget (#10198).
+ * Cap for pending keep-awake, biometric and network teardown retries, measured with the
+ * injected Timer. The release awaits their separately bounded first attempts, then hands
+ * pending work back as device cleanup. Teardown runs under its own signal, not the caller's;
+ * this cap stops wedged retries from holding the device quarantined. Screen-reader, clock
+ * and rotation restores keep their own budgets and abandon mechanisms (#10198).
  */
 export const SESSION_RELEASE_TEARDOWN_CAP_MS = 10_000;
 /**
@@ -1313,26 +1314,52 @@ export const SESSION_RELEASE_TEARDOWN_CAP_MS = 10_000;
  * path that has no budget of its own, so a wedged DB write would otherwise hold the session's
  * device forever. A terminal release that reaches it keeps the session fenced in memory, frees
  * the device, and leaves the row for a later release to persist. It is longer than the shutdown
- * release drain, so a write wedged at shutdown still keeps the database open and the release on
- * the drain's daemon-shutdown fallback path.
+ * release drain by 1 s, so a write wedged at shutdown still keeps the database open and the
+ * release on the drain's daemon-shutdown fallback path.
  */
-export const SESSION_RELEASE_PERSIST_TIMEOUT_MS = 10_000;
-/** Slack beyond bounded teardown and both release writes before the monitor forces a release. */
-const SESSION_RELEASE_STUCK_MARGIN_MS = 10_000;
+export const SESSION_RELEASE_PERSIST_TIMEOUT_MS = SESSION_RELEASE_DRAIN_TIMEOUT_MS + 1_000;
+/**
+ * Scheduling slack between stages separated only by microtasks; monitor scan granularity is
+ * budgeted separately. This is the only slack a release waiting on a pending rebind gets.
+ */
+export const SESSION_RELEASE_STUCK_MARGIN_MS = 2_000;
+/** First attempts plus two row writes and scheduling slack: 18 s without own-budget state. */
 export const SESSION_RELEASE_STUCK_DEADLINE_MS =
-  SESSION_RELEASE_TEARDOWN_CAP_MS +
+  SESSION_SETUP_DRAIN_TIMEOUT_MS +
+  KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS +
+  BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS +
+  NETWORK_CONDITION_RESTORE_TIMEOUT_MS +
   2 * SESSION_RELEASE_PERSIST_TIMEOUT_MS +
   SESSION_RELEASE_STUCK_MARGIN_MS;
 
 /**
- * Force at the first scan at or after the stuck deadline measured from the release's own start,
- * even when a monitor reap joins it: one interval, then the capped forced quarantine. A second
- * interval allows a late timer tick so the advertised hint never understates the cleanup bound.
- * Only monitor-tracked releases are forced; terminal explicit releases rely on their own stages.
+ * The first attempts a release actually awaits: 18 s plus clock (15 s), rotation (1 s) and
+ * screen-reader (35 s) budgets when it carries that state. Pending retries do not hold release.
  */
-export function getSessionReleaseCleanupWorstCaseMs(env: NodeJS.ProcessEnv = process.env): number {
+export function getSessionReleaseStuckDeadlineMs(
+  state?: Pick<SessionCacheData, "clock" | "rotation" | "screenReader">,
+): number {
   return (
     SESSION_RELEASE_STUCK_DEADLINE_MS +
+    (state?.clock ? CLOCK_RESTORE_TIMEOUT_MS : 0) +
+    (state?.rotation ? NETWORK_CONDITION_RESTORE_TIMEOUT_MS : 0) +
+    (state?.screenReader ? SCREEN_READER_RESTORE_TIMEOUT_MS : 0)
+  );
+}
+
+/**
+ * Force at the first scan at or after the per-release deadline measured from teardown's start
+ * (the ownership hold's cap while pending), even when a monitor reap joins it: one interval,
+ * then the capped forced quarantine. A second interval allows a late timer tick. With the
+ * default 2 s interval this advertises 32 s without clock, rotation or screen-reader state.
+ * Only monitor-tracked releases are forced; terminal explicit releases rely on their own stages.
+ */
+export function getSessionReleaseCleanupWorstCaseMs(
+  env: NodeJS.ProcessEnv = process.env,
+  state?: Pick<SessionCacheData, "clock" | "rotation" | "screenReader">,
+): number {
+  return (
+    getSessionReleaseStuckDeadlineMs(state) +
     2 * getSessionHeartbeatCheckIntervalMs(env) +
     SESSION_RELEASE_TEARDOWN_CAP_MS
   );
@@ -2776,7 +2803,9 @@ export class SessionManager {
       .map(
         (release) =>
           (release.teardownStartsByMs ?? release.startedAtMs ?? now) +
-          getSessionReleaseCleanupWorstCaseMs(),
+          release.stuckDeadlineMs +
+          2 * getSessionHeartbeatCheckIntervalMs() +
+          SESSION_RELEASE_TEARDOWN_CAP_MS,
       );
     for (const record of this.pendingDeviceCleanupBounds.get(deviceId) ?? []) {
       if (record.start) {
@@ -2900,6 +2929,17 @@ export class SessionManager {
         release.session.sessionId === sessionId &&
         release.startedAtMs === startedAtMs,
     );
+  }
+
+  /** The unforced release's absolute stuck deadline on the session clock, if still in flight. */
+  getReleaseStuckAtMs(sessionId: string): number | undefined {
+    const release = Array.from(this.activeReleasePromises).find(
+      (release) => !release.forced && release.session.sessionId === sessionId,
+    );
+    return release
+      ? (release.teardownStartsByMs ?? release.startedAtMs ?? this.sessionNow()) +
+          release.stuckDeadlineMs
+      : undefined;
   }
 
   /**
@@ -5789,7 +5829,7 @@ export class SessionManager {
         }
       },
     };
-    // Reuse the creation/release-finalization wait (40s); an orphaned receipt cannot reserve A forever.
+    // Reuse the creation/release-finalization wait (32s); an orphaned receipt cannot reserve A forever.
     const bound = this.timer.setTimeout(cleanup.commit, SESSION_CREATE_WAIT_TIMEOUT_MS);
     bound.unref?.();
     this.deferredRebindCleanups.set(cleanup, {
@@ -6238,6 +6278,7 @@ export class SessionManager {
       reason,
       judgeSuspectOwnerAtCommit,
       startedAtMs: this.sessionNow(),
+      stuckDeadlineMs: getSessionReleaseStuckDeadlineMs(session.cacheData),
       expiryOrigin: options.expiryOrigin,
       forcedAbort: new AbortController(),
     };

@@ -151,7 +151,10 @@ describe("monitor reap timestamps", () => {
     warn.mockRestore();
   });
 
-  function start(joinAt = timer.now()) {
+  function start(
+    joinAt = timer.now(),
+    getReleaseStuckAtMs?: (sessionId: string) => number | undefined,
+  ) {
     const source: HeartbeatSessionSource = {
       getAllSessions: () => (visible ? [session] : []),
       cleanupExpiredSessions: () => {},
@@ -160,6 +163,7 @@ describe("monitor reap timestamps", () => {
           ? []
           : [{ sessionId: session.sessionId, session, startedAtMs: sourceStartedAt }],
       isReleaseInProgress: (id, at) => id === session.sessionId && at === sourceStartedAt,
+      ...(getReleaseStuckAtMs ? { getReleaseStuckAtMs } : {}),
     };
     monitor = new SessionHeartbeatMonitor(
       source,
@@ -180,6 +184,22 @@ describe("monitor reap timestamps", () => {
   }
 
   const flush = () => drainMicrotasks(20);
+
+  test("a source deadline is forced on its first due scan instead of the fallback deadline", async () => {
+    sourceStartedAt = timer.now();
+    const deadline = sourceStartedAt + STUCK_REAP_WARN_MS + SCAN_MS + 1;
+    start(timer.now() + 2 * STUCK_REAP_WARN_MS, () => deadline);
+    await timer.advanceTimeAsync(STUCK_REAP_WARN_MS, flush);
+    expect(forcedAt).toEqual([]);
+    await timer.advanceTimeAsync(SCAN_MS, flush);
+    expect(forcedAt).toEqual([]);
+    await timer.advanceTimeAsync(1, flush);
+    expect(forcedAt).toEqual([]);
+    await timer.advanceTimeAsync(SCAN_MS - 1, flush);
+    expect(forcedAt).toEqual([deadline + SCAN_MS - 1]);
+    await timer.advanceTimeAsync(2 * SCAN_MS, flush);
+    expect(forcedAt).toHaveLength(1);
+  });
 
   test("a reap without a tracked source release starts its deadline at the joining scan", async () => {
     const origin = timer.now();

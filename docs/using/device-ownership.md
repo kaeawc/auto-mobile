@@ -785,8 +785,12 @@ and contribute no bound (a 1 s polling hint when nothing else bounds cleanup).
 Trusted numeric caps remain owned by recording finalize, held-plan app cleanup,
 forced stuck release, network-condition TTL restore, deferred rebind gates, and
 bounded acquisition cleanups. An in-flight release
-advertises the stuck deadline from its own start plus two heartbeat-monitor intervals
-(one to scan, one for a late tick) plus 10 s quarantine (54 s with the default interval);
+advertises its recorded stuck deadline from teardown's start (the ownership hold's
+cap while pending): 18 s for setup drain, keep-awake, biometric and network first
+attempts, two 6 s row writes and 2 s scheduling slack, plus 15 s for clock, 1 s for
+rotation and 35 s for screen-reader state when it carries them. Two heartbeat-monitor
+intervals (one to scan, one for a late tick) and 10 s quarantine make the advertised
+bound 32 s without that state at the default 2 s interval;
 the monitor only forces releases
 it tracks, while terminal explicit releases rely on their own bounded stages.
 `device_shutting_down` always

@@ -77,6 +77,8 @@ export interface HeartbeatSessionSource {
    * while it is as wedged as before; the monitor asks this before it forgets a release it tracks.
    */
   isReleaseInProgress?(sessionId: string, startedAtMs: number): boolean;
+  /** Per-release absolute stuck deadline on the session clock, including ownership holds. */
+  getReleaseStuckAtMs?(sessionId: string): number | undefined;
 }
 
 /** One idle release the session source is still running. */
@@ -157,10 +159,10 @@ export { UNSETTLED_EXECUTION_VETO_CEILING_MS };
 /** How long shutdown waits for releases a scan started before giving up on them. */
 const REAP_STOP_TIMEOUT_MS = 5_000;
 /**
- * How long a release may stay unsettled before the monitor reports it as stuck (#10704) and
- * forces it (#10963). Its session is skipped meanwhile, never released twice, but other sessions
- * are still judged on schedule. Above a release's own allowed worst case — the capped teardown
- * plus its two bounded writes (#11058) — so a release still within its bounds is never forced.
+ * Fallback stuck deadline (#10704, #10963) when the source reports none or release has not
+ * started: 18 s for first attempts, two bounded writes and scheduling slack. A source deadline
+ * adds clock (15 s), rotation (1 s), screen-reader (35 s) state and any ownership hold. Its
+ * session is skipped meanwhile, never released twice; other sessions are judged on schedule.
  */
 export const STUCK_REAP_WARN_MS = SESSION_RELEASE_STUCK_DEADLINE_MS;
 const DEFAULT_INITIAL_GRACE_MS = 20_000;
@@ -626,8 +628,9 @@ export class SessionHeartbeatMonitor {
     if (!started || started.reported) {
       return;
     }
-    const elapsedMs = this.now() - started.at;
-    if (elapsedMs < STUCK_REAP_WARN_MS) {
+    const now = this.now();
+    const elapsedMs = now - started.at;
+    if (now < (this.sessions.getReleaseStuckAtMs?.(sessionId) ?? started.at + STUCK_REAP_WARN_MS)) {
       return;
     }
     started.reported = true;

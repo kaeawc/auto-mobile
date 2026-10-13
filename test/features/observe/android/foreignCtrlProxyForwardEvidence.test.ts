@@ -41,7 +41,7 @@ function harness() {
     timer: new FakeTimer(),
   });
   return {
-    read: () => read.read(deviceId),
+    read: (signal?: AbortSignal) => read.read(deviceId, signal),
     adb,
     ports,
     rows: (value: string) => {
@@ -63,6 +63,46 @@ function harness() {
 }
 
 describe("foreign CtrlProxy forward evidence", () => {
+  test("F2 an already cancelled evidence read preserves its abort reason", async () => {
+    const h = harness();
+    const controller = new AbortController();
+    const abort = new Error("cancelled listing");
+    controller.abort(abort);
+    await expect(h.read(controller.signal)).rejects.toBe(abort);
+    expect(h.adb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("F2 cancellation during a failed listing preserves abort rather than unknown", async () => {
+    const h = harness();
+    const controller = new AbortController();
+    const abort = new Error("cancelled during listing");
+    h.adb.execute = async () => {
+      controller.abort(abort);
+      throw new Error("adb stopped");
+    };
+    await expect(h.read(controller.signal)).rejects.toBe(abort);
+    expect(h.ports).toEqual([]);
+  });
+
+  test("F2 an adb AbortError is not converted to unknown even without an aborted signal", async () => {
+    const h = harness();
+    const abort = new DOMException("cancelled", "AbortError");
+    h.adb.setCommandError("forward --list", abort);
+    await expect(h.read()).rejects.toBe(abort);
+  });
+
+  test("F8b memory-only evidence describes a past connection and live PID", async () => {
+    const h = harness();
+    await h.read();
+    h.clients([]);
+    const verdict = await h.read();
+    expect(verdict.kind).toBe("foreign");
+    expect("message" in verdict && verdict.message).toContain(
+      "was seen connected to it and is still running",
+    );
+    expect("message" in verdict && verdict.message).not.toContain("holds a connection to it");
+  });
+
   test("#12220 connected foreign PID is remembered until its process is provably dead", async () => {
     const h = harness();
     expect(await h.read()).toMatchObject({ kind: "foreign", ports: [52001], clientPids: [4242] });

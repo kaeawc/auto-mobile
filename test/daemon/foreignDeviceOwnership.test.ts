@@ -28,6 +28,11 @@ import {
 } from "../../src/utils/fileLock";
 import { ensureSecureDirectorySync } from "../../src/utils/tempDir";
 import { logger } from "../../src/utils/logger";
+import {
+  DefaultForeignCtrlProxyForwardEvidence,
+  resetForeignCtrlProxyForwardEvidenceForTesting,
+} from "../../src/features/observe/android/foreignCtrlProxyForwardEvidence";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 const SELF_PID = 100;
@@ -127,6 +132,34 @@ function harness(
 }
 
 describe("ForwardLeaseForeignDeviceOwnership", () => {
+  test("F4c refresh shares one forward listing across all Android devices", async () => {
+    const adb = new FakeAdbExecutor();
+    const ids = ["a", "b", "c", "d"];
+    adb.setCommandResponse("forward --list", {
+      stdout: ids.map((id) => `${id} tcp:8767 tcp:8765`).join("\n"),
+      stderr: "",
+    });
+    const evidence = new DefaultForeignCtrlProxyForwardEvidence({
+      adbFactory: { create: () => adb },
+      clientProbe: { findClientPids: async () => [FOREIGN_PID] },
+      ownership: () => ({ ownsForward: () => false }),
+      isProcessRunning: () => true,
+      timer: new FakeTimer(),
+    });
+    const { ownership } = harness(evidence);
+    try {
+      await ownership.refresh(ids);
+      expect(adb.getExecutedCommands()).toEqual(["forward --list"]);
+      for (const id of ids) {
+        expect(ownership.foreignOwnerPid(id)).toBe(FOREIGN_PID);
+      }
+      await ownership.refresh(ids);
+      expect(adb.getExecutedCommands()).toEqual(["forward --list", "forward --list"]);
+    } finally {
+      resetForeignCtrlProxyForwardEvidenceForTesting();
+    }
+  });
+
   test("#12220 retains a live foreign forward PID with no claim or lease", async () => {
     const { ownership, ownerOf } = harness({
       kind: "foreign",

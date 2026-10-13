@@ -96,7 +96,7 @@ describe("CtrlProxy manager foreign-forward mutation backstop #12220", () => {
     }
   });
 
-  test("#12220 unknown evidence with no parsed ports still refuses", async () => {
+  test("#12220 F2 unreadable forward listing fails without cross-daemon refusal", async () => {
     evidence({
       kind: "unknown",
       ports: [],
@@ -107,9 +107,10 @@ describe("CtrlProxy manager foreign-forward mutation backstop #12220", () => {
       await manager.assertNotDrivenByOtherDaemon();
       throw new Error("expected ownership refusal");
     } catch (error) {
-      expect(error).toBeInstanceOf(DeviceOwnedByOtherDaemonError);
-      expect((error as DeviceOwnedByOtherDaemonError).ownerPid).toBeUndefined();
-      expect((error as Error).message).toContain("adb -s emulator-12220 forward --list");
+      expect(error).not.toBeInstanceOf(DeviceOwnedByOtherDaemonError);
+      expect((error as Error).message).toContain("adb forward listing failed");
+      expect((error as Error).message).toContain("retry");
+      expect("code" in (error as Error)).toBe(false);
     }
     expect(reads).toBe(1);
   });
@@ -122,7 +123,7 @@ describe("CtrlProxy manager foreign-forward mutation backstop #12220", () => {
     expect(adb.getExecutedCommands()).toContain('install "/unused.apk"');
   });
 
-  test("#12220 setup performs one evidence read across nested mutating methods", async () => {
+  test("#12220 setup checks at entry and after download while nested enable reuses the check", async () => {
     evidence({ kind: "none" });
     const compatibility = spyOn(manager, "ensureCompatibleVersion").mockResolvedValue({
       status: "compatible",
@@ -138,7 +139,7 @@ describe("CtrlProxy manager foreign-forward mutation backstop #12220", () => {
     adb.setCommandResponse('install "/unused.apk"', commandResult("Success"));
     try {
       expect((await manager.setup()).success).toBe(true);
-      expect(reads).toBe(1);
+      expect(reads).toBe(2);
       expect(adb.getExecutedCommands()).toContain('install "/unused.apk"');
       expect(adb.getExecutedCommands()).toContain(
         "shell settings put secure accessibility_enabled 1",
@@ -149,6 +150,61 @@ describe("CtrlProxy manager foreign-forward mutation backstop #12220", () => {
       enabled.mockRestore();
       download.mockRestore();
       capabilities.mockRestore();
+    }
+  });
+
+  test("F5 owner appearing during setup download refuses before APK writes", async () => {
+    AndroidCtrlProxyManager.setForeignForwardEvidenceForTesting({
+      read: async () =>
+        ++reads === 1
+          ? { kind: "none" }
+          : { kind: "foreign", ports: [8767], clientPids: [44122], message: "new owner" },
+    });
+    const spies = [
+      spyOn(manager, "ensureCompatibleVersion").mockResolvedValue({ status: "compatible" }),
+      spyOn(manager, "isInstalled").mockResolvedValue(false),
+      spyOn(manager, "isEnabled").mockResolvedValue(false),
+      spyOn(manager, "downloadApk").mockResolvedValue("/unused.apk"),
+      spyOn(manager, "cleanupApk").mockResolvedValue(undefined),
+    ];
+    try {
+      await expect(manager.setup()).rejects.toBeInstanceOf(DeviceOwnedByOtherDaemonError);
+      expect(reads).toBe(2);
+      expect(
+        adb.getExecutedCommands().filter((command) => /install|uninstall/.test(command)),
+      ).toEqual([]);
+    } finally {
+      for (const spy of spies) {
+        spy.mockRestore();
+      }
+    }
+  });
+
+  test("F5 setup compatibility download rechecks before installation", async () => {
+    AndroidCtrlProxyManager.setExpectedChecksumForTesting("a".repeat(64));
+    AndroidCtrlProxyManager.setForeignForwardEvidenceForTesting({
+      read: async () =>
+        ++reads === 1
+          ? { kind: "none" }
+          : { kind: "foreign", ports: [8767], clientPids: [44122], message: "new owner" },
+    });
+    const spies = [
+      spyOn(manager, "isInstalled").mockResolvedValue(false),
+      spyOn(manager, "downloadApk").mockResolvedValue("/unused.apk"),
+      spyOn(manager, "cleanupApk").mockResolvedValue(undefined),
+    ];
+    try {
+      await expect(manager.setup()).rejects.toBeInstanceOf(DeviceOwnedByOtherDaemonError);
+      expect(reads).toBe(2);
+      expect(
+        adb
+          .getExecutedCommands()
+          .filter((command) => /^(install|shell pm uninstall)/.test(command)),
+      ).toEqual([]);
+    } finally {
+      for (const spy of spies) {
+        spy.mockRestore();
+      }
     }
   });
 

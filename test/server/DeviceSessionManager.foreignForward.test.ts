@@ -2,10 +2,16 @@ import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
 import { AndroidCtrlProxyManager } from "../../src/ctrlProxy/CtrlProxyManager";
 import { DeviceOwnedByOtherDaemonError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android/AndroidCtrlProxyClient";
+import { PortManager } from "../../src/utils/PortManager";
 import type { AndroidCtrlProxy } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import type { BootedDevice } from "../../src/models";
 import type { ForeignCtrlProxyForwardVerdict } from "../../src/features/observe/android/foreignCtrlProxyForwardEvidence";
-import { DefaultForeignCtrlProxyForwardEvidence } from "../../src/features/observe/android/foreignCtrlProxyForwardEvidence";
+import {
+  DefaultForeignCtrlProxyForwardEvidence,
+  CtrlProxyForwardOwnershipUnreadableError,
+  resetForeignCtrlProxyForwardEvidenceForTesting,
+} from "../../src/features/observe/android/foreignCtrlProxyForwardEvidence";
 import type { ExecResult } from "../../src/models";
 import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -20,9 +26,16 @@ import { FakeVirtualDeviceLifecycleCoordinator } from "../fakes/FakeVirtualDevic
 afterEach(() => {
   AndroidCtrlProxyManager.setForeignForwardEvidenceForTesting(null);
   AndroidCtrlProxyManager.resetInstances();
+  resetForeignCtrlProxyForwardEvidenceForTesting();
 });
 
-function harness(installed: boolean, enabled: boolean, realManager = false, refuseGuard = true) {
+function harness(
+  installed: boolean,
+  enabled: boolean,
+  realManager = false,
+  refuseGuard = true,
+  clientFactory?: (device: BootedDevice, adb: FakeAdbExecutor) => AndroidCtrlProxy,
+) {
   const device: BootedDevice = { platform: "android", deviceId: "emulator-5560", name: "Pixel" };
   const adb = new FakeAdbExecutor();
   adb.setDevices([device]);
@@ -34,7 +47,7 @@ function harness(installed: boolean, enabled: boolean, realManager = false, refu
   ctrlProxyManager.setInstalled(installed);
   ctrlProxyManager.setEnabled(enabled);
   const refusal = new DeviceOwnedByOtherDaemonError(device.deviceId, 4242);
-  const guard = mock(async () => {
+  const guard = mock(async (_signal?: AbortSignal) => {
     if (refuseGuard) {
       throw refusal;
     }
@@ -44,14 +57,16 @@ function harness(installed: boolean, enabled: boolean, realManager = false, refu
     ? AndroidCtrlProxyManager.getInstance(device, adb)
     : ctrlProxyManager;
   const waitForConnection = mock(async () => false);
-  const ctrlProxyClient = {
-    isConnected: () => false,
-    waitForConnection,
-    verifyServiceReady: async () => true,
-    isLastConnectionFailureForwardingLeaseConflict: () => true,
-    getLastConnectionFailureMessage: () => refusal.message,
-    resetConnectionBudget: () => {},
-  } as unknown as AndroidCtrlProxy;
+  const ctrlProxyClient =
+    clientFactory?.(device, adb) ??
+    ({
+      isConnected: () => false,
+      waitForConnection,
+      verifyServiceReady: async () => true,
+      isLastConnectionFailureForwardingLeaseConflict: () => true,
+      getLastConnectionFailureMessage: () => refusal.message,
+      resetConnectionBudget: () => {},
+    } as unknown as AndroidCtrlProxy);
   const appearance = mock(async () => {});
   const manager = DeviceSessionManager.createInstance(
     new FakeDeviceClientProvider(adb, devices, new FakeSimctl() as unknown as SimCtlClient, {
@@ -113,6 +128,187 @@ function installAdbForwardEvidence(
 }
 
 describe("#12220 foreign CtrlProxy forward at DeviceSessionManager readiness", () => {
+  test.each(["read", "control"] as const)(
+    "F4a connected responsive %s uses no forward evidence",
+    async (intent) => {
+      const h = harness(true, true);
+      h.ctrlProxyClient.isConnected = () => true;
+      await expect(
+        h.manager.ensureDeviceReady("android", h.device.deviceId, {
+          intent,
+          getConnectedPlatforms: async () => [h.device],
+        }),
+      ).resolves.toEqual(h.device);
+      expect(h.guard).not.toHaveBeenCalled();
+      expect(h.waitForConnection).not.toHaveBeenCalled();
+      expect(h.ctrlProxyManager.getExecutedOperations()).toEqual([]);
+    },
+  );
+
+  test.each(["provided", "auto"] as const)(
+    "F4b %s selection checks ownership once in readiness",
+    async (source) => {
+      const h = harness(true, true, false, false);
+      h.waitForConnection.mockResolvedValue(true);
+      await expect(
+        h.manager.ensureDeviceReady(
+          "android",
+          source === "provided" ? h.device.deviceId : undefined,
+          { skipCtrlProxyDownload: true },
+        ),
+      ).resolves.toEqual(h.device);
+      expect(h.guard).toHaveBeenCalledTimes(1);
+      // This fact is scoped to the call: a fresh call still checks.
+      await h.manager.ensureDeviceReady("android", h.device.deviceId, {
+        skipCtrlProxyDownload: true,
+      });
+      expect(h.guard).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  test.each(["read", "control"] as const)(
+    "F2 unreadable forward listing %s stays unwritten",
+    async (intent) => {
+      const h = harness(true, true, true);
+      AndroidCtrlProxyManager.setForeignForwardEvidenceForTesting({
+        read: async () => ({
+          kind: "unknown",
+          ports: [],
+          reason: "adb offline",
+          message: "listing failed",
+        }),
+      });
+      const result = h.manager.ensureDeviceReady("android", h.device.deviceId, { intent });
+      if (intent === "read") {
+        await expect(result).resolves.toEqual(h.device);
+      } else {
+        await expect(result).rejects.toBeInstanceOf(CtrlProxyForwardOwnershipUnreadableError);
+      }
+      expect(h.adb.getExecutedCommands()).toEqual([]);
+      expect(h.waitForConnection).not.toHaveBeenCalled();
+      expect(h.manager.getCurrentDevice()).toBeUndefined();
+    },
+  );
+
+  test("F7 read propagates an unrelated failure despite the client's stale conflict flag", async () => {
+    const h = harness(true, true, false, false);
+    const failure = new Error("unrelated read failure");
+    h.waitForConnection.mockRejectedValue(failure);
+    await expect(
+      h.manager.ensureDeviceReady("android", h.device.deviceId, { intent: "read" }),
+    ).rejects.toBe(failure);
+    expect(h.ctrlProxyManager.wasMethodCalled("setup")).toBe(false);
+  });
+
+  test("F7 read propagates cancellation despite the client's stale conflict flag", async () => {
+    const h = harness(true, true, false, false);
+    const controller = new AbortController();
+    const abort = new Error("call cancelled");
+    h.waitForConnection.mockImplementation(async () => {
+      controller.abort(abort);
+      throw abort;
+    });
+    await expect(
+      h.manager.ensureDeviceReady("android", h.device.deviceId, {
+        intent: "read",
+        signal: controller.signal,
+      }),
+    ).rejects.toBe(abort);
+    expect(h.ctrlProxyManager.wasMethodCalled("setup")).toBe(false);
+  });
+
+  test("F7 setup passes cancellation to the post-setup conflict guard", async () => {
+    const h = harness(false, false, false, false);
+    const controller = new AbortController();
+    await h.manager.ensureDeviceReady("android", h.device.deviceId, {
+      intent: "read",
+      signal: controller.signal,
+    });
+    expect(h.guard).toHaveBeenCalledTimes(2);
+    expect(h.guard.mock.calls[1]?.[0]).toBe(h.guard.mock.calls[0]?.[0]);
+    expect(h.guard.mock.calls[1]?.[0]).toBeInstanceOf(AbortSignal);
+  });
+
+  test("F6b real session manager, manager and client preserve foreign tcp:8767", async () => {
+    let realClient: AndroidCtrlProxyClient | undefined;
+    const socketFactory = mock((_url: string): WebSocket => {
+      throw new Error("socket must not be created");
+    });
+    PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
+    try {
+      const h = harness(true, true, true, true, (device, adb) => {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        realClient = AndroidCtrlProxyClient.createForTesting(
+          device,
+          adb,
+          socketFactory,
+          timer,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          { tryAcquire: () => true, release: () => {}, ownsForward: () => false },
+          () => {
+            throw new Error("service recovery must not run");
+          },
+        );
+        realClient.forwardClientProbe = { findClientPids: async () => [4242] };
+        realClient.forwardClientProcessIsRunning = () => true;
+        AndroidCtrlProxyManager.setForeignForwardEvidenceForTesting(
+          new DefaultForeignCtrlProxyForwardEvidence({
+            adbFactory: { create: () => adb },
+            clientProbe: realClient.forwardClientProbe,
+            ownership: () => ({ ownsForward: () => false }),
+            isProcessRunning: () => true,
+            timer,
+          }),
+        );
+        return realClient;
+      });
+      h.adb.setCommandResponse("forward --list", {
+        stdout: `${h.device.deviceId} tcp:8767 tcp:8765`,
+        stderr: "",
+      } as ExecResult);
+      const realManager = AndroidCtrlProxyManager.getInstance(h.device, h.adb);
+      const installed = spyOn(realManager, "isInstalled").mockResolvedValue(true);
+      const enabled = spyOn(realManager, "isEnabled").mockResolvedValue(true);
+      try {
+        await expect(
+          h.manager.ensureDeviceReady("android", h.device.deviceId),
+        ).rejects.toBeInstanceOf(DeviceOwnedByOtherDaemonError);
+        // Also exercise the real client's cleanup gate over the same fake forward.
+        await expect(realClient!.sweepOrphanedCtrlProxyPortForwards()).rejects.toThrow(
+          "another AutoMobile daemon",
+        );
+        expect(h.adb.getExecutedCommands()).toContain("forward --list");
+        expect(
+          h.adb
+            .getExecutedCommands()
+            .filter((command) =>
+              /install|uninstall|forward --remove|forward tcp:|settings put|am force-stop/.test(
+                command,
+              ),
+            ),
+        ).toEqual([]);
+        expect(socketFactory).not.toHaveBeenCalled();
+        expect(installed).not.toHaveBeenCalled();
+        expect(enabled).not.toHaveBeenCalled();
+      } finally {
+        installed.mockRestore();
+        enabled.mockRestore();
+      }
+    } finally {
+      await realClient?.close();
+      AndroidCtrlProxyClient.resetInstances();
+      PortManager.setPortAvailabilityCheckerForTesting(null);
+    }
+  });
+
   const controlCases = [
     [true, true],
     [false, false],

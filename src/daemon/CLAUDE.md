@@ -226,7 +226,7 @@ allocation claim under its shutdown reservation (reported as an active execution
 Acquisition (`getAndroid`, `getApple`, `startDevice` on a running device) is
 guarded by the pool's own owner check instead.
 
-Android's default foreign-owner gate also refuses control when an unrecorded CtrlProxy forward has a live or remembered-live foreign client PID, or a known forwarded port has an unknown owner; reads remain on the installed watch path (#12220).
+Android's default foreign-owner gate also refuses control when an unrecorded CtrlProxy forward has a live or remembered-live foreign client PID, or a known forwarded port has an unknown owner; reads remain on the installed watch path (#12220). A failed forward listing with no known port is not cross-daemon evidence: the pool warns and keeps its claim decision, while readiness skips writes for reads and returns a distinct, non-coded retry error for control. Cancellation propagates. An unrecorded forward with no client on either probe, whose owner this daemon never saw connected, is treated as a leftover and reclaimed (#10690); PID memory uses liveness only and cannot distinguish PID reuse.
 
 Managed slots (#11174, #11178): a device a valid managed slot holds, or one parked in
 the managed free pool, is never generic capacity, idle or not. `DevicePool` reads a

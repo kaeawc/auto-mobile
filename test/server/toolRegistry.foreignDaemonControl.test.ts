@@ -239,7 +239,7 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
     },
   );
 
-  test("#12220 explicit tapOn reports foreign PID and acquisition remedy", async () => {
+  test("#12220 explicit tapOn reports foreign PID and release remedy", async () => {
     foreignOwners.clear();
     forwardVerdict = {
       kind: "foreign",
@@ -257,7 +257,7 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
       code: DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
       ownerPid: FOREIGN_PID,
     });
-    expect(String(error)).toContain("setActiveDevice");
+    expect(String(error)).toContain("Retry after that daemon releases it, or pick another device.");
     expect(ran).toEqual([]);
     expect(readinessRequests).toBe(0);
   });
@@ -298,6 +298,35 @@ describe("ToolRegistry control on a device another daemon claims (#11349)", () =
     await call("observe", { platform: "android", deviceId: claimed.deviceId });
     expect(ran).toEqual([{ name: "observe", deviceId: claimed.deviceId }]);
     expect(readinessRequests).toBe(0);
+  });
+
+  test("F6a no current device or pin and one foreign running device refuses tapOn {} while observe {} watches", async () => {
+    onlyClaimedVisible();
+    foreignOwners.clear();
+    devices.getCurrentDevice = () => undefined;
+    devices.getCurrentPlatform = () => undefined;
+    expect(devices.getExplicitDevicePin()).toBeUndefined();
+    forwardVerdict = {
+      kind: "foreign",
+      ports: [8767],
+      clientPids: [FOREIGN_PID],
+      message: "foreign driver",
+    };
+    const error = await refusal("tapOn", {});
+    expect(error).toMatchObject({
+      code: DEVICE_OWNED_BY_OTHER_DAEMON_CODE,
+      deviceId: claimed.deviceId,
+      ownerPid: FOREIGN_PID,
+    });
+    expect(String(error)).toContain(
+      "the device it would use is driven by another AutoMobile daemon",
+    );
+    expect(String(error)).not.toContain("the only candidate");
+    expect(readinessRequests).toBe(0);
+    expect(ran).toEqual([]);
+    await call("observe", {});
+    expect(readinessRequests).toBe(0);
+    expect(ran).toEqual([{ name: "observe", deviceId: claimed.deviceId }]);
   });
 
   test("#12220 no forward admits unnamed control", async () => {

@@ -64,6 +64,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { DeviceOwnedByOtherDaemonError } from "../daemon/deviceAcquisitionRefusals";
 import {
   createForeignCtrlProxyForwardEvidence,
+  CtrlProxyForwardOwnershipUnreadableError,
   type ForeignCtrlProxyForwardEvidence,
 } from "../features/observe/android/foreignCtrlProxyForwardEvidence";
 
@@ -390,13 +391,16 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
   /** Fail closed when an existing CtrlProxy forward could belong to another daemon. */
   public async assertNotDrivenByOtherDaemon(signal?: AbortSignal): Promise<void> {
+    const activeSignal = signal ?? getAbortSignal();
+    activeSignal?.throwIfAborted();
     if (this.foreignForwardGuardContext.getStore()) {
       return;
     }
     const evidence =
       AndroidCtrlProxyManager.foreignForwardEvidenceOverride ??
       createForeignCtrlProxyForwardEvidence({ create: () => this.adb });
-    const finding = await evidence.read(this.device.deviceId, signal ?? getAbortSignal());
+    const finding = await evidence.read(this.device.deviceId, activeSignal);
+    activeSignal?.throwIfAborted();
     if (finding.kind === "none") {
       return;
     }
@@ -410,12 +414,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
           "another device.",
       );
     }
-    const remedy =
-      finding.ports.length > 0
-        ? finding.ports
-            .map((port) => `\`adb -s ${this.device.deviceId} forward --remove tcp:${port}\``)
-            .join(", ")
-        : `\`adb -s ${this.device.deviceId} forward --list\` to find the stale CtrlProxy forward, then remove it`;
+    if (finding.ports.length === 0) {
+      throw new CtrlProxyForwardOwnershipUnreadableError(this.device.deviceId, finding.reason);
+    }
+    const remedy = finding.ports
+      .map((port) => `\`adb -s ${this.device.deviceId} forward --remove tcp:${port}\``)
+      .join(", ");
     throw new DeviceOwnedByOtherDaemonError(
       this.device.deviceId,
       undefined,
@@ -1793,7 +1797,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         perf,
       );
     } catch (error) {
-      if (error instanceof DeviceOwnedByOtherDaemonError) {
+      if (
+        error instanceof DeviceOwnedByOtherDaemonError ||
+        error instanceof CtrlProxyForwardOwnershipUnreadableError
+      ) {
         throw error;
       }
       if (error instanceof CtrlProxyApkStageError) {
@@ -2079,7 +2086,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     needsReinstallDueToUnknownSha: boolean,
     perf: PerformanceTracker,
   ): Promise<AccessibilityVersionCheckResult> {
-    await this.assertNotDrivenByOtherDaemon();
+    await this.foreignForwardGuardContext.run(false, () => this.assertNotDrivenByOtherDaemon());
     return this.foreignForwardGuardContext.run(true, () =>
       this.installDownloadedApkGuarded(
         apkPath,
@@ -2273,7 +2280,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       );
       logger.info(`[CTRL_PROXY] Legacy package uninstalled`);
     } catch (error) {
-      if (error instanceof DeviceOwnedByOtherDaemonError) {
+      if (
+        error instanceof DeviceOwnedByOtherDaemonError ||
+        error instanceof CtrlProxyForwardOwnershipUnreadableError
+      ) {
         throw error;
       }
       // Legacy cleanup is best-effort; failure must not block setup of the current package.
@@ -2830,6 +2840,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       // Download APK if not installed or force is true
       if (force || !isAlreadyInstalled) {
         apkPath = await perf.track("downloadApk", () => this.downloadApk());
+        await this.foreignForwardGuardContext.run(false, () => this.assertNotDrivenByOtherDaemon());
         await perf.track("installApk", () => this.install(apkPath!));
       }
 
@@ -2845,6 +2856,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         perfTiming: perf.getTimings(),
       };
     } catch (error) {
+      if (
+        error instanceof DeviceOwnedByOtherDaemonError ||
+        error instanceof CtrlProxyForwardOwnershipUnreadableError
+      ) {
+        throw error;
+      }
       logger.warn(`[CTRL_PROXY] Setup failed: ${errorMessage(error)}`, error);
       const errorMsg = errorMessage(error);
       const { message, category } = AndroidCtrlProxyManager.classifySetupError(errorMsg);

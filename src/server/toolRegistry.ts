@@ -1890,7 +1890,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
             ...managedSlotAccess,
             deviceId: readinessTarget,
             remedy: !providedDeviceId
-              ? "This call named no device and the only candidate is driven by another daemon: pass the deviceId of a device this daemon may drive, or acquire one with getAndroid/getApple and pass its sessionUuid."
+              ? "This call named no device and the device it would use is driven by another AutoMobile daemon: pass the deviceId of a device this daemon may drive, or acquire one with getAndroid/getApple and pass its sessionUuid."
               : undefined,
           });
           await assertToolControlTargetIdentity(
@@ -3274,7 +3274,7 @@ async function assertManagedSlotControlAccess(input: {
       deviceId,
       platform,
       gate: pool,
-      remedy: input.remedy ?? TOOL_CALL_REMEDY,
+      remedy: input.remedy,
     });
   }
 }

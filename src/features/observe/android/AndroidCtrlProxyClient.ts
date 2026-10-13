@@ -5526,7 +5526,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       ports,
       AndroidCtrlProxyClient.FORWARD_CLIENT_PROBES,
       signal,
+      true,
     );
+    const rememberedOnly = "clientPidsByPort" in evidence && evidence.clientPidsByPort.size === 0;
     if ("clientPidsByPort" in evidence) {
       for (const port of ports) {
         const remembered = liveRememberedForwardClients(
@@ -5542,7 +5544,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
     }
     if ("probeFailure" in evidence || evidence.clientPidsByPort.size > 0) {
-      this.throwForeignCtrlProxyForwards(ports, evidence);
+      this.throwForeignCtrlProxyForwards(ports, evidence, false, rememberedOnly);
     }
     for (const port of ports) {
       logger.warn(
@@ -5563,6 +5565,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     ports: number[],
     evidence: ForwardClientEvidence,
     transient = false,
+    rememberedOnly = false,
   ): never {
     const clientPids =
       "clientPidsByPort" in evidence
@@ -5573,7 +5576,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         this.device.deviceId,
         ports,
         this.ctrlProxyForwardLease.ownershipDirectory?.(),
-        "probeFailure" in evidence ? evidence : { clientPids },
+        "probeFailure" in evidence ? evidence : { clientPids, rememberedOnly },
       ),
       clientPids[0],
       undefined,
@@ -5589,21 +5592,24 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     ports: number[],
     probes: number,
     signal?: AbortSignal,
+    rememberUnrecorded = false,
   ): Promise<ForwardClientEvidence> {
     const clientPidsByPort = new Map<number, number[]>();
+    const remember = rememberUnrecorded ? rememberForeignForwardClients : undefined;
     try {
       for (let probe = 0; probe < probes; probe++) {
         if (probe > 0) {
           await this.timer.sleep(AndroidCtrlProxyClient.FORWARD_CLIENT_REPROBE_INTERVAL_MS);
         }
         for (const [port, pids] of await this.probeForwardClientsOnce(ports, signal)) {
-          rememberForeignForwardClients(this.device.deviceId, port, pids);
+          remember?.(this.device.deviceId, port, pids);
           clientPidsByPort.set(port, [
             ...new Set([...(clientPidsByPort.get(port) ?? []), ...pids]),
           ]);
         }
       }
     } catch (error) {
+      signal?.throwIfAborted();
       logger.warn(
         `[CTRL_PROXY] Could not read host connections to CtrlProxy forwards on ` +
           `${this.device.deviceId}: ${errorMessage(error)}`,
@@ -5735,7 +5741,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this.forwardClientProcessIsRunning,
     );
     if (pids.length > 0) {
-      this.throwForeignCtrlProxyForwards([port], { clientPidsByPort: new Map([[port, pids]]) });
+      this.throwForeignCtrlProxyForwards(
+        [port],
+        { clientPidsByPort: new Map([[port, pids]]) },
+        false,
+        true,
+      );
     }
   }
 

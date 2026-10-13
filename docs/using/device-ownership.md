@@ -700,11 +700,21 @@ claim or forwarding lease, a managed slot, or an unrecorded CtrlProxy forward
 with a live or remembered-live foreign client PID keeps the device on the
 installed read-only path, regardless of a **Yes** entry. If a listed forward's
 client ownership is unknown, reads still use that path and control gets a typed
-refusal without an `ownerPid`. A daemon removes only forwards its coordination
-directory recorded, or unrecorded forwards whose owner is provably gone. An unreadable forward list with no known port warns
-and leaves the ordinary claim decision in place. A peer using a different
-coordination directory with **no forward** leaves no forward evidence for this
-check to detect.
+refusal without an `ownerPid`. Explicit-device control refusals advise retrying after
+the owning daemon releases the device, or choosing another device. A call naming no
+device advises passing the `deviceId` of a device this daemon may drive, or acquiring
+one with `getAndroid`/`getApple` and passing its `sessionUuid`. A daemon removes forwards its coordination directory recorded when no foreign client
+is connected. An unrecorded forward with no client connected on either probe,
+whose owner this daemon never saw connected, is treated as a leftover and reclaimed
+(the existing #10690 rule). A remembered PID protects its forward while that PID
+is alive; PID reuse cannot be distinguished by this liveness-only check. The existing
+process-incarnation probe launches `ps` on macOS and is not used on this hot path.
+An unreadable forward list with no known port warns and leaves the pool's ordinary
+claim decision in place; a readiness guard performs no writes, skips readiness for
+a read, and fails control with a distinct, non-coded adb failure asking for a retry.
+Cancellation propagates as cancellation. A peer using a different coordination
+directory with **no forward**, or an unrecorded forward whose disconnected owner
+was never observed, leaves no live forward evidence for this check to detect.
 
 | Tool                    | Android                                     | iOS simulator                               |
 | ----------------------- | ------------------------------------------- | ------------------------------------------- |

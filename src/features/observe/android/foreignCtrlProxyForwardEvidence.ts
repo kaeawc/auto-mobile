@@ -1,3 +1,4 @@
+import { ActionableError } from "../../../models/ActionableError";
 import { PortManager } from "../../../utils/PortManager";
 import { logger } from "../../../utils/logger";
 import { errorMessage } from "../../../utils/describeUnknownError";
@@ -17,6 +18,14 @@ export type ForeignCtrlProxyForwardVerdict =
   | { kind: "none" }
   | { kind: "foreign"; ports: number[]; clientPids: number[]; message: string }
   | { kind: "unknown"; ports: number[]; reason: string; message: string };
+
+export class CtrlProxyForwardOwnershipUnreadableError extends ActionableError {
+  constructor(deviceId: string, reason: string) {
+    super(
+      `Cannot read CtrlProxy forward ownership on ${deviceId}: adb forward --list failed (${reason}); retry before driving this device.`,
+    );
+  }
+}
 
 export interface ForeignCtrlProxyForwardEvidence {
   /** Never mutates the device or the host. */
@@ -133,14 +142,34 @@ export interface ForeignForwardEvidenceDependencies {
 }
 
 export class DefaultForeignCtrlProxyForwardEvidence implements ForeignCtrlProxyForwardEvidence {
+  private listingInFlight?: Promise<{ stdout: string }>;
+
   constructor(private readonly deps: ForeignForwardEvidenceDependencies) {}
+
+  private listForwards(deviceId: string, signal?: AbortSignal): Promise<{ stdout: string }> {
+    const list = () =>
+      this.deps.adbFactory
+        .create({ deviceId, name: deviceId, platform: "android" })
+        .execute(["forward", "--list"], { signal });
+    // Cancellation belongs to one caller; only signal-less inventory reads coalesce.
+    if (signal) {
+      return list();
+    }
+    if (!this.listingInFlight) {
+      this.listingInFlight = list().finally(() => {
+        this.listingInFlight = undefined;
+      });
+    }
+    return this.listingInFlight;
+  }
 
   async read(deviceId: string, signal?: AbortSignal): Promise<ForeignCtrlProxyForwardVerdict> {
     let ports: number[] = [];
     let ownershipDirectory: string | undefined;
     try {
-      const adb = this.deps.adbFactory.create({ deviceId, name: deviceId, platform: "android" });
-      const { stdout } = await adb.execute(["forward", "--list"], { signal });
+      signal?.throwIfAborted();
+      const { stdout } = await this.listForwards(deviceId, signal);
+      signal?.throwIfAborted();
       const listed = listedCtrlProxyForwardPorts(deviceId, stdout);
       if (listed.size === 0) {
         pruneForeignForwardMemory(deviceId, listed);
@@ -159,6 +188,7 @@ export class DefaultForeignCtrlProxyForwardEvidence implements ForeignCtrlProxyF
           const pids = (await this.deps.clientProbe.findClientPids(port, signal)).filter(
             (pid) => pid !== process.pid && pid > 0,
           );
+          signal?.throwIfAborted();
           rememberForeignForwardClients(deviceId, port, pids);
           return pids;
         }),
@@ -180,9 +210,14 @@ export class DefaultForeignCtrlProxyForwardEvidence implements ForeignCtrlProxyF
         clientPids,
         message: describeForeignCtrlProxyForwards(deviceId, ports, ownershipDirectory, {
           clientPids,
+          rememberedOnly: connected.flat().length === 0,
         }),
       };
     } catch (error) {
+      signal?.throwIfAborted();
+      if (error instanceof Error && error.name === "AbortError") {
+        throw error;
+      }
       const reason = errorMessage(error);
       logger.warn(
         `[CTRL_PROXY] Could not establish forward ownership on ${deviceId}: ${reason}`,
@@ -224,7 +259,7 @@ export function describeForeignCtrlProxyForwards(
   deviceId: string,
   ports: number[],
   ownershipDirectory: string | undefined,
-  evidence: { clientPids: number[] } | { probeFailure: string },
+  evidence: { clientPids: number[]; rememberedOnly?: boolean } | { probeFailure: string },
 ): string {
   const listed = ports.map((port) => `tcp:${port}`).join(", ");
   const removal = ports
@@ -236,9 +271,12 @@ export function describeForeignCtrlProxyForwards(
     `any daemon sharing its coordination directory${domain}`;
   if ("clientPids" in evidence) {
     const pids = evidence.clientPids.join(", ");
+    const connection = evidence.rememberedOnly
+      ? "was seen connected to it and is still running"
+      : "holds a connection to it";
     return (
       `${deviceId} is driven by another AutoMobile daemon: ${unrecorded}, and PID ${pids} ` +
-      `holds a connection to it, so it was left in place. An older AutoMobile release or a ` +
+      `${connection}, so it was left in place. An older AutoMobile release or a ` +
       `daemon started with a different AUTOMOBILE_COORDINATION_DIR is the usual owner; stop ` +
       `it (\`kill ${evidence.clientPids[0]}\`) or use another device.`
     );

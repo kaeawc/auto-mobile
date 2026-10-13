@@ -23,7 +23,7 @@ afterEach(async () => {
   setCtrlProxyHostPortProbeForTesting(null);
 });
 
-function harness(acquire = true) {
+function harness(acquire = true, recorded = false) {
   const adb = new FakeAdbExecutor();
   adb.setDeviceStates([{ deviceId: device.deviceId, state: "device" }]);
   const timer = new FakeTimer();
@@ -46,7 +46,10 @@ function harness(acquire = true) {
     tryAcquire: () => acquire,
     release: () => {},
     getLastOwnerPid: () => 4242,
-    ownsForward: () => false,
+    ownsForward: () => recorded,
+    forgetOwnedForward: () => {
+      recorded = false;
+    },
   };
   let recoveries = 0;
   client = AndroidCtrlProxyClient.createForTesting(
@@ -85,6 +88,9 @@ describe("#12220 foreign forward protection", () => {
     await expect(h.client.sweepOrphanedCtrlProxyPortForwards()).rejects.toBeInstanceOf(
       CtrlProxyForwardingLeaseConflictError,
     );
+    await expect(h.client.sweepOrphanedCtrlProxyPortForwards()).rejects.toThrow(
+      "was seen connected to it and is still running",
+    );
     expect(h.adb.getExecutedCommands().filter((c) => c.startsWith("forward --remove"))).toEqual([]);
     alive = false;
     await h.client.sweepOrphanedCtrlProxyPortForwards();
@@ -95,6 +101,22 @@ describe("#12220 foreign forward protection", () => {
     expect(
       h.adb.getExecutedCommands().some((command) => /^forward tcp:\d+ tcp:8765$/.test(command)),
     ).toBe(true);
+  });
+
+  test("F1 recorded orphan stray disconnect retries reclamation while its PID lives", async () => {
+    const h = harness(true, true);
+    let connected = true;
+    h.client.forwardClientProbe = { findClientPids: async () => (connected ? [4242] : []) };
+    h.client.forwardClientProcessIsRunning = () => true;
+    const failure = await h.client
+      .sweepOrphanedCtrlProxyPortForwards()
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(CtrlProxyForwardingLeaseConflictError);
+    expect((failure as CtrlProxyForwardingLeaseConflictError).transient).toBe(true);
+    expect(h.adb.getExecutedCommands()).not.toContain("forward --remove tcp:52001");
+    connected = false;
+    await h.client.sweepOrphanedCtrlProxyPortForwards();
+    expect(h.adb.getExecutedCommands()).toContain("forward --remove tcp:52001");
   });
 
   test("#12220 three forwarding lease conflicts never invoke service recovery", async () => {

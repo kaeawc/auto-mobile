@@ -2,6 +2,8 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype.screenshot
 
 import android.app.Application
 import kotlinx.serialization.json.JsonPrimitive
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -18,6 +20,31 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [34], application = Application::class, qualifiers = "+notnight")
 class PrototypeRenderThemeTest {
+
+  @Test
+  fun themeFromAppliesTheOtherFixturesTheme() {
+    val plain = validPrototypeFixture("material-controls")
+    val themed = validPrototypeFixture("material-controls", themeFrom = "theme-seed")
+    assertEquals(validPrototypeFixture("theme-seed").theme, themed.theme)
+    assertEquals(plain.root, themed.root)
+    val plainImage = renderPrototype("plain-controls", plain)
+    val themedImage = renderPrototype("themed-controls", themed)
+    assertTrue(
+      "theme-seed changed nothing on the light device",
+      plainImage.width != themedImage.width ||
+        plainImage.height != themedImage.height ||
+        !plainImage.pixels.contentEquals(themedImage.pixels),
+    )
+  }
+
+  @Test
+  fun themeFromRejectsAFixtureWithoutATheme() {
+    val error =
+      assertThrows(IllegalStateException::class.java) {
+        validPrototypeFixture("material-controls", themeFrom = "material-controls")
+      }
+    assertTrue(error.message.orEmpty().contains("material-controls"))
+  }
 
   @Test
   fun darkSpecThemeDrawsLightInkOnLightDevice() {

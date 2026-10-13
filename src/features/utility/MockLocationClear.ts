@@ -16,6 +16,7 @@ export interface MockLocationClears {
   clearLateSet(options: { sessionId: string; device: BootedDevice }): Promise<void> | null;
   clearAfter(sessionId: string, deviceId: string, settled: Promise<unknown>): Promise<void> | null;
   retireDevice(deviceId: string): void;
+  abandonClear(sessionId: string, deviceId: string): void;
 }
 
 interface LocationMarker {
@@ -81,6 +82,17 @@ export class MockLocationClearRegistry implements MockLocationClears {
     marker?.controller.abort();
     // Device removed, nothing to clear; cancellation releases its quarantine.
     logger.debug(`Mock location device removed, nothing to clear for ${deviceId}`);
+  }
+
+  abandonClear(sessionId: string, deviceId: string): void {
+    const marker = this.markers.get(deviceId);
+    if (marker?.sessionId !== sessionId) {
+      return;
+    }
+    this.markers.delete(deviceId);
+    marker.controller.abort();
+    // The manager's cap ended quarantine; cancellation prevents another holder's clear.
+    logger.debug(`Mock location clear abandoned for session ${sessionId} on ${deviceId}`);
   }
 
   private isCurrent(marker: LocationMarker): boolean {

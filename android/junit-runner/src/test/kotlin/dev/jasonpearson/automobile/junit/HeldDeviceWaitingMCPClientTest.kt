@@ -2,9 +2,12 @@ package dev.jasonpearson.automobile.junit
 
 import java.io.File
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -180,6 +183,50 @@ class HeldDeviceWaitingMCPClientTest {
       assertEquals(code, "ok", client(delegate).callTool("tapOn", emptyMap()))
       assertEquals(code, listOf(firstSleep), sleeps)
     }
+  }
+
+  @Test
+  fun `recovery corpus waits only for recoverable refusals and honours hints`() {
+    var directory: File? = File("").absoluteFile
+    while (
+      directory != null && !File(directory, "test/fixtures/refusal-wire").isDirectory
+    ) directory = directory.parentFile
+    val files =
+      File(directory ?: error("fixture directory not found"), "test/fixtures/refusal-wire")
+        .listFiles()!!
+    var hinted = false
+    var unbounded = false
+    var permanent = false
+    for (file in files.filter { it.extension == "json" && it.name != "expectations.json" }) {
+      val name = file.nameWithoutExtension
+      val payload = Json.parseToJsonElement(fixtureText(name)).jsonObject
+      val envelope = payload["error"] as? JsonObject
+      val code = (envelope?.get("code") ?: payload["code"])?.jsonPrimitive?.content
+      if (code !in setOf("device_unhealthy", "session_held_by_recovery")) continue
+      val recovering = (envelope?.get("recovering") ?: payload["recovering"]) == JsonPrimitive(true)
+      val retryable = (envelope?.get("retryable") ?: payload["retryable"]) == JsonPrimitive(true)
+      val waits = retryable && (code == "session_held_by_recovery" || recovering)
+      val hint = (envelope?.get("retryAfterMs") ?: payload["retryAfterMs"])?.jsonPrimitive?.long
+      sleeps.clear()
+      val delegate = ScriptedClient(mutableListOf(fixtureRefusal(name), { "ok" }))
+      if (waits) {
+        assertEquals(name, "ok", client(delegate).callTool("tapOn", emptyMap()))
+        assertEquals(name, listOf(maxOf(500L, hint ?: 0L)), sleeps)
+        if (code == "device_unhealthy") {
+          hinted = hinted || hint != null
+          unbounded = unbounded || hint == null
+        }
+      } else {
+        try {
+          client(delegate).callTool("tapOn", emptyMap())
+          fail("$name must surface")
+        } catch (_: RuntimeException) {}
+        assertTrue(name, sleeps.isEmpty())
+        assertEquals(name, 1, delegate.calls)
+        permanent = permanent || (code == "device_unhealthy" && !recovering)
+      }
+    }
+    assertTrue(hinted && unbounded && permanent)
   }
 
   @Test

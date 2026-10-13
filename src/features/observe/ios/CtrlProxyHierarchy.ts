@@ -1,3 +1,4 @@
+import { normalizeHierarchyOptionalFields } from "../truncationReasons";
 import { iosHierarchyAcquisition } from "./types";
 /**
  * CtrlProxy iOSHierarchy - Delegate for hierarchy operations.
@@ -826,7 +827,7 @@ export class CtrlProxyHierarchy {
     // with XCUITest frames. Their sdk.source marker survives beside $ in extras.
     assignIosStableViewIds(filteredNode);
 
-    return {
+    return normalizeHierarchyOptionalFields({
       hierarchy: {
         node: filteredNode ?? undefined,
       },
@@ -850,7 +851,7 @@ export class CtrlProxyHierarchy {
       systemInsets: hierarchy.systemInsets,
       insets: hierarchy.insets,
       ...(hierarchy.truncationReasons && { truncationReasons: hierarchy.truncationReasons }),
-    };
+    });
   }
 
   // ===========================================================================

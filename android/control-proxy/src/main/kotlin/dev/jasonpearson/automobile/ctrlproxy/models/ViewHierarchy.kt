@@ -53,8 +53,10 @@ constructor(
   val nativeScale: Float? = null,
   val pixelWidth: Int? = null, // Physical screenshot pixel width (== screenWidth on Android)
   val pixelHeight: Int? = null, // Physical screenshot pixel height (== screenHeight on Android)
-  /** Structured reasons why this snapshot is partial or unavailable. */
-  val truncationReasons: List<String>? = null,
+  /**
+   * Structured reasons why this snapshot is partial or unavailable; omitted for a complete capture.
+   */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val truncationReasons: List<String>? = null,
   /**
    * True only while an AutoMobile prototype exists but is hidden because its app is not in front,
    * so a `layer: "prototype"` call can say so instead of "no prototype is showing". Omitted

@@ -24,7 +24,7 @@ extension AutoMobilePlanExecutor {
                 return "Invalid response: \(message)"
             case let .refused(tool, refusal):
                 let code = refusal.code.map { " (\($0))" } ?? ""
-                return "Daemon refused \(tool)\(code): \(refusal.message)"
+                return "Daemon refused \(tool)\(code): \(refusal.failureMessage)"
             case let .deviceUnavailable(message):
                 return "Device unavailable: \(message)"
             }

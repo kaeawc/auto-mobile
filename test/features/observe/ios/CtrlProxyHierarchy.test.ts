@@ -1,3 +1,4 @@
+import capturedWire from "../../../fixtures/ios/keyboard-modes/hardware-keyboard.runner-hierarchy.json";
 import { describe, expect, test } from "bun:test";
 import { CtrlProxyHierarchy } from "../../../../src/features/observe/ios/CtrlProxyHierarchy";
 import { STABLE_VIEW_ID_PREFIX } from "../../../../src/features/observe/android/StableNodeIdentity";
@@ -49,6 +50,16 @@ function makeHierarchy(root: CtrlProxyNode): any {
 
 describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
   const subject = new CtrlProxyHierarchy(stubContext);
+
+  test("omits null inset fields from a captured runner hierarchy", () => {
+    // Only systemInsets and insets are overwritten with the runner's null sentinel on an otherwise captured runner payload.
+    const wire = Object.assign(structuredClone(capturedWire), { systemInsets: null, insets: null });
+    const result = subject.convertToViewHierarchyResult(wire as XCTestHierarchy);
+    expect(Object.hasOwn(result, "systemInsets")).toBe(false);
+    expect(Object.hasOwn(result, "insets")).toBe(false);
+    expect(wire.systemInsets).toBeNull();
+    expect(wire.insets).toBeNull();
+  });
 
   test("preserves the runner's SpringBoard fallback diagnostic", () => {
     const hierarchy = {

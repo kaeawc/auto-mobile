@@ -29,6 +29,7 @@ screenshots (#10943, #10988) and the renderer and accessibility fixes that follo
 | `display` selector                                                                    | Refused: a simulator has one screen                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `window.layer: "app"`                                                                 | Accepted and ignored, silently: the window level is fixed at alert + 1 (decision 3)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `window.persistence: "device"`                                                        | Refused: the agent lives in the app process and dies with it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `window.chrome` (#12064)                                                              | Supported, not yet device-verified: fullscreen only, a device advertising `prototype_window_chrome_v1` honours `none` (default) or `bar`; `none` fills the window including under the status bar (use top-edge `safeAreaPadding`) and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s. The iOS agent advertises the capability, leaves sheet/floating chrome unchanged, and provides accessible exits; older agents keep the bar and explicit `none` is refused with a relaunch hint. `lastResult.chrome` reports the effective chrome for successful fullscreen shows and subsequent host-local status.                                          |
 | `inspect`                                                                             | Supported (`prototype_inspect_v1`); see [Inspect](#inspect)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | Idle TTL and dismissal on host disconnect                                             | Supported; see [Expiry](#expiry). Reasons `user`, `agent`, `ttl`, `disconnect`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | Per-mode colours and images, gradients, role scrims (#11220)                          | Supported, not yet device-verified (`prototype_theme_modes_v1`); see [Light and dark values](#light-and-dark-values)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -371,7 +372,9 @@ status has no `appearance` while nothing is shown.
 
 Node anchors (#9316) work as on [Android](../android/prototype-ux.md#anchors), in points.
 The host resolves each element anchor once at show against a fresh hierarchy of the app
-alone (the agent's own window, found by its dismiss control, is excluded) and sends it as
+alone (the agent's own window, found by the root view's `automobile-prototype-window` marker
+only for a chromeless fullscreen prototype, or by the dismiss control for every other prototype
+and older agents, is excluded) and sends it as
 a bounds anchor. iOS hierarchy bounds are already points, the unit iOS spec sizes use, so
 no density conversion happens; the result's `anchors[].boundsPx` and `bounds` carry the
 same point values. The host sends anchors only to an agent whose handshake advertises
@@ -383,9 +386,10 @@ The agent draws anchored nodes in a window-level layer above the spec tree (abov
 modal, for a node inside a dialog), so a parent neither reserves a slot for one nor clips
 it, and its touch target and accessibility frame are where it is drawn. The layer places
 a node at its anchor's screen rectangle less the layer's own screen origin: the prototype
-window's screen origin plus the layer's position in the window. For a fullscreen prototype
-the layer sits in the content area below the dismiss bar, so anchors are shifted up by the
-bar and an anchor under the bar is clipped. `cover` sizes the node to the bounds, ignoring
+window's screen origin plus the layer's position in the window. With fullscreen `chrome: "none"`
+the anchor layer starts at the window top, so anchors are not shifted. With `chrome: "bar"`
+the layer sits below the dismiss bar, so anchors are shifted up by the bar and an anchor
+under the bar is clipped. `cover` sizes the node to the bounds, ignoring
 authored width and height; the edges keep the node's size, align that edge and centre it
 on the other axis; `start` and `end` follow the layout direction; `offset` applies last,
 in screen axes. Only the root of a floating prototype may be anchored, as on Android; with
@@ -417,7 +421,7 @@ transition as a real tap, including on a part identifier.
 
 A segmented `Picker` cannot carry per-segment accessibility identifiers, so segmented buttons
 are drawn as a row of buttons. A dialog's scrim covers the whole window (below the dismiss
-bar in fullscreen) and takes every touch while it is open, even for floating or sheet
+bar with fullscreen `chrome: "bar"`) and takes every touch while it is open, even for floating or sheet
 placements; a snackbar takes touches only on itself. A dialog's title (a header), text, child
 controls and buttons are each their own accessibility element. While a dialog is open the page
 behind it (the spec tree and its anchor layer) is collapsed out of the accessibility tree, as it
@@ -439,11 +443,25 @@ freed space; unrelated state changes such as typing do not animate. The animatio
 the system's Reduce Motion (`UIAccessibility.isReduceMotionEnabled`) makes every change instant.
 
 The host's dismiss control (`automobile-prototype-dismiss`, "Dismiss prototype") cannot be removed
-by the spec. In fullscreen it sits in a bar across the top of the window, like Android's
-dismiss bar: the bar clears the status bar and cutout, is only as tall as the 44 pt control, is
+by the spec. Fullscreen defaults to `window.chrome: "none"`: content and anchors fill the
+window, and `safeAreaPadding` sees the real top inset. A host-owned two-finger 1 s long press
+anywhere on the window reveals a dismiss pill for 5 s; another hold restarts that deadline.
+The two-finger long press on a simulator is not yet device-verified.
+Single-pointer taps and swipes cannot reveal it. VoiceOver's escape gesture dismisses directly,
+and the pill stays visible under VoiceOver or Switch Control so assistive technology can
+activate it. It sits above modals, clears the top safe inset, and `window.opacity` never fades
+it. The VoiceOver escape gesture, permanent assistive pill under VoiceOver / Switch Control,
+opacity-0 escape, and `automobile-prototype-window` marker's shape in a real capture are
+not yet device-verified. The marker is present on the root view only for a chromeless fullscreen
+prototype; every other prototype is found by its dismiss control. All these exits dismiss with reason `user`; revealing is not activity for the idle TTL.
+The host's dismiss, replacing show, authored dismiss, idle TTL and last-client disconnect keep
+working. Back is not the exit.
+
+With fullscreen `chrome: "bar"`, the control sits in a bar across the top of the window:
+the bar clears the status bar and cutout, is only as tall as the 44 pt control, is
 translucent and follows the spec's light or dark theme, and the spec is laid out below it, so
-the control never covers spec content. `safeAreaPadding` inside a fullscreen spec therefore
-sees no top inset. Floating and sheet prototypes keep the control at the window's top trailing
+the control never covers spec content. `safeAreaPadding` inside a fullscreen spec with the bar
+therefore sees no top inset. Floating and sheet prototypes keep the control at the window's top trailing
 corner.
 
 See the [`prototype` tool reference](../../../tools.md#prototype).

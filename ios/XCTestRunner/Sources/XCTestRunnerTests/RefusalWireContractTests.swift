@@ -19,6 +19,7 @@ final class RefusalWireContractTests: XCTestCase {
             let acquireNewSession: Bool
             let retryAfterMs: Int?
             let externalDevices: [String]?
+            let recovering: Bool?
         }
 
         let codes: [String: Row]
@@ -43,6 +44,11 @@ final class RefusalWireContractTests: XCTestCase {
             let fields = try XCTUnwrap(row["fields"] as? [String: Any], stem)
             let refusal = try XCTUnwrap(
                 AutoMobilePlanExecutor.DaemonRefusal.parse(frame), "\(stem) did not decode as a refusal"
+            )
+            XCTAssertEqual(
+                refusal.recovering,
+                (fields["details"] as? [String: Any])?["recovering"] as? Bool ?? false,
+                "\(stem): recovering"
             )
             XCTAssertEqual(refusal.code, fields["code"] as? String, "\(stem): code")
             XCTAssertEqual(refusal.retryable, fields["retryable"] as? Bool, "\(stem): retryable")
@@ -158,6 +164,7 @@ final class RefusalWireContractTests: XCTestCase {
             let refusal = try XCTUnwrap(
                 AutoMobilePlanExecutor.DaemonRefusal.parse(text), "\(code) did not decode as a refusal"
             )
+            XCTAssertEqual(refusal.recovering, row.fields.recovering ?? false, "\(code): recovering")
             XCTAssertEqual(refusal.code, row.fields.code, "\(code): code")
             XCTAssertEqual(refusal.retryable, row.fields.retryable, "\(code): retryable")
             XCTAssertEqual(refusal.acquiresNewSession, row.fields.acquireNewSession, "\(code): nextAction")

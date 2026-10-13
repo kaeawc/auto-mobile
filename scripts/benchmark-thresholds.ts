@@ -10,6 +10,11 @@
  *  - each sample times a BATCH of calls and records the per-call mean, sized so one sample lasts
  *    about TARGET_SAMPLE_MS (see `chooseBatchSize`);
  *  - no threshold is enforced below THRESHOLD_FLOOR_MS (see `effectiveThreshold`).
+ *
+ * Why re-measure (2026-10-13, #11581): about 5 of 360 CI PR runs failed only tapOn,
+ * with p50 21-26 ms against 17.5 ms (typically ~8 ms), while other tools were <=0.3 ms.
+ * Re-measure an over-threshold tool once to distinguish runner noise from a persistent regression,
+ * retaining both samples without changing the thresholds or their tolerance.
  */
 
 export type BenchmarkMetric = "p50" | "p95" | "mean";
@@ -42,6 +47,29 @@ export type MetricThresholds = Record<BenchmarkMetric, number>;
 
 export type SampledMetrics = Record<BenchmarkMetric, number>;
 
+/** One sample run of a tool judged against its thresholds. */
+export interface JudgedSample<M extends SampledMetrics> {
+  metrics: M;
+  checks: ThresholdResult[];
+  passed: boolean;
+}
+
+export interface RemeasureDecision<M extends SampledMetrics> {
+  /** Absent threshold => true (nothing to enforce). */
+  passed: boolean;
+  /** True iff the first sample tripped and a second sample run was taken. */
+  remeasured: boolean;
+  /** Always present: the first sample run (checks empty when there is no threshold). */
+  first: JudgedSample<M>;
+  /** Present iff remeasured. */
+  second?: JudgedSample<M>;
+  /** The sample that decides the verdict: second when remeasured, else first. */
+  deciding: JudgedSample<M>;
+}
+
+/** Maximum number of re-measures per tool. */
+export const MAX_REMEASURES = 1;
+
 /** The configured threshold, raised to the floor for its metric. */
 export function effectiveThreshold(metric: BenchmarkMetric, configured: number): number {
   return Math.max(configured, THRESHOLD_FLOOR_MS[metric]);
@@ -64,6 +92,32 @@ export function compareAgainstThreshold(
       regression,
     };
   });
+}
+
+/** Re-measure a failing first sample once; the second sample decides the verdict. */
+export async function judgeWithRemeasure<M extends SampledMetrics>(
+  first: M,
+  threshold: MetricThresholds | undefined,
+  remeasure: () => Promise<M>,
+): Promise<RemeasureDecision<M>> {
+  const checks = threshold ? compareAgainstThreshold(first, threshold) : [];
+  const judgedFirst: JudgedSample<M> = {
+    metrics: first,
+    checks,
+    passed: checks.every((check) => check.passed),
+  };
+  if (!threshold || judgedFirst.passed) {
+    return { passed: true, remeasured: false, first: judgedFirst, deciding: judgedFirst };
+  }
+
+  const metrics = await remeasure();
+  const secondChecks = compareAgainstThreshold(metrics, threshold);
+  const second: JudgedSample<M> = {
+    metrics,
+    checks: secondChecks,
+    passed: secondChecks.every((check) => check.passed),
+  };
+  return { passed: second.passed, remeasured: true, first: judgedFirst, second, deciding: second };
 }
 
 /**

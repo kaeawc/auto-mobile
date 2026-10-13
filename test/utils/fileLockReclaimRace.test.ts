@@ -142,90 +142,8 @@ test("T3: exclusive restore copy leaves a third acquirer untouched and removes t
   }
 });
 
-test("T3: a third acquirer that publishes during a failed last-resort restore is never clobbered", () => {
-  const warn = spyOn(logger, "warn").mockImplementation(() => {});
-  try {
-    const f = unsupportedRestore();
-    f.fs.openError = "EIO";
-    f.fs.writeFileError = "EIO";
-    // Pause after the old existence check, or finish when exclusive-only restore backs off.
-    for (
-      let count = 0;
-      !f.reclaimer.pending.done &&
-      !(f.reclaimer.pending.value.op === "rename" && f.reclaimer.pending.value.path === f.marker);
-      count++
-    ) {
-      expect(count).toBeLessThan(200);
-      f.reclaimer.advance();
-    }
-    expect(f.fs.exists(PATH)).toBe(false);
-    f.fs.openError = undefined;
-    f.fs.writeFileError = undefined;
-    expect(
-      tryAcquireExclusiveLock(PATH, {
-        pid: 303,
-        ownerToken: "third-acquirer",
-        fileSystem: f.fs,
-        idGenerator: new FakeIdGenerator(),
-        isProcessRunning: () => true,
-      }),
-    ).toBe(true);
-    expect(f.reclaimer.finish()).toBe(false);
-    expect(f.fs.readText(PATH)).toBe("303\nthird-acquirer");
-    expect(f.fs.readText(f.marker)).toBe(f.raw);
-    expect(f.fs.paths()).toEqual([PATH, f.marker]);
-    expect(warn).toHaveBeenCalledWith(
-      `Displaced lock restore failed at ${PATH}; retaining ${f.marker}; lock state is held-unknown`,
-    );
-  } finally {
-    warn.mockRestore();
-  }
-});
-
-test("T3: a third acquirer that publishes during a failed release restore is never clobbered", () => {
-  const warn = spyOn(logger, "warn").mockImplementation(() => {});
-  try {
-    const f = fixture("101\nowner-101");
-    const release = new Racer(releaseExclusiveLockSteps(PATH, 101, "owner-101", f.fs));
-    release.until((step) => step.op === "rename" && step.path === PATH);
-    const raw = "500\nforeign-owner\nmetadata  ";
-    f.fs.update(PATH, raw);
-    f.fs.linkError = "ENOTSUP";
-    f.fs.openError = "EIO";
-    f.fs.writeFileError = "EIO";
-    release.until((step) => step.op === "link" && step.path === PATH);
-    const marker = f.fs.paths()[0];
-    expect(marker).toStartWith(`${PATH}.101.release.`);
-    // The fixed generator has no marker rename, so completion is also a stop condition.
-    for (
-      let count = 0;
-      !release.pending.done &&
-      !(release.pending.value.op === "rename" && release.pending.value.path === marker);
-      count++
-    ) {
-      expect(count).toBeLessThan(200);
-      release.advance();
-    }
-    expect(f.fs.exists(PATH)).toBe(false);
-    f.fs.openError = undefined;
-    f.fs.writeFileError = undefined;
-    expect(f.acquire(303).finish()).toBe(true);
-    const thirdRaw = f.fs.readText(PATH);
-    expect(thirdRaw).toBe("303\nowner-303\n\ncurrent-generation");
-    expect(release.finish()).toBeUndefined();
-    expect(f.fs.readText(PATH)).toBe(thirdRaw);
-    expect(f.fs.readText(marker)).toBe(raw);
-    expect(f.fs.paths()).toEqual([PATH, marker]);
-    expect(warn).toHaveBeenCalledWith(
-      `Displaced lock restore failed at ${PATH}; retaining ${marker}; lock state is held-unknown`,
-    );
-  } finally {
-    warn.mockRestore();
-  }
-});
-
 test.each(["openError", "writeError", "closeError"] as const)(
-  "T3: failed exclusive copy (%s) retains the marker without rename or partial litter",
+  "T3: failed exclusive copy (%s) restores by last-resort rename without partial litter",
   (operation) => {
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
     try {
@@ -233,18 +151,14 @@ test.each(["openError", "writeError", "closeError"] as const)(
       f.fs[operation] = "EIO";
       f.fs.writeFileError = "EIO";
       expect(f.reclaimer.finish()).toBe(false);
-      expect(f.fs.exists(PATH)).toBe(false);
-      expect(f.fs.readText(f.marker)).toBe(f.raw);
-      expect(f.fs.paths()).toEqual([f.marker]);
+      expect(f.fs.readText(PATH)).toBe(f.raw);
+      expect(f.fs.paths()).toEqual([PATH]);
       expect(f.fs.operations.some((step) => step.op === "rename" && step.path === f.marker)).toBe(
-        false,
+        true,
       );
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining("exclusive copy"),
         expect.anything(),
-      );
-      expect(warn).toHaveBeenCalledWith(
-        `Displaced lock restore failed at ${PATH}; retaining ${f.marker}; lock state is held-unknown`,
       );
     } finally {
       warn.mockRestore();
@@ -252,20 +166,25 @@ test.each(["openError", "writeError", "closeError"] as const)(
   },
 );
 
-test("T3: failed exclusive restore warns and retains the only displaced copy without rename", () => {
+test("T3: failed last-resort rename warns and retains the only displaced copy", () => {
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
   try {
     const f = unsupportedRestore();
     f.fs.openError = "EACCES";
-    expect(f.reclaimer.finish()).toBe(false);
-    expect(f.fs.paths()).toEqual([f.marker]);
-    expect(f.fs.readText(f.marker)).toBe(f.raw);
-    expect(f.fs.operations.some((step) => step.op === "rename" && step.path === f.marker)).toBe(
-      false,
-    );
-    expect(warn).toHaveBeenCalledWith(
-      `Displaced lock restore failed at ${PATH}; retaining ${f.marker}; lock state is held-unknown`,
-    );
+    const rename = spyOn(f.fs, "rename").mockImplementation((from, to) => {
+      if (from === f.marker) {
+        throw Object.assign(new Error("rename denied"), { code: "EACCES" });
+      }
+      FakeLockFileSystem.prototype.rename.call(f.fs, from, to);
+    });
+    try {
+      expect(f.reclaimer.finish()).toBe(false);
+      expect(f.fs.paths()).toEqual([f.marker]);
+      expect(f.fs.readText(f.marker)).toBe(f.raw);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("last-resort"), expect.anything());
+    } finally {
+      rename.mockRestore();
+    }
   } finally {
     warn.mockRestore();
   }

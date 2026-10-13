@@ -199,6 +199,7 @@ async function harness() {
   return {
     timer,
     manager,
+    persistence,
     reowner,
     drain,
     behavior,
@@ -280,7 +281,7 @@ describe("managed ownership release", () => {
     expect(h.releasedDevices).toEqual([DEVICE]);
   });
 
-  test.each(["stamp", "mark", "reowner", "cap"] as const)(
+  test.each(["stamp", "mark", "cap"] as const)(
     "double failure holds teardown until %s lands",
     async (proof) => {
       const h = await harness();
@@ -308,9 +309,6 @@ describe("managed ownership release", () => {
         h.behavior.busy = false;
         h.behavior.busyMark = false;
         h.timer.advanceTime(100);
-      } else if (proof === "reowner") {
-        h.behavior.busy = false;
-        h.timer.advanceTime(1_300);
       } else {
         if (proof === "stamp") {
           h.behavior.busy = false;
@@ -337,6 +335,99 @@ describe("managed ownership release", () => {
       }
     },
   );
+
+  test("the hold's expedited re-own confirms ownership before teardown writes", async () => {
+    const h = await harness();
+    h.behavior.busy = true;
+    await h.reowner.reown([SESSION], { rehydrated: true });
+    h.behavior.busy = false;
+    const startedMs = h.timer.now();
+    const hold = h.reowner.releaseDeviceHold(SESSION);
+    const release = h.manager.releaseSession(SESSION);
+    expect(await hold?.settled).toBe("teardown");
+    expect(h.confirmed).toEqual([SESSION]); // The re-owner, rather than the drain, supplies proof.
+    await release;
+    await h.reowner.whenIdle();
+    await h.drain.whenIdle();
+    expect(h.reowner.isReleaseHeld(SESSION)).toBe(false);
+    expect(h.writes).toEqual(["restore"]);
+    expect(h.lost).toEqual([]);
+    expect(h.events[0]).toBe("confirmed");
+    expect(h.events.indexOf("confirmed")).toBeLessThan(h.events.indexOf("clear"));
+    expect(h.timer.now()).toBe(startedMs);
+  });
+
+  test("the hold ends at the cap; the re-own lands afterwards without device writes", async () => {
+    const h = await harness();
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const bookkeeping = Promise.withResolvers<void>();
+    // Keep the releasing session present: background re-owning stops once its object is gone.
+    const markReleased = h.persistence.markReleased.bind(h.persistence);
+    const persist = spyOn(h.persistence, "markReleased").mockImplementation(async (...args) => {
+      await bookkeeping.promise;
+      return markReleased(...args);
+    });
+    let release: Promise<string | null> | undefined;
+    try {
+      h.behavior.busy = true;
+      h.behavior.busyMark = true;
+      await h.reowner.reown([SESSION], { rehydrated: true });
+      const hold = h.reowner.releaseDeviceHold(SESSION);
+      release = h.manager.releaseSession(SESSION);
+      await drainMicrotasks(100); // The hold's single expedited attempt fails while busy.
+      h.timer.advanceTime(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS - 1);
+      await drainMicrotasks(100);
+      expect(h.reowner.isReleaseHeld(SESSION)).toBe(true);
+      expect(h.confirmed).toEqual([]);
+      expect(h.writes).toEqual([]);
+      expect(
+        warn.mock.calls.filter(([message]) =>
+          String(message).includes("saved device state was dropped"),
+        ),
+      ).toHaveLength(0);
+      h.timer.advanceTime(1);
+      expect(await hold?.settled).toBe("skip-device-writes");
+      await drainMicrotasks(100);
+      expect(h.manager.getReleasingSession(SESSION)).not.toBeNull();
+      expect(h.reowner.isReleaseHeld(SESSION)).toBe(false);
+      expect(h.writes).toEqual([]);
+      expect(
+        warn.mock.calls.filter(([message]) =>
+          String(message).includes("saved device state was dropped"),
+        ),
+      ).toHaveLength(1);
+      h.behavior.busy = false;
+      // Mark remains busy so the drain cannot supply confirmation before the re-own.
+      h.timer.advanceTime(1_000 - MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS - 1);
+      await drainMicrotasks(100);
+      expect(h.confirmed).toEqual([]);
+      h.timer.advanceTime(1);
+      await h.reowner.whenIdle();
+      expect(h.confirmed).toEqual([SESSION]);
+      expect(h.lost).toEqual([]);
+      expect(h.writes).toEqual([]);
+      h.behavior.busyMark = false;
+      bookkeeping.resolve();
+      await release;
+      await settleWithFakeTime(h.timer, h.drain.whenIdle(), {
+        description: "settlement after post-cap ownership confirmation",
+        stepMs: 100,
+        maxSteps: 100,
+      });
+      expect(h.writes).toEqual([]);
+      expect(
+        warn.mock.calls.filter(([message]) =>
+          String(message).includes("saved device state was dropped"),
+        ),
+      ).toHaveLength(1);
+      expect((await registry.getAssignment(h.key))?.state).toBe("ready");
+    } finally {
+      bookkeeping.resolve();
+      await release;
+      persist.mockRestore();
+      warn.mockRestore();
+    }
+  });
 
   test("background re-own continues after release hides its held session", async () => {
     const h = await harness();
@@ -407,14 +498,14 @@ describe("managed ownership release", () => {
       h.behavior.lookupGate = lookup.promise;
       h.behavior.busy = false;
       await drainMicrotasks(40);
-      h.timer.advanceTime(2_000);
+      h.timer.advanceTime(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS / 2);
       await drainMicrotasks(40);
       if (resolution === "confirmed") {
         h.reowner.confirmOwnership(SESSION);
       } else if (resolution === "close") {
         h.reowner.close();
       } else {
-        h.timer.advanceTime(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS - 2_000);
+        h.timer.advanceTime(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS / 2);
       }
       // No listener may wait on this deliberately parked registry read.
       h.drain.close();
@@ -549,9 +640,11 @@ describe("managed ownership release", () => {
       // Admission checks during releasing must not prune the mark.
       expect(h.reowner.automationRefusal(SESSION)).toBeDefined();
       if (end === "retry-tick") {
-        await h.timer.advanceTimeAsync(2_000, () => drainUntilQuiescent(h.timer));
+        await h.timer.advanceTimeAsync(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS / 2, () =>
+          drainUntilQuiescent(h.timer),
+        );
         expect(h.reowner.automationRefusal(SESSION)).toBeDefined();
-        await h.timer.advanceTimeAsync(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS - 2_000, () =>
+        await h.timer.advanceTimeAsync(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS / 2, () =>
           drainUntilQuiescent(h.timer),
         );
       } else {

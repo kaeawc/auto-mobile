@@ -24,7 +24,13 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import type { ReleaseDeviceHold } from "../sessionManager";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS } from "./managedExecutionRelease";
-import { RegistryRetryPacing } from "./registryRetryPacing";
+import {
+  RegistryRetryPacing,
+  REGISTRY_RETRY_INITIAL_DELAY_MS,
+  REGISTRY_RETRY_MAX_DELAY_MS,
+  REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS,
+  REGISTRY_BUSY_WRITE_MS,
+} from "./registryRetryPacing";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import {
@@ -61,16 +67,15 @@ export interface ManagedExecutionReownerDependencies {
   deviceOf?: (sessionUuid: string) => string | null;
 }
 
-const OLD_REGISTRY_BUSY_WRITE_MS = 3_300;
-// The 4 s cap is measured on the daemon's timer, not a full-attempt guarantee when queued.
-// A synchronous registry write crossing the cap delays it by at most that write;
-// device writes are skipped then, and the cap-derived cleanup hint is short by that delay.
-// Busy writes now fail in ~300 ms (#12123); the previous worst-case 3.3 s is headroom.
+// One re-own attempt's 700 ms bound plus one blocked registry write's 250 ms busy timeout = 950 ms.
+// Measured on the daemon's timer; an attempt queued behind another pacer's turn is not
+// guaranteed to finish inside the cap. A synchronous write crossing it delays the cap
+// by at most that write, and the cap-derived cleanup hint is short by that delay.
 export const MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS =
-  MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS + OLD_REGISTRY_BUSY_WRITE_MS;
-export const MANAGED_EXECUTION_REOWN_RETRY_INITIAL_DELAY_MS = 25;
-export const MANAGED_EXECUTION_REOWN_RETRY_MAX_DELAY_MS = 1_000;
-export const MANAGED_EXECUTION_REOWN_RETRY_MAX_BLOCKED_WAIT_MS = 5_000;
+  MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS + REGISTRY_BUSY_WRITE_MS;
+export const MANAGED_EXECUTION_REOWN_RETRY_INITIAL_DELAY_MS = REGISTRY_RETRY_INITIAL_DELAY_MS;
+export const MANAGED_EXECUTION_REOWN_RETRY_MAX_DELAY_MS = REGISTRY_RETRY_MAX_DELAY_MS;
+export const MANAGED_EXECUTION_REOWN_RETRY_MAX_BLOCKED_WAIT_MS = REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS;
 export const MANAGED_EXECUTION_REOWN_WARN_AFTER_MS = 5_000;
 type HoldOutcome = "teardown" | "skip-device-writes";
 interface ReleaseHold {

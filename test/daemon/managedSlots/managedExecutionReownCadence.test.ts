@@ -1,15 +1,35 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
 import {
   MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS,
+  MANAGED_EXECUTION_REOWN_RETRY_INITIAL_DELAY_MS,
+  MANAGED_EXECUTION_REOWN_RETRY_MAX_DELAY_MS,
+  MANAGED_EXECUTION_REOWN_RETRY_MAX_BLOCKED_WAIT_MS,
   ManagedExecutionReowner,
   type ManagedExecutionReownerDependencies,
   type ManagedExecutionReownRegistry,
 } from "../../../src/daemon/managedSlots/managedExecutionReowner";
-import { MANAGED_EXECUTION_REGISTRY_RETRY_BACKOFF } from "../../../src/daemon/managedSlots/managedExecutionRelease";
+import { MANAGED_SLOT_REGISTRY_BUSY_TIMEOUT_MS } from "../../../src/daemon/managedSlots/sqliteSlotRegistry";
+import {
+  MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS,
+  MANAGED_EXECUTION_REGISTRY_RETRY_BACKOFF,
+  MANAGED_SETTLED_SLOT_RECOVERY_RETRY_INITIAL_DELAY_MS,
+  MANAGED_SETTLED_SLOT_RECOVERY_RETRY_MAX_DELAY_MS,
+  MANAGED_SETTLED_SLOT_RECOVERY_RETRY_MAX_BLOCKED_WAIT_MS,
+} from "../../../src/daemon/managedSlots/managedExecutionRelease";
 import {
   ManagedSlotDiscoveryIncompleteError,
   ManagedSlotOwnershipUnconfirmedError,
 } from "../../../src/daemon/managedSlots/managedSlotRefusal";
+import {
+  MANAGED_SLOT_BACK_OUT_RETRY_INITIAL_DELAY_MS,
+  MANAGED_SLOT_BACK_OUT_RETRY_MAX_DELAY_MS,
+  MANAGED_SLOT_BACK_OUT_RETRY_MAX_BLOCKED_WAIT_MS,
+} from "../../../src/daemon/managedSlots/managedSlotAcquisition";
+import {
+  REGISTRY_RETRY_INITIAL_DELAY_MS,
+  REGISTRY_RETRY_MAX_DELAY_MS,
+  REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS,
+} from "../../../src/daemon/managedSlots/registryRetryPacing";
 import { logger } from "../../../src/utils/logger";
 import { FakeSlotRegistry } from "../../fakes/FakeSlotRegistry";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -398,18 +418,21 @@ test("release schedule stays unchanged while ownership and discovery hints are i
   expect(new ManagedSlotDiscoveryIncompleteError("a").toPayload().retryAfterMs).toBe(2_000);
 });
 
-test("busy ownership hold drops state exactly at the four second cap", async () => {
+test("busy ownership hold drops state exactly at the derived cap", async () => {
   const h = await harness();
   h.behavior.failures = Infinity;
   await h.reowner.reown(["a"], { rehydrated: true });
   const hold = h.reowner.releaseDeviceHold("a");
-  expect(hold?.capMs).toBe(4_000);
-  expect(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS).toBe(4_000);
+  expect(hold?.capMs).toBe(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS);
+  expect(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS).toBe(
+    MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS + MANAGED_SLOT_REGISTRY_BUSY_TIMEOUT_MS,
+  );
+  expect(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS).toBe(950);
   let outcome: string | undefined;
   void hold?.settled?.then((result) => {
     outcome = result;
   });
-  await h.step(3_999);
+  await h.step(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS - 1);
   expect(outcome).toBeUndefined();
   expect(h.warn).not.toHaveBeenCalled();
   await h.step(1);
@@ -420,7 +443,7 @@ test("busy ownership hold drops state exactly at the four second cap", async () 
 });
 
 for (const successBlocked of [0, 3_300]) {
-  test(`release bypasses OLD quiet time and a ${successBlocked} ms successful write fits the cap`, async () => {
+  test(`release bypasses old quiet time; a ${successBlocked} ms synchronous successful write delays the cap`, async () => {
     const h = await harness();
     h.behavior.failures = 1;
     h.behavior.blocked = 3_300;
@@ -433,13 +456,13 @@ for (const successBlocked of [0, 3_300]) {
     expect(h.calls.map((call) => call.at)).toEqual([0, start]);
     expect(await hold?.settled).toBe("teardown");
     expect(h.confirmed).toEqual([start + successBlocked]);
-    expect(h.timer.now() - start).toBeLessThan(4_000);
+    expect(h.timer.now() - start).toBe(successBlocked);
     expect(h.warn).not.toHaveBeenCalled();
   });
 }
 
 for (const successAttempt of [1, 2, 3]) {
-  test(`NEW timing confirms on release attempt ${successAttempt} inside four seconds`, async () => {
+  test(`release attempt ${successAttempt} confirms before the cap or continues after it`, async () => {
     const h = await harness();
     h.behavior.blocked = 300;
     h.behavior.failures = 1;
@@ -447,13 +470,21 @@ for (const successAttempt of [1, 2, 3]) {
     h.behavior.failures = successAttempt - 1;
     const start = h.timer.now();
     const hold = h.reowner.releaseDeviceHold("a");
-    await h.step(3_999);
+    await h.step(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS - 1);
     expect(h.calls.slice(1).map((call) => call.at - start)).toEqual(
       [0, 600, 1_200].slice(0, successAttempt),
     );
-    expect(await hold?.settled).toBe("teardown");
-    expect(h.confirmed[0] - start).toBeLessThan(4_000);
-    expect(h.warn).not.toHaveBeenCalled();
+    const confirmationDelay = (successAttempt - 1) * 600;
+    expect(await hold?.settled).toBe(
+      confirmationDelay < MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS ? "teardown" : "skip-device-writes",
+    );
+    if (confirmationDelay >= MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS) {
+      await h.step(confirmationDelay - MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS + 1);
+    }
+    expect(h.confirmed[0] - start).toBe(confirmationDelay);
+    expect(h.warn.mock.calls).toHaveLength(
+      confirmationDelay < MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS ? 0 : 1,
+    );
   });
 }
 
@@ -466,7 +497,7 @@ test("one expedite per hold then a failed OLD attempt restores shared quiet time
   expect(h.reowner.releaseDeviceHold("a")?.settled).toBe(hold?.settled);
   await h.step(0);
   expect(h.calls.map((call) => call.at)).toEqual([0, 3_300]);
-  expect(h.reowner.releaseDeviceHold("a")?.settled).toBe(hold?.settled);
+  expect(h.reowner.isReleaseHeld("a")).toBe(false);
   await h.step(3_299);
   expect(h.calls).toHaveLength(2);
   expect(await hold?.settled).toBe("skip-device-writes");
@@ -499,8 +530,8 @@ test("a recovering session's release never forces registry admission", async () 
   const recovery = Promise.withResolvers<void>();
   h.reowner.noteRecovering("a", recovery.promise);
   const hold = h.reowner.releaseDeviceHold("a");
-  expect(hold?.capMs).toBe(4_000);
-  await h.step(3_999);
+  expect(hold?.capMs).toBe(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS);
+  await h.step(MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS - 1);
   expect(h.calls).toHaveLength(0);
   expect(h.opens()).toBe(0);
   await h.step(1);
@@ -535,4 +566,27 @@ test("A's release expedites its attempt behind B's blocking in-flight attempt", 
   ]);
   expect(await hold?.settled).toBe("teardown");
   expect(h.confirmed).toEqual([3_300]);
+});
+
+test("back-out, re-own and settled-slot recovery export the shared retry schedule", () => {
+  const schedule = [
+    REGISTRY_RETRY_INITIAL_DELAY_MS,
+    REGISTRY_RETRY_MAX_DELAY_MS,
+    REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS,
+  ];
+  expect([
+    MANAGED_SLOT_BACK_OUT_RETRY_INITIAL_DELAY_MS,
+    MANAGED_SLOT_BACK_OUT_RETRY_MAX_DELAY_MS,
+    MANAGED_SLOT_BACK_OUT_RETRY_MAX_BLOCKED_WAIT_MS,
+  ]).toEqual(schedule);
+  expect([
+    MANAGED_EXECUTION_REOWN_RETRY_INITIAL_DELAY_MS,
+    MANAGED_EXECUTION_REOWN_RETRY_MAX_DELAY_MS,
+    MANAGED_EXECUTION_REOWN_RETRY_MAX_BLOCKED_WAIT_MS,
+  ]).toEqual(schedule);
+  expect([
+    MANAGED_SETTLED_SLOT_RECOVERY_RETRY_INITIAL_DELAY_MS,
+    MANAGED_SETTLED_SLOT_RECOVERY_RETRY_MAX_DELAY_MS,
+    MANAGED_SETTLED_SLOT_RECOVERY_RETRY_MAX_BLOCKED_WAIT_MS,
+  ]).toEqual(schedule);
 });

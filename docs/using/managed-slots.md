@@ -260,11 +260,13 @@ connection used for tools and resources:
    retry clears only that ended session's record; one a live execution holds
    again is left to that execution's own release. Failed acquisition back-out also
    retries owed session release and owner clearing in the background, at 25 ms
-   doubling to 1 s until it lands or the daemon closes; a step that does not finish
-   within 700 ms counts as a failed attempt. After an attempt waits on
-   a busy registry, retries of every owed cleanup wait at least as long as that
-   attempt took (at most 5 s), so even cleanup for several slots takes at most
-   about half the daemon's time for attempts lasting up to 5 s.
+   doubling to 1 s until it lands or the daemon closes. Each retry's session release,
+   ownership read and owner clear share one 700 ms deadline. Back-out retries,
+   execution re-owning and settled-slot recovery take turns in arrival order and
+   share one quiet period on the daemon's timer. An expedited re-own may pass
+   attempts that are only waiting out quiet time. After a blocked attempt, they wait at least as
+   long as that attempt took (at most 5 s). The inline first back-out takes no turn
+   and waits for no quiet period; the acquisition answer never waits for retries.
    It clears only the backed-out session's
    record belonging to that daemon and preserves the device assignment. If the
    `settling` mark itself cannot be written, the slot keeps its owner record and
@@ -364,9 +366,12 @@ in `reset-slot-scope` pending `liveOwners` evidence is this recorded daemon PID.
 While re-owning is unconfirmed, control calls refuse with
 `managed_slot_ownership_unconfirmed` and `retryAfterMs: 1000`; retries start at
 25 ms, double to a 1 s cap, and continue while the session remains unconfirmed.
-Attempts share quiet time after a blocked registry call (capped at 5 s), with
-asynchronous waits bounded at 700 ms; failures warn once after 5 s of unconfirmed ownership.
-A release while ownership is unconfirmed holds device teardown for up to 4 s on the
+Back-out cleanup, re-own and settled-slot recovery take turns in arrival order and
+share quiet time after a blocked registry call (capped at 5 s). An expedited re-own
+may pass attempts that are only waiting out quiet time. Asynchronous waits are
+bounded at 700 ms; failures warn once after 5 s of unconfirmed ownership.
+A release while ownership is unconfirmed holds device teardown for up to 950 ms (one 700 ms attempt plus the registry’s
+250 ms busy timeout) on the
 daemon’s timer and expedites one waiting re-own attempt without overlapping another session's attempt.
 Confirmation starts teardown early; proven ownership loss skips device writes. At the
 cap, device writes are skipped and one warning says saved device state was dropped

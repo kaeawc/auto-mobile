@@ -163,7 +163,8 @@ below are the defaults; the constants live in
   the previous connection no longer owns the session.
 
 A managed session released while slot ownership is unconfirmed holds device teardown for
-up to 4 s on the daemon’s timer. Creating the hold expedites one waiting re-own attempt,
+up to 950 ms (one 700 ms attempt plus the registry’s 250 ms busy timeout) on the
+daemon’s timer. Creating the hold expedites one waiting re-own attempt,
 still in turn with other attempts; an in-flight attempt continues and recovery admission stays unchanged.
 Confirmation starts teardown early. Proven ownership loss skips device writes. At the
 cap, teardown skips device writes and one warning reports that saved device state was

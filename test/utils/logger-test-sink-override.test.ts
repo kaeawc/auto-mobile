@@ -1,5 +1,5 @@
 import { beforeAll, afterAll, describe, expect, spyOn, test } from "bun:test";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { testOverrides } from "../../src/utils/testOverrides";
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
@@ -24,7 +24,11 @@ describe("test log sink override", () => {
       try {
         mod = await import("../../src/utils/logger.ts?test-sink-override");
         logFile = join(logDir, `${mod.resolveProcessLogPrefix(process.argv, process.pid)}.log`);
+        testOverrides.logSinksDisabled = undefined;
+        mod.logger.info("warm-up-record");
+        await mod.logger.flush();
       } finally {
+        testOverrides.logSinksDisabled = previousOverride;
         if (previousDir === undefined) {
           delete process.env.AUTOMOBILE_LOG_DIR;
         } else {
@@ -64,6 +68,7 @@ describe("test log sink override", () => {
         return true;
       }) as typeof process.stderr.write);
       try {
+        const contentsBefore = readFileSync(logFile, "utf8");
         testOverrides.logSinksDisabled = () => true;
         mod.logger.setLogLevel(mod.LogLevel.INFO);
         let formattingVisits = 0;
@@ -81,7 +86,9 @@ describe("test log sink override", () => {
         expect(settled).toBe(true);
         expect(formattingVisits).toBe(0);
         expect(writes).toHaveLength(0);
-        expect(existsSync(logFile) ? readFileSync(logFile, "utf8") : "").toBe("");
+        const contentsWhileDisabled = readFileSync(logFile, "utf8");
+        expect(contentsWhileDisabled).toBe(contentsBefore);
+        expect(contentsWhileDisabled).not.toContain("discarded-record");
         testOverrides.logSinksDisabled = undefined;
         mod.logger.info("resumed-first");
         mod.logger.info("resumed-second");

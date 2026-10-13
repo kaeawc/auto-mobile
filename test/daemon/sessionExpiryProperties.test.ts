@@ -1,6 +1,6 @@
 import { drainMicrotasks } from "../helpers/fakeTimerStepping";
 import { logger, LogLevel } from "../../src/utils/logger";
-import { beforeAll, describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import {
   AUTOLOCK_IDLE_WINDOW_MS,
   DEFAULT_IDLE_WINDOWS_MS,
@@ -502,9 +502,11 @@ describe("session expiry properties under clock discontinuities (#10670)", () =>
 describe("property replay logger isolation", () => {
   test("a replay leaves no log write waiting for a real event-loop turn", async () => {
     const previousLevel = logger.getLogLevel();
+    const info = spyOn(logger, "info");
     try {
       logger.setLogLevel(LogLevel.INFO);
       await runSchedule(generateSchedule(1, ALIVE_WITH_DISCONTINUITIES), ORDER_SEED_A);
+      expect(info.mock.calls.length).toBeGreaterThan(0);
       let settled = false;
       void logger.flush().then(() => {
         settled = true;
@@ -513,6 +515,7 @@ describe("property replay logger isolation", () => {
       expect(settled).toBe(true);
       expect(logger.getLogLevel()).toBe(LogLevel.INFO);
     } finally {
+      info.mockRestore();
       logger.setLogLevel(previousLevel);
     }
     expect(logger.getLogLevel()).toBe(previousLevel);
@@ -529,11 +532,13 @@ describe("property replay logger isolation", () => {
         throw failure;
       },
     };
+    const info = spyOn(logger, "info");
     try {
       logger.setLogLevel(LogLevel.INFO);
       await expect(
         runSchedule(generateSchedule(1, ALIVE_WITH_DISCONTINUITIES), ORDER_SEED_A, [instant]),
       ).rejects.toBe(failure);
+      expect(info.mock.calls.length).toBeGreaterThan(0);
       let settled = false;
       void logger.flush().then(() => {
         settled = true;
@@ -543,6 +548,7 @@ describe("property replay logger isolation", () => {
       expect(levelDuringReplay).toBe(LogLevel.INFO);
       expect(logger.getLogLevel()).toBe(LogLevel.INFO);
     } finally {
+      info.mockRestore();
       logger.setLogLevel(previousLevel);
     }
     expect(logger.getLogLevel()).toBe(previousLevel);

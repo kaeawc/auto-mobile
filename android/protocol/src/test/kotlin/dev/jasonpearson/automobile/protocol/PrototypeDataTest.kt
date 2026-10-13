@@ -227,6 +227,8 @@ class PrototypeDataTest {
         "MAX_PROTOTYPE_REPEAT_PATH_CELLS" to PrototypeSpecValidator.MAX_PROTOTYPE_REPEAT_PATH_CELLS,
         "MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH" to
           PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH,
+        "MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL" to
+          PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL,
         "MAX_PROTOTYPE_DATA_BYTES" to PrototypeSpecValidator.MAX_PROTOTYPE_DATA_BYTES,
         "MAX_PROTOTYPE_DATA_DEPTH" to PrototypeSpecValidator.MAX_PROTOTYPE_DATA_DEPTH,
         "MAX_PROTOTYPE_DATA_ARRAY_ITEMS" to PrototypeSpecValidator.MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
@@ -451,6 +453,73 @@ class PrototypeDataTest {
     assertEquals(
       PrototypeSpecError("root.children[0].text", "Unknown repeat field \"missing\""),
       (result as PrototypeSpecValidation.Failure).error,
+    )
+  }
+
+  @Test
+  fun `condition operands share the exact substituted text total`() {
+    val operand = buildJsonObject {
+      put("key", "k")
+      put("equals", "{item.b}y")
+    }
+    val condition = buildJsonObject {
+      put(
+        "all",
+        JsonArray(List(16) { buildJsonObject { put("any", JsonArray(List(16) { operand })) } }),
+      )
+    }
+    val child = JsonObject(substitutionText("t") + ("visibleWhen" to condition))
+    val root = substitutionList(child, listOf("x".repeat(16375)))
+    val state = buildJsonObject { put("k", "") }
+    assertSubstitutionValid(substitutionSpec(root, state = state))
+    val extra = JsonObject(substitutionText("t") + ("visibleWhen" to operand))
+    val crossed = JsonObject(root + ("children" to JsonArray(listOf(child, extra))))
+    val unknown = substitutionText("{item.missing}{data:/s}")
+    val unknownRoot = JsonObject(root + ("children" to JsonArray(listOf(child, unknown))))
+    assertEquals(
+      PrototypeSpecError("root.children[1].text", "Unknown repeat field \"missing\""),
+      PrototypeRepeatValidator.validate(
+        substitutionSpec(unknownRoot, data = buildJsonObject { put("s", "") }, state = state),
+      ),
+    )
+    assertEquals(
+      PrototypeSpecError(
+        "root.children[1].visibleWhen.equals",
+        "Substituted text total limit exceeded",
+      ),
+      PrototypeRepeatValidator.validate(substitutionSpec(crossed, state = state)),
+    )
+  }
+
+  @Test
+  fun `repeat total charges each item in order`() {
+    val root = buildJsonObject {
+      put("type", "column")
+      put(
+        "repeat",
+        buildJsonObject {
+          put("as", "i")
+          put("items", JsonArray(List(4) { buildJsonObject { put("b", "x".repeat(16379)) } }))
+        },
+      )
+      put("children", JsonArray(List(64) { substitutionText("{i.b}") }))
+    }
+    assertSubstitutionValid(substitutionSpec(root))
+    val crossed =
+      JsonObject(root + ("children" to JsonArray(List(65) { substitutionText("{i.b}") })))
+    assertEquals(
+      PrototypeSpecError("root.children[64].text", "Substituted text total limit exceeded"),
+      PrototypeRepeatValidator.validate(substitutionSpec(crossed)),
+    )
+  }
+
+  @Test
+  fun `per field substitution error wins before the total charge`() {
+    assertSubstitutionError(
+      substitutionSpec(
+        substitutionList(substitutionText("{item.b}{item.b}"), listOf("x".repeat(8193))),
+      ),
+      "root.children[0].text",
     )
   }
 

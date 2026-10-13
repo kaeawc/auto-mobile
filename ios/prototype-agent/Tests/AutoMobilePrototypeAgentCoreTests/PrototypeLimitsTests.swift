@@ -49,6 +49,7 @@ final class PrototypeLimitsTests: XCTestCase {
         XCTAssertEqual(PrototypeLimits.maxDataBytes, limits["MAX_PROTOTYPE_DATA_BYTES"])
         XCTAssertEqual(PrototypeLimits.maxRepeatPathCells, limits["MAX_PROTOTYPE_REPEAT_PATH_CELLS"])
         XCTAssertEqual(PrototypeLimits.maxSubstitutedTextLength, limits["MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH"])
+        XCTAssertEqual(PrototypeLimits.maxSubstitutedTextTotal, limits["MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL"])
     }
 
     func testExactLimitFixturesDecode() throws {
@@ -422,5 +423,89 @@ final class PrototypeLimitsTests: XCTestCase {
             "visibleWhen": .object(["data": .string("/s"), "equals": .string("{i.b}")]),
         ])
         try PrototypeLimits.guardSubstitutedText(literalRepeat(condition, items: [long]), data: nil)
+    }
+
+    func testObjectEdgesAtTheDepthLimitAreCheckedBeforeRecursionStops() {
+        for edge in ["child", "children"] {
+            for scalar in [true, false] {
+                let leaf: JSONValue = scalar ? .number(1) : .object(["type": .string("spacer")])
+                var root: JSONValue = .object([
+                    "type": .string("column"), edge: edge == "child" ? leaf : .array([leaf]),
+                ])
+                for _ in 0 ..< 23 {
+                    root = .object(["type": .string("scroll"), "child": root])
+                }
+                let path = "root" + String(repeating: ".child", count: 23)
+                    + (edge == "child" ? ".child" : ".children[0]")
+                let message = scalar ? "Expected object" : "Tree depth limit exceeded"
+                assertLimit("\(path): \(message)") { try PrototypeLimits.guardAuthoredTree(root) }
+            }
+        }
+    }
+
+    func testSubstitutionGuardVisitsChildrenBeforeSiblingChild() {
+        let item: JSONValue = .object(["b": .string(String(repeating: "x", count: 8193))])
+        let root: JSONValue = .object([
+            "type": .string("column"),
+            "repeat": .object(["as": .string("i"), "items": .array([item])]),
+            "child": .object(["type": .string("spacer")]),
+            "children": .array([.object(["type": .string("text"), "text": .string("{i.b}{i.b}")])]),
+        ])
+        assertLimit("root.children[0].text: Substituted text length limit exceeded") {
+            try PrototypeLimits.guardSubstitutedText(root, data: nil)
+        }
+    }
+
+    func testScalarLiteralItemsRetainTheirExpansionIndices() throws {
+        let child: JSONValue = .object([
+            "type": .string("text"), "text": .string(String(repeating: "{index}", count: 8193)),
+        ])
+        let items = Array(repeating: JSONValue.number(0), count: 10) + [.object([:])]
+        assertLimit("root.children[0].text: Substituted text length limit exceeded") {
+            try PrototypeLimits.guardSubstitutedText(literalRepeat(child, items: items), data: nil)
+        }
+        try PrototypeLimits.guardSubstitutedText(literalRepeat(child, items: [.object([:])]), data: nil)
+    }
+
+    func testConditionOperandsShareTheExactSubstitutedTextTotal() throws {
+        let operand: JSONValue = .object(["key": .string("k"), "equals": .string("{item.b}y")])
+        // Nine authored UTF-16 units plus 16375 replacement units per operand.
+        let condition: JSONValue = .object(["all": .array(Array(
+            repeating: .object(["any": .array(Array(repeating: operand, count: 16))]), count: 16
+        ))])
+        let child: JSONValue = .object([
+            "type": .string("text"), "text": .string("t"), "visibleWhen": condition,
+        ])
+        let item: JSONValue = .object(["b": .string(String(repeating: "x", count: 16375))])
+        var root: [String: JSONValue] = [
+            "type": .string("column"), "children": .array([child]),
+            "repeat": .object(["as": .string("item"), "items": .array([item])]),
+        ]
+        try PrototypeLimits.guardSubstitutedText(.object(root), data: nil)
+        root["children"] = .array([child, .object([
+            "type": .string("text"), "text": .string("t"), "visibleWhen": operand,
+        ])])
+        assertLimit("root.children[1].visibleWhen.equals: Substituted text total limit exceeded") {
+            try PrototypeLimits.guardSubstitutedText(.object(root), data: nil)
+        }
+    }
+
+    func testRepeatTotalChargesEachItemInOrderAndKeepsPerFieldPriority() throws {
+        let child: JSONValue = .object(["type": .string("text"), "text": .string("{i.b}")])
+        let item: JSONValue = .object(["b": .string(String(repeating: "x", count: 16379))])
+        guard case var .object(root) = literalRepeat(child, items: Array(repeating: item, count: 4)) else {
+            return XCTFail("Missing root")
+        }
+        root["children"] = .array(Array(repeating: child, count: 64))
+        try PrototypeLimits.guardSubstitutedText(.object(root), data: nil)
+        root["children"] = .array(Array(repeating: child, count: 65))
+        assertLimit("root.children[64].text: Substituted text total limit exceeded") {
+            try PrototypeLimits.guardSubstitutedText(.object(root), data: nil)
+        }
+        let oversized: JSONValue = .object(["b": .string(String(repeating: "x", count: 8193))])
+        let twice: JSONValue = .object(["type": .string("text"), "text": .string("{i.b}{i.b}")])
+        assertLimit("root.children[0].text: Substituted text length limit exceeded") {
+            try PrototypeLimits.guardSubstitutedText(literalRepeat(twice, items: [oversized]), data: nil)
+        }
     }
 }

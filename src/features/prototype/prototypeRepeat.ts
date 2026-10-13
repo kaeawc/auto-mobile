@@ -13,6 +13,7 @@ import {
   type Binding,
   type FieldKind,
   type Raw,
+  type Segment,
 } from "./prototypeTemplate";
 
 /**
@@ -48,8 +49,12 @@ function hasPlaceholder(text: string, binding: Binding): boolean {
   return templateSegments(text, binding).some((segment) => segment.kind !== "literal");
 }
 
-function unknownField(text: string, path: string, scope: Scope): RepeatError | undefined {
-  for (const name of templateFieldReferences(text, scope.binding)) {
+function unknownField(segments: Segment[], path: string, scope: Scope): RepeatError | undefined {
+  for (const segment of segments) {
+    if (segment.kind !== "field") {
+      continue;
+    }
+    const name = segment.name;
     if (!scope.items.every((item) => Object.hasOwn(item, name))) {
       return fail(path, `Unknown repeat field ${JSON.stringify(name)}`);
     }
@@ -91,20 +96,29 @@ function invalidBoundKey(key: string, path: string, scope: Scope): RepeatError |
 }
 
 /** Count each placeholder once, then evaluate field multiplicities per item. */
-function repeatTextTooLong(text: string, scope: Scope): boolean {
+function repeatTextError(
+  text: string,
+  segments: Segment[],
+  path: string,
+  scope: Scope,
+  state: RepeatState,
+): RepeatError | undefined {
   const fields = new Map<string, number>();
   let indices = 0;
-  for (const segment of templateSegments(text, scope.binding)) {
+  for (const segment of segments) {
     if (segment.kind === "index") {
       indices++;
     } else if (segment.kind === "field") {
       fields.set(segment.name, (fields.get(segment.name) ?? 0) + 1);
     }
   }
+  if (indices + fields.size === 0) {
+    return undefined;
+  }
   for (let index = 0; index < scope.items.length; index++) {
     let length = indices * String(index).length;
     if (length > contract.limits.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH) {
-      return true;
+      return fail(path, "Substituted text length limit exceeded");
     }
     const item = scope.items[index];
     for (const [name, count] of fields) {
@@ -113,11 +127,28 @@ function repeatTextTooLong(text: string, scope: Scope): boolean {
       }
       length += count * renderScalar(item[name]).length;
       if (length > contract.limits.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH) {
-        return true;
+        return fail(path, "Substituted text length limit exceeded");
       }
     }
+    if (!chargeText(state, text.length + length)) {
+      return fail(path, "Substituted text total limit exceeded");
+    }
   }
-  return false;
+  return undefined;
+}
+
+function chargeText(state: RepeatState, length: number): boolean {
+  state.total += length;
+  return state.total <= contract.limits.MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL;
+}
+
+function dataTextError(path: string, state: RepeatState): RepeatError | undefined {
+  return fail(
+    path,
+    state.total > contract.limits.MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL
+      ? "Substituted text total limit exceeded"
+      : "Substituted text length limit exceeded",
+  );
 }
 
 function fieldError(
@@ -125,18 +156,29 @@ function fieldError(
   path: string,
   kind: FieldKind,
   scope: Scope,
-  data: PrototypeRepeatData,
+  state: RepeatState,
+  dataCondition = false,
 ): RepeatError | undefined {
   if (typeof value !== "string") {
     return undefined;
   }
-  const unknown = unknownField(value, path, scope);
+  const authored = templateSegments(value, scope.binding);
+  if (dataCondition && authored.some((segment) => segment.kind !== "literal")) {
+    return fail(path, "Repeat placeholder in a data condition operand is not supported");
+  }
+  const unknown = unknownField(authored, path, scope);
   if (unknown) {
     return unknown;
   }
-  const resolved = kind === "text" ? data.text(value) : value;
-  if (resolved === undefined || repeatTextTooLong(resolved, scope)) {
-    return fail(path, "Substituted text length limit exceeded");
+  const resolved =
+    kind === "text" ? state.data.text(value, (length) => chargeText(state, length)) : value;
+  if (resolved === undefined) {
+    return dataTextError(path, state);
+  }
+  const segments = resolved === value ? authored : templateSegments(resolved, scope.binding);
+  const repeated = repeatTextError(resolved, segments, path, scope, state);
+  if (repeated) {
+    return repeated;
   }
   if (kind === "emitName") {
     return emptyEmitName(value, path, scope);
@@ -149,30 +191,27 @@ function checkOwnFields(
   node: Raw,
   path: string,
   scope: Scope,
-  data: PrototypeRepeatData,
+  state: RepeatState,
 ): RepeatError | undefined {
   let first: RepeatError | undefined;
   mapBindableFields(node, path, (value, fieldPath, kind, dataCondition) => {
-    if (dataCondition && typeof value === "string" && hasPlaceholder(value, scope.binding)) {
-      first ??= fail(fieldPath, "Repeat placeholder in a data condition operand is not supported");
-      return value;
-    }
-    first ??= fieldError(value, fieldPath, kind, scope, data);
+    first ??= fieldError(value, fieldPath, kind, scope, state, dataCondition);
     return value;
   });
   return first;
 }
 
 /** Outside every template a state key is literal, so a placeholder there is an invalid key. */
-function checkLiteralKeys(
-  node: Raw,
-  path: string,
-  data: PrototypeRepeatData,
-): RepeatError | undefined {
+function checkLiteralKeys(node: Raw, path: string, state: RepeatState): RepeatError | undefined {
   let first: RepeatError | undefined;
   mapBindableFields(node, path, (value, fieldPath, kind) => {
-    if (kind === "text" && typeof value === "string" && data.text(value) === undefined) {
-      first ??= fail(fieldPath, "Substituted text length limit exceeded");
+    if (
+      !first &&
+      kind === "text" &&
+      typeof value === "string" &&
+      state.data.text(value, (length) => chargeText(state, length)) === undefined
+    ) {
+      first = dataTextError(fieldPath, state);
     }
     if (kind === "key" && typeof value === "string" && !STATE_KEY.test(value)) {
       first ??= fail(fieldPath, "State key placeholder outside a repeat template");
@@ -202,6 +241,7 @@ function childrenOf(node: Raw, path: string): Child[] {
 interface RepeatState {
   data: PrototypeRepeatData;
   cells: number;
+  total: number;
 }
 
 function scopeOf(node: Raw, path: string, data: PrototypeRepeatData): Scope | undefined {
@@ -236,8 +276,8 @@ function templateErrors(
     }
   }
   const own = scope
-    ? checkOwnFields(node, path, scope, state.data)
-    : checkLiteralKeys(node, path, state.data);
+    ? checkOwnFields(node, path, scope, state)
+    : checkLiteralKeys(node, path, state);
   if (own) {
     return own;
   }
@@ -392,7 +432,7 @@ export function repeatErrors(
     return undefined;
   }
   return (
-    templateErrors(root, "root", { data, cells: 0 }) ??
+    templateErrors(root, "root", { data, cells: 0, total: 0 }) ??
     expandedErrors(root, "root", { nodes: 0, images: 0 }, data, undefined)
   );
 }

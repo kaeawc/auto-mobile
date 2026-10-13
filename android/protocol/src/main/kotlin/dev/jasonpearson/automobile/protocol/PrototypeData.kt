@@ -121,7 +121,8 @@ internal class PrototypeRepeatData(private val data: JsonObject?) {
     }
 
   /** Null signals an oversized substitution; never construct that resolved string. */
-  fun text(text: String): String? = PrototypeDataText.boundedBind(text, ::rendered)
+  fun text(text: String, charge: (Long) -> Boolean): String? =
+    PrototypeDataText.boundedBind(text, ::rendered, charge)
 
   fun cells(pointer: String): Int =
     counts.getOrPut(pointer) {
@@ -184,13 +185,19 @@ internal object PrototypeDataText {
 
   fun hasBinding(text: String): Boolean = placeholders(text).isNotEmpty()
 
-  fun boundedBind(text: String, resolve: (String) -> String): String? {
+  fun boundedBind(
+    text: String,
+    resolve: (String) -> String,
+    charge: (Long) -> Boolean,
+  ): String? {
     val spans = placeholders(text)
     var length = 0L
     for (span in spans) {
       length += resolve(span.pointer).length
       if (length > PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH) return null
     }
+    if (spans.isEmpty()) return text
+    if (!charge(text.length.toLong() + length)) return null
     return bind(text, spans, resolve)
   }
 

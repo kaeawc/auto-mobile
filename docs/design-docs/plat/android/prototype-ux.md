@@ -141,6 +141,11 @@ No data means every path is missing. `/a/` accesses the empty key inside `a`.
   then repeat in every bindable field for each item, including repeat placeholders inserted by
   data. Literal characters and unresolved repeat placeholders contribute zero; state placeholders
   are not validated because state can change after show.
+  `MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL` (4194304 UTF-16 code units) also bounds rebuilt text
+  per validation: each recognized data stage and each repeat item charges authored stage length
+  plus replacement length, including literal units and placeholder tokens. Stages without
+  placeholders and state placeholders are not charged. Crossing the total fails at the field path
+  with `Substituted text total limit exceeded`.
   During state interpolation, a replacement that would exceed the per-call substitution limit stays
   as written, and later placeholders may still substitute.
 - `{data:/pointer}` binds only the text-kind fields repeat already binds: text, button/FAB labels,
@@ -228,6 +233,7 @@ depth precedes array length, then children; the byte check runs last.
 | Pointer field | `Invalid pointer value` |
 | `<node>.repeat.items` | `Invalid union value` for neither array nor object |
 | `<node>.repeat.items.path` (in this order) | `Repeat path does not resolve to an array`; `Repeat path resolves to more than 128 items`; `Repeat path item <i> is not an object`; `Repeat path cell limit exceeded` |
+| Bindable field | `Substituted text total limit exceeded` (reduce bindable fields, replacement lengths or repeat items; `MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL`) |
 | Authored bindable field, e.g. `root.children[0].text` or `root.children[0].onTap[0].name` | `Substituted text length limit exceeded` (after unknown repeat fields, before bound key/empty emit checks) |
 | Referencing template string | `Unknown repeat field "x"` (non-scalar members count as absent) |
 | `<node>.repeat.items.path` | `Bound state key "<k>" is invalid (repeat item <i>)`; literal repeats keep `<node>.repeat.items[i]` without the suffix |

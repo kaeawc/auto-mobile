@@ -340,4 +340,24 @@ final class PrototypeDataTests: XCTestCase {
         XCTAssertFalse(PrototypeDataText.exceedsSubstitutionLimit(literal, data: data))
         XCTAssertEqual(PrototypeDataText.bind(literal, data: data), String(repeating: "x", count: 20001))
     }
+
+    func testSharedSubstitutedTextTotalBoundaries() throws {
+        _ = try JSONDecoder().decode(
+            PrototypeSpec.self, from: fixture("valid/substituted-text-total-exact.json")
+        )
+        for name in ["substituted-text-total-data-limit", "substituted-text-total-repeat-limit"] {
+            let wrapper = try object(JSONDecoder().decode(
+                JSONValue.self, from: fixture("invalid/\(name).json")
+            ))
+            let spec = try XCTUnwrap(wrapper["spec"])
+            let path = try XCTUnwrap(wrapper["expectedPath"]?.stringValue)
+            let message = try XCTUnwrap(wrapper["expectedMessage"]?.stringValue)
+            XCTAssertThrowsError(try JSONDecoder().decode(PrototypeSpec.self, from: encoded(spec))) { error in
+                guard case let DecodingError.dataCorrupted(context) = error else {
+                    return XCTFail("Unexpected error: \(error)")
+                }
+                XCTAssertEqual(context.debugDescription, "\(path): \(message)")
+            }
+        }
+    }
 }

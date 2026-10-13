@@ -289,7 +289,11 @@ internal object PrototypeRepeatValidator {
 
   private class Budget(var nodes: Int = 0, var images: Int = 0)
 
-  private class RepeatState(val data: PrototypeRepeatData, var cells: Int = 0)
+  private class RepeatState(
+    val data: PrototypeRepeatData,
+    var cells: Int = 0,
+    var total: Long = 0,
+  )
 
   private val stateKeyPattern = Regex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 
@@ -366,7 +370,13 @@ internal object PrototypeRepeatValidator {
   }
 
   /** Count placeholders once, then evaluate field multiplicities per item. */
-  private fun repeatTextTooLong(segments: List<PrototypeRepeatSegment>, scope: Scope): Boolean {
+  private fun repeatTextError(
+    text: String,
+    segments: List<PrototypeRepeatSegment>,
+    path: String,
+    scope: Scope,
+    state: RepeatState,
+  ): PrototypeSpecError? {
     val fields = mutableMapOf<String, Int>()
     var indices = 0
     for (segment in segments) {
@@ -376,23 +386,42 @@ internal object PrototypeRepeatValidator {
         is PrototypeRepeatSegment.Literal -> Unit
       }
     }
-    return scope.items.withIndex().any { (index, item) ->
+    if (indices == 0 && fields.isEmpty()) return null
+    for ((index, item) in scope.items.withIndex()) {
       var length = indices.toLong() * index.toString().length
-      length > PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH ||
-        fields.any { (name, count) ->
-          val value = item[name] as? JsonPrimitive
-          length += count.toLong() * (value?.let(PrototypeRepeatTemplate::rendered)?.length ?: 0)
-          length > PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH
-        }
+      if (length > PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH)
+        return fail(path, "Substituted text length limit exceeded")
+      for ((name, count) in fields) {
+        val value = item[name] as? JsonPrimitive
+        length += count.toLong() * (value?.let(PrototypeRepeatTemplate::rendered)?.length ?: 0)
+        if (length > PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH)
+          return fail(path, "Substituted text length limit exceeded")
+      }
+      if (!chargeText(state, text.length.toLong() + length))
+        return fail(path, "Substituted text total limit exceeded")
     }
+    return null
   }
+
+  private fun chargeText(state: RepeatState, length: Long): Boolean {
+    state.total += length
+    return state.total <= PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL
+  }
+
+  private fun dataTextError(path: String, state: RepeatState): PrototypeSpecError =
+    fail(
+      path,
+      if (state.total > PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL)
+        "Substituted text total limit exceeded"
+      else "Substituted text length limit exceeded",
+    )
 
   private fun fieldError(
     value: JsonElement?,
     path: String,
     kind: PrototypeBindableKind,
     scope: Scope,
-    data: PrototypeRepeatData,
+    state: RepeatState,
   ): PrototypeSpecError? {
     val text = value.string() ?: return null
     val authored = PrototypeRepeatTemplate.segments(text, scope.alias)
@@ -405,12 +434,14 @@ internal object PrototypeRepeatValidator {
     unknownField(authored, path, scope)?.let {
       return it
     }
-    val resolved = if (kind == PrototypeBindableKind.TEXT) data.text(text) else text
+    val resolved =
+      if (kind == PrototypeBindableKind.TEXT) state.data.text(text) { chargeText(state, it) }
+      else text
+    if (resolved == null) return dataTextError(path, state)
     val segments =
-      if (resolved == text) authored
-      else resolved?.let { PrototypeRepeatTemplate.segments(it, scope.alias) }
-    if (segments == null || repeatTextTooLong(segments, scope)) {
-      return fail(path, "Substituted text length limit exceeded")
+      if (resolved == text) authored else PrototypeRepeatTemplate.segments(resolved, scope.alias)
+    repeatTextError(resolved, segments, path, scope, state)?.let {
+      return it
     }
     return when (kind) {
       PrototypeBindableKind.EMIT_NAME -> emptyEmitName(segments, path, scope)
@@ -423,22 +454,26 @@ internal object PrototypeRepeatValidator {
     node: JsonObject,
     path: String,
     scope: Scope,
-    data: PrototypeRepeatData,
+    state: RepeatState,
   ): PrototypeSpecError? =
     PrototypeBindableFields.first(node, path) { value, fieldPath, kind ->
-      fieldError(value, fieldPath, kind, scope, data)
+      fieldError(value, fieldPath, kind, scope, state)
     }
 
   /** Outside every template a state key is literal, so a placeholder there is an invalid key. */
   private fun checkLiteralKeys(
     node: JsonObject,
     path: String,
-    data: PrototypeRepeatData,
+    state: RepeatState,
   ): PrototypeSpecError? =
     PrototypeBindableFields.first(node, path) { value, fieldPath, kind ->
       val text = value.string()
-      if (kind == PrototypeBindableKind.TEXT && text != null && data.text(text) == null)
-        fail(fieldPath, "Substituted text length limit exceeded")
+      if (
+        kind == PrototypeBindableKind.TEXT &&
+          text != null &&
+          state.data.text(text) { chargeText(state, it) } == null
+      )
+        dataTextError(fieldPath, state)
       else if (kind == PrototypeBindableKind.KEY && text != null && !stateKeyPattern.matches(text))
         fail(fieldPath, "State key placeholder outside a repeat template")
       else null
@@ -521,8 +556,8 @@ internal object PrototypeRepeatValidator {
         return fail(path, "Pager cannot appear inside a repeat template")
     }
     val own =
-      if (scope != null) checkOwnFields(node, path, scope, state.data)
-      else checkLiteralKeys(node, path, state.data)
+      if (scope != null) checkOwnFields(node, path, scope, state)
+      else checkLiteralKeys(node, path, state)
     if (own != null) return own
     repeatSourceError(node, path, state)?.let {
       return it

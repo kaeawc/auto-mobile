@@ -477,7 +477,7 @@ data conditions become constant conditions. Decode first guards data, then refus
 authored children before checking two independent node budgets (ordinary nodes and nonempty literal-repeat instances use the expanded budget;
 path-bound, empty, or malformed templates use the authored-template budget once) and the depth
 limit. It guards `MAX_PROTOTYPE_REPEAT_PATH_CELLS` in container pre-order, then checks
-substituted text and refuses nested repeats before resolving bindings with projected items cached
+substituted text against both the per-field limit and the 4,194,304 UTF-16 rebuilt-text total per show and refuses nested repeats before resolving bindings with projected items cached
 per pointer, guarding the resolved tree, and expanding repeats. State placeholders are clamped at
 substitution to the shared UTF-16 substituted-text limit; literals do not consume that budget.
 State interpolation then uses the ordinary expanded tree. `repeat.key` is accepted and kept during

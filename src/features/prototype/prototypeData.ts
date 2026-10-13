@@ -135,13 +135,21 @@ export class PrototypeRepeatData {
   }
 
   /** Undefined signals an oversized substitution; never construct that resolved string. */
-  text(text: string): string | undefined {
+  text(text: string, charge: (length: number) => boolean): string | undefined {
+    let recognized = false;
     let length = 0;
     for (const { pointer } of dataPlaceholderSpans(text)) {
+      recognized = true;
       length += this.rendered(pointer).length;
       if (length > contract.limits.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH) {
         return undefined;
       }
+    }
+    if (!recognized) {
+      return text;
+    }
+    if (!charge(text.length + length)) {
+      return undefined;
     }
     return bindPrototypeDataText(text, (pointer) => this.rendered(pointer));
   }

@@ -464,3 +464,87 @@ describe("substituted text length", () => {
     });
   });
 });
+
+describe("substituted text total", () => {
+  const text = (value: string) => ({ type: "text", text: value });
+  const totalError = (path: string) => ({
+    success: false,
+    error: { path, message: "Substituted text total limit exceeded" },
+  });
+  test("condition operands reach exactly the total", () => {
+    const operand = { key: "k", equals: "{item.b}y" };
+    const child = {
+      ...text("t"),
+      visibleWhen: {
+        all: Array.from({ length: 16 }, () => ({ any: Array.from({ length: 16 }, () => operand) })),
+      },
+    };
+    const input = { ...spec(list([child], [{ b: "x".repeat(16375) }])), state: { k: "" } };
+    expect(validatePrototypeSpec(input).success).toBe(true);
+  });
+  test("condition operands share the running total", () => {
+    const operand = { key: "k", equals: "{item.b}y" };
+    const child = {
+      ...text("t"),
+      visibleWhen: {
+        all: Array.from({ length: 16 }, () => ({ any: Array.from({ length: 16 }, () => operand) })),
+      },
+    };
+    const input = {
+      ...spec(list([child, { ...text("t"), visibleWhen: operand }], [{ b: "x".repeat(16375) }])),
+      state: { k: "" },
+    };
+    expect(validatePrototypeSpec(input)).toEqual(totalError("root.children[1].visibleWhen.equals"));
+  });
+  test.each([64, 65])("repeat total charges each item in order with %i fields", (count) => {
+    const input = spec(
+      list(
+        Array.from({ length: count }, () => text("{i.b}")),
+        Array.from({ length: 4 }, () => ({ b: "x".repeat(16379) })),
+        "i",
+      ),
+    );
+    // {i.b} is five units; each field/item charges exactly 16384.
+    const result = validatePrototypeSpec(input);
+    if (count === 64) {
+      expect(result.success).toBe(true);
+    } else {
+      expect(result).toEqual(totalError("root.children[64].text"));
+    }
+  });
+  test("per-field error wins on the first item before its total charge", () => {
+    const input = spec(list([text("{item.b}{item.b}")], [{ b: "x".repeat(8193) }]));
+    expect(validatePrototypeSpec(input)).toEqual({
+      success: false,
+      error: { path: "root.children[0].text", message: "Substituted text length limit exceeded" },
+    });
+  });
+  test("unknown field wins before both substitution limits", () => {
+    const input = {
+      ...spec(list([text("{item.missing}{data:/b}")], [{}])),
+      data: { b: "x".repeat(16385) },
+    };
+    expect(validatePrototypeSpec(input)).toEqual({
+      success: false,
+      error: { path: "root.children[0].text", message: 'Unknown repeat field "missing"' },
+    });
+  });
+  test("unknown field wins before crossing the total", () => {
+    const operand = { key: "k", equals: "{item.b}y" };
+    const child = {
+      ...text("t"),
+      visibleWhen: {
+        all: Array.from({ length: 16 }, () => ({ any: Array.from({ length: 16 }, () => operand) })),
+      },
+    };
+    const input = {
+      ...spec(list([child, text("{item.missing}{data:/s}")], [{ b: "x".repeat(16375) }])),
+      state: { k: "" },
+      data: { s: "" },
+    };
+    expect(validatePrototypeSpec(input)).toEqual({
+      success: false,
+      error: { path: "root.children[1].text", message: 'Unknown repeat field "missing"' },
+    });
+  });
+});

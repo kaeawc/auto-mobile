@@ -16,6 +16,7 @@ private struct PrototypeSubstitutionGuard {
 
     let data: [String: JSONValue]?
     private var repeats: PrototypeRepeatData
+    private var total = 0
 
     init(data: [String: JSONValue]?) {
         self.data = data
@@ -29,12 +30,13 @@ private struct PrototypeSubstitutionGuard {
         }
         try ownFields(fields, path: path, scope: scope)
         let childScope = ownScope(fields) ?? scope
-        if case .object? = fields["child"], let child = fields["child"] {
-            try visit(child, path: "\(path).child", scope: childScope)
-        } else if case let .array(children)? = fields["children"] {
+        if case let .array(children)? = fields["children"] {
             for (index, child) in children.enumerated() {
                 try visit(child, path: "\(path).children[\(index)]", scope: childScope)
             }
+        }
+        if case .object? = fields["child"], let child = fields["child"] {
+            try visit(child, path: "\(path).child", scope: childScope)
         }
     }
 
@@ -49,30 +51,40 @@ private struct PrototypeSubstitutionGuard {
             source = spec["items"]
         }
         guard case let .array(items)? = source else { return Scope(alias: alias, items: []) }
-        return Scope(alias: alias, items: items.compactMap { item in
+        return Scope(alias: alias, items: items.map { item in
             if case let .object(fields) = item { return fields }
-            return nil
+            return [:]
         })
     }
 
-    private func field(
+    private mutating func field(
         _ fields: [String: JSONValue], _ key: String, path: String, text: Bool = false, scope: Scope?
     ) throws {
         guard let authored = fields[key]?.stringValue else { return }
+        let fieldPath = "\(path).\(key)"
         var bound = authored
         if text {
-            if PrototypeDataText.exceedsSubstitutionLimit(authored, data: data) {
-                throw PrototypeLimits.violation("\(path).\(key)", "Substituted text length limit exceeded")
+            let substitution = PrototypeDataText.substitutionLength(authored, data: data)
+            if substitution.length > PrototypeLimits.maxSubstitutedTextLength {
+                throw PrototypeLimits.violation(fieldPath, "Substituted text length limit exceeded")
             }
-            // Outside a repeat no intermediate text needs to be built by this guard.
-            if scope != nil { bound = PrototypeDataText.bind(authored, data: data) }
+            if substitution.recognized {
+                try charge(authored.utf16.count + substitution.length, path: fieldPath)
+                // Outside a repeat no intermediate text needs to be built by this guard.
+                if scope != nil { bound = PrototypeDataText.bind(authored, data: data) }
+            }
         }
-        if let scope, repeatTooLong(bound, scope: scope) {
-            throw PrototypeLimits.violation("\(path).\(key)", "Substituted text length limit exceeded")
+        if let scope { try repeatText(bound, path: fieldPath, scope: scope) }
+    }
+
+    private mutating func charge(_ length: Int, path: String) throws {
+        total += length
+        if total > PrototypeLimits.maxSubstitutedTextTotal {
+            throw PrototypeLimits.violation(path, "Substituted text total limit exceeded")
         }
     }
 
-    private func repeatTooLong(_ text: String, scope: Scope) -> Bool {
+    private mutating func repeatText(_ text: String, path: String, scope: Scope) throws {
         let segments = PrototypeRepeat.segments(text, alias: scope.alias)
         let counts = segments.reduce(into: (indices: 0, fields: [String: Int]())) { counts, segment in
             switch segment {
@@ -81,18 +93,24 @@ private struct PrototypeSubstitutionGuard {
             case .literal: break
             }
         }
+        guard counts.indices != 0 || !counts.fields.isEmpty else { return }
+        let textLength = text.utf16.count
         for (index, item) in scope.items.enumerated() {
             var length = counts.indices * String(index).utf16.count
-            if length > PrototypeLimits.maxSubstitutedTextLength { return true }
+            if length > PrototypeLimits.maxSubstitutedTextLength {
+                throw PrototypeLimits.violation(path, "Substituted text length limit exceeded")
+            }
             for (name, count) in counts.fields {
                 length += count * (item[name]?.displayString.utf16.count ?? 0)
-                if length > PrototypeLimits.maxSubstitutedTextLength { return true }
+                if length > PrototypeLimits.maxSubstitutedTextLength {
+                    throw PrototypeLimits.violation(path, "Substituted text length limit exceeded")
+                }
             }
+            try charge(textLength + length, path: path)
         }
-        return false
     }
 
-    private func ownFields(_ fields: [String: JSONValue], path: String, scope: Scope?) throws {
+    private mutating func ownFields(_ fields: [String: JSONValue], path: String, scope: Scope?) throws {
         try componentFields(fields, path: path, scope: scope)
         if let condition = fields["visibleWhen"] {
             try conditionFields(condition, path: "\(path).visibleWhen", scope: scope)
@@ -116,7 +134,7 @@ private struct PrototypeSubstitutionGuard {
         }
     }
 
-    private func componentFields(_ fields: [String: JSONValue], path: String, scope: Scope?) throws {
+    private mutating func componentFields(_ fields: [String: JSONValue], path: String, scope: Scope?) throws {
         switch fields["type"]?.stringValue {
         case "text": try field(fields, "text", path: path, text: true, scope: scope)
         case "button", "fab": try field(fields, "label", path: path, text: true, scope: scope)
@@ -148,13 +166,13 @@ private struct PrototypeSubstitutionGuard {
         }
     }
 
-    private func part(_ value: JSONValue?, path: String, scope: Scope?) throws {
+    private mutating func part(_ value: JSONValue?, path: String, scope: Scope?) throws {
         guard case let .object(fields)? = value else { return }
         try field(fields, "label", path: path, text: true, scope: scope)
         try actions(fields, path: path, scope: scope)
     }
 
-    private func actions(_ fields: [String: JSONValue], path: String, scope: Scope?) throws {
+    private mutating func actions(_ fields: [String: JSONValue], path: String, scope: Scope?) throws {
         guard case let .array(entries)? = fields["onTap"] else { return }
         for (index, entry) in entries.enumerated() {
             guard case let .object(action) = entry else { continue }
@@ -171,7 +189,7 @@ private struct PrototypeSubstitutionGuard {
         }
     }
 
-    private func conditionFields(_ value: JSONValue, path: String, scope: Scope?) throws {
+    private mutating func conditionFields(_ value: JSONValue, path: String, scope: Scope?) throws {
         guard case let .object(fields) = value else { return }
         try field(fields, "key", path: path, scope: scope)
         if fields["data"] == nil {

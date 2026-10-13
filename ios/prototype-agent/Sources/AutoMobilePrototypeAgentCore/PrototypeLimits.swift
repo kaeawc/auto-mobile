@@ -12,6 +12,7 @@ enum PrototypeLimits {
     static let maxRepeatItems = 128
     static let maxRepeatPathCells = 65536
     static let maxSubstitutedTextLength = 16384
+    static let maxSubstitutedTextTotal = 4_194_304
     /// `MAX_PROTOTYPE_SPEC_BYTES`: the UTF-8 size of the whole spec, current state included. Android
     /// re-checks it on every state write; see `PrototypeStateValidator.specBytes`.
     static let maxSpecBytes = 1_048_576
@@ -116,8 +117,8 @@ enum PrototypeLimits {
     private static func guardObjectChildren(_ node: JSONValue, path: String, depth: Int) throws {
         guard depth <= maxDepth, case let .object(fields) = node else { return }
         func child(_ value: JSONValue, at childPath: String) throws {
-            guard depth < maxDepth else { return }
             guard case .object = value else { throw violation(childPath, "Expected object") }
+            guard depth < maxDepth else { return }
             try guardObjectChildren(value, path: childPath, depth: depth + 1)
         }
         if let value = fields["child"] { try child(value, at: "\(path).child") }

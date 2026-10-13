@@ -160,12 +160,21 @@ enum PrototypeDataText {
     }
 
     static func exceedsSubstitutionLimit(_ text: String, data: [String: JSONValue]?) -> Bool {
+        substitutionLength(text, data: data).length > PrototypeLimits.maxSubstitutedTextLength
+    }
+
+    /// Recognition is independent of rendered length: empty replacements still rebuild text.
+    static func substitutionLength(
+        _ text: String, data: [String: JSONValue]?
+    ) -> (recognized: Bool, length: Int) {
+        var recognized = false
         var length = 0
         scan(Array(text.utf16)) { _, _, pointer in
+            recognized = true
             length += rendered(pointer, data: data).utf16.count
             return length <= PrototypeLimits.maxSubstitutedTextLength
         }
-        return length > PrototypeLimits.maxSubstitutedTextLength
+        return (recognized, length)
     }
 
     private static func rendered(_ pointer: String, data: [String: JSONValue]?) -> String {

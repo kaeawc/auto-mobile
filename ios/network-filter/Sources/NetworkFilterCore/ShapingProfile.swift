@@ -12,7 +12,7 @@ public enum ShapingComponent: String, Codable {
 /// Host units: added round-trip milliseconds and decimal kilobits (1000 bits)
 /// per second, both integral to match profile units. Zero rates mean unlimited.
 /// Loss accepts fractional percentages and is reported, never emulated.
-public struct ShapingRequest: Equatable {
+public struct ShapingRequest: Codable, Equatable {
     public let delayMilliseconds: UInt64
     public let downloadKilobitsPerSecond: UInt64
     public let uploadKilobitsPerSecond: UInt64
@@ -36,7 +36,7 @@ public enum ShapingRejection: Error, Equatable {
     case nothingToApply(unapplied: [ShapingComponent])
 }
 
-public struct ShapingResolution: Equatable {
+public struct ShapingResolution: Codable, Equatable {
     public let profile: ShapingProfile
     public let applied: [ShapingComponent]
     public let unapplied: [ShapingComponent]

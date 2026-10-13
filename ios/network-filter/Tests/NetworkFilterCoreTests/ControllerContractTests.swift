@@ -29,8 +29,10 @@ final class ControllerContractTests: XCTestCase {
         return try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
-    func testContractVersionIsThree() {
-        XCTAssertEqual(ControllerContract.version, 3)
+    func testContractNewestVersionIsFourAndDefaultIsThree() {
+        XCTAssertEqual(ControllerContract.version, 4)
+        XCTAssertEqual(ControllerContract.defaultVersion, 3)
+        XCTAssertEqual(ControllerContract.supportedVersions, [3, 4])
         XCTAssertEqual(ControllerContract.commands, ["activate", "status", "snapshot", "apply", "reset", "renew"])
     }
 
@@ -50,7 +52,7 @@ final class ControllerContractTests: XCTestCase {
 
     func testReadyResultNestsTheSnapshotWithItsOwnVersion() throws {
         let object = try jsonObject(ControllerResult(state: .ready, detail: "ok", snapshot: snapshot()))
-        XCTAssertEqual(object["version"] as? Int, ControllerContract.version)
+        XCTAssertEqual(object["version"] as? Int, ControllerContract.defaultVersion)
         XCTAssertEqual(object["state"] as? String, "ready")
         let nested = try XCTUnwrap(object["snapshot"] as? [String: Any])
         XCTAssertEqual(nested["version"] as? Int, 3)
@@ -61,7 +63,7 @@ final class ControllerContractTests: XCTestCase {
     func testResultRoundTripsThroughDecoding() throws {
         let encoded = try ControllerResult(state: .ready, detail: "ok", snapshot: snapshot()).encodedLine()
         let decoded = try JSONDecoder().decode(ControllerResult.self, from: encoded)
-        XCTAssertEqual(decoded.version, ControllerContract.version)
+        XCTAssertEqual(decoded.version, ControllerContract.defaultVersion)
         XCTAssertEqual(decoded.state, .ready)
         XCTAssertEqual(decoded.detail, "ok")
         XCTAssertEqual(decoded.snapshot?.mode, "app_offline")
@@ -101,35 +103,111 @@ final class ControllerContractTests: XCTestCase {
 
     /// Exactly what the controller prints for each state, built with the production encoder.
     private func fixtureResults() throws -> [String: ControllerResult] {
-        try [
+        var results = try [
             "installation-required": ControllerResult(
                 state: .installationRequired,
-                detail: "A signed containing app and provider provisioning profiles are required."
+                detail: "A signed containing app and provider provisioning profiles are required.", version: 3
             ),
             "approval-required": ControllerResult(
                 state: .approvalRequired,
-                detail: "Approve AutoMobile Network Identity Probe in System Settings, then run activate again."
+                detail: "Approve AutoMobile Network Identity Probe in System Settings, then run activate again.",
+                version: 3
             ),
             "unavailable": ControllerResult(
                 state: .unavailable,
-                detail: "Operation timed out; installation may have completed. Run status to reconcile."
+                detail: "Operation timed out; installation may have completed. Run status to reconcile.", version: 3
             ),
             "ready": ControllerResult(
                 state: .ready,
                 detail: "Provider replied; per-app offline isolation is unverified until the signed run (#10263).",
-                snapshot: snapshot()
+                snapshot: snapshot(), version: 3
             ),
             "rule-applied": ControllerResult(
                 state: .ready,
                 detail: "Provider answered apply: applied.",
-                rule: NetworkRuleResult(outcome: .applied, installedRevision: 3, leaseRemainingMilliseconds: 15000)
+                rule: NetworkRuleResult(outcome: .applied, installedRevision: 3, leaseRemainingMilliseconds: 15000),
+                version: 3
             ),
             "rule-owned-by-another-session": ControllerResult(
                 state: .ready,
                 detail: "Provider answered reset: owned_by_another_session.",
-                rule: NetworkRuleResult(outcome: .ownedByAnotherSession)
+                rule: NetworkRuleResult(outcome: .ownedByAnotherSession), version: 3
             ),
         ]
+        do {
+            _ = try NetworkRuleArguments.parse(.apply, ["--delay-ms", "100"]) { $0 }
+            XCTFail("version 3 must reject shaping")
+        } catch {
+            results["shaping-requires-contract-4"] = ControllerResult(state: .unavailable, detail: "\(error)",
+                                                                      version: 3)
+        }
+        return results
+    }
+
+    private func versionFourFixtureResults() throws -> [String: ControllerResult] {
+        let resolution = try ShapingProfile.resolve(ShapingRequest(
+            delayMilliseconds: 100, downloadKilobitsPerSecond: 80,
+            uploadKilobitsPerSecond: 40, packetLossPercent: 1.5
+        )).get()
+        let offline = try XCTUnwrap(snapshot().rules?.first)
+        let shapedTarget = try XCTUnwrap(NetworkRuleTarget(
+            simulator: offline.target.simulator,
+            bundleId: "dev.jasonpearson.automobile.shaped"
+        ))
+        let shaped = NetworkRuleStatus(
+            target: shapedTarget,
+            owner: offline.owner,
+            ownerGeneration: offline.ownerGeneration,
+            revision: 4,
+            condition: .shaped(resolution.profile),
+            leaseRemainingMilliseconds: 14000,
+            droppedFlows: 0,
+            shaping: resolution
+        )
+        let probe = IdentityProbe(resolver: FakeIdentityResolver(), processTable: FakeProcessTable())
+        let mixed = probe.snapshot(managedSimulators: [offline.target.simulator], rules: [offline, shaped], version: 4)
+        var results: [String: ControllerResult] = [:]
+        for (name, result) in try fixtureResults() where name != "shaping-requires-contract-4" {
+            results[name] = ControllerResult(
+                state: result.state,
+                detail: result.detail,
+                snapshot: name == "ready" ? mixed : nil,
+                rule: result.rule,
+                version: 4
+            )
+        }
+        for (name, result) in [
+            ("rule-applied-shaped", NetworkRuleResult(outcome: .applied, installedRevision: 4,
+                                                      leaseRemainingMilliseconds: 15000, shaping: resolution)),
+            ("rule-unsupported-condition", NetworkRuleResult(outcome: .unsupportedCondition)),
+            ("rule-invalid-shaping", NetworkRuleResult(outcome: .invalidShaping,
+                                                       rejection: NetworkShapingRejection(.outOfRange(.latency)))),
+        ] {
+            results[name] = ControllerResult(
+                state: .ready,
+                detail: "Provider answered apply: \(result.outcome.rawValue).",
+                rule: result,
+                version: 4
+            )
+        }
+        do {
+            _ = try ControllerInvocation.parse(["status", "--contract-version", "9"])
+            XCTFail("unsupported version must fail")
+        } catch let error as ControllerInvocationError {
+            results["unsupported-contract-version"] = error.result
+        }
+        return results
+    }
+
+    func testVersionFourReadyRoundTripsWithShapingResolution() throws {
+        let ready = try XCTUnwrap(versionFourFixtureResults()["ready"])
+        let data = try ready.encodedLine()
+        let decoded = try JSONDecoder().decode(ControllerResult.self, from: data)
+        XCTAssertEqual(decoded.version, 4)
+        XCTAssertEqual(decoded.snapshot?.version, 4)
+        XCTAssertEqual(decoded.snapshot?.mode, "app_mixed")
+        XCTAssertEqual(decoded.snapshot?.rules?.last?.shaping?.unapplied, [.packetLoss])
+        XCTAssertEqual(try decoded.encodedLine(), data)
     }
 
     private var fixtureDirectory: URL {
@@ -145,11 +223,19 @@ final class ControllerContractTests: XCTestCase {
     /// Regenerate with the command in test/fixtures/network-filter-controller/README.md.
     func testCommittedFixturesMatchTheEncoder() throws {
         let outputDirectory = ProcessInfo.processInfo.environment["AUTOMOBILE_FIXTURE_OUT_DIR"]
-        for (name, result) in try fixtureResults() {
+        let fixtures = try fixtureResults().merging(
+            Dictionary(uniqueKeysWithValues: versionFourFixtureResults().map { ("v4/" + $0.key, $0.value) })
+        ) { _, newest in newest }
+        for (name, result) in fixtures {
             var line = try result.encodedLine()
             line.append(10)
             if let outputDirectory {
-                try line.write(to: URL(fileURLWithPath: outputDirectory).appendingPathComponent("\(name).json"))
+                let path = URL(fileURLWithPath: outputDirectory).appendingPathComponent("\(name).json")
+                try FileManager.default.createDirectory(
+                    at: path.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try line.write(to: path)
             }
             let committed = try Data(contentsOf: fixtureDirectory.appendingPathComponent("\(name).json"))
             XCTAssertEqual(committed, line, "\(name).json drifted from ControllerResult encoding")

@@ -16,7 +16,7 @@ integration evidence from the signed run (#10263).
   Controller output distinguishes `installation_required`, `approval_required`,
   `unavailable`, and `ready`. Ready means the provider replied over
   authenticated XPC, not that any traffic behavior has been verified.
-- Version 3 Codable/XPC snapshots and rule commands (version 1 and 2
+- Version 4 Codable/XPC snapshots and rule commands, negotiating version 3 by default (version 1 and 2
   snapshots still decode).
   Both peers require an Apple-signed executable with the expected bundle
   identifier and their own signing team.
@@ -161,7 +161,7 @@ After placing the signed app in `/Applications`, invoke its executable:
 "/Applications/AutoMobile Network Identity Probe.app/Contents/MacOS/network-filter-controller" snapshot
 ```
 
-### Controller JSON contract (version 3)
+### Controller JSON contract (versions 3 and 4)
 
 Every command prints exactly one line of JSON on stdout, then exits. The daemon
 runs the installed controller as a subprocess and parses this line
@@ -170,16 +170,52 @@ the provider, which only accepts peers signed by its own team. The types live in
 `Sources/NetworkFilterCore/ControllerContract.swift`.
 
 ```json
-{"detail":"…","snapshot":{…},"state":"ready","version":2}
+{"detail":"…","snapshot":{…},"state":"ready","version":3}
 ```
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `version` | integer | `ControllerContract.version`, currently `3` (version 2 added attribution; version 3 adds the rule commands, `rule`, and the snapshot's `rules`; there is no fallback). Bump it whenever a field changes meaning or a required field is added or removed; the daemon reports any other version as `unavailable`. It is independent of the snapshot's own `version`. |
+| `version` | integer | Negotiated invocation version: newest `4`, supported `[3, 4]`, default `3`. The unchanged daemon understands only `3` and reports any other version as `unavailable`. The provider snapshot must carry the same negotiated version. |
 | `state` | string | `installation_required`, `approval_required`, `unavailable`, or `ready`. |
 | `detail` | string | Human-readable reason or next step. |
-| `snapshot` | object, optional | `status`/`snapshot` when `ready`: the provider's snapshot, with its own `version`, its `mode` (`allow_only` or `app_offline`) and the active `rules`. |
-| `rule` | object, optional | `apply`/`reset`/`renew` when `ready`: the provider's definitive `outcome`, `installedRevision` and `leaseRemainingMilliseconds`. Absent whenever the outcome is unknown. |
+| `snapshot` | object, optional | `status`/`snapshot` when `ready`: the provider's snapshot, with its own `version`, its `mode` (`allow_only` or `app_offline` in version 3; also `app_shaped` and `app_mixed` in version 4) and the visible active `rules`. |
+| `rule` | object, optional | `apply`/`reset`/`renew` when `ready`: the provider's definitive `outcome`, `installedRevision` and `leaseRemainingMilliseconds`; version 4 can also carry a `shaping` resolution or an `invalid_shaping` rejection. Absent whenever the outcome is unknown. |
+
+Every command accepts one `--contract-version <n>` anywhere after its name.
+Omitting it uses version 3, the last version before negotiation existed, so the
+version-3 host works unchanged with a controller built from this package.
+Explicit version 3 is byte-compatible with the previous encoder. Repeated,
+malformed or unsupported negotiation prints one version-4 `unavailable` line
+naming supported versions and exits 2. All other endings, including argument
+errors, installation requirements and the 8-second timeout, carry the negotiated
+version. The controller passes that version over XPC; the provider accepts 3 and 4.
+An installed version-3 controller rejects `--contract-version 4` as an unknown
+flag and prints its own version-3 `unavailable` line. Unknown command flags remain
+errors in both modes; negotiation does not make legacy argument parsers permissive.
+
+Version-3 snapshots omit shaped rules, use only `allow_only`/`app_offline`, and
+append one limitation stating the omitted count and that version 3 supports only
+offline rules. Version-3 XPC shaped commands return `invalid_command`.
+
+Version-4 `apply` accepts `--delay-ms <n>`, `--down-kbps <n>`, `--up-kbps <n>`
+and `--packet-loss-percent <x>`. Any one flag makes a shaped request, with omitted
+values zero; no shaping flags means offline. Reset/renew, repeated flags and
+non-numeric values reject these flags. Version 3 rejects them with an argument
+error requiring `--contract-version 4`. Integral fields use unsigned integers;
+loss accepts finite decimals. Range and applicability validation belongs to the
+provider, never the controller.
+
+The wire condition remains `"condition":"offline"` with no `shaping` sibling,
+or `"condition":"shaped"` with a required `shaping` sibling. Commands carry the
+unresolved `ShapingRequest`; statuses and shaped applied results carry a
+`ShapingResolution` with `profile`, `applied` and `unapplied` component arrays.
+Profile field names state directional milliseconds and bytes per second.
+`applied` names effects accepted into configuration, not behavior verified by
+traffic. Non-zero loss remains `unapplied:["packetLoss"]`: consumers must report
+that fidelity gap as partial. Missing/invalid shaped siblings fail decoding.
+`invalid_shaping` carries either `rejection:{"reason":"out_of_range","component":"latency"}`
+(or the rejected component), or `rejection:{"reason":"nothing_to_apply","unapplied":["packetLoss"]}`
+(the array is empty for an all-zero request). Rejections leave state unchanged.
 
 Commands: `activate`, `status`, `snapshot` (`status` and `snapshot` are
 read-only and take repeatable `--managed <device-set-path> <udid>` pairs naming
@@ -259,13 +295,27 @@ the simulator IDs, process generations, request/revision, expected behavior,
 observed result, and host/control-plane health. Successful diagnostic unit tests
 are not native isolation evidence. Do not close #6298 on this preparation alone.
 
-## Shaping core (#10265, not wired)
+## Shaping core (#10265, carried but not enforced)
 
-`NetworkFilterCore` now contains a Foundation-only `ShapingProfile` and
-`FlowShaper`, tested with a fake monotonic clock and fake rule source. They are
-not connected to the provider, controller, XPC contract, rule store, or snapshot.
-The provider still applies only offline. No shaping behavior here has been
-verified against real traffic; the native isolation gate above still applies.
+`NetworkFilterCore` contains a Foundation-only `ShapingProfile` and `FlowShaper`.
+The controller and version-4 XPC contract now carry shaping requests and
+resolutions, and `NetworkRuleStore` can carry resolved profiles when constructed
+with `supportsShaping: true`. The store is a `ShapingRuleSource`, tested together
+with the scheduler using a fake monotonic clock. Shaped rules share offline's
+ownership/generation/revision fencing, capacity, renewal, expiry and tombstones.
+Identical apply redelivery refreshes the lease; a differing condition or request
+at the installed revision returns `invalid_command`. Newer revisions can replace
+offline with shaped configuration or vice versa. Drop evaluation and commit only
+consider offline rules: a shaped rule alone never performs attribution lookups.
+
+The provider uses the default `supportsShaping: false`. It refuses every shaped
+apply with `unsupported_condition` before validation, lease sweeping or any
+mutation; it never reports a shaped apply as applied. A shaping-capable store
+resolves requests in the provider-side Core and reports `invalid_shaping` when
+out of range or nothing is applicable. The scheduler is still unwired to provider
+data callbacks and timers. No shaping is enforced by this build, and no network
+effects have been verified against controlled traffic; configuration acknowledgements
+are not traffic evidence. The native isolation gate above still applies.
 
 Outbound means app to remote (upload); inbound means remote to app (download).
 One target is one app on one simulator (`NetworkRuleTarget`). Host requests use

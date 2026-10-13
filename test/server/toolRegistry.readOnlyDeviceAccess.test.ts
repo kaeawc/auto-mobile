@@ -51,7 +51,21 @@ import {
   isSessionlessDeviceRead,
   runWithToolSelectionContext,
 } from "../../src/features/toolSelection/toolSelectionContext";
-import { executionTracker, type ActiveExecution } from "../../src/server/executionTracker";
+import {
+  executionTracker,
+  type ActiveExecution,
+  type SessionClockOffsetProvider,
+} from "../../src/server/executionTracker";
+import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import {
+  getDeviceToolsDependencies,
+  resetDeviceToolsDependencies,
+} from "../../src/server/deviceTools";
+import { getDbWriteBarrier, resetDbWriteBarrier } from "../../src/db/dbWriteBarrier";
+import { ResourceRegistry } from "../../src/server/resourceRegistry";
+import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
+import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { getDaemonStreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
 import { SessionToolBinding } from "../../src/server/SessionToolBinding";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
@@ -509,8 +523,30 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
     let ingressHandler: Parameters<Server["setRequestHandler"]>[1];
     let finishControl: (() => void) | undefined;
     let pendingControl: Promise<unknown> | undefined;
+    let previousClockOffset: SessionClockOffsetProvider;
+    let previousFeatureFlags: FeatureFlagService | null;
+    let previousFlagNotifier: Parameters<FeatureFlagService["setToolListChangedNotifier"]>[0];
+    let previousResources: ReturnType<typeof ResourceRegistry.getAllResources>;
+    let previousTemplates: Map<string, ReturnType<typeof ResourceRegistry.getAllTemplates>[number]>;
+    let previousToolServers: unknown;
+    let previousResourceServers: unknown;
+    let previousBindingHandlers: unknown;
+    let previousReleaseListeners: Set<Parameters<typeof SessionReleaseBroadcaster.subscribe>[0]>;
+    let previousDeviceRemovalListeners: Set<(deviceId: string) => void>;
 
     beforeAll(async () => {
+      previousClockOffset = Reflect.get(executionTracker, "sessionClockOffsetProvider");
+      previousFeatureFlags = Reflect.get(FeatureFlagService, "instance");
+      if (previousFeatureFlags) {
+        previousFlagNotifier = Reflect.get(previousFeatureFlags, "notifier");
+      }
+      previousResources = ResourceRegistry.getAllResources();
+      previousTemplates = new Map(ResourceRegistry["templates"]);
+      previousToolServers = new Set(ToolRegistry["servers"]);
+      previousResourceServers = new Set(ResourceRegistry["servers"]);
+      previousBindingHandlers = new Set(ToolRegistry["sessionBindingReleaseHandlers"]);
+      previousReleaseListeners = new Set(SessionReleaseBroadcaster["listeners"]);
+      previousDeviceRemovalListeners = new Set(getDaemonStreamDeviceLifecycleEmitter()["removed"]);
       // Warm the real server/SDK setup outside the individual test budgets.
       restoreServer = installHermeticServerFixture();
       const warm = new McpTestFixture({ daemonMode: true });
@@ -531,7 +567,62 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       }
     });
 
-    afterAll(() => restoreServer());
+    afterAll(() => {
+      restoreServer();
+      // The fixture restores a manager it lazily created; retire both factory slots instead.
+      PlatformDeviceManagerFactory.reset();
+      const deviceToolsDependencies = getDeviceToolsDependencies();
+      resetDeviceToolsDependencies();
+      resetDbWriteBarrier();
+      // Match the neighbouring suite's identity restore; this tracker has no reset API.
+      Reflect.set(executionTracker, "sessionClockOffsetProvider", previousClockOffset);
+      DaemonState.getInstance().reset();
+      // Obtain the current shared prototype host's public disposer, then retire its lifecycle.
+      registerPrototypeTools()();
+      SessionReleaseBroadcaster.clearForTesting();
+      for (const listener of previousReleaseListeners) {
+        SessionReleaseBroadcaster.subscribe(listener);
+      }
+      // The stream emitter has no reset API; restore its existing listener set in place.
+      const removed = getDaemonStreamDeviceLifecycleEmitter()["removed"];
+      removed.clear();
+      for (const listener of previousDeviceRemovalListeners) {
+        getDaemonStreamDeviceLifecycleEmitter().onDeviceRemoved(listener);
+      }
+      ToolRegistry.clearTools();
+      ResourceRegistry.clearResources();
+      for (const resource of previousResources) {
+        ResourceRegistry["resources"].set(resource.uri, resource);
+      }
+      for (const [uri, template] of previousTemplates) {
+        ResourceRegistry["templates"].set(uri, template);
+      }
+      if (previousFeatureFlags) {
+        previousFeatureFlags.setToolListChangedNotifier(previousFlagNotifier);
+        expect(Reflect.get(previousFeatureFlags, "notifier")).toBe(previousFlagNotifier);
+      }
+      // FeatureFlagService has no singleton reset API; restore its pre-ingress identity.
+      Reflect.set(FeatureFlagService, "instance", previousFeatureFlags);
+      expect(Reflect.get(FeatureFlagService, "instance")).toBe(previousFeatureFlags);
+      expect(Reflect.get(PlatformDeviceManagerFactory, "instance")).toBeNull();
+      expect(Reflect.get(PlatformDeviceManagerFactory, "injectedManager")).toBeNull();
+      expect(Reflect.get(PlatformDeviceManagerFactory, "injectedAdbFactory")).toBeNull();
+      expect(executionTracker.getActiveExecutionCount()).toBe(0);
+      expect(Reflect.get(executionTracker, "sessionClockOffsetProvider")).toBe(previousClockOffset);
+      expect(DaemonState.getInstance().isInitialized()).toBe(false);
+      expect(ToolRegistry.getAllTools()).toHaveLength(0);
+      expect(getDbWriteBarrier().inFlightCount()).toBe(0);
+      expect(getDbWriteBarrier().isDraining()).toBe(false);
+      expect(getDeviceToolsDependencies()).not.toBe(deviceToolsDependencies);
+      expect(ResourceRegistry.getAllResources()).toEqual(previousResources);
+      expect(ResourceRegistry["templates"]).toEqual(previousTemplates);
+      // Closing the fixtures must unsubscribe their servers and binding closures, not mask leaks.
+      expect(ToolRegistry["servers"]).toEqual(previousToolServers);
+      expect(ResourceRegistry["servers"]).toEqual(previousResourceServers);
+      expect(ToolRegistry["sessionBindingReleaseHandlers"]).toEqual(previousBindingHandlers);
+      expect(SessionReleaseBroadcaster["listeners"]).toEqual(previousReleaseListeners);
+      expect(removed).toEqual(previousDeviceRemovalListeners);
+    });
 
     beforeEach(async () => {
       executions = [];
@@ -598,7 +689,8 @@ describe("ToolRegistry read-only device path on a held device (#10830)", () => {
       expect(binding?.boundDeviceSessionUuid(connection)).toBeUndefined();
       bindingLookup.mockRestore();
       release.mockRestore();
-      executionTracker.setSessionClockOffsetProvider(() => 0);
+      Reflect.set(executionTracker, "sessionClockOffsetProvider", previousClockOffset);
+      expect(Reflect.get(executionTracker, "sessionClockOffsetProvider")).toBe(previousClockOffset);
       expect(executionTracker.getActiveExecutionCount()).toBe(0);
       timer.reset();
     });

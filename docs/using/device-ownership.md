@@ -803,15 +803,19 @@ push, location route stop, mock-location clear, and late-set clear, starting
 when its holder leaves. At the cap the manager abandons it, warns about possible
 leftover state, and frees the device from that cleanup's quarantine. Downloads
 staging, `putAppFile` to `user_files`, registrations with no bound, and internal
-release-teardown, late-setup, and rebind-restore transfers stay uncapped here
-and contribute no bound (a 1 s polling hint when nothing else bounds cleanup).
+late-setup and uncapped release-teardown/rebind-restore transfers contribute no
+bound (a 1 s polling hint when nothing else bounds cleanup); capped restores retain their bound.
 Trusted numeric caps remain owned by recording finalize, held-plan app cleanup,
 forced stuck release, network-condition TTL restore, deferred rebind gates, and
 bounded acquisition cleanups. An in-flight release
-advertises the stuck deadline from its own start plus two heartbeat-monitor intervals
-(one to scan, one for a late tick) plus 10 s quarantine (54 s with the default interval);
-the monitor only forces releases
-it tracks, while terminal explicit releases rely on their own bounded stages.
+advertises its recorded stuck deadline from teardown's start (the ownership hold's
+cap while pending): 18 s for setup drain, keep-awake, biometric and network first
+attempts, two 6 s row writes and 2 s scheduling slack, plus 15 s for clock, 1 s for
+rotation and 35 s for screen-reader state when it carries them. Two heartbeat-monitor
+intervals (one to scan, one for a late tick) and 10 s quarantine make the advertised
+bound 32 s without that state at the default 2 s interval;
+the monitor tracks every release in flight and forces it at its stuck deadline,
+including terminal explicit releases that no monitor reap joins.
 `device_shutting_down` always
 advertises 2 s: a shutdown reservation is held across several separately bounded
 steps (stop, wait for the device to disappear, restart handoff) and records no

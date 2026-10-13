@@ -9210,6 +9210,7 @@ export class DevicePool {
   ): Promise<void> {
     const { session, deviceId, fromDeviceId } = rebound;
     const { sessionId } = session;
+    const overridesStillRetained = () => cleanup?.retained === true;
     let outcome: "rebound" | "failed" = "failed";
     try {
       const current = this.sessionManager.getSession(sessionId);
@@ -9223,11 +9224,7 @@ export class DevicePool {
       logger.info(
         `[DevicePool] Rebind of session ${sessionId} to ${deviceId} was cancelled before it was delivered; moving it back to ${fromDeviceId}`,
       );
-      const retainedOverrides = await this.cancelAndSettleRebindCleanup(
-        fromDeviceId,
-        sessionId,
-        cleanup,
-      );
+      await this.cancelAndSettleRebindCleanup(fromDeviceId, sessionId, cleanup);
       await runWithAcquisitionReceipt({ rebound, deferredRebindCleanup: cleanup }, () =>
         this.bindOrReuseDeviceSession(
           sessionId,
@@ -9242,8 +9239,9 @@ export class DevicePool {
       // Moving back was a rebind too, and a rebind keeps only the session's routing cache. The
       // session is on the device that cache described again, so it gets back what still describes
       // that device: its display pin, readiness and observation baselines. When undo cancelled
-      // deferred cleanup, all six overrides are still applied and their records come back too.
-      // If the bound already started restores, omit those records to keep the cache honest.
+      // deferred cleanup and its gate is still retained after the bind, all six overrides are
+      // still applied and their records come back too. If either deadline started restores,
+      // including during the awaited bind, omit those records to keep the cache honest.
       // Label routing is session-level, so whatever it is now stays.
       if (
         this.sessionManager.getSession(sessionId) !== session ||
@@ -9257,7 +9255,7 @@ export class DevicePool {
           ? {}
           : { deviceLabels: session.cacheData.deviceLabels }),
       };
-      if (!retainedOverrides) {
+      if (!overridesStillRetained()) {
         for (const override of OVERRIDES_A_REBIND_RESTORES) {
           delete restored[override];
         }

@@ -12,15 +12,30 @@ interface RegistryRetryPacingOptions {
   backoff?: BackoffPolicy;
 }
 
-/** Shared quiet time and FIFO turns, following the back-out cleanup pacing (#12107). */
+interface SharedRetryState {
+  quietUntilMs: number;
+  turn: Promise<void>;
+}
+
+const retryStates = new WeakMap<RegistryRetryPacingOptions["timer"], SharedRetryState>();
+
+/**
+ * Quiet time and FIFO turns are shared by pacers using the same timer object.
+ * The back-out cleanup pacer in managedSlotAcquisition.ts is not joined yet.
+ */
 export class RegistryRetryPacing {
   private readonly closing = new AbortController();
   private readonly backoff: BackoffPolicy;
-  private quietUntilMs = 0;
-  private turn: Promise<void> = Promise.resolve();
+  private readonly shared: SharedRetryState;
 
   constructor(private readonly options: RegistryRetryPacingOptions) {
     this.backoff = options.backoff ?? exponentialBackoff(options);
+    let shared = retryStates.get(options.timer);
+    if (!shared) {
+      shared = { quietUntilMs: 0, turn: Promise.resolve() };
+      retryStates.set(options.timer, shared);
+    }
+    this.shared = shared;
   }
 
   close(): void {
@@ -82,13 +97,13 @@ export class RegistryRetryPacing {
   ): Promise<T> {
     while (true) {
       // Quiet waiters own no turn, so an expedited waiter can reach the next free turn.
-      if (!expedited?.aborted && this.options.timer.now() < this.quietUntilMs) {
+      if (!expedited?.aborted && this.options.timer.now() < this.shared.quietUntilMs) {
         await this.waitForQuiet(stopped, expedited);
       }
-      const previous = this.turn;
+      const previous = this.shared.turn;
       const finished = Promise.withResolvers<void>();
       // A cancelled queued turn must not let its successor overtake an earlier active turn.
-      this.turn = previous.then(() => finished.promise);
+      this.shared.turn = previous.then(() => finished.promise);
       let startedMs: number | undefined;
       let failed = true;
       try {
@@ -100,7 +115,7 @@ export class RegistryRetryPacing {
         this.signal(stopped).throwIfAborted();
         // The preceding turn may have extended quiet time while we queued. Yield and rejoin.
         // Future quiet time awaits a timer above; an expedite instead awaits the next turn.
-        if (!expedited?.aborted && this.options.timer.now() < this.quietUntilMs) {
+        if (!expedited?.aborted && this.options.timer.now() < this.shared.quietUntilMs) {
           continue;
         }
         startedMs = this.options.timer.now();
@@ -114,8 +129,8 @@ export class RegistryRetryPacing {
       } finally {
         if (failed && startedMs !== undefined && !this.closing.signal.aborted) {
           const endMs = this.options.timer.now();
-          this.quietUntilMs = Math.max(
-            this.quietUntilMs,
+          this.shared.quietUntilMs = Math.max(
+            this.shared.quietUntilMs,
             endMs + Math.min(Math.max(0, endMs - startedMs), this.options.maxBlockedWaitMs),
           );
         }
@@ -129,8 +144,8 @@ export class RegistryRetryPacing {
   }
 
   private async waitForQuiet(stopped?: AbortSignal, expedited?: AbortSignal): Promise<void> {
-    while (!expedited?.aborted && this.options.timer.now() < this.quietUntilMs) {
-      await this.wait(this.quietUntilMs - this.options.timer.now(), stopped, expedited);
+    while (!expedited?.aborted && this.options.timer.now() < this.shared.quietUntilMs) {
+      await this.wait(this.shared.quietUntilMs - this.options.timer.now(), stopped, expedited);
     }
   }
 }

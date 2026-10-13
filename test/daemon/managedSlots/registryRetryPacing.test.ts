@@ -4,8 +4,7 @@ import { logger } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { drainMicrotasks, drainUntil } from "../../helpers/fakeTimerStepping";
 
-function harness(policy?: { delayForAttempt(attempt: number): number }) {
-  const timer = new FakeTimer();
+function harness(policy?: { delayForAttempt(attempt: number): number }, timer = new FakeTimer()) {
   const pacing = new RegistryRetryPacing({
     timer,
     initialDelayMs: 25,
@@ -281,3 +280,125 @@ test("a newly extended quiet period releases queued ordinary turns for an expedi
     await Promise.allSettled([active, ordinary, urgent]);
   }
 });
+
+test("two pacers on one timer alternate blocked attempts with shared quiet time", async () => {
+  const { timer, pacing: a } = harness();
+  const { pacing: b } = harness(undefined, timer);
+  const starts: number[] = [];
+  const operation = async () => {
+    starts.push(timer.now());
+    timer.setCurrentTime(timer.now() + 3_300);
+    return false;
+  };
+  const first = a.run(operation, (r) => r);
+  const second = b.run(operation, (r) => r);
+  try {
+    await first;
+    await drainMicrotasks(30);
+    expect(starts).toEqual([0]);
+    timer.advanceTime(3_299);
+    await drainMicrotasks(30);
+    expect(starts).toEqual([0]);
+    timer.advanceTime(1);
+    await second;
+    const third = a.run(operation, (r) => r);
+    await drainMicrotasks(30);
+    timer.advanceTime(3_300);
+    await third;
+    expect(starts).toEqual([0, 6_600, 13_200]);
+  } finally {
+    a.close();
+    b.close();
+    await Promise.allSettled([first, second]);
+  }
+});
+
+test("pacers on different timers have independent quiet clocks and turns", async () => {
+  const a = harness();
+  const b = harness();
+  const gate = Promise.withResolvers<boolean>();
+  const active = a.pacing.run(
+    () => gate.promise,
+    (r) => r,
+  );
+  try {
+    await drainMicrotasks(30);
+    expect(
+      await b.pacing.run(
+        async () => true,
+        (r) => r,
+      ),
+    ).toBe(true);
+    a.timer.setCurrentTime(3_300);
+    gate.resolve(false);
+    await active;
+    expect(
+      await b.pacing.run(
+        async () => true,
+        (r) => r,
+      ),
+    ).toBe(true);
+    expect(b.timer.now()).toBe(0);
+  } finally {
+    a.pacing.close();
+    b.pacing.close();
+    gate.resolve(false);
+    await active;
+  }
+});
+
+test.each(["queued", "quiet", "active"] as const)(
+  "closing one pacer with a %s turn leaves the other pacer usable",
+  async (phase) => {
+    const { timer, pacing: a } = harness();
+    const { pacing: b } = harness(undefined, timer);
+    const gate = Promise.withResolvers<boolean>();
+    const holder = phase === "queued" ? b : a;
+    const active = holder.run(
+      () => gate.promise,
+      (r) => r,
+    );
+    const observed = active.catch(() => false);
+    await drainMicrotasks(30);
+    if (phase === "quiet") {
+      timer.setCurrentTime(300);
+      gate.resolve(false);
+      await observed;
+    }
+    const cancelled = a
+      .run(
+        async () => true,
+        (r) => r,
+      )
+      .catch(() => false);
+    let ran = false;
+    const survivor = b.run(
+      async () => {
+        ran = true;
+        return true;
+      },
+      (r) => r,
+    );
+    try {
+      await drainMicrotasks(30);
+      a.close();
+      await cancelled;
+      if (phase === "queued") {
+        expect(ran).toBe(false); // A cancelled queue entry cannot overtake B's active turn.
+        gate.resolve(true);
+      }
+      if (phase === "quiet") {
+        expect(ran).toBe(false);
+        timer.advanceTime(300);
+      }
+      expect(await survivor).toBe(true);
+      expect(ran).toBe(true);
+    } finally {
+      a.close();
+      b.close();
+      gate.resolve(true);
+      await Promise.allSettled([active, cancelled, survivor]);
+    }
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  },
+);

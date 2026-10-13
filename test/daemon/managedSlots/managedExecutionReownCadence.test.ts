@@ -510,3 +510,29 @@ test("a recovering session's release never forces registry admission", async () 
   await h.step(0);
   expect(h.calls).toHaveLength(0);
 });
+
+test("A's release expedites its attempt behind B's blocking in-flight attempt", async () => {
+  const h = await harness();
+  h.behavior.failures = 1;
+  await h.reowner.reown(["a"], { rehydrated: true });
+  h.behavior.hangClaim = true;
+  const peer = h.reowner.reown(["b"], { rehydrated: true });
+  await h.step(0);
+  expect(h.calls.map((c) => c.id)).toEqual(["a", "b"]);
+  const hold = h.reowner.releaseDeviceHold("a");
+  await h.step(0);
+  expect(h.calls.map((c) => c.id)).toEqual(["a", "b"]);
+  // Hold A was created while B owned the turn; model B blocking before its failure completes.
+  h.timer.setCurrentTime(3_300);
+  h.behavior.hangClaim = false;
+  h.claim.resolve({ kind: "binding_changed" });
+  await h.step(0);
+  await peer;
+  expect(h.calls.map((c) => [c.id, c.at])).toEqual([
+    ["a", 0],
+    ["b", 0],
+    ["a", 3_300],
+  ]);
+  expect(await hold?.settled).toBe("teardown");
+  expect(h.confirmed).toEqual([3_300]);
+});

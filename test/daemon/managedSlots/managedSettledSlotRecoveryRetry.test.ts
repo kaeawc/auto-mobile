@@ -381,3 +381,51 @@ test("other drain registry steps retain the default 250 ms to five second policy
   expect(calls).toEqual([0, 250, 750, 1_750, 3_750, 7_750, 12_750, 17_750]);
   expect(h.warn.mock.calls[0]?.[0]).toContain("retrying in 250ms");
 });
+
+test("wired recovery and re-own pacers alternate blocking failures on the daemon timer", async () => {
+  const h = await harness();
+  h.behavior.failures = Infinity;
+  h.behavior.blocked = 3_300;
+  const reownStarts: number[] = [];
+  const registry = new Proxy(h.faulty, {
+    get(target, property) {
+      if (property === "findExecutionAssignments") {
+        return async () => {
+          reownStarts.push(h.timer.now());
+          h.timer.setCurrentTime(h.timer.now() + 3_300);
+          throw new Error("SQLITE_BUSY: re-own lookup");
+        };
+      }
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  const reowner = new ManagedExecutionReowner({
+    registry: async () => registry,
+    owner: () => ({ daemonId: "new", pid: 200 }),
+    timer: h.timer,
+    isSessionHeld: () => true,
+  });
+  cleanups.push(async () => {
+    reowner.close();
+    await reowner.whenIdle();
+  });
+  const recovery = h.release.recoverSettledSlots();
+  const reown = reowner.reown(["session-a"], { rehydrated: true });
+  await h.step(0);
+  expect(h.calls.map((c) => c.at)).toEqual([0]);
+  expect(reownStarts).toEqual([]);
+  await h.step(3_299);
+  expect(reownStarts).toEqual([]);
+  await h.step(1);
+  await reown;
+  expect(reownStarts).toEqual([6_600]);
+  await h.step(3_300);
+  expect(h.calls.map((c) => c.at)).toEqual([0, 13_200]);
+  await h.step(3_300);
+  expect(reownStarts).toEqual([6_600, 19_800]);
+  reowner.close();
+  h.release.close();
+  await recovery;
+  await reowner.whenIdle();
+});

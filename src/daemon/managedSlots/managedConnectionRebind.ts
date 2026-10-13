@@ -133,9 +133,14 @@ export class TimerManagedConnectionRebind implements ManagedConnectionRebind {
         this.cancel();
       }
     } catch (error) {
-      // A cancelled or replaced socket cannot use or report its late result.
+      // A cancelled or replaced socket cannot use or report its late result. Silence after
+      // cancel is deliberate, pinned by "cancelling an in-flight attempt prevents its failure from scheduling again".
       if (this.chain !== chain || !chain.attempts.stillWanted()) {
         if (this.chain === chain) {
+          // The socket no longer wants this best-effort bind; it stays fail-closed.
+          logger.debug(
+            `[ManagedSlots] Connection re-bind no longer wanted: ${errorMessage(error)}`,
+          );
           this.cancel();
         }
         return;

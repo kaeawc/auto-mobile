@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DAEMON_REGISTER_SESSION_METHOD,
   DAEMON_HEARTBEAT_METHOD,
@@ -9,7 +9,7 @@ import { DaemonClient, daemonResponseError } from "../../src/daemon/client";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
-import { drainMicrotasks } from "../helpers/fakeTimerStepping";
+import { drainMicrotasks, drainUntil } from "../helpers/fakeTimerStepping";
 import { readyManagedSlotsResult } from "../helpers/refusalWireFixtures";
 import {
   handleDaemonRequest,
@@ -48,7 +48,7 @@ describe("managed proxy re-bind after its slot session ended (#11399)", () => {
   let scopes: ManagedConnectionScopes;
   let state: DaemonStateAccess;
 
-  beforeEach(async () => {
+  async function initializeSessions() {
     timer = new FakeTimer();
     timer.setCurrentTime(1_000_000);
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
@@ -69,6 +69,13 @@ describe("managed proxy re-bind after its slot session ended (#11399)", () => {
     await sessionManager.adoptManagedExecutionLivenessPolicy(SLOT_SESSION, {});
     // What the acquisition bound for the proxy's first socket.
     scopes.bind(OLD_SOCKET, { scopeKey: SCOPE, sessionUuids: [SLOT_SESSION] });
+  }
+
+  beforeEach(async () => {
+    // The single reconnect scenario builds its acquisition fixture once in beforeAll.
+    if (!proxy) {
+      await initializeSessions();
+    }
   });
 
   afterEach(async () => {
@@ -92,7 +99,8 @@ describe("managed proxy re-bind after its slot session ended (#11399)", () => {
     const registrations: string[] = [];
     let allowClaim = true;
     let claimGate = Promise.withResolvers<void>();
-    beforeEach(async () => {
+    beforeAll(async () => {
+      await initializeSessions();
       clients.length = 0;
       registrations.length = 0;
       allowClaim = true;
@@ -162,12 +170,23 @@ describe("managed proxy re-bind after its slot session ended (#11399)", () => {
       await proxy!.ensureConnected();
       expect(sessionManager.getSession(SLOT_SESSION)?.livenessOwnerToken).toBeUndefined();
       expect(scopes.get("proxy-socket-1")?.sessionUuids.size).toBe(0);
-      await timer.advanceTimeAsync(500, () => drainMicrotasks(80));
+      // Step one retry rather than replaying every backoff round trip through 500 ms.
+      timer.advanceTime(500);
+      await drainMicrotasks(40);
       expect(scopes.get("proxy-socket-1")?.sessionUuids.size).toBe(0);
       allowClaim = true;
       claimGate.resolve();
-      await drainMicrotasks(80);
-      await timer.advanceTimeAsync(500, () => drainMicrotasks(80));
+      await drainUntil(
+        () => sessionManager.getSession(SLOT_SESSION)?.livenessOwnerToken === TOKEN,
+        { description: "keeper claims tokenless session" },
+      );
+      timer.advanceTime(500);
+      await drainUntil(
+        () => scopes.get("proxy-socket-1")?.sessionUuids.has(SLOT_SESSION) === true,
+        {
+          description: "retry binds the keeper's claimed session",
+        },
+      );
       expect(sessionManager.getSession(SLOT_SESSION)?.livenessOwnerToken).toBe(TOKEN);
       expect([...scopes.get("proxy-socket-1")!.sessionUuids]).toEqual([SLOT_SESSION]);
       expect(clients).toHaveLength(2);

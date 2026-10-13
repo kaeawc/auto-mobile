@@ -62,8 +62,10 @@ export interface ManagedExecutionReownerDependencies {
 }
 
 const OLD_REGISTRY_BUSY_WRITE_MS = 3_300;
-// One attempt started with the hold: 700 ms async budget + one OLD busy write (~3.3 s) = 4 s.
-// With NEW busy writes (~300 ms), the same cap covers about three paced attempts.
+// The 4 s cap is measured on the daemon's timer, not a full-attempt guarantee when queued.
+// A synchronous registry write crossing the cap delays it by at most that write;
+// device writes are skipped then, and the cap-derived cleanup hint is short by that delay.
+// Busy writes now fail in ~300 ms (#12123); the previous worst-case 3.3 s is headroom.
 export const MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS =
   MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS + OLD_REGISTRY_BUSY_WRITE_MS;
 export const MANAGED_EXECUTION_REOWN_RETRY_INITIAL_DELAY_MS = 25;
@@ -500,8 +502,16 @@ export class ManagedExecutionReowner {
           this.logRetry(id, result.error);
         }
       } catch (error) {
-        // Cancellation ends this episode; contention/deadlines retain the gate for another turn.
-        if (!this.canAttempt(id, stopped)) {
+        // Contention/deadlines retain the gate for another turn. Silence after cancel/close
+        // is deliberate, pinned by "close wakes a retry wait and suppresses all later logs and calls".
+        const admitted = this.canAttempt(id, stopped);
+        if (!admitted && !this.closed && !stopped.aborted) {
+          // Recovery admission or an ended hold makes this best-effort retry unnecessary.
+          logger.debug(
+            `[ManagedSlots] Re-own retry no longer admitted for ${id}: ${errorMessage(error)}`,
+          );
+        }
+        if (!admitted) {
           return;
         }
         this.logRetry(id, error);

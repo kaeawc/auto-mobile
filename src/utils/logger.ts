@@ -1,6 +1,7 @@
 /**
  * Simple logger utility with different log levels
  */
+import { testOverrides } from "./testOverrides";
 import fs from "fs";
 import path from "path";
 import { statAsync } from "./io";
@@ -1185,6 +1186,9 @@ const mirrorToLegacyStdout = (line: string): void => {
 };
 
 const writeToLogFile = async (level: string, message: string, args: any[]) => {
+  if (testOverrides.logSinksDisabled?.()) {
+    return;
+  }
   try {
     const safeLogMessage = formatLogRecord(level, message, args).replace(/[\r\n\t]/g, " ");
     // Start both configured writes before awaiting either one. A failed file

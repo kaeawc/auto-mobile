@@ -1,5 +1,9 @@
 import {
   NETWORK_FILTER_CONTRACT_VERSION,
+  NETWORK_FILTER_UPGRADE_COMMAND,
+  type NetworkFilterShapingRequest,
+  type NetworkFilterShapingResolution,
+  type NetworkFilterRuleResult,
   type NetworkFilterBridge,
   type NetworkFilterRuleCommandResult,
   type NetworkFilterRuleOwnership,
@@ -18,6 +22,7 @@ export interface FakeRuleCall {
   target: NetworkFilterRuleTarget;
   ownership: NetworkFilterRuleOwnership;
   leaseMs?: number;
+  shaping?: NetworkFilterShapingRequest;
 }
 
 /**
@@ -38,6 +43,8 @@ const FAKE_DEVICE_SET = "/fake/Devices";
  */
 export class FakeNetworkFilterBridge implements NetworkFilterBridge {
   private result: NetworkFilterSnapshotResult;
+  controllerVersion: 3 | 4 = NETWORK_FILTER_CONTRACT_VERSION;
+  supportsShaping = true;
   statusCalls = 0;
   snapshotCalls = 0;
   readonly ruleCalls: FakeRuleCall[] = [];
@@ -45,6 +52,7 @@ export class FakeNetworkFilterBridge implements NetworkFilterBridge {
   readonly ruleScripts: FakeRuleScript[] = [];
   /** Lease milliseconds remaining that the model reports for each rule. */
   leaseRemainingMs = 15_000;
+  private readonly requests = new Map<string, NetworkFilterShapingRequest>();
   private readonly rules = new Map<string, NetworkFilterRuleStatus>();
 
   constructor(result: NetworkFilterSnapshotResult = { state: "not_installed", detail: "fake" }) {
@@ -56,7 +64,7 @@ export class FakeNetworkFilterBridge implements NetworkFilterBridge {
     this.result =
       state === "not_installed"
         ? { state, detail }
-        : { state, detail, contractVersion: NETWORK_FILTER_CONTRACT_VERSION };
+        : { state, detail, contractVersion: this.controllerVersion };
   }
 
   setResult(result: NetworkFilterSnapshotResult): void {
@@ -75,11 +83,13 @@ export class FakeNetworkFilterBridge implements NetworkFilterBridge {
   /** As if the lease ran out or the provider restarted. */
   expireAll(): void {
     this.rules.clear();
+    this.requests.clear();
   }
 
   async status(): Promise<NetworkFilterStatus> {
     this.statusCalls += 1;
-    const { state, detail, contractVersion } = this.result;
+    const { state, detail } = this.result;
+    const contractVersion = state === "not_installed" ? undefined : this.controllerVersion;
     return {
       state,
       detail,
@@ -90,15 +100,24 @@ export class FakeNetworkFilterBridge implements NetworkFilterBridge {
 
   async snapshot(): Promise<NetworkFilterSnapshotResult> {
     this.snapshotCalls += 1;
-    return this.result;
+    return this.result.state === "not_installed"
+      ? this.result
+      : { ...this.result, contractVersion: this.controllerVersion };
   }
 
   apply(
     target: NetworkFilterRuleTarget,
     ownership: NetworkFilterRuleOwnership,
     leaseMs: number,
+    shaping?: NetworkFilterShapingRequest,
   ): Promise<NetworkFilterRuleCommandResult> {
-    return this.run({ command: "apply", target, ownership, leaseMs });
+    return this.run({
+      command: "apply",
+      target,
+      ownership,
+      leaseMs,
+      ...(shaping ? { shaping } : {}),
+    });
   }
 
   reset(
@@ -126,6 +145,18 @@ export class FakeNetworkFilterBridge implements NetworkFilterBridge {
       const { state, detail, contractVersion } = this.result;
       return { state, detail, ...(contractVersion === undefined ? {} : { contractVersion }) };
     }
+    if (call.shaping && this.controllerVersion === 3) {
+      return {
+        state: "unavailable",
+        contractVersion: 3,
+        detail: `Installed controller version 3 requires version 4 for shaping; update with ${NETWORK_FILTER_UPGRADE_COMMAND}.`,
+        upgradeRequired: {
+          installedVersion: 3,
+          requiredVersion: 4,
+          command: NETWORK_FILTER_UPGRADE_COMMAND,
+        },
+      };
+    }
     const lostAnswer: NetworkFilterRuleCommandResult = {
       state: "unavailable",
       detail: "fake: the controller's answer was lost",
@@ -139,7 +170,7 @@ export class FakeNetworkFilterBridge implements NetworkFilterBridge {
       : {
           state: "ready",
           detail: `fake ${call.command}`,
-          contractVersion: NETWORK_FILTER_CONTRACT_VERSION,
+          contractVersion: this.controllerVersion,
           rule,
         };
   }
@@ -150,34 +181,13 @@ export class FakeNetworkFilterBridge implements NetworkFilterBridge {
     const ours = existing?.owner === call.ownership.owner;
     switch (call.command) {
       case "apply":
-        if (existing && !ours) {
-          return { outcome: "owned_by_another_session" };
-        }
-        if (existing && existing.revision > call.ownership.revision) {
-          return { outcome: "stale_revision", installedRevision: existing.revision };
-        }
-        this.rules.set(key, {
-          target: {
-            simulator: { deviceSet: FAKE_DEVICE_SET, udid: call.target.udid },
-            bundleId: call.target.bundleId,
-          },
-          owner: call.ownership.owner,
-          ownerGeneration: call.ownership.ownerGeneration,
-          revision: call.ownership.revision,
-          condition: "offline",
-          leaseRemainingMilliseconds: this.leaseRemainingMs,
-          droppedFlows: 0,
-        });
-        return {
-          outcome: "applied",
-          installedRevision: call.ownership.revision,
-          leaseRemainingMilliseconds: this.leaseRemainingMs,
-        };
+        return this.applyRule(call, key, existing);
       case "reset":
         if (existing && !ours) {
           return { outcome: "owned_by_another_session" };
         }
         this.rules.delete(key);
+        this.requests.delete(key);
         return { outcome: "reset" };
       case "renew":
         if (!existing || !ours) {
@@ -187,5 +197,127 @@ export class FakeNetworkFilterBridge implements NetworkFilterBridge {
           ? { outcome: "renewed", installedRevision: existing.revision }
           : { outcome: "stale_revision", installedRevision: existing.revision };
     }
+  }
+
+  private applyRule(
+    call: FakeRuleCall,
+    key: string,
+    existing?: NetworkFilterRuleStatus,
+  ): NetworkFilterRuleResult {
+    if (existing && existing.owner !== call.ownership.owner) {
+      return { outcome: "owned_by_another_session" };
+    }
+    if (existing && existing.revision > call.ownership.revision) {
+      return { outcome: "stale_revision", installedRevision: existing.revision };
+    }
+    if (
+      existing?.revision === call.ownership.revision &&
+      existing.ownerGeneration === call.ownership.ownerGeneration &&
+      !this.sameConfiguration(call, key, existing)
+    ) {
+      return { outcome: "invalid_command" };
+    }
+    const resolved = call.shaping ? this.resolveShaping(call.shaping) : undefined;
+    if (resolved && "outcome" in resolved) {
+      return resolved;
+    }
+    const status = {
+      target: {
+        simulator: { deviceSet: FAKE_DEVICE_SET, udid: call.target.udid },
+        bundleId: call.target.bundleId,
+      },
+      owner: call.ownership.owner,
+      ownerGeneration: call.ownership.ownerGeneration,
+      revision: call.ownership.revision,
+      leaseRemainingMilliseconds: this.leaseRemainingMs,
+      droppedFlows: 0,
+    };
+    this.rules.set(
+      key,
+      resolved
+        ? { ...status, condition: "shaped", shaping: resolved }
+        : { ...status, condition: "offline" },
+    );
+    if (call.shaping) {
+      this.requests.set(key, { ...call.shaping });
+    } else {
+      this.requests.delete(key);
+    }
+    return {
+      outcome: "applied",
+      installedRevision: call.ownership.revision,
+      leaseRemainingMilliseconds: this.leaseRemainingMs,
+      ...(resolved ? { shaping: resolved } : {}),
+    };
+  }
+
+  private sameConfiguration(
+    call: FakeRuleCall,
+    key: string,
+    existing: NetworkFilterRuleStatus,
+  ): boolean {
+    const previous = this.requests.get(key);
+    if (!call.shaping) {
+      return existing.condition === "offline";
+    }
+    return (
+      existing.condition === "shaped" &&
+      previous !== undefined &&
+      previous.delayMs === call.shaping.delayMs &&
+      previous.downloadKbps === call.shaping.downloadKbps &&
+      previous.uploadKbps === call.shaping.uploadKbps &&
+      (previous.packetLossPercent ?? 0) === (call.shaping.packetLossPercent ?? 0)
+    );
+  }
+
+  private resolveShaping(
+    request: NetworkFilterShapingRequest,
+  ): NetworkFilterShapingResolution | NetworkFilterRuleResult {
+    if (!this.supportsShaping) {
+      return { outcome: "unsupported_condition" };
+    }
+    const { delayMs, downloadKbps, uploadKbps } = request;
+    const loss = request.packetLossPercent ?? 0;
+    const ranges = [
+      { component: "latency", valid: Number.isInteger(delayMs) && delayMs >= 0 && delayMs <= 4000 },
+      { component: "downloadBandwidth", valid: this.validRate(downloadKbps) },
+      { component: "uploadBandwidth", valid: this.validRate(uploadKbps) },
+      { component: "packetLoss", valid: Number.isFinite(loss) && loss >= 0 && loss <= 100 },
+    ] as const;
+    const invalid = ranges.find((range) => !range.valid);
+    if (invalid) {
+      return {
+        outcome: "invalid_shaping",
+        rejection: { reason: "out_of_range", component: invalid.component },
+      };
+    }
+    const applied: NetworkFilterShapingResolution["applied"] = [];
+    if (delayMs > 0) {
+      applied.push("latency");
+    }
+    if (downloadKbps > 0) {
+      applied.push("downloadBandwidth");
+    }
+    if (uploadKbps > 0) {
+      applied.push("uploadBandwidth");
+    }
+    const unapplied: NetworkFilterShapingResolution["unapplied"] = loss > 0 ? ["packetLoss"] : [];
+    if (applied.length === 0) {
+      return { outcome: "invalid_shaping", rejection: { reason: "nothing_to_apply", unapplied } };
+    }
+    return {
+      profile: {
+        outboundDelayMilliseconds: Math.ceil(delayMs / 2),
+        inboundDelayMilliseconds: Math.floor(delayMs / 2),
+        ...(downloadKbps > 0 ? { inboundBytesPerSecond: downloadKbps * 125 } : {}),
+        ...(uploadKbps > 0 ? { outboundBytesPerSecond: uploadKbps * 125 } : {}),
+      },
+      applied,
+      unapplied,
+    };
+  }
+
+  private validRate(rate: number): boolean {
+    return Number.isInteger(rate) && (rate === 0 || (rate >= 8 && rate <= 1000000));
   }
 }

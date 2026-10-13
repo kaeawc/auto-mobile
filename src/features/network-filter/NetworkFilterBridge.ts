@@ -29,9 +29,12 @@ import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKin
  * Version 2 shipped per-simulator attribution (#10589): `status`/`snapshot`
  * take `--managed` pairs and the snapshot reports per-flow attribution.
  * Version 3 adds the leased per-app `apply`/`reset`/`renew` commands, the
- * `rule` result and the snapshot's `rules` (#10264). There is no fallback.
+ * `rule` result and the snapshot's `rules` (#10264). Version 4 adds shaping.
+ * Legacy offline commands retry only a definitive unknown-contract-flag rejection.
  */
-export const NETWORK_FILTER_CONTRACT_VERSION = 3;
+export const NETWORK_FILTER_CONTRACT_VERSION = 4;
+export const NETWORK_FILTER_LEGACY_CONTRACT_VERSION = 3;
+export const NETWORK_FILTER_UPGRADE_COMMAND = "auto-mobile --ios-network-filter install --upgrade";
 
 /** The controller rejects more `--managed` pairs than this (`ManagedSimulator.maximumCount`). */
 export const NETWORK_FILTER_MAX_MANAGED_SIMULATORS = 256;
@@ -105,7 +108,7 @@ const ruleTargetSchema = z.object({
 });
 
 /** An active leased rule (snapshot v3, #10264). */
-const networkFilterRuleStatusSchema = z.object({
+const legacyRuleStatusSchema = z.object({
   target: ruleTargetSchema,
   owner: z.string(),
   ownerGeneration: z.number().int().nonnegative(),
@@ -114,10 +117,42 @@ const networkFilterRuleStatusSchema = z.object({
   leaseRemainingMilliseconds: z.number().int().nonnegative(),
   droppedFlows: z.number().int().nonnegative(),
 });
+const shapingComponentSchema = z.enum([
+  "latency",
+  "downloadBandwidth",
+  "uploadBandwidth",
+  "packetLoss",
+]);
+const shapingResolutionSchema = z.object({
+  profile: z.object({
+    outboundDelayMilliseconds: z.number().int().nonnegative(),
+    inboundDelayMilliseconds: z.number().int().nonnegative(),
+    outboundBytesPerSecond: z.number().int().positive().optional(),
+    inboundBytesPerSecond: z.number().int().positive().optional(),
+  }),
+  applied: z.array(shapingComponentSchema),
+  unapplied: z.array(shapingComponentSchema),
+});
+export type NetworkFilterShapingResolution = z.infer<typeof shapingResolutionSchema>;
+export interface NetworkFilterShapingRequest {
+  /** Added round-trip milliseconds; the provider splits them between directions. */
+  delayMs: number;
+  /** Decimal kilobits per second (1000 bits); zero means unlimited. */
+  downloadKbps: number;
+  uploadKbps: number;
+  packetLossPercent?: number;
+}
+const networkFilterRuleStatusSchema = z.discriminatedUnion("condition", [
+  legacyRuleStatusSchema.extend({ shaping: z.never().optional() }),
+  legacyRuleStatusSchema.extend({
+    condition: z.literal("shaped"),
+    shaping: shapingResolutionSchema,
+  }),
+]);
 export type NetworkFilterRuleStatus = z.infer<typeof networkFilterRuleStatusSchema>;
 
 /** The provider's definitive answer to `apply`, `reset` or `renew`. */
-export const networkFilterRuleOutcomeSchema = z.enum([
+const legacyRuleOutcomeSchema = z.enum([
   "applied",
   "reset",
   "renewed",
@@ -129,35 +164,90 @@ export const networkFilterRuleOutcomeSchema = z.enum([
   "invalid_command",
   "capacity_exceeded",
 ]);
+export const networkFilterRuleOutcomeSchema = z.enum([
+  ...legacyRuleOutcomeSchema.options,
+  "unsupported_condition",
+  "invalid_shaping",
+]);
 export type NetworkFilterRuleOutcome = z.infer<typeof networkFilterRuleOutcomeSchema>;
 
-const networkFilterRuleResultSchema = z.object({
-  outcome: networkFilterRuleOutcomeSchema,
+const legacyRuleResultSchema = z.object({
+  outcome: legacyRuleOutcomeSchema,
   installedRevision: z.number().int().positive().optional(),
   leaseRemainingMilliseconds: z.number().int().nonnegative().optional(),
+});
+const shapingRejectionSchema = z.object({
+  reason: z.enum(["out_of_range", "nothing_to_apply"]),
+  component: shapingComponentSchema.optional(),
+  unapplied: z.array(shapingComponentSchema).optional(),
+});
+const networkFilterRuleResultSchema = legacyRuleResultSchema.extend({
+  outcome: networkFilterRuleOutcomeSchema,
+  shaping: shapingResolutionSchema.optional(),
+  rejection: shapingRejectionSchema.optional(),
 });
 export type NetworkFilterRuleResult = z.infer<typeof networkFilterRuleResultSchema>;
 
 /** The provider's diagnostic snapshot; its own `version` evolves with the provider. */
-const networkFilterSnapshotSchema = z.object({
+const legacySnapshotSchema = z.object({
   version: z.number().int(),
   backend: z.string(),
   mode: z.string(),
   observedFlows: z.number().int().nonnegative(),
   discardedFlows: z.number().int().nonnegative(),
   managedSimulators: z.array(managedSimulatorSchema).optional(),
-  rules: z.array(networkFilterRuleStatusSchema).optional(),
+  rules: z.array(legacyRuleStatusSchema).optional(),
   flows: z.array(networkFilterFlowSchema),
   limitations: z.array(z.string()),
 });
-export type NetworkFilterSnapshot = z.infer<typeof networkFilterSnapshotSchema>;
+const counterSchema = z.number().int().nonnegative();
+const shapingActivitySchema = z.object({
+  flows: z.array(
+    z.object({
+      target: ruleTargetSchema,
+      owner: z.string(),
+      ownerGeneration: counterSchema,
+      revision: z.number().int().positive(),
+      trackedFlows: counterSchema,
+      pausedFlows: counterSchema,
+      outboundReleasedBytes: counterSchema,
+      inboundReleasedBytes: counterSchema,
+      outboundHeldBursts: counterSchema,
+      inboundHeldBursts: counterSchema,
+      overBudgetDrops: counterSchema,
+      refusedFlows: counterSchema,
+      callbacksWhilePaused: counterSchema,
+      debtReleases: counterSchema,
+    }),
+  ),
+  untrackedDataCallbacks: counterSchema,
+  pendingPauses: counterSchema,
+  filteredFlows: counterSchema,
+  completionRecords: counterSchema,
+  tickOutstanding: z.boolean(),
+  orphanedPauses: counterSchema,
+  unexpectedSecondPause: counterSchema,
+});
+const networkFilterSnapshotSchema = legacySnapshotSchema.extend({
+  version: z.literal(NETWORK_FILTER_CONTRACT_VERSION),
+  rules: z.array(networkFilterRuleStatusSchema).optional(),
+  shapingActivity: shapingActivitySchema.optional(),
+});
+export type NetworkFilterSnapshot = Omit<z.infer<typeof networkFilterSnapshotSchema>, "version"> & {
+  version: number;
+};
 
 const controllerVersionSchema = z.object({ version: z.number().int() });
 
-const controllerResultSchema = z.object({
-  version: z.literal(NETWORK_FILTER_CONTRACT_VERSION),
+const legacyControllerResultSchema = z.object({
+  version: z.literal(NETWORK_FILTER_LEGACY_CONTRACT_VERSION),
   state: networkFilterControllerStateSchema,
   detail: z.string(),
+  snapshot: legacySnapshotSchema.optional(),
+  rule: legacyRuleResultSchema.optional(),
+});
+const controllerResultSchema = legacyControllerResultSchema.extend({
+  version: z.literal(NETWORK_FILTER_CONTRACT_VERSION),
   snapshot: networkFilterSnapshotSchema.optional(),
   rule: networkFilterRuleResultSchema.optional(),
 });
@@ -197,6 +287,8 @@ export interface NetworkFilterRuleOwnership {
 }
 
 export interface NetworkFilterRuleCommandResult extends NetworkFilterStatus {
+  /** Definitive legacy argument rejection: nothing reached the provider. */
+  upgradeRequired?: { installedVersion: number; requiredVersion: number; command: string };
   /**
    * The provider's definitive answer. Absent whenever the outcome is unknown
    * (not installed, timeout, unavailable, malformed output): the command may or
@@ -212,11 +304,12 @@ export interface NetworkFilterRuleCommandResult extends NetworkFilterStatus {
 export interface NetworkFilterBridge {
   status(): Promise<NetworkFilterStatus>;
   snapshot(): Promise<NetworkFilterSnapshotResult>;
-  /** Take the target app offline for `leaseMs` unless renewed (#10264). */
+  /** Apply offline or shaped configuration for `leaseMs` unless renewed. */
   apply(
     target: NetworkFilterRuleTarget,
     ownership: NetworkFilterRuleOwnership,
     leaseMs: number,
+    shaping?: NetworkFilterShapingRequest,
   ): Promise<NetworkFilterRuleCommandResult>;
   /** Remove the owner's rule for the target; never clears another owner's rule. */
   reset(
@@ -317,13 +410,8 @@ function managedArguments(simulators: readonly ManagedSimulator[]): string[] {
   return simulators.flatMap((simulator) => ["--managed", simulator.deviceSet, simulator.udid]);
 }
 
-function lastNonEmptyLine(stdout: string): string | undefined {
-  return stdout
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .at(-1);
-}
+type ControllerAnswer = NetworkFilterSnapshotResult &
+  Pick<NetworkFilterRuleCommandResult, "rule" | "upgradeRequired"> & { legacyRejected?: boolean };
 
 /** Runs the installed controller through the host exec seam. */
 export class ExecNetworkFilterBridge implements NetworkFilterBridge {
@@ -333,6 +421,7 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
   private readonly timeoutMs: number;
   private readonly managedSimulators: () => Promise<ManagedSimulator[]>;
   private readonly deviceSet: () => string;
+  private legacyController = false;
 
   constructor(options: ExecNetworkFilterBridgeOptions = {}) {
     this.executor = options.executor ?? new DefaultHostCommandExecutor();
@@ -363,8 +452,9 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
     target: NetworkFilterRuleTarget,
     ownership: NetworkFilterRuleOwnership,
     leaseMs: number,
+    shaping?: NetworkFilterShapingRequest,
   ): Promise<NetworkFilterRuleCommandResult> {
-    return this.runRule("apply", target, ownership, leaseMs);
+    return this.runRule("apply", target, ownership, leaseMs, shaping);
   }
 
   reset(
@@ -387,23 +477,42 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
     target: NetworkFilterRuleTarget,
     ownership: NetworkFilterRuleOwnership,
     leaseMs?: number,
+    shaping?: NetworkFilterShapingRequest,
   ): Promise<NetworkFilterRuleCommandResult> {
-    const result = await this.run(command, async () => [
-      ...managedArguments([{ deviceSet: this.deviceSet(), udid: target.udid }]),
-      "--bundle-id",
-      target.bundleId,
-      "--owner",
-      ownership.owner,
-      "--owner-generation",
-      String(ownership.ownerGeneration),
-      "--revision",
-      String(ownership.revision),
-      ...(leaseMs === undefined ? [] : ["--lease-ms", String(Math.round(leaseMs))]),
-    ]);
+    const result = await this.run(
+      command,
+      async () => [
+        ...managedArguments([{ deviceSet: this.deviceSet(), udid: target.udid }]),
+        "--bundle-id",
+        target.bundleId,
+        "--owner",
+        ownership.owner,
+        "--owner-generation",
+        String(ownership.ownerGeneration),
+        "--revision",
+        String(ownership.revision),
+        ...(leaseMs === undefined ? [] : ["--lease-ms", String(Math.round(leaseMs))]),
+        ...(shaping === undefined
+          ? []
+          : [
+              "--delay-ms",
+              String(Math.round(shaping.delayMs)),
+              "--down-kbps",
+              String(Math.round(shaping.downloadKbps)),
+              "--up-kbps",
+              String(Math.round(shaping.uploadKbps)),
+              ...((shaping.packetLossPercent ?? 0) > 0
+                ? ["--packet-loss-percent", String(shaping.packetLossPercent)]
+                : []),
+            ]),
+      ],
+      shaping !== undefined,
+    );
     const status: NetworkFilterRuleCommandResult = {
       state: result.state,
       detail: result.detail,
       ...(result.contractVersion !== undefined ? { contractVersion: result.contractVersion } : {}),
+      ...(result.upgradeRequired ? { upgradeRequired: result.upgradeRequired } : {}),
     };
     // Only a `ready` answer that carries the provider's verdict is definitive.
     return result.state === "ready" && result.rule ? { ...status, rule: result.rule } : status;
@@ -423,16 +532,61 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
   private async run(
     command: NetworkFilterControllerCommand,
     commandArguments: () => Promise<string[]>,
-  ): Promise<NetworkFilterSnapshotResult & { rule?: NetworkFilterRuleResult }> {
-    if (!this.exists(this.controllerPath)) {
-      return this.notInstalled();
+    shaped = false,
+  ): Promise<ControllerAnswer> {
+    try {
+      if (!this.exists(this.controllerPath)) {
+        return this.notInstalled();
+      }
+      const args = await commandArguments();
+      const version =
+        shaped || !this.legacyController
+          ? NETWORK_FILTER_CONTRACT_VERSION
+          : NETWORK_FILTER_LEGACY_CONTRACT_VERSION;
+      const answer = await this.invoke(command, args, version);
+      if (!answer.legacyRejected) {
+        return answer;
+      }
+      this.legacyController = true;
+      if (!shaped) {
+        return this.invoke(command, args, NETWORK_FILTER_LEGACY_CONTRACT_VERSION);
+      }
+      return {
+        state: "unavailable",
+        contractVersion: NETWORK_FILTER_LEGACY_CONTRACT_VERSION,
+        detail: `The installed network-filter-controller speaks version 3; shaped rules require version 4. Update it with \`${NETWORK_FILTER_UPGRADE_COMMAND}\`.`,
+        upgradeRequired: {
+          installedVersion: NETWORK_FILTER_LEGACY_CONTRACT_VERSION,
+          requiredVersion: NETWORK_FILTER_CONTRACT_VERSION,
+          command: NETWORK_FILTER_UPGRADE_COMMAND,
+        },
+      };
+    } catch (error) {
+      throwIfRequestAborted();
+      logger.warn(
+        `[NetworkFilterBridge] preparing ${command} failed: ${errorMessage(error)}`,
+        error,
+      );
+      return this.unavailable(
+        `network-filter-controller ${command} failed: ${errorMessage(error)}`,
+      );
     }
-    const managed = await commandArguments();
+  }
+
+  private async invoke(
+    command: NetworkFilterControllerCommand,
+    args: string[],
+    version: number,
+  ): Promise<ControllerAnswer> {
     let stdout: string;
     try {
       const result = await this.executor.executeCommand(
         this.controllerPath,
-        [command, ...managed],
+        [
+          command,
+          ...(version === NETWORK_FILTER_CONTRACT_VERSION ? ["--contract-version", "4"] : []),
+          ...args,
+        ],
         {
           timeoutMs: this.timeoutMs,
           maxBuffer: CONTROLLER_MAX_BUFFER_BYTES,
@@ -441,74 +595,156 @@ export class ExecNetworkFilterBridge implements NetworkFilterBridge {
       );
       stdout = result.stdout;
     } catch (error) {
-      // A cancelled request is not an `unavailable` controller.
       throwIfRequestAborted();
       const failure = execFailureDetails(error);
+      logger.warn(
+        `[NetworkFilterBridge] controller ${command} failed: ${errorMessage(error)}`,
+        error,
+      );
       if (failure.code === "ENOENT") {
-        // Removed between the existence check and the exec.
         return this.notInstalled();
       }
-      // The controller exits non-zero for every non-ready state but still
-      // prints its JSON result, so a failed exec with output is still an answer.
+      // Non-ready controllers exit non-zero but still print their typed answer.
       if (failure.stdout.trim().length === 0) {
-        logger.warn(
-          `[NetworkFilterBridge] controller ${command} failed: ${errorMessage(error)}`,
-          error,
-        );
         return this.unavailable(
           `network-filter-controller ${command} failed: ${errorMessage(error)}`,
         );
       }
       stdout = failure.stdout;
     }
-    return this.parse(command, stdout);
+    return this.parse(command, stdout, version);
   }
 
-  private parse(
+  private mismatch(version: number): ControllerAnswer {
+    logger.warn(
+      `[NetworkFilterBridge] controller contract version ${version}, expected versions 3 and 4`,
+    );
+    return {
+      state: "unavailable",
+      detail: `network-filter-controller speaks contract version ${version}, but this AutoMobile expects versions 3 and 4 with the requested version honoured. Install the matching build with \`${NETWORK_FILTER_INSTALL_COMMAND}\`.`,
+      contractVersion: version,
+    };
+  }
+
+  private parse(command: string, stdout: string, requestedVersion: number): ControllerAnswer {
+    const lines = stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+    const answers: ControllerAnswer[] = [];
+    for (const [index, line] of lines.entries()) {
+      let json: unknown;
+      try {
+        json = JSON.parse(line);
+      } catch (error) {
+        // Preserve leading runtime diagnostics; every JSON line is still checked.
+        if (index < lines.length - 1 && !line.startsWith("{")) {
+          logger.debug(`[NetworkFilterBridge] controller diagnostic: ${line}`);
+          continue;
+        }
+        logger.warn(
+          `[NetworkFilterBridge] controller ${command} printed non-JSON output: ${errorMessage(error)}`,
+          error,
+        );
+        answers.push(
+          this.unavailable(`network-filter-controller ${command} printed no JSON result.`),
+        );
+        continue;
+      }
+      answers.push(
+        this.parseLine(command, json, requestedVersion) ??
+          this.unavailable(
+            `network-filter-controller ${command} printed a result that does not match contract version ${requestedVersion}.`,
+          ),
+      );
+    }
+    const failure = answers.find(
+      (answer) => answer.state === "unavailable" && !answer.legacyRejected,
+    );
+    if (failure) {
+      return failure;
+    }
+    const rejection = answers.find((answer) => answer.legacyRejected);
+    // Retry only a sole definitive answer; runtime diagnostics are not answers.
+    if (rejection) {
+      return answers.length === 1
+        ? rejection
+        : this.mismatch(NETWORK_FILTER_LEGACY_CONTRACT_VERSION);
+    }
+    return (
+      answers.at(-1) ??
+      this.unavailable(`network-filter-controller ${command} printed no JSON result.`)
+    );
+  }
+
+  private parseLine(
     command: string,
-    stdout: string,
-  ): NetworkFilterSnapshotResult & { rule?: NetworkFilterRuleResult } {
-    const line = lastNonEmptyLine(stdout);
-    let json: unknown;
-    try {
-      json = JSON.parse(line ?? "");
-    } catch (error) {
-      logger.warn(
-        `[NetworkFilterBridge] controller ${command} printed non-JSON output: ${errorMessage(error)}`,
-        error,
-      );
-      return this.unavailable(`network-filter-controller ${command} printed no JSON result.`);
-    }
+    json: unknown,
+    requestedVersion: number,
+  ): ControllerAnswer | undefined {
     const version = controllerVersionSchema.safeParse(json);
-    if (version.success && version.data.version !== NETWORK_FILTER_CONTRACT_VERSION) {
+    if (!version.success) {
       logger.warn(
-        `[NetworkFilterBridge] controller contract version ${version.data.version}, expected ${NETWORK_FILTER_CONTRACT_VERSION}`,
+        `[NetworkFilterBridge] controller ${command} result has no valid contract version`,
+        version.error,
       );
-      return {
-        state: "unavailable",
-        detail:
-          `network-filter-controller speaks contract version ${version.data.version}, but this ` +
-          `AutoMobile expects version ${NETWORK_FILTER_CONTRACT_VERSION}. Install the matching ` +
-          `build with \`${NETWORK_FILTER_INSTALL_COMMAND}\`.`,
-        contractVersion: version.data.version,
-      };
+      return undefined;
     }
-    const parsed = controllerResultSchema.safeParse(json);
+    if (
+      ![NETWORK_FILTER_LEGACY_CONTRACT_VERSION, NETWORK_FILTER_CONTRACT_VERSION].includes(
+        version.data.version,
+      )
+    ) {
+      return this.mismatch(version.data.version);
+    }
+    const schema =
+      version.data.version === NETWORK_FILTER_LEGACY_CONTRACT_VERSION
+        ? legacyControllerResultSchema
+        : controllerResultSchema;
+    const parsed = schema.safeParse(json);
     if (!parsed.success) {
       logger.warn(
-        `[NetworkFilterBridge] controller ${command} result did not match the contract: ${parsed.error.message}`,
+        `[NetworkFilterBridge] controller ${command} result failed schema validation`,
+        parsed.error,
       );
-      return this.unavailable(
-        `network-filter-controller ${command} printed a result that does not match contract version ${NETWORK_FILTER_CONTRACT_VERSION}.`,
-      );
+      return version.data.version !== requestedVersion
+        ? this.mismatch(version.data.version)
+        : undefined;
+    }
+    return this.controllerAnswer(parsed.data, requestedVersion);
+  }
+
+  private controllerAnswer(
+    data: z.infer<typeof legacyControllerResultSchema> | z.infer<typeof controllerResultSchema>,
+    requestedVersion: number,
+  ): ControllerAnswer {
+    const legacyRejected =
+      requestedVersion === NETWORK_FILTER_CONTRACT_VERSION && this.isLegacyRejection(data);
+    if (data.version === NETWORK_FILTER_CONTRACT_VERSION) {
+      this.legacyController = false;
+    } else if (requestedVersion === NETWORK_FILTER_CONTRACT_VERSION && !legacyRejected) {
+      return this.mismatch(data.version);
     }
     return {
-      state: parsed.data.state,
-      detail: parsed.data.detail,
-      contractVersion: parsed.data.version,
-      ...(parsed.data.snapshot ? { snapshot: parsed.data.snapshot } : {}),
-      ...(parsed.data.rule ? { rule: parsed.data.rule } : {}),
+      state: data.state,
+      detail: data.detail,
+      contractVersion: data.version,
+      ...(data.snapshot ? { snapshot: data.snapshot } : {}),
+      ...(data.state === "ready" && data.rule ? { rule: data.rule } : {}),
+      ...(legacyRejected ? { legacyRejected: true } : {}),
     };
+  }
+
+  private isLegacyRejection(data: {
+    version: number;
+    state: NetworkFilterControllerState;
+    detail: string;
+  }): boolean {
+    return (
+      data.version === NETWORK_FILTER_LEGACY_CONTRACT_VERSION &&
+      data.state === "unavailable" &&
+      data.detail.startsWith("Unexpected argument '--contract-version'")
+    );
   }
 }
 

@@ -5,6 +5,7 @@ import {
   DEFAULT_NETWORK_FILTER_CONTROLLER_PATH,
   ExecNetworkFilterBridge,
   NETWORK_FILTER_CONTRACT_VERSION,
+  NETWORK_FILTER_LEGACY_CONTRACT_VERSION,
   NETWORK_FILTER_MAX_MANAGED_SIMULATORS,
   createManagedSimulatorLister,
   type ManagedSimulator,
@@ -84,6 +85,16 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
       },
     });
 
+  const legacyBridge = async () => {
+    const instance = bridge();
+    exec.fail(execError(2, fixture("v3-app/status-contract-flag-rejected")));
+    await instance.status();
+    exec.calls.length = 0;
+    managedCalls = 0;
+    warn.mockClear();
+    return instance;
+  };
+
   beforeEach(() => {
     exec = new ScriptedExecFile();
     installed = true;
@@ -108,7 +119,7 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
 
   test("forwards the ambient request signal to the controller exec", async () => {
     const controller = new AbortController();
-    exec.succeed(fixture("ready"));
+    exec.succeed(fixture("v4/ready"));
 
     await runWithAbortSignal(controller.signal, () => bridge().status());
 
@@ -140,12 +151,14 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
       { deviceSet: DEVICE_SET, udid: SIM_A },
       { deviceSet: DEVICE_SET, udid: SIM_B },
     ];
-    exec.succeed(fixture("approval-required"));
+    exec.succeed(fixture("v4/approval-required"));
 
     await bridge().snapshot();
 
     expect(exec.calls[0].args).toEqual([
       "snapshot",
+      "--contract-version",
+      "4",
       "--managed",
       DEVICE_SET,
       SIM_A,
@@ -162,19 +175,19 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
   });
 
   test("runs `status` with a timeout above the controller's own 8 s deadline", async () => {
-    exec.succeed(fixture("approval-required"));
+    exec.succeed(fixture("v4/approval-required"));
 
     await bridge().status();
 
     expect(exec.calls).toHaveLength(1);
     expect(exec.calls[0].file).toBe(CONTROLLER);
-    expect(exec.calls[0].args).toEqual(["status"]);
+    expect(exec.calls[0].args).toEqual(["status", "--contract-version", "4"]);
     expect(exec.calls[0].options?.timeout).toBe(NETWORK_FILTER_CONTROLLER_TIMEOUT_MS);
     expect(NETWORK_FILTER_CONTROLLER_TIMEOUT_MS).toBeGreaterThan(8_000);
   });
 
   test("parses approval_required from a zero exit", async () => {
-    exec.succeed(fixture("approval-required"));
+    exec.succeed(fixture("v4/approval-required"));
 
     expect(await bridge().status()).toEqual({
       state: "approval_required",
@@ -189,21 +202,22 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
     ["unavailable", "unavailable"],
   ] as const) {
     test(`parses ${state} from the JSON the controller prints before exiting 1`, async () => {
-      exec.fail(execError(1, fixture(name)));
+      exec.fail(execError(1, fixture(`v4/${name}`)));
 
       const status = await bridge().status();
 
       expect(status.state).toBe(state);
       expect(status.contractVersion).toBe(NETWORK_FILTER_CONTRACT_VERSION);
-      expect(warn).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledTimes(1);
     });
   }
 
   test("snapshot returns the provider snapshot when ready; status keeps only its rules", async () => {
+    const legacy = await legacyBridge();
     exec.succeed(fixture("ready"));
 
-    const snapshot = await bridge().snapshot();
-    const status = await bridge().status();
+    const snapshot = await legacy.snapshot();
+    const status = await legacy.status();
 
     expect(exec.calls.map((call) => call.args)).toEqual([["snapshot"], ["status"]]);
     expect(snapshot.state).toBe("ready");
@@ -219,7 +233,7 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
     expect(status).toEqual({
       state: "ready",
       detail: snapshot.detail,
-      contractVersion: NETWORK_FILTER_CONTRACT_VERSION,
+      contractVersion: NETWORK_FILTER_LEGACY_CONTRACT_VERSION,
       rules: snapshot.snapshot?.rules,
     });
     expect(status.rules).toEqual([
@@ -242,6 +256,7 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
   });
 
   test("decodes v2 per-flow attribution and the managed simulators", async () => {
+    const legacy = await legacyBridge();
     const line = JSON.parse(fixture("ready"));
     const [flow] = line.snapshot.flows;
     line.snapshot.managedSimulators = [{ deviceSet: DEVICE_SET, udid: SIM_A }];
@@ -263,7 +278,7 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
     ];
     exec.succeed(`${JSON.stringify(line)}\n`);
 
-    const result = await bridge().snapshot();
+    const result = await legacy.snapshot();
 
     expect(result.state).toBe("ready");
     expect(result.snapshot?.managedSimulators).toEqual([{ deviceSet: DEVICE_SET, udid: SIM_A }]);
@@ -278,11 +293,12 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
   });
 
   test("an unknown attribution status is unavailable, never silently accepted", async () => {
+    const legacy = await legacyBridge();
     const line = JSON.parse(fixture("ready"));
     line.snapshot.flows = [{ ...line.snapshot.flows[0], attribution: "maybe" }];
     exec.succeed(`${JSON.stringify(line)}\n`);
 
-    expect((await bridge().snapshot()).state).toBe("unavailable");
+    expect((await legacy.snapshot()).state).toBe("unavailable");
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
@@ -300,14 +316,14 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
 
   test("a contract version mismatch is unavailable with a reinstall step", async () => {
     const line = JSON.parse(fixture("ready"));
-    exec.succeed(`${JSON.stringify({ ...line, version: 4 })}\n`);
+    exec.succeed(`${JSON.stringify({ ...line, version: 5 })}\n`);
 
     const status = await bridge().status();
 
     expect(status.state).toBe("unavailable");
-    expect(status.contractVersion).toBe(4);
-    expect(status.detail).toContain("contract version 4");
-    expect(status.detail).toContain(`expects version ${NETWORK_FILTER_CONTRACT_VERSION}`);
+    expect(status.contractVersion).toBe(5);
+    expect(status.detail).toContain("contract version 5");
+    expect(status.detail).toContain(`expects versions 3 and ${NETWORK_FILTER_CONTRACT_VERSION}`);
     expect(status.detail).toContain(NETWORK_FILTER_INSTALL_COMMAND);
     expect(warn).toHaveBeenCalledTimes(1);
   });
@@ -361,7 +377,7 @@ describe("ExecNetworkFilterBridge (#10590)", () => {
   });
 
   test("ignores leading noise and parses the last JSON line", async () => {
-    exec.succeed(`objc[1]: warning noise\n${fixture("approval-required")}`);
+    exec.succeed(`objc[1]: warning noise\n${fixture("v4/approval-required")}`);
 
     expect((await bridge().status()).state).toBe("approval_required");
   });

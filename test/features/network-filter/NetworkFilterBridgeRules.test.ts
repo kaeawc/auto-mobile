@@ -18,7 +18,7 @@ const DEVICE_SET = "/Users/test/Library/Developer/CoreSimulator/Devices";
 
 function fixture(name: string): string {
   return readFileSync(
-    join(import.meta.dir, "../../fixtures/network-filter-controller", `${name}.json`),
+    join(import.meta.dir, "../../fixtures/network-filter-controller", `v4/${name}.json`),
     "utf8",
   );
 }
@@ -82,6 +82,8 @@ describe("ExecNetworkFilterBridge rule commands (#10264)", () => {
     expect(exec.calls).toEqual([
       [
         "apply",
+        "--contract-version",
+        "4",
         "--managed",
         DEVICE_SET,
         SIM_A,

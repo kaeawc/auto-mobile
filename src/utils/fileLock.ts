@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { defaultIdGenerator, type IdGenerator } from "./IdGenerator";
 import { nodeLockFileSystem, type LockFileSystem } from "./lockFileSystem";
-import { dirname } from "path";
+import { basename, dirname } from "path";
 import { isProcessRunning as defaultIsProcessRunning } from "./processLiveness";
 import { errorMessage } from "./describeUnknownError";
 import { logger } from "./logger";
@@ -39,6 +39,9 @@ export interface LockOwnerGenerationProbe {
 export const OWNERLESS_LOCK_RECLAIM_AGE_MS = 10_000;
 // Guards cover a synchronous burst; tokenless/corrupt crash remnants get the same grace.
 export const RECLAIM_GUARD_ABANDON_AGE_MS = OWNERLESS_LOCK_RECLAIM_AGE_MS;
+export const RECLAIM_GUARD_SLOT_LIMIT = 64;
+// Count unlink attempts, including failures, across the entire acquire attempt.
+export const OWN_TMP_SWEEP_LIMIT = 8;
 
 export interface ExclusiveLockOptions {
   /** Optional synchronous filesystem seam; defaults to node fs. */
@@ -235,7 +238,58 @@ export function* acquireExclusiveLockSteps(
   if (!observed || !isReclaimable(observed, options)) {
     return false;
   }
-  return yield* reclaimExclusiveLock(lockFilePath, options, observed, first.generation);
+  // Reuse the free path's sweep unless mkdir failed before it could run.
+  return yield* reclaimExclusiveLock(
+    lockFilePath,
+    options,
+    observed,
+    first.generation,
+    !first.swept,
+  );
+}
+
+function* sweepOwnPublicationTmps(path: string, options: ExclusiveLockOptions): Steps<void> {
+  const fileSystem = options.fileSystem ?? nodeLockFileSystem;
+  const directory = dirname(path);
+  let names: string[];
+  try {
+    yield { op: "list", path: directory };
+    names = fileSystem.list(directory);
+  } catch (error) {
+    // Optional litter cleanup can be skipped safely when the directory is missing/unreadable.
+    logger.debug(`Lock tmp listing unavailable at ${directory}: ${errorMessage(error)}`, error);
+    return;
+  }
+  const pid = String(options.pid ?? process.pid);
+  const prefix = `${basename(path)}.`;
+  // Parse from the end: a guard prefix's fractional mtime may itself contain dots.
+  const publicationName = /^.+\.(\d+)\.\d+\.[^.]+\.tmp$/;
+  let attempts = 0;
+  for (const name of names.sort()) {
+    if (!name.startsWith(prefix) || publicationName.exec(name)?.[1] !== pid) {
+      continue;
+    }
+    const tmp = path.slice(0, path.length - basename(path).length) + name;
+    if (!(yield* isAbandonedPublicationTmp(tmp, options))) {
+      continue;
+    }
+    yield* cleanupFile(tmp, fileSystem);
+    if (++attempts === OWN_TMP_SWEEP_LIMIT) {
+      break;
+    }
+  }
+}
+
+function* isAbandonedPublicationTmp(path: string, options: ExclusiveLockOptions): Steps<boolean> {
+  try {
+    yield { op: "stat", path };
+    const { mtimeMs } = (options.fileSystem ?? nodeLockFileSystem).stat(path);
+    return (options.now ?? Date.now)() - mtimeMs > RECLAIM_GUARD_ABANDON_AGE_MS;
+  } catch (error) {
+    // A vanished/unreadable tmp can be left safely; publication never depends on cleanup.
+    logger.debug(`Lock tmp age unavailable at ${path}: ${errorMessage(error)}`, error);
+    return false;
+  }
 }
 
 interface LockSample {
@@ -333,15 +387,37 @@ function isOwnStaleLock(
   );
 }
 
+interface ReclaimGuard {
+  k: number;
+  content: string;
+  compacted: boolean;
+}
+
+/**
+ * Exclusive links arbitrate the first free slot. A superseder revalidates every
+ * remembered dead slot before becoming holder; only that holder may replace
+ * slot 0 or remove lower slots. Slot 0 stays present throughout compaction, so
+ * old ascenders fail revalidation and new observers see our live guard.
+ * Descending cleanup preserves a contiguous chain for a lone claimant's crash.
+ * Per instance, quiescent guards are bounded by one plus crashes inside the
+ * supersession window since the last completed supersession; each running
+ * claimant adds at most one (two during install/top removal). After successful
+ * compaction, critical-section crashes leave one slot 0 until guard release;
+ * a completed reclaim cleans its visible chain.
+ * With slot 0 already dead, 63 consecutive supersession-window crashes can
+ * fill the 64-slot cap without a completed supersession. R1/R2 remain unchanged. R3 (a live but aged-out owner)
+ * is outside this invariant; content-checked release narrows, not eliminates it.
+ */
 function* claimReclaimGuard(
   prefix: string,
   options: ExclusiveLockOptions,
   generation: string | undefined,
-): Steps<number | undefined> {
+): Steps<ReclaimGuard | undefined> {
   const fileSystem = options.fileSystem ?? nodeLockFileSystem;
   const pid = options.pid ?? process.pid;
   const content = formatLockContent(pid, options.ownerToken, undefined, generation);
-  for (let k = 0; k < 16; k++) {
+  const lower: LockSample[] = [];
+  for (let k = 0; k < RECLAIM_GUARD_SLOT_LIMIT; k++) {
     const path = `${prefix}.${k}`;
     const published = yield* publishReclaimGuard(
       path,
@@ -351,7 +427,12 @@ function* claimReclaimGuard(
       options.idGenerator,
     );
     if (published === "created") {
-      return k;
+      if (!(yield* revalidateGuardSlots(prefix, lower, fileSystem))) {
+        yield* releaseGuard(path, content, fileSystem);
+        return undefined;
+      }
+      const compacted = k > 0 && (yield* compactGuard(prefix, k, content, options));
+      return { k, content, compacted };
     }
     if (published === "failed") {
       return undefined;
@@ -360,9 +441,93 @@ function* claimReclaimGuard(
     if (guard === undefined || isGuardLive(guard, options)) {
       return undefined;
     }
+    lower.push(guard);
   }
   logger.warn(`Reclaim guard chain exhausted at ${prefix}`);
   return undefined;
+}
+
+function* revalidateGuardSlots(
+  prefix: string,
+  lower: LockSample[],
+  fileSystem: LockFileSystem,
+): Steps<boolean> {
+  for (const [k, remembered] of lower.entries()) {
+    if (!sameSample(yield* sampleLock(`${prefix}.${k}`, fileSystem), remembered)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function* releaseGuard(path: string, content: string, fileSystem: LockFileSystem): Steps<boolean> {
+  const current = yield* readText(path, fileSystem);
+  if (current !== content) {
+    // An aged-out actor must leave a successor's guard (or unreadable path) alone.
+    logger.debug(`Reclaim guard release skipped at ${path}: content changed or unavailable`);
+    return false;
+  }
+  return yield* unlinkGuard(path, fileSystem);
+}
+
+function* unlinkGuard(path: string, fileSystem: LockFileSystem): Steps<boolean> {
+  try {
+    yield { op: "unlink", path };
+    fileSystem.unlink(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      // Already absent means this cleanup has completed.
+      logger.debug(`Reclaim guard already removed at ${path}: ${errorMessage(error)}`);
+      return true;
+    }
+    logger.warn(`Reclaim guard removal failed at ${path}: ${errorMessage(error)}`, error);
+    return false;
+  }
+}
+
+function* installGuard(
+  path: string,
+  content: string,
+  options: ExclusiveLockOptions,
+): Steps<boolean> {
+  const fileSystem = options.fileSystem ?? nodeLockFileSystem;
+  const pid = options.pid ?? process.pid;
+  const idGenerator = options.idGenerator ?? defaultIdGenerator;
+  const tmp = `${path}.${pid}.${++publicationCounter}.${idGenerator.next()}.tmp`;
+  try {
+    yield* cleanupFile(tmp, fileSystem);
+    yield { op: "writeFile", path: tmp };
+    fileSystem.writeFile(tmp, content);
+    yield { op: "rename", path: tmp };
+    fileSystem.rename(tmp, path);
+    return true;
+  } catch (error) {
+    logger.warn(`Reclaim guard install failed at ${path}: ${errorMessage(error)}`, error);
+    return false;
+  } finally {
+    yield* cleanupFile(tmp, fileSystem);
+  }
+}
+
+function* compactGuard(
+  prefix: string,
+  k: number,
+  content: string,
+  options: ExclusiveLockOptions,
+): Steps<boolean> {
+  const fileSystem = options.fileSystem ?? nodeLockFileSystem;
+  if (!(yield* installGuard(`${prefix}.0`, content, options))) {
+    return false;
+  }
+  if (yield* releaseGuard(`${prefix}.${k}`, content, fileSystem)) {
+    for (let lower = k - 1; lower > 0; lower--) {
+      if (!(yield* unlinkGuard(`${prefix}.${lower}`, fileSystem))) {
+        break;
+      }
+    }
+  }
+  return true;
 }
 
 function isGuardLive(guard: LockSample, options: ExclusiveLockOptions): boolean {
@@ -389,6 +554,8 @@ function isGuardLive(guard: LockSample, options: ExclusiveLockOptions): boolean 
   // bound between its under-guard sample and rename can be superseded, then rename a
   // successor's lock. The post-rename fingerprint check and non-clobbering restore
   // remain defence in depth. Empty/unparseable legacy guards share this age rule.
+  // Content-checked guard release leaves an installed successor alone, but its
+  // read/unlink is not atomic and cannot close all of this out-of-scope R3 window.
   // Negative age keeps the guard live; a missing/unreadable sample backs off above.
   const age = (options.now ?? Date.now)() - guard.mtimeMs;
   return !(age > RECLAIM_GUARD_ABANDON_AGE_MS);
@@ -399,12 +566,16 @@ function* reclaimExclusiveLock(
   options: ExclusiveLockOptions,
   observed: LockSample,
   generation: string | undefined,
+  sweep = true,
 ): Steps<boolean> {
   const fileSystem = options.fileSystem ?? nodeLockFileSystem;
   const pid = options.pid ?? process.pid;
   const prefix = guardPrefix(lockFilePath, observed);
-  const k = yield* claimReclaimGuard(prefix, options, generation);
-  if (k === undefined) {
+  if (sweep) {
+    yield* sweepOwnPublicationTmps(lockFilePath, options);
+  }
+  const guard = yield* claimReclaimGuard(prefix, options, generation);
+  if (guard === undefined) {
     return false;
   }
   try {
@@ -423,13 +594,16 @@ function* reclaimExclusiveLock(
       return false;
     }
     yield* removeStaleLockMarker(marker, fileSystem);
-    for (let lower = 0; lower < k; lower++) {
+    for (let lower = guard.compacted ? 1 : 0; lower < guard.k; lower++) {
       // Once removed, this fingerprint cannot pass the path check again.
       yield* cleanupFile(`${prefix}.${lower}`, fileSystem);
     }
-    return (yield* writeExclusiveLockFile(lockFilePath, pid, options)).acquired;
+    return (yield* writeExclusiveLockFile(lockFilePath, pid, options, false)).acquired;
   } finally {
-    yield* cleanupFile(`${prefix}.${k}`, fileSystem);
+    yield* releaseGuard(`${prefix}.${guard.k}`, guard.content, fileSystem);
+    if (guard.compacted) {
+      yield* releaseGuard(`${prefix}.0`, guard.content, fileSystem);
+    }
   }
 }
 
@@ -768,18 +942,38 @@ function* writeExclusiveLockFile(
   path: string,
   pid: number,
   options: ExclusiveLockOptions,
-): Steps<{ acquired: boolean; generation: string | undefined }> {
+  sweep = true,
+): Steps<{ acquired: boolean; generation: string | undefined; swept: boolean }> {
   const fileSystem = options.fileSystem ?? nodeLockFileSystem;
   try {
     yield { op: "mkdir", path: dirname(path) };
     fileSystem.mkdir(dirname(path));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      // A parent occupied by a non-directory reads as held for pre-#12086 parity.
+      logger.debug(
+        `Lock parent already occupied at ${dirname(path)}: ${errorMessage(error)}`,
+        error,
+      );
+      return { acquired: false, generation: undefined, swept: false };
+    }
+    throw toActionableError(error, `Failed to create exclusive lock file at ${path}`);
+  }
+  if (sweep) {
+    yield* sweepOwnPublicationTmps(path, options);
+  }
+  try {
     const generation = captureLockOwnerGeneration(options.ownerGeneration, pid);
     const content = formatLockContent(pid, options.ownerToken, options.metadata, generation);
     const publication = yield* publishFile(path, content, pid, fileSystem, options.idGenerator);
     if (typeof publication === "string") {
-      return { acquired: publication === "created", generation };
+      return { acquired: publication === "created", generation, swept: sweep };
     }
-    return { acquired: yield* writeLegacyLock(path, content, fileSystem), generation };
+    return {
+      acquired: yield* writeLegacyLock(path, content, fileSystem),
+      generation,
+      swept: sweep,
+    };
   } catch (error) {
     // Genuine IO failures are not contention (#3623).
     throw toActionableError(error, `Failed to create exclusive lock file at ${path}`);

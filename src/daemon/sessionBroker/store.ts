@@ -78,6 +78,11 @@ export interface DestructionTicket {
   revision: number;
 }
 
+export interface BrokerAbandonment {
+  request: BrokerRequestRecord;
+  ticket?: DestructionTicket;
+}
+
 export function destructionTicket(resource: BrokerResourceRecord): DestructionTicket {
   return { resourceId: resource.resourceId, revision: resource.revision };
 }

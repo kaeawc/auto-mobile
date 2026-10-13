@@ -11,6 +11,7 @@ import {
   type BrokerAdmissionInput,
   type BrokerResourceRecord,
 } from "../../../src/daemon/sessionBroker/store";
+import { sessionRequestFingerprint } from "../../../src/daemon/sessionBroker/requestIdentity";
 
 const OWNER: SlotProcessIdentity = { daemonId: "daemon-a", pid: 101, processGenerationToken: "a" };
 const SUCCESSOR: SlotProcessIdentity = {
@@ -20,6 +21,7 @@ const SUCCESSOR: SlotProcessIdentity = {
 };
 const PHONE = { platform: "ios", model: "phone", runtime: "27.0" };
 const TABLET = { platform: "ios", model: "tablet", runtime: "27.0" };
+const CONSUMER_TOKEN = "consumer-owner";
 
 describe("session broker durable admission", () => {
   let registry: SqliteSlotRegistry;
@@ -213,6 +215,44 @@ describe("session broker durable admission", () => {
     expect(
       await store.admit(input("new-attempt", { limits: { totalDeviceCap: 1, sessionCap: 1 } })),
     ).toMatchObject({ kind: "create" });
+  });
+
+  test("abandoning an unknown identity creates an owner-fenced terminal tombstone", async () => {
+    const abandoned = await store.abandon("never-admitted", OWNER, CONSUMER_TOKEN);
+    expect(abandoned.request).toMatchObject({
+      requestId: "never-admitted",
+      state: "failed",
+      resourceId: null,
+      sessionId: null,
+      errorCode: "session_request_abandoned",
+    });
+    expect(abandoned.ticket).toBeUndefined();
+    expect(await store.abandon("never-admitted", OWNER, CONSUMER_TOKEN)).toEqual(abandoned);
+    await expect(store.abandon("never-admitted", OWNER, "different-owner")).rejects.toThrow(
+      "another liveness owner",
+    );
+  });
+
+  test("abandoning an active request atomically preserves its session and cleanup ownership", async () => {
+    const parameters = input("active").parameters;
+    const active = await prepare("active", {
+      fingerprint: sessionRequestFingerprint(parameters, CONSUMER_TOKEN),
+    });
+    const abandoned = await store.abandon("active", OWNER, CONSUMER_TOKEN);
+    expect(abandoned.request).toMatchObject({
+      state: "failed",
+      sessionId: active.sessionId,
+      errorCode: "session_request_abandoned",
+    });
+    expect(abandoned.ticket).toEqual(
+      destructionTicket(
+        (await store.listResources()).find(
+          (resource) => resource.resourceId === active.resource.resourceId,
+        )!,
+      ),
+    );
+    expect((await store.listResources())[0]?.state).toBe("destroying");
+    expect(await store.confirmDestroyed(abandoned.ticket!)).toBe(false);
   });
 
   test("released acquisition receipt never grants another session after physical reuse", async () => {

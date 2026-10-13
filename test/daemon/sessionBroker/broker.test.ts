@@ -307,6 +307,73 @@ describe("session-only broker lifecycle", () => {
     await ready("new-attempt");
   });
 
+  test("abandoning an unknown identity is terminal and blocks every late prepare", async () => {
+    const abandoned = await broker.abandon("never-sent", "owner-token");
+    expect(abandoned).toMatchObject({
+      requestId: "never-sent",
+      outcome: "failed",
+      sessionUuid: null,
+      cleanupPending: false,
+      failure: { code: "session_request_abandoned", retryable: false },
+    });
+    expect(await broker.prepare(config("never-sent"), "owner-token")).toEqual(abandoned);
+    expect(devices.prepared).toHaveLength(0);
+    await expect(broker.abandon("never-sent", "different-owner")).rejects.toThrow(
+      "another liveness owner",
+    );
+  });
+
+  test("abandonment wins while the original prepare is still resolving its catalog", async () => {
+    const entered = Promise.withResolvers<void>();
+    const complete = Promise.withResolvers<void>();
+    options.catalog = async () => {
+      entered.resolve();
+      await complete.promise;
+      return iosCatalog();
+    };
+    const pending = broker.prepare(config("catalog-race"), "owner-token");
+    await entered.promise;
+    const abandoned = await broker.abandon("catalog-race", "owner-token");
+    expect(abandoned).toMatchObject({
+      outcome: "failed",
+      cleanupPending: true,
+      failure: { code: "session_request_abandoned" },
+    });
+    complete.resolve();
+    expect(await pending).toMatchObject({
+      outcome: "failed",
+      cleanupPending: false,
+      failure: { code: "session_request_abandoned" },
+    });
+    expect(await broker.status("catalog-race")).toMatchObject({
+      outcome: "failed",
+      cleanupPending: false,
+      failure: { code: "session_request_abandoned" },
+    });
+    expect(devices.prepared).toHaveLength(0);
+  });
+
+  test("abandoning an active request releases its exact session and retires its device", async () => {
+    const sessionId = await ready("active-abandon");
+    devices.canDestroy = false;
+    expect(await broker.abandon("active-abandon", "owner-token")).toMatchObject({
+      outcome: "failed",
+      sessionUuid: sessionId,
+      cleanupPending: true,
+      failure: { code: "session_request_abandoned" },
+    });
+    expect(devices.sessions.has(sessionId)).toBe(false);
+    expect(await broker.hasActiveSession(sessionId)).toBe(false);
+    devices.canDestroy = true;
+    await broker.recover();
+    expect(await broker.status("active-abandon")).toMatchObject({
+      outcome: "failed",
+      sessionUuid: sessionId,
+      cleanupPending: false,
+      failure: { code: "session_request_abandoned" },
+    });
+  });
+
   test("a concurrent catalog failure cannot overwrite an admitted sibling request", async () => {
     const failingReadStarted = Promise.withResolvers<void>();
     const failRead = Promise.withResolvers<void>();
@@ -429,6 +496,44 @@ describe("session-only broker lifecycle", () => {
       complete.resolve();
     }
     expect(await pending).toMatchObject({ outcome: "ready" });
+  });
+
+  test("abandoning an in-flight prepare aborts it and recovery drains a late native claim", async () => {
+    const entered = Promise.withResolvers<void>();
+    const complete = Promise.withResolvers<void>();
+    const aborted = Promise.withResolvers<void>();
+    devices.canDestroy = false;
+    devices.prepareHook = async (request) => {
+      request.signal?.addEventListener("abort", () => aborted.resolve(), { once: true });
+      entered.resolve();
+      await complete.promise;
+    };
+    const pending = broker.prepare(config("in-flight-abandon"), "owner-token");
+    await entered.promise;
+    const abandoned = await broker.abandon("in-flight-abandon", "owner-token");
+    expect(abandoned).toMatchObject({
+      outcome: "failed",
+      cleanupPending: true,
+      failure: { code: "session_request_abandoned" },
+    });
+    await aborted.promise;
+    await broker.recover();
+    expect(devices.destroyed).toHaveLength(0);
+    complete.resolve();
+    expect(await pending).toMatchObject({
+      outcome: "failed",
+      cleanupPending: true,
+      failure: { code: "session_request_abandoned" },
+    });
+    expect(devices.sessions.size).toBe(1);
+    devices.canDestroy = true;
+    await broker.recover();
+    expect(devices.sessions.size).toBe(0);
+    expect(await broker.status("in-flight-abandon")).toMatchObject({
+      outcome: "failed",
+      cleanupPending: false,
+      failure: { code: "session_request_abandoned" },
+    });
   });
 
   test("shutdown cancels and joins acquisition before returning", async () => {

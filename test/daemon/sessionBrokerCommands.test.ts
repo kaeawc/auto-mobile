@@ -5,6 +5,7 @@ import {
   runDaemonCommand,
 } from "../../src/daemon/cli/runDaemonCommand";
 import {
+  abandonBrokerSessionRequest,
   parseSessionBrokerCommandArgs,
   queryBrokerSessionRequestStatus,
   releaseBrokerSession,
@@ -13,6 +14,7 @@ import {
   type SessionBrokerCommandClient,
 } from "../../src/daemon/cli/sessionBrokerCommands";
 import {
+  DAEMON_ABANDON_SESSION_REQUEST_METHOD,
   DAEMON_RELEASE_BROKER_SESSION_METHOD,
   DAEMON_SESSION_REQUEST_STATUS_METHOD,
 } from "../../src/daemon/sessionBrokerProxyAcquisition";
@@ -59,11 +61,16 @@ class FakeBrokerCommandClient implements SessionBrokerCommandClient {
 }
 
 const statusArgs = [REQUEST_ID, "--liveness-owner-token", OWNER_TOKEN, "--json"];
+const abandonArgs = [REQUEST_ID, "--liveness-owner-token", OWNER_TOKEN, "--json"];
 const releaseArgs = [SESSION_UUID, "--liveness-owner-token", OWNER_TOKEN, "--json"];
 
 describe("session broker command arguments", () => {
   test("accepts either normal flag form and retains the explicit identity", () => {
     expect(parseSessionBrokerCommandArgs("session-request-status", statusArgs)).toEqual({
+      identity: REQUEST_ID,
+      livenessOwnerToken: OWNER_TOKEN,
+    });
+    expect(parseSessionBrokerCommandArgs("abandon-session-request", abandonArgs)).toEqual({
       identity: REQUEST_ID,
       livenessOwnerToken: OWNER_TOKEN,
     });
@@ -258,5 +265,33 @@ describe("session broker release command", () => {
     } finally {
       log.mockRestore();
     }
+  });
+});
+
+describe("session broker abandon command", () => {
+  test("returns the terminal receipt and uses the cleanup-capable timeout", async () => {
+    const receipt = {
+      contractVersion: 1,
+      requestId: REQUEST_ID,
+      outcome: "failed",
+      sessionUuid: null,
+      profile: null,
+      cleanupPending: false,
+      failure: {
+        code: "session_request_abandoned",
+        message: "Session request was abandoned by its liveness owner",
+        retryable: false,
+      },
+    } as const;
+    const client = new FakeBrokerCommandClient(receipt);
+    expect(await abandonBrokerSessionRequest(abandonArgs, () => client)).toBe(receipt);
+    expect(client.calls).toEqual([
+      {
+        method: DAEMON_ABANDON_SESSION_REQUEST_METHOD,
+        params: { requestId: REQUEST_ID, livenessOwnerToken: OWNER_TOKEN },
+        options: { timeoutMs: SESSION_BROKER_RELEASE_TIMEOUT_MS },
+      },
+    ]);
+    expect(client.closeCalls).toBe(1);
   });
 });

@@ -12,6 +12,7 @@ import { ManagedConnectionScopes } from "../../../src/daemon/managedSlots/manage
 import { SessionBroker } from "../../../src/daemon/sessionBroker/broker";
 import {
   bindBrokerRegistration,
+  handleAbandonBrokerSessionRequest,
   handleBrokerSessionStatus,
   handlePrepareBrokerSession,
   handleReleaseBrokerSession,
@@ -88,6 +89,7 @@ class HandlerBroker extends SessionBroker {
     signal?: AbortSignal;
   }> = [];
   readonly statusCalls: Array<{ requestId: string; token: string }> = [];
+  readonly abandonCalls: Array<{ requestId: string; token: string }> = [];
   readonly sessionCalls: Array<{ sessionId: string; token: string }> = [];
   readonly releaseCalls: string[] = [];
 
@@ -149,6 +151,11 @@ class HandlerBroker extends SessionBroker {
       error: null,
       errorCode: null,
     };
+  }
+
+  override async abandon(requestId: string, token: string): Promise<SessionBrokerResult> {
+    this.abandonCalls.push({ requestId, token });
+    return result(requestId, "failed");
   }
 
   override async release(sessionId: string) {
@@ -360,6 +367,30 @@ describe("session broker daemon handlers", () => {
       sessionUuids: new Set(),
     });
     expect(broker.statusCalls).toEqual([{ requestId: "request-1", token: "wrong-owner" }]);
+  });
+
+  test("abandon validates and forwards the original request identity and owner", async () => {
+    expect(
+      await handleAbandonBrokerSessionRequest(
+        request({ requestId: "request-1", livenessOwnerToken: TOKEN }),
+        state,
+      ),
+    ).toEqual({
+      success: true,
+      result: result("request-1", "failed"),
+    });
+    expect(broker.abandonCalls).toEqual([{ requestId: "request-1", token: TOKEN }]);
+
+    expect(
+      await handleAbandonBrokerSessionRequest(
+        request({ requestId: "", livenessOwnerToken: TOKEN }),
+        state,
+      ),
+    ).toEqual({
+      success: false,
+      error: "requestId and livenessOwnerToken are required",
+    });
+    expect(broker.abandonCalls).toHaveLength(1);
   });
 
   test("release requires a token-owned receipt and never releases an unknown session", async () => {

@@ -841,10 +841,11 @@ describe("refusal wire contract", () => {
         limit: 2,
         usage: { orphaned: 0 },
         retained: [
-          { reason: "deletion_pending", attempts: 2, lastError: "delete failed" },
+          { reason: "deletion_pending", attempts: 2, failedDeletes: 1, lastError: "delete failed" },
           {
             reason: "deletion_stuck",
-            attempts: 3,
+            attempts: 5,
+            failedDeletes: 3,
             lastError: "native delete keeps failing",
           },
         ],

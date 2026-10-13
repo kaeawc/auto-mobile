@@ -263,7 +263,7 @@ describe("managed-slot total-resource budget", () => {
     return { kind: "absent" };
   }
 
-  async function markedCache(attempts: number) {
+  async function markedCache(attempts: number, failedDeletes = attempts) {
     await cache("amslot-stuck");
     const row = (await registry.listFreeDevices())[0];
     const owner = { daemonId: "delete-owner", pid: 7 };
@@ -272,12 +272,29 @@ describe("managed-slot total-resource budget", () => {
       expect(
         await registry.recordFreeDeviceDeletionAttempt(row, owner, {
           error: "native delete failed",
+          nativeDeleteFailed: attempt < failedDeletes,
           nextAttemptAtMs: timer.now() + 1_000,
         }),
       ).toBe(true);
     }
     return (await registry.listFreeDevices())[0];
   }
+
+  test.each([false, true])(
+    "ten blocked attempts stay charged and committed (eviction=%s)",
+    async (eviction) => {
+      await markedCache(10, 0);
+      await cache("amslot-eligible");
+      expect(await usage()).toMatchObject({ total: 2, deleting: 1, cached: 1 });
+      const mine = await creation("amslot-new");
+      expect(await budget(2, eviction).admitCreation({ journalEntryId: mine.id })).toMatchObject({
+        kind: "exhausted",
+        usage: { total: 3, deleting: 1 },
+        retained: [{ reason: "deletion_pending", attempts: 10, failedDeletes: 0 }],
+      });
+      expect(evictor.calls).toEqual([]);
+    },
+  );
 
   test.each([2, 3])("slot-bound deletion remains charged at %s attempts", async (attempts) => {
     await markedCache(attempts);
@@ -315,7 +332,14 @@ describe("managed-slot total-resource budget", () => {
     });
     expect(await selector.select(registry, {})).toMatchObject({
       candidates: [],
-      skipped: [{ reason: "deletion_stuck", attempts: 3, lastError: "native delete failed" }],
+      skipped: [
+        {
+          reason: "deletion_stuck",
+          attempts: 3,
+          failedDeletes: 3,
+          lastError: "native delete failed",
+        },
+      ],
     });
     expect(
       computeManagedSlotResourceUsage({
@@ -338,6 +362,7 @@ describe("managed-slot total-resource budget", () => {
             stableDeviceId: "amslot-stuck",
             reason: "deletion_pending",
             attempts: 2,
+            failedDeletes: 2,
             lastError: "native delete failed",
           },
         ],
@@ -375,6 +400,7 @@ describe("managed-slot total-resource budget", () => {
             stableDeviceId: "amslot-stuck",
             reason: "deletion_stuck",
             attempts: 3,
+            failedDeletes: 3,
             lastError: "native delete failed",
           },
         ],

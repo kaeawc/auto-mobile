@@ -26,7 +26,7 @@ describe("slot registry migrations", () => {
         db,
         provider: slotRegistryMigrationProvider,
       }).getMigrations();
-      expect(migrations).toHaveLength(5);
+      expect(migrations).toHaveLength(6);
       expect(migrations.every((migration) => migration.executedAt === undefined)).toBe(true);
       expect(await db.introspection.getTables({ withInternalKyselyTables: true })).toEqual([]);
       await migrateSlotRegistry(db, ":memory:");
@@ -64,6 +64,38 @@ describe("slot registry migrations", () => {
       expect(await registry.listFreeDevices()).toMatchObject([
         { state: "stopped", deletion: null },
       ]);
+    } finally {
+      await db.destroy();
+    }
+  });
+
+  test("migration 005 reads legacy marked rows with zero failed deletes", async () => {
+    const db = new Kysely<SlotRegistryDatabase>({
+      dialect: new BunSqliteDialect({ database: new Sqlite(":memory:") }),
+    });
+    try {
+      const migrator = new Migrator({ db, provider: slotRegistryMigrationProvider });
+      expect(
+        (await migrator.migrateTo("2026_10_12_004_free_device_deletion")).error,
+      ).toBeUndefined();
+      await sql`INSERT INTO slot_free_devices (platform, stable_device_id, from_scope_key, freed_at_ms,
+        state, deletion_owner_daemon_id, deletion_owner_pid, deletion_started_at_ms,
+        deletion_attempts, deletion_last_error, deletion_next_attempt_at_ms)
+        VALUES ('android', 'amslot-legacy', 'scope', 12, 'free', 'old', 7, 12, 10, 'blocked', 99)`.execute(
+        db,
+      );
+      await migrateSlotRegistry(db, ":memory:");
+      const registry = new SqliteSlotRegistry(db, { timer: new FakeTimer() });
+      expect((await registry.listFreeDeviceDeletions())[0].deletion).toMatchObject({
+        attempts: 10,
+        failedDeletes: 0,
+        lastError: "blocked",
+        nextAttemptAtMs: 99,
+      });
+      expect(
+        (await db.selectFrom("slot_free_devices").selectAll().executeTakeFirstOrThrow())
+          .deletion_failed_deletes,
+      ).toBeNull();
     } finally {
       await db.destroy();
     }

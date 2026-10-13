@@ -594,6 +594,7 @@ export class FakeSlotRegistry implements SlotRegistry {
       owner: { ...owner },
       startedAtMs: this.timer.now(),
       attempts: 0,
+      failedDeletes: 0,
       lastError: null,
       nextAttemptAtMs: this.timer.now(),
     };
@@ -603,13 +604,14 @@ export class FakeSlotRegistry implements SlotRegistry {
   async recordFreeDeviceDeletionAttempt(
     row: FreeDeviceIdentity,
     owner: SlotJournalOwner,
-    attempt: { error: string; nextAttemptAtMs: number },
+    attempt: { error: string; nextAttemptAtMs: number; nativeDeleteFailed?: boolean },
   ): Promise<boolean> {
     const current = this.deletionRow(row, owner);
     if (!current?.deletion) {
       return false;
     }
     current.deletion.attempts += 1;
+    current.deletion.failedDeletes += Number(attempt.nativeDeleteFailed === true);
     current.deletion.lastError = attempt.error;
     current.deletion.nextAttemptAtMs = attempt.nextAttemptAtMs;
     return true;

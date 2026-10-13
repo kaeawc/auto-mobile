@@ -34,16 +34,17 @@ export interface ManagedSlotEvictionSkip {
   stableDeviceId: string;
   reason: string;
   attempts?: number;
+  failedDeletes?: number;
   lastError?: string | null;
 }
 
-/** Free deletion markers stop reserving budget after this many recorded attempts. */
+/** Free deletion markers stop reserving budget after this many failed native deletes. */
 export const MANAGED_SLOT_DELETION_UNCOUNTED_AFTER_ATTEMPTS = 3;
 
 export function isStuckFreeDeviceDeletion(
-  deletion: { attempts?: number } | null | undefined,
+  deletion: { failedDeletes?: number } | null | undefined,
 ): boolean {
-  return (deletion?.attempts ?? 0) >= MANAGED_SLOT_DELETION_UNCOUNTED_AFTER_ATTEMPTS;
+  return (deletion?.failedDeletes ?? 0) >= MANAGED_SLOT_DELETION_UNCOUNTED_AFTER_ATTEMPTS;
 }
 
 /** Shared refusal evidence for a journaled free-device deletion. */
@@ -58,6 +59,7 @@ export function managedSlotDeletionSkip(
     stableDeviceId: row.stableDeviceId,
     reason: isStuckFreeDeviceDeletion(row.deletion) ? "deletion_stuck" : "deletion_pending",
     attempts: row.deletion.attempts,
+    failedDeletes: row.deletion.failedDeletes,
     lastError: row.deletion.lastError,
   };
 }
@@ -88,7 +90,7 @@ export type ManagedSlotEvictionResult =
   | { kind: "absent" }
   /** Adopted, re-freed or claimed meanwhile; nothing was deleted. */
   | { kind: "lost" }
-  /** Journaled but unconfirmed: redrive retries it; the budget applies its attempt threshold. */
+  /** Journaled but unconfirmed: redrive retries it; the budget applies its failed native delete threshold. */
   | { kind: "failed"; message: string };
 
 /**

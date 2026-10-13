@@ -610,13 +610,15 @@
               "stableDeviceId": "amslot-kept",
               "reason": "deletion_pending",
               "attempts": 2,
+              "failedDeletes": 1,
               "lastError": "delete failed"
             },
             {
               "platform": "android",
               "stableDeviceId": "amslot-stuck",
               "reason": "deletion_stuck",
-              "attempts": 3,
+              "attempts": 5,
+              "failedDeletes": 3,
               "lastError": "native delete keeps failing"
             }
           ],

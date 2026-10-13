@@ -214,7 +214,6 @@ test/daemon/releasingSessionRequests.test.ts
 test/daemon/selectorStartTakesDeviceFromWaitingRestartRecovery.test.ts
 test/daemon/sessionCacheNoEscapeHatch.test.ts
 test/daemon/sessionCacheTypedSlots.test.ts
-test/daemon/sessionExpiryProperties.test.ts
 test/daemon/sessionHeartbeatExecutionVetoCeiling.test.ts
 test/daemon/sessionHoldDiagnostics.test.ts
 test/daemon/sessionInfoWallClock.test.ts

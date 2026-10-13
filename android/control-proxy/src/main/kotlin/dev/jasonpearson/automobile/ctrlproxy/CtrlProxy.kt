@@ -3591,7 +3591,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     if (!prototypeController.isShowing && !prototypeController.isSuspendedByForeground) return
     val windowType =
       if (eventPackage == packageName) ownWindowType
-      else ownWindowTypeMemo.windowType(event.windowId) { ownEventWindowType(event) }
+      else
+        ownWindowTypeMemo.windowType(event.windowId, retryUnresolvedImmediately = true) {
+          ownEventWindowType(event)
+        }
     prototypeForeground.onWindowEvent(eventPackage, windowType)
   }
 
@@ -3642,7 +3645,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     // own accessibility-overlay windows, or system windows while an app-layer prototype shows, are
     // dropped. The keyboard and MainActivity keep advancing frameContext and hierarchy pushes.
     // This filter touches neither the memo nor prototype state for foreign packages. Unknown types
-    // fail open and are retried at a bounded rate.
+    // fail open and are retried at a bounded rate by the filter. Prototype foreground tracking also
+    // memoises foreign application windows' types, using positive entries only.
     val eventPackage = event.packageName?.toString()
     val ownWindowDecision =
       ownWindowEventDecision(

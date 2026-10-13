@@ -3,7 +3,11 @@ package dev.jasonpearson.automobile.ctrlproxy
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
 
-/** Memoises accessibility window types by window id. Thread-safe. */
+/**
+ * Memoises accessibility window types by window id. Thread-safe. The own-window filter does no
+ * memo or prototype-state work for foreign packages. Prototype foreground tracking also memoises
+ * foreign application windows' types, using positive entries only.
+ */
 internal class OwnWindowTypeMemo(
   private val nowMs: () -> Long,
   private val unresolvedRetryMs: Long = 250,
@@ -18,17 +22,31 @@ internal class OwnWindowTypeMemo(
     require(maxEntries > 0) { "maxEntries must be positive" }
   }
 
-  /** Window type for [windowId]; calls [resolve] (the binder work) only on a miss/expiry. */
+  /**
+   * Window type for [windowId]; calls [resolve] (the binder work) on a miss/expiry. When
+   * [retryUnresolvedImmediately] is true, only positive entries are reused and null is not stored.
+   */
   @Synchronized
-  fun windowType(windowId: Int, resolve: () -> Int?): Int? {
-    if (windowId < 0) return null
+  fun windowType(
+    windowId: Int,
+    retryUnresolvedImmediately: Boolean = false,
+    resolve: () -> Int?,
+  ): Int? {
+    if (windowId == UNDEFINED_WINDOW_ID) return null
     val now = nowMs()
     val entry = entries[windowId]
     if (entry != null) {
       val ttlMs = if (entry.type == null) unresolvedRetryMs else resolvedTtlMs
-      if (now >= entry.atMs && now - entry.atMs < ttlMs) return entry.type
+      if (
+        (entry.type != null || !retryUnresolvedImmediately) &&
+          now >= entry.atMs &&
+          now - entry.atMs < ttlMs
+      ) {
+        return entry.type
+      }
     }
     val type = resolve()
+    if (type == null && retryUnresolvedImmediately) return null
     // Clear before inserting a new id so the hard cap is never exceeded, even transiently.
     if (entry == null && entries.size >= maxEntries) entries.clear()
     entries[windowId] = Entry(type, now)
@@ -38,6 +56,10 @@ internal class OwnWindowTypeMemo(
   @Synchronized
   fun clear() {
     entries.clear()
+  }
+
+  private companion object {
+    const val UNDEFINED_WINDOW_ID = -1
   }
 }
 
@@ -53,7 +75,7 @@ internal fun ownWindowEventDecision(
   resolve: () -> Int?,
 ): OwnWindowEventDecision {
   if (eventPackage != ownPackage) return OwnWindowEventDecision(false, null)
-  val type = memo.windowType(windowId, resolve)
+  val type = memo.windowType(windowId, resolve = resolve)
   val showing = type == AccessibilityWindowInfo.TYPE_SYSTEM && appLayerShowing()
   return OwnWindowEventDecision(
     shouldSkipOwnWindowEvent(eventPackage, ownPackage, type, showing),

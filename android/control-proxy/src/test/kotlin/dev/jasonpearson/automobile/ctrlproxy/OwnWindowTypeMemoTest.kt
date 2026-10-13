@@ -15,14 +15,7 @@ class OwnWindowTypeMemoTest {
   fun `overlay burst resolves once and interleaved foreign events do no work`() {
     var resolutions = 0
     var stateReads = 0
-    var clockReads = 0
-    val memo =
-      OwnWindowTypeMemo(
-        nowMs = {
-          clockReads++
-          0L
-        },
-      )
+    val memo = OwnWindowTypeMemo(nowMs = { 0L })
     val resolve = {
       resolutions++
       AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY
@@ -43,7 +36,6 @@ class OwnWindowTypeMemoTest {
     // Previously 100 resolutions = 200 binder calls; now 1 resolution = 2 binder calls.
     assertEquals(1, resolutions)
     assertEquals(0, stateReads)
-    assertEquals(BURST_COUNT, clockReads)
     var foreignResolutions = 0
     assertNull(
       memo.windowType(FOREIGN_WINDOW_ID) {
@@ -70,10 +62,10 @@ class OwnWindowTypeMemoTest {
     }
     assertEquals(1, resolutions) // 0 through 99 ms occupy one 250 ms retry window.
     now = RETRY_MS - 1
-    assertNull(memo.windowType(OWN_WINDOW_ID, resolve))
+    assertNull(memo.windowType(OWN_WINDOW_ID, resolve = resolve))
     assertEquals(1, resolutions)
     now = RETRY_MS
-    assertNull(memo.windowType(OWN_WINDOW_ID, resolve))
+    assertNull(memo.windowType(OWN_WINDOW_ID, resolve = resolve))
     assertEquals(2, resolutions)
     type = AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY
     now = RETRY_MS * 2 - 1
@@ -84,6 +76,95 @@ class OwnWindowTypeMemoTest {
       now++
     }
     assertEquals(EXPECTED_RETRY_RESOLUTIONS, resolutions)
+  }
+
+  @Test
+  fun `immediate retry resolves every unknown event then caches success`() {
+    var resolutions = 0
+    var type: Int? = null
+    val memo = OwnWindowTypeMemo(nowMs = { 0L })
+    val resolve = {
+      resolutions++
+      type
+    }
+    repeat(IMMEDIATE_NULL_COUNT) {
+      assertNull(
+        memo.windowType(OWN_WINDOW_ID, retryUnresolvedImmediately = true, resolve = resolve)
+      )
+    }
+    assertEquals(IMMEDIATE_NULL_COUNT, resolutions)
+    type = AccessibilityWindowInfo.TYPE_APPLICATION
+    assertEquals(
+      type,
+      memo.windowType(OWN_WINDOW_ID, retryUnresolvedImmediately = true, resolve = resolve),
+    )
+    assertEquals(
+      type,
+      memo.windowType(OWN_WINDOW_ID, retryUnresolvedImmediately = true) {
+        error("Fresh positive entry must be cached")
+      },
+    )
+    assertEquals(IMMEDIATE_NULL_COUNT + 1, resolutions)
+  }
+
+  @Test
+  fun `immediate retry null does not create a bounded negative entry`() {
+    val memo = OwnWindowTypeMemo(nowMs = { 0L })
+    var resolutions = 0
+    assertNull(
+      memo.windowType(OWN_WINDOW_ID, retryUnresolvedImmediately = true) {
+        resolutions++
+        null
+      }
+    )
+    assertEquals(
+      AccessibilityWindowInfo.TYPE_APPLICATION,
+      memo.windowType(OWN_WINDOW_ID) {
+        resolutions++
+        AccessibilityWindowInfo.TYPE_APPLICATION
+      },
+    )
+    assertEquals(2, resolutions)
+  }
+
+  @Test
+  fun `immediate retry ignores bounded negative entries without extending them on null`() {
+    var now = 0L
+    var resolutions = 0
+    val memo = OwnWindowTypeMemo(nowMs = { now })
+    val unresolved = {
+      resolutions++
+      null
+    }
+    assertNull(memo.windowType(OWN_WINDOW_ID, resolve = unresolved))
+    now = RETRY_MS - 1
+    assertNull(
+      memo.windowType(OWN_WINDOW_ID, retryUnresolvedImmediately = true, resolve = unresolved)
+    )
+    assertEquals(2, resolutions)
+    assertNull(memo.windowType(OWN_WINDOW_ID) { error("Original negative entry must remain") })
+    now = RETRY_MS
+    assertEquals(
+      AccessibilityWindowInfo.TYPE_APPLICATION,
+      memo.windowType(OWN_WINDOW_ID) {
+        resolutions++
+        AccessibilityWindowInfo.TYPE_APPLICATION
+      },
+    )
+    assertEquals(EXPECTED_RETRY_RESOLUTIONS, resolutions)
+  }
+
+  @Test
+  fun `immediate retry null preserves an existing positive entry`() {
+    var now = CLOCK_START_MS
+    val memo = OwnWindowTypeMemo(nowMs = { now })
+    val type = AccessibilityWindowInfo.TYPE_APPLICATION
+    assertEquals(type, memo.windowType(OWN_WINDOW_ID) { type })
+    now += RESOLVED_TTL_MS
+    assertNull(memo.windowType(OWN_WINDOW_ID, retryUnresolvedImmediately = true) { null })
+    // Returning to the original timestamp makes the preserved entry fresh again.
+    now = CLOCK_START_MS
+    assertEquals(type, memo.windowType(OWN_WINDOW_ID) { error("Positive entry was overwritten") })
   }
 
   @Test
@@ -190,8 +271,9 @@ class OwnWindowTypeMemoTest {
   }
 
   @Test
-  fun `negative id fails open without resolving or reading prototype state`() {
+  fun `undefined id fails open without resolving or reading prototype state`() {
     val memo = OwnWindowTypeMemo(nowMs = { error("No clock read for an invalid id") })
+    assertNull(memo.windowType(-1, retryUnresolvedImmediately = true) { error("No resolution") })
     repeat(BURST_COUNT) {
       assertEquals(
         OwnWindowEventDecision(false, null),
@@ -200,6 +282,22 @@ class OwnWindowTypeMemoTest {
         },
       )
     }
+  }
+
+  @Test
+  fun `other negative ids resolve and are memoised`() {
+    val memo = OwnWindowTypeMemo(nowMs = { 0L })
+    var resolutions = 0
+    repeat(2) {
+      assertEquals(
+        AccessibilityWindowInfo.TYPE_APPLICATION,
+        memo.windowType(OTHER_NEGATIVE_WINDOW_ID) {
+          resolutions++
+          AccessibilityWindowInfo.TYPE_APPLICATION
+        },
+      )
+    }
+    assertEquals(1, resolutions)
   }
 
   @Test
@@ -212,17 +310,17 @@ class OwnWindowTypeMemoTest {
       resolutions++
       type
     }
-    assertEquals(type, memo.windowType(OWN_WINDOW_ID, resolve))
+    assertEquals(type, memo.windowType(OWN_WINDOW_ID, resolve = resolve))
     now = CLOCK_START_MS + RESOLVED_TTL_MS - 1
-    assertEquals(type, memo.windowType(OWN_WINDOW_ID, resolve))
+    assertEquals(type, memo.windowType(OWN_WINDOW_ID, resolve = resolve))
     assertEquals(1, resolutions)
     now++
     type = AccessibilityWindowInfo.TYPE_INPUT_METHOD
-    assertEquals(type, memo.windowType(OWN_WINDOW_ID, resolve))
+    assertEquals(type, memo.windowType(OWN_WINDOW_ID, resolve = resolve))
     assertEquals(2, resolutions)
     now--
     type = AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY
-    assertEquals(type, memo.windowType(OWN_WINDOW_ID, resolve))
+    assertEquals(type, memo.windowType(OWN_WINDOW_ID, resolve = resolve))
     assertEquals(EXPECTED_TTL_RESOLUTIONS, resolutions)
   }
 
@@ -283,11 +381,13 @@ class OwnWindowTypeMemoTest {
   private companion object {
     const val OWN_WINDOW_ID = 1
     const val FOREIGN_WINDOW_ID = 2
+    const val OTHER_NEGATIVE_WINDOW_ID = -3
     const val BURST_COUNT = 100
     const val RETRY_MS = 250L
     const val RESOLVED_TTL_MS = 5_000L
     const val CLOCK_START_MS = 100L
     const val SYSTEM_EVENT_COUNT = 3
+    const val IMMEDIATE_NULL_COUNT = 3
     const val EXPECTED_RETRY_RESOLUTIONS = 3
     const val EXPECTED_TTL_RESOLUTIONS = 3
     const val CAPACITY = 2

@@ -128,11 +128,14 @@ OS gating, `pending` flow and tolerances (#10445). The tests live in
 `android/control-proxy/src/**/*.png` rule in `.gitattributes` keeps them out of LFS).
 
 Record them with the same workflow, choosing module `control-proxy` and test filter
-`*PrototypeSpecContentScreenshotTest`; the PR's `kotlin-code-coverage` job (Linux) verifies them. To
-look at the renders locally on another OS (not for committing):
+`*Prototype*ScreenshotTest`, covering both `PrototypeSpecContentScreenshotTest` and
+`PrototypeHostChromeScreenshotTest`; the PR's `kotlin-code-coverage` job (Linux) verifies them.
+The un-pend step edits every `*ScreenshotTest.kt` in the directory, so the filter must record every
+class or an un-pended case is left with no baseline. To look at the renders locally on another OS
+(not for committing):
 
 ```bash
-./gradlew -p android :control-proxy:testDebugUnitTest --tests '*PrototypeSpecContentScreenshotTest' \
+./gradlew -p android :control-proxy:testDebugUnitTest --tests '*Prototype*ScreenshotTest' \
   -Dscreenshot.record=true -Dscreenshot.reference.os=any
 ```
 
@@ -146,6 +149,8 @@ background (inferred dark). Open sheets and dialogs come from `validPrototypeFix
 stateOverrides = ...)`, which flips a declared initial state key. `PrototypeHostChromeScreenshotTest`
 captures the host chrome (fullscreen dismiss bar and persistent Close control) in light and dark.
 `renderPrototype` applies the spec's own `theme`, so `theme_*` baselines show the authored scheme.
+`validPrototypeFixture(..., themeFrom = ...)` composes a theme fixture's theme with component content
+for the themed controls, slider/chip/card and colour-role gallery cases without editing shared specs.
 
 ### Previewing a spec without a device
 

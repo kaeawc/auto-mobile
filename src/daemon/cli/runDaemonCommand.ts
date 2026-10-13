@@ -1,3 +1,4 @@
+import { vetoedIdleReleaseAt } from "../sessionHoldDiagnostics";
 import { isSessionReleasing } from "../sessionReleaseState";
 import { handleDaemonRequest, refuseCliKeeperOnProxySession } from "../daemonRequestHandlers";
 import { errorMessage } from "../../utils/describeUnknownError";
@@ -840,6 +841,12 @@ async function querySessionInfo(rawArgs: string[], manager: DaemonManager): Prom
       // Running inside daemon process
       const sessionManager = daemonState.getSessionManager();
       const session = requireDaemonSession(sessionManager, sessionId);
+      // Match socket session-info: the shared vetoed deadline is reported on the wall clock.
+      const idleDeadline = vetoedIdleReleaseAt(
+        session,
+        sessionManager.getIdleReleaseExecutionVeto(sessionId),
+        sessionManager.getSessionLeaseState(sessionId)?.phase,
+      );
       console.log(
         JSON.stringify({
           sessionId: session.sessionId,
@@ -848,6 +855,8 @@ async function querySessionInfo(rawArgs: string[], manager: DaemonManager): Prom
           lastUsedAt: session.lastUsedAt,
           expiresAt: session.expiresAt,
           cacheSize: JSON.stringify(session.cacheData).length,
+          idleReleaseAt:
+            idleDeadline === null ? null : sessionManager.sessionClockToReportedWall(idleDeadline),
         }),
       );
       return;

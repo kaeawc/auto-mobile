@@ -47,6 +47,7 @@ describe("daemon command characterization with fake I/O", () => {
           ["stdout", "  start                 Start the daemon"],
           ["stdout", "  stop                  Stop the daemon"],
           ["stdout", "  status                Check daemon status"],
+          ["stdout", "  capabilities --json   Query the existing daemon's capability contract"],
           ["stdout", "  restart               Restart the daemon"],
           ["stdout", "  health                Check daemon health"],
           ["stdout", "  diagnose              Run full diagnostics"],
@@ -65,7 +66,7 @@ describe("daemon command characterization with fake I/O", () => {
           ],
           [
             "stdout",
-            "  (status, available-devices, active-sessions, session-info and release-session accept --json)",
+            "  (capabilities requires --json; status, available-devices, active-sessions, session-info and release-session accept --json)",
           ],
           [
             "stdout",

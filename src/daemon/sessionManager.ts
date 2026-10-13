@@ -2257,6 +2257,39 @@ export class SessionManager {
   }
 
   private readonly healthRecoveries = new Map<string, Promise<void>>();
+  private readonly healthRecoveryDeadlines = new Map<string, number | undefined>();
+
+  /** Whether a background recovery for this marker is still running, and its remaining bound (#12112). */
+  getDeviceHealthRecovery(
+    deviceId: string,
+    incarnation: number,
+    reason: DeviceHealthReason,
+  ): { recovering: boolean; retryAfterMs?: number } {
+    if (this.deviceHealth?.incarnation(deviceId) !== incarnation) {
+      return { recovering: false };
+    }
+    // Clock restoration owns a separate pending registry and retries without a bounded batch.
+    if (reason === "clock") {
+      return {
+        recovering: [...(this.pendingClockRestores.get(deviceId)?.values() ?? [])].some(
+          (target) => !target.removed,
+        ),
+      };
+    }
+    const key = `${deviceId}#${incarnation}:${reason}`;
+    if (!this.healthRecoveries.has(key)) {
+      return { recovering: false };
+    }
+    const deadline = this.healthRecoveryDeadlines.get(key);
+    return {
+      recovering: true,
+      ...(deadline !== undefined &&
+      !this.identityReplacementFences.has(deviceId) &&
+      this.deviceHealth.canRecover(deviceId)
+        ? { retryAfterMs: Math.max(1, Math.ceil(deadline - this.timer.now())) }
+        : {}),
+    };
+  }
 
   /** Optional pool wiring, preserving existing positional constructors. */
   setDeviceHealthMarkers(
@@ -2357,9 +2390,21 @@ export class SessionManager {
     // running under an aborted request signal or an expired teardown shield, and a
     // recovery attempt that inherited it would fail before reaching the device (#10198).
     const generation = this.replacedRestoreGenerations.get(target.deviceId) ?? 0;
+    // The existing backoff policies are deterministic; sample each delay once for both
+    // scheduling and the bound, and re-use that attempt's delay on skipped ticks (#12112).
+    const delays = [1, 2, 3].map((attempt) => health.backoff.delayForAttempt(attempt));
+    const remainingBudget = (attempt: number, sleeping: boolean) =>
+      delays
+        .slice(attempt - 1)
+        .reduce(
+          (total, delay, index) =>
+            total + restoreTimeoutMs * (attempt + index) + (index > 0 || sleeping ? delay : 0),
+          0,
+        );
     const recovery = runWithAbortSignal(undefined, async () => {
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        await this.timer.sleep(health.backoff.delayForAttempt(attempt));
+      for (let attempt = 1; attempt <= 3;) {
+        this.healthRecoveryDeadlines.set(key, this.timer.now() + remainingBudget(attempt, true));
+        await this.timer.sleep(delays[attempt - 1]!);
         if (
           !(await this.waitForIdentityReplacement(target.deviceId, generation)) ||
           !this.restoreIncarnationIsCurrent(target)
@@ -2372,11 +2417,15 @@ export class SessionManager {
           return;
         }
         if (!health.canRecover(target.deviceId)) {
+          if (!this.acceptingSessionCreations) {
+            return;
+          }
           continue;
         }
         const timeout = new Error("Device health recovery timed out");
         // Async wrapper: a synchronous throw from `restore` becomes this attempt's rejection.
         const inFlight = this.dispatchDeviceRestore(target.deviceId, restore, generation);
+        this.healthRecoveryDeadlines.set(key, this.timer.now() + remainingBudget(attempt, false));
         try {
           // Later attempts get a scaled deadline: a device slow enough to miss the
           // first one is likely to need longer, not to fail outright (#11145).
@@ -2397,11 +2446,16 @@ export class SessionManager {
           // retry: the marker stays while it runs, so no new session can race it.
           // Await it instead of giving up, so one slow command does not quarantine
           // the device until a kill/restart (#11145).
+          if (error === timeout) {
+            this.healthRecoveryDeadlines.set(key, undefined);
+          }
           if (error === timeout && (await this.inFlightRestoreSucceeded(inFlight, target))) {
             this.clearRestoreHealth(target, reason);
             return;
           }
         }
+        // Only the dispatch above consumes an attempt; a busy/cleanup tick re-arms it.
+        attempt++;
       }
     });
     this.healthRecoveries.set(key, recovery);
@@ -2412,6 +2466,7 @@ export class SessionManager {
       .finally(() => {
         if (this.healthRecoveries.get(key) === recovery) {
           this.healthRecoveries.delete(key);
+          this.healthRecoveryDeadlines.delete(key);
         }
       });
   }

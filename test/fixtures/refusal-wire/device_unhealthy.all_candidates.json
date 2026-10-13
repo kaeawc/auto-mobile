@@ -1,0 +1,13 @@
+{
+  "code": "device_unhealthy.all_candidates",
+  "builder": "DeviceUnhealthyError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"Unhealthy devices cannot be assigned: restoration is unresolved.\",\"code\":\"device_unhealthy\",\"recovering\":true,\"retryable\":true,\"retryAfterMs\":12863,\"devices\":[{\"deviceId\":\"emulator-5554\",\"reason\":\"network-condition\",\"recovering\":true,\"retryAfterMs\":12863},{\"deviceId\":\"emulator-5556\",\"reason\":\"app-cleanup\",\"recovering\":false}]}"
+      }
+    ],
+    "isError": true
+  }
+}

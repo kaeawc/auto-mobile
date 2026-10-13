@@ -65,6 +65,11 @@ import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { PlanDeviceLossMonitor, type PlanDeviceLossPort } from "./deviceDisconnectHandler";
 import { DevicePool, type PooledDevice } from "./devicePool";
+import { ForwardLeaseForeignDeviceOwnership } from "./foreignDeviceOwnership";
+import {
+  createForeignCtrlProxyForwardEvidence,
+  type ForeignCtrlProxyForwardEvidence,
+} from "../features/observe/android/foreignCtrlProxyForwardEvidence";
 import { DeviceOwnedByOtherDaemonError } from "./deviceAcquisitionRefusals";
 import {
   assertControlNotOnForeignDaemonDevice,
@@ -730,7 +735,7 @@ export class Daemon {
   private confirmedDisconnectedDeviceIds: Set<string> = new Set();
   private forceDisconnectedDeviceIds: Set<string> = new Set();
   private forceDisconnectedDeviceGenerations: Map<string, number> = new Map();
-  // Serials that already had one bounded 'adb reconnect offline' this offline
+  // Serials that already had one bounded 'adb -s <serial> reconnect' this offline
   // episode (#7536). Pruned each sweep by pruneStaleOfflineRecoveryAttempts so
   // a later episode for the same serial gets a fresh attempt.
   private offlineRecoveryAttemptedDeviceIds: Set<string> = new Set();
@@ -841,6 +846,8 @@ export class Daemon {
     ) => AbandonedScopeReclaimJournal,
     /** Free-pool device reclamation (#11337); not armed under `bun test`. */
     private readonly freeDeviceReclaimerFactory: FreeDeviceReclaimerFactory = createDefaultFreeDeviceReclaimer,
+    /** Host forward evidence is supplied by the production entry point only (#12220). */
+    private readonly foreignCtrlProxyForwardEvidence?: ForeignCtrlProxyForwardEvidence,
   ) {
     installDefaultProvisionedDeviceTransportFence();
     this.startupCompletion = new Promise<void>((resolve, reject) => {
@@ -1245,6 +1252,18 @@ export class Daemon {
       daemonSessionId: this.daemonSessionId,
       timer: this.timer,
       managedSlotExclusion: this.managedSlotExclusionFactory(this.timer),
+      ...(this.foreignCtrlProxyForwardEvidence
+        ? {
+            foreignDeviceOwnership: new ForwardLeaseForeignDeviceOwnership(
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              this.timer,
+              this.foreignCtrlProxyForwardEvidence,
+            ),
+          }
+        : {}),
       managedExecutionOwnership: () => this.managedExecutionReowner,
       missingDeviceMisses: this.deviceDisconnectMisses,
       installedAppsRepository: this.installedAppsRepository,
@@ -3871,20 +3890,24 @@ export class Daemon {
             candidatePlatforms,
           );
           if (!planActive) {
-            const { dispatchTargets, offlineRecoveryTargets } = this.prepareOfflineRecovery(
+            const { dispatchTargets } = this.prepareOfflineRecovery(
               candidateDeviceIds,
               listed.offlineDeviceIds,
               candidateIncarnations,
             );
             if (dispatchTargets.length > 0) {
               logger.warn(
-                `[DisconnectMonitor] In-session device(s) ADB-offline (${offlineRecoveryTargets.join(", ")}); attempting bounded 'adb reconnect offline' recovery before miss-counting`,
+                `[DisconnectMonitor] In-session device(s) ADB-offline (${dispatchTargets.join(", ")}); attempting bounded 'adb -s <serial> reconnect' recovery before miss-counting`,
               );
-              // Global re-detect (adb has no per-serial reconnect target), one
+              // Serial-scoped reconnects for the dispatch targets, one
               // shot per offline episode; failures are logged and swallowed
               // inside recoverAndroidOfflineDevices so a probe or recovery
               // hiccup here never blocks the miss-count/disconnect path below.
-              await deviceManager.recoverAndroidOfflineDevices();
+              const offlineTransportIds = dispatchTargets.flatMap((deviceId) => {
+                const transports = listed.offlineTransportIds?.get(deviceId);
+                return transports?.size ? [...transports] : [deviceId];
+              });
+              await deviceManager.recoverAndroidOfflineDevices(offlineTransportIds);
               // Reconnect may restore the transport during this await. Never use
               // the pre-recovery absence for miss counting or ADB-reset detection.
               discovery = await this.discoverAndReconcile(deviceManager, {
@@ -4062,6 +4085,7 @@ export class Daemon {
     candidatePlatforms: Map<string, "android" | "ios">,
   ): Promise<{
     offlineDeviceIds?: Set<string>;
+    offlineTransportIds?: Map<string, Set<string>>;
     transitionalAdbDeviceIds?: Set<string>;
     listedNonDeviceIds?: Set<string>;
   }> {
@@ -4085,7 +4109,17 @@ export class Daemon {
         aliasOwners.get(id) ?? id,
         state,
       ]);
+      const offlineTransportIds = new Map<string, Set<string>>();
+      for (const [id, state] of listedStates) {
+        const canonicalId = aliasOwners.get(id) ?? id;
+        if (state === "offline" && missingAndroidCandidateIds.has(canonicalId)) {
+          const transports = offlineTransportIds.get(canonicalId) ?? new Set<string>();
+          transports.add(id);
+          offlineTransportIds.set(canonicalId, transports);
+        }
+      }
       return {
+        offlineTransportIds,
         listedNonDeviceIds: new Set(candidateStates.map(([id]) => id)),
         offlineDeviceIds: new Set(
           candidateStates.filter(([, state]) => state === "offline").map(([id]) => id),
@@ -4248,7 +4282,7 @@ export class Daemon {
     // A serial that is mid-provisionDevice/startDevice already has its
     // own bounded offline recovery: AndroidEmulatorClient's
     // fresh-provision readiness wait (maybeRecoverFreshOffline, #7054/
-    // #7078) owns that serial's `adb reconnect offline` on its own 15s
+    // #7078) owns that serial's `adb -s <serial> reconnect` on its own 15s
     // threshold. Deferring to it here mirrors how the ADB-reset cohort
     // path (below) defers on the same in-flight-startup lease, so the
     // monitor never races a second reconnect against the readiness
@@ -5754,6 +5788,30 @@ export class Daemon {
  * Start the daemon process
  */
 export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
-  const daemon = new Daemon(options);
+  const daemon = new Daemon(
+    options,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    createForeignCtrlProxyForwardEvidence(),
+  );
   await daemon.start();
 }

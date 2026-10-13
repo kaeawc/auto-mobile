@@ -24,6 +24,13 @@
  * failed shutdown reverts the row to `free` at once (the device stays adoptable), is logged, and is
  * retried with {@link Backoff} per device; it never loops hot. Single-flight: concurrent
  * callers share the in-flight sweep.
+ *
+ * Absent rows require complete absence observations one sweep interval apart and one more complete
+ * platform listing immediately before journaling deletion. Reappearance at that pre-check clears
+ * the evidence and keeps the image. A device that reappears between the pre-check and the journal's
+ * own listing is deleted through the journaled path with its hold checks; the row is never removed
+ * while the device exists. `released` means journaled deletion completed and the free row is gone,
+ * whether or not native deletion was needed.
  */
 
 import {
@@ -104,7 +111,7 @@ export interface FreeDeviceReclaimSkip {
 export interface FreeDeviceSweepReport {
   /** Devices shut down and recorded `stopped`. */
   stopped: Array<{ platform: SlotPlatform; stableDeviceId: string }>;
-  /** Verified-absent rows released through the deletion journal. */
+  /** Journaled deletion completed and the free row is gone; native deletion may have occurred. */
   released: Array<{ platform: SlotPlatform; stableDeviceId: string }>;
   failed: Array<{ platform: SlotPlatform; stableDeviceId: string; message: string }>;
   skipped: FreeDeviceReclaimSkip[];
@@ -280,6 +287,16 @@ export class FreeDeviceReclaimer {
     row: FreeSlotDeviceRecord,
     report: FreeDeviceSweepReport,
   ): Promise<void> {
+    const devices = await this.listConfigured(row.platform);
+    if (!devices) {
+      report.skipped.push({ ...this.rowIdentity(row), reason: "discovery_incomplete" });
+      return;
+    }
+    if (devices.some((device) => deviceStableId(device) === row.stableDeviceId)) {
+      this.absentRows.delete(this.absenceIdentity(row));
+      report.skipped.push({ ...this.rowIdentity(row), reason: "reappeared" });
+      return;
+    }
     try {
       const result = await evictor.evict(
         {
@@ -296,7 +313,7 @@ export class FreeDeviceReclaimer {
         this.absentRows.delete(this.absenceIdentity(row));
         report.released.push(this.rowIdentity(row));
         logger.info(
-          `[ManagedSlots] Released verified-absent free-pool row '${row.stableDeviceId}'`,
+          `[ManagedSlots] Released free-pool row '${row.stableDeviceId}': journaled deletion completed`,
         );
       } else if (result.kind === "lost") {
         this.absentRows.delete(this.absenceIdentity(row));

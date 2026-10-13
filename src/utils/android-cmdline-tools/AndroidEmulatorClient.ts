@@ -853,6 +853,39 @@ export class AndroidOfflineProbeError extends ActionableError {}
 
 export class AndroidEmulatorUnavailableError extends ActionableError {}
 
+/** Classify spawn failures without mistaking a running/stopped process for missing tooling. */
+function isMissingExecutableError(
+  error: unknown,
+  resolvedPath: string,
+  pathExists: boolean,
+): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const failure = error as Error & {
+    code?: string | number;
+    path?: string;
+    killed?: boolean;
+    signal?: string | null;
+  };
+  if (
+    typeof failure.code === "number" ||
+    failure.killed ||
+    failure.signal ||
+    ["AbortError", "TimeoutError"].includes(failure.name) ||
+    /^(?:ETIMEDOUT|ABORT_ERR|ERR_CANCELED|ERR_CANCELLED)$/.test(String(failure.code)) ||
+    /timed out|timeout|cancel|abort|getcwd|current (?:working )?directory|^Command failed:/i.test(
+      failure.message,
+    )
+  ) {
+    return false;
+  }
+  return (
+    (failure.code === "ENOENT" && (failure.path === undefined || failure.path === resolvedPath)) ||
+    (isAbsolute(resolvedPath) && !pathExists)
+  );
+}
+
 export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorForDeviceManager {
   private execAsync: (file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>;
   private spawnFn: SpawnFn;
@@ -1946,36 +1979,20 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
 
       // Check if the error is because emulator is not found
       const errorMsg = errorMessage(error);
+      const daemonWorkingDirectoryFailure = this.isLikelyDaemonWorkingDirectoryFailure(errorMsg);
+      const missingExecutable =
+        !daemonWorkingDirectoryFailure &&
+        isMissingExecutableError(error, this.emulatorPath, existsSync(this.emulatorPath));
       const missingEmulator =
-        errorMsg.includes("No such file or directory") ||
-        errorMsg.includes("command not found") ||
-        errorMsg.includes("ENOENT");
-      if (missingEmulator && this.isLikelyDaemonWorkingDirectoryFailure(errorMsg)) {
+        missingExecutable || /No such file or directory|command not found|ENOENT/.test(errorMsg);
+      if (missingEmulator && daemonWorkingDirectoryFailure) {
         throw new ActionableError(
           `Android emulator command failed because the daemon working directory is unavailable. ` +
             `Restart the AutoMobile daemon so it can use a stable working directory. Underlying error: ${errorMsg}`,
         );
       }
       if (missingEmulator) {
-        const path = this.emulatorPath;
-        const missingExecutable = (): boolean => {
-          // execFile preserves numeric exit codes when the executable actually ran.
-          if (error instanceof Error && "code" in error && typeof error.code === "number") {
-            return false;
-          }
-          return (
-            !errorMsg.startsWith("Command failed:") &&
-            ((isAbsolute(path) && !existsSync(path)) ||
-              [
-                `${path}: command not found`,
-                `spawn ${path} ENOENT`,
-                `ENOENT: no such file or directory, posix_spawn '${path}'`,
-              ].includes(errorMsg))
-          );
-        };
-        const MissingError = missingExecutable()
-          ? AndroidEmulatorUnavailableError
-          : ActionableError;
+        const MissingError = missingExecutable ? AndroidEmulatorUnavailableError : ActionableError;
         throw new MissingError(
           `Android emulator not found.\n${this.describeEmulatorResolution()}\n\n` +
             `Install the emulator package with: sdkmanager --install "emulator"\n` +

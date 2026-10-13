@@ -1,3 +1,7 @@
+import {
+  FreeDeviceReclaimer,
+  FREE_DEVICE_RECLAIM_SWEEP_INTERVAL_MS,
+} from "../../../src/daemon/managedSlots/freeDeviceReclaimer";
 import { afterAll, describe, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { Kysely } from "kysely";
@@ -199,6 +203,50 @@ describe("hunt: total-resource budget charges a free-pool row whose device is ve
       },
     );
   }
+
+  warmTest(
+    "sweep pre-check reappearance keeps the sqlite row adoptable without a deletion marker",
+    async () => {
+      await cacheDevice("amslot-a");
+      inventory.remove("amslot-a");
+      const claims = new FakeClaims();
+      const reconciler = reconcilerWithLimit(1, claims);
+      const evictor = new JournaledManagedSlotCacheEvictor(registry, () => reconciler.journal);
+      const sweep = new FreeDeviceReclaimer({
+        registry: async () => registry,
+        inventory,
+        claims,
+        timer,
+        claimedBy: OWNER.daemonId,
+        reclaim: { thresholdMs: 0 },
+        absentRowEvictor: () => evictor,
+        stopper: {
+          stopAndVerifyOffline: async () => {
+            throw new Error("Unexpected shutdown");
+          },
+        },
+      });
+      const before = await registry.listFreeDevices();
+      expect((await sweep.sweep()).skipped[0]?.reason).toBe("absence_unconfirmed");
+      timer.advanceTime(FREE_DEVICE_RECLAIM_SWEEP_INTERVAL_MS);
+      let listings = 0;
+      inventory.beforeList = async () => {
+        if (++listings === 2) {
+          inventory.devices.push({ platform: "android", deviceId: "amslot-a", name: "amslot-a" });
+        }
+      };
+      const report = await sweep.sweep();
+      expect(deleter.calls).toEqual([]);
+      expect(report.released).toEqual([]);
+      expect(report.skipped[0]?.reason).toBe("reappeared");
+      expect(await registry.listFreeDevices()).toEqual(before);
+      expect(before[0]).toMatchObject({ state: "free", deletion: null });
+      expect(await registry.findDeviceHolder("android", "amslot-a")).toMatchObject({
+        kind: "free",
+        device: { state: "free", deletion: null },
+      });
+    },
+  );
 
   warmTest("incomplete discovery never releases a missing cached row", async () => {
     await cacheDevice("amslot-gone");

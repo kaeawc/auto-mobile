@@ -368,6 +368,100 @@ describe("AndroidEmulatorClient listAvds", () => {
     await expect(client.listAvds()).resolves.toMatchObject([{ apiLevel: 34 }]);
   });
 
+  // Captured via execFile and the client's preserveError shared seam under Bun 1.3.14,
+  // darwin/arm64; scratch/m38-12172/capture/errors.ts. Tests only inject these errors.
+  const bareMissing = {
+    message: 'Executable not found in $PATH: "amprobe-emulator-not-on-path"',
+    code: "ENOENT",
+    path: "amprobe-emulator-not-on-path",
+    syscall: "spawn amprobe-emulator-not-on-path",
+    killed: undefined,
+    signal: undefined,
+  };
+  const absoluteMissing = {
+    message: "ENOENT: no such file or directory, posix_spawn '/amprobe-emulator-not-on-path'",
+    code: "ENOENT",
+    path: "/amprobe-emulator-not-on-path",
+    syscall: "spawn /amprobe-emulator-not-on-path",
+    killed: undefined,
+    signal: undefined,
+  };
+  const nonzeroExit = {
+    message:
+      "Command failed: /bin/ls /amprobe-no-such-dir\nls: /amprobe-no-such-dir: No such file or directory\n",
+    code: 1,
+    path: undefined,
+    syscall: undefined,
+    killed: false,
+    signal: null,
+  };
+
+  function clientRejecting(error: Error, path: string): AndroidEmulatorClient {
+    const client = new AndroidEmulatorClient(
+      async () => {
+        throw error;
+      },
+      null,
+      new FakeTimer(),
+      undefined,
+      noAvdConfigReader,
+    );
+    Object.assign(client, { emulatorPath: path, ensureEmulatorPath: async () => path });
+    return client;
+  }
+
+  test("captured Bun spawn failures are unavailable while nonzero exits stay untyped", async () => {
+    for (const fixture of [bareMissing, absoluteMissing]) {
+      const client = clientRejecting(
+        Object.assign(new Error(fixture.message), fixture),
+        fixture.path,
+      );
+      await expect(client.listAvds()).rejects.toBeInstanceOf(AndroidEmulatorUnavailableError);
+      await expect(client.listAvds()).rejects.toThrow("Android emulator not found.");
+    }
+    const client = clientRejecting(
+      Object.assign(new Error(nonzeroExit.message), nonzeroExit),
+      "/bin/ls",
+    );
+    await expect(client.listAvds()).rejects.not.toBeInstanceOf(AndroidEmulatorUnavailableError);
+    await expect(client.listAvds()).rejects.toThrow("Android emulator not found.");
+  });
+
+  test.each([
+    { label: "killed process", killed: true },
+    { label: "signal termination", signal: "SIGTERM" },
+    { label: "timeout", message: "Command timed out: ENOENT" },
+    { label: "timeout code", code: "ETIMEDOUT" },
+    { label: "cancellation code", code: "ABORT_ERR" },
+    { label: "cancellation", name: "AbortError" },
+    { label: "cancelled command", message: "Command cancelled: ENOENT" },
+    { label: "daemon cwd", message: "ENOENT: current working directory unavailable" },
+  ])("missing absolute path does not override $label", async (overrides) => {
+    // Safety variants of the captured spawn error, not additional host-process probes.
+    const fixture = { ...absoluteMissing, ...overrides };
+    const client = clientRejecting(
+      Object.assign(new Error(fixture.message), fixture),
+      absoluteMissing.path,
+    );
+    await expect(client.listAvds()).rejects.not.toBeInstanceOf(AndroidEmulatorUnavailableError);
+  });
+
+  test("bare ENOENT requires a matching spawn path when provided", async () => {
+    const mismatched = { ...bareMissing, path: "another-executable" };
+    const wrongPath = clientRejecting(
+      Object.assign(new Error(mismatched.message), mismatched),
+      bareMissing.path,
+    );
+    await expect(wrongPath.listAvds()).rejects.not.toBeInstanceOf(AndroidEmulatorUnavailableError);
+    const unspecified = { ...bareMissing, path: undefined };
+    const noPath = clientRejecting(
+      Object.assign(new Error(unspecified.message), unspecified),
+      bareMissing.path,
+    );
+    await expect(noPath.listAvds()).rejects.toBeInstanceOf(AndroidEmulatorUnavailableError);
+  });
+
+  // Node's documented execFile spawn-error shape (not a Bun capture).
   test("missing executable retains the typed unavailable error and existing message", async () => {
     const client = new AndroidEmulatorClient(
       async () => {
@@ -401,8 +495,10 @@ describe("AndroidEmulatorClient listAvds", () => {
       undefined,
       noAvdConfigReader,
     );
-    (client as any).emulatorPath = import.meta.path;
-    (client as any).ensureEmulatorPath = async () => import.meta.path;
+    Object.assign(client, {
+      emulatorPath: import.meta.path,
+      ensureEmulatorPath: async () => import.meta.path,
+    });
     await expect(client.listAvds()).rejects.not.toBeInstanceOf(AndroidEmulatorUnavailableError);
     await expect(client.listAvds()).rejects.toThrow(
       message.includes("/bin/sh") ? "daemon working directory" : "Android emulator not found.",

@@ -26,7 +26,7 @@ export interface ManagedSlotEvictionCandidate {
   fromScopeKey: string;
   freedAtMs: number;
   lastUsedAtMs: number;
-  /** No device was listed in a complete inventory; eviction only releases the row. */
+  /** No device was listed in a complete inventory; journaled deletion must confirm absence. */
   absent?: true;
 }
 
@@ -122,9 +122,11 @@ interface EvictionSelectorDependencies {
 }
 
 /**
- * A free row's charge is released only on VERIFIED ABSENCE: its stable id is missing from
- * a COMPLETE platform listing at selection and again from the journal's own fresh COMPLETE
- * listing in driveFreeDeviceDeletion. Incomplete discovery proves nothing and releases nothing.
+ * Under budget pressure, absence is proved by a COMPLETE listing at selection that the journal's
+ * own COMPLETE listing in driveFreeDeviceDeletion does not contradict. On iOS both may share one
+ * cached simctl observation up to 5 s old, the same proof the reconciler accepts for an assigned
+ * device. A wrongly released simulator is never deleted and is counted again as an inventory
+ * orphan when next listed. Incomplete discovery proves nothing and releases nothing.
  * Only completeFreeDeviceDeletion removes the row. A device listed again at drive time follows
  * ordinary journaled deletion with session, claim, busy and generated-name checks; a blocked
  * marker stays for redrive. The row is never removed while the device exists.

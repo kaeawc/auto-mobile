@@ -122,6 +122,7 @@ describe("hunt: total-resource admission on a host without the Android emulator"
   }
 
   warmTest("an Android creation is admitted without installed simulator tools", async () => {
+    // macOS exercises SimctlUnavailableError; other hosts skip listing after isAvailable is false.
     const budget = new RegistryManagedSlotResourceBudget({
       registry: async () => registry,
       policy: { limit: () => 4 },

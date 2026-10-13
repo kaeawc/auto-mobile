@@ -50,11 +50,12 @@ struct ComponentColors {
 
 /// A labelled slider bound to a number. The visible label is hidden from accessibility because it
 /// is also the slider's own label, so the slider is one adjustable element.
+@MainActor
 struct PrototypeSliderView: View {
     @Environment(\.prototypePalette) private var palette
     private var colors: ComponentColors { ComponentColors(palette: palette) }
     let node: PrototypeNode
-    @ObservedObject var model: PrototypeModel
+    let model: PrototypeModel
     let style: Style?
 
     var body: some View {
@@ -83,11 +84,12 @@ struct PrototypeSliderView: View {
 
 /// A filter chip (bound to a boolean) toggles and reads as selected; assist, input and suggestion
 /// chips are buttons that run `onTap`.
+@MainActor
 struct PrototypeChipView: View {
     @Environment(\.prototypePalette) private var palette
     private var colors: ComponentColors { ComponentColors(palette: palette) }
     let node: PrototypeNode
-    @ObservedObject var model: PrototypeModel
+    let model: PrototypeModel
     let style: Style?
 
     var body: some View {
@@ -118,12 +120,13 @@ struct PrototypeChipView: View {
 
 /// A filled (default), elevated or outlined card laying its children out as a column. An authored
 /// `style.background` replaces the container colour; an `onTap` makes the whole card tappable.
+@MainActor
 struct PrototypeCardView: View {
     @Environment(\.prototypePalette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var colors: ComponentColors { ComponentColors(palette: palette) }
     let node: PrototypeNode
-    @ObservedObject var model: PrototypeModel
+    let model: PrototypeModel
     let style: Style?
 
     var body: some View {
@@ -156,11 +159,12 @@ struct PrototypeCardView: View {
 
 /// One button per option, each its own element with the option label, a selected state and the
 /// identifier `<tag>.<value>`. A bound value matching no option leaves every option unselected.
+@MainActor
 struct PrototypeRadioGroupView: View {
     @Environment(\.prototypePalette) private var palette
     private var colors: ComponentColors { ComponentColors(palette: palette) }
     let node: PrototypeNode
-    @ObservedObject var model: PrototypeModel
+    let model: PrototypeModel
     let style: Style?
 
     var body: some View {
@@ -189,11 +193,12 @@ struct PrototypeRadioGroupView: View {
 /// Headline, optional supporting line, optional leading icon and trailing switch, checkbox or
 /// icon. The row is one element: a toggle when it has a trailing switch or checkbox, else a button
 /// when it has `onTap`, else inert text.
+@MainActor
 struct PrototypeListItemView: View {
     @Environment(\.prototypePalette) private var palette
     private var colors: ComponentColors { ComponentColors(palette: palette) }
     let node: PrototypeNode
-    @ObservedObject var model: PrototypeModel
+    let model: PrototypeModel
     let style: Style?
 
     var body: some View {
@@ -258,6 +263,7 @@ struct PrototypeListItemView: View {
 /// `UISwitch`, which XCUITest still lists as its own switch elements under `accessibilityHidden`
 /// and inside a combined parent, so one switch row came back as three nodes (#10899). The
 /// control that draws this owns the single accessibility element.
+@MainActor
 struct PrototypeSwitchTrack: View {
     @Environment(\.prototypePalette) private var palette
     private var colors: ComponentColors { ComponentColors(palette: palette) }
@@ -280,6 +286,7 @@ struct PrototypeSwitchTrack: View {
 /// A decorative or button-internal SF Symbol drawn as a text glyph. A bare `Image(systemName:)`
 /// still surfaces as an image element on iOS 26 even under `accessibilityHidden(true)`; a `Text`
 /// glyph with the symbol inline does not, so the parent control's label stays the only element.
+@MainActor
 struct PrototypeGlyph: View {
     let symbol: String
 
@@ -288,11 +295,12 @@ struct PrototypeGlyph: View {
     }
 }
 
+@MainActor
 struct PrototypeIconButtonView: View {
     @Environment(\.prototypePalette) private var palette
     private var colors: ComponentColors { ComponentColors(palette: palette) }
     let node: PrototypeNode
-    @ObservedObject var model: PrototypeModel
+    let model: PrototypeModel
     let style: Style?
 
     var body: some View {
@@ -320,11 +328,12 @@ struct PrototypeIconButtonView: View {
 }
 
 /// A floating action button: small, regular or large, or extended (icon and label) with a `label`.
+@MainActor
 struct PrototypeFabView: View {
     @Environment(\.prototypePalette) private var palette
     private var colors: ComponentColors { ComponentColors(palette: palette) }
     let node: PrototypeNode
-    @ObservedObject var model: PrototypeModel
+    let model: PrototypeModel
     let style: Style?
 
     var body: some View {
@@ -356,11 +365,12 @@ struct PrototypeFabView: View {
 /// A single-select segmented row bound to a string key. Each segment is its own button with its
 /// label, a selected state and the identifier `<tag>.<value>`; a native segmented `Picker` cannot
 /// carry per-segment identifiers, so the segments are drawn here.
+@MainActor
 struct PrototypeSegmentedButtonView: View {
     @Environment(\.prototypePalette) private var palette
     private var colors: ComponentColors { ComponentColors(palette: palette) }
     let node: PrototypeNode
-    @ObservedObject var model: PrototypeModel
+    let model: PrototypeModel
 
     var body: some View {
         let options = node.options ?? []
@@ -396,11 +406,12 @@ struct PrototypeSegmentedButtonView: View {
 /// A small (default), centerAligned, medium or large top app bar. The title is a header; the
 /// navigation icon and actions are icon buttons labelled by their `label` and identified
 /// `<tag>.navigation` and `<tag>.actions.<index>`. Insets come only from `safeAreaPadding`.
+@MainActor
 struct PrototypeTopAppBarView: View {
     @Environment(\.prototypePalette) private var palette
     private var colors: ComponentColors { ComponentColors(palette: palette) }
     let node: PrototypeNode
-    @ObservedObject var model: PrototypeModel
+    let model: PrototypeModel
     let style: Style?
     let title: String
 
@@ -461,6 +472,7 @@ struct PrototypeTopAppBarView: View {
 // MARK: Divider, badge, progress
 
 /// A horizontal (default) or vertical hairline; it is an accessibility element only when tagged.
+@MainActor
 struct PrototypeDividerView: View {
     @Environment(\.prototypePalette) private var palette
     private var colors: ComponentColors { ComponentColors(palette: palette) }
@@ -483,6 +495,7 @@ struct PrototypeDividerView: View {
 }
 
 /// A small dot, or a short text such as a count; the text is its accessible label.
+@MainActor
 struct PrototypeBadgeView: View {
     @Environment(\.prototypePalette) private var palette
     private var colors: ComponentColors { ComponentColors(palette: palette) }
@@ -509,11 +522,12 @@ struct PrototypeBadgeView: View {
 
 /// Linear (default) or circular. Bound to a number it is determinate and reports `value / max`;
 /// unbound it is indeterminate.
+@MainActor
 struct PrototypeProgressView: View {
     @Environment(\.prototypePalette) private var palette
     private var colors: ComponentColors { ComponentColors(palette: palette) }
     let node: PrototypeNode
-    @ObservedObject var model: PrototypeModel
+    let model: PrototypeModel
 
     var body: some View {
         let fraction = node.stateKey.map { prototypeProgressFraction(model.state[$0]?.numberValue ?? 0, max: node.max) }
@@ -541,6 +555,7 @@ struct PrototypeProgressView: View {
 }
 
 /// SwiftUI's linear `ProgressView` has no indeterminate form, so the sweep is drawn here.
+@MainActor
 private struct IndeterminateBar: View {
     @Environment(\.prototypePalette) private var palette
     private var colors: ComponentColors { ComponentColors(palette: palette) }
@@ -569,11 +584,12 @@ private struct IndeterminateBar: View {
 
 /// A wheel time picker bound to integer hour and minute keys. A change sends both keys at once;
 /// `is24Hour` picks the clock, and without it the device setting applies.
+@MainActor
 struct PrototypeTimePickerView: View {
     @Environment(\.prototypePalette) private var palette
     private var colors: ComponentColors { ComponentColors(palette: palette) }
     let node: PrototypeNode
-    @ObservedObject var model: PrototypeModel
+    let model: PrototypeModel
 
     var body: some View {
         let hourKey = node.hourKey ?? ""
@@ -643,11 +659,12 @@ struct PrototypeTimePickerView: View {
 }
 
 /// A calendar bound to a `YYYY-MM-DD` string key; picking another day binds it.
+@MainActor
 struct PrototypeDatePickerView: View {
     @Environment(\.prototypePalette) private var palette
     private var colors: ComponentColors { ComponentColors(palette: palette) }
     let node: PrototypeNode
-    @ObservedObject var model: PrototypeModel
+    let model: PrototypeModel
 
     var body: some View {
         let key = node.stateKey ?? ""
@@ -673,11 +690,12 @@ struct PrototypeDatePickerView: View {
 /// Open dialogs and snackbars, drawn above the whole author tree inside the prototype window, in
 /// tree order. A dialog's scrim covers the window, intercepts every touch and closes it on tap; a
 /// snackbar takes touches only on itself.
+@MainActor
 struct PrototypeModalLayer: View {
     @Environment(\.prototypePalette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var colors: ComponentColors { ComponentColors(palette: palette) }
-    @ObservedObject var model: PrototypeModel
+    let model: PrototypeModel
 
     var body: some View {
         let modals = model.spec?.root.openModals(state: model.state, pages: model.pages) ?? []
@@ -721,11 +739,12 @@ struct PrototypeModalLayer: View {
 /// An alert-dialog surface: optional icon, the title (a header), body text, optional `child`, then
 /// the dismiss and confirm buttons, identified `<tag>.dismiss` and `<tag>.confirm`. A button closes
 /// the dialog, then runs its own `onTap`; a tap on the body runs the dialog's `onTap`.
+@MainActor
 struct PrototypeDialogView: View {
     @Environment(\.prototypePalette) private var palette
     private var colors: ComponentColors { ComponentColors(palette: palette) }
     let node: PrototypeNode
-    @ObservedObject var model: PrototypeModel
+    let model: PrototypeModel
     let title: String
     let text: String?
 
@@ -813,11 +832,12 @@ struct PrototypeDialogView: View {
 
 /// A snackbar at the bottom of the window; not modal, and it stays until closed unless it sets
 /// `durationMs` (`SnackbarTimeouts`). Its action, identified `<tag>.action`, closes it and runs `onTap`.
+@MainActor
 struct PrototypeSnackbarView: View {
     @Environment(\.prototypePalette) private var palette
     private var colors: ComponentColors { ComponentColors(palette: palette) }
     let node: PrototypeNode
-    @ObservedObject var model: PrototypeModel
+    let model: PrototypeModel
     let text: String
 
     var body: some View {

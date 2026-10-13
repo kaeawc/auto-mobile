@@ -78,6 +78,7 @@ extension PrototypePalette {
 
 /// `style.gradient`, sized to the node: the line and radius depend on the measured box, as on
 /// Android (`PrototypeGradient.linearLine`, `radialRadius`).
+@MainActor
 struct PrototypeGradientFill: View {
     let gradient: PrototypeGradient
     let palette: PrototypePalette
@@ -149,9 +150,10 @@ private let sfSymbols: [String: String] = [
     "filter_list": "line.3.horizontal.decrease", "content_copy": "doc.on.doc",
 ]
 
+@MainActor
 struct NodeView: View {
     let node: PrototypeNode
-    @ObservedObject var model: PrototypeModel
+    let model: PrototypeModel
     /// Dialogs and snackbars draw nothing in place; `PrototypeModalLayer` draws them with this set.
     var presentedAsModal = false
     /// Anchored nodes draw nothing in place; `PrototypeAnchorLayer` draws them with this set (#10803).
@@ -755,6 +757,7 @@ struct NodeView: View {
     }
 }
 
+@MainActor
 private struct SizeModifier: ViewModifier {
     let rules: PrototypeSizeRules
     let alignment: Alignment
@@ -787,6 +790,7 @@ private struct SizeModifier: ViewModifier {
     }
 }
 
+@MainActor
 private struct TapModifier: ViewModifier {
     let actions: [PrototypeAction]?
     let model: PrototypeModel
@@ -826,6 +830,7 @@ enum AccessibilityGrouping {
     case combine
 }
 
+@MainActor
 private struct IdentifierModifier: ViewModifier {
     let identifier: String?
     let label: String?
@@ -869,9 +874,10 @@ private struct IdentifierModifier: ViewModifier {
 
 /// Fill-sized pagers swipe with a paged TabView; wrap-sized ones show the current page and
 /// change pages with a horizontal drag, since a TabView has no intrinsic size.
+@MainActor
 struct PagerView: View {
     let node: PrototypeNode
-    @ObservedObject var model: PrototypeModel
+    let model: PrototypeModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var pagerId: String { node.id ?? "" }

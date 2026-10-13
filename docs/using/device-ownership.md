@@ -780,8 +780,8 @@ push, location route stop, mock-location clear, and late-set clear, starting
 when its holder leaves. At the cap the manager abandons it, warns about possible
 leftover state, and frees the device from that cleanup's quarantine. Downloads
 staging, `putAppFile` to `user_files`, registrations with no bound, and internal
-release-teardown, late-setup, and rebind-restore transfers stay uncapped here
-and contribute no bound (a 1 s polling hint when nothing else bounds cleanup).
+late-setup and uncapped release-teardown/rebind-restore transfers contribute no
+bound (a 1 s polling hint when nothing else bounds cleanup); capped restores retain their bound.
 Trusted numeric caps remain owned by recording finalize, held-plan app cleanup,
 forced stuck release, network-condition TTL restore, deferred rebind gates, and
 bounded acquisition cleanups. An in-flight release

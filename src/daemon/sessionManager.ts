@@ -1687,6 +1687,8 @@ export class SessionManager {
   private readonly pendingDeviceCleanupWork = new Map<string, Set<Promise<unknown>>>();
   /** Bounds belong to individual promises and disappear as each settles. */
   private readonly pendingDeviceCleanupBounds = new Map<string, Set<PendingDeviceCleanupBound>>();
+  /** Capped teardown promises retain the shield's deadline when transferred to device cleanup. */
+  private readonly teardownCleanupBounds = new WeakMap<Promise<void>, number>();
   /**
    * Work started by the device's current acquisition (owner-less recording stop, #11041). It never
    * blocks the live holder, but counts as cleanup once the device has no owner again.
@@ -5722,7 +5724,7 @@ export class SessionManager {
     } else {
       const pending = await this.restoreRebindOverrides(existing);
       if (pending.length > 0) {
-        this.trackPendingDeviceCleanup(previousDevice, pending);
+        this.trackPendingTeardownCleanup(previousDevice, pending);
       }
     }
     // Preserve object identity so an already-started release observes the
@@ -7024,7 +7026,7 @@ export class SessionManager {
   ): boolean {
     const removed = this.removeSession(sessionId, session);
     if (pendingCleanup.length > 0) {
-      this.trackPendingDeviceCleanup(deviceId, pendingCleanup);
+      this.trackPendingTeardownCleanup(deviceId, pendingCleanup);
     }
     if (!removed) {
       logger.warn(`Skipping release finalization for ${sessionId}: session ownership changed`);
@@ -7135,7 +7137,7 @@ export class SessionManager {
       settled = true;
     });
     const capError = new Error("Session release teardown cap reached");
-    return raceWithDeadline(tracked, {
+    const bounded = raceWithDeadline(tracked, {
       timer: this.timer,
       timeoutMs: Math.max(0, SESSION_RELEASE_TEARDOWN_CAP_MS - (this.sessionNow() - startedAtMs)),
       label: "Session release teardown",
@@ -7151,6 +7153,20 @@ export class SessionManager {
         throw error;
       }
     });
+    this.teardownCleanupBounds.set(bounded, startedAtMs + SESSION_RELEASE_TEARDOWN_CAP_MS);
+    return bounded;
+  }
+
+  private trackPendingTeardownCleanup(deviceId: string, cleanups: readonly Promise<void>[]): void {
+    for (const cleanup of cleanups) {
+      const settlesBy = this.teardownCleanupBounds.get(cleanup);
+      if (settlesBy !== undefined) {
+        this.trackDeviceCleanupBound(this.pendingDeviceCleanupBounds, deviceId, cleanup, {
+          settlesBy,
+        });
+      }
+    }
+    this.trackPendingDeviceCleanup(deviceId, cleanups);
   }
 
   private async startReleaseTeardown(
@@ -7432,7 +7448,7 @@ export class SessionManager {
       this.terminalReleaseJournal.resolve(sessionId);
     }
     if (pendingCleanup.length > 0) {
-      this.trackPendingDeviceCleanup(deviceId, pendingCleanup);
+      this.trackPendingTeardownCleanup(deviceId, pendingCleanup);
     }
     logger.info(
       `Skipping release of ${sessionId}: a newer identity confirmation superseded the eviction of ${deviceId}`,

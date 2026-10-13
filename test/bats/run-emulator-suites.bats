@@ -19,7 +19,8 @@ setup() {
 #!/usr/bin/env bash
 printf '%s %s tools=%s\n' "${name}" "\$*" "\${AUTOMOBILE_ENABLED_TOOLS:-unset}" >> "\$CALLS"
 case "${name} \$*" in
-  "gradle :junit-runner:test"*) exit "\${FAIL_JUNIT:-0}" ;;
+  "gradle :junit-runner:testClasses"*) exit "\${FAIL_PREBUILD:-0}" ;;
+  "gradle :junit-runner:test"*) printf '%s\\n' "\${JUNIT_OUTPUT:-}"; exit "\${FAIL_JUNIT:-0}" ;;
   "gradle :playground:app:test"*) exit "\${FAIL_PLAYGROUND:-0}" ;;
   "permission"*) exit "\${FAIL_PERMISSION:-0}" ;;
 esac
@@ -45,7 +46,7 @@ run_suites() {
 @test "runs JUnit Runner, a daemon reset, then the Playground chain in order" {
   run_suites
   [ "$status" -eq 0 ]
-  expected="gradle :junit-runner:test --stacktrace --info tools=unset
+  expected="gradle :junit-runner:test --rerun --stacktrace --info tools=unset
 reset  tools=unset
 permission control-proxy.apk tools=navigateTo,getNavigationGraph,explore
 navgraph  tools=navigateTo,getNavigationGraph,explore
@@ -79,4 +80,31 @@ gradle :playground:app:test --stacktrace --info tools=navigateTo,getNavigationGr
   run bash "$SCRIPT_ABS"
   [ "$status" -ne 0 ]
   [[ "$output" == *"usage: run-emulator-suites.sh <ctrl-proxy-apk>"* ]]
+}
+
+@test "prebuild runs only the four non-test Gradle tasks without an APK" {
+  run env GRADLE_CMD="${TEST_DIR}/gradle" bash "$SCRIPT_ABS" --prebuild
+  [ "$status" -eq 0 ]
+  [ "$(cat "$CALLS")" = "gradle :junit-runner:testClasses :control-proxy:assembleDebug :playground:app:assembleDebug :playground:app:compileDebugUnitTestKotlin --stacktrace tools=unset" ]
+}
+
+@test "prebuild propagates the Gradle failure status" {
+  run env GRADLE_CMD="${TEST_DIR}/gradle" FAIL_PREBUILD=8 bash "$SCRIPT_ABS" --prebuild
+  [ "$status" -eq 8 ]
+  [ "$(wc -l < "$CALLS" | tr -d ' ')" -eq 1 ]
+}
+
+@test "cached or skipped JUnit outcomes fail while Playground still runs" {
+  for outcome in FROM-CACHE UP-TO-DATE SKIPPED NO-SOURCE; do
+    run_suites JUNIT_OUTPUT="> Task :junit-runner:test $outcome"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"did not execute against the emulator ($outcome)"* ]]
+    grep -q '^gradle :playground:app:test' "$CALLS"
+  done
+}
+
+@test "a bare executed JUnit task passes and its output streams" {
+  run_suites JUNIT_OUTPUT="> Task :junit-runner:test"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"> Task :junit-runner:test"* ]]
 }

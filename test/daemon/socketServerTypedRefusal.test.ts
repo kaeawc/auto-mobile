@@ -1,3 +1,4 @@
+import * as acquisitionRefusals from "../../src/daemon/deviceAcquisitionRefusals";
 import { expect, test } from "bun:test";
 import { daemonResponseError } from "../../src/daemon/client";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
@@ -226,3 +227,24 @@ test("a terminal-session refusal is session_ownership_lost on the frame", () => 
     reason: mcp.reason,
   });
 });
+
+for (const recovering of [true, false]) {
+  test(`#12112 socket frame preserves unhealthy evidence (recovering=${recovering})`, () => {
+    const devices = [
+      {
+        deviceId: "emulator-5554",
+        reason: "new-health-reason",
+        recovering,
+        ...(recovering ? { retryAfterMs: 12345 } : {}),
+      },
+    ];
+    const error = new acquisitionRefusals.DeviceUnhealthyError(devices, "unhealthy");
+    expect(mcpRequestFailureDetails(error, undefined)).toEqual({
+      code: "device_unhealthy",
+      retryable: recovering,
+      ...(recovering ? { retryAfterMs: 12345 } : {}),
+      details: { deviceId: "emulator-5554", reason: "new-health-reason", recovering, devices },
+    });
+    expect(frameFields(error)).toEqual(mcpFields(error));
+  });
+}

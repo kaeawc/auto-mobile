@@ -695,6 +695,40 @@
         "acquireNewSession": true
       }
     },
+    "device_unhealthy": {
+      "expected": "retry",
+      "fields": {
+        "code": "device_unhealthy",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 12863
+      }
+    },
+    "device_unhealthy.recovering_unbounded": {
+      "expected": "retry",
+      "fields": {
+        "code": "device_unhealthy",
+        "retryable": true,
+        "acquireNewSession": false
+      }
+    },
+    "device_unhealthy.permanent": {
+      "expected": "fail",
+      "fields": {
+        "code": "device_unhealthy",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
+    "device_unhealthy.all_candidates": {
+      "expected": "retry",
+      "fields": {
+        "code": "device_unhealthy",
+        "retryable": true,
+        "acquireNewSession": false,
+        "retryAfterMs": 12863
+      }
+    },
     "managed_slot_acquisition_failed.managed_slot_budget_exhausted.budget": {
       "expected": "fail",
       "fields": {

@@ -44,6 +44,7 @@ import {
 } from "../daemon/managedSlots/managedSlotRefusal";
 import {
   RetryableDeviceAcquisitionError,
+  DeviceUnhealthyError,
   SESSION_NO_LONGER_OWNS_DEVICE_CODE,
   SESSION_REBINDING_CODE,
   SESSION_HELD_BY_RECOVERY_CODE,
@@ -155,6 +156,7 @@ function toolCallErrorText(error: unknown, message: string): string {
 function hasSelfDescribedRefusalPayload(
   error: unknown,
 ): error is
+  | DeviceUnhealthyError
   | PlanExecutionInProgressError
   | AmbiguousDeviceTargetError
   | DeviceAssignedToManagedSlotError
@@ -167,20 +169,21 @@ function hasSelfDescribedRefusalPayload(
   | ManagedSlotDiscoveryIncompleteError
   | ManagedSlotOwnershipUnconfirmedError
   | ManagedSlotOwnershipLostError {
-  return (
-    error instanceof PlanExecutionInProgressError ||
-    error instanceof AmbiguousDeviceTargetError ||
-    error instanceof DeviceAssignedToManagedSlotError ||
-    error instanceof DeviceOutsideManagedSlotsError ||
-    error instanceof DeviceOutsideBoundSessionError ||
-    error instanceof SessionOutsideBoundSessionError ||
-    error instanceof InputDeviceOwnedError ||
-    error instanceof DeviceGestureRecordingStartUnheldError ||
-    error instanceof AppNotRunningError ||
-    error instanceof ManagedSlotDiscoveryIncompleteError ||
-    error instanceof ManagedSlotOwnershipUnconfirmedError ||
-    error instanceof ManagedSlotOwnershipLostError
-  );
+  return [
+    DeviceUnhealthyError,
+    PlanExecutionInProgressError,
+    AmbiguousDeviceTargetError,
+    DeviceAssignedToManagedSlotError,
+    DeviceOutsideManagedSlotsError,
+    DeviceOutsideBoundSessionError,
+    SessionOutsideBoundSessionError,
+    InputDeviceOwnedError,
+    DeviceGestureRecordingStartUnheldError,
+    AppNotRunningError,
+    ManagedSlotDiscoveryIncompleteError,
+    ManagedSlotOwnershipUnconfirmedError,
+    ManagedSlotOwnershipLostError,
+  ].some((Refusal) => error instanceof Refusal);
 }
 
 /** The typed fields of a device or session refusal, after `success` and `error`. */

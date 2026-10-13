@@ -38,6 +38,15 @@ import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { awaitWhileRequestIsLive } from "../../utils/toolUtils";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { RealObserveScreen } from "../observe/ObserveScreen";
+import { scopeObserveResultToLayer } from "../observe/hierarchyLayer";
+import { prototypeAgentRegistry } from "../prototype/ios/prototypeAgentInjection";
+import {
+  AndroidPrototypeTextTargetReader,
+  IosPrototypeTextTargetReader,
+  prototypeTextFieldBindings,
+  verifyPrototypeTextTarget,
+  type PrototypeTextTargetReader,
+} from "../prototype/prototypeTextTarget";
 import { ObservedAndroidDisplayCache } from "../observe/ObservationDisplay";
 import type { HierarchyCaptureRequest } from "../observe/HierarchyCapture";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
@@ -394,6 +403,8 @@ interface SendKeysCommandExecution {
 }
 
 export interface SendKeysCommandExecutor {
+  setTargetLayer?(layer: HierarchyLayer | undefined): void;
+  isPasswordTarget?(): boolean;
   resetCaretState?(): void;
   withImeSpan?(action: () => Promise<SendKeysCommandExecution>): Promise<SendKeysCommandExecution>;
   type(
@@ -430,6 +441,7 @@ export interface SendKeysTargetFocuser {
     Pick<TapOnFocusResult, "success" | "error" | "focusVerified" | typeof tapFocusFailure> & {
       /** The resolved target is a password field. */
       passwordField?: boolean;
+      identifiers?: readonly string[];
     }
   >;
 }
@@ -455,6 +467,7 @@ export interface SendKeysTimestampProvider {
 }
 
 export interface SendKeysDependencies {
+  prototypeTextTarget?: PrototypeTextTargetReader;
   displayTransitions?: DisplayTransitionReader;
   lastRenderedObservation?: RenderedObservationReader;
   executor?: SendKeysCommandExecutor;
@@ -647,6 +660,15 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private imeUserId: number | undefined;
   /** Set while a type command targets a password field: diagnostics never name its characters. */
   private typingPasswordField = false;
+  private targetLayer: HierarchyLayer | undefined;
+
+  setTargetLayer(layer: HierarchyLayer | undefined): void {
+    this.targetLayer = layer;
+  }
+
+  isPasswordTarget(): boolean {
+    return this.typingPasswordField;
+  }
   private readonly imeTraceContext = new AsyncLocalStorage<{ lines?: string[] }>();
   private readonly imeSpanContext = new AsyncLocalStorage<AndroidImeSpan>();
 
@@ -664,7 +686,19 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     dependencies: SendKeysPlatformDependencies = {},
   ) {
     this.adb = adbFactory.create(device);
-    this.observer = observer;
+    // All executor-owned observations, including iOS pre/post reads, use this choke point.
+    this.observer = {
+      execute: async (options) => {
+        const observation = await observer.execute(options);
+        if (this.targetLayer !== "prototype") {
+          return observation;
+        }
+        return observation.viewHierarchy
+          ? scopeObserveResultToLayer(observation, "prototype", device.platform)
+          : { ...observation, focusedElement: undefined, accessibilityFocusedElement: undefined };
+      },
+      captureScreenshot: observer.captureScreenshot?.bind(observer),
+    };
     this.timer = dependencies.timer ?? defaultTimer;
     this.inputKey = dependencies.inputKey ?? new InputKey(device, adbFactory);
     this.textClient = dependencies.textClient ?? this.createTextClient(adbFactory);
@@ -1340,7 +1374,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     if (!hierarchy || !hasFocusedTextInput(hierarchy)) {
       // Auto insert already reads focus for password routing. Reject before dispatch
       // rather than trusting an IME acknowledgement with no readable editable target.
-      if (operation === "insert") {
+      if (operation === "insert" && this.targetLayer !== "prototype") {
         throw new ActionableError(ANDROID_TYPE_FOCUSED_INPUT_ERROR);
       }
       // Replace still dispatches; distinguish absent focus from a focused non-password field.
@@ -1368,6 +1402,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
 
     const before = await readIosTypedTextField(this.observer, this.timer, signal, display);
+    this.typingPasswordField = before?.secure === true;
     signal?.throwIfAborted();
 
     // iOS has one text-delivery mechanism: XCUITest typeText. Preserve the
@@ -1392,7 +1427,9 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
     return {
       ...this.withTextWarnings(
-        await verifyIosTypedText(text, before, this.observer, this.timer, signal, display),
+        this.targetLayer === "prototype"
+          ? result
+          : await verifyIosTypedText(text, before, this.observer, this.timer, signal, display),
         [clearWarning],
       ),
       resolvedMode,
@@ -2060,7 +2097,10 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     routing: ImeCommitRouting,
     operation: SendKeysOperation,
   ): Promise<TextActionResult> {
-    return verifyImeCommitResult(result, text, this.imeReadBack(text, routing, operation));
+    // Successful prototype delivery is compared once against the platform's authoritative source.
+    return this.targetLayer === "prototype" && result.success
+      ? Promise.resolve(result)
+      : verifyImeCommitResult(result, text, this.imeReadBack(text, routing, operation));
   }
 
   /** The device dispatched every unit but lost its sync barrier: re-read the editor (#10799). */
@@ -2112,6 +2152,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     // Auto-submit/navigation can remove focus after a legitimate commit. A passed
     // pre-check makes that read-back unverifiable, like an unreadable field.
     return (
+      this.targetLayer !== "prototype" &&
       !routing.focusedInputVerified &&
       observation.viewHierarchy !== undefined &&
       !hasFocusedTextInput(observation.viewHierarchy)
@@ -3444,6 +3485,8 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
 }
 
 export class SendKeys {
+  private readonly prototypeTextTarget: PrototypeTextTargetReader;
+  private prototypeTargetIdentifiers: readonly string[] = [];
   private readonly executor: SendKeysCommandExecutor;
   private readonly focuser: SendKeysTargetFocuser;
   private readonly keyboard?: SendKeysKeyboard;
@@ -3465,6 +3508,15 @@ export class SendKeys {
     this.lastRenderedObservation = dependencies.lastRenderedObservation;
     this.displayTransitionReader = dependencies.displayTransitions ?? displayTransitions;
     this.observer = dependencies.observer ?? new RealObserveScreen(device, adbFactory);
+    this.prototypeTextTarget =
+      dependencies.prototypeTextTarget ??
+      (device.platform === "android"
+        ? new AndroidPrototypeTextTargetReader(this.observer)
+        : new IosPrototypeTextTargetReader({
+            deviceId: device.deviceId,
+            connections: prototypeAgentRegistry,
+            bindings: prototypeTextFieldBindings,
+          }));
     this.timestampProvider =
       dependencies.timestampProvider ??
       (device.platform === "android"
@@ -3492,6 +3544,11 @@ export class SendKeys {
             error: result.error,
             focusVerified: result.focusVerified,
             [tapFocusFailure]: result[tapFocusFailure],
+            identifiers: [
+              result.element?.["resource-id"],
+              result.element?.["test-tag"],
+              result.element?.["view-id"],
+            ].filter((id): id is string => typeof id === "string" && id.length > 0),
             ...(result.element && new FieldTypeDetector().isPasswordField(result.element)
               ? { passwordField: true }
               : {}),
@@ -3509,6 +3566,10 @@ export class SendKeys {
     options?: SendKeysFocusOptions,
   ): Promise<SendKeysResult> {
     this.focusedPasswordTarget = false;
+    this.prototypeTargetIdentifiers = [selector?.elementId, selector?.testTag].filter(
+      (id): id is string => !!id,
+    );
+    this.executor.setTargetLayer?.(options?.layer);
     const result = await this.executeFocused(
       commands,
       selector,
@@ -4034,6 +4095,10 @@ export class SendKeys {
     const result = await this.focusWithKeyboardRecovery(selector, signal, display, options);
     signal?.throwIfAborted();
     this.focusedPasswordTarget ||= result.passwordField === true;
+    this.prototypeTargetIdentifiers = [
+      ...this.prototypeTargetIdentifiers,
+      ...(result.identifiers ?? []),
+    ];
     if (!result.success && result[tapFocusFailure]) {
       return {
         ...result,
@@ -4207,13 +4272,14 @@ export class SendKeys {
       await beginPostActionCaptureAction();
       signal?.throwIfAborted();
       routing.onCommandStart?.();
-      return await this.executeCommand(
+      const result = await this.executeCommand(
         command,
         signal,
         routing.onDispatch,
         routing.displayId,
         routing.display,
       );
+      return this.verifyPrototypeCommand(command, result, routing, signal);
     } catch (error) {
       signal?.throwIfAborted();
       logger.warn(`[SendKeys] ${command.action} command ${index} failed`, error);
@@ -4227,6 +4293,40 @@ export class SendKeys {
         error,
       );
     }
+  }
+
+  private async verifyPrototypeCommand(
+    command: SendKeysCommand,
+    result: SendKeysCommandResult,
+    routing: SendKeysRouting,
+    signal?: AbortSignal,
+  ): Promise<SendKeysCommandResult> {
+    if (
+      routing.layer !== "prototype" ||
+      command.action !== "type" ||
+      !command.text ||
+      !result.success ||
+      this.focusedPasswordTarget ||
+      this.executor.isPasswordTarget?.()
+    ) {
+      return result;
+    }
+    const verification = await verifyPrototypeTextTarget({
+      reader: this.prototypeTextTarget,
+      target: { identifiers: this.prototypeTargetIdentifiers, display: routing.display },
+      text: command.text,
+      operation: command.operation ?? "insert",
+      timer: this.timer,
+      settleMs: IME_COMMIT_READ_BACK_SETTLE_MS,
+      signal,
+    });
+    return {
+      ...result,
+      ...verification,
+      ...(result.warning || verification.warning
+        ? { warning: [result.warning, verification.warning].filter(Boolean).join(" ") }
+        : {}),
+    };
   }
 
   private addImeFailureGuidance(

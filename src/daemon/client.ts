@@ -376,6 +376,11 @@ export interface DaemonClientRecoveryOptions {
 export interface DaemonMethodCallOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
+  /**
+   * Lifecycle RPCs default to closing their connection on cancellation. A request such
+   * as notification subscription may cancel only itself and leave sibling release RPCs live.
+   */
+  abortMode?: "connection" | "request";
 }
 
 /**
@@ -1106,8 +1111,15 @@ export class DaemonClient {
    * own the failure strategy — a daemon that predates the subscription method
    * returns an error response, which surfaces here as a rejection.
    */
-  async subscribeToNotifications(): Promise<void> {
-    await this.callDaemonMethod(DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD, {});
+  async subscribeToNotifications(options?: { signal?: AbortSignal }): Promise<void> {
+    await this.callDaemonMethod(
+      DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
+      {},
+      {
+        ...options,
+        abortMode: "request",
+      },
+    );
   }
 
   /**
@@ -1447,7 +1459,9 @@ export class DaemonClient {
           // doctor has already reported its deadline. The cancel frame goes first
           // so a daemon that reads it before the close skips the request too.
           this.sendCancelFrame(requestId);
-          this.socket?.destroy();
+          if (options.abortMode !== "request") {
+            this.socket?.destroy();
+          }
           reject(
             new DaemonUnavailableError(`Daemon request ${method} aborted`, {
               cause: options.signal?.reason,
@@ -1555,7 +1569,7 @@ export interface DaemonClientLike {
    * wiring entirely — so a client must implement both or neither.
    */
   onNotification?(handler: (notification: DaemonNotification) => void): () => void;
-  subscribeToNotifications?(): Promise<void>;
+  subscribeToNotifications?(options?: { signal?: AbortSignal }): Promise<void>;
   onConnectionClosed?(handler: () => void): () => void;
 }
 

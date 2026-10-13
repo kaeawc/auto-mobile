@@ -2589,7 +2589,7 @@ export class DaemonMcpProxy {
       // timeout, while the time-critical first heartbeat must still be dispatched
       // immediately to beat the pre-first-heartbeat reclaim grace (#5637).
       const notificationSubscription = supportsNotifications
-        ? client.subscribeToNotifications!().catch((error) => {
+        ? client.subscribeToNotifications!({ signal: this.closeAbort.signal }).catch((error) => {
             logger.warn(`[DaemonMcpProxy] Failed to subscribe to daemon notifications: ${error}`);
           })
         : Promise.resolve();
@@ -2618,6 +2618,7 @@ export class DaemonMcpProxy {
       // so callers do not race later requests ahead of notification opt-in. Failure
       // was converted to a warning above and preserves the prior best-effort policy.
       await notificationSubscription;
+      this.throwIfClosing();
       if (this.resourceSubscriptions.size > 0) {
         await this.replayResourceSubscriptions(client);
       }

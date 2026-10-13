@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   UsageError,
@@ -68,4 +69,52 @@ describe("parseCliArgs", () => {
       "mutually exclusive",
     );
   });
+});
+
+test("parses Namespace overrides and CircleCI flags with checkout defaults", () => {
+  const defaults = parse([]);
+  expect(defaults.circleci).toBe(true);
+  expect(defaults.namespaceVcpus).toEqual({});
+  expect(defaults.circleciConfig).toBe(resolve("/repo/.circleci/continue_config.yml"));
+  const options = parse([
+    "--namespace-vcpus",
+    "namespace-profile-auto-mobile=8,namespace-custom=2",
+    "--no-circleci",
+    "--circleci-config",
+    "custom.yml",
+  ]);
+  expect(options.namespaceVcpus).toEqual({
+    "namespace-profile-auto-mobile": 8,
+    "namespace-custom": 2,
+  });
+  expect(options.circleci).toBe(false);
+  expect(options.circleciConfig).toBe("custom.yml");
+});
+
+test("rejects malformed vCPU overrides", () => {
+  for (const value of [
+    "",
+    "foo",
+    "foo=2",
+    "namespace-x=0",
+    "namespace-x=-1",
+    "namespace-x=1.5",
+    "namespace-x=2,",
+    "namespace-x=9007199254740992",
+    "namespace-x=2=3",
+  ]) {
+    expect(() => parse(["--namespace-vcpus", value])).toThrow(UsageError);
+  }
+  expect(() => parse(["--circleci-config"])).toThrow(UsageError);
+});
+
+test("BATS setup uses the caller's temp directory without a checkout scratch prerequisite", () => {
+  const source = readFileSync(resolve(import.meta.dir, "../bats/ci-time-to-green.bats"), "utf8");
+  expect(source).toContain('TEST_ROOT="$(mktemp -d)"');
+  expect(source).toContain('export TMPDIR="$TEST_ROOT"');
+});
+
+test("main-push CircleCI statuses require an explicit opt-in", () => {
+  expect(parse([]).circleciMainPushes).toBe(false);
+  expect(parse(["--circleci-main-pushes"]).circleciMainPushes).toBe(true);
 });

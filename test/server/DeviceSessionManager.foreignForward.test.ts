@@ -190,14 +190,21 @@ describe("#12220 foreign CtrlProxy forward at DeviceSessionManager readiness", (
     },
   );
 
-  test("F7 read propagates an unrelated failure despite the client's stale conflict flag", async () => {
+  test("S1 read swallows an unrelated readiness error with a stale lease-conflict flag without writes", async () => {
     const h = harness(true, true, false, false);
     const failure = new Error("unrelated read failure");
-    h.waitForConnection.mockRejectedValue(failure);
+    h.ctrlProxyManager.isInstalled = async () => {
+      throw failure;
+    };
+    expect(h.ctrlProxyClient.isLastConnectionFailureForwardingLeaseConflict?.()).toBe(true);
     await expect(
       h.manager.ensureDeviceReady("android", h.device.deviceId, { intent: "read" }),
-    ).rejects.toBe(failure);
-    expect(h.ctrlProxyManager.wasMethodCalled("setup")).toBe(false);
+    ).resolves.toEqual(h.device);
+    expect(h.ctrlProxyManager.getExecutedOperations()).toEqual(["isEnabled"]);
+    expect(h.adb.getExecutedCommands()).toEqual([]);
+    expect(h.waitForConnection).not.toHaveBeenCalled();
+    expect(h.appearance).not.toHaveBeenCalled();
+    expect(h.manager.getCurrentDevice()).toBeUndefined();
   });
 
   test("F7 read propagates cancellation despite the client's stale conflict flag", async () => {

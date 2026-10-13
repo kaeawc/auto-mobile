@@ -715,6 +715,12 @@ a read, and fails control with a distinct, non-coded adb failure asking for a re
 Cancellation propagates as cancellation. A peer using a different coordination
 directory with **no forward**, or an unrecorded forward whose disconnected owner
 was never observed, leaves no live forward evidence for this check to detect.
+Once this daemon's own CtrlProxy client is connected and responsive, it does not
+re-read forward ownership on each call. An older-release daemon that later connects
+through its own forward to the same device is therefore not detected by that fast
+path. The pool gate still refuses sessionless control in daemon mode on its next
+ownership read. Pool-level forward evidence is supplied by the daemon process
+entry point. Direct (non-daemon) mode is protected by the CtrlProxy manager guard alone.
 
 | Tool                    | Android                                     | iOS simulator                               |
 | ----------------------- | ------------------------------------------- | ------------------------------------------- |

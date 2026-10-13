@@ -63,6 +63,35 @@ function harness() {
 }
 
 describe("foreign CtrlProxy forward evidence", () => {
+  test("S2 a shared listing failure retries once on the other device and detects its foreign client", async () => {
+    const first = new FakeAdbExecutor();
+    first.setCommandError("forward --list", new Error("first device offline"));
+    const second = new FakeAdbExecutor();
+    second.setCommandResponse("forward --list", {
+      stdout: "second tcp:52001 tcp:8765",
+      stderr: "",
+    });
+    const evidence = new DefaultForeignCtrlProxyForwardEvidence({
+      adbFactory: { create: (device) => (device.deviceId === "first" ? first : second) },
+      clientProbe: { findClientPids: async () => [4242] },
+      ownership: () => ({ ownsForward: () => false }),
+      isProcessRunning: () => true,
+      timer: new FakeTimer(),
+    });
+    const [firstVerdict, secondVerdict] = await Promise.all([
+      evidence.read("first"),
+      evidence.read("second"),
+    ]);
+    expect(firstVerdict).toMatchObject({
+      kind: "unknown",
+      ports: [],
+      reason: "first device offline",
+    });
+    expect(secondVerdict).toMatchObject({ kind: "foreign", ports: [52001], clientPids: [4242] });
+    expect(first.getExecutedCommands()).toEqual(["forward --list"]);
+    expect(second.getExecutedCommands()).toEqual(["forward --list"]);
+  });
+
   test("F2 an already cancelled evidence read preserves its abort reason", async () => {
     const h = harness();
     const controller = new AbortController();

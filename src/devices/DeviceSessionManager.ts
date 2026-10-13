@@ -1769,12 +1769,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
       logger.error(`[DeviceSessionManager] Failed to setup accessibility service: ${errorMsg}`);
       // Rethrow ActionableErrors to preserve their specific error messages, and cancellation so
       // readiness does not go on to pin and configure the device (#10905).
-      if (
-        error instanceof ActionableError ||
-        (options?.intent === "read" &&
-          accessibilityClient?.isLastConnectionFailureForwardingLeaseConflict?.()) ||
-        options?.signal?.aborted
-      ) {
+      if (error instanceof ActionableError || options?.signal?.aborted) {
         throw error;
       }
     } finally {

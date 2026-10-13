@@ -142,7 +142,7 @@ export interface ForeignForwardEvidenceDependencies {
 }
 
 export class DefaultForeignCtrlProxyForwardEvidence implements ForeignCtrlProxyForwardEvidence {
-  private listingInFlight?: Promise<{ stdout: string }>;
+  private listingInFlight?: { deviceId: string; result: Promise<{ stdout: string }> };
 
   constructor(private readonly deps: ForeignForwardEvidenceDependencies) {}
 
@@ -156,11 +156,24 @@ export class DefaultForeignCtrlProxyForwardEvidence implements ForeignCtrlProxyF
       return list();
     }
     if (!this.listingInFlight) {
-      this.listingInFlight = list().finally(() => {
-        this.listingInFlight = undefined;
-      });
+      this.listingInFlight = {
+        deviceId,
+        result: list().finally(() => {
+          this.listingInFlight = undefined;
+        }),
+      };
     }
-    return this.listingInFlight;
+    const listing = this.listingInFlight;
+    return listing.result.catch((error: unknown) => {
+      if (listing.deviceId === deviceId) {
+        throw error;
+      }
+      logger.warn(
+        `[CTRL_PROXY] Shared forward listing from ${listing.deviceId} failed; retrying on ${deviceId}`,
+        error,
+      );
+      return list();
+    });
   }
 
   async read(deviceId: string, signal?: AbortSignal): Promise<ForeignCtrlProxyForwardVerdict> {

@@ -22,10 +22,15 @@ public protocol ProbeBridge {
     func rule(version: Int, command: Data, reply: @escaping (Data?, String?) -> Void)
 }
 
+/// Lock order: service lock → coordinator lock → shaper lock → store lock.
+/// Stop holds the service lock through onStop, making rule removal and pause
+/// settlement atomic with commands/startup. The coordinator never calls the
+/// service; onRulesChanged and shapingActivity run outside the service lock.
 public final class ProbeService: NSObject, ProbeBridge {
     private let probe: IdentityProbe
     private let rules: NetworkRuleStore
-    private let lock = NSLock()
+    // Internal so lifecycle tests can pin the lock held across the stop hook.
+    let lock = NSLock()
     private var active = false
     private var generation: UInt64 = 0
     private let onRulesChanged: (() -> Void)?
@@ -52,9 +57,9 @@ public final class ProbeService: NSObject, ProbeBridge {
         // A stopped or restarting filter must not resurrect an impairment the
         // host may have stopped renewing: every rule ends here.
         rules.removeAll()
+        onStop?()
         let current = generation
         lock.unlock()
-        onStop?()
         return current
     }
 

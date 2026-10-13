@@ -12,7 +12,20 @@ final class FakePauseScheduler: PauseScheduler {
 
     private let lock = NSLock()
     private var queue: [Item] = []
-    var onSchedule: (() -> Void)?
+    private var scheduleHook: (() -> Void)?
+    var onSchedule: (() -> Void)? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return scheduleHook
+        }
+        set {
+            lock.lock()
+            scheduleHook = newValue
+            lock.unlock()
+        }
+    }
+
     var items: [Item] {
         lock.lock()
         defer { lock.unlock() }
@@ -99,6 +112,29 @@ final class FlowShapingCoordinatorTests: XCTestCase {
         XCTAssertEqual(admit(transport: .datagram), .filter(inbound: false, outbound: true, peekBytes: 200))
         XCTAssertEqual(data(200), .pause)
         XCTAssertEqual(handler.verdicts, [])
+    }
+
+    func testScheduledWorkClaimRejectsEarlyWakesAndClaimsOnlyOnce() {
+        let claim = ScheduledWorkClaim(deadline: 100)
+        XCTAssertEqual(claim.claim(atNanoseconds: 99), .early)
+        XCTAssertEqual(claim.claim(atNanoseconds: 0), .early)
+        XCTAssertEqual(claim.claim(atNanoseconds: 100), .run)
+        XCTAssertEqual(claim.claim(atNanoseconds: 101), .finished)
+        XCTAssertEqual(claim.claim(atNanoseconds: 0), .finished)
+    }
+
+    func testScheduledWorkClaimIsThreadSafe() {
+        for _ in 0 ..< 30 {
+            let claim = ScheduledWorkClaim(deadline: 100)
+            let winner = RecordingResume()
+            DispatchQueue.concurrentPerform(iterations: 24) { index in
+                if claim.claim(atNanoseconds: index.isMultiple(of: 2) ? 99 : 100) == .run {
+                    winner.receive(.allow)
+                }
+            }
+            XCTAssertEqual(winner.verdicts, [.allow])
+            XCTAssertEqual(claim.claim(atNanoseconds: 100), .finished)
+        }
     }
 
     func testNonPauseVerdictsReleaseHandlersWithoutDelivery() {
@@ -448,30 +484,83 @@ final class FlowShapingCoordinatorTests: XCTestCase {
         XCTAssertEqual(handler.verdicts, [.allow])
     }
 
-    func testConcurrencySmokeDeliversEveryPauseExactlyOnceAfterStop() {
-        useStore(lease: 15000)
-        let handlers = (0 ..< 16).map { _ in RecordingResume() }
-        let flows = handlers.map { _ in UUID() }
-        var timers: [FakePauseScheduler.Item] = []
-        for index in handlers.indices {
-            let nextTimer = scheduler.items.count
-            XCTAssertEqual(coordinator.newFlow(
-                flows[index], target: RuleFixtures.target, transport: .stream, onResume: handlers[index].receive
-            ), .pause)
-            timers.append(scheduler.items[nextTimer])
-        }
-        DispatchQueue.concurrentPerform(iterations: handlers.count) { index in
-            _ = coordinator.data(
-                flows[index], direction: .outbound, availableBytes: 10, onResume: handlers[index].receive
-            )
-            coordinator.rulesChanged()
-            // One early firing per flow keeps the smoke test's work bounded.
-            timers[index].work()
-        }
-        coordinator.stop()
-        advance(10)
-        for recorder in handlers {
-            XCTAssertEqual(recorder.verdicts, [.allow])
+    private func raceSettlements(
+        _ flows: [UUID], timers: [FakePauseScheduler.Item], rules: NetworkRuleStore,
+        coordinator: FlowShapingCoordinator
+    ) {
+        let fireTimers = { for timer in timers {
+            timer.work()
+        } }
+        let operations: [() -> Void] = [
+            fireTimers, fireTimers,
+            {
+                _ = rules.execute(RuleFixtures.reset(RuleFixtures.ownership(revision: 2)))
+                coordinator.rulesChanged()
+            },
+            { for flow in flows {
+                coordinator.dataComplete(flow, direction: .inbound)
+            } },
+            { for flow in flows {
+                coordinator.dataComplete(flow, direction: .outbound)
+            } },
+            {
+                for flow in flows {
+                    // Zero-byte callbacks exercise paused/allow-latched data
+                    // without creating a fresh data pause after a due resume.
+                    _ = coordinator.data(flow, direction: .outbound, availableBytes: 0) { _ in
+                        XCTFail("A late callback must not register another pause")
+                    }
+                }
+            },
+            { [self] in scheduler.runDue(clock) },
+            { for _ in flows {
+                _ = coordinator.status()
+            } },
+        ]
+        DispatchQueue.concurrentPerform(iterations: operations.count) { operations[$0]() }
+    }
+
+    func testConcurrentSettlementsDeliverEveryPauseExactlyOnce() {
+        for _ in 0 ..< 30 {
+            useStore(lease: 15000)
+            let handlers = (0 ..< 24).map { _ in RecordingResume() }
+            let flows = handlers.map { _ in UUID() }
+            for index in handlers.indices {
+                let transport: FlowTransport = index.isMultiple(of: 2) ? .stream : .datagram
+                let verdict = coordinator.newFlow(
+                    flows[index], target: RuleFixtures.target, transport: transport, onResume: handlers[index].receive
+                )
+                if transport == .stream {
+                    XCTAssertEqual(verdict, .pause)
+                } else {
+                    XCTAssertEqual(verdict, .filter(inbound: true, outbound: true, peekBytes: 65536))
+                    XCTAssertEqual(coordinator.data(
+                        flows[index], direction: .outbound, availableBytes: 10, onResume: handlers[index].receive
+                    ), .pause)
+                }
+            }
+            let timers = scheduler.items
+            // Datagram data timers and the tick are due; new-flow timers are
+            // still early. All compete with reset/completion for the handlers.
+            // Clock writes happen only before/after the concurrent reads.
+            clock.advance(milliseconds: 1000)
+            let current = coordinator!
+            let rules = store!
+            raceSettlements(flows, timers: timers, rules: rules, coordinator: current)
+            // Pin actual concurrent settlement, before the serial stop can hide
+            // a race that lost a pending handler.
+            scheduler.runDue(clock)
+            XCTAssertEqual(current.status().pendingPauses, 0)
+            for recorder in handlers {
+                XCTAssertEqual(recorder.verdicts.count, 1)
+            }
+            current.stop()
+            scheduler.runDue(clock)
+            XCTAssertEqual(current.status().pendingPauses, 0)
+            for recorder in handlers {
+                XCTAssertEqual(recorder.verdicts.count, 1)
+            }
+            scheduler = FakePauseScheduler()
         }
     }
 }

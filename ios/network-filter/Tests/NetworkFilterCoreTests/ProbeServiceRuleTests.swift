@@ -141,7 +141,7 @@ final class NetworkRuleArgumentsTests: XCTestCase {
 }
 
 extension ProbeServiceRuleTests {
-    func testHooksRunAfterExecutedCommandsOutsideLocksAndStopClearsRules() throws {
+    func testRuleHooksRunOutsideLocksAndStopClearsRules() throws {
         var changes = 0
         var stops = 0
         service = ProbeService(
@@ -154,10 +154,8 @@ extension ProbeServiceRuleTests {
             }, onStop: { [self] in
                 stops += 1
                 XCTAssertEqual(store.activeRules(), [])
-                service.snapshot(version: 4, managedSimulators: Data("[]".utf8)) { data, error in
-                    XCTAssertNil(data)
-                    XCTAssertEqual(error, ProbeReadbackStartupState.inactiveProviderMessage)
-                }
+                // Stop holds the service lock; it may read the store but must
+                // not reenter the service. Rule/activity hooks remain outside.
             }
         )
         _ = try send(RuleFixtures.apply(RuleFixtures.ownership(revision: 1)))
@@ -180,6 +178,54 @@ extension ProbeServiceRuleTests {
         XCTAssertEqual(changes, 4)
         _ = service.stopOrBeginStartup()
         XCTAssertEqual(stops, 2)
+        // The old pin is kept outside the hook, which now holds the lock.
+        service.snapshot(version: 4, managedSimulators: Data("[]".utf8)) { data, error in
+            XCTAssertNil(data)
+            XCTAssertEqual(error, ProbeReadbackStartupState.inactiveProviderMessage)
+        }
+    }
+
+    func testStopHookCannotInterleaveWithRestartAndRuleCommand() throws {
+        let entered = DispatchSemaphore(value: 0)
+        let finished = DispatchGroup()
+        let events = RecordingResume()
+        let command = try JSONEncoder().encode(NetworkRuleCommand(
+            kind: .apply, target: RuleFixtures.target, ownership: RuleFixtures.ownership(revision: 2),
+            condition: .shaped(ShapingRequest(delayMilliseconds: 100)), leaseMilliseconds: 15000
+        ))
+        store = NetworkRuleStore(clock: clock, supportsShaping: true)
+        XCTAssertEqual(store.execute(RuleFixtures.apply(RuleFixtures.ownership(revision: 1))).outcome, .applied)
+        service = ProbeService(
+            probe: IdentityProbe(resolver: FakeIdentityResolver(), processTable: FakeProcessTable()), rules: store,
+            onStop: { [self] in
+                XCTAssertEqual(store.activeRules(), []) // removeAll precedes onStop.
+                // Pin the gate before launching the competitor, so its own
+                // lock acquisition cannot mask an unlocked stop hook.
+                let available = service.lock.try()
+                if available { service.lock.unlock() }
+                XCTAssertFalse(available, "Stop must hold the same lock as rule and finishStartup")
+                finished.enter()
+                let current = service
+                DispatchQueue.global().async {
+                    entered.signal()
+                    // Model a restart that would otherwise install a new rule
+                    // while the previous run's stop hook was still settling.
+                    XCTAssertTrue(current.finishStartup(generation: 1, succeeded: true))
+                    current.rule(version: 4, command: command) { data, error in
+                        XCTAssertNil(error)
+                        XCTAssertNotNil(data)
+                        events.receive(.filter(inbound: true, outbound: true, peekBytes: 1))
+                    }
+                    finished.leave()
+                }
+                entered.wait()
+                events.receive(.allow) // All old pauses settled by this hook.
+            }
+        )
+        XCTAssertEqual(service.stopOrBeginStartup(), 1)
+        finished.wait()
+        XCTAssertEqual(events.verdicts, [.allow, .filter(inbound: true, outbound: true, peekBytes: 1)])
+        XCTAssertEqual(store.activeRules().count, 1)
     }
 
     func testShapingActivityVersionFourOnlyAndShapedApplyAcknowledged() throws {
@@ -190,7 +236,16 @@ extension ProbeServiceRuleTests {
         var activityCalls = 0
         service = ProbeService(
             probe: IdentityProbe(resolver: FakeIdentityResolver(), processTable: FakeProcessTable()), rules: store,
-            shapingActivity: { activityCalls += 1; return coordinator.status() }
+            shapingActivity: { [self] in
+                activityCalls += 1
+                // Version 3 does not call shapingActivity again, so this pins
+                // service reentry without recursion or a real timer.
+                service.snapshot(version: 3, managedSimulators: Data("[]".utf8)) { data, error in
+                    XCTAssertNotNil(data)
+                    XCTAssertNil(error)
+                }
+                return coordinator.status()
+            }
         )
         start()
         let command = NetworkRuleCommand(

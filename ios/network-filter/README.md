@@ -2,7 +2,9 @@
 
 Backend for iOS Simulator `networkCondition` (#6298). It reports flow identity
 and applies leased **offline**, latency and bandwidth rules for one explicitly
-named app on one simulator (#10264, #10265). Packet loss remains unapplied.
+named app on one simulator (#10264, #10265), implemented and unit-tested only,
+compiled unsigned, and unverified against real traffic until the signed run (#10263).
+Packet loss remains unapplied.
 Simulator attribution, signed installation,
 authenticated XPC at runtime, and network isolation still require native
 integration evidence from the signed run (#10263).
@@ -315,13 +317,17 @@ Identical apply redelivery refreshes the lease; a differing condition or request
 at the installed revision returns `invalid_command`. Newer revisions can replace
 offline with shaped configuration or vice versa. Evaluation snapshots cover both
 kinds of target, while drop commit remains offline-only. A shaped rule alone
-triggers attribution; only attributed new socket flows of its app are shaped.
+triggers attribution; only attributed new socket flows of its app are shaped,
+implemented and unit-tested only, compiled unsigned, and unverified against
+real traffic until the signed run (#10263).
 
 The provider constructs its store with `supportsShaping: true`, resolves
 requests in Core, and reports `invalid_shaping` when out of range or nothing is
 applicable. The default Core store still refuses shaping with
 `unsupported_condition`. Shaped rules are enforced on **NEW flows** of the
-attributed app only; established flows are not shaped. The unsigned provider
+attributed app only, implemented and unit-tested only, compiled unsigned, and
+unverified against real traffic until the signed run (#10263); established flows
+are not shaped. The unsigned provider
 compiles, but every data-path NetworkExtension assumption and all traffic
 effects remain unverified until the signed run (#10263). Configuration
 acknowledgements are not traffic evidence. The native isolation gate above still applies.
@@ -451,8 +457,8 @@ callbacks and debt releases.
 The thread-safe Core adapter owns no payloads, at most 256 pending handlers,
 256 filter-direction records and 256 first-completion records (oldest forgotten
 first). A filtered flow ends after all requested directions complete; a pause
-before its first filter verdict assumes both directions. Stale records left by
-idle eviction are bounded and disappear on end, allow, drop or stop.
+before its first filter verdict assumes both directions. The filter-direction
+record of an idle-evicted flow leaves only through the 256-entry FIFO cap or stop.
 
 Claiming a handler under the coordinator lock gives exactly-once delivery for
 timers, rule reset/expiry/replacement, completion, drop and stop. Handlers and
@@ -465,12 +471,12 @@ individual timer was lost or late. One tick remains outstanding until it fires;
 it stops repeating when nothing is pending and restarts on the next pause.
 Stop invalidates the tick and all tokens; stale scheduled work does nothing.
 
-`DispatchPauseScheduler` uses a private serial queue and `asyncAfter(wallDeadline:)`.
-Wall deadlines count sleep like macOS `CLOCK_MONOTONIC`, whereas Dispatch's default
-deadline does not. A wall-clock step can wake early or late; monotonic deadline
-re-checks reschedule early wakes and the tick backs up late wakes. The Dispatch
-scheduler also re-checks its monotonic deadline before executing any work, so
-an early wall wake cannot bypass minimum-age handler delivery. Backwards
+`DispatchPauseScheduler` uses a private serial queue and arms every work item on
+both wall and uptime deadlines: sleep is covered by the wall deadline, a clock
+step by the uptime deadline, and the tick remains the backstop for a lost wake-up.
+The first wake at or after the monotonic deadline claims the work exactly once;
+an early wake re-arms only its own time base and the losing wake does nothing.
+This also prevents early wakes from bypassing minimum-age handler delivery. Backwards
 readings are clamped, and restart drops rules rather than restoring impairment.
 
 Version-4 snapshots optionally expose top-level `shapingActivity`: `flows`
@@ -497,6 +503,12 @@ The call sites compile unsigned. These assumptions require the signed run (#1026
 6. `NEFilterFlow.identifier` is stable for a flow's lifetime and unique among live flows.
 7. Stream data-complete callbacks arrive for both directions; otherwise 60 s idle
    eviction frees the slot on a later admission.
+8. Returning `allow()` from one direction's data-complete callback does not stop
+   filtering the other direction. If false, the other direction is simply unshaped;
+   the pending pause is still settled once.
+9. Returning `allow()` from a data callback on a paused flow does not itself resume
+   or unfilter it before `resumeFlow`. If false, the rest of the flow is simply
+   unshaped; the pending pause is still settled once.
 
 ## References
 

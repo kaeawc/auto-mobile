@@ -5,24 +5,33 @@ import NetworkFilterCore
 @objc(IdentityFilterProvider)
 final class IdentityFilterProvider: NEFilterDataProvider, NSXPCListenerDelegate {
     private let probe = IdentityProbe(resolver: SecurityProbeIdentityResolver(), processTable: DarwinProcessTable())
-    private let clock = SystemMonotonicClock()
-    private lazy var rules = NetworkRuleStore(clock: clock, supportsShaping: true)
-    private lazy var shaping = FlowShapingCoordinator(
-        shaper: FlowShaper(clock: clock, ruleSource: rules), clock: clock,
-        scheduler: DispatchPauseScheduler(clock: clock)
-    )
-    private lazy var policy = AppFlowPolicy(
-        store: rules,
-        processTable: DarwinProcessTable(),
-        identityResolver: SecurityProbeIdentityResolver()
-    )
+    private let clock: SystemMonotonicClock
+    private let rules: NetworkRuleStore
+    private let shaping: FlowShapingCoordinator
+    private let policy: AppFlowPolicy
+    private let service: ProbeService
     private var listener: NSXPCListener?
-    private lazy var service = ProbeService(
-        probe: probe, rules: rules,
-        onRulesChanged: { [weak self] in self?.shaping.rulesChanged() },
-        onStop: { [weak self] in self?.shaping.stop() },
-        shapingActivity: { [weak self] in self?.shaping.status() }
-    )
+
+    override init() {
+        let clock = SystemMonotonicClock()
+        let rules = NetworkRuleStore(clock: clock, supportsShaping: true)
+        let shaping = FlowShapingCoordinator(
+            shaper: FlowShaper(clock: clock, ruleSource: rules), clock: clock,
+            scheduler: DispatchPauseScheduler(clock: clock)
+        )
+        self.clock = clock
+        self.rules = rules
+        self.shaping = shaping
+        policy = AppFlowPolicy(
+            store: rules, processTable: DarwinProcessTable(), identityResolver: SecurityProbeIdentityResolver()
+        )
+        service = ProbeService(
+            probe: probe, rules: rules,
+            onRulesChanged: { shaping.rulesChanged() }, onStop: { shaping.stop() },
+            shapingActivity: { shaping.status() }
+        )
+        super.init()
+    }
 
     override func startFilter(completionHandler: @escaping (Error?) -> Void) {
         let generation = service.stopOrBeginStartup()
@@ -75,7 +84,13 @@ final class IdentityFilterProvider: NEFilterDataProvider, NSXPCListenerDelegate 
     // 5. Wall-deadline wake-ups fire promptly after sleep; the 1 s tick backs up.
     // 6. NEFilterFlow.identifier is lifetime-stable and unique among live flows.
     // 7. Streams complete both directions; otherwise 60 s idle eviction frees
-    // the slot. Traffic effects remain unverified until the signed run (#10263).
+    // the slot.
+    // 8. allow() from one direction's data-complete callback does not stop
+    // filtering the other direction; if false, the other direction is unshaped.
+    // 9. allow() from data on a paused flow does not resume or unfilter it before
+    // resumeFlow; if false, the rest of the flow is unshaped. In either case the
+    // pending pause is still settled once. Traffic effects remain unverified
+    // until the signed run (#10263).
 
     override func handleNewFlow(_ flow: NEFilterFlow) -> NEFilterNewFlowVerdict {
         probe.record(

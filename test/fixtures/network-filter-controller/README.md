@@ -35,7 +35,9 @@ naming their count and the reason. Its modes remain `allow_only`/`app_offline`.
 Version 4 also carries `app_shaped`/`app_mixed`, requests, accepted effect names,
 profile units and unapplied components. These describe configuration, not traffic
 verification. This build's shaping-capable provider enforces shaped rules on NEW
-flows of the attributed app only; established flows are not shaped. Data-path
+flows of the attributed app only, implemented and unit-tested only, compiled
+unsigned, and unverified against real traffic until the signed run (#10263);
+established flows are not shaped. Data-path
 NetworkExtension assumptions and all traffic effects remain unverified until
 the signed run (#10263). `rule-unsupported-condition.json` still models the
 default Core store, which refuses shaping unless explicitly enabled. Version-3

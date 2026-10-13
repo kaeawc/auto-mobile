@@ -7,22 +7,58 @@ public protocol PauseScheduler {
     func schedule(atNanoseconds deadline: UInt64, _ work: @escaping () -> Void)
 }
 
-/// Wall deadlines count sleep, like CLOCK_MONOTONIC on macOS. A wall-clock step
-/// may wake early or late: resume's notDue check and the one-second tick absorb
-/// that skew. No rule decision relies on the wall clock itself.
+/// A pure once-only gate shared by the wall and uptime wake-ups. Early wakes
+/// cannot claim the work; after the first due claim every wake does nothing.
+final class ScheduledWorkClaim {
+    enum Decision { case early, run, finished }
+
+    private let deadline: UInt64
+    private let lock = NSLock()
+    private var claimed = false
+
+    init(deadline: UInt64) { self.deadline = deadline }
+
+    func claim(atNanoseconds now: UInt64) -> Decision {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !claimed else { return .finished }
+        guard now >= deadline else { return .early }
+        claimed = true
+        return .run
+    }
+}
+
+/// Wall deadlines cover sleep, like CLOCK_MONOTONIC on macOS; uptime deadlines
+/// cover wall-clock steps. The first wake at or after the monotonic deadline
+/// claims the work once. Early wakes re-arm only their own time base; the tick
+/// remains the backstop for a lost wake-up. Rule decisions never use wall time.
 public final class DispatchPauseScheduler: PauseScheduler {
+    private enum TimeBase { case wall, uptime }
+
     private let clock: MonotonicClock
     private let queue = DispatchQueue(label: "AutoMobile.FlowShaping")
 
     public init(clock: MonotonicClock) { self.clock = clock }
 
     public func schedule(atNanoseconds deadline: UInt64, _ work: @escaping () -> Void) {
+        let claim = ScheduledWorkClaim(deadline: deadline)
+        arm(deadline, base: .wall, claim: claim, work: work)
+        arm(deadline, base: .uptime, claim: claim, work: work)
+    }
+
+    private func arm(_ deadline: UInt64, base: TimeBase, claim: ScheduledWorkClaim, work: @escaping () -> Void) {
         let now = clock.nowNanoseconds()
-        let delay = deadline > now ? deadline - now : 0
-        queue.asyncAfter(wallDeadline: .now() + Double(delay) / 1_000_000_000) { [self] in
-            // Protect even minimum-age handler delivery from a forward wall step.
-            if clock.nowNanoseconds() < deadline { schedule(atNanoseconds: deadline, work) }
-            else { work() }
+        let delay = Double(deadline > now ? deadline - now : 0) / 1_000_000_000
+        let wake = { [self] in
+            switch claim.claim(atNanoseconds: clock.nowNanoseconds()) {
+            case .early: arm(deadline, base: base, claim: claim, work: work)
+            case .run: work()
+            case .finished: break
+            }
+        }
+        switch base {
+        case .wall: queue.asyncAfter(wallDeadline: .now() + delay, execute: wake)
+        case .uptime: queue.asyncAfter(deadline: .now() + delay, execute: wake)
         }
     }
 }
@@ -53,8 +89,9 @@ public struct ShapingActivity: Codable, Equatable {
     public let unexpectedSecondPause: UInt64
 }
 
-/// Owns tokens and handlers, never payloads. Lock order is coordinator → shaper
-/// → rule source. Claiming a handler under this lock makes every exit exactly
+/// Owns tokens and handlers, never payloads. Lock order is service lock →
+/// coordinator lock → shaper lock → store lock. The coordinator never calls
+/// the service. Claiming a handler under this lock makes every exit exactly
 /// once; scheduling and delivery happen only after unlocking. Delayed work is
 /// fenced by the shaper's non-repeating token IDs and the tick's identity.
 public final class FlowShapingCoordinator {

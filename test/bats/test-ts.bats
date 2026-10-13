@@ -66,7 +66,8 @@ setup() {
   # The lane derives its per-test timeout and worker count from the runner's
   # OS, so a macOS CI runner (RUNNER_OS=macOS: --timeout 20000) must not leak
   # into stubbed invocations; tests that need an OS set RUNNER_OS themselves.
-  unset RUNNER_OS AUTOMOBILE_TEST_TIMEOUT_MS AUTOMOBILE_UNIT_TEST_WORKERS
+  unset RUNNER_OS AUTOMOBILE_TEST_TIMEOUT_MS AUTOMOBILE_UNIT_TEST_WORKERS \
+    AUTOMOBILE_INTEGRATION_TEST_WORKERS AUTOMOBILE_INTEGRATION_SAFE_TIER_FILE
   # Chunking and shared-process knobs are lane tuning that a caller shell (CI job env,
   # orchestrator) may export; every test that depends on them sets them explicitly.
   unset AUTOMOBILE_UNIT_TEST_CHUNK_FILES AUTOMOBILE_UNIT_ISOLATED_CHUNK_SIZE \
@@ -590,11 +591,205 @@ EOF
   rm -f "$timeout_args" "$clock_calls"
 }
 
-@test "Windows integration lane retains one process without a POSIX watchdog" {
+windows_tier_fixture() {
+  export AUTOMOBILE_INTEGRATION_SAFE_TIER_FILE="$BATS_TEST_TMPDIR/tiers.txt"
+  UNSAFE_ONE=test/contracts/runAll.integration.test.ts
+  UNSAFE_TWO=test/daemon/daemonManagerReadiness.integration.test.ts
+  printf '# fixture\n\n%s | unsafe | first\n%s | unsafe | second\ntest/missing.integration.test.ts | unsafe | absent\n' \
+    "$UNSAFE_ONE" "$UNSAFE_TWO" > "$AUTOMOBILE_INTEGRATION_SAFE_TIER_FILE"
+}
+
+@test "Windows integration lane prints an unsafe process and safe shards" {
+  windows_tier_fixture
   run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 bash "$SCRIPT" integration
   [ "$status" -eq 0 ]
+  [ "$(grep -c '^bun test' <<< "$output")" -eq 3 ]
+  [[ "${lines[0]}" == "bun test --isolate --timeout 5000 $UNSAFE_ONE $UNSAFE_TWO " ]]
+  for k in 1 2; do
+    [[ "${lines[$k]}" == "bun test --isolate --timeout 5000 --path-ignore-patterns $UNSAFE_ONE --path-ignore-patterns $UNSAFE_TWO --shard=$k/2 .integration.test.ts " ]]
+  done
+  [[ "$output" != *"run_with_timeout"* ]]
+  [[ "$output" != *"timeout 900"* ]]
+}
+
+@test "Windows integration single worker keeps the legacy command" {
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
+    AUTOMOBILE_INTEGRATION_TEST_WORKERS=1 bash "$SCRIPT" integration
+  [ "$status" -eq 0 ]
+  [ "$output" = 'bun test --isolate --timeout 5000 .integration.test.ts ' ]
+}
+
+@test "Windows integration passthrough bail keeps exactly the legacy command" {
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 bash "$SCRIPT" integration --bail
+  [ "$status" -eq 0 ]
   [ "$(grep -c '^bun test' <<< "$output")" -eq 1 ]
+  [[ "$output" != *"--shard="* ]]
   [[ "$output" != *"--path-ignore-patterns"* ]]
+  [ "$output" = 'bun test --isolate --timeout 5000 .integration.test.ts --bail ' ]
+}
+
+@test "Windows integration passthrough reporter keeps exactly the legacy command" {
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
+    bash "$SCRIPT" integration --reporter junit --reporter-outfile x.xml
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^bun test' <<< "$output")" -eq 1 ]
+  [[ "$output" != *"--shard="* ]]
+  [[ "$output" != *"--path-ignore-patterns"* ]]
+  [ "$output" = 'bun test --isolate --timeout 5000 .integration.test.ts --reporter junit --reporter-outfile x.xml ' ]
+}
+
+@test "Windows unit wall timeout keeps the legacy command" {
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
+    AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=60 bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^bun test' <<< "$output")" -eq 1 ]
+  [[ "$output" != *"--shard="* ]]
+  [ "$(grep '^bun test' <<< "$output")" = 'bun test --timeout 5000 --path-ignore-patterns \*\*/\*.integration.test.ts --path-ignore-patterns test/stress/\*\* ' ]
+}
+
+@test "Windows integration wall timeout keeps the legacy command" {
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
+    AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=60 bash "$SCRIPT" integration
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^bun test' <<< "$output")" -eq 1 ]
+  [[ "$output" != *"--shard="* ]]
+  [ "$output" = 'bun test --isolate --timeout 5000 .integration.test.ts ' ]
+}
+
+@test "Windows unit print mode leaves shard directories untouched" {
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [ ! -e "$SHARD_SCRATCH/test-ts-unit-shards" ]
+  mkdir -p "$SHARD_SCRATCH/test-ts-unit-shards"
+  printf 'preserve\n' > "$SHARD_SCRATCH/test-ts-unit-shards/sentinel"
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [ "$(cat "$SHARD_SCRATCH/test-ts-unit-shards/sentinel")" = preserve ]
+}
+
+@test "Windows integration print mode leaves shard directories untouched" {
+  windows_tier_fixture
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 bash "$SCRIPT" integration
+  [ "$status" -eq 0 ]
+  [ ! -e "$SHARD_SCRATCH/test-ts-integration-shards" ]
+  mkdir -p "$SHARD_SCRATCH/test-ts-integration-shards"
+  printf 'preserve\n' > "$SHARD_SCRATCH/test-ts-integration-shards/sentinel"
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 bash "$SCRIPT" integration
+  [ "$status" -eq 0 ]
+  [ "$(cat "$SHARD_SCRATCH/test-ts-integration-shards/sentinel")" = preserve ]
+}
+
+@test "Windows unit lane prints native Bun shards and keeps the single-worker command" {
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 STUB_NPROC_CORES=4 bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^bun test' <<< "$output")" -eq 3 ]
+  for k in 1 2 3; do
+    [[ "$output" == *"--shard=$k/3"* ]]
+  done
+  [[ "$output" != *"--isolate"* ]]
+  [[ "$output" != *"--no-orphans"* ]]
+  [[ "$output" != *"--parallel="* ]]
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
+    AUTOMOBILE_UNIT_TEST_WORKERS=1 bash "$SCRIPT" unit
+  [ "$status" -eq 0 ]
+  [ "$(grep '^bun test' <<< "$output")" = 'bun test --timeout 5000 --path-ignore-patterns \*\*/\*.integration.test.ts --path-ignore-patterns test/stress/\*\* ' ]
+}
+
+@test "Windows explicit unit paths keep one command" {
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 bash "$SCRIPT" unit test/scripts/testLaneClassification.test.ts
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^bun test' <<< "$output")" -eq 1 ]
+  [[ "$output" != *"--shard="* ]]
+}
+
+@test "Windows unit shard failure preserves every process log and status" {
+  cat > "$STUB_BIN/windows-hook.sh" <<'EOF'
+printf 'output: %s\n' "$*"
+[[ "$*" != *--shard=2/3* ]] || exit 7
+EOF
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" STUB_NPROC_CORES=4 \
+    STUB_SHARD_HOOK="$STUB_BIN/windows-hook.sh" bash "$SCRIPT" unit
+  [ "$status" -eq 7 ]
+  [ "$(wc -l < "$BUN_ARGS_FILE" | tr -d ' ')" -eq 3 ]
+  for k in 1 2 3; do
+    [[ "$output" == *"==> unit shard $k/3"* ]]
+    [[ "$output" == *"output: test "*"--shard=$k/3"* ]]
+    [[ "$output" == *"test-ts: unit shard $k/3 wall="*"s status="* ]]
+    [ -s "$SHARD_SCRATCH/test-ts-unit-shards/shard-$k.log" ]
+  done
+  [[ "$output" == *"s status=7"* ]]
+}
+
+@test "Windows unsafe integration failure preserves safe shards" {
+  windows_tier_fixture
+  cat > "$STUB_BIN/windows-hook.sh" <<'EOF'
+printf 'output: %s\n' "$*"
+[[ "$*" == *--shard=* ]] || exit 9
+EOF
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" \
+    STUB_SHARD_HOOK="$STUB_BIN/windows-hook.sh" bash "$SCRIPT" integration
+  [ "$status" -eq 9 ]
+  [ "$(wc -l < "$BUN_ARGS_FILE" | tr -d ' ')" -eq 3 ]
+  for label in 'unsafe' 'safe 1/2' 'safe 2/2'; do
+    [[ "$output" == *"==> integration $label"* ]]
+    [[ "$output" == *"test-ts: integration $label wall="*"s status="* ]]
+  done
+  [[ "$output" == *"s status=9"* ]]
+  [[ "$output" == *"output: test "*"--shard=1/2"* ]]
+  [[ "$output" == *"output: test "*"--shard=2/2"* ]]
+}
+
+@test "Windows safe integration failure preserves the passing unsafe log" {
+  windows_tier_fixture
+  cat > "$STUB_BIN/windows-hook.sh" <<'EOF'
+printf 'output: %s\n' "$*"
+[[ "$*" != *--shard=1/2* ]] || exit 7
+EOF
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" \
+    STUB_SHARD_HOOK="$STUB_BIN/windows-hook.sh" bash "$SCRIPT" integration
+  [ "$status" -eq 7 ]
+  [ "$(wc -l < "$BUN_ARGS_FILE" | tr -d ' ')" -eq 3 ]
+  [[ "$output" == *"test-ts: integration unsafe wall="*"s status=0"* ]]
+  [[ "$output" == *"==> integration unsafe"*"output: test --isolate --timeout 5000 $UNSAFE_ONE $UNSAFE_TWO"* ]]
+  [[ "$output" == *"==> integration safe 1/2"*"--shard=1/2"* ]]
+  [[ "$output" == *"==> integration safe 2/2"*"--shard=2/2"* ]]
+}
+
+@test "Windows integration returns the first failure in launch order" {
+  windows_tier_fixture
+  cat > "$STUB_BIN/windows-hook.sh" <<'EOF'
+printf 'output: %s\n' "$*"
+if [[ "$*" == *--shard=1/2* ]]; then exit 7; fi
+if [[ "$*" != *--shard=* ]]; then exit 9; fi
+EOF
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" \
+    STUB_SHARD_HOOK="$STUB_BIN/windows-hook.sh" bash "$SCRIPT" integration
+  [ "$status" -eq 9 ]
+  [ "$(wc -l < "$BUN_ARGS_FILE" | tr -d ' ')" -eq 3 ]
+  [[ "$output" == *"test-ts: integration unsafe wall="*"s status=9"* ]]
+  [[ "$output" == *"test-ts: integration safe 1/2 wall="*"s status=7"* ]]
+  for label in 'unsafe' 'safe 1/2' 'safe 2/2'; do
+    [[ "$output" == *"==> integration $label"* ]]
+  done
+}
+
+@test "Windows integration with no existing unsafe files uses all workers as safe shards" {
+  windows_tier_fixture
+  printf 'test/missing.integration.test.ts | unsafe | absent\n' > "$AUTOMOBILE_INTEGRATION_SAFE_TIER_FILE"
+  run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 bash "$SCRIPT" integration
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^bun test' <<< "$output")" -eq 3 ]
+  for k in 1 2 3; do [[ "$output" == *"--shard=$k/3 .integration.test.ts"* ]]; done
+  [[ "$output" != *"--path-ignore-patterns"* ]]
+}
+
+@test "Windows integration rejects invalid worker counts" {
+  for workers in 0 03 invalid; do
+    run env RUNNER_OS=Windows PATH="$STUB_BIN:$PATH" TEST_TS_PRINT_CMD=1 \
+      AUTOMOBILE_INTEGRATION_TEST_WORKERS="$workers" bash "$SCRIPT" integration
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"AUTOMOBILE_INTEGRATION_TEST_WORKERS must be a positive integer"* ]]
+  done
 }
 
 @test "macOS defaults to two unit shards on three cores" {

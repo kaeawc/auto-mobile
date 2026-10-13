@@ -33,6 +33,35 @@ export interface ManagedSlotEvictionSkip {
   platform: SlotPlatform;
   stableDeviceId: string;
   reason: string;
+  attempts?: number;
+  failedDeletes?: number;
+  lastError?: string | null;
+}
+
+/** Free deletion markers stop reserving budget after this many failed native deletes. */
+export const MANAGED_SLOT_DELETION_UNCOUNTED_AFTER_ATTEMPTS = 3;
+
+export function isStuckFreeDeviceDeletion(
+  deletion: { failedDeletes?: number } | null | undefined,
+): boolean {
+  return (deletion?.failedDeletes ?? 0) >= MANAGED_SLOT_DELETION_UNCOUNTED_AFTER_ATTEMPTS;
+}
+
+/** Shared refusal evidence for a journaled free-device deletion. */
+export function managedSlotDeletionSkip(
+  row: FreeSlotDeviceRecord,
+): ManagedSlotEvictionSkip | undefined {
+  if (row.deletion === null) {
+    return undefined;
+  }
+  return {
+    platform: row.platform,
+    stableDeviceId: row.stableDeviceId,
+    reason: isStuckFreeDeviceDeletion(row.deletion) ? "deletion_stuck" : "deletion_pending",
+    attempts: row.deletion.attempts,
+    failedDeletes: row.deletion.failedDeletes,
+    lastError: row.deletion.lastError,
+  };
 }
 
 /** Read-only registry surface needed to select cache entries. */
@@ -55,13 +84,13 @@ export interface ManagedSlotEvictionSelector {
   ): Promise<ManagedSlotEvictionSelection>;
 }
 
-/** Only verified absence releases a charge; a failed deletion remains journaled for redrive. */
+/** Verified absence removes the row; a failed deletion remains journaled for redrive. */
 export type ManagedSlotEvictionResult =
   /** Delete journaled, absence verified and free row removed. */
   | { kind: "absent" }
   /** Adopted, re-freed or claimed meanwhile; nothing was deleted. */
   | { kind: "lost" }
-  /** Journaled but unconfirmed: stays charged and redrive retries it. */
+  /** Journaled but unconfirmed: redrive retries it; the budget applies its failed native delete threshold. */
   | { kind: "failed"; message: string };
 
 /**
@@ -123,6 +152,8 @@ export class DefaultManagedSlotEvictionSelector implements ManagedSlotEvictionSe
           stableDeviceId: row.stableDeviceId,
           reason: result,
         });
+      } else if ("reason" in result) {
+        selection.skipped.push(result);
       } else {
         selection.candidates.push({
           platform: row.platform,
@@ -173,9 +204,10 @@ export class DefaultManagedSlotEvictionSelector implements ManagedSlotEvictionSe
     journal: readonly SlotJournalEntry[],
     listing: DeviceInfo[] | undefined,
     options: { signal?: AbortSignal; deadlineMs?: number },
-  ): Promise<string | DeviceInfo> {
-    if (row.deletion !== null) {
-      return "deletion_pending";
+  ): Promise<string | DeviceInfo | ManagedSlotEvictionSkip> {
+    const deletionSkip = managedSlotDeletionSkip(row);
+    if (deletionSkip) {
+      return deletionSkip;
     }
     if (row.state === "stopping") {
       return "stopping";

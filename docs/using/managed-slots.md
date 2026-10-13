@@ -664,7 +664,8 @@ ignored. No consumer configuration exists to validate in aggregate (#12051).
 The limit is host-wide only when **every daemon on the host starts with the same
 value**. A daemon with the variable unset creates without admission and is not
 ordered against participating daemons. All daemons sharing the registry must run
-a build that understands the deletion marker: upgrade them together.
+a build with the `deletion_failed_deletes` column: upgrade them together. Older
+daemons record attempts without adding failed deletes, so their markers stay counted.
 
 The ledger counts active devices, assigned idle devices, cached free-pool images
 (including stopped images), creation reservations, deleting or cleanup-pending
@@ -687,23 +688,31 @@ scope (including abandoned but revivable scopes), open journal targets, stopping
 already deleting rows, held devices, foreign claims, incomplete discovery, pooled
 work, shutdown/startup leases, and restart-recovery reservations are protected.
 Only a listed device with the `amslot-` prefix can be deleted.
-Pending deletions count as committed room: admission evicts at most the shortfall
-not already covered by those markers. If pending deletions cover the shortfall,
-creation is refused until redrive confirms absence, without evicting newer cache.
+Pending deletions with fewer than 3 failed native deletes count as committed room:
+admission evicts at most the shortfall not already covered by those markers. If
+pending deletions cover the shortfall, creation is refused until redrive confirms
+absence or the marker reaches 3 failed native deletes, without evicting newer cache.
+Markers with 3 or more failed native deletes do not count as committed room.
 
 Before a cache deletion, a transaction marks its exact free row as deletion pending.
 That durable marker fences adoption and shutdown. Only authoritative absence removes
-it. Failed or unconfirmed deletion remains charged as `deleting`, with retry backoff;
-the journal owner loop retries it even when that daemon's own limit is unset, taking
-over from a dead owner while leaving live foreign owners alone. No internal job queue
-is added for capacity refusals.
+it. A failed native delete is one that ran and did not confirm absence, including a
+delete that timed out. Blocked redrives and a passed preparation deadline never
+count as failed native deletes. Failed or unconfirmed deletion remains charged as
+`deleting` until its marker has 3 failed native deletes. At that threshold, an unbound
+marker contributes no resource charge or reservation ranking; a device still bound
+to a slot remains charged. The marker stays journaled and is still retried with
+backoff; the journal owner loop retries it even when that daemon's own limit is
+unset, taking over from a dead owner while leaving live foreign owners alone.
+No internal job queue is added for capacity refusals.
 A journaled delete is never reverted, even if its post-marking safety check finds
 the device transiently busy and the creation is refused. Redrive still deletes
 that marked cache when it becomes safe.
 
 Admission and eviction are bounded by the acquisition's preparation deadline.
-A delete journaled but not confirmed before that deadline stays charged and is
-finished by periodic redrive. A deadline passing during admission returns `timeout`.
+A delete journaled but not confirmed before that deadline stays charged until
+3 failed native deletes and is finished by periodic redrive. A
+deadline passing during admission returns `timeout`.
 
 A full budget returns `managed_slot_budget_exhausted`, `retryable: true`, with no
 `retryAfterMs` because recovery has no time bound. Its `budget` evidence contains
@@ -713,7 +722,11 @@ that are no longer needed, or raise `AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES`, then 
 This refusal is separate from `capacity_exhausted`, which concerns boot limits.
 `usage.total` includes the refused request's own `preparing` reservation, so it can
 read as the limit plus one or more. Pending deletions are named in `retained` with
-reason `deletion_pending`.
+reason `deletion_pending` when they have fewer than 3 failed native deletes and
+`deletion_stuck` at 3 or more failed native deletes. Both include `attempts`,
+`failedDeletes`, and `lastError` (a string or null). A stuck device still exists on
+the host and remains protected from adoption and eviction. Real device count can
+therefore exceed the limit by the number of stuck markers, with no cap.
 
 ## Error codes
 

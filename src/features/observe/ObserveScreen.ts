@@ -1818,7 +1818,7 @@ export class RealObserveScreen implements ObserveScreen {
                 this.adb,
                 reportedId,
                 signal,
-                panelUniqueId,
+                { panelUniqueId, panelFingerprint: result.viewHierarchy?.panelFingerprint },
                 explicitlyRouted,
               )
             : undefined;

@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.models.ObservationInsetsInfo
+import dev.jasonpearson.automobile.ctrlproxy.models.PanelFingerprintInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 
@@ -20,6 +21,7 @@ internal data class HierarchyMetadata(
   val deviceModel: String,
   val isEmulator: Boolean,
   val accessibilityTool: Boolean? = null,
+  val panelFingerprint: PanelFingerprintInfo? = null,
 )
 
 /** Applies the complete metadata set to hierarchy results from either extraction route. */
@@ -28,6 +30,7 @@ internal object HierarchyMetadataBuilder {
     hierarchy?.copy(
       displayId = metadata.displayId,
       panelUniqueId = metadata.panelUniqueId,
+      panelFingerprint = metadata.panelFingerprint,
       screenWidth = metadata.screenWidth,
       screenHeight = metadata.screenHeight,
       rotation = metadata.rotation,

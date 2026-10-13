@@ -126,6 +126,27 @@ already-installed JDK 21 and Android 15/API 35 Google APIs arm64 image:
   These checks qualify local arm64 phone/tablet lifecycle, not Android clean
   reuse, application behavior, ADB restart recovery, or Linux/KVM deployment.
 
+Native request-abandonment qualification passed on October 13 with commit
+`e7ca3bfd0441`, bundle build `90cce1d8b41ca9a3`, and the same iOS profile:
+
+- Abandoning an unknown request committed a terminal owner-bound receipt.
+  A later exact prepare returned that receipt without allocating.
+- Abandoning an observed `acquiring` request cancelled and joined preparation.
+  Its durable resource reached `destroyed` and status reported no pending
+  cleanup. No simulator identifier materialized in this exercised race.
+- Abandoning a ready MCP session preserved its UUID in the terminal receipt.
+  Raw `simctl` inventory confirmed its exact simulator was absent, and its old
+  tool connection returned `broker_session_ended` without generic acquisition.
+- A fresh successor received different session and simulator identities,
+  observed successfully, and completed ordinary release. Raw inventory
+  confirmed its absence; all 19 retained resource records were `destroyed`.
+- Evidence is retained under
+  `session-broker-native/abandon-2026-10-13T10-43-36.827Z`. An earlier probe
+  incorrectly required an older preparation reply to reflect later cleanup;
+  the final check distinguishes that immutable reply from current status.
+  This native race covers early acquisition; deterministic tests separately
+  cover late native claims and cleanup remaining pending.
+
 The supplied Slack bundle initially failed simulator installation with a
 copy-permission error. A staged copy with readable directories and no extended
 attributes or ACLs installed successfully; all 516 regular files were compared

@@ -37,6 +37,15 @@ const ORPHAN_ROW = {
   config: DEFAULT_VIDEO_RECORDING_CONFIG,
   captureTeardown: DESCRIPTOR,
 };
+const UNCONFIRMABLE_ROW = {
+  ...ORPHAN_ROW,
+  recordingId: "unconfirmable-orphan",
+  startedAt: "unparsable",
+  captureTeardown: {
+    kind: DESCRIPTOR.kind,
+    deviceTempPath: DESCRIPTOR.deviceTempPath,
+  },
+};
 
 describe("startup recorder redrive and a device pooled after it ran", () => {
   let timer: FakeTimer;
@@ -48,6 +57,7 @@ describe("startup recorder redrive and a device pooled after it ran", () => {
   let listener: (deviceId: string) => void;
   let kills: VideoCaptureTeardownDescriptor[];
   let owned: string[];
+  let warnings: string[];
   let deps: RecordingTeardownRedriveDeps;
 
   beforeEach(() => {
@@ -66,7 +76,12 @@ describe("startup recorder redrive and a device pooled after it ran", () => {
       () => incarnation,
       () => true,
     );
-    spies = [spyOn(logger, "warn").mockImplementation(() => {})];
+    warnings = [];
+    spies = [
+      spyOn(logger, "warn").mockImplementation((message) => {
+        warnings.push(String(message));
+      }),
+    ];
     kills = [];
     owned = [];
     deps = {
@@ -173,6 +188,132 @@ describe("startup recorder redrive and a device pooled after it ran", () => {
     await step();
     expect(kills).toEqual([DESCRIPTOR]);
     expect(marker()).toBeUndefined();
+  });
+
+  test.each(["startup", "late pooling"])(
+    "an unconfirmable row quarantines only its first incarnation at %s",
+    async (firstMark) => {
+      await repo.insertRecording(UNCONFIRMABLE_ROW);
+      const update = spyOn(repo, "updateRecording");
+      spies.push(update);
+      if (firstMark === "startup") {
+        incarnation = 1;
+      }
+      expect(await redriveUnconfirmedCaptureTeardowns(manager, deps)).toBe(true);
+      pool();
+      expect(marker()).toBe("recording-teardown");
+      await step();
+      expect(marker()).toBe("recording-teardown");
+      pool(2);
+      expect(marker()).toBeUndefined();
+      await step();
+      pool(3);
+      expect(marker()).toBeUndefined();
+      await step();
+      expect(kills).toEqual([]);
+      expect(update).not.toHaveBeenCalled();
+      expect(await repo.getRecording(UNCONFIRMABLE_ROW.recordingId)).toEqual(UNCONFIRMABLE_ROW);
+      const retainedWarnings = warnings.filter((message) =>
+        message.includes("no longer quarantined"),
+      );
+      expect(retainedWarnings).toHaveLength(1);
+      expect(retainedWarnings[0]).toContain(UNCONFIRMABLE_ROW.recordingId);
+      expect(retainedWarnings[0]).toContain("retained");
+    },
+  );
+
+  test("an unconfirmed pid row is retried under the next incarnation", async () => {
+    deps.forceStopOrphanedCapture = async (_device, descriptor) => {
+      kills.push(descriptor);
+      throw new Error("offline");
+    };
+    incarnation = 1;
+    await start();
+    await step();
+    expect(marker()).toBe("recording-teardown");
+    expect(kills).toEqual([DESCRIPTOR]);
+    pool(2);
+    expect(marker()).toBe("recording-teardown");
+    await step();
+    expect(kills).toEqual([DESCRIPTOR, DESCRIPTOR]);
+    expect(marker()).toBe("recording-teardown");
+    expect((await repo.getRecording(ORPHAN_ROW.recordingId))?.captureTeardown).toEqual(DESCRIPTOR);
+  });
+
+  test("a pid-less row with a finite expiry still marks the next incarnation", async () => {
+    const row = { ...UNCONFIRMABLE_ROW, startedAt: ORPHAN_ROW.startedAt };
+    await repo.insertRecording(row);
+    incarnation = 1;
+    expect(await redriveUnconfirmedCaptureTeardowns(manager, deps)).toBe(true);
+    expect(marker()).toBe("recording-teardown");
+    pool(2);
+    expect(marker()).toBe("recording-teardown");
+    await step(185_000);
+    expect(marker()).toBeUndefined();
+    expect(kills).toEqual([]);
+    expect((await repo.getRecording(row.recordingId))?.captureTeardown).toBeUndefined();
+  });
+
+  test("a deferred unconfirmable row uses the incarnation that first marks it", async () => {
+    await repo.insertRecording(UNCONFIRMABLE_ROW);
+    const holder = spyOn(manager, "getSessionForDevice").mockReturnValue("holder");
+    const unbound = spyOn(manager, "onSessionDeviceUnbound");
+    spies.push(holder, unbound);
+    incarnation = 1;
+    expect(await redriveUnconfirmedCaptureTeardowns(manager, deps)).toBe(true);
+    expect(marker()).toBeUndefined();
+    pool(2);
+    expect(marker()).toBeUndefined();
+    holder.mockReturnValue(null);
+    unbound.mock.calls[0]![0]("holder", DEVICE.deviceId);
+    await step(0);
+    expect(marker()).toBe("recording-teardown");
+    await step();
+    pool(3);
+    expect(marker()).toBeUndefined();
+    await step();
+    expect(kills).toEqual([]);
+    expect(await repo.getRecording(UNCONFIRMABLE_ROW.recordingId)).toEqual(UNCONFIRMABLE_ROW);
+  });
+
+  test("a pid row still quarantines the next incarnation alongside an unconfirmable row", async () => {
+    await repo.insertRecording(UNCONFIRMABLE_ROW);
+    let succeeds = false;
+    deps.forceStopOrphanedCapture = async (_device, descriptor) => {
+      kills.push(descriptor);
+      if (!succeeds) {
+        throw new Error("offline");
+      }
+    };
+    incarnation = 1;
+    await start();
+    await step();
+    expect(marker()).toBe("recording-teardown");
+    succeeds = true;
+    pool(2);
+    expect(marker()).toBe("recording-teardown");
+    await step();
+    expect(marker()).toBeUndefined();
+    expect(kills).toEqual([DESCRIPTOR, DESCRIPTOR]);
+    expect((await repo.getRecording(ORPHAN_ROW.recordingId))?.captureTeardown).toBeUndefined();
+    expect(await repo.getRecording(UNCONFIRMABLE_ROW.recordingId)).toEqual(UNCONFIRMABLE_ROW);
+  });
+
+  test("a failed startup read leaves no work for later pool hooks", async () => {
+    await repo.insertRecording(ORPHAN_ROW);
+    const read = spyOn(repo, "listRecordings").mockRejectedValueOnce(new Error("offline"));
+    const mark = spyOn(manager, "markDeviceNeedsRecorderTeardown");
+    spies.push(read, mark);
+    expect(await redriveUnconfirmedCaptureTeardowns(manager, deps)).toBe(false);
+    pool();
+    await step();
+    pool(2);
+    await step();
+    expect(marker()).toBeUndefined();
+    expect(mark).not.toHaveBeenCalled();
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(kills).toEqual([]);
+    expect((await repo.getRecording(ORPHAN_ROW.recordingId))?.captureTeardown).toEqual(DESCRIPTOR);
   });
 
   test("a row missing from the peer-safe re-read resolves without a command or DB write", async () => {

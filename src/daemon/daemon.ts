@@ -789,8 +789,9 @@ export class Daemon {
   private readonly acceptanceDiscoveryCapability = process.env[ACCEPTANCE_DISCOVERY_CAPABILITY_ENV];
   private shutdownHandlersRegistered: boolean = false;
   private shutdownInProgress: boolean = false;
-  /** Live peer daemon ids captured at startup, consulted by the appearance sweep (#11158). */
+  /** Redrives retained startup recorder descriptors when a device incarnation is assigned. */
   private recorderDeviceIncarnationListener?: (deviceId: string) => void;
+  /** Live peer daemon ids captured at startup, consulted by the appearance sweep (#11158). */
   private startupLiveDaemonSessionIds: ReadonlySet<string> = new Set();
   private shutdownSessionReleasesDrained = true;
   /** Session IDs whose normal callback emitted the daemon-shutdown reason. */

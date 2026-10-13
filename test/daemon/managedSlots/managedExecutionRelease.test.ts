@@ -428,7 +428,10 @@ describe("managed execution release (daemon/releaseExecution)", () => {
       state: "settling",
       settler: SETTLER,
     });
-    // A live settler keeps it; a restarted daemon recovers it once that settler is gone.
+    // A closed coordinator leaves recovery to its successor, even while the settler is live.
+    expect(await drain.recoverSettledSlots()).toEqual([]);
+    drain = new ManagedExecutionRelease({ registry: async () => registry, work, sessions, timer });
+    // A live settler keeps it; the successor recovers it once that settler is gone.
     expect(await drain.recoverSettledSlots()).toEqual([]);
     registry.setExecOwnerLiveness((owner) => owner.pid !== SETTLER.pid);
     expect((await drain.recoverSettledSlots()).map((slot) => slot.slotIndex)).toEqual([0]);

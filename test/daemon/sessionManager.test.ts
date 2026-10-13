@@ -1936,6 +1936,7 @@ describe("SessionManager", () => {
       const released: string[] = [];
       sessionManager.setActiveSessionExecutionChecker(
         (_sessionId, query) =>
+          !query?.recoveryOnly &&
           query?.excludeExecutionId !== "earlier" &&
           (query?.sessionClockStartedAtOrBefore === undefined ||
             0 <= query.sessionClockStartedAtOrBefore),
@@ -2153,6 +2154,7 @@ describe("SessionManager", () => {
     test("admits a late execution while timely control work keeps the session assigned", async () => {
       sessionManager.setActiveSessionExecutionChecker(
         (_sessionId, query) =>
+          !query?.recoveryOnly &&
           query?.excludeExecutionId !== "earlier" &&
           (query?.sessionClockStartedAtOrBefore === undefined ||
             0 <= query.sessionClockStartedAtOrBefore),

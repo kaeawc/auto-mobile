@@ -52,17 +52,21 @@ export function hasActiveSessionExecution(
   sessionId: string,
   query?: ActiveSessionExecutionQuery,
 ): boolean {
+  const { recoveryOnly, ...executionQuery } = query ?? {};
+  if (recoveryOnly) {
+    return devicePool.isSessionRecoveryInFlight(sessionId);
+  }
   const executionSessionId =
     resolveToolSelectionBaseSessionUuid(sessionId, sessionManager) ?? sessionId;
   return (
     // Recovery holds the release veto, but is not a timely control call admitting later work.
-    (query?.sessionClockStartedAtOrBefore === undefined &&
+    (executionQuery.sessionClockStartedAtOrBefore === undefined &&
       devicePool.isSessionRecoveryInFlight(sessionId)) ||
-    tracker.hasActiveSessionUuidExecutions(sessionId, query) ||
-    tracker.hasActiveAutolockSessionExecutions(sessionId, query) ||
+    tracker.hasActiveSessionUuidExecutions(sessionId, executionQuery) ||
+    tracker.hasActiveAutolockSessionExecutions(sessionId, executionQuery) ||
     (executionSessionId !== sessionId &&
-      (tracker.hasActiveSessionUuidExecutions(executionSessionId, query) ||
-        tracker.hasActiveAutolockSessionExecutions(executionSessionId, query)))
+      (tracker.hasActiveSessionUuidExecutions(executionSessionId, executionQuery) ||
+        tracker.hasActiveAutolockSessionExecutions(executionSessionId, executionQuery)))
   );
 }
 

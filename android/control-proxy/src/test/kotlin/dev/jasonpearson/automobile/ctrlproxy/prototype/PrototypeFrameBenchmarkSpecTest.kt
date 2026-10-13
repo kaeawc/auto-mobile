@@ -31,13 +31,23 @@ class PrototypeFrameBenchmarkSpecTest {
     assertEquals(4, pager.children.size)
 
     val targets =
-      rendered.flatMap { node ->
-        listOfNotNull(node.text, node.contentDescription) +
-          (node.source as? PrototypeTabBarNode)?.items.orEmpty().map { it.label }
-      }.toSet()
+      rendered
+        .flatMap { node ->
+          listOfNotNull(node.text, node.contentDescription) +
+            (node.source as? PrototypeTabBarNode)?.items.orEmpty().map { it.label }
+        }
+        .toSet()
     val scenarios = Json.parseToJsonElement(File(directory, "scenarios.json").readText()).jsonArray
     assertEquals(
-      listOf("idle", "tab-switch", "section-collapse", "pager-swipe", "scroll", "overlay-open", "three-write-tap"),
+      listOf(
+        "idle",
+        "tab-switch",
+        "section-collapse",
+        "pager-swipe",
+        "scroll",
+        "overlay-open",
+        "three-write-tap",
+      ),
       scenarios.map { it.jsonObject.getValue("name").jsonPrimitive.content },
     )
     scenarios.forEach { scenario ->

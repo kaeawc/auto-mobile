@@ -57,7 +57,13 @@ selected() {
   return 1
 }
 if $list; then
-  while IFS= read -r name; do selected "$name" && printf '%s\n' "$name"; done < <(jq -r '.[].name' "$scenarios")
+  while IFS= read -r name; do
+    set +e
+    selected "$name"
+    selected_status=$?
+    set -e
+    if [[ "$selected_status" -eq 0 ]]; then printf '%s\n' "$name"; fi
+  done < <(jq -r '.[].name' "$scenarios")
   exit 0
 fi
 [[ -n "$device" ]] || $dry || die "--device is required"
@@ -72,9 +78,12 @@ run_command() {
   if $dry; then printf '%q ' "$@"; printf '\n'; else "$@"; fi
 }
 run_cli() { run_command "${cli[@]}" ${session[@]+"${session[@]}"} "$@" --deviceId "${device:-<device>}"; }
-# shellcheck disable=SC2329 # Invoked by the EXIT trap.
+# shellcheck disable=SC2317,SC2329 # Invoked by the EXIT trap.
 cleanup() {
-  if $dry; then run_cli prototype --action dismiss --id "$id"; else run_cli prototype --action dismiss --id "$id" >&2 || true; fi
+  local exit_status=$?
+  set +e
+  if $dry; then run_cli prototype --action dismiss --id "$id"; else run_cli prototype --action dismiss --id "$id" >&2; fi
+  exit "$exit_status"
 }
 # Install cleanup before show, including a partially successful show.
 trap cleanup EXIT
@@ -88,11 +97,15 @@ if $markdown && ! $dry; then
 fi
 while IFS= read -r scenario; do
   name=$(jq -r '.name' <<< "$scenario")
-  selected "$name" || continue
+  set +e
+  selected "$name"
+  selected_status=$?
+  set -e
+  if [[ "$selected_status" -ne 0 ]]; then continue; fi
   error=""
   if $dry; then
     run_command "${adb[@]}" -s "${device:-<device>}" shell dumpsys gfxinfo "$package" reset
-  elif ! run_command "${adb[@]}" -s "$device" shell dumpsys gfxinfo "$package" reset >&2; then error="reset-failed"; fi
+  elif ! "${adb[@]}" -s "$device" shell dumpsys gfxinfo "$package" reset >&2; then error="reset-failed"; fi
   repeat=$(jq -r '.repeat' <<< "$scenario")
   for ((i=0; i<repeat; i++)); do
     while IFS= read -r step; do
@@ -100,7 +113,15 @@ while IFS= read -r scenario; do
       selector=$(jq -c '{text:.text}' <<< "$step")
       args=("$tool" --layer prototype)
       if [[ "$tool" == tapOn ]]; then args+=(--selector "$selector"); else args+=(--container "$selector" --direction "$(jq -r '.direction' <<< "$step")"); fi
-      if $dry; then run_cli "${args[@]}"; elif ! run_cli "${args[@]}" >&2; then error="step-failed"; fi
+      if $dry; then
+        run_cli "${args[@]}"
+      else
+        set +e
+        run_cli "${args[@]}" >&2
+        step_status=$?
+        set -e
+        if [[ "$step_status" -ne 0 ]]; then error="step-failed"; fi
+      fi
     done < <(jq -c '.steps[]' <<< "$scenario")
     delay=$(jq -r '((.durationMs // .settleMs) / 1000)' <<< "$scenario")
     run_command sleep "$delay"

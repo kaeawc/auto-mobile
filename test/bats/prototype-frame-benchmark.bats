@@ -13,13 +13,25 @@ setup() {
 printf 'cli' >> "$CALLS"
 printf ' <%s>' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
+if [[ -n "${FAIL_STEP:-}" && "${3:-}" == tapOn && ! -e "$CALLS.step-failed" ]]; then
+  touch "$CALLS.step-failed"
+  exit 1
+fi
+if [[ -n "${FAIL_SHOW:-}" && "${5:-}" == show ]]; then exit 7; fi
+if [[ -n "${FAIL_DISMISS:-}" && "${5:-}" == dismiss ]]; then exit 9; fi
 STUB
   cat > "$PROTOTYPE_BENCH_ADB" <<'STUB'
 #!/usr/bin/env bash
 printf 'adb' >> "$CALLS"
 printf ' <%s>' "$@" >> "$CALLS"
 printf '\n' >> "$CALLS"
-[[ "${7:-}" == reset ]] && exit 0
+if [[ "${7:-}" == reset ]]; then
+  if [[ -n "${FAIL_RESET:-}" && ! -e "$CALLS.reset-failed" ]]; then
+    touch "$CALLS.reset-failed"
+    exit 1
+  fi
+  exit 0
+fi
 if [[ -n "${FAIL_CAPTURE:-}" && ! -e "$CALLS.failed" ]]; then
   touch "$CALLS.failed"
   exit 1
@@ -110,6 +122,35 @@ STUB
   [[ "$output" == *'scenario=idle error=capture-failed'* ]]
   [ "$(printf '%s\n' "$output" | grep -c '^scenario=')" -eq 7 ]
   [[ "$output" == *'scenario=three-write-tap frames=100'* ]]
+  [ "$(grep -c '<dismiss>' "$CALLS")" -eq 1 ]
+}
+@test "step failure marks the scenario and continues through remaining scenarios" {
+  FAIL_STEP=1 run "$SCRIPT" --device test-device --show-settle-ms 0 --scenarios "$SCENARIOS"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'scenario=tab-switch error=step-failed'* ]]
+  [ "$(printf '%s\n' "$output" | grep -c '^scenario=')" -eq 7 ]
+  [[ "$output" == *'scenario=three-write-tap frames=100'* ]]
+  [ "$(grep -c '<dismiss>' "$CALLS")" -eq 1 ]
+}
+@test "reset failure marks the scenario and continues through remaining scenarios" {
+  FAIL_RESET=1 run "$SCRIPT" --device test-device --show-settle-ms 0 --scenarios "$SCENARIOS"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *'scenario=idle error=reset-failed'* ]]
+  [ "$(printf '%s\n' "$output" | grep -c '^scenario=')" -eq 7 ]
+  [[ "$output" == *'scenario=three-write-tap frames=100'* ]]
+  [ "$(grep -c '<dismiss>' "$CALLS")" -eq 1 ]
+}
+@test "show failure dismisses once and preserves its exit code despite dismiss failure" {
+  FAIL_SHOW=1 FAIL_DISMISS=1 run "$SCRIPT" --device test-device --show-settle-ms 0 --scenarios "$SCENARIOS"
+  [ "$status" -eq 7 ]
+  [ "$(grep -c '<show>' "$CALLS")" -eq 1 ]
+  [ "$(grep -c '<dismiss>' "$CALLS")" -eq 1 ]
+  ! grep -q '^adb' "$CALLS"
+}
+@test "dismiss failure leaves a successful run successful" {
+  FAIL_DISMISS=1 run "$SCRIPT" --device test-device --show-settle-ms 0 --scenarios "$SCENARIOS" --scenario idle
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'scenario=idle frames=100'* ]]
   [ "$(grep -c '<dismiss>' "$CALLS")" -eq 1 ]
 }
 @test "missing fields produce errors while filters and markdown work" {

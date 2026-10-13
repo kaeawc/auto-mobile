@@ -495,7 +495,7 @@ All scripts should:
 
 ## Android prototype performance
 
-- `android/compose-compiler-report.sh` — opt-in release compiler reports, package stability summary, and generated Compose compiler report pages.
-- `android/prototype-frame-benchmark.sh` — explicit-device gfxinfo scenarios for the fixed benchmark prototype; supports command-only dry runs and stub executables.
+- `scripts/android/compose-compiler-report.sh` — opt-in release compiler reports, package stability summary, and generated Compose compiler report pages.
+- `scripts/android/prototype-frame-benchmark.sh` — explicit-device gfxinfo scenarios for the fixed benchmark prototype; supports command-only dry runs and stub executables.
 
 See [prototype performance measurement](../docs/design-docs/plat/android/prototype-performance-measurement.md) for prerequisites and output formats.

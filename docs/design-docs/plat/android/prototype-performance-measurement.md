@@ -12,9 +12,10 @@ The script compiles `:control-proxy:compileReleaseKotlin --rerun` with
 `-Pautomobile.composeCompilerReports=true`. Only the exact property value `true`
 enables compiler reports and metrics; normal builds do not configure their
 output destinations. The rerun forces compiler execution even with cached outputs.
-The report directory is `android/control-proxy/build/compose-compiler-reports`:
-`control-proxy-composables.txt` is at its root and the module metrics are in
-`release/control-proxy-module.json`.
+The reports land in the `compose-compiler-reports` directory of the control-proxy
+module's Gradle build output: `control-proxy-composables.txt` is at its root and the
+module metrics are in `release/control-proxy-module.json`. The property alone does not
+force a recompile, so an up-to-date or cached compile writes nothing.
 
 To summarize existing reports without Gradle, use `--reports-dir DIR`. Use
 `--package PREFIX` to select fully qualified function names starting with

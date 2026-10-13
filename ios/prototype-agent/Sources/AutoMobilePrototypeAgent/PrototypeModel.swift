@@ -9,6 +9,8 @@ import UIKit
 final class PrototypeModel {
     @ObservationIgnored private(set) var session = PrototypeSession()
     private(set) var spec: PrototypeSpec?
+    /// Ends surviving text drafts even when a replacing show leaves their stored value unchanged.
+    private(set) var showRevision = 0
     private(set) var state: [String: JSONValue] = [:]
     private(set) var pages: [String: Int] = [:]
     private(set) var appearance: PrototypeAppearance?
@@ -132,6 +134,7 @@ final class PrototypeModel {
         var next = session
         next.show(spec, reset: reset, appearance: appearance, specBytes: specBytes)
         publish(next, replacingSpec: true)
+        showRevision += 1
         syncSnackbarTimeouts()
         // An accepted show, including a same-id replace, is activity.
         idleTimer.arm()

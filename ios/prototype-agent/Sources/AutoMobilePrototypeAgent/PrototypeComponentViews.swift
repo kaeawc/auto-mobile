@@ -46,13 +46,14 @@ struct ComponentColors {
     var switchThumb: Color { role("onPrimary", .white) }
 }
 
-/// A draft changes before validation, so a refused edit can rewrite the focused platform field
-/// in a later SwiftUI update (#12206), even when the model's stored string never changed.
+/// Keeps refused text while focused so constrained values can be typed character by character;
+/// editing ends or external stored changes restore the session's value (#12206).
 @MainActor
 struct PrototypeTextFieldView: View {
     let node: PrototypeNode
     let model: PrototypeModel
     @State private var draft: PrototypeTextDraft
+    @FocusState private var focused: Bool
 
     init(node: PrototypeNode, model: PrototypeModel) {
         self.node = node
@@ -65,16 +66,30 @@ struct PrototypeTextFieldView: View {
         let stored = model.state[key]?.displayString ?? ""
         TextField(node.placeholder ?? "", text: Binding(get: { draft.text }, set: { draft.type($0) }))
             .textFieldStyle(.roundedBorder)
+            .focused($focused)
             .onChange(of: draft.text) { _, _ in
-                // A settle may have updated state since this body captured its display value (#12206).
+                // Read live state: another callback may have changed the captured display value.
                 let stored = model.state[key]?.displayString ?? ""
                 if draft.needsCommit(stored: stored) {
                     model.change(key: key, value: draft.text)
-                    draft.settle(stored: model.state[key]?.displayString ?? "")
+                }
+                if !focused {
+                    draft.endEditing(stored: model.state[key]?.displayString ?? "")
                 }
             }
+            .onChange(of: focused) { _, value in
+                if !value {
+                    draft.endEditing(stored: model.state[key]?.displayString ?? "")
+                }
+            }
+            .onSubmit {
+                draft.endEditing(stored: model.state[key]?.displayString ?? "")
+            }
             .onChange(of: stored) { _, value in
-                draft.settle(stored: value)
+                draft.storedChanged(to: value)
+            }
+            .onChange(of: model.showRevision) { _, _ in
+                draft.endEditing(stored: model.state[key]?.displayString ?? "")
             }
     }
 }

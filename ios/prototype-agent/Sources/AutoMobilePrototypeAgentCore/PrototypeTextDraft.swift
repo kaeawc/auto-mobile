@@ -1,7 +1,7 @@
 import Foundation
 
-/// Holds displayed text apart from stored state so refused input becomes a real value change
-/// (typed text -> stored text) that the platform field can redraw without losing focus.
+/// Holds typed text apart from stored state until editing ends, so constrained values can be
+/// typed through refused intermediates (#12206).
 struct PrototypeTextDraft: Equatable, Sendable {
     private(set) var text: String
 
@@ -9,7 +9,7 @@ struct PrototypeTextDraft: Equatable, Sendable {
         text = stored
     }
 
-    /// The field reported new text.
+    /// The field reported new text (the user's own typing).
     mutating func type(_ typed: String) {
         text = typed
     }
@@ -19,9 +19,15 @@ struct PrototypeTextDraft: Equatable, Sendable {
         text != stored
     }
 
-    /// Shows the stored value after an edit or an external change; reports a rewrite.
+    /// Editing ended: drop refused text and report whether the field was rewritten.
     @discardableResult
-    mutating func settle(stored: String) -> Bool {
+    mutating func endEditing(stored: String) -> Bool {
+        storedChanged(to: stored)
+    }
+
+    /// Stored state changed: show it immediately, focused or not, and report a rewrite.
+    @discardableResult
+    mutating func storedChanged(to stored: String) -> Bool {
         guard text != stored else { return false }
         text = stored
         return true

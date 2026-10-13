@@ -1,5 +1,9 @@
 import type { ObserveResult } from "../../models/ObserveResult";
-import { nodeAttributes, type ViewHierarchyWindowInfo } from "../../models/ViewHierarchyResult";
+import {
+  nodeAttributes,
+  type ViewHierarchyResult,
+  type ViewHierarchyWindowInfo,
+} from "../../models/ViewHierarchyResult";
 
 /**
  * The truncation-reason vocabulary shared by the producer (`ViewHierarchy`) and
@@ -83,4 +87,40 @@ export function isHostOutputTruncationReason(reason: string): boolean {
 /** The subset of `reasons` that means the underlying capture itself is incomplete. */
 export function captureFidelityTruncationReasons(reasons: readonly string[] | undefined): string[] {
   return (reasons ?? []).filter((reason) => !isHostOutputTruncationReason(reason));
+}
+
+/** Omit legacy wire nulls only where the hierarchy output contract requires an array/object. */
+export function normalizeHierarchyOptionalFields<T extends ViewHierarchyResult | undefined>(
+  hierarchy: T,
+): T {
+  if (hierarchy === undefined) {
+    return hierarchy;
+  }
+  const normalized = { ...hierarchy };
+  for (const key of [
+    "hierarchy",
+    "accessibility-focused-element",
+    "systemInsets",
+    "insets",
+  ] as const) {
+    if (normalized[key] === null) {
+      delete normalized[key];
+    }
+  }
+  if (normalized.truncationReasons !== undefined && !Array.isArray(normalized.truncationReasons)) {
+    delete normalized.truncationReasons;
+  }
+  if (Array.isArray(normalized.windows)) {
+    normalized.windows = normalized.windows.map((window) => {
+      const copy = { ...window };
+      if (copy.bounds === null) {
+        delete copy.bounds;
+      }
+      if (copy.hierarchy === null) {
+        delete copy.hierarchy;
+      }
+      return copy;
+    });
+  }
+  return normalized;
 }

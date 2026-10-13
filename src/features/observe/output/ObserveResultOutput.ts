@@ -15,7 +15,11 @@ import { markOccludedRowsOnFullProjection } from "./FullProjectionOcclusion";
 import { SearchableHierarchy, type SearchableEntry } from "../../utility/SearchableNode";
 import { selectableCandidates } from "../../utility/selectionRank";
 import { capLayoutWarnings } from "../audits/SafeAreaAuditor";
-import { captureFidelityTruncationReasons, collectWindowTruncations } from "../truncationReasons";
+import {
+  captureFidelityTruncationReasons,
+  collectWindowTruncations,
+  normalizeHierarchyOptionalFields,
+} from "../truncationReasons";
 import { normalizeQuotes } from "../../utility/TextMatcher";
 import { GENERATED_VIEW_ID_PATTERN, STABLE_VIEW_ID_PREFIX } from "../android/StableNodeIdentity";
 import { isIosKeyboardClass, isIosKeyboardVisible } from "../ios/IosScreenIdentity";
@@ -141,6 +145,7 @@ export function sanitizeObserveResult(
   // (ViewHierarchy.ts) and the wire's own JSON semantics (undefined/functions
   // dropped), so it can never throw on a value structuredClone would reject.
   const out = clone(obs);
+  out.viewHierarchy = normalizeHierarchyOptionalFields(out.viewHierarchy);
 
   stripPerformanceAudit(out);
   reduceTopLevelDebugPerfTelemetry(out);

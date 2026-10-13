@@ -21,7 +21,7 @@ public enum MCPClientError: Error, CustomStringConvertible, Equatable, Sendable 
             return "MCP session expired"
         case let .refused(refusal):
             let code = refusal.code.map { " (\($0))" } ?? ""
-            return "MCP server refused the request\(code): \(refusal.message)"
+            return "MCP server refused the request\(code): \(refusal.failureMessage)"
         }
     }
 

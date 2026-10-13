@@ -72,6 +72,11 @@ class RefusalWireContractTest {
         json.decodeFromString(DaemonResponse.serializer(), withId(payload.jsonObject, stem))
       val fields = row.jsonObject.getValue("fields").jsonObject
       val evidence = AutoMobilePlanExecutor.refusalEvidence(response, json)
+      assertEquals(
+        "$stem: recovering",
+        (fields["details"] as? JsonObject)?.get("recovering") == JsonPrimitive(true),
+        evidence.recovering,
+      )
       assertEquals("$stem: code", fields["code"]?.jsonPrimitive?.content, evidence.code)
       assertEquals(
         "$stem: retryable",
@@ -96,6 +101,44 @@ class RefusalWireContractTest {
       checked++
     }
     assertTrue("socket-frame rows were not found", checked > 0)
+  }
+
+  @Test
+  fun `recovering requires a strict boolean and envelope fields take precedence`() {
+    val result =
+      json
+        .parseToJsonElement(File(dir, "device_unhealthy.json").readText())
+        .jsonObject
+        .getValue("result")
+        .jsonObject
+    val text =
+      result.getValue("content").jsonArray.first().jsonObject.getValue("text").jsonPrimitive.content
+    val payload = json.parseToJsonElement(text).jsonObject
+    fun evidence(wire: JsonObject): AutoMobilePlanExecutor.RefusalEvidence {
+      val content = JsonObject(mapOf("structuredContent" to wire, "isError" to JsonPrimitive(true)))
+      return AutoMobilePlanExecutor.refusalEvidence(
+        DaemonResponse("strict", "mcp_response", true, result = content),
+        json,
+      )
+    }
+    assertEquals(
+      false,
+      evidence(JsonObject(payload + ("recovering" to JsonPrimitive("true")))).recovering,
+    )
+    assertEquals(false, evidence(JsonObject(payload - "recovering")).recovering)
+    val envelope =
+      JsonObject(
+        mapOf(
+          "message" to payload.getValue("error"),
+          "recovering" to JsonPrimitive(true),
+          "devices" to payload.getValue("devices"),
+        ),
+      )
+    assertEquals(
+      true,
+      evidence(JsonObject(payload + ("recovering" to JsonPrimitive(false)) + ("error" to envelope)))
+        .recovering,
+    )
   }
 
   @Test
@@ -174,6 +217,11 @@ class RefusalWireContractTest {
     result: JsonElement,
   ) {
     val evidence = AutoMobilePlanExecutor.refusalEvidence(response, json)
+    assertEquals(
+      "$code: recovering",
+      fields["recovering"] == JsonPrimitive(true),
+      evidence.recovering,
+    )
     assertEquals("$code: code", fields["code"]?.jsonPrimitive?.content, evidence.code)
     assertEquals(
       "$code: retryable",

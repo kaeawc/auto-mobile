@@ -1,21 +1,25 @@
 import Foundation
 
-/// Host-owned chrome around a shown prototype, decided from the placement alone so the spec cannot
-/// remove or cover it (#9307). Mirrors Android's `prototypeHostChrome`: a fullscreen prototype gets a
-/// dismiss bar across the top of the window, translucent and themed like the spec, only as tall as
-/// its control (#10522), and the spec is laid out below it, so the control never covers authored
-/// content and modal scrims never cover the control. Other placements keep the compact close
-/// chip at the window's top trailing corner, outside their content.
+/// Host-owned chrome outside authored content (#12064). Fullscreen defaults to a hidden escape;
+/// an explicit bar reserves space above the content. Sheet and floating keep their close chip.
 struct PrototypeHostChrome: Equatable {
     /// Whether the top of the window is reserved for the dismiss bar.
     let reservesDismissBar: Bool
 
+    /// Whether a fullscreen prototype uses the hidden escape and assistive dismiss pill.
+    let escape: Bool
+
+    /// Marks the window even while no dismiss control is in the accessibility tree.
+    static let windowMarkerIdentifier = "automobile-prototype-window"
+
     /// The control's side, the iOS minimum touch target (Android's bar holds a 32 dp text button).
     static let controlSide = 44.0
 
-    init(placementType: String) {
-        // Unknown placement types render fullscreen, so they get the bar too.
-        reservesDismissBar = placementType != "sheet" && placementType != "floating"
+    init(placementType: String, chrome: String? = nil) {
+        // Unknown placement types render fullscreen too.
+        let fullscreen = placementType != "sheet" && placementType != "floating"
+        reservesDismissBar = fullscreen && chrome == "bar"
+        escape = fullscreen && !reservesDismissBar
     }
 
     /// The bar's height: the top safe-area inset it clears, plus the control.

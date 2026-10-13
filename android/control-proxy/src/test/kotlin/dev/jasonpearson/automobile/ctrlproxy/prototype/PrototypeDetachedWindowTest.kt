@@ -24,6 +24,7 @@ class PrototypeDetachedWindowTest {
   private val history = mutableListOf<String>()
   private val events = mutableListOf<PrototypeEvent>()
   private val results = mutableListOf<Pair<Boolean, String?>>()
+  private val requests = mutableListOf<PrototypeRequest>()
   private val timer = FakePrototypeTimer()
   private var blocked = false
   private val blockedScript = ArrayDeque<Boolean>()
@@ -55,7 +56,12 @@ class PrototypeDetachedWindowTest {
       )
     controller =
       PrototypeController(
-        host,
+        object : PrototypeHost by host {
+          override suspend fun show(request: PrototypeRequest): Boolean {
+            requests += request
+            return host.show(request)
+          }
+        },
         PrototypeResultSink { _, success, error -> results += success to error },
         onDismissed = { detached++ },
         eventSink = PrototypeEventSink { events += it },
@@ -119,11 +125,16 @@ class PrototypeDetachedWindowTest {
   fun `relayout of a detached window re-shows the same runtime without an event`() = runTest {
     controller.show(null, spec())
     val runtime = checkNotNull(controller.activeRuntime)
+    val request = requests.single()
+    assertEquals(PrototypeWindowChrome.NONE, request.chrome)
     detachPlatformWindow()
     controller.onConfigurationChanged()
     assertTrue(host.isShowing)
     assertSame(runtime, controller.activeRuntime)
     assertEquals(2, manager.added.size)
+    assertEquals(2, requests.size)
+    assertSame(request, requests.last())
+    assertEquals(PrototypeWindowChrome.NONE, requests.last().chrome)
     assertTrue(events.isEmpty())
     manager.failRemove = false
     controller.dismiss("agent", "panel", null)

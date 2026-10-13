@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { classifySqliteError } from "../../db/databaseFailureClassification";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import {
   evaluateIosPairCompatibility,
@@ -14,7 +15,12 @@ import {
   type IosDeviceSpecification,
   type ResolvedExactDeviceSpecification,
 } from "../../devices/exactDeviceProvisioning";
+import type {
+  ManagedSlotResourceBudget,
+  ManagedSlotResourceAdmission,
+} from "./managedSlotResourceBudget";
 import type { DeviceInfo } from "../../models";
+import type { ManagedSlotBudgetEvidence } from "../../models/managedSlotsResult";
 import type { FormFactor } from "../../models/DeviceMatchCriteria";
 import { androidProfileFormFactor } from "../../models/formFactor";
 import type { ManagedSlotDeviceFamily } from "../../server/provisionDeviceSpecSchemas";
@@ -317,6 +323,8 @@ export interface ManagedSlotReconcilerDependencies {
   deleter: ManagedSlotDeviceDeleter;
   claims: ManagedSlotDeviceClaims;
   capacity?: ManagedSlotBootCapacity;
+  resourceBudget?: ManagedSlotResourceBudget;
+  isBusy?: (device: DeviceInfo) => string | undefined;
   /** Whether a recorded execution owner is alive; default: PID plus process generation. */
   isExecOwnerLive?: SlotExecOwnerLiveness;
   timer: Pick<Timer, "now" | "setTimeout" | "clearTimeout">;
@@ -381,6 +389,7 @@ export type ManagedSlotReconcileFailureCode =
   | "reconcile_in_progress"
   | "cleanup_pending"
   | "capacity_exhausted"
+  | "managed_slot_budget_exhausted"
   | "concurrent_modification"
   | "readiness_incomplete"
   | "stale_session"
@@ -399,6 +408,7 @@ const FAILURE_RETRYABILITY: Readonly<Record<ManagedSlotReconcileFailureCode, boo
   reconcile_in_progress: true,
   cleanup_pending: true,
   capacity_exhausted: true,
+  managed_slot_budget_exhausted: true,
   concurrent_modification: true,
   readiness_incomplete: true,
   stale_session: true,
@@ -422,6 +432,8 @@ const FAILURE_NEXT_ACTION: Readonly<Record<ManagedSlotReconcileFailureCode, stri
   device_busy: "Wait for the device's live session or foreign claim to end, then retry.",
   reconcile_in_progress: "Another reconciliation of this slot is in progress; retry later.",
   cleanup_pending: "The previous device could not be removed; retry after cleanup succeeds.",
+  managed_slot_budget_exhausted:
+    "Reset or release managed slot scopes that are no longer needed, or raise AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES, then retry.",
   capacity_exhausted: "Shut down a device or raise the boot limit, then retry.",
   concurrent_modification: "The slot changed concurrently; retry to converge on its new state.",
   readiness_incomplete: "Retry; the device did not reach automation readiness.",
@@ -439,6 +451,7 @@ export interface ManagedSlotReconcileFailure {
   /** Underlying provision failure, when the provision path refused. */
   provision?: { code: string; retryable: boolean };
   capacity?: ManagedSlotFailureCapacity;
+  budget?: ManagedSlotBudgetEvidence;
 }
 
 /** Same `externalDevices` name and shape as the non-slot `capacity_exhausted` refusal (#11390). */
@@ -1005,7 +1018,9 @@ class ReconcileAbort extends Error {
 export function failure(
   code: ManagedSlotReconcileFailureCode,
   message: string,
-  extra: Partial<Pick<ManagedSlotReconcileFailure, "provision" | "capacity" | "retryable">> = {},
+  extra: Partial<
+    Pick<ManagedSlotReconcileFailure, "provision" | "capacity" | "budget" | "retryable">
+  > = {},
 ): ManagedSlotReconcileFailure {
   return {
     code,
@@ -1014,6 +1029,7 @@ export function failure(
     nextAction: FAILURE_NEXT_ACTION[code],
     ...(extra.provision ? { provision: extra.provision } : {}),
     ...(extra.capacity ? { capacity: extra.capacity } : {}),
+    ...(extra.budget ? { budget: extra.budget } : {}),
   };
 }
 
@@ -1160,6 +1176,7 @@ export class ManagedSlotReconciler {
       matcher: deps.matcher,
       deleter: deps.deleter,
       claims: deps.claims,
+      isBusy: deps.isBusy,
       timer: deps.timer,
       owner: deps.journal?.owner ?? processJournalOwner(),
       isExecOwnerLive: this.isExecOwnerLive,
@@ -1249,10 +1266,15 @@ export class ManagedSlotReconciler {
     try {
       return await this.reconcileSteps(request, evidence);
     } catch (error) {
-      if (error instanceof ReconcileAbort) {
+      if (error instanceof ReconcileAbort || classifySqliteError(error) === "retryable") {
+        // Busy writes opened no transaction; accepted journal work stays durable for redrive.
+        // Return through acquisition's normal failure path so earlier sessions are backed out.
         return {
           outcome: "failed",
-          failure: error.failure,
+          failure:
+            error instanceof ReconcileAbort
+              ? error.failure
+              : failure("discovery_incomplete", errorMessage(error)),
           assignment: await this.deps.registry.getAssignment(request.key),
           evidence,
         };
@@ -1540,40 +1562,42 @@ export class ManagedSlotReconciler {
     // execution, so any session on it is an earlier execution's leftover, unless this daemon still
     // holds it as a live execution (#11275), which refuses with slot_in_use instead.
     const provisioned = await this.provisionExisting(context, device, { releaseStale: true });
-    const expected = expectationOf(assignment);
-    const fingerprint = encodeManagedSpecFingerprint(context.fingerprint);
-    const unchanged =
-      assignment.state === "ready" &&
-      assignment.specFingerprint === fingerprint &&
-      stableStringify(assignment.requestedSpec) ===
-        stableStringify(context.request.requestedSpec) &&
-      this.resolvedIdentityMatches(assignment.resolvedSpec, context.resolvedSpec);
-    // Repair an older binding's creation-default metadata once; subsequent identical requests
-    // retain the generation. A full AVD config read adds detail beyond the resolver's fields,
-    // without changing the binding. The fingerprint still describes the resolver's creation choice.
-    // An unchanged ready binding is only re-verified; a new spec or a not-yet-ready binding is
-    // recorded as a new generation of the same device.
-    const committed = unchanged
-      ? await this.deps.registry.updateSlotState(context.request.key, expected, "ready")
-      : await this.deps.registry.commitBinding(context.request.key, expected, {
-          stableDeviceId: assignment.stableDeviceId,
-          deviceName: provisioned.device.name,
-          requestedSpec: context.request.requestedSpec,
-          resolvedSpec: context.resolvedSpec,
-          specFingerprint: fingerprint,
-          state: "ready",
-        });
-    if (committed.kind !== "updated" && committed.kind !== "committed") {
-      await this.releaseSession(provisioned.sessionUuid);
-      throw new ReconcileAbort(claimFailure(committed, "reuse"));
-    }
-    return await this.claimAndReady(
-      context,
-      "reused",
-      committed.assignment,
-      provisioned,
-      reservation,
-    );
+    return await this.readyOrReleaseOnBusy(provisioned, async () => {
+      const expected = expectationOf(assignment);
+      const fingerprint = encodeManagedSpecFingerprint(context.fingerprint);
+      const unchanged =
+        assignment.state === "ready" &&
+        assignment.specFingerprint === fingerprint &&
+        stableStringify(assignment.requestedSpec) ===
+          stableStringify(context.request.requestedSpec) &&
+        this.resolvedIdentityMatches(assignment.resolvedSpec, context.resolvedSpec);
+      // Repair an older binding's creation-default metadata once; subsequent identical requests
+      // retain the generation. A full AVD config read adds detail beyond the resolver's fields,
+      // without changing the binding. The fingerprint still describes the resolver's creation choice.
+      // An unchanged ready binding is only re-verified; a new spec or a not-yet-ready binding is
+      // recorded as a new generation of the same device.
+      const committed = unchanged
+        ? await this.deps.registry.updateSlotState(context.request.key, expected, "ready")
+        : await this.deps.registry.commitBinding(context.request.key, expected, {
+            stableDeviceId: assignment.stableDeviceId,
+            deviceName: provisioned.device.name,
+            requestedSpec: context.request.requestedSpec,
+            resolvedSpec: context.resolvedSpec,
+            specFingerprint: fingerprint,
+            state: "ready",
+          });
+      if (committed.kind !== "updated" && committed.kind !== "committed") {
+        await this.releaseSession(provisioned.sessionUuid);
+        throw new ReconcileAbort(claimFailure(committed, "reuse"));
+      }
+      return await this.claimAndReady(
+        context,
+        "reused",
+        committed.assignment,
+        provisioned,
+        reservation,
+      );
+    });
   }
 
   private resolvedIdentityMatches(stored: unknown, actual: ManagedSlotResolvedSpec): boolean {
@@ -1660,7 +1684,7 @@ export class ManagedSlotReconciler {
     const { request } = context;
     const free = new Set(
       (await this.deps.registry.listFreeDevices())
-        .filter((entry) => entry.platform === request.platform)
+        .filter((entry) => entry.platform === request.platform && entry.deletion === null)
         // A `stopping` device is mid-shutdown (#11337); a `stopped` one is adopted and booted.
         .filter(
           (entry) =>
@@ -1735,16 +1759,18 @@ export class ManagedSlotReconciler {
     const provisioned = await this.provisionExisting(context, device, {
       releaseStale: source === "free_pool",
     });
-    const ready = await this.deps.registry.updateSlotState(
-      request.key,
-      expectationOf(reserved.assignment),
-      "ready",
-    );
-    if (ready.kind !== "updated") {
-      await this.releaseSession(provisioned.sessionUuid);
-      throw new ReconcileAbort(claimFailure(ready, "adoption"));
-    }
-    return await this.claimAndReady(context, "adopted", ready.assignment, provisioned, undefined);
+    return await this.readyOrReleaseOnBusy(provisioned, async () => {
+      const ready = await this.deps.registry.updateSlotState(
+        request.key,
+        expectationOf(reserved.assignment),
+        "ready",
+      );
+      if (ready.kind !== "updated") {
+        await this.releaseSession(provisioned.sessionUuid);
+        throw new ReconcileAbort(claimFailure(ready, "adoption"));
+      }
+      return await this.claimAndReady(context, "adopted", ready.assignment, provisioned, undefined);
+    });
   }
 
   private async existingSpec(device: DeviceInfo): Promise<ManagedSlotResolvedSpec> {
@@ -1794,6 +1820,9 @@ export class ManagedSlotReconciler {
       : await this.openCreateEntry(context, assignment, name);
     this.journal.inFlight.add(entry.id);
     try {
+      if (replacing === undefined && this.deps.resourceBudget) {
+        await this.admitFreshCreation(context, entry);
+      }
       let provisioned: ManagedSlotProvisionedDevice;
       try {
         provisioned = await this.deps.provisioner.provision({
@@ -1814,48 +1843,58 @@ export class ManagedSlotReconciler {
         await this.settleFailedCreate(context, entry);
         throw new ReconcileAbort(provisionFailure(error));
       }
-      entry = await this.recordCreated(context, entry, provisioned);
-      if (!this.isAutomationReady(provisioned)) {
-        await this.discardUncommitted(context, provisioned, entry);
-        throw new ReconcileAbort(
-          failure("readiness_incomplete", `Device '${name}' did not reach automation readiness.`),
-        );
-      }
-      const committed = await this.journal.advance(entry, {
-        expectedPhase: "created",
-        phase: "committed",
-        assignment: {
-          kind: "commit",
-          expected: entry.binding,
-          next: {
-            stableDeviceId: provisioned.device.stableId,
-            deviceName: provisioned.device.name,
-            requestedSpec: request.requestedSpec,
-            resolvedSpec: context.resolvedSpec,
-            specFingerprint: encodeManagedSpecFingerprint(context.fingerprint),
-            state: "ready",
+      return await this.readyOrReleaseOnBusy(provisioned, async (release) => {
+        entry = await this.recordCreated(context, entry, provisioned);
+        if (!this.isAutomationReady(provisioned)) {
+          return await this.discardUncommitted(
+            context,
+            provisioned,
+            entry,
+            release,
+            failure("readiness_incomplete", `Device '${name}' did not reach automation readiness.`),
+          );
+        }
+        const committed = await this.journal.advance(entry, {
+          expectedPhase: "created",
+          phase: "committed",
+          assignment: {
+            kind: "commit",
+            expected: entry.binding,
+            next: {
+              stableDeviceId: provisioned.device.stableId,
+              deviceName: provisioned.device.name,
+              requestedSpec: request.requestedSpec,
+              resolvedSpec: context.resolvedSpec,
+              specFingerprint: encodeManagedSpecFingerprint(context.fingerprint),
+              state: "ready",
+            },
           },
-        },
-      });
-      if (committed.kind === "journal_conflict") {
-        // Another driver took the entry over; it owns the device's fate now.
-        await this.releaseSession(provisioned.sessionUuid);
-        throw new ReconcileAbort(
-          failure("concurrent_modification", "The slot's journal entry was taken over."),
+        });
+        if (committed.kind === "journal_conflict") {
+          // Another driver took the entry over; it owns the device's fate now.
+          await this.releaseSession(provisioned.sessionUuid);
+          throw new ReconcileAbort(
+            failure("concurrent_modification", "The slot's journal entry was taken over."),
+          );
+        }
+        if (committed.kind !== "advanced") {
+          return await this.discardUncommitted(
+            context,
+            provisioned,
+            entry,
+            release,
+            claimFailure(committed, "create commit"),
+          );
+        }
+        this.noteJournal(context, committed.entry);
+        return await this.claimAndReady(
+          context,
+          disposition,
+          committed.assignment!,
+          provisioned,
+          undefined,
         );
-      }
-      if (committed.kind !== "advanced") {
-        await this.discardUncommitted(context, provisioned, entry);
-        throw new ReconcileAbort(claimFailure(committed, "create commit"));
-      }
-      this.noteJournal(context, committed.entry);
-      return await this.claimAndReady(
-        context,
-        disposition,
-        committed.assignment!,
-        provisioned,
-        undefined,
-      );
+      });
     } finally {
       this.journal.inFlight.delete(entry.id);
     }
@@ -1926,12 +1965,53 @@ export class ManagedSlotReconciler {
     return recorded.entry;
   }
 
-  /** After a failed provision: roll the entry back on proven absence, else leave it for redrive. */
-  private async settleFailedCreate(
+  /** Reserve total-resource capacity before any native creation. */
+  private async admitFreshCreation(
     context: ReconcileContext,
     entry: SlotJournalEntry,
   ): Promise<void> {
+    let admission: ManagedSlotResourceAdmission;
     try {
+      admission = await this.deps.resourceBudget!.admitCreation({
+        journalEntryId: entry.id,
+        deadlineMs: context.request.deadlineMs,
+        signal: context.request.signal,
+      });
+      // Admission can consume the remaining preparation time even when it finds room.
+      this.checkBudget(context.request);
+    } catch (error) {
+      await this.settleFailedCreate(context, entry, true);
+      // Cancellation retains its identity for the reconciler's existing handling.
+      throw error;
+    }
+    if (admission.kind === "admitted") {
+      return;
+    }
+    // Native creation has not been called: absence is already proven, including when discovery
+    // itself is incomplete. Close directly rather than rediscovering a device that never existed.
+    await this.settleFailedCreate(context, entry, true);
+    if (admission.kind === "unknown") {
+      throw new ReconcileAbort(failure("discovery_incomplete", admission.message));
+    }
+    const { limit, usage, retained, evictionFailures } = admission;
+    throw new ReconcileAbort(
+      failure("managed_slot_budget_exhausted", "Managed-slot total-resource budget is exhausted.", {
+        budget: { limit, usage, retained, evictionFailures },
+      }),
+    );
+  }
+
+  /** Roll back on proven absence; otherwise discover leftovers and retain cleanup for redrive. */
+  private async settleFailedCreate(
+    context: ReconcileContext,
+    entry: SlotJournalEntry,
+    absenceProven = false,
+  ): Promise<void> {
+    try {
+      if (absenceProven) {
+        this.noteJournal(context, (await this.journal.close(entry, "rolled_back")).entry);
+        return;
+      }
       const settled = await this.journal.settleCreation(entry, {
         adopt: false,
         deadlineMs: context.request.deadlineMs,
@@ -1954,8 +2034,27 @@ export class ManagedSlotReconciler {
     context: ReconcileContext,
     provisioned: ManagedSlotProvisionedDevice,
     entry: SlotJournalEntry,
+    release: () => Promise<void>,
+    reason: ManagedSlotReconcileFailure,
+  ): Promise<never> {
+    await release();
+    try {
+      await this.cleanupUncommitted(context, provisioned, entry);
+    } catch (error) {
+      if (classifySqliteError(error) !== "retryable") {
+        throw error;
+      }
+      // The durable entry stays open for redrive; preserve the failure that required cleanup.
+      logger.debug(`[ManagedSlots] uncommitted cleanup deferred: ${errorMessage(error)}`);
+    }
+    throw new ReconcileAbort(reason);
+  }
+
+  private async cleanupUncommitted(
+    context: ReconcileContext,
+    provisioned: ManagedSlotProvisionedDevice,
+    entry: SlotJournalEntry,
   ): Promise<void> {
-    await this.releaseSession(provisioned.sessionUuid);
     if (!provisioned.created) {
       this.noteJournal(context, (await this.journal.close(entry, "rolled_back")).entry);
       return;
@@ -2372,6 +2471,28 @@ export class ManagedSlotReconciler {
       throw new ReconcileAbort(claimFailure(claimed, "execution claim"));
     }
     return this.ready(context, disposition, claimed.assignment, provisioned);
+  }
+
+  /** A busy publish cannot hand out its freshly provisioned session; release it before refusing. */
+  private async readyOrReleaseOnBusy(
+    provisioned: ManagedSlotProvisionedDevice,
+    publish: (release: () => Promise<void>) => Promise<ReadyResult>,
+  ): Promise<ReadyResult> {
+    let released = false;
+    const release = async () => {
+      if (!released) {
+        released = true;
+        await this.releaseSession(provisioned.sessionUuid);
+      }
+    };
+    try {
+      return await publish(release);
+    } catch (error) {
+      if (classifySqliteError(error) === "retryable") {
+        await release();
+      }
+      throw error;
+    }
   }
 
   private ready(

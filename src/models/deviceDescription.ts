@@ -37,6 +37,7 @@ export interface DeviceDescription {
       | "network-condition"
       | "clock"
       | "app-cleanup"
+      | "recording-teardown"
       | "keep-screen-awake";
     readonly since: number;
   };

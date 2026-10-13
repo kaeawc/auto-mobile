@@ -1,5 +1,5 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import { ActionableError, BootedDevice, ExecResult } from "../../models";
+import { ActionableError, toActionableError, BootedDevice, ExecResult } from "../../models";
 import { defaultTimer } from "../../utils/SystemTimer";
 import type { Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
@@ -18,6 +18,7 @@ import {
 } from "../../utils/ChildProcessTracker";
 import type {
   ForceStopOptions,
+  VideoCaptureTeardownDescriptor,
   RecordingHandle,
   RecordingResult,
   VideoCaptureBackend,
@@ -296,6 +297,48 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     throw new ActionableError(`Unsupported platform for video recording: ${device.platform}`);
   }
 
+  describeCaptureTeardown(handle: RecordingHandle): VideoCaptureTeardownDescriptor | undefined {
+    const backendHandle = handle.backendHandle as BackendHandle | undefined;
+    if (backendHandle?.kind !== "android") {
+      return undefined;
+    }
+    return {
+      kind: "android-screenrecord",
+      devicePid: backendHandle.devicePid?.pid,
+      deviceTempPath: backendHandle.deviceTempPath,
+    };
+  }
+
+  /** Restart recovery must identify this exact recorder; never signal by name or remove files. */
+  async forceStopOrphanedCapture(
+    device: BootedDevice,
+    descriptor: VideoCaptureTeardownDescriptor,
+  ): Promise<void> {
+    const pid = descriptor.devicePid;
+    if (pid === undefined) {
+      throw new ActionableError(
+        `Cannot identify orphan recorder on ${device.deviceId} without a pid.`,
+      );
+    }
+    const adb = this.adbFactory.create(device);
+    try {
+      const outcome = await this.signalDeviceRecorder(adb, descriptor, pid, 9);
+      if (outcome === "not-ours") {
+        return;
+      }
+      if (!(await this.confirmDeviceRecorderPidExited(adb, descriptor, pid))) {
+        throw new ActionableError(
+          `Cannot confirm orphan recorder pid ${pid} stopped on ${device.deviceId}.`,
+        );
+      }
+    } catch (error) {
+      throw toActionableError(
+        error,
+        `Failed to stop orphan recorder pid ${pid} on ${device.deviceId}`,
+      );
+    }
+  }
+
   async stop(handle: RecordingHandle): Promise<RecordingResult> {
     const backendHandle = handle.backendHandle as BackendHandle | undefined;
     if (!backendHandle || backendHandle.kind !== "android") {
@@ -485,13 +528,22 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     signal: 2 | 9,
   ): Promise<"signalled" | "not-ours"> {
     const probe = await this.readDeviceRecorderCmdline(adb, pid);
+    if (probe.error) {
+      throw toActionableError(probe.error, `Could not inspect recorder pid ${pid}`);
+    }
     if (!isOwnRecorderCmdline(probe.stdout, backendHandle.deviceTempPath)) {
       logger.warn(
         `[VideoCapture] Device pid ${pid} is no longer this recording's screenrecord; not signalling it`,
       );
       return "not-ours";
     }
-    await adb.executeCommand(`shell kill -${signal} ${pid}`, SIGNAL_RECORDER_COMMAND_TIMEOUT_MS);
+    const killed = await adb.executeCommand(
+      `shell kill -${signal} ${pid}`,
+      SIGNAL_RECORDER_COMMAND_TIMEOUT_MS,
+    );
+    if (killed.error) {
+      throw toActionableError(killed.error, `Could not signal recorder pid ${pid}`);
+    }
     return "signalled";
   }
 
@@ -699,7 +751,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
 
   private async confirmDeviceRecorderPidExited(
     adb: AdbExecutor,
-    backendHandle: AndroidBackendHandle,
+    backendHandle: Pick<AndroidBackendHandle, "deviceTempPath">,
     pid: number,
   ): Promise<boolean> {
     try {

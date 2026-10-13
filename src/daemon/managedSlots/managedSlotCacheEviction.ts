@@ -1,6 +1,9 @@
 import type { DeviceInfo } from "../../models";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
+import { ActionableError } from "../../models/ActionableError";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import type { ManagedSlotJournal } from "./slotJournal";
 import {
   MANAGED_SLOT_DEVICE_NAME_PREFIX,
   type ManagedSlotDeviceClaims,
@@ -8,7 +11,7 @@ import {
 } from "./reconciler";
 import { deviceStableId } from "./slotDeviceIdentity";
 import {
-  journalCreationPlatform,
+  journalNamesFreeDevice,
   type FreeSlotDeviceRecord,
   type SlotJournalEntry,
   type SlotPlatform,
@@ -48,7 +51,7 @@ export interface ManagedSlotEvictionSelection {
 export interface ManagedSlotEvictionSelector {
   select(
     registry: ManagedSlotEvictionRegistry,
-    options: { signal?: AbortSignal },
+    options: { signal?: AbortSignal; deadlineMs?: number },
   ): Promise<ManagedSlotEvictionSelection>;
 }
 
@@ -62,7 +65,7 @@ export type ManagedSlotEvictionResult =
   | { kind: "failed"; message: string };
 
 /**
- * PORT (no implementation here). Record the delete in the host-wide slot journal BEFORE any
+ * The journaled evictor records the delete on the host-wide free row BEFORE any
  * native deletion, guarded by a compare-and-set on the exact free-pool row (platform,
  * stableDeviceId, fromScopeKey, freedAtMs) so a concurrent adoption wins. Answer `absent` only
  * after verified absence and removal of the free row. A journaled delete always completes or
@@ -73,27 +76,18 @@ export type ManagedSlotEvictionResult =
 export interface ManagedSlotCacheEvictor {
   evict(
     candidate: ManagedSlotEvictionCandidate,
-    options: { signal?: AbortSignal },
+    options: { signal?: AbortSignal; deadlineMs?: number },
   ): Promise<ManagedSlotEvictionResult>;
 }
 
 interface EvictionSelectorDependencies {
   inventory: ManagedSlotInventory;
   claims: Pick<ManagedSlotDeviceClaims, "describe" | "sessionsOn">;
+  timer?: Pick<Timer, "now">;
   /** In-flight boot, lifecycle lease, shutdown or restart-recovery reservation; absent when quiet. */
   isBusy?: (device: DeviceInfo) => string | undefined;
   /** Default LRU clock is the persisted free-pool row's freedAtMs. */
   lastUsedAtMs?: (device: FreeSlotDeviceRecord) => number;
-}
-
-function journalNamesDevice(entry: SlotJournalEntry, row: FreeSlotDeviceRecord): boolean {
-  const oldSide =
-    entry.platform === row.platform &&
-    [entry.target.oldStableId, entry.target.oldName].includes(row.stableDeviceId);
-  const newSide =
-    journalCreationPlatform(entry) === row.platform &&
-    [entry.target.newStableId, entry.target.newName].includes(row.stableDeviceId);
-  return oldSide || newSide;
 }
 
 /** Select only unassigned, fully discovered and quiet daemon-created cache entries. */
@@ -102,18 +96,27 @@ export class DefaultManagedSlotEvictionSelector implements ManagedSlotEvictionSe
 
   async select(
     registry: ManagedSlotEvictionRegistry,
-    options: { signal?: AbortSignal },
+    options: { signal?: AbortSignal; deadlineMs?: number },
   ): Promise<ManagedSlotEvictionSelection> {
+    this.checkBudget(options);
     const rows = await registry.listFreeDevices();
+    this.checkBudget(options);
     const journal = await registry.listOpenSlotJournal();
     const listings = new Map<SlotPlatform, DeviceInfo[] | undefined>();
     const selection: ManagedSlotEvictionSelection = { candidates: [], skipped: [] };
     for (const row of rows) {
-      options.signal?.throwIfAborted();
+      this.checkBudget(options);
       if (!listings.has(row.platform)) {
         listings.set(row.platform, await this.list(row.platform, options));
       }
-      const result = await this.checkRow(registry, row, journal, listings.get(row.platform));
+      this.checkBudget(options);
+      const result = await this.checkRow(
+        registry,
+        row,
+        journal,
+        listings.get(row.platform),
+        options,
+      );
       if (typeof result === "string") {
         selection.skipped.push({
           platform: row.platform,
@@ -140,6 +143,16 @@ export class DefaultManagedSlotEvictionSelector implements ManagedSlotEvictionSe
     return selection;
   }
 
+  private checkBudget(options: { signal?: AbortSignal; deadlineMs?: number }): void {
+    options.signal?.throwIfAborted();
+    if (
+      options.deadlineMs !== undefined &&
+      (this.deps.timer ?? defaultTimer).now() >= options.deadlineMs
+    ) {
+      throw new ActionableError("Managed-slot preparation deadline passed during cache selection.");
+    }
+  }
+
   private async list(
     platform: SlotPlatform,
     options: { signal?: AbortSignal },
@@ -159,13 +172,41 @@ export class DefaultManagedSlotEvictionSelector implements ManagedSlotEvictionSe
     row: FreeSlotDeviceRecord,
     journal: readonly SlotJournalEntry[],
     listing: DeviceInfo[] | undefined,
+    options: { signal?: AbortSignal; deadlineMs?: number },
   ): Promise<string | DeviceInfo> {
+    if (row.deletion !== null) {
+      return "deletion_pending";
+    }
     if (row.state === "stopping") {
       return "stopping";
     }
-    if (journal.some((entry) => journalNamesDevice(entry, row))) {
+    if (journal.some((entry) => journalNamesFreeDevice(entry, row))) {
       return "journal_open";
     }
+    const device = this.listedDevice(row, journal, listing);
+    if (typeof device === "string") {
+      return device;
+    }
+    const reason = await this.holdReason(device);
+    if (reason) {
+      return reason;
+    }
+    this.checkBudget(options);
+    const holder = await registry.findDeviceHolder(row.platform, row.stableDeviceId);
+    if (holder?.kind !== "free") {
+      return "row_moved";
+    }
+    return holder.device.freedAtMs === row.freedAtMs &&
+      holder.device.fromScopeKey === row.fromScopeKey
+      ? device
+      : "row_moved";
+  }
+
+  private listedDevice(
+    row: FreeSlotDeviceRecord,
+    journal: readonly SlotJournalEntry[],
+    listing: DeviceInfo[] | undefined,
+  ): string | DeviceInfo {
     if (!listing) {
       return "discovery_incomplete";
     }
@@ -175,21 +216,13 @@ export class DefaultManagedSlotEvictionSelector implements ManagedSlotEvictionSe
     if (!device) {
       return "not_in_inventory";
     }
+    if (journal.some((entry) => journalNamesFreeDevice(entry, { ...row, name: device.name }))) {
+      return "journal_open";
+    }
     if (!device.name.startsWith(MANAGED_SLOT_DEVICE_NAME_PREFIX)) {
       return "not_daemon_created";
     }
-    const reason = await this.holdReason(device);
-    if (reason) {
-      return reason;
-    }
-    const holder = await registry.findDeviceHolder(row.platform, row.stableDeviceId);
-    if (holder?.kind !== "free") {
-      return "row_moved";
-    }
-    return holder.device.freedAtMs === row.freedAtMs &&
-      holder.device.fromScopeKey === row.fromScopeKey
-      ? device
-      : "row_moved";
+    return device;
   }
 
   private async holdReason(device: DeviceInfo): Promise<string | undefined> {
@@ -209,4 +242,32 @@ export class DefaultManagedSlotEvictionSelector implements ManagedSlotEvictionSe
 
 function compareText(a: string, b: string): number {
   return a < b ? -1 : Number(a > b);
+}
+
+/** The deletion marker is never reverted: absence completes it, redrive retries it. */
+export class JournaledManagedSlotCacheEvictor implements ManagedSlotCacheEvictor {
+  constructor(
+    private readonly registry: Pick<SlotRegistry, "beginFreeDeviceDeletion">,
+    private readonly journal: () => Pick<ManagedSlotJournal, "owner" | "driveFreeDeviceDeletion">,
+  ) {}
+
+  async evict(
+    candidate: ManagedSlotEvictionCandidate,
+    options: { signal?: AbortSignal; deadlineMs?: number },
+  ): Promise<ManagedSlotEvictionResult> {
+    options.signal?.throwIfAborted();
+    const journal = this.journal();
+    const begun = await this.registry.beginFreeDeviceDeletion(candidate, journal.owner);
+    if (begun.kind !== "begun") {
+      return { kind: "lost" };
+    }
+    const result = await journal.driveFreeDeviceDeletion(begun.row, options);
+    if (result.kind === "absent" || result.kind === "lost") {
+      return { kind: result.kind };
+    }
+    return {
+      kind: "failed",
+      message: "message" in result ? result.message : "Deletion was not confirmed.",
+    };
+  }
 }

@@ -5,6 +5,7 @@ import XCTest
 private actor FakeSdkHierarchyClient: SdkHierarchyFetching {
     private var serverInfo: SdkHierarchyServerInfo?
     private let hierarchy: SdkViewHierarchy?
+    private var freshResult: SdkHierarchyFetchResult?
     private var networkErrorCalls = 0
 
     init(serverInfo: SdkHierarchyServerInfo?, hierarchy: SdkViewHierarchy? = nil) {
@@ -20,6 +21,13 @@ private actor FakeSdkHierarchyClient: SdkHierarchyFetching {
 
     func stubMockRulesOutcome(_ outcome: SdkMockRulesOutcome) {
         mockRulesOutcome = outcome
+    }
+
+    func stubFreshResult(_ result: SdkHierarchyFetchResult) { freshResult = result }
+    func fetchFreshHierarchyResult() async -> SdkHierarchyFetchResult {
+        if let freshResult { return freshResult }
+        if let hierarchy { return .hierarchy(hierarchy) }
+        return .unavailable
     }
 
     func fetchHierarchy() async -> SdkViewHierarchy? { nil }
@@ -142,6 +150,43 @@ final class SdkCapabilitiesCommandTests: XCTestCase {
             ),
             gestures
         )
+    }
+
+    func testSdkFetchFailureFallsBackToXCUIWithWarning() async throws {
+        let failure = SdkHierarchyFetchFailure.undecodable(reason: "Missing key timestamp")
+        let response = try await fallbackLinkResponse(result: .failed(failure))
+        let warning = try XCTUnwrap(response.warning)
+        XCTAssertTrue(warning.contains(failure.reason))
+        XCTAssertTrue(warning.contains("in-app SDK link geometry"))
+        XCTAssertTrue(warning.contains("XCUITest link query"))
+        let decoded = try JSONDecoder().decode(WebSocketResponse.self, from: JSONEncoder().encode(response))
+        XCTAssertEqual(decoded.warning, warning)
+    }
+
+    func testUnavailableSdkFallsBackToXCUIWithoutWarning() async throws {
+        let response = try await fallbackLinkResponse(result: .unavailable)
+        XCTAssertNil(response.warning)
+    }
+
+    private func fallbackLinkResponse(result: SdkHierarchyFetchResult) async throws -> WebSocketResponse {
+        let sdk = FakeSdkHierarchyClient(
+            serverInfo: SdkHierarchyServerInfo(status: "ok", bundleId: "com.example.sdk")
+        )
+        await sdk.stubFreshResult(result)
+        let locator = RewriteFakeElementLocator()
+        locator.foregroundBundleId = "com.example.sdk"
+        let gestures = RewriteFakeGesturePerformer()
+        let handler = CommandHandler(
+            elementLocator: locator, gesturePerformer: gestures, perf: PerfProvider(), sdkHierarchyClient: sdk
+        )
+        let payload = try await handler.handle(
+            request(#"{"type":"request_activate_accessibility_link","text":"Terms","occurrence":0}"#)
+        )
+        let response = try XCTUnwrap(payload as? WebSocketResponse)
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(gestures.activateAccessibilityLinkCalls, 1)
+        XCTAssertEqual(gestures.tapCalls, 0)
+        return response
     }
 
     func testOwnerlessSemanticLinkTapsItsOccurrenceCoordinateWithoutFallback() async throws {

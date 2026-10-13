@@ -1,0 +1,13 @@
+{
+  "code": "managed_slot_acquisition_failed.managed_slot_budget_exhausted",
+  "builder": "reconciler failure via managedSlotsFailedToolResult",
+  "result": {
+    "isError": true,
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":{\"code\":\"managed_slot_acquisition_failed\",\"message\":\"Tool tapOn is unavailable: this execution's managed slot acquisition failed (managed_slot_budget_exhausted: managed_slot_budget_exhausted fixture). Read automobile:managed-slots for the evidence.\",\"acquisitionFailure\":{\"code\":\"managed_slot_budget_exhausted\",\"retryable\":true,\"message\":\"managed_slot_budget_exhausted fixture\",\"nextAction\":\"Reset or release managed slot scopes that are no longer needed, or raise AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES, then retry.\"}}}"
+      }
+    ]
+  }
+}

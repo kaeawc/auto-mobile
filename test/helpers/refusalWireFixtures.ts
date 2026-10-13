@@ -711,6 +711,34 @@ function managedSlotsFailureResult(
   ) as RefusalWireResult;
 }
 
+/** Total-resource evidence is independent of boot admission and has no retry hint. */
+function budgetSlotFailure(): ManagedSlotsFailure {
+  return reconcileFailure(
+    "managed_slot_budget_exhausted",
+    "Total-resource capacity is exhausted.",
+    {
+      budget: {
+        limit: 2,
+        usage: {
+          total: 3,
+          active: 1,
+          assignedIdle: 0,
+          cached: 0,
+          preparing: 1,
+          deleting: 1,
+          orphaned: 0,
+        },
+        retained: [
+          { platform: "android", stableDeviceId: "amslot-kept", reason: "deletion_pending" },
+        ],
+        evictionFailures: [
+          { platform: "android", stableDeviceId: "amslot-kept", message: "delete failed" },
+        ],
+      },
+    },
+  );
+}
+
 /** A slot-level `capacity_exhausted` failure carrying boot-capacity details (#11390, #11402). */
 function capacitySlotFailure(externalDevices?: string[]): ManagedSlotsFailure {
   const { code, retryable, message, nextAction, capacity } = reconcileFailure(
@@ -737,6 +765,11 @@ export function managedSlotNestedCodes(): string[] {
 function managedSlotFixtures(): [string, string, () => RefusalWireResult][] {
   const own: readonly string[] = MANAGED_SLOT_ACQUISITION_OWN_FAILURE_CODES;
   const withCapacity: [string, string, () => RefusalWireResult][] = [
+    [
+      `${MANAGED_SLOT_FIXTURE_PREFIX}managed_slot_budget_exhausted.budget`,
+      "reconciler failure with budget via managedSlotsFailedToolResult",
+      () => managedSlotsFailureResult(budgetSlotFailure(), true),
+    ],
     [
       `${MANAGED_SLOT_FIXTURE_PREFIX}capacity_exhausted.capacity`,
       "reconciler failure with capacity via managedSlotsFailedToolResult",
@@ -1153,6 +1186,12 @@ export function buildRefusalSurfaceFixtures(): RefusalSurfaceFixture[] {
       name: "discovery_incomplete",
       builder: "typedTeardownRefusal",
       payload: teardownFailure(new ManagedSlotDiscoveryIncompleteError("registry locked")),
+    },
+    {
+      surface: "managed-slots-result",
+      name: "managed_slot_budget_exhausted.budget",
+      builder: "reconciler failure in ManagedSlotsResult",
+      payload: failedManagedSlotsResult(budgetSlotFailure(), true),
     },
     {
       surface: "managed-slots-result",

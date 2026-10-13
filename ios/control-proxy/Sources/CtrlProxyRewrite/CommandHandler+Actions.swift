@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 extension CommandHandler {
     // MARK: - Actions
@@ -30,10 +31,28 @@ extension CommandHandler {
         // owner-less SDK requests select the first matching owner and report a note
         // when several qualify. Unresolved requests retain the XCUITest fallback,
         // which refuses owner-less occurrence > 0 because it cannot group owners.
-        let fresh: SdkViewHierarchy? = if await sdkServerMatchesTrackedForegroundApp() {
-            await sdkHierarchyClient?.fetchFreshHierarchy()
+        let fetchResult: SdkHierarchyFetchResult = if await sdkServerMatchesTrackedForegroundApp() {
+            await sdkHierarchyClient?.fetchFreshHierarchyResult() ?? .unavailable
         } else {
-            nil
+            .unavailable
+        }
+        let fresh: SdkViewHierarchy?
+        let fetchWarning: String?
+        switch fetchResult {
+        case let .hierarchy(hierarchy):
+            fresh = hierarchy
+            fetchWarning = nil
+        case .unavailable:
+            fresh = nil
+            fetchWarning = nil
+        case let .failed(failure):
+            fresh = nil
+            fetchWarning =
+                "The in-app SDK link geometry could not be read: \(failure.reason); the XCUITest link query was used instead."
+            Logger(subsystem: "dev.jasonpearson.automobile", category: "CommandHandler")
+                .warning(
+                    "SDK link hierarchy fetch failed: \(failure.reason, privacy: .public); using the XCUITest link query"
+                )
         }
         let resolution = SemanticLinkActivation.coordinate(
             in: fresh,
@@ -56,7 +75,7 @@ extension CommandHandler {
             type: ResponseType.actionResult.rawValue,
             requestId: request.requestId,
             totalTimeMs: totalTimeMs(from: startTime),
-            warning: resolution?.ownerNote
+            warning: resolution?.ownerNote ?? fetchWarning
         )
     }
 

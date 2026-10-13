@@ -219,9 +219,13 @@ import {
 import { registerPerformanceMonitorSessionCleanup } from "../server/performanceMonitorSessionCleanup";
 import {
   createOwnerlessRecordingAcquisitionCleanup,
+  createRecorderTeardownRecoveryMarker,
+  defaultRecordingSessionCleanupDeps,
   takeRecordingIdsFinalizedByRelease,
   registerRecordingSessionCleanup,
 } from "../server/recordingSessionCleanup";
+import { redriveUnconfirmedCaptureTeardowns } from "../server/recordingTeardownRedrive";
+import { PlatformVideoCaptureBackend } from "../features/video/PlatformVideoCaptureBackend";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
   awaitInFlightMigrations,
@@ -340,6 +344,7 @@ import {
   getPerformanceMonitor,
 } from "../features/performance/PerformanceMonitor";
 import {
+  initializeRecordingTeardownRedriveState,
   interruptVideoRecording,
   listActiveVideoRecordings,
   setVideoRecordingManagerDependencies,
@@ -592,6 +597,8 @@ export interface DaemonStartHost {
   startHttpIngress(): Promise<void>;
   /** Drop per-session appearance rows no rehydrated or recoverable session owns (#10976). */
   sweepStaleAppearanceConfigs(rehydration: RehydrationSummary): Promise<void>;
+  /** Mark unconfirmed recorders before sessions can bind; never await background recovery. */
+  redriveRecorderTeardowns(): Promise<boolean>;
   /** Create the control socket server over this daemon's state and start accepting clients. */
   bindControlSocket(): Promise<UnixSocketServer>;
   /** Auxiliary sockets, device monitors, the PID file and the health check. */
@@ -1338,7 +1345,10 @@ export class Daemon {
     registerLocationRouteSessionCleanup(this.sessionManager);
     registerNetworkStateSessionCleanup(this.sessionManager);
     registerPerformanceMonitorSessionCleanup(this.sessionManager);
-    registerRecordingSessionCleanup(this.sessionManager);
+    registerRecordingSessionCleanup(this.sessionManager, {
+      ...defaultRecordingSessionCleanupDeps,
+      markDeviceNeedsRecorderRecovery: createRecorderTeardownRecoveryMarker(this.sessionManager),
+    });
     this.sessionManager.onDeviceOwnershipChange((deviceId, frameInvalidation) => {
       // Generation only for unchanged-screen acquire/release; full for runtime-changing rebinds.
       if (frameInvalidation === "full") {
@@ -1693,6 +1703,36 @@ export class Daemon {
             this.deviceSessionRepository.getSession(sessionUuid),
         });
       },
+      redriveRecorderTeardowns: async () => {
+        try {
+          const state = await initializeRecordingTeardownRedriveState();
+          const backend = new PlatformVideoCaptureBackend();
+          return await redriveUnconfirmedCaptureTeardowns(this.sessionManager, {
+            recordingRepository: state.recordingRepository,
+            liveDaemonSessionIds: new Set(
+              [...state.liveDaemonSessionIds].filter((id) => id !== this.daemonSessionId),
+            ),
+            ownedCaptureIds: () => state.videoRecorderService.listActiveRecordingIds(),
+            getDeviceIncarnation: (id) => this.devicePool.getDeviceIncarnation(id),
+            getDevice: (id) => {
+              const device = this.devicePool.getDevice(id);
+              return device
+                ? { deviceId: device.id, name: device.name, platform: device.platform }
+                : undefined;
+            },
+            forceStopOrphanedCapture: (device, descriptor) =>
+              backend.forceStopOrphanedCapture(device, descriptor),
+            now: () => this.timer.now(),
+            timer: this.timer,
+          });
+        } catch (error) {
+          logger.warn(
+            "[Daemon] Recorder teardown initialization failed; continuing startup",
+            error,
+          );
+          return false;
+        }
+      },
       bindControlSocket: () => this.bindControlSocket(),
       startServicesAfterSocketBind: () => this.startServicesAfterSocketBind(),
       startMaintenanceMonitors: () => this.startMaintenanceMonitors(),
@@ -1778,6 +1818,8 @@ export class Daemon {
 
       // Rehydrated sessions are now owned here and can safely warm their runners.
       await startupBenchmark.runPhase("iosServices", () => this.initializeIosServices());
+
+      await this.startHost.redriveRecorderTeardowns();
 
       // Start Unix socket server AFTER device pool is ready
       this.socketServer = await this.startHost.bindControlSocket();

@@ -26,8 +26,12 @@ import Foundation
 /// Pauses over 30 seconds for streams or 8 seconds for UDP drop without charge,
 /// keeping UDP below Apple's ten-second limit. Caller-owned timers recheck the
 /// rule ticket on resume; reset/end/stop settle with allow exactly once.
-/// Same-ticket renewals preserve budgets; new tickets reset them and counters.
-/// Positive callbacks during a pause pass one debt grant without replacing it;
+/// Ticket changes inherit directional budgets and reset counters; pruning a
+/// target without a rule removes its budget. Same-ticket renewals change neither.
+/// At most one positive callback per pause passes a debt grant; a second drops
+/// and forgets the flow. Every data drop forgets its flow without new charge.
+/// Datagrams also drop when their own budget duration exceeds eight seconds.
+/// Allow latches until an outstanding pause settles with allow and is forgotten;
 /// non-positive callbacks pass zero without charge. Counter/time overflow
 /// saturates, and exhausted timelines cannot wrap into early normal grants.
 public final class FlowShaper {
@@ -43,6 +47,7 @@ public final class FlowShaper {
         let pause: FlowPause
         let ticket: NetworkRuleTicket
         let bytes: Int
+        var debtReleased = false
     }
 
     private struct Flow {
@@ -52,6 +57,7 @@ public final class FlowShaper {
         var inboundActivity: UInt64?
         var outboundActivity: UInt64?
         var pending: Pending?
+        var allowing = false
 
         func activity(_ direction: FlowDirection) -> UInt64? {
             direction == .inbound ? inboundActivity : outboundActivity
@@ -104,9 +110,14 @@ public final class FlowShaper {
         lock.lock()
         defer { lock.unlock() }
         let now = monotonicNow()
-        guard let rule = ruleSource.shapingRule(for: target) else { return .allow }
+        guard let rule = ruleSource.shapingRule(for: target) else {
+            flows[flow]?.allowing = true
+            if flows[flow]?.pending == nil { flows.removeValue(forKey: flow) }
+            return .allow
+        }
         // A duplicate admission must not orphan an outstanding timer token.
         if let existing = flows[flow] {
+            if existing.allowing { return .allow }
             if let pending = existing.pending { return .pause(pending.pause) }
             return newFilter(rule.profile)
         }
@@ -152,14 +163,20 @@ public final class FlowShaper {
             unknownCallbacks = Self.add(unknownCallbacks, 1)
             return .allow
         }
+        if tracked.allowing { return .allow }
         guard let rule = ruleSource.shapingRule(for: tracked.target) else {
             // Keep a paused flow's token until resume/settlement so its owner can
             // still settle it exactly once. Allow stops data filtering meanwhile.
             if tracked.pending == nil { flows.removeValue(forKey: flow) }
+            else {
+                tracked.allowing = true
+                flows[flow] = tracked
+            }
             return .allow
         }
         guard ensureTimeline(rule) else {
             countRefusal(rule)
+            flows.removeValue(forKey: flow)
             return .drop
         }
         let peek = rule.profile.quantum(direction)
@@ -170,8 +187,21 @@ public final class FlowShaper {
             return .pass(bytes: 0, peekBytes: peek)
         }
         let bytes = grant(availableBytes, tracked.transport, rule.profile, direction)
+        if tracked.transport == .datagram, let rate = rule.profile.rate(direction),
+           Self.duration(bytes, rate) > Self.maximumDatagramPauseNanoseconds
+        {
+            countDrop(tracked.target)
+            flows.removeValue(forKey: flow)
+            return .drop
+        }
         if tracked.pending != nil {
+            guard tracked.pending?.debtReleased == false else {
+                countDrop(tracked.target)
+                flows.removeValue(forKey: flow)
+                return .drop
+            }
             chargeDebt(bytes, target: tracked.target, direction: direction, now: now)
+            tracked.pending?.debtReleased = true
             tracked.record(direction, now: now)
             flows[flow] = tracked
             return .pass(bytes: bytes, peekBytes: peek)
@@ -179,34 +209,42 @@ public final class FlowShaper {
         return reserveData(flow, direction: direction, bytes: bytes, tracked: tracked, rule: rule, now: now)
     }
 
-    /// Nil for an already settled/foreign token. An early same-ticket timer is
-    /// ignored without consuming the pause; its caller must retain the deadline.
-    /// Reset/replacement may settle immediately even before that deadline.
-    public func resume(_ pause: FlowPause) -> ResumeDecision? {
+    /// Early same-ticket timers return notDue with the retained deadline.
+    /// Due/reset/replacement timers always settle, allowing and forgetting the
+    /// flow if its current timeline cannot be admitted. Foreign/settled tokens
+    /// return alreadySettled. An allow latch settles even before the deadline.
+    public func resume(_ pause: FlowPause) -> ResumeOutcome {
         lock.lock()
         defer { lock.unlock() }
         let now = monotonicNow()
-        guard var tracked = flows[pause.flow], let pending = tracked.pending, pending.pause == pause else { return nil }
-        guard let rule = ruleSource.shapingRule(for: tracked.target) else {
+        guard var tracked = flows[pause.flow], let pending = tracked.pending, pending.pause == pause else {
+            return .alreadySettled
+        }
+        guard !tracked.allowing, let rule = ruleSource.shapingRule(for: tracked.target) else {
             flows.removeValue(forKey: pause.flow)
-            return .allow
+            return .settled(.allow)
         }
         let same = rule.ticket == pending.ticket
-        guard !same || now >= pause.resumeAtNanoseconds else { return nil }
-        guard ensureTimeline(rule) else { return nil }
+        guard !same || now >= pause.resumeAtNanoseconds else {
+            return .notDue(resumeAtNanoseconds: pause.resumeAtNanoseconds)
+        }
+        guard ensureTimeline(rule) else {
+            flows.removeValue(forKey: pause.flow)
+            return .settled(.allow)
+        }
         tracked.pending = nil
         tracked.lastActive = now
         switch pause.phase {
         case .newFlow:
             flows[pause.flow] = tracked
-            return resumedFilter(rule.profile)
+            return .settled(resumedFilter(rule.profile))
         case let .data(direction):
             let bytes = same ? pending.bytes : grant(pending.bytes, tracked.transport, rule.profile, direction)
             if same { countRelease(bytes, tracked.target, direction) }
             else { chargeDebt(bytes, target: tracked.target, direction: direction, now: now) }
             tracked.record(direction, now: now)
             flows[pause.flow] = tracked
-            return .pass(bytes: bytes, peekBytes: rule.profile.quantum(direction))
+            return .settled(.pass(bytes: bytes, peekBytes: rule.profile.quantum(direction)))
         }
     }
 
@@ -222,7 +260,7 @@ public final class FlowShaper {
         lock.lock()
         defer { lock.unlock() }
         let stale = flows.filter { _, flow in
-            flow.pending != nil && ruleSource.shapingRule(for: flow.target) == nil
+            flow.pending != nil && (flow.allowing || ruleSource.shapingRule(for: flow.target) == nil)
         }.keys
         let settlements = stale.compactMap { flows.removeValue(forKey: $0)?.pending }
             .map { FlowSettlement(pause: $0.pause, decision: .allow) }
@@ -286,7 +324,6 @@ public final class FlowShaper {
         let last = tracked.activity(direction)
         let hold = last == nil || now - (last ?? now) >= rule.profile.quietGapNanoseconds ?
             rule.profile.delayNanoseconds(direction) : 0
-        tracked.record(direction, now: now)
         let slot = slotStart(tracked.target, direction, now)
         let release = max(Self.add(now, hold), slot)
         let limit = tracked.transport == .datagram ?
@@ -296,13 +333,14 @@ public final class FlowShaper {
               release - now <= limit
         else {
             countDrop(tracked.target)
-            flows[flow] = tracked
+            flows.removeValue(forKey: flow)
             return .drop
         }
         var token: FlowPause?
         if release > now {
             guard let value = makePause(flow, phase: .data(direction), release: release) else {
                 countDrop(tracked.target)
+                flows.removeValue(forKey: flow)
                 return .drop
             }
             token = value
@@ -333,6 +371,10 @@ public final class FlowShaper {
             guard timelines.count < Self.maximumTimelines else { return false }
         }
         var timeline = Timeline(rule)
+        if let previous = timelines[target] {
+            timeline.inboundNext = previous.inboundNext
+            timeline.outboundNext = previous.outboundNext
+        }
         if let previous = refused.removeValue(forKey: target), previous.owner == rule.ticket.owner,
            previous.ownerGeneration == rule.ticket.ownerGeneration, previous.revision == rule.ticket.revision
         { timeline.counters.refusedFlows = previous.refusedFlows }

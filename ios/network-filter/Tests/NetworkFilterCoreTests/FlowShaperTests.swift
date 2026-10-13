@@ -45,6 +45,255 @@ final class FlowShaperTests: XCTestCase {
         return value
     }
 
+    private func exhaustTimelinesWhilePaused(revision: UInt64 = 2) -> FlowPause {
+        let token = reservedData()
+        source.rules.removeValue(forKey: RuleFixtures.target)
+        for index in 0 ..< FlowShaper.maximumTimelines {
+            source.install(ShapingProfile(outboundBytesPerSecond: 1000)!, target: target(index))
+            _ = shaper.newFlow(flow(index + 1), target: target(index), transport: .stream)
+        }
+        source.install(ShapingProfile(outboundBytesPerSecond: revision == 1 ? 2000 : 1000)!, revision: revision)
+        return token
+    }
+
+    func testResumeAtTimelineCapacityAllowsAndForgetsPause() {
+        let token = exhaustTimelinesWhilePaused()
+        XCTAssertEqual(shaper.resume(token), .settled(.allow))
+        XCTAssertEqual(shaper.resume(token), .alreadySettled)
+        XCTAssertEqual(shaper.data(flow(), direction: .outbound, availableBytes: 100), .allow)
+        XCTAssertEqual(shaper.untrackedDataCallbacks, 1)
+        XCTAssertEqual(shaper.status().reduce(0) { $0 + $1.pausedFlows }, 0)
+        source.rules.removeValue(forKey: target(0))
+        admit()
+        XCTAssertEqual(shaper.status().first { $0.target == RuleFixtures.target }?.pausedFlows, 0)
+    }
+
+    func testDueSameTicketResumeAtCapacityAlwaysSettles() {
+        let token = exhaustTimelinesWhilePaused(revision: 1)
+        XCTAssertEqual(shaper.resume(token), .notDue(resumeAtNanoseconds: token.resumeAtNanoseconds))
+        clock.nanoseconds = token.resumeAtNanoseconds
+        XCTAssertEqual(shaper.resume(token), .settled(.allow))
+        XCTAssertEqual(shaper.resume(token), .alreadySettled)
+        XCTAssertEqual(shaper.data(flow(), direction: .outbound, availableBytes: 100), .allow)
+        XCTAssertEqual(shaper.untrackedDataCallbacks, 1)
+    }
+
+    func testMissingRuleOnDuplicateAdmissionLatchesAllow() {
+        let token = reservedData()
+        source.rules.removeAll()
+        XCTAssertEqual(shaper.newFlow(flow(), target: RuleFixtures.target, transport: .stream), .allow)
+        source.install(ShapingProfile(outboundBytesPerSecond: 1000)!, revision: 2)
+        XCTAssertEqual(shaper.data(flow(), direction: .outbound, availableBytes: 100), .allow)
+        XCTAssertEqual(shaper.resume(token), .settled(.allow))
+        XCTAssertEqual(shaper.resume(token), .alreadySettled)
+        XCTAssertEqual(shaper.status().first?.trackedFlows, 0)
+    }
+
+    func testDataAtTimelineCapacityDropsAndForgetsPause() {
+        let token = exhaustTimelinesWhilePaused()
+        XCTAssertEqual(shaper.data(flow(), direction: .outbound, availableBytes: 100), .drop)
+        XCTAssertEqual(shaper.resume(token), .alreadySettled)
+        XCTAssertEqual(shaper.data(flow(), direction: .outbound, availableBytes: 100), .allow)
+        XCTAssertEqual(shaper.untrackedDataCallbacks, 1)
+    }
+
+    func testDroppedFlowsReleaseAllCapacityImmediately() {
+        source.install(ShapingProfile(outboundDelayMilliseconds: 1)!)
+        clock.nanoseconds = UInt64.max - 1
+        for index in 0 ..< FlowShaper.maximumFlows {
+            _ = shaper.newFlow(flow(index), target: RuleFixtures.target, transport: .datagram)
+        }
+        XCTAssertEqual(shaper.status().first?.trackedFlows, FlowShaper.maximumFlows)
+        for index in 0 ..< FlowShaper.maximumFlows {
+            XCTAssertEqual(shaper.data(flow(index), direction: .outbound, availableBytes: 100), .drop)
+        }
+        XCTAssertEqual(shaper.status().first?.trackedFlows, 0)
+        XCTAssertEqual(shaper.status().first?.overBudgetDrops, UInt64(FlowShaper.maximumFlows))
+        XCTAssertEqual(shaper.status().first?.outboundHeldBursts, 0)
+        XCTAssertEqual(
+            shaper.newFlow(flow(256), target: RuleFixtures.target, transport: .datagram),
+            .filter(inbound: false, outbound: true, peekBytes: 65536)
+        )
+        XCTAssertEqual(shaper.status().first?.trackedFlows, 1)
+        XCTAssertEqual(shaper.status().first?.refusedFlows, 0)
+    }
+
+    func testDatagramOwnDurationBoundaryAndDropLeavesTimelineUnchanged() {
+        source.install(ShapingProfile(outboundBytesPerSecond: 1000)!)
+        admit(transport: .datagram)
+        XCTAssertEqual(
+            shaper.data(flow(), direction: .outbound, availableBytes: 8000),
+            .pass(bytes: 8000, peekBytes: 100)
+        )
+        clock.advance(milliseconds: 8000)
+        admit(1, transport: .datagram)
+        XCTAssertEqual(shaper.data(flow(1), direction: .outbound, availableBytes: 8001), .drop)
+        XCTAssertEqual(shaper.status().first?.overBudgetDrops, 1)
+        XCTAssertEqual(shaper.status().first?.outboundReleasedBytes, 8000)
+        XCTAssertEqual(shaper.status().first?.trackedFlows, 1)
+        XCTAssertEqual(
+            shaper.data(flow(), direction: .outbound, availableBytes: 100),
+            .pass(bytes: 100, peekBytes: 100)
+        )
+        let next = pause(shaper.data(flow(), direction: .outbound, availableBytes: 100))
+        XCTAssertEqual(next.resumeAtNanoseconds, clock.nanoseconds + 100_000_000)
+    }
+
+    func testOversizedPausedDatagramDropsBeforeDebtCharge() {
+        source.install(ShapingProfile(outboundDelayMilliseconds: 1, outboundBytesPerSecond: 1000)!)
+        _ = shaper.newFlow(flow(), target: RuleFixtures.target, transport: .datagram)
+        let token = pause(shaper.data(flow(), direction: .outbound, availableBytes: 100))
+        XCTAssertEqual(shaper.data(flow(), direction: .outbound, availableBytes: 8001), .drop)
+        XCTAssertEqual(shaper.status().first?.debtReleases, 0)
+        XCTAssertEqual(shaper.status().first?.overBudgetDrops, 1)
+        XCTAssertEqual(shaper.resume(token), .alreadySettled)
+        _ = shaper.newFlow(flow(1), target: RuleFixtures.target, transport: .datagram)
+        let next = pause(shaper.data(flow(1), direction: .outbound, availableBytes: 100))
+        XCTAssertEqual(next.resumeAtNanoseconds, clock.nanoseconds + 100_000_000)
+    }
+
+    func testSecondPositivePausedCallbackDropsAcrossDirections() {
+        let start = clock.nanoseconds
+        let token = reservedData()
+        for bytes in [0, -1] {
+            XCTAssertEqual(
+                shaper.data(flow(), direction: .outbound, availableBytes: bytes),
+                .pass(bytes: 0, peekBytes: 200)
+            )
+        }
+        XCTAssertEqual(
+            shaper.data(flow(), direction: .outbound, availableBytes: 200),
+            .pass(bytes: 200, peekBytes: 200)
+        )
+        XCTAssertEqual(shaper.status().first?.pausedFlows, 1)
+        XCTAssertEqual(shaper.status().first?.debtReleases, 1)
+        XCTAssertEqual(shaper.status().first?.outboundReleasedBytes, 400)
+        XCTAssertLessThanOrEqual(
+            shaper.status().first!.outboundReleasedBytes,
+            2000 * (clock.nanoseconds - start) / 1_000_000_000 + (1 + 1) * 200
+        )
+        XCTAssertEqual(shaper.data(flow(), direction: .inbound, availableBytes: 1), .drop)
+        XCTAssertEqual(shaper.status().first?.overBudgetDrops, 1)
+        XCTAssertEqual(shaper.status().first?.callbacksWhilePaused, 4)
+        XCTAssertEqual(shaper.status().first?.trackedFlows, 0)
+        XCTAssertEqual(shaper.status().first?.inboundReleasedBytes, 0)
+        XCTAssertEqual(shaper.resume(token), .alreadySettled)
+        clock.nanoseconds = token.resumeAtNanoseconds
+        XCTAssertEqual(shaper.resume(token), .alreadySettled)
+        // The dropped callback did not charge another slot; prior charges persist.
+        _ = shaper.newFlow(flow(1), target: RuleFixtures.target, transport: .stream)
+        let next = pause(shaper.data(flow(1), direction: .outbound, availableBytes: 200))
+        XCTAssertEqual(next.resumeAtNanoseconds, start + 300_000_000)
+    }
+
+    func testDebtReleaseLimitSurvivesTicketChangeDuringPause() {
+        let token = reservedData()
+        _ = shaper.data(flow(), direction: .outbound, availableBytes: 200)
+        source.install(ShapingProfile(outboundBytesPerSecond: 1000)!, revision: 2)
+        XCTAssertEqual(shaper.data(flow(), direction: .outbound, availableBytes: 100), .drop)
+        XCTAssertEqual(shaper.status().first?.debtReleases, 0)
+        XCTAssertEqual(shaper.status().first?.overBudgetDrops, 1)
+        XCTAssertEqual(shaper.resume(token), .alreadySettled)
+    }
+
+    func testAllowLatchSurvivesReinstalledRuleAndEverySettlementPath() {
+        for path in 0 ..< 4 {
+            let token = reservedData()
+            source.rules.removeAll()
+            XCTAssertEqual(shaper.data(flow(), direction: .outbound, availableBytes: 100), .allow)
+            source.install(ShapingProfile(outboundBytesPerSecond: 1000)!, revision: 2)
+            XCTAssertEqual(shaper.data(flow(), direction: .inbound, availableBytes: 100), .allow)
+            XCTAssertEqual(shaper.data(flow(), direction: .outbound, availableBytes: 0), .allow)
+            XCTAssertEqual(shaper.newFlow(flow(), target: RuleFixtures.target, transport: .stream), .allow)
+            clock.nanoseconds = token.resumeAtNanoseconds
+            switch path {
+            case 0: XCTAssertEqual(shaper.resume(token), .settled(.allow))
+            case 1: XCTAssertEqual(shaper.settleStale(), [FlowSettlement(pause: token, decision: .allow)])
+            case 2: XCTAssertEqual(shaper.flowEnded(flow()), FlowSettlement(pause: token, decision: .allow))
+            default: XCTAssertEqual(shaper.removeAll(), [FlowSettlement(pause: token, decision: .allow)])
+            }
+            XCTAssertEqual(shaper.resume(token), .alreadySettled)
+            XCTAssertEqual(shaper.data(flow(), direction: .outbound, availableBytes: 100), .allow)
+            XCTAssertEqual(shaper.status().reduce(0) { $0 + $1.trackedFlows }, 0)
+            _ = shaper.removeAll()
+        }
+    }
+
+    func testTwentyRevisionBumpsCannotEarnFreshFirstGrants() {
+        source.install(ShapingProfile(outboundBytesPerSecond: 1000)!)
+        let start = clock.nanoseconds
+        var released = 0
+        var debt = 0
+        for revision in 1 ... 20 {
+            source.install(ShapingProfile(outboundBytesPerSecond: 1000)!, revision: UInt64(revision))
+            admit(revision)
+            let decision = shaper.data(flow(revision), direction: .outbound, availableBytes: 100)
+            switch decision {
+            case let .pass(bytes, _): released += bytes
+            case let .pause(token):
+                XCTAssertEqual(token.resumeAtNanoseconds, start + UInt64(revision - 1) * 100_000_000)
+            default: XCTFail("Expected pass or reservation")
+            }
+            debt += Int(shaper.status().first!.debtReleases)
+        }
+        XCTAssertEqual(debt, 0)
+        XCTAssertEqual(released, 100)
+        XCTAssertLessThanOrEqual(released, (1 + debt) * 100)
+        XCTAssertEqual(shaper.status().first?.pausedFlows, 19)
+    }
+
+    func testTicketChangeInheritsBothDirectionsAndUnlimitedIgnoresDebt() {
+        source.install(ShapingProfile(outboundBytesPerSecond: 1000, inboundBytesPerSecond: 2000)!)
+        _ = shaper.newFlow(flow(), target: RuleFixtures.target, transport: .stream)
+        _ = shaper.data(flow(), direction: .outbound, availableBytes: 100)
+        _ = shaper.data(flow(), direction: .inbound, availableBytes: 200)
+        source.install(ShapingProfile(outboundBytesPerSecond: 2000, inboundBytesPerSecond: 1000)!, revision: 2)
+        let outbound = pause(shaper.data(flow(), direction: .outbound, availableBytes: 200))
+        XCTAssertEqual(outbound.resumeAtNanoseconds, clock.nanoseconds + 100_000_000)
+        _ = shaper.newFlow(flow(1), target: RuleFixtures.target, transport: .stream)
+        let inbound = pause(shaper.data(flow(1), direction: .inbound, availableBytes: 100))
+        XCTAssertEqual(inbound.resumeAtNanoseconds, clock.nanoseconds + 100_000_000)
+        source.install(ShapingProfile(outboundBytesPerSecond: 1000)!, revision: 3)
+        _ = shaper.newFlow(flow(2), target: RuleFixtures.target, transport: .stream)
+        XCTAssertEqual(
+            shaper.data(flow(2), direction: .inbound, availableBytes: 10000),
+            .pass(bytes: 10000, peekBytes: 65536)
+        )
+    }
+
+    func testPrunedTimelineStartsFreshAfterRuleReturns() {
+        source.install(ShapingProfile(outboundBytesPerSecond: 1000)!)
+        admit()
+        _ = shaper.data(flow(), direction: .outbound, availableBytes: 100)
+        source.rules.removeAll()
+        XCTAssertEqual(shaper.settleStale(), [])
+        source.install(ShapingProfile(outboundBytesPerSecond: 1000)!, revision: 2)
+        XCTAssertEqual(
+            shaper.data(flow(), direction: .outbound, availableBytes: 100),
+            .pass(bytes: 100, peekBytes: 100)
+        )
+    }
+
+    func testFastPingPongWithOnlyOneDelayedDirectionHoldsOnce() {
+        latencyFlow(ShapingProfile(outboundDelayMilliseconds: 30)!)
+        let first = pause(shaper.data(flow(), direction: .outbound, availableBytes: 10))
+        clock.nanoseconds = first.resumeAtNanoseconds
+        _ = shaper.resume(first)
+        for _ in 0 ..< 4 {
+            clock.advance(milliseconds: 1)
+            XCTAssertEqual(
+                shaper.data(flow(), direction: .inbound, availableBytes: 10),
+                .pass(bytes: 10, peekBytes: 65536)
+            )
+            XCTAssertEqual(
+                shaper.data(flow(), direction: .outbound, availableBytes: 10),
+                .pass(bytes: 10, peekBytes: 65536)
+            )
+        }
+        XCTAssertEqual(shaper.status().first?.outboundHeldBursts, 1)
+        XCTAssertEqual(shaper.status().first?.inboundHeldBursts, 0)
+    }
+
     func testNoRuleAllowsAndTracksNothing() {
         XCTAssertEqual(shaper.newFlow(flow(), target: RuleFixtures.target, transport: .stream), .allow)
         XCTAssertEqual(shaper.data(flow(), direction: .outbound, availableBytes: 100), .allow)
@@ -60,7 +309,7 @@ final class FlowShaperTests: XCTestCase {
         XCTAssertEqual(token.phase, .newFlow)
         XCTAssertEqual(token.resumeAtNanoseconds, clock.nanoseconds + 3_000_000)
         clock.nanoseconds = token.resumeAtNanoseconds
-        XCTAssertEqual(shaper.resume(token), .filter(inbound: false, outbound: true, peekBytes: 65536))
+        XCTAssertEqual(shaper.resume(token), .settled(.filter(inbound: false, outbound: true, peekBytes: 65536)))
     }
 
     func testStreamConnectionHoldIsOneRoundTrip() {
@@ -70,7 +319,7 @@ final class FlowShaperTests: XCTestCase {
         }
         XCTAssertEqual(token.resumeAtNanoseconds, clock.nanoseconds + 50_000_000)
         clock.nanoseconds = token.resumeAtNanoseconds
-        XCTAssertEqual(shaper.resume(token), .filter(inbound: true, outbound: true, peekBytes: 65536))
+        XCTAssertEqual(shaper.resume(token), .settled(.filter(inbound: true, outbound: true, peekBytes: 65536)))
     }
 
     func testDatagramNewFlowIsNotHeld() {
@@ -93,7 +342,7 @@ final class FlowShaperTests: XCTestCase {
             let token = pause(shaper.data(flow(), direction: .outbound, availableBytes: 500))
             XCTAssertEqual(token.resumeAtNanoseconds, clock.nanoseconds + 100_000_000)
             clock.nanoseconds = token.resumeAtNanoseconds
-            XCTAssertEqual(shaper.resume(token), .pass(bytes: 100, peekBytes: 100))
+            XCTAssertEqual(shaper.resume(token), .settled(.pass(bytes: 100, peekBytes: 100)))
         }
         XCTAssertEqual(shaper.status().first?.outboundReleasedBytes, 1100)
     }
@@ -108,9 +357,9 @@ final class FlowShaperTests: XCTestCase {
         let token = pause(shaper.data(flow(), direction: .outbound, availableBytes: 100))
         XCTAssertEqual(token.resumeAtNanoseconds - clock.nanoseconds, 99_900_100)
         clock.nanoseconds = token.resumeAtNanoseconds - 1
-        XCTAssertNil(shaper.resume(token))
+        XCTAssertEqual(shaper.resume(token), .notDue(resumeAtNanoseconds: token.resumeAtNanoseconds))
         clock.nanoseconds += 1
-        XCTAssertEqual(shaper.resume(token), .pass(bytes: 100, peekBytes: 100))
+        XCTAssertEqual(shaper.resume(token), .settled(.pass(bytes: 100, peekBytes: 100)))
     }
 
     private func driveConcurrent(_ count: Int) {
@@ -143,7 +392,7 @@ final class FlowShaperTests: XCTestCase {
         {
             pending.removeAll { $0.id == token.id }
             clock.nanoseconds = token.resumeAtNanoseconds
-            guard case let .pass(bytes, _) = shaper.resume(token) else { return XCTFail("Expected grant") }
+            guard case let .settled(.pass(bytes, _)) = shaper.resume(token) else { return XCTFail("Expected grant") }
             let index = (0 ..< count).first { flow($0) == token.flow }!
             totals[index] += bytes
             events.append((clock.nanoseconds, bytes))
@@ -212,7 +461,7 @@ final class FlowShaperTests: XCTestCase {
         let token = pause(shaper.data(flow(), direction: .outbound, availableBytes: 500))
         XCTAssertEqual(token.resumeAtNanoseconds, clock.nanoseconds + 30_000_000)
         clock.nanoseconds = token.resumeAtNanoseconds
-        XCTAssertEqual(shaper.resume(token), .pass(bytes: 500, peekBytes: 65536))
+        XCTAssertEqual(shaper.resume(token), .settled(.pass(bytes: 500, peekBytes: 65536)))
         XCTAssertEqual(shaper.status().first?.outboundHeldBursts, 1)
     }
 
@@ -280,7 +529,7 @@ final class FlowShaperTests: XCTestCase {
         var events: [(UInt64, UInt64)] = [(clock.nanoseconds, 100)]
         for token in [held, third] {
             clock.nanoseconds = token.resumeAtNanoseconds
-            XCTAssertEqual(shaper.resume(token), .pass(bytes: 100, peekBytes: 100))
+            XCTAssertEqual(shaper.resume(token), .settled(.pass(bytes: 100, peekBytes: 100)))
             events.append((clock.nanoseconds, 100))
         }
         for firstIndex in events.indices {
@@ -303,21 +552,54 @@ final class FlowShaperTests: XCTestCase {
         let token = pause(shaper.data(flow(), direction: .outbound, availableBytes: 1234))
         XCTAssertEqual(token.resumeAtNanoseconds, clock.nanoseconds + 1_234_000_000)
         clock.nanoseconds = token.resumeAtNanoseconds
-        XCTAssertEqual(shaper.resume(token), .pass(bytes: 1234, peekBytes: 100))
+        XCTAssertEqual(shaper.resume(token), .settled(.pass(bytes: 1234, peekBytes: 100)))
     }
 
     func testDatagramOverEightSecondWaitDropsWithoutCharge() {
         source.install(ShapingProfile(outboundBytesPerSecond: 1000)!)
         admit(transport: .datagram)
         XCTAssertEqual(
-            shaper.data(flow(), direction: .outbound, availableBytes: 8001),
-            .pass(bytes: 8001, peekBytes: 100)
+            shaper.data(flow(), direction: .outbound, availableBytes: 8000),
+            .pass(bytes: 8000, peekBytes: 100)
         )
-        XCTAssertEqual(shaper.data(flow(), direction: .outbound, availableBytes: 4000), .drop)
+        admit(1, transport: .datagram)
+        let token = pause(shaper.data(flow(1), direction: .outbound, availableBytes: 8000))
+        admit(2, transport: .datagram)
+        XCTAssertEqual(shaper.data(flow(2), direction: .outbound, availableBytes: 4000), .drop)
+        XCTAssertEqual(shaper.data(flow(2), direction: .outbound, availableBytes: 100), .allow)
         XCTAssertEqual(shaper.status().first?.overBudgetDrops, 1)
-        clock.advance(milliseconds: 8001)
+        XCTAssertEqual(shaper.status().first?.trackedFlows, 2)
+        clock.nanoseconds = token.resumeAtNanoseconds
+        XCTAssertEqual(shaper.resume(token), .settled(.pass(bytes: 8000, peekBytes: 100)))
+        clock.advance(milliseconds: 8000)
         XCTAssertEqual(
             shaper.data(flow(), direction: .outbound, availableBytes: 100),
+            .pass(bytes: 100, peekBytes: 100)
+        )
+    }
+
+    func testDroppedDatagramLeavesNoDirectionActivityOrCharge() {
+        source.install(ShapingProfile(outboundBytesPerSecond: 1000)!)
+        for index in 0 ..< 3 {
+            admit(index, transport: .datagram)
+        }
+        _ = shaper.data(flow(0), direction: .outbound, availableBytes: 8000)
+        _ = shaper.data(flow(1), direction: .outbound, availableBytes: 8000)
+        XCTAssertEqual(shaper.data(flow(2), direction: .outbound, availableBytes: 100), .drop)
+        XCTAssertEqual(shaper.status().first?.outboundHeldBursts, 0)
+        // Ignoring the inherited rate budget exposes whether dropped activity survived.
+        source.install(ShapingProfile(outboundDelayMilliseconds: 30)!, revision: 2)
+        _ = shaper.newFlow(flow(2), target: RuleFixtures.target, transport: .datagram)
+        let token = pause(shaper.data(flow(2), direction: .outbound, availableBytes: 100))
+        XCTAssertEqual(token.resumeAtNanoseconds, clock.nanoseconds + 30_000_000)
+        XCTAssertEqual(shaper.status().first?.outboundHeldBursts, 1)
+        XCTAssertEqual(shaper.status().first?.outboundReleasedBytes, 0)
+        // Returning to a rate limit preserves only the two accepted 8s charges.
+        source.install(ShapingProfile(outboundBytesPerSecond: 1000)!, revision: 3)
+        _ = shaper.flowEnded(flow(2))
+        clock.advance(milliseconds: 16000)
+        XCTAssertEqual(
+            shaper.data(flow(0), direction: .outbound, availableBytes: 100),
             .pass(bytes: 100, peekBytes: 100)
         )
     }
@@ -328,6 +610,32 @@ final class FlowShaperTests: XCTestCase {
         _ = shaper.data(flow(), direction: .outbound, availableBytes: 8000)
         let token = pause(shaper.data(flow(), direction: .outbound, availableBytes: 1))
         XCTAssertEqual(token.resumeAtNanoseconds - clock.nanoseconds, FlowShaper.maximumDatagramPauseNanoseconds)
+    }
+
+    func testDatagramSharedDirectionMakesStreamWaitAboveLimitDrop() {
+        source.install(ShapingProfile(outboundBytesPerSecond: 1000)!)
+        admit(0, transport: .datagram)
+        admit(1, transport: .datagram)
+        _ = shaper.data(flow(0), direction: .outbound, availableBytes: 8000)
+        _ = shaper.data(flow(1), direction: .outbound, availableBytes: 8000)
+        for index in 2 ..< FlowShaper.maximumFlows {
+            admit(index)
+            let decision = shaper.data(flow(index), direction: .outbound, availableBytes: 100)
+            if index <= 142 {
+                let token = pause(decision)
+                XCTAssertEqual(
+                    token.resumeAtNanoseconds,
+                    clock.nanoseconds + 16_000_000_000 + UInt64(index - 2) * 100_000_000
+                )
+                XCTAssertLessThanOrEqual(
+                    token.resumeAtNanoseconds - clock.nanoseconds,
+                    FlowShaper.maximumStreamPauseNanoseconds
+                )
+            } else { XCTAssertEqual(decision, .drop) }
+        }
+        XCTAssertEqual(shaper.status().first?.trackedFlows, 143)
+        XCTAssertEqual(shaper.status().first?.pausedFlows, 142)
+        XCTAssertEqual(shaper.status().first?.overBudgetDrops, 113)
     }
 
     func testAllStreamWaitsAtFlowCapAreUnderThirtySeconds() {
@@ -357,7 +665,7 @@ final class FlowShaperTests: XCTestCase {
     func testRemovedRuleResumeAllowsAndForgetsFlow() {
         let token = reservedData()
         source.rules.removeAll()
-        XCTAssertEqual(shaper.resume(token), .allow)
+        XCTAssertEqual(shaper.resume(token), .settled(.allow))
         XCTAssertEqual(shaper.data(flow(), direction: .outbound, availableBytes: 10), .allow)
         XCTAssertEqual(shaper.status(), [])
     }
@@ -370,8 +678,8 @@ final class FlowShaperTests: XCTestCase {
             generation: generation,
             revision: revision
         )
-        XCTAssertEqual(shaper.resume(token), .pass(bytes: 100, peekBytes: 100))
-        XCTAssertNil(shaper.resume(token))
+        XCTAssertEqual(shaper.resume(token), .settled(.pass(bytes: 100, peekBytes: 100)))
+        XCTAssertEqual(shaper.resume(token), .alreadySettled)
         let current = shaper.status().first!
         XCTAssertEqual(current.outboundReleasedBytes, 100)
         XCTAssertEqual(current.debtReleases, 1)
@@ -379,9 +687,9 @@ final class FlowShaperTests: XCTestCase {
         XCTAssertEqual(current.owner, owner)
         XCTAssertEqual(current.ownerGeneration, generation)
         XCTAssertEqual(current.revision, revision)
-        // Current timeline was fresh: only the immediate debt was charged.
+        // Two prior 100ms reservations survive, then the new 100ms debt grant.
         let next = pause(shaper.data(flow(), direction: .outbound, availableBytes: 100))
-        XCTAssertEqual(next.resumeAtNanoseconds, clock.nanoseconds + 100_000_000)
+        XCTAssertEqual(next.resumeAtNanoseconds, clock.nanoseconds + 300_000_000)
     }
 
     func testRevisionBumpSettlesUnderCurrentRule() { replacement(revision: 2) }
@@ -394,17 +702,17 @@ final class FlowShaperTests: XCTestCase {
             return XCTFail("Expected new-flow hold")
         }
         source.install(ShapingProfile(inboundBytesPerSecond: 1000)!, revision: 2)
-        XCTAssertEqual(shaper.resume(token), .filter(inbound: true, outbound: false, peekBytes: 100))
-        XCTAssertNil(shaper.resume(token))
+        XCTAssertEqual(shaper.resume(token), .settled(.filter(inbound: true, outbound: false, peekBytes: 100)))
+        XCTAssertEqual(shaper.resume(token), .alreadySettled)
         XCTAssertEqual(shaper.status().first?.debtReleases, 0)
     }
 
     func testRenewedSameTicketPreservesReservation() {
         let token = reservedData()
         source.install(ShapingProfile(outboundBytesPerSecond: 2000)!)
-        XCTAssertNil(shaper.resume(token))
+        XCTAssertEqual(shaper.resume(token), .notDue(resumeAtNanoseconds: token.resumeAtNanoseconds))
         clock.nanoseconds = token.resumeAtNanoseconds
-        XCTAssertEqual(shaper.resume(token), .pass(bytes: 200, peekBytes: 200))
+        XCTAssertEqual(shaper.resume(token), .settled(.pass(bytes: 200, peekBytes: 200)))
         XCTAssertEqual(shaper.status().first?.outboundReleasedBytes, 400)
         XCTAssertEqual(shaper.status().first?.debtReleases, 0)
     }
@@ -418,15 +726,16 @@ final class FlowShaperTests: XCTestCase {
         XCTAssertEqual(shaper.untrackedDataCallbacks, 1)
     }
 
-    func testUnpausedCallbackStartsFreshTimelineAfterReplacement() {
+    func testUnpausedCallbackInheritsTimelineAfterReplacement() {
         source.install(ShapingProfile(outboundBytesPerSecond: 1000)!)
         admit()
         _ = shaper.data(flow(), direction: .outbound, availableBytes: 100)
         source.install(ShapingProfile(outboundBytesPerSecond: 2000)!, revision: 2)
-        XCTAssertEqual(
-            shaper.data(flow(), direction: .outbound, availableBytes: 1000),
-            .pass(bytes: 200, peekBytes: 200)
-        )
+        let token = pause(shaper.data(flow(), direction: .outbound, availableBytes: 1000))
+        XCTAssertEqual(token.resumeAtNanoseconds, clock.nanoseconds + 100_000_000)
+        XCTAssertEqual(shaper.status().first?.outboundReleasedBytes, 0)
+        clock.nanoseconds = token.resumeAtNanoseconds
+        XCTAssertEqual(shaper.resume(token), .settled(.pass(bytes: 200, peekBytes: 200)))
         XCTAssertEqual(shaper.status().first?.outboundReleasedBytes, 200)
     }
 
@@ -434,14 +743,14 @@ final class FlowShaperTests: XCTestCase {
         let token = reservedData()
         source.rules.removeAll()
         XCTAssertEqual(shaper.settleStale(), [FlowSettlement(pause: token, decision: .allow)])
-        XCTAssertNil(shaper.resume(token))
+        XCTAssertEqual(shaper.resume(token), .alreadySettled)
         XCTAssertEqual(shaper.settleStale(), [])
     }
 
     func testFlowEndedSettlesPauseExactlyOnce() {
         let token = reservedData()
         XCTAssertEqual(shaper.flowEnded(flow()), FlowSettlement(pause: token, decision: .allow))
-        XCTAssertNil(shaper.resume(token))
+        XCTAssertEqual(shaper.resume(token), .alreadySettled)
         XCTAssertNil(shaper.flowEnded(flow()))
     }
 
@@ -456,16 +765,16 @@ final class FlowShaperTests: XCTestCase {
         XCTAssertEqual(shaper.removeAll(), tokens.map { FlowSettlement(pause: $0, decision: .allow) })
         XCTAssertEqual(shaper.removeAll(), [])
         for token in tokens {
-            XCTAssertNil(shaper.resume(token))
+            XCTAssertEqual(shaper.resume(token), .alreadySettled)
         }
         XCTAssertEqual(shaper.status(), [])
     }
 
-    func testDoubleResumeReturnsNil() {
+    func testDoubleResumeReturnsAlreadySettled() {
         let token = reservedData()
         clock.nanoseconds = token.resumeAtNanoseconds
-        XCTAssertEqual(shaper.resume(token), .pass(bytes: 200, peekBytes: 200))
-        XCTAssertNil(shaper.resume(token))
+        XCTAssertEqual(shaper.resume(token), .settled(.pass(bytes: 200, peekBytes: 200)))
+        XCTAssertEqual(shaper.resume(token), .alreadySettled)
     }
 
     func testFlowCapRefusesWhenNothingEvictable() {
@@ -526,7 +835,7 @@ final class FlowShaperTests: XCTestCase {
         XCTAssertEqual(settled.count, 64)
         XCTAssertEqual(settled.map { $0.pause.id }, settled.map { $0.pause.id }.sorted())
         for token in settled {
-            XCTAssertNil(shaper.resume(token.pause))
+            XCTAssertEqual(shaper.resume(token.pause), .alreadySettled)
         }
         source.install(ShapingProfile(outboundBytesPerSecond: 1000)!, target: target(64))
         XCTAssertEqual(
@@ -558,7 +867,7 @@ final class FlowShaperTests: XCTestCase {
         XCTAssertEqual(shaper.status().first?.debtReleases, 1)
         XCTAssertEqual(shaper.status().first?.pausedFlows, 1)
         clock.nanoseconds = token.resumeAtNanoseconds
-        XCTAssertEqual(shaper.resume(token), .pass(bytes: 200, peekBytes: 200))
+        XCTAssertEqual(shaper.resume(token), .settled(.pass(bytes: 200, peekBytes: 200)))
         let next = pause(shaper.data(flow(), direction: .outbound, availableBytes: 1000))
         XCTAssertEqual(next.resumeAtNanoseconds, clock.nanoseconds + 200_000_000)
         // 600 bytes released with D=1: rate*T + (1+D)*quantum = 600.
@@ -573,7 +882,7 @@ final class FlowShaperTests: XCTestCase {
         )
         XCTAssertEqual(shaper.status().first?.debtReleases, 1)
         clock.nanoseconds = token.resumeAtNanoseconds
-        XCTAssertNotNil(shaper.resume(token))
+        XCTAssertEqual(shaper.resume(token), .settled(.pass(bytes: 200, peekBytes: 200)))
     }
 
     func testNonPositiveDataDoesNotChargeOrCountDebt() {
@@ -594,10 +903,10 @@ final class FlowShaperTests: XCTestCase {
     func testBackwardsClockCannotGrantEarlyOrUnderflow() {
         let token = reservedData()
         clock.nanoseconds = 1
-        XCTAssertNil(shaper.resume(token))
+        XCTAssertEqual(shaper.resume(token), .notDue(resumeAtNanoseconds: token.resumeAtNanoseconds))
         XCTAssertEqual(shaper.status().first?.outboundReleasedBytes, 200)
         clock.nanoseconds = token.resumeAtNanoseconds
-        XCTAssertNotNil(shaper.resume(token))
+        XCTAssertEqual(shaper.resume(token), .settled(.pass(bytes: 200, peekBytes: 200)))
         clock.nanoseconds = 0
         let next = pause(shaper.data(flow(), direction: .outbound, availableBytes: 200))
         XCTAssertEqual(next.resumeAtNanoseconds, token.resumeAtNanoseconds + 100_000_000)
@@ -653,29 +962,34 @@ final class FlowShaperTests: XCTestCase {
     func testFullWidthDurationDoesNotOverflowIntermediateProduct() {
         source.install(ShapingProfile(outboundBytesPerSecond: 125_000_000)!)
         _ = shaper.newFlow(flow(), target: RuleFixtures.target, transport: .datagram)
-        let bytes = 100_000_000_000
+        // Multiplication needs more than 64 bits; this duration is 800s, over budget.
+        XCTAssertEqual(shaper.data(flow(), direction: .outbound, availableBytes: 100_000_000_000), .drop)
+        XCTAssertEqual(shaper.status().first?.outboundReleasedBytes, 0)
+        XCTAssertEqual(shaper.status().first?.overBudgetDrops, 1)
+        _ = shaper.newFlow(flow(1), target: RuleFixtures.target, transport: .datagram)
         XCTAssertEqual(
-            shaper.data(flow(), direction: .outbound, availableBytes: bytes),
-            .pass(bytes: bytes, peekBytes: 1_048_576)
-        )
-        XCTAssertEqual(shaper.data(flow(), direction: .outbound, availableBytes: 1), .drop)
-        clock.nanoseconds += 800_000_000_000
-        XCTAssertEqual(
-            shaper.data(flow(), direction: .outbound, availableBytes: 1),
+            shaper.data(flow(1), direction: .outbound, availableBytes: 1),
             .pass(bytes: 1, peekBytes: 1_048_576)
         )
+        let token = pause(shaper.data(flow(1), direction: .outbound, availableBytes: 1))
+        XCTAssertEqual(token.resumeAtNanoseconds, clock.nanoseconds + 8)
     }
 
-    func testUnrepresentableDurationSaturatesAndCannotGrantEarly() {
+    func testUnrepresentableDurationDropsWithoutChargeOrEarlyGrant() {
         source.install(ShapingProfile(outboundBytesPerSecond: 1000)!)
         admit(transport: .datagram)
+        XCTAssertEqual(shaper.data(flow(), direction: .outbound, availableBytes: Int.max), .drop)
+        XCTAssertEqual(shaper.data(flow(), direction: .outbound, availableBytes: 1), .allow)
+        admit(1, transport: .datagram)
         XCTAssertEqual(
-            shaper.data(flow(), direction: .outbound, availableBytes: Int.max),
-            .pass(bytes: Int.max, peekBytes: 100)
+            shaper.data(flow(1), direction: .outbound, availableBytes: 1),
+            .pass(bytes: 1, peekBytes: 100)
         )
-        XCTAssertEqual(shaper.data(flow(), direction: .outbound, availableBytes: 1), .drop)
+        let token = pause(shaper.data(flow(1), direction: .outbound, availableBytes: 1))
+        XCTAssertEqual(token.resumeAtNanoseconds, clock.nanoseconds + 1_000_000)
         clock.nanoseconds = UInt64.max
-        XCTAssertEqual(shaper.data(flow(), direction: .outbound, availableBytes: 1), .drop)
+        XCTAssertEqual(shaper.resume(token), .settled(.pass(bytes: 1, peekBytes: 100)))
+        XCTAssertEqual(shaper.data(flow(1), direction: .outbound, availableBytes: 1), .drop)
         XCTAssertEqual(shaper.status().first?.overBudgetDrops, 2)
     }
 
@@ -698,8 +1012,8 @@ final class FlowShaperTests: XCTestCase {
             phase: .data(.inbound)
         )
         clock.nanoseconds = token.resumeAtNanoseconds
-        XCTAssertNil(shaper.resume(foreign))
-        XCTAssertEqual(shaper.resume(token), .pass(bytes: 200, peekBytes: 200))
+        XCTAssertEqual(shaper.resume(foreign), .alreadySettled)
+        XCTAssertEqual(shaper.resume(token), .settled(.pass(bytes: 200, peekBytes: 200)))
     }
 
     func testPauseIDsNeverRepeatAfterRemoveAll() {
@@ -707,7 +1021,7 @@ final class FlowShaperTests: XCTestCase {
         _ = shaper.removeAll()
         let second = reservedData()
         XCTAssertGreaterThan(second.id, first.id)
-        XCTAssertNil(shaper.resume(first))
+        XCTAssertEqual(shaper.resume(first), .alreadySettled)
     }
 
     func testCallbackDuringNewFlowPauseKeepsConnectionToken() {
@@ -720,7 +1034,7 @@ final class FlowShaperTests: XCTestCase {
             .pass(bytes: 100, peekBytes: 100)
         )
         clock.nanoseconds = token.resumeAtNanoseconds
-        XCTAssertEqual(shaper.resume(token), .filter(inbound: false, outbound: true, peekBytes: 100))
+        XCTAssertEqual(shaper.resume(token), .settled(.filter(inbound: false, outbound: true, peekBytes: 100)))
         XCTAssertEqual(shaper.status().first?.callbacksWhilePaused, 1)
         XCTAssertEqual(shaper.status().first?.debtReleases, 1)
     }
@@ -752,7 +1066,7 @@ final class FlowShaperTests: XCTestCase {
         let token = reservedData()
         source.install(ShapingProfile(outboundBytesPerSecond: 1000)!, revision: 2)
         XCTAssertEqual(shaper.settleStale(), [])
-        XCTAssertEqual(shaper.resume(token), .pass(bytes: 100, peekBytes: 100))
+        XCTAssertEqual(shaper.resume(token), .settled(.pass(bytes: 100, peekBytes: 100)))
     }
 
     func testNewFlowPrunesGoneRuleEvenWhenOldFlowIsPaused() {

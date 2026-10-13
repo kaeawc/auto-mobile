@@ -55,6 +55,14 @@ public enum ResumeDecision: Equatable {
     case pass(bytes: Int, peekBytes: Int)
 }
 
+/// An early same-ticket timer retains its pause and must be scheduled again.
+/// Only settled carries a verdict; alreadySettled requires no caller action.
+public enum ResumeOutcome: Equatable {
+    case settled(ResumeDecision)
+    case alreadySettled
+    case notDue(resumeAtNanoseconds: UInt64)
+}
+
 public struct FlowSettlement: Equatable {
     public let pause: FlowPause
     public let decision: ResumeDecision

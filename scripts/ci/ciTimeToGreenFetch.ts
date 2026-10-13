@@ -5,7 +5,7 @@
  * cached item by item through the injected `CacheStore`, so a run that stops on the API budget or a
  * rate limit resumes where it stopped.
  */
-import type { Bundle, JobFact, PrFact, RunFact } from "./ciTimeToGreenReport";
+import type { Bundle, ExternalJobFact, JobFact, PrFact, RunFact } from "./ciTimeToGreenReport";
 import type { PathClassifier } from "./prPathClassification";
 
 export interface GhApi {
@@ -55,6 +55,8 @@ interface RawJob {
   started_at?: string | null;
   completed_at?: string | null;
   labels?: string[];
+  runner_name?: string | null;
+  steps?: { name: string; number: number; conclusion: string | null }[];
 }
 
 interface RawRun {
@@ -66,6 +68,7 @@ interface RawRun {
   status: string;
   conclusion: string | null;
   created_at: string;
+  head_branch?: string;
   pull_requests?: { number: number }[];
 }
 
@@ -74,7 +77,8 @@ interface RawPull {
   state: string;
   merged?: boolean;
   merged_at?: string | null;
-  head: { sha: string };
+  updated_at?: string;
+  head: { sha: string; ref?: string; repo?: { full_name: string } | null };
 }
 
 export function normalizeJob(raw: RawJob): JobFact {
@@ -88,6 +92,11 @@ export function normalizeJob(raw: RawJob): JobFact {
     startedAt: raw.started_at ?? null,
     completedAt: raw.completed_at ?? null,
     labels: raw.labels ?? [],
+    runnerName: raw.runner_name ?? null,
+    failedStep:
+      (raw.steps ?? [])
+        .filter((step) => step.conclusion === "failure" || step.conclusion === "timed_out")
+        .sort((a, b) => a.number - b.number)[0]?.name ?? null,
   };
 }
 
@@ -238,6 +247,9 @@ export interface FetchOptions {
   prRunsOnly: boolean;
   concurrency: number;
   classify: PathClassifier;
+  circleci?: boolean;
+  circleciMainPushes?: boolean;
+  circleciMacosMatcher: (name: string) => boolean;
 }
 
 async function jobsForRun(
@@ -246,6 +258,9 @@ async function jobsForRun(
   repo: string,
   run: RawRun,
 ): Promise<RawJob[]> {
+  if (run.event !== "pull_request" && run.conclusion === "skipped") {
+    return [];
+  }
   const key = `jobs-${run.id}-${run.run_attempt ?? 1}`;
   const cached = run.status === "completed" ? (cache.read(key) as RawJob[] | undefined) : undefined;
   if (cached) {
@@ -263,11 +278,14 @@ async function prFact(
   cache: CacheStore,
   options: FetchOptions,
   number: number,
+  listed: readonly RawPull[],
 ): Promise<PrFact> {
   const pullKey = `pull-${number}`;
   let pull = cache.read(pullKey) as RawPull | undefined;
   if (!pull) {
-    pull = (await api.get(`repos/${options.repo}/pulls/${number}`)) as RawPull;
+    pull =
+      listed.find((item) => item.number === number) ??
+      ((await api.get(`repos/${options.repo}/pulls/${number}`)) as RawPull);
     if (pull.state === "closed") {
       cache.write(pullKey, pull);
     }
@@ -299,6 +317,7 @@ async function attachPrNumbersFromCommits(
   cache: CacheStore,
   options: FetchOptions,
   runs: RunFact[],
+  listed: readonly RawPull[],
 ): Promise<void> {
   const prRuns = runs.filter((run) => run.event === "pull_request");
   const withNumbers = new Set(
@@ -307,10 +326,16 @@ async function attachPrNumbersFromCommits(
   const orphanShas = [
     ...new Set(prRuns.filter((run) => !withNumbers.has(run.headSha)).map((run) => run.headSha)),
   ];
-  const numbersBySha = new Map(
-    await mapLimit(orphanShas, options.concurrency, async (sha): Promise<[string, number[]]> => {
+  const resolved = await mapLimit(
+    orphanShas,
+    options.concurrency,
+    async (sha): Promise<[string, number[]]> => {
       const key = `commit-pulls-${sha}`;
       let pulls = cache.read(key) as { number: number; head?: { sha: string } }[] | undefined;
+      const matches = listedPullsForSha(sha, listed);
+      if (!pulls && matches.length > 0) {
+        return [sha, matches.map((pull) => pull.number)];
+      }
       if (!pulls) {
         pulls = (await api.get(`repos/${options.repo}/commits/${sha}/pulls`)) as {
           number: number;
@@ -321,13 +346,174 @@ async function attachPrNumbersFromCommits(
         }
       }
       return [sha, pulls.filter((pull) => pull.head?.sha === sha).map((pull) => pull.number)];
-    }),
+    },
   );
+  const numbersBySha = new Map([
+    ...prRuns
+      .filter((run) => run.prNumbers.length > 0)
+      .map((run): [string, number[]] => [run.headSha, run.prNumbers]),
+    ...resolved,
+  ]);
   for (const run of prRuns) {
     if (run.prNumbers.length === 0) {
       run.prNumbers = numbersBySha.get(run.headSha) ?? [];
     }
   }
+}
+
+export async function listRecentPulls(
+  api: GhApi,
+  repo: string,
+  sinceMs: number,
+): Promise<RawPull[]> {
+  const pulls: RawPull[] = [];
+  for (let page = 1; page <= 10; page += 1) {
+    const chunk = (await api.get(
+      `repos/${repo}/pulls?state=all&sort=updated&direction=desc&per_page=100&page=${page}`,
+    )) as RawPull[];
+    pulls.push(...chunk);
+    const lastUpdated = Date.parse(chunk.at(-1)?.updated_at ?? "");
+    if (chunk.length < 100 || !Number.isFinite(lastUpdated) || lastUpdated < sinceMs) {
+      break;
+    }
+  }
+  return pulls;
+}
+
+function listedPullsForSha(sha: string, listed: readonly RawPull[]): RawPull[] {
+  return listed.filter((pull) => pull.head.sha === sha);
+}
+
+function needsBulkPulls(runs: readonly RunFact[], cache: CacheStore): boolean {
+  const prRuns = runs.filter((run) => run.event === "pull_request");
+  const known = new Set(prRuns.filter((run) => run.prNumbers.length > 0).map((run) => run.headSha));
+  const orphan = new Set(
+    prRuns
+      .filter(
+        (run) => !known.has(run.headSha) && cache.read(`commit-pulls-${run.headSha}`) === undefined,
+      )
+      .map((run) => run.headSha),
+  );
+  const numbers = new Set(prRuns.flatMap((run) => run.prNumbers));
+  for (const run of prRuns) {
+    const cached = cache.read(`commit-pulls-${run.headSha}`) as
+      | { number: number; head?: { sha: string } }[]
+      | undefined;
+    cached
+      ?.filter((pull) => pull.head?.sha === run.headSha)
+      .forEach((pull) => numbers.add(pull.number));
+  }
+  return (
+    orphan.size +
+      [...numbers].filter((number) => cache.read(`pull-${number}`) === undefined).length >=
+    2
+  );
+}
+
+export interface CommitStatus {
+  context: string;
+  state: string;
+  created_at: string;
+}
+const CIRCLE_PREFIX = "ci/circleci:";
+
+export function circleciStatusesCacheable(statuses: readonly CommitStatus[]): boolean {
+  const newest = new Map<string, CommitStatus>();
+  for (const status of statuses) {
+    if (!status.context.startsWith(CIRCLE_PREFIX)) {
+      continue;
+    }
+    const previous = newest.get(status.context);
+    if (!previous || status.created_at > previous.created_at) {
+      newest.set(status.context, status);
+    }
+  }
+  return [...newest.values()].every((status) => status.state !== "pending");
+}
+
+export function normalizeCircleciStatuses(
+  statuses: readonly CommitStatus[],
+  sha: string,
+  macos: (name: string) => boolean,
+): ExternalJobFact[] {
+  const jobs: ExternalJobFact[] = [];
+  const open = new Map<string, ExternalJobFact[]>();
+  const chronological = [...statuses].sort(
+    (a, b) =>
+      a.created_at.localeCompare(b.created_at) ||
+      Number(b.state === "pending") - Number(a.state === "pending"),
+  );
+  for (const status of chronological) {
+    if (!status.context.startsWith(CIRCLE_PREFIX)) {
+      continue;
+    }
+    const name = status.context.slice(CIRCLE_PREFIX.length).trim();
+    if (status.state === "pending") {
+      const job: ExternalJobFact = {
+        provider: "circleci",
+        name,
+        sha,
+        createdAt: status.created_at,
+        completedAt: null,
+        state: "pending",
+        macos: macos(name),
+      };
+      jobs.push(job);
+      open.set(name, [...(open.get(name) ?? []), job]);
+    } else if (["success", "failure", "error"].includes(status.state)) {
+      for (const job of open.get(name) ?? []) {
+        job.completedAt = status.created_at;
+        job.state = status.state;
+      }
+      open.delete(name);
+    }
+  }
+  return jobs;
+}
+
+async function fetchExternalJobs(
+  api: GhApi,
+  cache: CacheStore,
+  options: FetchOptions,
+  runs: readonly RawRun[],
+  prs: readonly PrFact[],
+  normalized: readonly RunFact[],
+): Promise<{ jobs: ExternalJobFact[]; fetched: boolean }> {
+  if (options.circleci === false) {
+    return { jobs: [], fetched: false };
+  }
+  const types = new Map(prs.map((pr) => [pr.number, pr.prType]));
+  const shas = new Set(
+    normalized
+      .filter(
+        (run) =>
+          run.event === "pull_request" &&
+          (run.prNumbers.length === 0 ||
+            run.prNumbers.some((number) =>
+              ["ios", "mixed", "unknown"].includes(types.get(number) ?? "unknown"),
+            )),
+      )
+      .map((run) => run.headSha),
+  );
+  if (options.circleciMainPushes && !options.prRunsOnly) {
+    runs
+      .filter((run) => run.event === "push" && run.head_branch === "main")
+      .forEach((run) => shas.add(run.head_sha));
+  }
+  const jobs = await mapLimit([...shas], options.concurrency, async (sha) => {
+    const key = `statuses-${sha}`;
+    let statuses = cache.read(key) as CommitStatus[] | undefined;
+    if (!statuses) {
+      statuses = (await api.get(
+        `repos/${options.repo}/commits/${sha}/statuses?per_page=100`,
+      )) as CommitStatus[];
+      if (circleciStatusesCacheable(statuses)) {
+        cache.write(key, statuses);
+      }
+    }
+    return normalizeCircleciStatuses(statuses, sha, options.circleciMacosMatcher);
+  });
+  return { jobs: jobs.flat(), fetched: shas.size > 0 };
 }
 
 export async function fetchBundle(
@@ -346,20 +532,28 @@ export async function fetchBundle(
   const runs = await mapLimit(rawRuns, options.concurrency, async (run) =>
     normalizeRun(run, await jobsForRun(api, cache, options.repo, run)),
   );
-  await attachPrNumbersFromCommits(api, cache, options, runs);
+  const listed = needsBulkPulls(runs, cache)
+    ? await listRecentPulls(api, options.repo, options.sinceMs)
+    : [];
+  await attachPrNumbersFromCommits(api, cache, options, runs, listed);
   const prNumbers = [
     ...new Set(runs.filter((run) => run.event === "pull_request").flatMap((run) => run.prNumbers)),
   ].sort((a, b) => a - b);
   const prs = await mapLimit(prNumbers, options.concurrency, (number) =>
-    prFact(api, cache, options, number),
+    prFact(api, cache, options, number, listed),
   );
+  const external = await fetchExternalJobs(api, cache, options, rawRuns, prs, runs);
   return {
+    externalJobs: external.jobs,
     meta: {
       repo: options.repo,
       since: new Date(options.sinceMs).toISOString(),
       until: new Date(options.untilMs).toISOString(),
       requiredChecks,
       prRunsOnly: options.prRunsOnly,
+      circleci: external.fetched,
+      circleciScope:
+        options.circleciMainPushes && !options.prRunsOnly ? "pr-heads+main-pushes" : "pr-heads",
     },
     runs,
     prs,

@@ -27,6 +27,8 @@ function job(name: string, overrides: Partial<JobFact> = {}): JobFact {
     startedAt: at(0),
     completedAt: at(5),
     labels: ["ubuntu-latest"],
+    runnerName: null,
+    failedStep: null,
     ...overrides,
   };
 }
@@ -301,4 +303,224 @@ describe("buildReport", () => {
     expect(text).toContain("| ts-only |");
     expect(text).toContain("## Peak runner concurrency");
   });
+});
+
+test("attempt rows include never-executed checks, durations, queues and exclude skips/reruns", () => {
+  const jobs = [
+    job("Lint", { startedAt: at(2), completedAt: at(6) }),
+    job("Lint", { conclusion: "failure", startedAt: at(1), completedAt: at(11) }),
+    job("Test", { conclusion: "skipped" }),
+    job("Lint", { runAttempt: 2 }),
+  ];
+  const source = bundle(
+    [run("a", 0, jobs), run("a", 0, [job("Lint")], { event: "push" })],
+    [pr()],
+    ["Lint", "Test", "Never"],
+  );
+  const report = buildReport(source);
+  expect(report.firstAttempt.byCheck).toEqual([
+    {
+      check: "Lint",
+      executed: 2,
+      firstAttemptFailures: 1,
+      passRate: 0.5,
+      durationMs: { p50: 4 * 60000, p90: 10 * 60000 },
+      queueMs: { p50: 60000 },
+    },
+    {
+      check: "Never",
+      executed: 0,
+      firstAttemptFailures: 0,
+      passRate: null,
+      durationMs: { p50: null, p90: null },
+      queueMs: { p50: null },
+    },
+    {
+      check: "Test",
+      executed: 0,
+      firstAttemptFailures: 0,
+      passRate: null,
+      durationMs: { p50: null, p90: null },
+      queueMs: { p50: null },
+    },
+  ]);
+  expect(renderMarkdown(report)).toContain("## Required checks on attempt 1");
+  expect(renderMarkdown(report)).toContain("queue p50 min");
+});
+
+test("failing step pairs include advisory jobs and sort by count, job, step", () => {
+  const failed = (name: string, failedStep: string | null = null) =>
+    job(name, { conclusion: "failure", failedStep });
+  const source = bundle(
+    [
+      run("a", 0, [
+        failed("Z", "same"),
+        failed("Z", "same"),
+        failed("Test", "z"),
+        failed("Test", "a"),
+        failed("Advisory"),
+        job("Ignored", { conclusion: "failure", runAttempt: 2 }),
+      ]),
+    ],
+    [pr()],
+  );
+  expect(buildReport(source).firstAttempt.topFailingSteps).toEqual([
+    { job: "Z", step: "same", failures: 2, required: false },
+    { job: "Advisory", step: "(no failed step recorded)", failures: 1, required: false },
+    { job: "Test", step: "a", failures: 1, required: true },
+    { job: "Test", step: "z", failures: 1, required: true },
+  ]);
+});
+
+test("weighted Namespace peak is clipped, unknown profiles are a lower bound, overrides merge", () => {
+  const namespace = (profile: string, start: number, end: number) =>
+    job("Lint", { labels: [profile], startedAt: at(start), completedAt: at(end) });
+  const source = bundle(
+    [
+      run("a", 0, [
+        namespace("namespace-profile-auto-mobile", 0, 10),
+        namespace("namespace-profile-auto-mobile-small", 5, 12),
+        namespace("namespace-profile-auto-mobile-macos", 10, 20),
+        namespace("namespace-future", 6, 8),
+        namespace("namespace-profile-auto-mobile", 700, 800),
+      ]),
+    ],
+    [pr()],
+    ["Lint"],
+  );
+  const report = buildReport(source);
+  expect(report.concurrency.namespace).toMatchObject({ peak: 3, jobs: 4, cap: null });
+  expect(report.concurrency.namespaceVcpu).toEqual({
+    peak: 8,
+    peakAt: at(10),
+    cap: 32,
+    unknownProfiles: ["namespace-future"],
+  });
+  expect(report.concurrency.namespaceProfiles).toEqual([
+    { profile: "namespace-future", vcpu: null, peakJobs: 1, jobs: 1 },
+    { profile: "namespace-profile-auto-mobile", vcpu: 4, peakJobs: 1, jobs: 1 },
+    { profile: "namespace-profile-auto-mobile-macos", vcpu: 6, peakJobs: 1, jobs: 1 },
+    { profile: "namespace-profile-auto-mobile-small", vcpu: 2, peakJobs: 1, jobs: 1 },
+  ]);
+  expect(renderMarkdown(report)).toContain("lower bound: unknown profile namespace-future");
+  const overridden = buildReport(source, null, { namespaceVcpus: { "namespace-future": 40 } });
+  expect(overridden.concurrency.namespaceVcpu.peak).toBe(46);
+  expect(overridden.concurrency.namespaceVcpu.unknownProfiles).toEqual([]);
+  expect(renderMarkdown(overridden)).toContain("46 (OVER CAP)");
+});
+
+test("CircleCI overlapping queued/running macOS intervals exceed the one-job cap", () => {
+  const source = bundle([], []);
+  source.meta.circleci = true;
+  source.meta.prRunsOnly = true;
+  source.externalJobs = [
+    {
+      provider: "circleci",
+      name: "A",
+      sha: "a",
+      createdAt: at(-100),
+      completedAt: at(10),
+      state: "success",
+      macos: true,
+    },
+    {
+      provider: "circleci",
+      name: "B",
+      sha: "b",
+      createdAt: at(5),
+      completedAt: null,
+      state: "pending",
+      macos: true,
+    },
+    {
+      provider: "circleci",
+      name: "Linux",
+      sha: "c",
+      createdAt: at(0),
+      completedAt: at(15),
+      state: "success",
+      macos: false,
+    },
+  ];
+  const report = buildReport(source);
+  expect(report.concurrency.circleciMacos).toEqual({
+    peak: 2,
+    peakAt: at(5),
+    cap: 1,
+    jobs: 2,
+    fetched: true,
+  });
+  const text = renderMarkdown(report);
+  expect(text).toContain("2 (OVER CAP)");
+  expect(text).toContain("nightly pipeline not visible");
+  expect(text).toContain(
+    "Only pull_request runs were fetched, so peaks understate total demand against the caps.",
+  );
+});
+
+test("old bundles omit runners, steps and external jobs; Mac names are sorted and distinct", () => {
+  const source = bundle(
+    [run("a", 0, [job("Lint", { labels: ["self-hosted", "mac"] })])],
+    [pr()],
+    ["Lint"],
+  );
+  const legacy = JSON.parse(
+    JSON.stringify(source, (key, value) =>
+      ["runnerName", "failedStep"].includes(key) ? undefined : value,
+    ),
+  ) as Bundle;
+  const old = buildReport(legacy);
+  expect(old.concurrency.selfHostedMac.runners).toEqual([]);
+  expect(old.concurrency.circleciMacos).toEqual({
+    peak: 0,
+    peakAt: null,
+    cap: 1,
+    jobs: 0,
+    fetched: false,
+  });
+  expect(renderMarkdown(old)).toContain(
+    "| circleci macos (queued or running) | - | 1 | - | - | not fetched |",
+  );
+  source.runs[0].jobs.push(
+    ...["z", "a", "z"].map((runnerName) =>
+      job("Lint", { labels: ["self-hosted", "mac"], runnerName }),
+    ),
+  );
+  expect(buildReport(source).concurrency.selfHostedMac.runners).toEqual(["a", "z"]);
+});
+
+test("Mac job peaks never claim a machine-cap breach and exclude blank runner names", () => {
+  const runners = ["mac", "mac-2", "mac-3", "mac-4", "mac-heavy"];
+  const jobs = [...runners, "", "   ", "mac"].map((runnerName) =>
+    job("Lint", {
+      runnerName,
+      labels: ["self-hosted", "mac"],
+    }),
+  );
+  const report = buildReport(bundle([run("a", 0, jobs)], [pr()], ["Lint"]));
+  expect(report.concurrency.selfHostedMac).toMatchObject({
+    cap: 3,
+    capUnit: "machines",
+    peak: 8,
+    runners,
+  });
+  const row = renderMarkdown(report)
+    .split("\n")
+    .find((line) => line.startsWith("| self-hosted mac"))!;
+  expect(row).toContain("| 8 | 3 machines |");
+  expect(row).toContain("5 runner processes: mac, mac-2, mac-3, mac-4, mac-heavy");
+  expect(row).not.toContain("OVER CAP");
+});
+
+test("CircleCI notes describe the requested scope", () => {
+  const source = bundle([], []);
+  source.meta.circleci = true;
+  source.meta.circleciScope = "pr-heads";
+  expect(renderMarkdown(buildReport(source))).toContain(
+    "from commit statuses of iOS/mixed/unknown PR heads; nightly pipeline not visible",
+  );
+  source.meta.circleciScope = "pr-heads+main-pushes";
+  expect(renderMarkdown(buildReport(source))).toContain(
+    "from commit statuses of iOS/mixed/unknown PR heads and main pushes; nightly pipeline not visible",
+  );
 });

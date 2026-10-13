@@ -392,6 +392,70 @@ describe("recording release after serial identity replacement", () => {
     expect(timer.getPendingIntervalCount()).toBe(0);
   });
 
+  for (const finishWithinBound of [false, true]) {
+    test(`abandon bounds a normal stop's wedged display probe (${finishWithinBound ? "stop wins" : "host interruption"})`, async () => {
+      const display = {
+        physicalId: "panel-a",
+        panel: { key: "panel-a", role: "inner" as const },
+        activePanel: { key: "panel-a", role: "inner" as const },
+      };
+      const gate = Promise.withResolvers<typeof display>();
+      let probes = 0;
+      await manager.setVideoRecordingManagerDependencies({
+        resolveAndroidDisplay: async () => (++probes === 2 ? gate.promise : display),
+      });
+      const warn = spyOn(logger, "warn").mockImplementation(() => {});
+      spies.push(warn);
+      const active = await startA();
+      displayTransitions.notifyAndroidTransition(device.deviceId, {
+        change: "removed",
+        displayId: 0,
+      });
+      const stopping = manager.stopVideoRecording(active.recordingId);
+      await drainUntil(() => probes === 2, { description: "wedged final display probe" });
+      expect(service.listActiveRecordingIds()).toEqual([]);
+      let settled = false;
+      const abandon = manager.abandonVideoRecordingOnReplacedDevice(active.recordingId).then(() => {
+        settled = true;
+      });
+      try {
+        await drainUntilQuiescent(timer);
+        timer.advanceTime(4_999);
+        await drainUntilQuiescent(timer);
+        expect(settled).toBe(false);
+        if (finishWithinBound) {
+          gate.resolve(display);
+          await stopping;
+        } else {
+          timer.advanceTime(1);
+        }
+        await drainUntilQuiescent(timer);
+        expect(settled).toBe(true);
+        await abandon;
+        expect((await repository.getRecording(active.recordingId))?.status).toBe(
+          finishWithinBound ? "completed" : "interrupted",
+        );
+        expect(probes).toBe(2);
+        expect(backend.forceStopCalls).toEqual([]);
+        expect(
+          warn.mock.calls.some(([line]) => String(line).includes("timed out after 5000ms")),
+        ).toBe(!finishWithinBound);
+        if (!finishWithinBound) {
+          const next = await startA();
+          const nextRow = await repository.getRecording(next.recordingId);
+          gate.resolve(display);
+          expect((await stopping).metadata.recordingId).toBe(active.recordingId);
+          expect(await repository.getRecording(next.recordingId)).toEqual(nextRow);
+          expect(service.listActiveRecordingIds()).toEqual([next.recordingId]);
+          expect(backend.forceStopCalls).toEqual([]);
+        }
+      } finally {
+        gate.resolve(display);
+        await Promise.all([stopping, abandon]);
+      }
+    });
+  }
+
   test("host-only interruption disposes an unresolved display transition without probing", async () => {
     const probe = async () => ({
       physicalId: "panel-a",

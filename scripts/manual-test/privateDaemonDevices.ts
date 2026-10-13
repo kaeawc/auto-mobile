@@ -446,6 +446,7 @@ type DeviceOutcome =
   | "not-batch-booted"
   | "inferred-not-stopped"
   | "held-by-other-daemon"
+  | "ambiguous"
   | "not-found"
   | "dry-run"
   | "daemon-dead";
@@ -464,7 +465,7 @@ interface DeviceResult {
 function refusal(
   device: BatchDevice,
   protectedDevices: string[],
-  explicit = false,
+  exactId = false,
 ): Pick<DeviceResult, "outcome" | "message"> | undefined {
   if (device.protected || matchesProtection(device, protectedDevices)) {
     return { outcome: "protected" };
@@ -481,11 +482,11 @@ function refusal(
   if (!device.isVirtual || !["batch-booted", "batch-inferred"].includes(device.provenance)) {
     return { outcome: "not-batch-booted" };
   }
-  if (device.provenance === "batch-inferred" && !explicit) {
+  if (device.provenance === "batch-inferred" && !exactId) {
     return {
       outcome: "inferred-not-stopped",
       message:
-        "Check that this device was started by the batch, then name it explicitly with --device.",
+        "Check that this device was started by the batch, then name it by device ID (serial/UDID) with --device.",
     };
   }
   return undefined;
@@ -507,7 +508,7 @@ function resultRow(
 function selectedDevices(
   view: DeviceView,
   selectors: string[],
-): { devices: BatchDevice[]; missing: DeviceResult[] } {
+): { devices: BatchDevice[]; exactIds: Set<string>; selectorResults: DeviceResult[] } {
   if (!selectors.length) {
     return {
       devices: view.devices.filter(
@@ -516,20 +517,33 @@ function selectedDevices(
           ["batch-booted", "batch-inferred"].includes(device.provenance) &&
           !device.protected,
       ),
-      missing: [],
+      exactIds: new Set(),
+      selectorResults: [],
     };
   }
   const devices = new Set<BatchDevice>();
-  const missing: DeviceResult[] = [];
+  const exactIds = new Set<string>();
+  const selectorResults: DeviceResult[] = [];
   for (const selector of selectors) {
     const matches = view.devices.filter(
       (device) => device.deviceId === selector || device.name === selector,
     );
-    for (const device of matches) {
-      devices.add(device);
-    }
-    if (!matches.length) {
-      missing.push({
+    if (matches.length > 1) {
+      selectorResults.push(
+        ...matches.map((device) =>
+          resultRow(device, {
+            outcome: "ambiguous",
+            message: `Selector "${selector}" matches multiple devices; name each target by device ID (serial/UDID) with --device.`,
+          }),
+        ),
+      );
+    } else if (matches.length === 1) {
+      devices.add(matches[0]);
+      if (matches[0].deviceId === selector) {
+        exactIds.add(selector);
+      }
+    } else {
+      selectorResults.push({
         deviceId: selector,
         name: selector,
         platform: null,
@@ -540,7 +554,7 @@ function selectedDevices(
       });
     }
   }
-  return { devices: [...devices], missing };
+  return { devices: [...devices], exactIds, selectorResults };
 }
 function rejectionOutcome(error: unknown): "timeout" | "failed" {
   const detail = z.object({ code: z.union([z.string(), z.number()]).optional() }).safeParse(error);
@@ -589,9 +603,9 @@ async function shutdownDevices(
   deps: PrivateDaemonCliDeps,
 ): Promise<number> {
   const selected = selectedDevices(view, command.deviceSelectors ?? []);
-  const results = selected.missing;
+  const results = selected.selectorResults;
   for (const device of selected.devices) {
-    const denied = refusal(device, view.protectedDevices, Boolean(command.deviceSelectors?.length));
+    const denied = refusal(device, view.protectedDevices, selected.exactIds.has(device.deviceId));
     const spec = specs.find(
       (spec) =>
         device.seenByDaemons.includes(spec.name) &&
@@ -654,20 +668,27 @@ async function deadDaemonFallback(
     },
     command.deviceSelectors ?? [],
   );
-  const results = selected.missing;
+  const results = selected.selectorResults;
   for (const device of selected.devices) {
-    const denied = refusal(device, view.protectedDevices, true);
-    if (denied && denied.outcome !== "held-by-other-daemon") {
+    // Default fallback reports inferred snapshots as evidence only; explicit selectors retain refusals.
+    const denied = refusal(device, view.protectedDevices, selected.exactIds.has(device.deviceId));
+    if (denied && command.deviceSelectors?.length) {
+      results.push(resultRow(device, denied));
+      continue;
+    }
+    if (denied && !["held-by-other-daemon", "inferred-not-stopped"].includes(denied.outcome)) {
       continue;
     }
     Object.assign(device, await devicePid(device, deps));
     results.push(
       resultRow(
         device,
-        denied ?? {
-          outcome: "daemon-dead",
-          message: `No daemon can stop this device. After checking its name against the protected list, stop it by PID${device.platform === "ios" ? ` or xcrun simctl shutdown ${device.deviceId}` : ""}.`,
-        },
+        denied?.outcome === "held-by-other-daemon"
+          ? denied
+          : {
+              outcome: "daemon-dead",
+              message: `No daemon can stop this device. After checking its name against the protected list, stop it by PID${device.platform === "ios" ? ` or xcrun simctl shutdown ${device.deviceId}` : ""}.`,
+            },
       ),
     );
   }

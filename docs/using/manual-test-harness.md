@@ -248,7 +248,10 @@ evidence; it never changes the launch result.
 `shutdown-devices --batch-dir "$B"` stops by default only unprotected virtual
 devices with positive `batch-booted` evidence. It reports unprotected
 `batch-inferred` devices as `inferred-not-stopped` and exits 1; check that the
-batch started them, then name them explicitly with `--device ID_OR_NAME`.
+batch started them, then name them by exact device ID (serial/UDID) with `--device ID`.
+A unique name may select a `batch-booted` device. An ambiguous selector stops
+nothing and reports `ambiguous` for every match; a separate unambiguous selector
+(such as its exact ID) still applies to a matched device.
 Every iOS simulator needs this check and selector. `foreign`, `preexisting`,
 `unknown`, and physical devices are never sent a frame, even when named.
 Use `--daemon K` to restrict the view or `--dry-run` to report without stopping.
@@ -268,8 +271,9 @@ process.
 | `timeout`              | The request deadline expired.                                                                               |
 | `protected`            | The target matches protection or its name cannot be safely checked.                                         |
 | `not-batch-booted`     | The target is physical, foreign, preexisting, or unknown; selectors cannot override this.                   |
-| `inferred-not-stopped` | Check the inferred device and name it with `--device`.                                                      |
+| `inferred-not-stopped` | Check the inferred device and name it by exact device ID (serial/UDID) with `--device`.                     |
 | `held-by-other-daemon` | The inventory reports another daemon holding it; no frame is sent.                                          |
+| `ambiguous`            | Multiple devices match; this selector stops nothing. Name each target by device ID (serial/UDID).           |
 | `not-found`            | No device in the selected view matches the explicit selector.                                               |
 | `dry-run`              | An eligible target would be stopped.                                                                        |
 | `daemon-dead`          | No selected daemon produced an inventory to stop the snapshotted target.                                    |
@@ -285,7 +289,9 @@ cannot be parsed. `devices` exits 1 only when no daemon produced an inventory.
 Without inventories, `devices`/`shutdown-devices` use `shared/devices-last.json`
 to report unprotected `batch-booted` and `batch-inferred` snapshot devices and
 refreshed PID evidence, with exit 1 and no shutdown frames. Selectors restrict
-that fallback and missing selectors return `not-found`. Run `devices` or
+that fallback, ambiguous selectors return `ambiguous`, and missing selectors return
+`not-found`. Explicitly selected protected, foreign, preexisting, or unknown
+snapshot devices retain their refusal result rows. Run `devices` or
 `shutdown-devices` **before** `stop` so a snapshot exists. Check the reported AVD
 name against the protected list before manually stopping by PID when the daemon
 is dead; never use `adb emu` console commands under load (#12202).

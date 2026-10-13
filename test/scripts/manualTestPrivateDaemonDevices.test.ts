@@ -157,7 +157,7 @@ test("F1 default shutdown stops only positive emulator and reports inferred simu
 });
 test("F1 explicitly checked inferred simulator receives exactly one frame", async () => {
   const f = await deviceFixture();
-  inventoryRows(f, [row("sim", "simulator", "ios")]);
+  inventoryRows(f, [row("sim", "simulator", "ios"), row("other-sim", "other simulator", "ios")]);
   expect(
     await runPrivateDaemonCommand(command("shutdown-devices", "--device", "sim"), f.deps),
   ).toBe(0);
@@ -170,6 +170,164 @@ test("F1 explicitly checked inferred simulator receives exactly one frame", asyn
     outcome: "stopped",
     provenance: "batch-inferred",
   });
+});
+test.each(["live", "dry-run", "fallback"])(
+  "selector safety: shared simulator name is ambiguous in %s",
+  async (mode) => {
+    const f = await deviceFixture();
+    inventoryRows(f, [row("sim-a", "iPhone 16", "ios"), row("sim-b", "iPhone 16", "ios")]);
+    if (mode === "fallback") {
+      expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);
+      f.deps.requestSocket = async () => {
+        throw new Error("dead");
+      };
+    }
+    expect(
+      await runPrivateDaemonCommand(
+        command(
+          "shutdown-devices",
+          "--device",
+          "iPhone 16",
+          ...(mode === "dry-run" ? ["--dry-run"] : []),
+        ),
+        f.deps,
+      ),
+    ).toBe(1);
+    expect(document(f).results).toMatchObject([
+      { deviceId: "sim-a", outcome: "ambiguous", message: expect.stringContaining("device ID") },
+      { deviceId: "sim-b", outcome: "ambiguous", message: expect.stringContaining("device ID") },
+    ]);
+    expect(killFrames(f)).toEqual([]);
+  },
+);
+test("selector safety: unique inferred name does not authorize shutdown", async () => {
+  const f = await deviceFixture();
+  inventoryRows(f, [row("sim-a", "iPhone 16", "ios")]);
+  expect(
+    await runPrivateDaemonCommand(command("shutdown-devices", "--device", "iPhone 16"), f.deps),
+  ).toBe(1);
+  expect(document(f).results).toMatchObject([
+    {
+      deviceId: "sim-a",
+      outcome: "inferred-not-stopped",
+      message: expect.stringContaining("device ID"),
+    },
+  ]);
+  expect(killFrames(f)).toEqual([]);
+  inventoryRows(f, [row()]);
+  expect(
+    await runPrivateDaemonCommand(command("shutdown-devices", "--device", "batch-avd"), f.deps),
+  ).toBe(0);
+  expect(killFrames(f)).toHaveLength(1);
+  expect(killFrames(f)[0].params).toMatchObject({
+    arguments: { device: { deviceId: "emulator-5556" } },
+  });
+});
+test("selector safety: exact ID authorizes only its inferred device", async () => {
+  const f = await deviceFixture();
+  inventoryRows(f, [row("sim-a", "iPhone 16", "ios"), row("sim-b", "iPhone 17", "ios")]);
+  expect(
+    await runPrivateDaemonCommand(
+      command("shutdown-devices", "--device", "sim-a", "--device", "iPhone 17"),
+      f.deps,
+    ),
+  ).toBe(1);
+  expect(document(f).results).toMatchObject([
+    { deviceId: "sim-a", outcome: "stopped" },
+    { deviceId: "sim-b", outcome: "inferred-not-stopped" },
+  ]);
+  expect(killFrames(f).map((frame) => frame.params)).toEqual([
+    {
+      name: "killDevice",
+      arguments: { device: { deviceId: "sim-a", name: "iPhone 16", platform: "ios" } },
+    },
+  ]);
+});
+test.each([false, true])(
+  "selector safety: exact ID survives ambiguous name (ID first=%s)",
+  async (idFirst) => {
+    const f = await deviceFixture();
+    inventoryRows(f, [row("sim-a", "iPhone 16", "ios"), row("sim-b", "iPhone 16", "ios")]);
+    const selectors = idFirst ? ["sim-a", "iPhone 16"] : ["iPhone 16", "sim-a"];
+    expect(
+      await runPrivateDaemonCommand(
+        command("shutdown-devices", ...selectors.flatMap((selector) => ["--device", selector])),
+        f.deps,
+      ),
+    ).toBe(1);
+    expect(document(f).results).toMatchObject([
+      { deviceId: "sim-a", outcome: "ambiguous" },
+      { deviceId: "sim-b", outcome: "ambiguous" },
+      { deviceId: "sim-a", outcome: "stopped" },
+    ]);
+    expect(killFrames(f).map((frame) => frame.params)).toEqual([
+      {
+        name: "killDevice",
+        arguments: { device: { deviceId: "sim-a", name: "iPhone 16", platform: "ios" } },
+      },
+    ]);
+  },
+);
+test("selector safety: ID colliding with another name is ambiguous", async () => {
+  const f = await deviceFixture();
+  inventoryRows(f, [row("sim-a", "iPhone 16", "ios"), row("sim-b", "sim-a", "ios")]);
+  expect(
+    await runPrivateDaemonCommand(command("shutdown-devices", "--device", "sim-a"), f.deps),
+  ).toBe(1);
+  expect(document(f).results).toMatchObject([
+    { deviceId: "sim-a", outcome: "ambiguous" },
+    { deviceId: "sim-b", outcome: "ambiguous" },
+  ]);
+  expect(killFrames(f)).toEqual([]);
+});
+test.each(["protected", "foreign", "preexisting", "unknown"])(
+  "selector safety: fallback preserves named %s refusal",
+  async (kind) => {
+    const f = await deviceFixture(kind === "protected" ? ["batch-avd"] : []);
+    const signals: number[] = [];
+    f.deps.signalPid = (pid) => {
+      signals.push(pid);
+    };
+    expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);
+    const snapshot = JSON.parse(f.files.get(snapshotPath)!);
+    if (kind !== "protected") {
+      snapshot.devices[0].provenance = kind;
+    }
+    f.files.set(snapshotPath, JSON.stringify(snapshot));
+    f.deps.requestSocket = async () => {
+      throw new Error("dead");
+    };
+    expect(
+      await runPrivateDaemonCommand(command("shutdown-devices", "--device", "batch-avd"), f.deps),
+    ).toBe(1);
+    expect(document(f).results).toMatchObject([
+      {
+        deviceId: "emulator-5556",
+        outcome: kind === "protected" ? "protected" : "not-batch-booted",
+      },
+    ]);
+    expect(killFrames(f)).toEqual([]);
+    expect(signals).toEqual([]);
+  },
+);
+test("selector safety: fallback unique inferred name remains refused", async () => {
+  const f = await deviceFixture();
+  inventoryRows(f, [row("sim-a", "iPhone 16", "ios")]);
+  expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);
+  f.deps.requestSocket = async () => {
+    throw new Error("dead");
+  };
+  expect(
+    await runPrivateDaemonCommand(command("shutdown-devices", "--device", "iPhone 16"), f.deps),
+  ).toBe(1);
+  expect(document(f).results).toMatchObject([
+    {
+      deviceId: "sim-a",
+      outcome: "inferred-not-stopped",
+      message: expect.stringContaining("device ID"),
+    },
+  ]);
+  expect(killFrames(f)).toEqual([]);
 });
 test.each(["foreign", "preexisting"])("F1 explicit %s never receives a frame", async (kind) => {
   const f = await deviceFixture();

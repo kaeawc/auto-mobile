@@ -34,7 +34,8 @@ reproduction, use the [Python MCP SDK stdio clients](../../docs/using/manual-tes
   `~/.auto-mobile`; every client uses the wrapper or a guarded harness CLI.
 - Never `pkill`/`killall`; stop only your own daemon with `private-daemon.ts stop`.
 - `shutdown-devices` stops by default only emulators carrying this batch's environment
-  marker; name simulators and other `batch-inferred` devices with `--device` after checking them.
+  marker; name simulators and other `batch-inferred` devices by exact device ID (serial/UDID)
+  with `--device` after checking them. An ambiguous selector stops nothing (`ambiguous`).
 - Protect non-batch devices at `init --protect NAME_OR_ID` (repeatable).
 - Tear down with `shutdown-devices` before `stop` each daemon, then stop the
   batch's caffeinate by its recorded PID file. Save `devices`/`shutdown-devices`
@@ -141,8 +142,10 @@ read process environment without it, overriding baseline inference;
 platform baseline; `unknown` has missing/unavailable baseline without process
 evidence, or conflicting daemon rows. Every iOS simulator lacks process
 evidence. Default teardown targets only positive, unprotected virtual devices;
-check and explicitly select inferred devices. Foreign, preexisting, unknown
-and physical devices are refused even when named.
+check and select inferred devices by exact device ID (serial/UDID) with `--device`.
+A unique name may select a `batch-booted` device. An ambiguous selector stops
+nothing (`ambiguous` for each match); a separate unambiguous selector still applies.
+Foreign, preexisting, unknown and physical devices are refused even when named.
 
 Protection matches `deviceId`, `name`, `identity.stableId` and `processAvdName`.
 Empty/`Unknown (<serial>)` Android names without a process AVD name are refused
@@ -151,18 +154,19 @@ when the protected list is nonempty. Another daemon's hold blocks frames;
 device processes or passes `force`. Baseline recording failure warns once with
 `BASELINE WARNING:`; it never changes `start`'s launch result.
 
-| Outcome                | Meaning                                                                      |
-| ---------------------- | ---------------------------------------------------------------------------- |
-| `stopped`              | Shutdown succeeded or `device_already_stopped`; retain the daemon's message. |
-| `refused`              | Product refusal with code/message, including managed slots.                  |
-| `failed` / `timeout`   | Request failure/deadline; no mutation retry.                                 |
-| `protected`            | Protection matches or name evidence is insufficient.                         |
-| `not-batch-booted`     | Physical, foreign, preexisting, or unknown; never sent.                      |
-| `inferred-not-stopped` | Check the inferred device and name it with `--device`.                       |
-| `held-by-other-daemon` | Another daemon holds it; never sent.                                         |
-| `not-found`            | Explicit selector missing from the view.                                     |
-| `dry-run`              | Eligible target, no shutdown frame.                                          |
-| `daemon-dead`          | Snapshot evidence only, no shutdown frame.                                   |
+| Outcome                | Meaning                                                                                 |
+| ---------------------- | --------------------------------------------------------------------------------------- |
+| `stopped`              | Shutdown succeeded or `device_already_stopped`; retain the daemon's message.            |
+| `refused`              | Product refusal with code/message, including managed slots.                             |
+| `failed` / `timeout`   | Request failure/deadline; no mutation retry.                                            |
+| `protected`            | Protection matches or name evidence is insufficient.                                    |
+| `not-batch-booted`     | Physical, foreign, preexisting, or unknown; never sent.                                 |
+| `inferred-not-stopped` | Check the inferred device and name it by exact device ID (serial/UDID) with `--device`. |
+| `held-by-other-daemon` | Another daemon holds it; never sent.                                                    |
+| `ambiguous`            | Multiple matches; this selector stops nothing. Name targets by device ID (serial/UDID). |
+| `not-found`            | Explicit selector missing from the view.                                                |
+| `dry-run`              | Eligible target, no shutdown frame.                                                     |
+| `daemon-dead`          | Snapshot evidence only, no shutdown frame.                                              |
 
 Every result includes `provenance` and `bootedBy` when known. Selected daemon
 inventory refusals, unparseable replies or transport failures add top-level
@@ -170,8 +174,9 @@ inventory refusals, unparseable replies or transport failures add top-level
 processed. A socket reply is `alive: true` even when unparseable. `devices`
 exits 1 only when no daemon produced an inventory. Without inventories, fallback
 reports unprotected batch-booted/batch-inferred snapshot devices, honors
-selectors and sends nothing. Otherwise shutdown exits 0 only if all results
-are stopped/dry-run and there are no inventory errors.
+selectors including ambiguity, retains explicit refusal rows, and sends nothing.
+Otherwise shutdown exits 0 only if all results are stopped/dry-run and there are
+no inventory errors.
 
 `stop --wait-ms 0` signals and reports `still-alive` unless the daemon is already
 gone. `boot-gate --min-interval-ms` is best-effort when `--max-concurrent` is above

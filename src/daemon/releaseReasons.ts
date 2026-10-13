@@ -58,6 +58,7 @@ export type SessionReleaseReasonLiteral =
   | "rehydration-owner-timeout"
   | "restart-recovery-timeout"
   | "owner-disconnected"
+  | "managed-slot-ownership-lost"
   | "device-killed"
   | "session-creation-cancelled"
   | "session-creation-timeout"
@@ -140,6 +141,8 @@ export const SESSION_RELEASE_REASON_TRAITS: Readonly<
   "restart-recovery-timeout": TERMINAL_EXPIRY,
   /** The owning connection closed and no other client owns the session. */
   "owner-disconnected": TERMINAL,
+  /** Another execution took the managed slot and its device. */
+  "managed-slot-ownership-lost": TERMINAL,
   /** The session's device was killed. */
   "device-killed": TERMINAL,
   /** The session's creation was cancelled before it was handed out. */

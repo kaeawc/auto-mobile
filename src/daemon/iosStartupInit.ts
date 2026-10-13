@@ -17,13 +17,21 @@ export interface IosStartupWarmupDevice {
 export function selectIosStartupWarmupDevices(
   devices: readonly IosStartupWarmupDevice[],
   policy: IosStartupWarmupPolicy,
+  isGated?: (deviceId: string) => boolean,
 ): IosStartupWarmupDevice[] {
   if (!policy.isIosPassiveWorkEnabled()) {
     return [];
   }
-  return devices.filter(
+  const eligible = devices.filter(
     (device) => device.platform === "ios" && policy.allows("ios", "startup-warmup", device.id),
   );
+  const skipped = eligible.filter((device) => isGated?.(device.id));
+  if (skipped.length > 0) {
+    logger.info(
+      `[Daemon] Skipping gated CtrlProxy iOS warm-up devices: ${skipped.map((device) => device.id).join(", ")}`,
+    );
+  }
+  return eligible.filter((device) => !skipped.includes(device));
 }
 
 /** Options the startup path passes to `DeviceSessionManager.verifyIosDevice`. */

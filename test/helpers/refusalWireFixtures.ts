@@ -299,6 +299,7 @@ const CUT_RELEASE_REASONS: readonly (readonly [string, SessionReleaseReason])[] 
   ["heartbeat_timeout", "heartbeat-timeout"],
   ["cli_idle_timeout", "cli-idle-timeout"],
   ["owner_disconnected", "owner-disconnected"],
+  ["managed_slot_ownership_lost", "managed-slot-ownership-lost"],
   ["explicit_release", "explicit-release"],
 ];
 

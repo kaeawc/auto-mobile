@@ -532,6 +532,18 @@
         "acquireNewSession": false
       }
     },
+    "socket-frame.session_ownership_lost.released_managed_slot_ownership_lost": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true,
+        "details": {
+          "sessionUuid": "11111111-2222-4333-8444-555555555555",
+          "reason": "managed-slot-ownership-lost"
+        }
+      }
+    },
     "managed-slots-result.managed_slot_budget_exhausted.budget": {
       "expected": "retry",
       "fields": {

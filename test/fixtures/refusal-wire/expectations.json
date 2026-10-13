@@ -686,6 +686,14 @@
         "acquireNewSession": true
       }
     },
+    "session_ownership_lost.released_managed_slot_ownership_lost": {
+      "expected": "acquire-new-session",
+      "fields": {
+        "code": "session_ownership_lost",
+        "retryable": false,
+        "acquireNewSession": true
+      }
+    },
     "managed_slot_acquisition_failed.managed_slot_budget_exhausted.budget": {
       "expected": "fail",
       "fields": {

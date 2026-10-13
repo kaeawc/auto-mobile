@@ -43,6 +43,8 @@ export interface ManagedSlotRefreshOptions {
  */
 export interface ManagedSlotExclusion {
   refresh(options?: ManagedSlotRefreshOptions): Promise<void>;
+  /** True after a failed registry read; cleared by a successful or absent load. */
+  lastReadFailed?(): boolean;
   /** The managed entry holding the device, from the last snapshot. */
   holderOf(device: ManagedDeviceRef): ManagedDeviceEntry | undefined;
   /** Every stable id the last snapshot holds for `platform`, for selector-based boots. */
@@ -142,6 +144,7 @@ type RegistryState = LoadedSnapshot | AbsentSnapshot | UnreadableSnapshot;
 
 export class RegistryManagedSlotExclusion implements ManagedSlotExclusion {
   private snapshot: RegistryState | undefined;
+  private readFailed = false;
   private inFlight: Promise<void> | undefined;
   private registry: Promise<SlotRegistry> | undefined;
 
@@ -211,6 +214,10 @@ export class RegistryManagedSlotExclusion implements ManagedSlotExclusion {
     return waiter;
   }
 
+  lastReadFailed(): boolean {
+    return this.readFailed;
+  }
+
   holderOf(device: ManagedDeviceRef): ManagedDeviceEntry | undefined {
     if (this.snapshot?.kind !== "loaded") {
       return undefined;
@@ -237,11 +244,13 @@ export class RegistryManagedSlotExclusion implements ManagedSlotExclusion {
       // A host that never served a managed slot has no registry: nothing is managed, and reading
       // must not create the file. This is "absent", not a successful read of the registry.
       this.snapshot = { kind: "absent", loadedAtMs: this.timer.now() };
+      this.readFailed = false;
       return;
     }
     try {
       entries = await (await this.openRegistryOnce()).snapshotManagedDevices();
     } catch (error) {
+      this.readFailed = true;
       if (this.snapshot?.kind === "loaded") {
         logger.warn(
           `[ManagedSlots] Registry unreadable; keeping the last snapshot: ${errorMessage(error)}`,
@@ -262,6 +271,7 @@ export class RegistryManagedSlotExclusion implements ManagedSlotExclusion {
       byPlatform.set(entry.platform, ids);
     }
     this.snapshot = { kind: "loaded", byDevice, byPlatform, loadedAtMs: this.timer.now() };
+    this.readFailed = false;
   }
 
   private openRegistryOnce(): Promise<SlotRegistry> {

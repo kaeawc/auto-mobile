@@ -101,7 +101,7 @@ describe("prototype tool platform notes", () => {
     expect(raw).not.toHaveProperty("platformNotes");
     expect(payload).toEqual({
       success: true,
-      lastResult: { id: "panel", lastAction: "show", success: true, timestamp: 0 },
+      lastResult: { id: "panel", lastAction: "show", success: true, timestamp: 0, chrome: "bar" },
     });
   });
   test("failed iOS show has no platformNotes key", async () => {

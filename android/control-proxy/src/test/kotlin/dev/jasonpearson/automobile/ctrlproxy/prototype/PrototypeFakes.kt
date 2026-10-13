@@ -256,3 +256,38 @@ internal class FakePrototypeTimer : PrototypeScheduler {
     }
   }
 }
+
+/** Virtual view-post scheduler; cancelled callbacks remain available to test late delivery. */
+internal class FakePrototypeEscapeScheduler : PrototypeEscapeScheduler {
+  class Task(val due: Long, val block: () -> Unit) {
+    var cancelled = false
+    var fired = false
+  }
+
+  val tasks = mutableListOf<Task>()
+  var cancelled = 0
+    private set
+
+  private var now = 0L
+
+  override fun schedule(delayMillis: Long, block: () -> Unit): () -> Unit {
+    val task = Task(now + delayMillis, block)
+    tasks += task
+    return {
+      if (!task.cancelled && !task.fired) {
+        task.cancelled = true
+        cancelled++
+      }
+    }
+  }
+
+  fun advanceBy(millis: Long) {
+    now += millis
+    tasks
+      .filter { !it.cancelled && !it.fired && it.due <= now }
+      .forEach {
+        it.fired = true
+        it.block()
+      }
+  }
+}

@@ -33,6 +33,7 @@ import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadc
 import { getDaemonStreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
 import { INTERNAL_TOOL_PARAM_NAMES } from "../../src/daemon/constants";
 import { InMemoryPrototypeStatusStore } from "../../src/features/prototype/PrototypeStatusStore";
+import { prototypeTextFieldBindings } from "../../src/features/prototype/prototypeTextTarget";
 import { FakePrototypeEventLifecycle } from "../fakes/FakePrototypeEventLifecycle";
 import { event } from "../helpers/prototypeTestEvent";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
@@ -67,6 +68,7 @@ describe("prototype MCP tool", () => {
     });
   });
   afterEach(() => {
+    prototypeTextFieldBindings.clear();
     unsubscribe();
     restore();
   });
@@ -136,6 +138,32 @@ describe("prototype MCP tool", () => {
     expect(client.getPrototypeHistory()).toEqual([]);
   });
 
+  test("a successful show records text bindings and a refused show preserves them", async () => {
+    const fieldSpec = {
+      ...spec,
+      state: { name: "", other: "" },
+      root: { type: "textField", id: "field", testTag: "ptf", stateKey: "name" },
+    };
+    expect((await call({ action: "show", spec: fieldSpec })).payload.success).toBe(true);
+    const binding = prototypeTextFieldBindings.forDevice(device.deviceId);
+    expect(binding?.prototypeId).toBe(spec.id);
+    expect([...binding!.keys]).toEqual([
+      ["ptf", "name"],
+      ["field", "name"],
+    ]);
+    client.setPrototypeResult({ success: false, error: "refused" });
+    expect(
+      (
+        await call({
+          action: "show",
+          spec: { ...fieldSpec, root: { ...fieldSpec.root, stateKey: "other" } },
+        })
+      ).payload.success,
+    ).toBe(false);
+    expect(client.getPrototypeHistory()).toHaveLength(2);
+    expect(prototypeTextFieldBindings.forDevice(device.deviceId)).toBe(binding);
+  });
+
   test("a spec with components is expanded on the host before it is sent (#11053)", async () => {
     const authored = {
       id: "panel",
@@ -175,14 +203,14 @@ describe("prototype MCP tool", () => {
     const { payload } = await call({ action: "show", spec: replacement });
     expect(payload).toEqual({
       success: true,
-      lastResult: { id: "panel", lastAction: "show", success: true, timestamp: 5 },
+      lastResult: { id: "panel", lastAction: "show", chrome: "bar", success: true, timestamp: 5 },
     });
     expect(client.getPrototypeHistory()).toEqual([
       { method: "show", spec, timeoutMs: 5000, perf: undefined },
       { method: "show", spec: replacement, timeoutMs: 5000, perf: undefined },
     ]);
     expect((await call({ action: "status" })).payload.prototypes).toEqual([
-      { id: "panel", lastAction: "show", success: true, timestamp: 5 },
+      { id: "panel", lastAction: "show", chrome: "bar", success: true, timestamp: 5 },
     ]);
   });
 
@@ -326,6 +354,7 @@ describe("prototype MCP tool", () => {
       {
         id: "panel",
         lastAction: "show",
+        chrome: "bar",
         success: true,
         timestamp: 0,
         pendingCount: PROTOTYPE_EVENT_BUFFER_CAPACITY,
@@ -475,14 +504,14 @@ describe("prototype MCP tool", () => {
     });
   });
 
-  test("legacy mutation responses and status without events are byte-identical", async () => {
+  test("mutation text and structured status agree, including legacy fullscreen chrome", async () => {
     const show = await call({ action: "show", spec });
     const expectedShow =
-      '{"success":true,"lastResult":{"id":"panel","lastAction":"show","success":true,"timestamp":0}}';
+      '{"success":true,"lastResult":{"id":"panel","lastAction":"show","chrome":"bar","success":true,"timestamp":0}}';
     expect(show.response.content[0].text).toBe(expectedShow);
     expect(JSON.stringify(show.response.structuredContent)).toBe(expectedShow);
     expect((await call({ action: "status" })).response.content[0].text).toBe(
-      '{"success":true,"prototypes":[{"id":"panel","lastAction":"show","success":true,"timestamp":0}],"lastResult":{"id":"panel","lastAction":"show","success":true,"timestamp":0}}',
+      '{"success":true,"prototypes":[{"id":"panel","lastAction":"show","chrome":"bar","success":true,"timestamp":0}],"lastResult":{"id":"panel","lastAction":"show","chrome":"bar","success":true,"timestamp":0}}',
     );
     expect((await call({ action: "dismiss", all: true })).response.content[0].text).toBe(
       '{"success":true,"lastResult":{"all":true,"lastAction":"dismiss","success":true,"timestamp":0}}',
@@ -761,7 +790,7 @@ describe("prototype MCP tool", () => {
     timer.advanceTime(12);
     const { payload } = await call({ action: "status", sessionUuid: "session" });
     expect(payload.prototypes).toEqual([
-      { id: "panel", lastAction: "show", success: true, timestamp: 0 },
+      { id: "panel", lastAction: "show", chrome: "bar", success: true, timestamp: 0 },
     ]);
     expect(payload.lastResult).toEqual(payload.prototypes![0]);
     expect(client.getPrototypeHistory()).toHaveLength(1);

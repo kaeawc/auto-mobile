@@ -52,23 +52,37 @@ internal object BitmapPngCodec : PrototypeScreenshotComparator.PngCodec {
  * Loads a shared fixture from the repo's `test/fixtures/prototype-spec/valid` directory. With
  * [resolveElementAnchors] each `element` anchor is replaced by a fixed `bounds` anchor with the
  * same alignment (and offset), standing in for the host's selector resolution: the renderer refuses
- * an unresolved element anchor.
+ * an unresolved element anchor. [stateOverrides] replaces declared initial state values.
+ * [themeFrom] replaces the theme with another valid fixture's theme object, while keeping this
+ * fixture's content. The edited spec is still validated by the production [PrototypeSpecValidator].
  */
 internal fun validPrototypeFixture(
   name: String,
   resolveElementAnchors: Boolean = false,
   stateOverrides: Map<String, JsonElement> = emptyMap(),
+  themeFrom: String? = null,
 ): PrototypeSpec {
-  val file =
-    generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
-      .map { File(it, "test/fixtures/prototype-spec/valid/$name.json") }
-      .first { it.isFile }
-  if (!resolveElementAnchors && stateOverrides.isEmpty()) return loadPrototypeSpec(file)
+  val file = validPrototypeFixtureFile(name)
+  if (!resolveElementAnchors && stateOverrides.isEmpty() && themeFrom == null) {
+    return loadPrototypeSpec(file)
+  }
   var edited = Json.parseToJsonElement(file.readText())
   if (resolveElementAnchors) edited = resolveElementAnchors(edited)
   if (stateOverrides.isNotEmpty()) edited = overrideInitialState(edited, stateOverrides)
+  if (themeFrom != null) {
+    val themed =
+      Json.parseToJsonElement(validPrototypeFixtureFile(themeFrom).readText()) as JsonObject
+    val theme = themed["theme"]
+    check(theme is JsonObject) { "fixture $themeFrom has no theme object" }
+    edited = JsonObject((edited as JsonObject) + ("theme" to theme))
+  }
   return loadPrototypeSpecText(file.path, Json.encodeToString(JsonElement.serializer(), edited))
 }
+
+private fun validPrototypeFixtureFile(name: String): File =
+  generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
+    .map { File(it, "test/fixtures/prototype-spec/valid/$name.json") }
+    .first { it.isFile }
 
 /**
  * Replaces keys of the spec's initial `state`, so a gallery case can open a dialog or bottom sheet
@@ -172,13 +186,21 @@ internal fun prototypeScreenshotTest(
   spec: PrototypeSpec,
   pending: Boolean = false,
   options: PrototypeScreenshotComparator.Options = PrototypeScreenshotComparator.Options(),
+) = prototypeScreenshotTest(name, pending, options) { renderPrototype(name, spec) }
+
+/** General form: [render] produces the image; gating, pending and record/verify are shared. */
+internal fun prototypeScreenshotTest(
+  name: String,
+  pending: Boolean = false,
+  options: PrototypeScreenshotComparator.Options = PrototypeScreenshotComparator.Options(),
+  render: () -> PrototypeScreenshotComparator.Image,
 ) {
   PrototypeScreenshotEnvironment.assumeReferencePlatform()
   PrototypeScreenshotEnvironment.skipIfPending(name, pending)
   PrototypeScreenshotEnvironment.handleResult(
     BitmapPngCodec,
     name,
-    renderPrototype(name, spec),
+    render(),
     options,
   )
 }

@@ -21,7 +21,9 @@ import org.robolectric.annotation.GraphicsMode
  * resolves for the show, so the device night mode stays at its default.
  *
  * Every baseline is pending until recorded on Linux with the `Record Desktop Screenshot Baselines`
- * workflow; [PrototypeRenderThemeTest] checks the light/dark difference on any OS meanwhile.
+ * workflow (module `control-proxy`, test filter `*Prototype*ScreenshotTest`, covering this class
+ * and `PrototypeSpecContentScreenshotTest`); [PrototypeRenderThemeTest] checks the light/dark
+ * difference on any OS meanwhile.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -31,32 +33,29 @@ class PrototypeHostChromeScreenshotTest {
   /** Fullscreen: the translucent dismiss bar above the spec, light. */
   @Test
   fun dismissBarLight() =
-    chromeTest("host_chrome_dismiss_bar_light", dark = false, fullscreen = true)
+    chromeTest("host_chrome_dismiss_bar_light", dark = false, fullscreen = true, pending = true)
 
   /** Fullscreen: the translucent dismiss bar above the spec, dark. */
   @Test
-  fun dismissBarDark() = chromeTest("host_chrome_dismiss_bar_dark", dark = true, fullscreen = true)
+  fun dismissBarDark() =
+    chromeTest("host_chrome_dismiss_bar_dark", dark = true, fullscreen = true, pending = true)
 
   /** Floating and persistent: the Close control over the spec, light. */
   @Test
   fun closeControlLight() =
-    chromeTest("host_chrome_close_control_light", dark = false, fullscreen = false)
+    chromeTest("host_chrome_close_control_light", dark = false, fullscreen = false, pending = true)
 
   /** Floating and persistent: the Close control over the spec, dark. */
   @Test
   fun closeControlDark() =
-    chromeTest("host_chrome_close_control_dark", dark = true, fullscreen = false)
+    chromeTest("host_chrome_close_control_dark", dark = true, fullscreen = false, pending = true)
 
-  private fun chromeTest(name: String, dark: Boolean, fullscreen: Boolean) {
-    PrototypeScreenshotEnvironment.assumeReferencePlatform()
-    PrototypeScreenshotEnvironment.skipIfPending(name, pending = true)
-    PrototypeScreenshotEnvironment.handleResult(
-      BitmapPngCodec,
-      name,
-      renderPrototypeChrome(name, dark, fullscreen),
-      PrototypeScreenshotComparator.Options(),
-    )
-  }
+  private fun chromeTest(
+    name: String,
+    dark: Boolean,
+    fullscreen: Boolean,
+    pending: Boolean = false,
+  ) = prototypeScreenshotTest(name, pending) { renderPrototypeChrome(name, dark, fullscreen) }
 }
 
 /** Renders `PrototypeWindowContent` around the `doc-example-3` styled box. */

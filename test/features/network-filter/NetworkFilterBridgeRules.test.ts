@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   ExecNetworkFilterBridge,
+  ExpiringControllerVersionMemory,
   NETWORK_FILTER_CONTRACT_VERSION,
 } from "../../../src/features/network-filter/NetworkFilterBridge";
 import {
@@ -18,7 +19,7 @@ const DEVICE_SET = "/Users/test/Library/Developer/CoreSimulator/Devices";
 
 function fixture(name: string): string {
   return readFileSync(
-    join(import.meta.dir, "../../fixtures/network-filter-controller", `${name}.json`),
+    join(import.meta.dir, "../../fixtures/network-filter-controller", `v4/${name}.json`),
     "utf8",
   );
 }
@@ -56,6 +57,7 @@ describe("ExecNetworkFilterBridge rule commands (#10264)", () => {
 
   const bridge = (installed = true) =>
     new ExecNetworkFilterBridge({
+      versionMemory: new ExpiringControllerVersionMemory(),
       executor: new DefaultHostCommandExecutor(exec.exec),
       controllerPath: CONTROLLER,
       exists: (path) => installed && path === CONTROLLER,
@@ -82,6 +84,8 @@ describe("ExecNetworkFilterBridge rule commands (#10264)", () => {
     expect(exec.calls).toEqual([
       [
         "apply",
+        "--contract-version",
+        "4",
         "--managed",
         DEVICE_SET,
         SIM_A,

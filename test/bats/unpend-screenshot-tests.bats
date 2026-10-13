@@ -77,6 +77,21 @@ EOF
   [ "$status" -ne 0 ]
 }
 
+@test "un-pends every prototype screenshot class without direct pending gates" {
+  local screenshot_dir="$REPO_ROOT/android/control-proxy/src/test/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/screenshot"
+  local files=("$screenshot_dir"/*ScreenshotTest.kt)
+  [ "${#files[@]}" -ge 2 ]
+  cp "${files[@]}" "$TEST_DIR/"
+  local copies=("$TEST_DIR"/*ScreenshotTest.kt)
+  [ "${#copies[@]}" -ge 2 ]
+  run "$SCRIPT" "${copies[@]}"
+  [ "$status" -eq 0 ]
+  run grep -nF 'pending = true' "${copies[@]}"
+  [ "$status" -eq 1 ]
+  run grep -nF 'skipIfPending(' "${copies[@]}"
+  [ "$status" -eq 1 ]
+}
+
 @test "errors with usage when given no arguments" {
   run "$SCRIPT"
   [ "$status" -eq 2 ]

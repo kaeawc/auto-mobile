@@ -841,3 +841,19 @@ wiring_requires_yq() {
   [ "$status" -eq 2 ]
   rm -rf "$dir"
 }
+
+@test "CtrlProxy release shrinks without obfuscation and verifies kept classes (#12129)" {
+  local build="android/control-proxy/build.gradle.kts"
+  local rules="android/control-proxy/proguard-rules.pro"
+  grep -Fq '.gradleProperty("automobile.ctrlproxy.minifyRelease")' "$build"
+  grep -Fq '.map { !it.equals("false", ignoreCase = true) }' "$build"
+  grep -Fq '.orElse(true)' "$build"
+  grep -Fq 'isMinifyEnabled = minifyRelease.get()' "$build"
+  grep -Fq 'tasks.register<VerifyR8KeptClassesTask>("verifyReleaseR8KeptClasses")' "$build"
+  grep -Fq 'tasks.matching { it.name == "assembleRelease" }.configureEach { dependsOn(verify) }' "$build"
+  grep -Fq 'tasks.matching { it.name == "minifyReleaseWithR8" }.configureEach { finalizedBy(verify) }' "$build"
+  grep -Fxq -- '-dontobfuscate' "$rules"
+  grep -Fq -- '-keep @kotlinx.serialization.Serializable class dev.jasonpearson.automobile.** { *; }' "$rules"
+  run grep -Fq 'implementation(libs.bundles.compose.ui)' "$build"
+  [ "$status" -eq 1 ]
+}

@@ -425,24 +425,29 @@ class PrototypeController(
   internal suspend fun interact(runtime: PrototypeRuntime, interaction: PrototypeInteraction) =
     mutex.withLock {
       if (destroyed || runtime !== activeRuntime) return@withLock
-      try {
-        // Compose reports its initial/restored settled page; that is rendering, not idle activity.
-        if (
-          interaction !is PrototypeInteraction.PagerMotion ||
-            interaction.scrolling ||
-            runtime.current.pages[interaction.pager] != interaction.page
-        )
-          armIdle(runtime)
-        runtime.handle(interaction)
-        if (runtime === activeRuntime && runtime.current.active) {
-          val model = runtime.renderModel()
-          syncAppearance(runtime, model)
-          syncTextFieldFocus(model)
+      PrototypeTrace.asyncSection(PrototypeTrace.INTERACT) {
+        try {
+          // Compose reports its initial/restored settled page; that is rendering, not idle
+          // activity.
+          if (
+            interaction !is PrototypeInteraction.PagerMotion ||
+              interaction.scrolling ||
+              runtime.current.pages[interaction.pager] != interaction.page
+          )
+            armIdle(runtime)
+          runtime.handle(interaction)
+          if (runtime === activeRuntime && runtime.current.active) {
+            val model = runtime.renderModel()
+            PrototypeTrace.asyncSection(PrototypeTrace.SYNC_APPEARANCE) {
+              syncAppearance(runtime, model)
+              syncTextFieldFocus(model)
+            }
+          }
+        } catch (error: CancellationException) {
+          throw error
+        } catch (error: Exception) {
+          Log.w("PrototypeController", "Prototype interaction failed", error)
         }
-      } catch (error: CancellationException) {
-        throw error
-      } catch (error: Exception) {
-        Log.w("PrototypeController", "Prototype interaction failed", error)
       }
     }
 

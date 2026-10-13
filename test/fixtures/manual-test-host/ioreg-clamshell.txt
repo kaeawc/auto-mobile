@@ -1,0 +1,38 @@
++-o IOPMrootDomain  <class IOPMrootDomain, id 0x1000002ee, registered, matched, active, busy 0 (8601 ms), retain 205>
+    {
+      "Wake Reason" = "smc.sysState.Wake(0x70070000) USB-C_plug SMC.OutboxNotEmpty nub-spmi-a0.0x59"
+      "IOPMSystemSleepParameters" = <02000000070000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000>
+      "IOPMUserTriggeredFullWake" = No
+      "IOSleepSupported" = Yes
+      "IOUserClientClass" = "RootDomainUserClient"
+      "DriverPMAssertions" = 256
+      "SleepRequestedByPID" = 361
+      "AppleClamshellCausesSleep" = No
+      "Last Sleep Reason" = "Clamshell Sleep"
+      "Hibernate File Min" = 2147483648
+      "BootSessionUUID" = "E813F5AF-5E2C-44F8-931D-CD08999B0AAD"
+      "IOPowerManagement" = {"ChildrenPowerState"=0,"DevicePowerState"=4,"CurrentPowerState"=4,"CapabilityFlags"=2,"MaxPowerState"=4}
+      "Wake Type" = "UserActivity Assertion"
+      "IOPriorityPowerStateInterest" = "IOCommand is not serializable"
+      "AppleClamshellState" = No
+      "SystemPowerProfileOverrideDict" = {}
+      "IOPMSystemSleepType" = 7
+      "DriverPMAssertionsDetailed" = ({"Assertions"=1,"ModifiedTime"=7695756077811820443,"Owner"="com.apple.pci.hostBridge.preventSleep","RegistryEntryID"=0,"CreatedTime"=0,"Level"=0,"ID"=500},{"Assertions"=1,"ModifiedTime"=7691409931685585420,"Owner"="com.apple.pci.hostBridge.preventSleep","RegistryEntryID"=0,"CreatedTime"=0,"Level"=0,"ID"=501},{"Assertions"=1,"ModifiedTime"=7691409931685585419,"Owner"="com.apple.pci.hostBridge.preventSleep","RegistryEntryID"=0,"CreatedTime"=0,"Level"=0,"ID"=502},{"Assertions"=1,"ModifiedTime"=7691409931685512799,"Owner"="com.apple.pci.hostBridge.preventSleep","RegistryEntryID"=0,"CreatedTime"=0,"Level"=0,"ID"=503},{"Assertions"=1,"ModifiedTime"=0,"Owner"="AppleHPMARMSPMI","RegistryEntryID"=4294968737,"CreatedTime"=0,"Level"=0,"ID"=504},{"Assertions"=1,"ModifiedTime"=0,"Owner"="AppleHPMARMSPMI","RegistryEntryID"=4294968816,"CreatedTime"=0,"Level"=0,"ID"=505},{"Assertions"=1,"ModifiedTime"=0,"Owner"="AppleHPMARMSPMI","RegistryEntryID"=4294968931,"CreatedTime"=0,"Level"=0,"ID"=506},{"Assertions"=1,"ModifiedTime"=0,"Owner"="AppleHPMARMSPMI","RegistryEntryID"=4294968970,"CreatedTime"=0,"Level"=0,"ID"=507},{"Assertions"=32,"ModifiedTime"=7691409910210547103,"Owner"="acio0","RegistryEntryID"=4294968220,"CreatedTime"=7691409910210545846,"Level"=0,"ID"=542},{"Assertions"=32,"ModifiedTime"=7691409910210573690,"Owner"="acio2","RegistryEntryID"=4294968214,"CreatedTime"=7691409910210573655,"Level"=0,"ID"=545},{"Assertions"=32,"ModifiedTime"=7691409910210591862,"Owner"="acio1","RegistryEntryID"=4294968803,"CreatedTime"=7691409910210590124,"Level"=0,"ID"=551},{"Assertions"=1,"ModifiedTime"=0,"Owner"="IOThunderboltControllerType5","RegistryEntryID"=4294969680,"CreatedTime"=7691409910210593514,"Level"=0,"ID"=556},{"Assertions"=1,"ModifiedTime"=0,"Owner"="IOThunderboltControllerType5","RegistryEntryID"=4294969762,"CreatedTime"=7691409910210610771,"Level"=0,"ID"=567},{"Assertions"=1,"ModifiedTime"=0,"Owner"="IOThunderboltControllerType5","RegistryEntryID"=4294969800,"CreatedTime"=7691409910210621882,"Level"=0,"ID"=572},{"Assertions"=256,"ModifiedTime"=7696190509459145589,"Owner"="en0","RegistryEntryID"=4294971907,"CreatedTime"=7691414849423457042,"Level"=255,"ID"=583})
+      "System Capabilities" = 15
+      "SleepDisabled" = No
+      "Standby Enabled" = Yes
+      "Hibernate Mode" = 3
+      "DestroyFVKeyOnStandby" = No
+      "Hibernate File" = "/var/vm/sleepimage"
+      "IOHibernateState" = <00000000>
+      "IOPreviewBuffer" = ({"address"=0,"length"=30982144})
+      "IOPMUserIsActive" = Yes
+      "Supported Features" = {"WakeByCalendarDate"=32899079,"MaintenanceWakeCalendarDate"=32964615,"SleepServiceWakeCalendarKey"=33030151,"PowerByCalendarDate"=33095687,"PowerRelativeToShutdown"=33226759,"WakeOnMagicPacket"=33423367,"WakeRelativeToSleep"=33161223,"AdaptiveDimming"=33292295,"Hibernation"=32833543}
+      "IOGeneralInterest" = "IOCommand is not serializable"
+      "IOAppPowerStateInterest" = "IOCommand is not serializable"
+      "SleepStatistics" = <da5ba523dc5103000000000000000000eb292b43df510300f20df64bdf510300>
+      "Last Sleep Options" = {"Sleep Reason"="Notification Wake Back to Sleep"}
+      "SleepWakeUUID" = "A052568E-BEE1-476F-AAC5-FC05E8A416FA"
+    }
+    
+

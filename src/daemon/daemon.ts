@@ -3871,20 +3871,20 @@ export class Daemon {
             candidatePlatforms,
           );
           if (!planActive) {
-            const { dispatchTargets, offlineRecoveryTargets } = this.prepareOfflineRecovery(
+            const { dispatchTargets } = this.prepareOfflineRecovery(
               candidateDeviceIds,
               listed.offlineDeviceIds,
               candidateIncarnations,
             );
             if (dispatchTargets.length > 0) {
               logger.warn(
-                `[DisconnectMonitor] In-session device(s) ADB-offline (${offlineRecoveryTargets.join(", ")}); attempting bounded 'adb reconnect offline' recovery before miss-counting`,
+                `[DisconnectMonitor] In-session device(s) ADB-offline (${dispatchTargets.join(", ")}); attempting bounded 'adb -s <serial> reconnect' recovery before miss-counting`,
               );
-              // Global re-detect (adb has no per-serial reconnect target), one
+              // Serial-scoped reconnects for the dispatch targets, one
               // shot per offline episode; failures are logged and swallowed
               // inside recoverAndroidOfflineDevices so a probe or recovery
               // hiccup here never blocks the miss-count/disconnect path below.
-              await deviceManager.recoverAndroidOfflineDevices();
+              await deviceManager.recoverAndroidOfflineDevices(dispatchTargets);
               // Reconnect may restore the transport during this await. Never use
               // the pre-recovery absence for miss counting or ADB-reset detection.
               discovery = await this.discoverAndReconcile(deviceManager, {
@@ -4248,7 +4248,7 @@ export class Daemon {
     // A serial that is mid-provisionDevice/startDevice already has its
     // own bounded offline recovery: AndroidEmulatorClient's
     // fresh-provision readiness wait (maybeRecoverFreshOffline, #7054/
-    // #7078) owns that serial's `adb reconnect offline` on its own 15s
+    // #7078) owns that serial's `adb -s <serial> reconnect` on its own 15s
     // threshold. Deferring to it here mirrors how the ADB-reset cohort
     // path (below) defers on the same in-flight-startup lease, so the
     // monitor never races a second reconnect against the readiness

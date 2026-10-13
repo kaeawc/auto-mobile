@@ -73,19 +73,26 @@ class AndroidPrototypeDeviceAppearance(
   }
 }
 
-/**
- * What one show is themed from. The controller owns it and updates it when the live tree, the
- * device setting or the device palette changes; host chrome, scrims, content, images and window
- * metadata all read this one value, so they can never resolve different modes (#11221). [root] is
- * the live render root (current pager pages and `styleWhen` states), not the tree as it was first
- * shown.
- */
-data class PrototypeShownTheme(
-  val root: PrototypeRenderNode,
+/** The small resolved theme value shared by the controller, host chrome and content. */
+data class PrototypeShownTheme
+internal constructor(
+  internal val themeSpec: PrototypeThemeSpec,
   val specTheme: PrototypeSpecTheme?,
   val appearance: PrototypeAppearance,
   val paletteKey: Int = 0,
-)
+) {
+  constructor(
+    root: PrototypeRenderNode,
+    specTheme: PrototypeSpecTheme?,
+    appearance: PrototypeAppearance,
+    paletteKey: Int = 0,
+  ) : this(
+    prototypeThemeSpecFor(root, specTheme, appearance.dark),
+    specTheme,
+    appearance,
+    paletteKey,
+  )
+}
 
 internal val PrototypeAppearance.dark: Boolean
   get() = mode == PrototypeAppearanceMode.DARK
@@ -141,7 +148,7 @@ internal fun prototypeResolveAppearance(
 internal fun prototypeShownPalette(shown: PrototypeShownTheme): PrototypePalette {
   val dark = shown.appearance.dark
   return PrototypePalette(
-    prototypeColorScheme(prototypeThemeSpecFor(shown.root, shown.specTheme, dark)),
+    prototypeColorScheme(shown.themeSpec),
     dark,
   )
 }

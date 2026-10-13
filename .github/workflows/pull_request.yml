@@ -3098,12 +3098,12 @@ jobs:
     # One boot (~10 min incl. Gradle setup) + both suites, inside the action's
     # one bounded retry.
     timeout-minutes: 30
-    # Compile failures stop this lane before it boots a device through the build
-    # jobs that already compile its modules (#10890): Build CtrlProxy APK,
-    # Build Playground App (incl. :playground:app unit-test sources) and Run
-    # JUnit Runner Unit Tests (:junit-runner main + test sources).
-    needs:
-      [detect-changes, build-android-control-proxy, build-playground-app, junit-runner-unit-tests]
+    # Start as soon as detect-changes finishes, without waiting for Build CtrlProxy
+    # APK, Build Playground App or Run JUnit Runner Unit Tests (#11578, owner
+    # decision 2026-10-13). Give up #10890's fail-fast and its ~3.5 min wait:
+    # a PR that does not compile now boots an emulator before failing here;
+    # those three jobs still report compile errors on their own.
+    needs: detect-changes
     if: needs.detect-changes.outputs.android_should_run == 'true'
     # Gradle home borrowed from main's kotlin-code-coverage job (#11578). The
     # setup-gradle cache is read-only on PRs and is found by job id plus the
@@ -3123,18 +3123,13 @@ jobs:
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
-      - name: "Download CtrlProxy APK"
-        uses: actions/download-artifact@v7
-        with:
-          name: control-proxy-apk
-          path: android/control-proxy/build/outputs/apk/debug
-
       # Run AutoMobile tests that require emulator
       - uses: ./.github/actions/android-emulator
         with:
-          # Compile suite prerequisites while the emulator boots and dexopt
-          # settles (#11578). Await the prebuild before running either suite;
-          # a failed prebuild leaves the suites to build their own prerequisites.
+          # Prebuild during boot also produces the CtrlProxy debug APK installed
+          # here, without a Build CtrlProxy APK artifact (#11578). Await prebuild;
+          # failure or timeout leaves the APK missing: "Accessibility APK not found"
+          # fails the attempt, and the action's one bounded retry reruns prebuild.
           prebuild-script: "../scripts/android/run-emulator-suites.sh --prebuild"
           script: "../scripts/android/run-emulator-suites.sh control-proxy/build/outputs/apk/debug/control-proxy-debug.apk"
           working-directory: "./android/"
@@ -3369,8 +3364,8 @@ jobs:
 
       - uses: ./.github/actions/gradle-task-run
         with:
-          # JVM Consumer Checks compiles the release variant, keeping it off
-          # the emulator lane's needs path (#11578).
+          # JVM Consumer Checks compiles the release variant as its own PR
+          # signal, concurrently with the emulator lane (#11578).
           gradle-tasks: ":control-proxy:assembleDebug :video-server:d8Dex"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
@@ -3424,7 +3419,7 @@ jobs:
           # not exercise, so without this they never gate.
           # Discover host unit tests (including Long Press Drag reorder) also gate here.
           # :playground:app:compileDebugUnitTestKotlin keeps the app's unit-test
-          # sources compiling before the emulator lane runs them (#10890; it
+          # sources compiling as its own PR signal alongside the emulator lane (#10890; it
           # moved here from the removed Android Emulator Compile Smoke).
           gradle-tasks: ":playground:app:assembleDebug :playground:app:compileDebugUnitTestKotlin :playground:design:system:testDebugUnitTest :playground:discover:testDebugUnitTest"
           gradle-project-directory: "android"

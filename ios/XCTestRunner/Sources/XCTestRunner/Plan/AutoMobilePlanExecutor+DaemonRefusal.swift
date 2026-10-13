@@ -15,14 +15,50 @@ extension AutoMobilePlanExecutor {
         public let message: String
         public let retryable: Bool
         public let nextAction: String?
+        public struct UnhealthyDevice: Sendable, Equatable {
+            public let deviceId: String
+            public let reason: String
+            public let recovering: Bool
+
+            public init(deviceId: String, reason: String, recovering: Bool) {
+                self.deviceId = deviceId
+                self.reason = reason
+                self.recovering = recovering
+            }
+        }
+
+        public let recovering: Bool
+        public let unhealthyDevices: [UnhealthyDevice]
         public let retryAfterMs: Int?
 
-        public init(code: String?, message: String, retryable: Bool, nextAction: String?, retryAfterMs: Int?) {
+        public init(
+            code: String?,
+            message: String,
+            retryable: Bool,
+            nextAction: String?,
+            retryAfterMs: Int?,
+            recovering: Bool = false,
+            unhealthyDevices: [UnhealthyDevice] = []
+        ) {
             self.code = code
             self.message = message
             self.retryable = retryable
             self.nextAction = nextAction
             self.retryAfterMs = retryAfterMs
+            self.recovering = recovering
+            self.unhealthyDevices = unhealthyDevices
+        }
+
+        var unhealthyDevicesMessage: String {
+            "Unhealthy devices: " + unhealthyDevices.map {
+                "\($0.deviceId) (\($0.reason), \($0.recovering ? "recovering" : "not recovering"))"
+            }.joined(separator: ", ")
+        }
+
+        var failureMessage: String {
+            guard code == "device_unhealthy" else { return message }
+            return message + "\n" + unhealthyDevicesMessage +
+                (recovering ? "" : "\nReplace the device with killDevice then startDevice.")
         }
 
         /// The refusal names a terminal session UUID: retry only under a fresh session (#11098).
@@ -32,11 +68,13 @@ extension AutoMobilePlanExecutor {
 
         /// Whether the runner waits for the device to free up, within the bounded device wait,
         /// instead of failing the attempt. The held-device codes always wait, as on Android;
-        /// capacity and discovery refusals wait only when the daemon says they are retryable.
+        /// capacity, discovery and session recovery refusals wait only when retryable. Unhealthy
+        /// devices additionally require an explicit recovering boolean.
         public var waitsForDevice: Bool {
             guard let code else { return false }
             if DaemonRefusal.deviceWaitCodes.contains(code) { return true }
-            return retryable && DaemonRefusal.retryableWaitCodes.contains(code)
+            return retryable &&
+                (DaemonRefusal.retryableWaitCodes.contains(code) || (code == "device_unhealthy" && recovering))
         }
 
         /// How the runner reacts to this refusal; the shared vocabulary of
@@ -67,6 +105,7 @@ extension AutoMobilePlanExecutor {
         static let retryableWaitCodes: Set<String> = [
             "capacity_exhausted",
             "discovery_incomplete",
+            "session_held_by_recovery",
         ]
 
         /// The refusal in a tool's text payload, or nil when the payload is not one: a plan result
@@ -85,8 +124,29 @@ extension AutoMobilePlanExecutor {
             if object["executedSteps"] != nil { return nil }
             let envelope = object["error"] as? [String: Any]
             guard envelope != nil || (object["success"] as? Bool) == false else { return nil }
+            let details = object["details"] as? [String: Any]
             func field(_ key: String) -> Any? {
                 envelope?[key] ?? object[key]
+            }
+            func healthField(_ key: String) -> Any? {
+                field(key) ?? details?[key]
+            }
+            func isTrue(_ value: Any?) -> Bool {
+                guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return false }
+                return number.boolValue
+            }
+            let recovering = isTrue(healthField("recovering"))
+            let devices: [UnhealthyDevice]
+            if let entries = healthField("devices") as? [[String: Any]] {
+                devices = entries.compactMap { entry in
+                    guard let id = entry["deviceId"] as? String,
+                          let reason = entry["reason"] as? String else { return nil }
+                    return UnhealthyDevice(deviceId: id, reason: reason, recovering: isTrue(entry["recovering"]))
+                }
+            } else if let id = healthField("deviceId") as? String, let reason = healthField("reason") as? String {
+                devices = [UnhealthyDevice(deviceId: id, reason: reason, recovering: recovering)]
+            } else {
+                devices = []
             }
             let message = (envelope?["message"] as? String)
                 ?? (object["error"] as? String)
@@ -97,7 +157,9 @@ extension AutoMobilePlanExecutor {
                 message: message,
                 retryable: (field("retryable") as? Bool) == true,
                 nextAction: field("nextAction") as? String,
-                retryAfterMs: DeviceWaitBackoff.usableHintMs(wire: field("retryAfterMs"))
+                retryAfterMs: DeviceWaitBackoff.usableHintMs(wire: field("retryAfterMs")),
+                recovering: recovering,
+                unhealthyDevices: devices
             )
         }
     }
@@ -177,6 +239,14 @@ extension AutoMobilePlanExecutor {
     }
 
     static func deviceWaitGiveUpMessage(_ refusal: DaemonRefusal, waitedMs: Int) -> String {
+        if refusal.code == "device_unhealthy" || refusal.code == "session_held_by_recovery" {
+            let isUnhealthy = refusal.code == "device_unhealthy"
+            let lead = isUnhealthy ? "Device is still being recovered" :
+                "Session's device is still being recovered"
+            return "\(lead) (\(refusal.code ?? "unknown")): \(refusal.message)" +
+                (isUnhealthy ? "\n\(refusal.unhealthyDevicesMessage)" : "") +
+                "\nThe runner waited \(waitedMs)ms for the recovery to finish."
+        }
         let what = switch refusal.code {
         case "device_cleanup_in_progress":
             "Device is still finishing its previous session's cleanup"

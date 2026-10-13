@@ -122,6 +122,46 @@
       "code": "capacity_exhausted",
       "retryAfterMs": 3000,
       "delayMs": 3000
+    },
+    {
+      "name": "device_unhealthy recovery hint at 0ms after 0 waits",
+      "waits": 0,
+      "waitedMs": 0,
+      "code": "device_unhealthy",
+      "retryAfterMs": 12863,
+      "delayMs": 12863
+    },
+    {
+      "name": "device_unhealthy recovery hint at 25000ms after 1 waits",
+      "waits": 1,
+      "waitedMs": 25000,
+      "code": "device_unhealthy",
+      "retryAfterMs": 12863,
+      "delayMs": 5000
+    },
+    {
+      "name": "device_unhealthy recovery hint at 30000ms after 8 waits",
+      "waits": 8,
+      "waitedMs": 30000,
+      "code": "device_unhealthy",
+      "retryAfterMs": 12863,
+      "delayMs": null
+    },
+    {
+      "name": "session_held_by_recovery recovery hint at 0ms after 0 waits",
+      "waits": 0,
+      "waitedMs": 0,
+      "code": "session_held_by_recovery",
+      "retryAfterMs": 1000,
+      "delayMs": 1000
+    },
+    {
+      "name": "session_held_by_recovery recovery hint at 7000ms after 3 waits",
+      "waits": 3,
+      "waitedMs": 7000,
+      "code": "session_held_by_recovery",
+      "retryAfterMs": 1000,
+      "delayMs": 4000
     }
   ]
 }

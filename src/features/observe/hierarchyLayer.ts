@@ -28,11 +28,14 @@ const scopedCache = new WeakMap<
 >();
 
 /**
- * Accessibility identifier of the host-owned dismiss control the iOS prototype agent always draws in
- * its own window beside the spec content (`PrototypeAgent.swift`). The spec cannot remove it, so it
- * marks the agent's window in the app's XCUITest hierarchy.
+ * Host-owned markers identifying the iOS prototype agent's window (`PrototypeAgent.swift`). New
+ * agents mark the window's root view only for a chromeless fullscreen prototype; every other
+ * prototype (and older agents) is found by its dismiss control. Authored content cannot remove these markers.
  */
-const IOS_PROTOTYPE_DISMISS_IDENTIFIER = "automobile-prototype-dismiss";
+const IOS_PROTOTYPE_MARKER_IDENTIFIERS = [
+  "automobile-prototype-window",
+  "automobile-prototype-dismiss",
+];
 
 /**
  * The window roots of a capture, each marked `true` when it belongs to AutoMobile's own prototype.
@@ -77,13 +80,15 @@ function isIosWindowRoot(node: ViewHierarchyNode): boolean {
   return iosWindowLayer(node.extras) !== undefined || classOf(node) === "UIWindow";
 }
 
-/** Ancestors of the first node carrying the agent's dismiss identifier, root first, itself last. */
-function pathToIosDismiss(root: ViewHierarchyNode): ViewHierarchyNode[] | undefined {
+/** Ancestors of the first node carrying an agent window marker, root first, itself last. */
+function pathToIosMarker(root: ViewHierarchyNode): ViewHierarchyNode[] | undefined {
   const path: ViewHierarchyNode[] = [];
   const visit = (node: ViewHierarchyNode): boolean => {
     path.push(node);
     if (
-      nodeAttributes(node)["resource-id"] === IOS_PROTOTYPE_DISMISS_IDENTIFIER ||
+      IOS_PROTOTYPE_MARKER_IDENTIFIERS.some(
+        (marker) => nodeAttributes(node)["resource-id"] === marker,
+      ) ||
       childrenOf(node).some(visit)
     ) {
       return true;
@@ -104,19 +109,19 @@ function collectRoots(
 
 /**
  * iOS: the in-app prototype agent's UIWindow (iphone D2). Captures carry no window ids, so the agent's
- * window is the one holding its host dismiss control:
+ * window is the one holding its chromeless fullscreen root marker, or otherwise its dismiss control:
  * - converted captures stamp each window's top-level nodes with its front-to-back layer once two
- *   windows contribute nodes (`iosWindowLayer.ts`); the prototype is every root sharing the dismiss
- *   control's layer;
+ *   windows contribute nodes (`iosWindowLayer.ts`); the prototype is every root sharing the
+ *   marker's layer;
  * - unconverted XCUITest trees keep the `UIWindow` wrappers; the prototype is the one around it;
  * - when no window root is stamped the agent's window is the only one contributing nodes (a
  *   fullscreen prototype hides the app's windows from accessibility), so every top-level node of the
  *   application is the prototype's.
- * Undefined when the dismiss control is absent: no prototype is showing, or this is not an iOS capture.
+ * Undefined when neither marker is present: no prototype is showing, or this is not an iOS capture.
  */
 function iosWindowRoots(hierarchy: ViewHierarchyResult): WindowRoots | undefined {
   const tree = hierarchy.hierarchy as ViewHierarchyNode | undefined;
-  const path = tree && !hierarchy.hierarchy.error ? pathToIosDismiss(tree) : undefined;
+  const path = tree && !hierarchy.hierarchy.error ? pathToIosMarker(tree) : undefined;
   if (!tree || !path) {
     return undefined;
   }

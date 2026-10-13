@@ -6,7 +6,8 @@ one LF newline. `ControllerContractTests.testCommittedFixturesMatchTheEncoder`
 pins both directories. The six original version-3 fixtures remain unchanged and
 are encoded through an explicit version-3 path; `shaping-requires-contract-4.json`
 adds the default-version argument error. Version-4 `ready.json` carries a mixed
-snapshot with one offline rule and one shaped rule, with packet loss unapplied.
+snapshot with one offline rule and one shaped rule, with packet loss unapplied,
+and a top-level optional `shapingActivity` containing idle adapter counters.
 The version-4 ready line round-trips through the production Codable types.
 
 Every command accepts `--contract-version <n>` only immediately after its name:
@@ -33,8 +34,14 @@ for `--contract-version 4`, and omits shaped snapshot rules with one limitation
 naming their count and the reason. Its modes remain `allow_only`/`app_offline`.
 Version 4 also carries `app_shaped`/`app_mixed`, requests, accepted effect names,
 profile units and unapplied components. These describe configuration, not traffic
-verification. This build's provider refuses shaping with `unsupported_condition`;
-shaping is neither enforced nor natively verified.
+verification. This build's shaping-capable provider enforces shaped rules on NEW
+flows of the attributed app only, implemented and unit-tested only, compiled
+unsigned, and unverified against real traffic until the signed run (#10263);
+established flows are not shaped. Data-path
+NetworkExtension assumptions and all traffic effects remain unverified until
+the signed run (#10263). `rule-unsupported-condition.json` still models the
+default Core store, which refuses shaping unless explicitly enabled. Version-3
+snapshots never contain `shapingActivity`.
 
 Regenerate both directories from the repository root (the environment variable
 continues pointing at the root fixture directory):
@@ -47,7 +54,7 @@ AUTOMOBILE_FIXTURE_OUT_DIR="$PWD/test/fixtures/network-filter-controller" \
 These fixtures are encoder output. Approval, timeout, `ready.json` and all rule
 results were not captured from an installed controller. Ready and rule results
 require a signed, approved install; `rule-applied-shaped.json` models an explicitly
-shaping-capable Core store, which this build's provider does not use. No signed,
+shaping-capable Core store, also used by this build's provider. No signed,
 approved controller was run to produce them. The TypeScript bridge tests parse
 the original version-3 lines through `ExecNetworkFilterBridge` with a fake exec seam.
 

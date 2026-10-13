@@ -15,7 +15,11 @@ import { markOccludedRowsOnFullProjection } from "./FullProjectionOcclusion";
 import { SearchableHierarchy, type SearchableEntry } from "../../utility/SearchableNode";
 import { selectableCandidates } from "../../utility/selectionRank";
 import { capLayoutWarnings } from "../audits/SafeAreaAuditor";
-import { captureFidelityTruncationReasons, collectWindowTruncations } from "../truncationReasons";
+import {
+  captureFidelityTruncationReasons,
+  collectWindowTruncations,
+  normalizeHierarchyOptionalFields,
+} from "../truncationReasons";
 import { normalizeQuotes } from "../../utility/TextMatcher";
 import { GENERATED_VIEW_ID_PATTERN, STABLE_VIEW_ID_PREFIX } from "../android/StableNodeIdentity";
 import { isIosKeyboardClass, isIosKeyboardVisible } from "../ios/IosScreenIdentity";
@@ -124,6 +128,13 @@ function cloneObserveResult(obs: ObserveResult): ObserveResult {
   return JSON.parse(JSON.stringify(obs)) as ObserveResult;
 }
 
+/** Drops legacy wire nulls from schema-declared hierarchy fields and never creates the key. */
+function dropNullHierarchyFields(out: ObserveResult): void {
+  if (out.viewHierarchy !== undefined && out.viewHierarchy !== null) {
+    out.viewHierarchy = normalizeHierarchyOptionalFields(out.viewHierarchy);
+  }
+}
+
 /**
  * Return an output-only copy of `obs` shrunk for serialization. Applies, in
  * order: perf-audit strip (always), top-level debug-perf telemetry reduction
@@ -141,6 +152,7 @@ export function sanitizeObserveResult(
   // (ViewHierarchy.ts) and the wire's own JSON semantics (undefined/functions
   // dropped), so it can never throw on a value structuredClone would reject.
   const out = clone(obs);
+  dropNullHierarchyFields(out);
 
   stripPerformanceAudit(out);
   reduceTopLevelDebugPerfTelemetry(out);

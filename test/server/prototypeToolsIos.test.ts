@@ -76,7 +76,7 @@ describe("prototype tool on an iOS simulator", () => {
     });
     expect(payload).toEqual({
       success: true,
-      lastResult: { id: "panel", lastAction: "show", success: true, timestamp: 0 },
+      lastResult: { id: "panel", lastAction: "show", chrome: "bar", success: true, timestamp: 0 },
       uploadedAssets: [{ id: "logo", mimeType: "image/png", bytes: png.length }],
     });
     expect(types()).toEqual(["put_prototype_asset", "show_prototype"]);

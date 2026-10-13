@@ -69,6 +69,11 @@ export interface PrototypeStatusStore {
   shownOnDevice(deviceId: string, id: string): PrototypeLastResult | undefined;
   startShow(scope: PrototypeScope): void;
   /**
+   * A show is about to be sent. An accepted appearance change before its result is recorded
+   * cannot be ordered against that result, so its presence must carry no appearance (#11416).
+   */
+  beginShowDispatch(deviceId: string, id: string): void;
+  /**
    * The device reported this prototype as showing (`inspect`). Presence and its last known
    * pages/state come from the device, replacing whatever the host remembered for the device.
    */
@@ -105,6 +110,7 @@ export const MAX_PROTOTYPE_STATUS_SCOPES = 128;
 /** Successful shows establish presence; host dismissals and terminal device events remove it. */
 export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
   private readonly scopes = new Map<string, StoredPrototypeStatus>();
+  private readonly showDispatches = new Map<string, Map<string, boolean>>();
 
   constructor(
     private readonly clock: Pick<Timer, "now"> = defaultTimer,
@@ -147,6 +153,12 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     }
   }
 
+  beginShowDispatch(deviceId: string, id: string): void {
+    const dispatches = this.showDispatches.get(deviceId) ?? new Map<string, boolean>();
+    dispatches.set(id, false);
+    this.showDispatches.set(deviceId, dispatches);
+  }
+
   adopt(scope: PrototypeScope, prototype: AdoptedPrototype): void {
     const key = JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]);
     const stored = this.scopes.get(key) ?? {
@@ -179,6 +191,14 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
 
   /** Accepted pushes may precede the successful show acknowledgement. */
   recordEvent(scope: PrototypeScope, event: PrototypeEvent): void {
+    const dispatches = this.showDispatches.get(scope.deviceId);
+    if (
+      dispatches?.has(event.id) &&
+      event.kind === "appearance_changed" &&
+      prototypeAppearanceAfterChange(undefined, event.payload)
+    ) {
+      dispatches.set(event.id, true);
+    }
     const key = JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]);
     const stored = this.scopes.get(key) ?? {
       ...scope,
@@ -230,6 +250,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
         ? existing?.shown.get(target.id)?.displayId
         : undefined;
     const entry = this.createResult(action, target, result, displayId ?? shownDisplay);
+    const presence = this.consumeShowDispatch(scope.deviceId, entry);
     if (!existing && !result.success) {
       return { ...entry };
     }
@@ -239,9 +260,28 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       lastResult: entry,
     };
     stored.lastResult = entry;
-    this.updatePresence(stored, entry);
+    this.updatePresence(stored, presence);
     this.remember(key, stored);
     return { ...entry };
+  }
+
+  /** Consume every recorded show's window, while preserving its device answer in lastResult. */
+  private consumeShowDispatch(deviceId: string, entry: PrototypeLastResult): PrototypeLastResult {
+    if (entry.lastAction !== "show" || !entry.id) {
+      return entry;
+    }
+    const dispatches = this.showDispatches.get(deviceId);
+    const crossed = dispatches?.get(entry.id);
+    dispatches?.delete(entry.id);
+    if (dispatches?.size === 0) {
+      this.showDispatches.delete(deviceId);
+    }
+    if (!crossed) {
+      return entry;
+    }
+    const presence = { ...entry };
+    delete presence.appearance;
+    return presence;
   }
 
   /** Re-insert so Map order tracks recency, then evict the oldest scopes past the cap. */
@@ -276,6 +316,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
   }
 
   clearDevice(deviceId: string): void {
+    this.showDispatches.delete(deviceId);
     for (const [key, stored] of this.scopes) {
       if (stored.deviceId === deviceId) {
         this.scopes.delete(key);

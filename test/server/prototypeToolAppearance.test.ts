@@ -59,8 +59,22 @@ function changed(
   };
 }
 
+/** Emit an accepted push while the real handler is waiting for the show reply. */
+class CrossingCtrlProxy extends FakeCtrlProxy {
+  crossing?: PrototypeEvent;
+
+  override async requestShowPrototype(...args: Parameters<FakeCtrlProxy["requestShowPrototype"]>) {
+    const result = await super.requestShowPrototype(...args);
+    if (this.crossing) {
+      this.emitPrototypeEvent(this.crossing);
+      this.crossing = undefined;
+    }
+    return result;
+  }
+}
+
 describe("prototype appearance on the host (#11223)", () => {
-  let client: FakeCtrlProxy;
+  let client: CrossingCtrlProxy;
   let agent: FakePrototypeAgentClient;
   let adb: FakeAdbExecutor;
   let restore: () => void;
@@ -69,7 +83,7 @@ describe("prototype appearance on the host (#11223)", () => {
   function register(agentCapabilities: readonly string[] = FAKE_PROTOTYPE_AGENT_CAPABILITIES) {
     const timer = new FakeTimer();
     adb = new FakeAdbExecutor();
-    client = new FakeCtrlProxy(timer);
+    client = new CrossingCtrlProxy(timer);
     agent = new FakePrototypeAgentClient({
       agentVersion: "0.1.0",
       protocolVersion: 1,
@@ -327,6 +341,129 @@ describe("prototype appearance on the host (#11223)", () => {
       const older = await call(ios, { action: "inspect" });
       expect(older.prototypes).toHaveLength(1);
       expect(older.prototypes?.[0]).not.toHaveProperty("appearance");
+    });
+  });
+
+  describe("appearance events crossing a show reply", () => {
+    test.each([false, true])(
+      "fresh/reset=%s crossing leaves presence unknown and preserves the buffered event",
+      async (reset) => {
+        client.setPrototypeResult({ success: true, appearance: lightSystem });
+        if (reset) {
+          await show(android);
+        }
+        client.crossing = changed(1, { mode: "dark", source: "system" });
+        const shown = await show(android, { reset });
+        expect(shown.lastResult?.appearance).toEqual(lightSystem);
+        const status = await call(android, { action: "status" });
+        expect(status.prototypes).toHaveLength(1);
+        expect(status.prototypes?.[0]).not.toHaveProperty("appearance");
+        expect(status.lastResult?.appearance).toEqual(hostLocal(lightSystem));
+        const waited = await call(android, {
+          action: "awaitEvent",
+          id: spec.id,
+          kind: "appearance_changed",
+        });
+        expect(waited.event).toMatchObject({
+          sequence: 1,
+          payload: { mode: "dark", source: "system" },
+        });
+        client.emitPrototypeEvent(changed(2, { mode: "light", source: "roleLuminance" }));
+        expect((await call(android, { action: "status" })).prototypes?.[0]?.appearance).toEqual({
+          mode: "light",
+          source: "roleLuminance",
+        });
+      },
+    );
+
+    test("in-place crossing leaves presence unknown until inspect adopts the device answer", async () => {
+      client.setSupportedCommands([INSPECT, PROTOTYPE_APPEARANCE_CAPABILITY]);
+      client.setPrototypeResult({ success: true, appearance: lightSystem });
+      await show(android);
+      client.crossing = changed(1, { mode: "dark", source: "system" });
+      expect((await show(android)).lastResult?.appearance).toEqual(lightSystem);
+      const status = await call(android, { action: "status" });
+      expect(status.prototypes).toHaveLength(1);
+      expect(status.prototypes?.[0]).not.toHaveProperty("appearance");
+      client.setInspectReply({
+        success: true,
+        prototypes: [
+          {
+            id: spec.id,
+            persistent: false,
+            pages: {},
+            state: {},
+            lastSequence: 1,
+            appearance: darkOverride,
+          },
+        ],
+        droppedEvents: 0,
+      });
+      expect((await call(android, { action: "inspect" })).prototypes?.[0]?.appearance).toEqual(
+        darkOverride,
+      );
+      expect((await call(android, { action: "status" })).prototypes?.[0]?.appearance).toEqual(
+        hostLocal(darkOverride),
+      );
+    });
+
+    test("an event before dispatch does not invalidate the newer show answer", async () => {
+      client.setPrototypeResult({ success: true, appearance: lightSystem });
+      await show(android);
+      client.emitPrototypeEvent(changed(1, { mode: "dark", source: "system" }));
+      await show(android);
+      expect((await call(android, { action: "status" })).prototypes?.[0]?.appearance).toEqual(
+        hostLocal(lightSystem),
+      );
+    });
+
+    test("a device-failed crossing show preserves the event's appearance on existing presence", async () => {
+      client.setPrototypeResult({ success: true, appearance: lightSystem });
+      await show(android);
+      client.setPrototypeResult({ success: false, error: "device refused" });
+      client.crossing = changed(1, { mode: "dark", source: "system" });
+      expect((await show(android)).success).toBe(false);
+      const status = await call(android, { action: "status" });
+      expect(status.prototypes).toHaveLength(1);
+      expect(status.prototypes?.[0]?.appearance).toEqual({ mode: "dark", source: "system" });
+    });
+
+    test("a malformed crossing payload does not invalidate the show answer", async () => {
+      client.setPrototypeResult({ success: true, appearance: lightSystem });
+      client.crossing = changed(1, { anything: 1 });
+      await show(android);
+      expect((await call(android, { action: "status" })).prototypes?.[0]?.appearance).toEqual(
+        hostLocal(lightSystem),
+      );
+    });
+
+    test("a host-refused show arms nothing before an ordinary successful show", async () => {
+      client.setSupportedCommands([]);
+      expect((await show(android, { appearance: "dark" })).success).toBe(false);
+      expect(client.getPrototypeHistory()).toHaveLength(0);
+      client.setPrototypeResult({ success: true, appearance: lightSystem });
+      await show(android);
+      expect((await call(android, { action: "status" })).prototypes?.[0]?.appearance).toEqual(
+        hostLocal(lightSystem),
+      );
+    });
+
+    test("iOS crossing leaves presence unknown while preserving the device answer", async () => {
+      unsubscribe();
+      register(withAppearance());
+      const request = agent.request.bind(agent);
+      agent.request = async (...args) => {
+        const result = await request(...args);
+        if (args[0] === "show_prototype") {
+          agent.emit({ ...changed(1, { mode: "dark", source: "system" }) });
+        }
+        return result;
+      };
+      agent.queueReplies({ appearance: lightSystem });
+      expect((await show(ios)).lastResult?.appearance).toEqual(lightSystem);
+      const status = await call(ios, { action: "status" });
+      expect(status.prototypes).toHaveLength(1);
+      expect(status.prototypes?.[0]).not.toHaveProperty("appearance");
     });
   });
 

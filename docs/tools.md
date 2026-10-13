@@ -751,6 +751,7 @@ authored mode stays put, which sends no event, so a remembered value could be wr
 `inspect` returns it on each prototype; `status` returns `mode` and `source` only. The field is
 absent when the device lacks the flag, on `dismiss` and on a failed show; a failed same-id show
 keeps the `mode` and `source` of the prototype still on screen.
+After a show crossed by an `appearance_changed` event, its status entry has no appearance until a later event or `inspect` states it.
 
 While a prototype is shown it follows the device live. On any change of the resolved mode (the
 device flipping, or prototype state changing a background the mode is inferred from) the device

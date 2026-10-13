@@ -15,7 +15,7 @@ internal fun prototypeNodeTappable(node: PrototypeRenderNode): Boolean =
 
 /** Preserve visual selector handles when their nearest tap owner has no visible text handle. */
 internal fun prototypeHandleVisuals(root: PrototypeRenderNode): Set<String> {
-  var handles: MutableSet<String>? = null
+  val handles = lazy(LazyThreadSafetyMode.NONE) { mutableSetOf<String>() }
   fun visit(node: PrototypeRenderNode, inheritedOwner: HandleVisualOwner?) {
     if (!node.visible) return
     val tappable = prototypeNodeTappable(node)
@@ -28,26 +28,24 @@ internal fun prototypeHandleVisuals(root: PrototypeRenderNode): Set<String> {
     if (owner != null && !owner.hasTextHandle) {
       if (node.role == "text" && node.text.isNotEmpty()) {
         owner.hasTextHandle = true
-        owner.visuals = null
+        owner.visuals.clear()
       } else if (node.role == "icon" || node.role == "image") {
-        val visuals = owner.visuals ?: mutableListOf<String>().also { owner.visuals = it }
-        visuals.add(node.identity)
+        owner.visuals.add(node.identity)
       }
     }
     for (index in node.children.indices) visit(node.children[index], owner)
-    if (tappable && owner != null && !owner.hasTextHandle) {
-      owner.visuals?.let { visuals ->
-        val result = handles ?: mutableSetOf<String>().also { handles = it }
-        result.addAll(visuals)
-      }
+    if (tappable && owner != null && !owner.hasTextHandle && owner.visuals.isNotEmpty()) {
+      handles.value.addAll(owner.visuals)
     }
   }
   visit(root, null)
-  return handles ?: emptySet()
+  return if (handles.isInitialized()) handles.value else emptySet()
 }
 
-/** Allocated only for tap owners; candidate storage is lazy and discarded once text is found. */
+/**
+ * Allocated only for tap owners; candidate storage starts empty and is cleared once text is found.
+ */
 private class HandleVisualOwner {
   var hasTextHandle = false
-  var visuals: MutableList<String>? = null
+  val visuals = ArrayList<String>(0)
 }

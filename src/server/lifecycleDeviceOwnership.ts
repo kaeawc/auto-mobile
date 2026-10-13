@@ -311,7 +311,8 @@ async function checkForeignHolder(
 
 /**
  * A managed slot's device, idle or not, stops only for that slot's execution; `force` does not
- * override it (#11174). This synchronous re-check reads the snapshot the entry check refreshed.
+ * override it (#11174). On a failed read, preserve the entry check's admission of the session
+ * already holding this device in the pool; a current snapshot still judges the registry first.
  */
 function assertNotForeignManagedSlotFromSnapshot(
   daemonState: DaemonState,
@@ -322,14 +323,25 @@ function assertNotForeignManagedSlotFromSnapshot(
     stableIds?: ReadonlyArray<string | undefined>;
   },
 ): void {
-  const managedRefusal = managedSlotPoolGate(daemonState.getDevicePool()).managedSlotRefusalFor?.({
+  const pool = daemonState.getDevicePool();
+  const gate = managedSlotPoolGate(pool);
+  const requesterSessionUuid = baseRequesterSession(daemonState, input.requester);
+  const managedRefusal = gate.managedSlotRefusalFor?.({
     action: input.toolName,
     deviceId: input.device.deviceId,
     platform: input.device.platform,
     stableIds: input.stableIds,
-    requesterSessionUuid: baseRequesterSession(daemonState, input.requester),
+    requesterSessionUuid,
   });
   if (managedRefusal) {
+    if (
+      gate.managedSlotSnapshotRetainedAfterFailedRead?.() &&
+      requesterSessionUuid &&
+      pool.getDevice(input.device.deviceId)?.sessionId === requesterSessionUuid
+    ) {
+      logger.debug(`[DeviceTools] ${input.toolName} preserves failed-read holder admission.`);
+      return;
+    }
     throw managedRefusal;
   }
 }

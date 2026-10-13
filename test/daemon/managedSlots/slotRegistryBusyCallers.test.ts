@@ -212,7 +212,8 @@ describe("busy registry callers", () => {
           outcome: "failed",
           failure: { code: cause === "readiness" ? "readiness_incomplete" : "scope_not_valid" },
         });
-        expect(await registry.listOpenSlotJournal(key)).toHaveLength(1);
+        expect(await registry.listOpenSlotJournal(key)).toHaveLength(0);
+        expect(inventory.devices).toHaveLength(0);
       } finally {
         write.mockRestore();
       }
@@ -227,6 +228,40 @@ describe("busy registry callers", () => {
       expect(inventory.devices).toHaveLength(1);
       expect(await registry.listOpenSlotJournal(key)).toEqual([]);
       expect((await registry.getAssignment(key))?.execOwner?.sessionUuid).toBe(retry.sessionUuid);
+    },
+  );
+
+  test.each(["readiness", "commit conflict"] as const)(
+    "persistently busy cleanup after %s retains discard intent without adopting it",
+    async (cause) => {
+      const advance = registry.advanceSlotJournal.bind(registry);
+      const busy = Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
+      const write = spyOn(registry, "advanceSlotJournal")
+        .mockRejectedValue(busy)
+        .mockImplementationOnce(advance);
+      if (cause === "readiness") {
+        provisioner.readinessStatus = "booted";
+      } else {
+        write.mockResolvedValueOnce({ kind: "scope_not_valid", scope: null });
+      }
+      try {
+        expect(await reconciler.reconcile(request())).toMatchObject({
+          outcome: "failed",
+          failure: { code: cause === "readiness" ? "readiness_incomplete" : "scope_not_valid" },
+        });
+        expect(provisioner.released).toEqual(["session-1"]);
+        expect(await registry.listOpenSlotJournal(key)).toHaveLength(1);
+        expect(inventory.has("UDID-1")).toBe(true);
+      } finally {
+        write.mockRestore();
+      }
+      provisioner.readinessStatus = "automation_ready";
+      expect(await reconciler.reconcile(request())).toMatchObject({ outcome: "ready" });
+      expect(inventory.has("UDID-1")).toBe(false);
+      expect((await registry.getAssignment(key))?.stableDeviceId).not.toBe("UDID-1");
+      expect(inventory.devices).toHaveLength(1);
+      expect(await registry.listOpenSlotJournal(key)).toHaveLength(0);
+      expect(provisioner.released).toEqual(["session-1"]);
     },
   );
 

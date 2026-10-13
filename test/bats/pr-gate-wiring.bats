@@ -38,6 +38,18 @@ wiring_requires_yq() {
   skip "yq not installed"
 }
 
+@test "JVM Consumer Checks alone opts into CtrlProxy release R8 on Android PRs (#12129)" {
+  wiring_requires_yq
+  run yq -r '.jobs."jvm-consumer-checks".steps[]
+    | select(.uses == "./.github/actions/gradle-task-run" and ((.with."gradle-tasks" // "") | test(":control-proxy:assembleRelease")))
+    | .with."gradle-flags" // ""' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" = '["-Pautomobile.ctrlproxy.minifyRelease=true"]' ]
+  run grep -Fc 'automobile.ctrlproxy.minifyRelease' "$WF"
+  [ "$status" -eq 0 ]
+  [ "$output" -eq 1 ]
+}
+
 @test "required gate jobs exist with stable context names" {
   wiring_requires_yq
   local job expected

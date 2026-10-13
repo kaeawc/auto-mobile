@@ -11,11 +11,17 @@ plugins {
   alias(libs.plugins.compose.compiler)
 }
 
+// R8 rules apply only with -Pautomobile.ctrlproxy.minifyRelease=true; CI's JVM Consumer Checks
+// uses it so the rules and kept-class verifier cannot rot. Default-on is gated on minified-APK
+// device checks (#12129): coroutine/Ktor atomic updaters rewritten to sun.misc.Unsafe on API 24/36;
+// Ktor CIO bind/accept and a long-lived WebSocket; accessibility service, IME and device-admin
+// binding; prototype icon lookup for all five styles; decode-failure wire messages; SDK event
+// batch decode and storage requests; baseline-profile install.
 val minifyRelease =
   providers
     .gradleProperty("automobile.ctrlproxy.minifyRelease")
-    .map { !it.equals("false", ignoreCase = true) }
-    .orElse(true)
+    .map { it.equals("true", ignoreCase = true) }
+    .orElse(false)
 
 android {
   namespace = "dev.jasonpearson.automobile.ctrlproxy"

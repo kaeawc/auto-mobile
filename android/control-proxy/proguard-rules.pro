@@ -1,5 +1,11 @@
+# Rules apply only with -Pautomobile.ctrlproxy.minifyRelease=true; CI's JVM Consumer Checks
+# uses it so the rules and kept-class verifier cannot rot. Default-on is gated on minified-APK
+# device checks (#12129): coroutine/Ktor atomic updaters rewritten to sun.misc.Unsafe on API 24/36;
+# Ktor CIO bind/accept and a long-lived WebSocket; accessibility service, IME and device-admin
+# binding; prototype icon lookup for all five styles; decode-failure wire messages; SDK event
+# batch decode and storage requests; baseline-profile install.
 # Open-source adb-sideloaded tool: wire errors, host component names and crash stacks need names.
-# Shrinking and optimization remain enabled.
+# Shrinking and optimization are enabled when opted in.
 -dontobfuscate
 
 # Class and member names are preserved; original file names and line numbers need retrace with

@@ -1479,7 +1479,7 @@ describe("DeviceBootService", () => {
     devices.setWaitForDeviceReadyError(
       new ActionableError(
         "Emulator 'Pixel_9_API_35' remained ADB-offline during a fresh provision cold boot; " +
-          "target=emulator-5554; state=offline. Attempted recovery: 'adb reconnect offline'.",
+          "target=emulator-5554; state=offline. Attempted recovery: 'adb -s emulator-5554 reconnect'.",
       ),
     );
 
@@ -1490,7 +1490,7 @@ describe("DeviceBootService", () => {
     });
 
     await expect(boot).rejects.toThrow("state=offline");
-    await expect(boot).rejects.toThrow("adb reconnect offline");
+    await expect(boot).rejects.toThrow("adb -s emulator-5554 reconnect");
     // The fresh-provision flag reaches the Android readiness wait...
     expect(devices.getWaitForDeviceReadyOptions()).toEqual({ freshProvision: true });
     // ...and the owned emulator process is torn down, leaving no dangling boot.

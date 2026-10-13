@@ -958,6 +958,13 @@ export const PROTOTYPE_DISPLAY_CAPABILITY = "prototype_display_id_v1";
 export const PROTOTYPE_WINDOW_OPTIONS_CAPABILITY = "prototype_window_options_v1";
 
 /**
+ * Advertised by a CtrlProxy or iOS prototype agent that honours spec `window.chrome`, draws a
+ * fullscreen prototype without the host dismiss bar by default and offers a two-finger long-press
+ * escape. A device without it always draws the dismiss bar on a fullscreen prototype.
+ */
+export const PROTOTYPE_WINDOW_CHROME_CAPABILITY = "prototype_window_chrome_v1";
+
+/**
  * Advertised by a CtrlProxy that buffers a device-persistent prototype's events while no host is
  * connected, replays them on the next connection, and answers `inspect_prototypes`.
  */

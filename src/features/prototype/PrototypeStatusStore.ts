@@ -7,6 +7,7 @@ import {
   shownAppearance,
   type ShownPrototypeAppearance,
 } from "./prototypeAppearance";
+import type { PrototypeWindowChrome } from "./prototypeWindowChrome";
 
 export type PrototypeMutation = "show" | "dismiss";
 export interface PrototypeLastResult {
@@ -28,6 +29,8 @@ export interface PrototypeLastResult {
    */
   suspended?: true;
   displayId?: number;
+  /** Host-resolved chrome for a successful fullscreen show; absent for adopted prototypes. */
+  chrome?: PrototypeWindowChrome;
   /**
    * The light or dark mode the prototype is drawn in, as last reported by the device: a show
    * result, an `inspect`, or an `appearance_changed` event since (which updates `mode` and `source`
@@ -95,8 +98,13 @@ export interface PrototypeStatusStore {
     target: { id?: string; all?: true },
     result: PrototypeResult,
     displayId?: number,
-    data?: PrototypeData,
+    details?: PrototypeRecordDetails,
   ): PrototypeLastResult;
+}
+/** What a show placed besides its display: the spec's data (#11673) and the chrome drawn (#12064). */
+export interface PrototypeRecordDetails {
+  data?: PrototypeData;
+  chrome?: PrototypeWindowChrome;
 }
 interface StoredPrototypeStatus extends PrototypeScope {
   shown: Map<string, PrototypeLastResult>;
@@ -260,7 +268,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     target: { id?: string; all?: true },
     result: PrototypeResult,
     displayId?: number,
-    data?: PrototypeData,
+    details?: PrototypeRecordDetails,
   ): PrototypeLastResult {
     const key = JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]);
     const existing = this.scopes.get(key);
@@ -269,7 +277,13 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       action !== "show" && target.id !== undefined
         ? existing?.shown.get(target.id)?.displayId
         : undefined;
-    const entry = this.createResult(action, target, result, displayId ?? shownDisplay);
+    const entry = this.createResult(
+      action,
+      target,
+      result,
+      displayId ?? shownDisplay,
+      details?.chrome,
+    );
     const presence = this.consumeShowDispatch(scope.deviceId, entry);
     if (!existing && !result.success) {
       return structuredClone(entry);
@@ -280,7 +294,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       lastResult: entry,
     };
     stored.lastResult = entry;
-    this.updatePresence(stored, { ...presence, ...shownData(action, result, data) });
+    this.updatePresence(stored, { ...presence, ...shownData(action, result, details?.data) });
     this.remember(key, stored);
     return structuredClone(entry);
   }
@@ -382,11 +396,13 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     target: { id?: string; all?: true },
     result: PrototypeResult,
     displayId?: number,
+    chrome?: PrototypeWindowChrome,
   ): PrototypeLastResult {
     return {
       ...target,
       lastAction: action,
       ...(displayId === undefined ? {} : { displayId }),
+      ...(action === "show" && result.success && chrome !== undefined ? { chrome } : {}),
       ...shownAppearance(action, result),
       success: result.success,
       ...(result.error ? { error: result.error } : {}),

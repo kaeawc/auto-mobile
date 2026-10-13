@@ -179,6 +179,23 @@ enum PrototypeModeValue: Decodable, Equatable, ExpressibleByStringLiteral {
 struct WindowSpec: Decodable {
     let placement: Placement
     let opacity: Int?
+    let chrome: String?
+
+    private enum CodingKeys: String, CodingKey { case placement, opacity, chrome }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        placement = try container.decode(Placement.self, forKey: .placement)
+        opacity = try container.decodeIfPresent(Int.self, forKey: .opacity)
+        chrome = try container.decodeIfPresent(String.self, forKey: .chrome)
+        if let chrome, chrome != "none", chrome != "bar" {
+            throw DecodingError.dataCorruptedError(
+                forKey: .chrome,
+                in: container,
+                debugDescription: "window.chrome must be none or bar"
+            )
+        }
+    }
 }
 
 struct Placement: Decodable {

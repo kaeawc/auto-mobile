@@ -178,3 +178,76 @@ final class AppFlowPolicyTests: XCTestCase {
         XCTAssertEqual(ticket.owner, "session-b")
     }
 }
+
+extension AppFlowPolicyTests {
+    private func applyShaped() {
+        store = NetworkRuleStore(clock: clock, supportsShaping: true)
+        policy = AppFlowPolicy(store: store, processTable: table, identityResolver: identities)
+        XCTAssertEqual(store.execute(NetworkRuleCommand(
+            kind: .apply, target: RuleFixtures.target, ownership: RuleFixtures.ownership(revision: 1),
+            condition: .shaped(ShapingRequest(delayMilliseconds: 100)), leaseMilliseconds: 15000
+        )).outcome, .applied)
+    }
+
+    func testOnlyShapedRuleAttributesTarget() {
+        applyShaped()
+        let token = addApp(pid: 501)
+        XCTAssertEqual(
+            policy.verdict(sourceAppAuditToken: nil, sourceProcessAuditToken: token),
+            .shape(RuleFixtures.target)
+        )
+        XCTAssertEqual(store.evaluationSnapshot()?.shapedTargets, [RuleFixtures.target])
+        XCTAssertEqual(store.evaluationSnapshot()?.managedSimulators, [RuleFixtures.simulator])
+        XCTAssertEqual(identities.lookups, 1)
+        XCTAssertGreaterThan(table.tokenLookups, 0)
+    }
+
+    func testShapedRuleAllowsSiblingNativeOtherUnattributedAndConflictingFlows() {
+        applyShaped()
+        let app = addApp(pid: 501)
+        let sibling = addApp(pid: 502, udid: RuleFixtures.sibling.udid)
+        let other = addApp(pid: 503, bundleId: "dev.example.other")
+        identities.identifiers[504] = RuleFixtures.bundleId
+        let native = table.add(pid: 504, parent: 1, path: "/Applications/Fixture.app/Contents/MacOS/Fixture")
+        let unsigned = table.add(pid: 505, parent: 400, path: CapturedSimulator.appExecutable())
+        for token in [sibling, other, native, unsigned, Data(), FakeProcessTable.token(pid: 777, pidVersion: 1)] {
+            XCTAssertEqual(policy.verdict(sourceAppAuditToken: nil, sourceProcessAuditToken: token), .allow)
+        }
+        XCTAssertEqual(policy.verdict(sourceAppAuditToken: nil, sourceProcessAuditToken: nil), .allow)
+        XCTAssertEqual(policy.verdict(sourceAppAuditToken: app, sourceProcessAuditToken: sibling), .allow)
+    }
+
+    func testOfflineReplacementDuringShapedAttributionHasPrecedence() {
+        applyShaped()
+        let token = addApp(pid: 501)
+        table.onTokenLookup = { [store] in
+            _ = store.execute(RuleFixtures.apply(RuleFixtures.ownership(revision: 2)))
+        }
+        guard case let .drop(ticket) = policy.verdict(sourceAppAuditToken: nil, sourceProcessAuditToken: token) else {
+            return XCTFail("Current offline rule must take precedence")
+        }
+        XCTAssertEqual(ticket.revision, 2)
+        XCTAssertEqual(store.activeRules().first?.droppedFlows, 1)
+    }
+
+    func testShapedResetDuringAttributionAllows() {
+        applyShaped()
+        let token = addApp(pid: 501)
+        table.onTokenLookup = { [store] in
+            _ = store.execute(RuleFixtures.reset(RuleFixtures.ownership(revision: 2)))
+        }
+        XCTAssertEqual(policy.verdict(sourceAppAuditToken: nil, sourceProcessAuditToken: token), .allow)
+    }
+}
+
+extension AppFlowPolicyTests {
+    func testResetLastShapedRuleRestoresNoLookupFastPath() {
+        applyShaped()
+        let token = addApp(pid: 501)
+        XCTAssertEqual(store.execute(RuleFixtures.reset(RuleFixtures.ownership(revision: 2))).outcome, .reset)
+        XCTAssertNil(store.evaluationSnapshot())
+        XCTAssertEqual(policy.verdict(sourceAppAuditToken: nil, sourceProcessAuditToken: token), .allow)
+        XCTAssertEqual(table.tokenLookups, 0)
+        XCTAssertEqual(identities.lookups, 0)
+    }
+}

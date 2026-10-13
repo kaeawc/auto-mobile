@@ -22,6 +22,7 @@ test/fixtures/android-touch-node/*.txt text eol=lf
 test/fixtures/android-window-policy/*.txt text eol=lf
 test/fixtures/ios-devicectl/*.json text eol=lf
 test/fixtures/observe-output/ios-overlay-window/*.json text eol=lf
+test/fixtures/observe-output/ios-prototype-sheet/*.json text eol=lf
 test/fixtures/network-filter-controller/*.json text eol=lf
 test/fixtures/network-filter-controller/v4/*.json text eol=lf
 test/fixtures/desktop-wire/*.json text eol=lf
@@ -154,3 +155,4 @@ test/fixtures/refusal-wire-hints/*.json text eol=lf
 test/lint/*-baseline.txt text eol=lf
 
 test/fixtures/android-boot-admission/README.md text eol=lf
+test/fixtures/gradle-retry/*.log text eol=lf

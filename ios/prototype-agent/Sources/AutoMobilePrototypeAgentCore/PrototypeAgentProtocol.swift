@@ -27,6 +27,7 @@ enum PrototypeAgentProtocol {
         inspectCapability,
         themeModesCapability,
         appearanceCapability,
+        windowChromeCapability,
         dataModelCapability,
     ]
     /// A same-id `show_prototype` replaces the prototype in place keeping pager pages, and
@@ -63,6 +64,9 @@ enum PrototypeAgentProtocol {
     /// that advertises
     /// this. Same name as the CtrlProxy capability.
     static let appearanceCapability = "prototype_appearance_v1"
+    /// Fullscreen `window.chrome` (#12064): `none` (default) fills the window with a hidden and
+    /// accessible escape; `bar` reserves the host dismiss bar. Same name as the CtrlProxy capability.
+    static let windowChromeCapability = "prototype_window_chrome_v1"
     /// Read-only data (#11673): resolves path repeats, authored text and data conditions once per
     /// show before repeat expansion. Status reports the shown data alongside state.
     static let dataModelCapability = "prototype_data_model_v1"

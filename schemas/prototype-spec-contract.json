@@ -4799,6 +4799,13 @@
             "values": ["session", "device"]
           },
           "optional": true
+        },
+        "chrome": {
+          "rule": {
+            "kind": "enum",
+            "values": ["bar", "none"]
+          },
+          "optional": true
         }
       }
     },

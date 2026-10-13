@@ -5,6 +5,7 @@ import { registerDerivedLabelSessionReleaseCascade } from "../../src/daemon/deri
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import type { BootedDevice } from "../../src/models";
+import { executionTracker } from "../../src/server/executionTracker";
 import { registerPlanTools } from "../../src/server/planTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import * as videoRecordingManager from "../../src/server/videoRecordingManager";
@@ -80,6 +81,9 @@ export interface PlanSessionHunt {
 
 export async function createPlanSessionHunt(devices: BootedDevice[]): Promise<PlanSessionHunt> {
   const restores: Array<() => void> = [];
+  // Callers stamp request deadlines on this hunt's FakeTimer, already on the session clock.
+  executionTracker.setSessionClockOffsetProvider(() => 0);
+  restores.push(() => executionTracker.setSessionClockOffsetProvider(() => 0));
   const recorder = new FakePlanVideoRecorder();
   const videoSpies = [
     spyOn(videoRecordingManager, "startVideoRecording").mockImplementation(

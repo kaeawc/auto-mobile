@@ -304,7 +304,7 @@ test("data is copied on show, adoption and every read, preserved on failure, and
   const store = new InMemoryPrototypeStatusStore(new FakeTimer());
   const scope = { deviceId: "data-device" };
   const data = { orders: [{ title: "Latte" }] };
-  store.record(scope, "show", { id: "orders" }, ok, undefined, data);
+  store.record(scope, "show", { id: "orders" }, ok, undefined, { data });
   data.orders[0].title = "external";
   const status = store.status(scope);
   expect(status.prototypes[0].data).toEqual({ orders: [{ title: "Latte" }] });
@@ -316,17 +316,19 @@ test("data is copied on show, adoption and every read, preserved on failure, and
     shown.data.orders = [];
   }
   expect(store.status(scope).prototypes[0].data).toEqual({ orders: [{ title: "Latte" }] });
-  store.record(scope, "show", { id: "orders" }, { success: false }, undefined, { orders: [] });
+  store.record(scope, "show", { id: "orders" }, { success: false }, undefined, {
+    data: { orders: [] },
+  });
   expect(store.status(scope).prototypes[0].data).toEqual({ orders: [{ title: "Latte" }] });
   store.adopt(scope, { id: "orders", data, pages: {}, state: {} });
   data.orders[0].title = "changed again";
   expect(store.status(scope).prototypes[0].data).toEqual({ orders: [{ title: "external" }] });
   store.adopt(scope, { id: "orders", pages: {}, state: {} });
   expect(store.status(scope).prototypes[0]).not.toHaveProperty("data");
-  store.record(scope, "show", { id: "orders" }, ok, undefined, data);
+  store.record(scope, "show", { id: "orders" }, ok, undefined, { data });
   store.record(scope, "show", { id: "orders" }, ok);
   expect(store.status(scope).prototypes[0]).not.toHaveProperty("data");
-  store.record(scope, "show", { id: "orders" }, ok, undefined, data);
+  store.record(scope, "show", { id: "orders" }, ok, undefined, { data });
   store.record(scope, "dismiss", { id: "orders" }, ok);
   expect(store.status(scope).prototypes).toEqual([]);
 });

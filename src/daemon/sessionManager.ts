@@ -6085,20 +6085,17 @@ export class SessionManager {
 
   /**
    * Whether this daemon holds `sessionId` as a live managed slot execution (#11275): present, on
-   * the `managed-execution` policy, with a non-lapsed lease and not being released. A session
-   * rehydrated after a restart and still waiting for its proxy counts: the heartbeat monitor
-   * releases it if the proxy never returns. Side-effect free: a lapsed lease is reported dead,
-   * never released here; the stored idle deadline does not decide managed liveness.
+   * the `managed-execution` policy and not being released. The stored idle deadline does not
+   * decide managed liveness; a lapsed owner lease stays live until the heartbeat path actually
+   * releases the session. A rehydrated session waiting for its proxy counts until released too.
+   * Side-effect free apart from the stall probe every lookup runs.
    */
   isLiveManagedExecutionSession(sessionId: string): boolean {
-    const session = this.sessions.get(sessionId);
+    const session = this.getSessionInternal(sessionId, false, undefined, false);
     return (
-      session !== undefined &&
-      !this.terminalReleaseSnapshots.has(sessionId) &&
+      session !== null &&
       session.livenessPolicy === MANAGED_EXECUTION_LIVENESS_POLICY &&
-      !this.releasingSessions.has(session) &&
-      (session.ownership === "awaiting-owner" ||
-        this.getSessionLeaseState(sessionId)?.phase !== "lapsed")
+      !this.releasingSessions.has(session)
     );
   }
 

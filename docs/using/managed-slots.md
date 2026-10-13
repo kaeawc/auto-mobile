@@ -294,7 +294,8 @@ A managed-execution session uses the `managed-execution` liveness policy:
   `session-info` and requested heartbeat reports give `idleReleaseAt: null`; the proxy
   treats null as authoritative and never substitutes its local idle window.
   Once the owner lease lapses, `session-info` reports a numeric `idleReleaseAt` again;
-  the release that follows is `heartbeat-timeout`, without an `idle` flag.
+  the release that follows is `heartbeat-timeout`, or `rehydration-owner-timeout` for a
+  rehydrated execution whose proxy never returns (no release if it returns), without an `idle` flag.
 - **Execution end is terminal.** Owner exit, heartbeat loss or explicit release ends the
   UUID. A call on the managed connection then answers `managed_execution_ended`
   (`nextAction: relaunch_execution`, release reason, `slotIndex` and

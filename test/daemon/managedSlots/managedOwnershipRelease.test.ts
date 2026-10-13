@@ -494,7 +494,7 @@ describe("managed ownership release", () => {
         } else if (trigger === "gate-check") {
           expect(h.reowner.automationRefusal(SESSION)).toBeDefined();
         }
-        expect(h.manager.isLiveManagedExecutionSession(SESSION)).toBe(false);
+        expect(h.manager.getSessionLeaseState(SESSION)?.phase).toBe("lapsed");
         const release = h.manager.releaseSession(SESSION, "heartbeat-timeout", true);
         await drainMicrotasks(40);
         expect(h.writes).toEqual([]);

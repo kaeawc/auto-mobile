@@ -26,7 +26,7 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeTimer } from "../fakes/FakeTimer";
 import { SUSPECT_GRACE_MS } from "../../src/daemon/livenessOwnerLease";
 
-// #11340: managed executions stay held while their owner lease is non-lapsed.
+// #11340: managed executions stay live until their held session is released.
 // The configured idle window stays stored; heartbeats and reads never move activity clocks.
 
 const SESSION = "managed-execution-session";
@@ -254,25 +254,91 @@ describe("managed-execution session liveness", () => {
     });
   });
 
-  test("managed liveness reads the lease without reaping or probing a stall", async () => {
-    await manager.adoptManagedExecutionLivenessPolicy(SESSION);
-    const probe = { calls: 0 };
-    manager.setStallProbe(() => {
-      probe.calls++;
-    });
-    const original = manager.getAllSessions()[0]!;
+  test("a managed session past its idle deadline with a live lease is live", async () => {
+    const session = await manager.adoptManagedExecutionLivenessPolicy(SESSION);
+    timer.setCurrentTime(session.expiresAt + 1);
+    await heartbeat();
+
+    expect(manager.getSessionLeaseState(SESSION)?.phase).toBe("live");
     expect(manager.isLiveManagedExecutionSession(SESSION)).toBe(true);
-    timer.advanceTime(original.heartbeatTimeoutMs + 1);
-    expect(manager.getSessionLeaseState(SESSION)?.phase).toBe("suspect");
-    expect(manager.isLiveManagedExecutionSession(SESSION)).toBe(true);
-    timer.advanceTime(SUSPECT_GRACE_MS);
+    expect(releases).toEqual([]);
+  });
+
+  test("a lapsed lease stays live without releasing or changing activity clocks", async () => {
+    const session = await manager.adoptManagedExecutionLivenessPolicy(SESSION);
+    const before = { ...session };
+    timer.setCurrentTime(session.expiresAt + 1);
     expect(manager.getSessionLeaseState(SESSION)?.phase).toBe("lapsed");
-    expect(manager.isLiveManagedExecutionSession(SESSION)).toBe(false);
+
+    expect(manager.isLiveManagedExecutionSession(SESSION)).toBe(true);
     expect(manager.hasSession(SESSION)).toBe(true);
-    expect(probe.calls).toBe(0);
+    expect(session.lastUsedAt).toBe(before.lastUsedAt);
+    expect(session.expiresAt).toBe(before.expiresAt);
     expect(releases).toEqual([]);
     expect((await persistence.getSession!(SESSION))?.release_reason).toBeNull();
   });
+
+  test("a lapsed lease stays live throughout an in-flight control call until heartbeat reap", async () => {
+    const session = await manager.adoptManagedExecutionLivenessPolicy(SESSION);
+    const control = { inFlight: true };
+    const hasControl = (sessionId: string) => sessionId === SESSION && control.inFlight;
+    manager.setActiveSessionExecutionChecker(hasControl);
+    await monitor.stop();
+    monitor = new SessionHeartbeatMonitor(
+      manager,
+      hasControl,
+      async (sessionId, reason) => {
+        await manager.releaseSession(sessionId, reason);
+      },
+      timer,
+    );
+    await manager.getOrCreateSession(SESSION, undefined, undefined, {
+      executionId: "held-control",
+      startTime: timer.now(),
+    });
+    timer.setCurrentTime(session.heartbeatTimeoutMs + SUSPECT_GRACE_MS + 1);
+    for (let tick = 0; tick < 3; tick++) {
+      expect(manager.getSessionLeaseState(SESSION)?.phase).toBe("lapsed");
+      await monitor.tick();
+      expect(manager.isLiveManagedExecutionSession(SESSION)).toBe(true);
+      expect(releases).toEqual([]);
+      timer.setCurrentTime(timer.now() + DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS);
+    }
+    control.inFlight = false;
+    manager.recordToolCallEnded(SESSION);
+    expect(manager.isLiveManagedExecutionSession(SESSION)).toBe(true);
+    await monitor.tick();
+
+    expect(releases).toEqual([{ at: timer.now(), reason: "heartbeat-timeout" }]);
+    expect(manager.isLiveManagedExecutionSession(SESSION)).toBe(false);
+    expect(manager.hasSession(SESSION)).toBe(false);
+    expect((await persistence.getSession!(SESSION))?.release_reason).toBe("heartbeat-timeout");
+  });
+
+  test.each([false, true])(
+    "managed liveness probes a stall with prior lookup=%s",
+    async (lookupFirst) => {
+      const session = await manager.adoptManagedExecutionLivenessPolicy(SESSION);
+      const lastHeartbeat = session.lastHeartbeat;
+      monitor.start();
+      // Jump without firing callbacks: the first lookup must run the real monitor's stall probe.
+      timer.setCurrentTime(30 * MINUTE);
+      expect(manager.getSessionLeaseState(SESSION)?.phase).toBe("lapsed");
+      if (lookupFirst) {
+        expect(manager.getSession(SESSION)).toBe(session);
+      }
+      expect(manager.isLiveManagedExecutionSession(SESSION)).toBe(true);
+      expect(manager.getSessionLeaseState(SESSION)?.phase).toBe("live");
+      expect(session.lastHeartbeat).toBe(lastHeartbeat);
+      expect(session.stallForgivenAt).toBeGreaterThan(lastHeartbeat);
+      const forgivenHeartbeat = session.stallForgivenAt;
+      expect(manager.getSession(SESSION)).toBe(session);
+      expect(session.stallForgivenAt).toBe(forgivenHeartbeat);
+      await monitor.tick();
+      expect(manager.isLiveManagedExecutionSession(SESSION)).toBe(true);
+      expect(releases).toEqual([]);
+    },
+  );
 
   test("adopting the policy is not use: the deadline is anchored on the last tool activity", async () => {
     const lastToolActivity = manager.getSession(SESSION)!.lastUsedAt;

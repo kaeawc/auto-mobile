@@ -467,6 +467,7 @@ interface SurfaceFields extends Omit<RefusalFields, "retryable"> {
   details?: Record<string, unknown>;
   /** A managed slot failure's boot-capacity object. */
   capacity?: Record<string, unknown>;
+  budget?: Record<string, unknown>;
 }
 
 interface SurfaceExpectations {
@@ -485,6 +486,7 @@ function surfaceTyped(fixture: RefusalSurfaceFixture): {
   typed: TypedFields;
   details?: Record<string, unknown>;
   capacity?: Record<string, unknown>;
+  budget?: Record<string, unknown>;
 } {
   const payload = fixture.payload as Record<string, unknown>;
   if (
@@ -547,11 +549,11 @@ function surfaceTyped(fixture: RefusalSurfaceFixture): {
   }
   const result = payload as unknown as ManagedSlotsResult;
   const failure = result.slots.find((slot) => slot.failure)?.failure ?? result.failure;
-  return { typed: failure as TypedFields, capacity: failure?.capacity };
+  return { typed: failure as TypedFields, capacity: failure?.capacity, budget: failure?.budget };
 }
 
 function surfaceFields(fixture: RefusalSurfaceFixture): SurfaceFields {
-  const { typed, details, capacity } = surfaceTyped(fixture);
+  const { typed, details, capacity, budget } = surfaceTyped(fixture);
   return {
     code: typed.code,
     ...(typeof typed.retryable === "boolean" ? { retryable: typed.retryable } : {}),
@@ -561,6 +563,7 @@ function surfaceFields(fixture: RefusalSurfaceFixture): SurfaceFields {
       : {}),
     ...(details ? { details } : {}),
     ...(capacity ? { capacity } : {}),
+    ...(budget ? { budget } : {}),
   };
 }
 
@@ -815,6 +818,28 @@ describe("refusal wire contract", () => {
       retryable: false,
     });
     expect(deriveDisposition(payload)).toBe("fail");
+  });
+
+  test("total-resource refusal is retryable without a retry delay on every budget surface", () => {
+    for (const fixture of fixtures.filter((entry) =>
+      entry.code.includes("managed_slot_budget_exhausted"),
+    )) {
+      const payload = JSON.parse(fixture.result.content[0].text) as {
+        error: { acquisitionFailure: ManagedSlotsResult["failure"] };
+      };
+      const failure = payload.error.acquisitionFailure;
+      expect(failure).toMatchObject({ code: "managed_slot_budget_exhausted", retryable: true });
+      expect(failure).not.toHaveProperty("retryAfterMs");
+    }
+    const surface = surfaceFixtures.find(
+      (entry) => entry.name === "managed_slot_budget_exhausted.budget",
+    )!;
+    expect(surfaceFields(surface)).toMatchObject({
+      code: "managed_slot_budget_exhausted",
+      retryable: true,
+      budget: { limit: 2, usage: { orphaned: 0 }, retained: [{ reason: "deletion_pending" }] },
+    });
+    expect(surfaceFields(surface)).not.toHaveProperty("retryAfterMs");
   });
 
   test("committed fixtures equal what the real TypeScript builders emit", () => {

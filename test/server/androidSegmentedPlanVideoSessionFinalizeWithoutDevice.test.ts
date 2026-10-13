@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
 import { AndroidSegmentedPlanVideoSession } from "../../src/server/androidSegmentedPlanVideoSession";
 import type { BootedDevice, VideoRecordingMetadata } from "../../src/models";
+import type { ActiveVideoRecording } from "../../src/features/video";
 import { drainUntil, drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -69,6 +70,180 @@ async function sessionWithTwoCompletedAndOneActive() {
 }
 
 describe("AndroidSegmentedPlanVideoSession.finalizeWithoutDevice", () => {
+  test.each(["custom abort reason", "aborted rollback failure", "non-aborted start failure"])(
+    "replacement start warning classification (%s)",
+    async (mode) => {
+      const timer = new FakeTimer();
+      const controller = new AbortController();
+      const reason = new Error("plan device lost");
+      const rollbackError = new Error("host reap failed");
+      const rollback = mock(async (_id: string) => {});
+      if (mode === "aborted rollback failure") {
+        rollback.mockRejectedValue(rollbackError);
+      }
+      const session = new AndroidSegmentedPlanVideoSession({
+        device,
+        outputNamePrefix: "classification",
+        timer,
+        segmentRotateAfterMs: 1000,
+        startVideoRecording: async (request) => {
+          if (request.outputName === "classification-seg1") {
+            if (mode === "non-aborted start failure") {
+              throw new Error("replacement rejected");
+            }
+            controller.abort(reason);
+            try {
+              request.abortSignal?.throwIfAborted();
+            } catch (error) {
+              try {
+                await rollback(request.outputName);
+              } catch (cleanupError) {
+                throw new AggregateError(
+                  [error, cleanupError],
+                  "plan device lost; recording rollback failed: host reap failed",
+                );
+              }
+              throw error;
+            }
+          }
+          return {
+            recordingId: request.outputName!,
+            outputPath: "/host/capture.mp4",
+            fileName: "capture.mp4",
+            startedAt: "",
+            config,
+          };
+        },
+        stopVideoRecording: async (id) => ({ metadata: metadata(id!), evictedRecordingIds: [] }),
+        rollbackVideoRecordingStart: rollback,
+      });
+      try {
+        await session.startFirstSegment();
+        timer.advanceTime(1000);
+        let rejection: unknown;
+        await session
+          .onBeforePlanStep({ stepIndex: 1, totalSteps: 2, signal: controller.signal })
+          .catch((error: unknown) => {
+            rejection = error;
+          });
+        expect(rejection).toBe(mode === "non-aborted start failure" ? undefined : reason);
+        expect(rollback).toHaveBeenCalledTimes(mode === "non-aborted start failure" ? 0 : 1);
+        const result = await session.finalize();
+        expect(result.recordingIds).toEqual(["classification"]);
+        const expectedWarnings =
+          mode === "custom abort reason"
+            ? []
+            : mode === "aborted rollback failure"
+              ? [
+                  "Cancelled replacement start cleanup failed: plan device lost; recording rollback failed: host reap failed",
+                ]
+              : [
+                  "Video truncated: failed to start next segment after classification: replacement rejected",
+                ];
+        expect(result.warnings).toBeUndefined();
+        expect([
+          ...(result.warnings ?? []),
+          ...result.metadata.flatMap((entry) => entry.warnings ?? []),
+        ]).toEqual(expectedWarnings);
+        expect(result.metadata.map((entry) => entry.warnings ?? [])).toEqual([expectedWarnings]);
+      } finally {
+        timer.reset();
+      }
+    },
+  );
+
+  for (const mode of [
+    "late success",
+    "aborted start",
+    "late rollback failure",
+    "start rollback failure",
+  ]) {
+    const lateSuccess = mode.startsWith("late");
+    const rollbackFails = mode.includes("failure");
+    test(`host-only finalize scopes an in-flight rotation rollback (${mode})`, async () => {
+      const timer = new FakeTimer();
+      const gate = Promise.withResolvers<void>();
+      let replacementRequest:
+        | Parameters<
+            NonNullable<
+              ConstructorParameters<
+                typeof AndroidSegmentedPlanVideoSession
+              >[0]["startVideoRecording"]
+            >
+          >[0]
+        | undefined;
+      const rollback = mock(
+        async (_id: string, _options?: { hostOnly?: boolean; deviceWide?: boolean }) => {},
+      );
+      if (rollbackFails) {
+        rollback.mockRejectedValue(new Error("host reap failed"));
+      }
+      try {
+        const session = new AndroidSegmentedPlanVideoSession({
+          device,
+          outputNamePrefix: "rotation",
+          timer,
+          segmentRotateAfterMs: 1000,
+          startVideoRecording: async (request) => {
+            const active: ActiveVideoRecording = {
+              recordingId: request.outputName!,
+              outputPath: "/host/capture.mp4",
+              fileName: "capture.mp4",
+              startedAt: "",
+              config,
+            };
+            if (request.outputName === "rotation-seg1") {
+              replacementRequest = request;
+              await gate.promise;
+              if (!lateSuccess) {
+                try {
+                  await rollback(active.recordingId, request.rollbackOptions?.());
+                } catch (rollbackError) {
+                  throw new AggregateError(
+                    [request.abortSignal?.reason, rollbackError],
+                    "recording rollback failed: host reap failed",
+                  );
+                }
+                request.abortSignal?.throwIfAborted();
+              }
+            }
+            return active;
+          },
+          stopVideoRecording: async (id) => ({ metadata: metadata(id!), evictedRecordingIds: [] }),
+          rollbackVideoRecordingStart: rollback,
+        });
+        await session.startFirstSegment();
+        timer.advanceTime(1000);
+        const rotation = session.onBeforePlanStep();
+        await drainUntil(() => replacementRequest !== undefined, {
+          description: "replacement start",
+        });
+        expect(replacementRequest?.rollbackOptions?.()).toBeUndefined();
+        await session.finalizeWithoutDevice({ hostOnly: true });
+        expect(replacementRequest?.abortSignal?.aborted).toBe(true);
+        gate.resolve();
+        await rotation;
+        expect(rollback.mock.calls).toEqual([
+          ["rotation-seg1", { hostOnly: true, deviceWide: false }],
+        ]);
+        if (rollbackFails) {
+          expect(
+            session
+              .completedResult()
+              .metadata.flatMap((entry) => entry.warnings ?? [])
+              .join(" "),
+          ).toContain("host reap failed");
+        }
+        expect(session.liveCaptureIds).toEqual([]);
+        expect(await session.finalizeWithoutDevice({ hostOnly: true })).toMatchObject({
+          recordingIds: ["rotation"],
+        });
+      } finally {
+        timer.reset();
+      }
+    });
+  }
+
   test("keeps completed segments and discards only the active one, scoped to our recorder", async () => {
     const { session, stop, rollback } = await sessionWithTwoCompletedAndOneActive();
 

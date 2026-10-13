@@ -7072,6 +7072,14 @@ export class DevicePool {
           `deviceId: '${device.id}', platform: '${device.platform}' }, then startDevice to ` +
           "bring up a fresh device.",
       );
+    const recordingTeardownRecovery = devices
+      .filter((device) => this.getDeviceHealthMarker(device.id)?.reason === "recording-teardown")
+      .map(
+        (device) =>
+          ` Device '${device.id}' is held for recording-teardown: the previous session's recorder could not be confirmed stopped. ` +
+          "Recovery is retried in the background (three attempts); if it stays held, " +
+          `call killDevice with device { name: '${device.name}', deviceId: '${device.id}', platform: '${device.platform}' }, then startDevice to bring up a fresh device.`,
+      );
     const evidence = devices.flatMap((device) => {
       const incarnation = this.getDeviceIncarnation(device.id);
       if (incarnation === undefined) {
@@ -7105,7 +7113,8 @@ export class DevicePool {
       `Unhealthy devices cannot be assigned: ${reasons.join(", ")}. ` +
         "Session state could not be restored. Retry after restoration succeeds, manually restore the state, " +
         "or use killDevice/startDevice to replace the device. Automatic erase/reboot is not performed." +
-        appCleanupRecovery.join(""),
+        appCleanupRecovery.join("") +
+        recordingTeardownRecovery.join(""),
     );
     error.message += error.recovering
       ? error.retryAfterMs === undefined

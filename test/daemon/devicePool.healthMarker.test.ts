@@ -10,7 +10,7 @@ import { registerUtilityTools } from "../../src/server/utilityTools";
 import { handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
 import { defaultDeviceClockRestoreRegistry } from "../../src/features/utility/DeviceClock";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
-import { FakeDeviceHealthMarkers } from "../fakes/FakeDeviceHealthMarkers";
+import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
@@ -39,7 +39,7 @@ afterEach(() => {
 async function harness(count = 1) {
   const timer = new FakeTimer();
   timer.setCurrentTime(1000);
-  const markers = new FakeDeviceHealthMarkers(timer);
+  const markers = new InMemoryDeviceHealthMarkers(timer);
   let calls = 0;
   let succeeds = false;
   let paused: ReturnType<typeof Promise.withResolvers<void>> | undefined;
@@ -1033,3 +1033,72 @@ for (const retirement of ["bump", "remove", "shutdown", "clear"] as const) {
     expect(h.timer.getPendingSleepCount()).toBe(0);
   });
 }
+
+test("recording-teardown refuses idle and exact binds until recovery confirms stop", async () => {
+  const h = await harness();
+  let stopped = false;
+  h.manager.markDeviceNeedsRecorderTeardown(
+    device.deviceId,
+    async () => {
+      stopped = true;
+    },
+    5_000,
+  );
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)?.reason).toBe("recording-teardown");
+  const message = await allocationError(h);
+  expect(message).toContain("recording-teardown");
+  expect(message).toContain("previous session's recorder could not be confirmed stopped");
+  expect(message).toContain("three");
+  expect(message).toContain(
+    "call killDevice with device { name: 'Pixel A', deviceId: 'emulator-5554', platform: 'android' }, then startDevice",
+  );
+  await expect(h.pool.assignDeviceToSession("idle-next", "android")).rejects.toThrow(
+    "recording-teardown",
+  );
+  DaemonState.getInstance().initialize(h.manager, h.pool);
+  const inventory = await handleDaemonRequest(
+    { id: "rec-health", type: "daemon_request", method: "daemon/availableDevices", params: {} },
+    DaemonState.getInstance(),
+  );
+  expect(inventory.result?.devices).toEqual([
+    expect.objectContaining({ unhealthy: { reason: "recording-teardown", since: 1000 } }),
+  ]);
+  expect(stopped).toBe(false);
+  await h.timer.advanceTimeAsync(1_000);
+  await flush();
+  expect(stopped).toBe(true);
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
+  expect(await h.pool.bindOrReuseDeviceSession("next", device.deviceId, "android")).toBe("next");
+});
+
+test("three recorder recovery failures hold the incarnation independently of app-cleanup", async () => {
+  const h = await harness();
+  let recorderCalls = 0;
+  let appCalls = 0;
+  h.manager.markDeviceNeedsRecorderTeardown(
+    device.deviceId,
+    async () => {
+      recorderCalls++;
+      throw new Error("recorder still alive");
+    },
+    5_000,
+  );
+  h.manager.markDeviceNeedsAppCleanup(
+    device.deviceId,
+    async () => {
+      appCalls++;
+    },
+    APP_CLEANUP_RETRY_BUDGET_MS,
+  );
+  for (const delay of [1_000, 2_000, 4_000, 60_000]) {
+    await h.timer.advanceTimeAsync(delay);
+    await flush();
+  }
+  expect(recorderCalls).toBe(3);
+  expect(appCalls).toBe(1);
+  const incarnation = h.pool.getDeviceIncarnation(device.deviceId)!;
+  expect(h.markers.get(device.deviceId, incarnation, "app-cleanup")).toBeUndefined();
+  expect(h.markers.get(device.deviceId, incarnation, "recording-teardown")?.reason).toBe(
+    "recording-teardown",
+  );
+});

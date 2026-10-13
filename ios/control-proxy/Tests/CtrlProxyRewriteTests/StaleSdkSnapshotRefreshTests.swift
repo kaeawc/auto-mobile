@@ -7,8 +7,19 @@ import XCTest
 private actor FreshFetchSdkClient: SdkHierarchyFetching {
     private var freshFetches = 0
     private let freshTimestamp: Int64
+    private var result: SdkHierarchyFetchResult?
 
     init(freshTimestamp: Int64) { self.freshTimestamp = freshTimestamp }
+
+    func stubResult(_ result: SdkHierarchyFetchResult) { self.result = result }
+    func fetchFreshHierarchyResult() async -> SdkHierarchyFetchResult {
+        if let result {
+            freshFetches += 1
+            return result
+        }
+        guard let hierarchy = await fetchFreshHierarchy() else { return .unavailable }
+        return .hierarchy(hierarchy)
+    }
 
     func freshFetchCount() -> Int { freshFetches }
     func fetchHierarchy() async -> SdkViewHierarchy? { nil }
@@ -106,6 +117,38 @@ final class StaleSdkSnapshotRefreshTests: XCTestCase {
         let fetches = await sdk.freshFetchCount()
         XCTAssertEqual(fetches, 0)
         XCTAssertEqual(cache.latest?.timestamp, 1500)
+    }
+
+    func testFailedAndUnavailableRefreshReturnXCUIHierarchyAndClearSdkCache() async throws {
+        for result: SdkHierarchyFetchResult in [.failed(.httpStatus(404)), .unavailable] {
+            let sdk = FreshFetchSdkClient(freshTimestamp: 2000)
+            await sdk.stubResult(result)
+            let cache = SdkHierarchyCache()
+            let raw = capture(updatedAt: 1000)
+            let locator = RewriteFakeElementLocator(hierarchy: raw)
+            locator.foregroundBundleId = "com.example.app"
+            locator.appState = .runningForeground
+            let handler = CommandHandler(
+                elementLocator: locator, gesturePerformer: RewriteFakeGesturePerformer(),
+                perf: PerfProvider(), sdkHierarchyClient: sdk, sdkHierarchyCache: cache
+            )
+            cache.update(snapshot(timestamp: 1))
+            let request = try JSONDecoder().decode(
+                WebSocketRequest.self, from: Data(#"{"type":"request_hierarchy","requestId":"fallback"}"#.utf8)
+            )
+
+            let payload = await handler.handle(request)
+            let response = try XCTUnwrap(payload as? HierarchyUpdateResponse)
+            XCTAssertNil(response.error)
+            XCTAssertEqual(response.requestId, "fallback")
+            let hierarchy = try XCTUnwrap(response.data)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .sortedKeys
+            XCTAssertEqual(try encoder.encode(hierarchy), try encoder.encode(raw))
+            XCTAssertNil(cache.latest)
+            let fetches = await sdk.freshFetchCount()
+            XCTAssertEqual(fetches, 1)
+        }
     }
 
     private func snapshot(timestamp: Int64) -> SdkViewHierarchy {

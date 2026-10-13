@@ -52,6 +52,9 @@ class ReadFailureRegistry implements ManagedSlotResourceRegistry, ManagedSlotEvi
     }
     return this.registry.listOpenSlotJournal();
   }
+  async snapshotManagedSlotResources() {
+    throw new Error(`${this.failAt} unavailable`);
+  }
   async snapshotManagedDevices() {
     if (this.failAt === "snapshot") {
       throw new Error("snapshot unavailable");
@@ -74,6 +77,13 @@ class SnapshotRaceRegistry implements ManagedSlotResourceRegistry, ManagedSlotEv
 
   constructor(private readonly registry: FakeSlotRegistry) {
     this.journal = () => registry.listOpenSlotJournal();
+  }
+  async snapshotManagedSlotResources() {
+    this.reads.push("snapshot");
+    const action = this.duringSnapshot;
+    this.duringSnapshot = async () => {};
+    await action();
+    return this.registry.snapshotManagedSlotResources();
   }
   listOpenSlotJournal() {
     this.reads.push("journal");
@@ -117,6 +127,7 @@ describe("managed-slot total-resource budget", () => {
 
   function budget(limit: number | null, eviction = false) {
     return new RegistryManagedSlotResourceBudget({
+      inventory,
       registry: async () => registry,
       policy: { limit: () => limit },
       eviction: eviction
@@ -218,10 +229,7 @@ describe("managed-slot total-resource budget", () => {
   }
 
   async function usage() {
-    return computeManagedSlotResourceUsage({
-      openJournal: await registry.listOpenSlotJournal(),
-      managed: await registry.snapshotManagedDevices(),
-    });
+    return computeManagedSlotResourceUsage(await registry.snapshotManagedSlotResources());
   }
 
   async function cache(name: string, platform: SlotPlatform = "android", stopped = false) {
@@ -239,8 +247,7 @@ describe("managed-slot total-resource budget", () => {
     }
   }
 
-  // The registry has no free-delete primitive yet. This test port models authoritative absence
-  // through public adoption + committed journal deletion, without native I/O or private maps.
+  // Test eviction port proves absence and removes inventory alongside the registry row.
   async function absent(
     candidate: ManagedSlotEvictionCandidate,
   ): Promise<ManagedSlotEvictionResult> {
@@ -252,11 +259,13 @@ describe("managed-slot total-resource budget", () => {
     );
     const entry = await open(key, "replace", null);
     await advance(entry, "committed", undefined, null);
+    inventory.remove(candidate.stableDeviceId);
     return { kind: "absent" };
   }
 
   test("no limit admits without ever reading the registry", async () => {
     const admission = new RegistryManagedSlotResourceBudget({
+      inventory,
       registry: async () => {
         throw new Error("must not read");
       },
@@ -282,7 +291,15 @@ describe("managed-slot total-resource budget", () => {
         managed: [...managed, ...managed],
         openJournal: await registry.listOpenSlotJournal(),
       }),
-    ).toEqual({ total: 6, active: 1, assignedIdle: 1, cached: 2, preparing: 1, deleting: 1 });
+    ).toEqual({
+      total: 6,
+      active: 1,
+      assignedIdle: 1,
+      cached: 2,
+      preparing: 1,
+      deleting: 1,
+      orphaned: 0,
+    });
   });
 
   test("materialization keeps one charge from reservation through stable identity and binding", async () => {
@@ -346,67 +363,37 @@ describe("managed-slot total-resource budget", () => {
     expect(evictor.calls).toEqual([]);
   });
 
-  test("T1 torn snapshot charges a free device adopted between assignment and free reads", async () => {
-    await assignManagedSlotDevice(registry, "android", "bound", "bound");
+  test("atomic snapshot counts an adoption once without a free pre-read", async () => {
     await cache("amslot-cache");
-    const adopter = await emptySlot("adopter");
     const mine = await creation("amslot-mine");
     const racing = new SnapshotRaceRegistry(registry);
-    racing.torn = true;
     racing.duringSnapshot = async () => {
-      expect(
-        await registry.commitBinding(
-          adopter,
-          { generation: 0, stableDeviceId: null },
-          {
-            stableDeviceId: "amslot-cache",
-            deviceName: "amslot-cache",
-            resolvedSpec: {},
-            specFingerprint: "fp",
-            state: "ready",
-          },
-        ),
-      ).toMatchObject({ kind: "committed" });
+      await assignManagedSlotDevice(registry, "android", "amslot-cache", "adopter");
     };
     const admission = new RegistryManagedSlotResourceBudget({
+      inventory,
       registry: async () => racing,
       policy: { limit: () => 2 },
     });
-    const result = await admission.admitCreation({ journalEntryId: mine.id });
-    expect(await usage()).toMatchObject({ total: 3, assignedIdle: 2, preparing: 1 });
-    expect(result).toMatchObject({ kind: "exhausted", usage: { total: 3, cached: 1 } });
-    expect(racing.reads).toEqual(["journal", "free", "snapshot"]);
+    expect(await admission.admitCreation({ journalEntryId: mine.id })).toMatchObject({
+      kind: "admitted",
+      usage: { total: 2, cached: 0, assignedIdle: 1 },
+    });
+    expect(racing.reads).toEqual(["snapshot"]);
   });
 
-  test("T2 pre-read free rows deduplicate by platform and identity and vanished rows stay charged", async () => {
-    await cache("amslot-cache", "android");
-    await cache("amslot-cache", "ios");
-    const freeBefore = await registry.listFreeDevices();
-    const input = {
-      openJournal: await registry.listOpenSlotJournal(),
-      managed: await registry.snapshotManagedDevices(),
-      freeBefore: [...freeBefore, ...freeBefore],
-    };
-    expect(computeManagedSlotResourceUsage(input)).toEqual(await usage());
-    const adoptedKey = await assignManagedSlotDevice(
-      registry,
-      "android",
-      "amslot-cache",
-      "adopted-cache",
-    );
-    const adopted = { ...input, managed: await registry.snapshotManagedDevices() };
-    expect(computeManagedSlotResourceUsage(adopted)).toMatchObject({
-      total: 2,
-      cached: 1,
-      assignedIdle: 1,
+  test("a vanished free row is no longer compensated as cached", async () => {
+    await cache("amslot-cache");
+    const mine = await creation("amslot-mine");
+    const row = (await registry.listFreeDevices())[0];
+    const owner = { daemonId: "test", pid: 7 };
+    await registry.beginFreeDeviceDeletion(row, owner);
+    await registry.completeFreeDeviceDeletion(row, owner);
+    inventory.remove(row.stableDeviceId);
+    expect(await budget(1).admitCreation({ journalEntryId: mine.id })).toMatchObject({
+      kind: "admitted",
+      usage: { total: 1, cached: 0 },
     });
-    await advance(await open(adoptedKey, "replace", null), "committed", undefined, null);
-    for (const row of await registry.listFreeDevices()) {
-      await absent({ ...row, name: row.stableDeviceId, lastUsedAtMs: row.freedAtMs });
-    }
-    const vanished = { ...input, managed: await registry.snapshotManagedDevices() };
-    expect(computeManagedSlotResourceUsage(vanished)).toMatchObject({ total: 2, cached: 2 });
-    expect((await usage()).total).toBe(0); // Safe over-count applies only to this read's ledger.
   });
 
   test("T3 lost candidates are each offered once in LRU order without eviction evidence", async () => {
@@ -437,7 +424,7 @@ describe("managed-slot total-resource budget", () => {
     });
   });
 
-  test("T5 a later create appearing during the snapshot retains cache with headroom", async () => {
+  test("an atomic snapshot associates a later reservation with its ranking", async () => {
     await cache("amslot-cache");
     const mine = await creation("amslot-mine");
     const racing = new SnapshotRaceRegistry(registry);
@@ -445,59 +432,15 @@ describe("managed-slot total-resource budget", () => {
       await creation("amslot-later");
     };
     const admission = new RegistryManagedSlotResourceBudget({
+      inventory,
       registry: async () => racing,
       policy: { limit: () => 2 },
-      eviction: {
-        selector: new DefaultManagedSlotEvictionSelector({ inventory, claims: new FakeClaims() }),
-        evictor,
-      },
-    });
-    const result = await admission.admitCreation({ journalEntryId: mine.id });
-    expect(evictor.calls).toEqual([]);
-    expect(result).toMatchObject({ kind: "admitted", usage: { total: 3 }, evicted: [] });
-    expect(racing.reads).toEqual(["journal", "free", "snapshot", "journal"]);
-  });
-
-  test("T6 a preparation unmatched by both journal reads stays charged without further rereads", async () => {
-    const mine = await creation("amslot-mine");
-    await creation("amslot-unknown");
-    const racing = new SnapshotRaceRegistry(registry);
-    racing.journal = async () => [mine];
-    const admission = new RegistryManagedSlotResourceBudget({
-      registry: async () => racing,
-      policy: { limit: () => 1 },
-    });
-    expect(await admission.admitCreation({ journalEntryId: mine.id })).toMatchObject({
-      kind: "exhausted",
-      usage: { total: 2, preparing: 2 },
-    });
-    expect(racing.reads.filter((read) => read === "journal")).toHaveLength(2);
-    expect(racing.reads).toEqual(["journal", "free", "snapshot", "journal"]);
-  });
-
-  test("journal union keeps first-read entries and the later version of matching ids", async () => {
-    const mine = await creation("amslot-mine");
-    const later = await creation("amslot-ios", "ios", "ios");
-    const racing = new SnapshotRaceRegistry(registry);
-    let journalReads = 0;
-    racing.journal = async () => {
-      journalReads += 1;
-      return journalReads === 1
-        ? [mine, later]
-        : (await registry.listOpenSlotJournal()).filter((entry) => entry.id === later.id);
-    };
-    racing.duringSnapshot = async () => {
-      await advance(later, "created", { newStableId: "UDID" });
-    };
-    const admission = new RegistryManagedSlotResourceBudget({
-      registry: async () => racing,
-      policy: { limit: () => 1 },
     });
     expect(await admission.admitCreation({ journalEntryId: mine.id })).toMatchObject({
       kind: "admitted",
-      usage: { total: 2, preparing: 2 },
+      usage: { total: 3 },
     });
-    expect(journalReads).toBe(2);
+    expect(racing.reads).toEqual(["snapshot"]);
   });
 
   test("at capacity only the LRU cache is evicted and the other remains", async () => {
@@ -590,6 +533,7 @@ describe("managed-slot total-resource budget", () => {
     "registry %s failure returns unknown",
     async (failAt) => {
       const admission = new RegistryManagedSlotResourceBudget({
+        inventory,
         registry: async () => new ReadFailureRegistry(registry, failAt),
         policy: { limit: () => 1 },
       });
@@ -604,6 +548,7 @@ describe("managed-slot total-resource budget", () => {
     await cache("amslot-cache");
     const mine = await creation("amslot-new");
     const admission = new RegistryManagedSlotResourceBudget({
+      inventory,
       registry: async () => registry,
       policy: { limit: () => 1 },
       eviction: { selector: new ThrowingSelector(), evictor },
@@ -667,9 +612,12 @@ describe("managed-slot total-resource budget", () => {
   test("unknown unmatched preparation and a missing caller reservation are both charged", async () => {
     await creation("amslot-unmatched");
     const admission = new RegistryManagedSlotResourceBudget({
+      inventory,
       registry: async () => ({
-        snapshotManagedDevices: () => registry.snapshotManagedDevices(),
-        listOpenSlotJournal: async () => [],
+        snapshotManagedSlotResources: async () => ({
+          ...(await registry.snapshotManagedSlotResources()),
+          openJournal: [],
+        }),
         listFreeDevices: () => registry.listFreeDevices(),
         findDeviceHolder: (platform, id) => registry.findDeviceHolder(platform, id),
       }),
@@ -684,6 +632,7 @@ describe("managed-slot total-resource budget", () => {
   test("each call reads and validates the current owner-chosen limit", async () => {
     let limit: number | null = null;
     const admission = new RegistryManagedSlotResourceBudget({
+      inventory,
       registry: async () => registry,
       policy: { limit: () => limit },
     });
@@ -699,34 +648,20 @@ describe("managed-slot total-resource budget", () => {
     expect((await admission.admitCreation({ journalEntryId: 1 })).kind).toBe("admitted");
   });
 
-  test("journal is read first and a creation committing between reads is never missed", async () => {
-    const lower = await creation("amslot-lower");
+  test("second independent read confirms exhaustion before refusal", async () => {
+    await cache("amslot-cache");
     const mine = await creation("amslot-mine");
-    const reads: string[] = [];
+    const racing = new SnapshotRaceRegistry(registry);
     const admission = new RegistryManagedSlotResourceBudget({
-      registry: async () => ({
-        listOpenSlotJournal: async () => {
-          reads.push("journal");
-          return registry.listOpenSlotJournal();
-        },
-        snapshotManagedDevices: async () => {
-          reads.push("snapshot");
-          await advance(lower, "committed", { newStableId: "amslot-lower" }, "amslot-lower");
-          return registry.snapshotManagedDevices();
-        },
-        listFreeDevices: async () => {
-          reads.push("free");
-          return registry.listFreeDevices();
-        },
-        findDeviceHolder: (platform, id) => registry.findDeviceHolder(platform, id),
-      }),
+      inventory,
+      registry: async () => racing,
       policy: { limit: () => 1 },
     });
     expect(await admission.admitCreation({ journalEntryId: mine.id })).toMatchObject({
       kind: "exhausted",
-      usage: { total: 2, assignedIdle: 1, preparing: 1 },
+      usage: { total: 2 },
     });
-    expect(reads).toEqual(["journal", "free", "snapshot"]);
+    expect(racing.reads).toEqual(["snapshot", "snapshot"]);
   });
 
   test("exhaustion reports the final selection's protected cached rows", async () => {

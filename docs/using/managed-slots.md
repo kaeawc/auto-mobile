@@ -595,41 +595,89 @@ boot its device.
 
 ## Total-resource capacity
 
-Boot capacity limits booted devices per platform. Total-resource capacity is a
-separate count of every distinct managed device on the host, whatever its power
-state: active, assigned idle, cached in the free pool, being prepared, being
-deleted or cleanup pending.
+`AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES` sets a trusted host-wide limit on distinct
+managed Android and iOS resources, separate from each platform's boot limit.
+Set a positive safe integer to enforce it. Unset or empty leaves total-resource
+admission disabled; an invalid value warns once when the daemon is wired and is
+ignored. No consumer configuration exists to validate in aggregate (#12051).
 
-The count comes from the host-wide slot registry, so every daemon shares it and
-its commitments survive restarts. A device stays counted until its absence is
-verified. A creation's journal entry is its reservation; the reservation becomes
-the device's charge when creation commits, without counting it twice.
+The limit is host-wide only when **every daemon on the host starts with the same
+value**. A daemon with the variable unset creates without admission and is not
+ordered against participating daemons. All daemons sharing the registry must run
+a build that understands the deletion marker: upgrade them together.
 
-This count is **not enforced yet** (#12051). No total-resource limit is
-configurable, nothing is evicted, and no acquisition is refused because of it.
+The ledger counts active devices, assigned idle devices, cached free-pool images
+(including stopped images), creation reservations, deleting or cleanup-pending
+devices, and inventory orphans whose names start with `amslot-` and whose stable
+identity is unknown to the registry. One device is counted once as its reservation
+materializes. The registry persists commitments across daemon restarts and scope
+resets. Unknown or incomplete registry or inventory reads refuse with retryable
+`discovery_incomplete`; unknown never means headroom or a full budget.
+
+Compatible eligible cache is adopted first. Adoption of cache or an orphan is
+charge-neutral. Fresh creation opens its journal reservation before native creation.
+Concurrent reservations are ordered by the registry's journal id: later fresh
+reservations cannot take capacity promised to earlier ones. A replacement keeps its
+continuous charge through delete, verified absence, and preparation of its successor.
+An over-limit read is confirmed by a fresh independent read before eviction or refusal.
+
+With headroom, unrelated cache is retained. Creation needing room may evict eligible
+unassigned cache from either platform, oldest `freedAtMs` first. Assignments in every
+scope (including abandoned but revivable scopes), open journal targets, stopping or
+already deleting rows, held devices, foreign claims, incomplete discovery, pooled
+work, shutdown/startup leases, and restart-recovery reservations are protected.
+Only a listed device with the `amslot-` prefix can be deleted.
+Pending deletions count as committed room: admission evicts at most the shortfall
+not already covered by those markers. If pending deletions cover the shortfall,
+creation is refused until redrive confirms absence, without evicting newer cache.
+
+Before a cache deletion, a transaction marks its exact free row as deletion pending.
+That durable marker fences adoption and shutdown. Only authoritative absence removes
+it. Failed or unconfirmed deletion remains charged as `deleting`, with retry backoff;
+the journal owner loop retries it even when that daemon's own limit is unset, taking
+over from a dead owner while leaving live foreign owners alone. No internal job queue
+is added for capacity refusals.
+A journaled delete is never reverted, even if its post-marking safety check finds
+the device transiently busy and the creation is refused. Redrive still deletes
+that marked cache when it becomes safe.
+
+Admission and eviction are bounded by the acquisition's preparation deadline.
+A delete journaled but not confirmed before that deadline stays charged and is
+finished by periodic redrive. A deadline passing during admission returns `timeout`.
+
+A full budget returns `managed_slot_budget_exhausted`, `retryable: true`, with no
+`retryAfterMs` because recovery has no time bound. Its `budget` evidence contains
+`limit`, category `usage` (including `total` and `orphaned`), protected `retained`
+entries with reasons, and `evictionFailures`. Reset or release managed slot scopes
+that are no longer needed, or raise `AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES`, then retry.
+This refusal is separate from `capacity_exhausted`, which concerns boot limits.
+`usage.total` includes the refused request's own `preparing` reservation, so it can
+read as the limit plus one or more. Pending deletions are named in `retained` with
+reason `deletion_pending`.
 
 ## Error codes
 
-| Code                                | Retryable | Meaning                                                                                                                                                                                                 |
-| ----------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `managed_slot_config_invalid`       | no        | Config is not valid JSON, fails the strict schema, has duplicate `slotIndex`, an out-of-range `idleTimeoutMs`, a dead `executionOwnerPid`, or is combined with `--initial-session-uuid` / `--no-proxy`. |
-| `contract_unsupported`              | no        | `contractVersion` is not supported by this build or daemon.                                                                                                                                             |
-| `managed_slot_group_unsupported`    | no        | `localSlotCapacity` or `requests` exceeds one slot and device.                                                                                                                                          |
-| `managed_slots_unsupported`         | no        | A config was supplied but this build does not serve managed slots.                                                                                                                                      |
-| `spec_unsupported`                  | no        | The requested spec is malformed, or names an Android image, iOS runtime or iOS device type this host has not installed; nothing was changed.                                                            |
-| `runtime_incompatible`              | no        | An installed iOS runtime that is unavailable, or outside the requested (or every listed) iPhone model's supported range; nothing was changed.                                                           |
-| `slot_in_use`                       | yes       | A live execution already holds the slot.                                                                                                                                                                |
-| `slot_settling`                     | yes       | The previous execution's released work is still settling.                                                                                                                                               |
-| `stale_session`                     | yes       | An earlier execution's session on the slot device could not be released.                                                                                                                                |
-| `scope_invalidated`                 | no        | The request's incarnation was reset and never accepts work again.                                                                                                                                       |
-| `scope_transition_pending`          | yes       | A scope reset is waiting for owners or cleanup to settle.                                                                                                                                               |
-| `cleanup_pending`                   | yes       | A prior deletion or release has not been confirmed.                                                                                                                                                     |
-| `discovery_incomplete`              | yes       | Device inventory or the slot registry was partial, so absence cannot be proven.                                                                                                                         |
-| `capacity_exhausted`                | yes       | Boot refused at the platform's booted-device limit.                                                                                                                                                     |
-| `device_assigned_to_managed_slot`   | no        | Generic control or lifecycle on a device assigned to a slot (or in the free pool).                                                                                                                      |
-| `device_outside_managed_slots`      | no        | A managed connection touched a device, session or tool outside its own slots.                                                                                                                           |
-| `managed_slot_acquisition_failed`   | no        | Tool call on a proxy whose acquisition failed; carries the underlying failure.                                                                                                                          |
-| `managed_slot_registration_refused` | no        | `daemon/registerSession` refused to bind a connection to managed sessions it cannot prove it holds.                                                                                                     |
+| Code                                | Retryable | Meaning                                                                                                                                                                                                                   |
+| ----------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `managed_slot_config_invalid`       | no        | Config is not valid JSON, fails the strict schema, has duplicate `slotIndex`, an out-of-range `idleTimeoutMs`, a dead `executionOwnerPid`, or is combined with `--initial-session-uuid` / `--no-proxy`.                   |
+| `contract_unsupported`              | no        | `contractVersion` is not supported by this build or daemon.                                                                                                                                                               |
+| `managed_slot_group_unsupported`    | no        | `localSlotCapacity` or `requests` exceeds one slot and device.                                                                                                                                                            |
+| `managed_slots_unsupported`         | no        | A config was supplied but this build does not serve managed slots.                                                                                                                                                        |
+| `spec_unsupported`                  | no        | The requested spec is malformed, or names an Android image, iOS runtime or iOS device type this host has not installed; nothing was changed.                                                                              |
+| `runtime_incompatible`              | no        | An installed iOS runtime that is unavailable, or outside the requested (or every listed) iPhone model's supported range; nothing was changed.                                                                             |
+| `slot_in_use`                       | yes       | A live execution already holds the slot.                                                                                                                                                                                  |
+| `slot_settling`                     | yes       | The previous execution's released work is still settling.                                                                                                                                                                 |
+| `stale_session`                     | yes       | An earlier execution's session on the slot device could not be released.                                                                                                                                                  |
+| `scope_invalidated`                 | no        | The request's incarnation was reset and never accepts work again.                                                                                                                                                         |
+| `scope_transition_pending`          | yes       | A scope reset is waiting for owners or cleanup to settle.                                                                                                                                                                 |
+| `cleanup_pending`                   | yes       | A prior deletion or release has not been confirmed.                                                                                                                                                                       |
+| `discovery_incomplete`              | yes       | Device inventory or the slot registry was partial, so absence cannot be proven.                                                                                                                                           |
+| `capacity_exhausted`                | yes       | Boot refused at the platform's booted-device limit.                                                                                                                                                                       |
+| `managed_slot_budget_exhausted`     | yes       | Total-resource budget is full. `budget` carries limit, usage, retained reasons and eviction failures; reset/release unused scopes or raise `AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES`, then retry. No retry delay is promised. |
+| `device_assigned_to_managed_slot`   | no        | Generic control or lifecycle on a device assigned to a slot (or in the free pool).                                                                                                                                        |
+| `device_outside_managed_slots`      | no        | A managed connection touched a device, session or tool outside its own slots.                                                                                                                                             |
+| `managed_slot_acquisition_failed`   | no        | Tool call on a proxy whose acquisition failed; carries the underlying failure.                                                                                                                                            |
+| `managed_slot_registration_refused` | no        | `daemon/registerSession` refused to bind a connection to managed sessions it cannot prove it holds.                                                                                                                       |
 
 Other reconciler codes that can appear in a slot's `failure`: `scope_not_valid`,
 `device_busy`, `reconcile_in_progress`, `concurrent_modification`,

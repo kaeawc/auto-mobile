@@ -3,6 +3,21 @@ import Foundation
     import os
     import UIKit
     import XCTest
+
+    @MainActor
+    private struct XCUIAppStateProbe: AppStateProbing {
+        func rawState(bundleId: String) -> UInt {
+            do {
+                return try catchingObjCException {
+                    XCUIApplication(bundleIdentifier: bundleId).state.rawValue
+                }
+            } catch {
+                // An unreadable state is safely unknown (0), preserving lifecycle polling behavior.
+                print("[ElementLocator] ObjC exception in non-throwing context: \(error)")
+                return 0
+            }
+        }
+    }
 #endif
 
 /// Locates elements via XCUITest and returns the Android-compatible hierarchy, applying
@@ -106,7 +121,7 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
 
         /// Injected performance tracking (Phase 6 wires the concrete provider).
         private let perf: any PerfTracking
-        private let appStateClock: any Clock<Duration>
+        private let appStateWaiter: AppStateWaiter
 
         // `internal`, not `public`: this init injects the internal `PerfTracking` seam, so a
         // `public` init would expose an internal type (a first-time iOS-compile error the host
@@ -118,12 +133,13 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         init(
             application: XCUIApplication? = nil,
             perf: any PerfTracking,
-            appStateClock: any Clock<Duration> = ContinuousClock()
+            appStateClock: any Clock<Duration> = ContinuousClock(),
+            appStateProbe: (any AppStateProbing)? = nil
         ) {
             DeviceRotation.startMonitoring()
             tracker.setApplication(application, bundleId: nil, observe: false)
             self.perf = perf
-            self.appStateClock = appStateClock
+            appStateWaiter = AppStateWaiter(clock: appStateClock, probe: appStateProbe ?? XCUIAppStateProbe())
         }
 
         /// Bracket a perf scope around `block` — the rewrite's expression of the reference
@@ -186,25 +202,11 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         }
 
         public func getAppState(bundleId: String) -> ObservedAppState {
-            let stateRaw: UInt = catchingObjCExceptionNonThrowing({
-                XCUIApplication(bundleIdentifier: bundleId).state.rawValue
-            }, fallback: 0)
-            switch stateRaw {
-            case 0: return .unknown
-            case 1: return .notRunning
-            case 2: return .runningBackgroundSuspended
-            case 3: return .runningBackground
-            default: return .runningForeground // rawValue >= 4
-            }
+            appStateWaiter.observedState(bundleId: bundleId)
         }
 
         public func awaitAppState(bundleId: String, expectedState: AppStateExpectation) async -> Bool {
-            await AppStateWait.poll(clock: appStateClock) {
-                let stateRaw: UInt = catchingObjCExceptionNonThrowing({
-                    XCUIApplication(bundleIdentifier: bundleId).state.rawValue
-                }, fallback: 0)
-                return AppStateWait.matches(rawState: stateRaw, expected: expectedState)
-            }
+            await appStateWaiter.awaitAppState(bundleId: bundleId, expectedState: expectedState)
         }
 
         /// Whether SpringBoard hosts a keyboard the app's own tree omits, using the same

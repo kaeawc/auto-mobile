@@ -22,6 +22,7 @@ import { trackProcess } from "../../src/utils/ChildProcessTracker";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { drainUntil } from "../helpers/fakeTimerStepping";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 import { FakeVideoCaptureBackend } from "../fakes/FakeVideoCaptureBackend";
 import { FakeHighlightClient } from "../fakes/FakeHighlightClient";
@@ -1452,6 +1453,47 @@ describe("videoRecordingManager", () => {
       endedAt: new Date(fakeTimer.now()).toISOString(),
     });
   });
+
+  for (const hostOnly of [true, false]) {
+    test(`aborted held start discards with ${hostOnly ? "live host-only options" : "device-bound defaults"}`, async () => {
+      await setVideoRecordingManagerDependencies({ resolveAndroidDisplay: async () => undefined });
+      const controller = new AbortController();
+      const gate = Promise.withResolvers<void>();
+      const originalStart = fakeBackend.start.bind(fakeBackend);
+      let started = false;
+      fakeBackend.start = async (config) => {
+        started = true;
+        await gate.promise;
+        return originalStart(config);
+      };
+      const discard = spyOn(service, "discardRecording");
+      let finalizingHostOnly = false;
+      try {
+        const starting = startVideoRecording({
+          device: testDevice,
+          abortSignal: controller.signal,
+          rollbackOptions: () =>
+            finalizingHostOnly ? { hostOnly: true, deviceWide: false } : undefined,
+        });
+        const failed = starting.catch((error: unknown) => error);
+        await drainUntil(() => started, { description: "held backend start" });
+        finalizingHostOnly = hostOnly;
+        controller.abort();
+        gate.resolve();
+        expect(await failed).toBeInstanceOf(DOMException);
+        const options = hostOnly ? { hostOnly: true, deviceWide: false } : undefined;
+        expect(discard.mock.calls).toEqual([[fakeBackend.startResults[0].recordingId, options]]);
+        expect(fakeBackend.forceStopOptionsCalls).toEqual([options]);
+        expect(fakeBackend.forceStopOptionsCalls.filter((entry) => !entry?.hostOnly)).toHaveLength(
+          hostOnly ? 0 : 1,
+        );
+        expect(service.listActiveRecordingIds()).toEqual([]);
+      } finally {
+        gate.resolve();
+        discard.mockRestore();
+      }
+    });
+  }
 
   test("rejects recording starts once shutdown begins", async () => {
     await stopAcceptingVideoRecordingStarts();

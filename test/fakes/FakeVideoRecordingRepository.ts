@@ -44,7 +44,7 @@ export class FakeVideoRecordingRepository implements VideoRecordingRepositoryCon
     }
     const updated = { ...existing };
     for (const [key, value] of Object.entries(update)) {
-      if (value !== undefined) {
+      if (value !== undefined || key === "captureTeardown") {
         (updated as Record<string, unknown>)[key] = value;
       }
     }
@@ -72,6 +72,9 @@ export class FakeVideoRecordingRepository implements VideoRecordingRepositoryCon
     let results = Array.from(this.records.values());
 
     results = results.filter((record) => ownerVisible(record, query));
+    if (query.hasCaptureTeardown) {
+      results = results.filter((record) => record.captureTeardown !== undefined);
+    }
     if (statuses) {
       results = results.filter((record) => statuses.includes(record.status));
     }

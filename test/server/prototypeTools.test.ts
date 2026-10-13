@@ -1062,9 +1062,11 @@ describe("prototype discovery over MCP", () => {
     unsubscribe = registerPrototypeTools();
     registerHighlightTools();
     registerToolSelectionTools();
-    // Compile the advertised output schemas once here, not on the test's first re-list.
+    // Default-off tools are absent from the default listing and are exactly what this test enables.
     precompileMcpOutputSchemas(
-      ToolRegistry.getToolDefinitions().map((definition) => definition.outputSchema),
+      ToolRegistry.getToolDefinitions({ includeUnavailable: true }).map(
+        (definition) => definition.outputSchema,
+      ),
     );
   });
   afterAll(async () => {
@@ -1095,6 +1097,7 @@ describe("prototype discovery over MCP", () => {
 describe("prototype CLI and advertised schema registration", () => {
   let restore: () => void;
   let definition: ReturnType<typeof ToolRegistry.getToolDefinitions>[number];
+  let validate: ReturnType<typeof compileAjv2020>;
   beforeAll(() => {
     restore = preserveToolRegistry();
     ToolRegistry.clearTools();
@@ -1102,6 +1105,23 @@ describe("prototype CLI and advertised schema registration", () => {
     definition = ToolRegistry.getToolDefinitions().find((tool) => tool.name === "prototype")!;
     compileJsonSchema(definition.inputSchema);
     compileJsonSchema(definition.outputSchema);
+    // The validator is an immutable shared fixture. Warm-up pays the engine's lazy compilation
+    // of generated validator code; verdicts are still computed and asserted in the test.
+    validate = compileAjv2020(definition.inputSchema);
+    expect(
+      validate({
+        action: "show",
+        spec: {
+          id: "warm-up-panel",
+          window: { placement: { type: "fullscreen" } },
+          components: { warmUpRow: { root: { type: "text", text: "{props.caption}" } } },
+          root: {
+            type: "column",
+            children: [{ type: "use", component: "warmUpRow", props: { caption: "Warm-up" } }],
+          },
+        },
+      }),
+    ).toBe(true);
   });
   afterAll(() => restore());
   test("the former overlay tool name is not registered (hard cut)", () => {
@@ -1114,7 +1134,6 @@ describe("prototype CLI and advertised schema registration", () => {
     expect(definition.outputSchema).toBeDefined();
   });
   test("the advertised spec accepts a components map and use nodes in any child slot", () => {
-    const validate = compileAjv2020(definition.inputSchema);
     const show = (spec: unknown) => validate({ action: "show", spec });
     const authored = {
       id: "panel",

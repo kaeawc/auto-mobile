@@ -7411,6 +7411,7 @@
                       "network-condition",
                       "clock",
                       "app-cleanup",
+                      "recording-teardown",
                       "keep-screen-awake"
                     ]
                   },
@@ -8115,6 +8116,7 @@
                       "network-condition",
                       "clock",
                       "app-cleanup",
+                      "recording-teardown",
                       "keep-screen-awake"
                     ]
                   },
@@ -22872,6 +22874,7 @@
                     "network-condition",
                     "clock",
                     "app-cleanup",
+                    "recording-teardown",
                     "keep-screen-awake"
                   ]
                 },

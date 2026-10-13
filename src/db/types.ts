@@ -645,6 +645,7 @@ export interface VideoRecordingsTable {
   last_accessed_at: string;
   config_json: string;
   highlights_json: string | null;
+  capture_teardown_json: string | null;
   recorded_panel_json: string | null;
   display_transitions_json: string | null;
   // Daemon session that started the recording (issue #4752). Nullable: rows that

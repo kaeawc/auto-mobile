@@ -257,11 +257,24 @@ Deterministic consumers can use the provider CLI instead of implementing its
 socket protocol:
 
 ```text
+auto-mobile --daemon capabilities --json
 auto-mobile --daemon session-request-status <request-id> --liveness-owner-token <token> --json
 auto-mobile --daemon abandon-session-request <request-id> --liveness-owner-token <token> --json
 auto-mobile --daemon release-broker-session <session-uuid> --liveness-owner-token <token> --json
 auto-mobile --daemon session-info <session-uuid> --json
 ```
+
+The capabilities command contacts the existing daemon and returns its complete
+`daemon/capabilities` result unchanged. Release readiness requires
+`session-broker/v1` in its `capabilities` array. A missing or unreachable daemon,
+an RPC refusal, or a malformed result exits nonzero and prints one JSON failure
+object; the command never starts a daemon, registers an MCP server, reads device
+inventory, or acquires a session. The current capability RPC identifies
+contracts, not the daemon process. Check `auto-mobile --daemon status --json`
+separately when the worker must verify the daemon PID, version, build ID, entry
+script, socket, or recovery state. If a future capability result includes
+identity fields, this command will preserve them, but the status check remains
+the identity authority.
 
 These commands only contact the existing daemon. Status preserves terminal
 failures and pending cleanup as reported; successful command execution does not

@@ -65,6 +65,11 @@ import {
   sessionBrokerCommandUsage,
   type SessionBrokerCliCommand,
 } from "./sessionBrokerCommands";
+import {
+  DAEMON_CAPABILITIES_COMMAND_USAGE,
+  daemonCapabilitiesCommandArgsAreValid,
+  queryExistingDaemonCapabilities,
+} from "./daemonCapabilitiesCommand";
 
 /** `--json`: print a daemon query's result or refusal as one JSON object (#11252). */
 export const DAEMON_JSON_FLAG = "--json";
@@ -911,6 +916,18 @@ async function queryActiveSessions(args: string[], manager: DaemonManager): Prom
   }
 }
 
+async function queryDaemonCapabilities(args: string[], manager: DaemonManager): Promise<void> {
+  try {
+    const result = await queryExistingDaemonCapabilities(args, () => manager.createClient());
+    console.log(JSON.stringify(result));
+  } catch (error) {
+    exitWithDaemonQueryFailure(
+      new DaemonCommandRefusal("Failed to query daemon capabilities", error),
+      true,
+    );
+  }
+}
+
 async function releaseDaemonSession(rawArgs: string[], manager: DaemonManager): Promise<void> {
   const { json, rest: args } = takeJsonFlag(rawArgs);
   const printReleased = (alreadyReleased: boolean, message: string, device?: string) => {
@@ -1190,6 +1207,7 @@ const STRICT_DAEMON_COMMANDS: Partial<Record<string, DaemonCommandFlagSpec>> = {
     valueFlags: ACCEPTANCE_SESSION_RESTART_FLAGS,
   },
   status: { launchFlags: true, booleanFlags: [DAEMON_JSON_FLAG] },
+  capabilities: { launchFlags: false, booleanFlags: [DAEMON_JSON_FLAG] },
   health: { launchFlags: true },
   diagnose: { launchFlags: true },
   "available-devices": { launchFlags: true, booleanFlags: [DAEMON_JSON_FLAG] },
@@ -1243,6 +1261,9 @@ export function daemonCommandArgumentError(command: string, args: string[]): str
   }
   const invalid = invalidDaemonCommandArgument(args, spec);
   if (!invalid) {
+    if (command === "capabilities" && !daemonCapabilitiesCommandArgsAreValid(args)) {
+      return DAEMON_CAPABILITIES_COMMAND_USAGE;
+    }
     if (isSessionBrokerCommand(command) && !sessionBrokerCommandArgsAreValid(command, args)) {
       return sessionBrokerCommandUsage(command);
     }
@@ -1266,6 +1287,7 @@ function printDaemonUsageError(message: string): void {
     console.log("  start                 Start the daemon");
     console.log("  stop                  Stop the daemon");
     console.log("  status                Check daemon status");
+    console.log("  capabilities --json   Query the existing daemon's capability contract");
     console.log("  restart               Restart the daemon");
     console.log("  health                Check daemon health");
     console.log("  diagnose              Run full diagnostics");
@@ -1277,7 +1299,7 @@ function printDaemonUsageError(message: string): void {
     console.log("  abandon-session-request <request-id> --liveness-owner-token <token> --json");
     console.log("  release-broker-session <session-uuid> --liveness-owner-token <token> --json");
     console.log(
-      "  (status, available-devices, active-sessions, session-info and release-session accept --json)",
+      "  (capabilities requires --json; status, available-devices, active-sessions, session-info and release-session accept --json)",
     );
     console.log(
       "  release-liveness-ownership <id> --liveness-owner-token <token>  Hand off liveness; keep the device",
@@ -1358,6 +1380,7 @@ export async function runDaemonCommand(
     "restart-admitted": () => runDaemonLifecycleCommand(command, args, options, manager),
     "restart-acceptance-session": () => runDaemonLifecycleCommand(command, args, options, manager),
     status: () => runDaemonDiagnosticsCommand(command, args, manager),
+    capabilities: () => queryDaemonCapabilities(args, manager),
     health: () => runDaemonDiagnosticsCommand(command, args, manager),
     diagnose: () => runDaemonDiagnosticsCommand(command, args, manager),
     "available-devices": () => queryAvailableDevices(args, manager),

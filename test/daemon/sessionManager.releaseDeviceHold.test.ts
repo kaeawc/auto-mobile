@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import {
-  SESSION_RELEASE_PERSIST_TIMEOUT_MS,
-  SESSION_RELEASE_TEARDOWN_CAP_MS,
+  getSessionReleaseCleanupWorstCaseMs,
   SessionManager,
 } from "../../src/daemon/sessionManager";
 import {
@@ -149,7 +148,7 @@ describe("session release device ownership hold", () => {
     expect(writes).toEqual([]);
     expect(manager.hasDeviceCleanupInProgress(DEVICE)).toBe(true);
     expect(manager.getDeviceCleanupRetryAfterMs(DEVICE)).toBe(
-      10_000 + SESSION_RELEASE_TEARDOWN_CAP_MS + SESSION_RELEASE_PERSIST_TIMEOUT_MS,
+      10_000 + getSessionReleaseCleanupWorstCaseMs(),
     );
     timer.advanceTime(700);
     hold.resolve("teardown");
@@ -307,7 +306,7 @@ describe("session release device ownership hold", () => {
     behavior.gate = teardown.promise;
     manager.setReleaseDeviceHold(() => ({ settled: hold.promise, capMs: 10_000 }));
     const release = manager.releaseSession(SESSION, "daemon-shutdown");
-    const base = SESSION_RELEASE_TEARDOWN_CAP_MS + SESSION_RELEASE_PERSIST_TIMEOUT_MS;
+    const base = getSessionReleaseCleanupWorstCaseMs();
     timer.advanceTime(1_200);
     expect(manager.getDeviceCleanupRetryAfterMs(DEVICE)).toBe(8_800 + base);
     expect(manager.getNonTerminalReleasesInProgress()[0].startedAtMs).toBe(1_000);
@@ -331,7 +330,7 @@ describe("session release device ownership hold", () => {
       return undefined;
     });
     const release = manager.releaseSession(SESSION);
-    const base = SESSION_RELEASE_TEARDOWN_CAP_MS + SESSION_RELEASE_PERSIST_TIMEOUT_MS;
+    const base = getSessionReleaseCleanupWorstCaseMs();
     expect(manager.getDeviceCleanupRetryAfterMs(DEVICE)).toBe(base);
     timer.advanceTime(700);
     expect(manager.getDeviceCleanupRetryAfterMs(DEVICE)).toBe(base - 700);

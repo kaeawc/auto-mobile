@@ -211,8 +211,15 @@ connection used for tools and resources:
    device-tool refusal). A daemon restart does not end the execution: its session
    is rehydrated, the proxy re-binds, and the restarted daemon records itself as
    the slot's owner. If registration arrives before the session is rehydrated, the
-   proxy retries on the same confined socket with backoff until it binds or the
-   execution ends; permanent refusals are not retried. While the daemon is away,
+   proxy retries on the same confined socket at 50 ms doubling to 1 s, then every
+   1 s, until it binds or the execution ends. The daemon's `retryAfterMs` floor
+   still wins (currently 500 ms for rehydration or an owner claim still pending).
+   A present managed session awaiting its owner token stays confined and retryable;
+   another token, a non-managed session or a terminal release is refused permanently.
+   Failed attempts log at debug; after more than 60 s one warning names the scope,
+   session UUIDs, elapsed time, attempt count and last failure. A successful retry
+   logs elapsed time and attempt count once. Shutdown stops retries quietly; the
+   next connection re-binds. While the daemon is away,
    tool calls answer `daemon_stalled`
    after automatic recovery is exhausted. Its message names the affected sessions
    and attempt count, with `recovery.action: "wait_for_managed_reclaim"`: the proxy
@@ -353,6 +360,22 @@ daemon until the execution is re-owned, a new execution claims the slot, or the
 record is cleared. A dead record alone never keeps a slot in use; a live session
 held by the current daemon can still do so while re-owning catches up. The `pid`
 in `reset-slot-scope` pending `liveOwners` evidence is this recorded daemon PID.
+
+While re-owning is unconfirmed, control calls refuse with
+`managed_slot_ownership_unconfirmed` and `retryAfterMs: 1000`; retries start at
+25 ms, double to a 1 s cap, and continue while the session remains unconfirmed.
+Attempts share quiet time after a blocked registry call (capped at 5 s), with
+asynchronous waits bounded at 700 ms; failures warn once after 5 s of unconfirmed ownership.
+A release while ownership is unconfirmed holds device teardown for up to 4 s on the
+daemon’s timer and expedites one waiting re-own attempt without overlapping another session's attempt.
+Confirmation starts teardown early; proven ownership loss skips device writes. At the
+cap, device writes are skipped and one warning says saved device state was dropped
+because ownership could not be confirmed. Ownership retries continue while the session
+object remains present. A queued attempt is not guaranteed to finish within the cap.
+A synchronously blocked registry write crossing the cap delays it by at most that write;
+device writes are skipped in that case, and the cap-derived `device_cleanup_in_progress`
+hint is short by the blocked time. Busy writes now fail in about 300 ms (#12123);
+the previous worst-case 3.3 s is retained as headroom.
 
 Values are the defaults in `src/daemon/sessionLivenessWindows.ts`; see
 [Device ownership](device-ownership.md#when-a-session-is-released) for the
@@ -746,3 +769,15 @@ MCP in under a second with outcome `failed`, `spec_unsupported`, zero tools,
 - [Device ownership](device-ownership.md): session holds, release rules and reads.
 - [Environment variables](environment-variables.md): heartbeat and idle tuning.
 - [Managed Macs and CI runners](managed-macs.md).
+
+Startup recovery of slots left `settling` by a dead daemon retries registry reads
+and opens at 25 ms doubling to 1 s, then every 1 s until successful or shutdown.
+After a blocked failure it also waits at least as long as the attempt took,
+capped at 5 s. Concurrent startup recovery calls share one loop. A failed read
+never means nothing needed recovery: rehydrated executions remain gated until
+ownership is confirmed. Failures log at debug, with one warning after more than
+5 s naming the last error. Recovery logs the number of restored slots when
+positive and, after any failure, elapsed time and attempt count even for zero
+slots. Shutdown cancels the wait quietly and leaves recovery to the next daemon.
+The drain's other registry retries keep their existing 250 ms to 5 s schedule,
+then every 30 s after the settlement cap.

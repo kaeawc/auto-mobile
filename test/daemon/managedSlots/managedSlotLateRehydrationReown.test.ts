@@ -20,6 +20,14 @@ const TOKEN = "managed-proxy-token";
 const BEFORE: SlotProcessIdentity = { daemonId: "before", pid: 4101, processGenerationToken: "b" };
 const AFTER: SlotProcessIdentity = { daemonId: "after", pid: 4102, processGenerationToken: "a" };
 
+const reowners: ManagedExecutionReowner[] = [];
+afterEach(async () => {
+  for (const reowner of reowners.splice(0)) {
+    reowner.close();
+    await reowner.whenIdle();
+  }
+});
+
 describe("managed execution across a daemon restart", () => {
   let timer: FakeTimer;
   let persistence: FakeDeviceSessionPersistence;
@@ -97,7 +105,12 @@ describe("managed execution across a daemon restart", () => {
   });
 
   function reowner(): ManagedExecutionReowner {
-    return new ManagedExecutionReowner({ registry: async () => registry, owner: () => AFTER });
+    const instance = new ManagedExecutionReowner({
+      registry: async () => registry,
+      owner: () => AFTER,
+    });
+    reowners.push(instance);
+    return instance;
   }
 
   async function duplicateClaim() {

@@ -18,8 +18,8 @@ export const MANAGED_SLOT_DISCOVERY_INCOMPLETE_CODE = "discovery_incomplete";
 /** Retry hint while the registry is unreadable. */
 export const MANAGED_SLOT_DISCOVERY_RETRY_AFTER_MS = 2_000;
 
-/** The same bounded retry hint while a live session's slot ownership is unconfirmed. */
-export const MANAGED_SLOT_OWNERSHIP_RETRY_AFTER_MS = MANAGED_SLOT_DISCOVERY_RETRY_AFTER_MS;
+/** Retry hint matching the re-owner's steady-state 1 s cadence while ownership is unconfirmed. */
+export const MANAGED_SLOT_OWNERSHIP_RETRY_AFTER_MS = 1_000;
 
 export class ManagedSlotOwnershipUnconfirmedError extends ActionableError {
   readonly code = "managed_slot_ownership_unconfirmed";

@@ -62,6 +62,7 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
     let timer: FakeTimer;
     let livePids: Set<number>;
     let registry: SlotRegistry;
+    const reowners: ManagedExecutionReowner[] = [];
 
     beforeEach(async () => {
       timer = new FakeTimer();
@@ -71,6 +72,10 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
     });
 
     afterEach(async () => {
+      for (const reowner of reowners.splice(0)) {
+        reowner.close();
+        await reowner.whenIdle();
+      }
       await registry.close();
     });
 
@@ -1214,10 +1219,12 @@ export function describeSlotRegistryContract(name: string, factory: SlotRegistry
       }
 
       function reowner(): ManagedExecutionReowner {
-        return new ManagedExecutionReowner({
+        const instance = new ManagedExecutionReowner({
           registry: async () => registry,
           owner: () => AFTER_RESTART,
         });
+        reowners.push(instance);
+        return instance;
       }
 
       test("the restarted daemon re-owns the live execution, so a duplicate claim is slot_in_use", async () => {

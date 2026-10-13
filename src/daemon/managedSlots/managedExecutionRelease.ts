@@ -50,6 +50,7 @@ import { type BackoffPolicy, exponentialBackoff } from "../../utils/Backoff";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
+import { RegistryRetryPacing } from "./registryRetryPacing";
 import { DefaultRetryExecutor, type RetryExecutor } from "../../utils/retry/RetryExecutor";
 import type { Timer } from "../../utils/SystemTimer";
 import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../managedExecutionLiveness";
@@ -202,6 +203,10 @@ const RECENT_RELEASE_LIMIT = 256;
 
 const RELEASE_REASON = "managed-execution-release";
 
+export const MANAGED_SETTLED_SLOT_RECOVERY_RETRY_INITIAL_DELAY_MS = 25;
+export const MANAGED_SETTLED_SLOT_RECOVERY_RETRY_MAX_DELAY_MS = 1_000;
+export const MANAGED_SETTLED_SLOT_RECOVERY_WARN_AFTER_MS = 5_000;
+
 /**
  * Session ids whose owner records this daemon must keep reading as live although the session is
  * gone: the released work still runs and its slot's `settling` mark has not been written yet
@@ -289,6 +294,8 @@ export class ManagedExecutionRelease {
   private readonly isExecOwnerLive: SlotExecOwnerLiveness;
   private readonly registryRetryBackoff: BackoffPolicy;
   private readonly registryRetry: RetryExecutor;
+  private readonly recoveryPacing: RegistryRetryPacing;
+  private recovery: Promise<SlotAssignmentRecord[]> | undefined;
   private readonly ownerHolds: ManagedExecutionOwnerHolds;
   /** Holders per session id, so one drain's release never drops another's hold. */
   private readonly ownerHoldCounts = new Map<string, number>();
@@ -306,6 +313,12 @@ export class ManagedExecutionRelease {
     this.registryRetryBackoff =
       options.registryRetryBackoff ?? MANAGED_EXECUTION_REGISTRY_RETRY_BACKOFF;
     this.registryRetry = new DefaultRetryExecutor(options.timer);
+    this.recoveryPacing = new RegistryRetryPacing({
+      timer: options.timer,
+      initialDelayMs: MANAGED_SETTLED_SLOT_RECOVERY_RETRY_INITIAL_DELAY_MS,
+      maxDelayMs: MANAGED_SETTLED_SLOT_RECOVERY_RETRY_MAX_DELAY_MS,
+      maxBlockedWaitMs: 5_000,
+    });
     this.ownerHolds = options.ownerHolds ?? inFlightSlotReservations;
   }
 
@@ -353,26 +366,47 @@ export class ManagedExecutionRelease {
   }
 
   /**
-   * Restart-time recovery: return every `settling` slot whose settler is dead to `ready`. Resolves
-   * to the recovered slots; a failure is logged and recovers nothing.
+   * Restart-time recovery retries until a read lands, returning dead settlers' slots to `ready`.
+   * Concurrent callers share the work; shutdown cancels it and resolves [] without a successful read.
+   * Never rejects: the daemon starts it fire-and-forget. whenIdle() includes this recovery.
    */
-  async recoverSettledSlots(): Promise<SlotAssignmentRecord[]> {
-    try {
-      const recovered = await (await this.options.registry()).recoverSettledSlots();
-      if (recovered.length > 0) {
-        logger.info(
-          `[ManagedExecutionRelease] Recovered ${recovered.length} settled slot(s) whose settling ` +
-            "daemon is gone",
-        );
-      }
-      return recovered;
-    } catch (error) {
-      this.warn(
-        `[ManagedExecutionRelease] Recovering settled slots failed: ${errorMessage(error)}`,
-        error,
-      );
+  recoverSettledSlots(): Promise<SlotAssignmentRecord[]> {
+    if (this.closed) {
+      return Promise.resolve([]);
+    }
+    if (this.recovery) {
+      return this.recovery;
+    }
+    const recovery = this.recoverSettledSlotsUntilReady().finally(() => {
+      this.recovery = undefined;
+    });
+    this.recovery = recovery;
+    this.track(recovery.then(() => {}));
+    return recovery;
+  }
+
+  private async recoverSettledSlotsUntilReady(): Promise<SlotAssignmentRecord[]> {
+    const result = await this.retryRegistryStep(
+      "Recovering settled slots",
+      Infinity,
+      async () => {
+        const registry = await this.options.registry();
+        this.closing.signal.throwIfAborted();
+        return registry.recoverSettledSlots();
+      },
+      undefined,
+      { fastRecovery: true },
+    );
+    if (!result.done || this.closed) {
       return [];
     }
+    if (result.value.length > 0) {
+      logger.info(
+        `[ManagedExecutionRelease] Recovered ${result.value.length} settled slot(s) whose settling ` +
+          "daemon is gone",
+      );
+    }
+    return result.value;
   }
 
   /**
@@ -385,6 +419,7 @@ export class ManagedExecutionRelease {
   close(): void {
     this.closed = true;
     this.closing.abort();
+    this.recoveryPacing.close();
   }
 
   private async drainAndRelease(sessionId: string): Promise<ManagedExecutionReleaseResult> {
@@ -1111,7 +1146,11 @@ export class ManagedExecutionRelease {
     deadline: number,
     step: () => Promise<T>,
     stopWhen?: () => boolean,
+    schedule?: { fastRecovery: true },
   ): Promise<{ done: true; value: T } | { done: false }> {
+    if (schedule?.fastRecovery) {
+      return this.retryRecoveryStep(what, step);
+    }
     const { timer } = this.options;
     let warnedPastCap = false;
     const result = await this.registryRetry.execute(step, {
@@ -1152,6 +1191,88 @@ export class ManagedExecutionRelease {
           `retried: ${errorMessage(result.error)}`,
         result.error,
       );
+    }
+    return { done: false };
+  }
+
+  /** Startup recovery bounds each shared turn, retaining late reads; drain defaults stay unchanged. */
+  private async retryRecoveryStep<T>(
+    what: string,
+    step: () => Promise<T>,
+  ): Promise<{ done: true; value: T } | { done: false }> {
+    const sinceMs = this.options.timer.now();
+    let attempts = 0;
+    let warned = false;
+    let pending: Promise<T> | undefined;
+    while (!this.closed) {
+      attempts++;
+      try {
+        const value = await this.recoveryPacing.run(
+          async () => {
+            let timedOut = false;
+            try {
+              return await raceWithDeadline(
+                () => {
+                  pending ??= step();
+                  return pending;
+                },
+                {
+                  timer: this.options.timer,
+                  timeoutMs: MANAGED_EXECUTION_SESSION_RELEASE_BUDGET_MS,
+                  signal: this.closing.signal,
+                  label: what,
+                  onTimeout: () => {
+                    timedOut = true;
+                  },
+                },
+              );
+            } finally {
+              // A timed-out read may already have landed; consume it on the next shared turn.
+              if (!timedOut) {
+                pending = undefined;
+              }
+            }
+          },
+          () => true,
+        );
+        if (this.closed) {
+          return { done: false };
+        }
+        if (attempts > 1) {
+          logger.info(
+            `[ManagedExecutionRelease] ${what} resolved after ${this.options.timer.now() - sinceMs} ms (${attempts} attempts)`,
+          );
+        }
+        return { done: true, value };
+      } catch (error) {
+        // Contention leaves recovery owed; shutdown safely leaves it to the next daemon.
+        if (this.closed) {
+          return { done: false };
+        }
+        logger.debug(`[ManagedExecutionRelease] ${what} failed: ${errorMessage(error)}`, error);
+        if (
+          !warned &&
+          this.options.timer.now() - sinceMs > MANAGED_SETTLED_SLOT_RECOVERY_WARN_AFTER_MS
+        ) {
+          warned = true;
+          this.warn(
+            `[ManagedExecutionRelease] ${what} still failing after ${this.options.timer.now() - sinceMs} ms (${attempts} attempts): ${errorMessage(error)}`,
+            error,
+          );
+        }
+      }
+      try {
+        await this.recoveryPacing.wait(this.recoveryPacing.delay(attempts));
+      } catch (error) {
+        // Closing cancels the wait; the next daemon owns startup recovery.
+        if (!this.closed) {
+          logger.debug(
+            `[ManagedExecutionRelease] Recovery retry wait cancelled: ${errorMessage(error)}`,
+            error,
+          );
+        }
+        return { done: false };
+      }
     }
     return { done: false };
   }

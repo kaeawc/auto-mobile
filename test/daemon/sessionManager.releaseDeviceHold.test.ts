@@ -7,6 +7,10 @@ import {
   ManagedExecutionReowner,
   MANAGED_OWNERSHIP_RELEASE_HOLD_CAP_MS,
 } from "../../src/daemon/managedSlots/managedExecutionReowner";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { DeviceCleanupInProgressError } from "../../src/daemon/deviceAcquisitionRefusals";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { logger } from "../../src/utils/logger";
 import { defaultDeviceClockRestoreRegistry } from "../../src/features/utility/DeviceClock";
 import {
@@ -376,4 +380,64 @@ describe("session release device ownership hold", () => {
       await reowner.whenIdle();
     }
   });
+});
+
+test("bind refusal uses the real four second hold and resets its bound at early confirmation", async () => {
+  const { manager, timer, behavior, session } = await harness();
+  const teardown = Promise.withResolvers<void>();
+  behavior.gate = teardown.promise;
+  const recovery = Promise.withResolvers<void>();
+  const reowner = new ManagedExecutionReowner({
+    registry: async () => {
+      throw new Error("recovery has not published");
+    },
+    owner: () => ({ daemonId: "test", pid: 1 }),
+    timer,
+  });
+  const device = { deviceId: DEVICE, name: DEVICE, platform: "android" as const };
+  const utils = new FakeDeviceUtils();
+  utils.setBootedDevices("android", [device]);
+  const pool = new DevicePool(
+    createDevicePoolDependencies(manager, "hold-hint", {
+      timer,
+      deviceManager: utils,
+    }),
+  );
+  await pool.initializeWithDevices([device]);
+  reowner.noteRecovering(SESSION, recovery.promise);
+  manager.setReleaseDeviceHold((id) => reowner.releaseDeviceHold(id));
+  const release = manager.releaseSession(SESSION, "daemon-shutdown");
+  async function refusedBind() {
+    const refusal = await pool.bindOrReuseDeviceSession("next-session", DEVICE, "android").then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    if (!(refusal instanceof DeviceCleanupInProgressError)) {
+      throw new Error(`Expected cleanup refusal, got ${String(refusal)}`);
+    }
+    expect(refusal.code).toBe("device_cleanup_in_progress");
+    return refusal.retryAfterMs;
+  }
+  try {
+    const base = getSessionReleaseCleanupWorstCaseMs(undefined, session.cacheData);
+    expect(await refusedBind()).toBe(4_000 + base);
+    expect(reowner.isReleaseHeld(SESSION)).toBe(true);
+    timer.advanceTime(1_200);
+    expect(await refusedBind()).toBe(2_800 + base);
+    reowner.confirmOwnership(SESSION);
+    await drainMicrotasks(40);
+    expect(await refusedBind()).toBe(base);
+    timer.advanceTime(300);
+    expect(await refusedBind()).toBe(base - 300);
+    teardown.resolve();
+    await release;
+    expect(manager.hasDeviceCleanupInProgress(DEVICE)).toBe(false);
+    expect(() => pool.assertDeviceCleanupComplete(DEVICE)).not.toThrow();
+  } finally {
+    teardown.resolve();
+    reowner.close();
+    recovery.resolve();
+    await release;
+    await reowner.whenIdle();
+  }
 });

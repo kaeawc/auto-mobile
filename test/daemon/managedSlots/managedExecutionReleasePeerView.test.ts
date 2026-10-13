@@ -19,7 +19,7 @@ import type {
 import { openSqliteSlotRegistry } from "../../../src/daemon/managedSlots/sqliteSlotRegistry";
 import { exponentialBackoff } from "../../../src/utils/Backoff";
 import { FakeTimer } from "../../fakes/FakeTimer";
-import { drainMicrotasks } from "../../helpers/fakeTimerStepping";
+import { drainMicrotasks, drainUntil } from "../../helpers/fakeTimerStepping";
 import { useScratchRoot } from "../../helpers/scratchRoot";
 
 const OWNER = { daemonId: "draining-daemon", pid: 4201, processGenerationToken: "test:owner" };
@@ -232,7 +232,8 @@ describe("managed execution release peer view", () => {
     testWithFreshSlot(
       `a peer claim between lookup and settling is loss, never ownership proof (journal=${journaled})`,
       async () => {
-        faults.busy.claimExecution = 1;
+        // Both the inline and hold-triggered re-own must leave this session unconfirmed.
+        faults.busy.claimExecution = Infinity;
         const lost: string[] = [];
         reowner = new ManagedExecutionReowner({
           registry: async () => faults.faulty,
@@ -247,6 +248,11 @@ describe("managed execution release peer view", () => {
         if (!hold || !("settled" in hold)) {
           throw new Error("expected pending hold");
         }
+        await drainUntil(() => timer.getPendingTimeouts().includes(50), {
+          description: "failed expedited re-own parking on its second backoff wait",
+        });
+        expect(faults.calls.claimExecution).toBe(2);
+        expect(reowner.ownershipState(SESSION)).toBe("unconfirmed");
         const writes: string[] = [];
         const manager = new SessionManager(
           timer,
@@ -266,7 +272,10 @@ describe("managed execution release peer view", () => {
         let peerClaimKind = "";
         faults.hooks.afterFind = async () => {
           faults.hooks.afterFind = undefined;
+          expect(reowner?.ownershipState(SESSION)).toBe("unconfirmed");
           peerClaimKind = (await peerClaim()).kind;
+          // The drain can now observe the peer's claim as loss, rather than another busy write.
+          faults.busy.claimExecution = 0;
         };
         await drain.releaseExecution(SESSION);
         expect(peerClaimKind).toBe("claimed");

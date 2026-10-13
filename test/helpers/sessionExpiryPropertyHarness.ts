@@ -1,3 +1,4 @@
+import { logger, LogLevel } from "../../src/utils/logger";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { releaseSessionAndDevice } from "../../src/daemon/releaseSessionAndDevice";
 import { SessionHeartbeatMonitor } from "../../src/daemon/SessionHeartbeatMonitor";
@@ -503,6 +504,10 @@ export async function runSchedule(
   const order = new SeededRandom(orderSeed);
   const world = new ScheduleWorld();
   const deadlines: RunResult["deadlines"] = [];
+  const previousLevel = logger.getLogLevel();
+  // Replays never yield a real event-loop turn: log lines would queue behind the rotation check
+  // until the file ends, retaining suspended frames and causing costly collections mid-test.
+  logger.setLogLevel(LogLevel.NONE);
   try {
     await world.start(schedule.idleWindowMs);
     for (const instant of instants) {
@@ -536,7 +541,11 @@ export async function runSchedule(
       device: world.device(),
     };
   } finally {
-    await world.stop();
+    try {
+      await world.stop();
+    } finally {
+      logger.setLogLevel(previousLevel);
+    }
   }
 }
 

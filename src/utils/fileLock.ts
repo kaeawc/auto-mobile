@@ -449,7 +449,10 @@ function* restoreDisplacedLock(
     } else {
       logger.warn(`Displaced lock link restore failed at ${path}: ${errorMessage(error)}`, error);
       if (!(yield* copyDisplacedLock(path, marker, fileSystem))) {
-        yield* renameDisplacedLock(path, marker, fileSystem);
+        // Only exclusive restoration is safe: retain the possibly live owner's only copy.
+        logger.warn(
+          `Displaced lock restore failed at ${path}; retaining ${marker}; lock state is held-unknown`,
+        );
         return;
       }
     }
@@ -469,30 +472,6 @@ function* copyDisplacedLock(
   }
   const result = yield* createLegacyFile(path, raw, fileSystem, "Displaced lock exclusive copy");
   return result !== "failed";
-}
-
-function* renameDisplacedLock(
-  path: string,
-  marker: string,
-  fileSystem: LockFileSystem,
-): Steps<void> {
-  try {
-    yield { op: "exists", path };
-    if (fileSystem.exists(path)) {
-      // A failed copy may have left a partial destination that cleanup could not remove.
-      logger.warn(`Displaced lock last-resort restore blocked at ${path}; retaining ${marker}`);
-      return;
-    }
-    yield { op: "rename", path: marker };
-    fileSystem.rename(marker, path);
-  } catch (error) {
-    logger.warn(
-      `Displaced lock last-resort restore failed at ${path}: ${errorMessage(error)}`,
-      error,
-    );
-    // Leave the marker if even rename fails: it is the only copy of a possibly
-    // live owner's lock. Deleting it would silently free that held lock.
-  }
 }
 
 function* cleanupFile(path: string, fileSystem: LockFileSystem): Steps<void> {

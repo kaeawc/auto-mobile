@@ -4,6 +4,8 @@ set -euo pipefail
 
 MAX_ATTEMPTS="${GRADLE_RETRY_MAX_ATTEMPTS:-2}"
 RETRY_DELAY_SECONDS="${GRADLE_RETRY_DELAY_SECONDS:-10}"
+MISSING_ARTIFACT_DELAY_SECONDS="${GRADLE_RETRY_MISSING_ARTIFACT_DELAY_SECONDS:-45}"
+MISSING_ARTIFACT_PATTERN='Could not find [A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[A-Za-z0-9_.+-]+'
 LOG_DIR="${GRADLE_RETRY_LOG_DIR:-${RUNNER_TEMP:-/tmp}/auto-mobile-gradle-retry}"
 
 usage() {
@@ -13,6 +15,14 @@ Usage: run-gradle-with-retry.sh -- ./gradlew <tasks> [flags...]
 Runs a Gradle command and retries once by default when the failure looks like
 transient Maven or Gradle plugin repository resolution trouble, including DNS
 name-resolution failures reaching those hosts.
+
+Environment:
+  GRADLE_RETRY_MAX_ATTEMPTS                    Positive integer (default: 2)
+  GRADLE_RETRY_DELAY_SECONDS                   Positive integer (default: 10)
+  GRADLE_RETRY_MISSING_ARTIFACT_DELAY_SECONDS   Positive integer (default: 45)
+
+Missing group:artifact:version failures use the longer repository-propagation
+backoff; other retryable failures use GRADLE_RETRY_DELAY_SECONDS.
 USAGE
 }
 
@@ -51,6 +61,9 @@ if ! is_positive_integer "$RETRY_DELAY_SECONDS"; then
   die "GRADLE_RETRY_DELAY_SECONDS must be a positive integer"
 fi
 
+[[ "$MISSING_ARTIFACT_DELAY_SECONDS" =~ ^[1-9][0-9]*$ ]] ||
+  die "GRADLE_RETRY_MISSING_ARTIFACT_DELAY_SECONDS must be a positive integer"
+
 mkdir -p "$LOG_DIR"
 
 is_retryable_gradle_failure() {
@@ -63,7 +76,7 @@ Could not resolve plugin artifact|Plugin \[id: .* was not found|Could not resolv
 PATTERN
   )
 
-  grep -qiE "$retryable_pattern" "$log_file"
+  grep -qiE "${retryable_pattern}|${MISSING_ARTIFACT_PATTERN}" "$log_file"
 }
 
 has_refresh_dependencies_flag() {
@@ -125,9 +138,16 @@ while [[ "$attempt" -le "$MAX_ATTEMPTS" ]]; do
     exit "$exit_code"
   fi
 
-  log "Retryable Maven/plugin repository failure detected."
-  log "Retrying in ${RETRY_DELAY_SECONDS}s with refreshed dependency metadata."
-  sleep "$RETRY_DELAY_SECONDS"
+  delay_seconds="$RETRY_DELAY_SECONDS"
+  if grep -qiE "$MISSING_ARTIFACT_PATTERN" "$log_file"; then
+    delay_seconds="$MISSING_ARTIFACT_DELAY_SECONDS"
+    log "Retryable missing-artifact (repository propagation) failure detected."
+  else
+    log "Retryable Maven/plugin repository failure detected."
+  fi
+
+  log "Retrying in ${delay_seconds}s with refreshed dependency metadata."
+  sleep "$delay_seconds"
 
   stop_gradle_daemon "${command[0]}"
 

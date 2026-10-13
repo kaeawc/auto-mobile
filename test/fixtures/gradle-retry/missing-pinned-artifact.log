@@ -1,0 +1,25 @@
+FAILURE: Build failed with an exception.
+
+* Where:
+Settings file '/home/runner/work/auto-mobile/auto-mobile/android/settings.gradle.kts' line: 29
+
+* What went wrong:
+Error resolving plugin [id: 'org.gradle.toolchains.foojay-resolver-convention', version: '1.0.0']
+> A problem occurred configuring project ':build-logic'.
+   > Could not resolve all artifacts for configuration 'classpath'.
+      > Could not resolve org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.10.
+        Required by:
+            buildscript of project ':build-logic' > org.gradle.kotlin.kotlin-dsl:org.gradle.kotlin.kotlin-dsl.gradle.plugin:6.7.6 > org.gradle.kotlin:gradle-kotlin-dsl-plugins:6.7.6
+         > Could not resolve org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.10.
+            > Could not parse POM https://plugins.gradle.org/m2/org/jetbrains/kotlin/kotlin-gradle-plugin/2.4.10/kotlin-gradle-plugin-2.4.10.pom
+               > Could not find org.jetbrains.kotlin:kotlin-gradle-plugins-bom:2.4.10.
+                 Searched in the following locations:
+                   - https://plugins.gradle.org/m2/org/jetbrains/kotlin/kotlin-gradle-plugins-bom/2.4.10/kotlin-gradle-plugins-bom-2.4.10.pom
+                   - https://dl.google.com/dl/android/maven2/org/jetbrains/kotlin/kotlin-gradle-plugins-bom/2.4.10/kotlin-gradle-plugins-bom-2.4.10.pom
+                   - https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-gradle-plugins-bom/2.4.10/kotlin-gradle-plugins-bom-2.4.10.pom
+> There are 4 more failures with identical causes.
+
+* Try:
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+> Get more help at https://help.gradle.org.

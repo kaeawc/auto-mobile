@@ -159,7 +159,11 @@ function createAdbFactory(adb: FakeAdbExecutor, deliveries: TextDelivery[]): Adb
   return { create: () => catalogAdb };
 }
 
-export function createSendKeysHarness(device: BootedDevice, observe: SendKeysObserver = observer) {
+export function createSendKeysHarness(
+  device: BootedDevice,
+  observe: SendKeysObserver = observer,
+  timer = new FakeTimer(),
+) {
   const adb = new FakeAdbExecutor();
   adb.setCommandResponseSequence("shell settings get secure default_input_method", [
     { stdout: priorImeId, stderr: "" },
@@ -220,7 +224,7 @@ export function createSendKeysHarness(device: BootedDevice, observe: SendKeysObs
     clientCalls,
     deliveries,
     executor: new DefaultSendKeysCommandExecutor(device, adbFactory, observe, {
-      timer: new FakeTimer(),
+      timer,
       textClient: client,
       inputKey: { press: async () => ({ success: true }) },
     }),

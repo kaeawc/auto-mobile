@@ -33,6 +33,7 @@ import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadc
 import { getDaemonStreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
 import { INTERNAL_TOOL_PARAM_NAMES } from "../../src/daemon/constants";
 import { InMemoryPrototypeStatusStore } from "../../src/features/prototype/PrototypeStatusStore";
+import { prototypeTextFieldBindings } from "../../src/features/prototype/prototypeTextTarget";
 import { FakePrototypeEventLifecycle } from "../fakes/FakePrototypeEventLifecycle";
 import { event } from "../helpers/prototypeTestEvent";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
@@ -67,6 +68,7 @@ describe("prototype MCP tool", () => {
     });
   });
   afterEach(() => {
+    prototypeTextFieldBindings.clear();
     unsubscribe();
     restore();
   });
@@ -134,6 +136,32 @@ describe("prototype MCP tool", () => {
     expect(result.response.isError).toBe(true);
     expect(result.payload.error).toContain(message);
     expect(client.getPrototypeHistory()).toEqual([]);
+  });
+
+  test("a successful show records text bindings and a refused show preserves them", async () => {
+    const fieldSpec = {
+      ...spec,
+      state: { name: "", other: "" },
+      root: { type: "textField", id: "field", testTag: "ptf", stateKey: "name" },
+    };
+    expect((await call({ action: "show", spec: fieldSpec })).payload.success).toBe(true);
+    const binding = prototypeTextFieldBindings.forDevice(device.deviceId);
+    expect(binding?.prototypeId).toBe(spec.id);
+    expect([...binding!.keys]).toEqual([
+      ["ptf", "name"],
+      ["field", "name"],
+    ]);
+    client.setPrototypeResult({ success: false, error: "refused" });
+    expect(
+      (
+        await call({
+          action: "show",
+          spec: { ...fieldSpec, root: { ...fieldSpec.root, stateKey: "other" } },
+        })
+      ).payload.success,
+    ).toBe(false);
+    expect(client.getPrototypeHistory()).toHaveLength(2);
+    expect(prototypeTextFieldBindings.forDevice(device.deviceId)).toBe(binding);
   });
 
   test("a spec with components is expanded on the host before it is sent (#11053)", async () => {

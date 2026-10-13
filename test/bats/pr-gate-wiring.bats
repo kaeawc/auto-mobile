@@ -609,3 +609,15 @@ wiring_requires_yq() {
   done < <(yq -r '.jobs | to_entries[] | select(.value."runs-on" | tostring | contains("automobile-mac")) | .key' "$WF")
   [ "$count" -eq 10 ]
 }
+
+@test "emulator prebuild overlaps boot and release stays off its needs path (#11578)" {
+  wiring_requires_yq
+  local job tasks
+  [ "$(yq -r '.jobs."android-emulator-tests".steps[] | select(.uses == "./.github/actions/android-emulator") | .with."prebuild-script"' "$WF")" = "../scripts/android/run-emulator-suites.sh --prebuild" ]
+  while IFS= read -r job; do
+    tasks="$(yq -r ".jobs.\"$job\".steps[]? | .with.\"gradle-tasks\" // \"\"" "$WF")"
+    [[ "$tasks" != *":control-proxy:assembleRelease"* ]] || return 1
+  done < <(yq -r '.jobs."android-emulator-tests".needs[]' "$WF")
+  tasks="$(yq -r '.jobs."jvm-consumer-checks".steps[] | select(.uses == "./.github/actions/gradle-task-run" and .with."release-keystore-base64" != null) | .with."gradle-tasks"' "$WF")"
+  [[ "$tasks" == *":control-proxy:assembleRelease"* ]]
+}

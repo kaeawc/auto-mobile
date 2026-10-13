@@ -1200,6 +1200,16 @@ function foreignDeviceRead(
   return assignedDevice && assignedDevice !== providedDeviceId ? providedDeviceId : undefined;
 }
 
+/** A gated holder's read watches its assigned device without admission or readiness. */
+function gatedReadSessionDevice(sessionUuid: string | undefined): string | undefined {
+  const state = DaemonState.getInstance();
+  return sessionUuid &&
+    state.isInitialized() &&
+    state.getDevicePool().managedSlotOwnershipGate(sessionUuid)
+    ? state.getSessionManager().getSession(sessionUuid)?.assignedDevice
+    : undefined;
+}
+
 /**
  * Admit a read under its session without refreshing or claiming it (#10964): the live session, or
  * null when the id names no live device session this daemon can route the read to (never issued,
@@ -1575,6 +1585,16 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     const readOnly = isDeviceReadOnlyCall(options, args);
     if (execution) {
       markDeviceCallKind(execution.executionId, name, readOnly);
+    }
+    const gatedReadDeviceId =
+      readOnly && shouldResolveDevice ? gatedReadSessionDevice(sessionUuid) : undefined;
+    if (gatedReadDeviceId) {
+      delete args.sessionUuid;
+      return resolveSessionlessDeviceRead(
+        input,
+        options.sessionlessDeviceRead ?? this.defaultDeviceRead,
+        providedDeviceId ?? gatedReadDeviceId,
+      );
     }
     // A read is admitted read-only (#10964): it never refreshes or claims the session, and its end
     // is not use. Only control calls extend a session's idle deadline.

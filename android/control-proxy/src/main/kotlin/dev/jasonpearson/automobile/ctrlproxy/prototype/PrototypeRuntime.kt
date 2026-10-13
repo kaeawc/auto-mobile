@@ -105,6 +105,11 @@ class PrototypeRuntime(
   private val requestDismiss: suspend () -> Boolean = { true },
   previousPages: Map<String, Int> = emptyMap(),
 ) {
+  @Volatile private var stateWriteValidator: PrototypeStateWriteValidator? = null
+  internal var prepareStateWrites: (PrototypeSpec) -> PrototypeStateWriteValidator = {
+    PrototypeSpecValidator.prepareStateWrites(it, runtimeJson)
+  }
+
   private val renderMapper = PrototypeRenderMapper()
 
   internal fun renderModel(snapshot: PrototypeRuntimeSnapshot = current): PrototypeRenderModel =
@@ -120,6 +125,7 @@ class PrototypeRuntime(
 
   fun replace(spec: PrototypeSpec) {
     if (!current.active) return
+    stateWriteValidator = null
     val next = snapshot(spec, current.pages)
     val changed =
       (current.state.keys + next.state.keys).filter { key ->
@@ -328,12 +334,13 @@ class PrototypeRuntime(
   /** [from] with [values] written, or [IllegalArgumentException] when the result is not valid. */
   private fun validated(from: PrototypeSpec, values: Map<String, PrototypeScalar>): PrototypeSpec {
     val spec = from.copy(state = from.state.orEmpty() + values)
-    // Reuse the structured protocol validator to enforce keys, numeric ranges and binding types.
-    val validation =
-      PrototypeSpecValidator.validate(runtimeJson.encodeToString(PrototypeSpec.serializer(), spec))
-    require(validation is PrototypeSpecValidation.Success) {
-      (validation as? PrototypeSpecValidation.Failure)?.error.toString()
-    }
+    val validator =
+      stateWriteValidator
+        ?: prepareStateWrites(from).also {
+          stateWriteValidator = it
+        }
+    val error = validator.validate(checkNotNull(spec.state))
+    require(error == null) { error.toString() }
     return spec
   }
 

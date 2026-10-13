@@ -309,6 +309,9 @@ async function readResourceCharges(
   for (const platform of ["android", "ios"] as const) {
     checkAdmissionBudget(request, timer);
     const listing = await inventory.list(platform, { signal: request.signal });
+    if (!listing.complete && listing.toolchain === "not_installed") {
+      continue;
+    }
     if (!listing.complete) {
       throw new ActionableError(
         `${platform} inventory is incomplete; total-resource usage is unknown.`,

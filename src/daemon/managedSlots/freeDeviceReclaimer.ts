@@ -24,6 +24,13 @@
  * failed shutdown reverts the row to `free` at once (the device stays adoptable), is logged, and is
  * retried with {@link Backoff} per device; it never loops hot. Single-flight: concurrent
  * callers share the in-flight sweep.
+ *
+ * Absent rows require complete absence observations one sweep interval apart and one more complete
+ * platform listing immediately before journaling deletion. Reappearance at that pre-check clears
+ * the evidence and keeps the image. A device that reappears between the pre-check and the journal's
+ * own listing is deleted through the journaled path with its hold checks; the row is never removed
+ * while the device exists. `released` means journaled deletion completed and the free row is gone,
+ * whether or not native deletion was needed.
  */
 
 import {
@@ -42,6 +49,8 @@ import {
   type ManagedSlotInventory,
 } from "./reconciler";
 import { deviceStableId } from "./slotDeviceIdentity";
+import type { ManagedSlotCacheEvictor } from "./managedSlotCacheEviction";
+import { resolveAbandonmentThresholdMs } from "./slotRegistry";
 import type {
   AbandonmentQuery,
   FreeDeviceStopClaim,
@@ -61,6 +70,7 @@ export const DEFAULT_FREE_DEVICE_STOP_BACKOFF = exponentialBackoff({
 
 export type FreeDeviceReclaimRegistry = Pick<
   SlotRegistry,
+  | "listFreeDevices"
   | "findReclaimableFreeDevices"
   | "beginFreeDeviceStop"
   | "holdsFreeDeviceStop"
@@ -101,6 +111,8 @@ export interface FreeDeviceReclaimSkip {
 export interface FreeDeviceSweepReport {
   /** Devices shut down and recorded `stopped`. */
   stopped: Array<{ platform: SlotPlatform; stableDeviceId: string }>;
+  /** Journaled deletion completed and the free row is gone; native deletion may have occurred. */
+  released: Array<{ platform: SlotPlatform; stableDeviceId: string }>;
   failed: Array<{ platform: SlotPlatform; stableDeviceId: string; message: string }>;
   skipped: FreeDeviceReclaimSkip[];
 }
@@ -128,10 +140,14 @@ export interface FreeDeviceReclaimerOptions {
   backoff?: BackoffInput;
   /** Unadopted threshold; defaults to the registry's one hour. */
   reclaim?: AbandonmentQuery;
+  /** Resolved per sweep; no journal means absent rows retain their charge. */
+  absentRowEvictor?: (
+    registry: FreeDeviceReclaimRegistry,
+  ) => Pick<ManagedSlotCacheEvictor, "evict"> | undefined;
 }
 
 function emptyReport(): FreeDeviceSweepReport {
-  return { stopped: [], failed: [], skipped: [] };
+  return { stopped: [], released: [], failed: [], skipped: [] };
 }
 
 function deviceKey(device: { platform: SlotPlatform; stableDeviceId: string }): string {
@@ -148,6 +164,7 @@ export class FreeDeviceReclaimer {
   private running: Promise<FreeDeviceSweepReport> | undefined;
   private readonly failures = new Map<string, FailureRecord>();
   private readonly backoff: BackoffPolicy;
+  private readonly absentRows = new Set<string>();
 
   constructor(private readonly options: FreeDeviceReclaimerOptions) {
     this.backoff = normalizeBackoff(options.backoff ?? DEFAULT_FREE_DEVICE_STOP_BACKOFF);
@@ -200,10 +217,117 @@ export class FreeDeviceReclaimer {
       }
       return listing;
     };
+    const evictor = this.options.absentRowEvictor?.(registry);
+    const handled = evictor
+      ? await this.releaseAbsentRows(registry, evictor, devicesOf, report)
+      : new Set<string>();
     for (const free of due) {
+      if (handled.has(deviceKey(free))) {
+        continue;
+      }
       await this.reclaimOne(registry, free, await devicesOf(free.platform), report);
     }
     return report;
+  }
+
+  private async releaseAbsentRows(
+    registry: FreeDeviceReclaimRegistry,
+    evictor: Pick<ManagedSlotCacheEvictor, "evict">,
+    devicesOf: (platform: SlotPlatform) => Promise<DeviceInfo[] | undefined>,
+    report: FreeDeviceSweepReport,
+  ): Promise<Set<string>> {
+    const rows = await registry.listFreeDevices();
+    const identities = new Set(rows.map((row) => this.absenceIdentity(row)));
+    for (const identity of this.absentRows) {
+      if (!identities.has(identity)) {
+        this.absentRows.delete(identity);
+      }
+    }
+    const cutoff = this.options.timer.now() - resolveAbandonmentThresholdMs(this.options.reclaim);
+    const eligible = rows.filter(
+      (row) =>
+        row.freedAtMs <= cutoff &&
+        row.deletion === null &&
+        (row.state === "free" || row.state === "stopped"),
+    );
+    const handled = new Set<string>();
+    for (const row of eligible) {
+      const devices = await devicesOf(row.platform);
+      const identity = this.absenceIdentity(row);
+      if (devices?.some((device) => deviceStableId(device) === row.stableDeviceId)) {
+        this.absentRows.delete(identity);
+        continue;
+      }
+      handled.add(deviceKey(row));
+      if (!devices) {
+        report.skipped.push({ ...this.rowIdentity(row), reason: "discovery_incomplete" });
+      } else if (!this.absentRows.has(identity)) {
+        this.absentRows.add(identity);
+        report.skipped.push({ ...this.rowIdentity(row), reason: "absence_unconfirmed" });
+      } else {
+        await this.releaseAbsentRow(evictor, row, report);
+      }
+    }
+    return handled;
+  }
+
+  private absenceIdentity(row: FreeSlotDeviceRecord): string {
+    return JSON.stringify([row.platform, row.stableDeviceId, row.fromScopeKey, row.freedAtMs]);
+  }
+
+  private rowIdentity(row: FreeSlotDeviceRecord): {
+    platform: SlotPlatform;
+    stableDeviceId: string;
+  } {
+    return { platform: row.platform, stableDeviceId: row.stableDeviceId };
+  }
+
+  private async releaseAbsentRow(
+    evictor: Pick<ManagedSlotCacheEvictor, "evict">,
+    row: FreeSlotDeviceRecord,
+    report: FreeDeviceSweepReport,
+  ): Promise<void> {
+    const devices = await this.listConfigured(row.platform);
+    if (!devices) {
+      report.skipped.push({ ...this.rowIdentity(row), reason: "discovery_incomplete" });
+      return;
+    }
+    if (devices.some((device) => deviceStableId(device) === row.stableDeviceId)) {
+      this.absentRows.delete(this.absenceIdentity(row));
+      report.skipped.push({ ...this.rowIdentity(row), reason: "reappeared" });
+      return;
+    }
+    try {
+      const result = await evictor.evict(
+        {
+          ...this.rowIdentity(row),
+          fromScopeKey: row.fromScopeKey,
+          freedAtMs: row.freedAtMs,
+          name: row.stableDeviceId,
+          lastUsedAtMs: row.freedAtMs,
+          absent: true,
+        },
+        {},
+      );
+      if (result.kind === "absent") {
+        this.absentRows.delete(this.absenceIdentity(row));
+        report.released.push(this.rowIdentity(row));
+        logger.info(
+          `[ManagedSlots] Released free-pool row '${row.stableDeviceId}': journaled deletion completed`,
+        );
+      } else if (result.kind === "lost") {
+        this.absentRows.delete(this.absenceIdentity(row));
+        report.skipped.push({ ...this.rowIdentity(row), reason: "row_moved" });
+      } else {
+        report.failed.push({ ...this.rowIdentity(row), message: result.message });
+      }
+    } catch (error) {
+      logger.warn(
+        `[ManagedSlots] Absent free-pool row release failed: ${errorMessage(error)}`,
+        error,
+      );
+      report.failed.push({ ...this.rowIdentity(row), message: errorMessage(error) });
+    }
   }
 
   private async listConfigured(platform: SlotPlatform): Promise<DeviceInfo[] | undefined> {
@@ -320,6 +444,7 @@ export class FreeDeviceReclaimer {
     if (!device) {
       return "not_in_inventory";
     }
+    this.absentRows.delete(this.absenceIdentity(free));
     // Only a device this daemon created is ours to shut down; boot capacity counts the others.
     if (!device.name.startsWith(MANAGED_SLOT_DEVICE_NAME_PREFIX)) {
       return "not_daemon_created";

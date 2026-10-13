@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { Simctl } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
+import { Simctl, SimctlUnavailableError } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import type { ExecResult } from "../../../src/models";
 import { createExecResult } from "../../../src/utils/execResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -66,5 +66,35 @@ describe("SimCtlClient.getSimulatorListingChecked", () => {
     const booted = await simctlFor(payload).getBootedSimulatorsChecked();
 
     expect(booted.map((device) => device.deviceId)).toEqual([udids[0]]);
+  });
+
+  test("missing simctl preserves typed unavailability through simulator image listing", async () => {
+    const client = new Simctl(
+      null,
+      async () => {
+        throw new Error(
+          'xcrun: error: unable to find utility "simctl", not a developer tool or in PATH',
+        );
+      },
+      new FakeTimer(),
+    );
+    await expect(client.listSimulatorImages()).rejects.toBeInstanceOf(SimctlUnavailableError);
+    await expect(client.listSimulatorImages()).rejects.toThrow(
+      "Failed to list iOS simulator devices:",
+    );
+  });
+
+  test("an installed simctl listing failure stays an ordinary actionable error", async () => {
+    const client = new Simctl(
+      null,
+      async () => {
+        throw new Error("listing timeout");
+      },
+      new FakeTimer(),
+    );
+    await expect(client.listSimulatorImages()).rejects.not.toBeInstanceOf(SimctlUnavailableError);
+    await expect(client.listSimulatorImages()).rejects.toThrow(
+      "Failed to list iOS simulator devices:",
+    );
   });
 });

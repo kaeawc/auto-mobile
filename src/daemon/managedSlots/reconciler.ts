@@ -153,6 +153,12 @@ export const MANAGED_SLOT_DEFAULT_ANDROID_DEVICE_TYPES_BY_FAMILY = {
 export interface ManagedSlotInventorySnapshot {
   /** False when any part of discovery failed; a missing device then proves nothing. */
   complete: boolean;
+  /**
+   * Set only when this platform's lister is verifiably not installed on the host. Complete
+   * stays false: a specific device's absence is not proven. Only the total-resource budget
+   * consumes this evidence, treating the platform as contributing zero inventory orphans.
+   */
+  toolchain?: "not_installed";
   devices: DeviceInfo[];
 }
 

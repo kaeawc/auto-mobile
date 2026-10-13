@@ -26,6 +26,8 @@ export interface ManagedSlotEvictionCandidate {
   fromScopeKey: string;
   freedAtMs: number;
   lastUsedAtMs: number;
+  /** No device was listed in a complete inventory; journaled deletion must confirm absence. */
+  absent?: true;
 }
 
 /** A cached device left alone and the safety check that protected it. */
@@ -119,7 +121,17 @@ interface EvictionSelectorDependencies {
   lastUsedAtMs?: (device: FreeSlotDeviceRecord) => number;
 }
 
-/** Select only unassigned, fully discovered and quiet daemon-created cache entries. */
+/**
+ * Under budget pressure, absence is proved by a COMPLETE listing at selection that the journal's
+ * own COMPLETE listing in driveFreeDeviceDeletion does not contradict. On iOS both may share one
+ * cached simctl observation up to 5 s old, the same proof the reconciler accepts for an assigned
+ * device. A wrongly released simulator is never deleted and is counted again as an inventory
+ * orphan when next listed. Incomplete discovery proves nothing and releases nothing.
+ * Only completeFreeDeviceDeletion removes the row. A device listed again at drive time follows
+ * ordinary journaled deletion with session, claim, busy and generated-name checks; a blocked
+ * marker stays for redrive. The row is never removed while the device exists.
+ * Absent rows precede listed cache; each group retains its existing LRU order.
+ */
 export class DefaultManagedSlotEvictionSelector implements ManagedSlotEvictionSelector {
   constructor(private readonly deps: EvictionSelectorDependencies) {}
 
@@ -159,6 +171,7 @@ export class DefaultManagedSlotEvictionSelector implements ManagedSlotEvictionSe
           platform: row.platform,
           stableDeviceId: row.stableDeviceId,
           name: result.name,
+          ...("absent" in result ? { absent: true as const } : {}),
           fromScopeKey: row.fromScopeKey,
           freedAtMs: row.freedAtMs,
           lastUsedAtMs: this.deps.lastUsedAtMs?.(row) ?? row.freedAtMs,
@@ -167,6 +180,7 @@ export class DefaultManagedSlotEvictionSelector implements ManagedSlotEvictionSe
     }
     selection.candidates.sort(
       (a, b) =>
+        Number(b.absent === true) - Number(a.absent === true) ||
         a.lastUsedAtMs - b.lastUsedAtMs ||
         compareText(a.platform, b.platform) ||
         compareText(a.stableDeviceId, b.stableDeviceId),
@@ -204,7 +218,7 @@ export class DefaultManagedSlotEvictionSelector implements ManagedSlotEvictionSe
     journal: readonly SlotJournalEntry[],
     listing: DeviceInfo[] | undefined,
     options: { signal?: AbortSignal; deadlineMs?: number },
-  ): Promise<string | DeviceInfo | ManagedSlotEvictionSkip> {
+  ): Promise<string | DeviceInfo | { name: string; absent: true } | ManagedSlotEvictionSkip> {
     const deletionSkip = managedSlotDeletionSkip(row);
     if (deletionSkip) {
       return deletionSkip;
@@ -219,7 +233,7 @@ export class DefaultManagedSlotEvictionSelector implements ManagedSlotEvictionSe
     if (typeof device === "string") {
       return device;
     }
-    const reason = await this.holdReason(device);
+    const reason = "absent" in device ? undefined : await this.holdReason(device);
     if (reason) {
       return reason;
     }
@@ -238,7 +252,7 @@ export class DefaultManagedSlotEvictionSelector implements ManagedSlotEvictionSe
     row: FreeSlotDeviceRecord,
     journal: readonly SlotJournalEntry[],
     listing: DeviceInfo[] | undefined,
-  ): string | DeviceInfo {
+  ): string | DeviceInfo | { name: string; absent: true } {
     if (!listing) {
       return "discovery_incomplete";
     }
@@ -246,7 +260,7 @@ export class DefaultManagedSlotEvictionSelector implements ManagedSlotEvictionSe
       (entry) => entry.platform === row.platform && deviceStableId(entry) === row.stableDeviceId,
     );
     if (!device) {
-      return "not_in_inventory";
+      return { name: row.stableDeviceId, absent: true };
     }
     if (journal.some((entry) => journalNamesFreeDevice(entry, { ...row, name: device.name }))) {
       return "journal_open";

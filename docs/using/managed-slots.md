@@ -675,6 +675,29 @@ materializes. The registry persists commitments across daemon restarts and scope
 resets. Unknown or incomplete registry or inventory reads refuse with retryable
 `discovery_incomplete`; unknown never means headroom or a full budget.
 
+A platform whose lister is verifiably not installed contributes zero inventory
+orphans to this budget, allowing single-platform hosts to create devices. Its
+listing remains incomplete: missing tooling does not prove any specific device
+absent. A transient failure of installed tooling still makes total usage unknown.
+
+Under budget pressure, absence is proved by a COMPLETE platform listing at selection
+that the journal's own COMPLETE listing inside `driveFreeDeviceDeletion` does not
+contradict. On iOS these listings may share one cached simctl observation up to 5 s
+old, the same proof the reconciler accepts for an assigned device. A wrongly released
+simulator is never deleted and is counted again as an inventory orphan when next
+listed. Incomplete discovery at either point proves nothing and releases nothing.
+Only `completeFreeDeviceDeletion` removes the row. If the journal lists the image
+again, ordinary journaled deletion checks all session, claim, busy and generated-name
+holds; the image is deleted first or its marker stays for redrive. Absent candidates
+precede listed cache in eviction order.
+Without budget pressure, the reclaim sweep requires two complete absence observations
+for the same row, one sweep interval apart and therefore independent, plus one more
+complete platform listing immediately before journaling deletion. Incomplete observations
+neither confirm nor clear that evidence; reappearance clears it and skips deletion.
+A device that reappears between the pre-check and the journal's own listing follows
+the journaled deletion path with its hold checks. A released row means that journaled
+deletion completed and the free row is gone, whether or not a native delete was needed.
+
 Compatible eligible cache is adopted first. Adoption of cache or an orphan is
 charge-neutral. Fresh creation opens its journal reservation before native creation.
 Concurrent reservations are ordered by the registry's journal id: later fresh

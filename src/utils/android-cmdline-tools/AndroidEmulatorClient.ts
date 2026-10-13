@@ -1,6 +1,6 @@
 import { errorMessage } from "../describeUnknownError";
 import { existsSync } from "node:fs";
-import { extname, resolve } from "node:path";
+import { extname, resolve, isAbsolute } from "node:path";
 import type { FileSystem } from "../filesystem/DefaultFileSystem";
 import { logger } from "../logger";
 import { testOverrides } from "../testOverrides";
@@ -848,8 +848,38 @@ const execAsync = async (
   );
 };
 
+// Keep the runtime API typed locally; this project does not include Bun's ambient types.
+declare const Bun: { which(name: string): string | null };
+
 /** Offline discovery failed; callers must retain the prior episode state. */
 export class AndroidOfflineProbeError extends ActionableError {}
+
+export class AndroidEmulatorUnavailableError extends ActionableError {}
+
+/** Classify spawn failures without mistaking a running/stopped process for missing tooling. */
+export function isMissingExecutableError(
+  error: unknown,
+  resolvedPath: string,
+  executableExists: boolean,
+): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const failure = error as Error & {
+    code?: string | number;
+    path?: string;
+    killed?: boolean;
+    signal?: string | null;
+  };
+  return (
+    failure.code === "ENOENT" &&
+    !failure.killed &&
+    !failure.signal &&
+    !["AbortError", "TimeoutError"].includes(failure.name) &&
+    (failure.path === undefined || failure.path === resolvedPath) &&
+    !executableExists
+  );
+}
 
 export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorForDeviceManager {
   private execAsync: (file: string, args: string[], signal?: AbortSignal) => Promise<ExecResult>;
@@ -1944,18 +1974,23 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
 
       // Check if the error is because emulator is not found
       const errorMsg = errorMessage(error);
+      const daemonWorkingDirectoryFailure = this.isLikelyDaemonWorkingDirectoryFailure(errorMsg);
+      const executableExists = (path: string): boolean =>
+        isAbsolute(path) ? existsSync(path) : Bun.which(path) !== null;
+      const missingExecutable =
+        !daemonWorkingDirectoryFailure &&
+        isMissingExecutableError(error, this.emulatorPath, executableExists(this.emulatorPath));
       const missingEmulator =
-        errorMsg.includes("No such file or directory") ||
-        errorMsg.includes("command not found") ||
-        errorMsg.includes("ENOENT");
-      if (missingEmulator && this.isLikelyDaemonWorkingDirectoryFailure(errorMsg)) {
+        missingExecutable || /No such file or directory|command not found|ENOENT/.test(errorMsg);
+      if (missingEmulator && daemonWorkingDirectoryFailure) {
         throw new ActionableError(
           `Android emulator command failed because the daemon working directory is unavailable. ` +
             `Restart the AutoMobile daemon so it can use a stable working directory. Underlying error: ${errorMsg}`,
         );
       }
       if (missingEmulator) {
-        throw new ActionableError(
+        const MissingError = missingExecutable ? AndroidEmulatorUnavailableError : ActionableError;
+        throw new MissingError(
           `Android emulator not found.\n${this.describeEmulatorResolution()}\n\n` +
             `Install the emulator package with: sdkmanager --install "emulator"\n` +
             `(Android Studio installs it too: https://developer.android.com/studio)\n` +

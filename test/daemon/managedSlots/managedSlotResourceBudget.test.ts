@@ -861,4 +861,33 @@ describe("managed-slot total-resource budget", () => {
       }).total,
     ).toBe(0);
   });
+
+  test("a missing toolchain contributes zero orphans while the other platform is counted", async () => {
+    const limited = new RegistryManagedSlotResourceBudget({
+      registry: async () => registry,
+      policy: { limit: () => 2 },
+      timer,
+      inventory: {
+        list: async (platform) =>
+          platform === "ios"
+            ? { complete: false, devices: [], toolchain: "not_installed" }
+            : { complete: true, devices: [{ platform: "android", name: "amslot-orphan" }] },
+      },
+    });
+    const entry = await creation("amslot-new");
+    expect(await limited.admitCreation({ journalEntryId: entry.id })).toMatchObject({
+      kind: "admitted",
+      usage: { orphaned: 1, total: 2 },
+    });
+  });
+
+  test("a plain incomplete platform keeps orphan usage unknown", async () => {
+    const limited = new RegistryManagedSlotResourceBudget({
+      registry: async () => registry,
+      policy: { limit: () => 2 },
+      timer,
+      inventory: { list: async (platform) => ({ complete: platform === "android", devices: [] }) },
+    });
+    expect(await limited.admitCreation({ journalEntryId: 1 })).toMatchObject({ kind: "unknown" });
+  });
 });

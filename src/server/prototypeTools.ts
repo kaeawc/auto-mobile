@@ -1,4 +1,5 @@
 import { prototypePlatformNotes } from "../features/prototype/prototypePlatformNotes";
+import { recordPrototypeTextShow } from "../features/prototype/prototypeTextTarget";
 import { TelemetryRecorder } from "../features/telemetry/TelemetryRecorder";
 import { z } from "zod/v4";
 import { z as specZ, type ZodTypeAny } from "zod";
@@ -1505,6 +1506,12 @@ async function performMutation(
       }),
     );
     retireObservation(dependencies.cacheInvalidator, device, result);
+    recordPrototypeTextShow(
+      device.deviceId,
+      sendArgs.action,
+      sendArgs.spec as PrototypeSpec | undefined,
+      result.success && !isSuperseded(commits, scope, target, generation),
+    );
     const placed = {
       ...placedDisplay(args, shown, comparable, result.success),
       chrome: resolved.chrome,

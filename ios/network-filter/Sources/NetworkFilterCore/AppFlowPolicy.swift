@@ -4,6 +4,8 @@ public enum AppFlowVerdict: Equatable {
     case allow
     /// Drop this new flow: it belongs to the rule the ticket names.
     case drop(NetworkRuleTicket)
+    /// Attribute a new flow; the shaper re-checks the current rule ticket.
+    case shape(NetworkRuleTarget)
 }
 
 /// Decides each new flow at the moment it arrives (#10264).
@@ -11,7 +13,7 @@ public enum AppFlowVerdict: Equatable {
 /// While no rule is active it allows immediately, with no process or Security
 /// lookup. While a rule is active it attributes the flow with
 /// `SimulatorFlowResolver`, limited to the simulators active rules name, and
-/// drops it only when the flow is `attributed` to that simulator and its app's
+/// drops or shapes it only when the flow is `attributed` to that simulator and its app's
 /// code-signing identifier equals the rule's bundle identifier. Every other
 /// outcome — unattributed, conflicting, a failed lookup, a different app —
 /// fails open and allows the flow.
@@ -52,14 +54,13 @@ public final class AppFlowPolicy {
               let simulator = attribution.simulator,
               let bundleId = attribution.app?.bundleId,
               let managed = ManagedSimulator(deviceSet: simulator.deviceSet, udid: simulator.udid),
-              let target = NetworkRuleTarget(simulator: managed, bundleId: bundleId),
-              let ticket = snapshot.tickets[target]
+              let target = NetworkRuleTarget(simulator: managed, bundleId: bundleId)
         else { return .allow }
-        if store.commitDrop(ticket) { return .drop(ticket) }
+        if let ticket = snapshot.tickets[target], store.commitDrop(ticket) { return .drop(ticket) }
         // The rule changed while the flow was being attributed. Attribution does
         // not depend on the rule's revision, so re-check the target once.
-        guard let current = store.currentTicket(for: target), store.commitDrop(current) else { return .allow }
-        return .drop(current)
+        if let current = store.currentTicket(for: target), store.commitDrop(current) { return .drop(current) }
+        return store.shapingRule(for: target) == nil ? .allow : .shape(target)
     }
 
     private func identity(_ token: Data) -> ProbeProcessIdentity {

@@ -2037,6 +2037,9 @@ export class ManagedSlotReconciler {
     release: () => Promise<void>,
     reason: ManagedSlotReconcileFailure,
   ): Promise<never> {
+    if (provisioned.created) {
+      this.journal.markRemovalIntended(entry);
+    }
     await release();
     try {
       await this.cleanupUncommitted(context, provisioned, entry);
@@ -2059,6 +2062,11 @@ export class ManagedSlotReconciler {
       this.noteJournal(context, (await this.journal.close(entry, "rolled_back")).entry);
       return;
     }
+    entry = await this.journal.requestRemoval(entry, {
+      deadlineMs: context.request.deadlineMs,
+      signal: context.request.signal,
+    });
+    this.noteJournal(context, entry);
     // Losing a compare-and-set never licenses deleting the device the winner committed.
     const holder = await this.deps.registry.findDeviceHolder(
       context.request.platform,
@@ -2407,21 +2415,6 @@ export class ManagedSlotReconciler {
           },
         ),
       );
-    }
-  }
-
-  private async deleteDevice(
-    target: ManagedSlotDeletionTarget,
-  ): Promise<ManagedSlotDeletionResult> {
-    try {
-      return await this.deps.deleter.deleteAndVerifyAbsence(target);
-    } catch (error) {
-      // An unverified deletion is a failed deletion: the device may still exist.
-      logger.warn(
-        `[ManagedSlots] deleting '${target.stableId}' threw: ${errorMessage(error)}`,
-        error,
-      );
-      return { kind: "failed", message: errorMessage(error) };
     }
   }
 

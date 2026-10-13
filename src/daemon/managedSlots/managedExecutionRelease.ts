@@ -239,9 +239,15 @@ export interface ManagedExecutionReleaseOptions {
    * Default: the process-wide set the daemon's owner liveness reads.
    */
   ownerHolds?: ManagedExecutionOwnerHolds;
+  ownership?: {
+    isReleaseHeld(sessionId: string): boolean;
+    confirmOwnership(sessionId: string): void;
+    loseOwnership?(sessionId: string): void;
+  };
 }
 
 interface MarkedSlot {
+  execOwner: SlotAssignmentRecord["execOwner"];
   key: SlotKey;
   generation: number;
   stableDeviceId: string | null;
@@ -507,6 +513,13 @@ export class ManagedExecutionRelease {
         releaseForced: false,
       };
     } catch (error) {
+      if (this.options.ownership?.isReleaseHeld(sessionId)) {
+        logger.debug(
+          `[ManagedExecutionRelease] Session ${sessionId} release awaits ownership; settlement continues within its hold cap`,
+          error,
+        );
+        return { releasedDevice: device, releaseSettled: false, releaseForced: false };
+      }
       this.warn(
         `[ManagedExecutionRelease] Session ${sessionId} release did not finish within ` +
           `${this.releaseBudgetMs}ms; forcing it into the stuck-release quarantine: ` +
@@ -619,6 +632,9 @@ export class ManagedExecutionRelease {
         marks.owed.push(held[index]);
       } else if (result.value) {
         marks.marked.push(result.value);
+        if (result.value.execOwner?.sessionUuid === sessionId) {
+          this.options.ownership?.confirmOwnership(sessionId);
+        }
       }
     });
   }
@@ -651,21 +667,28 @@ export class ManagedExecutionRelease {
           owner.sessionUuid !== sessionId ||
           journalOwnersEqual(owner, self)
         ) {
-          return;
+          return owner?.sessionUuid === sessionId && journalOwnersEqual(owner, self);
         }
         // Refused (the slot is not `ready` at this binding any more): it is not claimable as it
         // stands, and the mark that follows reports what became of it.
-        await registry.claimExecution(
+        const claimed = await registry.claimExecution(
           slotKeyOf(assignment),
           { generation: assignment.generation, stableDeviceId: assignment.stableDeviceId },
           { ...self, sessionUuid: sessionId },
           { supersedesSessionUuid: sessionId },
         );
+        if (claimed.kind === "slot_in_use") {
+          this.options.ownership?.loseOwnership?.(sessionId);
+        }
+        return claimed.kind === "claimed";
       }),
     );
     results.forEach((result, index) => {
       if (result.status === "fulfilled") {
         marks.stamped.add(held[index]);
+        if (result.value) {
+          this.options.ownership?.confirmOwnership(sessionId);
+        }
       } else if (!marks.stampWarned) {
         marks.stampWarned = true;
         const key = slotKeyOf(held[index]);
@@ -745,6 +768,7 @@ export class ManagedExecutionRelease {
     // Entering the fence bumped the generation; the watcher restores under the new one.
     return {
       key,
+      execOwner: updated.assignment.execOwner,
       generation: updated.assignment.generation,
       stableDeviceId: updated.assignment.stableDeviceId,
     };
@@ -776,6 +800,7 @@ export class ManagedExecutionRelease {
     }
     const marked: MarkedSlot = {
       key,
+      execOwner: current.execOwner,
       generation: current.generation,
       stableDeviceId: current.stableDeviceId,
     };
@@ -896,6 +921,7 @@ export class ManagedExecutionRelease {
       // Entering the fence bumped the generation; the watcher restores under the new one.
       return {
         key,
+        execOwner: opened.assignment.execOwner,
         generation: opened.assignment.generation,
         stableDeviceId: opened.assignment.stableDeviceId,
         journalEntryId: opened.entry.id,

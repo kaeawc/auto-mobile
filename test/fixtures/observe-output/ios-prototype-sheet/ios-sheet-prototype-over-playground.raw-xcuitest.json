@@ -1,0 +1,2399 @@
+{
+ "hierarchy": {
+  "bounds": {
+   "bottom": 844,
+   "left": 0,
+   "right": 390,
+   "top": 0
+  },
+  "className": "XCUIApplication",
+  "extras": {
+   "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+   "sdk.hasTapTarget": "true"
+  },
+  "node": [
+   {
+    "bounds": {
+     "bottom": 844,
+     "left": 0,
+     "right": 390,
+     "top": 0
+    },
+    "className": "UIWindow",
+    "extras": {
+     "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+     "sdk.hasTapTarget": "true"
+    },
+    "node": [
+     {
+      "bounds": {
+       "bottom": 844,
+       "left": 0,
+       "right": 390,
+       "top": 0
+      },
+      "className": "UIView",
+      "extras": {
+       "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+       "sdk.hasTapTarget": "true"
+      },
+      "node": [
+       {
+        "bounds": {
+         "bottom": 844,
+         "left": 0,
+         "right": 390,
+         "top": 0
+        },
+        "className": "UIView",
+        "extras": {
+         "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+         "sdk.hasTapTarget": "true"
+        },
+        "node": [
+         {
+          "bounds": {
+           "bottom": 844,
+           "left": 0,
+           "right": 390,
+           "top": 0
+          },
+          "className": "UIView",
+          "extras": {
+           "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+           "sdk.hasTapTarget": "true"
+          },
+          "node": [
+           {
+            "bounds": {
+             "bottom": 844,
+             "left": 0,
+             "right": 390,
+             "top": 0
+            },
+            "className": "UIView",
+            "extras": {
+             "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+             "sdk.hasTapTarget": "true"
+            },
+            "node": [
+             {
+              "bounds": {
+               "bottom": 844,
+               "left": 0,
+               "right": 390,
+               "top": 0
+              },
+              "className": "UIView",
+              "extras": {
+               "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+               "sdk.hasTapTarget": "true"
+              },
+              "node": [
+               {
+                "bounds": {
+                 "bottom": 844,
+                 "left": 0,
+                 "right": 390,
+                 "top": 0
+                },
+                "className": "UIView",
+                "extras": {
+                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                 "sdk.hasTapTarget": "true"
+                },
+                "node": [
+                 {
+                  "bounds": {
+                   "bottom": 844,
+                   "left": 0,
+                   "right": 390,
+                   "top": 0
+                  },
+                  "className": "UIView",
+                  "extras": {
+                   "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                   "sdk.hasTapTarget": "true"
+                  },
+                  "node": [
+                   {
+                    "bounds": {
+                     "bottom": 844,
+                     "left": 0,
+                     "right": 390,
+                     "top": 0
+                    },
+                    "className": "UIView",
+                    "extras": {
+                     "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                     "sdk.hasTapTarget": "true"
+                    },
+                    "node": [
+                     {
+                      "bounds": {
+                       "bottom": 844,
+                       "left": 0,
+                       "right": 390,
+                       "top": 0
+                      },
+                      "className": "UIView",
+                      "extras": {
+                       "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                       "sdk.hasTapTarget": "true"
+                      },
+                      "node": [
+                       {
+                        "bounds": {
+                         "bottom": 844,
+                         "left": 0,
+                         "right": 390,
+                         "top": 0
+                        },
+                        "className": "UIView",
+                        "extras": {
+                         "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                         "sdk.hasTapTarget": "true"
+                        },
+                        "node": [
+                         {
+                          "bounds": {
+                           "bottom": 844,
+                           "left": 0,
+                           "right": 390,
+                           "top": 0
+                          },
+                          "className": "UIView",
+                          "extras": {
+                           "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                           "sdk.hasTapTarget": "true"
+                          },
+                          "node": [
+                           {
+                            "bounds": {
+                             "bottom": 153,
+                             "left": 0,
+                             "right": 390,
+                             "top": 47
+                            },
+                            "className": "UINavigationBar",
+                            "extras": {
+                             "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                             "sdk.hasTapTarget": "true"
+                            },
+                            "node": [
+                             {
+                              "bounds": {
+                               "bottom": 145,
+                               "left": 16,
+                               "right": 154,
+                               "top": 104
+                              },
+                              "className": "UILabel",
+                              "extras": {
+                               "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                               "sdk.hasTapTarget": "true"
+                              },
+                              "role": "text",
+                              "text": "Discover",
+                              "view-id": "5d9a97e5-65f7-4530-c9da-bd378b709de8"
+                             }
+                            ],
+                            "resource-id": "Discover",
+                            "view-id": "Discover"
+                           },
+                           {
+                            "bounds": {
+                             "bottom": 844,
+                             "left": 0,
+                             "right": 390,
+                             "top": 0
+                            },
+                            "className": "UIView",
+                            "extras": {
+                             "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                             "sdk.hasTapTarget": "true"
+                            },
+                            "node": [
+                             {
+                              "bounds": {
+                               "bottom": 844,
+                               "left": 0,
+                               "right": 390,
+                               "top": 0
+                              },
+                              "className": "UIView",
+                              "extras": {
+                               "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                               "sdk.hasTapTarget": "true"
+                              },
+                              "node": [
+                               {
+                                "bounds": {
+                                 "bottom": 844,
+                                 "left": 0,
+                                 "right": 390,
+                                 "top": 0
+                                },
+                                "className": "UIView",
+                                "extras": {
+                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                 "sdk.hasTapTarget": "true"
+                                },
+                                "node": [
+                                 {
+                                  "bounds": {
+                                   "bottom": 844,
+                                   "left": 0,
+                                   "right": 390,
+                                   "top": 0
+                                  },
+                                  "className": "UIView",
+                                  "extras": {
+                                   "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                   "sdk.hasTapTarget": "true"
+                                  },
+                                  "node": [
+                                   {
+                                    "bounds": {
+                                     "bottom": 844,
+                                     "left": 0,
+                                     "right": 390,
+                                     "top": 0
+                                    },
+                                    "className": "UICollectionView",
+                                    "extras": {
+                                     "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                     "sdk.hasTapTarget": "true"
+                                    },
+                                    "node": [
+                                     {
+                                      "bounds": {
+                                       "bottom": 2282,
+                                       "left": -16,
+                                       "right": 406,
+                                       "top": -1535
+                                      },
+                                      "className": "UIView",
+                                      "view-id": "a4858adb-5652-3152-5b12-b2421384881b"
+                                     },
+                                     {
+                                      "bounds": {
+                                       "bottom": 844,
+                                       "left": 0,
+                                       "right": 390,
+                                       "top": 0
+                                      },
+                                      "className": "UIView",
+                                      "extras": {
+                                       "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                       "sdk.hasTapTarget": "true"
+                                      },
+                                      "node": [
+                                       {
+                                        "bounds": {
+                                         "bottom": 844,
+                                         "left": 0,
+                                         "right": 390,
+                                         "top": 721
+                                        },
+                                        "className": "UIView",
+                                        "view-id": "288ae65f-bcaa-0c14-da36-de2b1bda7880"
+                                       },
+                                       {
+                                        "bounds": {
+                                         "bottom": 844,
+                                         "left": 0,
+                                         "right": 390,
+                                         "top": 0
+                                        },
+                                        "className": "UITransitionView",
+                                        "extras": {
+                                         "sdk.source": "sdkWalker"
+                                        },
+                                        "node": [
+                                         {
+                                          "bounds": {
+                                           "bottom": 844,
+                                           "left": 0,
+                                           "right": 390,
+                                           "top": 0
+                                          },
+                                          "className": "UIDropShadowView",
+                                          "extras": {
+                                           "sdk.source": "sdkWalker"
+                                          },
+                                          "node": [
+                                           {
+                                            "bounds": {
+                                             "bottom": 844,
+                                             "left": 0,
+                                             "right": 390,
+                                             "top": 0
+                                            },
+                                            "className": "PrototypeLayersView",
+                                            "extras": {
+                                             "sdk.source": "sdkWalker"
+                                            },
+                                            "node": [
+                                             {
+                                              "bounds": {
+                                               "bottom": 844,
+                                               "left": 0,
+                                               "right": 390,
+                                               "top": 0
+                                              },
+                                              "className": "_UIHostingView<PrototypeRootView>",
+                                              "extras": {
+                                               "sdk.gestureRecognizers": "UIKitHoverGestureRecognizer(enabled)",
+                                               "sdk.source": "sdkWalker"
+                                              },
+                                              "node": [
+                                               {
+                                                "bounds": {
+                                                 "bottom": 844,
+                                                 "left": 0,
+                                                 "right": 390,
+                                                 "top": 544
+                                                },
+                                                "className": "_UIInheritedView",
+                                                "extras": {
+                                                 "sdk.source": "sdkWalker"
+                                                },
+                                                "node": [
+                                                 {
+                                                  "bounds": {
+                                                   "bottom": 844,
+                                                   "left": 0,
+                                                   "right": 390,
+                                                   "top": 544
+                                                  },
+                                                  "className": "CALayer",
+                                                  "extras": {
+                                                   "sdk.backgroundColor": "#FFE082FF",
+                                                   "sdk.isLayerNode": "true",
+                                                   "sdk.isUserInteractionEnabled": "false",
+                                                   "sdk.source": "sdkWalker"
+                                                  }
+                                                 },
+                                                 {
+                                                  "bounds": {
+                                                   "bottom": 844,
+                                                   "left": 0,
+                                                   "right": 390,
+                                                   "top": 544
+                                                  },
+                                                  "className": "CALayer",
+                                                  "extras": {
+                                                   "sdk.isLayerNode": "true",
+                                                   "sdk.isUserInteractionEnabled": "false",
+                                                   "sdk.source": "sdkWalker"
+                                                  },
+                                                  "node": [
+                                                   {
+                                                    "bounds": {
+                                                     "bottom": 623,
+                                                     "left": 16,
+                                                     "right": 110,
+                                                     "top": 589
+                                                    },
+                                                    "className": "CALayer",
+                                                    "extras": {
+                                                     "sdk.isLayerNode": "true",
+                                                     "sdk.isUserInteractionEnabled": "false",
+                                                     "sdk.source": "sdkWalker"
+                                                    },
+                                                    "node": [
+                                                     {
+                                                      "bounds": {
+                                                       "bottom": 623,
+                                                       "left": 16,
+                                                       "right": 110,
+                                                       "top": 589
+                                                      },
+                                                      "className": "CALayer",
+                                                      "extras": {
+                                                       "sdk.isLayerNode": "true",
+                                                       "sdk.isUserInteractionEnabled": "false",
+                                                       "sdk.source": "sdkWalker"
+                                                      },
+                                                      "node": [
+                                                       {
+                                                        "bounds": {
+                                                         "bottom": 623,
+                                                         "left": 16,
+                                                         "right": 110,
+                                                         "top": 589
+                                                        },
+                                                        "className": "CALayer",
+                                                        "extras": {
+                                                         "sdk.backgroundColor": "#0087FEFF",
+                                                         "sdk.cornerRadius": "17.166666",
+                                                         "sdk.isLayerNode": "true",
+                                                         "sdk.isUserInteractionEnabled": "false",
+                                                         "sdk.source": "sdkWalker"
+                                                        }
+                                                       }
+                                                      ]
+                                                     }
+                                                    ]
+                                                   }
+                                                  ]
+                                                 }
+                                                ]
+                                               }
+                                              ]
+                                             },
+                                             {
+                                              "bounds": {
+                                               "bottom": 844,
+                                               "left": 0,
+                                               "right": 390,
+                                               "top": 0
+                                              },
+                                              "className": "_UIHostingView<PrototypeRootView>",
+                                              "extras": {
+                                               "sdk.gestureRecognizers": "UIKitHoverGestureRecognizer(enabled)",
+                                               "sdk.source": "sdkWalker"
+                                              },
+                                              "node": [
+                                               {
+                                                "bounds": {
+                                                 "bottom": 84,
+                                                 "left": 345,
+                                                 "right": 375,
+                                                 "top": 54
+                                                },
+                                                "className": "CALayer",
+                                                "extras": {
+                                                 "sdk.backgroundColor": "#ECE6F0FF",
+                                                 "sdk.cornerRadius": "15.0",
+                                                 "sdk.isLayerNode": "true",
+                                                 "sdk.isUserInteractionEnabled": "false",
+                                                 "sdk.source": "sdkWalker"
+                                                }
+                                               },
+                                               {
+                                                "bounds": {
+                                                 "bottom": 75,
+                                                 "left": 355,
+                                                 "right": 366,
+                                                 "top": 64
+                                                },
+                                                "className": "ColorShapeLayer",
+                                                "extras": {
+                                                 "sdk.isLayerNode": "true",
+                                                 "sdk.isUserInteractionEnabled": "false",
+                                                 "sdk.source": "sdkWalker"
+                                                }
+                                               }
+                                              ]
+                                             }
+                                            ]
+                                           }
+                                          ]
+                                         }
+                                        ]
+                                       }
+                                      ],
+                                      "view-id": "44f8dc33-7198-59c6-51ef-b9dc5eb59d96"
+                                     },
+                                     {
+                                      "bounds": {
+                                       "bottom": 844,
+                                       "left": 0,
+                                       "right": 390,
+                                       "top": 0
+                                      },
+                                      "className": "UIView",
+                                      "extras": {
+                                       "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                       "sdk.hasTapTarget": "true"
+                                      },
+                                      "view-id": "f1acd59a-4480-fec3-8011-237b74bbc267"
+                                     },
+                                     {
+                                      "bounds": {
+                                       "bottom": 233,
+                                       "left": 16,
+                                       "right": 374,
+                                       "top": 153
+                                      },
+                                      "className": "UITableViewCell",
+                                      "clickable": "true",
+                                      "extras": {
+                                       "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                       "sdk.hasTapTarget": "true"
+                                      },
+                                      "node": [
+                                       {
+                                        "bounds": {
+                                         "bottom": 233,
+                                         "left": 16,
+                                         "right": 374,
+                                         "top": 153
+                                        },
+                                        "className": "UIView",
+                                        "extras": {
+                                         "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                         "sdk.hasTapTarget": "true"
+                                        },
+                                        "node": [
+                                         {
+                                          "bounds": {
+                                           "bottom": 233,
+                                           "left": 16,
+                                           "right": 374,
+                                           "top": 153
+                                          },
+                                          "className": "UIView",
+                                          "extras": {
+                                           "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                           "sdk.hasTapTarget": "true"
+                                          },
+                                          "view-id": "dc9f168a-2b64-d43a-cc7e-423ad739411a"
+                                         }
+                                        ],
+                                        "view-id": "16990f00-9415-e5d7-4447-dfdbc8e058b5"
+                                       },
+                                       {
+                                        "bounds": {
+                                         "bottom": 233,
+                                         "left": 16,
+                                         "right": 374,
+                                         "top": 153
+                                        },
+                                        "className": "UIView",
+                                        "extras": {
+                                         "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                         "sdk.hasTapTarget": "true"
+                                        },
+                                        "node": [
+                                         {
+                                          "bounds": {
+                                           "bottom": 233,
+                                           "left": 16,
+                                           "right": 374,
+                                           "top": 153
+                                          },
+                                          "className": "UIView",
+                                          "extras": {
+                                           "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                           "sdk.hasTapTarget": "true"
+                                          },
+                                          "node": [
+                                           {
+                                            "bounds": {
+                                             "bottom": 233,
+                                             "left": 16,
+                                             "right": 374,
+                                             "top": 153
+                                            },
+                                            "className": "UIView",
+                                            "extras": {
+                                             "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                             "sdk.hasTapTarget": "true"
+                                            },
+                                            "node": [
+                                             {
+                                              "bounds": {
+                                               "bottom": 233,
+                                               "left": 16,
+                                               "right": 374,
+                                               "top": 153
+                                              },
+                                              "className": "UIButton",
+                                              "clickable": "true",
+                                              "extras": {
+                                               "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                               "sdk.hasTapTarget": "true"
+                                              },
+                                              "node": [
+                                               {
+                                                "bounds": {
+                                                 "bottom": 213,
+                                                 "left": 32,
+                                                 "right": 92,
+                                                 "top": 173
+                                                },
+                                                "className": "UIView",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "view-id": "3f5f1f4e-5cf8-5e36-64f8-1ccdca73b36a"
+                                               },
+                                               {
+                                                "bounds": {
+                                                 "bottom": 193,
+                                                 "left": 104,
+                                                 "right": 336,
+                                                 "top": 172
+                                                },
+                                                "className": "UILabel",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "role": "text",
+                                                "text": "Getting Started with SwiftUI",
+                                                "view-id": "f84de8e7-22ff-6ed1-1cb6-f9857a311061"
+                                               },
+                                               {
+                                                "bounds": {
+                                                 "bottom": 202,
+                                                 "left": 48,
+                                                 "right": 77,
+                                                 "top": 183
+                                                },
+                                                "className": "UIImageView",
+                                                "clickable": "true",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "resource-id": "video.fill",
+                                                "role": "image",
+                                                "text": "Facetime Video Call",
+                                                "view-id": "video.fill"
+                                               },
+                                               {
+                                                "bounds": {
+                                                 "bottom": 199,
+                                                 "left": 348,
+                                                 "right": 355,
+                                                 "top": 187
+                                                },
+                                                "className": "UIImageView",
+                                                "clickable": "true",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "resource-id": "chevron.forward",
+                                                "role": "image",
+                                                "view-id": "chevron.forward"
+                                               },
+                                               {
+                                                "bounds": {
+                                                 "bottom": 214,
+                                                 "left": 104,
+                                                 "right": 136,
+                                                 "top": 197
+                                                },
+                                                "className": "UILabel",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "role": "text",
+                                                "text": "10:23",
+                                                "view-id": "1a3941a0-0ed4-b0cf-d8e6-8adad69ea3dd"
+                                               }
+                                              ],
+                                              "role": "button",
+                                              "text": "Getting Started with SwiftUI, 10:23",
+                                              "view-id": "bed8a8c6-0e54-9b38-902b-070e531b3b7b"
+                                             }
+                                            ],
+                                            "view-id": "928740c4-a3b4-2817-7007-957931692433"
+                                           }
+                                          ],
+                                          "view-id": "b6b3602c-37b7-bf5e-a5be-aa494bd8cecb"
+                                         }
+                                        ],
+                                        "view-id": "555a3477-8dcd-1911-ab30-1370caa9d184"
+                                       }
+                                      ],
+                                      "role": "listitem",
+                                      "view-id": "e5d4303b-1359-e62b-43d0-60ebf5c19135"
+                                     },
+                                     {
+                                      "bounds": {
+                                       "bottom": 313,
+                                       "left": 16,
+                                       "right": 374,
+                                       "top": 233
+                                      },
+                                      "className": "UITableViewCell",
+                                      "clickable": "true",
+                                      "extras": {
+                                       "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                       "sdk.hasTapTarget": "true"
+                                      },
+                                      "node": [
+                                       {
+                                        "bounds": {
+                                         "bottom": 313,
+                                         "left": 16,
+                                         "right": 374,
+                                         "top": 233
+                                        },
+                                        "className": "UIView",
+                                        "extras": {
+                                         "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                         "sdk.hasTapTarget": "true"
+                                        },
+                                        "node": [
+                                         {
+                                          "bounds": {
+                                           "bottom": 313,
+                                           "left": 16,
+                                           "right": 374,
+                                           "top": 233
+                                          },
+                                          "className": "UIView",
+                                          "extras": {
+                                           "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                           "sdk.hasTapTarget": "true"
+                                          },
+                                          "view-id": "18ba5041-1cfc-074c-1970-465bf820827b"
+                                         }
+                                        ],
+                                        "view-id": "c6a87ab7-54c7-9356-5868-9b71072438aa"
+                                       },
+                                       {
+                                        "bounds": {
+                                         "bottom": 313,
+                                         "left": 16,
+                                         "right": 374,
+                                         "top": 233
+                                        },
+                                        "className": "UIView",
+                                        "extras": {
+                                         "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                         "sdk.hasTapTarget": "true"
+                                        },
+                                        "node": [
+                                         {
+                                          "bounds": {
+                                           "bottom": 313,
+                                           "left": 16,
+                                           "right": 374,
+                                           "top": 233
+                                          },
+                                          "className": "UIView",
+                                          "extras": {
+                                           "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                           "sdk.hasTapTarget": "true"
+                                          },
+                                          "node": [
+                                           {
+                                            "bounds": {
+                                             "bottom": 313,
+                                             "left": 16,
+                                             "right": 374,
+                                             "top": 233
+                                            },
+                                            "className": "UIView",
+                                            "extras": {
+                                             "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                             "sdk.hasTapTarget": "true"
+                                            },
+                                            "node": [
+                                             {
+                                              "bounds": {
+                                               "bottom": 313,
+                                               "left": 16,
+                                               "right": 374,
+                                               "top": 233
+                                              },
+                                              "className": "UIButton",
+                                              "clickable": "true",
+                                              "extras": {
+                                               "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                               "sdk.hasTapTarget": "true"
+                                              },
+                                              "node": [
+                                               {
+                                                "bounds": {
+                                                 "bottom": 293,
+                                                 "left": 32,
+                                                 "right": 92,
+                                                 "top": 253
+                                                },
+                                                "className": "UIView",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "view-id": "ca342f8f-db8b-46ad-30cf-1c625f4a2257"
+                                               },
+                                               {
+                                                "bounds": {
+                                                 "bottom": 273,
+                                                 "left": 104,
+                                                 "right": 278,
+                                                 "top": 252
+                                                },
+                                                "className": "UILabel",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "role": "text",
+                                                "text": "Advanced Animations",
+                                                "view-id": "696c2efd-7392-c054-a253-f26a06159106"
+                                               },
+                                               {
+                                                "bounds": {
+                                                 "bottom": 284,
+                                                 "left": 49,
+                                                 "right": 73,
+                                                 "top": 261
+                                                },
+                                                "className": "UIImageView",
+                                                "clickable": "true",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "resource-id": "wand.and.stars",
+                                                "role": "image",
+                                                "text": "Magic Wand With Stars",
+                                                "view-id": "wand.and.stars"
+                                               },
+                                               {
+                                                "bounds": {
+                                                 "bottom": 279,
+                                                 "left": 348,
+                                                 "right": 355,
+                                                 "top": 267
+                                                },
+                                                "className": "UIImageView",
+                                                "clickable": "true",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "resource-id": "chevron.forward",
+                                                "role": "image",
+                                                "view-id": "chevron.forward"
+                                               },
+                                               {
+                                                "bounds": {
+                                                 "bottom": 294,
+                                                 "left": 104,
+                                                 "right": 134,
+                                                 "top": 277
+                                                },
+                                                "className": "UILabel",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "role": "text",
+                                                "text": "15:45",
+                                                "view-id": "1ef0a5d6-2f2a-6912-9264-d15200d226e3"
+                                               }
+                                              ],
+                                              "role": "button",
+                                              "text": "Advanced Animations, 15:45",
+                                              "view-id": "65a258a4-4f8c-6542-a79a-182cd51ed38c"
+                                             }
+                                            ],
+                                            "view-id": "70ccfc6e-35a0-c533-3c6b-a172e32e7284"
+                                           }
+                                          ],
+                                          "view-id": "2c300c1f-ca68-1933-7ad3-ab2abcf92b31"
+                                         }
+                                        ],
+                                        "view-id": "a5974ba8-ee38-c271-b93f-4acf3cb17655"
+                                       }
+                                      ],
+                                      "role": "listitem",
+                                      "view-id": "0d12567c-9750-a7f6-78a9-f07f0d46e182"
+                                     },
+                                     {
+                                      "bounds": {
+                                       "bottom": 233,
+                                       "left": 104,
+                                       "right": 358,
+                                       "top": 232
+                                      },
+                                      "className": "UIView",
+                                      "extras": {
+                                       "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                       "sdk.hasTapTarget": "true"
+                                      },
+                                      "view-id": "dc9b7a17-9561-d9dd-1f79-c27de6e25fbe"
+                                     },
+                                     {
+                                      "bounds": {
+                                       "bottom": 393,
+                                       "left": 16,
+                                       "right": 374,
+                                       "top": 313
+                                      },
+                                      "className": "UITableViewCell",
+                                      "clickable": "true",
+                                      "extras": {
+                                       "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                       "sdk.hasTapTarget": "true"
+                                      },
+                                      "node": [
+                                       {
+                                        "bounds": {
+                                         "bottom": 393,
+                                         "left": 16,
+                                         "right": 374,
+                                         "top": 313
+                                        },
+                                        "className": "UIView",
+                                        "extras": {
+                                         "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                         "sdk.hasTapTarget": "true"
+                                        },
+                                        "node": [
+                                         {
+                                          "bounds": {
+                                           "bottom": 393,
+                                           "left": 16,
+                                           "right": 374,
+                                           "top": 313
+                                          },
+                                          "className": "UIView",
+                                          "extras": {
+                                           "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                           "sdk.hasTapTarget": "true"
+                                          },
+                                          "view-id": "2450d8bf-8fd3-0a53-720c-809db2a9fc12"
+                                         }
+                                        ],
+                                        "view-id": "c45a3b63-2235-93e2-aca1-6251df9ba143"
+                                       },
+                                       {
+                                        "bounds": {
+                                         "bottom": 393,
+                                         "left": 16,
+                                         "right": 374,
+                                         "top": 313
+                                        },
+                                        "className": "UIView",
+                                        "extras": {
+                                         "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                         "sdk.hasTapTarget": "true"
+                                        },
+                                        "node": [
+                                         {
+                                          "bounds": {
+                                           "bottom": 393,
+                                           "left": 16,
+                                           "right": 374,
+                                           "top": 313
+                                          },
+                                          "className": "UIView",
+                                          "extras": {
+                                           "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                           "sdk.hasTapTarget": "true"
+                                          },
+                                          "node": [
+                                           {
+                                            "bounds": {
+                                             "bottom": 393,
+                                             "left": 16,
+                                             "right": 374,
+                                             "top": 313
+                                            },
+                                            "className": "UIView",
+                                            "extras": {
+                                             "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                             "sdk.hasTapTarget": "true"
+                                            },
+                                            "node": [
+                                             {
+                                              "bounds": {
+                                               "bottom": 393,
+                                               "left": 16,
+                                               "right": 374,
+                                               "top": 313
+                                              },
+                                              "className": "UIButton",
+                                              "clickable": "true",
+                                              "extras": {
+                                               "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                               "sdk.hasTapTarget": "true"
+                                              },
+                                              "node": [
+                                               {
+                                                "bounds": {
+                                                 "bottom": 373,
+                                                 "left": 32,
+                                                 "right": 92,
+                                                 "top": 333
+                                                },
+                                                "className": "UIView",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "view-id": "8d3bea4d-8425-3175-e31f-745fba5f61c7"
+                                               },
+                                               {
+                                                "bounds": {
+                                                 "bottom": 353,
+                                                 "left": 104,
+                                                 "right": 332,
+                                                 "top": 332
+                                                },
+                                                "className": "UILabel",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "role": "text",
+                                                "text": "Building Custom Components",
+                                                "view-id": "890aff71-02c1-d5dd-df38-3d8e13187612"
+                                               },
+                                               {
+                                                "bounds": {
+                                                 "bottom": 366,
+                                                 "left": 50,
+                                                 "right": 74,
+                                                 "top": 340
+                                                },
+                                                "className": "UIImageView",
+                                                "clickable": "true",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "resource-id": "cube.fill",
+                                                "role": "image",
+                                                "text": "Cube",
+                                                "view-id": "cube.fill"
+                                               },
+                                               {
+                                                "bounds": {
+                                                 "bottom": 359,
+                                                 "left": 348,
+                                                 "right": 355,
+                                                 "top": 347
+                                                },
+                                                "className": "UIImageView",
+                                                "clickable": "true",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "resource-id": "chevron.forward",
+                                                "role": "image",
+                                                "view-id": "chevron.forward"
+                                               },
+                                               {
+                                                "bounds": {
+                                                 "bottom": 374,
+                                                 "left": 104,
+                                                 "right": 136,
+                                                 "top": 357
+                                                },
+                                                "className": "UILabel",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "role": "text",
+                                                "text": "22:10",
+                                                "view-id": "09e02f21-fb4e-1ff2-e9de-12bb57f2c324"
+                                               }
+                                              ],
+                                              "role": "button",
+                                              "text": "Building Custom Components, 22:10",
+                                              "view-id": "b7a7c7f8-c589-ff57-7a77-5b07318026b3"
+                                             }
+                                            ],
+                                            "view-id": "ba865fb8-1cae-70df-8eb1-bf92c523a0f9"
+                                           }
+                                          ],
+                                          "view-id": "2b80464f-c2e4-362d-fb3c-d1db06ddfa4f"
+                                         }
+                                        ],
+                                        "view-id": "85bba307-2925-312a-ff2d-8460296400f6"
+                                       }
+                                      ],
+                                      "role": "listitem",
+                                      "view-id": "f7914e3b-52d0-31ca-9fc6-7670216b8262"
+                                     },
+                                     {
+                                      "bounds": {
+                                       "bottom": 313,
+                                       "left": 104,
+                                       "right": 358,
+                                       "top": 312
+                                      },
+                                      "className": "UIView",
+                                      "extras": {
+                                       "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                       "sdk.hasTapTarget": "true"
+                                      },
+                                      "view-id": "def140a1-af2a-2a81-21bd-5f10a8f9f31f"
+                                     },
+                                     {
+                                      "bounds": {
+                                       "bottom": 494,
+                                       "left": 16,
+                                       "right": 374,
+                                       "top": 393
+                                      },
+                                      "className": "UITableViewCell",
+                                      "clickable": "true",
+                                      "extras": {
+                                       "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                       "sdk.hasTapTarget": "true"
+                                      },
+                                      "node": [
+                                       {
+                                        "bounds": {
+                                         "bottom": 494,
+                                         "left": 16,
+                                         "right": 374,
+                                         "top": 393
+                                        },
+                                        "className": "UIView",
+                                        "extras": {
+                                         "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                         "sdk.hasTapTarget": "true"
+                                        },
+                                        "node": [
+                                         {
+                                          "bounds": {
+                                           "bottom": 494,
+                                           "left": 16,
+                                           "right": 374,
+                                           "top": 393
+                                          },
+                                          "className": "UIView",
+                                          "extras": {
+                                           "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                           "sdk.hasTapTarget": "true"
+                                          },
+                                          "view-id": "79fa640a-585a-64f9-981f-104301724177"
+                                         }
+                                        ],
+                                        "view-id": "fd52a071-3744-84a8-e9d7-75bdf8cd44dc"
+                                       },
+                                       {
+                                        "bounds": {
+                                         "bottom": 494,
+                                         "left": 16,
+                                         "right": 374,
+                                         "top": 393
+                                        },
+                                        "className": "UIView",
+                                        "extras": {
+                                         "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                         "sdk.hasTapTarget": "true"
+                                        },
+                                        "node": [
+                                         {
+                                          "bounds": {
+                                           "bottom": 494,
+                                           "left": 16,
+                                           "right": 374,
+                                           "top": 393
+                                          },
+                                          "className": "UIView",
+                                          "extras": {
+                                           "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                           "sdk.hasTapTarget": "true"
+                                          },
+                                          "node": [
+                                           {
+                                            "bounds": {
+                                             "bottom": 494,
+                                             "left": 16,
+                                             "right": 374,
+                                             "top": 393
+                                            },
+                                            "className": "UIView",
+                                            "extras": {
+                                             "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                             "sdk.hasTapTarget": "true"
+                                            },
+                                            "node": [
+                                             {
+                                              "bounds": {
+                                               "bottom": 494,
+                                               "left": 16,
+                                               "right": 374,
+                                               "top": 393
+                                              },
+                                              "className": "UIButton",
+                                              "clickable": "true",
+                                              "extras": {
+                                               "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                               "sdk.hasTapTarget": "true"
+                                              },
+                                              "node": [
+                                               {
+                                                "bounds": {
+                                                 "bottom": 455,
+                                                 "left": 104,
+                                                 "right": 262,
+                                                 "top": 412
+                                                },
+                                                "className": "UILabel",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "role": "text",
+                                                "text": "State Management Deep Dive",
+                                                "view-id": "96df30ff-d803-6124-53d6-8d35ed32df37"
+                                               },
+                                               {
+                                                "bounds": {
+                                                 "bottom": 463,
+                                                 "left": 32,
+                                                 "right": 92,
+                                                 "top": 423
+                                                },
+                                                "className": "UIView",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "view-id": "8a9d56b2-41ba-bb2d-3094-4e48a08b10a6"
+                                               },
+                                               {
+                                                "bounds": {
+                                                 "bottom": 455,
+                                                 "left": 47,
+                                                 "right": 76,
+                                                 "top": 431
+                                                },
+                                                "className": "UIImageView",
+                                                "clickable": "true",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "resource-id": "arrow.triangle.2.circlepath",
+                                                "role": "image",
+                                                "text": "Syncing",
+                                                "view-id": "arrow.triangle.2.circlepath"
+                                               },
+                                               {
+                                                "bounds": {
+                                                 "bottom": 449,
+                                                 "left": 348,
+                                                 "right": 355,
+                                                 "top": 437
+                                                },
+                                                "className": "UIImageView",
+                                                "clickable": "true",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "resource-id": "chevron.forward",
+                                                "role": "image",
+                                                "view-id": "chevron.forward"
+                                               },
+                                               {
+                                                "bounds": {
+                                                 "bottom": 475,
+                                                 "left": 104,
+                                                 "right": 136,
+                                                 "top": 459
+                                                },
+                                                "className": "UILabel",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "role": "text",
+                                                "text": "18:30",
+                                                "view-id": "531f9ded-48ba-6537-b12f-67d34c0ea3c2"
+                                               }
+                                              ],
+                                              "role": "button",
+                                              "text": "State Management Deep Dive, 18:30",
+                                              "view-id": "341ee900-4ecf-54be-6ec9-507c90ccd490"
+                                             }
+                                            ],
+                                            "view-id": "9f1ad7bb-68f8-d19d-cfad-47b62090b2f3"
+                                           }
+                                          ],
+                                          "view-id": "a10573b6-569d-ffa2-8422-77852536b998"
+                                         }
+                                        ],
+                                        "view-id": "6cf8f298-0d92-1d22-b853-c0d62913bd3c"
+                                       }
+                                      ],
+                                      "role": "listitem",
+                                      "view-id": "cebd73bc-0059-c11e-a31d-3df41a5eddb1"
+                                     },
+                                     {
+                                      "bounds": {
+                                       "bottom": 393,
+                                       "left": 104,
+                                       "right": 358,
+                                       "top": 392
+                                      },
+                                      "className": "UIView",
+                                      "extras": {
+                                       "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                       "sdk.hasTapTarget": "true"
+                                      },
+                                      "view-id": "6e8fc55b-144d-98ce-7f5e-412b4efdcff8"
+                                     },
+                                     {
+                                      "bounds": {
+                                       "bottom": 574,
+                                       "left": 16,
+                                       "right": 374,
+                                       "top": 494
+                                      },
+                                      "className": "UITableViewCell",
+                                      "clickable": "true",
+                                      "extras": {
+                                       "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                       "sdk.hasTapTarget": "true"
+                                      },
+                                      "node": [
+                                       {
+                                        "bounds": {
+                                         "bottom": 574,
+                                         "left": 16,
+                                         "right": 374,
+                                         "top": 494
+                                        },
+                                        "className": "UIView",
+                                        "extras": {
+                                         "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                         "sdk.hasTapTarget": "true"
+                                        },
+                                        "node": [
+                                         {
+                                          "bounds": {
+                                           "bottom": 574,
+                                           "left": 16,
+                                           "right": 374,
+                                           "top": 494
+                                          },
+                                          "className": "UIView",
+                                          "extras": {
+                                           "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                           "sdk.hasTapTarget": "true"
+                                          },
+                                          "view-id": "c5095754-a5bf-d69c-b02b-df6659826be1"
+                                         }
+                                        ],
+                                        "view-id": "2da84c34-c72c-9624-7a67-5bf39f810e12"
+                                       },
+                                       {
+                                        "bounds": {
+                                         "bottom": 574,
+                                         "left": 16,
+                                         "right": 374,
+                                         "top": 494
+                                        },
+                                        "className": "UIView",
+                                        "extras": {
+                                         "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                         "sdk.hasTapTarget": "true"
+                                        },
+                                        "node": [
+                                         {
+                                          "bounds": {
+                                           "bottom": 574,
+                                           "left": 16,
+                                           "right": 374,
+                                           "top": 494
+                                          },
+                                          "className": "UIView",
+                                          "extras": {
+                                           "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                           "sdk.hasTapTarget": "true"
+                                          },
+                                          "node": [
+                                           {
+                                            "bounds": {
+                                             "bottom": 574,
+                                             "left": 16,
+                                             "right": 374,
+                                             "top": 494
+                                            },
+                                            "className": "UIView",
+                                            "extras": {
+                                             "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                             "sdk.hasTapTarget": "true"
+                                            },
+                                            "node": [
+                                             {
+                                              "bounds": {
+                                               "bottom": 574,
+                                               "left": 16,
+                                               "right": 374,
+                                               "top": 494
+                                              },
+                                              "className": "UIButton",
+                                              "clickable": "true",
+                                              "extras": {
+                                               "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                               "sdk.hasTapTarget": "true"
+                                              },
+                                              "node": [
+                                               {
+                                                "bounds": {
+                                                 "bottom": 554,
+                                                 "left": 32,
+                                                 "right": 92,
+                                                 "top": 514
+                                                },
+                                                "className": "UIView",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "view-id": "3cf8007f-64c9-ac1d-1298-5453db870feb"
+                                               },
+                                               {
+                                                "bounds": {
+                                                 "bottom": 535,
+                                                 "left": 104,
+                                                 "right": 313,
+                                                 "top": 513
+                                                },
+                                                "className": "UILabel",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "role": "text",
+                                                "text": "Networking Best Practices",
+                                                "view-id": "8e68e2b6-274b-99fc-4cc3-ba412b030391"
+                                               },
+                                               {
+                                                "bounds": {
+                                                 "bottom": 546,
+                                                 "left": 50,
+                                                 "right": 74,
+                                                 "top": 522
+                                                },
+                                                "className": "UIImageView",
+                                                "clickable": "true",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "resource-id": "network",
+                                                "role": "image",
+                                                "text": "Network Nodes Connected By Lines",
+                                                "view-id": "network"
+                                               },
+                                               {
+                                                "bounds": {
+                                                 "bottom": 540,
+                                                 "left": 348,
+                                                 "right": 355,
+                                                 "top": 528
+                                                },
+                                                "className": "UIImageView",
+                                                "clickable": "true",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "resource-id": "chevron.forward",
+                                                "role": "image",
+                                                "view-id": "chevron.forward"
+                                               },
+                                               {
+                                                "bounds": {
+                                                 "bottom": 555,
+                                                 "left": 104,
+                                                 "right": 134,
+                                                 "top": 539
+                                                },
+                                                "className": "UILabel",
+                                                "extras": {
+                                                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                                 "sdk.hasTapTarget": "true"
+                                                },
+                                                "role": "text",
+                                                "text": "12:55",
+                                                "view-id": "a9201f6f-6b6a-c14f-797d-e636c06960cf"
+                                               }
+                                              ],
+                                              "role": "button",
+                                              "text": "Networking Best Practices, 12:55",
+                                              "view-id": "b96afaf5-479d-e403-e27a-942560970309"
+                                             }
+                                            ],
+                                            "view-id": "6d31bdf1-d8d4-03b6-0e76-ee5b523cbd17"
+                                           }
+                                          ],
+                                          "view-id": "7412a57a-b8fb-499a-6b4e-0f52ba8abed7"
+                                         }
+                                        ],
+                                        "view-id": "6be7b485-784d-0362-dbb5-ffbf5f79eb5e"
+                                       }
+                                      ],
+                                      "role": "listitem",
+                                      "view-id": "e6f87e98-1254-64bf-e88c-f33a939b0e83"
+                                     },
+                                     {
+                                      "bounds": {
+                                       "bottom": 494,
+                                       "left": 104,
+                                       "right": 358,
+                                       "top": 493
+                                      },
+                                      "className": "UIView",
+                                      "extras": {
+                                       "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                       "sdk.hasTapTarget": "true"
+                                      },
+                                      "view-id": "4e1d9ecf-2cce-cd98-aad3-52e85ba2ba91"
+                                     },
+                                     {
+                                      "bounds": {
+                                       "bottom": 761,
+                                       "left": 357,
+                                       "right": 387,
+                                       "top": 101
+                                      },
+                                      "className": "UIView",
+                                      "extras": {
+                                       "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                       "sdk.hasTapTarget": "true"
+                                      },
+                                      "node": [
+                                       {
+                                        "bounds": {
+                                         "bottom": 758,
+                                         "left": 384,
+                                         "right": 387,
+                                         "top": 751
+                                        },
+                                        "className": "UIView",
+                                        "view-id": "477604bd-885f-670e-8818-256bf240b250"
+                                       }
+                                      ],
+                                      "text": "Vertical scroll bar, 1 page",
+                                      "view-id": "43e92e44-f306-e495-2e23-ae65cac4571b"
+                                     },
+                                     {
+                                      "bounds": {
+                                       "bottom": 761,
+                                       "left": 357,
+                                       "right": 387,
+                                       "top": 101
+                                      },
+                                      "className": "UIView",
+                                      "extras": {
+                                       "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                                       "sdk.hasTapTarget": "true"
+                                      },
+                                      "node": [
+                                       {
+                                        "bounds": {
+                                         "bottom": 758,
+                                         "left": 384,
+                                         "right": 387,
+                                         "top": 751
+                                        },
+                                        "className": "UIView",
+                                        "view-id": "e596d795-0fd7-40a1-df29-894858b90830"
+                                       }
+                                      ],
+                                      "text": "Vertical scroll bar, 1 page",
+                                      "view-id": "440cf147-31cf-6794-c027-52b6c5cb153d"
+                                     }
+                                    ],
+                                    "role": "list",
+                                    "scrollable": "true",
+                                    "view-id": "0630fabb-3488-9792-fd77-0cf13d115ed6"
+                                   }
+                                  ],
+                                  "view-id": "040a8b42-2b4d-5b64-5cdf-f835de3462f2"
+                                 }
+                                ],
+                                "view-id": "d329a20f-d88b-d2ec-bfc6-8fd8edf4196b"
+                               }
+                              ],
+                              "view-id": "a0b589af-74f1-b849-42ce-63ec941500cf"
+                             }
+                            ],
+                            "view-id": "adba30c4-272b-e1f8-0c48-28930980495f"
+                           },
+                           {
+                            "bounds": {
+                             "bottom": 844,
+                             "left": 0,
+                             "right": 390,
+                             "top": 0
+                            },
+                            "className": "UIToolbar",
+                            "extras": {
+                             "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                             "sdk.hasTapTarget": "true"
+                            },
+                            "node": [
+                             {
+                              "bounds": {
+                               "bottom": 844,
+                               "left": 0,
+                               "right": 390,
+                               "top": 0
+                              },
+                              "className": "UIView",
+                              "extras": {
+                               "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                               "sdk.hasTapTarget": "true"
+                              },
+                              "view-id": "317c44fc-5cd3-d33e-ecb6-f66530552844"
+                             }
+                            ],
+                            "resource-id": "Toolbar",
+                            "text": "Toolbar",
+                            "view-id": "Toolbar"
+                           }
+                          ],
+                          "view-id": "526f38d4-8acb-0b22-1f71-c8ad3fc9f70a"
+                         }
+                        ],
+                        "view-id": "6fb36e73-25b5-8250-3adc-d1a3f6c8fb07"
+                       }
+                      ],
+                      "view-id": "6a377478-e1c0-cb54-40fc-9de61cd42d2d"
+                     }
+                    ],
+                    "view-id": "7c6131d8-dbde-aa17-7f74-3f36d5439579"
+                   }
+                  ],
+                  "view-id": "aaac914a-4330-255b-e87c-040707058b47"
+                 }
+                ],
+                "view-id": "2f2345f3-883e-3d99-198f-9d4d36a00fc8"
+               },
+               {
+                "bounds": {
+                 "bottom": 844,
+                 "left": 0,
+                 "right": 390,
+                 "top": 761
+                },
+                "className": "UIView",
+                "node": [
+                 {
+                  "bounds": {
+                   "bottom": 844,
+                   "left": 0,
+                   "right": 390,
+                   "top": 0
+                  },
+                  "className": "UIView",
+                  "extras": {
+                   "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                   "sdk.hasTapTarget": "true"
+                  },
+                  "node": [
+                   {
+                    "bounds": {
+                     "bottom": 844,
+                     "left": 0,
+                     "right": 390,
+                     "top": 761
+                    },
+                    "className": "UITabBar",
+                    "clickable": "true",
+                    "node": [
+                     {
+                      "bounds": {
+                       "bottom": 823,
+                       "left": 21,
+                       "right": 369,
+                       "top": 761
+                      },
+                      "className": "UIView",
+                      "node": [
+                       {
+                        "bounds": {
+                         "bottom": 815,
+                         "left": 21,
+                         "right": 113,
+                         "top": 761
+                        },
+                        "className": "UIView",
+                        "view-id": "f1e7f824-9565-35ac-5e5e-10d8fa3126f7"
+                       },
+                       {
+                        "bounds": {
+                         "bottom": 823,
+                         "left": 21,
+                         "right": 369,
+                         "top": 761
+                        },
+                        "className": "UIView",
+                        "node": [
+                         {
+                          "bounds": {
+                           "bottom": 819,
+                           "left": 25,
+                           "right": 117,
+                           "top": 765
+                          },
+                          "className": "UIButton",
+                          "clickable": "true",
+                          "node": [
+                           {
+                            "bounds": {
+                             "bottom": 798,
+                             "left": 57,
+                             "right": 85,
+                             "top": 771
+                            },
+                            "className": "UIImageView",
+                            "clickable": "true",
+                            "resource-id": "magnifyingglass",
+                            "role": "image",
+                            "text": "Search",
+                            "view-id": "magnifyingglass"
+                           }
+                          ],
+                          "resource-id": "magnifyingglass",
+                          "role": "button",
+                          "selected": "true",
+                          "text": "Discover",
+                          "view-id": "magnifyingglass"
+                         },
+                         {
+                          "bounds": {
+                           "bottom": 819,
+                           "left": 107,
+                           "right": 199,
+                           "top": 765
+                          },
+                          "className": "UIButton",
+                          "clickable": "true",
+                          "node": [
+                           {
+                            "bounds": {
+                             "bottom": 796,
+                             "left": 143,
+                             "right": 164,
+                             "top": 773
+                            },
+                            "className": "UIImageView",
+                            "clickable": "true",
+                            "resource-id": "play.fill",
+                            "role": "image",
+                            "text": "play",
+                            "view-id": "play.fill"
+                           }
+                          ],
+                          "resource-id": "play.fill",
+                          "role": "button",
+                          "text": "Demos",
+                          "view-id": "play.fill"
+                         },
+                         {
+                          "bounds": {
+                           "bottom": 819,
+                           "left": 190,
+                           "right": 282,
+                           "top": 765
+                          },
+                          "className": "UIButton",
+                          "clickable": "true",
+                          "node": [
+                           {
+                            "bounds": {
+                             "bottom": 797,
+                             "left": 220,
+                             "right": 252,
+                             "top": 772
+                            },
+                            "className": "UIImageView",
+                            "clickable": "true",
+                            "resource-id": "folder.fill",
+                            "role": "image",
+                            "text": "move",
+                            "view-id": "folder.fill"
+                           }
+                          ],
+                          "resource-id": "folder",
+                          "role": "button",
+                          "text": "Files",
+                          "view-id": "folder"
+                         },
+                         {
+                          "bounds": {
+                           "bottom": 819,
+                           "left": 273,
+                           "right": 365,
+                           "top": 765
+                          },
+                          "className": "UIButton",
+                          "clickable": "true",
+                          "node": [
+                           {
+                            "bounds": {
+                             "bottom": 799,
+                             "left": 305,
+                             "right": 333,
+                             "top": 771
+                            },
+                            "className": "UIImageView",
+                            "clickable": "true",
+                            "resource-id": "gearshape.fill",
+                            "role": "image",
+                            "text": "Gear shape, filled",
+                            "view-id": "gearshape.fill"
+                           }
+                          ],
+                          "resource-id": "gearshape.fill",
+                          "role": "button",
+                          "text": "Settings",
+                          "view-id": "gearshape.fill"
+                         }
+                        ],
+                        "view-id": "c213735d-2ac0-ed65-a7de-93dca2cf0ced"
+                       },
+                       {
+                        "bounds": {
+                         "bottom": 823,
+                         "left": 21,
+                         "right": 369,
+                         "top": 761
+                        },
+                        "className": "UIView",
+                        "view-id": "ab3d14a5-d4a8-4a95-c024-bc17eb80b985"
+                       },
+                       {
+                        "bounds": {
+                         "bottom": 819,
+                         "left": 25,
+                         "right": 117,
+                         "top": 765
+                        },
+                        "className": "UIView",
+                        "node": [
+                         {
+                          "bounds": {
+                           "bottom": 819,
+                           "left": 25,
+                           "right": 117,
+                           "top": 765
+                          },
+                          "className": "UIView",
+                          "node": [
+                           {
+                            "bounds": {
+                             "bottom": 819,
+                             "left": 25,
+                             "right": 117,
+                             "top": 765
+                            },
+                            "className": "UIView",
+                            "view-id": "361a0b1d-2787-6cb6-38a0-cf37ed38c314"
+                           },
+                           {
+                            "bounds": {
+                             "bottom": 819,
+                             "left": 25,
+                             "right": 117,
+                             "top": 765
+                            },
+                            "className": "UIView",
+                            "node": [
+                             {
+                              "bounds": {
+                               "bottom": 819,
+                               "left": 25,
+                               "right": 117,
+                               "top": 765
+                              },
+                              "className": "UIView",
+                              "node": [
+                               {
+                                "bounds": {
+                                 "bottom": 819,
+                                 "left": 25,
+                                 "right": 117,
+                                 "top": 765
+                                },
+                                "className": "UIView",
+                                "node": [
+                                 {
+                                  "bounds": {
+                                   "bottom": 819,
+                                   "left": 25,
+                                   "right": 117,
+                                   "top": 765
+                                  },
+                                  "className": "UIView",
+                                  "view-id": "9fbb90de-80a2-7fc6-ea24-d67991bf9cd7"
+                                 }
+                                ],
+                                "view-id": "d70c0a3f-70fd-c8b5-5535-276cd41e6c34"
+                               },
+                               {
+                                "bounds": {
+                                 "bottom": 819,
+                                 "left": 25,
+                                 "right": 117,
+                                 "top": 765
+                                },
+                                "className": "UIView",
+                                "view-id": "0be2054d-8dc4-4389-7835-0f3b85f3e5a1"
+                               }
+                              ],
+                              "view-id": "ed6e2783-17a4-acab-7396-cddea47a9be5"
+                             },
+                             {
+                              "bounds": {
+                               "bottom": 819,
+                               "left": 25,
+                               "right": 117,
+                               "top": 765
+                              },
+                              "className": "UIView",
+                              "view-id": "6fb07fb8-afea-9b05-c60c-cd03b50bdd9f"
+                             }
+                            ],
+                            "view-id": "019bbb80-8652-c2ff-b357-872d950d87c5"
+                           }
+                          ],
+                          "view-id": "ac38de51-17bd-dc84-8a21-4cd96116ef77"
+                         }
+                        ],
+                        "view-id": "e8716a02-726e-2da9-403a-01e8e303f286"
+                       }
+                      ],
+                      "view-id": "edce9e9c-4045-0ece-112d-a2d65243e634"
+                     }
+                    ],
+                    "text": "Tab Bar",
+                    "view-id": "5767236f-3292-c55d-4bc2-bbd9f8840614"
+                   }
+                  ],
+                  "view-id": "da01b223-2c6f-39ce-ff38-26d383e19410"
+                 },
+                 {
+                  "bounds": {
+                   "bottom": 844,
+                   "left": 0,
+                   "right": 390,
+                   "top": 761
+                  },
+                  "className": "UIView",
+                  "node": [
+                   {
+                    "bounds": {
+                     "bottom": 844,
+                     "left": 0,
+                     "right": 390,
+                     "top": 761
+                    },
+                    "className": "UIView",
+                    "node": [
+                     {
+                      "bounds": {
+                       "bottom": 844,
+                       "left": 0,
+                       "right": 390,
+                       "top": 761
+                      },
+                      "className": "UIView",
+                      "node": [
+                       {
+                        "bounds": {
+                         "bottom": 844,
+                         "left": 0,
+                         "right": 390,
+                         "top": 761
+                        },
+                        "className": "UIView",
+                        "node": [
+                         {
+                          "bounds": {
+                           "bottom": 844,
+                           "left": 0,
+                           "right": 390,
+                           "top": 761
+                          },
+                          "className": "UIView",
+                          "node": [
+                           {
+                            "bounds": {
+                             "bottom": 844,
+                             "left": 0,
+                             "right": 390,
+                             "top": 761
+                            },
+                            "className": "UIView",
+                            "view-id": "8292cd6c-2928-caba-894e-695b4249a38d"
+                           }
+                          ],
+                          "view-id": "7a1c59f7-7aa8-5cd0-f2e1-49055b3158c8"
+                         }
+                        ],
+                        "view-id": "b1854142-8751-6679-6783-5cd6f785f513"
+                       },
+                       {
+                        "bounds": {
+                         "bottom": 844,
+                         "left": 0,
+                         "right": 390,
+                         "top": 761
+                        },
+                        "className": "UIView",
+                        "node": [
+                         {
+                          "bounds": {
+                           "bottom": 844,
+                           "left": 0,
+                           "right": 390,
+                           "top": 761
+                          },
+                          "className": "UIView",
+                          "view-id": "2d1e5ea5-bb21-4ad0-dcbb-0f6aadffa164"
+                         }
+                        ],
+                        "view-id": "7aba9d52-6291-adf4-3921-a89a81035cc6"
+                       }
+                      ],
+                      "view-id": "9d8a156c-aa73-ba83-18fb-f9d6c711b1f3"
+                     }
+                    ],
+                    "view-id": "2a01d93e-38c3-add2-6962-5b7006fb5ddb"
+                   }
+                  ],
+                  "view-id": "17285a48-d892-2745-3f9e-b9d47e1546a5"
+                 }
+                ],
+                "view-id": "2ea28175-8ef5-1b2d-e335-753b935622bc"
+               }
+              ],
+              "view-id": "faad283b-00a1-3a9e-6b31-e154876e87aa"
+             }
+            ],
+            "view-id": "6d7fefde-6a82-70f4-5286-4c0e43a94226"
+           }
+          ],
+          "view-id": "23c046ee-d9f1-0b53-e415-aca04099aac3"
+         }
+        ],
+        "view-id": "342868ed-9339-afb1-fd68-304ce1141cae"
+       }
+      ],
+      "view-id": "54b54709-d08c-3814-4e4f-c66bf50820d8"
+     }
+    ],
+    "view-id": "5513e3ea-bba6-d754-02c1-c34c7365c6fa"
+   },
+   {
+    "bounds": {
+     "bottom": 844,
+     "left": 0,
+     "right": 390,
+     "top": 0
+    },
+    "className": "UIWindow",
+    "extras": {
+     "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+     "sdk.hasTapTarget": "true"
+    },
+    "node": [
+     {
+      "bounds": {
+       "bottom": 844,
+       "left": 0,
+       "right": 390,
+       "top": 0
+      },
+      "className": "UIView",
+      "extras": {
+       "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+       "sdk.hasTapTarget": "true"
+      },
+      "node": [
+       {
+        "bounds": {
+         "bottom": 844,
+         "left": 0,
+         "right": 390,
+         "top": 0
+        },
+        "className": "UIView",
+        "extras": {
+         "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+         "sdk.hasTapTarget": "true"
+        },
+        "node": [
+         {
+          "bounds": {
+           "bottom": 844,
+           "left": 0,
+           "right": 390,
+           "top": 0
+          },
+          "className": "UIView",
+          "extras": {
+           "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+           "sdk.hasTapTarget": "true"
+          },
+          "node": [
+           {
+            "bounds": {
+             "bottom": 844,
+             "left": 0,
+             "right": 390,
+             "top": 0
+            },
+            "className": "UIView",
+            "extras": {
+             "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+             "sdk.hasTapTarget": "true"
+            },
+            "node": [
+             {
+              "bounds": {
+               "bottom": 844,
+               "left": 0,
+               "right": 390,
+               "top": 0
+              },
+              "className": "UIView",
+              "extras": {
+               "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+               "sdk.hasTapTarget": "true"
+              },
+              "node": [
+               {
+                "bounds": {
+                 "bottom": 844,
+                 "left": 0,
+                 "right": 390,
+                 "top": 544
+                },
+                "className": "UIView",
+                "node": [
+                 {
+                  "bounds": {
+                   "bottom": 573,
+                   "left": 16,
+                   "right": 152,
+                   "top": 556
+                  },
+                  "className": "UILabel",
+                  "resource-id": "s6",
+                  "role": "text",
+                  "text": "Sheet top. note= n=2",
+                  "view-id": "s6"
+                 },
+                 {
+                  "bounds": {
+                   "bottom": 623,
+                   "left": 16,
+                   "right": 110,
+                   "top": 589
+                  },
+                  "className": "UIButton",
+                  "clickable": "true",
+                  "extras": {
+                   "sdk.isLayerNode": "true",
+                   "sdk.isUserInteractionEnabled": "false"
+                  },
+                  "resource-id": "b6",
+                  "role": "button",
+                  "text": "SheetBtn",
+                  "view-id": "b6"
+                 },
+                 {
+                  "actions": [
+                   "set_text",
+                   "clear_text"
+                  ],
+                  "bounds": {
+                   "bottom": 673,
+                   "left": 16,
+                   "right": 374,
+                   "top": 639
+                  },
+                  "className": "UITextField",
+                  "clickable": "true",
+                  "extras": {
+                   "sdk.gestureRecognizers": "UITextMultiTapRecognizer(enabled),UITapAndAHalfRecognizer(enabled),UIVariableDelayLoupeGesture(enabled),_UIPanOrFlickGestureRecognizer(enabled),UITextTapRecognizer(enabled),UITextRangeAdjustmentGestureRecognizer(enabled),UITapGestureRecognizer(enabled),_UIDragAddItemsGesture(enabled),_UIDragLiftGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIDragLiftPointerGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UITouchDurationObservingGestureRecognizer(enabled),_UISimplePressGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UISecondaryClickDriverGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled),_UIRelationshipGestureRecognizer(enabled)",
+                   "sdk.hasTapTarget": "true",
+                   "sdk.isAccessibilityElement": "true"
+                  },
+                  "hint-text": "bottom field",
+                  "node": [
+                   {
+                    "bounds": {
+                     "bottom": 673,
+                     "left": 16,
+                     "right": 374,
+                     "top": 639
+                    },
+                    "className": "_UITextFieldRoundedRectBackgroundViewNeue",
+                    "extras": {
+                     "sdk.backgroundColor": "#FFFFFFFF",
+                     "sdk.borderColor": "#00000033",
+                     "sdk.borderWidth": "0.33333334",
+                     "sdk.cornerRadius": "5.0",
+                     "sdk.isUserInteractionEnabled": "false",
+                     "sdk.source": "sdkWalker"
+                    }
+                   },
+                   {
+                    "bounds": {
+                     "bottom": 666,
+                     "left": 23,
+                     "right": 367,
+                     "top": 646
+                    },
+                    "className": "UITextFieldLabel",
+                    "extras": {
+                     "sdk.accessibilityTraits": "staticText",
+                     "sdk.isAccessibilityElement": "true",
+                     "sdk.isUserInteractionEnabled": "false",
+                     "sdk.source": "sdkWalker"
+                    },
+                    "text": "bottom field"
+                   }
+                  ],
+                  "resource-id": "tf6",
+                  "role": "textfield",
+                  "view-id": "tf6"
+                 }
+                ],
+                "view-id": "771256c7-63c6-9eeb-7ce1-53f75a16f889"
+               }
+              ],
+              "view-id": "b94a4f74-07d0-954c-b5c9-49ecf8564369"
+             }
+            ],
+            "view-id": "ccf7f96d-5223-f9b6-3dac-29ca820d4eee"
+           },
+           {
+            "bounds": {
+             "bottom": 844,
+             "left": 0,
+             "right": 390,
+             "top": 0
+            },
+            "className": "UIView",
+            "extras": {
+             "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+             "sdk.hasTapTarget": "true"
+            },
+            "node": [
+             {
+              "bounds": {
+               "bottom": 844,
+               "left": 0,
+               "right": 390,
+               "top": 0
+              },
+              "className": "UIView",
+              "extras": {
+               "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+               "sdk.hasTapTarget": "true"
+              },
+              "node": [
+               {
+                "bounds": {
+                 "bottom": 91,
+                 "left": 338,
+                 "right": 382,
+                 "top": 47
+                },
+                "className": "UIButton",
+                "clickable": "true",
+                "extras": {
+                 "sdk.gestureRecognizers": "_UISystemGestureGateGestureRecognizer(enabled),_UISystemGestureGateGestureRecognizer(enabled),_UIHomeAffordanceGateGestureRecognizer(enabled),UITapGestureRecognizer(enabled)",
+                 "sdk.hasTapTarget": "true"
+                },
+                "resource-id": "automobile-prototype-dismiss",
+                "role": "button",
+                "text": "Dismiss prototype",
+                "view-id": "automobile-prototype-dismiss"
+               }
+              ],
+              "view-id": "11624087-38e4-258b-3825-6c3733ca9a51"
+             }
+            ],
+            "view-id": "82343bf1-c7f9-b28f-cac4-af4104d38c21"
+           }
+          ],
+          "view-id": "d6150d07-c843-92d6-49bc-050b8aeadca6"
+         }
+        ],
+        "view-id": "a6f7ab36-0370-ca20-607e-156fd36990fc"
+       }
+      ],
+      "view-id": "57c3ab1a-1e0f-5dde-ba9d-ab04aabc1133"
+     }
+    ],
+    "view-id": "a93875fe-509a-c2fa-e0e0-939d3ec71c4d"
+   }
+  ],
+  "text": "Playground",
+  "view-id": "5feceb66-ffc8-6f38-d952-786c6d696c79"
+ },
+ "insets": {
+  "available": true,
+  "displayCutoutInfo": {
+   "classification": "unknown"
+  },
+  "safeArea": {
+   "bottom": 34,
+   "left": 0,
+   "right": 0,
+   "top": 47
+  },
+  "source": "ios-sdk-safe-area",
+  "systemChrome": {
+   "homeIndicatorAutoHideRequested": false,
+   "source": "ios-status-bar-manager",
+   "statusBar": "visible",
+   "visibility": "visible"
+  },
+  "units": "points"
+ },
+ "nativeScale": 3,
+ "packageName": "dev.jasonpearson.automobile.Playground",
+ "pixelHeight": 2532,
+ "pixelWidth": 1170,
+ "screenHeight": 844,
+ "screenScale": 3,
+ "screenWidth": 390,
+ "systemInsets": {
+  "bottom": 34,
+  "left": 0,
+  "right": 0,
+  "top": 47
+ },
+ "updatedAt": 1791908523590,
+ "windowInfo": {
+  "bounds": {
+   "bottom": 844,
+   "left": 0,
+   "right": 390,
+   "top": 0
+  },
+  "id": 0,
+  "isActive": true,
+  "isFocused": true,
+  "type": 1
+ },
+ "windows": [
+  {
+   "bounds": {
+    "bottom": 844,
+    "left": 0,
+    "right": 390,
+    "top": 0
+   },
+   "id": 0,
+   "isActive": true,
+   "isFocused": true,
+   "type": 1
+  }
+ ]
+}

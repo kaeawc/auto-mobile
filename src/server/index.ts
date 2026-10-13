@@ -38,6 +38,7 @@ import { holdsOwnerHeartbeatLease } from "../daemon/managedExecutionLiveness";
 import { combineRequestAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
+import { sessionForToolBinding } from "./sessionForToolBinding";
 import { dropToolCallRecording } from "./toolCallRecordingManager";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { DaemonSessionCreationRejectedError, TerminalSessionError } from "../daemon/sessionManager";
@@ -1763,9 +1764,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         !readOutsideBoundSession &&
         !isRecordingIdCleanup &&
         !isDeviceInventoryTool(name)
-          ? daemonSessionManager.getSessionForNewExecution(
+          ? sessionForToolBinding(
+              daemonSessionManager,
               providedSessionUuid,
               sessionExecutionMetadataOf(execution),
+              tool.isDeviceReadOnlyCall?.(parsedParams) === true,
             )
           : undefined;
       if (

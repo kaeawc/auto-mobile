@@ -1,4 +1,8 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import type { BootedDevice } from "../../src/models";
+import type { ChildProcess } from "node:child_process";
+import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { NoopTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
 import type { DaemonExitRecord } from "../../src/daemon/daemonExitRecord";
 import { Daemon, type DaemonStartHost } from "../../src/daemon/daemon";
@@ -105,8 +109,17 @@ describe("Daemon.start() tool-call-end wiring", () => {
     NavigationGraphManager.resetInstance();
   });
 
-  test("redrive wiring includes this daemon's rehydrated owner and excludes live peer owners", async () => {
-    const { daemon, internals, timer } = await makeDaemon({ port: 3161, debug: true });
+  // Seed the real in-memory repository outside the per-test budget; the measured
+  // test still exercises the daemon wiring and real peer-exclusion query.
+  async function createOwnerFixture() {
+    const identity = spyOn(buildIdentity, "getCurrentBuildIdentity").mockReturnValue({
+      entryScript: "/memory/entry.ts",
+      buildId: "memory-build",
+    });
+    const fixture = await makeDaemon({ port: 3161, debug: true }).finally(() =>
+      identity.mockRestore(),
+    );
+    const { daemon, internals, timer } = fixture;
     const db = await createTestDatabase();
     const repository = new VideoRecordingRepository(db);
     const sessions = new DeviceSessionRepository(db, timer);
@@ -131,6 +144,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
       });
       await repository.insertRecording({
         recordingId: owner,
+        recorderDaemonSessionId: daemonId,
         ownerSessionUuid: owner,
         deviceId: owner,
         platform: "android",
@@ -150,6 +164,15 @@ describe("Daemon.start() tool-call-end wiring", () => {
         },
       });
     }
+    return { daemon, internals, timer, db, repository, actualOwnId, host, live };
+  }
+  let ownerFixture: Awaited<ReturnType<typeof createOwnerFixture>>;
+  beforeAll(async () => {
+    ownerFixture = await createOwnerFixture();
+  });
+
+  test("redrive wiring includes this daemon's rehydrated owner and excludes live peer owners", async () => {
+    const { daemon, internals, timer, db, repository, actualOwnId, host, live } = ownerFixture;
     const initialize = spyOn(
       videoManager,
       "initializeRecordingTeardownRedriveState",
@@ -174,6 +197,67 @@ describe("Daemon.start() tool-call-end wiring", () => {
       internals.stopSessionTimers();
       timer.reset();
       await db.destroy();
+    }
+  });
+
+  test("pool process-start callback reaches the startup redrive listener", async () => {
+    const { daemon, internals, timer } = await makeDaemon({ port: 3161, debug: true });
+    const repo = new FakeVideoRecordingRepository();
+    await repo.insertRecording({
+      recordingId: "old-process",
+      deviceId: "emulator-5554",
+      platform: "android",
+      status: "interrupted",
+      fileName: "old.mp4",
+      filePath: "/unused/old.mp4",
+      format: "mp4",
+      sizeBytes: 0,
+      createdAt: "1970-01-01T00:00:00.000Z",
+      startedAt: "1970-01-01T00:00:00.000Z",
+      lastAccessedAt: "1970-01-01T00:00:00.000Z",
+      config: DEFAULT_VIDEO_RECORDING_CONFIG,
+      captureTeardown: {
+        kind: "android-screenrecord",
+        devicePid: 42,
+        deviceTempPath: "/sdcard/old.mp4",
+      },
+    });
+    const initialize = spyOn(
+      videoManager,
+      "initializeRecordingTeardownRedriveState",
+    ).mockResolvedValue({
+      recordingRepository: repo,
+      videoRecorderService: new VideoRecorderService({ backend: new FakeVideoCaptureBackend() }),
+      liveDaemonSessionIds: new Set(),
+    });
+    const incarnation = spyOn(daemon.getDevicePool(), "getDeviceIncarnation").mockReturnValue(1);
+    let disposed = 0;
+    const mark = spyOn(
+      daemon.getSessionManager(),
+      "markDeviceNeedsRecorderTeardown",
+    ).mockImplementation(() => () => {
+      disposed++;
+    });
+    try {
+      expect(await internals.processStartHost().redriveRecorderTeardowns()).toBe(true);
+      const pool = daemon.getDevicePool() as unknown as {
+        trackStartedDeviceProcess(device: BootedDevice, child: ChildProcess): Promise<void>;
+      };
+      await pool.trackStartedDeviceProcess(
+        { deviceId: "emulator-5554", platform: "android", name: "Pixel" },
+        new FakeChildProcess() as unknown as ChildProcess,
+      );
+      expect(disposed).toBe(1);
+      for (let i = 0; i < 10; i++) {
+        await Promise.resolve();
+      }
+      expect((await repo.getRecording("old-process"))?.captureTeardown).toBeUndefined();
+    } finally {
+      initialize.mockRestore();
+      incarnation.mockRestore();
+      mark.mockRestore();
+      internals.stopSessionTimers();
+      timer.reset();
     }
   });
 

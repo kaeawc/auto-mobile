@@ -16,6 +16,8 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
 
+import { DeviceUnreachableError } from "../../src/models/DeviceUnreachableError";
+
 const DEVICE = { deviceId: "emulator-5554", name: "Pixel", platform: "android" as const };
 const DESCRIPTOR = {
   kind: "android-screenrecord" as const,
@@ -55,6 +57,7 @@ describe("startup recorder redrive and a device pooled after it ran", () => {
   let spies: Array<{ mockRestore(): void }>;
   let incarnation: number | undefined;
   let listener: (deviceId: string) => void;
+  let processStarted: ((deviceId: string) => void) | undefined;
   let kills: VideoCaptureTeardownDescriptor[];
   let owned: string[];
   let warnings: string[];
@@ -84,12 +87,16 @@ describe("startup recorder redrive and a device pooled after it ran", () => {
     ];
     kills = [];
     owned = [];
+    processStarted = undefined;
     deps = {
       recordingRepository: repo,
       liveDaemonSessionIds: new Set(["peer"]),
       ownedCaptureIds: () => owned,
       getDevice: () => (incarnation === undefined ? undefined : DEVICE),
       getDeviceIncarnation: () => incarnation,
+      onDeviceProcessStarted: (callback) => {
+        processStarted = callback;
+      },
       onDeviceIncarnationAssigned: (callback) => {
         listener = callback;
       },
@@ -120,6 +127,96 @@ describe("startup recorder redrive and a device pooled after it ran", () => {
     listener(DEVICE.deviceId);
   }
   const marker = () => markers.get(DEVICE.deviceId, incarnation ?? 1)?.reason;
+
+  test("R6d thirty-second freeze preserves retries until the device answers", async () => {
+    incarnation = 1;
+    deps.forceStopOrphanedCapture = async (_device, descriptor) => {
+      kills.push(descriptor);
+      if (timer.now() < 30_000) {
+        throw new DeviceUnreachableError("frozen device");
+      }
+    };
+    await start();
+    await step(29_000);
+    expect(manager.getDeviceHealthRecovery(DEVICE.deviceId, 1, "recording-teardown")).toMatchObject(
+      {
+        recovering: true,
+        retryAfterMs: expect.any(Number),
+      },
+    );
+    await step(1000);
+    expect(marker()).toBeUndefined();
+    expect((await repo.getRecording(ORPHAN_ROW.recordingId))?.captureTeardown).toBeUndefined();
+  });
+
+  test("missing device preserves retries until it returns", async () => {
+    incarnation = 1;
+    let present = false;
+    deps.getDevice = () => (present ? DEVICE : undefined);
+    await start();
+    await step(10_000);
+    expect(
+      manager.getDeviceHealthRecovery(DEVICE.deviceId, 1, "recording-teardown").recovering,
+    ).toBe(true);
+    present = true;
+    await step(1000);
+    expect(marker()).toBeUndefined();
+  });
+
+  test.each([false, true])(
+    "started process acknowledges startup rows synchronously (independent retry=%s)",
+    async (independent) => {
+      incarnation = 1;
+      await start();
+      if (independent) {
+        manager.markDeviceNeedsRecorderTeardown(
+          DEVICE.deviceId,
+          async () => {
+            throw new Error("independent release give-up");
+          },
+          5000,
+          "release",
+        );
+      }
+      expect(processStarted).toBeDefined();
+      processStarted!(DEVICE.deviceId);
+      expect(marker()).toBe(independent ? "recording-teardown" : undefined);
+      expect(kills).toEqual([]);
+      await step(0);
+      expect((await repo.getRecording(ORPHAN_ROW.recordingId))?.captureTeardown).toBeUndefined();
+      pool(2);
+      expect(marker()).toBeUndefined();
+      await step(1000);
+      expect(kills).toEqual([]);
+    },
+  );
+
+  test("started process drops a session-held deferred startup row", async () => {
+    const holder = spyOn(manager, "getSessionForDevice").mockReturnValue("holder");
+    const unbound = spyOn(manager, "onSessionDeviceUnbound");
+    spies.push(holder, unbound);
+    incarnation = 1;
+    await start();
+    expect(processStarted).toBeDefined();
+    processStarted!(DEVICE.deviceId);
+    holder.mockReturnValue(null);
+    unbound.mock.calls[0]![0]("holder", DEVICE.deviceId);
+    await step(0);
+    expect(marker()).toBeUndefined();
+    expect(kills).toEqual([]);
+    expect((await repo.getRecording(ORPHAN_ROW.recordingId))?.captureTeardown).toBeUndefined();
+  });
+
+  test("process-start acknowledgement never touches a now locally owned capture", async () => {
+    incarnation = 1;
+    await start();
+    owned = [ORPHAN_ROW.recordingId];
+    expect(processStarted).toBeDefined();
+    processStarted!(DEVICE.deviceId);
+    await step(1000);
+    expect((await repo.getRecording(ORPHAN_ROW.recordingId))?.captureTeardown).toEqual(DESCRIPTOR);
+    expect(kills).toEqual([]);
+  });
 
   test("pool hook synchronously quarantines, then kills the exact orphan once", async () => {
     await start();

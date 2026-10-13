@@ -1,6 +1,12 @@
+import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../features/video/androidScreenrecord";
+import { DeviceUnreachableError } from "../models/DeviceUnreachableError";
 import type { Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
+
+export const ORPHAN_SCREENRECORD_EXIT_MARGIN_MS = 5_000;
+export const RECORDER_TEARDOWN_RECHECK_MS =
+  ANDROID_SCREENRECORD_MAX_SECONDS * 1_000 + ORPHAN_SCREENRECORD_EXIT_MARGIN_MS;
 
 interface RecorderRetry {
   retry: () => Promise<void>;
@@ -11,14 +17,23 @@ interface RecorderRetry {
 export class RecorderTeardownRetries {
   private readonly entries = new Map<string | symbol, RecorderRetry>();
   revision = 0;
+  recheckUsed = false;
 
   constructor(
     private readonly reason: "recording-teardown" | "app-cleanup" = "recording-teardown",
   ) {}
 
-  add(retry: () => Promise<void>, retryTimeoutMs: number, retryKey?: string): void {
-    this.entries.set(retryKey ?? Symbol(), { retry, retryTimeoutMs });
+  add(retry: () => Promise<void>, retryTimeoutMs: number, retryKey?: string): () => void {
+    const key = retryKey ?? Symbol();
+    const entry = { retry, retryTimeoutMs };
+    this.entries.set(key, entry);
     this.revision++;
+    this.recheckUsed = false;
+    return () => {
+      if (this.entries.get(key) === entry) {
+        this.entries.delete(key);
+      }
+    };
   }
 
   get empty(): boolean {
@@ -31,6 +46,7 @@ export class RecorderTeardownRetries {
 
   async dispatch(): Promise<void> {
     const snapshot = [...this.entries];
+    const failures: unknown[] = [];
     await Promise.all(
       snapshot.map(async ([key, entry]) => {
         try {
@@ -39,6 +55,7 @@ export class RecorderTeardownRetries {
             this.entries.delete(key);
           }
         } catch (error) {
+          failures.push(error);
           logger.warn(
             `${this.reason === "recording-teardown" ? "Recorder teardown" : "App cleanup"} retry remains unconfirmed`,
             error,
@@ -47,7 +64,13 @@ export class RecorderTeardownRetries {
       }),
     );
     if (!this.empty) {
-      throw new Error(
+      const Failure =
+        this.reason === "recording-teardown" &&
+        failures.length > 0 &&
+        failures.every((error) => error instanceof DeviceUnreachableError)
+          ? DeviceUnreachableError
+          : Error;
+      throw new Failure(
         `${this.reason === "recording-teardown" ? "Recorder teardown" : "App cleanup"} retries remain unconfirmed`,
       );
     }
@@ -86,7 +109,7 @@ async function settleDispatch(
   inFlight: Promise<void>,
   timeoutMs: number,
   deps: RecorderRecoveryDeps,
-): Promise<void> {
+): Promise<boolean> {
   const label = deps.reason === "app-cleanup" ? "App cleanup" : "Recorder teardown";
   const timeout = new Error(`${label} recovery timed out`);
   try {
@@ -105,12 +128,16 @@ async function settleDispatch(
         await inFlight;
       } catch (lateError) {
         logger.warn(`Timed-out ${label.toLowerCase()} recovery failed late`, lateError);
+        return lateError instanceof DeviceUnreachableError;
       }
+    } else {
+      return error instanceof DeviceUnreachableError;
     }
   }
+  return false;
 }
 
-/** Only dispatched attempts consume the budget; additions get a fresh three-attempt budget. */
+/** Only reached attempts consume the budget; additions get a fresh three-attempt budget. */
 export async function recoverRecorderTeardowns(
   retries: RecorderTeardownRetries,
   deps: RecorderRecoveryDeps,
@@ -140,7 +167,7 @@ export async function recoverRecorderTeardowns(
     const timeoutMs = retries.timeoutMs * attempt;
     deps.publishDeadline(deps.timer.now() + remainingBudget(retries, deps.delays, attempt, false));
     const inFlight = deps.dispatch(() => retries.dispatch());
-    await settleDispatch(inFlight, timeoutMs, deps);
+    const unreachable = await settleDispatch(inFlight, timeoutMs, deps);
     if (!(await deps.isCurrent())) {
       deps.drop();
       return retries.revision;
@@ -150,7 +177,7 @@ export async function recoverRecorderTeardowns(
       deps.drop();
       return retries.revision;
     }
-    attempt = revision !== retries.revision ? 1 : attempt + 1;
+    attempt = revision !== retries.revision ? 1 : unreachable ? attempt : attempt + 1;
     revision = retries.revision;
   }
   return revision;

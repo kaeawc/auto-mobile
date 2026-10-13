@@ -4171,6 +4171,15 @@ function leavePreviouslyRunningBoot(boot: DeviceBootResult | undefined): boolean
 }
 
 function coldBootRetryReason(failure: unknown): string | undefined {
+  const { DeviceUnhealthyError } =
+    require("../daemon/deviceAcquisitionRefusals") as typeof import("../daemon/deviceAcquisitionRefusals");
+  if (
+    failure instanceof DeviceUnhealthyError &&
+    failure.recovering &&
+    failure.devices.every((device) => device.reason === "recording-teardown")
+  ) {
+    return "recording-teardown";
+  }
   return failure instanceof DeviceTransportOfflineError
     ? failure.code
     : failure instanceof RunnerReadinessError &&

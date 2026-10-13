@@ -973,6 +973,7 @@ export interface DevicePoolDependencies {
   androidDeviceReboot?: AndroidDeviceReboot;
   recoveryPolicy?: DeviceRecoveryPolicy;
   onDeviceRemoved?: DeviceRemovedListener;
+  onDeviceProcessStarted?: (deviceId: string) => void;
   onDeviceIncarnationAssigned?: (deviceId: string, incarnation: number) => void;
   onDeviceStateChanged?: DeviceStateChangedListener;
   onDeviceFramesInvalidated?: (deviceId: string) => void;
@@ -1178,6 +1179,7 @@ export class DevicePool {
   private readonly criteriaMatcher: DeviceCriteriaMatcher;
   private readonly releaseSessionForDisconnectedDevice: DeviceDisconnectSessionReleaser;
   private readonly onDeviceReady: DeviceReadyListener | undefined;
+  private readonly onDeviceProcessStarted: DevicePoolDependencies["onDeviceProcessStarted"];
   private readonly onDeviceIncarnationAssigned: DevicePoolDependencies["onDeviceIncarnationAssigned"];
   private readonly onDeviceRemoved: DeviceRemovedListener | undefined;
   private readonly onDeviceStateChanged: DeviceStateChangedListener | undefined;
@@ -1366,6 +1368,7 @@ export class DevicePool {
     androidDeviceReboot,
     recoveryPolicy,
     onDeviceRemoved,
+    onDeviceProcessStarted,
     onDeviceIncarnationAssigned,
     onDeviceStateChanged,
     onDeviceFramesInvalidated,
@@ -1433,8 +1436,7 @@ export class DevicePool {
     this.deviceSessionRepository = deviceSessionRepository;
     this.autolockManager = this.createAutolockManager(env);
     this.criteriaMatcher = criteriaMatcher;
-    this.onDeviceReady = onDeviceReady;
-    this.onDeviceRemoved = onDeviceRemoved;
+    Object.assign(this, { onDeviceReady, onDeviceRemoved, onDeviceProcessStarted });
     this.onDeviceIncarnationAssigned = onDeviceIncarnationAssigned;
     this.onDeviceStateChanged = onDeviceStateChanged;
     this.onDeviceFramesInvalidated = onDeviceFramesInvalidated;
@@ -5742,7 +5744,17 @@ export class DevicePool {
     device: BootedDevice,
     childProcess: ChildProcess | null | undefined,
   ): Promise<void> {
-    return this.emulatorProcessLifecycle.trackStartedDeviceProcess(device, childProcess);
+    const alreadyTracked = this.emulatorProcessLifecycle.hasStartedDeviceProcess(
+      device.deviceId,
+      childProcess,
+    );
+    await this.emulatorProcessLifecycle.trackStartedDeviceProcess(device, childProcess);
+    if (
+      !alreadyTracked &&
+      this.emulatorProcessLifecycle.hasStartedDeviceProcess(device.deviceId, childProcess)
+    ) {
+      this.onDeviceProcessStarted?.(device.deviceId);
+    }
   }
 
   hasStartedDeviceProcess(

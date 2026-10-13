@@ -1,3 +1,5 @@
+import { ORPHAN_SCREENRECORD_EXIT_MARGIN_MS } from "../daemon/recorderTeardownRecovery";
+import { DeviceUnreachableError } from "../models/DeviceUnreachableError";
 import type { SessionManager } from "../daemon/sessionManager";
 import type {
   VideoRecordingRecord,
@@ -11,7 +13,7 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
 import { INCOMPLETE_MARK_GRACE_MS } from "./videoRecordingManager";
 
-export const ORPHAN_SCREENRECORD_EXIT_MARGIN_MS = 5_000;
+export { ORPHAN_SCREENRECORD_EXIT_MARGIN_MS } from "../daemon/recorderTeardownRecovery";
 
 export interface RecordingTeardownRedriveDeps {
   recordingRepository: Pick<VideoRecordingRepository, "listRecordings" | "updateRecording">;
@@ -23,6 +25,7 @@ export interface RecordingTeardownRedriveDeps {
     device: BootedDevice,
     descriptor: VideoCaptureTeardownDescriptor,
   ): Promise<void>;
+  onDeviceProcessStarted?(listener: (deviceId: string) => void): void;
   onDeviceIncarnationAssigned?(listener: (deviceId: string) => void): void;
   now(): number;
   timer: Pick<Timer, "sleep" | "setTimeout" | "clearTimeout">;
@@ -39,6 +42,7 @@ type RedriveManager = Pick<
 
 /** Startup-only bookkeeping; never written back to the repository. */
 interface RetainedCaptureRow extends VideoRecordingRecord {
+  withdrawRetry?: () => void;
   firstMarkedIncarnation?: number;
   warnedUnconfirmableRedrive?: boolean;
 }
@@ -52,6 +56,7 @@ export async function redriveUnconfirmedCaptureTeardowns(
   const pending = new Map<string, PendingRedrive>();
   const redrivenIncarnations = new Map<string, number>();
   let subscribedPending = false;
+  const startedDevices = new Set<string>();
   const redriveDevice = (deviceId: string, hookDriven: boolean): void => {
     const incarnation = deps.getDeviceIncarnation(deviceId);
     const owned = new Set(deps.ownedCaptureIds());
@@ -86,6 +91,20 @@ export async function redriveUnconfirmedCaptureTeardowns(
   };
   // Install before the startup read yields: its loop handles devices added during the read.
   deps.onDeviceIncarnationAssigned?.((deviceId) => redriveDevice(deviceId, true));
+  deps.onDeviceProcessStarted?.((deviceId) => {
+    startedDevices.add(deviceId);
+    const owned = new Set(deps.ownedCaptureIds());
+    const records = (byDevice.get(deviceId) ?? []).filter((row) => !owned.has(row.recordingId));
+    byDevice.delete(deviceId);
+    pending.delete(deviceId);
+    for (const row of records) {
+      row.withdrawRetry?.();
+      // A new emulator process cannot contain the previous process's recorder.
+      // Invalidate locally before yielding, including any in-flight/deferred retry.
+      row.captureTeardown = undefined;
+    }
+    void clearReplacedDescriptors(records, deps);
+  });
   let rows: VideoRecordingRecord[];
   try {
     rows = await deps.recordingRepository.listRecordings({
@@ -102,6 +121,10 @@ export async function redriveUnconfirmedCaptureTeardowns(
   const owned = new Set(deps.ownedCaptureIds());
   for (const row of rows) {
     if (!row.captureTeardown || owned.has(row.recordingId)) {
+      continue;
+    }
+    if (startedDevices.has(row.deviceId)) {
+      void clearReplacedDescriptors([row], deps);
       continue;
     }
     const group = byDevice.get(row.deviceId) ?? [];
@@ -140,16 +163,21 @@ function markOrphanedCaptures(
   deps: RecordingTeardownRedriveDeps,
   hookDriven = false,
 ): void {
+  records = records.filter((row) => row.captureTeardown);
+  if (records.length === 0) {
+    return;
+  }
   const remainingMs = records.map((row) => {
     const expiry = orphanExpiresAt(row);
     return Number.isFinite(expiry) ? Math.max(0, expiry - deps.now()) : 0;
   });
-  manager.markDeviceNeedsRecorderTeardown(
+  const withdrawRetry = manager.markDeviceNeedsRecorderTeardown(
     deviceId,
     () => retryOrphanedCaptures(deviceId, records, deps, true, hookDriven),
     Math.max(INCOMPLETE_MARK_GRACE_MS, ...remainingMs.map((ms) => ms + INCOMPLETE_MARK_GRACE_MS)),
   );
   for (const row of records) {
+    row.withdrawRetry = withdrawRetry;
     row.firstMarkedIncarnation ??= deps.getDeviceIncarnation(deviceId);
   }
 }
@@ -242,12 +270,16 @@ async function retryOrphanedCaptures(
   hookDriven = false,
 ): Promise<void> {
   const unconfirmed: string[] = [];
+  const failures: unknown[] = [];
   for (const row of records) {
-    if (!row.captureTeardown) {
+    if (!row.captureTeardown || deps.ownedCaptureIds().includes(row.recordingId)) {
       continue;
     }
     try {
       if (hookDriven && !(await hookRowStillUnconfirmed(row, deps))) {
+        continue;
+      }
+      if (!row.captureTeardown) {
         continue;
       }
       await confirmOrphanedCapture(row, deps, waitForExpiry);
@@ -261,11 +293,16 @@ async function retryOrphanedCaptures(
         error,
       );
       unconfirmed.push(row.recordingId);
+      failures.push(error);
     }
   }
   if (unconfirmed.length > 0) {
-    throw new ActionableError(
+    const Failure = failures.every((error) => error instanceof DeviceUnreachableError)
+      ? DeviceUnreachableError
+      : ActionableError;
+    throw new Failure(
       `Orphan recorder teardown on ${deviceId} is unconfirmed for ${unconfirmed.join(", ")}. Recover the device if retries fail.`,
+      { cause: failures[0] },
     );
   }
 }
@@ -322,7 +359,7 @@ async function confirmOrphanedCapture(
   }
   const device = deps.getDevice(row.deviceId);
   if (!device) {
-    throw new ActionableError(
+    throw new DeviceUnreachableError(
       `Cannot find device ${row.deviceId} to confirm orphan recorder teardown.`,
     );
   }

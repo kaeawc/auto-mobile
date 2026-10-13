@@ -802,6 +802,14 @@ remain allowed on marked devices. Skipped recovery ticks re-arm the same
 attempt, and only a dispatched restore consumes one of the three attempts.
 Recorder teardown composes all unconfirmed retries for the device incarnation; new or replaced retries get a fresh attempt budget, and a later mark also retries work left unconfirmed after exhaustion. Recorder rows from a successful startup read remain tracked when discovery pools a device later or assigns it a new incarnation: quarantine is synchronous before binding, and late redrive rechecks local and peer ownership before device commands; a descriptor with no pid and no finite expiry quarantines one incarnation only. A failed startup read leaves the descriptors for the next daemon start.
 
+Recorder teardown consumes an attempt only after reaching the device: an unanswered pid identity probe or missing pooled device re-arms the same attempt and delay when every failing entry is unreachable. A reached failure consumes it, even alongside unreachable entries. Timed-out work settles before another dispatch and follows the same rule. Unreachable re-arms keep reporting recovering with a retry deadline; marker/incarnation retirement and shutdown end recovery.
+
+After three reached failures, recording teardown schedules one re-check 185 seconds after exhaustion (screenrecord's 180-second hard limit plus a 5-second margin). While waiting, recovering remains true with a retry deadline. The same outstanding retry set then gets three fresh attempts; a second exhaustion holds the marker with recovering false and no further timer. A new mark starts recovery immediately. Retired markers/incarnations and shutdown cancel or ignore this unreferenced timer. App cleanup gets no hard-limit re-check.
+
+When this daemon tracks the spawned emulator process serving a device, startup-retained orphan rows and deferred work from the previous process are acknowledged on the host without device commands. Their quarantine entries are withdrawn synchronously before the bind health check; independent release cleanup and locally owned recordings remain protected. An adb reconnect or externally started emulator has no such signal and keeps the usual incarnation redrive.
+
+A refusal that is recovering and has only recording-teardown health reasons leaves an unowned, unprovisioned Android cold boot running for a retry, unless the request was aborted. Non-recovering markers and other health reasons still cancel that cold boot.
+
 In a plan failure result, top-level `deviceId` and `platform` identify the plan's device, while `devices[]` identifies the refused devices and top-level `reason`, `recovering`, `code`, `retryable`, and any `retryAfterMs` retain the refusal evidence.
 
 An exact Android acquisition also waits up to 5 s when adb still lists its

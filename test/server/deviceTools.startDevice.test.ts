@@ -38,7 +38,10 @@ import {
   RunnerReadinessError,
   SystemUiAnrRecoveryRequiredError,
 } from "../../src/ctrlProxy/RunnerReadinessService";
-import { DeviceTransportOfflineError } from "../../src/daemon/deviceAcquisitionRefusals";
+import {
+  DeviceUnhealthyError,
+  DeviceTransportOfflineError,
+} from "../../src/daemon/deviceAcquisitionRefusals";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { spyOn } from "bun:test";
@@ -2626,6 +2629,56 @@ describe("startDevice handler", () => {
       }
     });
   }
+
+  test.each([
+    "recovering",
+    "held",
+    "other-reason",
+    "mixed-reasons",
+    "aborted",
+    "provisioned",
+  ] as const)("recording quarantine cold boot cancellation (%s)", async (kind) => {
+    const child = new FakeChildProcess(bootTimer);
+    const kill = spyOn(child, "kill").mockImplementation(() => {
+      child.exitCode = 0;
+      child.emit("exit", 0, null);
+      return true;
+    });
+    const controller = new AbortController();
+    if (kind === "aborted") {
+      controller.abort();
+    }
+    const evidence = [
+      {
+        deviceId: androidDevice.deviceId,
+        reason: kind === "other-reason" ? "app-cleanup" : "recording-teardown",
+        recovering: kind !== "held",
+        retryAfterMs: 37_000,
+      },
+    ];
+    if (kind === "mixed-reasons") {
+      evidence.push({ ...evidence[0]!, reason: "clock" });
+    }
+    try {
+      const settlement = cancelUnownedColdBootUnlessRetryable(
+        {
+          device: androidDevice,
+          source: "cold-boot",
+          provisioned: kind === "provisioned",
+          processHandle: child as unknown as ChildProcess,
+        },
+        new DeviceUnhealthyError(evidence, "recorder quarantine"),
+        controller.signal,
+      );
+      if (kind === "recovering") {
+        expect(settlement).toBeUndefined();
+      }
+      await settlement;
+      expect(kill).toHaveBeenCalledTimes(kind === "recovering" ? 0 : 1);
+    } finally {
+      kill.mockRestore();
+    }
+  });
 
   it("an iOS cold boot still terminates after a retryable readiness deadline", async () => {
     const child = new FakeChildProcess(bootTimer);

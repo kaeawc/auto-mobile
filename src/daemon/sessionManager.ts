@@ -1,4 +1,8 @@
-import { RecorderTeardownRetries, recoverRecorderTeardowns } from "./recorderTeardownRecovery";
+import {
+  RecorderTeardownRetries,
+  RECORDER_TEARDOWN_RECHECK_MS,
+  recoverRecorderTeardowns,
+} from "./recorderTeardownRecovery";
 import { ignoresManagedExecutionIdleDeadline } from "./managedExecutionLiveness";
 import type { DeferredRebindCleanup } from "./acquisitionReceipt";
 import type { TimingData } from "../utils/PerformanceTracker";
@@ -2298,6 +2302,8 @@ export class SessionManager {
     }
   >();
 
+  private readonly recorderTeardownRechecks = new Map<string, NodeJS.Timeout>();
+
   private readonly healthRecoveries = new Map<string, Promise<void>>();
   private readonly healthRecoveryDeadlines = new Map<string, number | undefined>();
 
@@ -2320,15 +2326,15 @@ export class SessionManager {
       };
     }
     const key = `${deviceId}#${incarnation}:${reason}`;
-    if (!this.healthRecoveries.has(key)) {
+    if (!this.healthRecoveries.has(key) && !this.recorderTeardownRechecks.has(key)) {
       return { recovering: false };
     }
     const deadline = this.healthRecoveryDeadlines.get(key);
     return {
       recovering: true,
       ...(deadline !== undefined &&
-      !this.identityReplacementFences.has(deviceId) &&
-      this.deviceHealth.canRecover(deviceId)
+      (this.recorderTeardownRechecks.has(key) ||
+        (!this.identityReplacementFences.has(deviceId) && this.deviceHealth.canRecover(deviceId)))
         ? { retryAfterMs: Math.max(1, Math.ceil(deadline - this.timer.now())) }
         : {}),
     };
@@ -2370,8 +2376,8 @@ export class SessionManager {
     retry: () => Promise<void>,
     retryTimeoutMs: number,
     retryKey?: string,
-  ): void {
-    this.markDeviceNeedsKeyedRecovery(
+  ): () => void {
+    return this.markDeviceNeedsKeyedRecovery(
       deviceId,
       retry,
       retryTimeoutMs,
@@ -2386,7 +2392,7 @@ export class SessionManager {
     retryTimeoutMs: number,
     retryKey: string | undefined,
     reason: "recording-teardown" | "app-cleanup",
-  ): void {
+  ): () => void {
     this.pruneRecorderTeardownRetries();
     const health = this.deviceHealth;
     const incarnation = health?.incarnation(deviceId);
@@ -2394,20 +2400,33 @@ export class SessionManager {
       logger.warn(
         `${reason === "recording-teardown" ? "Recorder teardown" : "App cleanup"} on ${deviceId} has no pool incarnation; cannot key health marker`,
       );
-      return;
+      return () => {};
     }
     const target = { deviceId, incarnation };
     const key = `${deviceId}#${incarnation}:${reason}`;
     const retries =
       this.recorderTeardownRetries.get(key)?.retries ?? new RecorderTeardownRetries(reason);
     this.recorderTeardownRetries.set(key, { ...target, reason, retries });
-    retries.add(retry, retryTimeoutMs, retryKey);
+    const remove = retries.add(retry, retryTimeoutMs, retryKey);
+    const recheck = this.recorderTeardownRechecks.get(key);
+    if (recheck !== undefined) {
+      this.timer.clearTimeout(recheck);
+      this.recorderTeardownRechecks.delete(key);
+    }
     health.markers.mark(deviceId, incarnation, reason);
     this.healthRecoveryDeadlines.set(key, undefined);
-    if (this.healthRecoveries.has(key)) {
-      return;
+    if (!this.healthRecoveries.has(key)) {
+      this.startRecorderTeardownRecovery(target, retries, reason);
     }
-    this.startRecorderTeardownRecovery(target, retries, reason);
+    return () => {
+      remove();
+      if (retries.empty && this.recorderTeardownRetries.get(key)?.retries === retries) {
+        this.clearRestoreHealth(target, reason);
+        this.pruneRecorderTeardownRetries();
+        this.healthRecoveries.delete(key);
+        this.healthRecoveryDeadlines.delete(key);
+      }
+    };
   }
 
   private startRecorderTeardownRecovery(
@@ -2465,6 +2484,29 @@ export class SessionManager {
             (pending.retries !== retries || pending.retries.revision !== completedRevision)
           ) {
             this.startRecorderTeardownRecovery(target, pending.retries, reason);
+          } else if (
+            pending &&
+            reason === "recording-teardown" &&
+            !retries.empty &&
+            !retries.recheckUsed &&
+            this.acceptingSessionCreations
+          ) {
+            retries.recheckUsed = true;
+            this.healthRecoveryDeadlines.set(key, this.timer.now() + RECORDER_TEARDOWN_RECHECK_MS);
+            const handle = this.timer.setTimeout(() => {
+              this.recorderTeardownRechecks.delete(key);
+              this.healthRecoveryDeadlines.delete(key);
+              this.pruneRecorderTeardownRetries();
+              if (
+                this.acceptingSessionCreations &&
+                this.recorderTeardownRetries.get(key)?.retries === retries &&
+                !retries.empty
+              ) {
+                this.startRecorderTeardownRecovery(target, retries, reason);
+              }
+            }, RECORDER_TEARDOWN_RECHECK_MS);
+            (handle as { unref?: () => void }).unref?.();
+            this.recorderTeardownRechecks.set(key, handle);
           }
         }
       });
@@ -2477,6 +2519,12 @@ export class SessionManager {
         !this.deviceHealth?.markers.get(entry.deviceId, entry.incarnation, entry.reason)
       ) {
         this.recorderTeardownRetries.delete(key);
+        const recheck = this.recorderTeardownRechecks.get(key);
+        if (recheck !== undefined) {
+          this.timer.clearTimeout(recheck);
+          this.recorderTeardownRechecks.delete(key);
+          this.healthRecoveryDeadlines.delete(key);
+        }
       }
     }
   }

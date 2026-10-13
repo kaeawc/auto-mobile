@@ -69,29 +69,28 @@ abstract class VerifyR8KeptClassesTask : DefaultTask() {
     jars: List<File>,
     directories: List<File>,
     ownedPackagePrefixes: List<String>,
-  ): Sequence<ByteArray> =
-    sequence {
-      for (file in jars) {
-        JarFile(file).use { jar ->
-          val entries = jar.entries()
-          while (entries.hasMoreElements()) {
-            val entry = entries.nextElement()
-            if (
-              !entry.isDirectory &&
-                entry.name.endsWith(".class") &&
-                ownedPackagePrefixes.any { entry.name.contains(it) }
-            ) {
-              yield(jar.getInputStream(entry).use { it.readBytes() })
-            }
+  ): Sequence<ByteArray> = sequence {
+    for (file in jars) {
+      JarFile(file).use { jar ->
+        val entries = jar.entries()
+        while (entries.hasMoreElements()) {
+          val entry = entries.nextElement()
+          if (
+            !entry.isDirectory &&
+              entry.name.endsWith(".class") &&
+              ownedPackagePrefixes.any { entry.name.contains(it) }
+          ) {
+            yield(jar.getInputStream(entry).use { it.readBytes() })
           }
         }
       }
-      for (directory in directories) {
-        for (file in directory.walkTopDown().filter { it.isFile && it.extension == "class" }) {
-          val path = file.relativeTo(directory).invariantSeparatorsPath
-          if (ownedPackagePrefixes.none { path.contains(it) }) continue
-          yield(file.readBytes())
-        }
+    }
+    for (directory in directories) {
+      for (file in directory.walkTopDown().filter { it.isFile && it.extension == "class" }) {
+        val path = file.relativeTo(directory).invariantSeparatorsPath
+        if (ownedPackagePrefixes.none { path.contains(it) }) continue
+        yield(file.readBytes())
       }
     }
+  }
 }

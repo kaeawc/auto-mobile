@@ -1255,6 +1255,7 @@ internal data class DaemonResponse(
   val retryable: JsonElement? = null,
   val nextAction: JsonElement? = null,
   val retryAfterMs: JsonElement? = null,
+  val details: JsonElement? = null,
 )
 
 /** Interface for daemon tool calls to enable testing with fakes. */

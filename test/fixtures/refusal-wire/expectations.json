@@ -1,5 +1,5 @@
 {
-  "description": "How a runner must classify each typed daemon refusal in this directory (<code>.json, generated from the real TypeScript builders by scripts/generate-refusal-wire-fixtures.ts). wait = wait for the device within the bounded device wait; acquire-new-session = retry under a fresh session UUID; retry = ordinary bounded retry; fail = fail the attempt. Precedence when a runner derives it: wait, then acquire-new-session (nextAction), then retry (retryable: true), else fail. knownGaps maps a runner (kotlin, swift) to the disposition it currently produces instead of the expected one, so the suite stays green while the gap is tracked; a gap that starts matching the expectation fails the suite until the entry is removed. fields is what a runner must read from the fixture's wire payload: the typed code, retryable, whether nextAction is acquire_new_session, a positive retryAfterMs hint, and (capacity refusals) the externalDevices that count against the limit. A field absent from a row is absent on the wire.",
+  "description": "How a runner must classify each typed daemon refusal in this directory (<code>.json, generated from the real TypeScript builders by scripts/generate-refusal-wire-fixtures.ts). wait = wait for the device within the bounded device wait; acquire-new-session = retry under a fresh session UUID; retry = ordinary bounded retry; fail = fail the attempt. Precedence when a runner derives it: wait, then acquire-new-session (nextAction), then retry (retryable: true), else fail. knownGaps maps a runner (kotlin, swift) to the disposition it currently produces instead of the expected one, so the suite stays green while the gap is tracked; a gap that starts matching the expectation fails the suite until the entry is removed. fields is what a runner must read from the fixture's wire payload: the typed code, retryable, whether nextAction is acquire_new_session, a positive retryAfterMs hint, and (capacity refusals) the externalDevices that count against the limit. A field absent from a row is absent on the wire. session_held_by_recovery waits when retryable; device_unhealthy waits only when retryable and recovering are true. fields.recovering pins the wire boolean when present.",
   "codes": {
     "ambiguous_session_selector": {
       "expected": "fail",
@@ -571,7 +571,7 @@
       }
     },
     "session_held_by_recovery": {
-      "expected": "retry",
+      "expected": "wait",
       "fields": {
         "code": "session_held_by_recovery",
         "retryable": true,
@@ -696,20 +696,22 @@
       }
     },
     "device_unhealthy": {
-      "expected": "retry",
+      "expected": "wait",
       "fields": {
         "code": "device_unhealthy",
         "retryable": true,
         "acquireNewSession": false,
-        "retryAfterMs": 12863
+        "retryAfterMs": 12863,
+        "recovering": true
       }
     },
     "device_unhealthy.recovering_unbounded": {
-      "expected": "retry",
+      "expected": "wait",
       "fields": {
         "code": "device_unhealthy",
         "retryable": true,
-        "acquireNewSession": false
+        "acquireNewSession": false,
+        "recovering": true
       }
     },
     "device_unhealthy.permanent": {
@@ -717,16 +719,18 @@
       "fields": {
         "code": "device_unhealthy",
         "retryable": false,
-        "acquireNewSession": false
+        "acquireNewSession": false,
+        "recovering": false
       }
     },
     "device_unhealthy.all_candidates": {
-      "expected": "retry",
+      "expected": "wait",
       "fields": {
         "code": "device_unhealthy",
         "retryable": true,
         "acquireNewSession": false,
-        "retryAfterMs": 12863
+        "retryAfterMs": 12863,
+        "recovering": true
       }
     },
     "managed_slot_acquisition_failed.managed_slot_budget_exhausted.budget": {

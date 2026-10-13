@@ -15,6 +15,19 @@ import { INCOMPLETE_MARK_GRACE_MS } from "./videoRecordingManager";
 
 export { ORPHAN_SCREENRECORD_EXIT_MARGIN_MS } from "../daemon/recorderTeardownRecovery";
 
+export interface StartupOrphanCaptures {
+  /** Retained startup rows on this device whose descriptor is still unconfirmed. */
+  list(
+    deviceId: string,
+  ): readonly { recordingId: string; deviceId: string; ownerSessionUuid?: string }[];
+  /** Which device holds the retained orphan with this id, if any. */
+  find(
+    recordingId: string,
+  ): { recordingId: string; deviceId: string; ownerSessionUuid?: string } | undefined;
+  /** Stop and acknowledge startup rows; reject when teardown remains unconfirmed. */
+  stop(deviceId: string, recordingId?: string): Promise<void>;
+}
+
 export interface RecordingTeardownRedriveDeps {
   recordingRepository: Pick<VideoRecordingRepository, "listRecordings" | "updateRecording">;
   liveDaemonSessionIds: ReadonlySet<string>;
@@ -25,6 +38,7 @@ export interface RecordingTeardownRedriveDeps {
     device: BootedDevice,
     descriptor: VideoCaptureTeardownDescriptor,
   ): Promise<void>;
+  onStartupOrphans?(handle: StartupOrphanCaptures): void;
   onDeviceProcessStarted?(listener: (deviceId: string) => void): void;
   onDeviceIncarnationAssigned?(listener: (deviceId: string) => void): void;
   now(): number;
@@ -42,6 +56,8 @@ type RedriveManager = Pick<
 
 /** Startup-only bookkeeping; never written back to the repository. */
 interface RetainedCaptureRow extends VideoRecordingRecord {
+  confirmation?: Promise<void>;
+  hookDriven?: boolean;
   withdrawRetry?: () => void;
   firstMarkedIncarnation?: number;
   warnedUnconfirmableRedrive?: boolean;
@@ -77,6 +93,9 @@ export async function redriveUnconfirmedCaptureTeardowns(
         `[RecordingTeardownRedrive] Device ${deviceId} has no pool incarnation; retaining capture descriptors until the device is pooled`,
       );
       return;
+    }
+    for (const row of records) {
+      row.hookDriven ||= hookDriven;
     }
     redrivenIncarnations.set(deviceId, incarnation);
     if (manager.getSessionForDevice(deviceId) !== null) {
@@ -134,7 +153,56 @@ export async function redriveUnconfirmedCaptureTeardowns(
   for (const deviceId of byDevice.keys()) {
     redriveDevice(deviceId, false);
   }
+  deps.onStartupOrphans?.(createStartupOrphanCaptures(byDevice, deps));
   return true;
+}
+
+function createStartupOrphanCaptures(
+  byDevice: Map<string, RetainedCaptureRow[]>,
+  deps: RecordingTeardownRedriveDeps,
+): StartupOrphanCaptures {
+  const retained = (deviceId: string) =>
+    (byDevice.get(deviceId) ?? []).filter(
+      (row) => row.captureTeardown && !deps.ownedCaptureIds().includes(row.recordingId),
+    );
+  const reference = (row: RetainedCaptureRow) => ({
+    recordingId: row.recordingId,
+    deviceId: row.deviceId,
+    ownerSessionUuid: row.ownerSessionUuid,
+  });
+  return {
+    list: (deviceId) => retained(deviceId).map(reference),
+    find: (recordingId) => {
+      for (const deviceId of byDevice.keys()) {
+        const row = retained(deviceId).find((row) => row.recordingId === recordingId);
+        if (row) {
+          return reference(row);
+        }
+      }
+      return undefined;
+    },
+    stop: async (deviceId, recordingId) => {
+      const records = retained(deviceId).filter(
+        (row) => !recordingId || row.recordingId === recordingId,
+      );
+      try {
+        await retryOrphanedCaptures(deviceId, records, deps, false);
+      } finally {
+        // A disposer belongs to a whole registered batch, not to an individual row.
+        const batches = new Set(records.map((row) => row.withdrawRetry));
+        for (const withdraw of batches) {
+          if (
+            withdraw &&
+            !(byDevice.get(deviceId) ?? []).some(
+              (row) => row.withdrawRetry === withdraw && row.captureTeardown,
+            )
+          ) {
+            withdraw();
+          }
+        }
+      }
+    },
+  };
 }
 
 function canRedriveCapture(row: RetainedCaptureRow, incarnation: number | undefined): boolean {
@@ -264,7 +332,7 @@ async function confirmReleasedCaptures(
 
 async function retryOrphanedCaptures(
   deviceId: string,
-  records: VideoRecordingRecord[],
+  records: RetainedCaptureRow[],
   deps: RecordingTeardownRedriveDeps,
   waitForExpiry: boolean,
   hookDriven = false,
@@ -276,17 +344,7 @@ async function retryOrphanedCaptures(
       continue;
     }
     try {
-      if (hookDriven && !(await hookRowStillUnconfirmed(row, deps))) {
-        continue;
-      }
-      if (!row.captureTeardown) {
-        continue;
-      }
-      await confirmOrphanedCapture(row, deps, waitForExpiry);
-      await deps.recordingRepository.updateRecording(row.recordingId, {
-        captureTeardown: undefined,
-      });
-      row.captureTeardown = undefined;
+      await confirmRetainedCapture(row, deps, waitForExpiry, hookDriven);
     } catch (error) {
       logger.warn(
         `[RecordingTeardownRedrive] Teardown unconfirmed for ${row.recordingId} on ${deviceId}`,
@@ -304,6 +362,46 @@ async function retryOrphanedCaptures(
       `Orphan recorder teardown on ${deviceId} is unconfirmed for ${unconfirmed.join(", ")}. Recover the device if retries fail.`,
       { cause: failures[0] },
     );
+  }
+}
+
+/** Share PID confirmation and acknowledgement across caller, release and health retries. */
+async function confirmRetainedCapture(
+  row: RetainedCaptureRow,
+  deps: RecordingTeardownRedriveDeps,
+  waitForExpiry: boolean,
+  hookDriven: boolean,
+): Promise<void> {
+  // A caller preflight never joins a health retry waiting for a pid-less hard limit.
+  if (!waitForExpiry && row.captureTeardown?.devicePid === undefined && row.captureTeardown) {
+    await confirmOrphanedCapture(row, deps, false);
+  }
+  if (row.confirmation) {
+    return row.confirmation;
+  }
+  const confirmation = (async () => {
+    if ((hookDriven || row.hookDriven) && !(await hookRowStillUnconfirmed(row, deps))) {
+      return;
+    }
+    const descriptor = row.captureTeardown;
+    if (!descriptor || deps.ownedCaptureIds().includes(row.recordingId)) {
+      return;
+    }
+    await confirmOrphanedCapture(row, deps, waitForExpiry);
+    // Process-start acknowledgement can retire this row while device confirmation yields.
+    if (row.captureTeardown !== descriptor) {
+      return;
+    }
+    await deps.recordingRepository.updateRecording(row.recordingId, { captureTeardown: undefined });
+    row.captureTeardown = undefined;
+  })();
+  row.confirmation = confirmation;
+  try {
+    await confirmation;
+  } finally {
+    if (row.confirmation === confirmation) {
+      row.confirmation = undefined;
+    }
   }
 }
 

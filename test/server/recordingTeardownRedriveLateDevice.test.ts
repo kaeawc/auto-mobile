@@ -1,3 +1,5 @@
+import { createTestDatabase } from "../db/testDbHelper";
+import { VideoRecordingRepository } from "../../src/db/videoRecordingRepository";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { InMemoryDeviceHealthMarkers } from "../../src/daemon/deviceHealthMarkers";
 import { SessionManager } from "../../src/daemon/sessionManager";
@@ -8,6 +10,7 @@ import {
 import {
   redriveUnconfirmedCaptureTeardowns,
   type RecordingTeardownRedriveDeps,
+  type StartupOrphanCaptures,
 } from "../../src/server/recordingTeardownRedrive";
 import { logger } from "../../src/utils/logger";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
@@ -62,6 +65,7 @@ describe("startup recorder redrive and a device pooled after it ran", () => {
   let owned: string[];
   let warnings: string[];
   let deps: RecordingTeardownRedriveDeps;
+  let orphans: StartupOrphanCaptures | undefined;
 
   beforeEach(() => {
     timer = new FakeTimer();
@@ -88,7 +92,11 @@ describe("startup recorder redrive and a device pooled after it ran", () => {
     kills = [];
     owned = [];
     processStarted = undefined;
+    orphans = undefined;
     deps = {
+      onStartupOrphans: (handle) => {
+        orphans = handle;
+      },
       recordingRepository: repo,
       liveDaemonSessionIds: new Set(["peer"]),
       ownedCaptureIds: () => owned,
@@ -127,6 +135,107 @@ describe("startup recorder redrive and a device pooled after it ran", () => {
     listener(DEVICE.deviceId);
   }
   const marker = () => markers.get(DEVICE.deviceId, incarnation ?? 1)?.reason;
+
+  test("R6b held startup handle confirms once before release without a marker", async () => {
+    incarnation = 1;
+    const holder = spyOn(manager, "getSessionForDevice").mockReturnValue("holder");
+    const unbound = spyOn(manager, "onSessionDeviceUnbound");
+    spies.push(holder, unbound);
+    await start();
+    expect(orphans?.list(DEVICE.deviceId)).toEqual([
+      {
+        recordingId: ORPHAN_ROW.recordingId,
+        deviceId: DEVICE.deviceId,
+        ownerSessionUuid: undefined,
+      },
+    ]);
+    expect(orphans?.find(ORPHAN_ROW.recordingId)).toEqual(orphans!.list(DEVICE.deviceId)[0]);
+    await Promise.all([
+      orphans!.stop(DEVICE.deviceId, ORPHAN_ROW.recordingId),
+      orphans!.stop(DEVICE.deviceId),
+    ]);
+    expect(kills).toEqual([DESCRIPTOR]);
+    expect((await repo.getRecording(ORPHAN_ROW.recordingId))?.captureTeardown).toBeUndefined();
+    expect(orphans!.list(DEVICE.deviceId)).toEqual([]);
+    holder.mockReturnValue(null);
+    unbound.mock.calls[0]![0]("holder", DEVICE.deviceId);
+    await step(0);
+    expect(kills).toEqual([DESCRIPTOR]);
+    expect(marker()).toBeUndefined();
+  });
+  test("R6b idle startup handle withdraws its marker immediately", async () => {
+    incarnation = 1;
+    await start();
+    expect(marker()).toBe("recording-teardown");
+    expect(orphans).toBeDefined();
+    await orphans!.stop(DEVICE.deviceId);
+    expect(marker()).toBeUndefined();
+    expect(kills).toEqual([DESCRIPTOR]);
+  });
+  test.each(["pid", "pid-less"])("R6b unconfirmable %s orphan remains retained", async (kind) => {
+    incarnation = 1;
+    if (kind === "pid-less") {
+      await repo.insertRecording({
+        ...ORPHAN_ROW,
+        captureTeardown: { kind: DESCRIPTOR.kind, deviceTempPath: DESCRIPTOR.deviceTempPath },
+      });
+    } else {
+      await repo.insertRecording(ORPHAN_ROW);
+      deps.forceStopOrphanedCapture = async () => {
+        throw new Error("unconfirmed PID");
+      };
+    }
+    await redriveUnconfirmedCaptureTeardowns(manager, deps);
+    expect(orphans).toBeDefined();
+    await expect(orphans!.stop(DEVICE.deviceId)).rejects.toThrow();
+    expect(orphans!.find(ORPHAN_ROW.recordingId)).toBeDefined();
+    expect((await repo.getRecording(ORPHAN_ROW.recordingId))?.captureTeardown).toBeDefined();
+  });
+  test("R6b owned capture is never exposed or stopped", async () => {
+    incarnation = 1;
+    owned = [ORPHAN_ROW.recordingId];
+    await start();
+    expect(orphans).toBeDefined();
+    expect(orphans!.list(DEVICE.deviceId)).toEqual([]);
+    expect(orphans!.find(ORPHAN_ROW.recordingId)).toBeUndefined();
+    await orphans!.stop(DEVICE.deviceId);
+    expect(kills).toEqual([]);
+  });
+
+  test("R6b real startup filter never exposes live peer or later rows", async () => {
+    const db = await createTestDatabase();
+    const repository = new VideoRecordingRepository(db);
+    deps.recordingRepository = repository;
+    incarnation = 1;
+    try {
+      await repository.insertRecording({
+        ...ORPHAN_ROW,
+        recorderDaemonSessionId: "previous-daemon",
+      });
+      await repository.insertRecording({
+        ...ORPHAN_ROW,
+        recordingId: "peer-capture",
+        recorderDaemonSessionId: "peer",
+      });
+      await redriveUnconfirmedCaptureTeardowns(manager, deps);
+      expect(orphans!.list(DEVICE.deviceId).map((row) => row.recordingId)).toEqual([
+        ORPHAN_ROW.recordingId,
+      ]);
+      expect(orphans!.find("peer-capture")).toBeUndefined();
+      await repository.insertRecording({
+        ...ORPHAN_ROW,
+        recordingId: "later-capture",
+        recorderDaemonSessionId: "later-daemon",
+      });
+      expect(orphans!.find("later-capture")).toBeUndefined();
+      await orphans!.stop(DEVICE.deviceId);
+      expect(kills).toEqual([DESCRIPTOR]);
+      expect((await repository.getRecording("peer-capture"))?.captureTeardown).toEqual(DESCRIPTOR);
+      expect((await repository.getRecording("later-capture"))?.captureTeardown).toEqual(DESCRIPTOR);
+    } finally {
+      await db.destroy();
+    }
+  });
 
   test("R6d thirty-second freeze preserves retries until the device answers", async () => {
     incarnation = 1;

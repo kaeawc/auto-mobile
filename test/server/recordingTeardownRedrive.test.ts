@@ -183,8 +183,15 @@ describe("restart recorder teardown redrive", () => {
         }
         await settled;
         await step(1_000);
+        if (mode === "deadline") {
+          // The health retry joins the outstanding PID confirmation instead of issuing another command.
+          expect(kill).toHaveBeenCalledTimes(1);
+          expect(markers.get(device.deviceId, 1)?.reason).toBe("recording-teardown");
+          expect((await repo.getRecording("rec"))?.captureTeardown).toEqual(row.captureTeardown);
+        }
         gate.resolve();
-        expect(kill).toHaveBeenCalledTimes(2);
+        await drainUntilQuiescent(timer);
+        expect(kill).toHaveBeenCalledTimes(mode === "deadline" ? 1 : 2);
         expect(markers.get(device.deviceId, 1)).toBeUndefined();
         expect((await repo.getRecording("rec"))?.captureTeardown).toBeUndefined();
       } finally {

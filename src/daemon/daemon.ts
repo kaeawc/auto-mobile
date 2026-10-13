@@ -345,6 +345,7 @@ import {
 } from "../features/performance/PerformanceMonitor";
 import {
   initializeRecordingTeardownRedriveState,
+  setStartupOrphanCaptures,
   interruptVideoRecording,
   listActiveVideoRecordings,
   setVideoRecordingManagerDependencies,
@@ -790,7 +791,6 @@ export class Daemon {
   private shutdownHandlersRegistered: boolean = false;
   private shutdownInProgress: boolean = false;
   /** Redrives retained startup recorder descriptors when a device incarnation is assigned. */
-  private recorderDeviceProcessStartedListener?: (deviceId: string) => void;
   private recorderDeviceIncarnationListener?: (deviceId: string) => void;
   /** Live peer daemon ids captured at startup, consulted by the appearance sweep (#11158). */
   private startupLiveDaemonSessionIds: ReadonlySet<string> = new Set();
@@ -1283,7 +1283,6 @@ export class Daemon {
         this.deviceDataStreamServer?.invalidateDeviceFrames(deviceId);
         getDaemonStreamDeviceLifecycleEmitter().deviceIdentityChanged(deviceId);
       },
-      onDeviceProcessStarted: (deviceId) => this.recorderDeviceProcessStartedListener?.(deviceId),
       onDeviceIncarnationAssigned: (deviceId) => this.recorderDeviceIncarnationListener?.(deviceId),
       onDeviceRemoved: (deviceId, platform) => {
         getDaemonStreamDeviceLifecycleEmitter().deviceRemoved(deviceId);
@@ -1719,9 +1718,9 @@ export class Daemon {
               [...state.liveDaemonSessionIds].filter((id) => id !== this.daemonSessionId),
             ),
             ownedCaptureIds: () => state.videoRecorderService.listActiveRecordingIds(),
-            onDeviceProcessStarted: (listener) => {
-              this.recorderDeviceProcessStartedListener = listener;
-            },
+            onStartupOrphans: setStartupOrphanCaptures,
+            onDeviceProcessStarted: (listener) =>
+              this.devicePool.setDeviceProcessStartedListener(listener),
             onDeviceIncarnationAssigned: (listener) => {
               this.recorderDeviceIncarnationListener = listener;
             },

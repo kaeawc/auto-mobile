@@ -973,7 +973,6 @@ export interface DevicePoolDependencies {
   androidDeviceReboot?: AndroidDeviceReboot;
   recoveryPolicy?: DeviceRecoveryPolicy;
   onDeviceRemoved?: DeviceRemovedListener;
-  onDeviceProcessStarted?: (deviceId: string) => void;
   onDeviceIncarnationAssigned?: (deviceId: string, incarnation: number) => void;
   onDeviceStateChanged?: DeviceStateChangedListener;
   onDeviceFramesInvalidated?: (deviceId: string) => void;
@@ -1179,7 +1178,11 @@ export class DevicePool {
   private readonly criteriaMatcher: DeviceCriteriaMatcher;
   private readonly releaseSessionForDisconnectedDevice: DeviceDisconnectSessionReleaser;
   private readonly onDeviceReady: DeviceReadyListener | undefined;
-  private readonly onDeviceProcessStarted: DevicePoolDependencies["onDeviceProcessStarted"];
+  private onDeviceProcessStarted: ((deviceId: string) => void) | undefined;
+
+  setDeviceProcessStartedListener(listener: ((deviceId: string) => void) | undefined): void {
+    this.onDeviceProcessStarted = listener;
+  }
   private readonly onDeviceIncarnationAssigned: DevicePoolDependencies["onDeviceIncarnationAssigned"];
   private readonly onDeviceRemoved: DeviceRemovedListener | undefined;
   private readonly onDeviceStateChanged: DeviceStateChangedListener | undefined;
@@ -1368,7 +1371,6 @@ export class DevicePool {
     androidDeviceReboot,
     recoveryPolicy,
     onDeviceRemoved,
-    onDeviceProcessStarted,
     onDeviceIncarnationAssigned,
     onDeviceStateChanged,
     onDeviceFramesInvalidated,
@@ -1436,7 +1438,8 @@ export class DevicePool {
     this.deviceSessionRepository = deviceSessionRepository;
     this.autolockManager = this.createAutolockManager(env);
     this.criteriaMatcher = criteriaMatcher;
-    Object.assign(this, { onDeviceReady, onDeviceRemoved, onDeviceProcessStarted });
+    this.onDeviceReady = onDeviceReady;
+    this.onDeviceRemoved = onDeviceRemoved;
     this.onDeviceIncarnationAssigned = onDeviceIncarnationAssigned;
     this.onDeviceStateChanged = onDeviceStateChanged;
     this.onDeviceFramesInvalidated = onDeviceFramesInvalidated;

@@ -173,7 +173,10 @@ import {
   RunnerReadinessError,
   SystemUiAnrRecoveryRequiredError,
 } from "../ctrlProxy/RunnerReadinessService";
-import { DeviceTransportOfflineError } from "../daemon/deviceAcquisitionRefusals";
+import {
+  DeviceTransportOfflineError,
+  DeviceUnhealthyError,
+} from "../daemon/deviceAcquisitionRefusals";
 import { DeviceLostError } from "../models/DeviceLostError";
 import {
   DEFAULT_RUNNER_PROVISION_TIMEOUT_MS,
@@ -4171,8 +4174,6 @@ function leavePreviouslyRunningBoot(boot: DeviceBootResult | undefined): boolean
 }
 
 function coldBootRetryReason(failure: unknown): string | undefined {
-  const { DeviceUnhealthyError } =
-    require("../daemon/deviceAcquisitionRefusals") as typeof import("../daemon/deviceAcquisitionRefusals");
   if (
     failure instanceof DeviceUnhealthyError &&
     failure.recovering &&

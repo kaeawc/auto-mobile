@@ -79,11 +79,11 @@ async function harness(
       timer,
       deviceManager: utils,
       deviceHealthMarkers: markers,
-      onDeviceProcessStarted: started,
       onDeviceIncarnationAssigned: (id, incarnation) =>
         assigned?.(id, incarnation, pool.getDeviceIncarnation(id)),
     }),
   );
+  pool.setDeviceProcessStartedListener(started);
   await pool.initializeWithDevices(devices);
   return {
     timer,

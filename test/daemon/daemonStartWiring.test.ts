@@ -2,7 +2,7 @@ import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import type { BootedDevice } from "../../src/models";
 import type { ChildProcess } from "node:child_process";
 import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
-import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { NoopTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
 import type { DaemonExitRecord } from "../../src/daemon/daemonExitRecord";
 import { Daemon, type DaemonStartHost } from "../../src/daemon/daemon";
@@ -102,6 +102,8 @@ describe("Daemon.start() tool-call-end wiring", () => {
     } else {
       process.env[DAEMON_LAUNCH_CWD_ENV] = savedLaunchCwd;
     }
+    videoManager.setStartupOrphanCaptures(undefined);
+    expect(videoManager.getStartupOrphanCaptures()).toBeUndefined();
     setCtrlProxyForwardLeaseOwnerSocketPath(undefined);
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
@@ -109,17 +111,8 @@ describe("Daemon.start() tool-call-end wiring", () => {
     NavigationGraphManager.resetInstance();
   });
 
-  // Seed the real in-memory repository outside the per-test budget; the measured
-  // test still exercises the daemon wiring and real peer-exclusion query.
-  async function createOwnerFixture() {
-    const identity = spyOn(buildIdentity, "getCurrentBuildIdentity").mockReturnValue({
-      entryScript: "/memory/entry.ts",
-      buildId: "memory-build",
-    });
-    const fixture = await makeDaemon({ port: 3161, debug: true }).finally(() =>
-      identity.mockRestore(),
-    );
-    const { daemon, internals, timer } = fixture;
+  test("redrive wiring includes this daemon's rehydrated owner and excludes live peer owners", async () => {
+    const { daemon, internals, timer } = await makeDaemon({ port: 3161, debug: true });
     const db = await createTestDatabase();
     const repository = new VideoRecordingRepository(db);
     const sessions = new DeviceSessionRepository(db, timer);
@@ -164,15 +157,6 @@ describe("Daemon.start() tool-call-end wiring", () => {
         },
       });
     }
-    return { daemon, internals, timer, db, repository, actualOwnId, host, live };
-  }
-  let ownerFixture: Awaited<ReturnType<typeof createOwnerFixture>>;
-  beforeAll(async () => {
-    ownerFixture = await createOwnerFixture();
-  });
-
-  test("redrive wiring includes this daemon's rehydrated owner and excludes live peer owners", async () => {
-    const { daemon, internals, timer, db, repository, actualOwnId, host, live } = ownerFixture;
     const initialize = spyOn(
       videoManager,
       "initializeRecordingTeardownRedriveState",
@@ -240,6 +224,11 @@ describe("Daemon.start() tool-call-end wiring", () => {
     });
     try {
       expect(await internals.processStartHost().redriveRecorderTeardowns()).toBe(true);
+      expect(videoManager.getStartupOrphanCaptures()?.find("old-process")).toEqual({
+        recordingId: "old-process",
+        deviceId: "emulator-5554",
+        ownerSessionUuid: undefined,
+      });
       const pool = daemon.getDevicePool() as unknown as {
         trackStartedDeviceProcess(device: BootedDevice, child: ChildProcess): Promise<void>;
       };

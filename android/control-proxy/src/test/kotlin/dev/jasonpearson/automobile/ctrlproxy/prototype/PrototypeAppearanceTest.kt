@@ -273,10 +273,9 @@ class PrototypeAppearanceTest {
 
       controller.interact(runtime, PrototypeInteraction.SettledPage("pager", 1))
 
-      // The theme the host chrome and scrim draw from now names the live page and its mode; it
-      // used to stay the tree first shown, so chrome stayed dark around light content.
+      // The theme follows the live page, so chrome changes mode with the content.
       assertEquals(appearance(light, authored), shown().appearance)
-      assertEquals(1, shown().root.page)
+      assertEquals(1, runtime.renderModel().root.page)
       assertEquals(
         listOf(PrototypeEventKind.PAGE_CHANGED, PrototypeEventKind.APPEARANCE_CHANGED),
         events.map { it.kind },

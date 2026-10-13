@@ -122,7 +122,7 @@ class PrototypeController(
       // Opacity follows the mode the window is drawn in, not every mode the spec could reach.
       val shown = activeTheme?.value
       prototypeWindowMetadata(
-        mapPrototypeSpec(current.spec, current.pages),
+        runtime.renderModel(current),
         palettes = shown?.let { listOf(prototypeShownPalette(it)) },
         appearance = shown?.appearance,
       )
@@ -271,7 +271,7 @@ class PrototypeController(
         requestDismiss = { removeActive() },
         previousPages = if (preservePages) previous?.current?.pages.orEmpty() else emptyMap(),
       )
-    val mappedSpec = mapPrototypeSpec(validated, runtime.current.pages)
+    val mappedSpec = runtime.renderModel()
     val theme = MutableStateFlow(shownTheme(mappedSpec, appearance))
     val interactive =
       request.copy(
@@ -433,7 +433,7 @@ class PrototypeController(
           armIdle(runtime)
         runtime.handle(interaction)
         if (runtime === activeRuntime && runtime.current.active) {
-          val model = mapPrototypeSpec(runtime.current.spec, runtime.current.pages)
+          val model = runtime.renderModel()
           syncAppearance(runtime, model)
           syncTextFieldFocus(model)
         }
@@ -584,7 +584,7 @@ class PrototypeController(
   /** A failed re-theme keeps the mode already drawn and must not skip the window decision. */
   private suspend fun resyncAppearance(runtime: PrototypeRuntime) {
     try {
-      syncAppearance(runtime, mapPrototypeSpec(runtime.current.spec, runtime.current.pages))
+      syncAppearance(runtime, runtime.renderModel())
     } catch (error: CancellationException) {
       throw error
     } catch (error: Exception) {

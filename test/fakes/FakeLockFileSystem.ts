@@ -1,4 +1,4 @@
-import { dirname } from "node:path";
+import { basename, dirname } from "node:path";
 import type { LockFileSystem } from "../../src/utils/lockFileSystem";
 
 interface FileNode {
@@ -71,7 +71,7 @@ export class FakeLockFileSystem implements LockFileSystem {
   mkdir(path: string): void {
     this.record("mkdir", path);
     if (this.files.has(path)) {
-      throw this.error("ENOTDIR", path);
+      throw this.error("EEXIST", path);
     }
     let parent = path;
     while (!this.directories.has(parent)) {
@@ -81,6 +81,19 @@ export class FakeLockFileSystem implements LockFileSystem {
       this.directories.add(parent);
       parent = dirname(parent);
     }
+  }
+
+  list(directory: string): string[] {
+    this.record("list", directory);
+    if (this.files.has(directory)) {
+      throw this.error("ENOTDIR", directory);
+    }
+    if (!this.directories.has(directory)) {
+      throw this.error("ENOENT", directory);
+    }
+    return [...new Set([...this.files.keys(), ...this.directories])]
+      .filter((path) => path !== directory && dirname(path) === directory)
+      .map((path) => basename(path));
   }
 
   openExclusive(path: string): number {

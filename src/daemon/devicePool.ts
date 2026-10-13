@@ -10950,6 +10950,11 @@ export class DevicePool {
     return undefined;
   }
 
+  /** Whether the exclusion snapshot follows a failed registry read. */
+  managedSlotSnapshotRetainedAfterFailedRead(): boolean {
+    return this.managedSlotExclusion?.lastReadFailed?.() ?? false;
+  }
+
   /** Last forced re-read per device and session, so a hammering caller costs one read per window. */
   private readonly managedRereadAtMs = new Map<string, number>();
 

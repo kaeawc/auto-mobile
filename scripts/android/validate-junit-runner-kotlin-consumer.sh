@@ -3,10 +3,43 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd -- "${SCRIPT_DIR}/../.." && pwd)
-ANDROID_DIR="${PROJECT_ROOT}/android"
-SCRATCH_DIR="${PROJECT_ROOT}/scratch/junit-runner-kotlin-consumer"
+ANDROID_DIR="${JUNIT_CONSUMER_ANDROID_DIR:-${PROJECT_ROOT}/android}"
+SCRATCH_DIR="${JUNIT_CONSUMER_SCRATCH_DIR:-${PROJECT_ROOT}/scratch/junit-runner-kotlin-consumer}"
 CONSUMER_DIR="${SCRATCH_DIR}/consumer"
 LOG_DIR="${SCRATCH_DIR}/logs"
+
+LOG_TAIL_LINES="${JUNIT_CONSUMER_LOG_TAIL_LINES:-150}"
+if [[ ! "$LOG_TAIL_LINES" =~ ^[1-9][0-9]*$ ]]; then
+  echo "JUNIT_CONSUMER_LOG_TAIL_LINES must be a positive integer" >&2
+  exit 1
+fi
+
+run_logged() {
+  local log_file="$1"
+  local exit_code
+  shift
+
+  if "$@" >"$log_file" 2>&1; then
+    return 0
+  else
+    exit_code=$?
+  fi
+
+  {
+    echo "Gradle command failed; diagnostics from ${log_file}:"
+    awk '
+      /^\* What went wrong:/ { if (!found) { found = 1; active = 1 } }
+      active {
+        if (/^\* Try:/ || (blank && /^\*/)) exit
+        print
+        if (++count >= 40) exit
+        blank = ($0 ~ /^[[:space:]]*$/)
+      }
+    ' "$log_file"
+    tail -n "$LOG_TAIL_LINES" "$log_file"
+  } >&2
+  return "$exit_code"
+}
 
 KOTLIN_CONSUMER_VERSION="${KOTLIN_CONSUMER_VERSION:-2.2.21}"
 KOTLIN_CONSUMER_STDLIB_VERSION=$(
@@ -41,11 +74,11 @@ mkdir -p "${CONSUMER_DIR}/src/test/kotlin/dev/jasonpearson/automobile/compat" "$
 
 (
   cd "${ANDROID_DIR}"
-  ./gradlew \
+  run_logged "${LOG_DIR}/publish.log" ./gradlew \
     :test-plan-validation:publishToMavenLocal \
     :junit-runner:publishToMavenLocal \
     --stacktrace
-) >"${LOG_DIR}/publish.log" 2>&1
+)
 
 cat >"${CONSUMER_DIR}/settings.gradle.kts" <<'GRADLE_SETTINGS'
 pluginManagement {
@@ -100,11 +133,11 @@ KOTLIN
 
 (
   cd "${ANDROID_DIR}"
-  ./gradlew -p "${CONSUMER_DIR}" dependencyInsight \
+  run_logged "${LOG_DIR}/dependencyInsight.log" ./gradlew -p "${CONSUMER_DIR}" dependencyInsight \
     --dependency org.jetbrains.kotlin:kotlin-stdlib \
     --configuration testRuntimeClasspath \
     --stacktrace
-) >"${LOG_DIR}/dependencyInsight.log" 2>&1
+)
 
 if grep -q 'org.jetbrains.kotlin:kotlin-stdlib:2\.4\.0' "${LOG_DIR}/dependencyInsight.log"; then
   echo "Kotlin ${KOTLIN_CONSUMER_VERSION} consumer resolved kotlin-stdlib 2.4.0 from auto-mobile-junit-runner." >&2
@@ -114,7 +147,7 @@ fi
 
 (
   cd "${ANDROID_DIR}"
-  ./gradlew -p "${CONSUMER_DIR}" test --stacktrace
-) >"${LOG_DIR}/test.log" 2>&1
+  run_logged "${LOG_DIR}/test.log" ./gradlew -p "${CONSUMER_DIR}" test --stacktrace
+)
 
 echo "Kotlin ${KOTLIN_CONSUMER_VERSION} consumer compiled and tested against auto-mobile-junit-runner ${RUNNER_VERSION}."

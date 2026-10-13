@@ -61,6 +61,8 @@ public struct ProbeSnapshot: Codable {
     public let managedSimulators: [ManagedSimulator]?
     /// Version 3 reports offline rules; version 4 also carries shaped configuration.
     public let rules: [NetworkRuleStatus]?
+    /// Version 4 only: adapter activity, omitted when no adapter is attached.
+    public let shapingActivity: ShapingActivity?
     public let flows: [ProbeFlow]
     public let limitations: [String]
 }
@@ -117,7 +119,8 @@ public final class IdentityProbe {
     public func snapshot(
         managedSimulators: [ManagedSimulator] = [],
         rules: [NetworkRuleStatus] = [],
-        version: Int = IdentityProbe.version
+        version: Int = IdentityProbe.version,
+        shapingActivity: ShapingActivity? = nil
     )
         -> ProbeSnapshot
     {
@@ -152,7 +155,14 @@ public final class IdentityProbe {
         if version == 3, shapedCount > 0 {
             limitations.append("Omitted \(shapedCount) shaped rule(s): contract version 3 supports only offline rules.")
         } else if version == 4 {
-            limitations.append("Shaped rules are carried configuration; this build does not enforce them.")
+            limitations
+                .append(
+                    "Shaped rules are enforced on NEW flows of the attributed app only; established flows are not shaped."
+                )
+            limitations
+                .append(
+                    "Data-path NetworkExtension assumptions and all traffic effects are unverified until the signed run (#10263)."
+                )
             limitations.append("No network effects have been verified against controlled traffic probes.")
         }
         return ProbeSnapshot(
@@ -163,6 +173,7 @@ public final class IdentityProbe {
             discardedFlows: discardedFlows,
             managedSimulators: managedSimulators,
             rules: visible,
+            shapingActivity: version == 4 ? shapingActivity : nil,
             flows: flows,
             limitations: limitations
         )

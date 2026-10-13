@@ -1071,6 +1071,107 @@ test("recording-teardown refuses idle and exact binds until recovery confirms st
   expect(await h.pool.bindOrReuseDeviceSession("next", device.deviceId, "android")).toBe("next");
 });
 
+test("#12112 recording-teardown refusal carries its real recovery bound", async () => {
+  const h = await harness();
+  const markedAt = h.timer.now();
+  let calls = 0;
+  h.manager.markDeviceNeedsRecorderTeardown(
+    device.deviceId,
+    async () => {
+      calls++;
+      throw new Error("recorder still alive");
+    },
+    5_000,
+  );
+  const error = await typedAllocationError(h);
+  expect(error).toBeInstanceOf(acquisitionRefusals.DeviceUnhealthyError);
+  expect(error).toMatchObject({
+    code: "device_unhealthy",
+    deviceId: device.deviceId,
+    reason: "recording-teardown",
+    recovering: true,
+    retryable: true,
+    retryAfterMs: 37_000,
+  });
+  expect(error).toHaveProperty("message", expect.stringContaining("recording-teardown"));
+  expect(error).toHaveProperty("message", expect.stringContaining("code device_unhealthy"));
+  expect(error).toHaveProperty(
+    "message",
+    expect.stringContaining(
+      "call killDevice with device { name: 'Pixel A', deviceId: 'emulator-5554', platform: 'android' }, then startDevice to bring up a fresh device.",
+    ),
+  );
+  await h.timer.advanceTimeAsync(400, flush);
+  expect(calls).toBe(0);
+  expect(await typedAllocationError(h)).toMatchObject({ retryAfterMs: 36_600 });
+  await h.timer.advanceTimeAsync(600, flush);
+  expect(calls).toBe(1);
+  // Fake time 2_000: the first immediate failure starts attempt 2's sleep here.
+  expect(h.timer.now()).toBe(markedAt + 1_000);
+  expect(h.timer.getPendingSleeps()).toEqual([2_000]);
+  const remainingBound = markedAt + 1_000 + (2_000 + 4_000 + 10_000 + 15_000) - h.timer.now();
+  expect(remainingBound).toBe(31_000);
+  expect(await typedAllocationError(h)).toMatchObject({ retryAfterMs: remainingBound });
+});
+
+test("#12112 recording-teardown refusal is permanent after three dispatched failures", async () => {
+  const h = await harness();
+  let calls = 0;
+  h.manager.markDeviceNeedsRecorderTeardown(
+    device.deviceId,
+    async () => {
+      calls++;
+      throw new Error("recorder still alive");
+    },
+    5_000,
+  );
+  for (const delay of [1_000, 2_000, 4_000]) {
+    await h.timer.advanceTimeAsync(delay, flush);
+  }
+  expect(calls).toBe(3);
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)?.reason).toBe("recording-teardown");
+  const error = await typedAllocationError(h);
+  expect(error).toBeInstanceOf(acquisitionRefusals.DeviceUnhealthyError);
+  expect(error).toMatchObject({
+    code: "device_unhealthy",
+    deviceId: device.deviceId,
+    reason: "recording-teardown",
+    retryable: false,
+    recovering: false,
+  });
+  expect(error).not.toHaveProperty("retryAfterMs", expect.any(Number));
+  expect(error).toHaveProperty(
+    "message",
+    expect.stringContaining(
+      "call killDevice with device { name: 'Pixel A', deviceId: 'emulator-5554', platform: 'android' }, then startDevice to bring up a fresh device.",
+    ),
+  );
+  await h.timer.advanceTimeAsync(60_000, flush);
+  expect(calls).toBe(3);
+});
+
+test("#12112 recording-teardown recovery waits for a live owner without consuming attempts", async () => {
+  const h = await harness();
+  await h.pool.bindOrReuseDeviceSession("owner", device.deviceId, "android");
+  let calls = 0;
+  h.manager.markDeviceNeedsRecorderTeardown(
+    device.deviceId,
+    async () => {
+      calls++;
+    },
+    5_000,
+  );
+  await h.timer.advanceTimeAsync(60_000, flush);
+  expect(calls).toBe(0);
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)?.reason).toBe("recording-teardown");
+  await h.manager.releaseSession("owner");
+  await h.pool.releaseDevice(device.deviceId, "owner");
+  await h.timer.advanceTimeAsync(1_000, flush);
+  expect(calls).toBe(1);
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
+  expect(await h.pool.bindOrReuseDeviceSession("next", device.deviceId, "android")).toBe("next");
+});
+
 test("three recorder recovery failures hold the incarnation independently of app-cleanup", async () => {
   const h = await harness();
   let recorderCalls = 0;

@@ -132,6 +132,9 @@ const descriptionSchema = z.object({
   isVirtual: z.boolean(),
   runtime: z.object({
     deviceId: z.string().nullable(),
+    lifecycle: z.object({
+      state: z.enum(["configured", "booting", "booted", "shutting-down", "unavailable"]),
+    }),
     poolStatus: z.enum(["idle", "assigned", "error"]).nullable().optional(),
     heldBy: z.enum(["managed_slot", "other_daemon"]).optional(),
   }),
@@ -275,7 +278,13 @@ function mergeRows(
   protectedDevices: string[],
 ): void {
   for (const row of rows) {
-    const deviceId = row.runtime.deviceId ?? row.identity.stableId;
+    const deviceId = row.runtime.deviceId;
+    if (
+      !deviceId?.trim() ||
+      !["booting", "booted", "shutting-down"].includes(row.runtime.lifecycle.state)
+    ) {
+      continue;
+    }
     const previous = devices.get(deviceId);
     if (previous) {
       previous.seenByDaemons.push(name);
@@ -519,6 +528,7 @@ const snapshotSchema = z.object({ batchDir: z.string(), devices: z.array(deviceS
 async function deadDaemonFallback(
   view: DeviceView,
   specs: PrivateDaemonSpec[],
+  command: BatchDevicesCommand,
   deps: PrivateDaemonCliDeps,
 ): Promise<number> {
   const path = snapshotPath(view.batchDir);
@@ -535,12 +545,18 @@ async function deadDaemonFallback(
   if (snapshot.batchDir !== view.batchDir) {
     throw new Error("Device snapshot belongs to a different batch.");
   }
-  const results: DeviceResult[] = [];
-  for (const device of snapshot.devices) {
-    if (
-      refusal(device, view.protectedDevices) ||
-      !specs.some((spec) => device.seenByDaemons.includes(spec.name))
-    ) {
+  const selected = selectedDevices(
+    {
+      ...view,
+      devices: snapshot.devices.filter((device) =>
+        specs.some((spec) => device.seenByDaemons.includes(spec.name)),
+      ),
+    },
+    command.deviceSelectors ?? [],
+  );
+  const results = selected.missing;
+  for (const device of selected.devices) {
+    if (refusal(device, view.protectedDevices)) {
       continue;
     }
     Object.assign(device, await devicePid(device, deps));
@@ -562,7 +578,7 @@ export async function privateDaemonDevices(
 ): Promise<number> {
   const view = await buildDeviceView(options, specs, command.timeoutMs, deps);
   if (!view.daemons.some((daemon) => daemon.alive)) {
-    return deadDaemonFallback(view, specs, deps);
+    return deadDaemonFallback(view, specs, command, deps);
   }
   deps.mkdir(join(options.batchDir, "shared"), 0o700);
   deps.writeFile(snapshotPath(options.batchDir), JSON.stringify(view));

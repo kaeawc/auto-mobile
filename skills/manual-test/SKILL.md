@@ -11,14 +11,19 @@ specced feature end to end, and sweep the changed tool surface for regressions.
 Drive a real Android emulator and iOS simulator. Ground every PASS in an observed
 field or device-side ground truth, never the tool's self-reported `success`.
 
-Device work is **sequential — one device at a time (no parallelism yet)**. Do
-Phase A (Android) fully, then Phase B (iOS). Delegate breadth to **one** subagent
-at a time to conserve context; never let two actors drive devices at once.
+Several roles may each drive their OWN device in parallel, with one actor per
+device; never let two actors drive the same device. Every role takes
+`boot-gate` before starting or provisioning a device so boots are staggered and
+wait for host load to settle; wrap the boot command to hold the slot through
+bring-up. Run `preflight` before the batch: keep AC power attached, the lid open
+(or an external display connected), and idle sleep held using the printed
+caffeinate line. Caffeinate cannot prevent clamshell sleep on battery. Treat
+timings measured across a host sleep or a load spike as invalid.
 
 ## Harness
 
 Use [the manual-test harness](../../docs/using/manual-test-harness.md) for private
-batches: `private-daemon.ts init|start|status|stop|env|wrappers`, `in-daemon-env.sh`,
+batches: `private-daemon.ts init|start|status|stop|env|wrappers|devices|shutdown-devices|preflight|boot-gate`, `in-daemon-env.sh`,
 `proxy-session.ts up|call|read|tools|resources|subscribe|status|close`,
 `daemon-frame.ts send|session-info|heartbeat`, and `aux-socket.ts recording|video|webrtc` under
 `scripts/manual-test/`. Use those commands instead of hand-rolling a private
@@ -28,6 +33,12 @@ reproduction, use the [Python MCP SDK stdio clients](../../docs/using/manual-tes
 - Never touch the resident daemon, its default socket, port 3000 or
   `~/.auto-mobile`; every client uses the wrapper or a guarded harness CLI.
 - Never `pkill`/`killall`; stop only your own daemon with `private-daemon.ts stop`.
+- Protect non-batch devices at `init --protect NAME_OR_ID` (repeatable).
+- Tear down with `shutdown-devices` before `stop` each daemon, then stop the
+  batch's caffeinate by its recorded PID file. Save `devices`/`shutdown-devices`
+  evidence before `stop` for the dead-daemon fallback.
+- Use PIDs/the daemon, never `adb emu` console commands, to stop devices under
+  load; check the AVD name against the protected list before using a reported PID.
 - Never delete an AVD, simulator or directory.
 - For `startDevice`, use `avdName` (Android) or `deviceId` (UDID/serial).
   `name` is a matcher and is refused. The guard refuses
@@ -106,8 +117,10 @@ Client help (`--help`, `-h`, `help`, `<subcommand> --help`) exits 0 on stdout;
 parse errors exit 2 with a help pointer. Frame/aux codes: 0 success/cancel ran,
 1 typed refusal, 2 usage/guard, 3 timeout/connection. Proxy codes: 0 success/status,
 1 failed response, 2 usage/guard/wait deadline, 3 serve transport closed,
-4 serve initialization failed. Private-daemon codes: 0 success/status,
-2 usage/guard/I/O, or the lifecycle command's propagated code.
+4 serve initialization failed. Private-daemon codes: 0 success/status;
+1 typed non-success outcome (daemon still alive, a device not stopped,
+`preflight --strict` with warnings); 2 usage/guard/I/O or a `boot-gate` wait
+deadline. `boot-gate -- COMMAND` exits with the command's code.
 
 ## Phase 0 — Scope from the start point
 

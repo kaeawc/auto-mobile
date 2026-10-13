@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { z } from "zod";
 import { join } from "node:path";
-import { fixture, options, parsed } from "./manualTestPrivateDaemon.test";
+import { fixture, options, parsed } from "./manualTestPrivateDaemonFixture";
 import { runPrivateDaemonCommand } from "../../scripts/manual-test/private-daemon";
 import { derivePrivateDaemonBatch } from "../../scripts/manual-test/privateDaemonEnv";
 // Load the captured fixture as a text asset; command tests never use host filesystem APIs.
@@ -23,7 +23,12 @@ function row(
     name,
     platform,
     isVirtual,
-    runtime: { deviceId: id, poolStatus: "idle", heldBy: undefined },
+    runtime: {
+      deviceId: id,
+      lifecycle: { state: "booted" },
+      poolStatus: "idle",
+      heldBy: undefined,
+    },
   };
 }
 async function deviceFixture(protectedDevices: string[] = []) {
@@ -385,3 +390,81 @@ test("all daemons dead without snapshot says so", async () => {
   expect(await runPrivateDaemonCommand(command("shutdown-devices"), f.deps)).toBe(1);
   expect(document(f).message).toContain("snapshot");
 });
+
+test.each(["configured", "unavailable", "null-id", "empty-id"])(
+  "%s is never listed or killed",
+  async (kind) => {
+    const f = await deviceFixture();
+    const device = row();
+    const runtime = {
+      ...device.runtime,
+      deviceId: kind === "null-id" ? null : kind === "empty-id" ? "" : device.runtime.deviceId,
+      lifecycle: { state: ["configured", "unavailable"].includes(kind) ? kind : "booted" },
+    };
+    f.deps.requestSocket = async (_path, request) => {
+      expect(request.params).toMatchObject({ name: "listDevices" });
+      return {
+        success: true,
+        result: { structuredContent: { devices: [{ ...device, runtime }] } },
+      };
+    };
+    expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);
+    expect(document(f).devices).toEqual([]);
+    expect(await runPrivateDaemonCommand(command("shutdown-devices"), f.deps)).toBe(0);
+    expect(document(f).results).toEqual([]);
+  },
+);
+test("dead daemon fallback selects snapshot names and IDs and reports missing selectors", async () => {
+  const f = await deviceFixture();
+  f.deps.requestSocket = async () => ({
+    success: true,
+    result: {
+      structuredContent: {
+        devices: [row(), row("emulator-5558", "other-avd"), row("emulator-5560", "third-avd")],
+      },
+    },
+  });
+  expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);
+  f.deps.requestSocket = async () => {
+    throw new Error("dead");
+  };
+  expect(
+    await runPrivateDaemonCommand(
+      command(
+        "shutdown-devices",
+        "--device",
+        "batch-avd",
+        "--device",
+        "emulator-5560",
+        "--device",
+        "missing",
+      ),
+      f.deps,
+    ),
+  ).toBe(1);
+  expect(
+    document(f).results.map((r: { deviceId: string; outcome: string }) => [r.deviceId, r.outcome]),
+  ).toEqual([
+    ["missing", "not-found"],
+    ["emulator-5556", "daemon-dead"],
+    ["emulator-5560", "daemon-dead"],
+  ]);
+});
+
+test.each(["booting", "booted", "shutting-down"])(
+  "running lifecycle %s remains listed",
+  async (state) => {
+    const f = await deviceFixture();
+    const device = row();
+    f.deps.requestSocket = async () => ({
+      success: true,
+      result: {
+        structuredContent: {
+          devices: [{ ...device, runtime: { ...device.runtime, lifecycle: { state } } }],
+        },
+      },
+    });
+    expect(await runPrivateDaemonCommand(command("devices"), f.deps)).toBe(0);
+    expect(document(f).devices).toHaveLength(1);
+  },
+);

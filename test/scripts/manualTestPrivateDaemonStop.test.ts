@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { fixture, options, parsed } from "./manualTestPrivateDaemon.test";
+import { fixture, options, parsed } from "./manualTestPrivateDaemonFixture";
 import { runPrivateDaemonCommand } from "../../scripts/manual-test/private-daemon";
 import { derivePrivateDaemonBatch } from "../../scripts/manual-test/privateDaemonEnv";
 import { FakeTimer } from "../fakes/FakeTimer";

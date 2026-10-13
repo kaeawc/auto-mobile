@@ -1,14 +1,24 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { DaemonClient } from "../../src/daemon/client";
+import {
+  DaemonClient,
+  DaemonShuttingDownError,
+  DaemonUnavailableError,
+} from "../../src/daemon/client";
 import {
   DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD,
   DAEMON_HEARTBEAT_METHOD,
   DAEMON_RELEASE_EXECUTION_METHOD,
+  DAEMON_REGISTER_SESSION_METHOD,
+  DAEMON_SHUTTING_DOWN_ERROR_CODE,
   DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
   DAEMON_VERSION,
 } from "../../src/daemon/constants";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { MANAGED_EXECUTION_RELEASE_TIMEOUT_MS } from "../../src/daemon/managedExecutionLiveness";
+import {
+  DAEMON_SESSION_NOT_FOUND_CODE,
+  DAEMON_LIVENESS_OWNER_CONFLICT_CODE,
+} from "../../src/daemon/types";
 import type { ManagedSlotConfig } from "../../src/models/managedSlotConfig";
 import type { ManagedSlotsResult } from "../../src/models/managedSlotsResult";
 import { logger } from "../../src/utils/logger";
@@ -41,11 +51,17 @@ class HoldScenario {
   readonly release = Promise.withResolvers<unknown>();
   readonly reconnect = Promise.withResolvers<void>();
   readonly tokenListing = Promise.withResolvers<unknown>();
+  readonly registration = Promise.withResolvers<unknown>();
   parkHeartbeat = false;
   parkRelease = false;
   dropAfterReply = false;
   parkReconnect = false;
   parkTokenListing = false;
+  recoverClaim = false;
+  replacementUnavailable = false;
+  parkRegistration = false;
+  readonly claimRefusals: Error[] = [];
+  readonly registrationRefusals: unknown[] = [];
   result: ManagedSlotsResult | undefined;
   readonly proxy: DaemonMcpProxy;
 
@@ -77,7 +93,23 @@ class HoldScenario {
                 : { sessions: [] };
             }
             if (method === DAEMON_HEARTBEAT_METHOD && this.parkHeartbeat) {
+              if (index > 0 && this.recoverClaim) {
+                const refusal = this.claimRefusals.shift();
+                if (refusal) {
+                  throw refusal;
+                }
+                return { accepted: true };
+              }
               return this.heartbeat.promise;
+            }
+            if (method === DAEMON_REGISTER_SESSION_METHOD) {
+              const refusal = this.registrationRefusals.shift();
+              if (refusal) {
+                throw refusal;
+              }
+              if (this.parkRegistration) {
+                return this.registration.promise;
+              }
             }
             if (method === DAEMON_RELEASE_EXECUTION_METHOD && this.parkRelease) {
               return this.release.promise;
@@ -85,6 +117,7 @@ class HoldScenario {
             return {};
           },
         });
+        client.shouldFailConnect = index > 0 && this.replacementUnavailable;
         if (index > 0 && this.parkReconnect) {
           const connect = client.connect.bind(client);
           client.connect = async () => {
@@ -98,12 +131,22 @@ class HoldScenario {
     });
   }
 
-  acquire(): Promise<ManagedSlotsResult> {
-    const pending = this.proxy.acquireManagedSlots(CONFIG);
+  acquire(preparationTimeoutMs = CONFIG.preparationTimeoutMs): Promise<ManagedSlotsResult> {
+    const pending = this.proxy.acquireManagedSlots({ ...CONFIG, preparationTimeoutMs });
     void pending.then((result) => {
       this.result = result;
     });
     return pending;
+  }
+
+  loseClaimConnection(): void {
+    this.clients[0]!.emitConnectionClosed();
+    this.heartbeat.reject(new DaemonUnavailableError("Daemon socket closed"));
+  }
+
+  async step(ms: number): Promise<void> {
+    this.timer.advanceTime(ms);
+    await drainMicrotasks(150);
   }
 
   calls(method: string, sessionId = SESSION) {
@@ -159,6 +202,7 @@ describe("managed acquisition hold deadline on the proxy", () => {
     for (const scenario of scenarios.splice(0)) {
       scenario.reconnect.resolve();
       scenario.tokenListing.resolve({ sessions: [] });
+      scenario.registration.resolve({ accepted: true });
       scenario.heartbeat.resolve({});
       scenario.release.resolve({});
       await drainMicrotasks(150);
@@ -340,6 +384,390 @@ describe("managed acquisition hold deadline on the proxy", () => {
     await expect(s.proxy.holdManagedExecutionSession(OTHER)).rejects.toThrow("already bound");
     expect(s.proxy.getManagedExecutionSessions()).toEqual([SESSION]);
     expect(s.calls(DAEMON_RELEASE_EXECUTION_METHOD)).toHaveLength(0);
+  });
+
+  test("a lost claiming heartbeat waits through paced outages for claim and managed registration", async () => {
+    const s = scenario();
+    s.parkHeartbeat = true;
+    s.recoverClaim = true;
+    s.replacementUnavailable = true;
+    const pending = s.acquire(1_000);
+    await drainMicrotasks(150);
+    s.loseClaimConnection();
+    await drainMicrotasks(150);
+    expect(s.result).toBeUndefined();
+    for (const delay of [25, 50, 100]) {
+      await s.step(delay);
+      expect(s.result).toBeUndefined();
+    }
+    s.replacementUnavailable = false;
+    await s.step(200);
+    expect(s.result?.outcome).toBe("ready");
+    expect(await pending).toEqual(READY);
+    const calls = s.clients.at(-1)!.callDaemonMethodCalls;
+    expect(calls.find((call) => call.method === DAEMON_HEARTBEAT_METHOD)?.params).toMatchObject({
+      sessionId: SESSION,
+      claimLivenessOwnership: true,
+      livenessOwnerToken: TOKEN,
+    });
+    expect(calls.find((call) => call.method === DAEMON_REGISTER_SESSION_METHOD)?.params).toEqual({
+      sessionId: SESSION,
+      clientName: "auto-mobile-managed-slot-proxy",
+      managedSlots: {
+        scopeKey: READY.scope.scopeKey,
+        sessionUuids: [SESSION],
+        livenessOwnerToken: TOKEN,
+      },
+    });
+  });
+
+  test("a lost claiming heartbeat never publishes ready when the replacement misses the deadline", async () => {
+    const s = scenario();
+    s.parkHeartbeat = true;
+    s.recoverClaim = true;
+    s.replacementUnavailable = true;
+    const pending = s.acquire();
+    await drainMicrotasks(150);
+    s.loseClaimConnection();
+    await drainMicrotasks(150);
+    expect(s.result).toBeUndefined();
+    await s.step(25);
+    await s.step(50);
+    expect(s.result).toBeUndefined();
+    await s.step(25);
+    expect(await pending).toMatchObject({ outcome: "failed", failure: { code: "timeout" } });
+    s.assertAbandoned();
+    // No client is reachable: abandonment leaves release to the daemon's existing lease cleanup.
+    expect(s.calls(DAEMON_RELEASE_EXECUTION_METHOD)).toHaveLength(0);
+    await s.noMoreHeartbeats();
+  });
+
+  test.each([undefined, "daemon-restart"])(
+    "not-found claim with reason %s retries before ready",
+    async (releaseReason) => {
+      const s = scenario();
+      s.parkHeartbeat = true;
+      s.recoverClaim = true;
+      s.claimRefusals.push(
+        Object.assign(new Error("rehydration pending"), {
+          code: DAEMON_SESSION_NOT_FOUND_CODE,
+          releaseReason,
+        }),
+      );
+      const pending = s.acquire(1_000);
+      await drainMicrotasks(150);
+      s.loseClaimConnection();
+      await drainMicrotasks(150);
+      expect(s.result).toBeUndefined();
+      await s.step(25);
+      expect(s.result).toBeUndefined();
+      await s.step(50);
+      expect(s.result?.outcome).toBe("ready");
+      expect(await pending).toEqual(READY);
+      expect(
+        s.calls(DAEMON_HEARTBEAT_METHOD).filter((call) => call.params.claimLivenessOwnership),
+      ).toHaveLength(3);
+    },
+  );
+
+  test.each([
+    {
+      name: "device restart",
+      fields: {
+        code: DAEMON_SESSION_NOT_FOUND_CODE,
+        releaseReason: "device-restart:emulator-5554",
+      },
+    },
+    {
+      name: "terminal release",
+      fields: { code: DAEMON_SESSION_NOT_FOUND_CODE, releaseReason: "explicit-release" },
+    },
+    { name: "owner conflict", fields: { code: DAEMON_LIVENESS_OWNER_CONFLICT_CODE } },
+    {
+      name: "retryable owner conflict",
+      fields: { code: DAEMON_LIVENESS_OWNER_CONFLICT_CODE, retryable: true },
+    },
+    { name: "retryable database refusal", fields: { code: "SQLITE_BUSY", retryable: true } },
+  ])("a $name claim fails the hold immediately", async ({ fields }) => {
+    const s = scenario();
+    s.parkHeartbeat = true;
+    const pending = s.acquire();
+    await drainMicrotasks(150);
+    s.heartbeat.reject(Object.assign(new Error("claim refused"), fields));
+    await drainMicrotasks(150);
+    expect(s.result).toMatchObject({
+      outcome: "failed",
+      failure: { code: "execution_hold_failed" },
+    });
+    expect(await pending).toBe(s.result!);
+    expect(s.timer.now()).toBe(0);
+    expect(
+      s.calls(DAEMON_HEARTBEAT_METHOD).filter((call) => call.params.claimLivenessOwnership),
+    ).toHaveLength(1);
+    expect(s.calls(DAEMON_RELEASE_EXECUTION_METHOD)).toHaveLength(1);
+    s.assertAbandoned();
+  });
+
+  test.each([true, false])(
+    "replacement registration retryable=%s must settle before ready",
+    async (retryable) => {
+      const s = scenario();
+      s.parkHeartbeat = true;
+      s.recoverClaim = true;
+      s.registrationRefusals.push(
+        Object.assign(new Error("managed registration refused"), {
+          code: "managed_slot_registration_refused",
+          retryable,
+        }),
+      );
+      const pending = s.acquire(1_000);
+      await drainMicrotasks(150);
+      s.loseClaimConnection();
+      await drainMicrotasks(150);
+      await s.step(25);
+      if (retryable) {
+        expect(s.result).toBeUndefined();
+        await s.step(50);
+        expect(s.result?.outcome).toBe("ready");
+      } else {
+        expect(s.result).toMatchObject({
+          outcome: "failed",
+          failure: { code: "execution_hold_failed" },
+        });
+        expect(s.timer.now()).toBe(25);
+        expect(s.calls(DAEMON_REGISTER_SESSION_METHOD)).toHaveLength(1);
+      }
+      expect(await pending).toBe(s.result!);
+    },
+  );
+
+  test.each([
+    {
+      name: "release still draining",
+      failure: new Error("release is still in progress; retry registration"),
+    },
+    { name: "SQLITE_BUSY", failure: { code: "SQLITE_BUSY", retryable: true } },
+  ])("replacement registration retries $name before ready", async ({ failure }) => {
+    const s = scenario();
+    s.parkHeartbeat = true;
+    s.recoverClaim = true;
+    s.registrationRefusals.push(failure);
+    const pending = s.acquire(1_000);
+    await drainMicrotasks(150);
+    s.loseClaimConnection();
+    await drainMicrotasks(150);
+    await s.step(25);
+    expect(s.result).toBeUndefined();
+    expect(s.calls(DAEMON_REGISTER_SESSION_METHOD)).toHaveLength(1);
+    await s.step(50);
+    expect(s.result?.outcome).toBe("ready");
+    expect(await pending).toEqual(READY);
+    expect(s.calls(DAEMON_REGISTER_SESSION_METHOD)).toHaveLength(2);
+  });
+
+  test("replacement registration honours its 500 ms retry minimum", async () => {
+    const s = scenario();
+    s.parkHeartbeat = true;
+    s.recoverClaim = true;
+    s.registrationRefusals.push({
+      code: "managed_slot_registration_refused",
+      retryable: true,
+      retryAfterMs: 500,
+    });
+    const pending = s.acquire(1_000);
+    await drainMicrotasks(150);
+    s.loseClaimConnection();
+    await drainMicrotasks(150);
+    await s.step(25);
+    expect(s.calls(DAEMON_REGISTER_SESSION_METHOD)).toHaveLength(1);
+    expect(s.result).toBeUndefined();
+    await s.step(499);
+    expect(s.calls(DAEMON_REGISTER_SESSION_METHOD)).toHaveLength(1);
+    expect(s.result).toBeUndefined();
+    await s.step(1);
+    expect(s.result?.outcome).toBe("ready");
+    expect(await pending).toEqual(READY);
+    expect(s.calls(DAEMON_REGISTER_SESSION_METHOD)).toHaveLength(2);
+  });
+
+  test.each([
+    { name: "typed", failure: new DaemonShuttingDownError() },
+    { name: "coded", failure: { code: DAEMON_SHUTTING_DOWN_ERROR_CODE, retryable: false } },
+  ])("replacement registration reconnects after a $name shutdown answer", async ({ failure }) => {
+    const s = scenario();
+    s.parkHeartbeat = true;
+    s.recoverClaim = true;
+    s.registrationRefusals.push(failure);
+    const pending = s.acquire(1_000);
+    await drainMicrotasks(150);
+    s.loseClaimConnection();
+    await drainMicrotasks(150);
+    await s.step(25);
+    expect(s.result).toBeUndefined();
+    const shuttingDownClient = s.clients[1]!;
+    expect(
+      shuttingDownClient.callDaemonMethodCalls.filter(
+        (call) => call.method === DAEMON_REGISTER_SESSION_METHOD,
+      ),
+    ).toHaveLength(1);
+    await s.step(50);
+    expect(s.result?.outcome).toBe("ready");
+    expect(await pending).toEqual(READY);
+    expect(s.clients).toHaveLength(3);
+    expect(
+      s.clients[2]!.callDaemonMethodCalls.filter(
+        (call) => call.method === DAEMON_REGISTER_SESSION_METHOD,
+      ),
+    ).toHaveLength(1);
+  });
+
+  test.each([
+    { name: "explicit false without a code", failure: { retryable: false } },
+    { name: "code without retry intent", failure: { code: "registration_refused" } },
+  ])("replacement registration fails immediately on $name", async ({ failure }) => {
+    const s = scenario();
+    s.parkHeartbeat = true;
+    s.recoverClaim = true;
+    s.registrationRefusals.push(failure);
+    const pending = s.acquire(1_000);
+    await drainMicrotasks(150);
+    s.loseClaimConnection();
+    await drainMicrotasks(150);
+    await s.step(25);
+    expect(s.result).toMatchObject({
+      outcome: "failed",
+      failure: { code: "execution_hold_failed" },
+    });
+    expect(await pending).toBe(s.result!);
+    expect(s.timer.now()).toBe(25);
+    expect(s.calls(DAEMON_REGISTER_SESSION_METHOD)).toHaveLength(1);
+    s.assertAbandoned();
+  });
+
+  test("normal acquisition keeps exactly its existing call order and adds no wait", async () => {
+    const s = scenario();
+    expect(await s.acquire()).toEqual(READY);
+    expect(s.clients).toHaveLength(1);
+    expect(s.clients[0]!.callDaemonMethodCalls.map((call) => call.method)).toEqual([
+      DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
+      "daemon/capabilities",
+      DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD,
+      DAEMON_HEARTBEAT_METHOD,
+    ]);
+    expect(s.timer.now()).toBe(0);
+  });
+
+  test("a late successful claim on the closed connection cannot publish ready", async () => {
+    const s = scenario();
+    s.parkHeartbeat = true;
+    s.recoverClaim = true;
+    const pending = s.acquire(1_000);
+    await drainMicrotasks(150);
+    s.clients[0]!.emitConnectionClosed();
+    s.heartbeat.resolve({ accepted: true });
+    await drainMicrotasks(150);
+    expect(s.result).toBeUndefined();
+    await s.step(25);
+    expect(s.result?.outcome).toBe("ready");
+    expect(await pending).toEqual(READY);
+    expect(s.clients[1]!.callDaemonMethodCalls.map((call) => call.method)).toContain(
+      DAEMON_REGISTER_SESSION_METHOD,
+    );
+  });
+
+  test("a registration ack on an obsolete replacement cannot finish the hold", async () => {
+    const s = scenario();
+    s.parkHeartbeat = true;
+    s.recoverClaim = true;
+    s.parkRegistration = true;
+    const pending = s.acquire(1_000);
+    await drainMicrotasks(150);
+    s.loseClaimConnection();
+    await drainMicrotasks(150);
+    await s.step(25);
+    expect(s.result).toBeUndefined();
+    expect(s.clients[1]!.callDaemonMethodCalls.map((call) => call.method)).toContain(
+      DAEMON_REGISTER_SESSION_METHOD,
+    );
+    s.clients[1]!.emitConnectionClosed();
+    s.parkRegistration = false;
+    s.registration.resolve({ accepted: true });
+    await drainMicrotasks(150);
+    expect(s.result).toBeUndefined();
+    await s.step(50);
+    expect(s.result?.outcome).toBe("ready");
+    expect(await pending).toEqual(READY);
+    expect(s.clients[2]!.callDaemonMethodCalls.map((call) => call.method)).toContain(
+      DAEMON_REGISTER_SESSION_METHOD,
+    );
+  });
+
+  test("closing during a paced outage cancels instead of publishing ready", async () => {
+    const s = scenario();
+    s.parkHeartbeat = true;
+    s.recoverClaim = true;
+    s.replacementUnavailable = true;
+    const pending = s.acquire(1_000);
+    await drainMicrotasks(150);
+    s.loseClaimConnection();
+    await drainMicrotasks(150);
+    await s.proxy.close();
+    expect(await pending).toMatchObject({ outcome: "failed", failure: { code: "cancelled" } });
+    s.assertAbandoned();
+    const clients = s.clients.length;
+    await s.step(1_000);
+    expect(s.clients).toHaveLength(clients);
+  });
+
+  test("the hold signal cancels an outstanding claim without waiting for its reply", async () => {
+    const s = scenario();
+    s.parkHeartbeat = true;
+    const abort = new AbortController();
+    let settled = false;
+    const pending = s.proxy.holdManagedExecutionSession(SESSION, abort.signal).then(
+      () => {
+        settled = true;
+      },
+      (error: unknown) => {
+        settled = true;
+        return error;
+      },
+    );
+    await drainMicrotasks(150);
+    expect(s.calls(DAEMON_HEARTBEAT_METHOD)).toHaveLength(1);
+    abort.abort(new Error("hold cancelled"));
+    await drainMicrotasks(150);
+    expect(settled).toBe(true);
+    expect(String(await pending)).toContain("hold cancelled");
+  });
+
+  test("a non-managed initial binding still connects after its first heartbeat fails", async () => {
+    const timer = new FakeTimer();
+    const manager = new FakeDaemonManager();
+    manager.statusResult = { ...manager.statusResult, version: DAEMON_VERSION };
+    const client = new FakeDaemonClient({
+      onCallDaemonMethod: (method) => {
+        if (method === DAEMON_HEARTBEAT_METHOD) {
+          throw new DaemonUnavailableError("heartbeat transport failure");
+        }
+      },
+    });
+    const proxy = new DaemonMcpProxy({
+      timer,
+      initialSessionUuid: SESSION,
+      autoStartDaemon: false,
+      daemonManager: manager,
+      clientFactory: () => client,
+    });
+    try {
+      await proxy.ensureConnected();
+      expect(proxy.isConnected()).toBe(true);
+      expect(
+        client.callDaemonMethodCalls.filter((call) => call.method === DAEMON_HEARTBEAT_METHOD),
+      ).toHaveLength(1);
+    } finally {
+      await proxy.close();
+    }
   });
 
   test("an already-aborted hold refuses before binding or sending anything", async () => {

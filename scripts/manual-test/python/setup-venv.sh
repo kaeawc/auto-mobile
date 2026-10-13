@@ -14,7 +14,9 @@ mcp_version=''
 while (($#)); do
   case "$1" in
     --batch-dir|--python|--mcp-version)
-      (($# >= 2)) && [[ -n "$2" && "$2" != --* ]] || refuse "missing value for $1"
+      if (($# < 2)) || [[ -z "$2" || "$2" == --* ]]; then
+        refuse "missing value for $1"
+      fi
       case "$1" in
         --batch-dir) batch_dir="$2" ;;
         --python) python="$2" ;;

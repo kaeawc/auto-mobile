@@ -1,6 +1,7 @@
 import type { SessionManager, Session } from "../daemon/sessionManager";
 import { ActionableError } from "../models/ActionableError";
 import type { BootedDevice } from "../models";
+import { logger } from "../utils/logger";
 import {
   defaultMockLocationClearRegistry,
   type MockLocationClears,
@@ -66,11 +67,28 @@ export function createSessionLocationAppliedCallback(
     if (!admittedAtConstruction || !releasedOrUnbound) {
       return;
     }
+    const holder = sessionManager.getSessionForDevice(options.device.deviceId);
+    const heldByAnother =
+      holder !== null &&
+      sessionManager.peekSession(holder) !== session &&
+      sessionManager.getReleasingSession(holder) !== session;
+    if (heldByAnother) {
+      registry.markSet(holder, options.device);
+      logger.warn(
+        `Released session ${session.sessionId}'s late location write landed on device ` +
+          `${options.device.deviceId} now held by ${holder}; it will be cleared when that session releases`,
+      );
+      return;
+    }
     // Setup drain is bounded: a successful late set can follow its lifecycle hook.
     // Publish its clear before setup settles, extending the existing quarantine.
     const clear = registry.clearLateSet({ sessionId: session.sessionId, device: options.device });
     if (clear) {
-      sessionManager.registerPendingDeviceCleanup(options.device.deviceId, clear);
+      sessionManager.registerPendingDeviceCleanup(options.device.deviceId, clear, {
+        name: "clear mock location",
+        leftover: "the released session's simulated location",
+        abandon: () => registry.abandonClear(session.sessionId, options.device.deviceId),
+      });
     }
   };
 }

@@ -38,6 +38,16 @@ export const SUSPECT_GRACE_MS = 4_000;
 /** How often the daemon's heartbeat monitor scans for stale and idle sessions. */
 export const DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS = 2_000;
 
+/** The daemon's resolved scan cadence, shared with cleanup retry bounds. */
+export function getSessionHeartbeatCheckIntervalMs(env: NodeJS.ProcessEnv = process.env): number {
+  return readEnvPositiveInteger(
+    "AUTOMOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS",
+    "AUTO_MOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS",
+    { fallback: DEFAULT_SESSION_HEARTBEAT_CHECK_INTERVAL_MS },
+    env,
+  );
+}
+
 /** Worst-case time from the owner's last heartbeat to the session's release. */
 export const NO_HEARTBEAT_RELEASE_BUDGET_MS =
   DEFAULT_SESSION_HEARTBEAT_TIMEOUT_MS +

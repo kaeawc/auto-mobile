@@ -148,6 +148,7 @@ describe("Daemon.initializeDatabase fatality", () => {
     expect(deviceSessionRepository.liveDaemonSessionIds).toEqual(new Set(["live-peer-daemon"]));
     expect(configureRecordings).toHaveBeenCalledWith({
       liveDaemonSessionIds: new Set(["live-peer-daemon"]),
+      daemonSessionId: "daemon-session-1",
     });
     expect(tracker.recorded).toHaveLength(0);
     // Reset happens only at the END of start() (after all startup DB reads),
@@ -216,6 +217,7 @@ describe("Daemon.initializeDatabase fatality", () => {
     expect(deviceSessionRepository.incumbentSessionStatus).toBe("active");
     expect(configureRecordings).toHaveBeenCalledWith({
       liveDaemonSessionIds: new Set(["sibling-worktree-daemon", "same-namespace-incumbent"]),
+      daemonSessionId: "daemon-session-1",
     });
   });
 

@@ -14,6 +14,8 @@
  * and slots it is waiting on, so the caller can retry; a repeated reset resumes where it stopped.
  */
 
+import { classifySqliteError } from "../../db/databaseFailureClassification";
+import { ManagedSlotDiscoveryIncompleteError } from "./managedSlotRefusal";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { Timer } from "../../utils/SystemTimer";
@@ -223,6 +225,24 @@ export class SlotScopeReset {
   }
 
   private async invalidate(
+    registry: SlotScopeResetRegistry,
+    scope: SlotScopeRecord,
+    reason: SlotScopeInvalidationReason,
+    deadlineMs: number,
+    force = false,
+  ): Promise<SlotScopeResetScopeResult> {
+    try {
+      return await this.invalidateSteps(registry, scope, reason, deadlineMs, force);
+    } catch (error) {
+      if (classifySqliteError(error) === "retryable") {
+        // Each reset write is idempotent; a repeated reset resumes any committed invalidation.
+        throw new ManagedSlotDiscoveryIncompleteError(errorMessage(error));
+      }
+      throw error;
+    }
+  }
+
+  private async invalidateSteps(
     registry: SlotScopeResetRegistry,
     scope: SlotScopeRecord,
     reason: SlotScopeInvalidationReason,

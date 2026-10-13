@@ -3,6 +3,7 @@ import { logger } from "../../utils/logger";
 import { isIosPhysicalUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import {
   type ForceStopOptions,
+  type VideoCaptureTeardownDescriptor,
   VideoCaptureStartCleanupError,
   type RecordingHandle,
   type RecordingResult,
@@ -69,6 +70,14 @@ export class HybridVideoCaptureBackend implements VideoCaptureBackend {
         handle,
       },
     };
+  }
+
+  describeCaptureTeardown(handle: RecordingHandle): VideoCaptureTeardownDescriptor | undefined {
+    const hybridHandle = handle.backendHandle as HybridBackendHandle | undefined;
+    if (!hybridHandle || hybridHandle.kind !== "hybrid") {
+      return undefined;
+    }
+    return this.backendFor(hybridHandle.backend).describeCaptureTeardown?.(hybridHandle.handle);
   }
 
   async stop(handle: RecordingHandle): Promise<RecordingResult> {

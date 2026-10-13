@@ -14,7 +14,7 @@ import { DaemonState } from "../../src/daemon/daemonState";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { RegistryManagedSlotExclusion } from "../../src/daemon/managedSlots/managedSlotExclusion";
-import * as toolExecutionContext from "../../src/server/toolExecutionContext";
+import * as toolExecutionContext from "../../src/server/ToolExecutionContext";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";

@@ -99,14 +99,15 @@ struct FoundationPrototypeEndpointFiles: PrototypeEndpointFiles {
         defer { try? fileManager.removeItem(at: temporary) }
         defer { if descriptor >= 0 { _ = close(descriptor) } }
         try data.withUnsafeBytes { bytes in
+            guard let baseAddress = bytes.baseAddress else { return }
             var written = 0
             while written < bytes.count {
-                let count = write(descriptor, bytes.baseAddress!.advanced(by: written), bytes.count - written)
-                if count < 0, errno == EINTR { continue }
-                guard count > 0 else {
-                    throw POSIXError(count == 0 ? .EIO : (POSIXErrorCode(rawValue: errno) ?? .EIO))
+                let writeResult = write(descriptor, baseAddress.advanced(by: written), bytes.count - written)
+                if writeResult < 0, errno == EINTR { continue }
+                guard writeResult > 0 else {
+                    throw POSIXError(writeResult == 0 ? .EIO : (POSIXErrorCode(rawValue: errno) ?? .EIO))
                 }
-                written += count
+                written += writeResult
             }
         }
         guard fsync(descriptor) == 0 else {

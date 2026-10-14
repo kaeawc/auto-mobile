@@ -126,6 +126,7 @@ nav:
       - "Screen control": using/screen-control.md
       - "Device ownership": using/device-ownership.md
       - "Managed device slots": using/managed-slots.md
+      - "Managed-slot qualification": using/managed-slot-qualification.md
       - "Managed Macs and CI runners": using/managed-macs.md
       - "WebRTC Streaming": webrtc-streaming.md
   - "How it Works":

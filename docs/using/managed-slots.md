@@ -819,6 +819,7 @@ MCP in under a second with outcome `failed`, `spec_unsupported`, zero tools,
 
 ## Related
 
+- [Managed-slot qualification](managed-slot-qualification.md)
 - [Device ownership](device-ownership.md): session holds, release rules and reads.
 - [Environment variables](environment-variables.md): heartbeat and idle tuning.
 - [Managed Macs and CI runners](managed-macs.md).

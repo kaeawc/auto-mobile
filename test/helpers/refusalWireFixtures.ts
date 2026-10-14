@@ -150,6 +150,7 @@ import {
   DEFAULT_PROVISION_DEVICE_RETRYABILITY,
   type ProvisionDeviceFailureCode,
 } from "../../src/devices/exactDeviceProvisioning";
+import { SdkTooOldError, MINIMUM_READ_ONLY_SDK_VERSION } from "../../src/models/SdkTooOldError";
 import { AppNotRunningError } from "../../src/models/AppNotRunningError";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { deviceLossOutcomeFromError } from "../../src/server/deviceLossOutcome";
@@ -430,6 +431,11 @@ const BUILDERS: readonly FixtureEntry[] = [
     "prototype_suspended",
     "PrototypeSuspendedError via shapeToolCallError",
     () => shaped(new PrototypeSuspendedError()),
+  ],
+  [
+    "sdk_too_old",
+    "SdkTooOldError via shapeToolCallError",
+    () => shaped(new SdkTooOldError("com.example.app", DEVICE, MINIMUM_READ_ONLY_SDK_VERSION)),
   ],
   [
     "app_not_running",

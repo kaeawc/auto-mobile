@@ -17,6 +17,14 @@
         "acquireNewSession": false
       }
     },
+    "sdk_too_old": {
+      "expected": "fail",
+      "fields": {
+        "code": "sdk_too_old",
+        "retryable": false,
+        "acquireNewSession": false
+      }
+    },
     "app_not_running": {
       "expected": "fail",
       "fields": {

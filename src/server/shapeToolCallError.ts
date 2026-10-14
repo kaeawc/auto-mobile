@@ -38,6 +38,7 @@ import {
 } from "./deviceOutsideBoundSessionRefusal";
 import { PlanExecutionInProgressError } from "./planExecutionInProgressRefusal";
 import { AmbiguousDeviceTargetError } from "./ambiguousDeviceTargetRefusal";
+import { SdkTooOldError } from "../models/SdkTooOldError";
 import { AppNotRunningError } from "../models/AppNotRunningError";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { DeviceGestureRecordingStartUnheldError } from "../daemon/deviceGestureRecordingStartAdmission";
@@ -174,6 +175,7 @@ function hasSelfDescribedRefusalPayload(
   | DeviceGestureRecordingStartUnheldError
   | OrphanRecorderActiveError
   | AppNotRunningError
+  | SdkTooOldError
   | ManagedSlotDiscoveryIncompleteError
   | ManagedSlotOwnershipUnconfirmedError {
   return [
@@ -190,6 +192,7 @@ function hasSelfDescribedRefusalPayload(
     DeviceGestureRecordingStartUnheldError,
     OrphanRecorderActiveError,
     AppNotRunningError,
+    SdkTooOldError,
     ManagedSlotDiscoveryIncompleteError,
     ManagedSlotOwnershipUnconfirmedError,
   ].some((Refusal) => error instanceof Refusal);

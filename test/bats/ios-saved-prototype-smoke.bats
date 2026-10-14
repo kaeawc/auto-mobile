@@ -8,6 +8,16 @@ setup() {
   cat > "$TEST_DIR/cli" <<'EOF'
 #!/usr/bin/env bash
 printf 'cli %s\n' "$*" >> "$CALLS"
+args=("$@")
+if [[ "${args[0]:-}" == --session-uuid ]]; then args=("${args[@]:2}"); fi
+tool="${args[0]:-}"
+case "$tool" in getApple|prototype|observe) ;; *) printf 'Invalid parameter format: %s. Parameters must start with --\n' "$tool" >&2; exit 2;; esac
+args=("${args[@]:1}")
+while ((${#args[@]})); do
+  if [[ "${args[0]}" != --* ]]; then printf 'Invalid parameter format: %s. Parameters must start with --\n' "${args[0]}" >&2; exit 2; fi
+  if ((${#args[@]} < 2)); then printf 'Missing value for %s\n' "${args[0]}" >&2; exit 2; fi
+  args=("${args[@]:2}")
+done
 case "${CLI_MODE:-happy}:$*" in
   *getApple*) printf '{"runtime":{"session":{"sessionUuid":"acquired-session"}}}\n';;
   unsupported:*) echo '{"success":false,"errorCode":"unsupported_capability"}'; exit 1;;
@@ -65,10 +75,22 @@ run_smoke() {
   [[ "$output" == *'ok: save'*'ok: listSaved'*'ok: launch'*'ok: observe'*'ok: save again (replaced)'*'ok: deleteSaved'* ]]
   grep -q 'xcrun simctl launch test-udid dev.jasonpearson.automobile.proto.test-slug' "$CALLS"
   grep -q -- '--action deleteSaved --id dev.jasonpearson.automobile.proto.test-slug' "$CALLS"
+  grep -Eq '^cli --session-uuid test-session prototype --deviceId test-udid --action [^ ]+' "$CALLS"
 }
 
 @test "second save must report replaced true" { run_smoke CLI_MODE=second-false; [ "$status" -eq 1 ]; [[ "$output" == *'error: save again (replaced):'* ]]; }
 @test "observe failure triggers cleanup delete" { run_smoke CLI_MODE=observe-fail; [ "$status" -eq 1 ]; [[ "$output" == *'error: observe:'* ]]; [ "$(grep -c -- '--action deleteSaved' "$CALLS")" -ge 2 ]; }
+@test "acquired session is released after observe failure and saved entry is deleted" {
+  mkdir "$TEST_DIR/bin"
+  cat > "$TEST_DIR/bin/auto-mobile" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == --daemon && "${2:-}" == release-session ]]; then printf 'release %s\n' "$*" >> "$CALLS"; else exec "$TEST_DIR/cli" "$@"; fi
+EOF
+  chmod +x "$TEST_DIR/bin/auto-mobile"
+  run env PATH="$TEST_DIR/bin:$PATH" CLI_MODE=observe-fail AUTO_MOBILE_CMD="$TEST_DIR/bin/auto-mobile" XCRUN_BIN="$TEST_DIR/xcrun" AUTOMOBILE_IOS_PROTOTYPE_VIEWER_TEMPLATE="$TEST_DIR/template" SMOKE_LAUNCH_SETTLE_SECONDS=0 bash "$ROOT/scripts/ios/saved-prototype-smoke.sh" test-udid
+  [ "$status" -eq 1 ]; grep -q 'release --daemon release-session acquired-session' "$CALLS"
+  grep -q -- 'prototype --deviceId test-udid --action deleteSaved --id smoke-saved-12259' "$CALLS"
+}
 @test "delete leaving entry listed fails" { run_smoke CLI_MODE=delete-listed; [ "$status" -eq 1 ]; [[ "$output" == *'still listed'* ]]; }
 
 @test "supplied session skips acquire and acquired session releases" {
@@ -76,10 +98,10 @@ run_smoke() {
   mkdir "$TEST_DIR/bin"
   cat > "$TEST_DIR/bin/auto-mobile" <<'EOF'
 #!/usr/bin/env bash
-if [[ "$*" == '--daemon release-session '* ]]; then printf 'release %s\n' "$*" >> "$CALLS"; else exec "$TEST_DIR/cli" "$@"; fi
+if [[ "${1:-}" == --daemon && "${2:-}" == release-session ]]; then printf 'release %s\n' "$*" >> "$CALLS"; else exec "$TEST_DIR/cli" "$@"; fi
 EOF
   chmod +x "$TEST_DIR/bin/auto-mobile"
-  run env PATH="$TEST_DIR/bin:$PATH" AUTO_MOBILE_CMD="$TEST_DIR/bin/auto-mobile --debug --embedded-sdk --cli" XCRUN_BIN="$TEST_DIR/xcrun" AUTOMOBILE_IOS_PROTOTYPE_VIEWER_TEMPLATE="$TEST_DIR/template" SMOKE_LAUNCH_SETTLE_SECONDS=0 bash "$ROOT/scripts/ios/saved-prototype-smoke.sh" test-udid
+  run env PATH="$TEST_DIR/bin:$PATH" AUTO_MOBILE_CMD="$TEST_DIR/bin/auto-mobile" XCRUN_BIN="$TEST_DIR/xcrun" AUTOMOBILE_IOS_PROTOTYPE_VIEWER_TEMPLATE="$TEST_DIR/template" SMOKE_LAUNCH_SETTLE_SECONDS=0 bash "$ROOT/scripts/ios/saved-prototype-smoke.sh" test-udid
   [ "$status" -eq 0 ]; grep -q 'cli getApple --deviceId test-udid' "$CALLS"; grep -q 'release --daemon release-session acquired-session' "$CALLS"
 }
 

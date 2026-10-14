@@ -31,11 +31,13 @@ call_cli() {
 }
 result_json() { jq -c 'if .content? then ([.content[] | select(.type == "text") | .text | (fromjson? // empty)][0] // {}) else . end' <<< "$1" 2>/dev/null || printf '{}\n'; }
 step_error() { echo "error: $1: $2" >&2; exit 1; }
-call_saved() { call_cli --session-uuid "$session_uuid" --deviceId "$device_id" prototype --action "$1" "${@:2}"; }
+call_saved() { call_cli --session-uuid "$session_uuid" prototype --deviceId "$device_id" --action "$1" "${@:2}"; }
 delete_saved() { call_saved deleteSaved --id "$saved_id"; [[ "$cli_status" -eq 0 && "$(jq -r '.success // false' <<< "$(result_json "$cli_stdout")")" == true ]]; }
 cleanup_saved() {
   local status=$?
-  if [[ $status -ne 0 && -n "$saved_id" && -n "$session_uuid" ]]; then set +e; delete_saved; set -e; fi
+  set +e
+  if [[ $status -ne 0 && -n "$saved_id" && -n "$session_uuid" ]]; then delete_saved; fi
+  set +e # call_cli re-enables errexit
   if [[ "$acquired_session" -eq 1 ]]; then (exit "$status"); session_release_on_exit; fi
   return "$status"
 }

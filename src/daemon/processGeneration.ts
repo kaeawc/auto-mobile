@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { testOverrides } from "../utils/testOverrides";
 import { runDaemonProcessCommand, type DaemonProcessCommandRunner } from "./DaemonLauncher";
@@ -150,15 +151,193 @@ export function createLinuxProcessGenerationTokenReader(
 /** Read a stable Linux process-generation token without reconstructing wall time. */
 export const readLinuxProcessGenerationToken = createLinuxProcessGenerationTokenReader();
 
+const DARWIN_LSTART_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DARWIN_LSTART_MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+/** Render the C-locale ps lstart text in UTC, with whitespace already normalized. */
+export function formatDarwinLstartUtc(startSeconds: number): string | undefined {
+  if (!Number.isFinite(startSeconds) || !Number.isInteger(startSeconds) || startSeconds <= 0) {
+    return undefined;
+  }
+  const start = new Date(startSeconds * 1_000);
+  if (!Number.isFinite(start.getTime())) {
+    return undefined;
+  }
+  const time = [start.getUTCHours(), start.getUTCMinutes(), start.getUTCSeconds()]
+    .map((part) => String(part).padStart(2, "0"))
+    .join(":");
+  return `${DARWIN_LSTART_WEEKDAYS[start.getUTCDay()]} ${DARWIN_LSTART_MONTHS[start.getUTCMonth()]} ${start.getUTCDate()} ${time} ${String(start.getUTCFullYear()).padStart(4, "0")}`;
+}
+
+/** Darwin kinfo_proc begins with p_un.p_starttime: a little-endian timeval. */
+export function decodeDarwinKinfoProcStartSeconds(
+  buffer: Uint8Array,
+  length: number,
+): number | undefined {
+  if (length < 16 || buffer.byteLength < 16) {
+    return undefined;
+  }
+  const seconds = Number(new DataView(buffer.buffer, buffer.byteOffset, 16).getBigInt64(0, true));
+  return seconds > 0 && Number.isSafeInteger(seconds) ? seconds : undefined;
+}
+
+export interface DarwinProcessStartReader {
+  readStartSeconds(pid: number): number | undefined;
+}
+
+/** Only the bun:ffi surface needed for sysctl; resolved lazily like bun:sqlite. */
+interface DarwinSysctlFfi {
+  FFIType: { ptr: number; u32: number; u64: number; i32: number };
+  ptr(buffer: Int32Array | Uint8Array | BigUint64Array): number;
+  dlopen(
+    path: string,
+    symbols: {
+      sysctl: { args: number[]; returns: number };
+    },
+  ): {
+    symbols: {
+      sysctl: (
+        mib: number,
+        count: number,
+        buffer: number,
+        length: number,
+        newValue: null,
+        newLength: number,
+      ) => number;
+    };
+  };
+}
+
+function loadDarwinProcessStartReader(): DarwinProcessStartReader {
+  const { dlopen, ptr, FFIType } = require("bun:ffi") as DarwinSysctlFfi;
+  const library = dlopen("/usr/lib/libSystem.B.dylib", {
+    sysctl: {
+      args: [FFIType.ptr, FFIType.u32, FFIType.ptr, FFIType.ptr, FFIType.ptr, FFIType.u64],
+      returns: FFIType.i32,
+    },
+  });
+  // CTL_KERN, KERN_PROC, KERN_PROC_PID; one reader owns and reuses these buffers.
+  const mib = new Int32Array([1, 14, 1, 0]);
+  const buffer = new Uint8Array(648);
+  const length = new BigUint64Array(1);
+  return {
+    readStartSeconds(pid) {
+      try {
+        mib[3] = pid;
+        length[0] = BigInt(buffer.byteLength);
+        const result = library.symbols.sysctl(
+          ptr(mib),
+          mib.length,
+          ptr(buffer),
+          ptr(length),
+          null,
+          0,
+        );
+        return result === 0
+          ? decodeDarwinKinfoProcStartSeconds(buffer, Number(length[0]))
+          : undefined;
+      } catch (error) {
+        // An unavailable sysctl identity is safe to swallow: the ps fallback follows.
+        logger.debug(`Unable to read Darwin sysctl process start: ${errorMessage(error)}`);
+        return undefined;
+      }
+    },
+  };
+}
+
+let darwinStartReaderLoadAttempted = false;
+let darwinStartReader: DarwinProcessStartReader | undefined;
+
+function defaultDarwinProcessStartReader(): DarwinProcessStartReader | undefined {
+  if (process.platform !== "darwin" || darwinStartReaderLoadAttempted) {
+    return darwinStartReader;
+  }
+  darwinStartReaderLoadAttempted = true;
+  try {
+    darwinStartReader = loadDarwinProcessStartReader();
+  } catch (error) {
+    // A cached optional FFI load failure is safe to swallow: the ps fallback follows.
+    logger.debug(`Unable to load Darwin sysctl process start reader: ${errorMessage(error)}`);
+  }
+  return darwinStartReader;
+}
+
+/** Procfs and an available Darwin sysctl reader permit an identity read on every check. */
+export function processGenerationReadIsCheap(
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  if (platform === "linux") {
+    return true;
+  }
+  return platform === "darwin" && defaultDarwinProcessStartReader() !== undefined;
+}
+
+/** Prefer a direct kernel start read, preserving the existing ps token and fallback. */
+export function createDarwinProcessGenerationTokenReader(
+  deps: {
+    startReader?: DarwinProcessStartReader;
+    runCommand?: DaemonProcessCommandRunner;
+    captureDisabled?: () => boolean;
+  } = {},
+): (pid: number) => string | undefined {
+  const {
+    startReader = {
+      readStartSeconds: (pid) => defaultDarwinProcessStartReader()?.readStartSeconds(pid),
+    },
+    runCommand = runDaemonProcessCommand,
+    captureDisabled = () => testOverrides.processGenerationCaptureDisabled?.() ?? false,
+  } = deps;
+  return (pid) => {
+    if (!captureDisabled()) {
+      try {
+        const seconds = startReader.readStartSeconds(pid);
+        const lstart = seconds === undefined ? undefined : formatDarwinLstartUtc(seconds);
+        if (lstart !== undefined) {
+          return darwinProcessGenerationToken(lstart);
+        }
+      } catch (error) {
+        // Optional start capture is safe to swallow: the ps fallback follows.
+        logger.debug(`Unable to capture Darwin process start: ${errorMessage(error)}`);
+      }
+    }
+    return readDarwinPsProcessGenerationToken(pid, runCommand);
+  };
+}
+
+const defaultDarwinProcessGenerationTokenReader = createDarwinProcessGenerationTokenReader();
+
+/** Explicit command runners retain the ps-only injection seam. */
+export function readDarwinProcessGenerationToken(
+  pid: number,
+  runCommand?: DaemonProcessCommandRunner,
+): string | undefined {
+  return runCommand === undefined
+    ? defaultDarwinProcessGenerationTokenReader(pid)
+    : readDarwinPsProcessGenerationToken(pid, runCommand);
+}
+
 /**
  * Reads only one Darwin process's `lstart` value, instead of scanning the
  * process table. The pinned C locale and UTC zone preserve the same canonical
  * format used by DaemonManager's full-table recovery scan, independent of the
  * reader's `TZ`.
  */
-export function readDarwinProcessGenerationToken(
+function readDarwinPsProcessGenerationToken(
   pid: number,
-  runCommand: DaemonProcessCommandRunner = runDaemonProcessCommand,
+  runCommand: DaemonProcessCommandRunner,
 ): string | undefined {
   try {
     return darwinProcessGenerationToken(

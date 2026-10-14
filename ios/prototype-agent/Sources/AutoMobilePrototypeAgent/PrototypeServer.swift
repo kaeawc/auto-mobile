@@ -10,18 +10,30 @@ final class PrototypeServer {
     private let configuration: PrototypeAgentConfiguration
     private let transport: PrototypeTransport
     private let delivery: PrototypeTransportDelivery
+    private let onReady: ((UInt16) -> Void)?
     private let listenerQueue = DispatchQueue(label: "dev.jasonpearson.automobile.prototype-agent.listener")
     private var listener: NWListener?
     private var acceptor: Task<Void, Never>?
+    private var incomingConnections: AsyncStream<PrototypeTransportConnection>.Continuation?
+    var onFailed: (() -> Void)?
 
     var onClientCountChanged: ((Int) -> Void)? {
         get { delivery.onClientCountChanged }
         set { delivery.onClientCountChanged = newValue }
     }
 
-    init(configuration: PrototypeAgentConfiguration, capabilities: [String], handler: @escaping Handler) {
+    init(
+        configuration: PrototypeAgentConfiguration,
+        capabilities: [String],
+        maxAuthenticatedClients: Int? = nil,
+        onReady: ((UInt16) -> Void)? = nil,
+        handler: @escaping Handler
+    ) {
         self.configuration = configuration
-        let transport = PrototypeTransport(token: configuration.token, capabilities: capabilities)
+        self.onReady = onReady
+        let transport = PrototypeTransport(
+            token: configuration.token, capabilities: capabilities, maxAuthenticatedClients: maxAuthenticatedClients
+        )
         self.transport = transport
         delivery = PrototypeTransportDelivery(transport: transport, handler: handler)
     }
@@ -31,7 +43,9 @@ final class PrototypeServer {
         // Exclusive bind: endpoint reuse would let another local process listen on the same
         // port and receive the host's per-launch auth token.
         parameters.allowLocalEndpointReuse = false
-        guard let endpointPort = NWEndpoint.Port(rawValue: configuration.port) else {
+        guard let endpointPort = configuration.port == 0 ? NWEndpoint.Port.any : NWEndpoint
+            .Port(rawValue: configuration.port)
+        else {
             NSLog("[AutoMobilePrototypeAgent] invalid port %d", configuration.port)
             return
         }
@@ -40,11 +54,28 @@ final class PrototypeServer {
         do {
             let listener = try NWListener(using: parameters)
             let incoming = AsyncStream<PrototypeTransportConnection>.makeStream()
+            incomingConnections = incoming.continuation
             listener.newConnectionHandler = { connection in
-                incoming.continuation.yield(Self.adapt(connection))
+                let adapted = Self.adapt(connection)
+                if case .terminated = incoming.continuation.yield(adapted) { adapted.cancel() }
             }
-            listener.stateUpdateHandler = { state in
-                NSLog("[AutoMobilePrototypeAgent] listener %@", String(describing: state))
+            let hostedViewer = configuration.port == 0
+            listener.stateUpdateHandler = { [weak self, weak listener] state in
+                if !hostedViewer {
+                    NSLog("[AutoMobilePrototypeAgent] listener %@", String(describing: state))
+                }
+                if case .ready = state, let listener, let port = listener.port?.rawValue {
+                    Task { @MainActor [weak self] in
+                        guard let self, self.listener === listener else { return }
+                        self.onReady?(port)
+                    }
+                }
+                switch state {
+                case .failed, .cancelled:
+                    incoming.continuation.finish()
+                    Task { @MainActor [weak self] in self?.onFailed?() }
+                default: break
+                }
             }
             let transport = transport
             acceptor = Task.detached {
@@ -52,11 +83,27 @@ final class PrototypeServer {
                     await transport.accept(connection)
                 }
             }
-            listener.start(queue: listenerQueue)
             self.listener = listener
+            listener.start(queue: listenerQueue)
         } catch {
-            NSLog("[AutoMobilePrototypeAgent] listener failed: %@", String(describing: error))
+            if configuration.port == 0 {
+                NSLog("[AutoMobilePrototypeAgent] viewer listener failed (error code %ld)", (error as NSError).code)
+            } else {
+                NSLog("[AutoMobilePrototypeAgent] listener failed: %@", String(describing: error))
+            }
         }
+    }
+
+    func close() {
+        listener?.cancel()
+        listener = nil
+        incomingConnections?.finish()
+        incomingConnections = nil
+        // Drain already-adapted connections into the closed transport so every socket is
+        // cancelled. Cancelling the consumer here would abandon its buffered sockets.
+        acceptor = nil
+        let transport = transport
+        Task { await transport.close() }
     }
 
     /// Events go only to authenticated connections, synchronously enqueued in call order.

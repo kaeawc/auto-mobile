@@ -102,6 +102,157 @@ final class PrototypeTransportTests: XCTestCase {
 
     private func hello() throws -> Data { try line(["type": "hello", "token": token]) }
 
+    func testSingleHostRejectsBusyAndBadTokensWithoutAffectingFirstHost() async throws {
+        let clock = TransportDeadline()
+        let transport = PrototypeTransport(
+            token: token,
+            maxAuthenticatedClients: 1,
+            sleep: { _ in await clock.sleep() }
+        )
+        let log = TransportLog()
+        let delivery = PrototypeTransportDelivery(transport: transport) { _, _ in log.append("request") }
+        delivery.onClientCountChanged = { log.append("count:\($0)") }
+        let first = TransportSocket()
+        let firstID = await transport.accept(first.connection)
+        try await transport.receive(hello(), on: firstID)
+        await transport.flush()
+        XCTAssertEqual(log.turns, ["count:1"])
+
+        let busy = TransportSocket()
+        let busyID = await transport.accept(busy.connection)
+        // A pipelined request must not escape the failed gate after the valid second hello.
+        try await transport.receive(hello() + line(["type": "get_prototype_status"]), on: busyID)
+        await transport.waitForReader(busyID)
+        await transport.flush()
+        XCTAssertTrue(busy.bytes.isEmpty)
+        XCTAssertGreaterThan(busy.cancelCount, 0)
+        XCTAssertEqual(log.turns, ["count:1"])
+
+        for message: [String: Any] in [["type": "hello", "token": "wrong"], ["type": "hello"]] {
+            let rejected = TransportSocket()
+            let rejectedID = await transport.accept(rejected.connection)
+            try await transport.receive(line(message), on: rejectedID)
+            await transport.waitForReader(rejectedID)
+            await transport.flush()
+            XCTAssertTrue(rejected.bytes.isEmpty)
+            XCTAssertGreaterThan(rejected.cancelCount, 0)
+            XCTAssertEqual(log.turns, ["count:1"])
+        }
+
+        delivery.broadcast(["type": "prototype_event", "sequence": 7])
+        try await transport.receive(line(["type": "get_prototype_status"]), on: firstID)
+        await transport.flush()
+        XCTAssertEqual(first.cancelCount, 0)
+        XCTAssertEqual(try first.frames().compactMap { $0["type"] as? String }, ["hello_result", "prototype_event"])
+        XCTAssertEqual(try first.frames().last?["sequence"] as? Int, 7)
+        XCTAssertTrue(busy.bytes.isEmpty)
+        XCTAssertEqual(log.turns, ["count:1", "request"])
+        await clock.waitFor(4)
+        await transport.disconnected(firstID)
+        await transport.flush()
+        XCTAssertEqual(log.turns, ["count:1", "request", "count:0"])
+        await clock.release()
+        withExtendedLifetime(delivery) {}
+    }
+
+    func testSingleHostReconnectReplaysOfflineEventsAfterHelloInOrder() async throws {
+        let clock = TransportDeadline()
+        let capabilities = PrototypeViewerHostCapabilities.advertised(
+            PrototypeLifecycleMode.standalone.advertising(PrototypeAgentProtocol.capabilities)
+        )
+        let transport = PrototypeTransport(
+            token: token, capabilities: capabilities, maxAuthenticatedClients: 1, sleep: { _ in await clock.sleep() }
+        )
+        var outbox = PrototypeEventOutbox<[String: Any]>(mode: .standalone)
+        let log = TransportLog()
+        let delivery = PrototypeTransportDelivery(transport: transport) { _, _ in }
+        delivery.onClientCountChanged = { [weak delivery] count in
+            log.append("count:\(count)")
+            for event in outbox.clientCountChanged(count) {
+                delivery?.broadcast(event)
+            }
+        }
+        for sequence in 1 ... 2 {
+            XCTAssertTrue(outbox.publish(["type": "prototype_event", "sequence": sequence]).isEmpty)
+        }
+        let first = TransportSocket()
+        let firstID = await transport.accept(first.connection)
+        try await transport.receive(hello(), on: firstID)
+        await transport.flush()
+        let initial = try first.frames()
+        XCTAssertEqual(
+            initial.compactMap { $0["type"] as? String },
+            ["hello_result", "prototype_event", "prototype_event"]
+        )
+        XCTAssertEqual(initial.compactMap { $0["sequence"] as? Int }, [1, 2])
+        XCTAssertEqual(initial.first?["capabilities"] as? [String], capabilities)
+        XCTAssertEqual(outbox.bufferedCount, 0)
+
+        first.input.continuation.finish()
+        await transport.waitForReader(firstID)
+        await transport.flush()
+        XCTAssertEqual(outbox.clients, 0)
+        for sequence in 3 ... 5 {
+            XCTAssertTrue(outbox.publish(["type": "prototype_event", "sequence": sequence]).isEmpty)
+        }
+        let replacement = TransportSocket()
+        let replacementID = await transport.accept(replacement.connection)
+        try await transport.receive(hello(), on: replacementID)
+        await transport.flush()
+        let replay = try replacement.frames()
+        XCTAssertEqual(replay.first?["type"] as? String, "hello_result")
+        XCTAssertEqual(replay.compactMap { $0["sequence"] as? Int }, [3, 4, 5])
+        XCTAssertEqual(log.turns, ["count:1", "count:0", "count:1"])
+        XCTAssertEqual(outbox.bufferedCount, 0)
+        XCTAssertEqual(try first.frames().compactMap { $0["sequence"] as? Int }, [1, 2])
+        for event in outbox.publish(["type": "prototype_event", "sequence": 6]) { delivery.broadcast(event) }
+        await transport.flush()
+        XCTAssertEqual(try replacement.frames().compactMap { $0["sequence"] as? Int }, [3, 4, 5, 6])
+        await clock.waitFor(2)
+        await transport.disconnected(replacementID)
+        await transport.flush()
+        await clock.release()
+        withExtendedLifetime(delivery) {}
+    }
+
+    func testDefaultLimitAllowsTwoAuthenticatedHostsAndBroadcastsToBoth() async throws {
+        let clock = TransportDeadline()
+        let transport = PrototypeTransport(token: token, sleep: { _ in await clock.sleep() })
+        let log = TransportLog()
+        let delivery = PrototypeTransportDelivery(transport: transport) { _, _ in }
+        delivery.onClientCountChanged = { log.append("count:\($0)") }
+        let first = TransportSocket()
+        let second = TransportSocket()
+        let firstID = await transport.accept(first.connection)
+        let secondID = await transport.accept(second.connection)
+        try await transport.receive(hello(), on: firstID)
+        try await transport.receive(hello(), on: secondID)
+        delivery.broadcast(["type": "prototype_event", "sequence": 1])
+        await transport.flush()
+        XCTAssertEqual(log.turns, ["count:1", "count:2"])
+        for socket in [first, second] {
+            XCTAssertEqual(socket.cancelCount, 0)
+            XCTAssertEqual(
+                try socket.frames().compactMap { $0["type"] as? String },
+                ["hello_result", "prototype_event"]
+            )
+            XCTAssertEqual(try socket.frames().last?["sequence"] as? Int, 1)
+        }
+        await clock.waitFor(2)
+        await transport.close()
+        await transport.flush()
+        XCTAssertEqual(log.turns, ["count:1", "count:2", "count:1", "count:0"])
+        let afterClose = TransportSocket()
+        let closedID = await transport.accept(afterClose.connection)
+        try await transport.receive(hello(), on: closedID)
+        await transport.flush()
+        XCTAssertTrue(afterClose.bytes.isEmpty)
+        XCTAssertEqual(afterClose.cancelCount, 1)
+        XCTAssertEqual(log.turns, ["count:1", "count:2", "count:1", "count:0"])
+        await clock.release()
+        withExtendedLifetime(delivery) {}
+    }
+
     func testFinishedInputDisconnectsAuthenticatedReader() async throws {
         let clock = TransportDeadline()
         let transport = PrototypeTransport(token: token, sleep: { _ in await clock.sleep() })

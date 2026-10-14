@@ -8,6 +8,7 @@ import UIKit
 struct PrototypeViewerApp: App {
     @State private var model: PrototypeModel
     private let content: PrototypeViewerContent
+    private static let terminationObserver = ViewerTerminationObserver()
 
     init() {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
@@ -31,6 +32,14 @@ struct PrototypeViewerApp: App {
         model.assetProblems = launch.problems
         if case let .loaded(spec, bytes) = launch.content { model.show(spec, specBytes: bytes) }
         _model = State(initialValue: model)
+        let savedSpecId: String?
+        if case let .loaded(spec, _) = content { savedSpecId = spec.id } else { savedSpecId = nil }
+        let specPath = (documents ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Documents"))
+            .appendingPathComponent(PrototypeViewerSpecLoader.documentsFileName).path
+        PrototypeAgent.bootViewerHost(
+            model: model, container: NSHomeDirectory(), savedSpecId: savedSpecId, specPath: specPath
+        )
+        _ = Self.terminationObserver
     }
 
     var body: some Scene {
@@ -117,6 +126,21 @@ private final class PrototypeViewerAssetRegistrar: PrototypeAssetRegistering {
         guard registered || alreadyRegistered else { return nil }
         registeredFontDigests[face] = digest
         return face
+    }
+}
+
+@MainActor
+private final class ViewerTerminationObserver: NSObject {
+    override init() {
+        super.init()
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(terminate(_:)), name: UIApplication.willTerminateNotification, object: nil
+        )
+    }
+
+    @objc
+    private func terminate(_: Notification) {
+        PrototypeAgent.retractViewerEndpoint()
     }
 }
 

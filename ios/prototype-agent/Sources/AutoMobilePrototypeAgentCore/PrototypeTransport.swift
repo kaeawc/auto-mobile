@@ -118,9 +118,11 @@ actor PrototypeTransport {
     private var clients: [Int: Client] = [:]
     private var tracker = PrototypeClientTracker<Int>()
     private var nextID = 0
+    private var closed = false
     fileprivate let writer = PrototypeTransportWriter()
     private let token: String
     private let capabilities: [String]
+    private let maxAuthenticatedClients: Int?
     private let sleep: Sleep
     fileprivate let deliveries: AsyncStream<Delivery>
     private let delivery: AsyncStream<Delivery>.Continuation
@@ -128,10 +130,12 @@ actor PrototypeTransport {
     init(
         token: String,
         capabilities: [String] = PrototypeAgentProtocol.capabilities,
+        maxAuthenticatedClients: Int? = nil,
         sleep: @escaping Sleep = { seconds in try await Task.sleep(for: .seconds(seconds)) }
     ) {
         self.token = token
         self.capabilities = capabilities
+        self.maxAuthenticatedClients = maxAuthenticatedClients
         self.sleep = sleep
         let stream = AsyncStream<Delivery>.makeStream()
         deliveries = stream.stream
@@ -142,6 +146,10 @@ actor PrototypeTransport {
     func accept(_ connection: PrototypeTransportConnection) -> Int {
         nextID += 1
         let id = nextID
+        guard !closed else {
+            connection.cancel()
+            return id
+        }
         writer.accept(id, connection: connection)
         let reader = Task { [weak self] in
             do {
@@ -173,13 +181,18 @@ actor PrototypeTransport {
         guard var client = clients[id] else { return }
         client.framer.append(data)
         while client.gate.state != .closed {
-            let action: PrototypeConnectionGate.Action
+            var action: PrototypeConnectionGate.Action
             switch client.framer.nextLine(limit: client.gate.frameLimit) {
             case .success(nil):
                 clients[id] = client
                 return
             case let .success(line?): action = client.gate.receive(line: line)
             case .failure: action = client.gate.fail(.frameTooLarge)
+            }
+            if case .helloAccepted = action,
+               let maxAuthenticatedClients, tracker.count >= maxAuthenticatedClients
+            {
+                action = client.gate.fail(.hostBusy)
             }
             perform(action, on: id, connection: client.connection)
         }
@@ -228,6 +241,13 @@ actor PrototypeTransport {
         client.deadline.cancel()
         writer.remove(id)
         if let count = tracker.close(id) { delivery.yield(.count(count)) }
+    }
+
+    func close() {
+        closed = true
+        for id in Array(clients.keys) {
+            disconnected(id)
+        }
     }
 
     deinit {

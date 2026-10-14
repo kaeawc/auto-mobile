@@ -174,8 +174,15 @@ STUB
   # First clone "dies mid-transfer": leaves a non-empty target and fails.
   # Second clone must see a CLEAN target (proving per-attempt cleanup) — it
   # fails loudly like real git if the directory still exists.
+  local pinned_commit
+  pinned_commit="$(sed -n 's/^BATS_CORE_COMMIT="\(.*\)"$/\1/p' "$SCRIPT")"
   cat > "${MOCK_BIN}/git" <<STUB
 #!/usr/bin/env bash
+# The post-clone pin check: report the pinned commit.
+if [ "\$1" = "-C" ]; then
+  echo "${pinned_commit}"
+  exit 0
+fi
 target="\${!#}"
 calls=0
 [ -f "${CLONE_STATE}" ] && calls="\$(cat "${CLONE_STATE}")"
@@ -283,4 +290,52 @@ STUB
   run env FAST_VALIDATION_DEPS_MAX_ATTEMPTS=0 bash "$SCRIPT"
   [ "$status" -ne 0 ]
   [[ "$output" == *"must be a positive integer"* ]]
+}
+
+@test "a bats-core clone that does not match the pinned commit is not installed" {
+  rm "${MOCK_BIN}/bats"
+  make_apt_get 0
+  local clone_dir="${MOCK_BIN}/bats-clone"
+  local sudo_log="${MOCK_BIN}/sudo-calls"
+  cat > "${MOCK_BIN}/git" <<STUB
+#!/usr/bin/env bash
+if [ "\$1" = "-C" ]; then
+  echo 0000000000000000000000000000000000000000
+  exit 0
+fi
+target="\${!#}"
+mkdir -p "\$target"
+printf '#!/usr/bin/env bash\nexit 0\n' > "\$target/install.sh"
+chmod +x "\$target/install.sh"
+STUB
+  chmod +x "${MOCK_BIN}/git"
+  cat > "${MOCK_BIN}/sudo" <<STUB
+#!/usr/bin/env bash
+echo "\$*" >> "${sudo_log}"
+exec "\$@"
+STUB
+  chmod +x "${MOCK_BIN}/sudo"
+  run env PATH="${MOCK_BIN}:/usr/bin:/bin" \
+    FAST_VALIDATION_DEPS_BATS_CLONE_DIR="$clone_dir" \
+    bash "$SCRIPT"
+  echo "$output"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"expected"* ]]
+  ! grep -q 'install.sh' "${sudo_log}" 2>/dev/null
+}
+
+@test "every bats-core install pins the same tag and verifies the same commit" {
+  local tag commit
+  tag="$(sed -n 's/^BATS_CORE_TAG="\(.*\)"$/\1/p' "$SCRIPT")"
+  commit="$(sed -n 's/^BATS_CORE_COMMIT="\(.*\)"$/\1/p' "$SCRIPT")"
+  [ -n "$tag" ]
+  [ -n "$commit" ]
+  local repo_root="${BATS_TEST_DIRNAME}/../.."
+  for workflow in "${repo_root}/.github/workflows/merge.yml" "${repo_root}/.github/workflows/pull_request.yml"; do
+    clones="$(grep -c 'bats-core.git /tmp/bats-core' "$workflow")"
+    pinned="$(grep -c -- "--branch ${tag} https://github.com/bats-core/bats-core.git" "$workflow")"
+    verified="$(grep -c "rev-parse HEAD)\" = \"${commit}\"" "$workflow")"
+    [ "$clones" -eq "$pinned" ]
+    [ "$clones" -eq "$verified" ]
+  done
 }

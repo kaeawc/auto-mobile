@@ -55,11 +55,28 @@ final class PrototypeViewerSpecTests: XCTestCase {
         XCTAssertEqual(spec.id, "bundle")
     }
 
-    func testValidSpecByteCount() {
+    func testValidSpecByteCount() throws {
         let data = spec()
+        let object = try JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)
+        let compactBytes = try JSONSerialization.data(withJSONObject: object, options: .fragmentsAllowed).count
         guard case let .loaded(spec, bytes) = load(data) else { return XCTFail("Expected loaded prototype") }
         XCTAssertEqual(spec.id, "saved")
-        XCTAssertEqual(bytes, data.count)
+        XCTAssertEqual(bytes, compactBytes)
+    }
+
+    func testPrettyPrintedSpecUsesCompactByteCount() throws {
+        let object = try JSONSerialization.jsonObject(with: spec(), options: .fragmentsAllowed)
+        let compactBytes = try JSONSerialization.data(withJSONObject: object, options: .fragmentsAllowed).count
+        let pretty = try JSONSerialization.data(withJSONObject: object, options: .prettyPrinted)
+        // A wide indentation keeps the JSON valid without constructing a huge authored tree.
+        var data = Data("{\n".utf8)
+        data.append(Data(repeating: 32, count: PrototypeLimits.maxSpecBytes))
+        data.append(pretty.dropFirst())
+        XCTAssertGreaterThan(data.count, PrototypeLimits.maxSpecBytes)
+        XCTAssertLessThanOrEqual(data.count, PrototypeLimits.maxSpecBytes * 4)
+        guard case let .loaded(spec, bytes) = load(data) else { return XCTFail("Expected loaded prototype") }
+        XCTAssertEqual(spec.id, "saved")
+        XCTAssertEqual(bytes, compactBytes)
     }
 
     func testMalformedJSON() {
@@ -71,9 +88,20 @@ final class PrototypeViewerSpecTests: XCTestCase {
         assertInvalid(load(data), pathContains: "id")
     }
 
-    func testByteLimitBeforeDecoding() {
+    func testCompactByteLimitBeforeDecoding() {
+        var data = Data(#"{"padding":""#.utf8)
+        data.append(Data(repeating: 97, count: PrototypeLimits.maxSpecBytes))
+        data
+            .append(Data(
+                #"","id":"saved","window":{"placement":{"type":"fullscreen"}},"root":{"type":"spacer"}}"#
+                    .utf8
+            ))
+        assertInvalid(load(data), pathContains: "$", messageContains: "Spec byte limit exceeded")
+    }
+
+    func testRawByteBackstopBeforeParsing() {
         assertInvalid(
-            load(Data(repeating: 32, count: PrototypeLimits.maxSpecBytes + 1)),
+            load(Data(repeating: 32, count: PrototypeLimits.maxSpecBytes * 4 + 1)),
             pathContains: "$",
             messageContains: "Spec byte limit exceeded"
         )

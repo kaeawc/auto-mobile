@@ -8,6 +8,7 @@
      simctl get_app_container <udid> <bundle-id> data.
      Then codesign --force --sign - the .app and simctl install.
      Executable name and bundle layout must not change.
+     CFBundleInfoDictionaryVersion and LSRequiresIPhoneOS are fixed metadata, not stamp points.
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -17,9 +18,11 @@
     <key>CFBundleDisplayName</key><string>Prototype</string>
     <key>CFBundleExecutable</key><string>PrototypeViewer</string>
     <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleVersion</key><string>1</string>
     <key>CFBundleShortVersionString</key><string>1.0</string>
     <key>MinimumOSVersion</key><string>17.0</string>
+    <key>LSRequiresIPhoneOS</key><true/>
     <key>UIDeviceFamily</key><array><integer>1</integer></array>
     <key>UILaunchScreen</key><dict/>
     <key>UISupportedInterfaceOrientations</key>

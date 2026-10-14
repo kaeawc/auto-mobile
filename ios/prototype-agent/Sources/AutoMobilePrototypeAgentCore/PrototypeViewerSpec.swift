@@ -39,7 +39,7 @@ struct PrototypeViewerSpecLoader {
     func load() -> PrototypeViewerContent {
         for location in locations {
             guard let data = reader.read(path: location) else { continue }
-            guard data.count <= PrototypeLimits.maxSpecBytes else {
+            guard data.count <= PrototypeLimits.maxSpecBytes * 4 else {
                 return .invalid(path: "$", message: "Spec byte limit exceeded")
             }
             guard !data.isEmpty,
@@ -48,11 +48,18 @@ struct PrototypeViewerSpecLoader {
                 return .invalid(path: "$", message: "Prototype file is empty; expected JSON")
             }
             do {
+                // Match the injected agent's byte count; file whitespace does not consume the
+                // spec budget. The raw-size guard above bounds work before parsing the file.
+                let object = try JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)
+                let specBytes = try JSONSerialization.data(withJSONObject: object, options: .fragmentsAllowed).count
+                guard specBytes <= PrototypeLimits.maxSpecBytes else {
+                    return .invalid(path: "$", message: "Spec byte limit exceeded")
+                }
                 let spec = try JSONDecoder().decode(PrototypeSpec.self, from: data)
                 if let path = spec.root.unresolvedAnchorPath() {
                     return .invalid(path: path, message: "Element anchors must be resolved to bounds by the host")
                 }
-                return .loaded(spec, specBytes: data.count)
+                return .loaded(spec, specBytes: specBytes)
             } catch let error as DecodingError {
                 return Self.invalid(error)
             } catch {

@@ -74,6 +74,7 @@ private final class ViewerContentController: UIViewController {
     private let layers: PrototypeLayersViewController
     private weak var observedScene: UIWindowScene?
     private var appearanceObservation: (any UITraitChangeRegistration)?
+    private var appliedAccessibility: PrototypeHostAccessibility?
 
     init(model: PrototypeModel) {
         self.model = model
@@ -121,25 +122,54 @@ private final class ViewerContentController: UIViewController {
         syncAppearance()
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        syncAppearanceObservation()
+        syncAppearance()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        unregisterAppearanceObservation()
+    }
+
+    override func willMove(toParent parent: UIViewController?) {
+        if parent == nil { unregisterAppearanceObservation() }
+        super.willMove(toParent: parent)
+    }
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        syncAppearanceObservation()
         guard let window = view.window else { return }
-        if let scene = window.windowScene, observedScene !== scene {
-            if let observedScene, let appearanceObservation {
-                observedScene.unregisterForTraitChanges(appearanceObservation)
-            }
-            observedScene = scene
-            appearanceObservation = scene.registerForTraitChanges(
-                [UITraitUserInterfaceStyle.self]
-            ) { [weak self] (_: UIWindowScene, _: UITraitCollection) in
-                self?.syncAppearance()
-            }
-        }
         let origin = window.convert(CGPoint.zero, to: window.screen.coordinateSpace)
         if model.windowOrigin != origin { model.windowOrigin = origin }
         if model.windowSize != window.bounds.size { model.windowSize = window.bounds.size }
         if model.safeInsets != window.safeAreaInsets { model.safeInsets = window.safeAreaInsets }
         syncAppearance()
+    }
+
+    private func syncAppearanceObservation() {
+        guard let scene = view.window?.windowScene else {
+            unregisterAppearanceObservation()
+            return
+        }
+        guard observedScene !== scene else { return }
+        unregisterAppearanceObservation()
+        observedScene = scene
+        appearanceObservation = scene.registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self]
+        ) { [weak self] (_: UIWindowScene, _: UITraitCollection) in
+            self?.syncAppearance()
+        }
+    }
+
+    private func unregisterAppearanceObservation() {
+        if let observedScene, let appearanceObservation {
+            observedScene.unregisterForTraitChanges(appearanceObservation)
+        }
+        appearanceObservation = nil
+        observedScene = nil
     }
 
     func syncAppearance() {
@@ -155,7 +185,11 @@ private final class ViewerContentController: UIViewController {
             let style: UIUserInterfaceStyle = appearance.dark ? .dark : .light
             if overrideUserInterfaceStyle != style { overrideUserInterfaceStyle = style }
         }
-        layers.apply(PrototypeHostAccessibility(session: session, windowShown: true))
+        let flags = PrototypeHostAccessibility(session: session, windowShown: true)
+        guard flags != appliedAccessibility else { return }
+        appliedAccessibility = flags
+        layers.apply(flags)
+        UIAccessibility.post(notification: .screenChanged, argument: nil)
     }
 
     @objc

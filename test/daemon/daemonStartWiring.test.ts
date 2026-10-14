@@ -1,3 +1,8 @@
+import { PlatformVideoCaptureBackend } from "../../src/features/video/PlatformVideoCaptureBackend";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import type { BootedDevice } from "../../src/models";
+import type { ChildProcess } from "node:child_process";
+import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { NoopTerminalReleaseJournal } from "../../src/daemon/terminalReleaseJournal";
 import type { DaemonExitRecord } from "../../src/daemon/daemonExitRecord";
@@ -98,6 +103,8 @@ describe("Daemon.start() tool-call-end wiring", () => {
     } else {
       process.env[DAEMON_LAUNCH_CWD_ENV] = savedLaunchCwd;
     }
+    videoManager.setStartupOrphanCaptures(undefined);
+    expect(videoManager.getStartupOrphanCaptures()).toBeUndefined();
     setCtrlProxyForwardLeaseOwnerSocketPath(undefined);
     if (DaemonState.getInstance().isInitialized()) {
       DaemonState.getInstance().reset();
@@ -131,6 +138,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
       });
       await repository.insertRecording({
         recordingId: owner,
+        recorderDaemonSessionId: daemonId,
         ownerSessionUuid: owner,
         deviceId: owner,
         platform: "android",
@@ -174,6 +182,90 @@ describe("Daemon.start() tool-call-end wiring", () => {
       internals.stopSessionTimers();
       timer.reset();
       await db.destroy();
+    }
+  });
+
+  test("pool process-start callback reaches the startup redrive listener", async () => {
+    const { daemon, internals, timer } = await makeDaemon({ port: 3161, debug: true });
+    const repo = new FakeVideoRecordingRepository();
+    await repo.insertRecording({
+      recordingId: "old-process",
+      deviceId: "emulator-5554",
+      platform: "android",
+      status: "interrupted",
+      fileName: "old.mp4",
+      filePath: "/unused/old.mp4",
+      format: "mp4",
+      sizeBytes: 0,
+      createdAt: "1970-01-01T00:00:00.000Z",
+      startedAt: "1970-01-01T00:00:00.000Z",
+      lastAccessedAt: "1970-01-01T00:00:00.000Z",
+      config: DEFAULT_VIDEO_RECORDING_CONFIG,
+      captureTeardown: {
+        kind: "android-screenrecord",
+        devicePid: 42,
+        deviceTempPath: "/sdcard/old.mp4",
+      },
+    });
+    const initialize = spyOn(
+      videoManager,
+      "initializeRecordingTeardownRedriveState",
+    ).mockResolvedValue({
+      recordingRepository: repo,
+      videoRecorderService: new VideoRecorderService({ backend: new FakeVideoCaptureBackend() }),
+      liveDaemonSessionIds: new Set(),
+    });
+    const incarnation = spyOn(daemon.getDevicePool(), "getDeviceIncarnation").mockReturnValue(1);
+    const device = spyOn(daemon.getDevicePool(), "getDevice").mockReturnValue({
+      id: "emulator-5554",
+      name: "Pixel",
+      platform: "android",
+      sessionId: null,
+      status: "idle",
+      lastUsedAt: 0,
+      assignmentCount: 0,
+      errorCount: 0,
+    });
+    const confirm = spyOn(
+      PlatformVideoCaptureBackend.prototype,
+      "forceStopOrphanedCapture",
+    ).mockResolvedValue(undefined);
+    let disposed = 0;
+    const mark = spyOn(
+      daemon.getSessionManager(),
+      "markDeviceNeedsRecorderTeardown",
+    ).mockImplementation(() => () => {
+      disposed++;
+    });
+    try {
+      expect(await internals.processStartHost().redriveRecorderTeardowns()).toBe(true);
+      expect(videoManager.getStartupOrphanCaptures()?.find("old-process")).toEqual({
+        recordingId: "old-process",
+        deviceId: "emulator-5554",
+        ownerSessionUuid: undefined,
+      });
+      const pool = daemon.getDevicePool() as unknown as {
+        trackStartedDeviceProcess(device: BootedDevice, child: ChildProcess): Promise<void>;
+      };
+      await pool.trackStartedDeviceProcess(
+        { deviceId: "emulator-5554", platform: "android", name: "Pixel" },
+        new FakeChildProcess() as unknown as ChildProcess,
+      );
+      expect(confirm).toHaveBeenCalledTimes(1);
+      expect(confirm).toHaveBeenCalledWith(
+        { deviceId: "emulator-5554", platform: "android", name: "Pixel" },
+        { kind: "android-screenrecord", devicePid: 42, deviceTempPath: "/sdcard/old.mp4" },
+      );
+      expect(disposed).toBe(1);
+      expect((await repo.getRecording("old-process"))?.captureTeardown).toBeUndefined();
+    } finally {
+      confirm.mockRestore();
+      device.mockRestore();
+      initialize.mockRestore();
+      incarnation.mockRestore();
+      mark.mockRestore();
+      internals.stopSessionTimers();
+      timer.reset();
     }
   });
 

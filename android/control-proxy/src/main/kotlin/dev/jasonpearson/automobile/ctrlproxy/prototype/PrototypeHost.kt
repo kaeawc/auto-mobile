@@ -299,33 +299,36 @@ class DefaultPrototypeHost(
       }
     }
 
-  private fun showOnMain(request: PrototypeRequest): Boolean {
-    if (destroyed || isBlocked()) return false
-    val current = window
-    // An in-place update keeps the window's own display target; a fresh context per update would
-    // be created on every non-default-display request only to be discarded. A window's type cannot
-    // change after it is added, so a layer change attaches a new window like a display change.
-    val inPlace = current?.takeIf {
-      it.displayId == request.displayId && it.request.layer == request.layer
+  private fun showOnMain(request: PrototypeRequest): Boolean =
+    PrototypeTrace.section(PrototypeTrace.HOST_SHOW) {
+      if (destroyed || isBlocked()) return@section false
+      val current = window
+      // An in-place update keeps the window's own display target; a fresh context per update would
+      // be created on every non-default-display request only to be discarded. A window's type
+      // cannot change after it is added, so a layer change attaches a new window like a display
+      // change.
+      val inPlace = current?.takeIf {
+        it.displayId == request.displayId && it.request.layer == request.layer
+      }
+      val target = inPlace?.target ?: windowFor(request.displayId, request.layer)
+      val params =
+        prototypeLayoutParams(
+          request.placement,
+          request.hasTextField,
+          target.density(),
+          sdkInt,
+          request.layer,
+          imeLift(request),
+        )
+      if (touchThroughToken != null) {
+        params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+      }
+      // New content places its own anchored root again, so a replaced spec starts from its
+      // placement.
+      inPlace?.anchoredOrigin = null
+      if (inPlace != null) updateInPlace(inPlace, request, params)
+      else addWindow(target, request, params, replacing = current)
     }
-    val target = inPlace?.target ?: windowFor(request.displayId, request.layer)
-    val params =
-      prototypeLayoutParams(
-        request.placement,
-        request.hasTextField,
-        target.density(),
-        sdkInt,
-        request.layer,
-        imeLift(request),
-      )
-    if (touchThroughToken != null) {
-      params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-    }
-    // New content places its own anchored root again, so a replaced spec starts from its placement.
-    inPlace?.anchoredOrigin = null
-    return if (inPlace != null) updateInPlace(inPlace, request, params)
-    else addWindow(target, request, params, replacing = current)
-  }
 
   /** The keyboard's reach for a bottom sheet; other placements never read it. */
   private fun imeLift(request: PrototypeRequest): Int =

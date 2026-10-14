@@ -1,3 +1,5 @@
+import { ORPHAN_SCREENRECORD_EXIT_MARGIN_MS } from "../daemon/recorderTeardownRecovery";
+import { DeviceUnreachableError } from "../models/DeviceUnreachableError";
 import type { SessionManager } from "../daemon/sessionManager";
 import type {
   VideoRecordingRecord,
@@ -11,7 +13,20 @@ import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
 import { INCOMPLETE_MARK_GRACE_MS } from "./videoRecordingManager";
 
-export const ORPHAN_SCREENRECORD_EXIT_MARGIN_MS = 5_000;
+export { ORPHAN_SCREENRECORD_EXIT_MARGIN_MS } from "../daemon/recorderTeardownRecovery";
+
+export interface StartupOrphanCaptures {
+  /** Retained startup rows on this device whose descriptor is still unconfirmed. */
+  list(
+    deviceId: string,
+  ): readonly { recordingId: string; deviceId: string; ownerSessionUuid?: string }[];
+  /** Which device holds the retained orphan with this id, if any. */
+  find(
+    recordingId: string,
+  ): { recordingId: string; deviceId: string; ownerSessionUuid?: string } | undefined;
+  /** Stop and acknowledge startup rows; reject when teardown remains unconfirmed. */
+  stop(deviceId: string, recordingId?: string): Promise<void>;
+}
 
 export interface RecordingTeardownRedriveDeps {
   recordingRepository: Pick<VideoRecordingRepository, "listRecordings" | "updateRecording">;
@@ -23,6 +38,8 @@ export interface RecordingTeardownRedriveDeps {
     device: BootedDevice,
     descriptor: VideoCaptureTeardownDescriptor,
   ): Promise<void>;
+  onStartupOrphans?(handle: StartupOrphanCaptures): void;
+  onDeviceProcessStarted?(listener: (deviceId: string) => void | Promise<void>): void;
   onDeviceIncarnationAssigned?(listener: (deviceId: string) => void): void;
   now(): number;
   timer: Pick<Timer, "sleep" | "setTimeout" | "clearTimeout">;
@@ -39,6 +56,9 @@ type RedriveManager = Pick<
 
 /** Startup-only bookkeeping; never written back to the repository. */
 interface RetainedCaptureRow extends VideoRecordingRecord {
+  confirmation?: Promise<void>;
+  hookDriven?: boolean;
+  withdrawRetry?: () => void;
   firstMarkedIncarnation?: number;
   warnedUnconfirmableRedrive?: boolean;
 }
@@ -52,6 +72,7 @@ export async function redriveUnconfirmedCaptureTeardowns(
   const pending = new Map<string, PendingRedrive>();
   const redrivenIncarnations = new Map<string, number>();
   let subscribedPending = false;
+  const orphans = createStartupOrphanCaptures(byDevice, deps);
   const redriveDevice = (deviceId: string, hookDriven: boolean): void => {
     const incarnation = deps.getDeviceIncarnation(deviceId);
     const owned = new Set(deps.ownedCaptureIds());
@@ -73,6 +94,9 @@ export async function redriveUnconfirmedCaptureTeardowns(
       );
       return;
     }
+    for (const row of records) {
+      row.hookDriven ||= hookDriven;
+    }
     redrivenIncarnations.set(deviceId, incarnation);
     if (manager.getSessionForDevice(deviceId) !== null) {
       pending.set(deviceId, { records, hookDriven });
@@ -86,6 +110,24 @@ export async function redriveUnconfirmedCaptureTeardowns(
   };
   // Install before the startup read yields: its loop handles devices added during the read.
   deps.onDeviceIncarnationAssigned?.((deviceId) => redriveDevice(deviceId, true));
+  deps.onDeviceProcessStarted?.(async (deviceId) => {
+    if (orphans.list(deviceId).length === 0) {
+      return;
+    }
+    try {
+      // Quick-boot snapshots can restore a recorder: a new child is not teardown proof.
+      await raceWithDeadline(() => orphans.stop(deviceId), {
+        timer: deps.timer,
+        timeoutMs: INCOMPLETE_MARK_GRACE_MS,
+        label: `Process-start orphan recorder teardown on ${deviceId}`,
+      });
+    } catch (error) {
+      logger.warn(
+        `[RecordingTeardownRedrive] Process-start teardown unconfirmed on ${deviceId}`,
+        error,
+      );
+    }
+  });
   let rows: VideoRecordingRecord[];
   try {
     rows = await deps.recordingRepository.listRecordings({
@@ -111,7 +153,59 @@ export async function redriveUnconfirmedCaptureTeardowns(
   for (const deviceId of byDevice.keys()) {
     redriveDevice(deviceId, false);
   }
+  deps.onStartupOrphans?.(orphans);
   return true;
+}
+
+function createStartupOrphanCaptures(
+  byDevice: Map<string, RetainedCaptureRow[]>,
+  deps: RecordingTeardownRedriveDeps,
+): StartupOrphanCaptures {
+  const retained = (deviceId: string) =>
+    (byDevice.get(deviceId) ?? []).filter(
+      (row) =>
+        row.captureTeardown &&
+        !deps.ownedCaptureIds().includes(row.recordingId) &&
+        canRedriveCapture(row, deps.getDeviceIncarnation(deviceId)),
+    );
+  const reference = (row: RetainedCaptureRow) => ({
+    recordingId: row.recordingId,
+    deviceId: row.deviceId,
+    ownerSessionUuid: row.ownerSessionUuid,
+  });
+  return {
+    list: (deviceId) => retained(deviceId).map(reference),
+    find: (recordingId) => {
+      for (const deviceId of byDevice.keys()) {
+        const row = retained(deviceId).find((row) => row.recordingId === recordingId);
+        if (row) {
+          return reference(row);
+        }
+      }
+      return undefined;
+    },
+    stop: async (deviceId, recordingId) => {
+      const records = retained(deviceId).filter(
+        (row) => !recordingId || row.recordingId === recordingId,
+      );
+      try {
+        await retryOrphanedCaptures(deviceId, records, deps, false);
+      } finally {
+        // A disposer belongs to a whole registered batch, not to an individual row.
+        const batches = new Set(records.map((row) => row.withdrawRetry));
+        for (const withdraw of batches) {
+          if (
+            withdraw &&
+            !(byDevice.get(deviceId) ?? []).some(
+              (row) => row.withdrawRetry === withdraw && row.captureTeardown,
+            )
+          ) {
+            withdraw();
+          }
+        }
+      }
+    },
+  };
 }
 
 function canRedriveCapture(row: RetainedCaptureRow, incarnation: number | undefined): boolean {
@@ -140,16 +234,21 @@ function markOrphanedCaptures(
   deps: RecordingTeardownRedriveDeps,
   hookDriven = false,
 ): void {
+  records = records.filter((row) => row.captureTeardown);
+  if (records.length === 0) {
+    return;
+  }
   const remainingMs = records.map((row) => {
     const expiry = orphanExpiresAt(row);
     return Number.isFinite(expiry) ? Math.max(0, expiry - deps.now()) : 0;
   });
-  manager.markDeviceNeedsRecorderTeardown(
+  const withdrawRetry = manager.markDeviceNeedsRecorderTeardown(
     deviceId,
     () => retryOrphanedCaptures(deviceId, records, deps, true, hookDriven),
     Math.max(INCOMPLETE_MARK_GRACE_MS, ...remainingMs.map((ms) => ms + INCOMPLETE_MARK_GRACE_MS)),
   );
   for (const row of records) {
+    row.withdrawRetry = withdrawRetry;
     row.firstMarkedIncarnation ??= deps.getDeviceIncarnation(deviceId);
   }
 }
@@ -236,37 +335,76 @@ async function confirmReleasedCaptures(
 
 async function retryOrphanedCaptures(
   deviceId: string,
-  records: VideoRecordingRecord[],
+  records: RetainedCaptureRow[],
   deps: RecordingTeardownRedriveDeps,
   waitForExpiry: boolean,
   hookDriven = false,
 ): Promise<void> {
   const unconfirmed: string[] = [];
+  const failures: unknown[] = [];
   for (const row of records) {
-    if (!row.captureTeardown) {
+    if (!row.captureTeardown || deps.ownedCaptureIds().includes(row.recordingId)) {
       continue;
     }
     try {
-      if (hookDriven && !(await hookRowStillUnconfirmed(row, deps))) {
-        continue;
-      }
-      await confirmOrphanedCapture(row, deps, waitForExpiry);
-      await deps.recordingRepository.updateRecording(row.recordingId, {
-        captureTeardown: undefined,
-      });
-      row.captureTeardown = undefined;
+      await confirmRetainedCapture(row, deps, waitForExpiry, hookDriven);
     } catch (error) {
       logger.warn(
         `[RecordingTeardownRedrive] Teardown unconfirmed for ${row.recordingId} on ${deviceId}`,
         error,
       );
       unconfirmed.push(row.recordingId);
+      failures.push(error);
     }
   }
   if (unconfirmed.length > 0) {
-    throw new ActionableError(
+    const Failure = failures.every((error) => error instanceof DeviceUnreachableError)
+      ? DeviceUnreachableError
+      : ActionableError;
+    throw new Failure(
       `Orphan recorder teardown on ${deviceId} is unconfirmed for ${unconfirmed.join(", ")}. Recover the device if retries fail.`,
+      { cause: failures[0] },
     );
+  }
+}
+
+/** Share PID confirmation and acknowledgement across caller, release and health retries. */
+async function confirmRetainedCapture(
+  row: RetainedCaptureRow,
+  deps: RecordingTeardownRedriveDeps,
+  waitForExpiry: boolean,
+  hookDriven: boolean,
+): Promise<void> {
+  // A caller preflight never joins a health retry waiting for a pid-less hard limit.
+  if (!waitForExpiry && row.captureTeardown?.devicePid === undefined && row.captureTeardown) {
+    await confirmOrphanedCapture(row, deps, false);
+  }
+  if (row.confirmation) {
+    return row.confirmation;
+  }
+  const confirmation = (async () => {
+    if ((hookDriven || row.hookDriven) && !(await hookRowStillUnconfirmed(row, deps))) {
+      return;
+    }
+    const descriptor = row.captureTeardown;
+    if (!descriptor || deps.ownedCaptureIds().includes(row.recordingId)) {
+      return;
+    }
+    await confirmOrphanedCapture(row, deps, waitForExpiry);
+    // Identity replacement can retire this row while device confirmation yields.
+    if (row.captureTeardown !== descriptor) {
+      return;
+    }
+    await deps.recordingRepository.updateRecording(row.recordingId, { captureTeardown: undefined });
+    row.captureTeardown = undefined;
+  })();
+  row.confirmation = confirmation;
+  try {
+    await confirmation;
+  } finally {
+    if (row.confirmation === confirmation) {
+      row.confirmation = undefined;
+    }
   }
 }
 
@@ -322,7 +460,7 @@ async function confirmOrphanedCapture(
   }
   const device = deps.getDevice(row.deviceId);
   if (!device) {
-    throw new ActionableError(
+    throw new DeviceUnreachableError(
       `Cannot find device ${row.deviceId} to confirm orphan recorder teardown.`,
     );
   }

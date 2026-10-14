@@ -25,6 +25,7 @@ test/fixtures/observe-output/ios-overlay-window/*.json text eol=lf
 test/fixtures/observe-output/ios-prototype-sheet/*.json text eol=lf
 test/fixtures/network-filter-controller/*.json text eol=lf
 test/fixtures/network-filter-controller/v4/*.json text eol=lf
+test/fixtures/network-filter-controller/v3-app/*.json text eol=lf
 test/fixtures/desktop-wire/*.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-injected.json text eol=lf
 test/fixtures/ios/ios-demos-observe-full-sdk-nodes-not-injected.json text eol=lf
@@ -134,6 +135,7 @@ schemas/prototype-asset-contract.json text eol=lf
 
 # Real `ps -o lstart=` captures whose exact bytes (trailing padding) are asserted (issue #10116).
 test/fixtures/daemon-ps-lstart/*.txt text eol=lf
+test/fixtures/manual-test-host/*.txt text eol=lf
 # Real contrast-audit captures (PNG already uses the test/fixtures exemption above).
 test/fixtures/accessibility-contrast/*.json text eol=lf
 

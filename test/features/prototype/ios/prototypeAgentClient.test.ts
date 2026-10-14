@@ -5,6 +5,7 @@ import {
   PROTOTYPE_AGENT_PROTOCOL_VERSION,
   PROTOTYPE_AGENT_CLIENT_MAX_FRAME_BYTES,
   PrototypeAgentFrameTooLargeError,
+  PrototypeAgentRequestTimeoutError,
   type PrototypeAgentClient,
 } from "../../../../src/features/prototype/ios/prototypeAgentClient";
 import { MAX_PROTOTYPE_SPEC_BYTES } from "../../../../src/features/prototype/prototypeSpec";
@@ -40,7 +41,7 @@ async function flushMicrotasks(): Promise<void> {
   }
 }
 
-function setup(maxFrameBytes?: number) {
+function setup(maxFrameBytes?: number, requestTimeoutMs = 2_000) {
   const socket = new FakePrototypeAgentSocket();
   const connector = new FakePrototypeAgentConnector(socket);
   const timer = new FakeTimer();
@@ -51,17 +52,20 @@ function setup(maxFrameBytes?: number) {
     timer,
     maxFrameBytes,
     handshakeTimeoutMs: 1_000,
-    requestTimeoutMs: 2_000,
+    requestTimeoutMs,
   });
   return { socket, connector, timer, connecting };
 }
 
-async function connected(maxFrameBytes?: number): Promise<{
+async function connected(
+  maxFrameBytes?: number,
+  requestTimeoutMs = 2_000,
+): Promise<{
   socket: FakePrototypeAgentSocket;
   timer: FakeTimer;
   client: PrototypeAgentClient;
 }> {
-  const { socket, timer, connecting } = setup(maxFrameBytes);
+  const { socket, timer, connecting } = setup(maxFrameBytes, requestTimeoutMs);
   await flushMicrotasks();
   socket.push(helloResult());
   const client = await connecting;
@@ -325,5 +329,53 @@ describe("prototype inbound frame bounds", () => {
     socket.pushRaw('bad json\n{"type":"prototype_event"}\n');
     expect(events).toEqual([]);
     expect(socket.ended).toBe(true);
+  });
+});
+
+describe("prototype request timeout overrides", () => {
+  test("status override expires at 3000 ms with typed metadata", async () => {
+    const { client, timer } = await connected(undefined, 6000);
+    const pending = client.request("get_prototype_status", undefined, { timeoutMs: 3000 });
+    const caught = pending.catch((error: unknown) => error);
+    timer.advanceTime(3000);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    const error = await caught;
+    expect(error).toBeInstanceOf(PrototypeAgentRequestTimeoutError);
+    expect(error).not.toHaveProperty("code");
+    expect(error).toMatchObject({
+      name: "PrototypeAgentRequestTimeoutError",
+      requestType: "get_prototype_status",
+      timeoutMs: 3000,
+      message: "Prototype agent did not answer get_prototype_status within 3000 ms.",
+    });
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+  test("default request still waits the client-wide timeout", async () => {
+    const { client, timer } = await connected(undefined, 6000);
+    let rejected = false;
+    const caught = client.request("get_prototype_status").catch((error: unknown) => {
+      rejected = true;
+      return error;
+    });
+    timer.advanceTime(3000);
+    await flushMicrotasks();
+    expect(rejected).toBe(false);
+    timer.advanceTime(3000);
+    const error = await caught;
+    expect(error).toBeInstanceOf(PrototypeAgentRequestTimeoutError);
+    expect(error).not.toHaveProperty("code");
+    expect(error).toMatchObject({
+      name: "PrototypeAgentRequestTimeoutError",
+      requestType: "get_prototype_status",
+      timeoutMs: 6000,
+    });
+  });
+  test("reply before override resolves and clears its timer", async () => {
+    const { client, timer, socket } = await connected(undefined, 6000);
+    const pending = client.request("get_prototype_status", undefined, { timeoutMs: 3000 });
+    timer.advanceTime(2999);
+    socket.push({ type: "prototype_result", requestId: "r1", success: true });
+    expect((await pending).success).toBe(true);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 });

@@ -8,7 +8,7 @@ import Foundation
 /// in every item, no nested `repeat`, expanded limits), so this only binds values.
 ///
 /// Bound per instance, as on Android: a `text` node's `text`, the component label, title and
-/// button fields listed on `bindComponentFields`; `setState` values and `emit` names in
+/// button fields listed on `bindTextFields`; `setState` values and `emit` names in
 /// `onTap`; the `equals`/`notEquals` operands of `visibleWhen` and `styleWhen` conditions,
 /// recursively through `all`/`any`/`not`; and every state key (#11051): `stateKey`,
 /// `hourKey`/`minuteKey`, a list item's trailing key, `openWhen.key`, condition keys and the keys
@@ -67,11 +67,51 @@ enum PrototypeRepeat {
         return .object(fields)
     }
 
+    /// `key` is accepted but rows keep positional identity until keyed patching (#11675).
     private static func instances(of spec: [String: JSONValue]) -> [Instance] {
         guard case let .string(alias)? = spec["as"], case let .array(items)? = spec["items"] else { return [] }
         return items.enumerated().map { index, item in
             guard case let .object(fields) = item else { return Instance(alias: alias, item: [:], index: index) }
             return Instance(alias: alias, item: fields, index: index)
+        }
+    }
+
+    /// The contract's text-kind fields, shared by data resolution and repeat binding.
+    /// This maps only this node's authored text, never actions, operands or descendants.
+    static func bindTextFields(_ fields: inout [String: JSONValue], transform: (String) -> String) {
+        func string(_ key: String, in object: inout [String: JSONValue]) {
+            if case let .string(text)? = object[key] { object[key] = .string(transform(text)) }
+        }
+        func part(_ key: String, in object: inout [String: JSONValue]) {
+            guard case var .object(member)? = object[key] else { return }
+            string("label", in: &member)
+            object[key] = .object(member)
+        }
+        func list(_ key: String, in object: inout [String: JSONValue]) {
+            guard case let .array(entries)? = object[key] else { return }
+            object[key] = .array(entries.map { entry in
+                guard case var .object(member) = entry else { return entry }
+                string("label", in: &member)
+                return .object(member)
+            })
+        }
+        switch fields["type"] {
+        case .string("text")?: string("text", in: &fields)
+        case .string("button")?, .string("fab")?: string("label", in: &fields)
+        case .string("segmentedButton")?: list("options", in: &fields)
+        case .string("topAppBar")?:
+            string("title", in: &fields)
+            part("navigationIcon", in: &fields)
+            list("actions", in: &fields)
+        case .string("dialog")?:
+            string("title", in: &fields)
+            string("text", in: &fields)
+            part("confirm", in: &fields)
+            part("dismiss", in: &fields)
+        case .string("snackbar")?:
+            string("text", in: &fields)
+            part("action", in: &fields)
+        default: break
         }
     }
 
@@ -93,7 +133,7 @@ enum PrototypeRepeat {
         return isFieldName(field) ? (.field(field), end) : nil
     }
 
-    private static func isFieldName(_ name: String) -> Bool {
+    static func isFieldName(_ name: String) -> Bool {
         guard (1 ... 64).contains(name.unicodeScalars.count),
               let first = name.unicodeScalars.first else { return false }
         func letter(_ scalar: Unicode.Scalar) -> Bool {
@@ -111,10 +151,8 @@ private struct Instance {
     /// One template node bound to this instance; descendants are bound too.
     func bind(_ node: JSONValue) -> JSONValue {
         guard case var .object(fields) = node else { return node }
-        if case .string("text")? = fields["type"], case let .string(text)? = fields["text"] {
-            fields["text"] = .string(interpolate(text))
-        }
-        bindComponentFields(&fields)
+        PrototypeRepeat.bindTextFields(&fields, transform: interpolate)
+        bindComponentActions(&fields)
         bindStateKeys(&fields)
         if case let .array(actions)? = fields["onTap"] {
             fields["onTap"] = .array(actions.map(bindAction))
@@ -136,26 +174,17 @@ private struct Instance {
         return .object(fields)
     }
 
-    /// Component fields that take placeholders besides a `text` node's `text`: button, fab and
-    /// segmented option labels, app bar titles and actions, and dialog and snackbar text and buttons.
-    private func bindComponentFields(_ fields: inout [String: JSONValue]) {
+    /// Part actions bind independently of the shared text-kind field mapping.
+    private func bindComponentActions(_ fields: inout [String: JSONValue]) {
         guard case let .string(type)? = fields["type"] else { return }
         switch type {
-        case "button", "fab":
-            bindString("label", in: &fields)
-        case "segmentedButton":
-            bindList("options", in: &fields) { bindString("label", in: &$0) }
         case "topAppBar":
-            bindString("title", in: &fields)
             bindPart("navigationIcon", in: &fields)
             bindList("actions", in: &fields) { bindPartFields(&$0) }
         case "dialog":
-            bindString("title", in: &fields)
-            bindString("text", in: &fields)
             bindPart("confirm", in: &fields)
             bindPart("dismiss", in: &fields)
         case "snackbar":
-            bindString("text", in: &fields)
             bindPart("action", in: &fields)
         default:
             break
@@ -179,9 +208,8 @@ private struct Instance {
         if case let .string(text)? = fields[key] { fields[key] = .string(interpolate(text)) }
     }
 
-    /// A `{label, onTap?}` part: its label and its actions bind.
+    /// A part's actions; its label was already mapped by `bindTextFields`.
     private func bindPartFields(_ part: inout [String: JSONValue]) {
-        bindString("label", in: &part)
         if case let .array(actions)? = part["onTap"] { part["onTap"] = .array(actions.map(bindAction)) }
     }
 

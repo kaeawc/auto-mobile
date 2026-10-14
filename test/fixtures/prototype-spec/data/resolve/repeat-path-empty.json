@@ -1,0 +1,43 @@
+{
+  "spec": {
+    "id": "resolve",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": {
+          "path": "/orders"
+        },
+        "as": "order",
+        "key": "id"
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "{order.id}"
+        }
+      ]
+    },
+    "data": {
+      "orders": []
+    }
+  },
+  "root": {
+    "type": "column",
+    "repeat": {
+      "items": [],
+      "as": "order",
+      "key": "id"
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "{order.id}"
+      }
+    ]
+  }
+}

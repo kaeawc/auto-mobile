@@ -1,11 +1,62 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import android.util.Log
 import android.view.Display
 
-/** Physical panel ID is not part of the public Display SDK on every supported API. */
-internal fun panelUniqueIdOf(display: Display?): String? = display?.let { panel ->
-  runCatching {
-    panel.javaClass.getMethod("getUniqueId").invoke(panel) as? String
+private const val TAG = "DisplayIdentity"
+
+private val panelUniqueIdResolver =
+  PanelUniqueIdResolver<Display>(
+    lookup = {
+      val method = Display::class.java.getMethod("getUniqueId")
+      val read: (Display) -> String? = { display -> method.invoke(display) as? String }
+      read
+    },
+    onUnavailable = { error ->
+      Log.d(TAG, "Display.getUniqueId() is unavailable; panelUniqueId will be omitted", error)
+    },
+  )
+
+/**
+ * Physical panel ID uses a hidden API, blocked on API 36, resolved once per process. When
+ * unavailable, the host maps the logical displayId to a panel itself.
+ */
+internal fun panelUniqueIdOf(display: Display?): String? = panelUniqueIdResolver.resolve(display)
+
+/** Looks up and caches the accessor for a display's physical panel id; a failed lookup is final. */
+internal class PanelUniqueIdResolver<D : Any>(
+  private val lookup: () -> ((D) -> String?)?,
+  private val onUnavailable: (Throwable?) -> Unit = {},
+) {
+  private val lock = Any()
+  private var resolved = false
+  private var accessor: ((D) -> String?)? = null
+
+  fun resolve(display: D?): String? {
+    if (display == null) return null
+    // Serialize invocation too, so no caller can invoke after another caller latches a failure.
+    return synchronized(lock) {
+      if (resolved && accessor == null) return@synchronized null
+      val value =
+        try {
+          if (!resolved) {
+            resolved = true
+            accessor = lookup()
+          }
+          accessor?.invoke(display)
+        } catch (e: Exception) {
+          return@synchronized unavailable(e)
+        } catch (e: LinkageError) {
+          return@synchronized unavailable(e)
+        }
+      if (accessor == null) unavailable(null) else value
+    }
   }
-    .getOrNull()
+
+  private fun unavailable(error: Throwable?): String? {
+    resolved = true
+    accessor = null
+    onUnavailable(error)
+    return null
+  }
 }

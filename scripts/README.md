@@ -462,6 +462,14 @@ scripts/ios/video-recording-start-stop-integration.sh
 
 The script uses an already booted iPhone simulator when available, otherwise it uses AutoMobile product boot. It requires `bun`, `xcrun`, `jq`, `ffmpeg`, and `ffprobe`, records for `AUTOMOBILE_IOS_VIDEO_RECORDING_WAIT_MS` milliseconds when set, and fails if the finalized `.mp4` is missing, empty, unreadable, or lacks a video stream.
 
+## Artifact Qualification
+
+- `qualification/caseResult.ts` - Strict Zod case-result format, proof levels, sanitized fixture IDs and supported boundaries. Generate `case-result.schema.json` with `--write`; `--check` exits 1 on drift, 2 on usage error.
+- `qualification/runCase.ts` - `bun run qualify:run-case` records a reproducible command, elapsed operation timing, identity fields and evidence hashes. Requires metadata, `--out` and `-- <command...>`; `--not-exercised --boundary <text>` records a gap without spawning. Exits with the command's status, or 2 on usage error.
+- `qualification/aggregateResults.ts` - `bun run qualify:aggregate --results <dir> [--identity <file>] [--markdown <out>] [--require-pass]` validates non-recursive JSON cases and renders separate native, injected-fault, deterministic-test and gap tables. Rejects duplicate cases/mixed artifacts and warns on timing overruns; exits 1 on validation errors or required fail/blocked outcomes, 2 on usage error. See [Managed-slot qualification](../docs/using/managed-slot-qualification.md).
+- `release/write-build-info.ts` - Runs at `prepack`; writes reproducible source SHA, tracked-file dirtiness, package version, and native-resource checksum pins to `dist/build-info.json`. Skips with a warning when `dist/` is absent.
+- `qualification/artifactIdentity.ts` - Identifies an installed or extracted package, refuses source checkouts and mismatched expected SHAs, checks packed assets and native pins, and records the published managed-slot contract. Run `bun run qualify:identity --package-dir <dir>`; optional flags: `--tarball <tgz>`, `--expected-integrity <sri>`, `--repo <dir>`, `--expect-source-sha <sha>`, `--native-assets-dir <dir>`, `--out <file>`. Emits JSON plus checks on stderr; exits 0 identified, 1 refused, 2 usage error. Published-package proof requires matching expected tarball integrity and directory contents (extra node_modules files allowed).
+
 ## CI Integration
 
 The following scripts are invoked by GitHub Actions workflows:

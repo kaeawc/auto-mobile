@@ -117,6 +117,7 @@ enum PrototypeLimits {
         throws
     {
         guard case let .object(fields) = node else { return }
+        try guardCheckLimits(.object(fields), path: path)
         count += 1
         if count > maxNodes { throw violation(path, "Node limit exceeded") }
         if depth > maxDepth { throw violation(path, "Tree depth limit exceeded") }
@@ -174,6 +175,7 @@ enum PrototypeLimits {
         throws
     {
         guard case let .object(fields) = node else { return }
+        try guardCheckLimits(.object(fields), path: path)
         if template {
             count += 1
             if count > maxNodes { throw violation(path, "Node limit exceeded") }
@@ -192,6 +194,63 @@ enum PrototypeLimits {
             try visitAuthoredTemplates(
                 child, path: "\(path).child", depth: depth + 1, template: childTemplate, count: &count
             )
+        }
+    }
+
+    /// Checks are host-validated. Re-check resource limits, not the host's schema or grammar.
+    private static func guardCheckLimits(_ node: JSONValue, path: String) throws {
+        guard case let .object(fields) = node else { return }
+        if case let .array(checks)? = fields["checks"] {
+            if checks.count > 8 { throw violation("\(path).checks", "Check limit exceeded") }
+            for check in checks {
+                if case let .object(rule) = check, let pattern = rule["pattern"]?.stringValue,
+                   !PrototypeCheckPattern.withinLimits(pattern)
+                {
+                    throw violation("\(path).checks", "Pattern limit exceeded")
+                }
+            }
+        }
+        // Walk only condition/action fields here; children have the existing bounded tree walk.
+        func guardReferences(_ value: JSONValue) throws {
+            switch value {
+            case let .object(object):
+                for key in ["valid", "requireValid"] {
+                    if case let .array(keys)? = object[key], keys.count > 8 {
+                        throw violation(path, "Validity key limit exceeded")
+                    }
+                }
+                for key in [
+                    "all",
+                    "any",
+                    "not",
+                    "when",
+                    "onTap",
+                    "actions",
+                    "navigationIcon",
+                    "confirm",
+                    "dismiss",
+                    "action",
+                ] {
+                    if let child = object[key] { try guardReferences(child) }
+                }
+            case let .array(values): for child in values {
+                    try guardReferences(child)
+                }
+            default: break
+            }
+        }
+        for key in [
+            "visibleWhen",
+            "enabledWhen",
+            "styleWhen",
+            "onTap",
+            "actions",
+            "navigationIcon",
+            "confirm",
+            "dismiss",
+            "action",
+        ] {
+            if let value = fields[key] { try guardReferences(value) }
         }
     }
 

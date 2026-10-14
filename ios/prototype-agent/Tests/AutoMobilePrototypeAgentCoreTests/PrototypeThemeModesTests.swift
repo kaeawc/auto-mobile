@@ -43,6 +43,7 @@ final class PrototypeThemeModesTests: XCTestCase {
             "prototype_theme_modes_v1", "prototype_appearance_v1", "prototype_window_chrome_v1",
             "prototype_icon_sf_symbols_v1",
             "prototype_data_model_v1",
+            "prototype_checks_v1",
         ])
     }
 

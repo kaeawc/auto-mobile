@@ -12,6 +12,7 @@ final class PrototypeModel {
     /// Ends surviving text drafts even when a replacing show leaves their stored value unchanged.
     private(set) var showRevision = 0
     private(set) var state: [String: JSONValue] = [:]
+    private(set) var shownErrors: Set<String> = []
     private(set) var pages: [String: Int] = [:]
     private(set) var appearance: PrototypeAppearance?
     private(set) var deviceDark = false
@@ -31,6 +32,7 @@ final class PrototypeModel {
         session = next
         escapeReveal.sync(hasEscape: hasEscape, shown: next.isShown)
         if state != next.state { state = next.state }
+        if shownErrors != next.shownErrors { shownErrors = next.shownErrors }
         if pages != next.pages { pages = next.pages }
         if appearance != next.appearance { appearance = next.appearance }
         if deviceDark != next.deviceDark { deviceDark = next.deviceDark }
@@ -185,6 +187,26 @@ final class PrototypeModel {
     }
 
     // MARK: Interactions
+
+    func isEnabled(_ node: PrototypeNode) -> Bool {
+        node.enabledWhen?.holds(state) ?? true
+    }
+
+    func shownError(_ node: PrototypeNode) -> String? {
+        // Read the observed fields; the session itself is observation-ignored.
+        for key in node.checkedKeys where shownErrors.contains(key) {
+            let result = PrototypeChecks.evaluate(state[key], checks: node.checks ?? [], nodeType: node.type)
+            if let message = result.firstFailingMessage { return message }
+        }
+        return nil
+    }
+
+    func blur(_ node: PrototypeNode) {
+        apply(activity: false) { session in
+            session.blur(node)
+            return []
+        }
+    }
 
     func run(_ actions: [PrototypeAction]) {
         apply { $0.run(actions) }

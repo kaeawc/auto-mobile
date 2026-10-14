@@ -9,6 +9,11 @@ private func line(_ object: [String: Any]) throws -> Data {
 }
 
 final class PrototypeAgentConfigurationTests: XCTestCase {
+    func testChecksCapability() {
+        XCTAssertEqual(PrototypeAgentProtocol.checksCapability, "prototype_checks_v1")
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.checksCapability))
+    }
+
     func testTheAgentAdvertisesSfSymbolsWithoutMaterialParity() {
         XCTAssertEqual(PrototypeAgentProtocol.iconSfSymbolsCapability, "prototype_icon_sf_symbols_v1")
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.iconSfSymbolsCapability))

@@ -22481,23 +22481,6 @@
                 "validation_failed"
               ]
             },
-            "validity": {
-              "type": "object",
-              "propertyNames": {
-                "type": "string"
-              },
-              "additionalProperties": {
-                "type": "boolean"
-              }
-            },
-            "keys": {
-              "minItems": 1,
-              "maxItems": 8,
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
             "name": {
               "anyOf": [
                 {
@@ -22539,6 +22522,23 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              }
+            },
+            "validity": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "boolean"
+              }
+            },
+            "keys": {
+              "minItems": 1,
+              "maxItems": 8,
+              "type": "array",
+              "items": {
+                "type": "string"
               }
             },
             "timestamp": {

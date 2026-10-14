@@ -73,6 +73,10 @@ final class PrototypeSpecDecodingTests: XCTestCase {
         let files = try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }
         XCTAssertGreaterThan(files.count, 20)
+        let names = Set(files.map(\.lastPathComponent))
+        for name in ["text-spans", "text-spans-max", "text-spans-tappable", "text-spans-placeholders", "text-spans-plain-text"] {
+            XCTAssertTrue(names.contains("\(name).json"))
+        }
         for file in files {
             XCTAssertNoThrow(
                 try JSONDecoder().decode(PrototypeSpec.self, from: Data(contentsOf: file)),

@@ -451,19 +451,69 @@ struct NodeView: View {
         }
         // Scaled with Dynamic Type, unlike the Android bug #10436.
         let scaled = UIFontMetrics.default.scaledValue(for: resolved.size)
-        var text = Text(interpolatedText)
+        let runs = PrototypeRichText.runs(
+            node: node, state: model.state, pager: pagerPosition, nodeKey: node.id ?? "text"
+        )
+        var text = (runs.map { Text(attributedText($0)) } ?? Text(interpolatedText))
             .font(.system(size: scaled, weight: weight, design: design))
-        if style?.fontStyle == "italic" { text = text.italic() }
+        if runs == nil, style?.fontStyle == "italic" { text = text.italic() }
         let decoration = style?.textDecoration
-        if decoration == "underline" || decoration == "underlineLineThrough" { text = text.underline() }
-        if decoration == "lineThrough" || decoration == "underlineLineThrough" { text = text.strikethrough() }
+        if runs == nil, decoration == "underline" || decoration == "underlineLineThrough" { text = text.underline() }
+        if runs == nil, decoration == "lineThrough" || decoration == "underlineLineThrough" { text = text.strikethrough() }
+        if runs == nil { text = text.tracking(resolved.letterSpacing) }
         return text
-            .tracking(resolved.letterSpacing)
             .lineSpacing(max(0, (resolved.lineHeight.map { $0 * scaled / resolved.size } ?? scaled) - scaled))
             .foregroundColor(palette.color(style?.color) ?? contentColor)
             .multilineTextAlignment(alignment)
             .lineLimit(style?.maxLines)
             .truncationMode(.tail)
+            .modifier(SpanLinksModifier(runs: runs, spans: node.spans, model: model))
+    }
+
+    /// The core supplies plain values; only this layer knows SwiftUI attribute types.
+    private func attributedText(_ runs: [PrototypeTextRun]) -> AttributedString {
+        let resolved = typography.resolve(style)
+        var result = AttributedString()
+        for run in runs {
+            let authored = run.style
+            var part = AttributedString(run.text)
+            // Explicit even for an unstyled link, so SwiftUI's link tint cannot replace the text colour.
+            part.foregroundColor = palette.color(authored?.color) ?? palette.color(style?.color) ?? contentColor
+            part.backgroundColor = palette.color(authored?.background)
+            let design: Font.Design = switch authored?.fontFamily {
+            case .keyword("serif")?: .serif
+            case .keyword("monospace")?: .monospaced
+            case .some: .default // Uploaded fonts fall back exactly like node text.
+            case nil:
+                switch resolved.design {
+                case .serif: .serif
+                case .monospaced: .monospaced
+                case .standard: .default
+                }
+            }
+            let weight: Font.Weight = switch authored?.fontWeight ?? resolved.weight {
+            case ..<200: .ultraLight
+            case ..<300: .thin
+            case ..<400: .light
+            case ..<500: .regular
+            case ..<600: .medium
+            case ..<700: .semibold
+            case ..<800: .bold
+            case ..<900: .heavy
+            default: .black
+            }
+            let size = UIFontMetrics.default.scaledValue(for: authored?.textSize ?? resolved.size)
+            var font = Font.system(size: size, weight: weight, design: design)
+            if (authored?.fontStyle ?? style?.fontStyle) == "italic" { font = font.italic() }
+            part.font = font
+            part.tracking = CGFloat(authored?.letterSpacing ?? resolved.letterSpacing)
+            let decoration = authored?.textDecoration ?? style?.textDecoration
+            part.underlineStyle = (decoration == "underline" || decoration == "underlineLineThrough") ? Text.LineStyle(pattern: .solid) : nil
+            part.strikethroughStyle = (decoration == "lineThrough" || decoration == "underlineLineThrough") ? Text.LineStyle(pattern: .solid) : nil
+            part.link = run.link
+            result.append(part)
+        }
+        return result
     }
 
     @ViewBuilder private var imageView: some View {
@@ -790,6 +840,28 @@ private struct SizeModifier: ViewModifier {
     private func fills(_ dimension: Dimension?) -> Bool {
         if case .fill = dimension { return true }
         return dimension == nil && fillsByDefault
+    }
+}
+
+@MainActor
+private struct SpanLinksModifier: ViewModifier {
+    let runs: [PrototypeTextRun]?
+    let spans: [PrototypeTextSpan]?
+    let model: PrototypeModel
+
+    func body(content: Content) -> some View {
+        if let runs, let spans {
+            content.environment(\.openURL, OpenURLAction { url in
+                guard url.scheme == PrototypeRichText.linkScheme,
+                      let index = runs.firstIndex(where: { $0.link == url }),
+                      spans.indices.contains(index), let actions = spans[index].onTap
+                else { return .discarded }
+                model.run(actions)
+                return .handled
+            })
+        } else {
+            content
+        }
     }
 }
 

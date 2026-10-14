@@ -1,3 +1,5 @@
+import type { KeepAwakeRestoreReport } from "../../utils/KeepScreenAwakeManager";
+import type { SessionManager } from "../sessionManager";
 import type { SessionReleaseReason } from "../releaseReasons";
 /**
  * End-of-execution drain for managed device slots (epic #11172, #11177).
@@ -111,6 +113,7 @@ export interface ManagedExecutionSlotFailure {
 }
 
 export interface ManagedExecutionReleaseResult {
+  keepAwakeRestore?: KeepAwakeRestoreReport;
   sessionId: string;
   outcome: ManagedExecutionReleaseOutcome;
   settlement: ManagedExecutionSettlement;
@@ -159,7 +162,9 @@ export interface ManagedExecutionWork {
 }
 
 /** The session-manager and pool slice the drain needs. */
-export interface ManagedExecutionSessions {
+export interface ManagedExecutionSessions extends Partial<
+  Pick<SessionManager, "getKeepAwakeRestoreReport">
+> {
   /** Live or mid-release in this daemon. */
   isSessionLive(sessionId: string): boolean;
   /** The device the session holds (or held, while its release is fenced), if known. */
@@ -429,6 +434,13 @@ export class ManagedExecutionRelease {
     this.recoveryPacing.close();
   }
 
+  private keepAwakeRestoreResult(
+    sessionId: string,
+  ): Pick<ManagedExecutionReleaseResult, "keepAwakeRestore"> {
+    const keepAwakeRestore = this.options.sessions.getKeepAwakeRestoreReport?.(sessionId);
+    return keepAwakeRestore ? { keepAwakeRestore } : {};
+  }
+
   private async drainAndRelease(sessionId: string): Promise<ManagedExecutionReleaseResult> {
     const { sessions } = this.options;
     const registry = await this.options.registry();
@@ -483,6 +495,7 @@ export class ManagedExecutionRelease {
       this.track(this.settleOwedMarks(registry, sessionId, releasedDevice, marks, releaseOwedHold));
     }
     return {
+      ...this.keepAwakeRestoreResult(sessionId),
       sessionId,
       outcome: settled ? "reusable_for_this_slot" : "cleanup_pending",
       settlement: settled ? "confirmed" : "settling",
@@ -524,6 +537,7 @@ export class ManagedExecutionRelease {
       this.options.work.hasActiveDeviceSessionExecutions(sessionId) ||
       assignments.some((assignment) => assignment.state === "settling");
     return {
+      ...this.keepAwakeRestoreResult(sessionId),
       sessionId,
       outcome: stillSettling ? "cleanup_pending" : "reusable_for_this_slot",
       settlement: stillSettling ? "settling" : "confirmed",
@@ -1536,7 +1550,9 @@ function toEvidence(
 }
 
 /** The session-manager surface {@link managedExecutionSessionsFrom} adapts. */
-export interface ManagedExecutionSessionManager {
+export interface ManagedExecutionSessionManager extends Partial<
+  Pick<SessionManager, "getKeepAwakeRestoreReport">
+> {
   hasSession(sessionId: string): boolean;
   getSession(sessionId: string): { assignedDevice: string } | null;
   getReleasingSession(sessionId: string): { assignedDevice: string } | null;
@@ -1565,6 +1581,7 @@ export function managedExecutionSessionsFrom(
     isSessionLive: (sessionId) =>
       manager.hasSession(sessionId) || manager.getReleasingSession(sessionId) !== null,
     deviceOf,
+    getKeepAwakeRestoreReport: (sessionId) => manager.getKeepAwakeRestoreReport?.(sessionId),
     releaseSession: async (sessionId) => {
       let deviceId = deviceOf(sessionId);
       await releaseSessionAndDevice(manager, pool, deviceId, sessionId, undefined, {

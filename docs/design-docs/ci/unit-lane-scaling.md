@@ -220,7 +220,10 @@ a fast shard 1 must report different walls.
 Since #10644 the parent reaps attempts in completion order. It polls the live
 shard pids (`AUTOMOBILE_UNIT_SHARD_POLL_SECONDS`, default 0.2 s, because macOS
 Bash 3.2 has no `wait -n`). A shard that infra-exits early is retried at once,
-and its retry window is judged against the lane cap at its own end time. The
+and its retry window is judged against the lane cap at its own end time. A
+wall-budget timeout whose own attempt calibration reaches
+`AUTOMOBILE_UNIT_CONTENDED_SLOWDOWN` (default 2.5x) skips the same-runner retry
+and reports `RUNNER-CONTENDED`; re-run the job on a fresh runner (#12237). The
 per-shard `.wall` record still excludes the end probe and the poll latency.
 
 ## 5. Change made: tier C files share processes

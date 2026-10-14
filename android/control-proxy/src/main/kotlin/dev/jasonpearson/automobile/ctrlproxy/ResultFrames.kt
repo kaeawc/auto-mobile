@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleReportContract
 import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
+import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import dev.jasonpearson.automobile.protocol.PrototypeResult
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import dev.jasonpearson.automobile.protocol.SavedPrototypeEntry
@@ -155,6 +156,7 @@ internal fun prototypeResultFrame(
   error: String?,
   missingAssets: List<String> = emptyList(),
   appearance: PrototypeAppearance? = null,
+  hiddenReason: PrototypeHiddenReason? = null,
 ): String =
   resultFrameJson.encodeToString<WebSocketResponse>(
     PrototypeResult(
@@ -164,6 +166,7 @@ internal fun prototypeResultFrame(
       error = error,
       missingAssets = missingAssets.ifEmpty { null },
       appearance = appearance,
+      hiddenReason = hiddenReason,
     ),
   )
 

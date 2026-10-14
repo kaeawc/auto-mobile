@@ -1983,9 +1983,11 @@ describe("SessionManager", () => {
         },
         () => new FakeDbWriteBarrier(),
         () => ({
-          restore: async (): Promise<void> => {
+          restore: async (): Promise<{ status: "restored" }> => {
             restoreStarted();
             await restoration;
+
+            return { status: "restored" as const };
           },
         }),
       );
@@ -2057,9 +2059,11 @@ describe("SessionManager", () => {
         },
         () => new FakeDbWriteBarrier(),
         () => ({
-          restore: async (): Promise<void> => {
+          restore: async (): Promise<{ status: "restored" }> => {
             restoreStarted();
             await restoration;
+
+            return { status: "restored" as const };
           },
         }),
       );
@@ -2183,7 +2187,7 @@ describe("SessionManager", () => {
         () => ({
           restore: () => {
             restorationStarted.resolve();
-            return new Promise<void>(() => {});
+            return new Promise<{ status: "restored" }>(() => {});
           },
         }),
       );
@@ -2227,6 +2231,8 @@ describe("SessionManager", () => {
               restorationStarted.resolve();
               await restoration.promise;
               restored.push({ deviceId: device.deviceId, state });
+
+              return { status: "restored" as const };
             },
           }),
         );
@@ -2286,6 +2292,8 @@ describe("SessionManager", () => {
         (device) => ({
           restore: async () => {
             restoredDevices.push(device.deviceId);
+
+            return { status: "restored" as const };
           },
         }),
       );
@@ -2401,6 +2409,8 @@ describe("SessionManager", () => {
       const manager = new SessionManager(fakeTimer, repository, undefined, (device) => ({
         restore: async () => {
           restoredDevices.push(device.deviceId);
+
+          return { status: "restored" as const };
         },
       }));
       const unboundDevices: string[] = [];
@@ -2431,6 +2441,8 @@ describe("SessionManager", () => {
       const manager = new SessionManager(fakeTimer, repository, undefined, (device) => ({
         restore: async () => {
           restoredDevices.push(device.deviceId);
+
+          return { status: "restored" as const };
         },
       }));
       const unboundDevices: string[] = [];
@@ -2465,7 +2477,9 @@ describe("SessionManager", () => {
     test("publishes live heartbeat and label routing updates after deferred persistence", async () => {
       const repository = new DeferredDeviceSessionPersistence();
       const manager = new SessionManager(fakeTimer, repository, undefined, () => ({
-        restore: async () => {},
+        restore: async () => {
+          return { status: "restored" as const };
+        },
       }));
       const labels = {
         primary: "session-1",
@@ -2843,9 +2857,11 @@ describe("SessionManager", () => {
         finishRestore = resolve;
       });
       const restorer: KeepScreenAwakeRestorer = {
-        async restore(_state: KeepScreenAwakeState): Promise<void> {
+        async restore(_state: KeepScreenAwakeState): Promise<{ status: "restored" }> {
           beginRestore();
           await restoreFinished;
+
+          return { status: "restored" as const };
         },
       };
       const repository = {
@@ -3073,7 +3089,12 @@ describe("SessionManager", () => {
           async markStaleActiveSessionsExpired(): Promise<void> {},
         },
         () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => await restoreFinished }),
+        () => ({
+          restore: async () => {
+            await restoreFinished;
+            return { status: "restored" as const };
+          },
+        }),
       );
       try {
         await manager.createSession("s1", "device-1", "android");
@@ -3150,7 +3171,12 @@ describe("SessionManager", () => {
           async markStaleActiveSessionsExpired(): Promise<void> {},
         },
         () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => await new Promise<void>(() => {}) }),
+        () => ({
+          restore: async () => {
+            await new Promise<void>(() => {});
+            return { status: "restored" as const };
+          },
+        }),
       );
       try {
         await manager.createSession("s1", "device-1", "android");
@@ -3189,6 +3215,8 @@ describe("SessionManager", () => {
           restore: async () => {
             restoreStarted();
             await restoration;
+
+            return { status: "restored" as const };
           },
         }),
       );
@@ -3261,7 +3289,12 @@ describe("SessionManager", () => {
           async markStaleActiveSessionsExpired(): Promise<void> {},
         },
         () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => await restore }),
+        () => ({
+          restore: async () => {
+            await restore;
+            return { status: "restored" as const };
+          },
+        }),
       );
       try {
         await manager.createSession("s1", "device-1", "android");
@@ -3957,7 +3990,7 @@ describe("SessionManager", () => {
         fakeTimer,
         new FakeDeviceSessionPersistence(),
         () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => {} }),
+        () => ({ restore: async () => ({ status: "restored" as const }) }),
         () => restorer,
       );
       try {
@@ -3980,7 +4013,7 @@ describe("SessionManager", () => {
         fakeTimer,
         new FakeDeviceSessionPersistence(),
         () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => {} }),
+        () => ({ restore: async () => ({ status: "restored" as const }) }),
         (device) => ({
           restore: async (enrollment) => {
             restored.push({ deviceId: device.deviceId, enrollment });
@@ -4006,7 +4039,7 @@ describe("SessionManager", () => {
         fakeTimer,
         new FakeDeviceSessionPersistence(),
         () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => {} }),
+        () => ({ restore: async () => ({ status: "restored" as const }) }),
         () => ({ restore: async (enrollment) => restored.push(enrollment) }),
       );
       const started = Promise.withResolvers<void>();
@@ -4041,7 +4074,7 @@ describe("SessionManager", () => {
         timer,
         new FakeDeviceSessionPersistence(),
         () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => {} }),
+        () => ({ restore: async () => ({ status: "restored" as const }) }),
         () => ({
           restore: async () => {
             attempts += 1;
@@ -4079,7 +4112,7 @@ describe("SessionManager", () => {
         timer,
         new FakeDeviceSessionPersistence(),
         () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => {} }),
+        () => ({ restore: async () => ({ status: "restored" as const }) }),
         () => ({
           restore: async () => {
             attempts += 1;
@@ -4115,7 +4148,7 @@ describe("SessionManager", () => {
         fakeTimer,
         new FakeDeviceSessionPersistence(),
         () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => {} }),
+        () => ({ restore: async () => ({ status: "restored" as const }) }),
         (device) => ({
           restore: async (enrollment) => {
             restored.push({ deviceId: device.deviceId, enrollment });
@@ -4146,7 +4179,7 @@ describe("SessionManager", () => {
         timer,
         new FakeDeviceSessionPersistence(),
         () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => {} }),
+        () => ({ restore: async () => ({ status: "restored" as const }) }),
         (device) => ({
           restore: async () => {
             attempts.push(device.deviceId);
@@ -4188,7 +4221,7 @@ describe("SessionManager", () => {
         fakeTimer,
         new FakeDeviceSessionPersistence(),
         () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => {} }),
+        () => ({ restore: async () => ({ status: "restored" as const }) }),
         noopBiometric,
         (device): NetworkConditionRestorer => ({
           restore: async (profile) => {
@@ -4216,7 +4249,7 @@ describe("SessionManager", () => {
         fakeTimer,
         new FakeDeviceSessionPersistence(),
         () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => {} }),
+        () => ({ restore: async () => ({ status: "restored" as const }) }),
         noopBiometric,
         (): NetworkConditionRestorer => ({
           restore: async (profile) => {
@@ -4247,7 +4280,7 @@ describe("SessionManager", () => {
         fakeTimer,
         new FakeDeviceSessionPersistence(),
         () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => {} }),
+        () => ({ restore: async () => ({ status: "restored" as const }) }),
         noopBiometric,
         (): NetworkConditionRestorer => ({
           restore: async (profile) => {
@@ -4281,7 +4314,7 @@ describe("SessionManager", () => {
         timer,
         new FakeDeviceSessionPersistence(),
         () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => {} }),
+        () => ({ restore: async () => ({ status: "restored" as const }) }),
         noopBiometric,
         (): NetworkConditionRestorer => ({
           restore: async (profile) => {
@@ -4329,7 +4362,7 @@ describe("SessionManager", () => {
         timer,
         new FakeDeviceSessionPersistence(),
         () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => {} }),
+        () => ({ restore: async () => ({ status: "restored" as const }) }),
         () => ({ restore: async () => {} }),
         (): NetworkConditionRestorer => ({
           restore: async () => {
@@ -4368,7 +4401,7 @@ describe("SessionManager", () => {
         timer,
         new FakeDeviceSessionPersistence(),
         () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => {} }),
+        () => ({ restore: async () => ({ status: "restored" as const }) }),
         () => ({ restore: async () => {} }),
         (): NetworkConditionRestorer => ({
           restore: async () => {
@@ -4402,7 +4435,7 @@ describe("SessionManager", () => {
         fakeTimer,
         new FakeDeviceSessionPersistence(),
         () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => {} }),
+        () => ({ restore: async () => ({ status: "restored" as const }) }),
         noopBiometric,
         (device): NetworkConditionRestorer => ({
           restore: async (profile) => {
@@ -4435,7 +4468,7 @@ describe("SessionManager", () => {
         timer,
         new FakeDeviceSessionPersistence(),
         () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => {} }),
+        () => ({ restore: async () => ({ status: "restored" as const }) }),
         noopBiometric,
         (device): NetworkConditionRestorer => ({
           restore: async (profile) => {
@@ -4589,7 +4622,7 @@ describe("SessionManager", () => {
         timer,
         new FakeDeviceSessionPersistence(),
         () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => {} }),
+        () => ({ restore: async () => ({ status: "restored" as const }) }),
         noopBiometric,
         (): NetworkConditionRestorer => ({
           restore: async () => {
@@ -4631,7 +4664,7 @@ describe("SessionManager", () => {
         timer,
         new FakeDeviceSessionPersistence(),
         () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => {} }),
+        () => ({ restore: async () => ({ status: "restored" as const }) }),
         noopBiometric,
         (): NetworkConditionRestorer => ({
           restore: async () => {
@@ -4695,7 +4728,7 @@ describe("SessionManager", () => {
         timer,
         new FakeDeviceSessionPersistence(),
         () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => {} }),
+        () => ({ restore: async () => ({ status: "restored" as const }) }),
         noopBiometric,
         (): NetworkConditionRestorer => ({
           restore: async (profile) => {
@@ -4756,7 +4789,7 @@ describe("SessionManager", () => {
         timer,
         new FakeDeviceSessionPersistence(),
         () => new FakeDbWriteBarrier(),
-        () => ({ restore: async () => {} }),
+        () => ({ restore: async () => ({ status: "restored" as const }) }),
         noopBiometric,
         (): NetworkConditionRestorer => ({
           restore: async (profile) => {

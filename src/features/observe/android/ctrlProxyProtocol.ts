@@ -1,3 +1,4 @@
+import type { PrototypeHiddenReason } from "../../prototype/prototypeHidden";
 import type { PrototypePatchOp } from "../../prototype/prototypePatch";
 import type {
   PrototypePatchConflict,
@@ -584,6 +585,7 @@ export interface PrototypeResult {
   saved?: SavedPrototypeInfo;
   savedPrototypes?: SavedPrototypeEntry[];
   errorCode?: SavedPrototypeErrorCode;
+  hiddenReason?: PrototypeHiddenReason;
   /** Only the reply to patch_prototype from a device advertising prototype_patch_v1. */
   revision?: number;
   /** Only the reply to patch_prototype from a device advertising prototype_patch_v1. */
@@ -620,6 +622,7 @@ export interface PrototypeStatusEntry {
   lastSequence: number;
   /** True while the prototype's app is not in front: hidden, state kept, back with the app. */
   suspended?: boolean;
+  hiddenReason?: PrototypeHiddenReason;
   /** The mode it is drawn in right now; only from a device advertising prototype_appearance_v1. */
   appearance?: PrototypeAppearance;
 }

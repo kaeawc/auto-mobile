@@ -65,7 +65,12 @@ async function harness(
     timer,
     new FakeDeviceSessionPersistence(),
     () => new FakeDbWriteBarrier(),
-    () => ({ restore }),
+    () => ({
+      restore: async () => {
+        await restore();
+        return { status: "restored" as const };
+      },
+    }),
     () => ({ restore }),
     { networkCondition: () => ({ restore }), clock: () => ({ restore }) },
   );

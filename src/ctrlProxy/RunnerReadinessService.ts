@@ -79,6 +79,9 @@ export class RunnerReadinessError extends ActionableError {
     return this.deadlineExhausted ? true : undefined;
   }
 
+  readonly diagnosticCause?: unknown;
+  readonly failureKind?: "ctrlproxy_forward_unavailable";
+
   constructor(
     message: string,
     readonly retryableAndroidFrameworkFailure = false,
@@ -90,9 +93,10 @@ export class RunnerReadinessError extends ActionableError {
     readonly deadlineExhausted = false,
     readonly phase?: RunnerReadinessPhase,
     readonly attempts?: number,
-    readonly diagnosticCause?: unknown,
+    ...diagnostic: [diagnosticCause?: unknown, failureKind?: "ctrlproxy_forward_unavailable"]
   ) {
     super(message);
+    [this.diagnosticCause, this.failureKind] = diagnostic;
   }
 }
 
@@ -162,6 +166,9 @@ export interface ReadinessIosManager {
 }
 
 export interface ReadinessClient {
+  beginReadinessHold?(): () => void;
+  isClosed?(): boolean;
+  getForwardFailureCause?(): string | undefined;
   isConnected(): boolean;
   waitForConnection(maxAttempts?: number, delayMs?: number): Promise<boolean>;
   verifyServiceReady(maxAttempts?: number, delayMs?: number, timeoutMs?: number): Promise<boolean>;
@@ -1049,6 +1056,22 @@ export class RunnerReadinessService {
     client: ReadinessClient,
     androidManager?: ReadinessAndroidManager,
   ): Promise<void> {
+    const hold = {
+      release: context.device.platform === "android" ? client.beginReadinessHold?.() : undefined,
+    };
+    try {
+      await this.pollResponsiveClient(context, client, hold, androidManager);
+    } finally {
+      hold.release?.();
+    }
+  }
+
+  private async pollResponsiveClient(
+    context: ReadinessAttemptContext,
+    client: ReadinessClient,
+    hold: { release: (() => void) | undefined },
+    androidManager?: ReadinessAndroidManager,
+  ): Promise<void> {
     // Provisioning is done; open the steady-state health window now so a long
     // cold launch above did not consume it (#5376).
     this.startHealthWindow(context);
@@ -1058,6 +1081,9 @@ export class RunnerReadinessService {
     let lastSystemUiProbeMs = Number.NEGATIVE_INFINITY;
     while (this.remainingForPhase(context, "runner-health") > 0) {
       this.throwIfCallerCancelled(context);
+      if (context.device.platform === "android") {
+        client = await this.replaceClosedAndroidClient(context, client, hold, attempts);
+      }
       attempts++;
       connected = client.isConnected();
       if (!connected) {
@@ -1104,6 +1130,28 @@ export class RunnerReadinessService {
       }
     }
     await this.failUnresponsiveClient(context, client, phase, attempts);
+  }
+
+  private async replaceClosedAndroidClient(
+    context: ReadinessAttemptContext,
+    client: ReadinessClient,
+    hold: { release: (() => void) | undefined },
+    attempts: number,
+  ): Promise<ReadinessClient> {
+    if (!client.isClosed?.()) {
+      return client;
+    }
+    hold.release?.();
+    hold.release = undefined;
+    const replacement = this.dependencies.getAndroidClient(context.device);
+    logger.info(
+      `[RunnerReadiness] Re-resolved closed CtrlProxy client for ${context.device.deviceId}`,
+    );
+    hold.release = replacement.beginReadinessHold?.();
+    if (replacement.isClosed?.()) {
+      await this.failUnresponsiveClient(context, replacement, "runner-connect", attempts, false);
+    }
+    return replacement;
   }
 
   private async rebindUnhealthyAndroidAccessibilityService(
@@ -1260,6 +1308,7 @@ export class RunnerReadinessService {
     client: ReadinessClient,
     phase: RunnerReadinessPhase,
     attempts: number,
+    deadlineExhausted = true,
   ): Promise<never> {
     const isForwardingLeaseConflict =
       phase === "runner-connect" &&
@@ -1269,6 +1318,9 @@ export class RunnerReadinessService {
       if (lastConnectionFailure) {
         this.fail(context, phase, attempts, lastConnectionFailure);
       }
+    }
+    if (phase === "runner-connect") {
+      this.failForwardUnavailableClient(context, client, attempts, deadlineExhausted);
     }
     const diagnostic =
       phase === "runner-connect"
@@ -1281,6 +1333,25 @@ export class RunnerReadinessService {
       `${this.unresponsiveClientRecoveryNote(context, phase)}${diagnostic}`,
       { deadlineExhausted: true },
     );
+  }
+
+  private failForwardUnavailableClient(
+    context: ReadinessAttemptContext,
+    client: ReadinessClient,
+    attempts: number,
+    deadlineExhausted: boolean,
+  ): void {
+    const cause =
+      client.getForwardFailureCause?.() ??
+      (client.isClosed?.()
+        ? `CtrlProxy client for ${context.device.deviceId} is closed; adb forward unavailable`
+        : undefined);
+    if (cause) {
+      this.fail(context, "runner-connect", attempts, cause, {
+        deadlineExhausted,
+        failureKind: "ctrlproxy_forward_unavailable",
+      });
+    }
   }
 
   /**
@@ -1582,7 +1653,7 @@ export class RunnerReadinessService {
     phase: RunnerReadinessPhase,
     attempts: number,
     detail: unknown,
-    options?: { deadlineExhausted?: boolean },
+    options?: { deadlineExhausted?: boolean; failureKind?: "ctrlproxy_forward_unavailable" },
   ): never {
     const { device } = context;
     const mapping =
@@ -1592,9 +1663,13 @@ export class RunnerReadinessService {
     const phaseElapsed = Object.entries(context.phaseElapsedMs)
       .map(([trackedPhase, elapsedMs]) => `${phaseElapsedLabel(trackedPhase)}=${elapsedMs}`)
       .join(" ");
-    const failure = new RunnerReadinessError(
+    const readinessContext =
       `${context.operationName ?? "startDevice"} automation runner readiness failed: ${mapping} phase=${phase} ` +
-        `attempts=${attempts} remainingBudgetMs=${remainingBudgetMs}${phaseElapsed ? ` ${phaseElapsed}` : ""}: ${normalizeDiagnostic(detail)}`,
+      `attempts=${attempts} remainingBudgetMs=${remainingBudgetMs}${phaseElapsed ? ` ${phaseElapsed}` : ""}`;
+    const failure = new RunnerReadinessError(
+      options?.failureKind
+        ? `${normalizeDiagnostic(detail)}; ${readinessContext}`
+        : `${readinessContext}: ${normalizeDiagnostic(detail)}`,
       device.platform === "android" &&
         RunnerReadinessService.isSetupPhase(phase) &&
         isAndroidFrameworkUnavailable(detail),
@@ -1602,6 +1677,7 @@ export class RunnerReadinessService {
       phase,
       attempts,
       detail,
+      options?.failureKind,
     );
     if (options?.deadlineExhausted) {
       context.deadlineFailure = failure;

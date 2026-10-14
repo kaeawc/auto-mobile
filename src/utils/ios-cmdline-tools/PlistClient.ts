@@ -28,6 +28,10 @@ export interface PlistReader {
   extractRawFile(key: string, path: string, options?: PlistReadOptions): Promise<string>;
 }
 
+export interface PlistWriter {
+  writeXmlFromJson(path: string, value: Record<string, unknown>): Promise<void>;
+}
+
 export interface PlistReadOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
@@ -105,7 +109,7 @@ const defaultProcess: PlistProcess = ({ args, input, signal, maxOutputBytes }) =
  * Typed owner for plist conversion and reads. All production code must use this
  * boundary instead of resolving or invoking `plutil` itself.
  */
-export class PlistClient implements PlistReader {
+export class PlistClient implements PlistReader, PlistWriter {
   private readonly timeoutMs: number;
   private readonly maxOutputBytes: number;
   private readonly timer: Timer;
@@ -117,6 +121,13 @@ export class PlistClient implements PlistReader {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
     this.timer = options.timer ?? defaultTimer;
+  }
+
+  async writeXmlFromJson(path: string, value: Record<string, unknown>): Promise<void> {
+    await this.run(
+      ["-convert", "xml1", "-o", path, "--", "-"],
+      Buffer.from(JSON.stringify(value), "utf8"),
+    );
   }
 
   async readJsonFile(path: string, options?: PlistReadOptions): Promise<unknown> {

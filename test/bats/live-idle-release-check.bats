@@ -242,6 +242,17 @@ while IFS= read -r line; do
     fi
   fi
   printf '%s %s\n' "${tool}" "$(jq -c '.params.arguments' <<< "${line}")" >> "${FAKE}/tool.calls"
+  if [[ "${tool}" == homeScreen && -n "${FAKE_CONTROL_ERROR:-}" ]]; then
+    calls=0
+    [[ ! -f "${FAKE}/control.calls" ]] || calls="$(cat "${FAKE}/control.calls")"
+    calls=$((calls + 1))
+    printf '%s\n' "${calls}" > "${FAKE}/control.calls"
+    if ((calls <= ${FAKE_CONTROL_ERROR_CALLS:-1})); then
+      reply "${id}" "$(jq -cn --arg text "${FAKE_CONTROL_ERROR}" \
+        '{isError: true, content: [{type: "text", text: $text}]}')"
+      continue
+    fi
+  fi
   target=""
   session_arg="$(jq -r '.params.arguments.sessionUuid // empty' <<< "${line}")"
   # A released owner cannot re-use its connection binding or its old UUID.
@@ -442,6 +453,34 @@ run_check() {
   for scenario in active no-heartbeat idle stdin-eof selector observe-only stream; do
     [ -s "${EVIDENCE}/${scenario}.sessions.log" ]
   done
+}
+
+@test "active recovers from a transient adb disappearance" {
+  FAKE_CONTROL_ERROR="Failed to go to home screen: adb: device 'emulator-5560' not found" \
+    run_check --scenario active
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"PASS active"* ]]
+  [[ "${output}" == *"active: adb lost emulator-5560 (transient); waiting for it to return"* ]]
+  [ "$(grep -c 'get-state' "${FAKE}/adb.calls")" -eq 3 ]
+}
+
+@test "active fails after three adb disappearance recoveries" {
+  FAKE_CONTROL_ERROR="Failed to go to home screen: adb: device 'emulator-5560' not found" \
+    FAKE_CONTROL_ERROR_CALLS=4 run_check --scenario active
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"FAIL active"*"device 'emulator-5560' not found"* ]]
+  [ "$(cat "${FAKE}/control.calls")" -eq 4 ]
+  [ "$(grep -c 'active: adb lost' <<< "${output}")" -eq 3 ]
+}
+
+@test "active fails immediately for an unrelated control tool error" {
+  FAKE_CONTROL_ERROR="Failed to go to home screen: permission denied" \
+    run_check --scenario active
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"FAIL active"*"permission denied"* ]]
+  [ "$(cat "${FAKE}/control.calls")" -eq 1 ]
+  [[ "${output}" != *"active: adb lost"* ]]
+  [ "$(grep -c 'get-state' "${FAKE}/adb.calls")" -eq 1 ]
 }
 
 @test "fails the active scenario when the device is released while in use" {

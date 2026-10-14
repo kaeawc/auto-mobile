@@ -1,3 +1,4 @@
+import type { DeviceReadOnlyArgShape } from "./deviceReadOnlyArgShapes";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import {
   explicitReadTargetPlatform,
@@ -403,6 +404,8 @@ async function shadowedSdkToolCallback(): Promise<never> {
 }
 
 interface ToolRegistrationOptions {
+  /** Declarative read forms advertised to proxies; a subset of the per-call classifier. */
+  deviceReadOnlyArgs?: readonly DeviceReadOnlyArgShape[];
   /** Built-in session default before startup or persisted exact-tool overrides. */
   defaultEnabled?: boolean;
   supportsProgress?: boolean;
@@ -522,9 +525,19 @@ export interface RegisteredTool {
    * read, a per-args classifier for a mixed tool, absent for control. Enumerated by
    * `test/lint/toolReadControlClassification.test.ts`. Only `true` (a read for every call) is
    * advertised as `_meta["automobile/deviceReadOnly"]`, so a proxy can forward such reads without
-   * a session (#10971); a per-args tool (sqlQuery, keyboard, clipboard, ...) is not marked.
+   * a session (#10971). Mixed tools may advertise conservative declarative read forms via
+   * `_meta["automobile/deviceReadOnlyArgs"]`; SQL text remains classifier-only.
    */
   deviceReadOnly?: boolean | ((args: any) => boolean);
+  deviceReadOnlyArgs?: readonly DeviceReadOnlyArgShape[];
+}
+
+/** Keep both registration paths' advertised read metadata consistent. */
+function deviceReadOnlyMetadata(
+  deviceReadOnly: RegisteredTool["deviceReadOnly"],
+  deviceReadOnlyArgs: readonly DeviceReadOnlyArgShape[] | undefined,
+): Pick<RegisteredTool, "deviceReadOnly" | "deviceReadOnlyArgs"> {
+  return { deviceReadOnly, deviceReadOnlyArgs };
 }
 
 /**
@@ -3611,7 +3624,7 @@ export class ToolRegistryClass {
       transportRecovery: options.transportRecovery,
       requiresDevice: false,
       isDeviceReadOnlyCall: (args) => isReadOnlyCall(options.readOnly, args),
-      deviceReadOnly: options.readOnly,
+      ...deviceReadOnlyMetadata(options.readOnly, options.deviceReadOnlyArgs),
       debugOnly: options.debugOnly ?? false,
       hidden: options.hidden ?? false,
       embeddedSdkOnly: false,
@@ -3821,7 +3834,7 @@ export class ToolRegistryClass {
       acceptsPlanLockNamespace: options.acceptsPlanLockNamespace ?? false,
       outputSchema: options.outputSchema,
       appUiResourceUri: options.appUiResourceUri,
-      deviceReadOnly: options.deviceReadOnly,
+      ...deviceReadOnlyMetadata(options.deviceReadOnly, options.deviceReadOnlyArgs),
     });
   }
 
@@ -4212,6 +4225,7 @@ export class ToolRegistryClass {
           "automobile/embeddedSdkOnly"?: boolean;
           "automobile/planOnly"?: boolean;
           "automobile/deviceReadOnly"?: boolean;
+          "automobile/deviceReadOnlyArgs"?: readonly DeviceReadOnlyArgShape[];
           ui?: { resourceUri: string };
         };
       } = {
@@ -4248,6 +4262,11 @@ export class ToolRegistryClass {
       // Read/control classification for the proxy (#10971) — additive; other clients ignore it.
       if (tool.deviceReadOnly === true) {
         definition._meta = { ...definition._meta, "automobile/deviceReadOnly": true };
+      } else if (tool.deviceReadOnlyArgs?.length) {
+        definition._meta = {
+          ...definition._meta,
+          "automobile/deviceReadOnlyArgs": tool.deviceReadOnlyArgs,
+        };
       }
       // MCP Apps UI pointer (issue #4669) — additive; non-Apps hosts ignore it.
       if (tool.appUiResourceUri) {

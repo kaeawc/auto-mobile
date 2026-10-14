@@ -1,0 +1,84 @@
+import Foundation
+
+/// Numeric layout bounds mirrored from the shared contract. This walks authored nodes (including
+/// inactive styles and repeat templates) before decoding or resolving them. Opaque data/state and
+/// action payloads are deliberately outside this check. Tests pin every range to the contract.
+enum PrototypeSizeBounds {
+    static let maxLength = 10000.0
+    static let maxTypography = 1000.0
+    static let maxElevation = 1000.0
+    static let minPositive = 0.000001
+
+    static let ranges: [String: [String: ClosedRange<Double>]] = [
+        "dimension": ["dp": 0 ... maxLength],
+        "detent": ["dp": minPositive ... maxLength],
+        "bounds": ["x": -maxLength ... maxLength, "y": -maxLength ... maxLength,
+                   "width": 0 ... maxLength, "height": 0 ... maxLength],
+        "offset": ["x": -maxLength ... maxLength, "y": -maxLength ... maxLength],
+        "padding": ["top": 0 ... maxLength, "bottom": 0 ... maxLength,
+                    "start": 0 ... maxLength, "end": 0 ... maxLength],
+        "cornerRadius": ["topStart": 0 ... maxLength, "topEnd": 0 ... maxLength,
+                         "bottomStart": 0 ... maxLength, "bottomEnd": 0 ... maxLength],
+        "border": ["width": 0 ... maxLength],
+        "sheet": ["height": minPositive ... maxLength],
+        "style": [
+            "weight": minPositive ... maxLength, "aspectRatio": minPositive ... maxLength,
+            "minWidth": 0 ... maxLength, "maxWidth": 0 ... maxLength,
+            "minHeight": 0 ... maxLength, "maxHeight": 0 ... maxLength,
+            "cornerRadius": 0 ... maxLength, "spacing": 0 ... maxLength,
+            "elevation": 0 ... maxElevation, "textSize": minPositive ... maxTypography,
+            "lineHeight": minPositive ... maxTypography, "letterSpacing": -maxTypography ... maxTypography,
+        ],
+    ]
+
+    static func validate(_ spec: JSONValue) throws {
+        try visit(spec, group: "spec", path: "")
+    }
+
+    private static func visit(_ value: JSONValue, group: String, path: String) throws {
+        if case let .array(items) = value {
+            for (index, item) in items.enumerated() {
+                try visit(item, group: group, path: "\(path)[\(index)]")
+            }
+        }
+        guard case let .object(fields) = value else { return }
+        // The host and Kotlin visit object members in sorted UTF-16 order, regardless of JSON order.
+        for key in fields.keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
+            guard let member = fields[key] else { continue }
+            let childPath = path.isEmpty ? key : "\(path).\(key)"
+            if let range = ranges[group]?[key], case let .number(number) = member,
+               !number.isFinite || !range.contains(number)
+            {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: [], debugDescription: "\(childPath): Invalid number value"
+                ))
+            }
+            if let childGroup = childGroup(group, key: key, fields: fields) {
+                try visit(member, group: childGroup, path: childPath)
+            }
+        }
+    }
+
+    private static func childGroup(_ group: String, key: String, fields: [String: JSONValue]) -> String? {
+        switch (group, key) {
+        case ("spec", "root"), ("node", "child"), ("node", "children"): return "node"
+        case ("spec", "window"): return "window"
+        case ("window", "placement"):
+            if case let .object(placement)? = fields[key], placement["type"]?.stringValue == "sheet" {
+                return "sheet"
+            }
+            return "placement"
+        case ("node", "style"), ("styleWhen", "style"): return "style"
+        case ("node", "styleWhen"): return "styleWhen"
+        case ("node", "anchor"): return "anchor"
+        case ("node", "detents"): return "detent"
+        case ("anchor", "bounds"): return "bounds"
+        case ("anchor", "offset"), ("placement", "offset"), ("style", "offset"): return "offset"
+        case ("style", "width"), ("style", "height"): return "dimension"
+        case ("style", "padding"): return "padding"
+        case ("style", "border"): return "border"
+        case ("style", "cornerRadius"): return "cornerRadius"
+        default: return nil
+        }
+    }
+}

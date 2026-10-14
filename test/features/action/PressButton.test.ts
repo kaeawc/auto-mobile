@@ -18,6 +18,7 @@ import { holdDispatchedRequest } from "../../../src/daemon/dispatchedRequestHold
 import { drainMicrotasks, drainUntil } from "../../helpers/fakeTimerStepping";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { SimctlCommandTimeoutError } from "../../../src/utils/ios-cmdline-tools/SimctlCommandTimeoutError";
+import { IosHomeLaunchTimeoutError } from "../../../src/models/IosHomeLaunchTimeoutError";
 
 describe("PressButton", () => {
   const iosDevice: BootedDevice = {
@@ -614,10 +615,116 @@ describe("PressButton", () => {
 
   test("ios menu remains unsupported", async () => {
     const pressButton = new PressButton(iosDevice);
-    const result = await (pressButton as any).executeiOSButtonPress("menu");
+    const result = await pressButton.press("menu");
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("no menu hardware button");
+    expect(result).toMatchObject({ code: "unsupported_button", retryable: false });
+  });
+
+  test("unsupported iOS button is typed and terminal", async () => {
+    const result = await new PressButton(iosDevice).press("menuish");
+    expect(result).toMatchObject({ code: "unsupported_button", retryable: false });
+  });
+
+  test("iOS dispatched without acknowledgement is typed indeterminate", async () => {
+    const client = new FakeIOSCtrlProxy();
+    client.setPressButtonResult({
+      success: false,
+      dispatched: true,
+      acknowledged: false,
+      error: "reply lost",
+    });
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      client as unknown as IOSCtrlProxyClient,
+    );
+    try {
+      const result = await new PressButton(iosDevice).press("power");
+      expect(result).toMatchObject({ code: "indeterminate_outcome", retryable: false });
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
+  test("iOS runner error is typed as terminal press failure", async () => {
+    const client = new FakeIOSCtrlProxy();
+    client.setPressButtonResult({
+      success: false,
+      dispatched: true,
+      acknowledged: true,
+      error: "runner failed",
+    });
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      client as unknown as IOSCtrlProxyClient,
+    );
+    try {
+      const result = await new PressButton(iosDevice).press("power");
+      expect(result).toMatchObject({ code: "press_failed", retryable: false });
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
+  test("thrown iOS Home timeout preserves retryable typing", async () => {
+    const client = new FakeIOSCtrlProxy();
+    client.setFailureMode(
+      "pressHome",
+      new IosHomeLaunchTimeoutError("SpringBoard launch exhausted"),
+    );
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      client as unknown as IOSCtrlProxyClient,
+    );
+    try {
+      const result = await new PressButton(iosDevice).press("home");
+      expect(result).toMatchObject({ code: "timeout", retryable: true });
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
+  test("generic thrown iOS error is typed as terminal press failure", async () => {
+    const client = new FakeIOSCtrlProxy();
+    client.setFailureMode("pressButton", new Error("runner unavailable"));
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      client as unknown as IOSCtrlProxyClient,
+    );
+    try {
+      const result = await new PressButton(iosDevice).press("power");
+      expect(result).toMatchObject({ code: "press_failed", retryable: false });
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
+  test("successful button result has no refusal fields", async () => {
+    const client = new FakeIOSCtrlProxy();
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      client as unknown as IOSCtrlProxyClient,
+    );
+    try {
+      const result = await new PressButton(iosDevice).press("power");
+      expect(result).not.toHaveProperty("code");
+      expect(result).not.toHaveProperty("retryable");
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
+  test("thrown typed iOS error preserves non-timeout code and retryability", async () => {
+    const client = new FakeIOSCtrlProxy();
+    client.setFailureMode(
+      "pressButton",
+      Object.assign(new Error("device is offline"), { code: "device_offline", retryable: true }),
+    );
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      client as unknown as IOSCtrlProxyClient,
+    );
+    try {
+      const result = await new PressButton(iosDevice).press("power");
+      expect(result).toMatchObject({ code: "device_offline", retryable: true });
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
   });
 
   test("ios hardware buttons delegate to generic CtrlProxy pressButton on physical devices", async () => {

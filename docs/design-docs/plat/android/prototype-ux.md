@@ -215,8 +215,8 @@ therefore resolves during controller validation, its one-off `mapPrototypeSpec` 
 its runtime's incremental mapping. The validator's `MAX_PROTOTYPE_REPEAT_PATH_CELLS` limit bounds
 resolution work.
 Appearance and anchor layout consume the resulting render tree. `repeat.key` is validated and
-carried on the model; Compose rows retain positional identity in this slice. Keyed identity lands
-with patch (#11675), when reordering becomes observable. CtrlProxy advertises
+carried on the model; keyed Compose rows retain identity by `repeat.key` across patches and
+reordering, while unkeyed rows retain positional identity. CtrlProxy advertises
 `prototype_data_model_v1`, and its inspect entries report the shown spec's original `data` beside
 state, omitting it when absent.
 
@@ -643,9 +643,9 @@ prototype shows, or keep display text in a string key.
 ## Style
 
 All properties are optional. Sizes, padding, offsets, radii, and spacing use dp.
-Numeric lengths are capped at 10000, including fixed dimensions, bounds width/height,
+Numeric lengths are capped at 10000, including fixed dimensions, bounds x/y/width/height,
 size constraints, padding, corner radii, border width, spacing, sheet height and fixed detents.
-Offsets range from -10000 to 10000. Elevation is capped at 1000; text size and line height
+Offsets and bounds x/y range from -10000 to 10000. Elevation is capped at 1000; text size and line height
 are positive and capped at 1000, and letter spacing ranges from -1000 to 1000.
 Weight and aspect ratio range from 0.000001 to 10000. All endpoints are inclusive.
 
@@ -1054,11 +1054,9 @@ written once.
 ### Patch (#11675)
 
 Use `show` for a new screen or a window, theme or root change. Use `patch` for
-content (`/data`), state (`/state`) or one node by id (`replaceNode`). The host action,
-wire contract and capability gate exist, but **no device advertises
-`prototype_patch_v1` yet**. Every patch is refused before sending: update CtrlProxy
-on Android, or relaunch the app with `launchApp prototype: true` on iOS when a
-supporting agent is available; until then, send the whole spec with `show`.
+content (`/data`), state (`/state`) or one node by id (`replaceNode`). Android CtrlProxy advertises
+`prototype_patch_v1` and applies patches in place; iOS does not advertise it yet
+and requires the whole spec with `show`.
 
 `{action:"patch", id, ops, baseRevision?}` sends a `patch_prototype` frame
 `{requestId, id, baseRevision?, ops}` only to a device advertising

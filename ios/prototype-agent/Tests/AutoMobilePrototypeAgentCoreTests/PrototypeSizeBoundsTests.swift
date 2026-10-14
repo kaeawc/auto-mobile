@@ -46,7 +46,8 @@ final class PrototypeSizeBoundsTests: XCTestCase {
         for file in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
             where file.lastPathComponent.hasSuffix("-over-max.json") ||
-            file.lastPathComponent.hasSuffix("-below-min.json") || minimumFixtures.contains(file.lastPathComponent)
+            file.lastPathComponent.hasSuffix("-below-min.json") ||
+            file.lastPathComponent.hasSuffix("-first-error.json") || minimumFixtures.contains(file.lastPathComponent)
         {
             let fixture = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any])
             let spec = try JSONSerialization.data(withJSONObject: XCTUnwrap(fixture["spec"]))
@@ -56,6 +57,28 @@ final class PrototypeSizeBoundsTests: XCTestCase {
                 try JSONDecoder().decode(PrototypeSpec.self, from: spec),
                 file.lastPathComponent
             ) { error in
+                if file.lastPathComponent.hasSuffix("-first-error.json") {
+                    let actualPath: String
+                    switch error {
+                    case let DecodingError.dataCorrupted(context):
+                        actualPath = context.debugDescription.components(separatedBy: ": ")[0]
+                    case let DecodingError.typeMismatch(_, context),
+                         let DecodingError.keyNotFound(_, context),
+                         let DecodingError.valueNotFound(_, context):
+                        actualPath = context.codingPath.reduce(into: "") { path, key in
+                            if let index = key.intValue {
+                                path += "[\(index)]"
+                            } else {
+                                if !path.isEmpty { path += "." }
+                                path += key.stringValue
+                            }
+                        }
+                    default:
+                        return XCTFail("\(file.lastPathComponent): \(error)")
+                    }
+                    XCTAssertEqual(actualPath, path, file.lastPathComponent)
+                    return
+                }
                 guard case let DecodingError.dataCorrupted(context) = error else {
                     return XCTFail("\(file.lastPathComponent): \(error)")
                 }

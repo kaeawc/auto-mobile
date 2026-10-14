@@ -23,11 +23,22 @@ struct PrototypeViewerFileReader: PrototypeViewerFileReading {
 enum PrototypeViewerContent {
     case none
     case invalid(path: String, message: String)
+    case unsupportedFormat(version: Int)
+    case corrupt(String)
     case loaded(PrototypeSpec, specBytes: Int)
 }
 
-struct PrototypeViewerSpecLoader {
-    static let documentsFileName = "prototype.json"
+protocol PrototypeViewerContentLoading {
+    func load() -> PrototypeViewerContent
+}
+
+/// Count compact JSON bytes from the original data, preserving fields not stored in the decoded spec.
+func prototypeViewerCompactSpecBytes(_ data: Data) throws -> Int {
+    let object = try JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)
+    return try JSONSerialization.data(withJSONObject: object, options: .fragmentsAllowed).count
+}
+
+struct PrototypeViewerSpecLoader: PrototypeViewerContentLoading {
     private let reader: any PrototypeViewerFileReading
     private let locations: [String]
 
@@ -50,8 +61,7 @@ struct PrototypeViewerSpecLoader {
             do {
                 // Match the injected agent's byte count; file whitespace does not consume the
                 // spec budget. The raw-size guard above bounds work before parsing the file.
-                let object = try JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)
-                let specBytes = try JSONSerialization.data(withJSONObject: object, options: .fragmentsAllowed).count
+                let specBytes = try prototypeViewerCompactSpecBytes(data)
                 guard specBytes <= PrototypeLimits.maxSpecBytes else {
                     return .invalid(path: "$", message: "Spec byte limit exceeded")
                 }

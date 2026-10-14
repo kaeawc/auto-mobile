@@ -32,6 +32,8 @@ export interface ImeCommitActionResult extends BaseResult {
   trace?: string[];
   /** Editor delta captured by the device; internal transport evidence only. */
   insertedText?: string;
+  /** Device reconciliation confirmed input consumed by the editor. */
+  editorConsumed?: boolean;
   partialApplication?: boolean;
   /** Device upper bound on dispatched editing units; absent/zero means unknown or none. */
   committedUnits?: number;
@@ -112,7 +114,7 @@ export function imeCommitSuffixMatches(committedText: string, text: string): boo
 export function imeInsertedTextMatches(
   insertedText: string,
   text: string,
-  options?: { deviceSucceeded?: boolean },
+  options?: { deviceSucceeded?: boolean; editorConsumed?: boolean },
 ): boolean {
   if (options?.deviceSucceeded === true && text.endsWith("\n") && !text.endsWith("\r\n")) {
     if (text === "\n") {
@@ -123,6 +125,85 @@ export function imeInsertedTextMatches(
       return true;
     }
   }
+  return (
+    imeInsertedTextStrictMatches(insertedText, text) ||
+    (options?.deviceSucceeded === true &&
+      options.editorConsumed === true &&
+      imeEditorConsumedMatches(insertedText, text))
+  );
+}
+
+/** Prune by Unicode evidence before spending a bounded number of strict checks. */
+function imeEditorConsumedMatches(insertedText: string, text: string): boolean {
+  if (insertedText.length === 0 || text.length > 4096) {
+    return false;
+  }
+  const evidence = /[\p{L}\p{N}\p{M}]/u;
+  const insertedEvidence = Array.from(insertedText.normalize("NFC")).filter((point) =>
+    evidence.test(point),
+  );
+  const insertedCount = insertedEvidence.length;
+  // A lone numeral is too weak to verify a restarted numeric field.
+  if (insertedCount === 0 || (insertedCount === 1 && /\p{N}/u.test(insertedEvidence[0]!))) {
+    return false;
+  }
+  let candidates = 0;
+  for (const candidate of imeEditorConsumedCandidates(text, insertedCount)) {
+    if (candidates++ >= 512) {
+      break;
+    }
+    if (imeInsertedTextStrictMatches(insertedText, candidate)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Private candidate generation keeps the evidence scan separate from the strict-check budget.
+function* imeEditorConsumedCandidates(text: string, insertedCount: number): Generator<string> {
+  const normalized = text.normalize("NFC");
+  const points = Array.from(normalized);
+  const minimum = Math.ceil(insertedCount / 3);
+  const maximum = insertedCount * 3;
+  const starts: { offset: number; count: number }[] = [];
+  const newlines: number[] = [];
+  let count = 0;
+  let offset = normalized.length;
+  // Count normalized code points once, backwards; never split a surrogate pair.
+  for (let index = points.length - 1; index >= 0; index--) {
+    const point = points[index]!;
+    offset -= point.length;
+    if (/[\p{L}\p{N}\p{M}]/u.test(point)) {
+      count++;
+    }
+    if (point === "\n" && normalized[offset - 1] !== "\r") {
+      newlines.push(offset);
+    }
+    if (count >= minimum && count <= maximum) {
+      starts.push({ offset, count });
+    }
+  }
+  starts.sort(
+    (left, right) =>
+      Math.abs(left.count - insertedCount) - Math.abs(right.count - insertedCount) ||
+      left.offset - right.offset,
+  );
+  for (const { offset: start } of starts) {
+    const suffix = normalized.slice(start);
+    if (start > 0) {
+      yield suffix;
+    }
+    for (const newline of newlines) {
+      if (newline < start) {
+        break;
+      }
+      const index = newline - start;
+      yield suffix.slice(0, index) + suffix.slice(index + 1);
+    }
+  }
+}
+
+function imeInsertedTextStrictMatches(insertedText: string, text: string): boolean {
   const markers = /[*_~`]/g;
   if (text.replace(markers, "").length === 0) {
     return true;

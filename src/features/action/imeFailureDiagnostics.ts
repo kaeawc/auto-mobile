@@ -237,7 +237,10 @@ export function verifyImeInsertedText(
   if (
     insertedText === undefined ||
     text.length === 0 ||
-    imeInsertedTextMatches(insertedText, text, { deviceSucceeded: result.success === true })
+    imeInsertedTextMatches(insertedText, text, {
+      deviceSucceeded: result.success === true,
+      editorConsumed: result.editorConsumed === true,
+    })
   ) {
     return result;
   }

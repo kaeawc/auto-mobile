@@ -76,3 +76,43 @@ export function buildDisconnectedPanelMessage(
     : "";
   return `Display "${panelKey}" (${panelRole}) is not connected in the current posture. Connected panels: ${choices}. Target a connected panel, omit display, or use display: "active"${postureRemedy}.${pinRemedy}`;
 }
+
+/** Native Android panel size; dimensions are in natural orientation. */
+export interface PanelFingerprint {
+  width: number;
+  height: number;
+}
+
+/** Validate optional native panel dimensions at the Android wire boundary. */
+export function panelFingerprintFromWire(value: unknown): PanelFingerprint | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const fingerprint = value as Record<string, unknown>;
+  if (
+    typeof fingerprint.width !== "number" ||
+    typeof fingerprint.height !== "number" ||
+    !Number.isInteger(fingerprint.width) ||
+    fingerprint.width <= 0 ||
+    !Number.isInteger(fingerprint.height) ||
+    fingerprint.height <= 0
+  ) {
+    return undefined;
+  }
+  return { width: fingerprint.width, height: fingerprint.height };
+}
+
+/** Resolve only unambiguous exact native sizes; rotated geometry is not identity. */
+export function panelKeyForFingerprint(
+  panels: readonly DisplayPanel[] | undefined,
+  fingerprint: PanelFingerprint | undefined,
+): string | undefined {
+  if (!fingerprint) {
+    return undefined;
+  }
+  const matches = panels?.filter(
+    (panel) =>
+      panel.sizePx.width === fingerprint.width && panel.sizePx.height === fingerprint.height,
+  );
+  return matches?.length === 1 ? matches[0].key : undefined;
+}

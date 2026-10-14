@@ -619,9 +619,9 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       appliedSettings: { stayOnWhilePluggedIn: true, screenOffTimeout: true },
     };
     const releasedCallbacks: Array<{ sessionId: string; deviceId: string }> = [];
-    const restoreSpy = spyOn(KeepScreenAwakeManager.prototype, "restore").mockResolvedValue(
-      undefined,
-    );
+    const restoreSpy = spyOn(KeepScreenAwakeManager.prototype, "restore").mockResolvedValue({
+      status: "restored",
+    });
     const releaseDeviceSpy = spyOn(devicePool, "releaseDevice");
     const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
     const closeDatabaseSpy = spyOn(databaseModule, "closeDatabase").mockImplementation(async () => {
@@ -754,7 +754,7 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const healthySessionId = "healthy-shutdown-session";
     const restoreSpy = spyOn(KeepScreenAwakeManager.prototype, "restore")
       .mockRejectedValueOnce(new Error("simulated restore failure"))
-      .mockResolvedValue(undefined);
+      .mockResolvedValue({ status: "restored" });
     const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
 
     try {
@@ -1175,9 +1175,9 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       originalStayOnWhilePluggedIn: "0",
     };
     const releasedCallbacks: string[] = [];
-    const restoreSpy = spyOn(KeepScreenAwakeManager.prototype, "restore").mockResolvedValue(
-      undefined,
-    );
+    const restoreSpy = spyOn(KeepScreenAwakeManager.prototype, "restore").mockResolvedValue({
+      status: "restored",
+    });
     const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
 
     try {

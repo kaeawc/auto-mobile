@@ -285,7 +285,9 @@ function subscribePendingRedrive(
       consume(deviceId, options?.deviceIdentityReplaced);
     }
   });
-  manager.onSessionDeviceUnbound((_sessionId, deviceId) => consume(deviceId));
+  manager.onSessionDeviceUnbound((_sessionId, deviceId, options) =>
+    consume(deviceId, options?.deviceIdentityReplaced),
+  );
 }
 
 async function clearReplacedDescriptors(

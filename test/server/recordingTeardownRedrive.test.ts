@@ -219,6 +219,29 @@ describe("restart recorder teardown redrive", () => {
       held.restore();
     }
   });
+  test.each([true, false])("held unbound forwards identity replacement=%s", async (replaced) => {
+    await repo.insertRecording(row);
+    const held = heldDevice();
+    const d = deps();
+    const kill = spyOn(d, "forceStopOrphanedCapture");
+    try {
+      await (await redriveModule()).redriveUnconfirmedCaptureTeardowns(manager, d);
+      held.unbound.mock.calls[0]?.[0]("holder", device.deviceId, {
+        deviceIdentityReplaced: replaced,
+      });
+      await drainUntilQuiescent(timer);
+      expect(kill).toHaveBeenCalledTimes(replaced ? 0 : 1);
+      expect(held.pending).toHaveBeenCalledTimes(replaced ? 0 : 1);
+      expect(held.mark).not.toHaveBeenCalled();
+      expect((await repo.getRecording("rec"))?.captureTeardown).toBeUndefined();
+      held.fire();
+      held.unbound.mock.calls[0]?.[0]("holder", device.deviceId);
+      expect(kill).toHaveBeenCalledTimes(replaced ? 0 : 1);
+      expect(held.pending).toHaveBeenCalledTimes(replaced ? 0 : 1);
+    } finally {
+      held.restore();
+    }
+  });
   test("pid-less restart at 30 seconds waits through expiry and clears at 185 seconds", async () => {
     await repo.insertRecording({
       ...row,

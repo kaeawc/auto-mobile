@@ -104,6 +104,9 @@ describe("shared prototype contract", () => {
       if (result.success) {
         throw new Error(`Accepted ${name}`);
       }
+      if (name.endsWith("-over-max.json") || name.endsWith("-below-min.json")) {
+        expect(prototypeSpecSchema.safeParse(data.spec).success).toBe(false);
+      }
       expect(result.error.path).toBe(data.expectedPath);
       if (data.expectedMessage !== undefined) {
         expect(result.error.message).toBe(data.expectedMessage);

@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.protocol
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonArray
 
 /**
  * Sealed class hierarchy for all inbound WebSocket messages from MCP server to Android.
@@ -484,6 +485,21 @@ data class DismissPrototype(
 @Serializable
 @SerialName("inspect_prototypes")
 data class InspectPrototypes(override val requestId: String? = null) : WebSocketRequest()
+
+/**
+ * Applies [ops] to the shown prototype [id] (#11675): the RFC 6902 subset add/replace/remove/test
+ * rooted at /data and /state, plus replaceNode {id, node}. [baseRevision] guards /state ops.
+ * Answered by one `prototype_result`. Hosts only send it to a device advertising
+ * `prototype_patch_v1`.
+ */
+@Serializable
+@SerialName("patch_prototype")
+data class PatchPrototype(
+  override val requestId: String? = null,
+  val id: String,
+  val baseRevision: Long? = null,
+  val ops: JsonArray,
+) : WebSocketRequest()
 
 /**
  * Uploads one prototype image asset, replacing any asset with the same [id]. [dataBase64] is the

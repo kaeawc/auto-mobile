@@ -140,6 +140,7 @@ internal class FakePrototypeHost : PrototypeHost {
   val requests = mutableListOf<PrototypeRequest>()
   var accept = true
   var failure: Exception? = null
+  override var isHiddenForCapture = false
   override var isShowing = false
   override var currentPlacement: PrototypePlacement? = null
   override val isTouchThroughActive = false

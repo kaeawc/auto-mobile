@@ -161,6 +161,26 @@ class PrototypeRenderModelTest {
   }
 
   @Test
+  fun `finite but oversized Compose width is rejected by show and patch validator`() {
+    // PrototypeController.validate uses this validator before mapping or installing content.
+    val encoded =
+      Json.encodeToString(
+        spec(
+          PrototypeTextNode(
+            text = "text",
+            style = PrototypeStyle(width = PrototypeDimension.Dp(1e30)),
+          ),
+        ),
+      )
+    val result = PrototypeSpecValidator.validate(encoded)
+    assertTrue(result is PrototypeSpecValidation.Failure)
+    assertEquals(
+      PrototypeSpecError("root.style.width.dp", "Invalid number value"),
+      (result as PrototypeSpecValidation.Failure).error,
+    )
+  }
+
+  @Test
   fun `unrepresentable Compose size is rejected before content installation`() {
     val error =
       assertThrows(IllegalArgumentException::class.java) {
@@ -450,6 +470,45 @@ class PrototypeRenderModelTest {
     assertEquals(
       "{page}/{pageCount}",
       interpolatePrototypeText("{page}/{pageCount}", state, inPager = false),
+    )
+  }
+
+  @Test
+  fun `interpolation substitutes exactly the limit and preserves oversized tokens`() {
+    val limit = PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH
+    val exact = "x".repeat(limit)
+    assertEquals(exact, interpolatePrototypeText("{b}", mapOf("b" to PrototypeScalar.Text(exact))))
+    assertEquals(
+      "{b}",
+      interpolatePrototypeText("{b}", mapOf("b" to PrototypeScalar.Text(exact + "x"))),
+    )
+  }
+
+  @Test
+  fun `interpolation accumulates replacement lengths per call`() {
+    val value = "x".repeat(8193)
+    assertEquals(
+      value + "{b}",
+      interpolatePrototypeText("{b}{b}", mapOf("b" to PrototypeScalar.Text(value))),
+    )
+  }
+
+  @Test
+  fun `interpolation allows short replacements after an oversized token`() {
+    val state =
+      mapOf(
+        "b" to PrototypeScalar.Text("x".repeat(16_385)),
+        "s" to PrototypeScalar.Text("short"),
+      )
+    assertEquals("{b}short", interpolatePrototypeText("{b}{s}", state))
+  }
+
+  @Test
+  fun `interpolation literal characters do not count toward the limit`() {
+    val literal = "x".repeat(20_000)
+    assertEquals(
+      literal + "short",
+      interpolatePrototypeText(literal + "{s}", mapOf("s" to PrototypeScalar.Text("short"))),
     )
   }
 

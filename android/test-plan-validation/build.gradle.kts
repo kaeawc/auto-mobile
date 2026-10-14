@@ -85,4 +85,12 @@ tasks.withType<Test>().configureEach {
     .dir(rootDir.resolve("../test/fixtures/plan-coordination-params"))
     .withPropertyName("coordinationParamsFixtures")
     .withPathSensitivity(PathSensitivity.RELATIVE)
+  inputs
+    .file(rootDir.resolve("../test/fixtures/plan-schedule-feasibility/cases.json"))
+    .withPropertyName("scheduleFeasibilityCases")
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+  inputs
+    .file(rootDir.resolve("../schemas/tool-definitions.json"))
+    .withPropertyName("toolDefinitions")
+    .withPathSensitivity(PathSensitivity.RELATIVE)
 }

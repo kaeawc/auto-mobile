@@ -968,6 +968,7 @@ Boundaries this release does not close (follow-ups):
 
 ## Related
 
+- [Managed-slot qualification](managed-slot-qualification.md)
 - [Device ownership](device-ownership.md): session holds, release rules and reads.
 - [Environment variables](environment-variables.md): heartbeat and idle tuning.
 - [Managed Macs and CI runners](managed-macs.md).

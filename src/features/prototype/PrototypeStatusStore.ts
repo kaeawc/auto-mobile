@@ -281,9 +281,6 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       action !== "show" && target.id !== undefined
         ? existing?.shown.get(target.id)?.displayId
         : undefined;
-    if (action === "dismiss" && result.success) {
-      this.shownSpecs.forget(scope.deviceId, target.id);
-    }
     const entry = this.createResult(
       action,
       target,
@@ -362,6 +359,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       stored.snapshot = snapshot?.id === entry.id ? snapshot : undefined;
       stored.shown.set(entry.id, entry);
     } else if (entry.lastAction === "dismiss" && entry.success) {
+      this.shownSpecs.forget(stored.deviceId, entry.all ? undefined : entry.id);
       if (entry.all) {
         this.clearShown(stored.deviceId);
       } else if (entry.id) {

@@ -338,7 +338,7 @@ describe("patch spec and data hooks", () => {
   function track(store: InMemoryPrototypeStatusStore) {
     const ticket = store.shownSpecs.beginShow(scope.deviceId);
     store.shownSpecs.endShow(scope.deviceId, ticket, { id: "panel", spec: { data: { count: 1 } } });
-    store.record(scope, "show", { id: "panel" }, ok, undefined, { count: 1 });
+    store.record(scope, "show", { id: "panel" }, ok, undefined, { data: { count: 1 } });
   }
   test("patched data refreshes every session without touching results or snapshots", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());
@@ -358,7 +358,7 @@ describe("patch spec and data hooks", () => {
     store.recordPatchedData("device", "panel", undefined);
     expect(store.status(other)).toEqual(before);
     // Insert another session presence through the public show path, then prove device/id filtering.
-    store.record(scope, "show", { id: "panel" }, ok, undefined, { count: 1 });
+    store.record(scope, "show", { id: "panel" }, ok, undefined, { data: { count: 1 } });
     store.recordPatchedData("device", "other", { count: 3 });
     expect(store.status(scope).prototypes[0].data).toEqual({ count: 1 });
   });

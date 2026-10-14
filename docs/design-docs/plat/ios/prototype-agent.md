@@ -522,3 +522,42 @@ have any vertical scroll ancestor (omitted scroll axis is vertical). Current pag
 the first fully visible page; page events, placeholders and navigation bindings keep
 their meaning. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed.
 Indicator and carousel remain deferred.
+
+## Saved prototype on-disk layout (#12254)
+
+One saved prototype lives in the viewer app container:
+
+```text
+Documents/prototype/
+  manifest.json
+  spec.json
+  assets/<sha256>.png|jpg|webp
+  fonts/<sha256>.ttf|otf
+```
+
+Version 1 has the strict manifest shape
+`{"formatVersion":1,"specFile":"spec.json","assets":[{"id":"image","file":"assets/<sha256>.png","sha256":"<sha256>","mediaType":"image/png"}],"fonts":[]}`.
+Both arrays are always present. SHA-256 is lowercase hexadecimal over file bytes;
+identical bytes with the same media type share one content-addressed file. Paths
+must exactly match the media type, folder and hash. IDs are unique across both arrays.
+The shared asset contract caps count, per-file size and total bytes; spec and
+manifest caps are 1 MiB and 256 KiB respectively.
+
+The host writer stages a sibling `.tmp-<token>` directory, writes the manifest last,
+then renames into place. Replacement first backs up the old directory to
+`.old-<token>` and restores it if the commit rename fails. Callers serialize writes.
+The reader refuses unknown versions before validating version-specific fields and
+never changes any files. A bad manifest, spec, count or verified-byte total is corrupt;
+missing, unreadable, unsafe, empty/oversized or hash-mismatched assets are omitted
+from the verified snapshot and reported as sorted problems. The viewer can use its
+missing-asset placeholder and expose those problems through `inspect`.
+
+Unlike Android's many slug directories, iOS stores one prototype and has no manifest
+id, label or savedAt. Asset failures leave the prototype loadable; reading never
+repairs or deletes it. The writer permits spec references absent from the request;
+the reader reports these as missing manifest entries. The installer is separate (#12256).
+
+The implementations are `src/features/prototype/savedPrototypeLayout.ts` and
+`ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSavedLayout.swift`.
+Both test suites consume `test/fixtures/prototype-saved-layout/layout.json`, including
+the same expected manifest and file hashes. Fixture binaries are generated at test time.

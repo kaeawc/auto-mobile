@@ -29,6 +29,8 @@ import dev.jasonpearson.automobile.protocol.PrototypeListItemSwitch
 import dev.jasonpearson.automobile.protocol.PrototypeListItemTrailing
 import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypePagerNode
+import dev.jasonpearson.automobile.protocol.PrototypeStackNode
+import kotlinx.serialization.json.JsonPrimitive
 import dev.jasonpearson.automobile.protocol.PrototypeProgressNode
 import dev.jasonpearson.automobile.protocol.PrototypeRadioGroupNode
 import dev.jasonpearson.automobile.protocol.PrototypeRepeat
@@ -80,6 +82,10 @@ internal fun prototypeChildEntries(
   path: String,
   bind: Boolean = true,
 ): List<PrototypeChildEntry> {
+  if (node is PrototypeStackNode)
+    return node.screens.map { (name, child) ->
+      PrototypeChildEntry(child, "$path.screens[${JsonPrimitive(name)}]")
+    }
   val children = prototypeDescendants(node)
   val repeat = node.repeatSpec()
   if (repeat == null) {
@@ -126,6 +132,13 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         children = children.bound(),
+      )
+    is PrototypeStackNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        screens = screens.mapValues { (_, child) -> child.bound(instance) },
       )
     is PrototypePagerNode ->
       copy(

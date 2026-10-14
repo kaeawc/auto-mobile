@@ -533,6 +533,10 @@ private fun RenderPrototypeNodeContent(
         node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
       }
     }
+    "stack" -> Box(modifier, contentAlignment = node.style.alignment) {
+      // Only the runtime's top screen exists here; navigation has no transition in this slice.
+      node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
+    }
     "pager" -> RenderPrototypePager(node, modifier, interact)
     "tabBar",
     "bottomNav" -> RenderPrototypeNavigation(node, modifier, interact)
@@ -964,7 +968,7 @@ private fun prototypeNodeModifier(
 }
 
 private val SEMANTICS_FREE_CONTAINERS =
-  setOf("box", "row", "column", "scroll", "pager", "spacer", "card", "divider")
+  setOf("box", "row", "column", "scroll", "pager", "stack", "spacer", "card", "divider")
 
 /**
  * Navigation bars are labelled by their tabs, which carry the Tab role and selected state, so their

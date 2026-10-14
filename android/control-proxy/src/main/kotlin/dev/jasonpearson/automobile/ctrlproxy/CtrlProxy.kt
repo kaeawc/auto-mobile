@@ -112,6 +112,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
+import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
 import dev.jasonpearson.automobile.protocol.ScreenshotResult as ProtocolScreenshotResult
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
 import dev.jasonpearson.automobile.protocol.SdkBroadcastEvent
@@ -1128,6 +1129,22 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           resultBroadcaster.guard(requestId, "prototype_result") {
             webSocketServer.broadcastWithPerf { _ ->
               prototypeResultFrame(requestId, true, null, missingAssets, appearance)
+            }
+          }
+        }
+      }
+
+      override suspend fun sendShownNavigation(
+        requestId: String?,
+        missingAssets: List<String>,
+        appearance: PrototypeAppearance,
+        pages: Map<String, Int>,
+        stacks: Map<String, PrototypeStackSnapshot>,
+      ) {
+        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+          resultBroadcaster.guard(requestId, "prototype_result") {
+            webSocketServer.broadcastWithPerf { _ ->
+              prototypeResultFrame(requestId, true, null, missingAssets, appearance, pages, stacks)
             }
           }
         }

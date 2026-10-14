@@ -91,7 +91,7 @@ data class PrototypeHiddenCapture<T>(val value: T, val prototypeExcluded: Boolea
  */
 data class PrototypeRequest(
   val placement: PrototypePlacement = PrototypePlacement.Floating(),
-  /** True only while a text field is visible: the window is focusable (takes keys) just then. */
+  /** True only while an editable field is visible; navigation focus is tracked separately. */
   val hasTextField: Boolean = false,
   val opacityPercent: Int = 100,
   val displayId: Int = Display.DEFAULT_DISPLAY,
@@ -112,8 +112,14 @@ data class PrototypeRequest(
   /** Direct host callers retain the legacy bar; the controller resolves the spec default. */
   val chrome: PrototypeWindowChrome = PrototypeWindowChrome.BAR,
   val onHostDismiss: suspend () -> Unit = {},
+  /** Navigation takes Back even without an editable field; IME handling stays separate. */
+  val hasStackBack: Boolean = false,
+  val onHostBack: (suspend () -> Unit)? = null,
   val content: @Composable () -> Unit = { PrototypeTestContent() },
 ) {
+  val focusable: Boolean
+    get() = hasTextField || hasStackBack
+
   init {
     require(opacityPercent in 0..100) { "Opacity must be in 0..100" }
     require(displayId >= 0) { "displayId must be non-negative: $displayId" }
@@ -147,6 +153,9 @@ interface PrototypeHost {
    * previous setting, so the caller can retry. A detached window is reported like [relayout].
    */
   suspend fun setTextFieldVisible(visible: Boolean): Boolean
+
+  /** Changes Back focusability without changing text-field or keyboard state. */
+  suspend fun setStackBackEnabled(enabled: Boolean): Boolean
 
   /**
    * Removes immediately, allowing the app to regain focus. A window already detached counts as
@@ -204,11 +213,12 @@ interface PrototypeHost {
  * path (relayout, replace, touch-through). Service wiring uses it to schedule the controller's
  * restore-or-abandon pass promptly instead of waiting for an unrelated event. Same constraints.
  *
- * While a text field is visible the window is focusable, and Back dismisses the prototype through
+ * While a text field is visible or a stack can pop the window is focusable. Back first navigates
+ * through the controller; without navigation it dismisses the prototype through
  * the request's `onHostDismiss` on [backScope], the same `user`-reason path as the fullscreen
  * dismiss row. Back arrives as a key event below API 33 and as an OnBackInvokedCallback (registered
  * through [backRegistrarFactory] only while focusable) from API 33; both call one target. Without a
- * visible text field the window is not focusable and never sees Back at all.
+ * visible text field or navigated stack the window is not focusable and never sees Back at all.
  *
  * [context] must be the service/display context used for the default display; [densityProvider]
  * defaults to its resources. A request for any other display takes its context, WindowManager and
@@ -319,6 +329,7 @@ class DefaultPrototypeHost(
           sdkInt,
           request.layer,
           imeLift(request),
+          hasStackBack = request.hasStackBack,
         )
       if (touchThroughToken != null) {
         params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -351,7 +362,7 @@ class DefaultPrototypeHost(
     current.request = request
     placement = request.placement
     applyContent(current)
-    current.back.sync(request.hasTextField)
+    current.back.sync(request.focusable)
     return true
   }
 
@@ -405,7 +416,7 @@ class DefaultPrototypeHost(
     placement = request.placement
     owner.resume()
     replacing?.let(::retire)
-    added.back.sync(request.hasTextField)
+    added.back.sync(request.focusable)
     onWindowAttached()
     return true
   }
@@ -489,6 +500,7 @@ class DefaultPrototypeHost(
         sdkInt,
         current.request.layer,
         imeLift(current.request),
+        hasStackBack = current.request.hasStackBack,
       )
     current.anchoredOrigin?.let { applyAnchoredOrigin(params, it) }
     if (touchThroughToken != null)
@@ -503,7 +515,17 @@ class DefaultPrototypeHost(
     if (!visible) hideKeyboard(current.view)
     current.request = previous.copy(hasTextField = visible)
     val applied = relayoutOnMain(current)
-    if (applied) current.back.sync(visible) else current.request = previous
+    if (applied) current.back.sync(current.request.focusable) else current.request = previous
+    applied
+  }
+
+  override suspend fun setStackBackEnabled(enabled: Boolean): Boolean = mainThread.onMain {
+    val current = window ?: return@onMain true
+    val previous = current.request
+    if (previous.hasStackBack == enabled) return@onMain true
+    current.request = previous.copy(hasStackBack = enabled)
+    val applied = relayoutOnMain(current)
+    if (applied) current.back.sync(current.request.focusable) else current.request = previous
     applied
   }
 
@@ -515,7 +537,7 @@ class DefaultPrototypeHost(
 
   private fun backDecision(event: KeyEvent): PrototypeBackDecision =
     prototypeBackDecision(
-      window?.request?.hasTextField == true,
+      window?.request?.focusable == true,
       event.keyCode,
       event.action,
       event.isCanceled,
@@ -523,8 +545,8 @@ class DefaultPrototypeHost(
 
   /** The one Back target for the key-event path and the predictive-back callback. */
   private fun dismissFromBack() {
-    val request = window?.request?.takeIf { it.hasTextField } ?: return
-    backScope.launch { request.onHostDismiss() }
+    val request = window?.request?.takeIf { it.focusable } ?: return
+    backScope.launch { (request.onHostBack ?: request.onHostDismiss)() }
   }
 
   override suspend fun setOpacity(percent: Int) {
@@ -703,13 +725,14 @@ enum class PrototypeBackDecision {
   /** Swallow the key without acting (the down half of a Back press, or a canceled up). */
   CONSUME,
 
-  /** Back completed on a focusable prototype: dismiss it as the user. */
+  /** Back completed on a focusable prototype: dispatch to its pop-or-dismiss target. */
   DISMISS,
 }
 
 /**
  * Back reaches the prototype only while its window is focusable, which is exactly while a text
- * field is visible. Dismissal fires once, on the up half of an uncanceled press.
+ * field is visible or stack navigation can pop. Dispatch fires once, on the up half of an
+ * uncanceled press.
  */
 fun prototypeBackDecision(
   focusable: Boolean,

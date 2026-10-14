@@ -162,6 +162,15 @@ internal class FakePrototypeHost : PrototypeHost {
     return acceptTextField
   }
 
+  var acceptStackBack = true
+
+  override suspend fun setStackBackEnabled(enabled: Boolean): Boolean {
+    calls += "stackBack:$enabled"
+    if (!isShowing) return true
+    if (acceptStackBack) requests[requests.lastIndex] = requests.last().copy(hasStackBack = enabled)
+    return acceptStackBack
+  }
+
   override suspend fun dismiss(): Boolean {
     calls += "dismiss"
     failure?.let { throw it }

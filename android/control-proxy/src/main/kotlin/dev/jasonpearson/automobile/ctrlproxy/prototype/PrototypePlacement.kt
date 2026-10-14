@@ -69,9 +69,17 @@ enum class PrototypeWindowLayer(val windowType: Int) {
  * interaction, so a non-focusable app-layer prototype adds FLAG_ALT_FOCUSABLE_IM to stay below it.
  * A window that takes focus for a text field is focusable and needs neither flag.
  */
-private fun focusFlags(layer: PrototypeWindowLayer, hasTextField: Boolean): Int =
+private fun focusFlags(
+  layer: PrototypeWindowLayer,
+  hasTextField: Boolean,
+  hasStackBack: Boolean,
+): Int =
   when {
     hasTextField -> 0
+    // Back alone takes key focus, without attaching this window to the IME. NOT_TOUCH_MODAL
+    // remains set below. Open question: verify app-layer outside-touch pass-through on a device
+    // while stack Back takes focus, including Android 12's untrusted overlay policy.
+    hasStackBack -> WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM
     layer == PrototypeWindowLayer.APP ->
       WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
         WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM
@@ -94,6 +102,7 @@ fun prototypeLayoutParams(
   layer: PrototypeWindowLayer = PrototypeWindowLayer.SYSTEM,
   /** Keyboard height from the screen bottom (#10262); only a bottom sheet is moved by it. */
   imeLiftPx: Int = 0,
+  hasStackBack: Boolean = false,
 ): WindowManager.LayoutParams {
   require(density.isFinite() && density > 0) { "Density must be positive and finite" }
   val match = WindowManager.LayoutParams.MATCH_PARENT
@@ -104,7 +113,7 @@ fun prototypeLayoutParams(
       layer.windowType,
       WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-        focusFlags(layer, hasTextField),
+        focusFlags(layer, hasTextField, hasStackBack),
       PixelFormat.TRANSLUCENT,
     )
     .apply {

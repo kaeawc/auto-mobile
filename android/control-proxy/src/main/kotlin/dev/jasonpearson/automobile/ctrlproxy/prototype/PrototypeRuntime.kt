@@ -21,6 +21,7 @@ data class PrototypeRuntimeSnapshot(
    * adopts the value whenever the epoch moves; see [TextChange].
    */
   val textEpochs: Map<String, Int> = emptyMap(),
+  val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
 ) {
   val state: Map<String, PrototypeScalar>
     get() = spec.state.orEmpty()
@@ -28,6 +29,8 @@ data class PrototypeRuntimeSnapshot(
 
 sealed interface PrototypeInteraction {
   data object HostDismiss : PrototypeInteraction
+
+  data object Back : PrototypeInteraction
 
   data class Tap(val actions: List<PrototypeAction>) : PrototypeInteraction
 
@@ -104,6 +107,7 @@ class PrototypeRuntime(
   private val nextSequence: () -> Long,
   private val requestDismiss: suspend () -> Boolean = { true },
   previousPages: Map<String, Int> = emptyMap(),
+  previousStacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
 ) {
   @Volatile private var stateWriteValidator: PrototypeStateWriteValidator? = null
   internal var prepareStateWrites: (PrototypeSpec) -> PrototypeStateWriteValidator = {
@@ -113,12 +117,12 @@ class PrototypeRuntime(
   private val renderMapper = PrototypeRenderMapper()
 
   internal fun renderModel(snapshot: PrototypeRuntimeSnapshot = current): PrototypeRenderModel =
-    renderMapper.map(snapshot.spec, snapshot.pages)
+    renderMapper.map(snapshot.spec, snapshot.pages, snapshot.stacks)
 
   internal val renderMappingPasses: Int
     get() = renderMapper.mappingPasses
 
-  private val mutableSnapshot = MutableStateFlow(snapshot(spec, previousPages))
+  private val mutableSnapshot = MutableStateFlow(snapshot(spec, previousPages, previousStacks))
   val snapshots = mutableSnapshot.asStateFlow()
   val current: PrototypeRuntimeSnapshot
     get() = snapshots.value
@@ -126,7 +130,7 @@ class PrototypeRuntime(
   fun replace(spec: PrototypeSpec) {
     if (!current.active) return
     stateWriteValidator = null
-    val next = snapshot(spec, current.pages)
+    val next = snapshot(spec, current.pages, current.stacks)
     val changed =
       (current.state.keys + next.state.keys).filter { key ->
         current.state[key] != next.state[key] &&
@@ -147,6 +151,9 @@ class PrototypeRuntime(
     if (!current.active) return
     when (interaction) {
       PrototypeInteraction.HostDismiss -> dismiss()
+      // Paths in hidden screens still retain focus while navigated. If none is visible and
+      // eligible, preserve the existing Back dismissal rather than changing a hidden screen.
+      PrototypeInteraction.Back -> if (!popTopmostStack()) dismiss()
       is PrototypeInteraction.Tap -> control(emptyMap(), interaction.actions)
       is PrototypeInteraction.PagerMotion ->
         if (!interaction.scrolling) setPage(interaction.pager, interaction.page)
@@ -248,6 +255,20 @@ class PrototypeRuntime(
             },
           )
         }
+        is PrototypePushAction ->
+          changeStack(action.stack) { node, path ->
+            if (
+              path.size >= PrototypeSpecValidator.MAX_PROTOTYPE_STACK_DEPTH ||
+                !node.screens.containsKey(action.screen)
+            ) path else path + action.screen
+          }
+        is PrototypePopAction -> changeStack(action.stack) { _, path ->
+          if (path.size == 1) path else path.dropLast(1)
+        }
+        is PrototypePopToRootAction -> changeStack(action.stack) { node, _ -> listOf(node.start) }
+        is PrototypeReplaceAction -> changeStack(action.stack) { node, path ->
+          if (!node.screens.containsKey(action.screen)) path else path.dropLast(1) + action.screen
+        }
         PrototypeDismissAction -> dismiss()
         else ->
           writes[index]?.let { (key, spec) ->
@@ -331,6 +352,52 @@ class PrototypeRuntime(
     emit(PrototypeEventKind.PAGE_CHANGED, id, JsonPrimitive(page))
   }
 
+  /** Framework-free Back policy; the controller serializes this with other interactions. */
+  suspend fun popTopmostStack(): Boolean {
+    if (!current.active) return false
+    val root = renderModel().root
+    var target: String? = null
+    fun visit(node: PrototypeRenderNode) {
+      if (!node.visible || node.role in PROTOTYPE_MODAL_ROLES) return
+      val stack = node.source as? PrototypeStackNode
+      if (stack != null && (current.stacks[stack.id]?.depth ?: 1) > 1) target = stack.id
+      // Visit parents before children: a nested top-screen stack wins over its ancestor.
+      // Among siblings the last eligible stack in document order wins, matching render order.
+      val children =
+        if (node.role == "pager") listOfNotNull(node.children.getOrNull(node.page))
+        else node.children
+      children.forEach(::visit)
+    }
+    visit(root)
+    // Hoisted modals render last; stacks in their visible bodies take Back before inline ones.
+    modalPrototypeSheets(root).forEach { modal -> modal.children.forEach(::visit) }
+    val id = target ?: return false
+    changeStack(id) { _, path -> path.dropLast(1) }
+    return true
+  }
+
+  private suspend fun changeStack(
+    id: String,
+    transform: (PrototypeStackNode, List<String>) -> List<String>,
+  ) {
+    val node = stackNodes(current.spec.root)[id] ?: return
+    val before = current.stacks[id] ?: return
+    val path = transform(node, before.path)
+    if (path == before.path) return
+    val next = PrototypeStackSnapshot(path.toList())
+    mutableSnapshot.value = current.copy(stacks = current.stacks + (id to next))
+    if (before.path.last() != path.last() || before.depth != next.depth) {
+      emit(
+        PrototypeEventKind.SCREEN_CHANGED,
+        id,
+        buildJsonObject {
+          put("screen", path.last())
+          put("depth", next.depth)
+        },
+      )
+    }
+  }
+
   /** [from] with [values] written, or [IllegalArgumentException] when the result is not valid. */
   private fun validated(from: PrototypeSpec, values: Map<String, PrototypeScalar>): PrototypeSpec =
     PrototypeTrace.section(PrototypeTrace.VALIDATE_STATE_WRITE) {
@@ -411,15 +478,26 @@ class PrototypeRuntime(
         payload,
         current.state.toMap(),
         current.pages.toMap(),
+        current.stacks.toMap(),
       ),
     )
   }
 
-  private fun snapshot(spec: PrototypeSpec, previous: Map<String, Int>) =
+  private fun snapshot(
+    spec: PrototypeSpec,
+    previous: Map<String, Int>,
+    previousStacks: Map<String, PrototypeStackSnapshot>,
+  ) =
     PrototypeRuntimeSnapshot(
       spec,
       pagerCounts(spec.root).mapValues { (id, count) ->
         (previous[id] ?: 0).coerceIn(0, count - 1)
+      },
+      stacks = stackNodes(spec.root).mapValues { (id, node) ->
+        val path =
+          previousStacks[id]?.path.orEmpty().filter { node.screens.containsKey(it) }
+            .take(PrototypeSpecValidator.MAX_PROTOTYPE_STACK_DEPTH)
+        PrototypeStackSnapshot(path.ifEmpty { listOf(node.start) })
       },
     )
 }
@@ -432,12 +510,21 @@ internal fun prototypeDescendants(node: PrototypeNode): List<PrototypeNode> =
     is PrototypeRowNode -> node.children
     is PrototypeColumnNode -> node.children
     is PrototypePagerNode -> node.children
+    is PrototypeStackNode -> node.screens.values.toList()
     is PrototypeCardNode -> node.children
     is PrototypeScrollNode -> listOf(node.child)
     is PrototypeBottomSheetNode -> listOf(node.child)
     is PrototypeDialogNode -> listOfNotNull(node.child)
     else -> emptyList()
   }
+
+internal fun stackNodes(root: PrototypeNode): Map<String, PrototypeStackNode> = buildMap {
+  fun visit(node: PrototypeNode) {
+    if (node is PrototypeStackNode) put(node.id, node)
+    prototypeDescendants(node).forEach(::visit)
+  }
+  visit(root)
+}
 
 internal fun pagerCounts(root: PrototypeNode): Map<String, Int> = buildMap {
   fun visit(node: PrototypeNode) {

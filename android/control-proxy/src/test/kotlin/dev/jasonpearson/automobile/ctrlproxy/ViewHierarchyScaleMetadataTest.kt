@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.ctrlproxy.models.PanelFingerprintInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import java.io.File
 import kotlinx.serialization.json.Json
@@ -24,6 +25,16 @@ class ViewHierarchyScaleMetadataTest {
   }
 
   private val lenientJson = Json { ignoreUnknownKeys = true }
+
+  @Test
+  fun `hierarchy fingerprint is additive and omitted when null`() {
+    val json = Json { encodeDefaults = true }
+    val empty = json.encodeToString(ViewHierarchy.serializer(), ViewHierarchy())
+    assertTrue(!empty.contains("panelFingerprint"))
+    val hierarchy = ViewHierarchy(panelFingerprint = PanelFingerprintInfo(2076, 2152))
+    val wire = json.encodeToString(ViewHierarchy.serializer(), hierarchy)
+    assertTrue(wire.contains("\"panelFingerprint\":{\"width\":2076,\"height\":2152}"))
+  }
 
   @Test
   fun `incomplete reason is omitted when null even with encoded defaults`() {

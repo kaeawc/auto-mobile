@@ -874,17 +874,20 @@ async function startExecutionOwnerWatch(
     { isProcessRunning },
     { defaultTimer },
     { defaultLockOwnerGenerationProbe },
+    { processGenerationReadIsCheap },
   ] = await Promise.all([
     import("./daemon/executionOwnerWatch"),
     import("./utils/processLiveness"),
     import("./utils/SystemTimer"),
     import("./daemon/lockOwnerGeneration"),
+    import("./daemon/processGeneration"),
   ]);
   new ExecutionOwnerWatch(
     {
       launchParentPid,
       ownerPid,
       ownerGenerationToken,
+      generationCheckEvery: processGenerationReadIsCheap() ? 1 : undefined,
       onOwnerLost: () => requestProcessShutdown("execution-owner-lost"),
     },
     { isProcessRunning: (pid) => isProcessRunning(pid), currentParentPid: () => process.ppid },

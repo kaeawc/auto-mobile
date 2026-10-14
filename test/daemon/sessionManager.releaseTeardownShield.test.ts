@@ -54,7 +54,7 @@ class SignalAwareDevice {
   /** A command already sent can acknowledge successfully after its caller's signal aborts. */
   ignoreAbort = false;
 
-  restorer(kind: RestoreKind): () => Promise<void> {
+  restorer(kind: RestoreKind): () => Promise<{ status: "restored" }> {
     return async () => {
       const signal = getAbortSignal();
       if (signal?.aborted && !this.ignoreAbort) {
@@ -66,7 +66,7 @@ class SignalAwareDevice {
             once: true,
           });
         });
-        return;
+        return { status: "restored" };
       }
       await this.gate;
       const failuresLeft = this.failFirst[kind] ?? 0;
@@ -75,6 +75,7 @@ class SignalAwareDevice {
         throw new Error(`${kind} command failed on the device`);
       }
       this.reached.push(kind);
+      return { status: "restored" };
     };
   }
 }

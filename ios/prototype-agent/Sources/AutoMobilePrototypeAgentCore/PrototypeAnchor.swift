@@ -77,7 +77,12 @@ struct PrototypeAnchor: Decodable, Equatable {
         let y: Double
     }
 
-    init(bounds: PrototypeRect?, alignment: PrototypeAnchorAlignment = .cover, offsetX: Double = 0, offsetY: Double = 0) {
+    init(
+        bounds: PrototypeRect?,
+        alignment: PrototypeAnchorAlignment = .cover,
+        offsetX: Double = 0,
+        offsetY: Double = 0
+    ) {
         self.bounds = bounds
         self.alignment = alignment
         self.offsetX = offsetX
@@ -179,6 +184,7 @@ private let prototypeInlineContainerTypes: Set<String> = [
     "card",
     "pager",
     "bottomSheet",
+    "searchBar",
 ]
 
 extension PrototypeNode {
@@ -235,6 +241,7 @@ extension PrototypeNode {
         }
         guard prototypeInlineContainerTypes.contains(type) else { return [] }
         if type == "bottomSheet", !(openWhen?.holds(state) ?? false) { return [] }
+        if type == "searchBar", !searchBarActive(state: state) { return [] }
         var entries = childEntries(path: path)
         if type == "pager" {
             // The renderer's clamp: a page past the end shows the last one.

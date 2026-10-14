@@ -558,6 +558,10 @@ final class PrototypeNode: Decodable {
     let variant: String?
     let stateKey: String?
     let placeholder: String?
+    /// Search results are shown only while this boolean state key is true.
+    let activeKey: String?
+    let trailingActions: [PrototypeAppBarAction]?
+    let onSubmit: [PrototypeAction]?
     let axis: String?
     let items: [NavItem]?
     let pager: String?

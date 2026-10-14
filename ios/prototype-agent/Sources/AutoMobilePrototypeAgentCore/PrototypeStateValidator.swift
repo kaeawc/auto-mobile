@@ -55,6 +55,8 @@ enum PrototypeStateValidator {
     private static func collect(_ node: PrototypeNode, nodes: inout [PrototypeNode], actions: inout [PrototypeAction]) {
         nodes.append(node)
         actions += node.onTap ?? []
+        actions += node.onSubmit ?? []
+        actions += (node.trailingActions ?? []).flatMap { $0.onTap ?? [] }
         actions += node.navigationIcon?.onTap ?? []
         actions += (node.actions ?? []).flatMap { $0.onTap ?? [] }
         actions += node.confirm?.onTap ?? []
@@ -68,11 +70,17 @@ enum PrototypeStateValidator {
 
     private static func bindingError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> String? {
         if let message = componentError(node, state) { return message }
-        guard let key = node.stateKey else { return nil }
+        guard let key = node.stateKey else {
+            return node.type == "searchBar" ? "Text field requires a string state key" : nil
+        }
         let stored = state[key]
         switch node.type {
-        case "textField":
-            return stored?.stringValue == nil ? "Text field requires a string state key" : nil
+        case "textField", "searchBar":
+            if stored?.stringValue == nil { return "Text field requires a string state key" }
+            if node.type == "searchBar", let activeKey = node.activeKey, state[activeKey]?.boolValue == nil {
+                return "Search bar requires a boolean active key"
+            }
+            return nil
         case "switch", "checkbox":
             return stored?.boolValue == nil ? "Toggle control requires a boolean state key" : nil
         case "radioGroup", "segmentedButton":

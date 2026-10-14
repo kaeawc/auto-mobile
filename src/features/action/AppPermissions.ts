@@ -91,6 +91,8 @@ export interface AppPermissionStateResult {
   state: AppPermissionState;
   service?: string;
   source: "androidRuntime" | "iosTcc";
+  verified?: boolean;
+  reason?: string;
   authValue?: number;
   raw?: Record<string, string | number | boolean | null>;
 }
@@ -117,7 +119,7 @@ export interface SetAppPermissionsResult {
   failedCount: number;
   operations: AppPermissionOperationResult[];
   error?: string;
-  /** Operation warnings (e.g. an unverified outcome); present only on Android when any exist. */
+  /** Operation warnings (e.g. an unverified outcome); present on Android or iOS simulator Photos grants when any exist. */
   warnings?: string[];
 }
 
@@ -230,8 +232,10 @@ export class AppPermissions {
         failedCount: permissionResult.success ? 0 : 1,
         result: permissionResult,
         ...(permissionResult.error ? { error: permissionResult.error } : {}),
+        ...(permissionResult.warning ? { warning: permissionResult.warning } : {}),
       })),
       ...(result.error ? { error: result.error } : {}),
+      ...(result.warnings ? { warnings: result.warnings } : {}),
     };
   }
 
@@ -448,6 +452,8 @@ export class AppPermissions {
         service: permission.service,
         state: permission.state,
         source: "iosTcc",
+        ...(permission.verified === undefined ? {} : { verified: permission.verified }),
+        ...(permission.reason === undefined ? {} : { reason: permission.reason }),
         ...(permission.authValue === undefined ? {} : { authValue: permission.authValue }),
         ...(permission.raw ? { raw: permission.raw } : {}),
       })),

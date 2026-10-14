@@ -93,11 +93,47 @@ struct PrototypeSpec: Decodable {
         case id, window, state, data, theme, motion, root
     }
 
+    // Keep the root prefix in coding paths when decoding the resolved/expanded tree.
+    private struct DecodedRoot: Decodable {
+        let root: PrototypeNode
+    }
+
     init(from decoder: Decoder) throws {
-        try PrototypeSizeBounds.validate(JSONValue(from: decoder))
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        // Match the host/Kotlin top-level UTF-16 key order: data, id, motion, root,
+        // state, theme, window. Each size walk stays at its member's turn.
+        // Within root/window, sizes still precede structural decoding, whose nested
+        // field order is not sorted; mixed nested errors can therefore differ from
+        // the host/Kotlin's single traversal. Root decoding also uses the resolved,
+        // expanded tree, so its structural paths refer to that tree.
+        if container.contains(.data) {
+            data = try container.decode([String: JSONValue].self, forKey: .data)
+        } else {
+            data = nil
+        }
+        if let data { try PrototypeLimits.guardData(data) }
         id = try container.decode(String.self, forKey: .id)
-        window = try container.decode(WindowSpec.self, forKey: .window)
+        motion = try container.decodeIfPresent(String.self, forKey: .motion)
+        let raw = try container.decode(JSONValue.self, forKey: .root)
+        try PrototypeSizeBounds.validate(.object(["root": raw]))
+        try PrototypeLimits.guardAuthoredTree(raw)
+        try PrototypeLimits.guardRepeatPathCells(raw, data: data)
+        try PrototypeMenus.validateAuthoredText(raw)
+        try PrototypeRepeat.validateEmitContexts(raw, data: data)
+        try PrototypeLimits.guardSubstitutedText(raw, data: data)
+        let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
+        try PrototypeLimits.guardTree(resolved)
+        let expanded = PrototypeRepeat.expand(resolved)
+        try PrototypePagerOptions.validate(expanded)
+        // Menus validate against state, but state is decoded (and checked) after root to keep the
+        // key order; a state that does not decode is reported at its own turn below.
+        let menuState = (try? container.decodeIfPresent([String: JSONValue].self, forKey: .state)) ?? nil
+        try PrototypeMenus.validate(expanded, state: menuState ?? [:])
+        root = try JSONDecoder().decode(
+            DecodedRoot.self,
+            from: JSONEncoder().encode(JSONValue.object(["root": expanded]))
+        ).root
+        root.bindValidity(PrototypeChecks.bindings(root: root))
         state = try container.decodeIfPresent([String: JSONValue].self, forKey: .state)
         // Android's `PrototypeScalarSerializer` and the host schema accept only string, number and
         // boolean state values, so a null, array or object fails the show everywhere.
@@ -108,29 +144,9 @@ struct PrototypeSpec: Decodable {
                 debugDescription: "State value for \"\(offending)\" must be a string, number or boolean"
             )
         }
-        if container.contains(.data) {
-            data = try container.decode([String: JSONValue].self, forKey: .data)
-        } else {
-            data = nil
-        }
-        if let data { try PrototypeLimits.guardData(data) }
         theme = try container.decodeIfPresent(PrototypeTheme.self, forKey: .theme)
-        motion = try container.decodeIfPresent(String.self, forKey: .motion)
-        let raw = try container.decode(JSONValue.self, forKey: .root)
-        try PrototypeLimits.guardAuthoredTree(raw)
-        try PrototypeLimits.guardRepeatPathCells(raw, data: data)
-        try PrototypeMenus.validateAuthoredText(raw)
-        try PrototypeRepeat.validateEmitContexts(raw, data: data)
-        try PrototypeLimits.guardSubstitutedText(raw, data: data)
-        let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
-        try PrototypeLimits.guardTree(resolved)
-        let expanded = PrototypeRepeat.expand(resolved)
-        try PrototypePagerOptions.validate(expanded)
-        try PrototypeMenus.validate(expanded, state: state ?? [:])
-        root = try JSONDecoder().decode(
-            PrototypeNode.self, from: JSONEncoder().encode(expanded)
-        )
-        root.bindValidity(PrototypeChecks.bindings(root: root))
+        try PrototypeSizeBounds.validate(.object(["window": container.decode(JSONValue.self, forKey: .window)]))
+        window = try container.decode(WindowSpec.self, forKey: .window)
         // There is no Swift twin of the host validator, so the forms `prototype_theme_modes_v1`
         // added are checked here: a malformed one fails the show instead of drawing a fallback.
         try PrototypeStacks.validate(root: root)
@@ -632,6 +648,8 @@ final class PrototypeNode: Decodable {
     let detents: [Detent]?
     let scrim: PrototypeModeValue?
     let dragHandle: Bool?
+    /// Swipe dismissal is enabled when omitted, as on Android.
+    let dismissOnSwipe: Bool?
     /// `radioGroup` and `segmentedButton` choices.
     let options: [PrototypeOption]?
     /// Built-in icon name of a `button`, `iconButton`, `fab` or `dialog`.

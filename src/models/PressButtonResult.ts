@@ -6,4 +6,6 @@ import { BaseActionResult } from "./BaseActionResult";
 export interface PressButtonResult extends BaseActionResult {
   button: string;
   keyCode: number;
+  code?: string;
+  retryable?: boolean;
 }

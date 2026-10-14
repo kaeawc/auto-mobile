@@ -40,6 +40,8 @@ enum PrototypeAgentProtocol {
         stackCapability,
         emitContextCapability,
         checksCapability,
+        identifierTestTagOnlyCapability,
+        bottomSheetDragCapability,
     ]
     /// A same-id `show_prototype` replaces the prototype in place keeping pager pages and stack paths, and
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
@@ -105,6 +107,10 @@ enum PrototypeAgentProtocol {
     /// Draws icons from schemas/prototype-ios-icon-symbols.json and honours filled/outlined
     /// icon variants where the table has those forms.
     static let iconSfSymbolsCapability = "prototype_icon_sf_symbols_v1"
+    /// Node and composite-part accessibility identifiers use only `testTag`, as on Android.
+    static let identifierTestTagOnlyCapability = "prototype_identifier_test_tag_only_v1"
+    /// Bottom sheets drag between detents and optionally dismiss on a downward swipe.
+    static let bottomSheetDragCapability = "prototype_bottom_sheet_drag_v1"
     static let portEnvironmentKey = "AUTOMOBILE_PROTOTYPE_PORT"
     static let tokenEnvironmentKey = "AUTOMOBILE_PROTOTYPE_TOKEN"
     /// Shortest token the agent accepts, so a stray or empty value cannot open the server.

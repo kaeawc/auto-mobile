@@ -544,8 +544,8 @@ struct PrototypeSession {
 
     // MARK: Status
 
-    /// Font asset ids the shown spec names. iOS cannot load an uploaded font, so these are always
-    /// reported missing and drawn with the system font.
+    /// Font asset ids the shown spec names. Fonts are reported missing and drawn with the system
+    /// font unless the viewer registered a face for the asset.
     func fontAssets() -> [String] {
         guard let spec else { return [] }
         var ids = Set<String>()

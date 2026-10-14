@@ -1487,6 +1487,8 @@ export const pressButtonResultSchema = z
     ...lifecycleActionOutputFields,
     button: z.string().optional(),
     keyCode: z.number().optional(),
+    code: z.string().optional(),
+    retryable: z.boolean().optional(),
   })
   .passthrough();
 

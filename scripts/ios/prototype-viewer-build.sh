@@ -5,7 +5,9 @@
 # STAMP POINTS after copying the .app: CFBundleIdentifier, CFBundleDisplayName + CFBundleName
 # in Info.plist (the only name source; no InfoPlist.strings); overwrite the loose PNGs
 # PrototypeViewerIcon60x60@2x.png (120x120) and PrototypeViewerIcon60x60@3x.png (180x180).
-# Write Documents/prototype.json in the data container from
+# Write the saved layout under Documents/prototype/ in the data container:
+# manifest.json, spec.json, assets/<sha256>.<ext>, fonts/<sha256>.<ext> (formatVersion 1).
+# The bundled prototype.json is only the template demo fallback. Obtain the container from
 # simctl get_app_container <udid> <bundle-id> data; then codesign --force --sign - the .app
 # and simctl install. Executable name and bundle layout must not change.
 set -euo pipefail

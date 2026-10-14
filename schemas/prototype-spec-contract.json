@@ -53,14 +53,18 @@
         "x": {
           "rule": {
             "kind": "number",
-            "integer": false
+            "integer": false,
+            "min": -10000,
+            "max": 10000
           },
           "optional": false
         },
         "y": {
           "rule": {
             "kind": "number",
-            "integer": false
+            "integer": false,
+            "min": -10000,
+            "max": 10000
           },
           "optional": false
         },

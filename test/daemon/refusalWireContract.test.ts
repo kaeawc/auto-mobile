@@ -138,7 +138,10 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
 };
 
 /** Only non-wire codes may bypass the module map; the inventory rejects stale exemptions. */
-const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {};
+const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
+  "features/prototype/ios/iosPrototypeInstallerErrors":
+    "Host installer library errors; no MCP/tool boundary until #12257 wires the installer.",
+};
 
 interface CodedErrorModule {
   module: string;
@@ -556,6 +559,9 @@ function surfaceTyped(fixture: RefusalSurfaceFixture): {
     // Preserve absence of retry intent rather than inventing a boolean on this wire.
     expect(Object.hasOwn(payload, "retryable"), fixture.name).toBe(false);
     return { typed: { code: String(payload.errorCode) } };
+  }
+  if (fixture.surface === "press-button-result") {
+    return { typed: payload as TypedFields };
   }
   if (fixture.surface === "delete-device") {
     const text = (payload as unknown as RefusalWireResult).content[0].text;

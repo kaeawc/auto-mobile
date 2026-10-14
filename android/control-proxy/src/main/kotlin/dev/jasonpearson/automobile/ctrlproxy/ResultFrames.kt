@@ -8,6 +8,9 @@ import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypeResult
 import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
+import dev.jasonpearson.automobile.protocol.SavedPrototypeEntry
+import dev.jasonpearson.automobile.protocol.SavedPrototypeErrorCode
+import dev.jasonpearson.automobile.protocol.SavedPrototypeInfo
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import kotlinx.serialization.encodeToString
@@ -174,6 +177,44 @@ internal fun prototypeResultFrame(
       pages = pages,
       stacks = stacks,
       hiddenReason = hiddenReason,
+    ),
+  )
+
+internal fun prototypeSavedFrame(requestId: String?, saved: SavedPrototypeInfo): String =
+  resultFrameJson.encodeToString<WebSocketResponse>(
+    PrototypeResult(
+      timestamp = System.currentTimeMillis(),
+      requestId = requestId,
+      success = true,
+      saved = saved,
+    ),
+  )
+
+internal fun prototypeSavedListFrame(
+  requestId: String?,
+  entries: List<SavedPrototypeEntry>,
+): String =
+  resultFrameJson.encodeToString<WebSocketResponse>(
+    PrototypeResult(
+      timestamp = System.currentTimeMillis(),
+      requestId = requestId,
+      success = true,
+      savedPrototypes = entries,
+    ),
+  )
+
+internal fun prototypeRefusalFrame(
+  requestId: String?,
+  code: SavedPrototypeErrorCode,
+  error: String,
+): String =
+  resultFrameJson.encodeToString<WebSocketResponse>(
+    PrototypeResult(
+      timestamp = System.currentTimeMillis(),
+      requestId = requestId,
+      success = false,
+      errorCode = code,
+      error = error,
     ),
   )
 

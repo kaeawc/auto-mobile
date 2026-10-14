@@ -565,6 +565,10 @@ jobs:
             AUTOMOBILE_ENABLED_TOOLS: "videoRecording,navigateTo,getNavigationGraph,explore"
           command: ./scripts/ios/navigation-graph-sdk-event-integration.sh "${SIMULATOR_UDID}"
       - run:
+          name: "Run saved prototype smoke (advisory)"
+          no_output_timeout: 12m
+          command: ./scripts/ios/saved-prototype-smoke-advisory.sh "${SIMULATOR_UDID}"
+      - run:
           name: "Stop AutoMobile daemon before odd-width boot"
           command: |
             source ./scripts/ios/run_with_timeout.sh

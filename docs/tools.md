@@ -637,7 +637,7 @@ response size, so use it only when the client needs image bytes in the tool resu
 | 🗺️ <code>navigateTo</code>           | Navigates using the learned navigation graph.                             |
 | 📊 <code>getNavigationGraph</code>   | Retrieves the navigation graph for debugging.                             |
 | 🔗 <code>identifyInteractions</code> | Suggests likely interactions.                                             |
-| 🪟 <code>prototype</code>            | Shows, dismisses, awaits events, or reports prototypes.                   |
+| 🪟 <code>prototype</code>            | Shows, dismisses, awaits events, reports, saves, lists or deletes.        |
 | 🖍️ <code>highlight</code>            | Draws a visual highlight around a UI element.                             |
 
 ### prototype
@@ -653,7 +653,7 @@ adopts it, and dismiss clears it. See the [data model contract](design-docs/plat
 
 The `prototype` tool (Android and iOS simulators) is omitted from discovery by default. Enable it
 with `setToolEnabled { toolName: "prototype", enabled: true }`. Its `action` is
-`show`, `dismiss`, `status`, `inspect`, or `awaitEvent`. `show` requires a full `spec` (id,
+`show`, `patch`, `dismiss`, `status`, `inspect`, `awaitEvent`, `save`, `listSaved`, or `deleteSaved`. `show` requires a full `spec` (id,
 window, optional data and state, root) and always renders the whole spec. Instead of an inline
 `spec`, `show` accepts `specPath`, the absolute path of a local JSON file with the same spec
 (exactly one of the two): the daemon reads it, refuses a file over the spec byte limit (1 MiB)
@@ -662,6 +662,19 @@ The path is never sent to the device. A spec holds up to 2000 nodes, and a `repe
 128 items. `dismiss`
 requires either `id` or `all: true`. `spec.window.opacity` is an integer
 percentage from 0 to 100, default 100; show the spec again to change it.
+
+Android saved prototypes require `prototype_saved_v1`: `save` takes `spec`, optional `assets`,
+`label` (defaults to `spec.id`, 1–120 characters) and `icon` (an asset uploaded in the same call).
+`listSaved` reads saved entries; `deleteSaved` requires `id`. iOS refuses all three with
+`unsupported_platform`; a missing Android capability returns `unsupported_capability`.
+Pinning (`pin:true`, optionally `autoConfirm:true`) and icon removal (`removeIcon:true`) are
+not available yet: save still succeeds with `pinned:"unsupported"`, and deletion warns that
+an earlier pinned icon may remain and can be removed by hand. A deleted prototype's disabled
+home-screen icon may remain. Store failures return actionable errors with `errorCode`:
+`invalid_id`, `invalid_label`, `spec_too_large`, `invalid_spec`, `invalid_asset_id`,
+`duplicate_asset_id`, `unsupported_mime_type`, `empty_asset`, `asset_too_large`, `count_limit`,
+`total_limit`, `missing_asset`, `saved_count_limit`, `storage_failure`, `unsupported_existing`,
+`not_found`, `unsupported_format`, or `internal_error`.
 
 A `show` whose `spec.id` is the prototype already on screen replaces it in place:
 it stays on the display it is on, and each pager keeps its current page (matched
@@ -1623,6 +1636,14 @@ termination/PID contract is verified. Use <code>homeScreen</code> for iOS Home.
 the Android package name or iOS bundle ID. `clearKeyValueFile.fileName` and
 `removeKeyValue.fileName` are deprecated aliases for the store selector `name`.
 `setAppPermissions.action` selects `grant`, `revoke`, or `reset`.
+
+On iOS Simulator, a stored TCC Photos grant is not proof of effective full
+read/write authorization. `getAppPermissions` reports it as `unknown` with
+`verified: false`; `setAppPermissions` reports a dispatched Photos grant as
+success with `applied: true`, `verified: false`, and a warning. Verification is
+unavailable from the host without app instrumentation: launch the app and check
+`PHPhotoLibrary authorizationStatusForAccessLevel:ReadWrite`. Add-only access is
+insufficient. Physical-device permission limits are unchanged.
 
 `resetKeychain` requires `appId` and `confirm: true`. On iOS Simulator the reset
 erases every app's Keychain, regardless of `appId`.

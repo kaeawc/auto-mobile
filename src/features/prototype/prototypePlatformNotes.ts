@@ -144,7 +144,7 @@ export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly (PlatformDifference & {
     effect: "substituted",
     capability: PROTOTYPE_IDENTIFIER_TEST_TAG_ONLY_CAPABILITY,
     detail:
-      "iOS uses id as the accessibility identifier (and <id>.<part> for composite parts) when testTag is absent; Android gives such a node no identifier, so set testTag for an identifier on both.",
+      "An iOS agent without prototype_identifier_test_tag_only_v1 uses id as the accessibility identifier (and <id>.<part> for composite parts) when testTag is absent; Android gives such a node no identifier, so set testTag for an identifier on both.",
     occurrencePath: ({ node, path }) =>
       node?.id !== undefined && node.testTag === undefined ? `${path}.id` : undefined,
   },
@@ -154,7 +154,7 @@ export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly (PlatformDifference & {
     effect: "ignored",
     capability: PROTOTYPE_BOTTOM_SHEET_DRAG_CAPABILITY,
     detail:
-      "iOS has no swipe-to-dismiss and the sheet closes only through its openWhen key or a scrim tap; Android supports swipe-to-dismiss by default.",
+      "An iOS agent without prototype_bottom_sheet_drag_v1 has no swipe-to-dismiss and the sheet closes only through its openWhen key or a scrim tap; Android supports swipe-to-dismiss by default.",
     occurrencePath: ({ node, path }) =>
       node?.type === "bottomSheet" && node.dismissOnSwipe !== false
         ? `${path}.dismissOnSwipe`
@@ -166,7 +166,7 @@ export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly (PlatformDifference & {
     effect: "ignored",
     capability: PROTOTYPE_BOTTOM_SHEET_DRAG_CAPABILITY,
     detail:
-      "iOS opens the sheet at its first detent and cannot drag to the others; Android supports dragging between detents.",
+      "An iOS agent without prototype_bottom_sheet_drag_v1 opens the sheet at its first detent and cannot drag to the others; Android supports dragging between detents.",
     occurrencePath: ({ node, path }) =>
       node?.type === "bottomSheet" && Array.isArray(node.detents) && node.detents.length > 1
         ? `${path}.detents`

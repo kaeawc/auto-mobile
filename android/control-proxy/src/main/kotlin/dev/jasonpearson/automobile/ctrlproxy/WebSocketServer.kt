@@ -135,8 +135,15 @@ class WebSocketServer(
      * Prototype requests answer a malformed frame with a `prototype_result` rather than an error.
      */
     private val prototypeRequestTypes =
-      setOf("show_prototype", "dismiss_prototype", "inspect_prototypes", "patch_prototype") +
-        prototypeAssetRequestTypes
+      setOf(
+        "show_prototype",
+        "dismiss_prototype",
+        "inspect_prototypes",
+        "patch_prototype",
+        "save_prototype",
+        "list_saved_prototypes",
+        "delete_saved_prototype",
+      ) + prototypeAssetRequestTypes
 
     /** Requests whose payload is typed user input, which may be a password. */
     private val textInputRequestTypes =
@@ -382,6 +389,8 @@ class WebSocketServer(
     // A device-persistent prototype buffers its events while no host is connected and replays them,
     // and inspect_prototypes reports what it is showing. Older hosts never send inspect_prototypes.
     add("prototype_persistence_replay_v1")
+    // Gates save_prototype, list_saved_prototypes and delete_saved_prototype.
+    add("prototype_saved_v1")
     // show_prototype replaces a same-id prototype in place (display and pager pages kept) unless
     // reset
     // is set. Older APKs ignore reset and re-show fresh; hosts warn that pages restarted (#10642).

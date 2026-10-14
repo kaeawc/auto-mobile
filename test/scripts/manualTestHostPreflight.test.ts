@@ -5,6 +5,7 @@ import {
   parsePmsetBatt,
   parsePmsetAssertions,
   parseIoregClamshell,
+  parsePmsetSettings,
   buildHostPreflightReport,
   hostPreflight,
   type HostStats,
@@ -17,7 +18,7 @@ import {
 import { fixture, options, parsed } from "./manualTestPrivateDaemonFixture";
 // Read real host captures as immutable text assets, never through a spawned command.
 const captures = await Promise.all(
-  ["pmset-batt", "pmset-assertions", "ioreg-clamshell"].map(async (name) => {
+  ["pmset-batt", "pmset-assertions", "ioreg-clamshell", "pmset-settings"].map(async (name) => {
     const asset: { default: unknown } = await import(
       new URL(`../fixtures/manual-test-host/${name}.txt`, import.meta.url).href,
       { with: { type: "text" } }
@@ -36,6 +37,7 @@ const healthy: HostSections = {
   power: { source: "ac", chargePercent: 85 },
   sleep: { preventUserIdleSystemSleep: true, preventSystemSleep: true },
   lid: { closed: false, clamshellCausesSleep: false },
+  lowPower: { enabled: false },
 };
 function darwinFixture() {
   const f = fixture();
@@ -44,7 +46,8 @@ function darwinFixture() {
     f.captures.push({ command, args, env, timeoutMs });
     return {
       exitCode: 0,
-      stdout: captures[command === "ioreg" ? 2 : args[1] === "batt" ? 0 : 1],
+      stdout:
+        captures[command === "ioreg" ? 2 : args.length === 1 ? 3 : args[1] === "batt" ? 0 : 1],
       stderr: "",
     };
   };
@@ -54,9 +57,55 @@ test("parsers read real captures and only system-wide assertion counters", () =>
   expect(parsePmsetBatt(captures[0])).toEqual(healthy.power);
   expect(parsePmsetAssertions(captures[1])).toEqual(healthy.sleep);
   expect(parseIoregClamshell(captures[2])).toEqual(healthy.lid);
+  expect(parsePmsetSettings(captures[3])).toEqual({ enabled: false });
+  expect(
+    buildHostPreflightReport(options.batchDir, stats, {
+      ...healthy,
+      lowPower: parsePmsetSettings(captures[3]),
+    }).warnings,
+  ).toEqual([]);
   expect(parsePmsetAssertions(captures[1].split("Listed by owning process:")[1])).toHaveProperty(
     "unavailable",
   );
+});
+test("low power mode warns only when reported enabled", () => {
+  expect(parsePmsetSettings("lowpowermode         1")).toEqual({ enabled: true });
+  expect(parsePmsetSettings("lowpowermode 0")).toEqual({ enabled: false });
+  expect(parsePmsetSettings("powermode 1")).toEqual({ enabled: true });
+  expect(parsePmsetSettings("powermode 0")).toEqual({ enabled: false });
+  expect(parsePmsetSettings("lowpowermode 1\npowermode 2")).toEqual({ enabled: true });
+  expect(parsePmsetSettings("lowpowermode 1 (x)\r\n")).toEqual({ enabled: true });
+  expect(parsePmsetSettings("garbage")).toEqual({
+    unavailable: "pmset lowpowermode or powermode setting not reported",
+  });
+  expect(
+    buildHostPreflightReport(options.batchDir, stats, {
+      ...healthy,
+      lowPower: parsePmsetSettings("lowpowermode 0"),
+    }).warnings,
+  ).toEqual([]);
+  expect(
+    buildHostPreflightReport(options.batchDir, stats, {
+      ...healthy,
+      lowPower: parsePmsetSettings("lowpowermode         1"),
+    }).warnings,
+  ).toEqual([
+    "Low Power Mode is on; timings are unreliable and the host may throttle; turn it off before the batch.",
+  ]);
+  expect(
+    buildHostPreflightReport(options.batchDir, stats, {
+      ...healthy,
+      lowPower: parsePmsetSettings("powermode 1"),
+    }).warnings,
+  ).toEqual([
+    "Low Power Mode is on; timings are unreliable and the host may throttle; turn it off before the batch.",
+  ]);
+  expect(
+    buildHostPreflightReport(options.batchDir, stats, {
+      ...healthy,
+      lowPower: parsePmsetSettings("garbage"),
+    }).warnings,
+  ).toEqual([]);
 });
 test("garbage is unknown or unavailable without throwing", () => {
   expect(parsePmsetBatt("garbage")).toEqual({ source: "unknown" });
@@ -107,6 +156,7 @@ test("non-darwin runs no command and reports unsupported sections", async () => 
     power: { unavailable: "unsupported platform" },
     sleep: { unavailable: "unsupported platform" },
     lid: { unavailable: "unsupported platform" },
+    lowPower: { unavailable: "unsupported platform" },
     warnings: [],
   });
 });
@@ -117,6 +167,7 @@ test("darwin command argv and deadlines use the capture seam", async () => {
     ["pmset", ["-g", "batt"], 5000],
     ["pmset", ["-g", "assertions"], 5000],
     ["ioreg", ["-r", "-k", "AppleClamshellState", "-d", "1"], 5000],
+    ["pmset", ["-g"], 5000],
   ]);
 });
 test("preflight requires only a safe path, prints one document, strict reflects warnings", async () => {

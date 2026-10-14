@@ -14,9 +14,9 @@ extension PrototypeNode {
         activeKey.flatMap { state[$0]?.boolValue } ?? false
     }
 
-    /// The accessibility identifier: `testTag`, else `id`.
+    /// The accessibility identifier is only the authored `testTag`, as on Android.
     var identifier: String? {
-        testTag ?? id
+        testTag
     }
 
     /// The identifier of a part of a composite node: the node's identifier, a dot, then the part

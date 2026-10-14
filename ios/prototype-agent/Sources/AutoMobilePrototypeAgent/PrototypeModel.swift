@@ -63,6 +63,8 @@ final class PrototypeModel {
     private(set) var keyboardFrame: CGRect?
     @ObservationIgnored private(set) var keyboardDuration: Double?
     var assets: [String: UIImage] = [:]
+    var fontFaces: [String: String] = [:]
+    var assetProblems: [PrototypeSavedProblem] = []
 
     func setKeyboard(frame: CGRect?, duration: Double?) {
         keyboardDuration = duration
@@ -353,6 +355,8 @@ final class PrototypeModel {
             "assets": assets.keys.sorted(),
             "lastSequence": session.lastSequence,
         ]
+        if !fontFaces.isEmpty { status["fonts"] = fontFaces.keys.sorted() }
+        if !assetProblems.isEmpty { status["assetProblems"] = assetProblems.map(\.wireObject) }
         if let data = session.data { status["data"] = JSONValue.object(data).foundationObject }
         // Only a shown prototype has a resolved mode.
         if let appearance = session.appearance { status["appearance"] = appearance.wireObject }

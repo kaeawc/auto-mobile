@@ -664,9 +664,9 @@ this slice does not redact it.
 ## Style
 
 All properties are optional. Sizes, padding, offsets, radii, and spacing use dp.
-Numeric lengths are capped at 10000, including fixed dimensions, bounds width/height,
+Numeric lengths are capped at 10000, including fixed dimensions, bounds x/y/width/height,
 size constraints, padding, corner radii, border width, spacing, sheet height and fixed detents.
-Offsets range from -10000 to 10000. Elevation is capped at 1000; text size and line height
+Offsets and bounds x/y range from -10000 to 10000. Elevation is capped at 1000; text size and line height
 are positive and capped at 1000, and letter spacing ranges from -1000 to 1000.
 Weight and aspect ratio range from 0.000001 to 10000. All endpoints are inclusive.
 
@@ -1806,3 +1806,48 @@ button, iconButton, fab, chip and listItem; false disables the control and skips
 whole action list atomically, shows errors on every listed field, and sends
 `{kind:"validation_failed", keys:[…]}` naming only the failing keys. `change` events carry
 `validity: {key:boolean}` for checked keys. Both event kinds retain the usual event envelope.
+
+## Saved prototype activity
+
+`SavedPrototypeLaunch.intent(context, id)` targets the explicit
+`SavedPrototypeActivity` component with data `automobile-saved-prototype:/<id>`
+(the single path segment is encoded with `Uri.Builder`) and
+`FLAG_ACTIVITY_NEW_DOCUMENT`. No extras are read: intents select only an id,
+never a spec or assets. `documentLaunchMode="intoExisting"` matches component and
+data via `Intent.filterEquals`, giving each id its own task while reusing the
+same id's task. Shortcut publishing may add flags; shortcut removal is deferred
+to #12265.
+
+A document relaunch calls `onNewIntent`, updates the activity's intent and reloads
+the saved entry. It closes the previous runtime without emitting a dismissal,
+then renders the latest snapshot or the corresponding typed error screen if the
+entry was deleted or cannot be opened. A different id delivered to the activity
+also reloads. Handled configuration changes preserve the live runtime state.
+
+The activity is `exported=false` with no intent filter. App-owned launches,
+including our pinned shortcut intents launched with the app's identity, can
+open it; other apps cannot render saved content or probe ids. An exported
+activity plus a signature permission would introduce an unnecessary external
+entry point, and exporting with an intent filter alone would let any app
+enumerate/launch saved entries. We rejected those alternatives; explicit,
+app-owned intents also avoid Android 15's stricter intent matching requirements.
+
+Saved entries live under `savedPrototypeRoot(context)`, the credential-encrypted
+app-private `filesDir/saved-prototypes` directory. Locked storage is checked
+before constructing or calling the store. Missing ids, deleted entries, corrupt
+content, unsupported format versions and locked storage have typed screens;
+raw storage messages and paths never reach the UI.
+The Locked screen is defensive: the app is not `directBootAware`, so this
+activity cannot start before the device's first unlock. The storage check also
+covers unavailable credential storage, such as a locked work profile.
+
+The existing runtime and Compose renderer run in an activity window without
+accessibility service state, overlay ownership, idle timeout, disconnect
+dismissal or foreground-app scoping. Back, authored dismiss and HostDismiss
+finish the activity and emit exactly one `dismissed` event with reason `user`.
+A system process kill emits nothing. Offline events enter the process-level
+`SavedPrototypeEvents.buffer`; a registered delivery consumes an event only when
+it returns true. Sequence numbers are allocated per prototype id for the process
+lifetime and continue across activity recreation and document relaunch. Future
+replay must synchronize on the buffer while draining or
+restoring it. The bounded buffer is in memory and does not survive process death.

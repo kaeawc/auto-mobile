@@ -1,5 +1,12 @@
 import { parsePrototypeStacks } from "../features/observe/android/CtrlProxyPrototypes";
 import { parsePrototypeHiddenReason } from "../features/prototype/prototypeHidden";
+import {
+  dispatchPrototypeSavedAction,
+  prototypePlatformFailure,
+  type PrototypeSavedErrorCode,
+  validatePrototypeSavedInput,
+  prototypeSavedPlatformError,
+} from "./prototypeSavedActions";
 import { prototypeAppLayerVisibilityOutput } from "../features/prototype/prototypeAppLayerVisibility";
 import {
   createPrototypePatchQueue,
@@ -54,6 +61,7 @@ import {
   prototypeInspectUnsupportedMessage,
 } from "../features/observe/android/CtrlProxyPrototypes";
 import {
+  SAVED_PROTOTYPE_ERROR_CODES,
   PROTOTYPE_ANCHOR_CAPABILITY,
   PROTOTYPE_PATCH_CAPABILITY,
   PROTOTYPE_APPEARANCE_CAPABILITY,
@@ -339,11 +347,24 @@ const assetsInput = z
 export const prototypeSchema = addDeviceTargetingToSchema(
   z
     .object({
-      action: z.enum(["show", "patch", "dismiss", "status", "inspect", "awaitEvent"], {
-        error: (issue) =>
-          getRemovedToolActionHint(PROTOTYPE_TOOL_NAME, issue.input) ??
-          "action must be one of show, patch, dismiss, status, inspect or awaitEvent",
-      }),
+      action: z.enum(
+        [
+          "show",
+          "patch",
+          "dismiss",
+          "status",
+          "inspect",
+          "awaitEvent",
+          "save",
+          "listSaved",
+          "deleteSaved",
+        ],
+        {
+          error: (issue) =>
+            getRemovedToolActionHint(PROTOTYPE_TOOL_NAME, issue.input) ??
+            "action must be one of show, patch, dismiss, status, inspect or awaitEvent; saved actions: save, listSaved or deleteSaved",
+        },
+      ),
       spec: specInput
         .optional()
         .describe(
@@ -410,12 +431,37 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .string()
         .min(1)
         .optional()
-        .describe("Prototype id required for dismiss (unless all: true) and awaitEvent"),
+        .describe(
+          "Prototype id required for dismiss (unless all: true), awaitEvent and deleteSaved",
+        ),
       assets: assetsInput
         .optional()
         .describe(
-          "show only: images to upload before the prototype is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes, or from style.fontFamily as {asset} for a TTF/OTF font file (path only, up to 2 MiB). Uploads are sequential; any failure fails the call before the prototype changes and names the assets already stored. If the device reports a supplied asset missing after the prototype is sent, it is re-uploaded and the prototype re-sent once.",
+          "show or save only: images to upload before the prototype is sent, as {id, path} with an absolute local file path or {id, observation} with an observation screenshot URI (PNG, JPEG or WebP, up to 4 MiB each, 16 MiB total, 32 assets). Reference each id from image nodes, or from style.fontFamily as {asset} for a TTF/OTF font file (path only, up to 2 MiB). Uploads are sequential; any failure fails the call before the prototype changes and names the assets already stored. If the device reports a supplied asset missing after the prototype is sent, it is re-uploaded and the prototype re-sent once.",
         ),
+      label: z
+        .string()
+        .min(1)
+        .max(120)
+        .optional()
+        .describe("save only: label, defaults to spec.id"),
+      icon: z
+        .string()
+        .min(1)
+        .optional()
+        .describe("save only: icon asset id uploaded in assets in this call"),
+      pin: z
+        .literal(true)
+        .optional()
+        .describe("save only: requests pinning, currently unsupported"),
+      autoConfirm: z
+        .literal(true)
+        .optional()
+        .describe("save only: requires pin; pinning is currently unsupported"),
+      removeIcon: z
+        .literal(true)
+        .optional()
+        .describe("deleteSaved only: requests icon removal, currently unsupported"),
       all: z.literal(true).optional().describe("Dismiss all prototypes on the targeted device"),
       eventName: z.string().min(1).optional().describe("awaitEvent only: filter event name"),
       kind: z
@@ -456,10 +502,18 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "assets",
     "ops",
     "baseRevision",
+    "label",
+    "icon",
+    "pin",
+    "autoConfirm",
+    "removeIcon",
   ] as const;
   const allowed: Record<typeof value.action, readonly string[]> = {
     show: ["spec", "specPath", "display", "reset", "appearance", "assets"],
     patch: ["id", "ops", "baseRevision"],
+    save: ["spec", "assets", "label", "icon", "pin", "autoConfirm"],
+    listSaved: [],
+    deleteSaved: ["id", "removeIcon"],
     dismiss: ["id", "all"],
     status: [],
     inspect: [],
@@ -474,6 +528,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
       });
     }
   }
+  validatePrototypeSavedInput(value, ctx);
   if (value.action === "patch") {
     (["id", "ops"] as const)
       .filter((field) => value[field] === undefined)
@@ -520,9 +575,9 @@ function validateAwaitEventInput(
 }
 
 /** status and inspect show nothing on the device: reads (#10965). The rest are control. */
-const PROTOTYPE_READ_ACTIONS: readonly string[] = ["status", "inspect"];
+const PROTOTYPE_READ_ACTIONS: readonly string[] = ["status", "inspect", "listSaved"];
 
-function isPrototypeReadAction(args: z.infer<typeof prototypeSchema>): boolean {
+export function isPrototypeReadAction(args: z.infer<typeof prototypeSchema>): boolean {
   return PROTOTYPE_READ_ACTIONS.includes(args.action);
 }
 
@@ -644,6 +699,22 @@ const prototypeEventOutputSchema = z.object({
   timestamp: z.number(),
 });
 export const prototypeOutputSchema = z.object({
+  saved: z.object({ id: z.string(), slug: z.string(), replaced: z.boolean() }).optional(),
+  savedPrototypes: z
+    .array(
+      z.object({
+        id: z.string(),
+        label: z.string(),
+        slug: z.string(),
+        savedAt: z.number().finite(),
+        pinned: z.boolean(),
+      }),
+    )
+    .optional(),
+  pinned: z.enum(["pinned", "pending", "unsupported"]).optional(),
+  errorCode: z
+    .enum([...SAVED_PROTOTYPE_ERROR_CODES, "unsupported_capability", "unsupported_platform"])
+    .optional(),
   revision: z
     .number()
     .int()
@@ -735,7 +806,7 @@ export const prototypeOutputSchema = z.object({
     .array(z.object({ id: z.string(), mimeType: z.string(), bytes: z.number().int().positive() }))
     .optional()
     .describe(
-      "show with assets: assets the device confirmed, also present on failure. They stay on the device until the prototype session ends.",
+      "show or save with assets: assets the device confirmed, also present on failure. They stay on the device until the prototype session ends.",
     ),
   missingAssets: z
     .array(z.string())
@@ -1223,7 +1294,20 @@ async function stageAssets(
   return {
     uploaded: outcome.uploaded,
     prepared: prepared.assets,
-    ...(outcome.success ? {} : { failure: { success: false, error: outcome.error } }),
+    ...(outcome.success
+      ? {}
+      : {
+          failure: {
+            success: false,
+            error:
+              args.action === "save"
+                ? outcome.error?.replace(
+                    "The new spec was not sent; a prototype already showing stays as it was.",
+                    "The prototype was not saved.",
+                  )
+                : outcome.error,
+          },
+        }),
   };
 }
 
@@ -2410,7 +2494,11 @@ async function waitForPrototypeEvent(
 function prototypePlatformError(
   device: BootedDevice,
   args: z.infer<typeof prototypeSchema>,
-): ActionableError | undefined {
+): (ActionableError & { errorCode?: PrototypeSavedErrorCode }) | undefined {
+  const savedError = prototypeSavedPlatformError(device.platform, args.action);
+  if (savedError) {
+    return savedError;
+  }
   if (device.platform === "android") {
     return undefined;
   }
@@ -2726,7 +2814,7 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
         : { ...loaded.args, spec: prototypeSpecForDevice(loaded.args.spec) };
     const platformError = prototypePlatformError(device, args);
     if (platformError) {
-      return responseFor({ success: false, error: platformError.message });
+      return responseFor(prototypePlatformFailure(platformError));
     }
     const scope = prototypeScope(device, args);
     if (args.action === "status") {
@@ -2768,19 +2856,31 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
       anchorHierarchyCaptureFactory: dependencies.anchorHierarchyCaptureFactory,
     };
     return responseFor(
-      await performPrototypeAction(
-        handlerDependencies,
-        device,
-        { ...args, action: args.action },
-        scope,
-        host.patchQueue,
-        combineWithAmbientAbort(signal),
+      await dispatchPrototypeSavedAction(
+        { ...args, action: args.action, spec: args.spec as PrototypeSpec | undefined },
+        () => {
+          const savedSignal = combineWithAmbientAbort(signal);
+          return {
+            client: target.android!,
+            signal: savedSignal,
+            stageAssets: () => stageAssets(target, args, assetReaders, savedSignal),
+          };
+        },
+        (action) =>
+          performPrototypeAction(
+            handlerDependencies,
+            device,
+            { ...args, action },
+            scope,
+            host.patchQueue,
+            combineWithAmbientAbort(signal),
+          ),
       ),
     );
   };
   ToolRegistry.registerDeviceAware(
     PROTOTYPE_TOOL_NAME,
-    'Show (always a full spec, inline as spec or from a local JSON file as specPath), patch (id and ops), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which prototypes it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for a prototype id on Android, or on an iOS simulator through the prototype agent that launchApp with prototype:true injects (show, patch, dismiss, status, inspect, awaitEvent; sizes are points). A show with the id of the prototype already on screen replaces it in place: it keeps the display and each pager\'s page (clamped), while the new spec\'s state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. patch changes the prototype already on screen without re-sending the spec: {action:"patch",id,ops:[...]} with ops add/replace/remove/test on /data (content, agent-owned) or /state/<key> (needs baseRevision; the device refuses with conflict if the user changed that key since), and replaceNode {id,node} for one node by id; use show for a new screen or a window, theme or root change. patch needs a device advertising prototype_patch_v1 and is refused otherwise: use show. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column/flow/grid, text/image/icon/spacer/textField/searchBar, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/stack/tabBar/bottomNav/bottomSheet; actions: emit/setPage/push/pop/popToRoot/replace/setState/toggle/increment/decrement/dismiss. Stack {type:"stack",id,start,screens} needs prototype_stack_v1; only its top screen renders, and status/inspect report stacks {id:{path,depth}}. screen_changed has name = stack id and payload {screen,depth}. Reuse: a top-level components:{name:{root}} map placed with {type:"use",component,props} nodes, expanded on the host with {props.<field>} bound like repeat placeholders. Sizes and anchors use dp (points on iOS). A node\'s anchor {type:"element",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the prototype excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:"bounds",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: "device" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the prototype is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the prototype re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. On Android a session prototype is tied to the app it was shown over: while another app is in front it is hidden (state kept, no dismissed event, not in observe, layer "prototype" calls fail saying so) and it returns with the app; a device-persistent prototype is not tied to an app. Status makes no device request, marks a prototype suspended:true once an inspect finds it hidden that way (an awaitEvent that then times out warns), and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the prototype stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising prototype_window_options_v1. A device-persistent prototype keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising prototype_persistence_replay_v1 and is refused otherwise. On an iOS simulator inspect asks the agent (prototype_inspect_v1) for the one prototype it shows, with no suspended and no deviceDroppedEvents, and is refused with a relaunch hint on an older agent. Light and dark: show takes appearance device (default), light or dark, which pins what the system setting means for that show without changing the device; it replaces the system setting only (mode order: explicit theme.mode, then the flat theme.colors.background/surface luminance, then an opaque authored background, then appearance, else the device), and light or dark is refused unless the device advertises prototype_appearance_v1. Such a device reports appearance {mode, source, deviceDark} in the show result and per prototype in inspect; deviceDark (the device\'s own setting) appears only in those device answers. The host-local status reports mode and source only (kept current by appearance_changed events, which carry just mode and source), because the device can flip while a pinned mode stays put and then no event arrives; call inspect for the current deviceDark. It sends one appearance_changed event (match it with awaitEvent kind:"appearance_changed", not eventName: its name is null; payload {mode, source}) on any change of the resolved mode while shown (the device flipping, or prototype state changing an inferred mode), never for the show itself. If an appearance_changed event arrives while a show is in flight the host cannot order the two, so that status entry has no appearance until a later event or inspect states it. In a scrim slot only the scrim role gets alpha (0.4); other roles are drawn unchanged. Flow/grid require prototype_flow_grid_v1; grid is non-lazy and never scrolls itself (wrap it in scroll). Per-mode {light, dark} forms need prototype_theme_modes_v1. Stack {type:"stack",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats. textField options (label, variant, supportingText, keyboardType, secure, multiline, minLines, maxLines, maxLength) require prototype_text_field_options_v1; a device without it refuses the show. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. Read the MCP resource automobile:prototype for the authoring guide (repeat grammar, limits, theme roles); look up icon names with automobile:prototype/icons?query=<word>. searchBar requires prototype_search_bar_v1 for show and patch.',
+    'Show (always a full spec, inline as spec or from a local JSON file as specPath), patch (id and ops), dismiss (id or all:true), status (host-local, no device request), inspect (asks the device which prototypes it is showing and adopts them into status and awaitEvent; use it after a session release or reconnect), or awaitEvent for a prototype id on Android, or on an iOS simulator through the prototype agent that launchApp with prototype:true injects (show, patch, dismiss, status, inspect, awaitEvent; sizes are points). save (spec/assets/label/icon), listSaved and deleteSaved (id) are Android only for now and need prototype_saved_v1; pinning is not available yet. A show with the id of the prototype already on screen replaces it in place: it keeps the display and each pager\'s page (clamped), while the new spec\'s state is authoritative (values the user changed by tapping are not carried over unless the spec includes them); reset:true starts fresh instead. patch changes the prototype already on screen without re-sending the spec: {action:"patch",id,ops:[...]} with ops add/replace/remove/test on /data (content, agent-owned) or /state/<key> (needs baseRevision; the device refuses with conflict if the user changed that key since), and replaceNode {id,node} for one node by id; use show for a new screen or a window, theme or root change. patch needs a device advertising prototype_patch_v1 and is refused otherwise: use show. To present alternatives, show one design, describe it and the others in chat (what each is, what changed, which you recommend), and show the next on request; or show one spec whose pager holds every design with a visible label per page. Ask the user in chat which they prefer; never wait on the device for a choice. awaitEvent returns one buffered event, supports eventName/kind and afterSequence, and times out successfully (timedOut:true); default 30000 ms, maximum 60000 ms. Buffer: 64 events per session/device/id; overflow drops oldest and reports droppedCount. Lower-or-equal sequences are ignored, including late arrivals and reconnect replays. Nodes: box/row/column/flow/grid, text/image/icon/spacer/textField/searchBar, Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker bound to state keys, scroll/pager/stack/tabBar/bottomNav/bottomSheet; actions: emit/setPage/push/pop/popToRoot/replace/setState/toggle/increment/decrement/dismiss. Stack {type:"stack",id,start,screens} needs prototype_stack_v1; only its top screen renders, and status/inspect report stacks {id:{path,depth}}. screen_changed has name = stack id and payload {screen,depth}. Reuse: a top-level components:{name:{root}} map placed with {type:"use",component,props} nodes, expanded on the host with {props.<field>} bound like repeat placeholders. Sizes and anchors use dp (points on iOS). A node\'s anchor {type:"element",selector:{elementId,text,testTag,container},alignment:cover|top|bottom|start|end,offset?} is resolved once at show against the app (the prototype excluded) and converted to dp with the display density (iOS bounds are already points); a missing, ambiguous or off-screen element fails the show, and the result reports anchors and hierarchyUpdatedAt (show again to re-anchor). {type:"bounds",bounds:{x,y,width,height}} is screen dp (screen points on iOS). Window placement: fullscreen/sheet/floating, window.opacity: 0-100 (default 100). window.chrome: none (default) or bar, fullscreen only: on a device advertising prototype_window_chrome_v1, none draws no host dismiss bar and fills the window including under the status bar (use safeAreaPadding on a top bar), and a two-finger long press (about 1 s) reveals a dismiss pill for 5 s; window.persistence: "device" defaults to bar. Without the capability the bar is kept, explicit none is refused, and lastResult.chrome says which was drawn. Example: {action:"show",spec:{id:"demo",window:{placement:{type:"fullscreen"},opacity:80},root:{type:"text",text:"Hello"}}}. show also accepts assets:[{id,path}] (absolute local PNG/JPEG/WebP file path, or a TTF/OTF font file referenced from style.fontFamily as {asset}) or [{id,observation}] (an observation screenshot URI) uploaded before the prototype is sent; image nodes reference the id. If the device reports supplied assets missing, they are re-uploaded and the prototype re-sent once; missingAssets and warning report what is still missing. Verify with observe; no screenshot is returned. On Android a session prototype is tied to the app it was shown over: while another app is in front it is hidden (state kept, no dismissed event, not in observe, layer "prototype" calls fail saying so) and it returns with the app; a device-persistent prototype is not tied to an app. Status makes no device request, marks a prototype suspended:true once an inspect finds it hidden that way (an awaitEvent that then times out warns), and includes pendingCount/lastSequence/droppedCount after events arrive. Device dismissed events remove shown status; the terminal event remains available until consumed or explicit show/dismiss. Awaiting consumes events; unmatched events remain buffered. Optional MCP progress reports wait start/finish without delaying the wait. Session release, device removal and unbinding clear buffers. A disconnect alone is not observed. window.layer: system (default, above system UI) or app (above apps only, so the shade, keyboard and screenshot preview draw over it; the daemon grants CtrlProxy SYSTEM_ALERT_WINDOW with appops first). window.persistence: session (default) or device: the prototype stays interactive after USB/adb disconnect and session end with no idle timeout, keeps its assets, and carries a visible Close control; remove it with that control, dismiss, or a new show. Both are Android only and need a CtrlProxy advertising prototype_window_options_v1. A device-persistent prototype keeps emitting taps, page changes and text input while no host is connected: the device buffers the last 200 events (oldest dropped, counted) and delivers them when a host connects or on inspect, with sequences continuing and no rewind; inspect returns deviceDroppedEvents. inspect needs a CtrlProxy advertising prototype_persistence_replay_v1 and is refused otherwise. On an iOS simulator inspect asks the agent (prototype_inspect_v1) for the one prototype it shows, with no suspended and no deviceDroppedEvents, and is refused with a relaunch hint on an older agent. Light and dark: show takes appearance device (default), light or dark, which pins what the system setting means for that show without changing the device; it replaces the system setting only (mode order: explicit theme.mode, then the flat theme.colors.background/surface luminance, then an opaque authored background, then appearance, else the device), and light or dark is refused unless the device advertises prototype_appearance_v1. Such a device reports appearance {mode, source, deviceDark} in the show result and per prototype in inspect; deviceDark (the device\'s own setting) appears only in those device answers. The host-local status reports mode and source only (kept current by appearance_changed events, which carry just mode and source), because the device can flip while a pinned mode stays put and then no event arrives; call inspect for the current deviceDark. It sends one appearance_changed event (match it with awaitEvent kind:"appearance_changed", not eventName: its name is null; payload {mode, source}) on any change of the resolved mode while shown (the device flipping, or prototype state changing an inferred mode), never for the show itself. If an appearance_changed event arrives while a show is in flight the host cannot order the two, so that status entry has no appearance until a later event or inspect states it. In a scrim slot only the scrim role gets alpha (0.4); other roles are drawn unchanged. Flow/grid require prototype_flow_grid_v1; grid is non-lazy and never scrolls itself (wrap it in scroll). Per-mode {light, dark} forms need prototype_theme_modes_v1. Stack {type:"stack",id,start,screens} requires prototype_stack_v1 and is refused otherwise. Data, repeat.items {path}, repeat.key, {data:/pointer} text and {data: pointer} conditions require prototype_data_model_v1. Input checks, validateOn, enabledWhen, {valid: key|keys} conditions and emit.requireValid require prototype_checks_v1; see the guide for checks and formats. textField options (label, variant, supportingText, keyboardType, secure, multiline, minLines, maxLines, maxLength) require prototype_text_field_options_v1; a device without it refuses the show. onLongPress/onDoubleTap on box/row/column/text/image/icon/card require prototype_gestures_v1. Read the MCP resource automobile:prototype for the authoring guide (repeat grammar, limits, theme roles); look up icon names with automobile:prototype/icons?query=<word>. searchBar requires prototype_search_bar_v1 for show and patch.',
     prototypeSchema,
     handler,
     {

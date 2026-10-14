@@ -21,6 +21,7 @@ class CommandAdvertisementTest {
     subtypeDescriptor.elementDescriptors.map { it.serialName }.toSet()
   private val knownFlags =
     setOf(
+      "prototype_saved_v1",
       "node_selector_actions",
       "ime_key_events_v1",
       "ime_clear_field_v1",
@@ -90,6 +91,7 @@ class CommandAdvertisementTest {
       assertTrue(commands.contains("prototype_checks_v1"))
       assertTrue(commands.contains("prototype_appearance_v1"))
       assertTrue(commands.contains("prototype_persistence_replay_v1"))
+      assertTrue(commands.contains("prototype_saved_v1"))
       assertTrue(commands.contains("prototype_show_in_place_v1"))
       assertTrue(commands.contains("prototype_stack_v1"))
       assertTrue(commands.contains("prototype_anchor_v1"))

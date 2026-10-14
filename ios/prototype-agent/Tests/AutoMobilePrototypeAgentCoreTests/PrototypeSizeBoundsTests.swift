@@ -65,9 +65,13 @@ final class PrototypeSizeBoundsTests: XCTestCase {
                     case let DecodingError.typeMismatch(_, context),
                          let DecodingError.keyNotFound(_, context),
                          let DecodingError.valueNotFound(_, context):
-                        actualPath = context.codingPath.reduce("") { path, key in
-                            if let index = key.intValue { return "\(path)[\(index)]" }
-                            return path.isEmpty ? key.stringValue : "\(path).\(key.stringValue)"
+                        actualPath = context.codingPath.reduce(into: "") { path, key in
+                            if let index = key.intValue {
+                                path += "[\(index)]"
+                            } else {
+                                if !path.isEmpty { path += "." }
+                                path += key.stringValue
+                            }
                         }
                     default:
                         return XCTFail("\(file.lastPathComponent): \(error)")

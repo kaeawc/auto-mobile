@@ -3,7 +3,11 @@ import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { homedir } from "node:os";
 import { Readable } from "node:stream";
-import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import {
+  AndroidEmulatorClient,
+  EmulatorExitedDuringReadinessError,
+} from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import { ActionableError } from "../../../src/models/ActionableError";
 import type { BootedDevice, ExecResult } from "../../../src/models";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
@@ -67,7 +71,12 @@ function createClient(
   child: ChildProcess & EventEmitter,
   onSpawn: () => void,
   accelCheck: ProbeResult = async () => execResult(),
-): { client: AndroidEmulatorClient; accelChecks: () => number; timer: FakeTimer } {
+): {
+  client: AndroidEmulatorClient;
+  accelChecks: () => number;
+  timer: FakeTimer;
+  executor: FakeAdbExecutor;
+} {
   const timer = new FakeTimer();
   const calls: string[][] = [];
   const executor = new FakeAdbExecutor();
@@ -104,6 +113,7 @@ function createClient(
 
   return {
     client,
+    executor,
     accelChecks: () => calls.filter((args) => args[0] === "-accel-check").length,
     timer,
   };
@@ -125,6 +135,183 @@ function emitFailure(
 }
 
 describe("AndroidEmulatorClient launch diagnostics", () => {
+  for (const path of ["monitor", "during-readiness", "before-readiness"] as const) {
+    for (const exitCode of [0, 1, null]) {
+      test(`readiness exit regression: ${path} code ${exitCode} rejects promptly`, async () => {
+        const child = createChild();
+        const { client, timer } = createClient(child, () => {
+          child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+        });
+        if (path !== "monitor") {
+          await client.startEmulator(avdName);
+        }
+        const emitExit = () => {
+          child.emit("exit", exitCode, exitCode === null ? "SIGTERM" : null);
+          child.emit("close", exitCode, exitCode === null ? "SIGTERM" : null);
+        };
+        if (path === "before-readiness") {
+          emitExit();
+        }
+        const controller = new AbortController();
+        let rejection: unknown;
+        const readiness = client
+          .waitForEmulatorReady(avdName, 760_000, child, undefined, controller.signal)
+          .then(
+            () => {
+              throw new Error("Expected readiness to reject");
+            },
+            (error: unknown) => {
+              rejection = error;
+            },
+          );
+        try {
+          if (path !== "before-readiness") {
+            emitExit();
+          }
+          await timer.advanceTimeAsync(0);
+          await timer.advanceTimeAsync(1_000);
+          expect(rejection).toBeInstanceOf(ActionableError);
+          expect(rejection).toBeInstanceOf(EmulatorExitedDuringReadinessError);
+          expect((rejection as { exitCode: number | null }).exitCode).toBe(exitCode);
+          if (path === "monitor") {
+            expect((rejection as Error).message).toBe(
+              `Emulator process exited with code ${exitCode} while waiting for readiness`,
+            );
+          } else {
+            expect((rejection as Error).message).toContain(`code: ${exitCode}`);
+          }
+          expect(rejection).not.toHaveProperty("code");
+          expect(timer.now()).toBeLessThan(2_000);
+        } finally {
+          controller.abort(new Error("test cleanup"));
+          await timer.advanceTimeAsync(1_000);
+          await readiness;
+        }
+      });
+    }
+  }
+
+  for (const [exitCode, signal] of [
+    [1, null],
+    [1, "SIGKILL"],
+    [0, null],
+    [null, "SIGKILL"],
+  ] as const) {
+    for (const order of ["stderr-before-exit", "stderr-after-exit"] as const) {
+      test(`validated exit code ${exitCode}, signal ${signal}, ${order} preserves formatted diagnostics`, async () => {
+        const child = createChild();
+        let notifySpawn!: () => void;
+        const spawned = new Promise<void>((resolve) => {
+          notifySpawn = resolve;
+        });
+        const { client, timer } = createClient(child, notifySpawn);
+        const startup = client.startEmulator(avdName);
+        await spawned;
+        await timer.advanceTimeAsync(5_000);
+        await startup;
+        const readiness = expectRejection(client.waitForEmulatorReady(avdName, 760_000, child));
+        await timer.advanceTimeAsync(0);
+        const diagnostic = "qemu: FATAL UNIQUE_DIAG_MARKER out of memory\n";
+        if (order === "stderr-before-exit") {
+          child.stderr!.emit("data", Buffer.from(diagnostic));
+        }
+        child.emit("exit", exitCode, signal);
+        if (order === "stderr-after-exit") {
+          child.stderr!.emit("data", Buffer.from(diagnostic));
+        }
+        child.stderr!.emit("data", Buffer.from("token=diagnostic-secret\n"));
+        child.emit("close", exitCode, signal);
+        await timer.advanceTimeAsync(1_000);
+
+        const error = await readiness;
+        expect(error).toBeInstanceOf(EmulatorExitedDuringReadinessError);
+        expect((error as EmulatorExitedDuringReadinessError).exitCode).toBe(exitCode);
+        expect(error).not.toHaveProperty("code");
+        expect(error.message).toContain(`code: ${exitCode}`);
+        expect(error.message).toContain("UNIQUE_DIAG_MARKER");
+        if (signal) {
+          expect(error.message).toContain(signal);
+        }
+        expect(error.message).toBe(
+          `Emulator process exited with code: ${exitCode}${signal ? ` (signal: ${signal})` : ""} (AVD '${avdName}')\n` +
+            "Diagnostic:\n" +
+            diagnostic +
+            "token=[REDACTED]",
+        );
+      });
+    }
+  }
+
+  for (const postValidation of [false, true]) {
+    for (const exitCode of [0, 1, null]) {
+      test(`readiness exit regression: duplicate AVD code ${exitCode}, validated=${postValidation} keeps polling`, async () => {
+        const child = createChild();
+        const { client, timer } = createClient(child, () => {
+          child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+        });
+        if (postValidation) {
+          await client.startEmulator(avdName);
+        }
+        const controller = new AbortController();
+        let settled = false;
+        const readiness = client
+          .waitForEmulatorReady(avdName, 760_000, child, undefined, controller.signal)
+          .then(
+            () => {
+              settled = true;
+            },
+            () => {
+              settled = true;
+            },
+          );
+        try {
+          child.stderr!.emit("data", Buffer.from("Running multiple emulators with the same AVD\n"));
+          child.emit("exit", exitCode, exitCode === null ? "SIGTERM" : null);
+          child.emit("close", exitCode, exitCode === null ? "SIGTERM" : null);
+          await timer.advanceTimeAsync(1_000);
+          expect(settled).toBe(false);
+          expect(timer.getPendingTimeoutCount()).toBeGreaterThan(0);
+        } finally {
+          controller.abort(new Error("test cleanup"));
+          await timer.advanceTimeAsync(1_000);
+          await readiness;
+        }
+      });
+    }
+  }
+
+  test("readiness exit regression: exit after completed readiness is a non-event", async () => {
+    const child = createChild();
+    const { client, timer, executor } = createClient(child, () => {
+      child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
+    });
+    await client.startEmulator(avdName);
+    executor.setDevices([{ name: avdName, platform: "android", deviceId: "emulator-5554" }]);
+    executor.setDeviceStates([{ deviceId: "emulator-5554", state: "device" }]);
+    for (const [command, output] of [
+      ["emu avd name", avdName],
+      ["get-state", "device"],
+      ["shell pm list packages", "package:android"],
+      ["shell getprop sys.boot_completed", "1"],
+      ["shell getprop init.svc.bootanim", "stopped"],
+      ["shell getprop ro.product.model", "Pixel 9 Pro"],
+    ]) {
+      executor.setCommandResponse(command!, execResult(output));
+    }
+    const baselineListeners = child.listenerCount("exit");
+    const readiness = client.waitForEmulatorReady(avdName, 760_000, child);
+    await timer.advanceTimeAsync(1_000);
+    const device = await readiness;
+    expect(device.deviceId).toBe("emulator-5554");
+    expect(child.listenerCount("exit")).toBe(baselineListeners);
+    for (const exitCode of [0, 1, null]) {
+      child.emit("exit", exitCode, exitCode === null ? "SIGTERM" : null);
+      child.emit("close", exitCode, exitCode === null ? "SIGTERM" : null);
+    }
+    await timer.advanceTimeAsync(1_000);
+    expect(await readiness).toBe(device);
+  });
+
   test("preserves a missing shared-library error emitted after exit and before close", async () => {
     const child = createChild();
     const { client, accelChecks } = createClient(child, () => {

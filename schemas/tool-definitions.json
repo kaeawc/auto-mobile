@@ -18785,7 +18785,8 @@
                         },
                         "height": {
                           "type": "number",
-                          "minimum": 0.000001
+                          "minimum": 0.000001,
+                          "maximum": 10000
                         }
                       },
                       "required": ["type", "edge", "height"],
@@ -18816,10 +18817,14 @@
                           "type": "object",
                           "properties": {
                             "x": {
-                              "type": "number"
+                              "type": "number",
+                              "minimum": -10000,
+                              "maximum": 10000
                             },
                             "y": {
-                              "type": "number"
+                              "type": "number",
+                              "minimum": -10000,
+                              "maximum": 10000
                             }
                           },
                           "required": ["x", "y"],
@@ -19308,7 +19313,8 @@
                               "properties": {
                                 "dp": {
                                   "type": "number",
-                                  "minimum": 0
+                                  "minimum": 0,
+                                  "maximum": 10000
                                 }
                               },
                               "required": ["dp"],
@@ -19321,42 +19327,51 @@
                         },
                         "weight": {
                           "type": "number",
-                          "minimum": 0.000001
+                          "minimum": 0.000001,
+                          "maximum": 10000
                         },
                         "minWidth": {
                           "type": "number",
-                          "minimum": 0
+                          "minimum": 0,
+                          "maximum": 10000
                         },
                         "maxWidth": {
                           "type": "number",
-                          "minimum": 0
+                          "minimum": 0,
+                          "maximum": 10000
                         },
                         "minHeight": {
                           "type": "number",
-                          "minimum": 0
+                          "minimum": 0,
+                          "maximum": 10000
                         },
                         "maxHeight": {
                           "type": "number",
-                          "minimum": 0
+                          "minimum": 0,
+                          "maximum": 10000
                         },
                         "padding": {
                           "type": "object",
                           "properties": {
                             "top": {
                               "type": "number",
-                              "minimum": 0
+                              "minimum": 0,
+                              "maximum": 10000
                             },
                             "bottom": {
                               "type": "number",
-                              "minimum": 0
+                              "minimum": 0,
+                              "maximum": 10000
                             },
                             "start": {
                               "type": "number",
-                              "minimum": 0
+                              "minimum": 0,
+                              "maximum": 10000
                             },
                             "end": {
                               "type": "number",
-                              "minimum": 0
+                              "minimum": 0,
+                              "maximum": 10000
                             }
                           },
                           "additionalProperties": false
@@ -19368,7 +19383,8 @@
                           "anyOf": [
                             {
                               "type": "number",
-                              "minimum": 0
+                              "minimum": 0,
+                              "maximum": 10000
                             },
                             {
                               "type": "string",
@@ -19387,19 +19403,23 @@
                               "properties": {
                                 "topStart": {
                                   "type": "number",
-                                  "minimum": 0
+                                  "minimum": 0,
+                                  "maximum": 10000
                                 },
                                 "topEnd": {
                                   "type": "number",
-                                  "minimum": 0
+                                  "minimum": 0,
+                                  "maximum": 10000
                                 },
                                 "bottomEnd": {
                                   "type": "number",
-                                  "minimum": 0
+                                  "minimum": 0,
+                                  "maximum": 10000
                                 },
                                 "bottomStart": {
                                   "type": "number",
-                                  "minimum": 0
+                                  "minimum": 0,
+                                  "maximum": 10000
                                 }
                               },
                               "additionalProperties": false
@@ -19411,7 +19431,8 @@
                           "properties": {
                             "width": {
                               "type": "number",
-                              "minimum": 0
+                              "minimum": 0,
+                              "maximum": 10000
                             },
                             "color": {
                               "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim"
@@ -19422,7 +19443,8 @@
                         },
                         "elevation": {
                           "type": "number",
-                          "minimum": 0
+                          "minimum": 0,
+                          "maximum": 1000
                         },
                         "shadowColor": {
                           "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/0/properties/scrim"
@@ -19486,7 +19508,8 @@
                         },
                         "aspectRatio": {
                           "type": "number",
-                          "minimum": 0.000001
+                          "minimum": 0.000001,
+                          "maximum": 10000
                         },
                         "offset": {
                           "$ref": "#/properties/spec/properties/window/properties/placement/anyOf/2/properties/offset"
@@ -19528,11 +19551,13 @@
                         },
                         "spacing": {
                           "type": "number",
-                          "minimum": 0
+                          "minimum": 0,
+                          "maximum": 10000
                         },
                         "textSize": {
                           "type": "number",
-                          "minimum": 0.000001
+                          "minimum": 0.000001,
+                          "maximum": 1000
                         },
                         "fontWeight": {
                           "type": "integer",
@@ -19553,10 +19578,13 @@
                         },
                         "lineHeight": {
                           "type": "number",
-                          "minimum": 0.000001
+                          "minimum": 0.000001,
+                          "maximum": 1000
                         },
                         "letterSpacing": {
-                          "type": "number"
+                          "type": "number",
+                          "minimum": -1000,
+                          "maximum": 1000
                         },
                         "textDecoration": {
                           "type": "string",
@@ -19815,11 +19843,13 @@
                                 },
                                 "width": {
                                   "type": "number",
-                                  "minimum": 0
+                                  "minimum": 0,
+                                  "maximum": 10000
                                 },
                                 "height": {
                                   "type": "number",
-                                  "minimum": 0
+                                  "minimum": 0,
+                                  "maximum": 10000
                                 }
                               },
                               "required": ["x", "y", "width", "height"],
@@ -21710,7 +21740,8 @@
                             "properties": {
                               "dp": {
                                 "type": "number",
-                                "minimum": 0.000001
+                                "minimum": 0.000001,
+                                "maximum": 10000
                               }
                             },
                             "required": ["dp"],
@@ -21984,6 +22015,11 @@
                 "description": "Adopted prototypes only: true when the device keeps the prototype after the host disconnects (window.persistence: device), false when it ends with the session",
                 "type": "boolean"
               },
+              "hiddenReason": {
+                "description": "Android: the prototype exists but is not visible, and why; absent when visible, when suspended, or with an older CtrlProxy",
+                "type": "string",
+                "enum": ["app_layer_window_hidden", "device_blocked"]
+              },
               "suspended": {
                 "description": "Android only: the prototype is hidden because the app it was shown over is not in front (as of the last inspect); its state is kept and it returns with the app. Absent when visible and on iOS",
                 "type": "boolean",
@@ -22129,6 +22165,11 @@
             "persistent": {
               "description": "Adopted prototypes only: true when the device keeps the prototype after the host disconnects (window.persistence: device), false when it ends with the session",
               "type": "boolean"
+            },
+            "hiddenReason": {
+              "description": "Android: the prototype exists but is not visible, and why; absent when visible, when suspended, or with an older CtrlProxy",
+              "type": "string",
+              "enum": ["app_layer_window_hidden", "device_blocked"]
             },
             "suspended": {
               "description": "Android only: the prototype is hidden because the app it was shown over is not in front (as of the last inspect); its state is kept and it returns with the app. Absent when visible and on iOS",
@@ -22339,14 +22380,14 @@
           }
         },
         "visible": {
-          "description": "show with window.layer \"app\" on Android: no prototype window was on screen after the show; absent when visible or not checked",
+          "description": "Android show: no prototype window was on screen after an app-layer show, or the device reports device_blocked for any layer; absent when visible or not checked",
           "type": "boolean",
           "const": false
         },
         "notVisibleReason": {
-          "description": "show with window.layer \"app\" on Android: why visible is false. no_prototype_window_on_screen: the window was created but the screen does not show it, usually because the app in front hides app-layer windows; absent when visible or not checked",
+          "description": "Android show: why visible is false. app_layer_window_hidden: the app in front hides app-layer windows; device_blocked: the device is locked or its screen is off. no_prototype_window_on_screen: older-device app-layer confirmation found no window on screen; absent when visible or not checked",
           "type": "string",
-          "enum": ["no_prototype_window_on_screen"]
+          "enum": ["no_prototype_window_on_screen", "app_layer_window_hidden", "device_blocked"]
         },
         "warning": {
           "description": "show succeeded or awaitEvent timed out, and it needs attention: names what to do about missingAssets, that display was ignored by a same-id show, that an Android app-layer prototype is not on screen, or (awaitEvent timeout) that the prototype is hidden because its app is not in front",

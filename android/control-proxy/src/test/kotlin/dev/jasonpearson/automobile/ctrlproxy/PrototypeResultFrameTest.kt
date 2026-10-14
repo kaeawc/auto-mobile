@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
+import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import dev.jasonpearson.automobile.protocol.PrototypeResult
 import dev.jasonpearson.automobile.protocol.PrototypeScalar
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
@@ -10,11 +12,53 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PrototypeResultFrameTest {
   private val json = Json { classDiscriminator = "type" }
+
+  @Test
+  fun `show result forwards hidden reason while legacy result omits it`() {
+    for (reason in PrototypeHiddenReason.entries) {
+      val frame = prototypeResultFrame("show", true, null, hiddenReason = reason)
+      val result = json.decodeFromString<WebSocketResponse>(frame) as PrototypeResult
+      assertEquals(reason, result.hiddenReason)
+    }
+    val frame = prototypeResultFrame("legacy", true, null)
+    assertFalse("hiddenReason" in json.parseToJsonElement(frame).jsonObject)
+    assertNull((json.decodeFromString<WebSocketResponse>(frame) as PrototypeResult).hiddenReason)
+  }
+
+  @Test
+  fun `hierarchy hidden reason is optional even when defaults are encoded`() {
+    val legacy = """{"updatedAt":42}"""
+    val hierarchy = ViewHierarchy(updatedAt = 42)
+    assertEquals(legacy, json.encodeToString(ViewHierarchy.serializer(), hierarchy))
+    assertNull(json.decodeFromString(ViewHierarchy.serializer(), legacy).prototypeHiddenReason)
+    val defaults = Json { encodeDefaults = true }
+    assertFalse(
+      "prototypeHiddenReason" in
+        defaults.encodeToJsonElement(ViewHierarchy.serializer(), hierarchy).jsonObject,
+    )
+    for ((reason, wire) in
+      listOf(
+        PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN to "app_layer_window_hidden",
+        PrototypeHiddenReason.DEVICE_BLOCKED to "device_blocked",
+      )) {
+      val frame =
+        json.encodeToString(
+          ViewHierarchy.serializer(),
+          hierarchy.copy(prototypeHiddenReason = reason),
+        )
+      assertEquals(legacy.dropLast(1) + ",\"prototypeHiddenReason\":\"$wire\"}", frame)
+      assertEquals(
+        reason,
+        json.decodeFromString(ViewHierarchy.serializer(), frame).prototypeHiddenReason,
+      )
+    }
+  }
 
   @Test
   fun `a result without missing assets keeps the frame legacy peers expect`() {

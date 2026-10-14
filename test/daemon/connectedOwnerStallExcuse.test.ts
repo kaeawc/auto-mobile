@@ -118,6 +118,32 @@ describe("connected-owner stall excuse (#11992)", () => {
     expect(r.manager.getSession(ID)).toBe(r.session);
   });
 
+  test("a connected silent owner survives the issue's 35 s awake stall", async () => {
+    const r = await setUp();
+    await silentScans(r);
+    await lateScan(r, 35_000);
+    expect(r.reaped).toEqual([]);
+    expect(r.session.stallForgivenAt).toBe(r.session.lastOwnerHeartbeat! + 35_000);
+    expect(r.manager.getSession(ID)).toBe(r.session);
+  });
+
+  test("a 5 min awake stall is credited fully while the owner remains connected", async () => {
+    const r = await setUp();
+    await silentScans(r);
+    await lateScan(r, 300_000);
+    expect(r.session.stallForgivenAt).toBe(r.session.lastOwnerHeartbeat! + 300_000);
+    expect(r.reaped).toEqual([]);
+    expect(r.manager.getSession(ID)).toBe(r.session);
+  });
+
+  test("a 900 s awake stall credits exactly 600 s and is reaped", async () => {
+    const r = await setUp();
+    await silentScans(r);
+    await lateScan(r, 900_000);
+    expect(r.session.stallForgivenAt).toBe(r.session.lastOwnerHeartbeat! + 600_000);
+    expect(r.reaped).toEqual(["heartbeat-timeout"]);
+  });
+
   for (const connected of [false, undefined]) {
     test(`a ${connected === false ? "closed owner" : "missing reader"} receives nothing and is reaped`, async () => {
       const r = await setUp(connected);
@@ -132,9 +158,11 @@ describe("connected-owner stall excuse (#11992)", () => {
     });
   }
 
-  test("a 78 s stall credits exactly 30 s and is still reaped", async () => {
+  test("an owner that closes during a 78 s stall credits exactly 30 s and is reaped", async () => {
     const r = await setUp();
     await silentScans(r);
+    const closedAt = r.manager.sessionNow() + 1;
+    r.manager.setOwnerConnectedAtReader((_session, at) => at < closedAt);
     await lateScan(r, 78_000);
     expect(r.session.stallForgivenAt).toBe(
       r.session.lastOwnerHeartbeat! + MAX_CREDIBLE_DAEMON_STALL_MS,
@@ -142,34 +170,58 @@ describe("connected-owner stall excuse (#11992)", () => {
     expect(r.reaped).toEqual(["heartbeat-timeout"]);
   });
 
-  test("successive stalls spend 12 + 15 + 3 + 0 s without a heartbeat", async () => {
+  test("successive stalls with owners closing at resume spend 12 + 15 + 3 + 0 s", async () => {
     const r = await setUp();
     r.timer.setCurrentTime(r.timer.now() + 6_000);
+    // Each gap starts connected, but its owner socket closes before that gap resumes.
+    r.manager.setOwnerConnectedAtReader((_session, at) => at < r.manager.sessionNow());
     expect([12_000, 15_000, 18_000, 12_000].map((lost) => forgive(r, lost))).toEqual([
       12_000, 15_000, 3_000, 0,
     ]);
   });
 
-  test("twenty possible 29 s late ticks cannot hold a silent connected owner past the capped bound", async () => {
+  test("twenty-one 29 s stalls exhaust the still-connected owner's 600 s cumulative cap", async () => {
     const r = await setUp();
     const heartbeatAt = r.session.lastOwnerHeartbeat!;
-    await silentScans(r);
-    let tick = 0;
-    while (tick < 20 && r.reaped.length === 0) {
-      await lateScan(r, 29_000);
-      tick++;
+    r.timer.setCurrentTime(r.timer.now() + 6_000);
+    // Direct gap delivery avoids scan-time debt reaping the owner before the budget is spent.
+    for (let tick = 0; tick < 20; tick++) {
+      expect(forgive(r, 29_000)).toBe(29_000);
     }
-    // First: 6 + 2 + 29 - 29 = 8 s, held. Second: 6 + 2*(2+29) - 30 = 38 s, released.
-    expect(tick).toBe(2);
-    expect(r.manager.sessionNow() - heartbeatAt).toBe(68_000);
+    expect(forgive(r, 29_000)).toBe(20_000);
+    expect(forgive(r, 12_000)).toBe(0);
+    expect(r.session.stallForgivenAt).toBe(heartbeatAt + 600_000);
+    r.monitor.start();
+    await lateScan(r, 0);
+    expect(r.manager.sessionNow() - heartbeatAt).toBe(629_000);
     expect(r.manager.sessionNow() - heartbeatAt).toBeLessThanOrEqual(
-      r.session.heartbeatTimeoutMs +
-        SUSPECT_GRACE_MS +
-        MAX_CREDIBLE_DAEMON_STALL_MS +
-        SCAN_MS +
-        29_000,
+      r.session.heartbeatTimeoutMs + SUSPECT_GRACE_MS + 600_000 + SCAN_MS + 29_000,
     );
     expect(r.reaped).toEqual(["heartbeat-timeout"]);
+  });
+
+  test("ordinary scan-time debt still releases a silent connected owner after two 29 s late ticks", async () => {
+    const r = await setUp();
+    await silentScans(r);
+    await lateScan(r, 29_000);
+    expect(r.reaped).toEqual([]);
+    await lateScan(r, 29_000);
+    expect(r.session.stallForgivenAt).toBe(r.session.lastOwnerHeartbeat! + 58_000);
+    expect(r.reaped).toEqual(["heartbeat-timeout"]);
+  });
+
+  test("closing during a later gap adds no credit once more than 30 s was spent", async () => {
+    const r = await setUp();
+    r.timer.setCurrentTime(r.timer.now() + 6_000);
+    expect(forgive(r, 300_000)).toBe(300_000);
+    const closedAt = r.manager.sessionNow() + 1;
+    r.manager.setOwnerConnectedAtReader((_session, at) => at < closedAt);
+    expect(forgive(r, 12_000)).toBe(0);
+    expect(r.session.stallForgivenAt).toBe(r.session.lastOwnerHeartbeat! + 300_000);
+    // Reopening does not refund previously spent credit.
+    r.manager.setOwnerConnectedAtReader(() => true);
+    expect(forgive(r, 300_000)).toBe(300_000);
+    expect(forgive(r, 12_000)).toBe(0);
   });
 
   test("without a late tick the connected silent owner is released at 10 s", async () => {
@@ -186,6 +238,7 @@ describe("connected-owner stall excuse (#11992)", () => {
 
   test("a new owner heartbeat resets the connected credit budget", async () => {
     const r = await setUp();
+    r.manager.setOwnerConnectedAtReader((_session, at) => at < r.manager.sessionNow());
     r.timer.setCurrentTime(r.timer.now() + 6_000);
     expect(forgive(r, 30_000)).toBe(30_000);
     await r.heartbeat();
@@ -193,9 +246,20 @@ describe("connected-owner stall excuse (#11992)", () => {
     expect(forgive(r, 30_000)).toBe(30_000);
   });
 
+  test("a new owner heartbeat resets an exhausted 600 s connected credit budget", async () => {
+    const r = await setUp();
+    r.timer.setCurrentTime(r.timer.now() + 6_000);
+    expect(forgive(r, 600_000)).toBe(600_000);
+    expect(forgive(r, 12_000)).toBe(0);
+    await r.heartbeat();
+    r.timer.setCurrentTime(r.timer.now() + 6_000);
+    expect(forgive(r, 600_000)).toBe(600_000);
+  });
+
   test("a live owner's 40 s stall is forgiven fully without spending connected credit", async () => {
     const r = await setUp();
     expect(forgive(r, 40_000)).toBe(40_000);
+    r.manager.setOwnerConnectedAtReader((_session, at) => at < r.manager.sessionNow());
     expect(forgive(r, 30_000)).toBe(30_000);
     expect(forgive(r, 12_000)).toBe(0);
   });
@@ -225,6 +289,8 @@ describe("connected-owner stall excuse (#11992)", () => {
   test("the log distinguishes connected credit from ordinary lease forgiveness", async () => {
     const r = await setUp();
     r.timer.setCurrentTime(r.timer.now() + 6_000);
+    const closedAt = r.manager.sessionNow() + 1;
+    r.manager.setOwnerConnectedAtReader((_session, at) => at < closedAt);
     const info = spyOn(logger, "info").mockImplementation(() => {});
     try {
       forgive(r, 78_000);
@@ -297,6 +363,7 @@ describe("owner connection interval history on the session clock", () => {
 
   test("a recreated session id inherits neither connection history nor credit budget", async () => {
     const r = await setUp();
+    r.manager.setOwnerConnectedAtReader((_session, at) => at < r.manager.sessionNow());
     const history = new OwnerConnectionIntervals();
     history.connected(r.session, r.manager.sessionNow());
     r.timer.setCurrentTime(r.timer.now() + 6_000);
@@ -310,7 +377,7 @@ describe("owner connection interval history on the session clock", () => {
       replacement,
       r.manager.sessionNow(),
       { lostMs: 30_000, sleptMs: 0, gapBeganAt: r.manager.sessionNow() - 30_000 },
-      () => true,
+      (_session, at) => at < r.manager.sessionNow(),
     );
     expect(extension.connectedCreditMs).toBe(30_000);
     expect(extension.leaseStart).toBe(replacement.lastOwnerHeartbeat! + 30_000);

@@ -258,7 +258,7 @@ describe("managed-slot total-resource enforcement on SQLite", () => {
     },
   );
 
-  test("no eligible cache produces typed evidence, closes intent and preserves the binding", async () => {
+  test("no eligible cache produces typed evidence, closes intent and removes the never-bound slot", async () => {
     await cache("amslot-held");
     claims.sessions.set("amslot-held", ["session"]);
     const req = await request();
@@ -267,7 +267,6 @@ describe("managed-slot total-resource enforcement on SQLite", () => {
       platform: req.platform,
       requestedSpec: SPEC,
     });
-    const before = await registry.getAssignment(req.key);
     const result = await make().reconcile(req);
     expect(result).toMatchObject({
       outcome: "failed",
@@ -287,7 +286,7 @@ describe("managed-slot total-resource enforcement on SQLite", () => {
     expect(provisioner.calls).toEqual([]);
     expect(deleter.calls).toEqual([]);
     expect(await registry.listOpenSlotJournal(req.key)).toEqual([]);
-    expect(await registry.getAssignment(req.key)).toEqual(before);
+    expect(await registry.getAssignment(req.key)).toBeNull();
   });
 
   test("two daemon registries at N-1 admit exactly one concurrent creation", async () => {

@@ -26,11 +26,21 @@ type AdbClientInternals = {
   ) => Promise<unknown>;
 };
 
+const children: ChildProcess[] = [];
+function createChild(): ChildProcess {
+  const child = new EventEmitter() as ChildProcess;
+  children.push(child);
+  return child;
+}
+
 const originalExecuteCommandWithChild = adbHostProcessExecutor.executeCommandWithChild;
 
 describe.serial("AdbClient execWithSignal shared process seam", () => {
   afterEach(() => {
     adbHostProcessExecutor.executeCommandWithChild = originalExecuteCommandWithChild;
+    for (const child of children.splice(0)) {
+      child.emit("exit", 0, null);
+    }
   });
 
   for (const { name, explicitTimeoutMs, advanceBeforeKillMs, killAtMs } of [
@@ -40,7 +50,7 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
   ]) {
     test(`${name} command timeout kills the adb child at its budget`, async () => {
       const timer = new FakeTimer();
-      const child = new EventEmitter() as ChildProcess;
+      const child = createChild();
       const signals: (string | number | undefined)[] = [];
       child.kill = (signal) => {
         signals.push(signal);
@@ -83,7 +93,7 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
   test("keeps the dispatched timeout error when a read retries after its budget expires", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
-    const child = new EventEmitter() as ChildProcess;
+    const child = createChild();
     child.kill = () => true;
     let dispatches = 0;
     adbHostProcessExecutor.executeCommandWithChild = (): StartedHostCommand => {
@@ -111,7 +121,7 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
     const originalTestMode = process.env.AUTOMOBILE_TEST_MODE;
     process.env.AUTOMOBILE_TEST_MODE = "false";
     try {
-      const child = new EventEmitter() as ChildProcess;
+      const child = createChild();
       child.kill = () => true;
       let injectedDispatches = 0;
       const injectedExecutor = {
@@ -168,7 +178,7 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
 
   test("keeps the injected timeout error when SIGTERM rejects during graceful settlement", async () => {
     const timer = new FakeTimer();
-    const child = new EventEmitter() as ChildProcess;
+    const child = createChild();
     let rejectResult: ((error: Error) => void) | undefined;
     child.kill = () => {
       rejectResult?.(new Error("terminated by SIGTERM"));
@@ -201,7 +211,7 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
 
   test("waits for the child exit after SIGKILL before rejecting a timed-out command", async () => {
     const timer = new FakeTimer();
-    const child = new EventEmitter() as ChildProcess;
+    const child = createChild();
     const signals: (string | number | undefined)[] = [];
     child.kill = (signal) => {
       signals.push(signal);
@@ -248,7 +258,7 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
 
   test("waits for the child exit after SIGKILL before rejecting an aborted command", async () => {
     const timer = new FakeTimer();
-    const child = new EventEmitter() as ChildProcess;
+    const child = createChild();
     const signals: (string | number | undefined)[] = [];
     child.kill = (signal) => {
       signals.push(signal);
@@ -296,7 +306,7 @@ describe.serial("AdbClient execWithSignal shared process seam", () => {
 
   test("warns and rejects after SIGKILL when the child never exits", async () => {
     const timer = new FakeTimer();
-    const child = new EventEmitter() as ChildProcess;
+    const child = createChild();
     child.kill = () => true;
     adbHostProcessExecutor.executeCommandWithChild = (): StartedHostCommand => ({
       child,

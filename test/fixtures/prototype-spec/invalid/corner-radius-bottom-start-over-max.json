@@ -1,0 +1,20 @@
+{
+  "spec": {
+    "id": "size-bounds",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "spacer",
+      "style": {
+        "cornerRadius": {
+          "bottomStart": 10001
+        }
+      }
+    }
+  },
+  "expectedPath": "root.style.cornerRadius.bottomStart",
+  "expectedMessage": "Invalid number value"
+}

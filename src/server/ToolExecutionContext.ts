@@ -1010,7 +1010,17 @@ async function ensureKeepScreenAwake(
   if (!sessionManager.isAdmittedForAutomation(session)) {
     if (state.applied) {
       try {
-        await manager.restore(state);
+        await manager.restore(state).then((outcome) => {
+          if (outcome.status === "restored_to_baseline" || outcome.status === "failed") {
+            const settings =
+              outcome.status === "failed"
+                ? [...outcome.failures, ...(outcome.baselineSettings ?? [])]
+                : outcome.settings;
+            logger.warn(
+              `[ToolExecutionContext] Keep-awake restore ${outcome.status} after session release for ${device.deviceId}: ${JSON.stringify(settings)}`,
+            );
+          }
+        });
       } catch (error) {
         logger.warn(
           `[ToolExecutionContext] Failed to restore keep-awake after session release for ${device.deviceId}: ${error}`,

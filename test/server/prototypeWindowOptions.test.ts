@@ -17,6 +17,7 @@ import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { capturedAppLayerPrototypeHierarchy } from "../helpers/prototypeWindowCapture";
 import { preserveToolRegistry } from "../helpers/withTemporaryTool";
 
 const device: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "Pixel" };
@@ -48,6 +49,18 @@ describe("prototype window.layer and window.persistence", () => {
       subscribeDeviceUnbound: () => () => {},
     };
     unsubscribe = registerPrototypeTools({
+      anchorHierarchyCaptureFactory: () => ({
+        async capture(request) {
+          return {
+            captureId: "capture",
+            platform: "android",
+            requestedFreshness: request.freshness,
+            receivedAt: 0,
+            hierarchy: capturedAppLayerPrototypeHierarchy(),
+            nodes: [],
+          };
+        },
+      }),
       clientFactory: () => client,
       adbFactory: new FakeAdbClientFactory(adb),
       lastRenderedObservation: () => undefined,

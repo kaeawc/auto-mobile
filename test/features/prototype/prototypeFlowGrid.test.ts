@@ -38,12 +38,16 @@ test.each(["flow", "grid"])("%s counts every repeated child even when visually c
   });
 });
 
-test.each([0, 1, Number.MAX_VALUE, -1, Infinity, NaN])(
+test.each([0, 1, 10000, 10001, Number.MAX_VALUE, -1, Infinity, NaN])(
   "runSpacing bound %s mirrors spacing",
   (gap) => {
     const candidate = spec({ type: "flow", children: [], style: { runSpacing: gap } });
-    expect(validatePrototypeSpec(candidate).success).toBe(Number.isFinite(gap) && gap >= 0);
-    expect(prototypeSpecSchema.safeParse(candidate).success).toBe(Number.isFinite(gap) && gap >= 0);
+    expect(validatePrototypeSpec(candidate).success).toBe(
+      Number.isFinite(gap) && gap >= 0 && gap <= 10000,
+    );
+    expect(prototypeSpecSchema.safeParse(candidate).success).toBe(
+      Number.isFinite(gap) && gap >= 0 && gap <= 10000,
+    );
   },
 );
 

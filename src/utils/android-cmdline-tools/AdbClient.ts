@@ -1,3 +1,7 @@
+import {
+  getNativeHelperRegistry,
+  type NativeHelperTracker,
+} from "../nativeHelpers/NativeHelperRegistry";
 import { DUMPSYS_MAX_BUFFER } from "./dumpsysLimits";
 import { isDeviceLossCancellationReason } from "../deviceLossCancellationReason";
 import {
@@ -227,7 +231,6 @@ export class AdbClient implements AdbExecutor {
   private adbPath: string;
   private isTestMode: boolean;
   private readonly hostProcessExecutor: HostProcessExecutor;
-  private activeProcesses: Set<ChildProcess> = new Set();
   /**
    * Cached API level for the current device. Intentionally never expires during
    * a device session because API level is constant. Reset on setDevice().
@@ -276,6 +279,7 @@ export class AdbClient implements AdbExecutor {
     hostProcessExecutor: HostProcessExecutor = adbHostProcessExecutor,
     private readonly transportRouting?: AndroidTransportRouting,
     private readonly transportRestartRegistry?: AdbTransportRestartRegistry,
+    private readonly nativeHelperRegistry?: NativeHelperTracker,
   ) {
     this.device = device;
     this.hostProcessExecutor = hostProcessExecutor;
@@ -741,7 +745,11 @@ export class AdbClient implements AdbExecutor {
       stdio: ["ignore", "pipe", "pipe"],
       signal: options.abortSignalScope === "startup" ? undefined : signal,
     });
-    this.activeProcesses.add(child);
+    trackActiveAdbChild(child);
+    (this.nativeHelperRegistry ?? getNativeHelperRegistry()).track(child, {
+      kind: "adb",
+      processGroup: false,
+    });
 
     let timeoutId: NodeJS.Timeout | undefined;
     let cleaned = false;
@@ -758,7 +766,7 @@ export class AdbClient implements AdbExecutor {
         return;
       }
       cleaned = true;
-      this.activeProcesses.delete(child);
+      removeFinishedAdbChild(child);
       child.off("exit", onExit);
       child.off("error", onError);
       removeStartupCancellation();
@@ -1307,7 +1315,7 @@ export class AdbClient implements AdbExecutor {
           reject(pendingTerminationError ?? error);
         });
 
-      this.activeProcesses.add(child);
+      trackActiveAdbChild(child);
 
       const onAbort = () => {
         if (settled) {
@@ -1337,7 +1345,7 @@ export class AdbClient implements AdbExecutor {
       };
 
       const onExit = () => {
-        this.activeProcesses.delete(child);
+        activeProcesses.delete(child);
       };
 
       const settleAfterSigkill = () => {
@@ -1364,7 +1372,7 @@ export class AdbClient implements AdbExecutor {
       };
 
       const cleanup = () => {
-        this.activeProcesses.delete(child);
+        removeFinishedAdbChild(child);
         child.off("exit", onExit);
         child.off("exit", settleAfterSigkill);
         child.off("close", settleAfterSigkill);
@@ -2013,4 +2021,106 @@ export class AdbClient implements AdbExecutor {
       return { state: "unreadable", error: errorMessage(error) };
     }
   }
+}
+
+// Shared across instances: daemon shutdown must cover request-scoped clients too.
+const activeProcesses = new Set<ChildProcess>();
+
+function isActiveAdbChild(child: ChildProcess): boolean {
+  return (
+    (child.exitCode === null || child.exitCode === undefined) &&
+    (child.signalCode === null || child.signalCode === undefined)
+  );
+}
+
+export async function terminateActiveAdbProcesses(
+  options: { timer?: Timer; graceMs?: number } = {},
+): Promise<{ terminated: number; failed: number }> {
+  const timer = options.timer ?? defaultTimer;
+  const graceMs = Math.max(0, options.graceMs ?? 500);
+  const summary = { terminated: 0, failed: 0 };
+  const pending = new Set<ChildProcess>();
+  for (const child of [...activeProcesses]) {
+    const result = terminateAdbChild(child);
+    if (result === "pending") {
+      pending.add(child);
+    } else if (result === "failed") {
+      summary.failed++;
+    }
+  }
+  try {
+    await waitForActiveAdbChildren(pending, timer, graceMs);
+    for (const child of pending) {
+      killActiveAdbChild(child);
+    }
+    await waitForActiveAdbChildren(pending, timer, graceMs);
+    for (const child of pending) {
+      if (!isPendingAdbChild(child)) {
+        activeProcesses.delete(child);
+        summary.terminated++;
+      } else {
+        summary.failed++;
+        logger.warn(`[ADB] Host child ${child.pid ?? "unknown"} still alive after bounded cleanup`);
+      }
+    }
+  } catch (error) {
+    logger.warn(`[ADB] Failed to wait for host children: ${errorMessage(error)}`, error);
+    summary.failed += pending.size;
+  }
+  return summary;
+}
+
+async function waitForActiveAdbChildren(
+  children: Set<ChildProcess>,
+  timer: Timer,
+  graceMs: number,
+): Promise<void> {
+  const now = () => timer.monotonicNow?.() ?? timer.now();
+  const deadline = now() + graceMs;
+  while ([...children].some((child) => isPendingAdbChild(child)) && now() < deadline) {
+    await timer.sleep(Math.min(25, deadline - now()));
+  }
+}
+
+function trackActiveAdbChild(child: ChildProcess): void {
+  activeProcesses.add(child);
+  child.once("exit", () => activeProcesses.delete(child));
+}
+
+function removeFinishedAdbChild(child: ChildProcess): void {
+  if (!isActiveAdbChild(child)) {
+    activeProcesses.delete(child);
+  }
+}
+
+function terminateAdbChild(child: ChildProcess): "pending" | "skipped" | "failed" {
+  if (!isActiveAdbChild(child)) {
+    activeProcesses.delete(child);
+    return "skipped";
+  }
+  if (child.pid !== undefined && (child.pid <= 1 || child.pid === process.pid)) {
+    return "skipped";
+  }
+  try {
+    child.kill("SIGTERM");
+    return "pending";
+  } catch (error) {
+    logger.warn(`[ADB] Failed to terminate host child: ${errorMessage(error)}`, error);
+    return "failed";
+  }
+}
+
+function killActiveAdbChild(child: ChildProcess): void {
+  if (!isPendingAdbChild(child)) {
+    return;
+  }
+  try {
+    child.kill("SIGKILL");
+  } catch (error) {
+    logger.warn(`[ADB] Failed to kill host child: ${errorMessage(error)}`, error);
+  }
+}
+
+function isPendingAdbChild(child: ChildProcess): boolean {
+  return activeProcesses.has(child) && isActiveAdbChild(child);
 }

@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import android.util.Log
 import android.view.Display
+import java.lang.reflect.InvocationTargetException
 
 private const val TAG = "DisplayIdentity"
 
@@ -11,6 +12,9 @@ private val panelUniqueIdResolver =
       val method = Display::class.java.getMethod("getUniqueId")
       val read: (Display) -> String? = { display -> method.invoke(display) as? String }
       read
+    },
+    onTransientFailure = { error ->
+      Log.d(TAG, "Display.getUniqueId() failed transiently; panelUniqueId will be omitted", error)
     },
     onUnavailable = { error ->
       Log.d(TAG, "Display.getUniqueId() is unavailable; panelUniqueId will be omitted", error)
@@ -27,9 +31,11 @@ internal fun panelUniqueIdOf(display: Display?): String? = panelUniqueIdResolver
 internal class PanelUniqueIdResolver<D : Any>(
   private val lookup: () -> ((D) -> String?)?,
   private val onUnavailable: (Throwable?) -> Unit = {},
+  private val onTransientFailure: (Throwable) -> Unit = {},
 ) {
   private val lock = Any()
   private var resolved = false
+  private var transientFailureLogged = false
   private var accessor: ((D) -> String?)? = null
 
   fun resolve(display: D?): String? {
@@ -37,21 +43,44 @@ internal class PanelUniqueIdResolver<D : Any>(
     // Serialize invocation too, so no caller can invoke after another caller latches a failure.
     return synchronized(lock) {
       if (resolved && accessor == null) return@synchronized null
-      val value =
-        try {
-          if (!resolved) {
-            resolved = true
-            accessor = lookup()
+      if (!resolved) {
+        resolved = true
+        accessor =
+          try {
+            lookup()
+          } catch (error: Exception) {
+            return@synchronized unavailable(error)
+          } catch (error: LinkageError) {
+            return@synchronized unavailable(error)
           }
-          accessor?.invoke(display)
-        } catch (e: Exception) {
-          return@synchronized unavailable(e)
-        } catch (e: LinkageError) {
-          return@synchronized unavailable(e)
+        if (accessor == null) return@synchronized unavailable(null)
+      }
+      try {
+        accessor?.invoke(display)
+      } catch (error: Exception) {
+        if (error is IllegalArgumentException || isAccessFailure(error)) {
+          unavailable(error)
+        } else {
+          if (!transientFailureLogged) {
+            transientFailureLogged = true
+            onTransientFailure(error)
+          }
+          null
         }
-      if (accessor == null) unavailable(null) else value
+      } catch (error: LinkageError) {
+        unavailable(error)
+      }
     }
   }
+
+  private fun isAccessFailure(error: Throwable): Boolean =
+    when (error) {
+      is IllegalAccessException,
+      is SecurityException,
+      is LinkageError -> true
+      is InvocationTargetException -> error.cause?.let(::isAccessFailure) == true
+      else -> false
+    }
 
   private fun unavailable(error: Throwable?): String? {
     resolved = true

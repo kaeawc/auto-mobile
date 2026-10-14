@@ -128,6 +128,18 @@ export function maxSlowdown(samples: readonly CalibrationSample[]): number | nul
   return Math.max(...samples.map((sample) => slowdownFactor(sample.elapsedMs, sample.baselineMs)));
 }
 
+/** Worst probe for exactly one attempt; other shards, attempts and suffixes are ignored. */
+export function attemptSlowdown(
+  samples: readonly CalibrationSample[],
+  labelPrefix: string,
+): number | null {
+  return maxSlowdown(
+    samples.filter(
+      (sample) => sample.label === `${labelPrefix} start` || sample.label === `${labelPrefix} end`,
+    ),
+  );
+}
+
 const SHARD_LABEL_PATTERN = /^(unit|changed) shard (\d+) attempt (\d+) (?:start|end)$/;
 
 /**
@@ -184,7 +196,8 @@ const USAGE =
   "Usage: bun scripts/lib/runner-calibration.ts probe <out.tsv> <label>\n" +
   "       bun scripts/lib/runner-calibration.ts measure\n" +
   "       bun scripts/lib/runner-calibration.ts slowdown <report-dir>\n" +
-  "       bun scripts/lib/runner-calibration.ts shard-slowdowns <report-dir>";
+  "       bun scripts/lib/runner-calibration.ts shard-slowdowns <report-dir>\n" +
+  "       bun scripts/lib/runner-calibration.ts shard-attempt-slowdown <report-dir> <shard-key> <attempt>";
 
 async function main(args: string[]): Promise<void> {
   const [mode, target, label] = args;
@@ -226,6 +239,21 @@ async function main(args: string[]): Promise<void> {
     // No samples prints nothing: the caller treats that as "no calibration".
     if (slowdown !== null) {
       console.log(slowdown.toFixed(2));
+    }
+    return;
+  }
+  if (
+    mode === "shard-attempt-slowdown" &&
+    target &&
+    label &&
+    /^shard-\d+$/.test(label) &&
+    /^[1-9]\d*$/.test(args[3] ?? "")
+  ) {
+    const file = join(target, `calibration-unit-${label}.tsv`);
+    const samples = existsSync(file) ? parseCalibrationSamples(readFileSync(file, "utf8")) : [];
+    const slowdown = attemptSlowdown(samples, `unit shard ${label.slice(6)} attempt ${args[3]}`);
+    if (slowdown !== null) {
+      console.log(slowdown);
     }
     return;
   }

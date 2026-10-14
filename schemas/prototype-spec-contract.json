@@ -13,6 +13,8 @@
     "MAX_PROTOTYPE_DATA_ARRAY_ITEMS": 500,
     "MAX_PROTOTYPE_DATA_POINTER_LENGTH": 256,
     "MAX_PROTOTYPE_REPEAT_PATH_CELLS": 65536,
+    "MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH": 16384,
+    "MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL": 4194304,
     "MAX_PROTOTYPE_PATCH_OPS": 64
   },
   "definitions": {
@@ -22,14 +24,18 @@
         "x": {
           "rule": {
             "kind": "number",
-            "integer": false
+            "integer": false,
+            "min": -10000,
+            "max": 10000
           },
           "optional": false
         },
         "y": {
           "rule": {
             "kind": "number",
-            "integer": false
+            "integer": false,
+            "min": -10000,
+            "max": 10000
           },
           "optional": false
         }
@@ -56,7 +62,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": false
         },
@@ -64,7 +71,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": false
         }
@@ -243,7 +251,8 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0
+                "min": 0,
+                "max": 10000
               },
               "optional": false
             }
@@ -265,7 +274,8 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0.000001
+                "min": 1e-6,
+                "max": 10000
               },
               "optional": false
             }
@@ -280,7 +290,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": true
         },
@@ -288,7 +299,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": true
         },
@@ -296,7 +308,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": true
         },
@@ -304,7 +317,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": true
         }
@@ -317,7 +331,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": false
         },
@@ -523,7 +538,8 @@
         {
           "kind": "number",
           "integer": false,
-          "min": 0
+          "min": 0,
+          "max": 10000
         },
         {
           "kind": "enum",
@@ -536,7 +552,8 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0
+                "min": 0,
+                "max": 10000
               },
               "optional": true
             },
@@ -544,7 +561,8 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0
+                "min": 0,
+                "max": 10000
               },
               "optional": true
             },
@@ -552,7 +570,8 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0
+                "min": 0,
+                "max": 10000
               },
               "optional": true
             },
@@ -560,7 +579,8 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0
+                "min": 0,
+                "max": 10000
               },
               "optional": true
             }
@@ -589,7 +609,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0.000001
+            "min": 1e-6,
+            "max": 10000
           },
           "optional": true
         },
@@ -597,7 +618,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": true
         },
@@ -605,7 +627,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": true
         },
@@ -613,7 +636,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": true
         },
@@ -621,7 +645,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": true
         },
@@ -657,7 +682,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 1000
           },
           "optional": true
         },
@@ -679,7 +705,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0.000001
+            "min": 1e-6,
+            "max": 10000
           },
           "optional": true
         },
@@ -736,7 +763,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": true
         },
@@ -744,7 +772,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0
+            "min": 0,
+            "max": 10000
           },
           "optional": true
         },
@@ -752,7 +781,8 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0.000001
+            "min": 1e-6,
+            "max": 1000
           },
           "optional": true
         },
@@ -792,14 +822,17 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0.000001
+            "min": 1e-6,
+            "max": 1000
           },
           "optional": true
         },
         "letterSpacing": {
           "rule": {
             "kind": "number",
-            "integer": false
+            "integer": false,
+            "min": -1000,
+            "max": 1000
           },
           "optional": true
         },
@@ -1030,7 +1063,8 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0.000001
+                "min": 1e-6,
+                "max": 10000
               },
               "optional": false
             }

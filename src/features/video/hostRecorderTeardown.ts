@@ -6,7 +6,10 @@ import type { DaemonProcessSignaler } from "../../daemon/processTable";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
-import type { VideoCaptureTeardownDescriptor } from "./VideoRecorderService";
+import type {
+  OrphanCaptureStopOptions,
+  VideoCaptureTeardownDescriptor,
+} from "./VideoRecorderService";
 
 export type HostRecorderTeardownDescriptor = Extract<
   VideoCaptureTeardownDescriptor,
@@ -27,7 +30,11 @@ export const defaultHostRecorderProcessControl: HostRecorderProcessControl = {
   },
 };
 
-export const HOST_RECORDER_INTERRUPT_TIMEOUT_MS = 10_000;
+// Matches IOS_RECORDING_STOP_TIMEOUT_MS. Importing the FFmpeg backend here
+// would cycle through its hostRecorderTeardown import.
+export const HOST_RECORDER_INTERRUPT_TIMEOUT_MS = 30_000;
+// Leave margin inside recordingTeardownRedrive's 5 s INCOMPLETE_MARK_GRACE_MS race.
+export const HOST_RECORDER_BACKGROUND_TIMEOUT_MS = 4_000;
 export const HOST_RECORDER_KILL_TIMEOUT_MS = 1_000;
 export const HOST_RECORDER_POLL_MS = 100;
 
@@ -38,6 +45,7 @@ export async function forceStopHostRecorder(
     control: defaultHostRecorderProcessControl,
     timer: defaultTimer,
   },
+  options: OrphanCaptureStopOptions = { mode: "user" },
 ): Promise<void> {
   const { control, timer } = deps;
   const pid = descriptor.hostPid;
@@ -71,8 +79,18 @@ export async function forceStopHostRecorder(
       return;
     }
     control.signal(pid, "SIGINT");
-    if (await waitForExit(HOST_RECORDER_INTERRUPT_TIMEOUT_MS)) {
+    const background = options.mode === "background";
+    if (
+      await waitForExit(
+        background ? HOST_RECORDER_BACKGROUND_TIMEOUT_MS : HOST_RECORDER_INTERRUPT_TIMEOUT_MS,
+      )
+    ) {
       return;
+    }
+    if (background) {
+      throw new ActionableError(
+        `Orphan host recorder pid ${pid} teardown is unconfirmed; retry after MOV finalization completes.`,
+      );
     }
     if (!ownsRunningProcess()) {
       return;

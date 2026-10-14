@@ -8,6 +8,7 @@ import {
   type VideoCaptureBackend,
   type VideoCaptureConfig,
   type VideoCaptureTeardownDescriptor,
+  type OrphanCaptureStopOptions,
 } from "../../../src/features/video/VideoRecorderService";
 import type { BootedDevice } from "../../../src/models";
 
@@ -17,6 +18,7 @@ class FakeBackend implements VideoCaptureBackend {
   stopCalls: RecordingHandle[] = [];
   forceStopCalls: RecordingHandle[] = [];
   orphanStopCalls: Array<[BootedDevice | undefined, VideoCaptureTeardownDescriptor]> = [];
+  orphanStopOptions: Array<OrphanCaptureStopOptions | undefined> = [];
   descriptor?: VideoCaptureTeardownDescriptor;
   describeCaptureTeardown(_handle: RecordingHandle): VideoCaptureTeardownDescriptor | undefined {
     return this.descriptor;
@@ -24,8 +26,10 @@ class FakeBackend implements VideoCaptureBackend {
   async forceStopOrphanedCapture(
     device: BootedDevice | undefined,
     descriptor: VideoCaptureTeardownDescriptor,
+    options?: OrphanCaptureStopOptions,
   ): Promise<void> {
     this.orphanStopCalls.push([device, descriptor]);
+    this.orphanStopOptions.push(options);
   }
   constructor(name: string) {
     this.name = name;
@@ -314,4 +318,20 @@ test("hybrid passes the iOS host descriptor through its wrapped FFmpeg handle", 
     device: { deviceId: ffmpeg.descriptor.udid, platform: "ios", name: "Fake simulator" },
   });
   expect(hybrid.describeCaptureTeardown(handle)).toEqual(ffmpeg.descriptor);
+});
+
+test("hybrid forwards caller and background orphan stop modes to FFmpeg", async () => {
+  const ffmpeg = new FakeBackend("ffmpeg");
+  const platform = new FakeBackend("platform");
+  const hybrid = new HybridVideoCaptureBackend(ffmpeg, platform);
+  const host = {
+    kind: "ios-host-recorder" as const,
+    hostPid: 42,
+    hostStartToken: "generation-a",
+    udid: "sim-id",
+  };
+  await hybrid.forceStopOrphanedCapture(undefined, host, { mode: "user" });
+  await hybrid.forceStopOrphanedCapture(undefined, host, { mode: "background" });
+  expect(ffmpeg.orphanStopOptions).toEqual([{ mode: "user" }, { mode: "background" }]);
+  expect(platform.orphanStopCalls).toEqual([]);
 });

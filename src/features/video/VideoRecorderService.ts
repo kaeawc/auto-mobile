@@ -192,11 +192,16 @@ export interface ForceStopOptions {
   hostOnly?: boolean;
 }
 
+export interface OrphanCaptureStopOptions {
+  mode?: "user" | "background";
+}
+
 export interface VideoCaptureBackend {
   describeCaptureTeardown?(handle: RecordingHandle): VideoCaptureTeardownDescriptor | undefined;
   forceStopOrphanedCapture?(
     device: BootedDevice | undefined,
     descriptor: VideoCaptureTeardownDescriptor,
+    options?: OrphanCaptureStopOptions,
   ): Promise<void>;
   start(config: VideoCaptureConfig): Promise<RecordingHandle>;
   stop(handle: RecordingHandle): Promise<RecordingResult>;

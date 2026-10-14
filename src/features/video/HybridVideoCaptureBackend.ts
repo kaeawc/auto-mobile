@@ -4,6 +4,7 @@ import { isIosPhysicalUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import {
   type ForceStopOptions,
   type VideoCaptureTeardownDescriptor,
+  type OrphanCaptureStopOptions,
   VideoCaptureStartCleanupError,
   type RecordingHandle,
   type RecordingResult,
@@ -83,6 +84,7 @@ export class HybridVideoCaptureBackend implements VideoCaptureBackend {
   async forceStopOrphanedCapture(
     device: BootedDevice | undefined,
     descriptor: VideoCaptureTeardownDescriptor,
+    options?: OrphanCaptureStopOptions,
   ): Promise<void> {
     const backend =
       descriptor.kind === "ios-host-recorder" ? this.ffmpegBackend : this.platformBackend;
@@ -92,7 +94,11 @@ export class HybridVideoCaptureBackend implements VideoCaptureBackend {
     if (!backend.forceStopOrphanedCapture) {
       throw new ActionableError("Selected backend does not support orphan capture teardown.");
     }
-    await backend.forceStopOrphanedCapture(device, descriptor);
+    if (options) {
+      await backend.forceStopOrphanedCapture(device, descriptor, options);
+    } else {
+      await backend.forceStopOrphanedCapture(device, descriptor);
+    }
   }
 
   async stop(handle: RecordingHandle): Promise<RecordingResult> {

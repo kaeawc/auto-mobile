@@ -99,7 +99,7 @@ test("idle startup host identity confirms immediately without a device or expiry
   await h.start();
   expect(h.mark).toHaveBeenCalledTimes(1);
   await h.mark.mock.calls[0]![1]!();
-  expect(h.stop).toHaveBeenCalledWith(undefined, descriptor);
+  expect(h.stop).toHaveBeenCalledWith(undefined, descriptor, { mode: "background" });
   expect((await h.repo.getRecording("host"))?.captureTeardown).toBeUndefined();
   expect(h.timer.getSleepHistory()).toEqual([]);
 });
@@ -110,7 +110,7 @@ test("held release confirms a host descriptor while the device is absent", async
   expect(h.stop).not.toHaveBeenCalled();
   h.release.mock.calls[0]![0]("holder", "sim-id");
   await h.pending.mock.calls[0]![1];
-  expect(h.stop).toHaveBeenCalledWith(undefined, descriptor);
+  expect(h.stop).toHaveBeenCalledWith(undefined, descriptor, { mode: "background" });
   expect((await h.repo.getRecording("host"))?.captureTeardown).toBeUndefined();
 });
 
@@ -119,7 +119,7 @@ test("failed host teardown preserves its descriptor for another attempt", async 
   h.stop.mockRejectedValue(new ActionableError("identity unreadable"));
   await h.start();
   await expect(h.orphans().stop("sim-id")).rejects.toBeInstanceOf(ActionableError);
-  expect(h.stop).toHaveBeenCalledWith(undefined, descriptor);
+  expect(h.stop).toHaveBeenCalledWith(undefined, descriptor, { mode: "user" });
   expect((await h.repo.getRecording("host"))?.captureTeardown).toEqual(descriptor);
 });
 
@@ -129,7 +129,7 @@ test("a host orphan is redriven even without a pool incarnation", async () => {
   await h.start();
   expect(h.mark).not.toHaveBeenCalled();
   await h.pending.mock.calls[0]![1];
-  expect(h.stop).toHaveBeenCalledWith(undefined, descriptor);
+  expect(h.stop).toHaveBeenCalledWith(undefined, descriptor, { mode: "background" });
   expect((await h.repo.getRecording("host"))?.captureTeardown).toBeUndefined();
 });
 
@@ -152,4 +152,42 @@ test("device identity replacement still stops the independent host process", asy
   );
   await h.pending.mock.calls[0]![1];
   expect(h.stop).toHaveBeenCalledTimes(1);
+});
+
+for (const held of [false, true]) {
+  test(`unconfirmed ${held ? "release" : "health retry"} uses background and retains host identity`, async () => {
+    const h = await harness(held);
+    h.stop.mockRejectedValue(new ActionableError("unconfirmed"));
+    await h.start();
+    if (held) {
+      h.release.mock.calls[0]![0]("holder", "sim-id");
+      await h.pending.mock.calls[0]![1];
+    } else {
+      await expect(h.mark.mock.calls[0]![1]!()).rejects.toBeInstanceOf(ActionableError);
+    }
+    expect(h.stop).toHaveBeenCalledWith(undefined, descriptor, { mode: "background" });
+    expect((await h.repo.getRecording("host"))?.captureTeardown).toEqual(descriptor);
+  });
+}
+
+for (const id of [undefined, "host"]) {
+  test(`caller orphan stop (${id ?? "id-less"}) uses user mode`, async () => {
+    const h = await harness();
+    await h.start();
+    await h.orphans().stop("sim-id", id);
+    expect(h.stop).toHaveBeenCalledWith(undefined, descriptor, { mode: "user" });
+  });
+}
+
+test("process-start redrive uses background and retains unconfirmed host identity", async () => {
+  const h = await harness(true);
+  let listener!: (deviceId: string) => void | Promise<void>;
+  h.deps.onDeviceProcessStarted = (callback) => {
+    listener = callback;
+  };
+  h.stop.mockRejectedValue(new ActionableError("unconfirmed"));
+  await h.start();
+  await listener("sim-id");
+  expect(h.stop).toHaveBeenCalledWith(undefined, descriptor, { mode: "background" });
+  expect((await h.repo.getRecording("host"))?.captureTeardown).toEqual(descriptor);
 });

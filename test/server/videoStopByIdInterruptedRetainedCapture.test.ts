@@ -1,4 +1,7 @@
-import type { VideoCaptureTeardownDescriptor } from "../../src/features/video/VideoRecorderService";
+import type {
+  OrphanCaptureStopOptions,
+  VideoCaptureTeardownDescriptor,
+} from "../../src/features/video/VideoRecorderService";
 import { HybridVideoCaptureBackend } from "../../src/features/video/HybridVideoCaptureBackend";
 import { FfmpegVideoProcessingBackend } from "../../src/features/video/FfmpegVideoProcessingBackend";
 import { FakeHostRecorderProcessControl } from "../fakes/FakeHostRecorderProcessControl";
@@ -44,6 +47,8 @@ import {
 import { Daemon } from "../../src/daemon/daemon";
 import { logger } from "../../src/utils/logger";
 import type { BootedDevice } from "../../src/models";
+
+import { drainUntil } from "../helpers/fakeTimerStepping";
 
 isolateToolRegistry();
 
@@ -348,6 +353,7 @@ async function retainStartupOrphan(
   forceStop: (
     device: BootedDevice | undefined,
     descriptor: VideoCaptureTeardownDescriptor,
+    options?: OrphanCaptureStopOptions,
   ) => Promise<void>,
   captureTeardown?: VideoCaptureTeardownDescriptor,
 ) {
@@ -562,10 +568,11 @@ test("iOS host startup orphan is stopped by id through redrive and permits a fol
     control,
   );
   const hybrid = new HybridVideoCaptureBackend(ffmpeg, backend);
-  await retainStartupOrphan(async (target, descriptor) => {
+  await retainStartupOrphan(async (target, descriptor, options) => {
     expect(target).toBeUndefined();
     expect(descriptor).toEqual(host);
-    await hybrid.forceStopOrphanedCapture(target, descriptor);
+    expect(options).toEqual({ mode: "user" });
+    await hybrid.forceStopOrphanedCapture(target, descriptor, options);
   }, host);
   const stopped = await outcome(
     { action: "stop", sessionUuid: OWNER, recordingId: "startup-orphan" },
@@ -587,4 +594,73 @@ test("iOS host startup orphan is stopped by id through redrive and permits a fol
   for (const recordingId of service.listActiveRecordingIds()) {
     await service.forceStopRecording(recordingId);
   }
+});
+
+for (const platform of ["ios", "android"] as const) {
+  test(`${platform} host-only abandon retains host identity in flight and after failure`, async () => {
+    const descriptor: VideoCaptureTeardownDescriptor =
+      platform === "ios"
+        ? {
+            kind: "ios-host-recorder",
+            hostPid: 42,
+            hostStartToken: "generation-a",
+            udid: "sim-id",
+            capturePath: "/kept/raw.mov",
+          }
+        : { kind: "android-screenrecord", devicePid: 42, deviceTempPath: "/sdcard/raw.mp4" };
+    Object.assign(backend, { describeCaptureTeardown: () => descriptor });
+    const active = await startVideoRecording({
+      device: { ...device, platform },
+      ownerSessionUuid: OWNER,
+      ...(platform === "android" ? { physicalDisplayId: "0" } : {}),
+    });
+    let fail!: (error: Error) => void;
+    const force = spyOn(backend, "forceStop").mockImplementation(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
+    spies.push(force);
+    const work = videoManager.abandonVideoRecordingOnReplacedDevice(active.recordingId);
+    let failure: unknown;
+    const observed = work.then(
+      () => {},
+      (error: unknown) => {
+        failure = error;
+      },
+    );
+    await drainUntil(() => force.mock.calls.length > 0, {
+      description: "host force stop started",
+    });
+    expect(force.mock.calls).toHaveLength(1);
+    const during = (await repository.getRecording(active.recordingId))?.captureTeardown;
+    fail(new Error("still running"));
+    await observed;
+    expect(String(failure)).toContain("unconfirmed");
+    expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
+    expect(during).toEqual(platform === "ios" ? descriptor : undefined);
+    expect((await repository.getRecording(active.recordingId))?.captureTeardown).toEqual(
+      platform === "ios" ? descriptor : undefined,
+    );
+    expect(force.mock.calls[0]![1]).toEqual({ hostOnly: true });
+  });
+}
+
+test("confirmed iOS host-only abandon clears its descriptor", async () => {
+  Object.assign(backend, {
+    describeCaptureTeardown: () => ({
+      kind: "ios-host-recorder",
+      hostPid: 42,
+      hostStartToken: "generation-a",
+      udid: "sim-id",
+    }),
+  });
+  const active = await startVideoRecording({
+    device: { ...device, platform: "ios" },
+    ownerSessionUuid: OWNER,
+  });
+  await videoManager.abandonVideoRecordingOnReplacedDevice(active.recordingId);
+  expect(service.listActiveRecordingIds()).toEqual([]);
+  expect((await repository.getRecording(active.recordingId))?.captureTeardown).toBeUndefined();
 });

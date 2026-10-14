@@ -51,6 +51,7 @@ import {
   type VideoCaptureBackend,
   type VideoCaptureConfig,
   type VideoCaptureTeardownDescriptor,
+  type OrphanCaptureStopOptions,
 } from "./VideoRecorderService";
 
 export { PROCESS_EXIT_TIMEOUT_MS, waitForExit };
@@ -619,14 +620,19 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
   async forceStopOrphanedCapture(
     _device: BootedDevice | undefined,
     descriptor: VideoCaptureTeardownDescriptor,
+    options?: OrphanCaptureStopOptions,
   ): Promise<void> {
     if (descriptor.kind !== "ios-host-recorder") {
       throw new ActionableError("FFmpeg orphan teardown requires an iOS host recorder identity.");
     }
-    await forceStopHostRecorder(descriptor, {
-      control: this.hostRecorderControl,
-      timer: this.timer,
-    });
+    await forceStopHostRecorder(
+      descriptor,
+      {
+        control: this.hostRecorderControl,
+        timer: this.timer,
+      },
+      options,
+    );
   }
 
   async start(config: VideoCaptureConfig): Promise<RecordingHandle> {

@@ -7,6 +7,8 @@ import {
 import { trackProcess } from "../../../src/utils/ChildProcessTracker";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { ActionableError } from "../../../src/models";
+import { FakeHostRecorderProcessControl } from "../../fakes/FakeHostRecorderProcessControl";
 import { logger } from "../../../src/utils/logger";
 
 function handle(platform: "ios" | "android", pid: number | undefined = 42): RecordingHandle {
@@ -104,4 +106,57 @@ test("Android ffmpeg-pipe handle never probes a host token", () => {
       throw new Error("must not probe");
     }).describeCaptureTeardown(handle("android")),
   ).toBeUndefined();
+});
+
+test("FFmpeg background orphan teardown retains a slow-finalizing host without SIGKILL", async () => {
+  const timer = new FakeTimer();
+  const control = new FakeHostRecorderProcessControl();
+  const recorder = new FfmpegVideoProcessingBackend(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    timer,
+    undefined,
+    undefined,
+    undefined,
+    () => "generation-a",
+    control,
+  );
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    let failure: unknown;
+    const observed = recorder
+      .forceStopOrphanedCapture(
+        undefined,
+        {
+          kind: "ios-host-recorder",
+          hostPid: 42,
+          hostStartToken: "generation-a",
+          udid: "sim-id",
+        },
+        { mode: "background" },
+      )
+      .then(
+        () => {},
+        (error: unknown) => {
+          failure = error;
+        },
+      );
+    for (let elapsed = 0; elapsed < 5_000; elapsed += 100) {
+      timer.advanceTime(100);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+    expect(failure).toBeInstanceOf(ActionableError);
+    await observed;
+    timer.advanceTime(40_000);
+    expect(control.signals).toEqual([[42, "SIGINT"]]);
+    expect(timer.getPendingSleepCount()).toBe(0);
+  } finally {
+    warn.mockRestore();
+    timer.reset();
+  }
 });

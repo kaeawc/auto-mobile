@@ -1758,8 +1758,10 @@ export class Daemon {
                 ? { deviceId: device.id, name: device.name, platform: device.platform }
                 : undefined;
             },
-            forceStopOrphanedCapture: (device, descriptor) =>
-              backend.forceStopOrphanedCapture(device, descriptor),
+            forceStopOrphanedCapture: (device, descriptor, options) =>
+              options
+                ? backend.forceStopOrphanedCapture(device, descriptor, options)
+                : backend.forceStopOrphanedCapture(device, descriptor),
             now: () => this.timer.now(),
             timer: this.timer,
           });

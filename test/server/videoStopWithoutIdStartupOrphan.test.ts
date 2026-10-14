@@ -1,4 +1,7 @@
-import type { VideoCaptureTeardownDescriptor } from "../../src/features/video/VideoRecorderService";
+import type {
+  OrphanCaptureStopOptions,
+  VideoCaptureTeardownDescriptor,
+} from "../../src/features/video/VideoRecorderService";
 import { HybridVideoCaptureBackend } from "../../src/features/video/HybridVideoCaptureBackend";
 import { FfmpegVideoProcessingBackend } from "../../src/features/video/FfmpegVideoProcessingBackend";
 import { FakeHostRecorderProcessControl } from "../fakes/FakeHostRecorderProcessControl";
@@ -158,6 +161,7 @@ async function retainStartupOrphan(
   forceStop: (
     device: BootedDevice | undefined,
     descriptor: VideoCaptureTeardownDescriptor,
+    options?: OrphanCaptureStopOptions,
   ) => Promise<void>,
   captureTeardown?: VideoCaptureTeardownDescriptor,
 ) {
@@ -377,10 +381,11 @@ test("iOS host startup orphan is stopped without an id through redrive and permi
     control,
   );
   const hybrid = new HybridVideoCaptureBackend(ffmpeg, backend);
-  await retainStartupOrphan(async (target, descriptor) => {
+  await retainStartupOrphan(async (target, descriptor, options) => {
     expect(target).toBeUndefined();
     expect(descriptor).toEqual(host);
-    await hybrid.forceStopOrphanedCapture(target, descriptor);
+    expect(options).toEqual({ mode: "user" });
+    await hybrid.forceStopOrphanedCapture(target, descriptor, options);
   }, host);
   const stopped = await outcome({ action: "stop", sessionUuid: OWNER }, iosDevice);
   expect(stopped.error).toBeUndefined();

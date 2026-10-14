@@ -129,3 +129,81 @@ test("a host still alive after SIGKILL remains unconfirmed", async () => {
     [42, "SIGKILL"],
   ]);
 });
+
+async function advanceRecorder(h: ReturnType<typeof harness>, ms: number) {
+  for (let elapsed = 0; elapsed < ms; elapsed += HOST_RECORDER_POLL_MS) {
+    h.timer.advanceTime(HOST_RECORDER_POLL_MS);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+}
+
+test("user stop allows a MOV to finalize at 25 seconds without SIGKILL", async () => {
+  const h = harness();
+  h.control.onSignal = (sig) => {
+    if (sig === "SIGKILL") {
+      h.control.running = false;
+    }
+  };
+  h.timer.setTimeout(() => {
+    h.control.running = false;
+  }, 25_000);
+  const work = forceStopHostRecorder(descriptor, h, { mode: "user" });
+  await advanceRecorder(h, 30_000);
+  await work;
+  expect(h.control.signals).toEqual([[42, "SIGINT"]]);
+});
+
+test("user stop waits 30 seconds before token-checked SIGKILL", async () => {
+  const h = harness();
+  h.control.onSignal = (sig) => {
+    if (sig === "SIGKILL") {
+      h.control.running = false;
+    }
+  };
+  const work = forceStopHostRecorder(descriptor, h, { mode: "user" });
+  await advanceRecorder(h, 29_900);
+  expect(h.control.signals).toEqual([[42, "SIGINT"]]);
+  await advanceRecorder(h, 100);
+  await work;
+  expect(h.control.signals).toEqual([
+    [42, "SIGINT"],
+    [42, "SIGKILL"],
+  ]);
+  expect(h.control.tokenReads).toBe(2);
+});
+
+test("background stop becomes unconfirmed within the redrive budget and never kills", async () => {
+  const h = harness();
+  const work = forceStopHostRecorder(descriptor, h, { mode: "background" });
+  let failure: unknown;
+  const observed = work.then(
+    () => {},
+    (error: unknown) => {
+      failure = error;
+    },
+  );
+  await advanceRecorder(h, 5_000);
+  expect(failure).toBeInstanceOf(ActionableError);
+  expect(h.timer.getPendingSleepCount()).toBe(0);
+  // Even well after the outer race expired, no detached escalation may run.
+  await advanceRecorder(h, 40_000);
+  await observed;
+  expect(failure).toBeInstanceOf(ActionableError);
+  expect(String(failure)).toContain("unconfirmed");
+  expect(h.control.signals).toEqual([[42, "SIGINT"]]);
+  expect(h.timer.getSleepHistory().reduce((sum, ms) => sum + ms, 0)).toBeLessThanOrEqual(5_000);
+  expect(h.timer.getPendingSleepCount()).toBe(0);
+});
+
+test("background stop confirms an exit within its budget", async () => {
+  const h = harness();
+  h.timer.setTimeout(() => {
+    h.control.running = false;
+  }, 2_000);
+  const work = forceStopHostRecorder(descriptor, h, { mode: "background" });
+  await advanceRecorder(h, 5_000);
+  await work;
+  expect(h.control.signals).toEqual([[42, "SIGINT"]]);
+});

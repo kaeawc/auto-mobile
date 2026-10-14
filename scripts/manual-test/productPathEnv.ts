@@ -124,6 +124,11 @@ export const PRODUCT_PATH_ENV_VARIABLES: readonly ProductPathEnvVariable[] = [
     reason: "Read-only helper executable.",
   },
   { name: "AUTOMOBILE_IOS_PROTOTYPE_AGENT", kind: "input", reason: "Read-only agent dylib." },
+  {
+    name: "AUTOMOBILE_IOS_PROTOTYPE_VIEWER",
+    kind: "input",
+    reason: "Read-only viewer template archive.",
+  },
 ];
 /** Non-path product reads, derived from the same AST scan as docs conformance.
  * URLs, hashes, identities, lists, numeric settings and flags are values, not filesystem paths.
@@ -241,6 +246,7 @@ export const NON_PATH_ENV_VARIABLES: readonly string[] = [
   "AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED",
   "AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD",
   "AUTOMOBILE_SKIP_IOS_PROTOTYPE_AGENT_DOWNLOAD",
+  "AUTOMOBILE_SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD",
   "AUTOMOBILE_SKIP_VIDEO_SERVER_DOWNLOAD",
   "AUTOMOBILE_STARTUP_BENCHMARK",
   "AUTOMOBILE_STARTUP_BENCHMARK_LABEL",

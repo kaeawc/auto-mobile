@@ -1,3 +1,4 @@
+import type { PanelFingerprint } from "../../../models/DisplayPanel";
 /**
  * Shared types for CtrlProxyClient delegates.
  *
@@ -119,6 +120,7 @@ export interface AccessibilityHierarchy {
   prototypeSuspended?: boolean;
   displayId?: number | null;
   panelUniqueId?: string | null;
+  panelFingerprint?: PanelFingerprint;
   /** Daemon sequence assigned when this capture was forwarded to the observation stream. */
   captureSequence?: number;
   updatedAt: number;

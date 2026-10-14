@@ -30,11 +30,14 @@ enum PrototypeAgentProtocol {
         windowChromeCapability,
         iconSfSymbolsCapability,
         dataModelCapability,
+        stackCapability,
     ]
-    /// A same-id `show_prototype` replaces the prototype in place keeping pager pages, and
+    /// A same-id `show_prototype` replaces the prototype in place keeping pager pages and stack paths, and
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
     /// `reset` on an agent that does not advertise it.
     static let showInPlaceCapability = "prototype_show_in_place_v1"
+    /// Stack paths, four navigation actions, screen_changed and left-edge Back (#12068).
+    static let stackCapability = "prototype_stack_v1"
     /// Positions `{type: "bounds"}` node anchors (#9316). The host refuses anchors on an agent that
     /// does not advertise it, which would draw the node at its normal position. Same name as the
     /// CtrlProxy capability.

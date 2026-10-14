@@ -74,7 +74,18 @@ extension PrototypePalette {
 extension PrototypeNode {
     /// Whether a `textField` is anywhere in this subtree, so focusing it is what the author meant.
     var containsTextField: Bool {
-        type == "textField" || ((children ?? []) + [child].compactMap(\.self)).contains { $0.containsTextField }
+        type == "textField" || childEntries(path: "root").map(\.node).contains { $0.containsTextField }
+    }
+
+    func containsVisibleTextField(
+        state: [String: JSONValue], pages: [String: Int], stacks: [String: PrototypeStackSnapshot]
+    )
+        -> Bool
+    {
+        if let visibleWhen, !visibleWhen.holds(state) { return false }
+        return type == "textField" || currentChildEntries(path: "root", pages: pages, stacks: stacks).contains {
+            $0.node.containsVisibleTextField(state: state, pages: pages, stacks: stacks)
+        }
     }
 }
 
@@ -83,10 +94,15 @@ extension PrototypeNode {
 /// on a wheel's selected row opens a number pad) or a field behind the dialog would otherwise keep
 /// the keyboard up over the dialog's buttons; a dialog that holds a text field keeps focus so the
 /// user can type into it. Snackbars never take focus, so only dialogs count.
-func prototypeModalChangeEndsEditing(from dialogsBefore: [ObjectIdentifier], to modalsAfter: [PrototypeNode]) -> Bool {
+func prototypeModalChangeEndsEditing(
+    from dialogsBefore: [ObjectIdentifier], to modalsAfter: [PrototypeNode],
+    state: [String: JSONValue] = [:], pages: [String: Int] = [:], stacks: [String: PrototypeStackSnapshot] = [:]
+)
+    -> Bool
+{
     let dialogsAfter = modalsAfter.filter { $0.type == "dialog" }
     guard dialogsBefore != dialogsAfter.map(ObjectIdentifier.init) else { return false }
-    return !(dialogsAfter.last?.containsTextField ?? false)
+    return !(dialogsAfter.last?.containsVisibleTextField(state: state, pages: pages, stacks: stacks) ?? false)
 }
 
 extension [PrototypeNode] {

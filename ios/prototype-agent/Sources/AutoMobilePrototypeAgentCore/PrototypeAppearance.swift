@@ -82,6 +82,7 @@ struct PrototypeAppearance: Equatable {
         root: PrototypeNode?,
         state: [String: JSONValue] = [:],
         pages: [String: Int] = [:],
+        stacks: [String: PrototypeStackSnapshot] = [:],
         override: PrototypeAppearanceOverride = .device,
         deviceDark: Bool
     )
@@ -103,7 +104,7 @@ struct PrototypeAppearance: Equatable {
         if let surface = PrototypeRGBA(hex: roles["background"]) ?? PrototypeRGBA(hex: roles["surface"]) {
             return resolved(surface.luminance < darkLuminanceCeiling, .roleLuminance)
         }
-        if let background = root?.authoredBackground(state: state, pages: pages) {
+        if let background = root?.authoredBackground(state: state, pages: pages, stacks: stacks) {
             return resolved(background.luminance < darkLuminanceCeiling, .authoredBackground)
         }
         return system
@@ -116,7 +117,11 @@ extension PrototypeNode {
     /// page) is what the author painted the screen with. A hidden node paints nothing and is
     /// skipped. Only a single hex value takes part: a role name and a `{light, dark}` pair depend
     /// on the mode, so neither can decide it, and the search continues below them.
-    func authoredBackground(state: [String: JSONValue], pages: [String: Int]) -> PrototypeRGBA? {
+    func authoredBackground(
+        state: [String: JSONValue], pages: [String: Int], stacks: [String: PrototypeStackSnapshot] = [:]
+    )
+        -> PrototypeRGBA?
+    {
         var node: PrototypeNode? = self
         while let current = node {
             if current.isShown(state: state),
@@ -125,13 +130,10 @@ extension PrototypeNode {
             {
                 return color
             }
-            let children = current.child.map { [$0] } ?? current.children ?? []
-            if current.type == "pager" {
-                let page = current.id.flatMap { pages[$0] } ?? 0
-                node = children.indices.contains(page) ? children[page] : nil
-            } else {
-                node = children.first { $0.isShown(state: state) }
-            }
+            let children = current.currentChildEntries(
+                path: "root", pages: pages, stacks: stacks, clampPagerPage: false
+            ).map(\.node)
+            node = current.type == "pager" ? children.first : children.first { $0.isShown(state: state) }
         }
         return nil
     }

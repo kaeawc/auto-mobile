@@ -22,6 +22,7 @@ struct PrototypeEvent: Equatable {
     let payload: JSONValue
     let state: [String: JSONValue]
     let pages: [String: Int]
+    let stacks: [String: PrototypeStackSnapshot]
 
     /// The wire object, in the shape of `PrototypeEvent` in `ctrlProxyProtocol.ts`.
     func wireObject(timestamp: Int) -> [String: Any] {
@@ -35,6 +36,7 @@ struct PrototypeEvent: Equatable {
             "payload": payload.foundationObject,
             "state": JSONValue.object(state).foundationObject,
             "pages": pages,
+            "stacks": stacks.mapValues(\.wireObject),
         ]
     }
 }
@@ -59,6 +61,8 @@ struct PrototypeSession {
     private(set) var spec: PrototypeSpec?
     private(set) var state: [String: JSONValue] = [:]
     private(set) var pages: [String: Int] = [:]
+    private(set) var stacks: [String: PrototypeStackSnapshot] = [:]
+    private var stackNodes: [String: PrototypeNode] = [:]
     private(set) var pageCounts: [String: Int] = [:]
     /// Agent-lifetime ledger, per prototype id and monotonic from 1: re-showing an id after a
     /// dismissal or another prototype never rewinds it, because hosts discard lower-or-equal
@@ -90,8 +94,9 @@ struct PrototypeSession {
 
     /// A show of the prototype already on screen replaces it in place: its spec state is
     /// authoritative and each pager that survives keeps its page, matched by id and clamped to the
-    /// new page count. Any other show, or one with `reset`, starts fresh: the spec's own state and
-    /// every pager on its first page. Event sequences are per id and never rewound either way.
+    /// new page count. Stack paths drop unknown screens and fall back to start when empty.
+    /// Any other show, or one with `reset`, starts fresh: the spec's own state, every pager on
+    /// its first page and every stack at start. Event sequences are per id and never rewound either way.
     /// `appearance` is the request's own: a show that carries none follows the device again.
     mutating func show(
         _ spec: PrototypeSpec,
@@ -103,6 +108,14 @@ struct PrototypeSession {
         // The agent keeps no raw spec, so the request's own size (when the caller has it) less the
         // state it carried is what the cap adds every later state to; without it only state counts.
         nonStateBytes = max(0, (specBytes ?? 0) - PrototypeStateValidator.stateBytes(spec.state ?? [:]))
+        let previousStacks = !reset && self.spec?.id == spec.id ? stacks : [:]
+        stackNodes = [:]
+        spec.root.collectStacks(into: &stackNodes)
+        stacks = stackNodes.mapValues { node in
+            let path = (node.id.flatMap { previousStacks[$0]?.path } ?? [])
+                .filter { node.screens?[$0] != nil }.prefix(PrototypeLimits.maxStackDepth)
+            return PrototypeStackSnapshot(path: path.isEmpty ? [node.start ?? ""] : Array(path))
+        }
         let previous = !reset && self.spec?.id == spec.id ? pages : [:]
         pageCounts = spec.root.pagerCounts()
         pages = pageCounts.reduce(into: [:]) { result, entry in
@@ -130,6 +143,7 @@ struct PrototypeSession {
             root: spec.root,
             state: state,
             pages: pages,
+            stacks: stacks,
             override: appearanceOverride,
             deviceDark: deviceDark
         )
@@ -249,6 +263,8 @@ struct PrototypeSession {
             switch action.type {
             case "emit":
                 events += emit(kind: "emit", name: action.name, payload: action.payload ?? .null)
+            case "push", "pop", "popToRoot", "replace":
+                events += runStack(action)
             case "setPage":
                 events += runSetPage(action)
             case "dismiss":
@@ -323,7 +339,8 @@ struct PrototypeSession {
     /// runs its `onTap`.
     mutating func simulateTap(identifier: String) -> Result<[PrototypeEvent], PrototypeTapFailure> {
         guard isShown, let spec else { return .failure(.notShown) }
-        guard let target = spec.root.tapTarget(identifier: identifier, state: state) else {
+        guard let target = spec.root.tapTarget(identifier: identifier, state: state, pages: pages, stacks: stacks)
+        else {
             return .failure(.notFound)
         }
         guard let events = activate(target) else { return .failure(.notTappable) }
@@ -337,6 +354,60 @@ struct PrototypeSession {
         guard pages[pager] != clamped else { return [] }
         pages[pager] = clamped
         return emit(kind: "page_changed", name: pager, payload: .number(Double(clamped)))
+    }
+
+    /// The navigation fields shared by show and inspect/status results.
+    var navigationSnapshot: [String: Any] {
+        ["pages": pages, "stacks": stacks.mapValues(\.wireObject)]
+    }
+
+    var stackPopTarget: String? {
+        guard let spec else { return nil }
+        return PrototypeStacks.popTarget(root: spec.root, state: state, pages: pages, stacks: stacks)
+    }
+
+    mutating func popTopmostStack() -> [PrototypeEvent] {
+        guard let id = stackPopTarget else { return [] }
+        return changeStack(id) { _, path in Array(path.dropLast()) }
+    }
+
+    private mutating func runStack(_ action: PrototypeAction) -> [PrototypeEvent] {
+        guard let id = action.stack else { return [] }
+        return changeStack(id) { node, path in
+            switch action.type {
+            case "push":
+                guard path.count < PrototypeLimits.maxStackDepth, let screen = action.screen,
+                      node.screens?[screen] != nil else { return path }
+                return path + [screen]
+            case "pop":
+                return path.count > 1 ? Array(path.dropLast()) : path
+            case "popToRoot":
+                return [node.start ?? ""]
+            case "replace":
+                guard let screen = action.screen, node.screens?[screen] != nil else { return path }
+                return Array(path.dropLast()) + [screen]
+            default:
+                return path
+            }
+        }
+    }
+
+    private mutating func changeStack(
+        _ id: String, transform: (PrototypeNode, [String]) -> [String]
+    )
+        -> [PrototypeEvent]
+    {
+        guard isShown, let node = stackNodes[id], let before = stacks[id] else { return [] }
+        let path = transform(node, before.path)
+        guard path != before.path, let screen = path.last else { return [] }
+        let next = PrototypeStackSnapshot(path: path)
+        stacks[id] = next
+        // popToRoot can change a depth-one replacement back to start; repeated pushes of the
+        // same screen change depth. Both are real changes, just as on Android.
+        guard before.path.last != screen || before.depth != next.depth else { return [] }
+        return emit(kind: "screen_changed", name: id, payload: .object([
+            "screen": .string(screen), "depth": .number(Double(next.depth)),
+        ]))
     }
 
     /// A user edit of a bound control: one `emit` named `change` per changed value, matching
@@ -391,7 +462,8 @@ struct PrototypeSession {
             name: name,
             payload: payload,
             state: state,
-            pages: pages
+            pages: pages,
+            stacks: stacks
         )]
     }
 

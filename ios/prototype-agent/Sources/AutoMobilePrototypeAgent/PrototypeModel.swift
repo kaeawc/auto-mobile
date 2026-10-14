@@ -13,6 +13,7 @@ final class PrototypeModel {
     private(set) var showRevision = 0
     private(set) var state: [String: JSONValue] = [:]
     private(set) var pages: [String: Int] = [:]
+    private(set) var stacks: [String: PrototypeStackSnapshot] = [:]
     private(set) var appearance: PrototypeAppearance?
     private(set) var deviceDark = false
     private(set) var escapeRevealed = false
@@ -32,6 +33,7 @@ final class PrototypeModel {
         escapeReveal.sync(hasEscape: hasEscape, shown: next.isShown)
         if state != next.state { state = next.state }
         if pages != next.pages { pages = next.pages }
+        if stacks != next.stacks { stacks = next.stacks }
         if appearance != next.appearance { appearance = next.appearance }
         if deviceDark != next.deviceDark { deviceDark = next.deviceDark }
     }
@@ -114,7 +116,8 @@ final class PrototypeModel {
 
     /// Re-arms snackbar timeouts against the snackbars the session now has open.
     private func syncSnackbarTimeouts() {
-        let open = session.spec?.root.openModals(state: session.state, pages: session.pages) ?? []
+        let open = session.spec?.root
+            .openModals(state: session.state, pages: session.pages, stacks: session.stacks) ?? []
         snackbarTimeouts.sync(openModals: open)
     }
 
@@ -185,6 +188,22 @@ final class PrototypeModel {
     }
 
     // MARK: Interactions
+
+    /// Reading stacks registers the SwiftUI dependency; the pop policy itself stays in core.
+    var stackPopTarget: String? {
+        _ = spec
+        _ = state
+        _ = pages
+        _ = stacks
+        return session.stackPopTarget
+    }
+
+    @discardableResult
+    func popTopmostStack() -> Bool {
+        guard stackPopTarget != nil else { return false }
+        apply { $0.popTopmostStack() }
+        return true
+    }
 
     func run(_ actions: [PrototypeAction]) {
         apply { $0.run(actions) }
@@ -289,6 +308,7 @@ final class PrototypeModel {
             "shown": session.isShown,
             "id": spec?.id as Any? ?? NSNull(),
             "pages": pages,
+            "stacks": stacks.mapValues(\.wireObject),
             "state": JSONValue.object(state).foundationObject,
             "assets": assets.keys.sorted(),
             "lastSequence": session.lastSequence,

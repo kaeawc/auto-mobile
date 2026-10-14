@@ -360,6 +360,7 @@ final class PrototypeAgent: NSObject {
                 warnAboutFontAssets(for: spec)
                 warnAboutUnknownThemeColors(for: spec)
                 var extra = missingAssetsExtra()
+                extra.merge(model.session.navigationSnapshot) { _, navigation in navigation }
                 if let appearance = model.session.appearance { extra["appearance"] = appearance.wireObject }
                 // The host can leave before this queued show runs; nothing would remove it later.
                 if connectedClients == 0 { model.hostDisconnected() }
@@ -488,7 +489,9 @@ final class PrototypeAgent: NSObject {
 /// Shared gate for the root view and controller; focused SwiftUI nodes can reach either chain.
 @MainActor
 private func performPrototypeAccessibilityEscape(_ model: PrototypeModel?) -> Bool {
-    guard let model, model.hasEscape else { return false }
+    guard let model else { return false }
+    if model.popTopmostStack() { return true }
+    guard model.hasEscape else { return false }
     model.dismiss(reason: .user)
     return true
 }
@@ -631,7 +634,11 @@ struct PrototypeRootView: View {
         // An open dialog makes the page behind it inert for accessibility, as it is for touches
         // (#10899). VoiceOver honours this collapse; the XCUITest snapshot needs the UIKit flags
         // `PrototypeLayersViewController.apply` sets on the page's hosting view.
-        let pageAccessibility = model.spec?.root.layerAccessibility(state: model.state, pages: model.pages)
+        let pageAccessibility = model.spec?.root.layerAccessibility(
+            state: model.state,
+            pages: model.pages,
+            stacks: model.stacks
+        )
             ?? .container
         ZStack {
             if let spec = model.spec {
@@ -700,6 +707,23 @@ struct PrototypeRootView: View {
         // Android: the hosts keep no safe area (`PrototypeKeyboardLift.hostSafeAreaRegions`), and
         // this ignores every region too, so no second lift can stack on the sheet's (#11042).
         .ignoresSafeArea()
+        .overlay(alignment: .leading) {
+            if model.stackPopTarget != nil {
+                // Reserve only the active Back edge. A full-root simultaneous drag also turns a
+                // nested pager; a full-root high-priority drag consumes non-edge scrolls too.
+                // Both hosts need this strip because UIKit routes each touch to just one layer.
+                Color.clear
+                    .frame(width: 20)
+                    .frame(maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .accessibilityHidden(true)
+                    .gesture(DragGesture(minimumDistance: 60, coordinateSpace: .local).onEnded { value in
+                        if value.startLocation.x >= 0, value.startLocation.x <= 20, value.translation.width >= 60 {
+                            model.popTopmostStack()
+                        }
+                    })
+            }
+        }
     }
 
     /// The spec's anchored nodes, above its tree and below its modals, as Android's anchor layer.
@@ -708,7 +732,7 @@ struct PrototypeRootView: View {
         let motion = PrototypeMotion(specMotion: spec.motion, reduceMotion: reduceMotion)
         return PrototypeAnchorLayer(
             entries: spec.root.windowAnchorLayer(
-                state: model.state, pages: model.pages, retainExiting: motion.enabled
+                state: model.state, pages: model.pages, stacks: model.stacks, retainExiting: motion.enabled
             ),
             model: model,
             sheet: placement.type == "sheet"

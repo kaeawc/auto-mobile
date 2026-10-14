@@ -34,6 +34,8 @@ final class PrototypeLimitsTests: XCTestCase {
             )
         ) as? [String: Any]
         let limits = try XCTUnwrap(contract?["limits"] as? [String: Int])
+        XCTAssertEqual(PrototypeLimits.maxStackScreens, limits["MAX_PROTOTYPE_STACK_SCREENS"])
+        XCTAssertEqual(PrototypeLimits.maxStackDepth, limits["MAX_PROTOTYPE_STACK_DEPTH"])
         XCTAssertEqual(PrototypeLimits.maxPatchOps, limits["MAX_PROTOTYPE_PATCH_OPS"])
         XCTAssertEqual(PrototypeLimits.maxNodes, limits["MAX_PROTOTYPE_NODES"])
         XCTAssertEqual(PrototypeLimits.maxDepth, limits["MAX_PROTOTYPE_DEPTH"])

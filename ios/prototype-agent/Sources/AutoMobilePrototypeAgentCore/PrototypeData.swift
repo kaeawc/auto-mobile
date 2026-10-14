@@ -203,6 +203,9 @@ enum PrototypeDataResolver {
         } else if case let .array(children)? = fields["children"] {
             fields["children"] = .array(children.map { resolveRoot($0, data: data, repeats: &repeats) })
         }
+        if case let .object(screens)? = fields["screens"] {
+            fields["screens"] = .object(screens.mapValues { resolveRoot($0, data: data, repeats: &repeats) })
+        }
         return .object(fields)
     }
 

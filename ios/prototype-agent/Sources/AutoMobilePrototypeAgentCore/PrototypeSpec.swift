@@ -125,6 +125,7 @@ struct PrototypeSpec: Decodable {
         )
         // There is no Swift twin of the host validator, so the forms `prototype_theme_modes_v1`
         // added are checked here: a malformed one fails the show instead of drawing a fallback.
+        try PrototypeStacks.validate(root: root)
         try PrototypeThemeModes.validate(placement: window.placement, root: root)
     }
 }
@@ -397,6 +398,8 @@ struct PrototypeAction: Decodable {
     let payload: JSONValue?
     let pager: String?
     let page: JSONValue?
+    let stack: String?
+    let screen: String?
     let key: String?
     let value: JSONValue?
     /// `increment`/`decrement` step; 1 when omitted.
@@ -542,6 +545,8 @@ final class PrototypeNode: Decodable {
     let anchor: PrototypeAnchor?
     let children: [PrototypeNode]?
     let child: PrototypeNode?
+    let start: String?
+    let screens: [String: PrototypeNode]?
     let text: String?
     /// Authored accessible label (#10446); wins over the label derived from text or icon.
     let contentDescription: String?
@@ -615,6 +620,7 @@ final class PrototypeNode: Decodable {
         }
         children?.forEach { $0.collectPagers(into: &counts) }
         child?.collectPagers(into: &counts)
+        screens?.values.forEach { $0.collectPagers(into: &counts) }
     }
 
     /// `fontFamily: {asset}` ids on this node's own style and its `styleWhen` entries.
@@ -630,6 +636,7 @@ final class PrototypeNode: Decodable {
         ids.formUnion(fontAssetIds())
         children?.forEach { $0.collectFontAssets(into: &ids) }
         child?.collectFontAssets(into: &ids)
+        screens?.values.forEach { $0.collectFontAssets(into: &ids) }
     }
 
     /// Asset ids the spec references, for the `missingAssets` warning.
@@ -640,5 +647,6 @@ final class PrototypeNode: Decodable {
         items?.compactMap(\.image).forEach { ids.formUnion($0.values) }
         children?.forEach { $0.collectAssets(into: &ids) }
         child?.collectAssets(into: &ids)
+        screens?.values.forEach { $0.collectAssets(into: &ids) }
     }
 }

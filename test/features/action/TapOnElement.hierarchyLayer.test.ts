@@ -1,5 +1,6 @@
+import { warmedTests } from "../../helpers/warmedTests";
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import { TapOnElement, tapResolvedLayer } from "../../../src/features/action/TapOnElement";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
 import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
@@ -49,7 +50,25 @@ afterEach(() => {
   mock.restore();
 });
 
+const regressionTest = warmedTests(() => mock.restore());
+
 describe("tapOn layer (#9305)", () => {
+  regressionTest("successful prototype tap keeps layer metadata off the wire", async () => {
+    const { command } = createCommand(capturedPrototypeHierarchy());
+    const result = await command.execute({ action: "tap", text: "Settings", layer: "prototype" });
+
+    expect(result.success).toBe(true);
+    expect(result[tapResolvedLayer]).toBe("prototype");
+    expect(
+      Object.getOwnPropertySymbols(result).filter((key) =>
+        Object.prototype.propertyIsEnumerable.call(result, key),
+      ),
+    ).toEqual([]);
+    const roundTrip = JSON.parse(JSON.stringify(result));
+    expect(roundTrip).toEqual(Object.fromEntries(Object.entries(result)));
+    expect(roundTrip.success).toBe(true);
+  });
+
   test("text in both windows taps the prototype by default", async () => {
     const { command, service, viewHierarchy } = createCommand(capturedPrototypeHierarchy());
     const result = await command.execute({ action: "tap", text: "Settings" });

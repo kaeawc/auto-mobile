@@ -8,6 +8,7 @@ import {
 import type { MirroredSavedPrototype } from "../../../src/features/prototype/savedPrototypeMirror";
 import { FakeSavedPrototypeMirror } from "../../fakes/FakeSavedPrototypeMirror";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { settleByFakeEvents } from "../../helpers/fakeTimerStepping";
 
 const entry: MirroredSavedPrototype = {
   id: "one",
@@ -128,7 +129,7 @@ test("a success envelope with an error is a failed restore", async () => {
   ]);
 });
 
-function adapterHarness(commands: string[]) {
+function adapterHarness(commands: string[], timeoutMs?: number) {
   const calls: string[] = [];
   const timer = new FakeTimer();
   const client: SavedPrototypeRestoreClient = {
@@ -157,7 +158,7 @@ function adapterHarness(commands: string[]) {
       calls.push("resolve");
       return client;
     },
-    50,
+    timeoutMs,
   );
   return { adapter, client, timer, calls };
 }
@@ -176,24 +177,78 @@ test("unsupported adapter sends no mutations and reports device_unsupported per 
   expect((await restoreSavedPrototypes("serial", mirror, adapter)).failed).toMatchObject([
     { id: "one", code: "device_unsupported" },
   ]);
-  expect(calls).toEqual(["resolve", "connect"]);
+  expect(calls).toEqual(["resolve", "connect", "resolve", "connect"]);
+});
+test.each(["false", "reject"])(
+  "adapter retries an initial %s connection and restores",
+  async (mode) => {
+    const { adapter, client, timer, calls } = adapterHarness(["prototype_saved_v1"]);
+    let attempts = 0;
+    client.ensureConnected = async () => {
+      calls.push("connect");
+      if (++attempts === 1) {
+        if (mode === "reject") {
+          throw new Error("service still binding");
+        }
+        return false;
+      }
+      return true;
+    };
+    const mirror = new FakeSavedPrototypeMirror();
+    await mirror.record("serial", entry);
+    expect(
+      await settleByFakeEvents(timer, restoreSavedPrototypes("serial", mirror, adapter), {
+        description: "restore after service binding",
+      }),
+    ).toEqual({ restored: ["one"], skipped: [], failed: [] });
+    expect(calls).toEqual(["resolve", "connect", "connect", "list", "asset:photo", "save:one"]);
+    expect(timer.now()).toBe(500);
+  },
+);
+test.each(["false", "reject"])(
+  "adapter does not cache %s connections after the deadline",
+  async (mode) => {
+    const { adapter, client, timer, calls } = adapterHarness(["prototype_saved_v1"], 1000);
+    client.ensureConnected = async () => {
+      calls.push("connect");
+      if (mode === "reject") {
+        throw new Error("service unavailable");
+      }
+      return false;
+    };
+    const reply = await settleByFakeEvents(timer, adapter.list(), {
+      description: "connection deadline",
+    });
+    expect(reply).toMatchObject({ success: false, errorCode: "service_unavailable" });
+    expect(reply.error).toContain("timed out after 1000ms");
+    expect(timer.now()).toBe(1000);
+    expect(calls).toEqual(["resolve", "connect", "connect"]);
+    client.ensureConnected = async () => true;
+    expect((await adapter.list()).success).toBe(true);
+    expect(calls.at(-1)).toBe("list");
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(timer.getPendingSleepCount()).toBe(0);
+  },
+);
+test("adapter does not cache a missing capability", async () => {
+  const { adapter, client, calls } = adapterHarness([]);
+  expect(await adapter.list()).toMatchObject({ errorCode: "device_unsupported" });
+  client.getSupportedCommands = async () => ["prototype_saved_v1"];
+  expect((await adapter.save(entry)).success).toBe(true);
+  expect(calls).toEqual(["resolve", "connect", "resolve", "connect", "save:one"]);
 });
 test("adapter connection deadline uses FakeTimer and never hangs restore", async () => {
-  const { adapter, client, timer } = adapterHarness(["prototype_saved_v1"]);
-  let started!: () => void;
-  const connecting = new Promise<void>((resolve) => {
-    started = resolve;
-  });
-  client.ensureConnected = () => {
-    started();
-    return new Promise<boolean>(() => {});
-  };
+  const { adapter, client, timer } = adapterHarness(["prototype_saved_v1"], 50);
+  client.ensureConnected = () => new Promise<boolean>(() => {});
   const mirror = new FakeSavedPrototypeMirror();
   await mirror.record("serial", entry);
-  const pending = restoreSavedPrototypes("serial", mirror, adapter);
-  await connecting;
-  timer.advanceTime(50);
-  const report = await pending;
-  expect(report.failed).toMatchObject([{ id: "one", code: "restore_failed" }]);
+  const report = await settleByFakeEvents(
+    timer,
+    restoreSavedPrototypes("serial", mirror, adapter),
+    {
+      description: "hung connection restore",
+    },
+  );
+  expect(report.failed).toMatchObject([{ id: "one", code: "service_unavailable" }]);
   expect(report.failed[0].reason).toContain("timed out after 50ms");
 });

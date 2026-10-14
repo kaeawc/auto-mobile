@@ -29,6 +29,7 @@ import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/Adb
 import { FakeSavedPrototypeMirror } from "../fakes/FakeSavedPrototypeMirror";
 import { NoOpPerformanceTracker } from "../../src/utils/PerformanceTracker";
 import type { SavedPrototypeRestoreReport } from "../../src/features/prototype/savedPrototypeRestore";
+import { settleByFakeEvents } from "../helpers/fakeTimerStepping";
 
 // Captured on a bound API 36 / Android 16 google_apis arm64 emulator. No older
 // API-level dumpsys captures exist in this repository; variants below are
@@ -101,11 +102,8 @@ describe("CtrlProxyManager", function () {
     function reinstallHarness() {
       const mirror = new FakeSavedPrototypeMirror();
       const adb = new FakeAdbExecutor();
-      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
-        testDevice,
-        adb,
-        new FakeTimer(),
-      );
+      const timer = new FakeTimer();
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, adb, timer);
       manager.setSavedPrototypeMirrorForTesting(mirror);
       const order: string[] = [];
       const warn = spyOn(logger, "warn").mockImplementation((message) => {
@@ -121,6 +119,12 @@ describe("CtrlProxyManager", function () {
       const enable = spyOn(manager, "enable").mockImplementation(async () => {
         order.push("enable");
       });
+      const binding = spyOn(manager, "waitForAccessibilityServiceBinding").mockImplementation(
+        async () => {
+          order.push("binding");
+          return "already-bound";
+        },
+      );
       const report: SavedPrototypeRestoreReport = { restored: ["panel"], skipped: [], failed: [] };
       let restoreCalls = 0;
       manager.setSavedPrototypeRestorerForTesting(async (serial, usedMirror) => {
@@ -159,11 +163,14 @@ describe("CtrlProxyManager", function () {
         restoreCalls: () => restoreCalls,
         uninstall,
         install,
+        binding,
+        timer,
         cleanup: () => {
           warn.mockRestore();
           uninstall.mockRestore();
           install.mockRestore();
           enable.mockRestore();
+          binding.mockRestore();
         },
       };
     }
@@ -177,7 +184,7 @@ describe("CtrlProxyManager", function () {
         expect(h.order[0]).toContain("panel (My panel)");
         expect(h.order[0]).toContain("Uninstall will delete");
         expect(h.order[1]).toContain("pm uninstall");
-        expect(h.order.slice(2)).toEqual(["install", "enable", "restore"]);
+        expect(h.order.slice(2)).toEqual(["install", "enable", "binding", "restore"]);
       } finally {
         h.cleanup();
       }
@@ -202,7 +209,7 @@ describe("CtrlProxyManager", function () {
         const warning = h.order.findIndex((call) => call.includes("Uninstall will delete"));
         const uninstall = h.order.findIndex((call) => call.includes("pm uninstall"));
         expect(warning).toBeLessThan(uninstall);
-        expect(h.order.slice(-3)).toEqual(["install", "enable", "restore"]);
+        expect(h.order.slice(-4)).toEqual(["install", "enable", "binding", "restore"]);
       } finally {
         h.cleanup();
       }
@@ -234,6 +241,71 @@ describe("CtrlProxyManager", function () {
             mode === "throws" ? "failed for: *" : "failed for: panel",
           );
         } finally {
+          h.cleanup();
+        }
+      },
+    );
+    test.each(["unhealthy", "reject", "timeout"])(
+      "binding wait %s still restores and preserves reinstalled status",
+      async (mode) => {
+        const h = reinstallHarness();
+        try {
+          await h.record();
+          h.binding.mockImplementation(async () => {
+            h.order.push("binding");
+            expect(h.restoreCalls()).toBe(0);
+            if (mode === "reject") {
+              throw new Error("binding inspection failed");
+            }
+            if (mode === "timeout") {
+              return new Promise<"unhealthy">(() => {});
+            }
+            return "unhealthy";
+          });
+          const result = await settleByFakeEvents(h.timer, h.invoke(), {
+            description: "best effort binding wait",
+          });
+          expect(h.binding).toHaveBeenCalledTimes(1);
+          expect(result.status).toBe("reinstalled");
+          expect(result.savedPrototypeRestore).toEqual(h.report);
+          expect(h.restoreCalls()).toBe(1);
+          expect(h.order.at(-2)).toContain("warn:");
+          expect(h.order.at(-2)).toContain("binding");
+          expect(h.order.at(-1)).toBe("restore");
+          expect(h.timer.now()).toBe(mode === "timeout" ? REBIND_BIND_WAIT_BUDGET_MS : 0);
+          expect(h.timer.getPendingTimeoutCount()).toBe(0);
+        } finally {
+          h.cleanup();
+        }
+      },
+    );
+    test.each(["success", "failure", "none"])(
+      "setup carries the %s restore report only when restore ran",
+      async (mode) => {
+        const h = reinstallHarness();
+        const compatibility = spyOn(h.manager, "ensureCompatibleVersion").mockImplementation(() =>
+          h.invoke(),
+        );
+        const guard = spyOn(h.manager, "assertNotDrivenByOtherDaemon").mockResolvedValue();
+        try {
+          if (mode !== "none") {
+            await h.record();
+          }
+          if (mode === "failure") {
+            h.report.restored = [];
+            h.report.failed = [
+              { id: "panel", code: "service_unavailable", reason: "connection timed out" },
+            ];
+          }
+          const result = await h.manager.setup();
+          expect(result.success).toBe(true);
+          expect(result.savedPrototypeRestore).toEqual(mode === "none" ? undefined : h.report);
+          if (mode === "none") {
+            expect(result).not.toHaveProperty("savedPrototypeRestore");
+          }
+        } finally {
+          compatibility.mockRestore();
+          guard.mockRestore();
           h.cleanup();
         }
       },

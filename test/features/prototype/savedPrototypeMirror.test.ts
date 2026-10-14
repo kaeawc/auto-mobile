@@ -1,4 +1,5 @@
 import { describe, expect, test, spyOn } from "bun:test";
+import { createHash } from "node:crypto";
 import {
   FileSavedPrototypeMirror,
   missingOnDevice,
@@ -30,6 +31,17 @@ function harness() {
   };
 }
 describe("saved prototype mirror", () => {
+  test("lists entries in sorted directory order regardless of write order", async () => {
+    const { mirror } = harness();
+    const ids = ["one", "two", "three"].sort((a, b) => {
+      const hash = (id: string) => createHash("sha256").update(id, "utf16le").digest("hex");
+      return hash(a) < hash(b) ? -1 : 1;
+    });
+    for (const id of ids.toReversed()) {
+      await mirror.record("device", { ...entry, id, spec: { ...entry.spec, id } });
+    }
+    expect((await mirror.list("device")).map((value) => value.id)).toEqual(ids);
+  });
   test("round trips spec, label, icon, asset bytes and missing assets; removes entries", async () => {
     const { mirror } = harness();
     await mirror.record("emulator-5554", entry);

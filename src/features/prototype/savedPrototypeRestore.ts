@@ -129,9 +129,12 @@ export type SavedPrototypeRestoreClient = Pick<
   | "requestSavePrototype"
   | "requestListSavedPrototypes"
 >;
+type RestoreClientConnection =
+  | { client: SavedPrototypeRestoreClient; failure?: never }
+  | { client?: never; failure: SavedPrototypeRestoreResult };
 /** Dynamic resolution avoids the client -> manager -> restorer -> client import cycle. */
 export class AndroidSavedPrototypeRestoreDevice implements SavedPrototypeRestoreDevice {
-  private ready: Promise<SavedPrototypeRestoreClient | undefined> | undefined;
+  private ready: SavedPrototypeRestoreClient | undefined;
   constructor(
     private readonly device: BootedDevice,
     private readonly timer: Timer = defaultTimer,
@@ -142,21 +145,57 @@ export class AndroidSavedPrototypeRestoreDevice implements SavedPrototypeRestore
         AndroidCtrlProxyClient.getInstance(device)
       );
     },
-    private readonly timeoutMs = 5000,
+    private readonly timeoutMs = 20_000,
   ) {}
-  private client(): Promise<SavedPrototypeRestoreClient | undefined> {
-    return (this.ready ??= raceWithDeadline(
-      async () => {
-        const client = await this.resolveClient();
-        if (!(await client.ensureConnected())) {
-          return undefined;
-        }
-        return (await client.getSupportedCommands())?.includes(PROTOTYPE_SAVED_CAPABILITY)
-          ? client
-          : undefined;
-      },
-      { timer: this.timer, timeoutMs: this.timeoutMs, label: "Saved prototype restore connection" },
-    ));
+  private async client(): Promise<RestoreClientConnection> {
+    if (this.ready) {
+      return { client: this.ready };
+    }
+    let expired = false;
+    try {
+      const connection = await raceWithDeadline<RestoreClientConnection>(
+        async () => {
+          const client = await this.resolveClient();
+          while (!expired) {
+            const connected = await client.ensureConnected().catch((error) => {
+              logger.warn("[PROTOTYPE] Restore connection attempt failed", error);
+              return false;
+            });
+            if (expired) {
+              break;
+            }
+            if (connected) {
+              return (await client.getSupportedCommands())?.includes(PROTOTYPE_SAVED_CAPABILITY)
+                ? { client }
+                : { failure: this.unsupported() };
+            }
+            await this.timer.sleep(500);
+          }
+          return { failure: this.unavailable() };
+        },
+        {
+          timer: this.timer,
+          timeoutMs: this.timeoutMs,
+          label: "Saved prototype restore connection",
+          onTimeout: () => {
+            expired = true;
+          },
+        },
+      );
+      // A losing deadline race must never publish a late or failed connection.
+      if (connection.client) {
+        this.ready = connection.client;
+      }
+      return connection;
+    } catch (error) {
+      logger.warn("[PROTOTYPE] Restore connection unavailable", error);
+      return { failure: this.unavailable(errorMessage(error)) };
+    }
+  }
+  private unavailable(
+    reason = `Saved prototype restore connection timed out after ${this.timeoutMs}ms`,
+  ): SavedPrototypeRestoreResult {
+    return { success: false, errorCode: "service_unavailable", error: reason };
   }
   private unsupported(): SavedPrototypeRestoreResult {
     return {
@@ -166,19 +205,19 @@ export class AndroidSavedPrototypeRestoreDevice implements SavedPrototypeRestore
     };
   }
   async list(): Promise<SavedPrototypeRestoreResult> {
-    const client = await this.client();
-    return client ? client.requestListSavedPrototypes() : this.unsupported();
+    const { client, failure } = await this.client();
+    return client ? client.requestListSavedPrototypes() : failure;
   }
   async putAsset(upload: PrototypeAssetUpload): Promise<SavedPrototypeRestoreResult> {
-    const client = await this.client();
-    return client ? client.requestPutPrototypeAsset(upload) : this.unsupported();
+    const { client, failure } = await this.client();
+    return client ? client.requestPutPrototypeAsset(upload) : failure;
   }
   async save(save: {
     spec: PrototypeSpec;
     label: string;
     icon?: string;
   }): Promise<SavedPrototypeRestoreResult> {
-    const client = await this.client();
-    return client ? client.requestSavePrototype(save) : this.unsupported();
+    const { client, failure } = await this.client();
+    return client ? client.requestSavePrototype(save) : failure;
   }
 }

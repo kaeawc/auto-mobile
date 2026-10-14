@@ -1,5 +1,7 @@
 import path from "node:path";
+import type { Dirent } from "node:fs";
 import type { MirrorFileSystem } from "../../src/features/prototype/savedPrototypeMirror";
+import { compareCodeUnits } from "../../src/utils/io";
 
 export class FakeMirrorFileSystem implements MirrorFileSystem {
   readonly files = new Map<string, Uint8Array>();
@@ -29,7 +31,7 @@ export class FakeMirrorFileSystem implements MirrorFileSystem {
     }
     return bytes.slice();
   }
-  async readdir(directory: string): Promise<string[]> {
+  async sortedReaddirEntries(directory: string): Promise<Pick<Dirent, "name" | "isDirectory">[]> {
     if (!this.directories.has(directory)) {
       throw Object.assign(new Error("missing directory"), { code: "ENOENT" });
     }
@@ -39,7 +41,12 @@ export class FakeMirrorFileSystem implements MirrorFileSystem {
           .filter((file) => file !== directory && path.dirname(file) === directory)
           .map((file) => path.basename(file)),
       ),
-    ];
+    ]
+      .sort(compareCodeUnits)
+      .map((name) => ({
+        name,
+        isDirectory: () => this.directories.has(path.join(directory, name)),
+      }));
   }
   async rm(target: string): Promise<void> {
     for (const file of this.files.keys()) {

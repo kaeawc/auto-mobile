@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 import { logger } from "../../utils/logger";
+import { sortedReaddirEntries } from "../../utils/io";
 import { getTempDir } from "../../utils/tempDir";
 import { prototypeSpecSchema, type PrototypeSpec } from "./prototypeSpec";
 import type { PrototypeAssetMimeType } from "./prototypeAssets";
@@ -30,7 +32,7 @@ export interface MirrorFileSystem {
   mkdir(directory: string): Promise<void>;
   writeFile(file: string, data: string | Uint8Array): Promise<void>;
   readFile(file: string): Promise<Uint8Array>;
-  readdir(directory: string): Promise<string[]>;
+  sortedReaddirEntries(directory: string): Promise<Pick<Dirent, "name" | "isDirectory">[]>;
   rm(target: string): Promise<void>;
   rename(from: string, to: string): Promise<void>;
 }
@@ -40,7 +42,7 @@ const disk: MirrorFileSystem = {
   },
   writeFile: (file, data) => fs.writeFile(file, data),
   readFile: (file) => fs.readFile(file),
-  readdir: (directory) => fs.readdir(directory),
+  sortedReaddirEntries,
   rm: (target) => fs.rm(target, { recursive: true, force: true }),
   rename: (from, to) => fs.rename(from, to),
 };
@@ -119,7 +121,9 @@ export class FileSavedPrototypeMirror implements SavedPrototypeMirror {
         assets,
       });
       await this.files.writeFile(path.join(stage, "manifest.json"), JSON.stringify(manifest));
-      const replaced = (await this.files.readdir(directory)).includes(segment(entry.id));
+      const replaced = (await this.files.sortedReaddirEntries(directory)).some(
+        (item) => item.name === segment(entry.id),
+      );
       if (replaced) {
         await this.files.rename(target, backup);
       }
@@ -155,8 +159,14 @@ export class FileSavedPrototypeMirror implements SavedPrototypeMirror {
     try {
       const directory = path.join(this.rootDir(), segment(serial));
       const entries: MirroredSavedPrototype[] = [];
-      for (const name of await this.files.readdir(directory)) {
-        if (name.startsWith(".") || name !== path.basename(name) || name.includes("\\")) {
+      for (const item of await this.files.sortedReaddirEntries(directory)) {
+        const { name } = item;
+        if (
+          !item.isDirectory() ||
+          name.startsWith(".") ||
+          name !== path.basename(name) ||
+          name.includes("\\")
+        ) {
           continue;
         }
         const entry = await this.readEntry(path.join(directory, name), name);

@@ -102,12 +102,14 @@ enum PrototypeStacks {
         func visit(_ node: PrototypeNode) {
             guard shown(node), !modalTypes.contains(node.type) else { return }
             if node.type == "stack", let id = node.id, (stacks[id]?.depth ?? 1) > 1 { target = id }
-            for entry in node.currentChildEntries(path: "root", pages: pages, stacks: stacks, state: state) { visit(entry.node) }
+            for entry in node
+                .currentChildEntries(path: "root", pages: pages, stacks: stacks, state: state) { visit(entry.node) }
         }
         visit(root)
         collectModals(root)
         for modal in modals {
-            for entry in modal.currentChildEntries(path: "root", pages: pages, stacks: stacks, state: state) { visit(entry.node) }
+            for entry in modal
+                .currentChildEntries(path: "root", pages: pages, stacks: stacks, state: state) { visit(entry.node) }
         }
         return target
     }

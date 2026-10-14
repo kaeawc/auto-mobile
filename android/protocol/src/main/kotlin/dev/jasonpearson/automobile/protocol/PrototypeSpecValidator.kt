@@ -17,6 +17,7 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.double
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.int
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive

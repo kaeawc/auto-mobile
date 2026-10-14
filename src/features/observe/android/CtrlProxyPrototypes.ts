@@ -669,10 +669,15 @@ export class CtrlProxyPrototypes {
     ) {
       throw new ActionableError(prototypeInspectUnsupportedMessage());
     }
+    if (message.type === "show_prototype") {
+      this.requirePrototypeDisplaySupport(message);
+    }
+  }
+
+  private requirePrototypeDisplaySupport(message: ShowPrototypeMessage): void {
     if (
-      message.type === "show_prototype" &&
       message.displayId !== undefined &&
-      supports(PROTOTYPE_DISPLAY_CAPABILITY) !== true
+      this.context.isCommandSupported?.(PROTOTYPE_DISPLAY_CAPABILITY) !== true
     ) {
       // Never send displayId to a device that would ignore it and show on the default display.
       throw new ActionableError(prototypeDisplayUnsupportedMessage(message.displayId));

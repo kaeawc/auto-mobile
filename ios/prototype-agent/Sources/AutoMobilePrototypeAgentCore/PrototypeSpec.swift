@@ -605,7 +605,7 @@ final class PrototypeNode: Decodable {
     /// Screen placement resolved by the host (#9316); see `PrototypeAnchor`.
     let anchor: PrototypeAnchor?
     let children: [PrototypeNode]?
-    /// Flow line cap; clipped overflow children remain in the hierarchy.
+    /// Flow line cap (clipped overflow children remain in the hierarchy) and textField maximum lines.
     let maxLines: Int?
     let columns: PrototypeGridColumns?
     /// A direct grid child's requested column span, on every node shape.
@@ -688,7 +688,6 @@ final class PrototypeNode: Decodable {
     let secure: Bool?
     let multiline: Bool?
     let minLines: Int?
-    let maxLines: Int?
     let maxLength: Int?
 
     /// Gesture-only nodes have the same touch target and accessibility semantics as tap nodes.
@@ -704,6 +703,9 @@ final class PrototypeNode: Decodable {
         case orientation, min, max, step, title, navigationIcon, actions, confirm
         case dismiss, action, durationMs, hourKey, minuteKey, is24Hour, headline, supporting
         case leadingIcon, trailing
+        case onLongPress, onDoubleTap, enabledWhen, checks, validateOn, maxLines, columns, span, start, screens, spans,
+             activeKey, trailingActions, onSubmit, pageSpacing, peek, pageSize, dismissOnSwipe, supportingText,
+             keyboardType, secure, multiline, minLines, maxLength
     }
 
     init(from decoder: Decoder) throws {
@@ -765,6 +767,30 @@ final class PrototypeNode: Decodable {
         supporting = try container.decodeIfPresent(String.self, forKey: .supporting)
         leadingIcon = try container.decodeIfPresent(String.self, forKey: .leadingIcon)
         trailing = try container.decodeIfPresent(PrototypeListItemTrailing.self, forKey: .trailing)
+        onLongPress = try container.decodeIfPresent([PrototypeAction].self, forKey: .onLongPress)
+        onDoubleTap = try container.decodeIfPresent([PrototypeAction].self, forKey: .onDoubleTap)
+        enabledWhen = try container.decodeIfPresent(Condition.self, forKey: .enabledWhen)
+        checks = try container.decodeIfPresent([PrototypeCheck].self, forKey: .checks)
+        validateOn = try container.decodeIfPresent(PrototypeValidateOn.self, forKey: .validateOn)
+        maxLines = try container.decodeIfPresent(Int.self, forKey: .maxLines)
+        columns = try container.decodeIfPresent(PrototypeGridColumns.self, forKey: .columns)
+        span = try container.decodeIfPresent(Int.self, forKey: .span)
+        start = try container.decodeIfPresent(String.self, forKey: .start)
+        screens = try container.decodeIfPresent([String: PrototypeNode].self, forKey: .screens)
+        spans = try container.decodeIfPresent([PrototypeTextSpan].self, forKey: .spans)
+        activeKey = try container.decodeIfPresent(String.self, forKey: .activeKey)
+        trailingActions = try container.decodeIfPresent([PrototypeAppBarAction].self, forKey: .trailingActions)
+        onSubmit = try container.decodeIfPresent([PrototypeAction].self, forKey: .onSubmit)
+        pageSpacing = try container.decodeIfPresent(Double.self, forKey: .pageSpacing)
+        peek = try container.decodeIfPresent(PrototypePagerPeek.self, forKey: .peek)
+        pageSize = try container.decodeIfPresent(PrototypePagerPageSize.self, forKey: .pageSize)
+        dismissOnSwipe = try container.decodeIfPresent(Bool.self, forKey: .dismissOnSwipe)
+        supportingText = try container.decodeIfPresent(String.self, forKey: .supportingText)
+        keyboardType = try container.decodeIfPresent(String.self, forKey: .keyboardType)
+        secure = try container.decodeIfPresent(Bool.self, forKey: .secure)
+        multiline = try container.decodeIfPresent(Bool.self, forKey: .multiline)
+        minLines = try container.decodeIfPresent(Int.self, forKey: .minLines)
+        maxLength = try container.decodeIfPresent(Int.self, forKey: .maxLength)
     }
 
     /// Android's `resolvePrototypeStyle`: every `styleWhen` entry whose condition holds is merged over

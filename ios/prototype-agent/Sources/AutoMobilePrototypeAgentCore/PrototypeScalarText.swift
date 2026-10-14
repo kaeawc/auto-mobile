@@ -35,11 +35,11 @@ enum PrototypeScalarText {
         if count <= pointPosition, pointPosition <= 21 {
             return digits + String(repeating: "0", count: pointPosition - count)
         }
-        if 0 < pointPosition, pointPosition <= 21 {
+        if pointPosition > 0, pointPosition <= 21 {
             let split = digits.index(digits.startIndex, offsetBy: pointPosition)
             return digits[..<split] + "." + digits[split...]
         }
-        if -6 < pointPosition, pointPosition <= 0 {
+        if pointPosition > -6, pointPosition <= 0 {
             return "0." + String(repeating: "0", count: -pointPosition) + digits
         }
         let exponent = pointPosition - 1

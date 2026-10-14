@@ -10,6 +10,7 @@ import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.double
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -628,6 +629,7 @@ data class PrototypeSearchBarNode(
   override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
+  override val span: Int? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val stateKey: String,
   val placeholder: String? = null,
@@ -736,6 +738,7 @@ data class PrototypeSelectNode(
   override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
+  override val span: Int? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val stateKey: String,
   val options: List<PrototypeRadioOption>,
@@ -785,6 +788,7 @@ data class PrototypeMenuNode(
   override val visibleWhen: PrototypeCondition? = null,
   override val transition: String? = null,
   override val anchor: PrototypeAnchor? = null,
+  override val span: Int? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val openWhen: PrototypeSheetCondition,
   val items: List<PrototypeMenuItem>,
@@ -1186,8 +1190,6 @@ data class PrototypeStackNode(
   override val testTag: String? = null,
   override val contentDescription: String? = null,
   override val onTap: List<PrototypeAction>? = null,
-  override val onLongPress: List<PrototypeAction>? = null,
-  override val onDoubleTap: List<PrototypeAction>? = null,
   override val style: PrototypeStyle? = null,
   override val styleWhen: List<PrototypeStyleWhen>? = null,
   override val visibleWhen: PrototypeCondition? = null,

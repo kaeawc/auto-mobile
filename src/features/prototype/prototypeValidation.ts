@@ -210,6 +210,19 @@ function textNodeConstraint(
   }
   return undefined;
 }
+function searchBarConstraint(
+  data: Record<string, unknown>,
+  path: string,
+): PrototypeValidationError | undefined {
+  if (
+    data.type === "searchBar" &&
+    Object.hasOwn(data, "child") &&
+    !Object.hasOwn(data, "activeKey")
+  ) {
+    return fail(keyPath(path, "child"), "Search bar child requires activeKey");
+  }
+  return undefined;
+}
 function visitObject(
   value: unknown,
   rule: Rule,
@@ -226,12 +239,9 @@ function visitObject(
     return textError;
   }
   const fields = rule.fields ?? {};
-  if (
-    data.type === "searchBar" &&
-    Object.hasOwn(data, "child") &&
-    !Object.hasOwn(data, "activeKey")
-  ) {
-    return fail(keyPath(path, "child"), "Search bar child requires activeKey");
+  const searchBarError = searchBarConstraint(data, path);
+  if (searchBarError) {
+    return searchBarError;
   }
   const keys = [...new Set([...Object.keys(data), ...Object.keys(fields)])].sort();
   for (const key of keys) {

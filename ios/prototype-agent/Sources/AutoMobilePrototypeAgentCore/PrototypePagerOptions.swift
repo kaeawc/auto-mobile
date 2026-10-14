@@ -101,6 +101,8 @@ struct PrototypePagerLayout: Equatable {
     /// At rest the selected page aligns to the leading margin, bounded by the content end.
     /// Strict intersection excludes pages whose edge merely touches the viewport.
     func visiblePages(selected: Int, count: Int, viewportExtent: Double) -> [Int] {
+        // `count` is the page count parameter, not a collection.
+        // swiftlint:disable:next empty_count
         guard count > 0, viewportExtent.isFinite, viewportExtent > 0 else { return [] }
         let extent: Double
         switch pageSize {

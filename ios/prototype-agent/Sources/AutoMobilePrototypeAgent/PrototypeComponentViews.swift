@@ -117,32 +117,32 @@ struct PrototypeTextFieldView: View {
                 renderedField
             }
         }
-            .onChange(of: draft.text) { _, _ in
-                // Read live state: another callback may have changed the captured display value.
-                let stored = model.state[key]?.displayString ?? ""
-                if draft.needsCommit(stored: stored) {
-                    model.change(key: key, value: draft.text)
-                }
-                if !focused {
-                    draft.endEditing(stored: model.state[key]?.displayString ?? "")
-                }
+        .onChange(of: draft.text) { _, _ in
+            // Read live state: another callback may have changed the captured display value.
+            let stored = model.state[key]?.displayString ?? ""
+            if draft.needsCommit(stored: stored) {
+                model.change(key: key, value: draft.text)
             }
-            .onChange(of: focused) { _, value in
-                if !value {
-                    model.blur(node)
-                    draft.endEditing(stored: model.state[key]?.displayString ?? "")
-                }
-            }
-            .onSubmit {
-                draft.endEditing(stored: model.state[key]?.displayString ?? "")
-                if node.type == "searchBar" { model.run(node.onSubmit ?? []) }
-            }
-            .onChange(of: stored) { _, value in
-                draft.storedChanged(to: value)
-            }
-            .onChange(of: model.showRevision) { _, _ in
+            if !focused {
                 draft.endEditing(stored: model.state[key]?.displayString ?? "")
             }
+        }
+        .onChange(of: focused) { _, value in
+            if !value {
+                model.blur(node)
+                draft.endEditing(stored: model.state[key]?.displayString ?? "")
+            }
+        }
+        .onSubmit {
+            draft.endEditing(stored: model.state[key]?.displayString ?? "")
+            if node.type == "searchBar" { model.run(node.onSubmit ?? []) }
+        }
+        .onChange(of: stored) { _, value in
+            draft.storedChanged(to: value)
+        }
+        .onChange(of: model.showRevision) { _, _ in
+            draft.endEditing(stored: model.state[key]?.displayString ?? "")
+        }
     }
 
     private var textBinding: Binding<String> {

@@ -198,3 +198,18 @@ test("checks cover screen and component roots while keeping opaque structures sk
     }),
   ).toEqual(['root.screens["home"].checks', "components.A.root.validateOn"]);
 });
+
+test("input checks on a textField do not trip any other capability gate", () => {
+  const spec = {
+    root: {
+      type: "textField",
+      stateKey: "name",
+      enabledWhen: { key: "on", equals: true },
+      checks: [{ required: true, message: "Required" }],
+      validateOn: "blur",
+    },
+  };
+  expect(prototypeRequiredCapabilities(spec).map((gate) => gate.capability)).toEqual([
+    "prototype_checks_v1",
+  ]);
+});

@@ -136,7 +136,7 @@ export const PROTOTYPE_SEARCH_BAR_PLATFORM_DIFFERENCES: readonly PlatformDiffere
 
 /** One table drives both show notes and the generated guide. */
 export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly (PlatformDifference & {
-  capability: string;
+  capability?: string;
 })[] = [
   {
     construct: "node.id",
@@ -198,7 +198,7 @@ export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly (PlatformDifference & {
     effect: "substituted",
     capability: PROTOTYPE_TEXT_FIELD_MATERIAL_STYLE_CAPABILITY,
     detail:
-      "iOS has no native outlined text field; the agent draws a rounded outline around a standard SwiftUI TextField. Android draws the Material outlined field.",
+      "An iOS agent without prototype_text_field_material_style_v1 has no native outlined text field; the agent draws a rounded outline around a standard SwiftUI TextField. Android draws the Material outlined field.",
     occurrencePath: ({ node, path }) =>
       node?.type === "textField" && node.variant === "outlined" ? `${path}.variant` : undefined,
   },
@@ -208,7 +208,7 @@ export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly (PlatformDifference & {
     effect: "substituted",
     capability: PROTOTYPE_TEXT_FIELD_MATERIAL_STYLE_CAPABILITY,
     detail:
-      "iOS has no native floating label; the agent draws the label as a caption above the field that does not animate. Android draws the Material floating label.",
+      "An iOS agent without prototype_text_field_material_style_v1 has no native floating label; the agent draws the label as a caption above the field that does not animate. Android draws the Material floating label.",
     occurrencePath: ({ node, path }) =>
       node?.type === "textField" && node.label !== undefined ? `${path}.label` : undefined,
   },
@@ -303,14 +303,9 @@ function occurrences(
         occurrences(entry, rule.item!, `${path}[${index}]`, found, nodeType),
       );
       break;
-    case "object": {
-      const data = value as Record<string, unknown>;
-      for (const [key, field] of Object.entries(rule.fields ?? {})) {
-        // Imported JSON has no undefined entries; only union inference makes fields optional.
-        occurrences(data[key], field!.rule, path ? `${path}.${key}` : key, found, nodeType);
-      }
+    case "object":
+      objectOccurrences(value as Record<string, unknown>, rule, path, found, nodeType);
       break;
-    }
     case "tagged": {
       const data = value as Record<string, unknown>;
       const variant = rule.variants?.[String(data.type)];
@@ -319,6 +314,19 @@ function occurrences(
       }
       break;
     }
+  }
+}
+
+function objectOccurrences(
+  data: Record<string, unknown>,
+  rule: Rule,
+  path: string,
+  found: Occurrence[],
+  nodeType?: string,
+): void {
+  for (const [key, field] of Object.entries(rule.fields ?? {})) {
+    // Imported JSON has no undefined entries; only union inference makes fields optional.
+    occurrences(data[key], field!.rule, path ? `${path}.${key}` : key, found, nodeType);
   }
 }
 

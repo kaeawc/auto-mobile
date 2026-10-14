@@ -1,16 +1,23 @@
 import { prototypeNodeChildren, prototypeSpecNodeRoots } from "./prototypeNodeChildren";
-import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_TEXT_FIELD_OPTIONS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { record } from "./prototypeTemplate";
 
-const optionFields = new Set(
-  Object.keys(contract.definitions.node.variants.textField.fields).filter(
-    (field) =>
-      !Object.hasOwn(contract.definitions.node.variants.spacer.fields, field) &&
-      field !== "stateKey" &&
-      field !== "placeholder",
-  ),
-);
+/**
+ * Fields gated by `prototype_text_field_options_v1`. Listed explicitly: deriving them from the
+ * contract's textField fields would also sweep in fields owned by other capabilities, such as the
+ * `prototype_checks_v1` fields `enabledWhen`, `checks` and `validateOn`.
+ */
+const optionFields: ReadonlySet<string> = new Set([
+  "label",
+  "variant",
+  "supportingText",
+  "keyboardType",
+  "secure",
+  "multiline",
+  "minLines",
+  "maxLines",
+  "maxLength",
+]);
 
 /** Authored field order, including descendants and reusable component roots. */
 export function prototypeTextFieldOptionFields(spec: unknown): string[] {

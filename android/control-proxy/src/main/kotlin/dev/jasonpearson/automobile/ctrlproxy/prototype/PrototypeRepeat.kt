@@ -177,8 +177,6 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
     is PrototypeStackNode ->
       copy(
         onTap = onTap,
-        onLongPress = onLongPress,
-        onDoubleTap = onDoubleTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         screens = screens.mapValues { (_, child) -> child.bound(instance) },

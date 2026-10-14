@@ -127,7 +127,7 @@ final class PrototypeMenusTests: XCTestCase {
     func testInvertedOpenConditionAndItemWithoutActionsCloseLikeDialogs() throws {
         let spec = try decode("""
         {"id":"m","window":{"placement":{"type":"fullscreen"}},"state":{"open":false},
-         "root":{"type":"menu","id":"m","openWhen":{"key":"open","equals":false},"items":[{"label":"Close"}]}}
+         "root":{"type":"menu","id":"m","testTag":"m","openWhen":{"key":"open","equals":false},"items":[{"label":"Close"}]}}
         """)
         var session = PrototypeSession()
         session.show(spec)
@@ -137,10 +137,10 @@ final class PrototypeMenusTests: XCTestCase {
         XCTAssertNil(spec.root.menuParent(of: spec.root))
     }
 
-    func testSelectUsesRadioChangePayloadAndIdFallback() throws {
+    func testSelectUsesRadioChangePayloadAndTestTagIdentifier() throws {
         let spec = try decode("""
         {"id":"s","window":{"placement":{"type":"fullscreen"}},"state":{"choice":"a"},
-         "root":{"type":"select","id":"pick","stateKey":"choice","options":[{"value":"a","label":"A"},{"value":"b","label":"B"}]}}
+         "root":{"type":"select","id":"pick","testTag":"pick","stateKey":"choice","options":[{"value":"a","label":"A"},{"value":"b","label":"B"}]}}
         """)
         var session = PrototypeSession()
         session.show(spec)
@@ -163,7 +163,7 @@ final class PrototypeMenusTests: XCTestCase {
         {"id":"m","window":{"placement":{"type":"fullscreen"}},"state":{"open":true,"choice":"a"},
          "root":{"type":"column","children":[
            {"type":"select","stateKey":"choice","options":[{"value":"a","label":"A"},{"value":"b","label":"B"}]},
-           {"type":"menu","id":"m","openWhen":{"key":"open","equals":true},"items":[
+           {"type":"menu","id":"m","testTag":"m","openWhen":{"key":"open","equals":true},"items":[
              {"label":"Bad","onTap":[{"type":"setState","key":"choice","value":1}]}
            ]}
          ]}}

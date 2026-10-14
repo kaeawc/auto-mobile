@@ -264,7 +264,9 @@ struct NodeView: View {
     private var handlesOwnTap: Bool {
         [
             "switch", "checkbox", "button", "slider", "chip", "radioGroup", "listItem", "iconButton",
-            "fab", "segmentedButton", "topAppBar", "timePicker", "datePicker", "dialog", "snackbar", "searchBar", "menu", "select",
+            "fab", "segmentedButton", "topAppBar", "timePicker", "datePicker", "dialog", "snackbar", "searchBar",
+            "menu",
+            "select",
         ].contains(node.type)
     }
 

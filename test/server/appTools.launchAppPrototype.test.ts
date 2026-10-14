@@ -22,6 +22,7 @@ import {
   FakePrototypeAgentPorts,
 } from "../fakes/FakePrototypeAgentInjection";
 import type { SessionReleaseSnapshot } from "../../src/daemon/sessionManager";
+import { FakePrototypeViewerAttacher } from "../fakes/FakePrototypeViewerAttacher";
 
 const SIMULATOR: BootedDevice = {
   deviceId: "11111111-2222-3333-4444-555555555555",
@@ -49,11 +50,13 @@ function setup(options: { launchResult?: LaunchAppResult; connect?: PrototypeAge
   const dylibResolver = new FakePrototypeAgentDylibResolver();
   const clients: FakePrototypeAgentClient[] = [];
   const launches: LaunchCall[] = [];
+  const viewerAttacher = new FakePrototypeViewerAttacher();
   let injectorsCreated = 0;
   const observation = {
     activeWindow: { appId: APP, activityName: "Main", layoutSeqSum: 1 },
   } as ObserveResult;
   setLaunchAppToolDependencies({
+    prototypeViewerAttacher: viewerAttacher,
     createLaunchApp: () => ({
       execute: async (
         appId,
@@ -97,6 +100,7 @@ function setup(options: { launchResult?: LaunchAppResult; connect?: PrototypeAge
     dylibResolver,
     clients,
     launches,
+    viewerAttacher,
     injectorsCreated: () => injectorsCreated,
   };
 }
@@ -155,6 +159,7 @@ describe("launchApp prototype:true (#10567)", () => {
       token: "token-1",
     });
     expect(response.isError).toBeUndefined();
+    expect(h.viewerAttacher.calls).toHaveLength(0);
     const payload = JSON.parse(response.content[0]!.text) as Record<string, unknown>;
     expect(payload.prototypeAgent).toEqual({
       port: 8770,

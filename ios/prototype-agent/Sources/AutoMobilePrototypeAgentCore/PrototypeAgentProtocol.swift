@@ -202,6 +202,7 @@ struct PrototypeConnectionGate {
         case notJSON
         case notHello
         case badToken
+        case hostBusy
         case frameTooLarge
         case helloTimeout
     }

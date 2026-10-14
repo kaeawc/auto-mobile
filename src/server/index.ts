@@ -337,6 +337,10 @@ import { registerBiometricTools } from "./biometricTools";
 import { registerTelephonyTools } from "./telephonyTools";
 import { registerPrototypeTools } from "./prototypeTools";
 import { prototypeAgentRegistry } from "../features/prototype/ios/prototypeAgentInjection";
+import {
+  CompositePrototypeAgentConnections,
+  prototypeViewerConnections,
+} from "../features/prototype/ios/prototypeViewerAttach";
 import { registerHighlightTools } from "./highlightTools";
 import { registerDatabaseTools } from "./databaseTools";
 import { registerStorageTools } from "./storageTools";
@@ -681,7 +685,12 @@ export function registerMcpTools(daemonMode: boolean): void {
   registerBiometricTools();
   registerTelephonyTools();
   registerHighlightTools();
-  registerPrototypeTools({ agentConnections: prototypeAgentRegistry });
+  registerPrototypeTools({
+    agentConnections: new CompositePrototypeAgentConnections(
+      prototypeViewerConnections,
+      prototypeAgentRegistry,
+    ),
+  });
   registerDatabaseTools();
   registerStorageTools();
   registerPreferenceTools();

@@ -88,6 +88,53 @@ final class PrototypeAgent: NSObject {
         agent.boot()
     }
 
+    static func bootViewerHost(model: PrototypeModel, container: String, savedSpecId: String?, layoutDirectory: URL) {
+        guard instance == nil else { return }
+        let agent = PrototypeAgent(model: model)
+        instance = agent
+        agent.viewerHosted = true
+        agent.booted = true
+        agent.viewerSaveBack = PrototypeViewerSaveBack(savedSpecId: savedSpecId, layoutDirectory: layoutDirectory)
+        let publisher = PrototypeEndpointPublisher(root: container)
+        agent.viewerEndpoint = publisher
+        let server = PrototypeServer(
+            configuration: PrototypeAgentConfiguration(port: 0, token: publisher.token),
+            capabilities: PrototypeViewerHostCapabilities.advertised(
+                model.mode.advertising(PrototypeTestHooks.capabilities(enabled: false))
+            ),
+            maxAuthenticatedClients: 1,
+            onReady: { [weak agent] port in
+                do {
+                    try publisher.publish(port: port)
+                } catch {
+                    NSLog(
+                        "[AutoMobilePrototypeAgent] could not publish viewer endpoint (error code %ld)",
+                        (error as NSError).code
+                    )
+                    publisher.retract()
+                    agent?.server?.close()
+                }
+            },
+            handler: { [weak agent] message, reply in
+                agent?.handle(message, reply: reply)
+            }
+        )
+        server.onFailed = { publisher.retract() }
+        model.onEvent = { [weak agent, weak server] event in
+            guard let agent else { return }
+            for pending in agent.outbox.publish(event) {
+                server?.broadcast(pending)
+            }
+        }
+        server.onClientCountChanged = { [weak agent] count in agent?.clientCountChanged(count) }
+        agent.server = server
+        server.start()
+    }
+
+    static func retractViewerEndpoint() {
+        instance?.viewerEndpoint?.retract()
+    }
+
     let model: PrototypeModel
     private var outbox: PrototypeEventOutbox<[String: Any]>
 
@@ -97,6 +144,15 @@ final class PrototypeAgent: NSObject {
         super.init()
     }
 
+    private init(model: PrototypeModel) {
+        self.model = model
+        outbox = PrototypeEventOutbox(mode: model.mode)
+        super.init()
+    }
+
+    private var viewerHosted = false
+    private var viewerEndpoint: PrototypeEndpointPublisher?
+    private var viewerSaveBack: PrototypeViewerSaveBack?
     private var window: PassthroughWindow?
     private var server: PrototypeServer?
     private var booted = false
@@ -371,6 +427,12 @@ final class PrototypeAgent: NSObject {
         if let rejection = PrototypeTestHooks.rejection(requestType: type, enabled: testHooksEnabled) {
             return result(false, rejection)
         }
+        if viewerHosted,
+           type == PrototypeAgentProtocol.hideForCaptureRequest || type == PrototypeAgentProtocol
+           .restoreAfterCaptureRequest
+        {
+            return result(false, "not supported by the prototype viewer")
+        }
         do {
             switch type {
             case "simulate_tap":
@@ -396,8 +458,8 @@ final class PrototypeAgent: NSObject {
                 guard let appearance = PrototypeAppearanceOverride.parse(message["appearance"]) else {
                     return result(false, "appearance: Expected device, light or dark")
                 }
-                // The show result reports the device's appearance, so read it before resolving.
-                syncDeviceAppearance()
+                // The viewer controller owns device appearance; the injected agent reads it here.
+                if !viewerHosted { syncDeviceAppearance() }
                 model.show(
                     spec,
                     reset: message["reset"] as? Bool == true,
@@ -406,6 +468,9 @@ final class PrototypeAgent: NSObject {
                         try? JSONSerialization.data(withJSONObject: $0, options: .fragmentsAllowed).count
                     }
                 )
+                if let specJSON = message["spec"] {
+                    viewerSaveBack?.persistIfSaved(specId: spec.id, specJSON: specJSON)
+                }
                 warnAboutFontAssets(for: spec)
                 warnAboutUnknownThemeColors(for: spec)
                 var extra = missingAssetsExtra()
@@ -441,7 +506,7 @@ final class PrototypeAgent: NSObject {
                     server?.broadcast(pending)
                 }
                 var status = model.status()
-                status["visible"] = window?.isHidden == false
+                status["visible"] = viewerHosted || window?.isHidden == false
                 if model.mode == .standalone {
                     status["persistent"] = true
                     status["droppedEvents"] = outbox.droppedEvents

@@ -64,7 +64,7 @@ describe("DefaultDataContainerWriter", () => {
     );
     expect(files.operations.indexOf(`remove ${legacy}`)).toBeGreaterThan(commit);
     expect(files.files.has(legacy)).toBe(false);
-  }, 15);
+  });
 
   test("stages replacement before backup rename and removes backup after commit", async () => {
     const { files, writer } = setup();
@@ -87,7 +87,7 @@ describe("DefaultDataContainerWriter", () => {
       ),
     ).toBe(false);
     expect(files.files.has(`${destination}/old-spec`)).toBe(false);
-  }, 15);
+  });
 
   test("preserves legacy and propagates rejection message and reason", async () => {
     const { files } = setup();
@@ -113,7 +113,7 @@ describe("DefaultDataContainerWriter", () => {
     ]);
     expect(files.files.get(legacy)).toEqual(Buffer.from("legacy spec"));
     expect(files.operations).toEqual([]);
-  }, 15);
+  });
 
   test("preserves legacy on injected storage failure", async () => {
     const { files, writer } = setup();
@@ -125,7 +125,7 @@ describe("DefaultDataContainerWriter", () => {
     expect(files.operations).not.toContain(`remove ${legacy}`);
     expect([...files.files.keys()]).toEqual([legacy]);
     expect(files.directories.size).toBe(0);
-  }, 15);
+  });
 
   test("omitted assets writes manifest with empty assets and fonts", async () => {
     const { files, writer } = setup();
@@ -145,5 +145,5 @@ describe("DefaultDataContainerWriter", () => {
     expect(Buffer.from(files.files.get(`${destination}/spec.json`) ?? []).toString()).toBe(
       JSON.stringify(spec),
     );
-  }, 15);
+  });
 });

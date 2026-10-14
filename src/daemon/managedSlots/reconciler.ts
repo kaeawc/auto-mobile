@@ -2088,10 +2088,10 @@ export class ManagedSlotReconciler {
     if (admission.kind === "unknown") {
       throw new ReconcileAbort(failure("discovery_incomplete", admission.message));
     }
-    const { limit, usage, retained, evictionFailures } = admission;
+    const { limit, usage, charged, retained, evictionFailures } = admission;
     throw new ReconcileAbort(
       failure("managed_slot_budget_exhausted", "Managed-slot total-resource budget is exhausted.", {
-        budget: { limit, usage, retained, evictionFailures },
+        budget: { limit, usage, charged, retained, evictionFailures },
       }),
     );
   }

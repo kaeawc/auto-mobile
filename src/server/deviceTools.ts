@@ -1,3 +1,12 @@
+import {
+  ProcessTableEmulatorProcessStopper,
+  isSafeEmulatorProcessPid,
+  emulatorProcessEscapeHint,
+  type EmulatorProcessStopper,
+} from "../utils/android-cmdline-tools/EmulatorProcessStop";
+import { ProcessTableReader } from "../features/bootAdmission/processTableRetry";
+import { nodeProcFs } from "../features/bootAdmission/procProcessTable";
+import { DefaultHostCommandExecutor } from "../utils/HostCommandExecutor";
 import { managedSlotPoolGate } from "../daemon/managedSlots/managedSlotPoolGate";
 import type { QrPosterWriter } from "../utils/qr/QrPosterWriter";
 import {
@@ -1279,6 +1288,7 @@ export function detailedDiscoveryOptions(
 }
 
 export interface DeviceToolsDependencies {
+  androidEmulatorProcessStopper: EmulatorProcessStopper;
   /** Renders `cameraPosterQr` payloads to a poster image; defaults to a file writer under the data dir. */
   cameraPosterQrWriter?: QrPosterWriter;
   androidAdbFactory: AdbClientFactory;
@@ -1696,7 +1706,12 @@ function getValidatedPooledAndroidAvdName(
 
 type PooledAvdNameRefusal =
   | { reason: "conflict"; pooledAvdName: string; runtimeAvdName: string }
-  | { reason: "unresolved"; pooledAvdName: string }
+  | {
+      reason: "unresolved";
+      pooledAvdName: string;
+      candidates?: { pid: number; command: string }[];
+      processTableStatus?: "absent" | "unreadable";
+    }
   | { reason: "moved"; pooledAvdName: string };
 
 /**
@@ -1795,6 +1810,7 @@ export class PooledAvdIdentityError extends ActionableError {}
  * probe borrows rather than starting a timer of its own.
  */
 interface PooledAvdNameProbeBudget {
+  processStopper?: EmulatorProcessStopper;
   timer: Timer;
   deadlineMs: number;
   signal?: AbortSignal;
@@ -1858,9 +1874,9 @@ export function capturePooledAvdIdentity(
  * obtained.
  *
  * There is no fail-open branch. `Unknown (<serial>)` means "no information", and
- * a probe that does not answer leaves it that way -- acting anyway would be
- * acting on a label this daemon cannot tie to the runtime. The message names
- * `adb -s <serial> emu kill` as the manual escape for a wedged console.
+ * a console probe that does not answer needs process-table evidence instead.
+ * Without either source, acting would use a label this daemon cannot tie to the
+ * runtime. The refusal names a checked process kill as the manual escape.
  *
  * `force` is the TOOL-level escape from that same dead end (#6864), for a client
  * with no shell access. It skips the console probe and NOTHING else, which makes
@@ -1881,9 +1897,8 @@ export function capturePooledAvdIdentity(
  *
  * It DOES clear the mandatory confirmation a QUARANTINED capture otherwise
  * carries. That case is the wedged-console kill this flag exists for: the pool
- * cannot name the serial either, so the probe is still the only identity
- * evidence there is -- and when it does not answer, the quarantined kill is
- * exactly as stuck as the unquarantined one. Skipping it leaves the caller's own
+ * cannot name the serial either; the console or process table must provide
+ * runtime identity evidence. Skipping confirmation leaves the caller's own
  * target (the `Unknown (<serial>)` placeholder) in place, which is what the
  * serial-scoped `emu kill` needs.
  *
@@ -1923,8 +1938,8 @@ export async function confirmPooledAvdIdentity(
     return { kind: "skipped" };
   }
   if (capture.quarantined) {
-    // Not an extra check, a louder one: for a quarantined entry the probe is the
-    // ONLY identity evidence there is, and a refusal here is the fail-closed
+    // Not an extra check, a louder one: a quarantined entry needs fresh runtime
+    // evidence from the console or process table, and a refusal is the fail-closed
     // outcome rather than a surprising one (#6863 review).
     logger.warn(
       `[DeviceTools] The pooled identity of ${device.deviceId} is quarantined; the runtime must ` +
@@ -1941,15 +1956,51 @@ export async function confirmPooledAvdIdentity(
     budget.signal,
   );
   if (runtimeAvdName === undefined) {
-    logger.warn(
-      `[DeviceTools] Could not confirm that ${device.deviceId} is still AVD '${pooledAvdName}': ` +
-        "the emulator console did not report a name.",
-    );
-    return { kind: "refusal", refusal: { reason: "unresolved", pooledAvdName } };
+    return confirmPooledAvdFromProcessTable(device, pooledAvdName, budget);
   }
   return runtimeAvdName === pooledAvdName
     ? { kind: "confirmed", confirmedAvdName: runtimeAvdName }
     : { kind: "refusal", refusal: { reason: "conflict", pooledAvdName, runtimeAvdName } };
+}
+
+async function confirmPooledAvdFromProcessTable(
+  device: BootedDevice,
+  pooledAvdName: string,
+  budget: PooledAvdNameProbeBudget,
+): Promise<PooledAvdConfirmation> {
+  const processIdentity = await budget.processStopper?.identify(
+    { serial: device.deviceId, avdName: pooledAvdName },
+    { deadlineMs: budget.deadlineMs, signal: budget.signal },
+  );
+  if (processIdentity?.kind === "match") {
+    logger.info(
+      `[DeviceTools] Confirmed ${device.deviceId} as AVD '${pooledAvdName}' from process table pid ${processIdentity.pid}`,
+    );
+    return { kind: "confirmed", confirmedAvdName: pooledAvdName };
+  }
+  if (processIdentity?.kind === "mismatch") {
+    return {
+      kind: "refusal",
+      refusal: {
+        reason: "conflict",
+        pooledAvdName,
+        runtimeAvdName: processIdentity.runningAvdName,
+      },
+    };
+  }
+  const candidates = processIdentity?.kind === "ambiguous" ? processIdentity.candidates : undefined;
+  logger.warn(
+    `[DeviceTools] Could not confirm that ${device.deviceId} is still AVD '${pooledAvdName}': ` +
+      "the emulator console did not report a name.",
+  );
+  const processTableStatus =
+    processIdentity?.kind === "absent" || processIdentity?.kind === "unreadable"
+      ? processIdentity.kind
+      : undefined;
+  return {
+    kind: "refusal",
+    refusal: { reason: "unresolved", pooledAvdName, candidates, processTableStatus },
+  };
 }
 
 export function pooledAvdNameRefusalMessage(
@@ -1976,8 +2027,8 @@ export function pooledAvdNameRefusalMessage(
     `Refusing to act on Android emulator '${device.deviceId}': this daemon has it recorded as ` +
     `AVD '${refusal.pooledAvdName}', but the emulator console on that serial did not answer, so ` +
     "the AVD actually running there could not be confirmed. Acting on the recorded name could " +
-    "stop a different emulator that took the serial. Resolve the target and retry, or stop it " +
-    `by hand with \`adb -s ${device.deviceId} emu kill\`.`
+    "stop a different emulator that took the serial. Resolve the target and retry. " +
+    emulatorProcessEscapeHint(device.deviceId, refusal.candidates, refusal.processTableStatus)
   );
 }
 
@@ -3435,7 +3486,50 @@ export async function verifyTeardownAbsence(
   }
 }
 
+function createAndroidEmulatorProcessStopper(): EmulatorProcessStopper {
+  const timer = getDeviceToolsDependencies().timer;
+  return new ProcessTableEmulatorProcessStopper(
+    new ProcessTableReader(new DefaultHostCommandExecutor(), {
+      timer,
+      processTableSupported: process.platform !== "win32",
+      procFs: process.platform === "linux" ? nodeProcFs : undefined,
+    }),
+    {
+      signal: (pid, signal) => {
+        if (!isSafeEmulatorProcessPid(pid)) {
+          throw new ActionableError(`Refusing to signal unsafe emulator pid ${pid}`);
+        }
+        process.kill(pid, signal);
+      },
+      isRunning: (pid) => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch (error) {
+          if (
+            typeof error === "object" &&
+            error !== null &&
+            "code" in error &&
+            error.code === "ESRCH"
+          ) {
+            // ESRCH means the process exited, so reporting absence is safe.
+            logger.debug(`[DeviceTools] emulator pid ${pid} exited`);
+            return false;
+          }
+          logger.warn(
+            `[DeviceTools] could not probe emulator pid ${pid}; treating it as running`,
+            error,
+          );
+          return true;
+        }
+      },
+    },
+    timer,
+  );
+}
+
 let moduleDependencies: DeviceToolsDependencies | null = null;
+let androidProcessStopper: EmulatorProcessStopper | undefined;
 
 export function getDeviceToolsDependencies(): DeviceToolsDependencies {
   if (!moduleDependencies) {
@@ -3486,6 +3580,9 @@ export function getDeviceToolsDependencies(): DeviceToolsDependencies {
       idGenerator: defaultIdGenerator,
       timer: defaultTimer,
       lifecycleCoordinator: getVirtualDeviceLifecycleCoordinator(),
+      get androidEmulatorProcessStopper() {
+        return (androidProcessStopper ??= createAndroidEmulatorProcessStopper());
+      },
       resolveRunningAndroidAvdName: defaultResolveRunningAndroidAvdName,
     };
   }
@@ -3567,12 +3664,16 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
     idGenerator: deps.idGenerator ?? currentDeps.idGenerator,
     timer: deps.timer ?? currentDeps.timer,
     lifecycleCoordinator: resolveDeviceToolsLifecycleCoordinator(deps, currentDeps),
+    get androidEmulatorProcessStopper() {
+      return deps.androidEmulatorProcessStopper ?? currentDeps.androidEmulatorProcessStopper;
+    },
     resolveRunningAndroidAvdName:
       deps.resolveRunningAndroidAvdName ?? currentDeps.resolveRunningAndroidAvdName,
   };
 }
 
 export function resetDeviceToolsDependencies(): void {
+  androidProcessStopper = undefined;
   deviceTeardownService = undefined;
   moduleDependencies = null;
   activeProvisionDeviceRequests.clear();

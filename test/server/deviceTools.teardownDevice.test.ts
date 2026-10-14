@@ -1,3 +1,4 @@
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { warmedTests } from "../helpers/warmedTests";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
 import { afterAll, afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
@@ -299,6 +300,7 @@ describe("deleteDevice handler", () => {
       now: () => new Date(0),
     });
     setDeviceToolsDependencies({
+      androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
       deviceManagerFactory: () => manager,
       avdManagerFactory: () => avdManager,
       notifyResourcesChanged: async () => {},

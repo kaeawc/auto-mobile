@@ -1,5 +1,13 @@
 Fixtures for `src/features/bootAdmission` (#11588).
 
+- `ps-snapshot-two-emulators-with-ports.txt`: kept rows of one
+  `ps -axo pid=,ppid=,rss=,pcpu=,command=` capture, macOS 26 (Darwin 25.6), Android Emulator
+  37.1.11, 2026-10-13. Two AutoMobile managed-slot emulators ran: pid 75134, windowed
+  `qemu-system-aarch64 ... -port 5556`, and pid 83205, `qemu-system-aarch64-headless ... -port 5554`.
+  Both were reparented to pid 1. Their `crashpad_handler`/`netsimd` helpers and an
+  `adb -s emulator-5556 logcat` decoy are also retained. Kept rows only; no row is synthetic.
+  Redactions: user name replaced with `dev`.
+
 - `ps-snapshot-one-running-emulator.txt`: rows of one `ps -axo pid=,ppid=,rss=,pcpu=,command=`
   capture (macOS 26, Android Emulator 37.1.11, 2026-10-10) taken while an AutoMobile daemon ran one
   headless emulator it had booted. Kept rows: `launchd`, `logd`, `syslogd`, a Chrome crashpad

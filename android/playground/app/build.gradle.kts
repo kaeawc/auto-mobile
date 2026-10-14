@@ -1,5 +1,6 @@
 plugins {
   id("automobile.kotlin-common")
+  id("automobile.robolectric-sdk-pin")
   id("automobile.android-app-signing")
   alias(libs.plugins.android.application)
   alias(libs.plugins.compose.compiler)

@@ -266,7 +266,7 @@ jobs:
 
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: "detektMain detektTest"
+          gradle-tasks: "detektMain detektTest :build-logic:test"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           # Configuration-cache reuse is deliberately OFF here (#5332), matching

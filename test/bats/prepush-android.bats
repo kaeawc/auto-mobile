@@ -380,6 +380,7 @@ SCRIPT
   export GIT_CONFIG_SYSTEM=/dev/null
 
   mkdir -p "${fixture_repo}/android/build-logic/src/main/kotlin"
+  mkdir -p "${fixture_repo}/android/build-logic/src/test/kotlin"
   copy_prepush_fixture
   cat > "${fixture_repo}/scripts/ktfmt/validate_ktfmt.sh" <<'SCRIPT'
 #!/usr/bin/env bash
@@ -392,6 +393,7 @@ SCRIPT
   chmod +x "${fixture_repo}/android/gradlew"
   printf '%s\n' 'plugins { `kotlin-dsl` }' > "${fixture_repo}/android/build-logic/build.gradle.kts"
   printf '%s\n' 'class Changed' > "${fixture_repo}/android/build-logic/src/main/kotlin/Changed.kt"
+  printf '%s\n' 'class ChangedTest' > "${fixture_repo}/android/build-logic/src/test/kotlin/ChangedTest.kt"
 
   cd "${fixture_repo}"
   git init -q
@@ -414,6 +416,7 @@ SCRIPT
     false
   fi
   grep -qx ':build-logic:compileKotlin' "${invocations_file}"
+  grep -qx ':build-logic:test' "${invocations_file}"
 }
 
 @test "validates both modules for a cross-module Kotlin rename" {

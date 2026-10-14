@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../../src/utils/debug";
 import type { ObserveResult } from "../../../src/models";
 import { DefaultSendKeysCommandExecutor, SendKeys } from "../../../src/features/action/SendKeys";
 import { clearAndroidImeQuarantine } from "../../../src/features/action/androidImeLock";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { android, createSendKeysHarness, focused } from "./SendKeysTestHarness";
 
@@ -214,4 +215,42 @@ describe("IME trace opt-in", () => {
     expect(result.success).toBe(true);
     expect("imeTrace" in result).toBe(false);
   });
+});
+
+test.each([true, false])(
+  "SendKeys carries editorConsumed=%s through verification",
+  async (editorConsumed) => {
+    const h = harness("helloworld");
+    h.client.commitViaIme = async () => ({
+      success: true,
+      insertedText: "helloworld",
+      ...(editorConsumed ? { editorConsumed: true } : {}),
+    });
+    const result = await h.action.execute([{ action: "type", text: "hello\nworld", mode: "ime" }]);
+    expect(result.success).toBe(editorConsumed);
+    expect(result.commands[0]).not.toHaveProperty("editorConsumed");
+    expect(result.commands[0]).not.toHaveProperty("insertedText");
+  },
+);
+
+test("Android SendKeys adapter forwards the consumed verdict", async () => {
+  const h = harness("helloworld");
+  const client = AndroidCtrlProxyClient.createForTesting(device, h.adb);
+  const instance = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(client);
+  const commit = spyOn(client, "commitViaIme").mockResolvedValue({
+    success: true,
+    insertedText: "helloworld",
+    editorConsumed: true,
+  });
+  try {
+    const adapter = h.executor["createTextClient"](h.adbFactory);
+    expect(await adapter.commitViaIme("hello\nworld", undefined)).toMatchObject({
+      success: true,
+      insertedText: "helloworld",
+      editorConsumed: true,
+    });
+  } finally {
+    commit.mockRestore();
+    instance.mockRestore();
+  }
 });

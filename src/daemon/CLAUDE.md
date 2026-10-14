@@ -167,6 +167,14 @@ Device-aware `tools/call` follows the same rule (`assertToolCallerHoldsDevice` i
 `src/server/toolRegistry.ts`): on a held device, a call from another session or
 with no session is refused with the same code before admission or device work,
 unless the tool is registered `deviceReadOnly` (watching).
+
+Tool metadata advertises wholly read-only tools with `automobile/deviceReadOnly: true`.
+Mixed tools can advertise `automobile/deviceReadOnlyArgs`, an array of conservative read
+shapes: `{ argument, values }` matches a string argument in the listed values, and
+`{ absentArguments }` matches when every listed argument is undefined (null is present).
+The proxy uses these shapes for per-call read routing; the daemon's per-arguments
+classifier remains authoritative, and SQL reads are not advertised as shapes.
+
 `recordDeviceGestures` also refuses an unheld device (`no_active_device_session`) before readiness;
 a live session holding no device is refused before context creation can auto-acquire one (#11716).
 A call without a deviceId is checked against the device readiness would select (the

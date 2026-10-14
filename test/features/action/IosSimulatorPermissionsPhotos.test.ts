@@ -112,27 +112,35 @@ describe("iOS simulator Photos permission honesty", () => {
     },
   );
 
-  test.each([undefined, new Error("TCC unavailable")])(
-    "Photos grant remains unverified: %j",
-    async (error) => {
-      const { permissions, simctl, reader } = fixture([photosRow], error, true);
-      simctl.setCommandArgsResult(command("grant", "photos"), "dispatched", "diagnostic");
-      const result = await permissions.setPermissions("grant", appId, ["photos"]);
-      expectUnverified(result);
-      expect(result.results[0]).toMatchObject({ stdout: "dispatched", stderr: "diagnostic" });
-      expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([
-        { args: command("grant", "photos"), timeoutMs: undefined },
-      ]);
-      expect(reader.calls).toEqual([{ deviceId: device.deviceId, appId, permissions: ["photos"] }]);
-      expect(reader.commandCounts).toEqual([1]);
-    },
-  );
+  test.each([
+    { permission: "photos", error: undefined },
+    { permission: "photos", error: new Error("TCC unavailable") },
+    { permission: "all", error: undefined },
+    { permission: "all", error: new Error("TCC unavailable") },
+  ])("$permission grant remains unverified: $error", async ({ permission, error }) => {
+    const { permissions, simctl, reader } = fixture([photosRow], error, true);
+    simctl.setCommandArgsResult(command("grant", permission), "dispatched", "diagnostic");
+    const result = await permissions.setPermissions("grant", appId, [permission]);
+    expectUnverified(result);
+    expect(result.results[0]).toMatchObject({
+      permission,
+      stdout: "dispatched",
+      stderr: "diagnostic",
+    });
+    expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([
+      { args: command("grant", permission), timeoutMs: undefined },
+    ]);
+    expect(reader.calls).toEqual([{ deviceId: device.deviceId, appId, permissions: ["photos"] }]);
+    expect(reader.commandCounts).toEqual([1]);
+  });
 
   test.each([
     { action: "grant" as const, permission: "photos-add" },
     { action: "grant" as const, permission: "camera" },
     { action: "revoke" as const, permission: "photos" },
     { action: "reset" as const, permission: "photos" },
+    { action: "revoke" as const, permission: "all" },
+    { action: "reset" as const, permission: "all" },
   ])("$action $permission skips readback", async ({ action, permission }) => {
     const { permissions, simctl, reader } = fixture();
     const result = await permissions.setPermissions(action, appId, [permission]);
@@ -143,6 +151,54 @@ describe("iOS simulator Photos permission honesty", () => {
     expect(simctl.getMethodCalls("executeCommandArgs")).toEqual([
       { args: command(action, permission), timeoutMs: undefined },
     ]);
+  });
+
+  test("photos-add then all grants preserve dispatch and readback ordering", async () => {
+    const { permissions, simctl, reader } = fixture([photosRow], undefined, true);
+    const result = await permissions.setPermissions("grant", appId, ["photos-add", "all"]);
+    expect(result).toMatchObject({ success: false, changedCount: 1, failedCount: 1 });
+    expect(result.results).toMatchObject([
+      { permission: "photos-add", success: true },
+      { permission: "all", success: false, applied: true, verified: false },
+    ]);
+    expect(result.error).toBe(result.results[1].error);
+    expect(simctl.getMethodCalls("executeCommandArgs").map((call) => call.args)).toEqual([
+      command("grant", "photos-add"),
+      command("grant", "all"),
+    ]);
+    expect(reader.calls).toEqual([{ deviceId: device.deviceId, appId, permissions: ["photos"] }]);
+    expect(reader.commandCounts).toEqual([2]);
+  });
+
+  test.each([
+    ["camera", "photos"],
+    ["photos", "camera"],
+  ])("real dispatch failure takes precedence for %j", async (...batch) => {
+    const { permissions, simctl, reader } = fixture([photosRow], undefined, true);
+    const cameraError = "camera simctl dispatch failed";
+    simctl.setCommandArgsError(command("grant", "camera"), new Error(cameraError));
+    const result = await permissions.setPermissions("grant", appId, batch);
+    expect(result).toMatchObject({
+      success: false,
+      changedCount: 0,
+      failedCount: 2,
+      error: cameraError,
+    });
+    expect(result.results.find((item) => item.permission === "camera")).toMatchObject({
+      success: false,
+      error: cameraError,
+    });
+    expect(result.results.find((item) => item.permission === "photos")).toMatchObject({
+      success: false,
+      applied: true,
+      verified: false,
+      error: expect.stringContaining("Photos grant was dispatched via simctl"),
+    });
+    expect(simctl.getMethodCalls("executeCommandArgs").map((call) => call.args)).toEqual(
+      batch.map((permission) => command("grant", permission)),
+    );
+    expect(reader.calls).toEqual([{ deviceId: device.deviceId, appId, permissions: ["photos"] }]);
+    expect(reader.commandCounts).toEqual([batch.indexOf("photos") + 1]);
   });
 
   test("mixed grants preserve sequential dispatch and locked readback", async () => {

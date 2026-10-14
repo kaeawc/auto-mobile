@@ -212,8 +212,12 @@ export class IosSimulatorPermissions {
           appId: normalizedAppId,
         });
         const verification =
-          action === "grant" && tccServiceForPermission(permission) === "kTCCServicePhotos"
-            ? await this.verifyPhotosGrant(normalizedAppId, permission)
+          action === "grant" &&
+          (permission === "all" || tccServiceForPermission(permission) === "kTCCServicePhotos")
+            ? await this.verifyPhotosGrant(
+                normalizedAppId,
+                permission === "all" ? "photos" : permission,
+              )
             : { success: true };
         results.push({ permission, ...verification, stdout: result.stdout, stderr: result.stderr });
       } catch (error) {
@@ -227,6 +231,9 @@ export class IosSimulatorPermissions {
     }
 
     const failedCount = results.filter((result) => !result.success).length;
+    const commandError = results.find(
+      (result) => !result.success && result.verified !== false,
+    )?.error;
     const unverifiedError = results.find((result) => result.verified === false)?.error;
 
     return {
@@ -239,7 +246,12 @@ export class IosSimulatorPermissions {
       failedCount,
       results,
       ...(failedCount > 0
-        ? { error: unverifiedError ?? `One or more iOS simulator permissions failed to ${action}` }
+        ? {
+            error:
+              commandError ??
+              unverifiedError ??
+              `One or more iOS simulator permissions failed to ${action}`,
+          }
         : {}),
     };
   }
@@ -262,6 +274,8 @@ export class IosSimulatorPermissions {
         "kTCCServicePhotos",
         rows.find((row) => row.service === "kTCCServicePhotos"),
       );
+      // Success is intentionally unreachable until app-level instrumentation supplies a
+      // verified native status; this branch is the seam for that verification.
       if (classification.state === "granted" && classification.verified !== false) {
         return { success: true, applied: true, verified: true };
       }

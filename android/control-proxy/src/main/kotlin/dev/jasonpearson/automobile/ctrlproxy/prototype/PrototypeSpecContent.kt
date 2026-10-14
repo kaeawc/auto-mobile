@@ -143,7 +143,7 @@ fun PrototypeSpecContent(
         // The page box takes the fill: it is the root's parent and must measure the window.
         Box(
           Modifier.then(if (fillsWindow) Modifier.fillWhenEmpty() else Modifier)
-            .then(if (pageBlocked) Modifier.clearAndSetSemantics {} else Modifier)
+            .then(if (pageBlocked) Modifier.clearAndSetSemantics {} else Modifier),
         ) {
           RenderPrototypeNode(root, interact, windowRoot = true)
           PrototypeAnchorLayer(remember(root) { layeredPrototypeAnchors(root) }, interact)
@@ -254,7 +254,7 @@ private fun PrototypeAnchorLayer(
       anchors.forEach { anchor ->
         key(anchor.node.identity) { LayeredAnchorEntry(anchor, interact) }
       }
-    }
+    },
   ) { measurables, constraints ->
     val loose = constraints.copy(minWidth = 0, minHeight = 0)
     val placeables = measurables.map { it.measure(loose) }
@@ -384,7 +384,7 @@ private fun RenderPrototypeVisibility(
   }
   if (node.visible) history.clearSettledHidden()
   CompositionLocalProvider(
-    LocalPrototypeShowEpoch provides LocalPrototypeShowEpoch.current + history.epoch
+    LocalPrototypeShowEpoch provides LocalPrototypeShowEpoch.current + history.epoch,
   ) {
     if (LocalPrototypeMotion.current) {
       AnimatedVisibility(
@@ -538,8 +538,8 @@ private fun RenderPrototypeNodeContent(
             .defaultMinSize(24.dp, 24.dp)
             .background(
               prototypeThemedColor(node.style.background, node.style.source.background)
-                ?: prototypePlaceholderColor(MaterialTheme.colorScheme)
-            )
+                ?: prototypePlaceholderColor(MaterialTheme.colorScheme),
+            ),
         )
     }
     "image" -> PrototypeImageContent(node, modifier)
@@ -635,14 +635,13 @@ private fun RenderPrototypeTextField(
   }
   var fieldModifier = modifier.focusRequester(focus)
   if (node.enabled && actions.isNotEmpty())
-    fieldModifier =
-      fieldModifier.semantics {
-        onClick {
-          focus.requestFocus()
-          interact(PrototypeInteraction.Tap(actions))
-          true
-        }
+    fieldModifier = fieldModifier.semantics {
+      onClick {
+        focus.requestFocus()
+        interact(PrototypeInteraction.Tap(actions))
+        true
       }
+    }
   // Material's editable field supplies SetText semantics and the keyboard input connection.
   TextField(
     shown,
@@ -690,13 +689,11 @@ private fun RenderPrototypePager(
     Modifier.then(if (fill.width) Modifier.fillMaxWidth() else Modifier)
       .then(if (fill.height) Modifier.fillMaxHeight() else Modifier)
   var boundedHeight by remember { mutableStateOf(false) }
-  val pagerModifier =
-    modifier.layout { measurable, constraints ->
-      if (boundedHeight != constraints.hasBoundedHeight)
-        boundedHeight = constraints.hasBoundedHeight
-      val placeable = measurable.measure(constraints)
-      layout(placeable.width, placeable.height) { placeable.place(0, 0) }
-    }
+  val pagerModifier = modifier.layout { measurable, constraints ->
+    if (boundedHeight != constraints.hasBoundedHeight) boundedHeight = constraints.hasBoundedHeight
+    val placeable = measurable.measure(constraints)
+    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+  }
   val keepNeighbours = fill.height && boundedHeight
   HorizontalPager(
     pager,
@@ -799,9 +796,9 @@ private fun RenderPrototypeSheet(
       Modifier.fillMaxSize()
         .background(
           prototypeThemedScrim(null, source.scrim)
-            ?: prototypeSheetScrimFallback(prototypePalette())
+            ?: prototypeSheetScrimFallback(prototypePalette()),
         )
-        .clickable { interact(PrototypeInteraction.SheetDismiss(source.openWhen)) }
+        .clickable { interact(PrototypeInteraction.SheetDismiss(source.openWhen)) },
     )
     Column(
       modifier
@@ -813,7 +810,7 @@ private fun RenderPrototypeSheet(
           // fill would cover them, so the surface is only the fallback when neither is authored.
           if (node.style.source.background == null && node.style.source.gradient == null)
             Modifier.background(MaterialTheme.colorScheme.surface)
-          else Modifier
+          else Modifier,
         )
         .pointerInput(heights, height, source.dismissOnSwipe) {
           detectVerticalDragGestures(
@@ -835,14 +832,14 @@ private fun RenderPrototypeSheet(
         .clickable {
           if (!source.onTap.isNullOrEmpty())
             interact(PrototypeInteraction.Tap(source.onTap.orEmpty()))
-        }
+        },
     ) {
       if (source.dragHandle)
         Box(
           Modifier.align(Alignment.CenterHorizontally)
             .padding(8.dp)
             .size(32.dp, 4.dp)
-            .background(prototypeHandleColor(MaterialTheme.colorScheme), RoundedCornerShape(2.dp))
+            .background(prototypeHandleColor(MaterialTheme.colorScheme), RoundedCornerShape(2.dp)),
         )
       node.children.forEach {
         key(it.identity) {
@@ -944,31 +941,29 @@ private fun prototypeNodeModifier(
       remember(node, tappable) { prototypeMergedTapLabel(node, tappable) }
     } else null
   if (mergedTapLabel != null) {
-    modifier =
-      modifier.clearAndSetSemantics {
-        text = AnnotatedString(mergedTapLabel)
-        contentDescription = mergedTapLabel
-        this[PrototypeRole] = node.role
-        state?.let { stateDescription = it }
-        node.testTag?.let { testTag = it }
-      }
+    modifier = modifier.clearAndSetSemantics {
+      text = AnnotatedString(mergedTapLabel)
+      contentDescription = mergedTapLabel
+      this[PrototypeRole] = node.role
+      state?.let { stateDescription = it }
+      node.testTag?.let { testTag = it }
+    }
   } else if (
     !isSemanticsFreeContainer(node, tappable, description, state) &&
       (handleVisual || !isDecorativePrototypeVisual(node, tappable))
   ) {
-    modifier =
-      modifier.semantics {
-        if (node.role != "textField" && node.role !in SEMANTICS_FREE_CONTAINERS) {
-          text = AnnotatedString(node.text)
-        }
-        this[PrototypeRole] = node.role
-        if (node.role == "icon" || node.role == "image") role = Role.Image
-        // Compose has no native role for text or layout containers; the kind travels in
-        // PrototypeRole.
-        description?.let { contentDescription = it }
-        state?.let { stateDescription = it }
-        node.testTag?.let { testTag = it }
+    modifier = modifier.semantics {
+      if (node.role != "textField" && node.role !in SEMANTICS_FREE_CONTAINERS) {
+        text = AnnotatedString(node.text)
       }
+      this[PrototypeRole] = node.role
+      if (node.role == "icon" || node.role == "image") role = Role.Image
+      // Compose has no native role for text or layout containers; the kind travels in
+      // PrototypeRole.
+      description?.let { contentDescription = it }
+      state?.let { stateDescription = it }
+      node.testTag?.let { testTag = it }
+    }
   }
   val insetFloor = LocalPrototypeInsetFloor.current
   node.safeArea?.let { safeArea ->
@@ -981,7 +976,7 @@ private fun prototypeNodeModifier(
             "cutout" -> WindowInsets.displayCutout
             "ime" -> WindowInsets.ime
             else -> WindowInsets(0, 0, 0, 0)
-          }
+          },
         )
     }
     val sides =
@@ -1205,7 +1200,9 @@ internal enum class PrototypeWeightAxis {
 
 /** [axis] when this child carries a `weight`, so its own size on that axis does not wrap. */
 private fun PrototypeRenderNode.weightAxis(axis: PrototypeWeightAxis): PrototypeWeightAxis? =
-  axis.takeIf { style.source.weight != null }
+  axis.takeIf {
+    style.source.weight != null
+  }
 
 /** Child `weight` takes the remaining main-axis space; only meaningful inside a Row. */
 private fun RowScope.rowWeight(child: PrototypeRenderNode): Modifier =

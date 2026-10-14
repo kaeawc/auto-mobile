@@ -142,7 +142,7 @@ class PrototypeRuntime(
     mutableSnapshot.value =
       next.copy(
         textEpochs =
-          current.textEpochs + changed.associateWith { (current.textEpochs[it] ?: 0) + 1 }
+          current.textEpochs + changed.associateWith { (current.textEpochs[it] ?: 0) + 1 },
       )
   }
 
@@ -448,7 +448,7 @@ class PrototypeRuntime(
             validity().takeIf { it.isNotEmpty() }
           else null,
         keys = keys,
-      )
+      ),
     )
   }
 
@@ -466,8 +466,9 @@ class PrototypeRuntime(
         .filter { it.requireValid != null }
     if (guarded.isEmpty()) return true
     val validity = validity()
-    val failed =
-      guarded.filter { action -> action.requireValid.orEmpty().any { validity[it] != true } }
+    val failed = guarded.filter { action ->
+      action.requireValid.orEmpty().any { validity[it] != true }
+    }
     if (failed.isEmpty()) return true
     mutableSnapshot.value =
       current.copy(shownErrors = current.shownErrors + failed.flatMap { it.requireValid.orEmpty() })
@@ -484,7 +485,9 @@ class PrototypeRuntime(
   private fun snapshot(spec: PrototypeSpec, previous: Map<String, Int>) =
     PrototypeRuntimeSnapshot(
       spec,
-      pagerCounts(spec.root).mapValues { (id, count) -> (previous[id] ?: 0).coerceIn(0, count - 1) },
+      pagerCounts(spec.root).mapValues { (id, count) ->
+        (previous[id] ?: 0).coerceIn(0, count - 1)
+      },
     )
 }
 

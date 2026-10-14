@@ -236,7 +236,7 @@ internal fun RenderPrototypeSlider(
         if (node.enabled) change(it)
         node.enabled
       }
-    }
+    },
   ) {
     if (node.text.isNotEmpty()) PrototypeComponentLabel(node)
     Slider(
@@ -277,7 +277,7 @@ internal fun RenderPrototypeChip(
       .toggleable(node.checked, enabled = node.enabled, role = Role.Checkbox) {
         interact(PrototypeInteraction.Toggle(key, actions))
       }
-      .then(modifier)
+      .then(modifier),
   ) {
     FilterChip(
       selected = node.checked,

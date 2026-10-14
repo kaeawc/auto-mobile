@@ -101,11 +101,10 @@ class IcuRegexCompatibilityTest {
       )
     }
 
-    val violations =
-      found.flatMap { site ->
-        val problems = site.pattern?.let(IcuRegexSyntax::problems) ?: listOf(site.reason)
-        problems.map { "${site.location}: $it  [${site.pattern ?: "<dynamic>"}]" }
-      }
+    val violations = found.flatMap { site ->
+      val problems = site.pattern?.let(IcuRegexSyntax::problems) ?: listOf(site.reason)
+      problems.map { "${site.location}: $it  [${site.pattern ?: "<dynamic>"}]" }
+    }
     assertTrue(
       "Regex patterns that Android's ICU engine may reject (#9947):\n" +
         violations.joinToString("\n"),
@@ -215,15 +214,16 @@ object RegexLiteralScanner {
     path: String,
     sites: MutableList<RegexSite>,
   ): Int? {
-    val call =
-      constructors.firstOrNull { s.startsWith(it, i) && !isIdentifierPart(s.getOrNull(i - 1)) }
+    val call = constructors.firstOrNull {
+      s.startsWith(it, i) && !isIdentifierPart(s.getOrNull(i - 1))
+    }
     val afterParen = call?.let { i + it.length }
     val next = afterParen?.let { p -> s.indexOfFirst(p) { c -> !c.isWhitespace() } }
     val isLiteralArg = next != null && next >= 0 && s[next] == '"'
     val validatedPortablePattern =
       call == "Pattern.compile(" &&
         path.endsWith(
-          "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeCheckPattern.kt"
+          "protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/PrototypeCheckPattern.kt",
         ) &&
         next != null &&
         s.startsWith("source(pattern))", next) &&
@@ -305,7 +305,7 @@ object RegexLiteralScanner {
             'r' -> '\r'
             'b' -> '\b'
             else -> next
-          }
+          },
         )
         i += 2
       }

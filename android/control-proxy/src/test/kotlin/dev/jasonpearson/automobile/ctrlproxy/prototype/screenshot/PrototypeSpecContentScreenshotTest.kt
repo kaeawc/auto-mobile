@@ -57,7 +57,7 @@ class PrototypeSpecContentScreenshotTest {
                   if (node is PrototypeSliderNode)
                     node.copy(checks = listOf(PrototypeCheck.Min(10.0, "Choose at least ten")))
                   else node
-                }
+                },
             ),
           state = fixture.state.orEmpty() + ("radioGroup" to PrototypeScalar.Text("")),
         )

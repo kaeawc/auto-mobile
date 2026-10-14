@@ -51,8 +51,9 @@ internal fun prototypeListItemToggleKey(node: PrototypeNode): String? =
   }
 
 /** The `testTag` of one radio option: the group's tag, a dot, then the option value. */
-internal fun prototypeRadioOptionTag(groupTag: String?, value: String): String? =
-  groupTag?.let { "$it.$value" }
+internal fun prototypeRadioOptionTag(groupTag: String?, value: String): String? = groupTag?.let {
+  "$it.$value"
+}
 
 /**
  * A group of Material radio buttons bound to a string state key. Each option row is one selectable

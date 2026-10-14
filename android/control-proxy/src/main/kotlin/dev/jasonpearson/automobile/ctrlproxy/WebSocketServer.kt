@@ -297,25 +297,24 @@ class WebSocketServer(
     }
 
     // kotlinx omits the path for a missing discriminator; match its input object structurally.
-    private fun decodeFailurePath(raw: String, cause: String): String? =
-      runCatching {
-          val target =
-            lenientJson.parseToJsonElement(cause.substringAfter("JSON input:", "").trim())
-              as? JsonObject ?: return@runCatching null
-          fun findPath(value: JsonElement, path: String): String? =
-            when {
-              value == target -> path
-              value is JsonObject ->
-                value.entries.firstNotNullOfOrNull { (key, child) -> findPath(child, "$path.$key") }
-              value is JsonArray ->
-                value.withIndex().firstNotNullOfOrNull { (index, child) ->
-                  findPath(child, "$path[$index]")
-                }
-              else -> null
+    private fun decodeFailurePath(raw: String, cause: String): String? = runCatching {
+      val target =
+        lenientJson.parseToJsonElement(cause.substringAfter("JSON input:", "").trim())
+          as? JsonObject ?: return@runCatching null
+      fun findPath(value: JsonElement, path: String): String? =
+        when {
+          value == target -> path
+          value is JsonObject ->
+            value.entries.firstNotNullOfOrNull { (key, child) -> findPath(child, "$path.$key") }
+          value is JsonArray ->
+            value.withIndex().firstNotNullOfOrNull { (index, child) ->
+              findPath(child, "$path[$index]")
             }
-          findPath(lenientJson.parseToJsonElement(raw), "$")
+          else -> null
         }
-        .getOrNull()
+      findPath(lenientJson.parseToJsonElement(raw), "$")
+    }
+      .getOrNull()
   }
 
   internal fun supportedCommands(): List<String> = buildList {
@@ -582,23 +581,22 @@ class WebSocketServer(
       // An explicit start replaces any pending internal retry budget.
       startRetryJob?.cancel()
       startRetryJob = null
-      startRetryJob =
-        scope.launch {
+      startRetryJob = scope.launch {
+        synchronized(startLock) {
+          if (!coroutineContext.isActive || server != null || tryStart()) return@launch
+        }
+        for (retry in 1 until MAX_START_ATTEMPTS) {
+          delay(START_RETRY_BASE_DELAY_MS * (1L shl (retry - 1)))
           synchronized(startLock) {
+            onRetryLockAcquired()
             if (!coroutineContext.isActive || server != null || tryStart()) return@launch
-          }
-          for (retry in 1 until MAX_START_ATTEMPTS) {
-            delay(START_RETRY_BASE_DELAY_MS * (1L shl (retry - 1)))
-            synchronized(startLock) {
-              onRetryLockAcquired()
-              if (!coroutineContext.isActive || server != null || tryStart()) return@launch
-              if (retry == MAX_START_ATTEMPTS - 1) {
-                Log.e(TAG, "WebSocket server failed to start after $MAX_START_ATTEMPTS attempts")
-                onPermanentStartFailure()
-              }
+            if (retry == MAX_START_ATTEMPTS - 1) {
+              Log.e(TAG, "WebSocket server failed to start after $MAX_START_ATTEMPTS attempts")
+              onPermanentStartFailure()
             }
           }
         }
+      }
     }
   }
 
@@ -639,8 +637,8 @@ class WebSocketServer(
                             id = connectionId,
                             supportedCommands = supportedCommands(),
                           ),
-                        )
-                      )
+                        ),
+                      ),
                     )
                   }
                   if (!greetingSent) {

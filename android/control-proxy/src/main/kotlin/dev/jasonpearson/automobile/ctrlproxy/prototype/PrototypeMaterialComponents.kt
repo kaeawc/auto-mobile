@@ -95,8 +95,9 @@ internal val PROTOTYPE_MATERIAL_ROLES =
 internal val PROTOTYPE_ICON_CONTROL_ROLES = setOf("iconButton", "fab")
 
 /** The `testTag` of a part of a composite node: the node's tag, a dot, then the part's name. */
-internal fun prototypePartTag(nodeTag: String?, part: String): String? =
-  nodeTag?.let { "$it.$part" }
+internal fun prototypePartTag(nodeTag: String?, part: String): String? = nodeTag?.let {
+  "$it.$part"
+}
 
 /** An icon-only Material button: standard (default), filled, tonal or outlined. */
 @Composable
@@ -323,7 +324,7 @@ internal fun RenderPrototypeDialog(
     Box(
       Modifier.fillMaxSize()
         .background(prototypeDialogScrimFallback(MaterialTheme.colorScheme))
-        .clickable { interact(PrototypeInteraction.SheetDismiss(source.openWhen)) }
+        .clickable { interact(PrototypeInteraction.SheetDismiss(source.openWhen)) },
     )
     Surface(
       modifier
@@ -373,7 +374,7 @@ internal fun RenderPrototypeDialog(
           }
           PrototypeDialogTextButton(source.confirm, prototypePartTag(node.testTag, "confirm")) {
             interact(
-              PrototypeInteraction.CloseModal(source.openWhen, source.confirm.onTap.orEmpty())
+              PrototypeInteraction.CloseModal(source.openWhen, source.confirm.onTap.orEmpty()),
             )
           }
         }
@@ -474,7 +475,7 @@ internal fun RenderPrototypeTimePicker(
               hour,
               minute,
               source.onTap.orEmpty(),
-            )
+            ),
           )
       }
   }

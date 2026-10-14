@@ -173,8 +173,9 @@ internal class PrototypeNodeMapping(
     val entries = cache?.children(node, path) ?: validatedPrototypeChildren(node, path)
     val role = prototypeNodeRole(node)
     val text = prototypeNodeText(node, state, localState, inPager)
-    val children =
-      entries.map { (child, childPath) -> map(child, childPath, if (inPager) localState else null) }
+    val children = entries.map { (child, childPath) ->
+      map(child, childPath, if (inPager) localState else null)
+    }
     val pager =
       when (node) {
         is PrototypeTabBarNode -> node.pager
@@ -701,8 +702,7 @@ private fun anchorsBelow(parent: PrototypeRenderNode, ancestors: List<PrototypeR
 private fun anchorsAmong(
   children: List<PrototypeRenderNode>,
   ancestors: List<PrototypeRenderNode>,
-): List<LayeredPrototypeAnchor> =
-  children.flatMap { child ->
-    (if (isLayeredPrototypeAnchor(child)) listOf(LayeredPrototypeAnchor(child, ancestors))
-    else emptyList()) + anchorsBelow(child, ancestors + child)
-  }
+): List<LayeredPrototypeAnchor> = children.flatMap { child ->
+  (if (isLayeredPrototypeAnchor(child)) listOf(LayeredPrototypeAnchor(child, ancestors))
+  else emptyList()) + anchorsBelow(child, ancestors + child)
+}

@@ -40,7 +40,7 @@ class PrototypeChecksRuntimeTest {
           PrototypeTextFieldNode(
             stateKey = "x",
             checks = listOf(PrototypeCheck.Required("Required")),
-          )
+          ),
         ),
         mapOf("x" to PrototypeScalar.Text("")),
       )
@@ -74,7 +74,7 @@ class PrototypeChecksRuntimeTest {
       PrototypeWindow(PrototypeFullscreenPlacement()),
       fields.associate { it.stateKey to PrototypeScalar.Text("") },
       PrototypeColumnNode(
-        children = fields + PrototypeButtonNode(label = "Send", enabledWhen = condition)
+        children = fields + PrototypeButtonNode(label = "Send", enabledWhen = condition),
       ),
     )
 
@@ -94,7 +94,7 @@ class PrototypeChecksRuntimeTest {
           listOf(
             PrototypeSetStateAction("change", PrototypeScalar.Text("written")),
             PrototypeEmitAction("sent"),
-          )
+          ),
         ),
       )
     runtime.handle(tap)
@@ -113,7 +113,7 @@ class PrototypeChecksRuntimeTest {
     val runtime =
       PrototypeRuntime(disabled, PrototypeEventSink { events += it }, { 42L }, { ++sequence })
     runtime.handle(
-      PrototypeInteraction.Guarded("root", PrototypeInteraction.TextChange("change", "ignored"))
+      PrototypeInteraction.Guarded("root", PrototypeInteraction.TextChange("change", "ignored")),
     )
     assertEquals(disabled.state, runtime.current.state)
     assertTrue(events.isEmpty())
@@ -149,7 +149,7 @@ class PrototypeChecksRuntimeTest {
     events.clear()
     val emit =
       PrototypeInteraction.Tap(
-        listOf(PrototypeEmitAction("send", requireValid = listOf("change", "blur")))
+        listOf(PrototypeEmitAction("send", requireValid = listOf("change", "blur"))),
       )
     runtime.handle(emit)
     assertEquals(listOf("blur"), events.single().keys)
@@ -173,7 +173,9 @@ class PrototypeChecksRuntimeTest {
     assertEquals(setOf("change", "blur"), runtime.current.shownErrors)
     assertNull(runtime.renderModel().root.children[2].errorMessage)
     runtime.handle(
-      PrototypeInteraction.Tap(listOf(PrototypeEmitAction("send", requireValid = listOf("submit"))))
+      PrototypeInteraction.Tap(
+        listOf(PrototypeEmitAction("send", requireValid = listOf("submit"))),
+      ),
     )
     assertEquals("Required", runtime.renderModel().root.children[2].errorMessage)
     runtime.handle(PrototypeInteraction.TextChange("submit", "ok"))

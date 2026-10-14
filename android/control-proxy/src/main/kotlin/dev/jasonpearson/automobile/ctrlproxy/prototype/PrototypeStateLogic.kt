@@ -50,13 +50,13 @@ private fun PrototypeScalar?.sameValue(other: PrototypeScalar?): Boolean =
 
 /** The flipped value, or null when the key no longer holds a boolean (the action is a no-op). */
 internal fun PrototypeToggleAction.nextValue(
-  state: Map<String, PrototypeScalar>
+  state: Map<String, PrototypeScalar>,
 ): PrototypeScalar? =
   (state[key] as? PrototypeScalar.BooleanValue)?.let { PrototypeScalar.BooleanValue(!it.value) }
 
 /** The stepped value, or null when the key is not numeric or the result would not be finite. */
 internal fun PrototypeIncrementAction.nextValue(
-  state: Map<String, PrototypeScalar>
+  state: Map<String, PrototypeScalar>,
 ): PrototypeScalar? {
   val current = (state[key] as? PrototypeScalar.Numeric)?.value ?: return null
   val next = current + (by ?: 1.0)
@@ -65,7 +65,7 @@ internal fun PrototypeIncrementAction.nextValue(
 
 /** The stepped-down value: [PrototypeIncrementAction] with the sign of `by` flipped (default 1). */
 internal fun PrototypeDecrementAction.nextValue(
-  state: Map<String, PrototypeScalar>
+  state: Map<String, PrototypeScalar>,
 ): PrototypeScalar? {
   val current = (state[key] as? PrototypeScalar.Numeric)?.value ?: return null
   val next = current - (by ?: 1.0)
@@ -77,7 +77,7 @@ internal fun PrototypeDecrementAction.nextValue(
  * nothing: it is not a state action, or it is a toggle or step that is a no-op for the stored type.
  */
 internal fun PrototypeAction.stateWrite(
-  state: Map<String, PrototypeScalar>
+  state: Map<String, PrototypeScalar>,
 ): Pair<String, PrototypeScalar>? =
   when (this) {
     is PrototypeSetStateAction -> key to value

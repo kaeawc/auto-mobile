@@ -61,7 +61,7 @@ class PrototypeChecksRenderModelTest {
         PrototypeWindow(PrototypeFullscreenPlacement()),
         mapOf("email" to PrototypeScalar.Text("a")),
         PrototypeColumnNode(
-          children = fields + PrototypeButtonNode(label = "Send", enabledWhen = condition)
+          children = fields + PrototypeButtonNode(label = "Send", enabledWhen = condition),
         ),
       )
     val mapper = PrototypeRenderMapper()
@@ -97,9 +97,10 @@ class PrototypeChecksRenderModelTest {
     val validity = prototypeValidity(listOf(node), state)
     assertTrue(
       PrototypeCondition(
-          not = PrototypeCondition(valid = PrototypeValidityKeys.Multiple(listOf("hour", "minute")))
+          not =
+            PrototypeCondition(valid = PrototypeValidityKeys.Multiple(listOf("hour", "minute"))),
         )
-        .holds(state, validity)
+        .holds(state, validity),
     )
   }
 
@@ -119,7 +120,7 @@ class PrototypeChecksRenderModelTest {
               checks = listOf(PrototypeCheck.Required("Required")),
               enabledWhen =
                 PrototypeCondition(valid = PrototypeValidityKeys.Single("value_{item.id}")),
-            )
+            ),
           ),
       )
     val spec =

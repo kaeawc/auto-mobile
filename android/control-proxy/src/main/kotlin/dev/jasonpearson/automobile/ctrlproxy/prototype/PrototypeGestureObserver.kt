@@ -4,7 +4,10 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -43,20 +46,26 @@ internal class PrototypeGestureTaps {
 }
 
 /** Observe Initial without consuming a plain tap; detectTapGestures consumes even without onTap. */
+@Composable
 internal fun Modifier.prototypeGestureObserver(
   taps: PrototypeGestureTaps,
   presses: MutableInteractionSource,
   onLongPress: (() -> Unit)?,
   onDoubleTap: (() -> Unit)?,
-): Modifier =
-  pointerInput(taps, presses, onLongPress, onDoubleTap) {
+): Modifier {
+  val currentLongPress = rememberUpdatedState(onLongPress)
+  val currentDoubleTap = rememberUpdatedState(onDoubleTap)
+  return pointerInput(taps, presses, onLongPress != null, onDoubleTap != null) {
     awaitEachGesture {
       val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-      val first = observedPress(down, onLongPress, presses) ?: return@awaitEachGesture
+      val first = observedPress(down, currentLongPress, presses) ?: return@awaitEachGesture
       val up = first.up ?: return@awaitEachGesture
-      if (onDoubleTap == null) return@awaitEachGesture
+      if (currentDoubleTap.value == null) return@awaitEachGesture
       val waiting = taps.begin()
       try {
+        awaitPointerEvent(PointerEventPass.Final)
+        // Without an ancestor tap on this up, leave unrelated nodes' taps alone.
+        if (waiting.tap == null) taps.finish(waiting, singleTap = false)
         val secondDown =
           withTimeoutOrNull(viewConfiguration.doubleTapTimeoutMillis) {
             awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
@@ -69,10 +78,10 @@ internal fun Modifier.prototypeGestureObserver(
           taps.finish(waiting, singleTap = true)
           return@awaitEachGesture
         }
-        val second = observedPress(secondDown, onLongPress, presses)
+        val second = observedPress(secondDown, currentLongPress, presses)
         if (second?.up != null) {
           second.up.consume()
-          onDoubleTap()
+          currentDoubleTap.value?.invoke()
         }
         if (second == null || second.up != null) {
           // An ancestor combinedClickable may fall back to onClick when its second up is consumed.
@@ -88,13 +97,14 @@ internal fun Modifier.prototypeGestureObserver(
       }
     }
   }
+}
 
 private class ObservedPress(val up: PointerInputChange?)
 
 /** Null means a completed long press; a null up means slop/multitouch cancelled the press. */
 private suspend fun AwaitPointerEventScope.observedPress(
   down: PointerInputChange,
-  onLongPress: (() -> Unit)?,
+  onLongPress: State<(() -> Unit)?>,
   presses: MutableInteractionSource,
 ): ObservedPress? {
   val press = PressInteraction.Press(down.position)
@@ -108,13 +118,13 @@ private suspend fun AwaitPointerEventScope.observedPress(
 
 private suspend fun AwaitPointerEventScope.observedPressRelease(
   down: PointerInputChange,
-  onLongPress: (() -> Unit)?,
+  onLongPress: State<(() -> Unit)?>,
 ): ObservedPress? {
-  if (onLongPress == null) return ObservedPress(observedUp(down))
+  if (onLongPress.value == null) return ObservedPress(observedUp(down))
   val released =
     withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) { ObservedPress(observedUp(down)) }
   if (released != null) return released
-  onLongPress()
+  onLongPress.value?.invoke()
   // Only a recognized hold consumes events, cancelling the ancestor's clickable.
   currentEvent.changes.forEach { it.consume() }
   do {

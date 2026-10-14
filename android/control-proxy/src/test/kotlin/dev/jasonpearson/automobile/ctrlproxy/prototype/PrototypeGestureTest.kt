@@ -25,6 +25,7 @@ class PrototypeGestureTest {
   private val double = listOf<PrototypeAction>(PrototypeEmitAction("double"))
   private val interactions = mutableListOf<PrototypeInteraction>()
   private var doubleTapTimeout = 0L
+  private var longPressTimeout = 0L
 
   private fun render() {
     val spec =
@@ -44,6 +45,7 @@ class PrototypeGestureTest {
                 ),
                 PrototypeTextNode(testTag = "hold", text = "Hold", onLongPress = hold),
                 PrototypeTextNode(testTag = "tap", text = "Tap", onTap = tap),
+                PrototypeTextNode(testTag = "double", text = "Double", onDoubleTap = double),
               ),
           ),
       )
@@ -96,7 +98,7 @@ class PrototypeGestureTest {
     compose.runOnIdle { assertEquals(listOf(PrototypeInteraction.Tap(tap)), interactions) }
   }
 
-  private fun renderNested(parentDoubleTap: Boolean = false) {
+  private fun renderNested(parentDoubleTap: Boolean = false, pressScale: Double? = null) {
     val root =
       mapPrototypeSpec(
           PrototypeSpec(
@@ -109,11 +111,17 @@ class PrototypeGestureTest {
                 onDoubleTap = if (parentDoubleTap) tap else null,
                 children =
                   listOf(
-                    PrototypeTextNode(testTag = "childHold", text = "Hold", onLongPress = hold),
+                    PrototypeTextNode(
+                      testTag = "childHold",
+                      text = "Hold",
+                      onLongPress = hold,
+                      style = PrototypeStyle(pressScale = pressScale),
+                    ),
                     PrototypeTextNode(
                       testTag = "childDouble",
                       text = "Double",
                       onDoubleTap = double,
+                      style = PrototypeStyle(pressScale = pressScale),
                     ),
                     PrototypeTextNode(
                       testTag = "immediate",
@@ -128,6 +136,7 @@ class PrototypeGestureTest {
         .root
     compose.setContent {
       doubleTapTimeout = LocalViewConfiguration.current.doubleTapTimeoutMillis
+      longPressTimeout = LocalViewConfiguration.current.longPressTimeoutMillis
       PrototypeSpecContent(root) { interactions += it }
     }
     compose.waitForIdle()
@@ -135,8 +144,8 @@ class PrototypeGestureTest {
   }
 
   @Test
-  fun `gesture-only hold child passes single tap to row but owns long press`() {
-    renderNested()
+  fun `pressScale gesture-only hold child passes single tap to row but owns long press`() {
+    renderNested(pressScale = 0.9)
     compose.onNodeWithTag("childHold", useUnmergedTree = true).performTouchInput { click() }
     compose.runOnIdle { assertEquals(listOf(PrototypeInteraction.Tap(tap)), interactions) }
     compose.runOnIdle { interactions.clear() }
@@ -146,14 +155,41 @@ class PrototypeGestureTest {
   }
 
   @Test
-  fun `gesture-only double child owns double tap and defers ancestor single tap`() {
-    renderNested()
+  fun `pressScale hold child keeps its long press across recomposition while down`() {
+    renderNested(pressScale = 0.9)
+    val child = compose.onNodeWithTag("childHold", useUnmergedTree = true)
+    child.performTouchInput { down(center) }
+    // Separate input batches let the pressScale state recompose while the pointer stays down.
+    repeat(2) { compose.mainClock.advanceTimeByFrame() }
+    compose.mainClock.advanceTimeBy(longPressTimeout + 1)
+    child.performTouchInput { up() }
+    compose.mainClock.advanceTimeBy(doubleTapTimeout + 1)
+    compose.runOnIdle { assertEquals(listOf(PrototypeInteraction.Tap(hold)), interactions) }
+  }
+
+  @Test
+  fun `pressScale gesture-only double child owns double tap and defers ancestor single tap`() {
+    renderNested(pressScale = 0.9)
     compose.onNodeWithTag("childDouble", useUnmergedTree = true).performTouchInput { doubleClick() }
     compose.mainClock.advanceTimeBy(doubleTapTimeout + 1)
     compose.runOnIdle { assertEquals(listOf(PrototypeInteraction.Tap(double)), interactions) }
     compose.runOnIdle { interactions.clear() }
-    compose.onNodeWithTag("childDouble", useUnmergedTree = true).performTouchInput { click() }
+    val child = compose.onNodeWithTag("childDouble", useUnmergedTree = true)
+    child.performTouchInput { down(center) }
+    repeat(2) { compose.mainClock.advanceTimeByFrame() }
+    child.performTouchInput { up() }
+    repeat(2) { compose.mainClock.advanceTimeByFrame() }
     compose.runOnIdle { assertTrue(interactions.isEmpty()) }
+    compose.mainClock.advanceTimeBy(doubleTapTimeout + 1)
+    compose.runOnIdle { assertEquals(listOf(PrototypeInteraction.Tap(tap)), interactions) }
+  }
+
+  @Test
+  fun `standalone double tap node does not capture an unrelated single tap`() {
+    render()
+    compose.onNodeWithTag("double").performTouchInput { click() }
+    compose.onNodeWithTag("tap").performTouchInput { click() }
+    compose.runOnIdle { assertEquals(listOf(PrototypeInteraction.Tap(tap)), interactions) }
     compose.mainClock.advanceTimeBy(doubleTapTimeout + 1)
     compose.runOnIdle { assertEquals(listOf(PrototypeInteraction.Tap(tap)), interactions) }
   }

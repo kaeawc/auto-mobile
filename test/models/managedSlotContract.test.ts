@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { Kysely, sql } from "kysely";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import { DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD } from "../../src/daemon/constants";
+import { DaemonHandshakeMismatchError } from "../../src/daemon/client";
 import {
   DAEMON_CAPABILITIES_METHOD,
   handleDaemonRequest,
@@ -18,6 +19,7 @@ import {
   SLOT_REGISTRY_MIGRATIONS,
 } from "../../src/daemon/managedSlots/slotRegistryMigrations";
 import type { SlotRegistryDatabase } from "../../src/daemon/managedSlots/sqliteSlotRegistry";
+import { ManagedSlotRegistrySchemaUnsupportedError } from "../../src/daemon/managedSlots/managedSlotRefusal";
 import {
   MANAGED_SLOT_CONFIG_ENV,
   MANAGED_SLOT_CONFIG_FLAG,
@@ -186,7 +188,25 @@ describe("published managed-slot contract", () => {
       const ports: ManagedSlotProxyAcquisitionPorts = {
         timer: new FakeTimer(),
         livenessOwnerToken: "contract-owner",
-        ensureConnected: async () => {},
+        ensureConnected: async () => {
+          if ("daemonConnect" in row && row.daemonConnect === "handshake-mismatch") {
+            throw new DaemonHandshakeMismatchError(
+              {
+                code: "daemon_identity_mismatch",
+                phase: "daemon-preflight",
+                executionStarted: false,
+                reason: "version",
+                daemon: { version: "0.0.68", build: { buildId: "old", entryScript: "/old" } },
+                client: {
+                  clientVersion: "0.0.70",
+                  clientBuildId: "new",
+                  clientEntryScript: "/new",
+                },
+              },
+              "daemon version mismatch",
+            );
+          }
+        },
         callDaemonMethod: async (method) => {
           calls.push(method);
           if (method === DAEMON_CAPABILITIES_METHOD) {
@@ -234,7 +254,11 @@ describe("published managed-slot contract", () => {
         expect(result.failure).toMatchObject({ code: row.outcome, retryable: false });
       }
       if (row.refusedBeforeMutation) {
-        expect(calls).toEqual([DAEMON_CAPABILITIES_METHOD]);
+        expect(calls).toEqual(
+          "daemonConnect" in row && row.daemonConnect === "handshake-mismatch"
+            ? []
+            : [DAEMON_CAPABILITIES_METHOD],
+        );
         expect(tracked).toEqual([]);
         expect(held).toEqual([]);
         expect(releases).toBe(0);
@@ -242,7 +266,7 @@ describe("published managed-slot contract", () => {
     },
   );
 
-  test("older builds on newer registries match the published refusal gap", async () => {
+  test("older builds on newer registries are refused before mutation as published", async () => {
     const db = new Kysely<SlotRegistryDatabase>({
       dialect: new BunSqliteDialect({
         database: new Sqlite(new Uint8Array(migratedRegistryTemplate)),
@@ -257,7 +281,24 @@ describe("published managed-slot contract", () => {
       const message =
         "Update registry.olderBuildOnNewerRegistry in schemas/managed-slot-contract.json when the refusal behavior changes";
       if (contract.registry.olderBuildOnNewerRegistry.refusedBeforeMutation) {
-        await expect(migration, message).rejects.toThrow();
+        await expect(migration, message).rejects.toBeInstanceOf(
+          ManagedSlotRegistrySchemaUnsupportedError,
+        );
+        try {
+          await migration;
+        } catch (error) {
+          expect(error).toBeInstanceOf(ManagedSlotRegistrySchemaUnsupportedError);
+          if (!(error instanceof ManagedSlotRegistrySchemaUnsupportedError)) {
+            throw error;
+          }
+          expect(error.code).toBe(contract.registry.olderBuildOnNewerRegistry.failureCode);
+          expect(error.retryable).toBe(contract.registry.olderBuildOnNewerRegistry.retryable);
+          expect(error.unknownMigrations).toEqual(["2099_01_01_999_future"]);
+        }
+        const rows = await db.selectFrom("kysely_migration").select("name").execute();
+        expect(rows.filter((row) => row.name.includes("future")).map((row) => row.name)).toEqual([
+          "2099_01_01_999_future",
+        ]);
       } else {
         await expect(migration, message).resolves.toBeUndefined();
       }

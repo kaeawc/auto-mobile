@@ -33,8 +33,10 @@
     ],
     "olderBuildOnNewerRegistry": {
       "supported": false,
-      "refusedBeforeMutation": false,
-      "note": "migrateSlotRegistry returns early when every migration this build knows has executed; migrations recorded by a newer build are not detected. Do not run an older daemon against a registry a newer daemon migrated."
+      "refusedBeforeMutation": true,
+      "failureCode": "registry_schema_unsupported",
+      "retryable": false,
+      "note": "A registry migrated by a newer build is refused before any write; upgrade every daemon sharing the registry."
     }
   },
   "packageVersions": [
@@ -54,6 +56,17 @@
       "outcome": "acquire",
       "refusedBeforeMutation": false,
       "verifiedBy": "unit-test"
+    },
+    {
+      "id": "frontend-daemon-build-mismatch",
+      "description": "A frontend whose daemon handshake reports a version or build mismatch is refused before acquisition.",
+      "frontend": { "contractVersion": 1, "groupSize": 1, "usesDeviceFamily": false },
+      "daemonCapabilities": ["managed-slots/v1", "managed-slots/v1.deviceFamily"],
+      "supported": false,
+      "outcome": "contract_unsupported",
+      "refusedBeforeMutation": true,
+      "verifiedBy": "unit-test",
+      "daemonConnect": "handshake-mismatch"
     },
     {
       "id": "v1-on-v1-only-daemon",

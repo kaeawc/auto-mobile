@@ -95,7 +95,7 @@ extension PrototypeNode {
             interpolatePrototypeText($0, state: state, pager: pager)
         }
         if let authored, !authored.isEmpty { return authored }
-        let shown = interpolatePrototypeText(text ?? "", state: state, pager: pager)
+        let shown = plainText(state: state, pager: pager)
         if !shown.isEmpty { return shown }
         if type == "icon", tappable, let name, !name.isEmpty { return name }
         // Icon-only controls (#10439): an extended FAB's label, else the icon name.

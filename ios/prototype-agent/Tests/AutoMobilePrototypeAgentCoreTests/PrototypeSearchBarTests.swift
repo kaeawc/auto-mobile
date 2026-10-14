@@ -192,6 +192,6 @@ final class PrototypeSearchBarTests: XCTestCase {
         XCTAssertEqual(prototypeAccessibilityGrouping(type: "searchBar", tappable: true), .contain)
         XCTAssertEqual(PrototypeAgentProtocol.searchBarCapability, "prototype_search_bar_v1")
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.searchBarCapability))
-        XCTAssertEqual(PrototypeAgentProtocol.capabilities.last, PrototypeAgentProtocol.searchBarCapability)
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.searchBarCapability))
     }
 }

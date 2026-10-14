@@ -97,7 +97,15 @@ enum PrototypeRepeat {
             })
         }
         switch fields["type"] {
-        case .string("text")?: string("text", in: &fields)
+        case .string("text")?:
+            string("text", in: &fields)
+            if case let .array(spans)? = fields["spans"] {
+                fields["spans"] = .array(spans.map { span in
+                    guard case var .object(member) = span else { return span }
+                    string("text", in: &member)
+                    return .object(member)
+                })
+            }
         case .string("button")?, .string("fab")?: string("label", in: &fields)
         case .string("segmentedButton")?: list("options", in: &fields)
         case .string("topAppBar")?:
@@ -157,6 +165,9 @@ private struct Instance {
         guard case var .object(fields) = node else { return node }
         PrototypeRepeat.bindTextFields(&fields, transform: interpolate)
         bindComponentActions(&fields)
+        if fields["type"] == .string("text") {
+            bindList("spans", in: &fields) { bindPartFields(&$0) }
+        }
         bindStateKeys(&fields)
         bindPartFields(&fields)
         if let condition = fields["visibleWhen"] {

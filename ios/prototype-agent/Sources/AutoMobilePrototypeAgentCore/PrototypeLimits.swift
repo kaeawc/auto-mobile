@@ -10,6 +10,7 @@ enum PrototypeLimits {
     static let maxPatchOps = 64
     static let maxNodes = 2000
     static let maxDepth = 24
+    static let maxTextSpans = 64
     static let maxRepeatItems = 128
     static let maxRepeatPathCells = 65536
     static let maxSubstitutedTextLength = 16384
@@ -139,6 +140,7 @@ enum PrototypeLimits {
         count += 1
         if count > maxNodes { throw violation(path, "Node limit exceeded") }
         if depth > maxDepth { throw violation(path, "Tree depth limit exceeded") }
+        if authored { try guardTextSpans(fields, path: path) }
         if authored, hasUncountedTemplate(fields) { return }
         if case let .array(children)? = fields["children"] {
             if case let .object(spec)? = fields["repeat"] {
@@ -198,6 +200,7 @@ enum PrototypeLimits {
             if count > maxNodes { throw violation(path, "Node limit exceeded") }
         }
         if depth > maxDepth { throw violation(path, "Tree depth limit exceeded") }
+        if template { try guardTextSpans(fields, path: path) }
         let childTemplate = template || hasUncountedTemplate(fields)
         if case let .array(children)? = fields["children"] {
             for (index, child) in children.enumerated() {
@@ -211,6 +214,33 @@ enum PrototypeLimits {
             try visitAuthoredTemplates(
                 child, path: "\(path).child", depth: depth + 1, template: childTemplate, count: &count
             )
+        }
+    }
+
+    /// Validate authored spans before data/repeat substitution (which may legitimately yield empty text).
+    private static func guardTextSpans(_ fields: [String: JSONValue], path: String) throws {
+        guard fields["type"] == .string("text") else { return }
+        let hasText = fields["text"] != nil
+        let hasSpans = fields["spans"] != nil
+        if hasText == hasSpans {
+            throw violation(
+                "\(path).\(hasSpans ? "spans" : "text")",
+                hasSpans ? "text and spans cannot both be set" : "text node needs text or spans"
+            )
+        }
+        guard hasSpans else {
+            if fields["text"] == .null { throw violation("\(path).text", "Invalid string value") }
+            return
+        }
+        guard case let .array(spans)? = fields["spans"] else {
+            throw violation("\(path).spans", "Expected array")
+        }
+        if spans.count > maxTextSpans { throw violation("\(path).spans", "Text span limit exceeded") }
+        if spans.isEmpty { throw violation("\(path).spans", "Array length out of range") }
+        for (index, span) in spans.enumerated() {
+            if case let .object(member) = span, member["text"] == .string("") {
+                throw violation("\(path).spans[\(index)].text", "Invalid string value")
+            }
         }
     }
 

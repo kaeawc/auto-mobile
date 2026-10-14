@@ -59,6 +59,7 @@ enum PrototypeStateValidator {
         actions += node.onDoubleTap ?? []
         actions += node.onSubmit ?? []
         actions += (node.trailingActions ?? []).flatMap { $0.onTap ?? [] }
+        actions += (node.spans ?? []).flatMap { $0.onTap ?? [] }
         actions += node.navigationIcon?.onTap ?? []
         actions += (node.actions ?? []).flatMap { $0.onTap ?? [] }
         actions += node.confirm?.onTap ?? []

@@ -126,6 +126,6 @@ final class PrototypeTextFieldOptionsTests: XCTestCase {
         XCTAssertEqual(PrototypeAgentProtocol.textFieldOptionsCapability, "prototype_text_field_options_v1")
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.textFieldOptionsCapability))
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.dataModelCapability))
-        XCTAssertEqual(PrototypeAgentProtocol.capabilities.last, PrototypeAgentProtocol.textFieldOptionsCapability)
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.textFieldOptionsCapability))
     }
 }

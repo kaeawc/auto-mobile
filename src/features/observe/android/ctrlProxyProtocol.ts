@@ -1027,6 +1027,9 @@ export const PROTOTYPE_GESTURES_CAPABILITY = "prototype_gestures_v1";
 export const PROTOTYPE_FLOW_GRID_CAPABILITY = "prototype_flow_grid_v1";
 export const PROTOTYPE_THEME_MODES_CAPABILITY = "prototype_theme_modes_v1";
 
+/** Renders styled text spans and their independent tap actions. */
+export const PROTOTYPE_RICH_TEXT_CAPABILITY = "prototype_rich_text_v1";
+
 /** Future iOS capabilities that lift host-reported prototype platform differences. */
 export const PROTOTYPE_IDENTIFIER_TEST_TAG_ONLY_CAPABILITY =
   "prototype_identifier_test_tag_only_v1";

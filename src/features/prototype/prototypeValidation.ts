@@ -187,6 +187,27 @@ function visitTagged(
   }
   return walk(data, variant, path, context, depth);
 }
+/** Text's two content forms and its span count are pinned by the shared contract. */
+function textNodeConstraint(
+  data: Record<string, unknown>,
+  rule: Rule,
+  path: string,
+): PrototypeValidationError | undefined {
+  if (rule === definitions.node.variants?.text) {
+    const text = Object.hasOwn(data, "text");
+    const spans = Object.hasOwn(data, "spans");
+    if (text === spans) {
+      return fail(
+        keyPath(path, spans ? "spans" : "text"),
+        spans ? "text and spans cannot both be set" : "text node needs text or spans",
+      );
+    }
+    if (Array.isArray(data.spans) && data.spans.length > contract.limits.MAX_PROTOTYPE_TEXT_SPANS) {
+      return fail(keyPath(path, "spans"), "Text span limit exceeded");
+    }
+  }
+  return undefined;
+}
 function visitObject(
   value: unknown,
   rule: Rule,
@@ -197,6 +218,10 @@ function visitObject(
   const data = object(value);
   if (!data) {
     return fail(path, "Expected object");
+  }
+  const textError = textNodeConstraint(data, rule, path);
+  if (textError) {
+    return textError;
   }
   const fields = rule.fields ?? {};
   if (

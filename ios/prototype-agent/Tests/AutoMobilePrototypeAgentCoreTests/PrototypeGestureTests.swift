@@ -158,6 +158,6 @@ final class PrototypeGestureTests: XCTestCase {
     func testTheAgentAdvertisesGestures() {
         XCTAssertEqual(PrototypeAgentProtocol.gesturesCapability, "prototype_gestures_v1")
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.gesturesCapability))
-        XCTAssertEqual(PrototypeAgentProtocol.capabilities.last, PrototypeAgentProtocol.gesturesCapability)
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.gesturesCapability))
     }
 }

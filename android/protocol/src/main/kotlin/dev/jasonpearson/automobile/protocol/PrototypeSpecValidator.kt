@@ -42,6 +42,7 @@ object PrototypeSpecValidator {
       .jsonObject
   private val definitions = contract.getValue("definitions").jsonObject
   private val limits = contract.getValue("limits").jsonObject
+  val MAX_PROTOTYPE_TEXT_SPANS: Int = limit("MAX_PROTOTYPE_TEXT_SPANS")
   val MAX_PROTOTYPE_NODES: Int = limit("MAX_PROTOTYPE_NODES")
   val MAX_PROTOTYPE_PAGER_DP: Int = limit("MAX_PROTOTYPE_PAGER_DP")
   val MAX_PROTOTYPE_DEPTH: Int = limit("MAX_PROTOTYPE_DEPTH")
@@ -490,6 +491,19 @@ object PrototypeSpecValidator {
     depth: Int,
   ): PrototypeSpecError? {
     val data = value as? JsonObject ?: return fail(path, "Expected object")
+    // Text constraints precede field walking, matching the host's first-error ordering.
+    if (rule === definitions.getValue("node").jsonObject.getValue("variants").jsonObject["text"]) {
+      val exactlyOne = rule.getValue("exactlyOne").jsonArray
+      if (exactlyOne.count { data.containsKey(it.jsonPrimitive.content) } != 1) {
+        val spans = data.containsKey("spans")
+        return fail(
+          keyPath(path, if (spans) "spans" else "text"),
+          if (spans) "text and spans cannot both be set" else "text node needs text or spans",
+        )
+      }
+      if ((data["spans"] as? JsonArray)?.size?.let { it > MAX_PROTOTYPE_TEXT_SPANS } == true)
+        return fail(keyPath(path, "spans"), "Text span limit exceeded")
+    }
     val fields = rule.getValue("fields").jsonObject
     if (data.text("type") == "searchBar" && "child" in data && "activeKey" !in data)
       return fail("$path.child", "Search bar child requires activeKey")

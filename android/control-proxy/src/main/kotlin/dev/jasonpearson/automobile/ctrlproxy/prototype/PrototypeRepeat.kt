@@ -185,7 +185,14 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         onDoubleTap = onDoubleTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
-        text = instance.interpolate(text),
+        text = text?.let(instance::interpolate),
+        spans =
+          spans?.map { span ->
+            span.copy(
+              text = instance.interpolate(span.text),
+              onTap = span.onTap?.map { it.bound(instance) },
+            )
+          },
       )
     is PrototypeScrollNode ->
       copy(

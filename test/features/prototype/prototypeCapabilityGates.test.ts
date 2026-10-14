@@ -10,6 +10,7 @@ import { prototypeFlowGridUnsupportedMessage } from "../../../src/features/proto
 import { prototypePagerOptionsUnsupportedMessage } from "../../../src/features/prototype/prototypePagerOptions";
 import { prototypeGesturesUnsupportedMessage } from "../../../src/features/prototype/prototypeGestures";
 import { prototypeSearchBarUnsupportedMessage } from "../../../src/features/prototype/prototypeSearchBar";
+import { prototypeRichTextUnsupportedMessage } from "../../../src/features/prototype/prototypeRichText";
 
 test("plain and non-spec inputs require no capability", () => {
   for (const spec of [undefined, null, 3, {}, { root: { type: "text", text: "Hello" } }]) {
@@ -19,6 +20,7 @@ test("plain and non-spec inputs require no capability", () => {
 test("required gates report fields and original messages", () => {
   const spec = {
     data: { x: 1 },
+    components: { rich: { root: { type: "text", spans: [{ text: "Hi" }] } } },
     root: {
       type: "box",
       onLongPress: [{ type: "emit", name: "long" }],
@@ -43,6 +45,7 @@ test("required gates report fields and original messages", () => {
     "prototype_flow_grid_v1",
     "prototype_gestures_v1",
     "prototype_search_bar_v1",
+    "prototype_rich_text_v1",
   ]);
   expect(required.map((gate) => gate.fields)).toEqual([
     ["root.children[0].style.background"],
@@ -51,6 +54,7 @@ test("required gates report fields and original messages", () => {
     ["root.children[2]"],
     ["root.onLongPress", "root.onDoubleTap"],
     ["root.children[3]"],
+    ["components.rich.root.spans"],
   ]);
   expect(required.map((gate) => gate.unsupportedMessage)).toEqual([
     prototypeThemeModesUnsupportedMessage,
@@ -59,6 +63,7 @@ test("required gates report fields and original messages", () => {
     prototypeFlowGridUnsupportedMessage,
     prototypeGesturesUnsupportedMessage,
     prototypeSearchBarUnsupportedMessage,
+    prototypeRichTextUnsupportedMessage,
   ]);
   expect(
     PROTOTYPE_SPEC_CAPABILITY_GATES.map((gate) => gate.fields(spec)).filter((f) => f.length > 0),

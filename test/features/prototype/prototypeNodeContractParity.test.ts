@@ -17,8 +17,9 @@ const contractNodes = contract.definitions.node.variants as unknown as Record<
 
 /** The Zod node union, unwrapped from its lazy wrapper, keyed by node type. */
 function zodNodeShapes(): Map<string, string[]> {
-  const union = (prototypeNodeSchema as unknown as z.ZodLazy<z.ZodDiscriminatedUnion<"type", []>>)
-    .schema;
+  const union = (
+    prototypeNodeSchema as unknown as z.ZodEffects<z.ZodLazy<z.ZodDiscriminatedUnion<"type", []>>>
+  ).innerType().schema;
   const shapes = new Map<string, string[]>();
   for (const option of union.options as z.AnyZodObject[]) {
     const type = (option.shape.type as z.ZodEnum<[string]>).options[0];
@@ -81,8 +82,9 @@ describe("prototype node contract parity", () => {
   });
 
   test("style has the same fields in Zod and the contract", () => {
-    const union = (prototypeNodeSchema as unknown as z.ZodLazy<z.ZodDiscriminatedUnion<"type", []>>)
-      .schema;
+    const union = (
+      prototypeNodeSchema as unknown as z.ZodEffects<z.ZodLazy<z.ZodDiscriminatedUnion<"type", []>>>
+    ).innerType().schema;
     const box = (union.options as z.AnyZodObject[])[0];
     const style = (box.shape.style as z.ZodOptional<z.AnyZodObject>).unwrap();
     const contractStyle = contract.definitions.style.fields as unknown as ContractFields;

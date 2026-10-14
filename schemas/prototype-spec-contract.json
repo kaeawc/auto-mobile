@@ -16,7 +16,8 @@
     "MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH": 16384,
     "MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL": 4194304,
     "MAX_PROTOTYPE_PATCH_OPS": 64,
-    "MAX_PROTOTYPE_PAGER_DP": 10000
+    "MAX_PROTOTYPE_PAGER_DP": 10000,
+    "MAX_PROTOTYPE_TEXT_SPANS": 64
   },
   "definitions": {
     "offset": {
@@ -2114,9 +2115,23 @@
                 "kind": "string",
                 "empty": true
               },
-              "optional": false
+              "optional": true
+            },
+            "spans": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "textSpan"
+                },
+                "min": 1,
+                "max": 64,
+                "unique": false
+              },
+              "optional": true
             }
-          }
+          },
+          "exactlyOne": ["text", "spans"]
         },
         "image": {
           "kind": "object",
@@ -8755,6 +8770,120 @@
           }
         }
       ]
+    },
+    "textSpanStyle": {
+      "kind": "object",
+      "fields": {
+        "color": {
+          "rule": {
+            "kind": "ref",
+            "name": "colorValue"
+          },
+          "optional": true
+        },
+        "fontWeight": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 100,
+            "max": 900
+          },
+          "optional": true
+        },
+        "fontStyle": {
+          "rule": {
+            "kind": "enum",
+            "values": ["normal", "italic"]
+          },
+          "optional": true
+        },
+        "textDecoration": {
+          "rule": {
+            "kind": "enum",
+            "values": ["none", "underline", "lineThrough", "underlineLineThrough"]
+          },
+          "optional": true
+        },
+        "textSize": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": 0.000001,
+            "max": 1000
+          },
+          "optional": true
+        },
+        "letterSpacing": {
+          "rule": {
+            "kind": "number",
+            "integer": false,
+            "min": -1000,
+            "max": 1000
+          },
+          "optional": true
+        },
+        "fontFamily": {
+          "rule": {
+            "kind": "choice",
+            "options": [
+              {
+                "kind": "enum",
+                "values": ["default", "sansSerif", "serif", "monospace"]
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "asset": {
+                    "rule": {
+                      "kind": "string"
+                    },
+                    "optional": false
+                  }
+                }
+              }
+            ]
+          },
+          "optional": true
+        },
+        "background": {
+          "rule": {
+            "kind": "ref",
+            "name": "colorValue"
+          },
+          "optional": true
+        }
+      }
+    },
+    "textSpan": {
+      "kind": "object",
+      "fields": {
+        "text": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        "style": {
+          "rule": {
+            "kind": "ref",
+            "name": "textSpanStyle"
+          },
+          "optional": true
+        },
+        "onTap": {
+          "rule": {
+            "kind": "array",
+            "item": {
+              "kind": "ref",
+              "name": "action"
+            },
+            "min": 1,
+            "unique": false,
+            "max": 32
+          },
+          "optional": true
+        }
+      }
     }
   }
 }

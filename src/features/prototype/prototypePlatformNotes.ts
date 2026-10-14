@@ -11,6 +11,7 @@ import {
 import type { PrototypeSpec } from "./prototypeSpec";
 
 export type PrototypePlatformNoteConstruct =
+  | "rich-text-links"
   | "node.id"
   | "bottomSheet.dismissOnSwipe"
   | "bottomSheet.detents"
@@ -336,7 +337,7 @@ export function prototypePlatformNotes(
     ...PROTOTYPE_PLATFORM_DIFFERENCES,
     ...PROTOTYPE_SEARCH_BAR_PLATFORM_DIFFERENCES,
   ];
-  return differences.flatMap((legacyDifference) => {
+  const notes = differences.flatMap((legacyDifference) => {
     const difference = sfSymbols ? sfSymbolDifference(legacyDifference) : legacyDifference;
     if (difference.capability && supports(difference.capability)) {
       return [];
@@ -362,4 +363,25 @@ export function prototypePlatformNotes(
       },
     ];
   });
+  const links = found.flatMap(({ node, path }) =>
+    node?.type === "text" && Array.isArray(node.spans)
+      ? node.spans.flatMap((span: unknown, index: number) =>
+          typeof span === "object" && span !== null && "onTap" in span
+            ? [`${path}.spans[${index}].onTap`]
+            : [],
+        )
+      : [],
+  );
+  if (links.length > 0) {
+    notes.push({
+      platform: "ios",
+      construct: "rich-text-links",
+      effect: "substituted",
+      paths: links.slice(0, 20),
+      ...(links.length > 20 ? { total: links.length } : {}),
+      detail:
+        "Tappable text spans render as links; the agent does not expose them as separate accessibility elements or semantic links. Use tapAt on the span.",
+    });
+  }
+  return notes;
 }

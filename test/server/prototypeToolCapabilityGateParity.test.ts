@@ -55,6 +55,7 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
     activeKey: "active",
     child: label,
   }),
+  prototype_rich_text_v1: fixture({ type: "text", id: "label", spans: [{ text: "Hello" }] }),
 };
 function fixture(root: Record<string, unknown>) {
   return {

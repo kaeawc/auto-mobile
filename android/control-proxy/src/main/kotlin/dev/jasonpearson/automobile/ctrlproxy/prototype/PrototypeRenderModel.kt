@@ -69,6 +69,7 @@ data class PrototypeRenderNode(
   val minute: Int = 0,
   /** The authored `contentDescription`, state placeholders resolved; null when not authored. */
   val contentDescription: String? = null,
+  val spans: List<PrototypeRenderSpan>? = null,
 )
 
 @Immutable
@@ -239,6 +240,8 @@ internal class PrototypeNodeMapping(
         minute = prototypeStateInt(state, (node as? PrototypeTimePickerNode)?.minuteKey),
         contentDescription =
           node.contentDescription?.let { interpolatePrototypeText(it, localState, inPager) },
+        spans =
+          (node as? PrototypeTextNode)?.let { mapPrototypeTextSpans(it, localState, inPager) },
       )
     val shared = intern(mapped, old)
     nodes[path] = shared
@@ -312,7 +315,8 @@ private fun prototypeNodeText(
   inPager: Boolean,
 ): String =
   when (node) {
-    is PrototypeTextNode -> interpolatePrototypeText(node.text, localState, inPager)
+    is PrototypeTextNode ->
+      prototypePlainText(node) { interpolatePrototypeText(it, localState, inPager) }
     is PrototypeTextFieldNode -> (state[node.stateKey] as? PrototypeScalar.Text)?.value.orEmpty()
     is PrototypeSearchBarNode -> (state[node.stateKey] as? PrototypeScalar.Text)?.value.orEmpty()
     is PrototypeSwitchNode -> node.label.orEmpty()
@@ -494,6 +498,40 @@ fun mapPrototypeStyle(style: PrototypeStyle): PrototypeRenderStyle =
       else -> TextOverflow.Clip
     },
   )
+
+/** A span's authored-only style: absent fields inherit the surrounding Text. */
+@Immutable
+data class PrototypeRenderSpan(
+  val text: String,
+  val style: PrototypeRenderStyle,
+  val onTap: List<PrototypeAction>?,
+)
+
+/** Device-free mapping; text uses the same interpolation and styles as a plain text node. */
+fun mapPrototypeTextSpans(
+  node: PrototypeTextNode,
+  state: Map<String, PrototypeScalar>,
+  inPager: Boolean = false,
+): List<PrototypeRenderSpan>? =
+  node.spans?.map { span ->
+    val authored = span.style
+    val style =
+      PrototypeStyle(
+        color = authored?.color,
+        fontWeight = authored?.fontWeight,
+        fontStyle = authored?.fontStyle,
+        textDecoration = authored?.textDecoration,
+        textSize = authored?.textSize,
+        letterSpacing = authored?.letterSpacing,
+        fontFamily = authored?.fontFamily,
+        background = authored?.background,
+      )
+    PrototypeRenderSpan(
+      interpolatePrototypeText(span.text, state, inPager),
+      mapPrototypeStyle(style),
+      span.onTap,
+    )
+  }
 
 private fun prototypeTextDecoration(value: String?): TextDecoration =
   when (value) {

@@ -469,8 +469,34 @@ data class PrototypeTextNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
-  val text: String,
+  val text: String? = null,
+  val spans: List<PrototypeTextSpan>? = null,
 ) : PrototypeNode()
+
+@Serializable
+data class PrototypeTextSpan(
+  val text: String,
+  val style: PrototypeTextSpanStyle? = null,
+  val onTap: List<PrototypeAction>? = null,
+)
+
+@Serializable
+data class PrototypeTextSpanStyle(
+  val color: PrototypeModeValue? = null,
+  val fontWeight: Int? = null,
+  val fontStyle: String? = null,
+  val textDecoration: String? = null,
+  val textSize: Double? = null,
+  val letterSpacing: Double? = null,
+  val fontFamily: PrototypeFontFamily? = null,
+  val background: PrototypeModeValue? = null,
+)
+
+/**
+ * The displayed text, with each authored text field resolved by the same caller-supplied binder.
+ */
+fun prototypePlainText(node: PrototypeTextNode, resolve: (String) -> String = { it }): String =
+  node.spans?.joinToString("") { resolve(it.text) } ?: node.text?.let(resolve).orEmpty()
 
 @SerialName("image")
 @Serializable

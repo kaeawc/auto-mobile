@@ -41,6 +41,7 @@ class CommandAdvertisementTest {
       "prototype_text_field_options_v1",
       "prototype_gestures_v1",
       "prototype_search_bar_v1",
+      "prototype_rich_text_v1",
       "prototype_appearance_v1",
       "prototype_persistence_replay_v1",
       "prototype_show_in_place_v1",
@@ -80,6 +81,7 @@ class CommandAdvertisementTest {
       assertTrue(commands.contains("prototype_text_field_options_v1"))
       assertTrue(commands.contains("prototype_gestures_v1"))
       assertTrue(commands.contains("prototype_search_bar_v1"))
+      assertTrue(commands.contains("prototype_rich_text_v1"))
       assertTrue(commands.contains("prototype_appearance_v1"))
       assertTrue(commands.contains("prototype_persistence_replay_v1"))
       assertTrue(commands.contains("prototype_show_in_place_v1"))

@@ -273,6 +273,11 @@ export function mapBindableFields(node: Raw, path: string, visit: FieldVisitor):
   const copy = { ...node };
   if (copy.type === "text") {
     mapField(copy, "text", path, "text", visit);
+    mapList(copy, "spans", path, (span, spanPath) => {
+      mapField(span, "text", spanPath, "text", visit);
+      mapActions(span, spanPath, visit);
+      return span;
+    });
   }
   const component = typeof copy.type === "string" ? COMPONENT_FIELDS[copy.type] : undefined;
   component?.(copy, path, visit);

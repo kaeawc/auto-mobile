@@ -1,7 +1,7 @@
 import Foundation
 
 /// Arbitrary JSON, used for state values and emit payloads.
-enum JSONValue: Codable, Equatable {
+enum JSONValue: Codable, Equatable, Sendable {
     case null
     case bool(Bool)
     case number(Double)
@@ -136,7 +136,7 @@ struct PrototypeSpec: Decodable {
 /// A colour or image-asset slot that can differ by appearance (#11218): one value used in both
 /// modes, or a `{light, dark}` pair. A colour slot holds a hex value or a Material role name, an
 /// asset slot an opaque asset id; `PrototypeThemeModes.validate` checks the contents.
-enum PrototypeModeValue: Decodable, Equatable, ExpressibleByStringLiteral {
+enum PrototypeModeValue: Decodable, Equatable, Sendable, ExpressibleByStringLiteral {
     case single(String)
     case modes(light: String, dark: String)
 
@@ -297,7 +297,7 @@ enum CornerRadius: Decodable, Equatable {
 }
 
 /// `fontFamily`: a keyword, or `{asset: id}` naming an uploaded font.
-enum FontFamily: Decodable, Equatable {
+enum FontFamily: Decodable, Equatable, Sendable {
     case keyword(String)
     case asset(String)
 
@@ -415,7 +415,7 @@ struct StyleWhen: Decodable {
     let style: Style
 }
 
-struct PrototypeAction: Decodable {
+struct PrototypeAction: Decodable, Sendable {
     let type: String
     let name: String?
     let payload: JSONValue?
@@ -574,6 +574,7 @@ final class PrototypeNode: Decodable {
     let span: Int?
     let child: PrototypeNode?
     let text: String?
+    let spans: [PrototypeTextSpan]?
     /// Authored accessible label (#10446); wins over the label derived from text or icon.
     let contentDescription: String?
     /// An uploaded image asset id, or a `{light, dark}` pair of ids (#11218).
@@ -672,7 +673,10 @@ final class PrototypeNode: Decodable {
     /// `fontFamily: {asset}` ids on this node's own style and its `styleWhen` entries.
     func fontAssetIds() -> Set<String> {
         let styles = [style].compactMap { $0 } + (styleWhen ?? []).map(\.style)
-        return Set(styles.compactMap { style -> String? in
+        let spanFonts = (spans ?? []).compactMap { span -> String? in
+            if case let .asset(id) = span.style?.fontFamily { id } else { nil }
+        }
+        return Set(spanFonts + styles.compactMap { style -> String? in
             if case let .asset(id) = style.fontFamily { id } else { nil }
         })
     }

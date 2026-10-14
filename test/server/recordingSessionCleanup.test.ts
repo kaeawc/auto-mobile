@@ -100,9 +100,9 @@ class FakeSessionManager implements CleanupManager {
     );
   }
 
-  unbound(sessionId: string, deviceId: string): void {
+  unbound(sessionId: string, deviceId: string, deviceIdentityReplaced = false): void {
     for (const callback of this.unboundCallbacks) {
-      callback(sessionId, deviceId);
+      callback(sessionId, deviceId, { deviceIdentityReplaced });
     }
   }
 }
@@ -119,6 +119,9 @@ class FakeRecordings implements RecordingSessionCleanupDeps, RecordingAcquisitio
     this.abandoned.push(`${sessionId}@${deviceId}`);
     if (this.abandonFailure) {
       throw this.abandonFailure;
+    }
+    if (this.active.get(deviceId)?.ownerSessionUuid === sessionId) {
+      this.active.delete(deviceId);
     }
   }
   segmentedStops: string[] = [];
@@ -306,6 +309,19 @@ describe("registerRecordingSessionCleanup", () => {
     expect(manager.pendingCleanups).toEqual([]);
     expect(takeRecordingIdsFinalizedByRelease("session-a")).toEqual([]);
   });
+
+  for (const replaced of [true, false]) {
+    test(`unbound recording cleanup with identity replacement=${replaced}`, async () => {
+      const { manager, recordings } = setup();
+      recordings.start("emulator-5554", "session-a");
+      manager.unbound("session-a", "emulator-5554", replaced);
+      await manager.settle();
+      expect(recordings.abandoned).toEqual(replaced ? ["session-a@emulator-5554"] : []);
+      expect(recordings.segmentedStops).toHaveLength(replaced ? 0 : 1);
+      expect(manager.pendingCleanups).toHaveLength(replaced ? 0 : 1);
+      expect(recordings.active.size).toBe(0);
+    });
+  }
 
   test("a rejected host-only abandon is warned without escaping the release listener", async () => {
     const { manager, recordings } = setup();

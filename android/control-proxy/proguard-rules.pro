@@ -20,6 +20,7 @@
 
 # Explicit host-addressed manifest entry points supplement AAPT's generated rules.
 -keep class dev.jasonpearson.automobile.ctrlproxy.MainActivity { *; }
+-keep class dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeActivity { *; }
 -keep class dev.jasonpearson.automobile.ctrlproxy.CtrlProxy { *; }
 -keep class dev.jasonpearson.automobile.ctrlproxy.ime.CtrlProxyIme { *; }
 -keep class dev.jasonpearson.automobile.ctrlproxy.AutoMobileDeviceAdminReceiver { *; }

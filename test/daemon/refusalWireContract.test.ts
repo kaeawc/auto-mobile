@@ -1,3 +1,4 @@
+import * as prototypeHidden from "../../src/features/prototype/prototypeHidden";
 import * as prototypeSuspended from "../../src/features/prototype/prototypeSuspended";
 import { isTypedToolRefusal } from "../../src/server/shapeToolCallError";
 import { beforeAll, describe, expect, spyOn, test } from "bun:test";
@@ -49,6 +50,7 @@ import * as daemonTypes from "../../src/daemon/types";
 import * as daemonConstants from "../../src/daemon/constants";
 import * as mcpTimeouts from "../../src/daemon/McpTimeoutError";
 import * as sessionReleasedDuringCall from "../../src/daemon/sessionReleasedDuringCall";
+import * as sdkTooOld from "../../src/models/SdkTooOldError";
 import * as appNotRunning from "../../src/models/AppNotRunningError";
 import * as daemonClient from "../../src/daemon/client";
 import * as controlTransport from "../../src/daemon/deviceControlTransportFailure";
@@ -126,6 +128,8 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "daemon/McpTimeoutError": mcpTimeouts,
   "daemon/sessionReleasedDuringCall": sessionReleasedDuringCall,
   "models/AppNotRunningError": appNotRunning,
+  "models/SdkTooOldError": sdkTooOld,
+  "features/prototype/prototypeHidden": prototypeHidden,
   "features/prototype/prototypeSuspended": prototypeSuspended,
   "daemon/client": daemonClient,
   "daemon/deviceControlTransportFailure": controlTransport,
@@ -134,7 +138,10 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
 };
 
 /** Only non-wire codes may bypass the module map; the inventory rejects stale exemptions. */
-const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {};
+const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
+  "features/prototype/ios/iosPrototypeInstallerErrors":
+    "Host installer library errors; no MCP/tool boundary until #12257 wires the installer.",
+};
 
 interface CodedErrorModule {
   module: string;

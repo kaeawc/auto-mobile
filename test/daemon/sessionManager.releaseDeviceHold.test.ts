@@ -48,6 +48,7 @@ async function harness() {
     restore: async () => {
       await behavior.gate;
       writes.push(kind);
+      return { status: "restored" as const };
     },
   });
   const manager = new SessionManager(

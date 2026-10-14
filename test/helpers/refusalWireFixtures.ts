@@ -1,3 +1,4 @@
+import { PrototypeHiddenError } from "../../src/features/prototype/prototypeHidden";
 import { PrototypeSuspendedError } from "../../src/features/prototype/prototypeSuspended";
 import { OrphanRecorderActiveError } from "../../src/server/orphanRecorderRefusal";
 import { HostBootAdmissionRegistryError } from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
@@ -150,6 +151,7 @@ import {
   DEFAULT_PROVISION_DEVICE_RETRYABILITY,
   type ProvisionDeviceFailureCode,
 } from "../../src/devices/exactDeviceProvisioning";
+import { SdkTooOldError, MINIMUM_READ_ONLY_SDK_VERSION } from "../../src/models/SdkTooOldError";
 import { AppNotRunningError } from "../../src/models/AppNotRunningError";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { deviceLossOutcomeFromError } from "../../src/server/deviceLossOutcome";
@@ -427,9 +429,19 @@ const BUILDERS: readonly FixtureEntry[] = [
     () => shaped(deviceAssignedToOtherSessionError(DEVICE, "holder-session", SESSION)),
   ],
   [
+    "prototype_hidden",
+    "PrototypeHiddenError via shapeToolCallError",
+    () => shaped(new PrototypeHiddenError("app_layer_window_hidden")),
+  ],
+  [
     "prototype_suspended",
     "PrototypeSuspendedError via shapeToolCallError",
     () => shaped(new PrototypeSuspendedError()),
+  ],
+  [
+    "sdk_too_old",
+    "SdkTooOldError via shapeToolCallError",
+    () => shaped(new SdkTooOldError("com.example.app", DEVICE, MINIMUM_READ_ONLY_SDK_VERSION)),
   ],
   [
     "app_not_running",
@@ -804,6 +816,16 @@ function budgetSlotFailure(): ManagedSlotsFailure {
             lastError: "native delete keeps failing",
           },
         ],
+        charged: [
+          { platform: "android", stableDeviceId: "active-device", kind: "assigned_active" },
+          { platform: "android", stableDeviceId: "amslot-kept", kind: "deletion_stuck" },
+          {
+            platform: "android",
+            stableDeviceId: "amslot-stuck",
+            kind: "deletion_stuck",
+            uncounted: true,
+          },
+        ],
         evictionFailures: [
           { platform: "android", stableDeviceId: "amslot-kept", message: "delete failed" },
         ],
@@ -1074,6 +1096,7 @@ function terminalAtAdmission(releaseReason: SessionReleaseReason): TerminalSessi
 }
 
 const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
+  ["prototype_hidden", () => new PrototypeHiddenError("app_layer_window_hidden")],
   ["prototype_suspended", () => new PrototypeSuspendedError()],
   ["device_unhealthy", () => unhealthyRefusal()],
   ["device_unhealthy.permanent", () => unhealthyRefusal("permanent")],

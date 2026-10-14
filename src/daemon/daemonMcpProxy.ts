@@ -1,3 +1,4 @@
+import { anyDeviceReadOnlyArgShapeMatches } from "../server/deviceReadOnlyArgShapes";
 import { SessionOutsideBoundSessionError } from "../server/deviceOutsideBoundSessionRefusal";
 import { isMcpQueueTimeoutError } from "./McpTimeoutError";
 import { assertDaemonNamespaceMatchesState } from "./sharedNamespaceGuard";
@@ -234,6 +235,7 @@ const MAX_FINALIZED_RECORDING_OWNERS = 64;
  * registration (#10971): the tool only watches a device, which never requires a session.
  */
 const DEVICE_READ_ONLY_META_KEY = "automobile/deviceReadOnly";
+const DEVICE_READ_ONLY_ARGS_META_KEY = "automobile/deviceReadOnlyArgs";
 
 export function isDeviceInventoryTool(name: unknown): boolean {
   return (
@@ -5062,14 +5064,14 @@ export class DaemonMcpProxy {
     };
   }
 
-  private isSessionlessControlDeviceTool(name: string): boolean {
+  private isSessionlessControlDeviceTool(name: string, args?: Record<string, unknown>): boolean {
     return (
       !this.config.initialSessionUuid &&
       !isDeviceBindingTool(name) &&
       !isDeviceInventoryTool(name) &&
       name !== SET_TOOL_ENABLED_TOOL_NAME &&
       this.toolTargetsDevice(name) &&
-      !this.isDeviceReadOnlyTool(name)
+      !this.isDeviceReadOnlyTool(name, args)
     );
   }
 
@@ -5078,7 +5080,7 @@ export class DaemonMcpProxy {
     name: string,
     args: Record<string, unknown>,
   ): Record<string, unknown> {
-    if (!this.isSessionlessControlDeviceTool(name)) {
+    if (!this.isSessionlessControlDeviceTool(name, args)) {
       return args;
     }
     // A selector call may itself discover the idle release. Fence before resolving its device,
@@ -5103,7 +5105,7 @@ export class DaemonMcpProxy {
     const bound = this.boundSessionUuid;
     if (
       this.initialSessionBindingConfigured ||
-      !this.isSessionlessControlDeviceTool(name) ||
+      !this.isSessionlessControlDeviceTool(name, args) ||
       (platform !== "android" && platform !== "ios") ||
       typeof args.deviceId === "string" ||
       this.sessionUuidFromArgs(args) !== undefined ||
@@ -5193,20 +5195,21 @@ export class DaemonMcpProxy {
 
   /**
    * Read-only access never requires a session (owner decision 2026-10-09, #10971). After the
-   * binding is released and one call has been told so, a read-only tool that names no session is
-   * forwarded without one: the daemon serves it on its read-only device path. Control tools keep
-   * the fence and its reacquire guidance, as does a liveness handover, which every call reports
-   * until the harness acts on it. A managed execution keeps the fence for reads without a deviceId.
+   * binding is released, a managed read-only tool naming a deviceId and no session is forwarded
+   * without a session immediately, without marking the release as reported. Non-managed reads
+   * require one call to report the release first. The daemon serves these on its read-only device
+   * path. Control tools and managed reads without a deviceId keep the fence, as does a liveness
+   * handover, which every call reports until the harness acts on it.
    */
   private isSessionlessReadAfterRelease(name: string, args: Record<string, unknown>): boolean {
     const terminal = this.terminalBoundSession;
     return (
       terminal !== undefined &&
-      this.releaseSurfacedFor === terminal.sessionUuid &&
       !this.stallHandovers.has(terminal.sessionUuid) &&
-      (managedSlotForSession(this.managedSlotsResult, terminal.sessionUuid) === null ||
-        (typeof args.deviceId === "string" && args.deviceId.trim().length > 0)) &&
-      this.isDeviceReadOnlyTool(name)
+      (managedSlotForSession(this.managedSlotsResult, terminal.sessionUuid) !== null
+        ? typeof args.deviceId === "string" && args.deviceId.trim().length > 0
+        : this.releaseSurfacedFor === terminal.sessionUuid) &&
+      this.isDeviceReadOnlyTool(name, args)
     );
   }
 
@@ -5290,7 +5293,7 @@ export class DaemonMcpProxy {
     const platform = args.platform;
     if (
       this.terminalBoundSession ||
-      !this.isSessionlessControlDeviceTool(name) ||
+      !this.isSessionlessControlDeviceTool(name, args) ||
       (platform !== "android" && platform !== "ios") ||
       typeof args.deviceId === "string" ||
       this.sessionUuidFromArgs(args) !== undefined ||
@@ -5314,11 +5317,15 @@ export class DaemonMcpProxy {
     }
   }
 
-  private isDeviceReadOnlyTool(name: string): boolean {
+  private isDeviceReadOnlyTool(name: string, args?: Record<string, unknown>): boolean {
     const definition =
       this.cachedTools?.find((tool) => tool.name === name) ??
       this.staticToolDefinitionsProvider().find((tool) => tool.name === name);
-    return definition?._meta?.[DEVICE_READ_ONLY_META_KEY] === true;
+    return (
+      definition?._meta?.[DEVICE_READ_ONLY_META_KEY] === true ||
+      (args !== undefined &&
+        anyDeviceReadOnlyArgShapeMatches(definition?._meta?.[DEVICE_READ_ONLY_ARGS_META_KEY], args))
+    );
   }
 
   private toolTargetsDevice(name: string): boolean {
@@ -5506,7 +5513,7 @@ export class DaemonMcpProxy {
     }
     const enforcesStartupBinding = () =>
       this.initialSessionBindingConfigured &&
-      (toolName === undefined || !this.isDeviceReadOnlyTool(toolName));
+      (toolName === undefined || !this.isDeviceReadOnlyTool(toolName, args));
     if (
       explicitSessionUuid &&
       enforcesStartupBinding() &&
@@ -5549,7 +5556,7 @@ export class DaemonMcpProxy {
           usesDeviceSelector &&
           (toolName === undefined ||
             toolName === "setActiveDevice" ||
-            this.isDeviceReadOnlyTool(toolName));
+            this.isDeviceReadOnlyTool(toolName, args));
   }
 
   private throwIfBoundSessionUnavailable(

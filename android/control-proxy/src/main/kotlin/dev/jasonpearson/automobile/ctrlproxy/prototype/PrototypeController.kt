@@ -5,22 +5,48 @@ import android.view.Display
 import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeDataResolver
+import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
+import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 
 /** The CtrlProxy application id, named in errors that tell the host which package to grant. */
 const val DEFAULT_CTRL_PROXY_PACKAGE = "dev.jasonpearson.automobile.ctrlproxy"
 
+/** Whether our prototype window is among accessibility windows on [displayId]; null is unknown. */
+fun interface PrototypeWindowOnScreen {
+  fun isOnScreen(displayId: Int): Boolean?
+}
+
 fun interface PrototypeResultSink {
   suspend fun send(requestId: String?, success: Boolean, error: String?)
+
+  suspend fun sendSaved(
+    requestId: String?,
+    saved: dev.jasonpearson.automobile.protocol.SavedPrototypeInfo,
+  ) = send(requestId, true, null)
+
+  suspend fun sendSavedList(
+    requestId: String?,
+    entries: List<dev.jasonpearson.automobile.protocol.SavedPrototypeEntry>,
+  ) = send(requestId, true, null)
+
+  suspend fun sendRefusal(
+    requestId: String?,
+    code: dev.jasonpearson.automobile.protocol.SavedPrototypeErrorCode,
+    error: String,
+  ) = send(requestId, false, error)
 
   /**
    * A successful `show_prototype` that references assets the device does not have: a warning
@@ -42,9 +68,18 @@ fun interface PrototypeResultSink {
     requestId: String?,
     missingAssets: List<String>,
     appearance: PrototypeAppearance,
+    hiddenReason: PrototypeHiddenReason? = null,
   ) =
     if (missingAssets.isEmpty()) send(requestId, true, null)
     else sendWithMissingAssets(requestId, true, null, missingAssets)
+
+  suspend fun sendPatched(
+    requestId: String?,
+    success: Boolean,
+    error: String?,
+    revision: Long?,
+    conflict: PrototypePatchConflict?,
+  ) = send(requestId, success, error)
 
   /** The reply to `inspect_prototypes`. Sinks that predate it answer a bare success. */
   suspend fun sendPrototypeStatus(
@@ -99,6 +134,8 @@ class PrototypeController(
   private val foreground: PrototypeForegroundScope = NoPrototypeForegroundScope,
   /** The device's light or dark setting and dynamic-colour palette, read at every resolve. */
   private val deviceAppearance: PrototypeDeviceAppearance = NoPrototypeDeviceAppearance,
+  private val windowOnScreen: PrototypeWindowOnScreen = PrototypeWindowOnScreen { null },
+  private val settle: suspend (Long) -> Unit = { delay(it) },
 ) {
   val isShowing: Boolean
     get() = host.isShowing
@@ -156,6 +193,11 @@ class PrototypeController(
 
   // Controller lifetime ledger: same-id show/dismiss/re-show and reconnect never rewind sequences.
   private val sequences = mutableMapOf<String, Long>()
+  private val revisions = mutableMapOf<String, Long>()
+
+  private fun nextRevision(id: String): Long =
+    ((revisions[id] ?: 0L) + 1L).also { revisions[id] = it }
+
   private var destroyed = false
   private var activeObserverSession = 0
   // A disconnect dismissal whose window removal failed; retried on the next lifecycle signal.
@@ -165,6 +207,30 @@ class PrototypeController(
   // re-resolves it. Its override is what the show asked the system setting to be.
   @Volatile private var activeTheme: MutableStateFlow<PrototypeShownTheme>? = null
   private var activeOverride: PrototypeAppearanceOverride? = null
+
+  private class AppearanceSyncKey(
+    val snapshot: PrototypeRuntimeSnapshot,
+    val dark: Boolean,
+    val paletteKey: Int,
+    val override: PrototypeAppearanceOverride?,
+  ) {
+    fun matches(other: AppearanceSyncKey): Boolean =
+      snapshot === other.snapshot &&
+        dark == other.dark &&
+        paletteKey == other.paletteKey &&
+        override == other.override
+  }
+
+  private var appearanceSyncKey: AppearanceSyncKey? = null
+
+  private fun appearanceKey(runtime: PrototypeRuntime) =
+    AppearanceSyncKey(
+      runtime.current,
+      deviceAppearance.dark,
+      deviceAppearance.paletteKey,
+      activeOverride,
+    )
+
   // Match WebSocketServer.protocolJson; default-valued optional fields are omitted, not null.
   private val json = Json {
     prettyPrint = false
@@ -202,6 +268,37 @@ class PrototypeController(
       Outcome(missingAssets(), activeTheme?.value?.appearance)
     }
 
+  suspend fun patch(requestId: String?, id: String, baseRevision: Long?, ops: JsonArray) =
+    execute(requestId, patchId = id) {
+      val runtime = activeRuntime?.takeIf { it.current.active && it.current.spec.id == id }
+      if (runtime == null) Outcome(error = "Unknown prototype id: $id")
+      else {
+        when (val result = runtime.patch(baseRevision, ops, json, ::validate)) {
+          is PrototypeRuntime.PatchResult.Rejected ->
+            Outcome(error = result.message, revision = result.revision)
+          is PrototypeRuntime.PatchResult.Conflict ->
+            Outcome(
+              error = "conflict: state changed after baseRevision $baseRevision",
+              revision = result.revision,
+              conflict = PrototypePatchConflict(result.revision, result.state),
+            )
+          is PrototypeRuntime.PatchResult.Applied -> {
+            try {
+              armIdle(runtime)
+              val model = runtime.renderModel()
+              syncAppearance(runtime, model)
+              syncTextFieldFocus(model)
+            } catch (error: CancellationException) {
+              throw error
+            } catch (error: Exception) {
+              Log.w("PrototypeController", "Prototype interaction failed", error)
+            }
+            Outcome(revision = result.revision)
+          }
+        }
+      }
+    }
+
   suspend fun dismiss(requestId: String?, id: String?, all: Boolean?) =
     execute(requestId) {
       require(all == true || (id != null && activeRuntime?.current?.spec?.id == id)) {
@@ -221,6 +318,9 @@ class PrototypeController(
   private data class Outcome(
     val missingAssets: List<String> = emptyList(),
     val appearance: PrototypeAppearance? = null,
+    val error: String? = null,
+    val revision: Long? = null,
+    val conflict: PrototypePatchConflict? = null,
   )
 
   /** Referenced assets the store lacks, for the active spec. Never fails the request. */
@@ -228,6 +328,13 @@ class PrototypeController(
     val spec = activeRuntime?.current?.spec ?: return emptyList()
     return prototypeAssetReferences(spec.root).filterNot(hasAsset)
   }
+
+  private fun validate(spec: JsonObject): PrototypeSpec =
+    when (val validation = PrototypeSpecValidator.validate(spec.toString())) {
+      is PrototypeSpecValidation.Failure ->
+        error("${validation.error.path}: ${validation.error.message}")
+      is PrototypeSpecValidation.Success -> validate(validation.spec)
+    }
 
   private fun validate(spec: PrototypeSpec): PrototypeSpec {
     guardPrototypeTree(spec.root)
@@ -242,6 +349,30 @@ class PrototypeController(
     guardPrototypeTree(resolved.root)
     if (resolved.root !== validated.root) requireResolvedPrototypeAnchors(resolved.root)
     return validated
+  }
+
+  /** Snapshot decision, like windowMetadata: no controller mutex is acquired. */
+  fun hiddenReason(displayId: Int, ownWindowCaptured: Boolean?): PrototypeHiddenReason? =
+    when {
+      activeRuntime == null || isSuspendedByForeground -> null
+      lifecycle.isBlocked() -> PrototypeHiddenReason.DEVICE_BLOCKED
+      host.isHiddenForCapture -> null
+      isAppLayerShowing && displayId == shownDisplayId() && ownWindowCaptured == false ->
+        PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN
+      else -> null
+    }
+
+  private suspend fun shownHiddenReason(): PrototypeHiddenReason? {
+    hiddenReason(shownDisplayId(), null)?.let {
+      return it
+    }
+    if (!isAppLayerShowing || isSuspendedByForeground || host.isHiddenForCapture) return null
+    repeat(5) { probe ->
+      val captured = windowOnScreen.isOnScreen(shownDisplayId())
+      if (captured != false) return hiddenReason(shownDisplayId(), captured)
+      if (probe < 4) settle(100L)
+    }
+    return hiddenReason(shownDisplayId(), false)
   }
 
   private fun shownDisplayId(): Int = activeRequest?.displayId ?: Display.DEFAULT_DISPLAY
@@ -278,6 +409,8 @@ class PrototypeController(
         },
         requestDismiss = { removeActive() },
         previousPages = if (preservePages) previous?.current?.pages.orEmpty() else emptyMap(),
+        initialRevision = nextRevision(validated.id),
+        nextRevision = { nextRevision(validated.id) },
       )
     val mappedSpec = runtime.renderModel()
     val theme = MutableStateFlow(shownTheme(mappedSpec, appearance))
@@ -314,6 +447,13 @@ class PrototypeController(
     activeRequest = interactive
     activeTheme = theme
     activeOverride = appearance
+    appearanceSyncKey =
+      AppearanceSyncKey(
+        runtime.current,
+        theme.value.appearance.deviceDark,
+        theme.value.paletteKey,
+        appearance,
+      )
     activeObserverSession = observerSession
     disconnectPending = false
     armIdle(runtime)
@@ -328,12 +468,14 @@ class PrototypeController(
   private fun shownTheme(
     model: PrototypeRenderModel,
     override: PrototypeAppearanceOverride?,
+    dark: Boolean = deviceAppearance.dark,
+    paletteKey: Int = deviceAppearance.paletteKey,
   ): PrototypeShownTheme =
     PrototypeShownTheme(
       model.root,
       model.theme,
-      prototypeResolveAppearance(model.root, model.theme, deviceAppearance.dark, override),
-      deviceAppearance.paletteKey,
+      prototypeResolveAppearance(model.root, model.theme, dark, override),
+      paletteKey,
     )
 
   /**
@@ -344,13 +486,22 @@ class PrototypeController(
    * untouched. A changed mode sends exactly one `appearance_changed` event; an unchanged one sends
    * nothing. Runs under [mutex].
    */
-  private suspend fun syncAppearance(runtime: PrototypeRuntime, model: PrototypeRenderModel) {
+  private suspend fun syncAppearance(
+    runtime: PrototypeRuntime,
+    model: PrototypeRenderModel,
+    key: AppearanceSyncKey = appearanceKey(runtime),
+  ) {
     val theme = activeTheme ?: return
+    appearanceSyncKey = null
     val previous = theme.value
-    val next = shownTheme(model, activeOverride)
-    if (next == previous) return
-    theme.value = next
-    if (next.appearance.mode != previous.appearance.mode) runtime.appearanceChanged(next.appearance)
+    val next = shownTheme(model, key.override, key.dark, key.paletteKey)
+    if (next != previous) {
+      theme.value = next
+      if (next.appearance.mode != previous.appearance.mode)
+        runtime.appearanceChanged(next.appearance)
+    }
+    // Record only after both resolution and any event delivery succeeded.
+    appearanceSyncKey = key
   }
 
   /**
@@ -402,6 +553,7 @@ class PrototypeController(
     activeRuntime = null
     activeRequest = null
     activeTheme = null
+    appearanceSyncKey = null
     foreground.release()
     lifecycle.cancel()
     notifyDetached()
@@ -458,13 +610,17 @@ class PrototypeController(
     }
 
   /** [action]'s missing asset ids are reported as a warning, never as a failure. */
-  private suspend fun execute(requestId: String?, action: suspend () -> Outcome) = mutex.withLock {
+  private suspend fun execute(
+    requestId: String?,
+    patchId: String? = null,
+    action: suspend () -> Outcome,
+  ) = mutex.withLock {
     var outcome = Outcome()
     val error =
       try {
         check(!destroyed) { "Prototype host destroyed" }
         outcome = action()
-        null
+        outcome.error
       } catch (error: CancellationException) {
         throw error
       } catch (error: Exception) {
@@ -473,7 +629,13 @@ class PrototypeController(
       }
     val missing = outcome.missingAssets
     val appearance = outcome.appearance
-    if (error == null && appearance != null) sink.sendShown(requestId, missing, appearance)
+    if (patchId != null) {
+      val revision =
+        outcome.revision
+          ?: activeRuntime?.current?.takeIf { it.active && it.spec.id == patchId }?.revision
+      sink.sendPatched(requestId, error == null, error, revision, outcome.conflict)
+    } else if (error == null && appearance != null)
+      sink.sendShown(requestId, missing, appearance, shownHiddenReason())
     else if (missing.isEmpty()) sink.send(requestId, error == null, error)
     else sink.sendWithMissingAssets(requestId, error == null, error, missing)
   }
@@ -532,7 +694,8 @@ class PrototypeController(
       check(replayOfflineEvents()) {
         "Buffered prototype events could not be delivered; the device kept them, retry inspect"
       }
-      val prototypes = listOfNotNull(activeRuntime?.takeIf { it.current.active }?.let(::statusOf))
+      val prototypes =
+        listOfNotNull(activeRuntime?.takeIf { it.current.active }?.let { statusOf(it) })
       sink.sendPrototypeStatus(requestId, prototypes, offlineEvents.dropped)
     } catch (error: CancellationException) {
       throw error
@@ -542,7 +705,7 @@ class PrototypeController(
     }
   }
 
-  private fun statusOf(runtime: PrototypeRuntime): PrototypeStatusEntry {
+  private suspend fun statusOf(runtime: PrototypeRuntime): PrototypeStatusEntry {
     val id = runtime.current.spec.id
     return PrototypeStatusEntry(
       id = id,
@@ -552,6 +715,7 @@ class PrototypeController(
       pages = runtime.current.pages.toMap(),
       lastSequence = sequences[id] ?: 0L,
       suspended = foreground.suspended,
+      hiddenReason = shownHiddenReason(),
       appearance = activeTheme?.value?.appearance,
     )
   }
@@ -598,7 +762,9 @@ class PrototypeController(
   /** A failed re-theme keeps the mode already drawn and must not skip the window decision. */
   private suspend fun resyncAppearance(runtime: PrototypeRuntime) {
     try {
-      syncAppearance(runtime, runtime.renderModel())
+      val key = appearanceKey(runtime)
+      if (appearanceSyncKey?.matches(key) == true) return
+      syncAppearance(runtime, runtime.renderModel(), key)
     } catch (error: CancellationException) {
       throw error
     } catch (error: Exception) {
@@ -688,6 +854,7 @@ class PrototypeController(
     activeRuntime = null
     activeRequest = null
     activeTheme = null
+    appearanceSyncKey = null
     foreground.release()
     lifecycle.cancel()
     notifyDetached()
@@ -739,6 +906,7 @@ class PrototypeController(
       activeRuntime = null
       activeRequest = null
       activeTheme = null
+      appearanceSyncKey = null
       foreground.release()
       releaseAssets()
       // Allocate the terminal sequence even when the last socket or service sink is gone.

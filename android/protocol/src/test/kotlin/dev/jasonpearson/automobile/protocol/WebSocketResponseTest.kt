@@ -18,6 +18,52 @@ class WebSocketResponseTest {
   }
 
   @Test
+  fun `patch request round trips alongside revision bearing replies`() {
+    val literal =
+      """{"type":"patch_prototype","requestId":"patch","id":"panel","baseRevision":7,"ops":[{"op":"replace","path":"/state/query","value":"typed"}]}"""
+    val request = assertIs<PatchPrototype>(json.decodeFromString<WebSocketRequest>(literal))
+    assertEquals(7L, request.baseRevision)
+    assertEquals(
+      request,
+      json.decodeFromString<WebSocketRequest>(json.encodeToString<WebSocketRequest>(request)),
+    )
+  }
+
+  @Test
+  fun `prototype patch result omits unset fields and encodes bare conflict scalars`() {
+    val legacy = PrototypeResult(42L, "r", true)
+    val encoded = json.encodeToString<WebSocketResponse>(legacy)
+    assertFalse(encoded.contains("revision"))
+    assertFalse(encoded.contains("conflict"))
+    val state =
+      mapOf(
+        "text" to PrototypeScalar.Text("typed"),
+        "number" to PrototypeScalar.Numeric(7.0),
+        "flag" to PrototypeScalar.BooleanValue(true),
+      )
+    val conflict =
+      legacy.copy(
+        success = false,
+        error = "conflict",
+        revision = 9L,
+        conflict = PrototypePatchConflict(9L, state),
+      )
+    val wire = json.encodeToString<WebSocketResponse>(conflict)
+    val parsed = json.parseToJsonElement(wire) as kotlinx.serialization.json.JsonObject
+    assertEquals(kotlinx.serialization.json.JsonPrimitive(9L), parsed["revision"])
+    val expected =
+      json.parseToJsonElement(
+        """{"revision":9,"state":{"text":"typed","number":7.0,"flag":true}}""",
+      )
+    assertEquals(expected, parsed["conflict"])
+    assertEquals(conflict, json.decodeFromString<WebSocketResponse>(wire))
+    val success = legacy.copy(revision = 10L)
+    val successWire = json.encodeToString<WebSocketResponse>(success)
+    assertFalse(successWire.contains("conflict"))
+    assertEquals(success, json.decodeFromString<WebSocketResponse>(successWire))
+  }
+
+  @Test
   fun `IME action approximation is optional and round trips when present`() {
     val exact = ImeActionResult(timestamp = 1L, success = true, action = "next", totalTimeMs = 0L)
     val encoded = json.encodeToString(ImeActionResult.serializer(), exact)

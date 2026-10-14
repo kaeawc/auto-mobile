@@ -22,6 +22,68 @@ class WebSocketRequestTest {
   }
 
   @Test
+  fun `saved prototype requests decode correlated and default fields`() {
+    val spec =
+      """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Hello"}}"""
+    val saved =
+      assertIs<SavePrototype>(
+        json.decodeFromString<WebSocketRequest>(
+          """{"type":"save_prototype","requestId":"save","spec":$spec,"label":"Panel","icon":"hero"}""",
+        ),
+      )
+    assertEquals("save", saved.requestId)
+    assertEquals(json.decodeFromString<PrototypeSpec>(spec), saved.spec)
+    assertEquals("Panel", saved.label)
+    assertEquals("hero", saved.icon)
+    val absent =
+      assertIs<SavePrototype>(
+        json.decodeFromString<WebSocketRequest>(
+          """{"type":"save_prototype","spec":$spec,"label":"Panel"}""",
+        ),
+      )
+    assertNull(absent.requestId)
+    assertNull(absent.icon)
+    assertEquals(
+      ListSavedPrototypes("list"),
+      json.decodeFromString<WebSocketRequest>(
+        """{"type":"list_saved_prototypes","requestId":"list"}""",
+      ),
+    )
+    assertEquals(
+      ListSavedPrototypes(),
+      json.decodeFromString<WebSocketRequest>(
+        """{"type":"list_saved_prototypes"}""",
+      ),
+    )
+    assertEquals(
+      DeleteSavedPrototype("delete", "panel"),
+      json.decodeFromString<WebSocketRequest>(
+        """{"type":"delete_saved_prototype","requestId":"delete","id":"panel"}""",
+      ),
+    )
+    assertEquals(
+      DeleteSavedPrototype(id = "panel"),
+      json.decodeFromString<WebSocketRequest>(
+        """{"type":"delete_saved_prototype","id":"panel"}""",
+      ),
+    )
+  }
+
+  @Test
+  fun `saved prototype requests require typed mandatory fields`() {
+    for (literal in
+      listOf(
+        """{"type":"save_prototype","label":"Panel"}""",
+        """{"type":"save_prototype","spec":{}}""",
+        """{"type":"delete_saved_prototype"}""",
+        """{"type":"delete_saved_prototype","id":null}""",
+        """{"type":"save_prototype","spec":null,"label":"Panel"}""",
+      )) {
+      assertFailsWith<SerializationException> { json.decodeFromString<WebSocketRequest>(literal) }
+    }
+  }
+
+  @Test
   fun `patch prototype decodes its correlated payload`() {
     val literal =
       """{"type":"patch_prototype","requestId":"r9","id":"orders","baseRevision":12,"ops":[{"op":"replace","path":"/data/cartCount","value":2}]}"""

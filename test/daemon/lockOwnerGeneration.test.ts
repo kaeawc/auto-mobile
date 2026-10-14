@@ -250,7 +250,7 @@ describe("lock owner generation probe", () => {
     expect(reader.mock.calls).toEqual([[10], [20]]);
   });
 
-  test("current retries undefined at the TTL, caches the first defined token per PID, and never supplies compare", () => {
+  test("current retries undefined and found tokens at the TTL, and never supplies compare", () => {
     const timer = new FakeTimer();
     let fresh: string | undefined;
     const reader = mock(() => fresh);
@@ -270,12 +270,32 @@ describe("lock owner generation probe", () => {
     expect(probe.current(10)).toBe(fresh);
     fresh = "linux:boot:B";
     timer.advanceTime(20);
-    expect(probe.current(10)).toBe("linux:boot:A");
-    expect(reader).toHaveBeenCalledTimes(2);
-    expect(probe.compare(10, "linux:boot:B")).toBe("same");
+    expect(probe.current(10)).toBe("linux:boot:B");
     expect(reader).toHaveBeenCalledTimes(3);
-    expect(probe.current(20)).toBe("linux:boot:B");
+    expect(probe.compare(10, "linux:boot:B")).toBe("same");
     expect(reader).toHaveBeenCalledTimes(4);
+    expect(probe.current(20)).toBe("linux:boot:B");
+    expect(reader).toHaveBeenCalledTimes(5);
+  });
+
+  test("current reuses a found token only within its capture TTL", () => {
+    const timer = new FakeTimer();
+    let fresh = "linux:boot:A";
+    const reader = mock(() => fresh);
+    const probe = createLockOwnerGenerationProbe({
+      platform: "linux",
+      readLinuxProcessGenerationToken: reader,
+      now: () => timer.now(),
+      captureDisabled: () => false,
+    });
+    expect(probe.current(7)).toBe("linux:boot:A");
+    fresh = "linux:boot:B";
+    timer.advanceTime(999);
+    expect(probe.current(7)).toBe("linux:boot:A");
+    expect(reader).toHaveBeenCalledTimes(1);
+    timer.advanceTime(1);
+    expect(probe.current(7)).toBe("linux:boot:B");
+    expect(reader.mock.calls).toEqual([[7], [7]]);
   });
 
   test("captureDisabled is evaluated on every call, including cached current and same", () => {

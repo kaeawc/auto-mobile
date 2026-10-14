@@ -148,6 +148,8 @@ describe("requests during device session release", () => {
           restoreCalls++;
           restoreStarted.resolve();
           await finishRestore.promise;
+
+          return { status: "restored" as const };
         },
       }),
     );

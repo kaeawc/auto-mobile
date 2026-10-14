@@ -1,0 +1,13 @@
+{
+  "code": "prototype_hidden",
+  "builder": "PrototypeHiddenError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"layer \\\"prototype\\\" was requested, but the AutoMobile prototype is hidden: it was shown with window.layer \\\"app\\\" and the app in front hides app-layer windows drawn over it (system apps such as Settings do). Show it again without window.layer (the default layer draws over every app) or over a different app, or omit layer.\",\"code\":\"prototype_hidden\",\"retryable\":false,\"nextAction\":\"Show it again without window.layer (the default layer draws over every app) or over a different app\",\"details\":{\"prototypeHiddenReason\":\"app_layer_window_hidden\"}}"
+      }
+    ],
+    "isError": true
+  }
+}

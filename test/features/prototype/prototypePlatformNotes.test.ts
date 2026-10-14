@@ -229,6 +229,9 @@ describe("prototype platform notes", () => {
     for (const difference of PROTOTYPE_PLATFORM_DIFFERENCES) {
       expect(guide).toContain(`\`${difference.construct}\``);
       if (!difference.construct.startsWith("icon.")) {
+        expect(difference.detail.startsWith(`An iOS agent without ${difference.capability} `)).toBe(
+          true,
+        );
         expect(guide).toContain(difference.detail);
       }
       expect(guide).toContain(difference.capability);

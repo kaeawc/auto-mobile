@@ -121,6 +121,25 @@ final class PrototypeComponentsTests: XCTestCase {
 
     // MARK: Taps
 
+    func testIdentifiersAndTapTargetsUseOnlyTestTagIncludingParts() throws {
+        let root = try spec("""
+        {"id":"s","window":{"placement":{"type":"fullscreen"}},
+         "root":{"type":"column","children":[
+           {"type":"segmentedButton","id":"id-only","options":[{"label":"A","value":"a"}]},
+           {"type":"segmentedButton","id":"internal","testTag":"tag","options":[{"label":"A","value":"a"}]}]}}
+        """).root
+        let nodes = try XCTUnwrap(root.children)
+        XCTAssertNil(nodes[0].identifier)
+        XCTAssertNil(nodes[0].partIdentifier("a"))
+        XCTAssertEqual(nodes[1].identifier, "tag")
+        XCTAssertEqual(nodes[1].partIdentifier("a"), "tag.a")
+        for identifier in ["id-only", "id-only.a", "internal", "internal.a"] {
+            XCTAssertNil(root.tapTarget(identifier: identifier, state: [:]), identifier)
+        }
+        XCTAssertNotNil(root.tapTarget(identifier: "tag", state: [:]))
+        XCTAssertNotNil(root.tapTarget(identifier: "tag.a", state: [:]))
+    }
+
     func testToggleControlsFlipTheirKeyByTag() throws {
         var controls = try shown("material-controls")
         XCTAssertEqual(try controls.simulateTap(identifier: "alarm_switch").get().map(\.payload), [

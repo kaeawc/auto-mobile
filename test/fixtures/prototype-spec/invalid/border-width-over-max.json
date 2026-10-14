@@ -1,0 +1,21 @@
+{
+  "spec": {
+    "id": "size-bounds",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "spacer",
+      "style": {
+        "border": {
+          "width": 10001,
+          "color": "#000000"
+        }
+      }
+    }
+  },
+  "expectedPath": "root.style.border.width",
+  "expectedMessage": "Invalid number value"
+}

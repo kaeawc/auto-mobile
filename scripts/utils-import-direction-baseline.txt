@@ -1,2 +1,3 @@
+src/utils/nativeHelpers/NativeHelperProcessControl.ts -> src/daemon/daemonFiles
 src/utils/plan/PlanExecutor.ts -> src/daemon/daemonState
 src/utils/plan/PlanExecutor.ts -> src/server/toolRegistry

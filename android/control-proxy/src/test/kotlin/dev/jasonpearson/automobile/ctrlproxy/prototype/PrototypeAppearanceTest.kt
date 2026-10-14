@@ -39,7 +39,9 @@ class PrototypeAppearanceTest {
         requestId: String?,
         missingAssets: List<String>,
         appearance: PrototypeAppearance,
-      ) = record(prototypeResultFrame(requestId, true, null, missingAssets, appearance))
+        hiddenReason: PrototypeHiddenReason?,
+      ) =
+        record(prototypeResultFrame(requestId, true, null, missingAssets, appearance, hiddenReason = hiddenReason))
 
       override suspend fun sendPrototypeStatus(
         requestId: String?,

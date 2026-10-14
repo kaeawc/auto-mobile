@@ -98,7 +98,7 @@ depth. The byte cost reuses the emit payload cost: 32 bytes per number, compact 
 strings/booleans/keys, punctuation and separators. Every number costs 32 bytes regardless of its
 digits, so numeric-heavy data reaches the byte limit before its serialized size does.
 
-The shared Kotlin validator and resolver ship in `:protocol`, but CtrlProxy does not advertise `prototype_data_model_v1` yet (renderer wiring follows separately), so until it does the host refuses every data-model spec on Android; the iOS prototype agent advertises it.
+CtrlProxy and the iOS prototype agent both advertise `prototype_data_model_v1`.
 
 Pointers are nonempty RFC 6901 paths relative to data, matching `^(?:/(?:[^~/]|~[01])*)+$`.
 Split after the leading slash; decode `~1` to `/`, then `~0` to `~`. Resolution follows exact own
@@ -148,8 +148,8 @@ No data means every path is missing. `/a/` accesses the empty key inside `a`.
   or non-scalar), `gt` or `lt` (numbers only, otherwise false). `equals`/`notEquals` operands are
   literals; repeat placeholders there are rejected. `bottomSheet.openWhen` remains boolean state.
 
-The host validates data and repeat paths; the device resolves bindings once per show before
-repeat expansion. All data uses require `prototype_data_model_v1`; an older device is refused
+The host validates data and repeat paths; the device resolves authored bindings before repeat
+expansion. All data uses require `prototype_data_model_v1`; an older device is refused
 before uploads or show, with an update/relaunch hint. `status` reports the last successful show's
 data next to state; `inspect` reports and adopts device data. Absent data is omitted; dismiss
 clears it. Events never carry data.
@@ -186,9 +186,26 @@ exactly one of `equals`, `notEquals`, `gt`, `lt`. Data `equals` needs the same s
 (numbers by value; -0 equals 0). `notEquals` is its inverse, including missing/non-scalar values.
 `gt`/`lt` compare numbers only, otherwise false. `equals`/`notEquals` are literals: a repeat
 placeholder in a data operand is rejected; state operands still bind. `bottomSheet.openWhen`
-keeps its boolean `{key, equals}` form. Devices resolve bindings once per show before repeat
+keeps its boolean `{key, equals}` form. Devices resolve authored bindings before repeat
 expansion: path items are projected, text is bound, conditions become in-memory constants.
 The host performs validation only, preserving authored bindings on the wire.
+
+On Android, CtrlProxy keeps the original validated spec for state-write validation, persistence,
+replay and status. Each render mapping entry point (`mapPrototypeSpec`
+and the runtime's incremental mapper) resolves the authored spec. The runtime's mapper caches the
+resolved root per (root, data) identity pair and the resolved spec per authored spec instance, so
+state writes and repeated `renderModel()` calls do not re-resolve. State writes trigger one mapping
+pass; unchanged calls reuse the same model. The controller guards the authored tree, checks authored
+anchors before validation to preserve error precedence, validates the authored spec, then resolves
+it and guards the resolved tree, checking anchors again when resolution changes the root. A show
+therefore resolves during controller validation, its one-off `mapPrototypeSpec` render request and
+its runtime's incremental mapping. The validator's `MAX_PROTOTYPE_REPEAT_PATH_CELLS` limit bounds
+resolution work.
+Appearance and anchor layout consume the resulting render tree. `repeat.key` is validated and
+carried on the model; Compose rows retain positional identity in this slice. Keyed identity lands
+with patch (#11675), when reordering becomes observable. CtrlProxy advertises
+`prototype_data_model_v1`, and its inspect entries report the shown spec's original `data` beside
+state, omitting it when absent.
 
 ### Validation paths and reporting
 

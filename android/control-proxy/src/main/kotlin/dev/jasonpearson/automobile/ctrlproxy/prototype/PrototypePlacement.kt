@@ -83,7 +83,9 @@ private fun focusFlags(layer: PrototypeWindowLayer, hasTextField: Boolean): Int 
  * concern. The highlight overlay's API-guarded cutout policy keeps offsets in true screen
  * coordinates, including cutouts (#9154). Density is supplied by the host's display context.
  * Accessibility overlays are trusted for touch pass-through on Android 12+, unlike application
- * prototypes ([PrototypeWindowLayer.APP]). This builder never consults SYSTEM_ALERT_WINDOW.
+ * prototypes ([PrototypeWindowLayer.APP]). This builder never consults SYSTEM_ALERT_WINDOW. Only a
+ * fullscreen placement with [opaque] true uses an opaque pixel format; all other windows retain
+ * translucency. The caller must account for authored surface opacity and host chrome.
  */
 @SuppressLint("NewApi")
 fun prototypeLayoutParams(
@@ -94,6 +96,7 @@ fun prototypeLayoutParams(
   layer: PrototypeWindowLayer = PrototypeWindowLayer.SYSTEM,
   /** Keyboard height from the screen bottom (#10262); only a bottom sheet is moved by it. */
   imeLiftPx: Int = 0,
+  opaque: Boolean = false,
 ): WindowManager.LayoutParams {
   require(density.isFinite() && density > 0) { "Density must be positive and finite" }
   val match = WindowManager.LayoutParams.MATCH_PARENT
@@ -105,7 +108,8 @@ fun prototypeLayoutParams(
       WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
         focusFlags(layer, hasTextField),
-      PixelFormat.TRANSLUCENT,
+      if (opaque && placement is PrototypePlacement.Fullscreen) PixelFormat.OPAQUE
+      else PixelFormat.TRANSLUCENT,
     )
     .apply {
       title = PROTOTYPE_WINDOW_TITLE

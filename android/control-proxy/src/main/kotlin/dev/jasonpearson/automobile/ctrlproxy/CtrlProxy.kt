@@ -81,6 +81,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImageCache
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeInset
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeWindow
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLifecycle
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRefreshCoalescer
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeResultSink
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWindowOnScreen
 import dev.jasonpearson.automobile.ctrlproxy.prototype.hasPrototypeTitle
@@ -1101,6 +1102,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     )
   }
   private lateinit var prototypeController: PrototypeController
+  private val prototypeRefreshCoalescer =
+    PrototypeRefreshCoalescer(
+      launch = { action -> serviceScope.launch { action() } },
+      action = { prototypeController.onConfigurationChanged() },
+    )
   // Hides the prototype while another app is in front, restores it on return (#10261).
   private val prototypeForeground by lazy {
     PrototypeForegroundTracker(
@@ -3696,8 +3702,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   private fun refreshPrototypeWindow() {
     if (::prototypeController.isInitialized) {
-      val controller = prototypeController
-      serviceScope.launch { controller.onConfigurationChanged() }
+      prototypeRefreshCoalescer.request()
     }
   }
 

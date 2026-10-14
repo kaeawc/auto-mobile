@@ -245,6 +245,16 @@ describe("getTempDir", () => {
 });
 
 describe("getSharedAutoMobileDir", () => {
+  test("CtrlProxy shared directories ignore AUTOMOBILE_DATA_DIR and honor coordination overrides", () => {
+    for (const subdir of ["ctrl-proxy-ios", "ctrl-proxy/entitlements"]) {
+      expect(getSharedAutoMobileDir(subdir, "/home/u", { AUTOMOBILE_DATA_DIR: "/x" })).toBe(
+        path.join(path.resolve("/home/u"), ".auto-mobile", subdir),
+      );
+      expect(getSharedAutoMobileDir(subdir, "/home/u", { AUTOMOBILE_COORDINATION_DIR: "/c" })).toBe(
+        path.join("/c", subdir),
+      );
+    }
+  });
   test("defaults to the home returned by os.userInfo", () => {
     const userInfoSpy = spyOn(os, "userInfo").mockReturnValue({
       uid: 501,

@@ -111,6 +111,11 @@ data class PrototypeRequest(
   val theme: StateFlow<PrototypeShownTheme>? = null,
   /** Direct host callers retain the legacy bar; the controller resolves the spec default. */
   val chrome: PrototypeWindowChrome = PrototypeWindowChrome.BAR,
+  /**
+   * The authored surface alone hides the whole window in every reachable mode. The theme is live,
+   * so this must account for all reachable palettes, not just the currently shown one.
+   */
+  val opaqueSurface: Boolean = false,
   val onHostDismiss: suspend () -> Unit = {},
   val content: @Composable () -> Unit = { PrototypeTestContent() },
 ) {
@@ -245,6 +250,7 @@ class DefaultPrototypeHost(
     ::viewPrototypeEscapeScheduler,
   private val escapeTouchSlop: (Context) -> Int = { ViewConfiguration.get(it).scaledTouchSlop },
   private val dispatchToContent: ((MotionEvent) -> Boolean)? = null,
+  private val isViewAttached: (View) -> Boolean = { it.isAttachedToWindow },
 ) : PrototypeHost {
   private class Window(
     val view: PrototypeComposeView,
@@ -326,6 +332,7 @@ class DefaultPrototypeHost(
           sdkInt,
           request.layer,
           imeLift(request),
+          opaque = prototypeWindowOpaque(request),
         )
       if (touchThroughToken != null) {
         params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -496,10 +503,13 @@ class DefaultPrototypeHost(
         sdkInt,
         current.request.layer,
         imeLift(current.request),
+        opaque = prototypeWindowOpaque(current.request),
       )
     current.anchoredOrigin?.let { applyAnchoredOrigin(params, it) }
     if (touchThroughToken != null)
       params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+    if (copyParams(current.params).copyFrom(params) == 0 && isViewAttached(current.view))
+      return true
     return update(current, params)
   }
 
@@ -538,7 +548,12 @@ class DefaultPrototypeHost(
     require(percent in 0..100) { "Opacity must be in 0..100" }
     mainThread.onMain {
       window?.let {
-        it.request = it.request.copy(opacityPercent = percent)
+        val previousRequest = it.request
+        val newRequest = previousRequest.copy(opacityPercent = percent)
+        it.request = newRequest
+        if (prototypeWindowOpaque(previousRequest) != prototypeWindowOpaque(newRequest)) {
+          relayoutOnMain(it)
+        }
         applyContent(it)
       }
     }
@@ -880,6 +895,12 @@ data class PrototypeHostChrome(
   val closeVisible: Boolean = false,
   val escape: Boolean = false,
 )
+
+internal fun prototypeWindowOpaque(request: PrototypeRequest): Boolean =
+  request.opaqueSurface &&
+    request.placement is PrototypePlacement.Fullscreen &&
+    request.opacityPercent == 100 &&
+    !prototypeHostChrome(request).dismissVisible
 
 fun prototypeHostChrome(request: PrototypeRequest): PrototypeHostChrome {
   val fullscreen = request.placement is PrototypePlacement.Fullscreen

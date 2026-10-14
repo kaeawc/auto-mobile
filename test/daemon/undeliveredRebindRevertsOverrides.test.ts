@@ -56,6 +56,8 @@ describe("an undelivered rebind keeps the session's overrides on the device it g
         restore: async () => {
           restoredKeepAwake.push(device.deviceId);
           await keepAwakeGate;
+
+          return { status: "restored" as const };
         },
       }),
       (device) => ({

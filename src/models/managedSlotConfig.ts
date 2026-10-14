@@ -6,6 +6,8 @@ import {
 } from "../server/provisionDeviceSpecSchemas";
 import { MAX_PROVISION_DEVICE_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import { errorMessage } from "../utils/describeUnknownError";
+import type { LockOwnerGenerationProbe } from "../utils/fileLock";
+import { logger } from "../utils/logger";
 import { ActionableError } from "./ActionableError";
 
 /**
@@ -127,9 +129,25 @@ export const managedSlotConfigSchema = z
      * alive (e.g. a wrapper shell between the runner and the proxy). Defaults to the launch parent.
      */
     executionOwnerPid: z.number().int().positive().optional(),
+    /**
+     * Runner's own start identity in AutoMobile's opaque token format:
+     * linux:<boot_id>:<starttime ticks> or darwin-utc:<C-locale ps lstart rendered in UTC>.
+     * Proxy-only; never forwarded to the daemon.
+     */
+    executionOwnerStartIdentity: z.string().min(1).max(256).optional(),
   })
   .strict()
   .superRefine((config, context) => {
+    if (
+      config.executionOwnerStartIdentity !== undefined &&
+      config.executionOwnerPid === undefined
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "executionOwnerStartIdentity requires executionOwnerPid",
+        path: ["executionOwnerStartIdentity"],
+      });
+    }
     const seen = new Set<number>();
     config.requests.forEach((request, index) => {
       if (seen.has(request.slotIndex)) {
@@ -224,6 +242,42 @@ export function assertManagedSlotOwnerRunning(
       `executionOwnerPid ${ownerPid} is not a running process`,
     );
   }
+}
+
+export type ManagedSlotOwnerIdentityVerdict = ReturnType<LockOwnerGenerationProbe["compare"]>;
+
+/** Startup check that the declared owner PID still names the process the runner described. */
+export function assertManagedSlotOwnerIdentity(
+  config: ManagedSlotConfig | undefined,
+  compare: LockOwnerGenerationProbe["compare"],
+): ManagedSlotOwnerIdentityVerdict | undefined {
+  const pid = config?.executionOwnerPid;
+  const recorded = config?.executionOwnerStartIdentity;
+  if (pid === undefined || recorded === undefined) {
+    return undefined;
+  }
+  let verdict: ManagedSlotOwnerIdentityVerdict;
+  try {
+    verdict = compare(pid, recorded);
+  } catch (error) {
+    logger.warn(
+      `executionOwnerPid ${pid} start identity could not be compared; trusting the PID alone: ${errorMessage(error)}`,
+      error,
+    );
+    return "unknown";
+  }
+  if (verdict === "different") {
+    throw new ManagedSlotConfigError(
+      "managed_slot_config_invalid",
+      `executionOwnerPid ${pid} no longer names the process described by executionOwnerStartIdentity (the PID was reused)`,
+    );
+  }
+  if (verdict === "unknown") {
+    logger.warn(
+      `executionOwnerPid ${pid} start identity could not be compared; trusting the PID alone`,
+    );
+  }
+  return verdict;
 }
 
 /** True when a daemon's `daemon/capabilities` list advertises managed slot contract v1. */

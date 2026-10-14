@@ -26,7 +26,7 @@ describe("BaseVisualChange device-lock warning (#4280)", () => {
     updatedAt: 1,
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { node: {} },
+    viewHierarchy: { hierarchy: {} },
     ...(deviceLock ? { deviceLock } : {}),
   });
 

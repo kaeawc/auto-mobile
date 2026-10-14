@@ -1,3 +1,4 @@
+import type { PrototypeHiddenReason } from "../features/prototype/prototypeHidden";
 import type { PanelFingerprint } from "./DisplayPanel";
 import { ElementBounds } from "./ElementBounds";
 import { RecompositionMetrics, RecompositionNodeInfo } from "./Recomposition";
@@ -156,6 +157,7 @@ export interface ViewHierarchyResult {
    * is not in front (Android, #10261). Absent otherwise and from older APKs.
    */
   prototypeSuspended?: boolean;
+  prototypeHiddenReason?: PrototypeHiddenReason;
   /** Present when CtrlProxy is reconnecting and the hierarchy is temporarily unavailable. */
   ctrlProxyReconnect?: CtrlProxyReconnectStatus;
 }

@@ -81,11 +81,19 @@ internal class RecordingPrototypeWindowManager(
   private val history: MutableList<String>,
 ) : WindowManager {
   var view: View? = null
+  private val attachedViews = mutableSetOf<View>()
+
+  fun isViewAttached(view: View): Boolean =
+    view in attachedViews && !(failUpdate && updateFailure is IllegalArgumentException)
+
   val added = mutableListOf<WindowManager.LayoutParams>()
   val updated = mutableListOf<WindowManager.LayoutParams>()
   var removals = 0
   var failAdd = false
   var failUpdate = false
+  var updateAttempts = 0
+    private set
+
   var failRemove = false
   var updateFailure: Exception = IllegalStateException("fake update failure")
   var removeFailure: Exception = IllegalStateException("fake remove failure")
@@ -95,11 +103,13 @@ internal class RecordingPrototypeWindowManager(
     history += "add"
     this.view = view
     if (failAdd) throw IllegalStateException("fake add failure")
+    attachedViews += view
     added += snapshot(params)
   }
 
   override fun updateViewLayout(view: View, params: ViewGroup.LayoutParams) {
     check(mainThread.isMainThread())
+    updateAttempts++
     if (failUpdate) throw updateFailure
     val copy = snapshot(params)
     updated += copy
@@ -111,6 +121,7 @@ internal class RecordingPrototypeWindowManager(
   override fun removeViewImmediate(view: View) {
     check(mainThread.isMainThread())
     if (failRemove) throw removeFailure
+    attachedViews -= view
     removals++
     history += "remove"
   }
@@ -129,6 +140,7 @@ internal class FakePrototypeHost : PrototypeHost {
   val requests = mutableListOf<PrototypeRequest>()
   var accept = true
   var failure: Exception? = null
+  override var isHiddenForCapture = false
   override var isShowing = false
   override var currentPlacement: PrototypePlacement? = null
   override val isTouchThroughActive = false

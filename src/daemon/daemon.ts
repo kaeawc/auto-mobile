@@ -1,3 +1,5 @@
+import { getNativeHelperRegistry } from "../utils/nativeHelpers/NativeHelperRegistry";
+import { terminateActiveAdbProcesses } from "../utils/android-cmdline-tools/AdbClient";
 import type { SessionReleaseReason } from "./releaseReasons";
 import {
   createDefaultManagedSlotExclusion,
@@ -230,7 +232,7 @@ import {
   registerRecordingSessionCleanup,
 } from "../server/recordingSessionCleanup";
 import { redriveUnconfirmedCaptureTeardowns } from "../server/recordingTeardownRedrive";
-import { PlatformVideoCaptureBackend } from "../features/video/PlatformVideoCaptureBackend";
+import { HybridVideoCaptureBackend } from "../features/video/HybridVideoCaptureBackend";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
   awaitInFlightMigrations,
@@ -1738,7 +1740,7 @@ export class Daemon {
       redriveRecorderTeardowns: async () => {
         try {
           const state = await initializeRecordingTeardownRedriveState();
-          const backend = new PlatformVideoCaptureBackend();
+          const backend = new HybridVideoCaptureBackend();
           return await redriveUnconfirmedCaptureTeardowns(this.sessionManager, {
             recordingRepository: state.recordingRepository,
             liveDaemonSessionIds: new Set(
@@ -1758,8 +1760,10 @@ export class Daemon {
                 ? { deviceId: device.id, name: device.name, platform: device.platform }
                 : undefined;
             },
-            forceStopOrphanedCapture: (device, descriptor) =>
-              backend.forceStopOrphanedCapture(device, descriptor),
+            forceStopOrphanedCapture: (device, descriptor, options) =>
+              options
+                ? backend.forceStopOrphanedCapture(device, descriptor, options)
+                : backend.forceStopOrphanedCapture(device, descriptor),
             now: () => this.timer.now(),
             timer: this.timer,
           });
@@ -5417,6 +5421,22 @@ export class Daemon {
         "simulator capture helper processes exiting",
         () => iosSimulatorCaptureHelperPool.shutdown(),
       ),
+      shutdownStage(
+        "native helper registry",
+        "tracked helper processes exiting",
+        async (context) => {
+          await getNativeHelperRegistry().shutdown({
+            timer: this.timer,
+            graceMs: Math.min(500, Math.max(0, (context.remainingMs() - 1) / 2)),
+          });
+        },
+      ),
+      shutdownStage("host adb children", "host adb children exiting", async (context) => {
+        await terminateActiveAdbProcesses({
+          timer: this.timer,
+          graceMs: Math.min(500, Math.max(0, (context.remainingMs() - 1) / 2)),
+        });
+      }),
       shutdownStage("appearance sync scheduler", "an in-flight appearance sync", () =>
         stopAppearanceSyncScheduler(),
       ),

@@ -693,6 +693,8 @@ export class XcodeSigningManager {
   }
 
   private entitlementsDirectory(): string {
+    // Signing entitlements are shared coordination state and intentionally
+    // ignore per-agent AUTOMOBILE_DATA_DIR; AUTOMOBILE_COORDINATION_DIR moves it.
     return getSharedAutoMobileDir("ctrl-proxy/entitlements", this.dependencies.homedir());
   }
 }

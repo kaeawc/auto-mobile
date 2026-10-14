@@ -45,10 +45,10 @@ for arch in "${archs[@]}"; do
     -target "${arch}-apple-ios${min_ios}-simulator" -sdk "${sdk}" \
     -swift-version 6 -warnings-as-errors -O -parse-as-library \
     -module-name AutoMobilePrototypeViewer \
-    -o "${slice}" "${swift_sources[@]}"
+    -o "${slice}" ${swift_sources[@]+"${swift_sources[@]}"}
   slices+=("${slice}")
 done
-lipo -create "${slices[@]}" -output "${app}/PrototypeViewer"
+lipo -create ${slices[@]+"${slices[@]}"} -output "${app}/PrototypeViewer"
 lipo "${app}/PrototypeViewer" -verify_arch "${archs[@]}"
 cp "${viewer_root}/Info.plist" "${app}/Info.plist"
 plutil -replace MinimumOSVersion -string "${min_ios}" "${app}/Info.plist"

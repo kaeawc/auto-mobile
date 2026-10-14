@@ -10,6 +10,7 @@ test/daemon/devicePool.ownerDisconnectRelease.test.ts
 test/daemon/devicePool.recoveryShutdown.test.ts
 test/daemon/disconnectMonitor-intentionalShutdown.test.ts
 test/daemon/disconnectMonitor-transitionalSimulator.test.ts
+test/daemon/heartbeatAcceptedLog.test.ts
 test/daemon/heartbeatActivityWriteFailure.test.ts
 test/daemon/heartbeatExpiryPersistence.test.ts
 test/daemon/heartbeatMonitorWedgedReap.test.ts

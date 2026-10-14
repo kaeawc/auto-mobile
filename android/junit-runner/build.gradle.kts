@@ -147,6 +147,10 @@ tasks.withType<Test> {
     .dir(layout.projectDirectory.dir("../../test/fixtures/refusal-wire-hints"))
     .withPropertyName("refusalWireHintFixtures")
     .withPathSensitivity(PathSensitivity.RELATIVE)
+  inputs
+    .file(layout.projectDirectory.file("../../schemas/tool-definitions.json"))
+    .withPropertyName("toolDefinitions")
+    .withPathSensitivity(PathSensitivity.RELATIVE)
 
   // Enable parallel test execution across multiple devices
   maxParallelForks = Runtime.getRuntime().availableProcessors().coerceAtLeast(2)

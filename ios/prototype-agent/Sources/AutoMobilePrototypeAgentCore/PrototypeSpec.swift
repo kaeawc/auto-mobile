@@ -118,6 +118,7 @@ struct PrototypeSpec: Decodable {
         let raw = try container.decode(JSONValue.self, forKey: .root)
         try PrototypeLimits.guardAuthoredTree(raw)
         try PrototypeLimits.guardRepeatPathCells(raw, data: data)
+        try PrototypeLimits.guardSubstitutedText(raw, data: data)
         let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
         try PrototypeLimits.guardTree(resolved)
         root = try JSONDecoder().decode(

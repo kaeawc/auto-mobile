@@ -1,3 +1,4 @@
+import * as prototypeHidden from "../../src/features/prototype/prototypeHidden";
 import * as prototypeSuspended from "../../src/features/prototype/prototypeSuspended";
 import { isTypedToolRefusal } from "../../src/server/shapeToolCallError";
 import { beforeAll, describe, expect, spyOn, test } from "bun:test";
@@ -126,6 +127,7 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
   "daemon/McpTimeoutError": mcpTimeouts,
   "daemon/sessionReleasedDuringCall": sessionReleasedDuringCall,
   "models/AppNotRunningError": appNotRunning,
+  "features/prototype/prototypeHidden": prototypeHidden,
   "features/prototype/prototypeSuspended": prototypeSuspended,
   "daemon/client": daemonClient,
   "daemon/deviceControlTransportFailure": controlTransport,

@@ -9,6 +9,15 @@
         "acquireNewSession": false
       }
     },
+    "socket-frame.prototype_hidden": {
+      "expected": "fail",
+      "fields": {
+        "code": "prototype_hidden",
+        "retryable": false,
+        "acquireNewSession": false,
+        "details": { "prototypeHiddenReason": "app_layer_window_hidden" }
+      }
+    },
     "socket-frame.prototype_suspended": {
       "expected": "fail",
       "fields": {

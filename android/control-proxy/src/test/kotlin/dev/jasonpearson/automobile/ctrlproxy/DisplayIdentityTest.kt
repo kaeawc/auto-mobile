@@ -15,6 +15,29 @@ class DisplayIdentityTest {
   private class FakeDisplay(var id: String)
 
   @Test
+  fun `repeated transient failures are logged once without disabling reads`() {
+    var calls = 0
+    val errors = mutableListOf<Throwable>()
+    val failure = InvocationTargetException(IllegalArgumentException("temporary target failure"))
+    val resolver =
+      PanelUniqueIdResolver<FakeDisplay>(
+        lookup = {
+          { display ->
+            calls++
+            if (calls <= 100) throw failure
+            display.id
+          }
+        },
+        onTransientFailure = { errors.add(it) },
+      )
+    val display = FakeDisplay("local:1")
+    repeat(100) { assertNull(resolver.resolve(display)) }
+    assertEquals(listOf(failure), errors)
+    assertEquals("local:1", resolver.resolve(display))
+    assertEquals(101, calls)
+  }
+
+  @Test
   fun `denied lookup is cached and reported once`() {
     var lookups = 0
     val errors = mutableListOf<Throwable?>()
@@ -147,6 +170,7 @@ class DisplayIdentityTest {
   @Test
   fun `wrapped access failures and linkage failures latch once`() {
     listOf(
+        IllegalArgumentException("wrong receiver"),
         IllegalAccessException("denied"),
         SecurityException("denied"),
         LinkageError("denied"),

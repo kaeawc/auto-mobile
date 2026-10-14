@@ -44,6 +44,7 @@ function fixture(
   };
   return {
     requests,
+    capture,
     timer,
     run: () => confirmPrototypeAppLayerVisibility(capture, timer, 7, signal, hiddenReason),
   };
@@ -187,4 +188,20 @@ test("only the last capture supplies a hidden reason; show fallback names the fo
     notVisibleReason: "app_layer_window_hidden",
     warning: `The AutoMobile prototype is hidden: it was shown with window.layer "app" and the app in front (${absent.packageName}) hides app-layer windows drawn over it (system apps such as Settings do). Show it again without window.layer (the default layer draws over every app) or over a different app.`,
   });
+});
+
+test("suspended final capture discards the show hint in output", async () => {
+  const f = fixture([absent, absent, { ...absent, prototypeSuspended: true }]);
+  expect(
+    await prototypeAppLayerVisibilityOutput({
+      android: true,
+      action: "show",
+      success: true,
+      spec: { id: "panel", window: { layer: "app" }, root: { type: "text", text: "Hello" } },
+      hiddenReason: "app_layer_window_hidden",
+      superseded: () => false,
+      capture: () => f.capture,
+      timer: f.timer,
+    }),
+  ).toEqual({});
 });

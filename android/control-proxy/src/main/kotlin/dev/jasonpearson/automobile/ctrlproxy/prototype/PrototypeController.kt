@@ -567,7 +567,8 @@ class PrototypeController(
       check(replayOfflineEvents()) {
         "Buffered prototype events could not be delivered; the device kept them, retry inspect"
       }
-      val prototypes = listOfNotNull(activeRuntime?.takeIf { it.current.active }?.let(::statusOf))
+      val prototypes =
+        listOfNotNull(activeRuntime?.takeIf { it.current.active }?.let { statusOf(it) })
       sink.sendPrototypeStatus(requestId, prototypes, offlineEvents.dropped)
     } catch (error: CancellationException) {
       throw error
@@ -577,7 +578,7 @@ class PrototypeController(
     }
   }
 
-  private fun statusOf(runtime: PrototypeRuntime): PrototypeStatusEntry {
+  private suspend fun statusOf(runtime: PrototypeRuntime): PrototypeStatusEntry {
     val id = runtime.current.spec.id
     return PrototypeStatusEntry(
       id = id,
@@ -587,7 +588,7 @@ class PrototypeController(
       pages = runtime.current.pages.toMap(),
       lastSequence = sequences[id] ?: 0L,
       suspended = foreground.suspended,
-      hiddenReason = hiddenReason(shownDisplayId(), windowOnScreen.isOnScreen(shownDisplayId())),
+      hiddenReason = shownHiddenReason(),
       appearance = activeTheme?.value?.appearance,
     )
   }

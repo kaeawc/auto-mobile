@@ -259,3 +259,14 @@ test("older-device app-layer tool output deep-equals the previous output", async
     warning: `The prototype was shown with window.layer "app" but no prototype window is on screen. The app in front (${absent.packageName}) most likely hides app-layer windows drawn over it (system apps such as Settings do); a locked device hides it too. Until it is visible, layer "prototype" calls will report that no prototype is showing. Show it again without window.layer (the default layer draws over every app) or over a different app, or dismiss it.`,
   });
 });
+
+test("suspended capture ignores the show hidden hint but retains its own reason", async () => {
+  client.setPrototypeResult({ success: true, hiddenReason: "app_layer_window_hidden" });
+  frame = { ...absent, prototypeSuspended: true };
+  const result = await call("app");
+  expect(result.success).toBe(true);
+  expect(result).not.toHaveProperty("visible");
+  expect(result).not.toHaveProperty("notVisibleReason");
+  frame = { ...frame, prototypeHiddenReason: "device_blocked" };
+  expect((await call("app")).notVisibleReason).toBe("device_blocked");
+});

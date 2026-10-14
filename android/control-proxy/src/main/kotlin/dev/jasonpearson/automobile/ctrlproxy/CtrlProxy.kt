@@ -83,9 +83,11 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeWindow
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLifecycle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeResultSink
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWindowOnScreen
+import dev.jasonpearson.automobile.ctrlproxy.prototype.hasPrototypeTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.imeLiftPx
 import dev.jasonpearson.automobile.ctrlproxy.prototype.isPrototypeWindow
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeForegroundFromWindows
+import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeWindowOnScreen
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.protocol.AnrData
 import dev.jasonpearson.automobile.protocol.AnrEvent
@@ -1872,23 +1874,24 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
                       // A null framework list is unavailable, rather than evidence of absence.
                       windows?.let {
-                        if (displayId == Display.DEFAULT_DISPLAY) it else emptyList()
+                        if (displayId == Display.DEFAULT_DISPLAY) it else null
                       }
                     } else viewHierarchyExtractor.selectDisplayWindows(this, displayId).windows
-                  selected?.any { window ->
-                    val root = window.root
-                    try {
-                      isPrototypeWindow(
-                        window.type,
-                        window.title,
-                        root?.packageName?.toString(),
-                        packageName,
-                      )
-                    } finally {
-                      root?.recycle()
-                    }
-                  }
+                  prototypeWindowOnScreen(
+                    selected,
+                    hasTitle = { hasPrototypeTitle(it.type, it.title) },
+                    rootPackage = { window ->
+                      val root = window.root
+                      try {
+                        root?.packageName?.toString()
+                      } finally {
+                        root?.recycle()
+                      }
+                    },
+                    ownPackage = packageName,
+                  )
                 } catch (error: Exception) {
+                  Log.d(TAG, "Could not determine prototype window visibility", error)
                   null
                 }
               },

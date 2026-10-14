@@ -13,6 +13,9 @@ private val panelUniqueIdResolver =
       val read: (Display) -> String? = { display -> method.invoke(display) as? String }
       read
     },
+    onTransientFailure = { error ->
+      Log.d(TAG, "Display.getUniqueId() failed transiently; panelUniqueId will be omitted", error)
+    },
     onUnavailable = { error ->
       Log.d(TAG, "Display.getUniqueId() is unavailable; panelUniqueId will be omitted", error)
     },
@@ -28,9 +31,11 @@ internal fun panelUniqueIdOf(display: Display?): String? = panelUniqueIdResolver
 internal class PanelUniqueIdResolver<D : Any>(
   private val lookup: () -> ((D) -> String?)?,
   private val onUnavailable: (Throwable?) -> Unit = {},
+  private val onTransientFailure: (Throwable) -> Unit = {},
 ) {
   private val lock = Any()
   private var resolved = false
+  private var transientFailureLogged = false
   private var accessor: ((D) -> String?)? = null
 
   fun resolve(display: D?): String? {
@@ -53,7 +58,15 @@ internal class PanelUniqueIdResolver<D : Any>(
       try {
         accessor?.invoke(display)
       } catch (error: Exception) {
-        if (isAccessFailure(error)) unavailable(error) else null
+        if (error is IllegalArgumentException || isAccessFailure(error)) {
+          unavailable(error)
+        } else {
+          if (!transientFailureLogged) {
+            transientFailureLogged = true
+            onTransientFailure(error)
+          }
+          null
+        }
       } catch (error: LinkageError) {
         unavailable(error)
       }

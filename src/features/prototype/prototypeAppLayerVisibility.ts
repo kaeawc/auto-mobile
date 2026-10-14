@@ -42,6 +42,12 @@ export async function confirmPrototypeAppLayerVisibility(
         await timer.sleep(APP_LAYER_VISIBILITY_RETRY_MS);
         continue;
       }
+      if (
+        !snapshot.hierarchy.prototypeHiddenReason &&
+        hasNoAppLayerVisibilityEvidence(snapshot.hierarchy)
+      ) {
+        return undefined;
+      }
       const reason = snapshot.hierarchy.prototypeHiddenReason ?? hiddenReason;
       if (reason) {
         return {
@@ -49,9 +55,6 @@ export async function confirmPrototypeAppLayerVisibility(
           notVisibleReason: reason,
           warning: prototypeHiddenWarning(reason, snapshot.hierarchy.packageName),
         };
-      }
-      if (hasNoAppLayerVisibilityEvidence(snapshot.hierarchy)) {
-        return undefined;
       }
       return appLayerNotVisible(snapshot.hierarchy);
     }

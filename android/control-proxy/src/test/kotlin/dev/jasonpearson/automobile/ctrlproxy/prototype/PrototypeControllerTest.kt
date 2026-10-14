@@ -128,6 +128,56 @@ class PrototypeControllerTest {
   }
 
   @Test
+  fun `window probe reads only titled candidates and preserves unknown`() {
+    val ownPackage = "dev.jasonpearson.automobile.ctrlproxy"
+    val reads = mutableListOf<String?>()
+    fun probe(windows: List<Triple<Int, String, String?>>?): Boolean? =
+      prototypeWindowOnScreen(
+        windows,
+        hasTitle = { hasPrototypeTitle(it.first, it.second) },
+        rootPackage = {
+          reads += it.third
+          it.third
+        },
+        ownPackage = ownPackage,
+      )
+    val type = android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM
+    assertNull(probe(null))
+    assertNull(probe(listOf(Triple(type, PROTOTYPE_WINDOW_TITLE, null))))
+    assertEquals(true, probe(listOf(Triple(type, PROTOTYPE_WINDOW_TITLE, ownPackage))))
+    reads.clear()
+    assertEquals(false, probe(listOf(Triple(type, "Highlight", ownPackage))))
+    assertEquals(false, probe(listOf(Triple(1, PROTOTYPE_WINDOW_TITLE, ownPackage))))
+    assertTrue(reads.isEmpty())
+    assertEquals(false, probe(listOf(Triple(type, PROTOTYPE_WINDOW_TITLE, "other.app"))))
+  }
+
+  @Test
+  fun `inspect uses bounded confirmation and stops at visible or unknown`() = runTest {
+    for (result in listOf(true, false, null)) {
+      val fixture = HiddenFixture()
+      fixture.onScreen = { true }
+      fixture.show()
+      fixture.probes.clear()
+      fixture.delays.clear()
+      fixture.onScreen = { attempt -> if (result == true && attempt < 3) false else result }
+      fixture.controller.inspect("inspect")
+      val expectedProbes =
+        when (result) {
+          true -> 3
+          false -> 5
+          null -> 1
+        }
+      assertEquals(List(expectedProbes) { 0 }, fixture.probes)
+      assertEquals(List(expectedProbes - 1) { 100L }, fixture.delays)
+      assertEquals(
+        if (result == false) PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN else null,
+        fixture.statuses.single().hiddenReason,
+      )
+    }
+  }
+
+  @Test
   fun `hidden decision distinguishes runtime layer display capture block and suspension`() =
     runTest {
       val fixture = HiddenFixture()

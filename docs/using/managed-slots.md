@@ -424,9 +424,10 @@ What this means:
   reported the owner as still alive.
 - **The identity is read cheaply on both platforms.** On macOS the proxy reads it in
   process through `sysctl`, which works for processes of any user, including
-  PID 1. It compares the identity on every 1 s check. If `bun:ffi` cannot load, the
-  proxy falls back to `ps` and compares every fifth check, so reuse is detected
-  within 5 s. On Linux, reading `/proc` is cheap and the identity is compared on
+  PID 1. It compares the identity on every 1 s check. A matching result is cached for
+  1 s, so in practice a fresh read happens every 1 to 2 s. If `bun:ffi` cannot load,
+  the proxy falls back to `ps` and compares every fifth check, so reuse is detected
+  within about 5 s. On Linux, reading `/proc` is cheap and the identity is compared on
   every check. Linux PID wrap rates were not measured. The default `pid_max` is
   32,768, or 4,194,304 where systemd raises it (`/proc/sys/kernel/pid_max`).
 

@@ -469,4 +469,30 @@ describe("managed slot acquisition through the daemon handler and the stdio prox
     expect(response).toMatchObject({ success: false, code: "contract_unsupported" });
     expect(provisioner.calls).toEqual([]);
   });
+
+  test("a multi-device group crossing the socket fails managed_slot_group_unsupported before any mutation", async () => {
+    const config = configFor();
+    const response = await handleDaemonRequest(
+      {
+        id: "r",
+        type: "daemon_request",
+        method: DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD,
+        params: {
+          config: {
+            ...config,
+            localSlotCapacity: 2,
+            requests: [config.requests[0], { ...config.requests[0], slotIndex: 1 }],
+          },
+          livenessOwnerToken: TOKEN,
+        },
+      },
+      state,
+    );
+
+    expect(response).toMatchObject({ success: false, code: "managed_slot_group_unsupported" });
+    expect(provisioner.calls).toEqual([]);
+    const scopeKey = computeSlotScopeKey(config);
+    expect(await registry.getScope(scopeKey)).toBeNull();
+    expect(await registry.listAssignments(scopeKey)).toEqual([]);
+  });
 });

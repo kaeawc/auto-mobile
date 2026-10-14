@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- STAMP POINTS after copying this .app:
+     Rewrite CFBundleIdentifier and CFBundleDisplayName + CFBundleName.
+     The plist is the only name source: no InfoPlist.strings.
+     Overwrite loose PrototypeViewerIcon60x60@2x.png (120x120) and
+     PrototypeViewerIcon60x60@3x.png (180x180) in place.
+     Write the spec to Documents/prototype.json in the data container obtained with
+     simctl get_app_container <udid> <bundle-id> data.
+     Then codesign --force --sign - the .app and simctl install.
+     Executable name and bundle layout must not change.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key><string>dev.jasonpearson.automobile.prototype-viewer</string>
+    <key>CFBundleName</key><string>Prototype</string>
+    <key>CFBundleDisplayName</key><string>Prototype</string>
+    <key>CFBundleExecutable</key><string>PrototypeViewer</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleShortVersionString</key><string>1.0</string>
+    <key>MinimumOSVersion</key><string>17.0</string>
+    <key>UIDeviceFamily</key><array><integer>1</integer></array>
+    <key>UILaunchScreen</key><dict/>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UIApplicationSceneManifest</key>
+    <dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
+    <key>CFBundleIcons</key>
+    <dict>
+        <key>CFBundlePrimaryIcon</key>
+        <dict>
+            <key>CFBundleIconFiles</key>
+            <array><string>PrototypeViewerIcon60x60</string></array>
+        </dict>
+    </dict>
+    <key>CFBundleSupportedPlatforms</key><array><string>iPhoneSimulator</string></array>
+</dict>
+</plist>

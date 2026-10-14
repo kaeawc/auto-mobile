@@ -36,6 +36,7 @@ import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 import { ensureSecureDirectorySync } from "../../src/utils/tempDir";
 import { deviceStartGuardRefusal } from "./deviceStartGuard";
 import { privateHarnessEnvRefusal } from "./harnessEnv";
+import { createSleepGapDetector, summarizeHostSleepRows } from "./hostSleep";
 import {
   canonicalizeHostPath,
   extraEnvRefusal,
@@ -324,11 +325,21 @@ export async function runServe(
     );
   let closing = false;
   let finished: number | undefined;
+  const hostSleepRows: Array<{ id: string; invalid?: string }> = [];
   const finish = async (reason: string, code: number): Promise<number> => {
     if (finished !== undefined) {
       return finished;
     }
     finished = code;
+    const hostSleepLines = summarizeHostSleepRows(hostSleepRows);
+    if (hostSleepLines.length > 0) {
+      deps.writeJson(join(dir, "host-sleep.json"), {
+        invalidIds: hostSleepRows
+          .filter((row) => row.invalid === "host-slept")
+          .map((row) => row.id),
+        lines: hostSleepLines,
+      });
+    }
     deps.writeJson(join(dir, "closed.json"), {
       at: new Date(deps.timer.now()).toISOString(),
       reason,
@@ -436,6 +447,7 @@ export async function runServe(
     };
     const seen = new Set<string>();
     const pending = new Set<Promise<void>>();
+    const sleepDetector = createSleepGapDetector(deps.timer);
     while (finished === undefined) {
       for (const file of deps
         .listFiles(join(dir, "in"))
@@ -461,6 +473,7 @@ export async function runServe(
           continue;
         }
         const request = parsed.data;
+        sleepDetector.sample();
         const t0 = deps.timer.now();
         if (request.op === "close") {
           closing = true;
@@ -488,6 +501,15 @@ export async function runServe(
         }
         event("request", { id: request.id, op: request.op, tool: request.tool, uri: request.uri });
         const respond = (body: Record<string, unknown>): void => {
+          sleepDetector.sample();
+          const gap = sleepDetector
+            .gaps()
+            .find((candidate) => candidate.endMs > t0 && candidate.startMs < deps.timer.now());
+          if (gap) {
+            body = { ...body, invalid: "host-slept", hostSleptMs: gap.sleptMs };
+            hostSleepRows.push({ id: request.id, invalid: "host-slept" });
+            event("host_slept", { id: request.id, sleptMs: gap.sleptMs });
+          }
           deps.writeJson(join(dir, "out", file), {
             id: request.id,
             op: request.op,

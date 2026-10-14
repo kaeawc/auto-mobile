@@ -45,6 +45,139 @@ export const OWN_TMP_SWEEP_LIMIT = 8;
 export const OWN_TMP_SWEEP_INTERVAL_MS = 300_000;
 export const OWN_TMP_SWEEP_CANDIDATE_LIMIT = 64;
 export const OWN_TMP_SWEEP_DIRECTORY_LIMIT = 64;
+export const BACK_OUT_RETRY_LIMIT = 3;
+const PENDING_PUBLICATION_LIMIT = 8;
+/**
+ * A publication this process linked at P and was told it does not hold, not yet verifiably removed.
+ * An atomic publication carries its identity (the tmp inode it was linked from); a legacy wx
+ * publication has none and is known by its bytes alone.
+ */
+interface DoomedPublication {
+  raw: string;
+  ino?: number;
+  mtimeMs?: number;
+}
+/**
+ * Eviction residual: more than 8 doomed publications per path or 64 paths per filesystem
+ * object evicts the oldest entry; its publication can then stay named until its process exits.
+ */
+interface PendingBackOut {
+  publications: DoomedPublication[];
+  markers: Set<string>;
+}
+const pendingBackOuts = new WeakMap<LockFileSystem, Map<string, PendingBackOut>>();
+const genuineHolds = new WeakMap<LockFileSystem, Map<string, Set<string>>>();
+const inFlightPublications = new WeakMap<LockFileSystem, Map<string, Map<string, number>>>();
+
+interface LockAttemptOptions extends ExclusiveLockOptions {
+  publications: Set<string>;
+}
+
+function hasInFlightPublication(path: string, raw: string, fileSystem: LockFileSystem): boolean {
+  return (inFlightPublications.get(fileSystem)?.get(path)?.get(raw) ?? 0) > 0;
+}
+
+function rememberInFlightPublication(
+  path: string,
+  raw: string,
+  fileSystem: LockFileSystem,
+  publications: Set<string>,
+): void {
+  if (publications.has(raw)) {
+    return;
+  }
+  publications.add(raw);
+  let paths = inFlightPublications.get(fileSystem);
+  if (!paths) {
+    paths = new Map();
+    inFlightPublications.set(fileSystem, paths);
+  }
+  let counts = paths.get(path);
+  if (!counts) {
+    counts = new Map();
+    paths.set(path, counts);
+  }
+  counts.set(raw, (counts.get(raw) ?? 0) + 1);
+}
+
+function forgetInFlightPublications(
+  path: string,
+  fileSystem: LockFileSystem,
+  publications: Set<string>,
+): void {
+  const paths = inFlightPublications.get(fileSystem);
+  const counts = paths?.get(path);
+  for (const raw of publications) {
+    const remaining = (counts?.get(raw) ?? 0) - 1;
+    if (remaining > 0) {
+      counts?.set(raw, remaining);
+    } else {
+      counts?.delete(raw);
+    }
+  }
+  if (!counts?.size) {
+    paths?.delete(path);
+  }
+}
+
+function hasProtectedPublication(path: string, raw: string, fileSystem: LockFileSystem): boolean {
+  return hasGenuineHold(path, raw, fileSystem) || hasInFlightPublication(path, raw, fileSystem);
+}
+
+// Once a genuine record is evicted, absent records no longer prove absence of a hold.
+// One bit per filesystem keeps bounded bookkeeping conservative after either capacity is exceeded.
+const genuineHoldOverflow = new WeakSet<LockFileSystem>();
+
+function hasGenuineHold(path: string, raw: string, fileSystem: LockFileSystem): boolean {
+  return (
+    genuineHoldOverflow.has(fileSystem) ||
+    genuineHolds.get(fileSystem)?.get(path)?.has(raw) === true
+  );
+}
+
+function rememberGenuineHold(path: string, raw: string, fileSystem: LockFileSystem): void {
+  let paths = genuineHolds.get(fileSystem);
+  if (!paths) {
+    paths = new Map();
+    genuineHolds.set(fileSystem, paths);
+  }
+  let holds = paths.get(path);
+  if (!holds) {
+    holds = new Set();
+    paths.set(path, holds);
+  }
+  holds.add(raw);
+  if (holds.size > PENDING_PUBLICATION_LIMIT) {
+    genuineHoldOverflow.add(fileSystem);
+    holds.delete(holds.values().next().value!);
+  }
+  if (paths.size > 64) {
+    genuineHoldOverflow.add(fileSystem);
+    paths.delete(paths.keys().next().value!);
+  }
+}
+
+function forgetGenuineHolds(
+  path: string,
+  fileSystem: LockFileSystem,
+  forget: (raw: string) => boolean,
+): void {
+  const paths = genuineHolds.get(fileSystem);
+  const holds = paths?.get(path);
+  for (const raw of holds ?? []) {
+    if (forget(raw)) {
+      holds?.delete(raw);
+    }
+  }
+  if (!holds?.size) {
+    paths?.delete(path);
+  }
+}
+
+/** @internal Test seam: does this filesystem object remember an unremoved doomed publication for the path? */
+export function hasPendingBackOut(fileSystem: LockFileSystem, lockFilePath: string): boolean {
+  return (pendingBackOuts.get(fileSystem)?.get(lockFilePath)?.publications.length ?? 0) > 0;
+}
 
 // List at most once per filesystem/PID/directory every five minutes (unless the clock
 // moves backwards). Remember bounded own-PID candidates across lock basenames,
@@ -228,8 +361,22 @@ export function* acquireExclusiveLockSteps(
   lockFilePath: string,
   options: ExclusiveLockOptions = {},
 ): Steps<boolean> {
+  const attempt = { ...options, publications: new Set<string>() };
+  try {
+    return yield* acquireLockSteps(lockFilePath, attempt);
+  } finally {
+    forgetInFlightPublications(
+      lockFilePath,
+      options.fileSystem ?? nodeLockFileSystem,
+      attempt.publications,
+    );
+  }
+}
+
+function* acquireLockSteps(lockFilePath: string, options: LockAttemptOptions): Steps<boolean> {
   const pid = options.pid ?? process.pid;
   const fileSystem = options.fileSystem ?? nodeLockFileSystem;
+  yield* drainPendingBackOut(lockFilePath, pid, fileSystem);
   const initial = yield* sampleLock(lockFilePath, fileSystem);
   if (initial) {
     // Preserve the first attempt's generation capture, including live-lock probes;
@@ -243,6 +390,9 @@ export function* acquireExclusiveLockSteps(
     return yield* reclaimExclusiveLock(lockFilePath, options, initial, generation);
   }
   const first = yield* writeExclusiveLockFile(lockFilePath, pid, options);
+  if (first.blocked) {
+    return false;
+  }
   if (first.acquired) {
     return true;
   }
@@ -421,14 +571,19 @@ function* claimLockMarker(
   path: string,
   marker: string,
   fileSystem: LockFileSystem,
+  warnOnFailure = false,
 ): Steps<boolean> {
   try {
     yield { op: "rename", path };
     fileSystem.rename(path, marker);
     return true;
   } catch (error) {
-    // A concurrent release may have removed the instance; a failed claim means retrying.
-    logger.debug(`Lock rename failed at ${path}: ${errorMessage(error)}`, error);
+    if (warnOnFailure && (error as NodeJS.ErrnoException).code !== "ENOENT") {
+      logger.warn(`Lock rename failed at ${path}: ${errorMessage(error)}`, error);
+    } else {
+      // A concurrent release may have removed the instance; a failed claim means retrying.
+      logger.debug(`Lock rename failed at ${path}: ${errorMessage(error)}`, error);
+    }
     return false;
   }
 }
@@ -526,7 +681,8 @@ function* revalidateGuardSlots(
 }
 
 function* releaseGuard(path: string, content: string, fileSystem: LockFileSystem): Steps<boolean> {
-  const current = yield* readText(path, fileSystem);
+  const read = yield* retryLockStep({ op: "readText", path }, () => fileSystem.readText(path));
+  const current = typeof read === "string" ? undefined : read.value;
   if (current !== content) {
     // An aged-out actor must leave a successor's guard (or unreadable path) alone.
     logger.debug(`Reclaim guard release skipped at ${path}: content changed or unavailable`);
@@ -536,19 +692,25 @@ function* releaseGuard(path: string, content: string, fileSystem: LockFileSystem
 }
 
 function* unlinkGuard(path: string, fileSystem: LockFileSystem): Steps<boolean> {
-  try {
-    yield { op: "unlink", path };
-    fileSystem.unlink(path);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      // Already absent means this cleanup has completed.
-      logger.debug(`Reclaim guard already removed at ${path}: ${errorMessage(error)}`);
-      return true;
+  let lastError: unknown;
+  const result = yield* retryLockStep({ op: "unlink", path }, () => {
+    try {
+      fileSystem.unlink(path);
+    } catch (error) {
+      lastError = error;
+      throw error;
     }
-    logger.warn(`Reclaim guard removal failed at ${path}: ${errorMessage(error)}`, error);
-    return false;
+  });
+  if (typeof result !== "string") {
+    return true;
   }
+  if (result === "missing") {
+    // Already absent means this cleanup has completed.
+    logger.debug(`Reclaim guard already removed at ${path}: ${errorMessage(lastError)}`);
+    return true;
+  }
+  logger.warn(`Reclaim guard removal failed at ${path}: ${errorMessage(lastError)}`, lastError);
+  return false;
 }
 
 function* installGuard(
@@ -628,7 +790,7 @@ function isGuardLive(guard: LockSample, options: ExclusiveLockOptions): boolean 
 
 function* reclaimExclusiveLock(
   lockFilePath: string,
-  options: ExclusiveLockOptions,
+  options: LockAttemptOptions,
   observed: LockSample,
   generation: string | undefined,
   sweep = true,
@@ -663,7 +825,7 @@ function* reclaimExclusiveLock(
       // Once removed, this fingerprint cannot pass the path check again.
       yield* cleanupFile(`${prefix}.${lower}`, fileSystem);
     }
-    return (yield* writeExclusiveLockFile(lockFilePath, pid, options, false)).acquired;
+    return (yield* writeExclusiveLockFile(lockFilePath, pid, options, false, observed)).acquired;
   } finally {
     yield* releaseGuard(`${prefix}.${guard.k}`, guard.content, fileSystem);
     if (guard.compacted) {
@@ -672,6 +834,12 @@ function* reclaimExclusiveLock(
   }
 }
 
+/**
+ * F = P.displaced remains authoritative until owner release or guarded reclaim.
+ * COMPLETE only links F to P; it never removes F or copies sampled bytes.
+ * R2 remains only while a lock is at a private in-flight marker: a third publisher
+ * can win, or owner release can miss it before the displacer restores/retains it.
+ */
 function* restoreDisplacedLock(
   path: string,
   marker: string,
@@ -688,7 +856,7 @@ function* restoreDisplacedLock(
     } else {
       logger.warn(`Displaced lock link restore failed at ${path}: ${errorMessage(error)}`, error);
       if (!(yield* copyDisplacedLock(path, marker, fileSystem))) {
-        yield* renameDisplacedLock(path, marker, fileSystem);
+        yield* retainDisplacedLock(path, marker, fileSystem);
         return;
       }
     }
@@ -710,27 +878,386 @@ function* copyDisplacedLock(
   return result !== "failed";
 }
 
-function* renameDisplacedLock(
+function* sampleRetainedLock(
+  path: string,
+  fileSystem: LockFileSystem,
+): Steps<LockSample | "absent" | "unreadable"> {
+  let identity: { ino: number; mtimeMs: number };
+  try {
+    yield { op: "stat", path };
+    identity = fileSystem.stat(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      // Absence is the normal uncontended path; no retained owner needs arbitration.
+      logger.debug(`Retained lock absent at ${path}: ${errorMessage(error)}`);
+      return "absent";
+    }
+    logger.warn(`Retained lock stat failed at ${path}: ${errorMessage(error)}`, error);
+    return "unreadable";
+  }
+  const raw = yield* readText(path, fileSystem);
+  return raw === undefined ? "unreadable" : { ...identity, raw };
+}
+
+function* retainDisplacedLock(
   path: string,
   marker: string,
   fileSystem: LockFileSystem,
 ): Steps<void> {
-  try {
-    yield { op: "exists", path };
-    if (fileSystem.exists(path)) {
-      // A failed copy may have left a partial destination that cleanup could not remove.
-      logger.warn(`Displaced lock last-resort restore blocked at ${path}; retaining ${marker}`);
-      return;
+  const retained = `${path}.displaced`;
+  const sample = yield* sampleRetainedLock(retained, fileSystem);
+  if (sample === "absent") {
+    try {
+      yield { op: "rename", path: marker };
+      fileSystem.rename(marker, retained);
+      logger.warn(
+        `Displaced lock restore failed at ${path}; retained at ${retained}; lock state is held-unknown`,
+      );
+    } catch (error) {
+      logger.warn(
+        `Displaced lock retention failed at ${path}; retaining ${marker}: ${errorMessage(error)}`,
+        error,
+      );
     }
-    yield { op: "rename", path: marker };
-    fileSystem.rename(marker, path);
-  } catch (error) {
-    logger.warn(
-      `Displaced lock last-resort restore failed at ${path}: ${errorMessage(error)}`,
-      error,
+    return;
+  }
+  if (sample !== "unreadable" && sameSample(yield* sampleLock(marker, fileSystem), sample)) {
+    yield* cleanupFile(marker, fileSystem);
+    return;
+  }
+  logger.warn(
+    `Displaced lock retention blocked at ${retained}; retaining ${marker}; lock state is held-unknown`,
+  );
+}
+
+/** Caller holds the guard for observed; verify both sides of the rename before deleting. */
+function* removeRetainedInstance(
+  path: string,
+  observed: LockSample,
+  options: ExclusiveLockOptions,
+): Steps<void> {
+  const fileSystem = options.fileSystem ?? nodeLockFileSystem;
+  const retained = `${path}.displaced`;
+  if (!sameSample(yield* sampleLock(retained, fileSystem), observed)) {
+    return;
+  }
+  const marker = `${path}.${options.pid ?? process.pid}.reclaim`;
+  if (!(yield* claimLockMarker(retained, marker, fileSystem))) {
+    return;
+  }
+  if (!sameSample(yield* sampleLock(marker, fileSystem), observed)) {
+    yield* retainDisplacedLock(path, marker, fileSystem);
+    return;
+  }
+  yield* cleanupFile(marker, fileSystem);
+}
+
+function* reclaimRetainedInstance(
+  path: string,
+  observed: LockSample,
+  options: ExclusiveLockOptions,
+  generation: string | undefined,
+): Steps<void> {
+  const fileSystem = options.fileSystem ?? nodeLockFileSystem;
+  const prefix = guardPrefix(path, observed);
+  const guard = yield* claimReclaimGuard(prefix, options, generation);
+  if (guard === undefined) {
+    return;
+  }
+  try {
+    yield* removeRetainedInstance(path, observed, options);
+  } finally {
+    yield* releaseGuard(`${prefix}.${guard.k}`, guard.content, fileSystem);
+    if (guard.compacted) {
+      yield* releaseGuard(`${prefix}.0`, guard.content, fileSystem);
+    }
+  }
+}
+
+function* checkRetainedLock(
+  path: string,
+  options: ExclusiveLockOptions,
+  generation: string | undefined,
+  reclaimed: LockSample | undefined,
+  publishedContent: string,
+  tmp?: string,
+): Steps<boolean> {
+  const fileSystem = options.fileSystem ?? nodeLockFileSystem;
+  const retained = yield* sampleRetainedLock(`${path}.displaced`, fileSystem);
+  if (retained === "absent") {
+    return true;
+  }
+  const pid = options.pid ?? process.pid;
+  const published: DoomedPublication =
+    (tmp ? yield* samplePublication(tmp, publishedContent, fileSystem) : undefined) ??
+    ({ raw: publishedContent } satisfies DoomedPublication);
+  const current = yield* removePriorRetainedPublication(path, retained, published, pid, fileSystem);
+  if (current === "absent") {
+    return true;
+  }
+  // S3: F provably THIS call's publication is never judged for reclaim; identity decides below.
+  if (typeof current === "string" || !hasIdentity(published) || !sameSample(published, current)) {
+    if (isOwnBytesLeak(current, reclaimed, publishedContent, options)) {
+      return yield* reclaimOwnBytesRetained(path, published, pid, fileSystem);
+    }
+    if (yield* reclaimRetainedLock(path, current, options, generation, reclaimed)) {
+      return true;
+    }
+  }
+  return yield* settleRetainedPublication(path, current, published, pid, fileSystem);
+}
+
+/** F2: distinguish this call's retained publication from remembered earlier doomed instances. */
+function* removePriorRetainedPublication(
+  path: string,
+  retained: LockSample | "unreadable",
+  published: DoomedPublication,
+  pid: number,
+  fileSystem: LockFileSystem,
+): Steps<LockSample | "absent" | "unreadable"> {
+  if (typeof retained !== "string" && hasIdentity(published) && sameSample(published, retained)) {
+    // Inode reuse makes this identity the new publication, never an earlier doomed one.
+    forgetBackOuts(path, fileSystem, (known) => isSamePublication(known, published));
+    return retained;
+  }
+  return yield* removeRememberedRetained(path, retained, pid, fileSystem);
+}
+
+function* settleRetainedPublication(
+  path: string,
+  retained: LockSample | "unreadable",
+  published: DoomedPublication,
+  pid: number,
+  fileSystem: LockFileSystem,
+): Steps<boolean> {
+  const publication = yield* isRetainedPublication(
+    path,
+    retained,
+    published.raw,
+    fileSystem,
+    hasIdentity(published) ? published : undefined,
+  );
+  if (publication === "absent") {
+    yield* completeRetainedLock(path, fileSystem);
+    return true;
+  }
+  if (publication === "same") {
+    return true; // Another actor already completed this publication; keep both names untouched.
+  }
+  if (publication === "older") {
+    if (hasIdentity(published)) {
+      // F1: D may be in a displacer's private marker; its identity cannot match the older hold.
+      rememberBackOut(path, fileSystem, published);
+    }
+    // Legacy wx has no identity: preserve the documented same-bytes self-block residual.
+    return false; // An older same-owner hold is authoritative; P is absent, foreign or unreadable.
+  }
+  if (publication === "blocked" && hasIdentity(published)) {
+    yield* removeBlockedPublication(path, published, pid, fileSystem);
+    return false;
+  }
+  // Back out only P; F remains the retained owner's authority throughout COMPLETE.
+  yield* backOutLockPath(path, published, pid, fileSystem);
+  yield* completeRetainedLock(path, fileSystem);
+  return false;
+}
+
+/**
+ * S1: this call's publication sits at F while P is someone else's. Its owner removes it by
+ * identity, F first: once the name F is claimed no COMPLETE can `link(F, P)` it any more. A peer
+ * may already have done so, hence the P sample. Never the release path, whose unlink-exhaustion
+ * fallback would link the doomed instance onto P. Unless it was verifiably removed from BOTH names
+ * a displacer may still hold it in a private marker and link it back, so it is remembered.
+ */
+function* removeBlockedPublication(
+  path: string,
+  published: LockSample,
+  pid: number,
+  fileSystem: LockFileSystem,
+): Steps<void> {
+  const retained = yield* removeInstance(path, `${path}.displaced`, published, pid, fileSystem);
+  const linked = yield* removeInstance(path, path, published, pid, fileSystem);
+  if (retained !== "removed" || linked !== "removed") {
+    rememberBackOut(path, fileSystem, published);
+  }
+}
+
+/** S2/C3: an earlier doomed publication of this process that a displacer retained at F is removed by its owner. */
+function* removeRememberedRetained(
+  path: string,
+  retained: LockSample | "unreadable",
+  pid: number,
+  fileSystem: LockFileSystem,
+  keepEntry = false,
+): Steps<LockSample | "absent" | "unreadable"> {
+  if (typeof retained === "string") {
+    return retained;
+  }
+  const doomed = pendingBackOuts
+    .get(fileSystem)
+    ?.get(path)
+    ?.publications.find(
+      (known) =>
+        hasIdentity(known) &&
+        (sameSample(known, retained) ||
+          (known.raw === retained.raw && !hasProtectedPublication(path, known.raw, fileSystem))),
     );
-    // Leave the marker if even rename fails: it is the only copy of a possibly
-    // live owner's lock. Deleting it would silently free that held lock.
+  if (doomed === undefined || !hasIdentity(doomed)) {
+    return retained;
+  }
+  const name = `${path}.displaced`;
+  const removed = sameSample(doomed, retained)
+    ? (yield* removeInstance(path, name, doomed, pid, fileSystem)) === "removed"
+    : (yield* backOutBytesAtName(path, name, doomed.raw, pid, fileSystem, true)) === "removed";
+  if (!removed) {
+    return retained;
+  }
+  if (!keepEntry && !sameSample(doomed, retained)) {
+    forgetBackOuts(path, fileSystem, (known) => known === doomed);
+  }
+  // Identity removal from F keeps the entry for another name or private-marker restore.
+  return yield* sampleRetainedLock(name, fileSystem);
+}
+
+/** S3 (b): F carries exactly this call's bytes without identity proof and is judged reclaimable. */
+function isOwnBytesLeak(
+  retained: LockSample | "unreadable",
+  reclaimed: LockSample | undefined,
+  publishedContent: string,
+  options: ExclusiveLockOptions,
+): retained is LockSample {
+  return (
+    typeof retained !== "string" &&
+    retained.raw === publishedContent &&
+    !(reclaimed !== undefined && sameSample(retained, reclaimed)) &&
+    isReclaimable(retained, options)
+  );
+}
+
+/**
+ * S3 (b): the own-pid `reclaimOwnPid` leak. Without identity proof F may BE this publication
+ * (legacy wx, displaced and retained), so removing it must not by itself report "acquired":
+ * the owner removes F without the guard and holds only if P still reads its exact bytes.
+ */
+function* reclaimOwnBytesRetained(
+  path: string,
+  published: DoomedPublication,
+  pid: number,
+  fileSystem: LockFileSystem,
+): Steps<boolean> {
+  const removed = yield* removeOwnBytesRetained(path, published.raw, pid, fileSystem);
+  if ((yield* readText(path, fileSystem)) === published.raw) {
+    return true;
+  }
+  if (!removed) {
+    rememberBackOut(path, fileSystem, { raw: published.raw });
+  }
+  if (hasIdentity(published)) {
+    // The atomic publication is at neither name: a displacer may link it back later.
+    rememberBackOut(path, fileSystem, published);
+  }
+  return false;
+}
+
+function* removeOwnBytesRetained(
+  path: string,
+  raw: string,
+  pid: number,
+  fileSystem: LockFileSystem,
+): Steps<boolean> {
+  const marker = `${path}.${pid}.release.${++releaseMarkerCounter}`;
+  if (!(yield* claimReleasePath(`${path}.displaced`, marker, fileSystem))) {
+    return false;
+  }
+  if ((yield* readReleasePath(marker, fileSystem)) !== raw) {
+    yield* retainDisplacedLock(path, marker, fileSystem);
+    return false;
+  }
+  yield* unlinkBackOutMarker(path, marker, fileSystem);
+  return true;
+}
+
+function* reclaimRetainedLock(
+  path: string,
+  retained: LockSample | "unreadable",
+  options: ExclusiveLockOptions,
+  generation: string | undefined,
+  reclaimed: LockSample | undefined,
+): Steps<boolean> {
+  if (typeof retained !== "string") {
+    if (reclaimed !== undefined && sameSample(retained, reclaimed)) {
+      yield* removeRetainedInstance(path, reclaimed, options);
+      return true;
+    }
+    if (isReclaimable(retained, options)) {
+      const alreadyGuarded =
+        reclaimed !== undefined && guardPrefix(path, reclaimed) === guardPrefix(path, retained);
+      if (!alreadyGuarded) {
+        yield* reclaimRetainedInstance(path, retained, options, generation);
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+function* samplePublication(
+  tmp: string,
+  raw: string,
+  fileSystem: LockFileSystem,
+): Steps<LockSample | undefined> {
+  try {
+    yield { op: "stat", path: tmp };
+    return { ...fileSystem.stat(tmp), raw };
+  } catch (error) {
+    // Without proof of this inode, F may be an older genuine hold and must be preserved.
+    logger.debug(`Lock publication identity unavailable at ${tmp}: ${errorMessage(error)}`, error);
+    return undefined;
+  }
+}
+
+function* isRetainedPublication(
+  path: string,
+  retained: LockSample | "unreadable",
+  publishedContent: string,
+  fileSystem: LockFileSystem,
+  publication?: LockSample,
+): Steps<"other" | "older" | "same" | "absent" | "blocked"> {
+  if (typeof retained === "string" || retained.raw !== publishedContent) {
+    return "other";
+  }
+  if (!sameSample(publication, retained)) {
+    // Legacy wx has no identity proof: if displaced into F it reports false and stays
+    // live there until exit or release; without hard links COMPLETE cannot restore it either.
+    return (yield* readText(path, fileSystem)) === publishedContent ? "other" : "older";
+  }
+  try {
+    yield { op: "readText", path };
+    const raw = fileSystem.readText(path);
+    if (raw !== publishedContent) {
+      return "blocked";
+    }
+    yield { op: "stat", path };
+    return sameSample({ ...fileSystem.stat(path), raw }, retained) ? "same" : "blocked";
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      // F existed before this read: later publishers see live F and back out;
+      // any publication that completed before retention is still at P. ENOENT is exclusive.
+      logger.debug(`Own retained publication has no peer at ${path}: ${errorMessage(error)}`);
+      return "absent";
+    }
+    logger.warn(`Own retained publication cannot read ${path}: ${errorMessage(error)}`, error);
+    return "blocked";
+  }
+}
+
+function* completeRetainedLock(path: string, fileSystem: LockFileSystem): Steps<void> {
+  try {
+    yield { op: "link", path };
+    fileSystem.link(`${path}.displaced`, path);
+  } catch (error) {
+    // Occupation, owner release or unavailable links safely leave F authoritative.
+    logger.debug(`Retained lock completion skipped at ${path}: ${errorMessage(error)}`, error);
   }
 }
 
@@ -762,7 +1289,7 @@ function* removeStaleLockMarker(path: string, fileSystem: LockFileSystem): Steps
 }
 
 /**
- * Read the PID recorded in an exclusive lock file without attempting to
+ * Read the PID from P, falling back to its retained sibling when unreadable, without attempting to
  * acquire or reclaim it (issue #6260). Used by callers that need to name the
  * process currently holding a lease in an actionable error — e.g. "another
  * AutoMobile process (PID N) owns this resource" — rather than a bare
@@ -775,11 +1302,8 @@ export function readLockOwnerPid(
   ownerGeneration?: LockOwnerGenerationProbe,
   fileSystem: LockFileSystem = nodeLockFileSystem,
 ): number | undefined {
-  let content: string;
-  try {
-    content = fileSystem.readText(lockFilePath).trim();
-  } catch (error) {
-    logger.debug(`src/utils/fileLock.ts readLockOwnerPid: lock unreadable: ${error}`, error);
+  const content = finishLockSteps(readLockOrRetained(lockFilePath, fileSystem))?.trim();
+  if (content === undefined) {
     return undefined;
   }
   const { pid, generation } = parseLockContent(content);
@@ -797,18 +1321,23 @@ export function readLockOwnerPid(
 }
 
 /**
- * Read and parse an exclusive lock file without acquiring or reclaiming it.
+ * Read and parse P, falling back to its retained sibling only when P is unreadable.
  * Returns `undefined` when the file is missing, unreadable, or empty.
  */
 export function readExclusiveLockContent(
   lockFilePath: string,
   fileSystem: LockFileSystem = nodeLockFileSystem,
 ): LockContent | undefined {
-  const content = finishLockSteps(readText(lockFilePath, fileSystem))?.trim();
+  const content = finishLockSteps(readLockOrRetained(lockFilePath, fileSystem))?.trim();
   if (content === undefined || content.length === 0) {
     return undefined;
   }
   return parseLockContent(content);
+}
+
+function* readLockOrRetained(path: string, fileSystem: LockFileSystem): Steps<string | undefined> {
+  const content = yield* readText(path, fileSystem);
+  return content ?? (yield* readText(`${path}.displaced`, fileSystem));
 }
 
 /**
@@ -817,7 +1346,10 @@ export function readExclusiveLockContent(
  * its control socket is unreachable). The takeover only succeeds when the lock
  * still holds exactly the observed owner's PID and token. Removal is guarded by
  * the sampled file identity just like dead-owner reclaim. R2: a live owner's own
- * release racing takeover retains the residual window documented in release.
+ * release racing takeover retains the private-marker in-flight window below.
+ * A lock only at F cannot be taken over. A taker crashing after publication but
+ * before removing a live owner's linked F is undone by the next acquirer,
+ * which restores that owner's lock to P as if the takeover never happened.
  */
 export function takeOverExclusiveLock(
   lockFilePath: string,
@@ -841,7 +1373,26 @@ function* takeOverLockSteps(
   owner: Pick<LockContent, "pid" | "token">,
   options: ExclusiveLockOptions,
 ): Steps<boolean> {
-  const sample = yield* sampleLock(path, options.fileSystem ?? nodeLockFileSystem);
+  const attempt = { ...options, publications: new Set<string>() };
+  try {
+    return yield* takeOverAttemptSteps(path, owner, attempt);
+  } finally {
+    forgetInFlightPublications(
+      path,
+      options.fileSystem ?? nodeLockFileSystem,
+      attempt.publications,
+    );
+  }
+}
+
+function* takeOverAttemptSteps(
+  path: string,
+  owner: Pick<LockContent, "pid" | "token">,
+  options: LockAttemptOptions,
+): Steps<boolean> {
+  const fileSystem = options.fileSystem ?? nodeLockFileSystem;
+  yield* drainPendingBackOut(path, options.pid ?? process.pid, fileSystem);
+  const sample = yield* sampleLock(path, fileSystem);
   if (!sample) {
     return false;
   }
@@ -887,20 +1438,68 @@ export function* releaseExclusiveLockSteps(
   ownerToken?: string,
   fileSystem: LockFileSystem = nodeLockFileSystem,
 ): Steps<void> {
-  let content: string;
-  try {
-    yield { op: "readText", path: lockFilePath };
-    content = fileSystem.readText(lockFilePath).trim();
-  } catch (error) {
-    // Lock file is already gone (released concurrently, or never existed); there is
-    // nothing left to release, so returning is a no-op, not a failure.
-    logger.debug(`src/utils/fileLock.ts fallback failed: ${error}`, error);
-    return;
+  yield* drainPendingBackOut(lockFilePath, pid, fileSystem);
+  const retainedGone = yield* releaseRetainedLock(lockFilePath, pid, ownerToken, fileSystem);
+  const pathGone = yield* releaseLockPath(lockFilePath, pid, ownerToken, fileSystem);
+  if (retainedGone && pathGone) {
+    forgetGenuineHolds(lockFilePath, fileSystem, (raw) =>
+      isOwnLockContent(parseLockContent(raw.trim()), pid, ownerToken),
+    );
+  }
+}
+
+function* releaseRetainedLock(
+  path: string,
+  pid: number,
+  ownerToken: string | undefined,
+  fileSystem: LockFileSystem,
+): Steps<boolean> {
+  const retained = `${path}.displaced`;
+  const read = yield* readReleaseResult(retained, fileSystem);
+  if (read === "missing") {
+    return true;
+  }
+  const raw = typeof read === "string" ? undefined : read.value;
+  if (raw === undefined || !isOwnLockContent(parseLockContent(raw.trim()), pid, ownerToken)) {
+    return false;
+  }
+  const marker = `${path}.${pid}.release.${++releaseMarkerCounter}`;
+  if (!(yield* claimReleasePath(retained, marker, fileSystem))) {
+    return false;
+  }
+  const claimed = yield* readReleasePath(marker, fileSystem);
+  if (
+    claimed === undefined ||
+    !isOwnLockContent(parseLockContent(claimed.trim()), pid, ownerToken)
+  ) {
+    yield* retainDisplacedLock(path, marker, fileSystem);
+    return false;
+  }
+  yield* forgetClaimedBackOut(path, marker, claimed, fileSystem);
+  if (yield* unlinkReleasedMarker(path, marker, fileSystem)) {
+    forgetGenuineHolds(path, fileSystem, (raw) => raw === claimed);
+  }
+  return false;
+}
+
+function* releaseLockPath(
+  lockFilePath: string,
+  pid: number,
+  ownerToken: string | undefined,
+  fileSystem: LockFileSystem,
+): Steps<boolean> {
+  const read = yield* readReleaseResult(lockFilePath, fileSystem);
+  if (read === "missing") {
+    return true;
+  }
+  const content = typeof read === "string" ? undefined : read.value;
+  if (content === undefined) {
+    return false;
   }
 
-  if (!isOwnLockContent(parseLockContent(content), pid, ownerToken)) {
+  if (!isOwnLockContent(parseLockContent(content.trim()), pid, ownerToken)) {
     // The lock is no longer ours — do not delete another opener's file.
-    return;
+    return false;
   }
 
   // A live owner's lock can now be taken over (#10497), so the read above may
@@ -908,48 +1507,413 @@ export function* releaseExclusiveLockSteps(
   // unlink-by-path, which would delete the TAKER's lock. Claim the exact file
   // instance by renaming it to a unique marker, verify the marker is ours, and
   // only then delete it; a displaced foreign lock is restored instead.
-  // POSIX has no compare-and-unlink, so a residual window remains: a releaser
-  // whose read predates a completed takeover can rename the taker's lock away
-  // and a third fresh acquirer can win before the restore. Forwarding-lease
-  // owners that answer their socket therefore release on request instead of
-  // being taken over (#10506 review); only an unreachable or orphaned owner is
-  // taken over while live.
+  // R2 is the private-marker in-flight window described at restoreDisplacedLock.
   const releaseMarker = `${lockFilePath}.${pid}.release.${++releaseMarkerCounter}`;
-  try {
-    yield { op: "rename", path: lockFilePath };
-    fileSystem.rename(lockFilePath, releaseMarker);
-  } catch (error) {
-    // Already gone (released or taken over and removed); nothing of ours remains.
-    logger.debug(`src/utils/fileLock.ts: release rename found no lock: ${error}`);
-    return;
+  if (!(yield* claimReleasePath(lockFilePath, releaseMarker, fileSystem))) {
+    return false;
   }
-  let claimed: LockContent | undefined;
-  try {
-    yield { op: "readText", path: releaseMarker };
-    claimed = parseLockContent(fileSystem.readText(releaseMarker).trim());
-  } catch (error) {
-    logger.warn(`src/utils/fileLock.ts: release marker unreadable at ${releaseMarker}: ${error}`);
-  }
-  if (claimed === undefined || !isOwnLockContent(claimed, pid, ownerToken)) {
+  const claimed = yield* readReleasePath(releaseMarker, fileSystem);
+  if (
+    claimed === undefined ||
+    !isOwnLockContent(parseLockContent(claimed.trim()), pid, ownerToken)
+  ) {
     yield* restoreDisplacedLock(lockFilePath, releaseMarker, fileSystem);
-    return;
+    return false;
   }
+  yield* forgetClaimedBackOut(lockFilePath, releaseMarker, claimed, fileSystem);
+  if (yield* unlinkReleasedMarker(lockFilePath, releaseMarker, fileSystem)) {
+    forgetGenuineHolds(lockFilePath, fileSystem, (raw) => raw === claimed);
+  }
+  return false;
+}
+
+function* unlinkReleasedMarker(
+  lockFilePath: string,
+  releaseMarker: string,
+  fileSystem: LockFileSystem,
+): Steps<boolean> {
+  const result = yield* retryLockStep({ op: "unlink", path: releaseMarker }, () =>
+    fileSystem.unlink(releaseMarker),
+  );
+  if (result !== "failed") {
+    return true;
+  }
+  logger.warn(`Failed to release exclusive lock at ${lockFilePath}; marker unlink exhausted`);
+  // Linking restores an unreleased lock without clobbering a concurrent publication.
   try {
-    yield { op: "unlink", path: releaseMarker };
-    fileSystem.unlink(releaseMarker);
+    yield { op: "link", path: lockFilePath };
+    fileSystem.link(releaseMarker, lockFilePath);
   } catch (error) {
     logger.warn(
-      `src/utils/fileLock.ts: failed to release exclusive lock at ${lockFilePath}: ${errorMessage(error)}`,
+      `Could not restore unreleased lock at ${lockFilePath}: ${errorMessage(error)}`,
+      error,
     );
-    // The lock could not be deleted, so put it back rather than strand it under
-    // the marker name; linking never clobbers a lock someone took meanwhile.
-    try {
-      yield { op: "link", path: lockFilePath };
-      fileSystem.link(releaseMarker, lockFilePath);
-    } catch (restoreError) {
-      logger.warn(`src/utils/fileLock.ts: could not restore unreleased lock: ${restoreError}`);
+  }
+  return false;
+}
+
+function hasIdentity(publication: DoomedPublication): publication is LockSample {
+  return publication.ino !== undefined && publication.mtimeMs !== undefined;
+}
+
+// Bounded like ownTmpSweeps: oldest paths/publications/markers are evicted, and separate fs objects never share state.
+function rememberBackOut(
+  path: string,
+  fileSystem: LockFileSystem,
+  publication?: DoomedPublication,
+  marker?: string,
+): void {
+  let paths = pendingBackOuts.get(fileSystem);
+  if (!paths) {
+    paths = new Map();
+    pendingBackOuts.set(fileSystem, paths);
+  }
+  let pending = paths.get(path);
+  if (!pending) {
+    pending = { publications: [], markers: new Set() };
+    paths.set(path, pending);
+  }
+  const { publications, markers } = pending;
+  // A SET per path: two openers of one process may strand different publications.
+  if (publication && !publications.some((known) => isSamePublication(known, publication))) {
+    publications.push(publication);
+  }
+  if (publications.length > PENDING_PUBLICATION_LIMIT) {
+    publications.shift();
+  }
+  if (marker) {
+    markers.add(marker);
+  }
+  if (markers.size > 8) {
+    markers.delete(markers.values().next().value!);
+  }
+  if (paths.size > 64) {
+    paths.delete(paths.keys().next().value!);
+  }
+}
+
+function isSamePublication(left: DoomedPublication, right: DoomedPublication): boolean {
+  return left.raw === right.raw && left.ino === right.ino && left.mtimeMs === right.mtimeMs;
+}
+
+function forgetBackOuts(
+  path: string,
+  fileSystem: LockFileSystem,
+  forget: (publication: DoomedPublication) => boolean,
+): void {
+  const paths = pendingBackOuts.get(fileSystem);
+  const pending = paths?.get(path);
+  if (!pending) {
+    return;
+  }
+  pending.publications = pending.publications.filter((publication) => !forget(publication));
+  if (!pending.publications.length && !pending.markers.size) {
+    paths?.delete(path);
+  }
+}
+
+/**
+ * Runs first in every lock call for the path. An identity entry costs `stat(P)` and at most one
+ * byte check of P when identity differs per call
+ * until it leaves by verified removal or eviction: a doomed publication that was not found may sit
+ * in a displacer's private marker and be linked back at any later time, including after this
+ * process acquired and released a genuine lock with identical bytes.
+ */
+function* drainPendingBackOut(path: string, pid: number, fileSystem: LockFileSystem): Steps<void> {
+  const pending = pendingBackOuts.get(fileSystem)?.get(path);
+  if (!pending) {
+    return; // Zero fs operations on the ordinary path.
+  }
+  for (const marker of [...pending.markers]) {
+    pending.markers.delete(marker);
+    yield* unlinkBackOutMarker(path, marker, fileSystem);
+  }
+  for (const publication of [...pending.publications]) {
+    if (yield* drainDoomedPublication(path, publication, pid, fileSystem)) {
+      forgetBackOuts(path, fileSystem, (known) => known === publication);
     }
   }
+  forgetBackOuts(path, fileSystem, () => false);
+  // A process that never calls this path's lock API again leaves P until it exits,
+  // just like any live-pid lock; other processes cannot distinguish the non-holder.
+}
+
+/** True when the entry is done: its publication was verifiably removed. */
+function* drainDoomedPublication(
+  path: string,
+  publication: DoomedPublication,
+  pid: number,
+  fileSystem: LockFileSystem,
+): Steps<boolean> {
+  if (!hasIdentity(publication)) {
+    // Open residual (no hard links): bytes alone cannot tell this doomed publication from a
+    // later genuine one, so a raw-only entry is cleared when this process acquires P with the
+    // same bytes; a displacer linking the doomed copy back after that is not drained.
+    if (hasInFlightPublication(path, publication.raw, fileSystem)) {
+      return false;
+    }
+    return (yield* backOutAttempt(path, publication.raw, pid, fileSystem, true)) === "removed";
+  }
+  const current = yield* samplePublication(path, publication.raw, fileSystem);
+  if (!sameSample(current, publication)) {
+    if (current === undefined) {
+      return false;
+    }
+    return yield* removeDoomedCopy(path, path, publication.raw, pid, fileSystem);
+  }
+  // F first: a retained copy of this instance could otherwise be linked onto P again.
+  const retained = yield* removeInstance(path, `${path}.displaced`, publication, pid, fileSystem);
+  const linked = yield* removeInstance(path, path, publication, pid, fileSystem);
+  return linked === "removed" && retained !== "unverified";
+}
+
+/** Production serializes lock calls synchronously; the in-flight guard also protects interleaved
+ * harness publishers. Bytes identify a doomed copy only without a genuine hold (#2947 reopen). */
+function* removeDoomedCopy(
+  path: string,
+  name: string,
+  raw: string,
+  pid: number,
+  fileSystem: LockFileSystem,
+): Steps<boolean> {
+  if (
+    hasProtectedPublication(path, raw, fileSystem) ||
+    (yield* readText(name, fileSystem)) !== raw
+  ) {
+    return false;
+  }
+  const retained = yield* sampleRetainedLock(`${path}.displaced`, fileSystem);
+  const remaining =
+    retained === "absent"
+      ? retained
+      : yield* removeRememberedRetained(path, retained, pid, fileSystem, true);
+  // A successful byte removal ends the entry. A later private-marker restore is the R2 residual.
+  const removed = (yield* backOutBytesAtName(path, name, raw, pid, fileSystem, true)) === "removed";
+  return removed && remaining !== "unreadable" && (remaining === "absent" || remaining.raw !== raw);
+}
+
+/**
+ * Remove one public name (P or F) of a doomed publication by identity: sample, claim to a private
+ * marker, verify the marker is that same instance, unlink it. A foreign instance is put back.
+ */
+function* removeInstance(
+  path: string,
+  name: string,
+  publication: LockSample,
+  pid: number,
+  fileSystem: LockFileSystem,
+): Steps<"removed" | "elsewhere" | "unverified"> {
+  if (!sameSample(yield* samplePublication(name, publication.raw, fileSystem), publication)) {
+    return "elsewhere";
+  }
+  if ((yield* readText(name, fileSystem)) !== publication.raw) {
+    return "unverified";
+  }
+  const marker = `${path}.${pid}.release.${++releaseMarkerCounter}`;
+  if (!(yield* claimReleasePath(name, marker, fileSystem))) {
+    return "unverified";
+  }
+  if (!sameSample(yield* sampleLock(marker, fileSystem), publication)) {
+    if (name === path) {
+      yield* restoreDisplacedLock(path, marker, fileSystem);
+    } else {
+      yield* retainDisplacedLock(path, marker, fileSystem);
+    }
+    return "unverified";
+  }
+  yield* unlinkBackOutMarker(path, marker, fileSystem);
+  return "removed";
+}
+
+/** A release that claimed an instance equal to a remembered identity ends that entry. */
+function* forgetClaimedBackOut(
+  path: string,
+  marker: string,
+  raw: string,
+  fileSystem: LockFileSystem,
+): Steps<void> {
+  const known = pendingBackOuts.get(fileSystem)?.get(path)?.publications;
+  if (!known?.some((publication) => hasIdentity(publication) && publication.raw === raw)) {
+    return; // Zero fs operations unless this process has such an entry.
+  }
+  const claimed = yield* samplePublication(marker, raw, fileSystem);
+  forgetBackOuts(path, fileSystem, (publication) => sameSample(claimed, toSample(publication)));
+}
+
+function toSample(publication: DoomedPublication): LockSample {
+  return { raw: publication.raw, ino: publication.ino ?? NaN, mtimeMs: publication.mtimeMs ?? NaN };
+}
+
+/**
+ * This process's acquire for P returned true. Its bytes are now legitimately at P, so a raw-only
+ * entry with those bytes must never drain again. An identity entry stays (acquire, takeover and
+ * release do not clear it) unless the filesystem reused that inode for this very publication.
+ */
+function* settleAcquiredBackOuts(
+  path: string,
+  content: string,
+  fileSystem: LockFileSystem,
+  publicationName: string,
+): Steps<void> {
+  rememberGenuineHold(path, content, fileSystem);
+  const known = pendingBackOuts.get(fileSystem)?.get(path)?.publications ?? [];
+  const candidates = known.filter((publication) => publication.raw === content);
+  if (!candidates.length) {
+    return; // Zero fs operations unless this process has a pending entry for these bytes.
+  }
+  const acquired = candidates.some(hasIdentity)
+    ? yield* samplePublication(publicationName, content, fileSystem)
+    : undefined;
+  forgetBackOuts(
+    path,
+    fileSystem,
+    (publication) =>
+      candidates.includes(publication) &&
+      (!hasIdentity(publication) || sameSample(acquired, publication)),
+  );
+}
+
+// Immediate retries share the back-out/release seam; ENOENT needs no retry or warning.
+function* retryLockStep<T>(
+  step: LockStep,
+  operation: () => T,
+): Steps<{ value: T } | "missing" | "failed"> {
+  for (let attempt = 0; attempt < BACK_OUT_RETRY_LIMIT; attempt++) {
+    try {
+      yield step;
+      return { value: operation() };
+    } catch (error) {
+      // Missing is complete; other failures may be transient and are reported by the caller if exhausted.
+      logger.debug(`Lock ${step.op} attempt failed at ${step.path}: ${errorMessage(error)}`, error);
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return "missing";
+      }
+    }
+  }
+  return "failed";
+}
+
+function* readReleaseResult(path: string, fileSystem: LockFileSystem) {
+  const result = yield* retryLockStep({ op: "readText", path }, () => fileSystem.readText(path));
+  if (result === "failed") {
+    logger.warn(`Lock release read failed at ${path}; lock left in place`, result);
+  }
+  return result;
+}
+
+function* readReleasePath(path: string, fileSystem: LockFileSystem): Steps<string | undefined> {
+  const result = yield* readReleaseResult(path, fileSystem);
+  return typeof result === "string" ? undefined : result.value;
+}
+
+function* claimReleasePath(
+  path: string,
+  marker: string,
+  fileSystem: LockFileSystem,
+): Steps<boolean> {
+  const result = yield* retryLockStep({ op: "rename", path }, () =>
+    fileSystem.rename(path, marker),
+  );
+  if (result === "failed") {
+    logger.warn(`Lock release claim failed at ${path}; lock left in place`, result);
+  }
+  return typeof result !== "string";
+}
+
+function* backOutLockPath(
+  path: string,
+  publication: DoomedPublication,
+  pid: number,
+  fileSystem: LockFileSystem,
+): Steps<void> {
+  const outcome = yield* backOutAttempt(path, publication.raw, pid, fileSystem);
+  if (outcome === "removed") {
+    return;
+  }
+  // S2: a back-out is complete only when it claimed and removed its own publication. Anything
+  // else leaves that publication possibly in a displacer's private marker, to be linked back.
+  rememberBackOut(path, fileSystem, publication);
+  if (outcome === "failed") {
+    logger.warn(`Lock back-out failed at ${path}; cleanup pending in this process`);
+  } else {
+    logger.debug(`Lock back-out did not find its publication at ${path}; removal pending`);
+  }
+}
+
+function* backOutAttempt(
+  path: string,
+  raw: string,
+  pid: number,
+  fileSystem: LockFileSystem,
+  protectGenuine = false,
+): Steps<"removed" | "unfound" | "failed"> {
+  const read = yield* retryLockStep({ op: "readText", path }, () => fileSystem.readText(path));
+  if (typeof read === "string") {
+    return read === "missing" ? "unfound" : "failed";
+  }
+  if (read.value !== raw) {
+    return "unfound";
+  }
+  return yield* backOutBytesAtName(path, path, raw, pid, fileSystem, protectGenuine);
+}
+
+function* backOutBytesAtName(
+  path: string,
+  name: string,
+  raw: string,
+  pid: number,
+  fileSystem: LockFileSystem,
+  protectGenuine = false,
+): Steps<"removed" | "unfound" | "failed"> {
+  const marker = `${path}.${pid}.release.${++releaseMarkerCounter}`;
+  const claim = yield* retryLockStep({ op: "rename", path: name }, () => {
+    if (protectGenuine && hasProtectedPublication(path, raw, fileSystem)) {
+      return false;
+    }
+    fileSystem.rename(name, marker);
+    return true;
+  });
+  if (typeof claim === "string") {
+    return claim === "missing" ? "unfound" : "failed";
+  }
+  if (!claim.value) {
+    return "unfound";
+  }
+  const claimed = yield* retryLockStep({ op: "readText", path: marker }, () =>
+    fileSystem.readText(marker),
+  );
+  if (
+    typeof claimed === "string" ||
+    claimed.value !== raw ||
+    (protectGenuine && hasProtectedPublication(path, raw, fileSystem))
+  ) {
+    // Foreign or unknown claimed bytes are restored; this publication was not removed.
+    if (name === path) {
+      yield* restoreDisplacedLock(path, marker, fileSystem);
+    } else {
+      yield* retainDisplacedLock(path, marker, fileSystem);
+    }
+    return claimed === "failed" ? "failed" : "unfound";
+  }
+  yield* unlinkBackOutMarker(path, marker, fileSystem);
+  return "removed";
+}
+
+function* unlinkBackOutMarker(
+  path: string,
+  marker: string,
+  fileSystem: LockFileSystem,
+): Steps<void> {
+  const result = yield* retryLockStep({ op: "unlink", path: marker }, () =>
+    fileSystem.unlink(marker),
+  );
+  if (result !== "failed") {
+    return;
+  }
+  rememberBackOut(path, fileSystem, undefined, marker);
+  logger.warn(`Lock back-out marker cleanup failed at ${path}; cleanup pending in this process`);
+  // Never sweep .release.<n> markers: after a process exits, one may be the only
+  // copy of a displaced live owner's lock. Only this process remembers doomed markers.
 }
 
 let releaseMarkerCounter = 0;
@@ -978,26 +1942,32 @@ function* publishFile(
   pid: number,
   fileSystem: LockFileSystem,
   idGenerator: IdGenerator = defaultIdGenerator,
+  postPublish?: (tmp: string) => Steps<void>,
 ): Steps<Publication> {
   const tmp = `${path}.${pid}.${++publicationCounter}.${idGenerator.next()}.tmp`;
   let linking = false;
   try {
-    // A recycled name may still alias a live lock inode; unlink before exclusive create.
-    yield* cleanupFile(tmp, fileSystem);
-    yield { op: "writeFile", path: tmp };
-    fileSystem.writeFile(tmp, content);
-    yield { op: "link", path };
-    linking = true;
-    fileSystem.link(tmp, path);
-    return "created";
-  } catch (error) {
-    if (linking && (error as NodeJS.ErrnoException).code === "EEXIST") {
-      // Exclusive link contention is expected and never overwrites an owner.
-      logger.debug(`Lock publication contended at ${path}: ${errorMessage(error)}`);
-      return "contended";
+    try {
+      // A recycled name may still alias a live lock inode; unlink before exclusive create.
+      yield* cleanupFile(tmp, fileSystem);
+      yield { op: "writeFile", path: tmp };
+      fileSystem.writeFile(tmp, content);
+      yield { op: "link", path };
+      linking = true;
+      fileSystem.link(tmp, path);
+    } catch (error) {
+      if (linking && (error as NodeJS.ErrnoException).code === "EEXIST") {
+        // Exclusive link contention is expected and never overwrites an owner.
+        logger.debug(`Lock publication contended at ${path}: ${errorMessage(error)}`);
+        return "contended";
+      }
+      logger.warn(`Atomic lock publication failed at ${path}: ${errorMessage(error)}`, error);
+      return { error };
     }
-    logger.warn(`Atomic lock publication failed at ${path}: ${errorMessage(error)}`, error);
-    return { error };
+    if (postPublish) {
+      yield* postPublish(tmp);
+    }
+    return "created";
   } finally {
     yield* cleanupFile(tmp, fileSystem);
   }
@@ -1006,9 +1976,10 @@ function* publishFile(
 function* writeExclusiveLockFile(
   path: string,
   pid: number,
-  options: ExclusiveLockOptions,
+  options: LockAttemptOptions,
   sweep = true,
-): Steps<{ acquired: boolean; generation: string | undefined; swept: boolean }> {
+  reclaimed?: LockSample,
+): Steps<{ acquired: boolean; generation: string | undefined; swept: boolean; blocked?: boolean }> {
   const fileSystem = options.fileSystem ?? nodeLockFileSystem;
   try {
     yield { op: "mkdir", path: dirname(path) };
@@ -1030,18 +2001,55 @@ function* writeExclusiveLockFile(
   try {
     const generation = captureLockOwnerGeneration(options.ownerGeneration, pid);
     const content = formatLockContent(pid, options.ownerToken, options.metadata, generation);
-    const publication = yield* publishFile(path, content, pid, fileSystem, options.idGenerator);
-    if (typeof publication === "string") {
-      return { acquired: publication === "created", generation, swept: sweep };
+    yield* drainRetainedBeforePublication(path, pid, fileSystem);
+    rememberInFlightPublication(path, content, fileSystem, options.publications);
+    let acquired = false;
+    const publication = yield* publishFile(
+      path,
+      content,
+      pid,
+      fileSystem,
+      options.idGenerator,
+      function* (tmp): Steps<void> {
+        acquired = yield* checkRetainedLock(path, options, generation, reclaimed, content, tmp);
+        if (acquired) {
+          yield* settleAcquiredBackOuts(path, content, fileSystem, tmp);
+        }
+      },
+    );
+    const published =
+      typeof publication === "string"
+        ? publication === "created"
+        : yield* writeLegacyLock(path, content, fileSystem);
+    if (!published) {
+      return { acquired: false, generation, swept: sweep };
     }
-    return {
-      acquired: yield* writeLegacyLock(path, content, fileSystem),
-      generation,
-      swept: sweep,
-    };
+    if (typeof publication !== "string") {
+      acquired = yield* checkRetainedLock(path, options, generation, reclaimed, content);
+      if (acquired) {
+        yield* settleAcquiredBackOuts(path, content, fileSystem, path);
+      }
+    }
+    return { acquired, generation, swept: sweep, blocked: !acquired };
   } catch (error) {
     // Genuine IO failures are not contention (#3623).
     throw toActionableError(error, `Failed to create exclusive lock file at ${path}`);
+  }
+}
+
+function* drainRetainedBeforePublication(
+  path: string,
+  pid: number,
+  fileSystem: LockFileSystem,
+): Steps<void> {
+  const known = pendingBackOuts.get(fileSystem)?.get(path)?.publications;
+  if (!known?.some(hasIdentity)) {
+    return;
+  }
+  // Drain F before publishing identical bytes; the new in-flight publication must stay protected.
+  const retained = yield* sampleRetainedLock(`${path}.displaced`, fileSystem);
+  if (retained !== "absent") {
+    yield* removeRememberedRetained(path, retained, pid, fileSystem);
   }
 }
 

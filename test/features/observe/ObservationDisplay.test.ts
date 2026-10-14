@@ -1,3 +1,5 @@
+import { parseAndroidDeviceDisplays } from "../../../src/utils/android-cmdline-tools/AndroidDisplayInventory";
+import { panelKeyForFingerprint } from "../../../src/models/DisplayPanel";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   AndroidDisplayReadError,
@@ -727,4 +729,210 @@ describe("observation display stamp", () => {
       posture: "opened",
     });
   });
+});
+
+const fingerprintInventory = parseAndroidDeviceDisplays(
+  readFileSync(
+    new URL(
+      "../../fixtures/android-display/fold-pixel10pf-api36/fold-open-surfaceflinger.txt",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+  readFileSync(
+    new URL(
+      "../../fixtures/android-display/fold-pixel10pf-api36/fold-open-displays.txt",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+  readFileSync(
+    new URL(
+      "../../fixtures/android-display/fold-pixel10pf-api36/fold-print-states.txt",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+)!;
+
+describe("panel fingerprint routing", () => {
+  const fold = { ...android, deviceId: "fingerprint-routing", displays: fingerprintInventory };
+  const coverSize = { width: 1080, height: 2364 };
+  test("resolves a native cover size without probing and gives unique id precedence", async () => {
+    const cache = new ObservedAndroidDisplayCache(new FakeTimer());
+    const adb = new FakeAdbExecutor();
+    const cover = await cache.panelForLogicalId(
+      fold,
+      adb,
+      0,
+      undefined,
+      { panelFingerprint: coverSize },
+      false,
+    );
+    expect(cover?.key).toBe("4619827551948147201");
+    const inner = await cache.panelForLogicalId(
+      fold,
+      adb,
+      0,
+      undefined,
+      { panelUniqueId: "local:4619827259835644672", panelFingerprint: coverSize },
+      false,
+    );
+    expect(inner?.key).toBe("4619827259835644672");
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
+  const displayList = readFileSync(
+    new URL("../../fixtures/android-fold-displays/fold-open-get-displays.txt", import.meta.url),
+    "utf8",
+  );
+  test("unresolved fingerprints preserve both the cached map and probe fallback", async () => {
+    const cache = new ObservedAndroidDisplayCache(new FakeTimer());
+    let index = 0;
+    for (const panels of [
+      fingerprintInventory.panels,
+      [],
+      undefined,
+      fingerprintInventory.panels.map((p) => ({ ...p, sizePx: coverSize })),
+    ]) {
+      for (const size of [
+        coverSize,
+        { width: 2364, height: 1080 },
+        { width: 1920, height: 1080 },
+      ]) {
+        if (panels === fingerprintInventory.panels && size === coverSize) {
+          continue;
+        }
+        const candidate = {
+          ...fold,
+          deviceId: `fingerprint-fallback-${index++}`,
+          displays: panels ? { ...fingerprintInventory, panels } : undefined,
+        };
+        const adb = new FakeAdbExecutor();
+        adb.setCommandResponse("cmd display get-displays", { stdout: displayList, stderr: "" });
+        try {
+          expect(
+            await cache.panelForLogicalId(
+              candidate,
+              adb,
+              0,
+              undefined,
+              { panelFingerprint: size },
+              false,
+            ),
+          ).toBeUndefined();
+          expect(adb.getExecutedCommands()).toEqual([]);
+          const expected = panels?.find((p) => p.key === "4619827259835644672");
+          expect(
+            await cache.panelForLogicalId(candidate, adb, 0, undefined, { panelFingerprint: size }),
+          ).toEqual(expected);
+          expect(adb.getExecutedCommands()).toHaveLength(1);
+          await cache.resolve(candidate, adb);
+          const reads = adb.getExecutedCommands().length;
+          expect(
+            await cache.panelForLogicalId(
+              candidate,
+              adb,
+              0,
+              undefined,
+              { panelFingerprint: size },
+              false,
+            ),
+          ).toEqual(expected);
+          expect(adb.getExecutedCommands()).toHaveLength(reads);
+        } finally {
+          ObservedAndroidDisplayCache.release(candidate.deviceId);
+        }
+      }
+    }
+  });
+});
+
+const closedFingerprintInventory = parseAndroidDeviceDisplays(
+  readFileSync(
+    new URL(
+      "../../fixtures/android-display/fold-pixel10pf-api36/fold-closed-surfaceflinger.txt",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+  readFileSync(
+    new URL(
+      "../../fixtures/android-display/fold-pixel10pf-api36/fold-closed-displays.txt",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+  readFileSync(
+    new URL(
+      "../../fixtures/android-display/fold-pixel10pf-api36/fold-print-states.txt",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+)!;
+
+test("exact fingerprint matching rejects ambiguous, missing, swapped and external sizes", () => {
+  const size = { width: 1080, height: 2364 };
+  for (const inventory of [fingerprintInventory, closedFingerprintInventory]) {
+    expect(panelKeyForFingerprint(inventory.panels, size)).toBe("4619827551948147201");
+    expect(panelKeyForFingerprint(inventory.panels, { width: 2076, height: 2152 })).toBe(
+      "4619827259835644672",
+    );
+  }
+  for (const panels of [
+    undefined,
+    [],
+    fingerprintInventory.panels.map((p) => ({ ...p, sizePx: size })),
+  ]) {
+    expect(panelKeyForFingerprint(panels, size)).toBeUndefined();
+  }
+  expect(
+    panelKeyForFingerprint(fingerprintInventory.panels, { width: 2364, height: 1080 }),
+  ).toBeUndefined();
+  expect(
+    panelKeyForFingerprint(fingerprintInventory.panels, { width: 1920, height: 1080 }),
+  ).toBeUndefined();
+  expect(panelKeyForFingerprint(fingerprintInventory.panels, undefined)).toBeUndefined();
+});
+
+test("both CtrlProxy hierarchy conversion routes retain the top-level fingerprint", () => {
+  const converter = new CtrlProxyHierarchy({ timer: new FakeTimer() } as HierarchyDelegateContext);
+  for (const hierarchy of [undefined, { className: "android.view.View", children: [] }]) {
+    const wire: AccessibilityHierarchy = {
+      updatedAt: 1,
+      packageName: "example",
+      hierarchy,
+      displayId: 4,
+      panelFingerprint: { width: 1080, height: 2364 },
+    };
+    expect(converter.convertToViewHierarchyResult(wire).panelFingerprint).toEqual(
+      wire.panelFingerprint,
+    );
+  }
+});
+
+test("both CtrlProxy hierarchy conversion routes drop malformed fingerprints", () => {
+  const converter = new CtrlProxyHierarchy({ timer: new FakeTimer() } as HierarchyDelegateContext);
+  for (const hierarchy of [undefined, { className: "android.view.View", children: [] }]) {
+    for (const panelFingerprint of [
+      null,
+      "1080x2364",
+      { width: "1080", height: 2364 },
+      { width: 1080, height: "2364" },
+      { width: 0, height: 2364 },
+      { width: 1080, height: 0 },
+      { width: -1, height: 2364 },
+      { width: 1080, height: -1 },
+      { width: 1080.5, height: 2364 },
+      { width: 1080, height: 2364.5 },
+      { width: 1080 },
+      { height: 2364 },
+    ]) {
+      const wire: AccessibilityHierarchy = { updatedAt: 1, packageName: "example", hierarchy };
+      // Object.assign models malformed wire data outside the typed producer contract.
+      Object.assign(wire, { panelFingerprint });
+      expect(converter.convertToViewHierarchyResult(wire).panelFingerprint).toBeUndefined();
+    }
+  }
 });

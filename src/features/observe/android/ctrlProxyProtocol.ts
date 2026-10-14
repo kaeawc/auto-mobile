@@ -1000,6 +1000,8 @@ export const PROTOTYPE_IDENTIFIER_TEST_TAG_ONLY_CAPABILITY =
   "prototype_identifier_test_tag_only_v1";
 export const PROTOTYPE_BOTTOM_SHEET_DRAG_CAPABILITY = "prototype_bottom_sheet_drag_v1";
 export const PROTOTYPE_ICON_SET_MATERIAL_CAPABILITY = "prototype_icon_set_material_v1";
+/** iOS draws the canonical SF Symbols table and available filled/outlined icon forms. */
+export const PROTOTYPE_ICON_SF_SYMBOLS_CAPABILITY = "prototype_icon_sf_symbols_v1";
 export const PROTOTYPE_ICON_VARIANT_CAPABILITY = "prototype_icon_variant_v1";
 
 /**

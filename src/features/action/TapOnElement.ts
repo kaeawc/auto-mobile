@@ -2778,7 +2778,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       this.adb,
       captured.displayId,
       signal,
-      captured.panelUniqueId,
+      { panelUniqueId: captured.panelUniqueId, panelFingerprint: captured.panelFingerprint },
       false,
     );
     const resolved = await displayCache.resolve(this.device, this.adb, signal);

@@ -1,7 +1,9 @@
+import iconSymbols from "../../../schemas/prototype-ios-icon-symbols.json";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
   PROTOTYPE_BOTTOM_SHEET_DRAG_CAPABILITY,
   PROTOTYPE_ICON_SET_MATERIAL_CAPABILITY,
+  PROTOTYPE_ICON_SF_SYMBOLS_CAPABILITY,
   PROTOTYPE_ICON_VARIANT_CAPABILITY,
   PROTOTYPE_IDENTIFIER_TEST_TAG_ONLY_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
@@ -28,7 +30,7 @@ export interface PrototypePlatformNote {
   detail: string;
 }
 
-/** Mirrors PrototypeRenderer.swift's sfSymbols table; the source equality test pins this set. */
+/** Frozen legacy set for agents without prototype_icon_sf_symbols_v1; no longer mirrored from Swift. */
 export const IOS_PROTOTYPE_MAPPED_ICON_NAMES: ReadonlySet<string> = new Set([
   "home",
   "search",
@@ -143,7 +145,7 @@ export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly PlatformDifference[] = [
     effect: "substituted",
     capability: PROTOTYPE_ICON_SET_MATERIAL_CAPABILITY,
     detail:
-      "iOS draws a placeholder symbol for unmapped built-in icon names; Android draws the Material icon.",
+      "This iOS agent lacks prototype_icon_sf_symbols_v1 and draws a placeholder for names outside its legacy mapping; relaunch with a current agent. Android draws the Material icon.",
     occurrencePath: ({ icon, path }) =>
       icon !== undefined && !IOS_PROTOTYPE_MAPPED_ICON_NAMES.has(icon) ? path : undefined,
   },
@@ -153,11 +155,54 @@ export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly PlatformDifference[] = [
     effect: "ignored",
     capability: PROTOTYPE_ICON_VARIANT_CAPABILITY,
     detail:
-      "iOS draws its one SF Symbol for the name regardless of variant; Android draws the requested Material style.",
+      "This iOS agent lacks prototype_icon_sf_symbols_v1 and ignores icon variants; relaunch with a current agent. Android draws the requested Material style.",
     occurrencePath: ({ node, path }) =>
       node?.type === "icon" && node.variant !== undefined ? `${path}.variant` : undefined,
   },
 ];
+
+const mappedSymbols: Readonly<
+  Record<string, { symbol: string; filled?: string; outlined?: string }>
+> = iconSymbols.mapped;
+
+function sfSymbolDifference(difference: PlatformDifference): PlatformDifference {
+  if (difference.construct === "icon.name") {
+    return {
+      ...difference,
+      detail:
+        "iOS draws SF Symbols; these names have no SF Symbol equivalent, so a placeholder symbol is drawn.",
+      occurrencePath: ({ icon, path }) =>
+        icon !== undefined && !Object.hasOwn(mappedSymbols, icon) ? path : undefined,
+    };
+  }
+  if (difference.construct === "icon.variant") {
+    return {
+      ...difference,
+      effect: "substituted",
+      detail:
+        "SF Symbols have no rounded, sharp or twoTone style; filled/outlined require a table form. For these variants iOS draws the name's default symbol.",
+      occurrencePath: ({ node, path }) => {
+        if (
+          node?.type !== "icon" ||
+          typeof node.name !== "string" ||
+          !Object.hasOwn(mappedSymbols, node.name)
+        ) {
+          return undefined;
+        }
+        const entry = mappedSymbols[node.name];
+        const variant = node.variant;
+        return variant === "rounded" ||
+          variant === "sharp" ||
+          variant === "twoTone" ||
+          (variant === "filled" && entry.filled === undefined) ||
+          (variant === "outlined" && entry.outlined === undefined)
+          ? `${path}.variant`
+          : undefined;
+      },
+    };
+  }
+  return difference;
+}
 
 interface Rule {
   kind: string;
@@ -229,7 +274,9 @@ export function prototypePlatformNotes(
   }
   const found: Occurrence[] = [];
   occurrences(spec.root, { kind: "ref", name: "node" }, "root", found);
-  return PROTOTYPE_PLATFORM_DIFFERENCES.flatMap((difference) => {
+  const sfSymbols = supports(PROTOTYPE_ICON_SF_SYMBOLS_CAPABILITY);
+  return PROTOTYPE_PLATFORM_DIFFERENCES.flatMap((legacyDifference) => {
+    const difference = sfSymbols ? sfSymbolDifference(legacyDifference) : legacyDifference;
     if (supports(difference.capability)) {
       return [];
     }

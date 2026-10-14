@@ -1574,7 +1574,6 @@ asset strings and count nav images as spec image uses; #9296 must remove its
 `window.opacity`, and its focusability wording follows the later device findings.
 No sibling issues are edited as part of this implementation.
 
-
 ## Saved prototype activity
 
 `SavedPrototypeLaunch.intent(context, id)` targets the explicit

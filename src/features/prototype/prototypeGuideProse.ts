@@ -15,6 +15,16 @@ the two. The spec is
 \`{id, window, theme?, data?, state?, motion?, root}\`. State values are flat scalars (string, finite
 number, boolean). State keys match \`[A-Za-z_][A-Za-z0-9_]{0,63}\`.
 
+Screen navigation: \`{type:"stack", id, start, screens:{home: node, detail: node}}\` starts with
+path [start] and renders only the top screen. Screen names and id are non-empty; start names an
+existing screen. Actions \`push {stack, screen}\`, \`pop {stack}\`, \`popToRoot {stack}\`, and
+\`replace {stack, screen}\` append, remove the top, reset to [start], and swap the top respectively.
+Push is ignored at depth 32; pop at depth 1 does nothing. \`screen_changed\` has name = stack id
+and payload \`{screen, depth}\`, emitted only when the top screen or depth changes. Requires
+\`prototype_stack_v1\`; every screen counts toward node limits, including hidden screens.
+Android Back and the iOS edge swipe pop a stack above depth 1. No transitions yet; per-screen
+scroll position is not restored. A stack cannot appear inside a repeat template.
+
 Minimal spec:
 
 \`\`\`json

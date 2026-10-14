@@ -1,3 +1,4 @@
+import { parsePrototypeStacks } from "./CtrlProxyPrototypes";
 import { panelFingerprintFromWire, type PanelFingerprint } from "../../../models/DisplayPanel";
 import {
   prototypePatchReplyFields,
@@ -6423,6 +6424,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           : {}),
         ...prototypePatchReplyFields(message),
         ...(Array.isArray(message.prototypes) ? { prototypes: message.prototypes } : {}),
+        ...(parsePrototypeStacks(message.stacks)
+          ? { stacks: parsePrototypeStacks(message.stacks) }
+          : {}),
         ...(typeof message.droppedEvents === "number"
           ? { droppedEvents: message.droppedEvents }
           : {}),

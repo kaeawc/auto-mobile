@@ -397,3 +397,37 @@ describe("patch spec and data hooks", () => {
     expect(store.shownSpecs.read("device", "panel").kind).toBe("known");
   });
 });
+
+test("stack snapshots are copied through events, pending shows and inspect adoption", () => {
+  const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+  const scope = { deviceId: "stacks" };
+  const stacks = { nav: { path: ["home", "detail"], depth: 2 } };
+  store.recordEvent(scope, { ...event(1), stacks });
+  store.record(scope, "show", { id: "panel" }, ok);
+  stacks.nav.path[0] = "mutated";
+  expect(store.status(scope).prototypes[0].stacks).toEqual({
+    nav: { path: ["home", "detail"], depth: 2 },
+  });
+  store.status(scope).prototypes[0].stacks!.nav.path.push("caller");
+  expect(store.status(scope).prototypes[0].stacks!.nav.path).toHaveLength(2);
+  store.adopt(scope, {
+    id: "panel",
+    pages: {},
+    state: {},
+    stacks: { nav: { path: ["home"], depth: 1 } },
+  });
+  expect(store.status(scope).prototypes[0].stacks).toEqual({ nav: { path: ["home"], depth: 1 } });
+  store.adopt(scope, { id: "panel", pages: {}, state: {} });
+  expect(store.status(scope).prototypes[0]).not.toHaveProperty("stacks");
+});
+
+test("show snapshots expose initial stacks until a device snapshot supersedes them", () => {
+  const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+  const scope = { deviceId: "initial-stacks" };
+  const stacks = { nav: { path: ["home"], depth: 1 } };
+  store.record(scope, "show", { id: "panel" }, { success: true, stacks });
+  stacks.nav.path[0] = "caller";
+  expect(store.status(scope).prototypes[0].stacks).toEqual({ nav: { path: ["home"], depth: 1 } });
+  store.recordEvent(scope, event(1));
+  expect(store.status(scope).prototypes[0]).not.toHaveProperty("stacks");
+});

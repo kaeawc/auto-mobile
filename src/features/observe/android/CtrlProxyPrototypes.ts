@@ -11,6 +11,8 @@ import { logger } from "../../../utils/logger";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import {
   actionSchema,
+  prototypeHasStack,
+  prototypeStackUnsupportedMessage,
   prototypeSpecSchema,
   type PrototypeSpec,
 } from "../../prototype/prototypeSpec";
@@ -27,6 +29,7 @@ import type { DelegateContext } from "./types";
 import {
   ctrlProxyRequests,
   PROTOTYPE_DISPLAY_CAPABILITY,
+  PROTOTYPE_STACK_CAPABILITY,
   PROTOTYPE_PATCH_CAPABILITY,
   type PatchPrototypeMessage,
   PROTOTYPE_EVENT_KINDS,
@@ -76,6 +79,25 @@ const prototypeEventEnvelopeSchema = z.object({
   kind: z.string().min(1),
 });
 
+/** Optional navigation snapshots from newer devices; malformed entries are ignored. */
+const stackEntrySchema = z
+  .object({
+    path: z.array(z.string().min(1)).min(1).max(32),
+    depth: z.number().int().min(1).max(32),
+  })
+  .refine((entry) => entry.path.length === entry.depth);
+export function parsePrototypeStacks(value: unknown): PrototypeEvent["stacks"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const entries = Object.entries(value).flatMap(([id, entry]) => {
+    const parsed = stackEntrySchema.safeParse(entry);
+    return id && parsed.success ? [[id, parsed.data] as const] : [];
+  });
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+export const prototypeStacksSchema = z.unknown().optional().transform(parsePrototypeStacks);
+
 /** One `prototype_event` push of a kind this host knows. */
 export const prototypeEventSchema = prototypeEventEnvelopeSchema.extend({
   kind: z.enum(PROTOTYPE_EVENT_KINDS),
@@ -83,6 +105,7 @@ export const prototypeEventSchema = prototypeEventEnvelopeSchema.extend({
   payload: actionSchema.options[0].shape.payload.unwrap(),
   state: prototypeSpecSchema.shape.state.unwrap(),
   pages: z.record(z.string().min(1), z.number().int().nonnegative().max(2147483647)).default({}),
+  stacks: prototypeStacksSchema,
 });
 
 /**
@@ -419,6 +442,13 @@ export class CtrlProxyPrototypes {
     const supports = (command: string) => this.context.isCommandSupported?.(command);
     if (message.type === "patch_prototype" && supports(PROTOTYPE_PATCH_CAPABILITY) !== true) {
       throw new ActionableError(prototypePatchUnsupportedMessage("android"));
+    }
+    if (
+      message.type === "show_prototype" &&
+      prototypeHasStack(message.spec) &&
+      supports(PROTOTYPE_STACK_CAPABILITY) !== true
+    ) {
+      throw new ActionableError(prototypeStackUnsupportedMessage("android"));
     }
     const type = message.type;
     if (supports(type) === false) {

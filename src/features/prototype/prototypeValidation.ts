@@ -315,6 +315,33 @@ function visitMap(
   }
   return undefined;
 }
+function visitScreenMap(
+  value: unknown,
+  rule: Rule,
+  path: string,
+  context: Context,
+  depth: number,
+): PrototypeValidationError | undefined {
+  const screens = object(value);
+  if (!screens) {
+    return fail(path, "Expected object");
+  }
+  const names = Object.keys(screens).sort();
+  if (names.length < 1 || names.length > contract.limits.MAX_PROTOTYPE_STACK_SCREENS) {
+    return fail(path, "Screen count out of range");
+  }
+  for (const name of names) {
+    const at = `${path}[${JSON.stringify(name)}]`;
+    if (!name.length) {
+      return fail(at, "Empty screen name");
+    }
+    const error = walk(screens[name], rule.item!, at, context, depth);
+    if (error) {
+      return error;
+    }
+  }
+  return undefined;
+}
 function numberValid(value: unknown, rule: Rule): boolean {
   return (
     typeof value === "number" &&
@@ -470,6 +497,7 @@ function walk(
     object: visitObject,
     array: visitArray,
     map: visitMap,
+    screenMap: visitScreenMap,
     choice: visitChoice,
   };
   const handler = handlers[rule.kind];
@@ -479,6 +507,41 @@ function walk(
   return primitiveChecks[rule.kind]?.(value, rule)
     ? undefined
     : fail(path, `Invalid ${rule.kind === "boundKey" ? "key" : rule.kind} value`);
+}
+function stackErrors(context: Context): PrototypeValidationError | undefined {
+  const stacks = new Map<string, Record<string, unknown>>();
+  for (const { value, path } of context.nodes) {
+    if (value.type !== "stack" || typeof value.id !== "string") {
+      continue;
+    }
+    if (stacks.has(value.id)) {
+      return fail(`${path}.id`, "Duplicate stack id");
+    }
+    const screens = object(value.screens) ?? {};
+    if (typeof value.start !== "string" || !Object.hasOwn(screens, value.start)) {
+      return fail(`${path}.start`, "Unknown start screen");
+    }
+    stacks.set(value.id, screens);
+  }
+  return stackActionErrors(context.actions, stacks);
+}
+function stackActionErrors(
+  actions: Located[],
+  stacks: Map<string, Record<string, unknown>>,
+): PrototypeValidationError | undefined {
+  for (const { value, path } of actions) {
+    if (typeof value.stack !== "string") {
+      continue;
+    }
+    const screens = stacks.get(value.stack);
+    if (!screens) {
+      return fail(`${path}.stack`, "Unknown stack id");
+    }
+    if (typeof value.screen === "string" && !Object.hasOwn(screens, value.screen)) {
+      return fail(`${path}.screen`, "Unknown stack screen");
+    }
+  }
+  return undefined;
 }
 function pagerErrors(context: Context): PrototypeValidationError | undefined {
   const pagers = new Set<string>();
@@ -895,6 +958,7 @@ function validateValue(value: unknown): PrototypeValidationResult {
     walk(value, definitions.spec, "", context, 0) ??
     repeatErrors(value, repeats) ??
     pagerErrors(context) ??
+    stackErrors(context) ??
     stateTypeErrors(value, context, data, repeats);
   if (error) {
     return { success: false, error };

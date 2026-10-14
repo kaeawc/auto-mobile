@@ -13,7 +13,9 @@
     "MAX_PROTOTYPE_DATA_ARRAY_ITEMS": 500,
     "MAX_PROTOTYPE_DATA_POINTER_LENGTH": 256,
     "MAX_PROTOTYPE_REPEAT_PATH_CELLS": 65536,
-    "MAX_PROTOTYPE_PATCH_OPS": 64
+    "MAX_PROTOTYPE_PATCH_OPS": 64,
+    "MAX_PROTOTYPE_STACK_SCREENS": 32,
+    "MAX_PROTOTYPE_STACK_DEPTH": 32
   },
   "definitions": {
     "offset": {
@@ -1232,6 +1234,90 @@
                 "integer": false
               },
               "optional": true
+            }
+          }
+        },
+        "push": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["push"]
+              },
+              "optional": false
+            },
+            "stack": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            },
+            "screen": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            }
+          }
+        },
+        "pop": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["pop"]
+              },
+              "optional": false
+            },
+            "stack": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            }
+          }
+        },
+        "popToRoot": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["popToRoot"]
+              },
+              "optional": false
+            },
+            "stack": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            }
+          }
+        },
+        "replace": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["replace"]
+              },
+              "optional": false
+            },
+            "stack": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            },
+            "screen": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
             }
           }
         }
@@ -4765,6 +4851,115 @@
               "optional": true
             }
           }
+        },
+        "stack": {
+          "kind": "object",
+          "fields": {
+            "type": {
+              "rule": {
+                "kind": "enum",
+                "values": ["stack"]
+              },
+              "optional": false
+            },
+            "id": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            },
+            "testTag": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "contentDescription": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": true
+            },
+            "onTap": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "action"
+                },
+                "min": 1,
+                "unique": false,
+                "max": 32
+              },
+              "optional": true
+            },
+            "style": {
+              "rule": {
+                "kind": "ref",
+                "name": "style"
+              },
+              "optional": true
+            },
+            "styleWhen": {
+              "rule": {
+                "kind": "array",
+                "item": {
+                  "kind": "ref",
+                  "name": "styleWhenEntry"
+                },
+                "min": 1,
+                "max": 8,
+                "unique": false
+              },
+              "optional": true
+            },
+            "visibleWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
+            },
+            "transition": {
+              "rule": {
+                "kind": "enum",
+                "values": ["none", "fade", "expand", "slide"]
+              },
+              "optional": true
+            },
+            "anchor": {
+              "rule": {
+                "kind": "ref",
+                "name": "anchor"
+              },
+              "optional": true
+            },
+            "safeAreaPadding": {
+              "rule": {
+                "kind": "ref",
+                "name": "safeAreaPadding"
+              },
+              "optional": true
+            },
+            "start": {
+              "rule": {
+                "kind": "string"
+              },
+              "optional": false
+            },
+            "screens": {
+              "rule": {
+                "kind": "screenMap",
+                "min": 1,
+                "max": 32,
+                "item": {
+                  "kind": "ref",
+                  "name": "node"
+                }
+              },
+              "optional": false
+            }
+          }
         }
       }
     },
@@ -7710,5 +7905,6 @@
         }
       }
     }
-  }
+  },
+  "eventKinds": ["emit", "page_changed", "dismissed", "appearance_changed", "screen_changed"]
 }

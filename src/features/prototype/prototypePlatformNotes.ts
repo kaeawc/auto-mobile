@@ -10,6 +10,7 @@ import {
 import type { PrototypeSpec } from "./prototypeSpec";
 
 export type PrototypePlatformNoteConstruct =
+  | "stack"
   | "node.id"
   | "bottomSheet.dismissOnSwipe"
   | "bottomSheet.detents"
@@ -98,7 +99,7 @@ interface PlatformDifference {
   construct: PrototypePlatformNoteConstruct;
   platform: "ios";
   effect: PrototypePlatformNoteEffect;
-  capability: string;
+  capability?: string;
   detail: string;
   occurrencePath: (site: Occurrence) => string | undefined;
 }
@@ -158,6 +159,14 @@ export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly PlatformDifference[] = [
       "This iOS agent lacks prototype_icon_sf_symbols_v1 and ignores icon variants; relaunch with a current agent. Android draws the requested Material style.",
     occurrencePath: ({ node, path }) =>
       node?.type === "icon" && node.variant !== undefined ? `${path}.variant` : undefined,
+  },
+  {
+    construct: "stack",
+    platform: "ios",
+    effect: "substituted",
+    detail:
+      "iOS pops a stack with the left-edge swipe (no system back button chrome); Android uses system Back above depth 1.",
+    occurrencePath: ({ node, path }) => (node?.type === "stack" ? path : undefined),
   },
 ];
 
@@ -225,6 +234,11 @@ function occurrences(value: unknown, rule: Rule, path: string, found: Occurrence
     case "ref":
       referenceOccurrences(value, rule.name!, path, found);
       break;
+    case "screenMap":
+      Object.entries(value as Record<string, unknown>).forEach(([name, child]) =>
+        occurrences(child, rule.item!, `${path}[${JSON.stringify(name)}]`, found),
+      );
+      break;
     case "array":
       (value as unknown[]).forEach((entry, index) =>
         occurrences(entry, rule.item!, `${path}[${index}]`, found),
@@ -233,7 +247,7 @@ function occurrences(value: unknown, rule: Rule, path: string, found: Occurrence
     case "object": {
       const data = value as Record<string, unknown>;
       for (const [key, field] of Object.entries(rule.fields ?? {})) {
-        occurrences(data[key], field.rule, path ? `${path}.${key}` : key, found);
+        occurrences(data[key], field.rule, `${path}.${key}`, found);
       }
       break;
     }
@@ -277,7 +291,7 @@ export function prototypePlatformNotes(
   const sfSymbols = supports(PROTOTYPE_ICON_SF_SYMBOLS_CAPABILITY);
   return PROTOTYPE_PLATFORM_DIFFERENCES.flatMap((legacyDifference) => {
     const difference = sfSymbols ? sfSymbolDifference(legacyDifference) : legacyDifference;
-    if (supports(difference.capability)) {
+    if (difference.capability && supports(difference.capability)) {
       return [];
     }
     const affected = found.flatMap((site) => {

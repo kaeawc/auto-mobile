@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { PROTOTYPE_THEME_MODES_CAPABILITY } from "../../src/features/observe/android/ctrlProxyProtocol";
 import type { BootedDevice } from "../../src/models";
 import { prototypeOutputSchema, registerPrototypeTools } from "../../src/server/prototypeTools";
@@ -76,6 +76,16 @@ describe("prototype show with per-mode spec forms (#11218)", () => {
       cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
     });
   }
+  beforeAll(async () => {
+    const restoreRegistry = preserveToolRegistry();
+    register(FAKE_PROTOTYPE_AGENT_CAPABILITIES);
+    try {
+      await call(ios, plain);
+    } finally {
+      unsubscribe();
+      restoreRegistry();
+    }
+  });
   beforeEach(() => {
     restore = preserveToolRegistry();
     register(FAKE_PROTOTYPE_AGENT_CAPABILITIES);
@@ -94,6 +104,21 @@ describe("prototype show with per-mode spec forms (#11218)", () => {
     return prototypeOutputSchema.parse(response.structuredContent);
   }
   const agentShows = () => agent.requests.filter((request) => request.type === "show_prototype");
+  test.each([android, ios])(
+    "refuses stack navigation on $platform without capability",
+    async (device) => {
+      client.setSupportedCommands([]);
+      const payload = await call(device, {
+        ...plain,
+        root: { type: "stack", id: "nav", start: "home", screens: { home: plain.root } },
+      });
+      expect(payload.success).toBe(false);
+      expect(payload.error).toContain("prototype_stack_v1");
+      expect(payload.error).toContain("Nothing was shown");
+      expect(client.getPrototypeHistory()).toHaveLength(0);
+      expect(agentShows()).toHaveLength(0);
+    },
+  );
 
   test("the fakes advertise no theme-modes capability by default, as both platforms do today", () => {
     expect(FAKE_PROTOTYPE_AGENT_CAPABILITIES).not.toContain(PROTOTYPE_THEME_MODES_CAPABILITY);

@@ -1,7 +1,8 @@
+import { PROTOTYPE_STACK_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { z } from "zod";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import contract from "../../../schemas/prototype-spec-contract.json";
-import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
+import { record, BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
 export const {
   MAX_PROTOTYPE_SPEC_BYTES,
   MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES,
@@ -435,6 +436,14 @@ export const actionSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   z.object({ type: z.enum(["dismiss"]) }).strict(),
+  z
+    .object({ type: z.enum(["push"]), stack: z.string().min(1), screen: z.string().min(1) })
+    .strict(),
+  z.object({ type: z.enum(["pop"]), stack: z.string().min(1) }).strict(),
+  z.object({ type: z.enum(["popToRoot"]), stack: z.string().min(1) }).strict(),
+  z
+    .object({ type: z.enum(["replace"]), stack: z.string().min(1), screen: z.string().min(1) })
+    .strict(),
 ]);
 const commonNodeShape = {
   id: z.string().min(1).optional(),
@@ -731,7 +740,16 @@ const bottomSheetBaseSchema = z
     dismissOnSwipe: z.boolean().optional(),
   })
   .strict();
+const stackBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["stack"]),
+    id: z.string().min(1),
+    start: z.string().min(1),
+  })
+  .strict();
 export type PrototypeNode =
+  | (z.infer<typeof stackBaseSchema> & { screens: Record<string, PrototypeNode> })
   | (z.infer<typeof boxBaseSchema> & { children: PrototypeNode[] })
   | (z.infer<typeof rowBaseSchema> & { children: PrototypeNode[] })
   | (z.infer<typeof columnBaseSchema> & { children: PrototypeNode[] })
@@ -764,6 +782,40 @@ export type PrototypeNode =
   | z.infer<typeof tabBarBaseSchema>
   | z.infer<typeof bottomNavBaseSchema>
   | (z.infer<typeof bottomSheetBaseSchema> & { child: PrototypeNode });
+// Object.fromEntries preserves all non-empty screen names, including __proto__, unlike z.record.
+const stackScreensSchema: z.ZodType<Record<string, PrototypeNode>, z.ZodTypeDef, unknown> = z
+  .unknown()
+  .transform((value, context) => {
+    const screens = record(value);
+    if (
+      !screens ||
+      Object.keys(screens).length < 1 ||
+      Object.keys(screens).length > contract.limits.MAX_PROTOTYPE_STACK_SCREENS
+    ) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "Expected 1..32 screens" });
+      return z.NEVER;
+    }
+    const entries: [string, PrototypeNode][] = [];
+    for (const [name, child] of Object.entries(screens)) {
+      if (!name.length) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [name],
+          message: "Empty screen name",
+        });
+        continue;
+      }
+      const parsed = prototypeNodeSchema.safeParse(child);
+      if (parsed.success) {
+        entries.push([name, parsed.data]);
+      } else {
+        for (const issue of parsed.error.issues) {
+          context.addIssue({ ...issue, path: [name, ...issue.path] });
+        }
+      }
+    }
+    return Object.fromEntries(entries);
+  });
 let prototypeNodeUnion: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> | undefined;
 export const prototypeNodeSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> = z.lazy(
   () =>
@@ -797,6 +849,9 @@ export const prototypeNodeSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown
       datePickerBaseSchema,
       scrollBaseSchema.extend({ child: z.lazy(() => prototypeNodeSchema) }),
       pagerBaseSchema.extend({ children: z.array(z.lazy(() => prototypeNodeSchema)).min(1) }),
+      stackBaseSchema.extend({
+        screens: stackScreensSchema,
+      }),
       tabBarBaseSchema,
       bottomNavBaseSchema,
       bottomSheetBaseSchema.extend({ child: z.lazy(() => prototypeNodeSchema) }),
@@ -928,6 +983,7 @@ export const PROTOTYPE_NODE_TYPES = [
   "datePicker",
   "scroll",
   "pager",
+  "stack",
   "tabBar",
   "bottomNav",
   "bottomSheet",
@@ -935,6 +991,10 @@ export const PROTOTYPE_NODE_TYPES = [
 export const PROTOTYPE_ACTION_TYPES = [
   "emit",
   "setPage",
+  "push",
+  "pop",
+  "popToRoot",
+  "replace",
   "setState",
   "toggle",
   "increment",
@@ -942,3 +1002,27 @@ export const PROTOTYPE_ACTION_TYPES = [
   "dismiss",
 ] as const;
 export const PROTOTYPE_PLACEMENT_TYPES = ["fullscreen", "sheet", "floating"] as const;
+
+export function prototypeHasStack(spec: unknown): boolean {
+  const root = record(record(spec)?.root);
+  const pending = root ? [root] : [];
+  while (pending.length) {
+    const node = pending.pop()!;
+    if (node.type === "stack") {
+      return true;
+    }
+    const children = Array.isArray(node.children) ? node.children : [node.child];
+    pending.push(...children.flatMap((value) => (record(value) ? [record(value)!] : [])));
+  }
+  return false;
+}
+
+/** Shared unsent refusal, following the theme-mode capability refusal wording. */
+export function prototypeStackUnsupportedMessage(platform: "android" | "ios"): string {
+  const device = platform === "ios" ? "connected iOS prototype agent" : "connected CtrlProxy";
+  const update =
+    platform === "ios"
+      ? "Relaunch the app with launchApp prototype: true to load the agent built for this AutoMobile version"
+      : "Update the connected CtrlProxy";
+  return `The ${device} does not advertise ${PROTOTYPE_STACK_CAPABILITY}, so it cannot draw stack navigation. Nothing was shown. ${update}, or use a spec without stacks.`;
+}

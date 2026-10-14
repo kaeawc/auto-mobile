@@ -174,6 +174,12 @@ describe("prototype tool on an iOS simulator", () => {
       },
     });
 
+    test("inspect and status preserve iOS stack paths", async () => {
+      const stacks = { nav: { path: ["home", "detail"], depth: 2 } };
+      agent.queueReplies(agentStatus({ stacks }));
+      expect((await call({ action: "inspect" })).payload.prototypes).toMatchObject([{ stacks }]);
+      expect((await call({ action: "status" })).payload.prototypes).toMatchObject([{ stacks }]);
+    });
     test("maps the agent's status to the Android inspect shape without suspended or dropped events", async () => {
       agent.queueReplies(agentStatus());
       const { response, payload } = await call({ action: "inspect" });

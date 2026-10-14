@@ -1,3 +1,6 @@
+import { prototypeHasStack, prototypeStackUnsupportedMessage } from "../prototypeSpec";
+import { PROTOTYPE_STACK_CAPABILITY } from "../../observe/android/ctrlProxyProtocol";
+import { prototypeStacksSchema } from "../../observe/android/CtrlProxyPrototypes";
 import {
   prototypePatchReplyFields,
   prototypePatchUnsupportedMessage,
@@ -121,6 +124,9 @@ function toPrototypeResult(result: PrototypeAgentResult): PrototypeResult {
   const appearance = parsePrototypeAppearance(result.appearance);
   return {
     ...(appearance ? { appearance } : {}),
+    ...(prototypeStacksSchema.parse(result.stacks)
+      ? { stacks: prototypeStacksSchema.parse(result.stacks) }
+      : {}),
     success: result.success,
     requestId: result.requestId,
     ...(typeof result.error === "string" ? { error: result.error } : {}),
@@ -217,6 +223,9 @@ export class IosPrototypeTransport implements PrototypeTransport {
    * `prototype_show_in_place_v1`.
    */
   async show(spec: PrototypeSpec, options: PrototypeShowOptions = {}): Promise<PrototypeResult> {
+    if (prototypeHasStack(spec) && !this.supportsCapability(PROTOTYPE_STACK_CAPABILITY)) {
+      throw new ActionableError(prototypeStackUnsupportedMessage("ios"));
+    }
     if (options.reset === true && !this.supportsCapability(PROTOTYPE_SHOW_IN_PLACE_CAPABILITY)) {
       throw new ActionableError(
         `Prototype agent ${this.agent.handshake.agentVersion} does not support reset; relaunch ` +

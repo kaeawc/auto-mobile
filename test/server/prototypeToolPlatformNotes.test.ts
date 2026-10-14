@@ -96,6 +96,28 @@ describe("prototype tool platform notes", () => {
     expect(payload.platformNotes).toEqual(prototypePlatformNotes(spec, "ios", () => false));
     expect(payload.platformNotes).toHaveLength(5);
   });
+  test("iOS stack show explains the back gesture", async () => {
+    agent.handshake.capabilities = [...agent.handshake.capabilities, "prototype_stack_v1"];
+    const { payload } = await call({
+      action: "show",
+      spec: {
+        ...spec,
+        root: {
+          type: "stack",
+          id: "nav",
+          start: "home",
+          screens: { home: { type: "text", text: "Home" } },
+        },
+      },
+    });
+    expect(payload.success).toBe(true);
+    expect(payload.platformNotes).toContainEqual(
+      expect.objectContaining({
+        construct: "stack",
+        detail: expect.stringContaining("left-edge swipe"),
+      }),
+    );
+  });
   test("Android show retains its exact result shape", async () => {
     const { raw, payload } = await call({ action: "show", spec }, android);
     expect(raw).not.toHaveProperty("platformNotes");

@@ -1,3 +1,8 @@
+import {
+  PROTOTYPE_ACTION_TYPES,
+  actionSchema,
+} from "../../../src/features/prototype/prototypeSpec";
+import { PROTOTYPE_EVENT_KINDS } from "../../../src/features/observe/android/ctrlProxyProtocol";
 import { describe, expect, test } from "bun:test";
 import type { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
@@ -168,4 +173,14 @@ test("spec, repeat, and condition field sets stay in step with the data contract
     expect(prototypeSpecSchema.safeParse(candidate).success).toBe(false);
     expect(validatePrototypeSpec(candidate).success).toBe(false);
   }
+});
+
+test("stack actions and events agree with the shared contract", () => {
+  expect(Object.keys(contract.definitions.action.variants).sort()).toEqual(
+    [...PROTOTYPE_ACTION_TYPES].sort(),
+  );
+  expect(actionSchema.options.map((option) => option.shape.type.options[0]).sort()).toEqual(
+    [...PROTOTYPE_ACTION_TYPES].sort(),
+  );
+  expect([...contract.eventKinds].sort()).toEqual([...PROTOTYPE_EVENT_KINDS].sort());
 });

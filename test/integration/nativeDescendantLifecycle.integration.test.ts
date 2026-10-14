@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -17,6 +17,7 @@ import { WebpBinaryResolver } from "../../src/utils/image/webp/WebpBinaryResolve
 import { ActionableError } from "../../src/models/ActionableError";
 
 const host = new DefaultHostCommandExecutor();
+const seenDead = new Set<number>();
 let dir: string;
 function pidOf(child: ChildProcess): number {
   if (!child.pid) {
@@ -24,12 +25,21 @@ function pidOf(child: ChildProcess): number {
   }
   return child.pid;
 }
-function isAlive(pid: number): boolean {
+function isAlive(owned: ChildProcess | number): boolean {
+  if (typeof owned !== "number") {
+    return owned.exitCode === null && owned.signalCode === null;
+  }
+  // A dead pid-file process must stay dead to this test even if its PID is reused.
+  const pid = owned;
+  if (seenDead.has(pid)) {
+    return false;
+  }
   try {
     process.kill(pid, 0);
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+      seenDead.add(pid);
       return false;
     }
     throw error;
@@ -44,21 +54,38 @@ async function waitUntil(pred: () => boolean | Promise<boolean>, timeoutMs = 200
     await new Promise((resolve) => defaultTimer.setTimeout(() => resolve(undefined), 10));
   }
 }
-async function cleanup(pids: number[]): Promise<void> {
-  for (const pid of pids) {
-    if (!isProcessRunning(pid)) {
+async function cleanup(processes: (ChildProcess | number)[]): Promise<void> {
+  const isRunning = (owned: ChildProcess | number): boolean => {
+    if (!isAlive(owned)) {
+      return false;
+    }
+    if (typeof owned === "number" && !isProcessRunning(owned)) {
+      seenDead.add(owned);
+      return false;
+    }
+    return true;
+  };
+  for (const owned of processes) {
+    if (!isRunning(owned)) {
       continue;
     }
     try {
-      process.kill(pid, "SIGKILL");
+      if (typeof owned === "number") {
+        process.kill(owned, "SIGKILL");
+      } else {
+        owned.kill("SIGKILL");
+      }
     } catch (error) {
       // An owned child can exit between the liveness probe and signal.
       if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
         throw error;
       }
+      if (typeof owned === "number") {
+        seenDead.add(owned);
+      }
     }
   }
-  await waitUntil(() => pids.every((pid) => !isProcessRunning(pid)));
+  await waitUntil(() => processes.every((owned) => !isRunning(owned)));
 }
 async function parentPid(pid: number): Promise<number> {
   return Number(
@@ -88,6 +115,9 @@ describe.skipIf(process.platform === "win32")("request-owned native descendants"
   beforeAll(() => {
     dir = mkdtempSync(path.join(os.tmpdir(), "automobile-native-descendants-"));
   });
+  beforeEach(() => {
+    seenDead.clear();
+  });
   afterAll(() => {
     rmSync(dir, { recursive: true, force: true });
   });
@@ -101,9 +131,9 @@ describe.skipIf(process.platform === "win32")("request-owned native descendants"
     try {
       controller.abort();
       expect(await rejected).toBeInstanceOf(Error);
-      await waitUntil(() => !isAlive(pidOf(child)));
+      await waitUntil(() => !isAlive(child));
     } finally {
-      await cleanup([pidOf(child)]);
+      await cleanup([child]);
     }
   });
 
@@ -122,13 +152,13 @@ describe.skipIf(process.platform === "win32")("request-owned native descendants"
       grandchild = readPid(file);
       controller.abort();
       expect(await rejected).toBeInstanceOf(Error);
-      await waitUntil(() => !isAlive(pidOf(child)));
+      await waitUntil(() => !isAlive(child));
       expect(isAlive(grandchild)).toBe(true);
     } finally {
       if (!grandchild && existsSync(file)) {
         grandchild = readPid(file);
       }
-      await cleanup([pidOf(child), ...(grandchild ? [grandchild] : [])]);
+      await cleanup([child, ...(grandchild ? [grandchild] : [])]);
     }
   });
 
@@ -147,12 +177,8 @@ describe.skipIf(process.platform === "win32")("request-owned native descendants"
         },
         {
           command: ignoresTerm ? "/bin/sh" : "sleep",
-          // Record each short-lived grandchild for cleanup, including on assertion failure.
           args: ignoresTerm
-            ? [
-                "-c",
-                `trap "" TERM; echo ready > '${ready}'; while :; do sleep 0.05 & echo $! >> '${dir}/term-children'; wait; done`,
-              ]
+            ? ["-c", `trap "" TERM; echo ready > '${ready}'; while :; do sleep 0.05 & wait; done`]
             : ["30"],
           signal: controller.signal,
           timeoutMs: 2500,
@@ -172,13 +198,9 @@ describe.skipIf(process.platform === "win32")("request-owned native descendants"
         const error = await result;
         expect(error).toBeInstanceOf(AndroidCommandTerminatedError);
         expect(error.reason).toBe("cancelled");
-        await waitUntil(() => !isAlive(pidOf(child!)));
+        await waitUntil(() => !isAlive(child!));
       } finally {
-        const file = path.join(dir, "term-children");
-        const descendants = existsSync(file)
-          ? readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map(Number)
-          : [];
-        await cleanup([...(child ? [pidOf(child)] : []), ...descendants]);
+        await cleanup(child ? [child] : []);
       }
     });
   }
@@ -189,9 +211,9 @@ describe.skipIf(process.platform === "win32")("request-owned native descendants"
       expect(await terminateColdBootProcess(child, "harmless sleep", defaultTimer).confirmed).toBe(
         true,
       );
-      expect(isAlive(pidOf(child))).toBe(false);
+      expect(isAlive(child)).toBe(false);
     } finally {
-      await cleanup([pidOf(child)]);
+      await cleanup([child]);
     }
   });
 
@@ -200,7 +222,7 @@ describe.skipIf(process.platform === "win32")("request-owned native descendants"
     const script = path.join(dir, "fake-daemon.ts");
     writeFileSync(
       script,
-      `import { DefaultHostCommandExecutor } from ${JSON.stringify(path.resolve("src/utils/HostCommandExecutor.ts"))};
+      `import { DefaultHostCommandExecutor } from ${JSON.stringify(path.resolve(import.meta.dir, "../../src/utils/HostCommandExecutor.ts"))};
 import { writeFileSync } from "node:fs";
 const host = new DefaultHostCommandExecutor();
 const sleep = host.spawn("sleep", ["30"], { stdio: ["ignore", "pipe", "pipe"] });
@@ -216,7 +238,7 @@ setInterval(() => {}, 1000);
       children = JSON.parse(readFileSync(file, "utf8"));
       expect(isAlive(children!.cat)).toBe(true);
       daemon.kill("SIGKILL");
-      await waitUntil(() => !isAlive(pidOf(daemon)) && !isAlive(children!.cat));
+      await waitUntil(() => !isAlive(daemon) && !isAlive(children!.cat));
       expect(isAlive(children!.sleep)).toBe(true);
       const ppid = await parentPid(children!.sleep);
       expect(ppid).not.toBe(pidOf(daemon));
@@ -227,7 +249,7 @@ setInterval(() => {}, 1000);
       if (!children && existsSync(file)) {
         children = JSON.parse(readFileSync(file, "utf8"));
       }
-      await cleanup([pidOf(daemon), ...(children ? [children.sleep, children.cat] : [])]);
+      await cleanup([daemon, ...(children ? [children.sleep, children.cat] : [])]);
     }
   });
 
@@ -246,7 +268,6 @@ setInterval(() => {}, 1000);
         ],
         { stdio: "ignore" },
       );
-      owned.add(pidOf(outer));
       let counter: ChildProcess | undefined;
       const counterFile = path.join(dir, "counter-sleep.pid");
       try {
@@ -267,7 +288,7 @@ setInterval(() => {}, 1000);
         expect(client.discovered).toContain(orphan);
         expect(client.discovered).toContain(pidOf(counter));
         await waitUntil(() => !isAlive(orphan) && !isAlive(readPid(sleepFile)));
-        expect(isAlive(pidOf(counter))).toBe(true);
+        expect(isAlive(counter)).toBe(true);
         expect(isAlive(readPid(counterFile))).toBe(true);
       } finally {
         for (const file of [orphanFile, sleepFile, counterFile]) {
@@ -275,7 +296,10 @@ setInterval(() => {}, 1000);
             owned.add(readPid(file));
           }
         }
-        await cleanup([...owned]);
+        if (counter) {
+          owned.delete(pidOf(counter));
+        }
+        await cleanup([outer, ...(counter ? [counter] : []), ...owned]);
       }
     },
   );
@@ -308,13 +332,13 @@ setInterval(() => {}, 1000);
       ]);
       expect(result).toBeInstanceOf(ActionableError);
       expect((result as Error).message).toContain("200ms");
-      await waitUntil(() => !!child && !isAlive(pidOf(child)));
+      await waitUntil(() => !!child && !isAlive(child));
     } finally {
       if (watchdog) {
         defaultTimer.clearTimeout(watchdog);
       }
       if (child) {
-        await cleanup([pidOf(child)]);
+        await cleanup([child]);
       }
     }
   });

@@ -954,7 +954,7 @@ private struct PrototypeBottomSheetView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .contentShape(Rectangle())
                 .gesture(
-                    DragGesture()
+                    DragGesture(coordinateSpace: .named("prototypeBottomSheet"))
                         .updating($drag) { value, drag, _ in drag = Double(value.translation.height) }
                         .onEnded { value in
                             guard let current else { return }
@@ -967,10 +967,11 @@ private struct PrototypeBottomSheetView: View {
                                 model.closeModal(node)
                             }
                         },
-                    including: heights.isEmpty ? .none : .all
+                    including: heights.isEmpty ? .subviews : .all
                 )
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .coordinateSpace(name: "prototypeBottomSheet")
             .onChange(of: heights) { _, _ in settledHeight = nil }
         }
     }

@@ -80,6 +80,13 @@
       },
       "required": ["service"],
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/deviceReadOnlyArgs": [
+        {
+          "absentArguments": ["talkback", "voiceover"]
+        }
+      ]
     }
   },
   {
@@ -837,6 +844,14 @@
       },
       "required": ["action"],
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnlyArgs": [
+        {
+          "argument": "action",
+          "values": ["get"]
+        }
+      ]
     }
   },
   {
@@ -1252,6 +1267,13 @@
         }
       },
       "additionalProperties": false
+    },
+    "_meta": {
+      "automobile/deviceReadOnlyArgs": [
+        {
+          "absentArguments": ["reset", "fontScale", "density", "theme"]
+        }
+      ]
     }
   },
   {
@@ -3912,6 +3934,14 @@
         }
       },
       "additionalProperties": {}
+    },
+    "_meta": {
+      "automobile/deviceReadOnlyArgs": [
+        {
+          "argument": "action",
+          "values": ["detect", "listImes", "listProfiles"]
+        }
+      ]
     }
   },
   {
@@ -19836,10 +19866,14 @@
                               "type": "object",
                               "properties": {
                                 "x": {
-                                  "type": "number"
+                                  "type": "number",
+                                  "minimum": -10000,
+                                  "maximum": 10000
                                 },
                                 "y": {
-                                  "type": "number"
+                                  "type": "number",
+                                  "minimum": -10000,
+                                  "maximum": 10000
                                 },
                                 "width": {
                                   "type": "number",
@@ -22574,6 +22608,14 @@
           ]
         }
       }
+    },
+    "_meta": {
+      "automobile/deviceReadOnlyArgs": [
+        {
+          "argument": "action",
+          "values": ["status", "inspect"]
+        }
+      ]
     }
   },
   {

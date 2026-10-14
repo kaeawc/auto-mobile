@@ -5431,6 +5431,8 @@ export class Daemon {
           });
         },
       ),
+      // Includes in-flight one-shot execs as well as long-lived adb spawn children.
+      // Request-serving stages have stopped; terminating remaining one-shots at shutdown is intended.
       shutdownStage("host adb children", "host adb children exiting", async (context) => {
         await terminateActiveAdbProcesses({
           timer: this.timer,

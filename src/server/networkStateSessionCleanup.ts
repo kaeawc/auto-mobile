@@ -1,4 +1,8 @@
-import { SESSION_RELEASE_TEARDOWN_CAP_MS, type SessionManager } from "../daemon/sessionManager";
+import {
+  SESSION_RELEASE_TEARDOWN_CAP_MS,
+  type SessionManager,
+  type SessionReleaseOptions,
+} from "../daemon/sessionManager";
 import { registerBoundedAcquisitionCleanup } from "../utils/boundedAcquisitionCleanup";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
@@ -61,9 +65,19 @@ export function registerNetworkStateSessionCleanup(
   options: NetworkStateSessionCleanupOptions = {},
 ): void {
   const pusher = options.pusher ?? defaultNetworkDeviceStatePusher;
-  const cleanup = (sessionId: string, deviceId: string): void => {
+  const cleanup = (
+    sessionId: string,
+    deviceId: string,
+    releaseOptions?: Pick<SessionReleaseOptions, "deviceIdentityReplaced">,
+  ): void => {
     const state = options.state?.() ?? NetworkState.getInstance();
     if (!state.clearDeviceOwnedBySession(deviceId, sessionId)) {
+      return;
+    }
+    if (releaseOptions?.deviceIdentityReplaced) {
+      logger.debug(
+        `[networkState] Cleanup for session ${sessionId} on replaced serial ${deviceId}: skipped cleared-state device push`,
+      );
       return;
     }
     // iOS probes capability before reading CURRENT rules; simulation is read after
@@ -75,17 +89,7 @@ export function registerNetworkStateSessionCleanup(
     });
   };
   manager.onSessionRelease((sessionId, deviceId, _reason, _snapshot, releaseOptions) => {
-    if (releaseOptions?.deviceIdentityReplaced) {
-      (options.state?.() ?? NetworkState.getInstance()).clearDeviceOwnedBySession(
-        deviceId,
-        sessionId,
-      );
-      logger.debug(
-        `[networkState] Cleanup for session ${sessionId} on replaced serial ${deviceId}: skipped cleared-state device push`,
-      );
-      return;
-    }
-    cleanup(sessionId, deviceId);
+    cleanup(sessionId, deviceId, releaseOptions);
   });
   manager.onSessionDeviceUnbound(cleanup);
 }

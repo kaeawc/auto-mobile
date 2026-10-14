@@ -89,6 +89,7 @@ data class PrototypeRenderModel(
       hasTextField = hasTextField,
       layer = layer,
       persistent = persistent,
+      opaqueSurface = prototypeWindowMetadata(this, dismissBarDrawn = false).opaque,
     ) {
       PrototypeSpecContent(root, theme = theme)
     }

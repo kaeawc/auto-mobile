@@ -65,12 +65,22 @@ export class PrototypeShownSpecs {
     const committed = state.open.size === 0 && state.epoch === version && state.entry?.id === id;
     if (committed) {
       state.entry = { id, spec: structuredClone(spec) };
+      state.epoch = ++this.sequence;
     } else {
-      state.entry = undefined;
-      state.poisonedThrough = state.issued;
+      this.abandon(deviceId);
     }
-    state.epoch = ++this.sequence;
     return committed;
+  }
+
+  /** A patch for this device has an unknown outcome: forget the entry and distrust every show dispatched so far. */
+  abandon(deviceId: string): void {
+    const state = this.devices.get(deviceId);
+    if (!state) {
+      return;
+    }
+    state.entry = undefined;
+    state.poisonedThrough = state.issued;
+    state.epoch = ++this.sequence;
   }
 
   forget(deviceId: string, id?: string): void {

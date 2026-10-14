@@ -131,7 +131,7 @@ async function queuedPatch(
   signal?.throwIfAborted();
   const result = await sendPatch(deps, args);
   if (result.delivery === "indeterminate") {
-    deps.store.shownSpecs.forget(deviceId, args.id);
+    deps.store.shownSpecs.abandon(deviceId);
     return failure(
       `${result.error ?? "Prototype patch failed"} The device may or may not have applied the patch: show the prototype again before the next patch.`,
     );

@@ -6,6 +6,7 @@ import {
 } from "../../src/features/observe/android/ctrlProxyProtocol";
 import { InMemoryPrototypeStatusStore } from "../../src/features/prototype/PrototypeStatusStore";
 import { prototypePatchUnsupportedMessage } from "../../src/features/prototype/prototypePatchWire";
+import type { PrototypePatchReply } from "../../src/features/prototype/prototypePatchWire";
 import { MAX_PROTOTYPE_SPEC_BYTES } from "../../src/features/prototype/prototypeSpec";
 import {
   prototypeOutputSchema,
@@ -54,12 +55,13 @@ describe("prototype patch host", () => {
   let proxy: FakeCtrlProxy;
   let agent: FakePrototypeAgentClient;
   let store: InMemoryPrototypeStatusStore;
+  let timer: FakeTimer;
   let restore: () => void;
   let unsubscribe: () => void;
   let releaseSession: (session: string, device?: string) => void;
   let removeDevice: (device: string) => void;
   function setup() {
-    const timer = new FakeTimer();
+    timer = new FakeTimer();
     proxy = new FakeCtrlProxy(timer);
     proxy.setSupportedCommands([
       PROTOTYPE_PATCH_CAPABILITY,
@@ -257,6 +259,39 @@ describe("prototype patch host", () => {
     expect((await patch()).error).toContain("not tracking its spec");
     await show();
     expect((await patch()).success).toBe(true);
+  });
+  test("Android patch timeout distrusts a pending same-id show until a new show", async () => {
+    await show();
+    const heldPatch = deferred<PrototypePatchReply>();
+    const heldShow = deferred<PrototypeResult>();
+    proxy.holdPatchReply(heldPatch.promise);
+    const patching = patch(replace, { timeoutMs: 50 });
+    await drain();
+    expect(proxy.patchRequests).toHaveLength(1);
+    proxy.holdShowReply(heldShow.promise);
+    const showing = call({ action: "show", spec: { ...spec, data: { cartCount: 3 } } });
+    await drain();
+    expect(proxy.getPrototypeHistory()).toHaveLength(2);
+    timer.setTimeout(() => {
+      heldPatch.resolve({
+        success: false,
+        delivery: "indeterminate",
+        error: "prototype_result timed out after 50ms",
+      });
+    }, 50);
+    timer.advanceTime(49);
+    expect(store.shownSpecs.read(android.deviceId, "orders")).toEqual({ kind: "busy" });
+    timer.advanceTime(1);
+    expect((await patching).error).toBe(
+      "prototype_result timed out after 50ms The device may or may not have applied the patch: show the prototype again before the next patch.",
+    );
+    heldShow.resolve({ success: true });
+    expect((await showing).success).toBe(true);
+    expect((await patch()).error).toContain("not tracking its spec");
+    expect(proxy.patchRequests).toHaveLength(1);
+    expect((await show()).success).toBe(true);
+    expect((await patch()).success).toBe(true);
+    expect(proxy.patchRequests).toHaveLength(2);
   });
   test("unsent and answered failures keep tracking", async () => {
     await show();

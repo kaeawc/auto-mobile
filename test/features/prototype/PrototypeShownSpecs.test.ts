@@ -52,6 +52,38 @@ describe("PrototypeShownSpecs", () => {
     expect(store.read("d", "panel")).toEqual({ kind: "unknown" });
     shown(store);
   });
+  test("abandon distrusts pending shows and a later show restores tracking", () => {
+    const store = new PrototypeShownSpecs();
+    const read = shown(store);
+    const overlap = store.beginShow("d");
+    store.abandon("d");
+    expect(store.read("d", "panel")).toEqual({ kind: "busy" });
+    store.endShow("d", overlap, { id: "panel", spec: { data: { count: 2 } } });
+    expect(store.read("d", "panel")).toEqual({ kind: "unknown" });
+    const restored = shown(store);
+    expect(restored.version).toBeGreaterThan(read.version);
+    expect(store.commitPatch("d", "panel", restored.version, spec)).toBe(true);
+  });
+  test("abandon forgets an entry and invalidates its patch version", () => {
+    const store = new PrototypeShownSpecs();
+    const read = shown(store);
+    store.abandon("d");
+    expect(store.read("d", "panel")).toEqual({ kind: "unknown" });
+    const restored = shown(store);
+    expect(restored.version).toBeGreaterThan(read.version);
+    expect(store.commitPatch("d", "panel", read.version, spec)).toBe(false);
+  });
+  test("abandon on an unknown device is a no-op", () => {
+    const store = new PrototypeShownSpecs();
+    const read = shown(store);
+    store.abandon("unknown");
+    expect(store.read("unknown", "panel")).toEqual({ kind: "unknown" });
+    expect(store.read("d", "panel")).toEqual(read);
+    const ticket = store.beginShow("unknown");
+    expect(ticket).toBe(read.version + 1);
+    store.endShow("unknown", ticket, { id: "panel", spec });
+    expect(store.read("unknown", "panel").kind).toBe("known");
+  });
   test.each(["endShow", "forget", "wrongId"])("commit fails after %s", (intervention) => {
     const store = new PrototypeShownSpecs();
     const read = shown(store);

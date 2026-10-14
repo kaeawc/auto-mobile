@@ -794,7 +794,7 @@ translucent, at 0.4 alpha; any other role is drawn unchanged. The per-mode forms
 ### Patch (#11675)
 
 Use `show` for a new screen or a window, theme or root change. Use `patch` for
-content (`/data`), state (`/state`) or one node by id (`replaceNode`). Android CtrlProxy advertises
+content (`/data`), state (`/state`) or one node by id (`replaceNode`) of the shown prototype. Android CtrlProxy advertises
 `prototype_patch_v1` and applies patches in place; iOS does not advertise it yet
 and requires the whole spec with `show`.
 

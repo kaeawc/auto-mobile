@@ -73,9 +73,9 @@ private fun PrototypeNode.repeatSpec(): PrototypeRepeat? =
  * instantiated once per item, in item order. With [bind] true, each child is bound to its item and
  * `{index}` and lives under `path.repeat[key].children[template]`, using `repeat.key` when present
  * and falling back to its index, so a row keeps its identity (and its Compose key). Pass [bind]
- * false to walk the shape only (limit guards and anchor validation) without copying any node;
- * these walks always use `path.repeat[index].children[template]` to preserve validation paths.
- * Without a `repeat` this is the plain child list.
+ * false to walk the shape only (limit guards and anchor validation) without copying any node; these
+ * walks always use `path.repeat[index].children[template]` to preserve validation paths. Without a
+ * `repeat` this is the plain child list.
  */
 internal fun prototypeChildEntries(
   node: PrototypeNode,

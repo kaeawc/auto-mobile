@@ -41,7 +41,9 @@ enum PrototypeRichText {
 
     static func runs(
         node: PrototypeNode, state: [String: JSONValue], pager: PagerPosition?, nodeKey: String
-    ) -> [PrototypeTextRun]? {
+    )
+        -> [PrototypeTextRun]?
+    {
         node.spans?.enumerated().map { index, span in
             PrototypeTextRun(
                 text: interpolatePrototypeText(span.text, state: state, pager: pager),

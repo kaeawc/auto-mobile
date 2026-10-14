@@ -28,7 +28,10 @@ final class PrototypeRichTextTests: XCTestCase {
                 Invalid.self,
                 from: Data(contentsOf: fixtures.appendingPathComponent("invalid/text-spans-\(name).json"))
             )
-            XCTAssertThrowsError(try JSONDecoder().decode(PrototypeSpec.self, from: JSONEncoder().encode(invalid.spec))) { error in
+            XCTAssertThrowsError(try JSONDecoder().decode(
+                PrototypeSpec.self,
+                from: JSONEncoder().encode(invalid.spec)
+            )) { error in
                 guard case let DecodingError.dataCorrupted(context) = error else {
                     return XCTFail("Expected a guard refusal, got \(error)")
                 }
@@ -51,20 +54,35 @@ final class PrototypeRichTextTests: XCTestCase {
         let text = try XCTUnwrap(spec.root.children?.first)
         XCTAssertEqual(text.spans?.map(\.text), ["{name}", "Heading", "0: First"])
         XCTAssertEqual(text.plainText(state: spec.state ?? [:], pager: nil), "AdaHeading0: First")
-        XCTAssertEqual(text.accessibilityLabel(state: spec.state ?? [:], pager: nil, tappable: false), "AdaHeading0: First")
+        XCTAssertEqual(
+            text.accessibilityLabel(state: spec.state ?? [:], pager: nil, tappable: false),
+            "AdaHeading0: First"
+        )
     }
 
     func testPlaceholdersCannotCrossSpanBoundariesAndDescriptionsStillWin() throws {
-        let text = try node(#"{"type":"text","spans":[{"text":"{na"},{"text":"me}"}],"contentDescription":"Read {name}"}"#)
+        let text =
+            try node(#"{"type":"text","spans":[{"text":"{na"},{"text":"me}"}],"contentDescription":"Read {name}"}"#)
         let state: [String: JSONValue] = ["name": .string("Ada")]
         XCTAssertEqual(text.plainText(state: state, pager: nil), "{name}")
         XCTAssertEqual(text.accessibilityLabel(state: state, pager: nil, tappable: false), "Read Ada")
-        XCTAssertEqual(PrototypeRichText.runs(node: text, state: state, pager: nil, nodeKey: "n")?.map(\.text), ["{na", "me}"])
+        XCTAssertEqual(
+            PrototypeRichText.runs(node: text, state: state, pager: nil, nodeKey: "n")?.map(\.text),
+            ["{na", "me}"]
+        )
     }
 
     func testMappingKeepsAuthoredStylesAndOnlyTappableRunsHavePrivateLinks() throws {
-        let text = try node(##"{"type":"text","spans":[{"text":"Hi {name}","style":{"color":{"light":"primary","dark":"#FFFFFF"},"fontWeight":700,"fontStyle":"italic","textDecoration":"underlineLineThrough","textSize":18,"letterSpacing":0.5,"fontFamily":"serif","background":"#123456"},"onTap":[{"type":"emit","name":"terms"}]},{"text":" plain"}]}"##)
-        let runs = try XCTUnwrap(PrototypeRichText.runs(node: text, state: ["name": .string("Ada")], pager: nil, nodeKey: "a /?雪"))
+        let text =
+            try node(
+                ##"{"type":"text","spans":[{"text":"Hi {name}","style":{"color":{"light":"primary","dark":"#FFFFFF"},"fontWeight":700,"fontStyle":"italic","textDecoration":"underlineLineThrough","textSize":18,"letterSpacing":0.5,"fontFamily":"serif","background":"#123456"},"onTap":[{"type":"emit","name":"terms"}]},{"text":" plain"}]}"##
+            )
+        let runs = try XCTUnwrap(PrototypeRichText.runs(
+            node: text,
+            state: ["name": .string("Ada")],
+            pager: nil,
+            nodeKey: "a /?雪"
+        ))
         XCTAssertEqual(runs.map(\.text), ["Hi Ada", " plain"])
         let style = try XCTUnwrap(runs[0].style)
         XCTAssertEqual(style.color, .modes(light: "primary", dark: "#FFFFFF"))
@@ -102,7 +120,13 @@ final class PrototypeRichTextTests: XCTestCase {
     }
 
     func testRepeatBindsSpanActionNamesKeysAndValuesThroughExistingFunctions() throws {
-        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data(#"{"id":"r","window":{"placement":{"type":"fullscreen"}},"root":{"type":"column","repeat":{"as":"item","items":[{"title":"Terms","key":"accepted","value":true}]},"children":[{"type":"text","spans":[{"text":"{index}: {item.title}","onTap":[{"type":"emit","name":"{item.title}"},{"type":"setState","key":"{item.key}","value":"{item.value}"}]}]}]}}"#.utf8))
+        let spec = try JSONDecoder().decode(
+            PrototypeSpec.self,
+            from: Data(
+                #"{"id":"r","window":{"placement":{"type":"fullscreen"}},"root":{"type":"column","repeat":{"as":"item","items":[{"title":"Terms","key":"accepted","value":true}]},"children":[{"type":"text","spans":[{"text":"{index}: {item.title}","onTap":[{"type":"emit","name":"{item.title}"},{"type":"setState","key":"{item.key}","value":"{item.value}"}]}]}]}}"#
+                    .utf8
+            )
+        )
         let span = try XCTUnwrap(spec.root.children?.first?.spans?.first)
         XCTAssertEqual(span.text, "0: Terms")
         XCTAssertEqual(span.onTap?.first?.name, "Terms")
@@ -113,21 +137,34 @@ final class PrototypeRichTextTests: XCTestCase {
     func testHostExpandedComponentSpansDecode() throws {
         struct Expanded: Decodable { let expanded: PrototypeSpec }
         let expanded = try JSONDecoder().decode(
-            Expanded.self, from: Data(contentsOf: fixtures.appendingPathComponent("components/expand/text-spans-props.json"))
+            Expanded.self,
+            from: Data(contentsOf: fixtures.appendingPathComponent("components/expand/text-spans-props.json"))
         ).expanded
         XCTAssertEqual(expanded.root.plainText(state: [:], pager: nil), "Terms")
         XCTAssertEqual(expanded.root.spans?.first?.onTap?.first?.name, "terms")
     }
 
     func testResolvedEmptyTextIsAllowedAndPagerUsesTheSameInterpolation() throws {
-        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data(#"{"id":"r","data":{"empty":""},"window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","spans":[{"text":"{data:/empty}"},{"text":"{page}/{pageCount} {name}"}]}}"#.utf8))
+        let spec = try JSONDecoder().decode(
+            PrototypeSpec.self,
+            from: Data(
+                #"{"id":"r","data":{"empty":""},"window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","spans":[{"text":"{data:/empty}"},{"text":"{page}/{pageCount} {name}"}]}}"#
+                    .utf8
+            )
+        )
         XCTAssertEqual(spec.root.spans?.first?.text, "")
-        XCTAssertEqual(spec.root.plainText(state: ["name": .string("")], pager: PagerPosition(page: 1, count: 3)), "2/3 ")
+        XCTAssertEqual(
+            spec.root.plainText(state: ["name": .string("")], pager: PagerPosition(page: 1, count: 3)),
+            "2/3 "
+        )
     }
 
     func testSpanFontAssetsUseTheExistingMissingAssetTracking() throws {
         let text = try node(#"{"type":"text","spans":[{"text":"a","style":{"fontFamily":{"asset":"custom"}}}]}"#)
         XCTAssertEqual(text.fontAssetIds(), ["custom"])
-        XCTAssertEqual(PrototypeRichText.runs(node: text, state: [:], pager: nil, nodeKey: "n")?.first?.style?.fontFamily, .asset("custom"))
+        XCTAssertEqual(
+            PrototypeRichText.runs(node: text, state: [:], pager: nil, nodeKey: "n")?.first?.style?.fontFamily,
+            .asset("custom")
+        )
     }
 }

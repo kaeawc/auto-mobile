@@ -204,8 +204,10 @@ enum PrototypeLimits {
         let hasText = fields["text"] != nil
         let hasSpans = fields["spans"] != nil
         if hasText == hasSpans {
-            throw violation("\(path).\(hasSpans ? "spans" : "text")",
-                            hasSpans ? "text and spans cannot both be set" : "text node needs text or spans")
+            throw violation(
+                "\(path).\(hasSpans ? "spans" : "text")",
+                hasSpans ? "text and spans cannot both be set" : "text node needs text or spans"
+            )
         }
         guard hasSpans else {
             if fields["text"] == .null { throw violation("\(path).text", "Invalid string value") }

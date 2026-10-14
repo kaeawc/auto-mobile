@@ -459,7 +459,8 @@ struct NodeView: View {
         if runs == nil, style?.fontStyle == "italic" { text = text.italic() }
         let decoration = style?.textDecoration
         if runs == nil, decoration == "underline" || decoration == "underlineLineThrough" { text = text.underline() }
-        if runs == nil, decoration == "lineThrough" || decoration == "underlineLineThrough" { text = text.strikethrough() }
+        if runs == nil,
+           decoration == "lineThrough" || decoration == "underlineLineThrough" { text = text.strikethrough() }
         if runs == nil { text = text.tracking(resolved.letterSpacing) }
         return text
             .lineSpacing(max(0, (resolved.lineHeight.map { $0 * scaled / resolved.size } ?? scaled) - scaled))
@@ -508,8 +509,10 @@ struct NodeView: View {
             part.font = font
             part.tracking = CGFloat(authored?.letterSpacing ?? resolved.letterSpacing)
             let decoration = authored?.textDecoration ?? style?.textDecoration
-            part.underlineStyle = (decoration == "underline" || decoration == "underlineLineThrough") ? Text.LineStyle(pattern: .solid) : nil
-            part.strikethroughStyle = (decoration == "lineThrough" || decoration == "underlineLineThrough") ? Text.LineStyle(pattern: .solid) : nil
+            part.underlineStyle = (decoration == "underline" || decoration == "underlineLineThrough") ? Text
+                .LineStyle(pattern: .solid) : nil
+            part.strikethroughStyle = (decoration == "lineThrough" || decoration == "underlineLineThrough") ? Text
+                .LineStyle(pattern: .solid) : nil
             part.link = run.link
             result.append(part)
         }

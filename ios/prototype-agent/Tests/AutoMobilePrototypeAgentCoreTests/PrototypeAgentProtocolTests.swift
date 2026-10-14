@@ -11,7 +11,10 @@ private func line(_ object: [String: Any]) throws -> Data {
 final class PrototypeAgentConfigurationTests: XCTestCase {
     func testRichTextCapabilityIsAdvertised() {
         XCTAssertEqual(PrototypeAgentProtocol.richTextCapability, "prototype_rich_text_v1")
-        XCTAssertEqual(PrototypeAgentProtocol.capabilities.filter { $0 == PrototypeAgentProtocol.richTextCapability }.count, 1)
+        XCTAssertEqual(
+            PrototypeAgentProtocol.capabilities.filter { $0 == PrototypeAgentProtocol.richTextCapability }.count,
+            1
+        )
     }
 
     func testTheAgentAdvertisesSfSymbolsWithoutMaterialParity() {

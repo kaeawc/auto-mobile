@@ -13,6 +13,8 @@ import {
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { installDefaultProvisionedDeviceTransportFence } from "../db/createDefaultProvisionedDeviceTransportFence";
 import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { InvalidToolParamsError } from "./invalidToolParamsError";
+import { ZodError } from "zod/v4";
 import {
   installToolCallDispatcher,
   type McpToolCallExtra,
@@ -1347,7 +1349,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     try {
       parsedParams = tool.schema.parse(strippedToolParams);
     } catch (error) {
-      throw new ActionableError(
+      const ParamsError = error instanceof ZodError ? InvalidToolParamsError : ActionableError;
+      throw new ParamsError(
         `Invalid parameters for tool ${name}: ${formatToolParamError(name, error, strippedToolParams, tool.schema)}`,
       );
     }

@@ -633,6 +633,10 @@ private fun RenderPrototypePager(
   interact: (PrototypeInteraction) -> Unit,
 ) {
   val source = node.source as? PrototypePagerNode ?: return
+  val markSelectedPage =
+    (source.peek?.start ?: 0.0) > 0.0 ||
+      (source.peek?.end ?: 0.0) > 0.0 ||
+      source.pageSize is PrototypePagerPageSize.Dp
   val pager = rememberPagerState(initialPage = node.page) { node.children.size }
   val animate = LocalPrototypeMotion.current
   // Keyed on motion too: turning motion off mid-scroll cancels the animation and snaps to the page.
@@ -666,12 +670,18 @@ private fun RenderPrototypePager(
     val onScreen by
       remember(pager, page) {
         derivedStateOf {
-          page == pager.currentPage ||
-            (pager.currentPageOffsetFraction > 0f && page == pager.currentPage + 1) ||
-            (pager.currentPageOffsetFraction < 0f && page == pager.currentPage - 1)
+          pager.layoutInfo.visiblePagesInfo.any { it.index == page }
         }
       }
-    Box(pageModifier.then(if (onScreen) Modifier else Modifier.clearAndSetSemantics {})) {
+    Box(
+      pageModifier.then(
+        when {
+          !onScreen -> Modifier.clearAndSetSemantics {}
+          markSelectedPage -> Modifier.semantics { selected = page == pager.currentPage }
+          else -> Modifier
+        },
+      ),
+    ) {
       RenderPrototypeNode(node.children[page], interact)
     }
   }

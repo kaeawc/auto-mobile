@@ -128,6 +128,49 @@ final class PrototypePagerOptionsTests: XCTestCase {
         XCTAssertEqual(partial.end, 7)
     }
 
+    func testVisibleFixedPagesOnBothAxesAndLastPage() throws {
+        for axis in ["horizontal", "vertical"] {
+            let layout = try PrototypePagerLayout(node: node(
+                #", "axis":"\#(axis)", "pageSize":{"dp":100}"#
+            ))
+            XCTAssertEqual(layout.visiblePages(selected: 0, count: 5, viewportExtent: 300), [0, 1, 2])
+            XCTAssertEqual(layout.visiblePages(selected: 0, count: 5, viewportExtent: 250), [0, 1, 2])
+            XCTAssertEqual(layout.visiblePages(selected: 4, count: 5, viewportExtent: 300), [4])
+        }
+    }
+
+    func testVisiblePeekNeighboursOnBothAxes() throws {
+        for axis in ["horizontal", "vertical"] {
+            for peek in [#"{"start":20}"#, #"{"end":20}"#, #"{"start":20,"end":20}"#] {
+                let layout = try PrototypePagerLayout(node: node(
+                    #", "axis":"\#(axis)", "peek":\#(peek)"#
+                ))
+                let expected = peek == #"{"start":20}"# ? [0, 1] :
+                    peek == #"{"end":20}"# ? [1, 2] : [0, 1, 2]
+                XCTAssertEqual(layout.visiblePages(selected: 1, count: 5, viewportExtent: 300), expected)
+            }
+        }
+    }
+
+    func testVisiblePagesExcludeSpacingAndExactViewportEdges() throws {
+        let layout = try PrototypePagerLayout(node: node(
+            #", "pageSpacing":20, "pageSize":{"dp":100}, "peek":{"start":20}"#
+        ))
+        XCTAssertEqual(layout.visiblePages(selected: 1, count: 5, viewportExtent: 260), [1, 2])
+        XCTAssertEqual(layout.visiblePages(selected: 1, count: 5, viewportExtent: 261), [1, 2, 3])
+        let spacedPeek = try PrototypePagerLayout(node: node(#", "pageSpacing":20, "peek":{"end":20}"#))
+        XCTAssertEqual(spacedPeek.visiblePages(selected: 1, count: 5, viewportExtent: 300), [1])
+    }
+
+    func testFillWithoutPeekExposesOnlySelectedAndEmptyViewportExposesNothing() throws {
+        for axis in ["horizontal", "vertical"] {
+            let layout = try PrototypePagerLayout(node: node(#", "axis":"\#(axis)""#))
+            XCTAssertEqual(layout.visiblePages(selected: 2, count: 5, viewportExtent: 300), [2])
+            XCTAssertEqual(layout.visiblePages(selected: 0, count: 0, viewportExtent: 300), [])
+            XCTAssertEqual(layout.visiblePages(selected: 0, count: 5, viewportExtent: 0), [])
+        }
+    }
+
     func testMaxPagerDpPendingContractWideMaximaAndStrictShapes() throws {
         XCTAssertEqual(PrototypePagerOptions.maxPagerDp, 10000)
         let invalid = [

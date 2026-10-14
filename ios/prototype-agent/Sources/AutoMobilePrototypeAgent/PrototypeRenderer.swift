@@ -912,12 +912,12 @@ struct PagerView: View {
     }
 
     @ViewBuilder
-    private func optionPage(_ index: Int, _ page: PrototypeNode) -> some View {
+    private func optionPage(_ index: Int, _ page: PrototypeNode, visiblePages: [Int]) -> some View {
         let axes: Axis.Set = layout.vertical ? .vertical : .horizontal
         let content = NodeView(node: page, model: model)
             .environment(\.pagerContext, PagerContext(page: index, count: pages.count))
-            // TabView exposes only the selected cell; peek neighbours follow the same rule.
-            .accessibilityHidden(index != selection.wrappedValue)
+            .accessibilityHidden(!visiblePages.contains(index))
+            .accessibilityAddTraits(index == selection.wrappedValue ? .isSelected : [])
         switch layout.pageSize {
         case .fill:
             content.containerRelativeFrame(axes)
@@ -931,29 +931,35 @@ struct PagerView: View {
 
     private var optionsPager: some View {
         let axes: Axis.Set = layout.vertical ? .vertical : .horizontal
-        return ScrollView(axes) {
-            if layout.vertical {
-                LazyVStack(spacing: CGFloat(layout.spacing)) {
-                    ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
-                        optionPage(index, page).id(index)
+        return GeometryReader { proxy in
+            let visiblePages = layout.visiblePages(
+                selected: selection.wrappedValue, count: pages.count,
+                viewportExtent: Double(layout.vertical ? proxy.size.height : proxy.size.width)
+            )
+            ScrollView(axes) {
+                if layout.vertical {
+                    LazyVStack(spacing: CGFloat(layout.spacing)) {
+                        ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
+                            optionPage(index, page, visiblePages: visiblePages).id(index)
+                        }
                     }
-                }
-                .scrollTargetLayout()
-            } else {
-                LazyHStack(spacing: CGFloat(layout.spacing)) {
-                    ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
-                        optionPage(index, page).id(index)
+                    .scrollTargetLayout()
+                } else {
+                    LazyHStack(spacing: CGFloat(layout.spacing)) {
+                        ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
+                            optionPage(index, page, visiblePages: visiblePages).id(index)
+                        }
                     }
+                    .scrollTargetLayout()
                 }
-                .scrollTargetLayout()
             }
+            .scrollTargetBehavior(.viewAligned)
+            .scrollPosition(id: pageBinding, anchor: layout.vertical ? .top : .leading)
+            .contentMargins(layout.vertical ? .top : .leading, CGFloat(layout.start), for: .scrollContent)
+            .contentMargins(layout.vertical ? .bottom : .trailing, CGFloat(layout.end), for: .scrollContent)
+            .scrollIndicators(.hidden)
+            .animation(pageAnimation, value: selection.wrappedValue)
         }
-        .scrollTargetBehavior(.viewAligned)
-        .scrollPosition(id: pageBinding, anchor: layout.vertical ? .top : .leading)
-        .contentMargins(layout.vertical ? .top : .leading, CGFloat(layout.start), for: .scrollContent)
-        .contentMargins(layout.vertical ? .bottom : .trailing, CGFloat(layout.end), for: .scrollContent)
-        .scrollIndicators(.hidden)
-        .animation(pageAnimation, value: selection.wrappedValue)
     }
 
     var body: some View {

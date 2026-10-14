@@ -704,10 +704,7 @@ The error is at the pager's `.axis`: "A vertical pager cannot appear inside a ve
 Current page means the first fully visible page: fixed sizes snap at Start; fill
 uses the usual settled page. `page_changed`, `{page}` / `{pageCount}`, `setPage` and
 navigation pager bindings keep their meaning. Stable keys and neighbour retention
-stay unchanged; non-current pages, including peek neighbours, stay outside the
-semantics tree. With a fixed `pageSize`, pages other than the current one are not
-exposed to accessibility, observe or tapOn even when fully visible; use tabBar/setPage
-to move. Indicator and carousel remain deferred. On iOS dp means points.
+stay unchanged. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; the current page is reported selected; on Android this selected state is added only for positive peek or fixed page size, preserving plain pagers’ semantics tree. Pages fully off-screen are not exposed. Indicator and carousel remain deferred. On iOS dp means points.
 
 
 ## Icons and images

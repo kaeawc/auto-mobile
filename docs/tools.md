@@ -798,9 +798,7 @@ are finite 0..10000; fixed page size is finite 1e-6..10000 (`MAX_PROTOTYPE_PAGER
 Missing spacing/peek sides mean 0, and `{}` peek is a no-op. Units are points on iOS.
 A vertical pager cannot have any vertical scroll ancestor (omitted axis is vertical).
 Current page is the first fully visible page; page events and navigation bindings
-keep their meaning, and non-current peek pages stay outside the semantics tree.
-With a fixed `pageSize`, pages other than the current one are not exposed to
-accessibility, observe or tapOn even when fully visible; use tabBar/setPage to move.
+keep their meaning. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; the current page is reported selected; on Android this selected state is added only for positive peek or fixed page size, preserving plain pagers’ semantics tree. Pages fully off-screen are not exposed.
 
 ### Patch (#11675)
 

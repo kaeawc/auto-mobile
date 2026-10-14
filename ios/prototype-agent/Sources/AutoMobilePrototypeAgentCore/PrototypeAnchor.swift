@@ -77,7 +77,12 @@ struct PrototypeAnchor: Decodable, Equatable {
         let y: Double
     }
 
-    init(bounds: PrototypeRect?, alignment: PrototypeAnchorAlignment = .cover, offsetX: Double = 0, offsetY: Double = 0) {
+    init(
+        bounds: PrototypeRect?,
+        alignment: PrototypeAnchorAlignment = .cover,
+        offsetX: Double = 0,
+        offsetY: Double = 0
+    ) {
         self.bounds = bounds
         self.alignment = alignment
         self.offsetX = offsetX
@@ -175,6 +180,8 @@ private let prototypeInlineContainerTypes: Set<String> = [
     "box",
     "row",
     "column",
+    "flow",
+    "grid",
     "scroll",
     "card",
     "pager",

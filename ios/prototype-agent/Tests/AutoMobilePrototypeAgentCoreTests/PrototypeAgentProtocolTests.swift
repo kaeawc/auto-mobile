@@ -129,6 +129,11 @@ final class PrototypeConnectionGateTests: XCTestCase {
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains("show_prototype"))
     }
 
+    func testAdvertisesFlowGrid() {
+        XCTAssertEqual(PrototypeAgentProtocol.flowGridCapability, "prototype_flow_grid_v1")
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.flowGridCapability))
+    }
+
     func testAdvertisesInPlaceShowWithReset() {
         XCTAssertEqual(PrototypeAgentProtocol.showInPlaceCapability, "prototype_show_in_place_v1")
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.showInPlaceCapability))

@@ -4,6 +4,7 @@ import android.util.Log
 import android.view.Display
 import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
+import dev.jasonpearson.automobile.protocol.PrototypeDataResolver
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
@@ -231,11 +232,16 @@ class PrototypeController(
   private fun validate(spec: PrototypeSpec): PrototypeSpec {
     guardPrototypeTree(spec.root)
     requireResolvedPrototypeAnchors(spec.root)
-    return when (val validation = PrototypeSpecValidator.validate(json.encodeToString(spec))) {
-      is PrototypeSpecValidation.Failure ->
-        error("${validation.error.path}: ${validation.error.message}")
-      is PrototypeSpecValidation.Success -> validation.spec
-    }
+    val validated =
+      when (val validation = PrototypeSpecValidator.validate(json.encodeToString(spec))) {
+        is PrototypeSpecValidation.Failure ->
+          error("${validation.error.path}: ${validation.error.message}")
+        is PrototypeSpecValidation.Success -> validation.spec
+      }
+    val resolved = PrototypeDataResolver.resolve(validated)
+    guardPrototypeTree(resolved.root)
+    if (resolved.root !== validated.root) requireResolvedPrototypeAnchors(resolved.root)
+    return validated
   }
 
   private fun shownDisplayId(): Int = activeRequest?.displayId ?: Display.DEFAULT_DISPLAY
@@ -542,6 +548,7 @@ class PrototypeController(
       id = id,
       persistent = runtime.persistent,
       state = runtime.current.state.toMap(),
+      data = runtime.current.spec.data,
       pages = runtime.current.pages.toMap(),
       lastSequence = sequences[id] ?: 0L,
       suspended = foreground.suspended,

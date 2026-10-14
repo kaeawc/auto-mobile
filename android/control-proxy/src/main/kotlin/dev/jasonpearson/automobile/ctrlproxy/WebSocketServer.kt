@@ -353,6 +353,10 @@ class WebSocketServer(
     // it expects a string and fails the whole show, and draws a role-named stop transparent, so
     // hosts refuse such a spec for a device lacking this flag.
     add("prototype_theme_modes_v1")
+    // Prototype specs resolve read-only data, path repeat items, and data text/conditions. Older
+    // APKs reject data, {path} items, repeat.key and data conditions as unknown, and draw
+    // {data:/x} text literally, so hosts refuse such a spec for a device lacking this flag.
+    add("prototype_data_model_v1")
     // show_prototype honours appearance (device, light or dark as the system setting); a shown
     // prototype re-themes when the device setting or palette changes and says so with an
     // appearance_changed prototype_event; the show result and each inspect entry carry the resolved

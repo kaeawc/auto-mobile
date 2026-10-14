@@ -117,6 +117,7 @@ export interface AccessibilityNodeSelector {
  * Interface for accessibility hierarchy data from the device.
  */
 export interface AccessibilityHierarchy {
+  prototypeSuspended?: boolean;
   displayId?: number | null;
   panelUniqueId?: string | null;
   panelFingerprint?: PanelFingerprint;

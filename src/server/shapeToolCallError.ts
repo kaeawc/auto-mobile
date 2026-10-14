@@ -1,3 +1,4 @@
+import { PrototypeHiddenError } from "../features/prototype/prototypeHidden";
 import {
   AndroidAvdIdentityUnresolvedError,
   AndroidDeviceIdentityUnresolvedError,
@@ -38,6 +39,7 @@ import {
 } from "./deviceOutsideBoundSessionRefusal";
 import { PlanExecutionInProgressError } from "./planExecutionInProgressRefusal";
 import { AmbiguousDeviceTargetError } from "./ambiguousDeviceTargetRefusal";
+import { SdkTooOldError } from "../models/SdkTooOldError";
 import { AppNotRunningError } from "../models/AppNotRunningError";
 import { InputDeviceOwnedError } from "../daemon/inputDeviceOwnership";
 import { DeviceGestureRecordingStartUnheldError } from "../daemon/deviceGestureRecordingStartAdmission";
@@ -174,6 +176,7 @@ function hasSelfDescribedRefusalPayload(
   | DeviceGestureRecordingStartUnheldError
   | OrphanRecorderActiveError
   | AppNotRunningError
+  | SdkTooOldError
   | ManagedSlotDiscoveryIncompleteError
   | ManagedSlotOwnershipUnconfirmedError {
   return [
@@ -190,6 +193,7 @@ function hasSelfDescribedRefusalPayload(
     DeviceGestureRecordingStartUnheldError,
     OrphanRecorderActiveError,
     AppNotRunningError,
+    SdkTooOldError,
     ManagedSlotDiscoveryIncompleteError,
     ManagedSlotOwnershipUnconfirmedError,
   ].some((Refusal) => error instanceof Refusal);
@@ -238,7 +242,7 @@ function typedRefusalPayload(error: unknown): Record<string, unknown> | undefine
 }
 
 function prototypeSuspendedPayload(error: unknown): Record<string, unknown> | undefined {
-  if (error instanceof PrototypeSuspendedError) {
+  if (error instanceof PrototypeSuspendedError || error instanceof PrototypeHiddenError) {
     return {
       code: error.code,
       retryable: error.retryable,

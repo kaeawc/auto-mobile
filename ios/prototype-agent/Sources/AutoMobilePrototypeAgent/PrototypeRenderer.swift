@@ -451,8 +451,13 @@ struct NodeView: View {
         }
         // Scaled with Dynamic Type, unlike the Android bug #10436.
         let scaled = UIFontMetrics.default.scaledValue(for: resolved.size)
-        var text = Text(interpolatedText)
-            .font(.system(size: scaled, weight: weight, design: design))
+        let font: Font
+        if let id = resolved.fontAsset, let face = model.fontFaces[id] {
+            font = .custom(face, fixedSize: scaled).weight(weight)
+        } else {
+            font = .system(size: scaled, weight: weight, design: design)
+        }
+        var text = Text(interpolatedText).font(font)
         if style?.fontStyle == "italic" { text = text.italic() }
         let decoration = style?.textDecoration
         if decoration == "underline" || decoration == "underlineLineThrough" { text = text.underline() }
@@ -625,37 +630,10 @@ struct NodeView: View {
         return palette.navUnselected.map { Color($0) } ?? .secondary
     }
 
-    /// Opens at its first detent. Dragging between detents and swipe-to-dismiss are not
-    /// prototyped on iOS yet. An authored `scrim` fills the sheet node's own frame behind the
-    /// surface, takes the touches there, and closes the sheet on tap, as on Android; without one
-    /// nothing is drawn behind the surface.
+    /// Open sheets own their detent state, resetting to the first detent when reopened.
     @ViewBuilder private var sheet: some View {
-        let open = node.openWhen.map(model.holds) ?? false
-        if open, let child = node.child {
-            GeometryReader { proxy in
-                if let scrim = palette.scrim(node.scrim).map({ Color($0) }) {
-                    scrim
-                        .contentShape(Rectangle())
-                        .onTapGesture { model.closeModal(node) }
-                        .accessibilityHidden(true)
-                }
-                VStack(spacing: 8) {
-                    if node.dragHandle ?? true {
-                        Capsule().fill(palette.sheetHandle.map { Color($0) } ?? Color.secondary.opacity(0.5)).frame(
-                            width: 36,
-                            height: 5
-                        ).padding(.top, 6)
-                    }
-                    NodeView(node: child, model: model)
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: node.detents?.first.map { detent in
-                    CGFloat(detent.height(in: Double(proxy.size.height)))
-                })
-                .background(palette.sheetSurface.map { Color($0) } ?? Color(UIColor.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .frame(maxHeight: .infinity, alignment: .bottom)
-            }
+        if node.openWhen.map(model.holds) ?? false, let child = node.child {
+            PrototypeBottomSheetView(node: node, child: child, model: model)
         }
     }
 
@@ -717,7 +695,7 @@ struct NodeView: View {
             .opacity(style?.alpha ?? 1)
             .modifier(TapModifier(actions: handlesOwnTap ? nil : node.onTap, model: model, style: style))
             .modifier(IdentifierModifier(
-                identifier: node.testTag ?? node.id,
+                identifier: node.testTag,
                 label: accessibilityLabelOverride,
                 grouping: grouping
             ))
@@ -943,6 +921,63 @@ extension PrototypeVisibilityTransition {
         case .expand: .scale(scale: 0.01, anchor: .top).combined(with: .opacity)
         case .slide: .move(edge: .top).combined(with: .opacity)
         case .standard: .scale(scale: 0.01, anchor: .top).combined(with: .opacity)
+        }
+    }
+}
+
+/// Dragging changes physical height; scrim taps and swipe dismissal share the same state action.
+private struct PrototypeBottomSheetView: View {
+    let node: PrototypeNode
+    let child: PrototypeNode
+    let model: PrototypeModel
+    @Environment(\.prototypePalette) private var palette
+    @State private var settledHeight: Double?
+    @GestureState private var drag = 0.0
+
+    var body: some View {
+        GeometryReader { proxy in
+            let containerHeight = Double(proxy.size.height)
+            let heights = prototypeSheetHeights(detents: node.detents ?? [], containerHeight: containerHeight)
+            let current = settledHeight ?? heights.first
+            ZStack(alignment: .bottom) {
+                if let scrim = palette.scrim(node.scrim).map({ Color($0) }) {
+                    scrim
+                        .contentShape(Rectangle())
+                        .onTapGesture { model.closeModal(node) }
+                        .accessibilityHidden(true)
+                }
+                VStack(spacing: 8) {
+                    if node.dragHandle ?? true {
+                        Capsule().fill(palette.sheetHandle.map { Color($0) } ?? Color.secondary.opacity(0.5))
+                            .frame(width: 36, height: 5).padding(.top, 6)
+                    }
+                    NodeView(node: child, model: model)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: current.map { CGFloat(min(max($0 - drag, 0), containerHeight)) })
+                .background(palette.sheetSurface.map { Color($0) } ?? Color(UIColor.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(coordinateSpace: .named("prototypeBottomSheet"))
+                        .updating($drag) { value, drag, _ in drag = Double(value.translation.height) }
+                        .onEnded { value in
+                            guard let current else { return }
+                            if let height = settlePrototypeSheet(
+                                heights: heights, current: current, drag: Double(value.translation.height),
+                                dismissOnSwipe: node.dismissOnSwipe ?? true
+                            ) {
+                                settledHeight = height
+                            } else {
+                                model.closeModal(node)
+                            }
+                        },
+                    including: heights.isEmpty ? .subviews : .all
+                )
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .coordinateSpace(name: "prototypeBottomSheet")
+            .onChange(of: heights) { _, _ in settledHeight = nil }
         }
     }
 }

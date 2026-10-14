@@ -130,6 +130,21 @@ else
 fi
 echo ""
 
+# The standalone viewer links the same renderer into its own simulator app content.
+echo -e "${BLUE}Building iOS simulator prototype viewer...${NC}"
+if xcrun --sdk iphonesimulator --show-sdk-path > /dev/null 2>&1; then
+    PROTOTYPE_VIEWER_OUT="${PROJECT_ROOT}/scratch/prototype-viewer-ci"
+    if "${SCRIPT_DIR}/prototype-viewer-build.sh" "${PROTOTYPE_VIEWER_OUT}" 2>&1; then
+        print_status 0 "prototype-viewer app built successfully"
+    else
+        print_status 1 "prototype-viewer app build failed"
+        FAILED_PACKAGES+=("prototype-viewer app")
+    fi
+else
+    print_info "Skipping prototype-viewer app (no iphonesimulator SDK)"
+fi
+echo ""
+
 # Optional: sign XCTestRunner for iOS releases when credentials are available.
 if [[ "${IOS_SIGNING_ENABLED:-false}" == "true" ]]; then
     echo -e "${BLUE}Signing iOS frameworks for release builds...${NC}"

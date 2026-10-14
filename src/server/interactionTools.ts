@@ -3871,6 +3871,7 @@ export function registerInteractionTools() {
       outputSchema: keyboardResultSchema,
       // detect, listImes and listProfiles change no UI: reads (#10965). The rest are control.
       deviceReadOnly: (args: KeyboardArgs) => KEYBOARD_READ_ACTIONS.has(args.action),
+      deviceReadOnlyArgs: [{ argument: "action", values: [...KEYBOARD_READ_ACTIONS] }],
     },
   );
 
@@ -3914,6 +3915,10 @@ export function registerInteractionTools() {
     clipboardSchema,
     clipboardHandler,
     // get changes no UI: a read (#10965). copy, paste and clear are control.
-    { defaultEnabled: false, deviceReadOnly: (args: ClipboardArgs) => args.action === "get" },
+    {
+      defaultEnabled: false,
+      deviceReadOnly: (args: ClipboardArgs) => args.action === "get",
+      deviceReadOnlyArgs: [{ argument: "action", values: ["get"] }],
+    },
   );
 }

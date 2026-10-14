@@ -158,6 +158,7 @@ class ImeCommitDriverTest {
     assertEquals(listOf("A", "😀", "e\u0301", family, flag, "B"), sink.committedChars)
     assertEquals(text, sink.committedChars.joinToString(""))
     assertEquals(6, result.committedUnits)
+    assertFalse(result.editorConsumed)
   }
 
   @Test
@@ -786,7 +787,7 @@ class ImeCommitDriverTest {
       )
       assertEquals(
         if (postDispatch) ImeCommitDriver.Reconciliation.Succeed("")
-        else ImeCommitDriver.Reconciliation.Fail(NONE_APPLIED_ERROR, ""),
+        else ImeCommitDriver.Reconciliation.Consumed(0),
         ImeCommitDriver.reconcileDecision(postDispatch, true, "", "", units),
       )
       assertEquals(
@@ -796,6 +797,15 @@ class ImeCommitDriverTest {
       )
     }
     for (restart in listOf(false, true)) {
+      assertEquals(
+        if (restart) ImeCommitDriver.Reconciliation.Consumed(0)
+        else ImeCommitDriver.Reconciliation.Fail(NONE_APPLIED_ERROR, ""),
+        ImeCommitDriver.reconcileDecision(false, restart, "", "", units),
+      )
+      assertEquals(
+        ImeCommitDriver.Reconciliation.Succeed(""),
+        ImeCommitDriver.reconcileDecision(true, restart, "", "", units),
+      )
       assertEquals(
         if (restart) ImeCommitDriver.Reconciliation.Continue
         else ImeCommitDriver.Reconciliation.Fail("Editor disconnected during IME commit", null),
@@ -815,6 +825,55 @@ class ImeCommitDriverTest {
       ImeCommitDriver.Reconciliation.Succeed("AB"),
       ImeCommitDriver.reconcileDecision(true, false, "", "AB", units),
     )
+  }
+
+  @Test
+  fun `pure reconciliation consumes only a missing last dispatched newline`() {
+    for (postDispatch in listOf(false, true)) {
+      for (restart in listOf(false, true)) {
+        for (lastResume in listOf(-1, 1, 2)) {
+          assertEquals(
+            when {
+              restart && postDispatch -> ImeCommitDriver.Reconciliation.Succeed("a")
+              restart -> ImeCommitDriver.Reconciliation.Consumed(1)
+              lastResume == -1 -> ImeCommitDriver.Reconciliation.Resume(1)
+              postDispatch -> ImeCommitDriver.Reconciliation.Succeed("a")
+              else -> ImeCommitDriver.Reconciliation.DropRejected(1)
+            },
+            ImeCommitDriver.reconcileDecision(
+              postDispatch,
+              restart,
+              "",
+              "a",
+              listOf("a", "\n"),
+              lastResume,
+            ),
+          )
+        }
+        assertEquals(
+          ImeCommitDriver.Reconciliation.Resume(1),
+          ImeCommitDriver.reconcileDecision(
+            postDispatch,
+            restart,
+            "",
+            "a",
+            listOf("a", "\n", "b"),
+          ),
+        )
+        assertEquals(
+          if (postDispatch) ImeCommitDriver.Reconciliation.Succeed("a")
+          else ImeCommitDriver.Reconciliation.DropRejected(1),
+          ImeCommitDriver.reconcileDecision(
+            postDispatch,
+            restart,
+            "",
+            "a",
+            listOf("a", "\n", "b"),
+            1,
+          ),
+        )
+      }
+    }
   }
 
   @Test
@@ -862,6 +921,7 @@ class ImeCommitDriverTest {
   fun `finish and same editor non restart with no applied units never resends`() {
     val sink = restartingSink("existing:", false)
     val result = commit(sink, "line one", PRIOR_IME_ID)
+    assertFalse(result.editorConsumed)
     assertEquals(NONE_APPLIED_ERROR, result.error)
     assertEquals("existing:", sink.editorText)
     assertEquals("", result.insertedText)
@@ -972,7 +1032,7 @@ class ImeCommitDriverTest {
   }
 
   @Test
-  fun `stripped final newline succeeds with retained query after one resend`() {
+  fun `stripped final newline succeeds with retained query without resending`() {
     val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
     sink.editorText = ""
     sink.afterCommit = {
@@ -982,14 +1042,35 @@ class ImeCommitDriverTest {
       }
     }
     val result = commit(sink, "hello\n", PRIOR_IME_ID)
-    assertEquals(2, sink.committedChars.count { it == "\n" })
+    assertEquals(1, sink.committedChars.count { it == "\n" })
     assertTrue(result.success)
     assertNull(result.error)
     assertEquals("hello", result.insertedText)
+    assertEquals("hello", sink.editorText)
   }
 
   @Test
-  fun `stripped mid dispatch newline continues remaining line after one resend`() {
+  fun `non restart lost final newline is resent once`() {
+    val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
+    sink.editorText = ""
+    sink.restarting = false
+    sink.afterCommit = {
+      if (sink.committedChars.last() == "\n" && sink.committedChars.count { it == "\n" } == 1) {
+        sink.editorText = requireNotNull(sink.editorText).dropLast(1)
+        sink.generation++
+      }
+    }
+    val result = commit(sink, "hello\n", PRIOR_IME_ID)
+    assertEquals(2, sink.committedChars.count { it == "\n" })
+    assertTrue(result.success)
+    assertNull(result.error)
+    assertFalse(result.editorConsumed)
+    assertEquals("hello\n", result.insertedText)
+    assertEquals("hello\n", sink.editorText)
+  }
+
+  @Test
+  fun `stripped mid dispatch newline continues remaining line without resending`() {
     val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
     sink.editorText = ""
     sink.afterCommit = {
@@ -999,10 +1080,43 @@ class ImeCommitDriverTest {
       }
     }
     val result = commit(sink, "line one\nline two", PRIOR_IME_ID)
-    assertEquals(2, sink.committedChars.count { it == "\n" })
+    assertEquals(1, sink.committedChars.count { it == "\n" })
     assertTrue(result.success)
     assertNull(result.error)
+    assertTrue(result.editorConsumed)
     assertEquals("line oneline two", result.insertedText)
+    assertEquals("line oneline two", sink.editorText)
+  }
+
+  @Test
+  fun `consumed Enter followed by stale connection reconnects without resending`() {
+    val sink = newlineStrippingSink()
+    val stripNewline = requireNotNull(sink.afterCommit)
+    sink.restarting = true
+    sink.afterCommit = {
+      stripNewline()
+      if (sink.committedChars.last() == "\n") {
+        sink.identity = null
+        sink.stale = true
+      }
+    }
+    var reconnectPolls = 0
+    sink.beforeContinuation = {
+      if (sink.stale && ++reconnectPolls == 2) {
+        sink.identity = "same-editor"
+        sink.stale = false
+        sink.generation++
+      }
+    }
+    val result = commit(sink, "hello\nworld", PRIOR_IME_ID)
+    assertTrue(result.success)
+    assertNull(result.error)
+    assertEquals(2, reconnectPolls)
+    assertEquals("hello\nworld", sink.committedChars.joinToString(""))
+    assertEquals(1, sink.committedChars.count { it == "\n" })
+    assertEquals("helloworld", sink.editorText)
+    assertEquals("helloworld", result.insertedText)
+    assertEquals(11, result.committedUnits)
   }
 
   @Test
@@ -1028,7 +1142,7 @@ class ImeCommitDriverTest {
     }
     val result = commit(sink, "one\ntwo three", PRIOR_IME_ID)
     assertEquals(2, sink.committedChars.count { it == "h" })
-    assertEquals(2, sink.committedChars.count { it == "\n" })
+    assertEquals(1, sink.committedChars.count { it == "\n" })
     assertTrue(result.success)
     assertNull(result.error)
     assertEquals("onetwo three", sink.editorText)
@@ -1037,10 +1151,10 @@ class ImeCommitDriverTest {
   }
 
   @Test
-  fun `tolerated newline rejection without later restart keeps one resend`() {
+  fun `tolerated newline rejection without later restart never resends`() {
     val sink = newlineStrippingSink()
     val result = commit(sink, "one\ntwo three", PRIOR_IME_ID)
-    assertEquals(2, sink.committedChars.count { it == "\n" })
+    assertEquals(1, sink.committedChars.count { it == "\n" })
     assertTrue(result.success)
     assertNull(result.error)
     assertEquals("onetwo three", sink.editorText)
@@ -1061,14 +1175,14 @@ class ImeCommitDriverTest {
   }
 
   @Test
-  fun `four rejected newlines succeed with only the first newline resent`() {
+  fun `four rejected newlines succeed without resending`() {
     val sink = newlineStrippingSink()
     val result = commit(sink, "a\nb\nc\nd\ne", PRIOR_IME_ID)
     assertTrue(result.success)
     assertNull(result.error)
     assertEquals("abcde", sink.editorText)
     assertEquals("abcde", result.insertedText)
-    assertEquals(5, sink.committedChars.count { it == "\n" })
+    assertEquals(4, sink.committedChars.count { it == "\n" })
     assertEquals(9, result.committedUnits)
   }
 
@@ -1088,7 +1202,9 @@ class ImeCommitDriverTest {
     assertNull(result.error)
     assertEquals("abcde", sink.editorText)
     assertEquals("abcde", result.insertedText)
-    for (unit in rejected) assertEquals(2, sink.committedChars.count { it == unit })
+    for (unit in rejected) {
+      assertEquals(if (unit == "\n") 1 else 2, sink.committedChars.count { it == unit })
+    }
   }
 
   @Test
@@ -1109,16 +1225,38 @@ class ImeCommitDriverTest {
       assertNull(result.error)
       assertEquals("abcdthree", sink.editorText)
       assertEquals("abcdthree", result.insertedText)
-      assertEquals(5, sink.committedChars.count { it == "\n" })
+      assertEquals(4, sink.committedChars.count { it == "\n" })
       assertEquals(2, sink.committedChars.count { it == "h" })
       assertEquals(13, result.committedUnits)
     }
   }
 
   @Test
-  fun `consume on space fails without ever resending consumed units`() {
+  fun `consume on space with restart continues remaining text`() {
     val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
     sink.editorText = ""
+    sink.restarting = true
+    sink.afterCommit = {
+      if (sink.committedChars.last() == " ") {
+        sink.editorText = ""
+        sink.generation++
+      }
+    }
+    val result = commit(sink, "ab cd", PRIOR_IME_ID)
+    assertTrue(result.success)
+    assertNull(result.error)
+    assertTrue(result.editorConsumed)
+    assertEquals("cd", result.insertedText)
+    assertEquals("cd", sink.editorText)
+    assertEquals(listOf("a", "b", " ", "c", "d"), sink.committedChars)
+    assertEquals(5, result.committedUnits)
+  }
+
+  @Test
+  fun `consume on space without restart fails without resending consumed units`() {
+    val sink = FakeImeCommitSink(InputType.TYPE_CLASS_TEXT)
+    sink.editorText = ""
+    sink.restarting = false
     sink.afterCommit = {
       if (sink.committedChars.last() == " ") {
         sink.editorText = ""
@@ -1130,6 +1268,7 @@ class ImeCommitDriverTest {
     assertFalse(result.success)
     assertTrue(result.partialApplication)
     assertEquals("", result.insertedText)
+    assertEquals("", sink.editorText)
     assertEquals("ab ", sink.committedChars.joinToString(""))
   }
 

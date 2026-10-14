@@ -146,3 +146,21 @@ fun isPrototypeWindow(
   ownPackage: String?,
 ): Boolean =
   hasPrototypeTitle(windowType, title) && ownPackage != null && windowPackage == ownPackage
+
+/** Reads roots only for titled candidates; any unreadable candidate prevents an absence claim. */
+internal fun <W> prototypeWindowOnScreen(
+  windows: List<W>?,
+  hasTitle: (W) -> Boolean,
+  rootPackage: (W) -> String?,
+  ownPackage: String,
+): Boolean? {
+  if (windows == null) return null
+  var unreadable = false
+  for (window in windows) {
+    if (!hasTitle(window)) continue
+    val packageName = rootPackage(window)
+    if (packageName == ownPackage) return true
+    if (packageName == null) unreadable = true
+  }
+  return if (unreadable) null else false
+}

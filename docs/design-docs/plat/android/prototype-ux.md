@@ -136,6 +136,19 @@ No data means every path is missing. `/a/` accesses the empty key inside `a`.
   not count. After the three path-source checks, exceeding this budget fails at
   `<node>.repeat.items.path` with `Repeat path cell limit exceeded`, before template projection.
   Cell counts and immutable projected lists are cached by pointer within each validation call.
+- `MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH` (16384 UTF-16 code units) bounds the sum of
+  replacement lengths per bindable field at each substitution stage: data in text-kind fields,
+  then repeat in every bindable field for each item, including repeat placeholders inserted by
+  data. Literal characters and unresolved repeat placeholders contribute zero; state placeholders
+  are not validated because state can change after show.
+  `MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL` (4194304 UTF-16 code units) also bounds rebuilt text
+  per validation: each recognized data stage and each repeat item charges authored stage length
+  plus replacement length, including literal units and placeholder tokens. Inside a repeat, a
+  data-resolved field is also charged once per item, even without repeat placeholders. Purely
+  literal fields and state placeholders are not charged. Crossing the total fails at the field path
+  with `Substituted text total limit exceeded`.
+  During state interpolation, a replacement that would exceed the per-call substitution limit stays
+  as written, and later placeholders may still substitute.
 - `{data:/pointer}` binds only the text-kind fields repeat already binds: text, button/FAB labels,
   segmented option labels, app bar title/navigation/action labels, dialog title/text/button labels,
   and snackbar text/action label. Missing, object or array values become empty text. Other braces
@@ -202,8 +215,8 @@ therefore resolves during controller validation, its one-off `mapPrototypeSpec` 
 its runtime's incremental mapping. The validator's `MAX_PROTOTYPE_REPEAT_PATH_CELLS` limit bounds
 resolution work.
 Appearance and anchor layout consume the resulting render tree. `repeat.key` is validated and
-carried on the model; Compose rows retain positional identity in this slice. Keyed identity lands
-with patch (#11675), when reordering becomes observable. CtrlProxy advertises
+carried on the model; keyed Compose rows retain identity by `repeat.key` across patches and
+reordering, while unkeyed rows retain positional identity. CtrlProxy advertises
 `prototype_data_model_v1`, and its inspect entries report the shown spec's original `data` beside
 state, omitting it when absent.
 
@@ -221,6 +234,8 @@ depth precedes array length, then children; the byte check runs last.
 | Pointer field | `Invalid pointer value` |
 | `<node>.repeat.items` | `Invalid union value` for neither array nor object |
 | `<node>.repeat.items.path` (in this order) | `Repeat path does not resolve to an array`; `Repeat path resolves to more than 128 items`; `Repeat path item <i> is not an object`; `Repeat path cell limit exceeded` |
+| Bindable field | `Substituted text total limit exceeded` (reduce bindable fields, replacement lengths or repeat items; `MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL`) |
+| Authored bindable field, e.g. `root.children[0].text` or `root.children[0].onTap[0].name` | `Substituted text length limit exceeded` (after unknown repeat fields, before bound key/empty emit checks) |
 | Referencing template string | `Unknown repeat field "x"` (non-scalar members count as absent) |
 | `<node>.repeat.items.path` | `Bound state key "<k>" is invalid (repeat item <i>)`; literal repeats keep `<node>.repeat.items[i]` without the suffix |
 | `<node>.repeat.key` | `Unknown repeat field "<key>"`; `Duplicate repeat key "<text>" (items <i> and <j>)`, first colliding pair |
@@ -628,6 +643,12 @@ prototype shows, or keep display text in a string key.
 ## Style
 
 All properties are optional. Sizes, padding, offsets, radii, and spacing use dp.
+Numeric lengths are capped at 10000, including fixed dimensions, bounds x/y/width/height,
+size constraints, padding, corner radii, border width, spacing, sheet height and fixed detents.
+Offsets and bounds x/y range from -10000 to 10000. Elevation is capped at 1000; text size and line height
+are positive and capped at 1000, and letter spacing ranges from -1000 to 1000.
+Weight and aspect ratio range from 0.000001 to 10000. All endpoints are inclusive.
+
 Text size uses sp, so it follows the system font scale. Negative offsets/positions
 are allowed; sizes are nonnegative, except text size and sheet height/detent
 height which must be positive. Positive values use a minimum of 0.000001.
@@ -1033,11 +1054,9 @@ written once.
 ### Patch (#11675)
 
 Use `show` for a new screen or a window, theme or root change. Use `patch` for
-content (`/data`), state (`/state`) or one node by id (`replaceNode`). The host action,
-wire contract and capability gate exist, but **no device advertises
-`prototype_patch_v1` yet**. Every patch is refused before sending: update CtrlProxy
-on Android, or relaunch the app with `launchApp prototype: true` on iOS when a
-supporting agent is available; until then, send the whole spec with `show`.
+content (`/data`), state (`/state`) or one node by id (`replaceNode`). Android CtrlProxy advertises
+`prototype_patch_v1` and applies patches in place; iOS does not advertise it yet
+and requires the whole spec with `show`.
 
 `{action:"patch", id, ops, baseRevision?}` sends a `patch_prototype` frame
 `{requestId, id, baseRevision?, ops}` only to a device advertising
@@ -1322,10 +1341,13 @@ allocation) and when the app returns the same runtime is shown again. A
   hierarchy capture carries top-level `prototypeSuspended: true`, so `layer: "prototype"`
   calls fail with "hidden because the app it was shown over is not in front" instead
   of "no prototype is showing".
+  `inspect` also reports optional `hiddenReason`: `app_layer_window_hidden` when the app in front hides an app-layer window, or `device_blocked` when locked or the screen is off. The host carries it into status and uses it for `prototype_hidden` layer refusals. A show reports `visible: false` with the same `notVisibleReason`; older devices retain `no_prototype_window_on_screen` for app-layer confirmation. Hidden reasons are absent when visible or suspended.
+
   The host stores `suspended` from `inspect` and surfaces it on `prototype` status
   entries (host-local, so it is as fresh as the last `inspect`; a new `show` or an
   `inspect` after the app returns clears it), and an `awaitEvent` that times out on
   a suspended prototype carries the same explanation as a `warning`. Absent on iOS.
+
 - **Separate from other hides.** Suspension is its own state
   (`PrototypeForegroundTracker.suspended`). The host's `isBlocked` is the lock-screen
   check OR suspension, so any restore path (unlock, relayout, or a future capture-time
@@ -1551,3 +1573,48 @@ asset strings and count nav images as spec image uses; #9296 must remove its
 `specVersion` proposal. #9295's root-level opacity wording maps to
 `window.opacity`, and its focusability wording follows the later device findings.
 No sibling issues are edited as part of this implementation.
+
+## Saved prototype activity
+
+`SavedPrototypeLaunch.intent(context, id)` targets the explicit
+`SavedPrototypeActivity` component with data `automobile-saved-prototype:/<id>`
+(the single path segment is encoded with `Uri.Builder`) and
+`FLAG_ACTIVITY_NEW_DOCUMENT`. No extras are read: intents select only an id,
+never a spec or assets. `documentLaunchMode="intoExisting"` matches component and
+data via `Intent.filterEquals`, giving each id its own task while reusing the
+same id's task. Shortcut publishing may add flags; shortcut removal is deferred
+to #12265.
+
+A document relaunch calls `onNewIntent`, updates the activity's intent and reloads
+the saved entry. It closes the previous runtime without emitting a dismissal,
+then renders the latest snapshot or the corresponding typed error screen if the
+entry was deleted or cannot be opened. A different id delivered to the activity
+also reloads. Handled configuration changes preserve the live runtime state.
+
+The activity is `exported=false` with no intent filter. App-owned launches,
+including our pinned shortcut intents launched with the app's identity, can
+open it; other apps cannot render saved content or probe ids. An exported
+activity plus a signature permission would introduce an unnecessary external
+entry point, and exporting with an intent filter alone would let any app
+enumerate/launch saved entries. We rejected those alternatives; explicit,
+app-owned intents also avoid Android 15's stricter intent matching requirements.
+
+Saved entries live under `savedPrototypeRoot(context)`, the credential-encrypted
+app-private `filesDir/saved-prototypes` directory. Locked storage is checked
+before constructing or calling the store. Missing ids, deleted entries, corrupt
+content, unsupported format versions and locked storage have typed screens;
+raw storage messages and paths never reach the UI.
+The Locked screen is defensive: the app is not `directBootAware`, so this
+activity cannot start before the device's first unlock. The storage check also
+covers unavailable credential storage, such as a locked work profile.
+
+The existing runtime and Compose renderer run in an activity window without
+accessibility service state, overlay ownership, idle timeout, disconnect
+dismissal or foreground-app scoping. Back, authored dismiss and HostDismiss
+finish the activity and emit exactly one `dismissed` event with reason `user`.
+A system process kill emits nothing. Offline events enter the process-level
+`SavedPrototypeEvents.buffer`; a registered delivery consumes an event only when
+it returns true. Sequence numbers are allocated per prototype id for the process
+lifetime and continue across activity recreation and document relaunch. Future
+replay must synchronize on the buffer while draining or
+restoring it. The bounded buffer is in memory and does not survive process death.

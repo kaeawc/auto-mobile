@@ -1,12 +1,13 @@
 import { toActionableError } from "../../models/ActionableError";
 import { ActionableError, BootedDevice } from "../../models";
+import { AppNotRunningError } from "../../models/AppNotRunningError";
+import { MINIMUM_READ_ONLY_SDK_VERSION, SdkTooOldError } from "../../models/SdkTooOldError";
 import { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import { shellQuote } from "../../utils/shellQuote";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { ProviderUnavailableError } from "../storage/ProviderUnavailableError";
 import { parseJsonKeepingBigIntegers } from "./bigIntegerJson";
-import { AppNotRunningError } from "../../models/AppNotRunningError";
 
 /**
  * Database descriptor returned from listDatabases
@@ -99,6 +100,13 @@ export class DatabaseInspector {
 
   /** Pause before the single retry of a DISABLED reply from a cold-started app (#10210). */
   static readonly COLD_START_RETRY_DELAY_MS = 500;
+
+  /** Only confirmed enforcement is cached; failed probes can recover after an app upgrade. */
+  private static readonly readOnlyCapabilities = new Map<string, true>();
+
+  static clearReadOnlyCapabilityCache(): void {
+    DatabaseInspector.readOnlyCapabilities.clear();
+  }
 
   constructor(
     private device: BootedDevice,
@@ -202,6 +210,9 @@ export class DatabaseInspector {
       // Starting the process is a control action on the holder's device (#11350).
       throw new AppNotRunningError(appId, this.device.deviceId);
     }
+    if (nonOwner) {
+      await this.assertReadOnlyEnforced(appId, uri);
+    }
     try {
       return await this.runContentCall<T>(cmd);
     } catch (error) {
@@ -225,12 +236,41 @@ export class DatabaseInspector {
     }
   }
 
-  private async runContentCall<T>(cmd: string): Promise<T> {
+  private async assertReadOnlyEnforced(appId: string, uri: string): Promise<void> {
+    const key = `${this.device.deviceId}:${appId}`;
+    if (DatabaseInspector.readOnlyCapabilities.has(key)) {
+      return;
+    }
+    const refusal = new SdkTooOldError(appId, this.device.deviceId, MINIMUM_READ_ONLY_SDK_VERSION);
+    const capability = await this.runContentCall<{ readOnlyEnforced?: unknown }>(
+      `shell content call --uri ${shellQuote(uri)} --method getReadOnlyCapability`,
+      (cause) =>
+        new SdkTooOldError(appId, this.device.deviceId, MINIMUM_READ_ONLY_SDK_VERSION, cause),
+    );
+    if (capability?.readOnlyEnforced !== true) {
+      throw refusal;
+    }
+    DatabaseInspector.readOnlyCapabilities.set(key, true);
+  }
+
+  private async runContentCall<T>(
+    cmd: string,
+    invalidReplyError?: (cause: unknown) => SdkTooOldError,
+  ): Promise<T> {
     const result = await this.adb.executeCommand(cmd);
     const output = [result.stdout, result.stderr]
       .filter((part) => part.trim().length > 0)
       .join("\n");
-    return this.parseContentCallResult<T>(output);
+    // Transport failures above propagate unchanged. Only a received reply can indicate an
+    // unknown SDK capability, including an old provider's INVALID_ARGUMENT reply or bad JSON.
+    try {
+      return this.parseContentCallResult<T>(output);
+    } catch (error) {
+      if (isInspectionDisabled(error) || error instanceof ProviderUnavailableError) {
+        throw error;
+      }
+      throw invalidReplyError ? invalidReplyError(error) : error;
+    }
   }
 
   /**

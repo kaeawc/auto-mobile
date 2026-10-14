@@ -500,6 +500,8 @@ interface SendKeysRouting extends SendKeysFocusOptions {
 export type TextActionResult = {
   /** Internal device read-back evidence; omitted from public command results. */
   insertedText?: string;
+  /** Internal device reconciliation verdict; omitted from public command results. */
+  editorConsumed?: boolean;
   success: boolean;
   retryable?: boolean;
   warning?: string;
@@ -3465,6 +3467,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
             ...(result.transportFailure ? { imeFailureStage: "transport" as const } : {}),
             ...imeCommitUnitFields(result),
             ...(result.insertedText !== undefined ? { insertedText: result.insertedText } : {}),
+            ...(result.editorConsumed === true ? { editorConsumed: true } : {}),
             ...(result.trace !== undefined ? { imeTrace: result.trace } : {}),
           };
         },

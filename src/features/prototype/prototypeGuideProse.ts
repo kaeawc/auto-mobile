@@ -144,6 +144,19 @@ are rejected; a missing text path renders empty.
   \`{item.x}\`, \`{index}\` or \`{key}\` inside it bind afterwards exactly like authored text.
   Data values cannot be escaped; inserted strings are never scanned again for data placeholders.
   Pointers are untouched by component props.
+- \`MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH\` (16384) bounds the sum of replacement UTF-16
+  lengths per bindable field at each stage: data in text-kind fields, then repeat in all bindable
+  fields for every item, including repeat placeholders inserted by data. Literal characters and
+  unresolved repeat placeholders contribute zero. State placeholders are not validated because
+  state can change after show. Exceeding the cap fails at the authored field path with
+  \`Substituted text length limit exceeded\`.
+  \`MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL\` (4194304) also bounds rebuilt text per validation: each
+  recognized data stage and each repeat item charges authored stage length plus replacement length,
+  including literal units and placeholder tokens. Inside a repeat, a data-resolved field is also
+  charged once per item, even without repeat placeholders. Purely literal fields and state
+  placeholders are not charged. Crossing the total fails at that field with \`Substituted text total limit exceeded\`.
+  During state interpolation, a replacement that would exceed the per-call substitution limit stays
+  as written, and later placeholders may still substitute.
 - A condition uses exactly one of \`key\`, \`data\`, \`all\`, \`any\`, \`not\`. A data condition has exactly
   one comparison: \`equals\` (same scalar type and value), \`notEquals\` (its inverse, including missing
   or non-scalar), \`gt\` or \`lt\` (numbers only, otherwise false). \`equals\`/\`notEquals\` operands are
@@ -373,6 +386,7 @@ export const GUIDE_ERRORS = `## Common validation errors
 | \`Bound state key "x" is invalid (repeat item <i>)\` | A path-bound key must form a valid state key; error is at repeat.items.path. |
 | \`Requires key or data\` | Supply one condition source with exactly one comparison. |
 | \`Repeat path cell limit exceeded\` | Reduce path-bound repeats or the scalar members projected per item; see \`MAX_PROTOTYPE_REPEAT_PATH_CELLS\`. |
+| \`Substituted text total limit exceeded\` | Reduce bindable fields, replacement lengths or repeat items; see \`MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL\`. |
 | \`Repeat placeholder in a data condition operand is not supported\` | Use a literal operand; state conditions still bind repeat operands. |
 | \`Unknown repeat field "x"\` | Every item needs the field the placeholder names. |
 | \`Missing component prop "x"\` / \`Unused component prop\` | Pass exactly the props the component's \`{props.*}\` placeholders name. |
@@ -386,11 +400,9 @@ Paths in errors (for example \`root.children[0].text\`) point at the offending v
 export const GUIDE_PATCH = `### Patch (#11675)
 
 Use \`show\` for a new screen or a window, theme or root change. Use \`patch\` for
-content (\`/data\`), state (\`/state\`) or one node by id (\`replaceNode\`). The host action,
-wire contract and capability gate exist, but **no device advertises
-\`prototype_patch_v1\` yet**. Every patch is refused before sending: update CtrlProxy
-on Android, or relaunch the app with \`launchApp prototype: true\` on iOS when a
-supporting agent is available; until then, send the whole spec with \`show\`.
+content (\`/data\`), state (\`/state\`) or one node by id (\`replaceNode\`). Android CtrlProxy advertises
+\`prototype_patch_v1\` and applies patches in place; iOS does not advertise it yet
+and requires the whole spec with \`show\`.
 
 \`{action:"patch", id, ops, baseRevision?}\` sends a \`patch_prototype\` frame
 \`{requestId, id, baseRevision?, ops}\` only to a device advertising

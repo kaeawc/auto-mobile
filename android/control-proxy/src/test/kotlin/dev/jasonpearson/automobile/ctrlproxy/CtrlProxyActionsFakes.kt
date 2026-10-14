@@ -3,12 +3,15 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
+import kotlinx.serialization.json.JsonArray
 
 /**
  * No-op [CtrlProxyActions] base for tests that only care about a couple of actions — subclass and
  * override just those. Keeps partial test doubles concise now that the interface is non-optional.
  */
 open class NoOpCtrlProxyActions : CtrlProxyActions {
+  val patches = mutableListOf<List<Any?>>()
+
   override suspend fun requestHierarchy(disableAllFiltering: Boolean, requestId: String?) {}
 
   override fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) {}
@@ -164,6 +167,15 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) {}
 
+  override fun patchPrototype(
+    requestId: String?,
+    id: String,
+    baseRevision: Long?,
+    ops: JsonArray,
+  ) {
+    patches += listOf(requestId, id, baseRevision, ops)
+  }
+
   override fun inspectPrototypes(requestId: String?) {}
 
   override fun putPrototypeAsset(
@@ -172,6 +184,17 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     mimeType: String,
     dataBase64: String,
   ) {}
+
+  override fun savePrototype(
+    requestId: String?,
+    spec: PrototypeSpec,
+    label: String,
+    icon: String?,
+  ) {}
+
+  override fun listSavedPrototypes(requestId: String?) {}
+
+  override fun deleteSavedPrototype(requestId: String?, id: String) {}
 
   override fun removePrototypeAsset(requestId: String?, id: String) {}
 
@@ -529,6 +552,9 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
   override fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) =
     record("dismissPrototype", requestId, id, all)
 
+  override fun patchPrototype(requestId: String?, id: String, baseRevision: Long?, ops: JsonArray) =
+    record("patchPrototype", requestId, id, baseRevision, ops)
+
   override fun inspectPrototypes(requestId: String?) = record("inspectPrototypes", requestId)
 
   override fun putPrototypeAsset(
@@ -537,6 +563,18 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     mimeType: String,
     dataBase64: String,
   ) = record("putPrototypeAsset", requestId, id, mimeType, dataBase64)
+
+  override fun savePrototype(
+    requestId: String?,
+    spec: PrototypeSpec,
+    label: String,
+    icon: String?,
+  ) = record("savePrototype", requestId, spec, label, icon)
+
+  override fun listSavedPrototypes(requestId: String?) = record("listSavedPrototypes", requestId)
+
+  override fun deleteSavedPrototype(requestId: String?, id: String) =
+    record("deleteSavedPrototype", requestId, id)
 
   override fun removePrototypeAsset(requestId: String?, id: String) =
     record("removePrototypeAsset", requestId, id)

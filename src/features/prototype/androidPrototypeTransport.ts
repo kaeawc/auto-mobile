@@ -19,6 +19,9 @@ import type {
 /** The CtrlProxy calls the Android prototype transport forwards to. */
 export type AndroidPrototypeClient = Pick<
   AndroidCtrlProxyClient,
+  | "requestSavePrototype"
+  | "requestListSavedPrototypes"
+  | "requestDeleteSavedPrototype"
   | "requestShowPrototype"
   | "requestInspectPrototypes"
   | "requestPatchPrototype"
@@ -55,6 +58,22 @@ export class AndroidPrototypeTransport implements PrototypeTransport {
 
   inspect(timeoutMs?: number): Promise<PrototypeResult> {
     return this.client.requestInspectPrototypes(timeoutMs);
+  }
+
+  /** Saved prototypes are Android-only extras outside PrototypeTransport. */
+  save(
+    save: { spec: PrototypeSpec; label: string; icon?: string },
+    timeoutMs?: number,
+  ): Promise<PrototypeResult> {
+    return this.client.requestSavePrototype(save, timeoutMs);
+  }
+
+  listSaved(timeoutMs?: number): Promise<PrototypeResult> {
+    return this.client.requestListSavedPrototypes(timeoutMs);
+  }
+
+  deleteSaved(id: string, timeoutMs?: number): Promise<PrototypeResult> {
+    return this.client.requestDeleteSavedPrototype(id, timeoutMs);
   }
 
   dismiss(target: PrototypeDismiss, timeoutMs?: number): Promise<PrototypeResult> {

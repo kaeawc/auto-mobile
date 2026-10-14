@@ -249,6 +249,7 @@ struct PrototypeTypography: Equatable {
         let lineHeight: Double?
         let letterSpacing: Double
         let design: PrototypeFontDesign
+        let fontAsset: String?
     }
 
     func resolve(_ style: Style?) -> Resolved {
@@ -256,16 +257,19 @@ struct PrototypeTypography: Equatable {
         let design: PrototypeFontDesign = switch style?.fontFamily {
         case .keyword("serif")?: .serif
         case .keyword("monospace")?: .monospaced
-        // An uploaded font asset is not delivered to the agent, so it uses the system font.
+        // Asset fonts use the standard design when their face is unavailable.
         case .some: .standard
         case nil: self.design
         }
+        let fontAsset: String?
+        if case let .asset(id)? = style?.fontFamily { fontAsset = id } else { fontAsset = nil }
         return Resolved(
             size: style?.textSize ?? role?.size ?? 14,
             weight: style?.fontWeight ?? role?.weight ?? 400,
             lineHeight: style?.lineHeight ?? role?.lineHeight,
             letterSpacing: style?.letterSpacing ?? role?.letterSpacing ?? 0,
-            design: design
+            design: design,
+            fontAsset: fontAsset
         )
     }
 }

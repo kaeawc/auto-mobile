@@ -245,6 +245,7 @@ class DefaultPrototypeHost(
     ::viewPrototypeEscapeScheduler,
   private val escapeTouchSlop: (Context) -> Int = { ViewConfiguration.get(it).scaledTouchSlop },
   private val dispatchToContent: ((MotionEvent) -> Boolean)? = null,
+  private val isViewAttached: (View) -> Boolean = { it.isAttachedToWindow },
 ) : PrototypeHost {
   private class Window(
     val view: PrototypeComposeView,
@@ -500,6 +501,8 @@ class DefaultPrototypeHost(
     current.anchoredOrigin?.let { applyAnchoredOrigin(params, it) }
     if (touchThroughToken != null)
       params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+    if (copyParams(current.params).copyFrom(params) == 0 && isViewAttached(current.view))
+      return true
     return update(current, params)
   }
 

@@ -391,10 +391,12 @@ configure_unit_shard_groups() {
 # Wall-time arithmetic (CI sets AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS=720):
 #   one attempt <= budget + UNIT_SHARD_ATTEMPT_OVERHEAD_SECONDS (60s covers the
 #                  watchdog's 2s TERM->KILL grace, two calibration probes capped
-#                  at UNIT_CALIBRATION_TIMEOUT_SECONDS each, and the timing
-#                  summary)
+#                  at UNIT_CALIBRATION_TIMEOUT_SECONDS each, one bounded
+#                  calibration lookup, and the timing summary)
 #   lane cap    =  AUTOMOBILE_UNIT_LANE_WALL_TIMEOUT_SECONDS, by default
 #                  2 * (budget + overhead) = 2 * (720 + 60) = 1560s (26 min)
+#   A calibrated timeout at >= AUTOMOBILE_UNIT_CONTENDED_SLOWDOWN (default 2.5x)
+#   skips the same-runner retry: one attempt <= 720 + 60 = 780s (13 min).
 #   A retry starts only while elapsed + budget + overhead <= lane cap, so the
 #   lane ends within its cap however many shards retry: retries run in
 #   parallel, each launched as soon as its first attempt is reaped. Attempts
@@ -532,6 +534,46 @@ launch_unit_shard() {
   pids[shard]=$!
 }
 
+# Best effort, bounded lookup of this shard's exact attempt. Missing/failed
+# calibration preserves the existing retry policy; never borrow another probe.
+unit_shard_is_contended() {
+  local shard="$1"
+  if [[ "$shard_mode" != unit ]]; then
+    return 1
+  fi
+  # The retry predicate and final diagnostic immediately share this result;
+  # read each attempt once so a second lookup cannot consume its overhead.
+  if [[ "$contended_probe_key" != "$shard:${shard_attempts[$shard]}" ]]; then
+    contended_probe_key="$shard:${shard_attempts[$shard]}"
+    contended_slowdown=""
+    # shellcheck disable=SC2310 # Lookup failure means no usable calibration.
+    if ! contended_slowdown="$(run_with_timeout "$UNIT_CALIBRATION_TIMEOUT_SECONDS" \
+      bun "$ROOT/scripts/lib/runner-calibration.ts" shard-attempt-slowdown \
+      "${AUTOMOBILE_UNIT_JUNIT_DIR:-$shard_root}" "shard-$shard" "${shard_attempts[$shard]}" 2>/dev/null)"; then
+      contended_slowdown=""
+      return 1
+    fi
+  fi
+  if ! [[ "$contended_slowdown" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    return 1
+  fi
+  awk -v slowdown="$contended_slowdown" -v threshold="$unit_contended_slowdown" \
+    'BEGIN { exit !(slowdown >= threshold) }'
+}
+
+report_contended_unit_shard() {
+  local shard="$1" suffix="$2" message
+  printf -v message 'RUNNER-CONTENDED: unit shard %d hit its %ss wall-clock budget%s on a starved runner (probe slowdown %sx >= %sx); not retrying on the same runner. Re-run the job to get a fresh runner.' \
+    "$shard" "${AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS:-}" "$suffix" "$contended_slowdown" "$unit_contended_slowdown"
+  printf '%s\n' "$message" >&2
+  if [[ "${GITHUB_ACTIONS:-}" == true ]]; then
+    printf '::error title=Unit shard runner contended::%s\n' "$message" >&2
+    if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+      printf '%s\n' "$message" >> "$GITHUB_STEP_SUMMARY"
+    fi
+  fi
+}
+
 # Succeeds when a reaped first attempt should be retried (see the arithmetic above).
 unit_shard_should_retry() {
   local shard="$1" status="$2" elapsed
@@ -539,6 +581,10 @@ unit_shard_should_retry() {
     return 1
   fi
   if [[ "$status" -ne 124 ]] && ! [[ "$status" -ge 129 && "$status" -le 192 ]]; then
+    return 1
+  fi
+  # shellcheck disable=SC2310 # Predicate intentionally handles lookup failure.
+  if [[ "$status" -eq 124 ]] && unit_shard_is_contended "$shard"; then
     return 1
   fi
   if [[ -n "$lane_cap" ]]; then
@@ -611,6 +657,10 @@ finish_unit_shard() {
   fi
   shard_statuses[shard]="$status"
   if [[ "$status" -eq 124 ]]; then
+    # shellcheck disable=SC2310 # No sample retains the ordinary timeout diagnostic.
+    if unit_shard_is_contended "$shard"; then
+      report_contended_unit_shard "$shard" "$suffix"
+    fi
     printf 'TIMEOUT: %s shard %d exceeded its wall-clock budget%s\n' "$shard_mode" "$number" "$suffix" >&2
     rc=124
   elif [[ "$status" -ne 0 ]]; then
@@ -740,6 +790,12 @@ run_unit_shards() {
   local still_pending=()
   local reaped_any
   local unit_shard_retries="${AUTOMOBILE_UNIT_SHARD_RETRIES:-1}"
+  local unit_contended_slowdown="${AUTOMOBILE_UNIT_CONTENDED_SLOWDOWN:-2.5}"
+  local contended_slowdown="" contended_probe_key=""
+  if ! [[ "$unit_contended_slowdown" =~ ^[0-9]+(\.[0-9]+)?$ && "$unit_contended_slowdown" =~ [1-9] ]]; then
+    echo "AUTOMOBILE_UNIT_CONTENDED_SLOWDOWN must be a positive number, got: ${unit_contended_slowdown}" >&2
+    return 2
+  fi
   local reap_poll_seconds="${AUTOMOBILE_UNIT_SHARD_POLL_SECONDS:-0.2}"
   if [[ "$unit_shard_retries" != 0 && "$unit_shard_retries" != 1 ]]; then
     echo "AUTOMOBILE_UNIT_SHARD_RETRIES must be 0 or 1, got: ${unit_shard_retries}" >&2

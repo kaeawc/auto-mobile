@@ -13,7 +13,7 @@ public func amPrototypeAgentStart() {
     }
 }
 
-/// The viewer selects persistence before the singleton is first constructed.
+/// For an app linking the agent directly (the viewer); run instead of, not after, the Loader.c injection constructor.
 @_cdecl("am_prototype_agent_start_standalone")
 public func amPrototypeAgentStartStandalone() {
     DispatchQueue.main.async {
@@ -75,8 +75,17 @@ final class PrototypeAgent: NSObject {
     }
 
     static func bootStandalone() {
-        if instance == nil { instance = PrototypeAgent(mode: .standalone) }
-        shared.boot()
+        if let instance {
+            NSLog(
+                "[AutoMobilePrototypeAgent] standalone requested after the agent already started in %@ mode; ignoring",
+                String(describing: instance.model.mode)
+            )
+            return
+        }
+
+        let agent = PrototypeAgent(mode: .standalone)
+        instance = agent
+        agent.boot()
     }
 
     let model: PrototypeModel
@@ -90,6 +99,7 @@ final class PrototypeAgent: NSObject {
 
     private var window: PassthroughWindow?
     private var server: PrototypeServer?
+    private var booted = false
     private var layers: PrototypeLayersViewController?
     private var sceneObserver: PrototypeSceneActivationObserver?
     // Selector observers are weakly held by NotificationCenter. Retain each registration just as
@@ -109,6 +119,11 @@ final class PrototypeAgent: NSObject {
     private var captureHold = PrototypeCaptureHold(now: { ProcessInfo.processInfo.systemUptime })
 
     func boot() {
+        guard !booted else {
+            NSLog("[AutoMobilePrototypeAgent] already booted; ignoring")
+            return
+        }
+
         let configuration: PrototypeAgentConfiguration
         switch PrototypeAgentConfiguration.from(environment: ProcessInfo.processInfo.environment) {
         case let .success(parsed):
@@ -118,6 +133,8 @@ final class PrototypeAgent: NSObject {
             NSLog("[AutoMobilePrototypeAgent] not starting: %@", failure.description)
             return
         }
+
+        booted = true
         testHooksEnabled = PrototypeTestHooks.isEnabled(environment: ProcessInfo.processInfo.environment)
         NSLog(
             "[AutoMobilePrototypeAgent] %@ (protocol %d) loaded into %@, listening on 127.0.0.1:%d",

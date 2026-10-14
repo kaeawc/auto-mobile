@@ -230,7 +230,7 @@ extension Condition {
     var key: String? {
         switch self {
         case let .equals(key, _), let .notEquals(key, _), let .greaterThan(key, _), let .lessThan(key, _): key
-        case .all, .any, .not: nil
+        case .all, .any, .not, .valid: nil
         }
     }
 }

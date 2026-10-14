@@ -99,6 +99,13 @@ enum PrototypeRepeat {
                 return .object(member)
             })
         }
+        if case let .array(checks)? = fields["checks"] {
+            fields["checks"] = .array(checks.map { check in
+                guard case var .object(rule) = check else { return check }
+                string("message", in: &rule)
+                return .object(rule)
+            })
+        }
         switch fields["type"] {
         case .string("text")?:
             string("text", in: &fields)
@@ -287,8 +294,8 @@ private struct Instance {
         }
         bindStateKeys(&fields)
         bindPartFields(&fields)
-        if let condition = fields["visibleWhen"] {
-            fields["visibleWhen"] = bindCondition(condition)
+        for key in ["visibleWhen", "enabledWhen"] {
+            if let condition = fields[key] { fields[key] = bindCondition(condition) }
         }
         if case let .array(entries)? = fields["styleWhen"] {
             fields["styleWhen"] = .array(entries.map { entry in
@@ -398,12 +405,20 @@ private struct Instance {
         default:
             break
         }
+        if case let .array(keys)? = fields["requireValid"] {
+            fields["requireValid"] = .array(keys.map { .string(interpolate($0.stringValue ?? "")) })
+        }
         return .object(fields)
     }
 
     private func bindCondition(_ condition: JSONValue) -> JSONValue {
         guard case var .object(fields) = condition else { return condition }
         bindString("key", in: &fields)
+        if case let .array(keys)? = fields["valid"] {
+            fields["valid"] = .array(keys.map { .string(interpolate($0.stringValue ?? "")) })
+        } else {
+            bindString("valid", in: &fields)
+        }
         for operand in ["equals", "notEquals"] {
             if let value = fields[operand] { fields[operand] = interpolateScalar(value) }
         }

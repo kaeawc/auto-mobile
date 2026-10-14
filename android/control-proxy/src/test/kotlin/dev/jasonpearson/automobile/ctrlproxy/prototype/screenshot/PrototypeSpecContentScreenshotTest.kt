@@ -1,7 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype.screenshot
 
 import android.app.Application
-import dev.jasonpearson.automobile.protocol.*
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
@@ -11,9 +10,15 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import dev.jasonpearson.automobile.ctrlproxy.prototype.LocalPrototypeMenuLayers
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeMenuLayers
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSpecContent
 import dev.jasonpearson.automobile.ctrlproxy.prototype.RenderPrototypeSelect
 import dev.jasonpearson.automobile.ctrlproxy.prototype.RenderPrototypeSelectOptions
 import dev.jasonpearson.automobile.ctrlproxy.prototype.mapPrototypeSpec
+import dev.jasonpearson.automobile.protocol.*
+import dev.jasonpearson.automobile.protocol.PrototypeCheck
+import dev.jasonpearson.automobile.protocol.PrototypeColumnNode
+import dev.jasonpearson.automobile.protocol.PrototypeScalar
+import dev.jasonpearson.automobile.protocol.PrototypeSliderNode
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -84,6 +89,36 @@ class PrototypeSpecContentScreenshotTest {
     )
   }
 
+  @Test
+  @Config(qualifiers = "+notnight")
+  fun inputChecksErrorsLight() = inputChecksErrors("input_checks_errors_light")
+
+  @Test
+  @Config(qualifiers = "+night")
+  fun inputChecksErrorsDark() = inputChecksErrors("input_checks_errors_dark")
+
+  private fun inputChecksErrors(name: String) =
+    prototypeScreenshotTest(name, pending = true) {
+      val fixture = validPrototypeFixture("checks-form")
+      // Compact form fits the window and shows the field, checkbox and switch captions together.
+      val root = fixture.root as PrototypeColumnNode
+      val spec =
+        fixture.copy(
+          root =
+            root.copy(
+              children =
+                root.children.take(5).map { node ->
+                  if (node is PrototypeSliderNode)
+                    node.copy(checks = listOf(PrototypeCheck.Min(10.0, "Choose at least ten")))
+                  else node
+                },
+            ),
+          state = fixture.state.orEmpty() + ("radioGroup" to PrototypeScalar.Text("")),
+        )
+      val model = mapPrototypeSpec(spec, shownErrors = spec.state.orEmpty().keys)
+      renderComposable(name) { PrototypeSpecContent(model.root, theme = model.theme) }
+    }
+
   // Pending: #11298 changed the image placeholder colours (surfaceVariant instead of LightGray), so
   // this baseline must be re-recorded by the Linux workflow described above.
   /** Every node type and style token in one fullscreen tree. */
@@ -132,10 +167,7 @@ class PrototypeSpecContentScreenshotTest {
   /** Buttons, checkbox and switch in a row and column layout. */
   @Test
   fun materialControls() =
-    prototypeScreenshotTest(
-      "material_controls",
-      validPrototypeFixture("material-controls"),
-    )
+    prototypeScreenshotTest("material_controls", validPrototypeFixture("material-controls"))
 
   /** Slider, chips and a card. */
   @Test
@@ -160,10 +192,7 @@ class PrototypeSpecContentScreenshotTest {
   /** Radio group, list items, checkbox, switch and icon buttons. */
   @Test
   fun selectionControls() =
-    prototypeScreenshotTest(
-      "selection_controls",
-      validPrototypeFixture("selection-controls"),
-    )
+    prototypeScreenshotTest("selection_controls", validPrototypeFixture("selection-controls"))
 
   /** Colour-role and corner-radius style tokens. */
   @Test

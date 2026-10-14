@@ -221,7 +221,9 @@ enum PrototypeDataResolver {
         guard case var .object(fields) = root else { return root }
         PrototypeRepeat.bindTextFields(&fields) { PrototypeDataText.bind($0, data: data) }
         if let value = fields["repeat"] { fields["repeat"] = resolveRepeat(value, repeats: &repeats) }
-        if let value = fields["visibleWhen"] { fields["visibleWhen"] = resolveCondition(value, data: data) }
+        for key in ["visibleWhen", "enabledWhen"] {
+            if let value = fields[key] { fields[key] = resolveCondition(value, data: data) }
+        }
         if case let .array(styles)? = fields["styleWhen"] {
             fields["styleWhen"] = .array(styles.map { entry in
                 guard case var .object(style) = entry, let condition = style["when"] else { return entry }

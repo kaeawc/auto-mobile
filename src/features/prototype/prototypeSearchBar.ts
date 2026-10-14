@@ -1,31 +1,28 @@
-import { PROTOTYPE_SEARCH_BAR_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import { prototypeNodeChildren, prototypeSpecNodeRoots } from "./prototypeNodeChildren";
 import { record } from "./prototypeTemplate";
+import { PROTOTYPE_SEARCH_BAR_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 
-/** Node paths in tree order, including results and repeat templates; no I/O or mutation. */
+/** Node paths in tree order, including component roots and repeat templates. */
 export function prototypeSearchBarFields(spec: unknown): string[] {
-  const root = record(record(spec)?.root);
-  if (!root) {
-    return [];
-  }
   const fields: string[] = [];
-  const visit = (node: Record<string, unknown>, path: string): void => {
+  const pending = prototypeSpecNodeRoots(spec).reverse();
+  while (pending.length) {
+    const { node: value, path } = pending.pop()!;
+    const node = record(value);
+    if (!node) {
+      continue;
+    }
     if (node.type === "searchBar") {
       fields.push(path);
     }
-    const child = record(node.child);
-    if (child) {
-      visit(child, `${path}.child`);
+    // Preserve the existing child-before-children order on mixed containers too.
+    const children = prototypeNodeChildren(node).sort(
+      (left, right) => Number(right.suffix === ".child") - Number(left.suffix === ".child"),
+    );
+    for (const child of children.reverse()) {
+      pending.push({ node: child.value, path: `${path}${child.suffix}` });
     }
-    if (Array.isArray(node.children)) {
-      node.children.forEach((value, index) => {
-        const child = record(value);
-        if (child) {
-          visit(child, `${path}.children[${index}]`);
-        }
-      });
-    }
-  };
-  visit(root, "root");
+  }
   return fields;
 }
 

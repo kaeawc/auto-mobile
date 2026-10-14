@@ -72,8 +72,14 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
     ...label,
     onTap: [{ type: "emit", name: "pick", context: { id: { state: "liked" } } }],
   }),
+  prototype_checks_v1: fixture({
+    type: "button",
+    id: "label",
+    label: "Save",
+    enabledWhen: { key: "liked", equals: true },
+  }),
 };
-function fixture(root: Record<string, unknown>) {
+function fixture(root: { type: string; id: string } & Record<string, unknown>) {
   return {
     minimalSpec: {
       ...base,

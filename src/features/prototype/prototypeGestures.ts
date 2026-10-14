@@ -1,6 +1,6 @@
+import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_GESTURES_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
-import { record } from "./prototypeTemplate";
 
 const gestureFields = ["onLongPress", "onDoubleTap"] as const;
 const gestureTypes = new Set(
@@ -9,41 +9,19 @@ const gestureTypes = new Set(
     .map(([type]) => type),
 );
 
-function nodeGestureFields(value: unknown, path: string): string[] {
-  const node = record(value);
-  if (!node) {
-    return [];
-  }
-  const fields = gestureTypes.has(String(node.type))
-    ? gestureFields.filter((field) => Object.hasOwn(node, field)).map((field) => `${path}.${field}`)
-    : [];
-  // Repeat templates are the container's children, so this also visits unexpanded templates.
-  const descendants = Object.entries(node).flatMap(([key, child]) => {
-    if (key === "child") {
-      return nodeGestureFields(child, `${path}.child`);
-    }
-    if (key === "children" && Array.isArray(child)) {
-      return child.flatMap((entry, index) =>
-        nodeGestureFields(entry, `${path}.children[${index}]`),
-      );
-    }
-    return [];
-  });
-  return [...fields, ...descendants];
-}
-
 /** Authored node paths, including component definitions and repeat templates; never action payloads. */
 export function prototypeGestureFields(spec: unknown): string[] {
-  const object = record(spec);
-  if (!object) {
-    return [];
-  }
-  return [
-    ...nodeGestureFields(object.root, "root"),
-    ...Object.entries(record(object.components) ?? {}).flatMap(([name, definition]) =>
-      nodeGestureFields(record(definition)?.root, `components.${name}.root`),
-    ),
-  ];
+  const fields: string[] = [];
+  walkPrototypeNodes(spec, (node, path) => {
+    if (gestureTypes.has(String(node.type))) {
+      fields.push(
+        ...gestureFields
+          .filter((field) => Object.hasOwn(node, field))
+          .map((field) => `${path}.${field}`),
+      );
+    }
+  });
+  return fields;
 }
 
 /** Refusal for a device that cannot execute authored prototype gesture actions. */

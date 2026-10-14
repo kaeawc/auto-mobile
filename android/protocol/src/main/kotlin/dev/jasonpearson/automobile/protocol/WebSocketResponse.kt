@@ -844,9 +844,14 @@ data class PrototypeStatusEntry(
   val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
 )
 
+/** Input validation vocabulary understood by this protocol version. */
+const val PROTOTYPE_CHECKS_CAPABILITY = "prototype_checks_v1"
+
 @Serializable
 enum class PrototypeEventKind {
   @SerialName("emit") EMIT,
+  @SerialName("change") CHANGE,
+  @SerialName("validation_failed") VALIDATION_FAILED,
   /** A pager settled on another page: `name` is the pager id, the payload the new page index. */
   @SerialName("page_changed") PAGE_CHANGED,
   /** A stack changed top or depth: `name` is its id, payload is `{screen, depth}`. */
@@ -880,6 +885,8 @@ data class PrototypeEvent(
   val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
   @EncodeDefault(EncodeDefault.Mode.NEVER) val context: JsonObject? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val contextTruncated: Boolean? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val validity: Map<String, Boolean>? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val keys: List<String>? = null,
 ) : WebSocketResponse() {
   init {
     require(contextTruncated != false) { "contextTruncated must be true or absent" }

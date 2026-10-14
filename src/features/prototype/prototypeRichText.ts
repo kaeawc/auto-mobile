@@ -1,27 +1,46 @@
+import { prototypeNodeChildren } from "./prototypeNodeChildren";
 import { PROTOTYPE_RICH_TEXT_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { record } from "./prototypeTemplate";
 
 /** Authored or expanded specs, including component roots, repeat templates and slots. */
 export function prototypeRichTextFields(spec: unknown): string[] {
-  function walk(value: unknown, path: string): string[] {
+  const fields: string[] = [];
+  const pending = [{ value: spec, path: "" }];
+  while (pending.length) {
+    const { value, path } = pending.pop()!;
     if (Array.isArray(value)) {
-      return value.flatMap((entry, index) => walk(entry, `${path}[${index}]`));
+      pending.push(
+        ...value.map((value, index) => ({ value, path: `${path}[${index}]` })).reverse(),
+      );
+      continue;
     }
     const object = record(value);
     if (!object) {
-      return [];
+      continue;
     }
-    const fields = object.type === "text" && object.spans !== undefined ? [`${path}.spans`] : [];
-    return fields.concat(
-      Object.entries(object).flatMap(([key, child]) =>
-        // Opaque data and action payloads are not prototype nodes.
-        key === "data" || key === "state" || key === "payload" || key === "props" || key === "items"
-          ? []
-          : walk(child, path ? `${path}.${key}` : key),
-      ),
-    );
+    if (object.type === "text" && object.spans !== undefined) {
+      fields.push(`${path}.spans`);
+    }
+    const children = prototypeNodeChildren(object);
+    const next: typeof pending = [];
+    for (const [key, child] of Object.entries(object)) {
+      // Preserve generic authored structures such as slots and patch nodes, but never opaque data.
+      if (["data", "state", "payload", "props", "items"].includes(key)) {
+        continue;
+      }
+      if (["child", "children", "screens"].includes(key)) {
+        next.push(
+          ...children
+            .filter((entry) => entry.suffix === `.${key}` || entry.suffix.startsWith(`.${key}[`))
+            .map((entry) => ({ value: entry.value, path: `${path}${entry.suffix}` })),
+        );
+      } else {
+        next.push({ value: child, path: path ? `${path}.${key}` : key });
+      }
+    }
+    pending.push(...next.reverse());
   }
-  return walk(spec, "");
+  return fields;
 }
 
 export function prototypeRichTextUnsupportedMessage(

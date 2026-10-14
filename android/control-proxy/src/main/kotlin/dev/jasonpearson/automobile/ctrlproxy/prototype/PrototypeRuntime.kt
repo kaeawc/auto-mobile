@@ -27,12 +27,19 @@ data class PrototypeRuntimeSnapshot(
   /** Removed keys keep their stamp so a stale add cannot resurrect them unnoticed. */
   val stateRevisions: Map<String, Long> = emptyMap(),
   val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
+  /** Device-local error visibility, cleared on spec replacement. */
+  val shownErrors: Set<String> = emptySet(),
 ) {
   val state: Map<String, PrototypeScalar>
     get() = spec.state.orEmpty()
 }
 
 sealed interface PrototypeInteraction {
+  data class Guarded(val identity: String, val interaction: PrototypeInteraction) :
+    PrototypeInteraction
+
+  data class Blur(val keys: List<String>) : PrototypeInteraction
+
   data object HostDismiss : PrototypeInteraction
 
   data object Back : PrototypeInteraction
@@ -124,7 +131,7 @@ class PrototypeRuntime(
   private val renderMapper = PrototypeRenderMapper()
 
   internal fun renderModel(snapshot: PrototypeRuntimeSnapshot = current): PrototypeRenderModel =
-    renderMapper.map(snapshot.spec, snapshot.pages, snapshot.stacks)
+    renderMapper.map(snapshot.spec, snapshot.pages, snapshot.stacks, snapshot.shownErrors)
 
   internal val renderMappingPasses: Int
     get() = renderMapper.mappingPasses
@@ -248,7 +255,8 @@ class PrototypeRuntime(
     // runtime's resolve cache, cached model or renderMappingPasses before the snapshot is
     // committed.
     try {
-      PrototypeRenderMapper().map(next.spec, next.pages, next.stacks)
+      PrototypeRenderMapper()
+        .map(next.spec, next.pages, stacks = next.stacks, shownErrors = next.shownErrors)
     } catch (error: IllegalArgumentException) {
       return PatchResult.Rejected(error.message ?: "Invalid prototype patch", before.revision)
     }
@@ -305,6 +313,22 @@ class PrototypeRuntime(
 
   private suspend fun handleInteraction(interaction: PrototypeInteraction) {
     when (interaction) {
+      is PrototypeInteraction.Guarded -> {
+        fun find(node: PrototypeRenderNode): PrototypeRenderNode? =
+          if (node.identity == interaction.identity) node
+          else node.children.firstNotNullOfOrNull(::find)
+        val node = find(renderModel().root) ?: return
+        if (node.enabled || interaction.interaction is PrototypeInteraction.Blur)
+          handle(interaction.interaction)
+      }
+      is PrototypeInteraction.Blur -> {
+        val keys =
+          checkedNodes()
+            .filter { it.validationMode() == PrototypeValidateOn.BLUR }
+            .flatMap { it.checkedKeys() }
+            .filter { it in interaction.keys }
+        mutableSnapshot.value = current.copy(shownErrors = current.shownErrors + keys)
+      }
       PrototypeInteraction.HostDismiss -> dismiss()
       // Hidden screens retain their paths but cannot take stack Back focus. If none is visible and
       // eligible, preserve the existing Back dismissal rather than changing a hidden screen.
@@ -357,6 +381,7 @@ class PrototypeRuntime(
    * moved, then the action list via [run].
    */
   private suspend fun control(own: Map<String, PrototypeScalar>, actions: List<PrototypeAction>) {
+    if (!requireValid(actions)) return
     val moved = own.filter { (key, value) -> current.state[key] != value }
     val written = if (moved.isEmpty()) current.spec else validated(current.spec, moved)
     val writes = plannedWrites(actions, written)
@@ -378,6 +403,7 @@ class PrototypeRuntime(
       control(interaction.key?.let { mapOf(it to index) }.orEmpty(), interaction.actions)
       return
     }
+    if (!requireValid(interaction.actions)) return
     val writes = plannedWrites(interaction.actions, current.spec)
     setPage(pager, interaction.index)
     run(interaction.actions, writes)
@@ -487,6 +513,12 @@ class PrototypeRuntime(
    */
   private suspend fun emitStateChange(keys: List<String>) {
     if (keys.isEmpty()) return
+    val changedChecks =
+      checkedNodes()
+        .filter { it.validationMode() == PrototypeValidateOn.CHANGE }
+        .flatMap { it.checkedKeys() }
+        .filter { it in keys }
+    mutableSnapshot.value = current.copy(shownErrors = current.shownErrors + changedChecks)
     val state = current.state
     fun json(key: String) =
       runtimeJson.encodeToJsonElement(PrototypeScalar.serializer(), state.getValue(key))
@@ -499,7 +531,7 @@ class PrototypeRuntime(
         put("values", buildJsonObject { keys.forEach { put(it, json(it)) } })
       }
     }
-    emit(PrototypeEventKind.EMIT, "change", payload)
+    emit(kind = PrototypeEventKind.EMIT, name = "change", payload = payload)
   }
 
   private suspend fun setPage(id: String, requested: Int) {
@@ -508,7 +540,7 @@ class PrototypeRuntime(
     if (current.pages[id] == page) return
     mutableSnapshot.value = current.copy(pages = current.pages + (id to page))
     // Names the pager that moved and its new page, as the iOS agent does (#11409).
-    emit(PrototypeEventKind.PAGE_CHANGED, id, JsonPrimitive(page))
+    emit(kind = PrototypeEventKind.PAGE_CHANGED, name = id, payload = JsonPrimitive(page))
   }
 
   /** Framework-free Back policy; the controller serializes this with other interactions. */
@@ -557,12 +589,13 @@ class PrototypeRuntime(
     mutableSnapshot.value = current.copy(stacks = current.stacks + (id to next))
     if (before.path.last() != path.last() || before.depth != next.depth) {
       emit(
-        PrototypeEventKind.SCREEN_CHANGED,
-        id,
-        buildJsonObject {
-          put("screen", path.last())
-          put("depth", next.depth)
-        },
+        kind = PrototypeEventKind.SCREEN_CHANGED,
+        name = id,
+        payload =
+          buildJsonObject {
+            put("screen", path.last())
+            put("depth", next.depth)
+          },
       )
     }
   }
@@ -611,7 +644,7 @@ class PrototypeRuntime(
     if (!current.active) return
     close()
     emit(
-      PrototypeEventKind.DISMISSED,
+      kind = PrototypeEventKind.DISMISSED,
       payload = buildJsonObject { put("reason", reason.wireValue) },
     )
   }
@@ -623,7 +656,7 @@ class PrototypeRuntime(
   internal suspend fun appearanceChanged(appearance: PrototypeAppearance) {
     if (!current.active) return
     emit(
-      PrototypeEventKind.APPEARANCE_CHANGED,
+      kind = PrototypeEventKind.APPEARANCE_CHANGED,
       payload =
         buildJsonObject {
           put("mode", runtimeJson.encodeToJsonElement(appearance.mode))
@@ -648,7 +681,12 @@ class PrototypeRuntime(
           },
         )
       }
-    emit(PrototypeEventKind.EMIT, action.name, action.payload, resolved)
+    emit(
+      kind = PrototypeEventKind.EMIT,
+      name = action.name,
+      payload = action.payload,
+      resolved = resolved,
+    )
   }
 
   private suspend fun emit(
@@ -656,22 +694,58 @@ class PrototypeRuntime(
     name: String? = null,
     payload: JsonElement? = null,
     resolved: ResolvedEmitContext? = null,
+    keys: List<String>? = null,
   ) {
     sink.send(
       PrototypeEvent(
-        clock(),
-        current.spec.id,
-        nextSequence(),
-        kind,
-        name,
-        payload,
-        current.state.toMap(),
-        current.pages.toMap(),
-        current.stacks.toMap(),
+        timestamp = clock(),
+        id = current.spec.id,
+        sequence = nextSequence(),
+        kind = kind,
+        name = name,
+        payload = payload,
+        state = current.state.toMap(),
+        pages = current.pages.toMap(),
+        stacks = current.stacks.toMap(),
         context = resolved?.context,
         contextTruncated = resolved?.contextTruncated,
+        validity =
+          if (name == "change" && kind == PrototypeEventKind.EMIT)
+            validity().takeIf { it.isNotEmpty() }
+          else null,
+        keys = keys,
       ),
     )
+  }
+
+  private fun checkedNodes(): List<PrototypeNode> =
+    checkedPrototypeNodes(PrototypeDataResolver.resolve(current.spec).root)
+
+  private fun validity(): Map<String, Boolean> = prototypeValidity(checkedNodes(), current.state)
+
+  /** Guards use the pre-interaction state, before any writes or emits in the list. */
+  private suspend fun requireValid(actions: List<PrototypeAction>): Boolean {
+    val guarded =
+      actions
+        .takeWhile { it != PrototypeDismissAction }
+        .filterIsInstance<PrototypeEmitAction>()
+        .filter { it.requireValid != null }
+    if (guarded.isEmpty()) return true
+    val validity = validity()
+    val failed = guarded.filter { action ->
+      action.requireValid.orEmpty().any { validity[it] != true }
+    }
+    if (failed.isEmpty()) return true
+    mutableSnapshot.value =
+      current.copy(shownErrors = current.shownErrors + failed.flatMap { it.requireValid.orEmpty() })
+    for (action in failed) {
+      emit(
+        kind = PrototypeEventKind.VALIDATION_FAILED,
+        name = action.name,
+        keys = action.requireValid.orEmpty().filter { validity[it] != true },
+      )
+    }
+    return false
   }
 
   private fun snapshot(

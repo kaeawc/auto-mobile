@@ -9,6 +9,7 @@ import {
   PROTOTYPE_RICH_TEXT_CAPABILITY,
   PROTOTYPE_MENUS_CAPABILITY,
   PROTOTYPE_EMIT_CONTEXT_CAPABILITY,
+  PROTOTYPE_CHECKS_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
 import { prototypeStackFields, prototypeStackUnsupportedMessage } from "./prototypeSpec";
 import {
@@ -37,6 +38,10 @@ import {
   prototypeEmitContextFields,
   prototypeEmitContextUnsupportedMessage,
 } from "./prototypeEmitContext";
+import {
+  prototypeChecksFields,
+  prototypeChecksUnsupportedMessage,
+} from "./prototypeChecksCapability";
 
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
@@ -100,6 +105,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_EMIT_CONTEXT_CAPABILITY,
     fields: prototypeEmitContextFields,
     unsupportedMessage: prototypeEmitContextUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_CHECKS_CAPABILITY,
+    fields: prototypeChecksFields,
+    unsupportedMessage: prototypeChecksUnsupportedMessage,
   },
 ];
 

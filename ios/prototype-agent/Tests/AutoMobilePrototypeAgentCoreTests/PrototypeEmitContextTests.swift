@@ -271,7 +271,7 @@ final class PrototypeEmitContextTests: XCTestCase {
 
     func testEventJSONOmitsContextAndFlagWhenUnset() throws {
         let event = PrototypeEvent(
-            id: "p", sequence: 1, kind: "emit", name: "pick", payload: .null, state: [:], pages: [:]
+            id: "p", sequence: 1, kind: "emit", name: "pick", payload: .null, state: [:], pages: [:], stacks: [:]
         )
         let wire = try JSONDecoder().decode(
             JSONValue.self, from: JSONSerialization.data(withJSONObject: event.wireObject(timestamp: 0))

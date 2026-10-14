@@ -370,6 +370,8 @@ class WebSocketServer(
     add("prototype_rich_text_v1")
     // ORCHESTRATOR-CHOSEN gate; fold into PROTOTYPE_SPEC_CAPABILITY_GATES when it lands.
     add("prototype_emit_context_v1")
+    // Prototype checks expose validity and guard actions; older APKs ignore these spec fields.
+    add("prototype_checks_v1")
     // show_prototype honours appearance (device, light or dark as the system setting); a shown
     // prototype re-themes when the device setting or palette changes and says so with an
     // appearance_changed prototype_event; the show result and each inspect entry carry the resolved
@@ -1036,10 +1038,7 @@ class WebSocketServer(
   }
 
   /** Send a typed terminal failure only to the client whose inbound message failed. */
-  private suspend fun sendErrorResponse(
-    connection: ConnectedClient,
-    response: WebSocketResponse,
-  ) {
+  private suspend fun sendErrorResponse(connection: ConnectedClient, response: WebSocketResponse) {
     val message = responseJson.encodeToString(WebSocketResponse.serializer(), response)
     correlationRequestId(response)?.let { requestId ->
       synchronized(connections) { requestConnections.remove(requestId) }
@@ -1095,9 +1094,7 @@ class WebSocketServer(
   /** Suspends until a client is currently connected, including after a reconnect. */
   suspend fun awaitClientConnection() {
     val connection =
-      synchronized(connections) {
-        if (connections.isEmpty()) activeClientConnection else null
-      }
+      synchronized(connections) { if (connections.isEmpty()) activeClientConnection else null }
     connection?.await()
   }
 
@@ -1219,9 +1216,7 @@ class WebSocketServer(
     // (#3190, #6621); their handler errors and queue-full rejections target the origin directly.
     val recordsOwner = recordsRequestOwner(request)
     if (recordsOwner) {
-      request.requestId?.let { requestId ->
-        registerRequestOwner(requestId, connection)
-      }
+      request.requestId?.let { requestId -> registerRequestOwner(requestId, connection) }
     }
     // The read loop enqueues; one per-client FIFO worker executes commands in wire order.
     // Owned replies retain atomic owner routing; unowned errors target this origin directly and

@@ -1,3 +1,4 @@
+import { prototypeNodeChildren, prototypeSpecNodeRoots } from "./prototypeNodeChildren";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_TEXT_FIELD_OPTIONS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { record } from "./prototypeTemplate";
@@ -11,29 +12,38 @@ const optionFields = new Set(
   ),
 );
 
-/** Authored field order, depth-first through child/children and repeat templates. */
-function nodeFields(value: unknown, path: string): string[] {
-  const node = record(value);
-  if (!node) {
-    return [];
-  }
-  return Object.entries(node).flatMap(([key, child]) => {
-    if (node.type === "textField" && optionFields.has(key)) {
-      return [`${path}.${key}`];
-    }
-    if (key === "child") {
-      return nodeFields(child, `${path}.child`);
-    }
-    if (key === "children" && Array.isArray(child)) {
-      return child.flatMap((entry, index) => nodeFields(entry, `${path}.children[${index}]`));
-    }
-    return [];
-  });
-}
-
-/** Components are expanded by the host before this scan, just as for data-model capability checks. */
+/** Authored field order, including descendants and reusable component roots. */
 export function prototypeTextFieldOptionFields(spec: unknown): string[] {
-  return nodeFields(record(spec)?.root, "root");
+  const fields: string[] = [];
+  const pending: ({ node: unknown; path: string } | { field: string })[] =
+    prototypeSpecNodeRoots(spec).reverse();
+  while (pending.length) {
+    const task = pending.pop()!;
+    if ("field" in task) {
+      fields.push(task.field);
+      continue;
+    }
+    const { path } = task;
+    const node = record(task.node);
+    if (!node) {
+      continue;
+    }
+    const children = prototypeNodeChildren(node);
+    const next: typeof pending = [];
+    for (const key of Object.keys(node)) {
+      if (node.type === "textField" && optionFields.has(key)) {
+        next.push({ field: `${path}.${key}` });
+      } else {
+        next.push(
+          ...children
+            .filter((entry) => entry.suffix === `.${key}` || entry.suffix.startsWith(`.${key}[`))
+            .map((entry) => ({ node: entry.value, path: `${path}${entry.suffix}` })),
+        );
+      }
+    }
+    pending.push(...next.reverse());
+  }
+  return fields;
 }
 
 export function prototypeTextFieldOptionsUnsupportedMessage(

@@ -24,6 +24,8 @@ struct PrototypeEvent: Equatable {
     let pages: [String: Int]
     let stacks: [String: PrototypeStackSnapshot]
     var resolvedContext: PrototypeResolvedEmitContext?
+    var keys: [String]?
+    var validity: [String: Bool]?
 
     var context: [String: JSONValue]? { resolvedContext?.context }
     var contextTruncated: Bool? { resolvedContext?.contextTruncated }
@@ -44,6 +46,8 @@ struct PrototypeEvent: Equatable {
         ]
         if let context { object["context"] = JSONValue.object(context).foundationObject }
         if contextTruncated == true { object["contextTruncated"] = true }
+        if let keys { object["keys"] = keys }
+        if let validity { object["validity"] = validity }
         return object
     }
 }
@@ -71,6 +75,8 @@ struct PrototypeSession {
     private(set) var stacks: [String: PrototypeStackSnapshot] = [:]
     private var stackNodes: [String: PrototypeNode] = [:]
     private(set) var pageCounts: [String: Int] = [:]
+    /// Keys whose errors have been revealed by change, blur or a failed guard.
+    private(set) var shownErrors: Set<String> = []
     /// Agent-lifetime ledger, per prototype id and monotonic from 1: re-showing an id after a
     /// dismissal or another prototype never rewinds it, because hosts discard lower-or-equal
     /// sequences as duplicates.
@@ -128,6 +134,7 @@ struct PrototypeSession {
         pages = pageCounts.reduce(into: [:]) { result, entry in
             result[entry.key] = min(max(previous[entry.key] ?? 0, 0), max(entry.value - 1, 0))
         }
+        shownErrors = []
         state = spec.state ?? [:]
         self.spec = spec
         // The show result reports this mode, so the show itself is not a change.
@@ -197,7 +204,9 @@ struct PrototypeSession {
     /// validated against the controls bound to its key (`PrototypeStateValidator`) before anything
     /// runs, so one rejected write drops the whole tap with no write, page move or event.
     mutating func run(_ actions: [PrototypeAction]) -> [PrototypeEvent] {
-        guard isShown, let writes = plannedWrites(actions, from: state) else { return [] }
+        guard isShown else { return [] }
+        if let failed = requireValid(actions) { return failed }
+        guard let writes = plannedWrites(actions, from: state) else { return [] }
         return execute(actions, writes)
     }
 
@@ -208,6 +217,7 @@ struct PrototypeSession {
     /// first, when a value moved, then the action list.
     mutating func control(own: [(String, JSONValue)], then actions: [PrototypeAction]) -> [PrototypeEvent] {
         guard isShown else { return [] }
+        if let failed = requireValid(actions) { return failed }
         let (written, moved) = applying(own)
         if !moved.isEmpty, !accepts(written) { return [] }
         guard let writes = plannedWrites(actions, from: written) else { return [] }
@@ -323,6 +333,7 @@ struct PrototypeSession {
     /// event's `state` always carries the full final state.
     private mutating func emitStateChange(_ keys: [String]) -> [PrototypeEvent] {
         guard let first = keys.first else { return [] }
+        showChangeErrors(keys)
         let payload: JSONValue = if keys.count == 1 {
             .object(["key": .string(first), "value": state[first] ?? .null])
         } else {
@@ -447,6 +458,7 @@ struct PrototypeSession {
         guard let pager else {
             return control(own: key.map { [($0, .number(Double(index)))] } ?? [], then: actions)
         }
+        if let failed = requireValid(actions) { return failed }
         guard let writes = plannedWrites(actions, from: state) else { return [] }
         return setPage(pager, index) + execute(actions, writes)
     }
@@ -476,8 +488,58 @@ struct PrototypeSession {
             state: state,
             pages: pages,
             stacks: stacks,
-            resolvedContext: context
+            resolvedContext: context,
+            validity: kind == "emit" && name == "change" && !validity.isEmpty ? validity : nil
         )]
+    }
+
+    var validity: [String: Bool] {
+        guard let spec else { return [:] }
+        return PrototypeChecks.validity(PrototypeChecks.bindings(root: spec.root), state: state)
+    }
+
+    func isEnabled(_ node: PrototypeNode) -> Bool {
+        node.enabledWhen?.holds(state) ?? true
+    }
+
+    func shownError(_ node: PrototypeNode) -> String? {
+        for key in node.checkedKeys where shownErrors.contains(key) {
+            let result = PrototypeChecks.evaluate(state[key], checks: node.checks ?? [], nodeType: node.type)
+            if let message = result.firstFailingMessage { return message }
+        }
+        return nil
+    }
+
+    mutating func blur(_ node: PrototypeNode) {
+        if (node.validateOn ?? .blur) == .blur { shownErrors.formUnion(node.checkedKeys) }
+    }
+
+    private mutating func showChangeErrors(_ keys: [String]) {
+        func visit(_ node: PrototypeNode) -> [String] {
+            let own = node.validateOn == .change ? node.checkedKeys.filter { keys.contains($0) } : []
+            return own + ((node.children ?? []) + [node.child].compactMap { $0 }).flatMap(visit)
+        }
+        if let root = spec?.root { shownErrors.formUnion(visit(root)) }
+    }
+
+    /// Every guard reads pre-interaction state. Failure aborts own writes, actions and pages.
+    private mutating func requireValid(_ actions: [PrototypeAction]) -> [PrototypeEvent]? {
+        let validity = validity
+        let failed = actions.prefix { $0.type != "dismiss" }.filter {
+            $0.type == "emit" && ($0.requireValid?.contains { validity[$0] != true } ?? false)
+        }
+        guard !failed.isEmpty else { return nil }
+        var events: [PrototypeEvent] = []
+        for action in failed {
+            let keys = action.requireValid ?? []
+            shownErrors.formUnion(keys)
+            var emitted = emit(kind: "validation_failed", name: action.name, payload: .null)
+            for index in emitted.indices {
+                emitted[index].keys = keys.filter { validity[$0] != true }
+            }
+            events += emitted
+        }
+        return events
     }
 
     // MARK: Status

@@ -1,3 +1,4 @@
+import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import {
   MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES,
   type PrototypeEmitContextBinding,
@@ -82,26 +83,23 @@ export function prototypeEmitContextFields(spec: unknown): string[] {
     return [];
   }
   const fields: string[] = [];
-  function walk(value: unknown, path: string): void {
-    const node = record(value);
-    if (!node) {
-      return;
-    }
+  const scan = (node: Record<string, unknown>, path: string): void => {
     mapBindableFields(node, path, (entry, at, kind) => {
       if (kind === "emitContext") {
         fields.push(at);
       }
       return entry;
     });
-    for (const [key, child] of Object.entries(node)) {
-      if (key === "child") {
-        walk(child, `${path}.child`);
-      }
-      if (key === "children" && Array.isArray(child)) {
-        child.forEach((entry, index) => walk(entry, `${path}.children[${index}]`));
-      }
-    }
+  };
+  walkPrototypeNodes(expansion.spec, scan);
+  const located = fields.map(expansion.locate);
+  fields.length = 0;
+  if (expansion.expanded) {
+    walkPrototypeNodes({ components: record(spec)?.components }, scan);
   }
-  walk(record(expansion.spec)?.root, "root");
-  return fields.map(expansion.locate);
+  // Expanded uses already name their authored fields; only append newly covered definitions.
+  return [
+    ...located,
+    ...fields.filter((field) => !located.some((at) => at.endsWith(` → ${field}`))),
+  ];
 }

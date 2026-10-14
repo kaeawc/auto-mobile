@@ -1,3 +1,4 @@
+import { prototypeSpecNodeRoots, walkPrototypeNodes } from "./prototypeNodeChildren";
 import { PROTOTYPE_STACK_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { z } from "zod";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
@@ -107,6 +108,7 @@ const pointerSchema = z
   .regex(/^(?:\/(?:[^~\/]|~[01])*)+$/);
 
 export type PrototypeCondition =
+  | { valid: string | string[] }
   | { data: string; equals: string | number | boolean }
   | { data: string; notEquals: string | number | boolean }
   | { data: string; gt: number }
@@ -122,6 +124,9 @@ let conditionUnion: z.ZodType<PrototypeCondition> | undefined;
 const conditionSchema: z.ZodType<PrototypeCondition> = z.lazy(
   () =>
     (conditionUnion ??= z.union([
+      z
+        .object({ valid: z.union([stateKeySchema, z.array(stateKeySchema).min(1).max(8)]) })
+        .strict(),
       z.object({ data: pointerSchema, equals: scalarSchema }).strict(),
       z.object({ data: pointerSchema, notEquals: scalarSchema }).strict(),
       z.object({ data: pointerSchema, gt: z.number().finite() }).strict(),
@@ -430,6 +435,7 @@ export const actionSchema = z.discriminatedUnion("type", [
       name: z.string().min(1),
       payload: prototypeJsonSchema.optional(),
       context: prototypeEmitContextSchema.optional(),
+      requireValid: z.array(stateKeySchema).min(1).max(8).optional(),
     })
     .strict(),
   z
@@ -479,6 +485,27 @@ export const actionSchema = z.discriminatedUnion("type", [
 const gestureNodeShape = {
   onLongPress: z.array(actionSchema).min(1).max(32).optional(),
   onDoubleTap: z.array(actionSchema).min(1).max(32).optional(),
+};
+export const prototypeCheckSchema = z.union([
+  z.object({ message: z.string().min(1), required: z.literal(true) }).strict(),
+  z.object({ message: z.string().min(1), minLength: z.number().finite().int().min(0) }).strict(),
+  z.object({ message: z.string().min(1), maxLength: z.number().finite().int().min(0) }).strict(),
+  z.object({ message: z.string().min(1), min: z.number().finite() }).strict(),
+  z.object({ message: z.string().min(1), max: z.number().finite() }).strict(),
+  z
+    .object({
+      message: z.string().min(1),
+      format: z.enum(["email", "phone", "digits", "decimal", "url"]),
+    })
+    .strict(),
+  z.object({ message: z.string().min(1), pattern: z.string().max(128) }).strict(),
+]);
+export type PrototypeCheck = z.infer<typeof prototypeCheckSchema>;
+const enabledShape = { enabledWhen: conditionSchema.optional() };
+const checksShape = {
+  ...enabledShape,
+  checks: z.array(prototypeCheckSchema).min(1).max(8).optional(),
+  validateOn: z.enum(["change", "blur", "submit"]).optional(),
 };
 const commonNodeShape = {
   span: z.number().finite().int().min(1).optional(),
@@ -587,6 +614,7 @@ const spacerBaseSchema = z.object({ ...commonNodeShape, type: z.enum(["spacer"])
 const textFieldBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...checksShape,
     type: z.enum(["textField"]),
     stateKey: stateKeySchema,
     placeholder: z.string().optional(),
@@ -606,6 +634,7 @@ const textFieldBaseSchema = z
 const switchBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...checksShape,
     type: z.enum(["switch"]),
     stateKey: stateKeySchema,
     label: z.string().min(1).optional(),
@@ -614,6 +643,7 @@ const switchBaseSchema = z
 const checkboxBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...checksShape,
     type: z.enum(["checkbox"]),
     stateKey: stateKeySchema,
     label: z.string().min(1).optional(),
@@ -622,6 +652,7 @@ const checkboxBaseSchema = z
 const buttonBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...enabledShape,
     type: z.enum(["button"]),
     label: z.string().min(1),
     variant: z.enum(["filled", "tonal", "elevated", "outlined", "text"]).optional(),
@@ -631,6 +662,7 @@ const buttonBaseSchema = z
 const radioGroupBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...checksShape,
     type: z.enum(["radioGroup"]),
     stateKey: stateKeySchema,
     options: z
@@ -669,6 +701,7 @@ const listItemTrailingSchema = z.discriminatedUnion("type", [
 const listItemBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...enabledShape,
     type: z.enum(["listItem"]),
     headline: z.string().min(1),
     supporting: z.string().min(1).optional(),
@@ -679,6 +712,7 @@ const listItemBaseSchema = z
 const sliderBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...checksShape,
     type: z.enum(["slider"]),
     stateKey: stateKeySchema,
     label: z.string().min(1).optional(),
@@ -690,6 +724,7 @@ const sliderBaseSchema = z
 const chipBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...enabledShape,
     type: z.enum(["chip"]),
     label: z.string().min(1),
     variant: z.enum(["assist", "filter", "input", "suggestion"]).optional(),
@@ -730,6 +765,7 @@ const dialogButtonSchema = z
 const iconButtonBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...enabledShape,
     type: z.enum(["iconButton"]),
     icon: iconNameSchema,
     variant: z.enum(["standard", "filled", "tonal", "outlined"]).optional(),
@@ -738,6 +774,7 @@ const iconButtonBaseSchema = z
 const fabBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...enabledShape,
     type: z.enum(["fab"]),
     icon: iconNameSchema,
     label: z.string().min(1).optional(),
@@ -827,6 +864,7 @@ const snackbarBaseSchema = z
 const timePickerBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...checksShape,
     type: z.enum(["timePicker"]),
     hourKey: stateKeyFieldSchema,
     minuteKey: stateKeyFieldSchema,
@@ -834,7 +872,12 @@ const timePickerBaseSchema = z
   })
   .strict();
 const datePickerBaseSchema = z
-  .object({ ...commonNodeShape, type: z.enum(["datePicker"]), stateKey: stateKeyFieldSchema })
+  .object({
+    ...commonNodeShape,
+    ...checksShape,
+    type: z.enum(["datePicker"]),
+    stateKey: stateKeyFieldSchema,
+  })
   .strict();
 const scrollBaseSchema = z
   .object({
@@ -1186,32 +1229,20 @@ export const PROTOTYPE_ACTION_TYPES = [
 export const PROTOTYPE_PLACEMENT_TYPES = ["fullscreen", "sheet", "floating"] as const;
 
 export function prototypeHasStack(spec: unknown): boolean {
-  const root = record(record(spec)?.root);
-  const pending = root ? [root] : [];
-  while (pending.length) {
-    const node = pending.pop()!;
+  let found = false;
+  walkPrototypeNodes(spec, (node) => {
     if (node.type === "stack") {
-      return true;
+      found = true;
     }
-    const children = Array.isArray(node.children) ? node.children : [node.child];
-    pending.push(...children.flatMap((value) => (record(value) ? [record(value)!] : [])));
-  }
-  return false;
+  });
+  return found;
 }
 
-/** Finds stack use in the full authored spec, including reusable component definitions. */
+/** One path per authored root containing stack navigation, preserving the gate's existing shape. */
 export function prototypeStackFields(spec: unknown): string[] {
-  const value = record(spec);
-  if (!value) {
-    return [];
-  }
-  const components = record(value.components) ?? {};
-  return [
-    ...(prototypeHasStack(spec) ? ["root"] : []),
-    ...Object.entries(components).flatMap(([name, component]) =>
-      prototypeHasStack({ root: record(component)?.root }) ? [`components.${name}.root`] : [],
-    ),
-  ];
+  return prototypeSpecNodeRoots(spec).flatMap(({ node, path }) =>
+    prototypeHasStack({ root: node }) ? [path] : [],
+  );
 }
 
 /** Shared unsent refusal, following the theme-mode capability refusal wording. */

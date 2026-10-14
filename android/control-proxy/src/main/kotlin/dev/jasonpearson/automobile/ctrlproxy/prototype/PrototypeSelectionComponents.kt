@@ -76,7 +76,7 @@ internal fun RenderPrototypeRadioGroup(
       Row(
         Modifier.fillMaxWidth()
           .minimumInteractiveComponentSize()
-          .selectable(selected, role = Role.RadioButton) {
+          .selectable(selected, enabled = node.enabled, role = Role.RadioButton) {
             interact(PrototypeInteraction.Choose(source.stateKey, option.value, actions))
           }
           .semantics {
@@ -87,7 +87,7 @@ internal fun RenderPrototypeRadioGroup(
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically,
       ) {
-        RadioButton(selected, onClick = null)
+        RadioButton(selected, onClick = null, enabled = node.enabled)
         Text(option.label, Modifier.clearAndSetSemantics {}, color = prototypeForeground(node))
       }
     }
@@ -114,12 +114,15 @@ internal fun RenderPrototypeListItem(
       toggleKey != null ->
         Modifier.toggleable(
           node.checked,
+          enabled = node.enabled,
           role = if (source.trailing is PrototypeListItemSwitch) Role.Switch else Role.Checkbox,
         ) {
           interact(PrototypeInteraction.Toggle(toggleKey, actions))
         }
       actions.isNotEmpty() ->
-        Modifier.clickable(role = Role.Button) { interact(PrototypeInteraction.Tap(actions)) }
+        Modifier.clickable(enabled = node.enabled, role = Role.Button) {
+          interact(PrototypeInteraction.Tap(actions))
+        }
       else -> Modifier
     }
   val foreground = prototypeAuthoredForeground(node) ?: Color.Unspecified
@@ -130,7 +133,7 @@ internal fun RenderPrototypeListItem(
     leadingContent = prototypeIcon(source.leadingIcon)?.let { icon -> { Icon(icon, null) } },
     trailingContent =
       source.trailing?.let { trailing ->
-        { PrototypeListItemTrailingContent(trailing, node.checked) }
+        { PrototypeListItemTrailingContent(trailing, node.checked, node.enabled) }
       },
     colors =
       ListItemDefaults.colors(
@@ -149,10 +152,11 @@ internal fun RenderPrototypeListItem(
 private fun PrototypeListItemTrailingContent(
   trailing: PrototypeListItemTrailing,
   checked: Boolean,
+  enabled: Boolean,
 ) {
   when (trailing) {
-    is PrototypeListItemSwitch -> Switch(checked, onCheckedChange = null)
-    is PrototypeListItemCheckbox -> Checkbox(checked, onCheckedChange = null)
+    is PrototypeListItemSwitch -> Switch(checked, onCheckedChange = null, enabled = enabled)
+    is PrototypeListItemCheckbox -> Checkbox(checked, onCheckedChange = null, enabled = enabled)
     is PrototypeListItemIcon ->
       prototypeIcon(trailing.name)?.let { Icon(it, contentDescription = null) }
   }

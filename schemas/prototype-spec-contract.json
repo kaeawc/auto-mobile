@@ -20,7 +20,8 @@
     "MAX_PROTOTYPE_TEXT_SPANS": 64,
     "MAX_PROTOTYPE_STACK_SCREENS": 32,
     "MAX_PROTOTYPE_STACK_DEPTH": 32,
-    "MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES": 16
+    "MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES": 16,
+    "MAX_PROTOTYPE_CHECK_VALUE_LENGTH": 4096
   },
   "definitions": {
     "offset": {
@@ -116,7 +117,7 @@
     },
     "condition": {
       "kind": "object",
-      "exactlyOne": ["key", "data", "all", "any", "not"],
+      "exactlyOne": ["key", "data", "all", "any", "not", "valid"],
       "dependents": {
         "key|data": ["equals", "notEquals", "gt", "lt"]
       },
@@ -189,6 +190,25 @@
         "data": {
           "rule": {
             "kind": "pointer"
+          },
+          "optional": true
+        },
+        "valid": {
+          "rule": {
+            "kind": "choice",
+            "options": [
+              {
+                "kind": "boundKey"
+              },
+              {
+                "kind": "array",
+                "min": 1,
+                "max": 8,
+                "item": {
+                  "kind": "boundKey"
+                }
+              }
+            ]
           },
           "optional": true
         }
@@ -1216,6 +1236,17 @@
                       }
                     }
                   ]
+                }
+              },
+              "optional": true
+            },
+            "requireValid": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 8,
+                "item": {
+                  "kind": "boundKey"
                 }
               },
               "optional": true
@@ -2851,6 +2882,32 @@
                 "max": 10000
               },
               "optional": true
+            },
+            "checks": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 8,
+                "item": {
+                  "kind": "ref",
+                  "name": "check"
+                }
+              },
+              "optional": true
+            },
+            "validateOn": {
+              "rule": {
+                "kind": "enum",
+                "values": ["change", "blur", "submit"]
+              },
+              "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
             }
           }
         },
@@ -2962,6 +3019,32 @@
                 "kind": "string"
               },
               "optional": true
+            },
+            "checks": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 8,
+                "item": {
+                  "kind": "ref",
+                  "name": "check"
+                }
+              },
+              "optional": true
+            },
+            "validateOn": {
+              "rule": {
+                "kind": "enum",
+                "values": ["change", "blur", "submit"]
+              },
+              "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
             }
           }
         },
@@ -3071,6 +3154,32 @@
             "label": {
               "rule": {
                 "kind": "string"
+              },
+              "optional": true
+            },
+            "checks": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 8,
+                "item": {
+                  "kind": "ref",
+                  "name": "check"
+                }
+              },
+              "optional": true
+            },
+            "validateOn": {
+              "rule": {
+                "kind": "enum",
+                "values": ["change", "blur", "submit"]
+              },
+              "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
               },
               "optional": true
             }
@@ -3192,6 +3301,13 @@
                 "name": "iconName"
               },
               "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
             }
           }
         },
@@ -3310,6 +3426,32 @@
                 "unique": false
               },
               "optional": false
+            },
+            "checks": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 8,
+                "item": {
+                  "kind": "ref",
+                  "name": "check"
+                }
+              },
+              "optional": true
+            },
+            "validateOn": {
+              "rule": {
+                "kind": "enum",
+                "values": ["change", "blur", "submit"]
+              },
+              "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
             }
           }
         },
@@ -3424,6 +3566,14 @@
             "label": {
               "rule": {
                 "kind": "string"
+              },
+              "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
               },
               "optional": true
             }
@@ -3549,6 +3699,13 @@
               "rule": {
                 "kind": "ref",
                 "name": "listItemTrailing"
+              },
+              "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
               },
               "optional": true
             }
@@ -3683,6 +3840,32 @@
                 "integer": false
               },
               "optional": true
+            },
+            "checks": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 8,
+                "item": {
+                  "kind": "ref",
+                  "name": "check"
+                }
+              },
+              "optional": true
+            },
+            "validateOn": {
+              "rule": {
+                "kind": "enum",
+                "values": ["change", "blur", "submit"]
+              },
+              "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
             }
           }
         },
@@ -3799,6 +3982,13 @@
             "stateKey": {
               "rule": {
                 "kind": "boundKey"
+              },
+              "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
               },
               "optional": true
             }
@@ -4058,6 +4248,13 @@
                 "values": ["standard", "filled", "tonal", "outlined"]
               },
               "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
             }
           }
         },
@@ -4175,6 +4372,13 @@
               "rule": {
                 "kind": "enum",
                 "values": ["small", "regular", "large"]
+              },
+              "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
               },
               "optional": true
             }
@@ -5014,6 +5218,14 @@
                 "unique": false
               },
               "optional": false
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
             }
           }
         },
@@ -5259,6 +5471,32 @@
                 "kind": "boolean"
               },
               "optional": true
+            },
+            "checks": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 8,
+                "item": {
+                  "kind": "ref",
+                  "name": "check"
+                }
+              },
+              "optional": true
+            },
+            "validateOn": {
+              "rule": {
+                "kind": "enum",
+                "values": ["change", "blur", "submit"]
+              },
+              "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
             }
           }
         },
@@ -5364,6 +5602,32 @@
                 "kind": "boundKey"
               },
               "optional": false
+            },
+            "checks": {
+              "rule": {
+                "kind": "array",
+                "min": 1,
+                "max": 8,
+                "item": {
+                  "kind": "ref",
+                  "name": "check"
+                }
+              },
+              "optional": true
+            },
+            "validateOn": {
+              "rule": {
+                "kind": "enum",
+                "values": ["change", "blur", "submit"]
+              },
+              "optional": true
+            },
+            "enabledWhen": {
+              "rule": {
+                "kind": "ref",
+                "name": "condition"
+              },
+              "optional": true
             }
           }
         },
@@ -6189,6 +6453,14 @@
                 "name": "node"
               },
               "optional": true
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
             }
           }
         },
@@ -6298,6 +6570,14 @@
                 }
               },
               "optional": false
+            },
+            "span": {
+              "rule": {
+                "kind": "number",
+                "integer": true,
+                "min": 1
+              },
+              "optional": true
             }
           }
         }
@@ -9325,7 +9605,7 @@
               "rule": {
                 "kind": "number",
                 "integer": false,
-                "min": 0.000001,
+                "min": 1e-6,
                 "max": 10000
               },
               "optional": false
@@ -9371,7 +9651,7 @@
           "rule": {
             "kind": "number",
             "integer": false,
-            "min": 0.000001,
+            "min": 1e-6,
             "max": 1000
           },
           "optional": true
@@ -9447,7 +9727,78 @@
           "optional": true
         }
       }
+    },
+    "check": {
+      "kind": "object",
+      "exactlyOne": ["required", "minLength", "maxLength", "min", "max", "format", "pattern"],
+      "fields": {
+        "message": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        "required": {
+          "rule": {
+            "kind": "true"
+          },
+          "optional": true
+        },
+        "minLength": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0
+          },
+          "optional": true
+        },
+        "maxLength": {
+          "rule": {
+            "kind": "number",
+            "integer": true,
+            "min": 0
+          },
+          "optional": true
+        },
+        "min": {
+          "rule": {
+            "kind": "number",
+            "integer": false
+          },
+          "optional": true
+        },
+        "max": {
+          "rule": {
+            "kind": "number",
+            "integer": false
+          },
+          "optional": true
+        },
+        "format": {
+          "rule": {
+            "kind": "enum",
+            "values": ["email", "phone", "digits", "decimal", "url"]
+          },
+          "optional": true
+        },
+        "pattern": {
+          "rule": {
+            "kind": "string",
+            "empty": true,
+            "max": 128
+          },
+          "optional": true
+        }
+      }
     }
   },
-  "eventKinds": ["emit", "page_changed", "dismissed", "appearance_changed", "screen_changed"]
+  "eventKinds": [
+    "emit",
+    "page_changed",
+    "dismissed",
+    "appearance_changed",
+    "screen_changed",
+    "change",
+    "validation_failed"
+  ]
 }

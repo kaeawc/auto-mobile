@@ -31,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.center
 import androidx.compose.ui.graphics.Brush
@@ -49,13 +50,14 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -508,10 +510,26 @@ private fun RenderPrototypeNodeContent(
   val boundsModifier =
     if (node.children.any { it.role == "menu" }) Modifier.prototypeMenuBounds(node.identity, layers)
     else Modifier
+  val controlInteract: (PrototypeInteraction) -> Unit = { interaction ->
+    if (node.source?.enabledCondition() != null)
+      interact(PrototypeInteraction.Guarded(node.identity, interaction))
+    else interact(interaction)
+  }
+  var focused by remember(node.identity) { mutableStateOf(false) }
+  val focusModifier =
+    if (node.source?.checks().isNullOrEmpty()) Modifier
+    else
+      Modifier.onFocusChanged { focus ->
+        if (focused && !focus.hasFocus) {
+          controlInteract(PrototypeInteraction.Blur(node.source.checkedKeys()))
+        }
+        focused = focus.hasFocus
+      }
   val modifier =
-    parentModifier
+    (if (node.errorMessage != null && node.role != "textField") Modifier else parentModifier)
       .then(boundsModifier)
-      .then(prototypeNodeModifier(node, interact, weightAxis, windowRoot))
+      .then(prototypeNodeModifier(node, controlInteract, weightAxis, windowRoot))
+      .then(focusModifier)
   // Inline layout containers with repeat or a direct visibleWhen child animate and clip their size.
   // Look through card/scroll/pager only; nested layout containers own the animation their parent
   // follows.
@@ -699,15 +717,21 @@ private fun RenderPrototypeNodeContent(
     "dialog",
     "menu",
     "snackbar" -> Unit // Modal content is hoisted above the whole author tree, within this window.
-    "iconButton" -> RenderPrototypeIconButton(node, modifier, interact)
-    "fab" -> RenderPrototypeFab(node, modifier, interact)
+    "iconButton" -> RenderPrototypeIconButton(node, modifier, controlInteract)
+    "fab" -> RenderPrototypeFab(node, modifier, controlInteract)
     "segmentedButton" -> RenderPrototypeSegmentedButton(node, modifier, interact)
     "topAppBar" -> RenderPrototypeTopAppBar(node, modifier, interact)
     "divider" -> RenderPrototypeDivider(node, modifier)
     "badge" -> RenderPrototypeBadge(node, modifier)
     "progress" -> RenderPrototypeProgress(node, modifier)
-    "timePicker" -> RenderPrototypeTimePicker(node, modifier, interact)
-    "datePicker" -> RenderPrototypeDatePicker(node, modifier, interact)
+    "timePicker" ->
+      PrototypeCheckedControl(node, parentModifier) {
+        RenderPrototypeTimePicker(node, modifier, controlInteract)
+      }
+    "datePicker" ->
+      PrototypeCheckedControl(node, parentModifier) {
+        RenderPrototypeDatePicker(node, modifier, controlInteract)
+      }
     "searchBar" ->
       RenderPrototypeSearchBar(node, modifier, interact) {
         node.children.forEach { child ->
@@ -721,15 +745,24 @@ private fun RenderPrototypeNodeContent(
           }
         }
       }
-    "textField" -> RenderPrototypeTextField(node, modifier, interact)
+    "textField" -> RenderPrototypeTextField(node, modifier, controlInteract)
     "switch",
-    "checkbox" -> RenderPrototypeToggle(node, modifier, interact)
-    "button" -> RenderPrototypeButton(node, modifier, interact)
-    "radioGroup" -> RenderPrototypeRadioGroup(node, modifier, interact)
+    "checkbox" ->
+      PrototypeCheckedControl(node, parentModifier) {
+        RenderPrototypeToggle(node, modifier, controlInteract)
+      }
+    "button" -> RenderPrototypeButton(node, modifier, controlInteract)
+    "radioGroup" ->
+      PrototypeCheckedControl(node, parentModifier) {
+        RenderPrototypeRadioGroup(node, modifier, controlInteract)
+      }
     "select" -> RenderPrototypeSelect(node, modifier)
-    "listItem" -> RenderPrototypeListItem(node, modifier, interact)
-    "slider" -> RenderPrototypeSlider(node, modifier, interact)
-    "chip" -> RenderPrototypeChip(node, modifier, interact)
+    "listItem" -> RenderPrototypeListItem(node, modifier, controlInteract)
+    "slider" ->
+      PrototypeCheckedControl(node, parentModifier) {
+        RenderPrototypeSlider(node, modifier, controlInteract)
+      }
+    "chip" -> RenderPrototypeChip(node, modifier, controlInteract)
     "card" ->
       RenderPrototypeCard(node, modifier) {
         node.children.forEach {
@@ -767,7 +800,9 @@ private fun RenderPrototypeTextField(
     val label: (@Composable () -> Unit)? = source.label?.let { text -> { Text(text) } }
     val counter = prototypeTextFieldCounter(shown, source.maxLength)
     val supportingText: (@Composable () -> Unit)? =
-      if (source.supportingText != null || counter != null) {
+      if (node.errorMessage != null) {
+        { PrototypeErrorCaption(node) }
+      } else if (source.supportingText != null || counter != null) {
         {
           Row(Modifier.fillMaxWidth()) {
             Text(source.supportingText.orEmpty(), Modifier.weight(1f))
@@ -782,7 +817,8 @@ private fun RenderPrototypeTextField(
           keyboardType = prototypeTextFieldKeyboardType(source.keyboardType, source.secure),
         )
     val visualTransformation =
-      if (prototypeTextFieldSecure(source.secure, source.keyboardType)) PasswordVisualTransformation()
+      if (prototypeTextFieldSecure(source.secure, source.keyboardType))
+        PasswordVisualTransformation()
       else VisualTransformation.None
     val multiline = source.multiline
     // Omit line options for legacy fields: Compose's default is a growing field.
@@ -792,6 +828,8 @@ private fun RenderPrototypeTextField(
           value = shown,
           onValueChange = onValueChange,
           modifier = fieldModifier,
+          enabled = node.enabled,
+          isError = node.errorMessage != null,
           interactionSource = presses,
           placeholder = { Text(source.placeholder.orEmpty()) },
           label = label,
@@ -804,6 +842,8 @@ private fun RenderPrototypeTextField(
           value = shown,
           onValueChange = onValueChange,
           modifier = fieldModifier,
+          enabled = node.enabled,
+          isError = node.errorMessage != null,
           interactionSource = presses,
           placeholder = { Text(source.placeholder.orEmpty()) },
           label = label,
@@ -821,6 +861,8 @@ private fun RenderPrototypeTextField(
           value = shown,
           onValueChange = onValueChange,
           modifier = fieldModifier,
+          enabled = node.enabled,
+          isError = node.errorMessage != null,
           interactionSource = presses,
           placeholder = { Text(source.placeholder.orEmpty()) },
           label = label,
@@ -833,6 +875,8 @@ private fun RenderPrototypeTextField(
           value = shown,
           onValueChange = onValueChange,
           modifier = fieldModifier,
+          enabled = node.enabled,
+          isError = node.errorMessage != null,
           interactionSource = presses,
           placeholder = { Text(source.placeholder.orEmpty()) },
           label = label,
@@ -874,7 +918,7 @@ internal fun RenderPrototypeEditableField(
     }
   }
   var fieldModifier = modifier.focusRequester(focus)
-  if (actions.isNotEmpty())
+  if (node.enabled && actions.isNotEmpty())
     fieldModifier = fieldModifier.semantics {
       onClick {
         focus.requestFocus()
@@ -1140,7 +1184,7 @@ private fun prototypeNodeModifier(
     (node.role == "icon" || node.role == "image") &&
       node.identity in LocalPrototypeHandleVisuals.current
   val presses = remember { MutableInteractionSource() }
-  var modifier: Modifier = Modifier
+  var modifier: Modifier = if (node.enabled) Modifier else Modifier.semantics { disabled() }
   // Outermost: the anchor fixes where the whole node, offset and touch target included, lands on
   // screen (#9316). The host resolved element anchors to screen dp bounds before sending.
   val anchor = node.source?.anchor as? PrototypeBoundsAnchor
@@ -1207,6 +1251,7 @@ private fun prototypeNodeModifier(
           }
       } else if (longPress != null || doubleTap != null) {
         modifier.combinedClickable(
+          enabled = node.enabled,
           interactionSource = presses,
           indication = LocalIndication.current,
           onClick = { gestureTaps.tap { interact(PrototypeInteraction.Tap(actions)) } },
@@ -1214,7 +1259,11 @@ private fun prototypeNodeModifier(
           onDoubleClick = doubleTap?.let { { interact(PrototypeInteraction.Tap(it)) } },
         )
       } else {
-        modifier.clickable(interactionSource = presses, indication = LocalIndication.current) {
+        modifier.clickable(
+          enabled = node.enabled,
+          interactionSource = presses,
+          indication = LocalIndication.current,
+        ) {
           gestureTaps.tap { interact(PrototypeInteraction.Tap(actions)) }
         }
       }
@@ -1308,7 +1357,19 @@ private fun prototypeNodeModifier(
 }
 
 private val SEMANTICS_FREE_CONTAINERS =
-  setOf("box", "row", "column", "flow", "grid", "scroll", "pager", "stack", "spacer", "card", "divider")
+  setOf(
+    "box",
+    "row",
+    "column",
+    "flow",
+    "grid",
+    "scroll",
+    "pager",
+    "stack",
+    "spacer",
+    "card",
+    "divider",
+  )
 
 /**
  * Navigation bars are labelled by their tabs, which carry the Tab role and selected state, so their
@@ -1547,3 +1608,30 @@ private fun prototypeGradientBrush(gradient: PrototypeGradient, palette: Prototy
         }
       }
   }
+
+/** Error captions remain separate semantic nodes so their tags are inspectable. */
+@Composable
+internal fun PrototypeErrorCaption(node: PrototypeRenderNode) {
+  node.errorMessage?.let { message ->
+    Text(
+      message,
+      Modifier.semantics { prototypePartTag(node.testTag, "error")?.let { testTag = it } },
+      color = MaterialTheme.colorScheme.error,
+      style = MaterialTheme.typography.bodySmall,
+    )
+  }
+}
+
+@Composable
+private fun PrototypeCheckedControl(
+  node: PrototypeRenderNode,
+  parentModifier: Modifier,
+  content: @Composable () -> Unit,
+) {
+  if (node.errorMessage == null) content()
+  else
+    Column(parentModifier) {
+      content()
+      PrototypeErrorCaption(node)
+    }
+}

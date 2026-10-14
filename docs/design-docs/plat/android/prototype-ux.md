@@ -1749,3 +1749,60 @@ A `select` requires a string `stateKey` and 2–32 `{value,label}` options with 
 Rendering stays inside the prototype window on both platforms so `observe` and `tapOn` reach the normal hierarchy. Android uses an in-window surface rather than a separate DropdownMenu/Popup window. iOS uses an in-window list rather than system SwiftUI Menu/Picker popups; successful iOS shows report this substitution in `platformNotes`. Menu icons use the existing SF Symbols mapping on iOS.
 
 The select field and menu surface carry the node `testTag`. Select option rows use `<testTag>.<value>`; menu item rows use `<testTag>.<index>`, with zero-based positions including dividers. Android adds row tags only when `testTag` is set; iOS falls back to `(testTag ?? id).<value>` or `(testTag ?? id).<index>`.
+
+## Checks
+
+Devices advertising `prototype_checks_v1` evaluate declarative checks locally. The host refuses
+show and patch results using this feature on older devices. Inputs `textField`, `slider`,
+`checkbox`, `switch`, `radioGroup`, `datePicker` and `timePicker` accept `checks` (1–8 entries)
+and `validateOn: "change" | "blur" | "submit"` (omitted means blur). Each check contains a
+nonempty `message` and exactly one rule. `validateOn` controls error display, never validity.
+The first failing message is displayed.
+
+- `required: true`: trimmed nonempty text, true for checkbox/switch, nonempty selection for
+  radioGroup/datePicker, present number for slider/timePicker.
+- `minLength` / `maxLength`: nonnegative integer UTF-16 lengths, textField only.
+- `min` / `max`: finite numeric inclusive bounds, slider and pickers only. Text fields hold
+  strings and have no numeric subtype. Date state remains YYYY-MM-DD; bounds are UTC epoch
+  milliseconds. Time pickers retain hourKey/minuteKey; checks apply independently to both keys.
+- `format`: textField only, one of email, phone, digits, decimal, url.
+- `pattern`: textField only, the restricted grammar below, at most 128 UTF-16 units.
+
+Empty string, null or missing value passes all rules except required. Whitespace is only empty
+for required. Pattern and format matching use at most 4096 UTF-16 units. Required and length checks inspect the complete value.
+Every validity reference must name declared state with at least one check. Multiple checked
+controls sharing a key must all pass. Numeric/length lower bounds must not exceed upper bounds.
+
+Formats use these exact whole-value expressions (ASCII digits):
+
+- email: `[^\s@]+@[^\s@]+\.[^\s@]+` (Unicode names allowed).
+- phone: optional leading +, then 7–15 characters from ASCII digits, space, hyphen and parentheses;
+  at least seven digits. The leading + is outside the character count. Punctuation need not balance.
+- digits: `[0-9]+`.
+- decimal: `-?[0-9]+(\.[0-9]+)?` (no exponent or leading +).
+- url: `https?://[^\s/?#]+([/?#]\S*)?` (lowercase scheme, Unicode hosts allowed).
+
+Format whitespace follows JavaScript whitespace (including NBSP); no format trims its value.
+Patterns use ASCII `\d`, `\w`, `\s` and their complements `\D`, `\W`, `\S`; `\w` is
+`[A-Za-z0-9_]` and `\s` is space, tab, CR, LF, FF, VT. Dot matches one Unicode scalar except
+CR, LF, U+2028 and U+2029. Matching consumes the entire value, even with a final newline.
+Allowed: literals, dot, classes `[abc]` / `[^abc]`, literal ranges, those six shorthand escapes,
+escaped metacharacters, anchors ^ $, groups `(…)` / `(?:…)`, alternation |, and quantifiers
+`? * + {n} {n,} {n,m}`. Every written bound is <=100 and n<=m; open upper bounds are unbounded.
+Reject backreferences, lookahead/behind, named groups, lazy/possessive quantifiers, Unicode
+properties, inline flags, word boundaries `\b` / `\B`, and every other escape (including
+`\n`, `\x`, `\u`; use literal characters). Empty classes are rejected. A group repeated more
+than once cannot contain alternation or any variable quantifier (maximum > minimum), transitively.
+At most two variable quantifiers are allowed in the entire pattern: ? * + {n,} and {n,m} when
+m>n. Fixed {n} quantifiers inside repeated groups remain allowed.
+Thus `(a|b)+`, `(a+)+`, `(a*)*` and `((ab)+)+` are rejected. Optional groups remain allowed.
+These exact rules and error substrings are pinned in the language-neutral checks fixtures.
+
+Conditions `{valid: "email"}` and `{valid: ["email", "password"]}` mean all referenced keys
+are valid, including fields whose errors are not yet shown. They compose with all/any/not in
+visibleWhen, styleWhen and enabledWhen. enabledWhen is supported on the seven input types plus
+button, iconButton, fab, chip and listItem; false disables the control and skips its onTap.
+`emit` may specify `requireValid: ["email", "password"]` (1–8 keys). Any failing key aborts the
+whole action list atomically, shows errors on every listed field, and sends
+`{kind:"validation_failed", keys:[…]}` naming only the failing keys. `change` events carry
+`validity: {key:boolean}` for checked keys. Both event kinds retain the usual event envelope.

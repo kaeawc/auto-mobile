@@ -265,6 +265,8 @@ export class PrototypeEventCoordinator {
       pages: event.pages,
       ...(event.stacks ? { stacks: structuredClone(event.stacks) } : {}),
       timestamp: event.timestamp,
+      ...(event.validity === undefined ? {} : { validity: event.validity }),
+      ...(event.keys === undefined ? {} : { keys: event.keys }),
     };
     return { event: delivered, ...entry.buffer.status() };
   }

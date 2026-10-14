@@ -15,6 +15,7 @@ final class PrototypeModel {
     var expandedSelect: PrototypeNode?
     var menuBounds: [ObjectIdentifier: CGRect] = [:]
     private(set) var state: [String: JSONValue] = [:]
+    private(set) var shownErrors: Set<String> = []
     private(set) var pages: [String: Int] = [:]
     private(set) var stacks: [String: PrototypeStackSnapshot] = [:]
     private(set) var appearance: PrototypeAppearance?
@@ -45,6 +46,7 @@ final class PrototypeModel {
         }
         escapeReveal.sync(hasEscape: hasEscape, shown: next.isShown)
         if state != next.state { state = next.state }
+        if shownErrors != next.shownErrors { shownErrors = next.shownErrors }
         if pages != next.pages { pages = next.pages }
         if stacks != next.stacks { stacks = next.stacks }
         if appearance != next.appearance { appearance = next.appearance }
@@ -220,6 +222,26 @@ final class PrototypeModel {
         guard stackPopTarget != nil else { return false }
         apply { $0.popTopmostStack() }
         return true
+    }
+
+    func isEnabled(_ node: PrototypeNode) -> Bool {
+        node.enabledWhen?.holds(state) ?? true
+    }
+
+    func shownError(_ node: PrototypeNode) -> String? {
+        // Read the observed fields; the session itself is observation-ignored.
+        for key in node.checkedKeys where shownErrors.contains(key) {
+            let result = PrototypeChecks.evaluate(state[key], checks: node.checks ?? [], nodeType: node.type)
+            if let message = result.firstFailingMessage { return message }
+        }
+        return nil
+    }
+
+    func blur(_ node: PrototypeNode) {
+        apply(activity: false) { session in
+            session.blur(node)
+            return []
+        }
     }
 
     func run(_ actions: [PrototypeAction]) {

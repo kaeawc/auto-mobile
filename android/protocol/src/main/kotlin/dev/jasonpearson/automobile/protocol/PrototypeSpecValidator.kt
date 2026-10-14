@@ -4,7 +4,23 @@ import kotlin.math.abs
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.double
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 /** Canonical errors are computed from JSON structure, never from decoder exception strings. */
 data class PrototypeSpecError(val path: String, val message: String)
@@ -124,8 +140,15 @@ object PrototypeSpecValidator {
     val value = checkNotNull(context.root).jsonObject
     val checked = checkNotNull(context.stateBindings)
     // Only bindings can change their verdict. Static-only nodes/actions passed full validation.
-    checked.nodes.removeAll { boundKeys(it.value).isEmpty() }
-    checked.actions.removeAll { it.value.text("type") !in stateWriteActionTypes }
+    checked.nodes.removeAll {
+      boundKeys(it.value).isEmpty() &&
+        it.value["enabledWhen"] == null &&
+        it.value["visibleWhen"] == null &&
+        it.value["styleWhen"] == null
+    }
+    checked.actions.removeAll {
+      it.value.text("type") !in stateWriteActionTypes && it.value["requireValid"] == null
+    }
     val serializer = MapSerializer(String.serializer(), PrototypeScalar.serializer())
     // An omitted state adds its field name and comma; a present state replaces only its value.
     // Compact serialization preserves all non-state bytes, including UTF-8 and escaped strings.
@@ -362,6 +385,120 @@ object PrototypeSpecValidator {
       ?: listItemBindingErrors(checked, data)
       ?: sheetBindingErrors(checked, data)
       ?: stateActionErrors(checked, data)
+      ?: checkErrors(checked, data)
+
+  private fun checkErrors(context: Context, data: JsonObject): PrototypeSpecError? {
+    val state = data["state"] as? JsonObject ?: JsonObject(emptyMap())
+    val keys =
+      context.nodes
+        .flatMap { located ->
+          if ((located.value["checks"] as? JsonArray).isNullOrEmpty()) emptyList()
+          else
+            listOfNotNull(
+                located.value.text("stateKey"),
+                located.value.text("hourKey"),
+                located.value.text("minuteKey"),
+              )
+              .filter(state::containsKey)
+        }
+        .toSet()
+    for ((value, path) in context.nodes) {
+      nodeCheckError(value, path)?.let {
+        return it
+      }
+      conditionCheckError(value["visibleWhen"], "$path.visibleWhen", keys)?.let {
+        return it
+      }
+      conditionCheckError(value["enabledWhen"], "$path.enabledWhen", keys)?.let {
+        return it
+      }
+      for ((index, entry) in (value["styleWhen"] as? JsonArray).orEmpty().withIndex()) {
+        conditionCheckError(
+            (entry as? JsonObject)?.get("when"),
+            "$path.styleWhen[$index].when",
+            keys,
+          )
+          ?.let {
+            return it
+          }
+      }
+    }
+    for ((value, path) in context.actions) {
+      value["requireValid"]?.let {
+        keyCheckError(it, path, keys)?.let { error ->
+          return error
+        }
+      }
+    }
+    return null
+  }
+
+  private fun nodeCheckError(node: JsonObject, path: String): PrototypeSpecError? {
+    val checks = (node["checks"] as? JsonArray).orEmpty().map { it.jsonObject }
+    for ((index, check) in checks.withIndex()) {
+      val kind = check.keys.first { it != "message" }
+      val at = "$path.checks[$index].$kind"
+      val fits =
+        when (kind) {
+          "minLength",
+          "maxLength",
+          "format",
+          "pattern" -> node.text("type") == "textField"
+          "min",
+          "max" -> node.text("type") in setOf("slider", "datePicker", "timePicker")
+          else -> true
+        }
+      if (!fits) return fail(at, "Check $kind does not fit ${node.text("type")}")
+      check.text("pattern")?.let {
+        val result = PrototypeCheckPattern.parse(it)
+        if (!result.ok) return fail(at, checkNotNull(result.message))
+      }
+    }
+    for ((lower, upper) in listOf("min" to "max", "minLength" to "maxLength")) {
+      val low = checks.mapNotNull { (it[lower] as? JsonPrimitive)?.doubleOrNull }.maxOrNull()
+      val high = checks.mapNotNull { (it[upper] as? JsonPrimitive)?.doubleOrNull }.minOrNull()
+      if (low != null && high != null && low > high) {
+        val index = checks.indexOfFirst { (it[upper] as? JsonPrimitive)?.doubleOrNull == high }
+        return fail("$path.checks[$index].$upper", "$lower exceeds $upper")
+      }
+    }
+    return null
+  }
+
+  private fun keyCheckError(
+    value: JsonElement,
+    path: String,
+    keys: Set<String>,
+  ): PrototypeSpecError? {
+    val requested = if (value is JsonArray) value else listOf(value)
+    return if (
+      requested.any { (it as? JsonPrimitive)?.takeIf { key -> key.isString }?.content !in keys }
+    )
+      fail(path, "Validity key must be declared state with at least one check")
+    else null
+  }
+
+  private fun conditionCheckError(
+    value: JsonElement?,
+    path: String,
+    keys: Set<String>,
+  ): PrototypeSpecError? {
+    val condition = value as? JsonObject ?: return null
+    condition["valid"]?.let {
+      return keyCheckError(it, path, keys)
+    }
+    condition["not"]?.let {
+      return conditionCheckError(it, "$path.not", keys)
+    }
+    for (form in listOf("all", "any")) {
+      for ((index, child) in (condition[form] as? JsonArray).orEmpty().withIndex()) {
+        conditionCheckError(child, "$path.$form[$index]", keys)?.let {
+          return it
+        }
+      }
+    }
+    return null
+  }
 
   private class Context {
     var root: JsonElement? = null
@@ -721,6 +858,7 @@ object PrototypeSpecValidator {
       "color" -> text != null && colorPattern.matches(text)
       "number" -> numberValid(value, rule)
       "boolean" -> primitive != null && !primitive.isString && primitive.booleanOrNull != null
+      "true" -> primitive != null && !primitive.isString && primitive.booleanOrNull == true
       "scalar" ->
         text != null ||
           (primitive != null &&

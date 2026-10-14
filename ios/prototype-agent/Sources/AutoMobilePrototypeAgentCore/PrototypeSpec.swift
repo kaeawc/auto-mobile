@@ -130,6 +130,7 @@ struct PrototypeSpec: Decodable {
         root = try JSONDecoder().decode(
             PrototypeNode.self, from: JSONEncoder().encode(expanded)
         )
+        root.bindValidity(PrototypeChecks.bindings(root: root))
         // There is no Swift twin of the host validator, so the forms `prototype_theme_modes_v1`
         // added are checked here: a malformed one fails the show instead of drawing a fallback.
         try PrototypeStacks.validate(root: root)
@@ -432,6 +433,7 @@ struct PrototypeAction: Decodable, Sendable {
     let value: JSONValue?
     /// `increment`/`decrement` step; 1 when omitted.
     let by: Double?
+    let requireValid: [String]?
 }
 
 /// The shared validator's condition vocabulary (`visibleWhen`, `openWhen`): exactly one form per
@@ -444,14 +446,23 @@ indirect enum Condition: Decodable, Equatable {
     case all([Condition])
     case any([Condition])
     case not(Condition)
+    case valid([String], PrototypeValidityContext)
 
     private enum CodingKeys: String, CodingKey {
-        case key, equals, notEquals, gt, lt, all, any, not
+        case key, equals, notEquals, gt, lt, all, any, not, valid
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        if let all = try container.decodeIfPresent([Condition].self, forKey: .all) {
+        if container.contains(.valid) {
+            let keys: [String]
+            if let key = try? container.decode(String.self, forKey: .valid) {
+                keys = [key]
+            } else {
+                keys = try container.decode([String].self, forKey: .valid)
+            }
+            self = .valid(keys, PrototypeValidityContext())
+        } else if let all = try container.decodeIfPresent([Condition].self, forKey: .all) {
             self = .all(all)
         } else if let any = try container.decodeIfPresent([Condition].self, forKey: .any) {
             self = .any(any)
@@ -488,6 +499,7 @@ indirect enum Condition: Decodable, Equatable {
         case let .all(conditions): conditions.allSatisfy { $0.holds(state) }
         case let .any(conditions): conditions.contains { $0.holds(state) }
         case let .not(condition): !condition.holds(state)
+        case let .valid(keys, context): context.holds(keys, state: state)
         }
     }
 }
@@ -568,6 +580,9 @@ final class PrototypeNode: Decodable {
     let style: Style?
     let styleWhen: [StyleWhen]?
     let visibleWhen: Condition?
+    let enabledWhen: Condition?
+    let checks: [PrototypeCheck]?
+    let validateOn: PrototypeValidateOn?
     /// The `visibleWhen` enter/exit: `none`, `fade`, `expand` or `slide`; absent is fade + expand.
     let transition: String?
     let safeAreaPadding: SafeAreaPadding?

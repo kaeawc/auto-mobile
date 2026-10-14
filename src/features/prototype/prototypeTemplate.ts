@@ -174,8 +174,18 @@ function mapObject(
   }
 }
 
+function mapKeyList(data: Raw, key: string, path: string, visit: FieldVisitor): void {
+  const values = data[key];
+  if (Array.isArray(values)) {
+    data[key] = values.map((value, index) => visit(value, `${path}.${key}[${index}]`, "key"));
+  } else {
+    mapField(data, key, path, "key", visit);
+  }
+}
+
 function mapCondition(condition: Raw, path: string, visit: FieldVisitor): Raw {
   mapField(condition, "key", path, "key", visit);
+  mapKeyList(condition, "valid", path, visit);
   const operandVisit: FieldVisitor = (value, fieldPath, kind) =>
     visit(value, fieldPath, kind, Object.hasOwn(condition, "data"));
   mapField(condition, "equals", path, "operand", operandVisit);
@@ -212,6 +222,7 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
           }),
         );
       }
+      mapKeyList(action, "requireValid", path, visit);
       break;
     case "toggle":
     case "increment":
@@ -311,6 +322,11 @@ export function mapBindableFields(node: Raw, path: string, visit: FieldVisitor):
   }
   const component = typeof copy.type === "string" ? COMPONENT_FIELDS[copy.type] : undefined;
   component?.(copy, path, visit);
+  mapObject(copy, "enabledWhen", path, (entry, entryPath) => mapCondition(entry, entryPath, visit));
+  mapList(copy, "checks", path, (entry, entryPath) => {
+    mapField(entry, "message", entryPath, "text", visit);
+    return entry;
+  });
   mapObject(copy, "visibleWhen", path, (entry, entryPath) => mapCondition(entry, entryPath, visit));
   mapList(copy, "styleWhen", path, (entry, entryPath) => {
     mapObject(entry, "when", entryPath, (condition, conditionPath) =>
@@ -344,7 +360,16 @@ export function bindNodeFields(node: Raw, path: string, instance: Instance): Raw
 
 /** The state-key values the validators type-check: node keys and an action's `key`. */
 export function checkedKeyValues(value: Raw): unknown[] {
+  const keys: unknown[] = [];
+  mapBindableFields(value, "", (field, _path, kind) => {
+    if (kind === "key") {
+      keys.push(field);
+    }
+    return field;
+  });
   return [
+    ...keys,
+    ...(Array.isArray(value.requireValid) ? value.requireValid : []),
     value.key,
     value.stateKey,
     value.activeKey,
@@ -357,7 +382,14 @@ export function checkedKeyValues(value: Raw): unknown[] {
 
 /** Binds only the state-key fields the validators type-check: node keys and an action's `key`. */
 export function bindCheckedKeys(value: Raw, instance: Instance): Raw {
-  const copy = { ...value };
+  const copy = mapBindableFields(value, "", (field, _path, kind) =>
+    kind === "key" && typeof field === "string" ? bindText(field, instance) : field,
+  );
+  if (Array.isArray(copy.requireValid)) {
+    copy.requireValid = copy.requireValid.map((key) =>
+      typeof key === "string" ? bindText(key, instance) : key,
+    );
+  }
   const bind = (entry: unknown) => (typeof entry === "string" ? bindText(entry, instance) : entry);
   for (const field of ["key", "stateKey", "activeKey", "hourKey", "minuteKey"]) {
     if (copy[field] !== undefined) {

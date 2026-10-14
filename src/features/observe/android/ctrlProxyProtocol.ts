@@ -588,6 +588,8 @@ export const PROTOTYPE_EVENT_KINDS = [
   "screen_changed",
   "dismissed",
   "appearance_changed",
+  "change",
+  "validation_failed",
 ] as const;
 export type PrototypeEventKind = (typeof PROTOTYPE_EVENT_KINDS)[number];
 /**
@@ -608,6 +610,10 @@ export interface PrototypeEvent {
    */
   sequence: number;
   kind: PrototypeEventKind | typeof UNKNOWN_PROTOTYPE_EVENT_KIND;
+  /** change: current validity for checked state keys. */
+  validity?: Record<string, boolean>;
+  /** validation_failed: failing keys from an atomic requireValid guard. */
+  keys?: string[];
   name: string | null;
   payload: PrototypeJson;
   context?: Record<string, PrototypeJson>;
@@ -1021,6 +1027,7 @@ export const PROTOTYPE_MENUS_CAPABILITY = "prototype_menus_v1";
 
 /** Resolves read-only prototype data, JSON Pointer bindings and stable repeat keys. */
 export const PROTOTYPE_EMIT_CONTEXT_CAPABILITY = "prototype_emit_context_v1";
+export const PROTOTYPE_CHECKS_CAPABILITY = "prototype_checks_v1";
 export const PROTOTYPE_DATA_MODEL_CAPABILITY = "prototype_data_model_v1";
 /** Editable in-tree search field with active results and submit/trailing actions. */
 export const PROTOTYPE_SEARCH_BAR_CAPABILITY = "prototype_search_bar_v1";

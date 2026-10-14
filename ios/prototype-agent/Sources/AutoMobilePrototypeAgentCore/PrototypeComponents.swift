@@ -167,6 +167,7 @@ extension PrototypeSession {
     mutating func activate(_ target: PrototypeTapTarget) -> [PrototypeEvent]? {
         switch target {
         case let .node(node):
+            guard isEnabled(node) else { return [] }
             if let key = node.toggleKey { return toggle(key: key, then: node.onTap ?? []) }
             guard let actions = node.onTap, !actions.isEmpty else { return nil }
             return run(actions)
@@ -179,6 +180,7 @@ extension PrototypeSession {
             guard let actions = button.onTap, !actions.isEmpty else { return nil }
             return run(actions)
         case let .option(node, option):
+            guard isEnabled(node) else { return [] }
             guard let key = node.stateKey else { return nil }
             return choose(key: key, value: option.value, then: node.onTap ?? [])
         }

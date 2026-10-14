@@ -1,27 +1,37 @@
+import { prototypeNodeChildren, prototypeSpecNodeRoots } from "./prototypeNodeChildren";
 import { PROTOTYPE_PAGER_OPTIONS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { record } from "./prototypeTemplate";
 
-/** Explicit pager options need the capability, even when they request the default behaviour. */
+/** Authored field order, including descendants and reusable component roots. */
 export function prototypePagerOptionFields(spec: unknown): string[] {
-  return nodeFields(record(spec)?.root, "root");
-}
-
-function nodeFields(value: unknown, path: string): string[] {
-  const node = record(value);
-  if (!node) {
-    return [];
-  }
   const fields: string[] = [];
-  for (const [key, child] of Object.entries(node)) {
-    if (node.type === "pager" && ["axis", "pageSpacing", "peek", "pageSize"].includes(key)) {
-      fields.push(`${path}.${key}`);
-    } else if (key === "children" && Array.isArray(child)) {
-      fields.push(
-        ...child.flatMap((entry, index) => nodeFields(entry, `${path}.children[${index}]`)),
-      );
-    } else if (key === "child") {
-      fields.push(...nodeFields(child, `${path}.child`));
+  const pending: ({ node: unknown; path: string } | { field: string })[] =
+    prototypeSpecNodeRoots(spec).reverse();
+  while (pending.length) {
+    const task = pending.pop()!;
+    if ("field" in task) {
+      fields.push(task.field);
+      continue;
     }
+    const { path } = task;
+    const node = record(task.node);
+    if (!node) {
+      continue;
+    }
+    const children = prototypeNodeChildren(node);
+    const next: typeof pending = [];
+    for (const key of Object.keys(node)) {
+      if (node.type === "pager" && ["axis", "pageSpacing", "peek", "pageSize"].includes(key)) {
+        next.push({ field: `${path}.${key}` });
+      } else {
+        next.push(
+          ...children
+            .filter((entry) => entry.suffix === `.${key}` || entry.suffix.startsWith(`.${key}[`))
+            .map((entry) => ({ node: entry.value, path: `${path}${entry.suffix}` })),
+        );
+      }
+    }
+    pending.push(...next.reverse());
   }
   return fields;
 }

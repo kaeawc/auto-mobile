@@ -135,9 +135,9 @@ test("context discovery expands component uses and reports their authored locati
   expect(prototypeEmitContextFields(prototypeSpecForDevice(spec))).toEqual([
     "root.onTap[0].context",
   ]);
-  expect(prototypeEmitContextFields({ ...spec, root: { type: "text", text: "Unused" } })).toEqual(
-    [],
-  );
+  expect(prototypeEmitContextFields({ ...spec, root: { type: "text", text: "Unused" } })).toEqual([
+    "components.row.root.onTap[0].context",
+  ]);
 });
 
 test("data capability discovery expands component emit bindings with the same device spec", () => {

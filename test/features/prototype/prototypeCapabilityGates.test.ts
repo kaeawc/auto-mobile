@@ -14,6 +14,7 @@ import { prototypePagerOptionsUnsupportedMessage } from "../../../src/features/p
 import { prototypeGesturesUnsupportedMessage } from "../../../src/features/prototype/prototypeGestures";
 import { prototypeSearchBarUnsupportedMessage } from "../../../src/features/prototype/prototypeSearchBar";
 import { prototypeEmitContextUnsupportedMessage } from "../../../src/features/prototype/prototypeEmitContext";
+import { prototypeChecksUnsupportedMessage } from "../../../src/features/prototype/prototypeChecksCapability";
 import { prototypeRichTextUnsupportedMessage } from "../../../src/features/prototype/prototypeRichText";
 
 test("plain and non-spec inputs require no capability", () => {
@@ -44,6 +45,7 @@ test("required gates report fields and original messages", () => {
           onTap: [{ type: "emit", name: "pick", context: { a: { value: 1 } } }],
         },
         { type: "menu", id: "more", items: [{ label: "Open" }] },
+        { type: "button", label: "Save", enabledWhen: { key: "liked", equals: true } },
         {
           type: "stack",
           id: "nav",
@@ -65,6 +67,7 @@ test("required gates report fields and original messages", () => {
     "prototype_menus_v1",
     "prototype_stack_v1",
     "prototype_emit_context_v1",
+    "prototype_checks_v1",
   ]);
   expect(required.map((gate) => gate.fields)).toEqual([
     ["root.children[0].style.background"],
@@ -77,6 +80,7 @@ test("required gates report fields and original messages", () => {
     ["root.children[5]"],
     ["root"],
     ["root.children[4].onTap[0].context"],
+    ["root.children[6].enabledWhen"],
   ]);
   expect(required.map((gate) => gate.unsupportedMessage)).toEqual([
     prototypeThemeModesUnsupportedMessage,
@@ -89,6 +93,7 @@ test("required gates report fields and original messages", () => {
     prototypeMenusUnsupportedMessage,
     expect.any(Function),
     prototypeEmitContextUnsupportedMessage,
+    prototypeChecksUnsupportedMessage,
   ]);
   expect(
     PROTOTYPE_SPEC_CAPABILITY_GATES.map((gate) => gate.fields(spec)).filter((f) => f.length > 0),

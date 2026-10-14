@@ -160,6 +160,7 @@ struct NodeView: View {
     var inStackSlot = false
     /// The main axis of the row or column laying this node out, so a `weight` knows what it fills.
     var stackAxis: PrototypeAxis?
+    @FocusState private var controlFocused: Bool
     @Environment(\.pagerContext) private var pager
     @Environment(\.prototypePalette) private var palette
     @Environment(\.prototypeTypography) private var typography
@@ -178,7 +179,7 @@ struct NodeView: View {
             // on the node and the parent drives the animation. No wrapping ZStack: a ZStack places
             // its child at the size it measured, and a row re-laid out at exactly its ideal width
             // shares that width out evenly, cutting "Edit"/"Save" short (#10899).
-            styled(content).transition(transition.swiftUITransition)
+            validatedContent.transition(transition.swiftUITransition)
         } else {
             // Parents without that filter (a root, a scroll child, a pager page): the conditional
             // lives in a stable container so the insertion/removal has one whose animation is
@@ -187,10 +188,40 @@ struct NodeView: View {
             // The container passes its parent's proposal through, unlike a ZStack (see above).
             PrototypeLayeredLayout(alignment: .topLeading) {
                 if isVisible {
-                    styled(content).transition(transition.swiftUITransition)
+                    validatedContent.transition(transition.swiftUITransition)
                 }
             }
             .animation(transition == .instant ? nil : .easeInOut(duration: 0.25), value: isVisible)
+        }
+    }
+
+    @ViewBuilder private var validatedContent: some View {
+        if node.checks?.isEmpty == false {
+            VStack(alignment: .leading, spacing: 4) {
+                checkedControl
+                if let message = model.shownError(node) {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .accessibilityIdentifier(node.partIdentifier("error") ?? "")
+                }
+            }
+        } else {
+            styled(content).disabled(!model.isEnabled(node))
+        }
+    }
+
+    @ViewBuilder private var checkedControl: some View {
+        if node.type == "textField" {
+            // Text fields own focus while preserving drafts; their view reports the blur.
+            styled(content).disabled(!model.isEnabled(node))
+        } else {
+            styled(content)
+                .disabled(!model.isEnabled(node))
+                .focused($controlFocused)
+                .onChange(of: controlFocused) { oldValue, value in
+                    if oldValue, !value { model.blur(node) }
+                }
         }
     }
 
@@ -617,7 +648,7 @@ struct NodeView: View {
 
     /// Filled (default), tonal, elevated, outlined or text, with an optional leading icon.
     @ViewBuilder private var buttonView: some View {
-        let button = Button { model.run(node.onTap ?? []) } label: {
+        let button = Button { model.activate(.node(node)) } label: {
             if let symbol = prototypeSymbol(node.icon) {
                 // The icon is decoration: a hidden glyph, so the button is one element named by
                 // its label rather than also exposing the icon's name (#10899).
@@ -804,6 +835,7 @@ struct NodeView: View {
                 actions: handlesOwnTap ? nil : node.onTap,
                 longPress: handlesOwnTap ? nil : node.onLongPress,
                 doubleTap: handlesOwnTap ? nil : node.onDoubleTap,
+                node: node,
                 model: model,
                 style: style
             ))
@@ -987,6 +1019,7 @@ private struct TapModifier: ViewModifier {
     let actions: [PrototypeAction]?
     let longPress: [PrototypeAction]?
     let doubleTap: [PrototypeAction]?
+    let node: PrototypeNode
     let model: PrototypeModel
     let style: Style?
 
@@ -1013,6 +1046,7 @@ private struct TapModifier: ViewModifier {
                     .updating($pressed) { _, state, _ in state = true }
             )
             .accessibilityAddTraits(.isButton)
+            .disabled(!model.isEnabled(node))
         } else {
             content
         }
@@ -1028,11 +1062,17 @@ private struct TapModifier: ViewModifier {
         plan.layers.reduce(AnyView(content)) { view, layer in
             switch layer {
             case .longPress:
-                AnyView(view.onLongPressGesture { model.run(longPress ?? []) })
+                AnyView(view.onLongPressGesture {
+                    guard model.isEnabled(node) else { return }
+                    model.run(longPress ?? [])
+                })
             case .doubleTap:
-                AnyView(view.onTapGesture(count: 2) { model.run(doubleTap ?? []) })
+                AnyView(view.onTapGesture(count: 2) {
+                    guard model.isEnabled(node) else { return }
+                    model.run(doubleTap ?? [])
+                })
             case .singleTap:
-                AnyView(view.onTapGesture { model.run(actions ?? []) })
+                AnyView(view.onTapGesture { model.activate(.node(node)) })
             }
         }
     }

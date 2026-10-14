@@ -1,6 +1,13 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { DaemonClient } from "../../src/daemon/client";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { createProxyMcpServer } from "../../src/server/proxyServer";
+import {
+  DaemonBoundSessionExpiredError,
+  DaemonMcpProxy,
+  RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
+} from "../../src/daemon/daemonMcpProxy";
+import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import {
   handleDaemonRequest,
   type DaemonStateAccess,
@@ -11,6 +18,7 @@ import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { DAEMON_VERSION } from "../../src/daemon/constants";
 import {
   DAEMON_STALL_RESUMED_CODE,
+  DAEMON_RESTART_RESUMED_CODE,
   type LivenessHandover,
 } from "../../src/daemon/proxyLivenessRecovery";
 import { DAEMON_INSTANCE_CHANGED_CODE } from "../../src/daemon/types";
@@ -19,9 +27,10 @@ import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
+import { drainUntilQuiescent, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 import { logger } from "../../src/utils/logger";
 import type { Timer } from "../../src/utils/SystemTimer";
+import { SUSPECT_GRACE_MS } from "../../src/daemon/sessionLivenessWindows";
 
 // #10989: a daemon frozen for longer than the lease (SIGSTOP) that then resumes by itself
 // (SIGCONT), still the same process holding the same sessions. The proxy, the daemon's real
@@ -143,11 +152,52 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
   let reaped: Array<{ sessionId: string; reason: string }>;
   let daemonManager: FakeDaemonManager;
   let daemonInstance: string;
+  let heartbeatUnavailable: boolean;
   let heartbeats: Array<Record<string, unknown>>;
   let refusals: string[];
   let handovers: LivenessHandover[];
   let spies: Array<ReturnType<typeof spyOn>>;
   const proxies: DaemonMcpProxy[] = [];
+
+  beforeAll(async () => {
+    // Warm the MCP handshake and session binding outside the per-test timing budget.
+    const warmManager = new FakeDaemonManager();
+    warmManager.statusResult = { ...warmManager.statusResult, version: DAEMON_VERSION };
+    const { server, proxy } = createProxyMcpServer({
+      proxyConfig: {
+        timer: new FakeTimer(),
+        autoStartDaemon: false,
+        daemonManager: warmManager,
+        clientFactory: () =>
+          new FakeDaemonClient({
+            daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+            toolResult: {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    runtime: { deviceId: "warm-device", session: { sessionUuid: "warm-session" } },
+                  }),
+                },
+              ],
+            },
+          }),
+      },
+    });
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "warm-plain-restart", version: "1" });
+    const available = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      await client.callTool({ name: "getApple", arguments: {} });
+    } finally {
+      await client.close();
+      await server.close();
+      await proxy.close();
+      available.mockRestore();
+    }
+  });
 
   function daemonState(): DaemonStateAccess {
     return {
@@ -190,6 +240,9 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
       if (method !== "daemon/heartbeat") {
         return forward(method, params);
       }
+      if (heartbeatUnavailable) {
+        throw new DaemonUnavailableError("Daemon is not reachable");
+      }
       return daemonTimer.whenRunning(async () => {
         heartbeats.push(params);
         const response = await handleDaemonRequest(
@@ -200,7 +253,7 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
           if (typeof response.code === "string") {
             refusals.push(response.code);
           }
-          throw Object.assign(new Error(response.error), { code: response.code });
+          throw Object.assign(new Error(response.error), response);
         }
         return response.result;
       });
@@ -233,18 +286,61 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
   /** SIGSTOP for {@link STOP_MS}: the proxy hands over during it, then SIGCONT. */
   async function stopThenResume(): Promise<void> {
     daemonTimer.stop();
-    for (let elapsed = 0; elapsed < STOP_MS; elapsed += 250) {
-      await baseTimer.advanceTimeAsync(250);
-    }
+    await advance(STOP_MS);
     expect(handovers.map((handover) => handover.code)).toEqual(["daemon_stalled"]);
     daemonTimer.resume();
     await drainUntilQuiescent(baseTimer);
   }
 
   async function advance(ms: number): Promise<void> {
-    for (let elapsed = 0; elapsed < ms; elapsed += 250) {
-      await baseTimer.advanceTimeAsync(250);
+    await baseTimer.advanceTimeAsync(ms);
+  }
+
+  /** A dead socket lasts through all three recovery attempts, then another probe interval. */
+  async function outageThroughHandover(proxy: DaemonMcpProxy): Promise<void> {
+    heartbeatUnavailable = true;
+    await monitor.stop();
+    await settleByFakeEvents(
+      baseTimer,
+      new Promise<LivenessHandover>((resolve) => proxy.onLivenessHandover(resolve)),
+      { description: "plain daemon outage handover" },
+    );
+    expect(handovers).toMatchObject([{ code: "daemon_stalled", attempts: 3 }]);
+    await advance(INTERVAL_MS);
+  }
+
+  /** A replacement's real monitor starts its own owner window; no owner heartbeat is fabricated. */
+  async function restartAwaitingOwner(withSessions = true): Promise<void> {
+    await monitor.stop();
+    sessionManager.stopCleanupTimer();
+    sessionManager = new SessionManager(daemonTimer, new FakeDeviceSessionPersistence());
+    sessionManager.stopCleanupTimer();
+    if (withSessions) {
+      for (const [sessionId, deviceId] of Object.entries(DEVICES)) {
+        const session = await sessionManager.createSession(
+          sessionId,
+          deviceId,
+          sessionId.startsWith("ios") ? "ios" : "android",
+          60_000,
+          LEASE_MS,
+        );
+        session.ownership = "awaiting-owner";
+        session.awaitingOwnerSince = baseTimer.now();
+      }
     }
+    monitor = new SessionHeartbeatMonitor(
+      sessionManager,
+      () => false,
+      async (sessionId, reason) => {
+        reaped.push({ sessionId, reason });
+        await sessionManager.releaseSession(sessionId, reason);
+      },
+      daemonTimer,
+      { checkIntervalMs: INTERVAL_MS },
+    );
+    monitor.start();
+    daemonInstance = "daemon-2";
+    heartbeatUnavailable = false;
   }
 
   beforeEach(async () => {
@@ -266,6 +362,7 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
     daemonManager = new FakeDaemonManager();
     daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
     daemonInstance = "daemon-1";
+    heartbeatUnavailable = false;
     heartbeats = [];
     refusals = [];
     handovers = [];
@@ -388,23 +485,29 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
     daemonTimer.resume();
     await drainUntilQuiescent(baseTimer);
     expect(handovers.map((handover) => handover.code)).toEqual(["daemon_stalled"]);
-    expect(proxy.getTerminalSessionRelease()).toBeUndefined();
-    await expect(proxy.callTool("observe", { sessionUuid: "ios-session" })).rejects.toMatchObject({
-      handover: { code: "proxy_stalled" },
-    });
+    await advance(INTERVAL_MS);
     expect(proxy.getTerminalSessionRelease()).toEqual({
       sessionUuid: "ios-session",
-      reason: "session-not-found",
+      reason: "daemon-shutdown",
     });
+    await expect(proxy.callTool("observe", { sessionUuid: "ios-session" })).rejects.toBeInstanceOf(
+      DaemonBoundSessionExpiredError,
+    );
+    await expect(proxy.callTool("observe", { sessionUuid: "ios-session" })).rejects.toMatchObject({
+      reason: "daemon-shutdown",
+    });
+    expect(handovers.map((handover) => handover.code)).toEqual(["daemon_stalled"]);
   });
 
-  test("a restarted daemon is not adopted by the probe: the handover stands, as before", async () => {
+  test("a restarted daemon is reclaimed by the probe for both plain sessions", async () => {
     const proxy = createProxy();
     await acquireBoth(proxy);
     daemonTimer.stop();
-    for (let elapsed = 0; elapsed < STOP_MS && handovers.length === 0; elapsed += 250) {
-      await baseTimer.advanceTimeAsync(250);
-    }
+    await settleByFakeEvents(
+      baseTimer,
+      new Promise<LivenessHandover>((resolve) => proxy.onLivenessHandover(resolve)),
+      { description: "plain stopped daemon handover" },
+    );
     expect(handovers[0]?.code).toBe("daemon_stalled");
     expect(proxy.getTerminalSessionRelease()).toBeUndefined();
     // A new daemon process answers on the socket instead of the one that stalled.
@@ -412,16 +515,154 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
     daemonTimer.resume();
     await drainUntilQuiescent(baseTimer);
     const heartbeatsAtRestart = heartbeats.length;
-    await advance(LEASE_MS * 5);
+    await advance(LEASE_MS + SUSPECT_GRACE_MS + INTERVAL_MS * 2);
 
-    // One pinned probe per session was refused, changing nothing, and probing stopped.
+    // Each pinned probe is refused before the unpinned owner claim reclaims the session.
     expect(refusals.filter((code) => code === DAEMON_INSTANCE_CHANGED_CODE)).toHaveLength(2);
     const sinceRestart = heartbeats.slice(heartbeatsAtRestart);
-    expect(sinceRestart.every((params) => params.expectedDaemonInstance === "daemon-1")).toBe(true);
-    expect(sinceRestart.length).toBeLessThanOrEqual(2);
-    // Nothing kept the sessions alive: the daemon releases them, exactly as it did before.
-    expect(reaped.map((entry) => entry.reason)).toEqual(["heartbeat-timeout", "heartbeat-timeout"]);
+    expect(
+      sinceRestart.some(
+        (params) =>
+          params.claimLivenessOwnership === true && params.expectedDaemonInstance === undefined,
+      ),
+    ).toBe(true);
+    expect(reaped).toEqual([]);
+    for (const sessionId of Object.keys(DEVICES)) {
+      expect(sessionManager.getSessionLeaseState(sessionId)?.phase).toBe("live");
+    }
     expect(daemonManager.startCallCount).toBe(0);
     expect(daemonManager.restartCallCount).toBe(0);
+  });
+
+  test("plain outage reproduction: the probe reclaims awaiting-owner sessions before rehydration-owner-timeout", async () => {
+    const proxy = createProxy();
+    await acquireBoth(proxy);
+    await outageThroughHandover(proxy);
+    await restartAwaitingOwner();
+    const restartedAt = baseTimer.now();
+    const ownerHeartbeatBefore = sessionManager.getSession("ios-session")!.lastOwnerHeartbeat;
+    await advance(INTERVAL_MS);
+    expect(baseTimer.now() - restartedAt).toBeLessThan(LEASE_MS + SUSPECT_GRACE_MS);
+    expect(sessionManager.getSession("ios-session")!.ownership).toBe("owned");
+    expect(ownerHeartbeatBefore).toBeUndefined();
+    expect(sessionManager.getSession("ios-session")!.lastOwnerHeartbeat).toBeGreaterThan(
+      restartedAt,
+    );
+    await advance(LEASE_MS + SUSPECT_GRACE_MS + INTERVAL_MS);
+    expect(reaped).toEqual([]);
+    const first = await proxy.callTool("observe", {});
+    expect((first as { isError?: boolean }).isError).toBeFalsy();
+    expect(resumedNotices(first)).toEqual([
+      expect.objectContaining({
+        code: DAEMON_RESTART_RESUMED_CODE,
+        sessionUuid: "ios-session",
+        previousDaemonInstance: "daemon-1",
+        daemonInstance: "daemon-2",
+      }),
+    ]);
+    expect(resumedNotices(await proxy.callTool("observe", {}))).toEqual([]);
+    expect(daemonManager.startCallCount).toBe(0);
+    expect(daemonManager.restartCallCount).toBe(0);
+  });
+
+  test("plain restart then released: the MCP refusal is session_ownership_lost with the daemon reason", async () => {
+    const proxy = createProxy();
+    await acquireBoth(proxy);
+    await outageThroughHandover(proxy);
+    await restartAwaitingOwner();
+    await sessionManager.releaseSession("ios-session", "rehydration-owner-timeout");
+    await advance(INTERVAL_MS);
+    expect(proxy.getTerminalSessionRelease()).toEqual({
+      sessionUuid: "ios-session",
+      reason: "rehydration-owner-timeout",
+    });
+    expect(handovers.map((handover) => handover.code)).toEqual(["daemon_stalled"]);
+    const { server } = createProxyMcpServer({ proxy });
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "plain-restart-loss", version: "1" });
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      for (const args of [{}, { sessionUuid: "ios-session" }]) {
+        const result = await client.callTool({ name: "observe", arguments: args });
+        expect(result.isError).toBe(true);
+        const payload = JSON.parse(textBlocks(result)[0]);
+        expect(payload.error).toMatchObject({
+          code: "session_ownership_lost",
+          sessionUuid: "ios-session",
+          reason: "rehydration-owner-timeout",
+          recovery: { action: "acquire_replacement_session" },
+        });
+      }
+      expect(handovers.map((handover) => handover.code)).toEqual(["daemon_stalled"]);
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  });
+
+  test("PIN: same-daemon released sessions still report proxy_stalled by the daemon", async () => {
+    const proxy = createProxy();
+    await acquireBoth(proxy);
+    await outageThroughHandover(proxy);
+    await sessionManager.releaseSession("ios-session", "heartbeat-timeout");
+    heartbeatUnavailable = false;
+    await advance(INTERVAL_MS);
+    await expect(proxy.callTool("observe", { sessionUuid: "ios-session" })).rejects.toMatchObject({
+      handover: { code: "proxy_stalled", stalledBy: "daemon", action: "reacquire_lost_sessions" },
+    });
+    expect(handovers.map((handover) => handover.code)).toEqual(["daemon_stalled", "proxy_stalled"]);
+  });
+
+  test("plain named restart refusal before the pinned probe reports the successor's terminal reason", async () => {
+    const proxy = createProxy();
+    await acquireBoth(proxy);
+    await outageThroughHandover(proxy);
+    await restartAwaitingOwner();
+    await sessionManager.releaseSession("ios-session", "rehydration-owner-timeout");
+    // No probe tick: daemonInstance in the named resume's refusal is the restart evidence.
+    await expect(proxy.callTool("observe", { sessionUuid: "ios-session" })).rejects.toMatchObject({
+      name: "DaemonBoundSessionExpiredError",
+      reason: "rehydration-owner-timeout",
+    });
+    expect(proxy.getTerminalSessionRelease()).toEqual({
+      sessionUuid: "ios-session",
+      reason: "rehydration-owner-timeout",
+    });
+    expect(handovers.map((handover) => handover.code)).toEqual(["daemon_stalled"]);
+  });
+
+  test("plain reclaim awaits a reasonless not-found until the successor rehydrates", async () => {
+    const proxy = createProxy();
+    await acquireBoth(proxy);
+    await outageThroughHandover(proxy);
+    await restartAwaitingOwner(false);
+    await advance(INTERVAL_MS);
+    expect(proxy.getTerminalSessionRelease()).toBeUndefined();
+    await restartAwaitingOwner();
+    await advance(INTERVAL_MS);
+    expect(resumedNotices(await proxy.callTool("observe", {}))).toMatchObject([
+      { code: DAEMON_RESTART_RESUMED_CODE },
+    ]);
+    await advance(LEASE_MS * 3);
+    expect(reaped).toEqual([]);
+  });
+
+  test("plain reclaim's reasonless not-found expires within the existing bounded window", async () => {
+    const proxy = createProxy();
+    await acquireBoth(proxy);
+    await outageThroughHandover(proxy);
+    await restartAwaitingOwner(false);
+    await advance(INTERVAL_MS);
+    expect(proxy.getTerminalSessionRelease()).toBeUndefined();
+    await advance(RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS + INTERVAL_MS);
+    expect(proxy.getTerminalSessionRelease()).toEqual({
+      sessionUuid: "ios-session",
+      reason: "session-not-found",
+    });
+    await expect(proxy.callTool("observe", {})).rejects.toMatchObject({
+      reason: "session-not-found",
+    });
+    expect(handovers.map((handover) => handover.code)).toEqual(["daemon_stalled"]);
   });
 });

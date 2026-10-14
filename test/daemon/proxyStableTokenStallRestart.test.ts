@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
 import {
@@ -22,13 +22,13 @@ import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeTimer } from "../fakes/FakeTimer";
-import { drainUntilQuiescent } from "../helpers/fakeTimerStepping";
+import { drainUntilQuiescent, settleByFakeEvents } from "../helpers/fakeTimerStepping";
 import { logger } from "../../src/utils/logger";
 
 // #11018: a proxy with a stable owner token (#10990) whose daemon stalls past recovery (#10989)
 // and is then restarted by the harness. The stall probe's reconnect runs the token resume against
-// the new daemon, which restored the token's sessions; the handed-over sessions must stay the
-// pinned probe's or the harness's to resume, not be adopted behind the harness.
+// the new daemon, which restored the token's sessions; reconnect must leave handed-over sessions
+// to the pinned probe. Only its instance-change refusal permits an unpinned owner claim.
 
 class LivenessTimer extends FakeTimer {
   override advanceTimeAsync(ms: number): Promise<void> {
@@ -39,7 +39,6 @@ class LivenessTimer extends FakeTimer {
 const TOKEN = "harness-stable-token";
 const LEASE_MS = 4_000;
 const INTERVAL_MS = 2_000;
-const STOP_MS = 15_000;
 const BOUND = "ios-session";
 const HELD = "android-session";
 const DEVICES: Record<string, string> = { [HELD]: "emulator-5554", [BOUND]: "sim-1" };
@@ -92,7 +91,7 @@ describe("stable-token resume after a daemon stall and restart (#11018)", () => 
       if (typeof response.code === "string") {
         refusals.push(response.code);
       }
-      throw Object.assign(new Error(response.error), { code: response.code });
+      throw Object.assign(new Error(response.error), response);
     }
     return response.result;
   }
@@ -145,9 +144,7 @@ describe("stable-token resume after a daemon stall and restart (#11018)", () => 
   }
 
   async function advance(ms: number): Promise<void> {
-    for (let elapsed = 0; elapsed < ms; elapsed += 250) {
-      await timer.advanceTimeAsync(250);
-    }
+    await timer.advanceTimeAsync(ms);
   }
 
   function heartbeatsTo(daemon: string, sessionId: string): Array<Record<string, unknown>> {
@@ -161,7 +158,7 @@ describe("stable-token resume after a daemon stall and restart (#11018)", () => 
       .map((call) => call.params);
   }
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     timer = new LivenessTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.stopCleanupTimer();
@@ -192,6 +189,11 @@ describe("stable-token resume after a daemon stall and restart (#11018)", () => 
       heartbeatIntervalMs: INTERVAL_MS,
     });
     proxy.onLivenessHandover((handover) => handovers.push(handover));
+    // Establish the fake transport outside the unit timing budget; it owns no sessions yet.
+    await proxy.listTools();
+    await proxy.callTool("getAndroid", {});
+    await proxy.callTool("getApple", {});
+    await advance(INTERVAL_MS * 2);
   });
 
   afterEach(async () => {
@@ -227,15 +229,13 @@ describe("stable-token resume after a daemon stall and restart (#11018)", () => 
     }
   }
 
-  test("handed-over sessions are not adopted on reconnect; naming one resumes it once", async () => {
-    await proxy.callTool("getAndroid", {});
-    await proxy.callTool("getApple", {});
-    await advance(INTERVAL_MS * 2);
-
+  test("reconnect leaves handed-over sessions pinned; the restart probe reclaims them and warns once", async () => {
     stalled = true;
-    for (let elapsed = 0; elapsed < STOP_MS && handovers.length === 0; elapsed += 250) {
-      await timer.advanceTimeAsync(250);
-    }
+    await settleByFakeEvents(
+      timer,
+      new Promise<LivenessHandover>((resolve) => proxy.onLivenessHandover(resolve)),
+      { description: "stable-token daemon stall handover" },
+    );
     expect(handovers.map((handover) => handover.code)).toEqual(["daemon_stalled"]);
     expect(handovers[0].sessions.map((session) => session.sessionUuid).sort()).toEqual(
       [BOUND, HELD].sort(),
@@ -243,25 +243,30 @@ describe("stable-token resume after a daemon stall and restart (#11018)", () => 
 
     await restartDaemon();
     const ownerHeartbeatAtRestart = sessionManager.getSession(HELD)!.lastOwnerHeartbeat;
-    await advance(LEASE_MS * 5);
+    await advance(INTERVAL_MS * 2);
 
-    // The probe reconnected to the new daemon and was refused there, pinned to daemon-1...
+    // #11018: token resume on reconnect must not adopt before the pinned probe is refused.
     const toRestarted = heartbeatsTo("daemon-2", HELD);
     expect(toRestarted.length).toBeGreaterThan(0);
-    expect(toRestarted.every((params) => params.expectedDaemonInstance === "daemon-1")).toBe(true);
+    for (const sessionId of [BOUND, HELD]) {
+      const beats = heartbeatsTo("daemon-2", sessionId);
+      expect(beats[0]).toMatchObject({ expectedDaemonInstance: "daemon-1" });
+      expect(beats[0].claimLivenessOwnership).not.toBe(true);
+      expect(beats[1]).toMatchObject({ claimLivenessOwnership: true });
+      expect(beats[1]).not.toHaveProperty("expectedDaemonInstance");
+    }
     expect(refusals).toContain(DAEMON_INSTANCE_CHANGED_CODE);
     expect(
       daemonCalls.some(
         (call) => call.daemon === "daemon-2" && call.method === DAEMON_TOKEN_OWNED_SESSIONS_METHOD,
       ),
     ).toBe(true);
-    // ...and nothing claimed or heartbeated the held session behind the harness.
-    expect(toRestarted.some((params) => params.claimLivenessOwnership === true)).toBe(false);
-    expect(sessionManager.getSession(HELD)!.lastOwnerHeartbeat).toBe(ownerHeartbeatAtRestart);
-    expect(heartbeatsTo("daemon-2", BOUND).every((p) => p.expectedDaemonInstance)).toBe(true);
+    expect(sessionManager.getSession(HELD)!.lastOwnerHeartbeat).toBeGreaterThan(
+      ownerHeartbeatAtRestart,
+    );
     expect(handovers).toHaveLength(1);
 
-    // The harness names the session: it resumes, and the first call says so once.
+    // The session is already held again: its first named call says so once.
     const first = await proxy.callTool("observe", { sessionUuid: HELD });
     expect((first as { isError?: boolean }).isError).toBeFalsy();
     // The restarted daemon acknowledged the resume, so the notice says the daemon was restarted

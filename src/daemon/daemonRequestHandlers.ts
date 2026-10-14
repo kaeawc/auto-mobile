@@ -35,6 +35,7 @@ import {
   type LivenessClaimOutcome,
   type LivenessReleaseOutcome,
   Session,
+  type SessionManager,
   type SessionReleaseSnapshot,
 } from "./sessionManager";
 import { sessionForIngress } from "./sessionForIngress";
@@ -151,7 +152,7 @@ export interface DaemonStateAccess {
   getManagedSlotAcquisition?(): Pick<ManagedSlotAcquisition, "acquire"> | undefined;
   /** Re-stamps a re-bound managed connection's slots with this daemon as their owner (#11275). */
   getManagedExecutionReowner?(): Pick<ManagedExecutionReowner, "reown"> | undefined;
-  getSessionManager(): {
+  getSessionManager(): Partial<Pick<SessionManager, "getKeepAwakeRestoreReport">> & {
     hasSession(sessionId: string): boolean;
     getSession(sessionId: string): Session | null;
     /** Admission/liveness judgement; never starts lazy release. */
@@ -1801,6 +1802,14 @@ function bindManagedConnection(
   state.getManagedConnectionScopes?.().bind(socketSessionId, { scopeKey, sessionUuids });
 }
 
+function keepAwakeRestoreResult(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+) {
+  const keepAwakeRestore = manager.getKeepAwakeRestoreReport?.(sessionId);
+  return keepAwakeRestore ? { keepAwakeRestore } : {};
+}
+
 /**
  * An unknown id stays idempotent for programmatic callers (the desktop releases sessions a
  * restarted daemon forgot). A caller that sets `requireKnown` (the `--daemon release-session`
@@ -1856,6 +1865,7 @@ async function releaseUnknownSession(
     result: {
       message: `Session ${sessionId} already released or never existed`,
       alreadyReleased: true,
+      ...keepAwakeRestoreResult(manager, sessionId),
     },
   };
 }
@@ -1903,6 +1913,7 @@ async function releaseBoundSession(
       message: `Session ${sessionId} released`,
       device: deviceId,
       alreadyReleased: false,
+      ...keepAwakeRestoreResult(manager, sessionId),
     },
   };
 }

@@ -156,6 +156,10 @@ tasks.withType<Test>().configureEach {
     .file(rootDir.resolve("../test/fixtures/daemon-isolation-paths.json"))
     .withPropertyName("daemonIsolationPathVectors")
     .withPathSensitivity(PathSensitivity.RELATIVE)
+  inputs
+    .dir(rootDir.resolve("../test/fixtures/refusal-wire"))
+    .withPropertyName("refusalWireFixtures")
+    .withPathSensitivity(PathSensitivity.RELATIVE)
 
   // Run this module's tests in a single worker JVM (#5422). desktop-core's Compose UI tests
   // (`runComposeUiTest`) drive real dispatchers, a frame/animation clock, and gesture timing;

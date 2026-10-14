@@ -37,6 +37,8 @@ beforeEach(() => {
         if (restoreAttempts === 1) {
           throw new Error("adb: device offline");
         }
+
+        return { status: "restored" as const };
       },
     }),
   );

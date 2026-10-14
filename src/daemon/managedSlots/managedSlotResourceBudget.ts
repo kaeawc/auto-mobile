@@ -108,7 +108,63 @@ interface LedgerInput {
 
 interface ResourceCharge {
   category: Exclude<keyof ManagedSlotResourceUsage, "total">;
+  platform: SlotPlatform;
+  stableDeviceId: string;
   journal?: SlotJournalEntry;
+}
+
+type ChargedEvidence = ManagedSlotBudgetEvidence["charged"][number];
+
+const chargeKindOrder: ChargedEvidence["kind"][] = [
+  "assigned_active",
+  "assigned_idle",
+  "free",
+  "deleting",
+  "deletion_stuck",
+  "preparing",
+  "orphaned",
+];
+
+function chargedEvidence(
+  charges: readonly ResourceCharge[],
+  free: readonly FreeSlotDeviceRecord[],
+  uncounted: readonly FreeSlotDeviceRecord[],
+): ChargedEvidence[] {
+  const kindFor: Record<ResourceCharge["category"], ChargedEvidence["kind"]> = {
+    active: "assigned_active",
+    assignedIdle: "assigned_idle",
+    cached: "free",
+    deleting: "deleting",
+    preparing: "preparing",
+    orphaned: "orphaned",
+  };
+  const rows = charges.map((charge): ChargedEvidence => {
+    const stuck = free.some(
+      (row) =>
+        row.platform === charge.platform &&
+        row.stableDeviceId === charge.stableDeviceId &&
+        isStuckFreeDeviceDeletion(row.deletion),
+    );
+    return {
+      platform: charge.platform,
+      stableDeviceId: charge.stableDeviceId,
+      kind: stuck ? "deletion_stuck" : kindFor[charge.category],
+    };
+  });
+  rows.push(
+    ...uncounted.map((row): ChargedEvidence => ({
+      platform: row.platform,
+      stableDeviceId: row.stableDeviceId,
+      kind: "deletion_stuck",
+      uncounted: true,
+    })),
+  );
+  return rows.sort(
+    (a, b) =>
+      chargeKindOrder.indexOf(a.kind) - chargeKindOrder.indexOf(b.kind) ||
+      a.platform.localeCompare(b.platform) ||
+      a.stableDeviceId.localeCompare(b.stableDeviceId),
+  );
 }
 
 function resourceKey(platform: SlotPlatform, stableDeviceId: string): string {
@@ -166,8 +222,30 @@ function chargeManagedDevice(
     return [];
   }
   return [
-    { category: categoryOf(device, deleting, free), journal: creationJournalFor(device, journal) },
+    {
+      category: categoryOf(device, deleting, free),
+      platform: device.platform,
+      stableDeviceId: device.stableDeviceId,
+      journal: creationJournalFor(device, journal),
+    },
   ];
+}
+
+function addPreparingJournalCharge(charges: ResourceCharge[], entry: SlotJournalEntry): void {
+  const stableDeviceId =
+    journalNewStableId(entry) ??
+    entry.target.newName ??
+    entry.target.oldStableId ??
+    entry.target.oldName;
+  if (!stableDeviceId) {
+    return;
+  }
+  charges.push({
+    category: "preparing",
+    platform: journalCreationPlatform(entry),
+    stableDeviceId,
+    journal: entry,
+  });
 }
 
 function resourceCharges(input: LedgerInput): ResourceCharge[] {
@@ -221,13 +299,13 @@ function resourceCharges(input: LedgerInput): ResourceCharge[] {
       // If old and new are both visible, retain both charges conservatively.
       const key = resourceKey(journalCreationPlatform(entry), newId);
       if (!seen.has(key)) {
-        charges.push({ category: "preparing", journal: entry });
+        addPreparingJournalCharge(charges, entry);
         // Defensive deduplication also covers journal targets missing from the supplied snapshot.
         seen.add(key);
       }
     } else if (!hasOldDevice(entry, distinct)) {
       // A genuine replacement keeps its continuous reservation after verified deletion.
-      charges.push({ category: "preparing", journal: entry });
+      addPreparingJournalCharge(charges, entry);
     }
   }
   chargeOrphans(input, charges, seen);
@@ -255,7 +333,7 @@ function chargeOrphans(input: LedgerInput, charges: ResourceCharge[], seen: Set<
             )),
       );
     if (!known && !seen.has(key)) {
-      charges.push({ category: "orphaned" });
+      charges.push({ category: "orphaned", platform: device.platform, stableDeviceId: stableId });
       seen.add(key);
     }
   }
@@ -297,7 +375,11 @@ async function readResourceCharges(
   inventory: ManagedSlotInventory,
   request: { signal?: AbortSignal; deadlineMs?: number },
   timer: Pick<Timer, "now">,
-): Promise<{ charges: ResourceCharge[]; retained: ManagedSlotEvictionSkip[] }> {
+): Promise<{
+  charges: ResourceCharge[];
+  charged: ChargedEvidence[];
+  retained: ManagedSlotEvictionSkip[];
+}> {
   checkAdmissionBudget(request, timer);
   const snapshot = await registry.snapshotManagedSlotResources();
   const devices: DeviceInfo[] = [];
@@ -318,8 +400,10 @@ async function readResourceCharges(
     snapshot.free,
     snapshot.managed.filter((device) => device.holder === "slot"),
   );
+  const charges = resourceCharges({ ...snapshot, inventory: devices });
   return {
-    charges: resourceCharges({ ...snapshot, inventory: devices }),
+    charges,
+    charged: chargedEvidence(charges, snapshot.free, uncounted),
     retained: snapshot.free.flatMap((row) => {
       const skip = managedSlotDeletionSkip(row, uncounted.includes(row));
       return skip ? [skip] : [];
@@ -422,7 +506,7 @@ export class RegistryManagedSlotResourceBudget implements ManagedSlotResourceBud
         // Confirm with a fresh independent snapshot before eviction or refusal.
         ledger = await readResourceCharges(registry, this.deps.inventory, request, this.timer);
       }
-      const { charges, retained } = ledger;
+      const { charges, charged, retained } = ledger;
       const usage = usageOf(charges);
       if (rankedCount(charges, request.journalEntryId) <= limit) {
         return { kind: "admitted", enforced: true, limit, usage, evicted };
@@ -431,6 +515,7 @@ export class RegistryManagedSlotResourceBudget implements ManagedSlotResourceBud
         kind: "exhausted",
         limit,
         usage,
+        charged,
         retained,
         evictionFailures,
       };

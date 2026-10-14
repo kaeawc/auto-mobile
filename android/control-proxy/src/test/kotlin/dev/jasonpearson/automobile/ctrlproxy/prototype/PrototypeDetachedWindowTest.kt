@@ -30,6 +30,7 @@ class PrototypeDetachedWindowTest {
   private val blockedScript = ArrayDeque<Boolean>()
   private var detached = 0
   private var lost = 0
+  private var density = 2.5f
   private lateinit var main: FakePrototypeMainThread
   private lateinit var manager: RecordingPrototypeWindowManager
   private lateinit var host: DefaultPrototypeHost
@@ -46,10 +47,11 @@ class PrototypeDetachedWindowTest {
       DefaultPrototypeHost(
         RuntimeEnvironment.getApplication(),
         manager,
+        isViewAttached = manager::isViewAttached,
         sdkInt = 30,
         mainThread = main,
         settleTimer = FakePrototypeSettleTimer(history),
-        densityProvider = { 2.5f },
+        densityProvider = { density },
         onWindowLost = { lost++ },
         isBlocked = ::isBlocked,
         backScope = CoroutineScope(Dispatchers.Unconfined),
@@ -142,6 +144,29 @@ class PrototypeDetachedWindowTest {
   }
 
   @Test
+  fun `unchanged relayout probes a platform detached window reports loss and restores the runtime`() =
+    runTest {
+      controller.show(null, spec())
+      val runtime = checkNotNull(controller.activeRuntime)
+      val request = requests.single()
+      val view = checkNotNull(manager.view)
+      assertTrue(manager.isViewAttached(view))
+      detachPlatformWindow()
+      assertFalse(manager.isViewAttached(view))
+      assertFalse(host.relayout())
+      assertEquals(1, manager.updateAttempts)
+      assertEquals(1, lost)
+      assertFalse(host.isShowing)
+      assertSame(runtime, controller.activeRuntime)
+      controller.onConfigurationChanged()
+      assertTrue(host.isShowing)
+      assertSame(runtime, controller.activeRuntime)
+      assertSame(request, requests.last())
+      assertEquals(2, manager.added.size)
+      assertTrue(events.isEmpty())
+    }
+
+  @Test
   fun `a gesture finding the window detached reports it so the controller can restore promptly`() =
     runTest {
       controller.show(null, spec())
@@ -177,7 +202,12 @@ class PrototypeDetachedWindowTest {
 
   @Test
   fun `relayout failure on an attached window stays retryable and emits nothing`() = runTest {
-    controller.show(null, spec())
+    controller.show(
+      null,
+      spec()
+        .copy(window = PrototypeWindow(PrototypeSheetPlacement(edge = "bottom", height = 20.0))),
+    )
+    density = 3f
     manager.failUpdate = true
     controller.onConfigurationChanged()
     assertTrue(host.isShowing)

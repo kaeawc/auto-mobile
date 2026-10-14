@@ -4,6 +4,7 @@ import contract from "../../../schemas/prototype-spec-contract.json";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
 export const {
   MAX_PROTOTYPE_SPEC_BYTES,
+  MAX_PROTOTYPE_TEXT_SPANS,
   MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES,
   MAX_PROTOTYPE_DATA_BYTES,
   MAX_PROTOTYPE_DATA_DEPTH,
@@ -474,8 +475,31 @@ const rowBaseSchema = z
 const columnBaseSchema = z
   .object({ ...commonNodeShape, ...repeatShape, type: z.enum(["column"]) })
   .strict();
+const textSpanSchema = z
+  .object({
+    text: z.string().min(1),
+    style: styleSchema
+      .pick({
+        color: true,
+        fontWeight: true,
+        fontStyle: true,
+        textDecoration: true,
+        textSize: true,
+        letterSpacing: true,
+        fontFamily: true,
+        background: true,
+      })
+      .optional(),
+    onTap: commonNodeShape.onTap,
+  })
+  .strict();
 const textBaseSchema = z
-  .object({ ...commonNodeShape, type: z.enum(["text"]), text: z.string() })
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["text"]),
+    text: z.string().optional(),
+    spans: z.array(textSpanSchema).min(1).max(MAX_PROTOTYPE_TEXT_SPANS).optional(),
+  })
   .strict();
 const imageBaseSchema = z
   .object({
@@ -765,7 +789,7 @@ export type PrototypeNode =
   | z.infer<typeof bottomNavBaseSchema>
   | (z.infer<typeof bottomSheetBaseSchema> & { child: PrototypeNode });
 let prototypeNodeUnion: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> | undefined;
-export const prototypeNodeSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> = z.lazy(
+const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> = z.lazy(
   () =>
     (prototypeNodeUnion ??= z.discriminatedUnion("type", [
       boxBaseSchema.extend({ children: z.array(z.lazy(() => prototypeNodeSchema)).min(0) }),
@@ -802,6 +826,19 @@ export const prototypeNodeSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown
       bottomSheetBaseSchema.extend({ child: z.lazy(() => prototypeNodeSchema) }),
     ])),
 );
+export const prototypeNodeSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
+  prototypeNodeBaseSchema.superRefine((node, context) => {
+    if (node.type === "text" && (node.text !== undefined) === (node.spans !== undefined)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [node.spans !== undefined ? "spans" : "text"],
+        message:
+          node.spans !== undefined
+            ? "text and spans cannot both be set"
+            : "text node needs text or spans",
+      });
+    }
+  });
 const windowSchema = z
   .object({
     placement: placementSchema,

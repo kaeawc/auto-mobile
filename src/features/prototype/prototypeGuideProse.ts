@@ -28,6 +28,26 @@ Minimal spec:
 
 A \`{key}\` placeholder in a \`text\` node reads the state value of that key.
 
+## Rich text
+
+A text node has exactly one of \`text\` or \`spans\`; plain \`text: ""\` remains valid.
+Spans are strict \`{text, style?, onTap?}\` objects with nonempty, untrimmed text; whitespace is valid.
+Span style accepts only color, fontWeight, fontStyle, textDecoration, textSize, letterSpacing,
+fontFamily and background, with the same ranges as node style; background is a colour, never a gradient.
+There are no span ids, testTags, visibility conditions, nested spans or URLs.
+Each span uses the same state \`{key}\`, data \`{data:/pointer}\`, repeat \`{item.field}\` / \`{index}\`
+and component \`{props.x}\` binding as node text; span actions bind like node onTap actions.
+The resolved texts concatenate in order without separators: observe and accessibility show the
+full plain text (an explicit node contentDescription still overrides its accessible label).
+Spans do not count as nodes and require \`prototype_rich_text_v1\`; older devices are refused before show.
+A tappable span is part of the text node, not a separate accessibility node, and runs actions without opening URLs.
+On Android, activate it with \`tapOn {accessibilityLink:"<span text>"}\` or
+\`tapOn {text:"<full plain text>", subtext:{text:"<span text>"}}\` without \`layer\`:
+these selectors act across windows because tapOn refuses layer with accessibilityLink/subtext (#9305).
+Use \`tapAt\` on the span bounds as the fallback.
+On iOS, links are drawn as links and tap-through is by \`tapAt\` only; show reports the
+\`rich-text-links\` platform note for tappable spans because there are no separate accessibility elements or semantic links.
+
 ## Fullscreen host chrome
 
 \`window.chrome\` is \`"none"\` (default) or \`"bar"\`, fullscreen only, on a device advertising

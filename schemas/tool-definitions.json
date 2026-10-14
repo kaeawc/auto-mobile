@@ -19866,10 +19866,14 @@
                               "type": "object",
                               "properties": {
                                 "x": {
-                                  "type": "number"
+                                  "type": "number",
+                                  "minimum": -10000,
+                                  "maximum": 10000
                                 },
                                 "y": {
-                                  "type": "number"
+                                  "type": "number",
+                                  "minimum": -10000,
+                                  "maximum": 10000
                                 },
                                 "width": {
                                   "type": "number",

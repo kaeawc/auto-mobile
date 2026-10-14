@@ -279,7 +279,7 @@ test.each(["android", "ios"] as const)(
       success: false,
       error: new ActionableError(
         prototypeMenusUnsupportedMessage(
-          ["ops[1].node.children[0]", "ops[1].node.children[1]"],
+          ["root.children[0].children[0]", "root.children[0].children[1]"],
           platform,
         ),
       ).message,

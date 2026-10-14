@@ -871,6 +871,16 @@ export class AndroidOfflineProbeError extends ActionableError {}
 
 export class AndroidEmulatorUnavailableError extends ActionableError {}
 
+export class EmulatorExitedDuringReadinessError extends ActionableError {
+  constructor(
+    readonly exitCode: number | null,
+    message?: string,
+  ) {
+    super(message ?? `Emulator process exited with code ${exitCode} while waiting for readiness`);
+    this.name = "EmulatorExitedDuringReadinessError";
+  }
+}
+
 /** Classify spawn failures without mistaking a running/stopped process for missing tooling. */
 export function isMissingExecutableError(
   error: unknown,
@@ -3587,8 +3597,8 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
       flushLaunchOutput,
       clearExitDrainTimeout,
     } = context;
-    const postValidationExitError = (output: string) =>
-      this.formatEarlyExitError(
+    const postValidationExitError = (output: string): ActionableError => {
+      const formattedError = this.formatEarlyExitError(
         avdName,
         state.exitCode ?? null,
         state.exitSignal ?? null,
@@ -3596,11 +3606,24 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         output,
         "",
       );
+      if (
+        !state.earlyExitCategory &&
+        !this.sandboxFailure(output) &&
+        !this.detectCorruptImage(output).isCorrupt &&
+        !this.detectDisplayError(output).isDisplayError &&
+        !this.detectArchitecturePanic(output).isPanic
+      ) {
+        return new EmulatorExitedDuringReadinessError(
+          state.exitCode ?? null,
+          formattedError.message,
+        );
+      }
+      return formattedError;
+    };
     const beginPostValidationExit = (output: string) => {
       if (
         !state.startupValidationComplete ||
         state.exitCode === undefined ||
-        state.exitCode === 0 ||
         state.resolvePostValidationExit
       ) {
         return;
@@ -5711,51 +5734,46 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         }
       };
       const handleProcessExit = (code: number | null) => {
-        // A null code means the process was killed by signal (e.g. SIGABRT from a
-        // failed Qt xcb plugin on a headless host) — treat that as a failure too.
-        if (code !== 0) {
-          const combinedOutput = processOutput.join("");
-          if (combinedOutput.includes("Running multiple emulators with the same AVD")) {
-            logger.warn(
-              `AVD '${avdName}' is owned by another emulator process; continuing readiness polling`,
-            );
-            return;
-          }
-
-          // Check for known error patterns
-          const sandboxError = this.sandboxFailure(combinedOutput);
-          const corruptResult = this.detectCorruptImage(combinedOutput);
-          const displayResult = this.detectDisplayError(combinedOutput);
-          if (sandboxError) {
-            state.processExitError = sandboxError;
-          } else if (corruptResult.isCorrupt) {
-            let msg = `Emulator failed to start: ${corruptResult.message}`;
-            if (corruptResult.suggestion) {
-              msg += `\n\nSuggestion: ${corruptResult.suggestion}`;
-            }
-            state.processExitError = new ActionableError(msg);
-          } else if (displayResult.isDisplayError) {
-            let msg = `Emulator failed to start: ${displayResult.message}`;
-            if (displayResult.suggestion) {
-              msg += `\n\nSuggestion: ${displayResult.suggestion}`;
-            }
-            state.processExitError = new ActionableError(msg);
-          } else {
-            const panicResult = this.detectArchitecturePanic(combinedOutput);
-            if (panicResult.isPanic) {
-              state.processExitError = new ActionableError(
-                `Emulator failed to start: ${panicResult.message}`,
-              );
-            } else {
-              state.processExitError = new ActionableError(
-                `Emulator process exited with code ${code} while waiting for readiness`,
-              );
-            }
-          }
-          logger.error(
-            `Emulator process exited during readiness wait: ${state.processExitError.message}`,
+        // Any exit before readiness is fatal unless another process owns the AVD.
+        const combinedOutput = processOutput.join("");
+        if (combinedOutput.includes("Running multiple emulators with the same AVD")) {
+          logger.warn(
+            `AVD '${avdName}' is owned by another emulator process; continuing readiness polling`,
           );
+          return;
         }
+
+        // Check for known error patterns
+        const sandboxError = this.sandboxFailure(combinedOutput);
+        const corruptResult = this.detectCorruptImage(combinedOutput);
+        const displayResult = this.detectDisplayError(combinedOutput);
+        if (sandboxError) {
+          state.processExitError = sandboxError;
+        } else if (corruptResult.isCorrupt) {
+          let msg = `Emulator failed to start: ${corruptResult.message}`;
+          if (corruptResult.suggestion) {
+            msg += `\n\nSuggestion: ${corruptResult.suggestion}`;
+          }
+          state.processExitError = new ActionableError(msg);
+        } else if (displayResult.isDisplayError) {
+          let msg = `Emulator failed to start: ${displayResult.message}`;
+          if (displayResult.suggestion) {
+            msg += `\n\nSuggestion: ${displayResult.suggestion}`;
+          }
+          state.processExitError = new ActionableError(msg);
+        } else {
+          const panicResult = this.detectArchitecturePanic(combinedOutput);
+          if (panicResult.isPanic) {
+            state.processExitError = new ActionableError(
+              `Emulator failed to start: ${panicResult.message}`,
+            );
+          } else {
+            state.processExitError = new EmulatorExitedDuringReadinessError(code);
+          }
+        }
+        logger.error(
+          `Emulator process exited during readiness wait: ${state.processExitError.message}`,
+        );
       };
       childProcess.stdout?.on("data", captureOutput);
       childProcess.stderr?.on("data", captureOutput);

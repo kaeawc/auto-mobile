@@ -28,10 +28,14 @@ const scratch = useScratchRoot("boot-admission-test-");
 let directory: string;
 let timer: FakeTimer;
 let live: Set<number>;
+let tokens: Map<number, string>;
+let throwingTokenPids: Set<number>;
 beforeEach(() => {
   directory = scratch.next();
   timer = new FakeTimer();
   live = new Set([100, 200]);
+  tokens = new Map();
+  throwingTokenPids = new Set();
 });
 function registry(pid = 100, resolver = () => directory): FileHostBootAdmissionRegistry {
   return new FileHostBootAdmissionRegistry({
@@ -39,6 +43,12 @@ function registry(pid = 100, resolver = () => directory): FileHostBootAdmissionR
     pid,
     timer,
     isProcessRunning: (owner) => live.has(owner),
+    readProcessGenerationToken: (pid) => {
+      if (throwingTokenPids.has(pid)) {
+        throw new Error("fake token reader failed");
+      }
+      return tokens.get(pid);
+    },
     idGenerator: new FakeIdGenerator(),
   });
 }
@@ -183,7 +193,8 @@ test("10: expired and dead-owner unspawned records are removed", () => {
   expect(existsSync(dead)).toBe(false);
 });
 
-test("10: a dead owner's handed-off boot counts until its deadline", () => {
+test("10: a dead owner's handed-off boot with a live emulator counts until its deadline", () => {
+  live.add(4242);
   const path = recordFile(300, "spawned", {
     deviceId: "emulator-5554",
     processId: 4242,
@@ -195,6 +206,140 @@ test("10: a dead owner's handed-off boot counts until its deadline", () => {
   expect(registry().readPeerAdmissions()).toEqual([]);
   expect(existsSync(path)).toBe(false);
 });
+
+test("hand-off: a dead owner and dead emulator are removed before the deadline", () => {
+  const path = recordFile(300, "both-dead", {
+    processId: 4242,
+    handedOffUntilMs: 360000,
+  });
+  expect(registry().readPeerAdmissions()).toEqual([]);
+  expect(existsSync(path)).toBe(false);
+});
+
+test("hand-off: a live owner preserves a dead emulator's admission", () => {
+  const path = recordFile(200, "live-owner", {
+    processId: 4242,
+    handedOffUntilMs: 360000,
+  });
+  expect(registry().readPeerAdmissions()).toHaveLength(1);
+  expect(existsSync(path)).toBe(true);
+});
+
+for (const recycled of ["owner", "emulator"] as const) {
+  test(`hand-off: a recycled ${recycled} PID and the other dead process are removed`, () => {
+    const pid = recycled === "owner" ? 300 : 4242;
+    live.add(pid);
+    tokens.set(pid, "linux:boot:20");
+    const path = recordFile(300, "recycled", {
+      ownerGenerationToken: "linux:boot:10",
+      processGenerationToken: "linux:boot:10",
+      processId: 4242,
+      handedOffUntilMs: 360000,
+    });
+    expect(registry().readPeerAdmissions()).toEqual([]);
+    expect(existsSync(path)).toBe(false);
+  });
+}
+
+for (const role of ["owner", "emulator"] as const) {
+  for (const identity of [
+    "unreadable",
+    "throwing",
+    "missing",
+    "incomparable",
+    "same",
+    "legacy-darwin",
+  ] as const) {
+    test(`hand-off: a running ${role} with ${identity} identity is preserved`, () => {
+      const pid = role === "owner" ? 300 : 4242;
+      live.add(pid);
+      if (identity === "throwing") {
+        throwingTokenPids.add(pid);
+      } else if (identity !== "unreadable") {
+        tokens.set(pid, identity === "same" ? "linux:boot:10" : "linux:boot:20");
+      }
+      const recordedToken =
+        identity === "missing"
+          ? undefined
+          : identity === "incomparable"
+            ? "darwin-utc:old-start"
+            : identity === "legacy-darwin"
+              ? "darwin:old-start"
+              : "linux:boot:10";
+      if (identity === "legacy-darwin") {
+        tokens.set(pid, "darwin:new-start");
+      }
+      const path = recordFile(300, "uncertain", {
+        ownerGenerationToken: role === "owner" ? recordedToken : undefined,
+        processGenerationToken: role === "emulator" ? recordedToken : undefined,
+        processId: 4242,
+        handedOffUntilMs: 360000,
+      });
+      expect(registry().readPeerAdmissions()).toHaveLength(1);
+      expect(existsSync(path)).toBe(true);
+    });
+  }
+}
+
+test("hand-off: a dead owner without an emulator PID counts until its deadline", () => {
+  const path = recordFile(300, "unknown-emulator", { handedOffUntilMs: 360000 });
+  expect(registry().readPeerAdmissions()).toHaveLength(1);
+  expect(existsSync(path)).toBe(true);
+  timer.advanceTime(360000);
+  expect(registry().readPeerAdmissions()).toEqual([]);
+  expect(existsSync(path)).toBe(false);
+});
+
+test("publish and update stamp generation tokens and peers parse them alongside legacy records", () => {
+  tokens.set(100, "linux:boot:10");
+  tokens.set(4242, "linux:boot:20");
+  const admission = registry().publish();
+  const path = join(directory, "100.fake-1.json");
+  expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+    id: "fake-1",
+    ownerPid: 100,
+    ownerGenerationToken: "linux:boot:10",
+  });
+  admission.update({ processId: 4242, handedOffUntilMs: 360000 });
+  const stamped = {
+    id: "fake-1",
+    ownerPid: 100,
+    ownerGenerationToken: "linux:boot:10",
+    processId: 4242,
+    processGenerationToken: "linux:boot:20",
+    handedOffUntilMs: 360000,
+  };
+  expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(stamped);
+  recordFile(200, "legacy", { processId: 4242, handedOffUntilMs: 360000 });
+  expect(registry(300).readPeerAdmissions()).toEqual([
+    stamped,
+    { ownerPid: 200, id: "legacy", processId: 4242, handedOffUntilMs: 360000 },
+  ]);
+});
+
+for (const identity of ["unreadable", "throwing"] as const) {
+  test(`publish and update omit ${identity} tokens and clear the previous emulator identity`, () => {
+    if (identity === "throwing") {
+      throwingTokenPids.add(100);
+      throwingTokenPids.add(5000);
+    }
+    tokens.set(4242, "linux:boot:20");
+    const admission = registry().publish();
+    const path = join(directory, "100.fake-1.json");
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ id: "fake-1", ownerPid: 100 });
+    admission.update({ processId: 4242 });
+    expect(JSON.parse(readFileSync(path, "utf8")).processGenerationToken).toBe("linux:boot:20");
+    admission.update({ deviceId: "emulator-5554" });
+    expect(JSON.parse(readFileSync(path, "utf8")).processGenerationToken).toBe("linux:boot:20");
+    admission.update({ processId: 5000 });
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
+      id: "fake-1",
+      ownerPid: 100,
+      processId: 5000,
+      deviceId: "emulator-5554",
+    });
+  });
+}
 
 test("10: dead-owner unparseable and invalid-shape files are dropped and unlinked", () => {
   const path = join(directory, "300.corrupt.json");

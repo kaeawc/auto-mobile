@@ -143,7 +143,8 @@ fun PrototypeSpecContent(
           .semantics { testTagsAsResourceId = true },
       ) {
         val modals = remember(root) { modalPrototypeSheets(root) }
-        // An open dialog or menu is modal: the page behind it leaves the accessibility tree, as it does
+        // An open dialog or menu is modal: the page behind it leaves the accessibility tree, as it
+        // does
         // on iOS and as touches already do. A snackbar or sheet does not block the page.
         val pageBlocked = modals.any { it.role == "dialog" || it.role == "menu" }
         // The page box takes the fill: it is the root's parent and must measure the window.

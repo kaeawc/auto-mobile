@@ -137,7 +137,8 @@ class PrototypeMenusSemanticsTest {
   @Test
   fun `menu starts at its parent bottom and remains inside the window`() {
     show(menu())
-    val parent = compose.onNodeWithTag("parent", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+    val parent =
+      compose.onNodeWithTag("parent", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
     val surface = compose.onNodeWithTag("menu").fetchSemanticsNode().boundsInRoot
     val window = compose.onRoot().fetchSemanticsNode().boundsInRoot
     assertEquals(parent.bottom, surface.top, 1f)

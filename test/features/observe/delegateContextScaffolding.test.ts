@@ -74,7 +74,9 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
         "getSupportedCommands",
         "getWebSocket",
         "isCommandSupported",
+        "prototypeAssetCache",
         "requestManager",
+        "savedPrototypeMirror",
         "timer",
       ]);
     });
@@ -108,7 +110,9 @@ describe("DelegateContext scaffolding (issue #5458)", () => {
         "getWebSocket",
         "isCommandSupported",
         "markObserverHierarchyRequest",
+        "prototypeAssetCache",
         "requestManager",
+        "savedPrototypeMirror",
         "setCachedHierarchy",
         "setLastWebSocketTimeout",
         "timer",

@@ -10,6 +10,7 @@ import {
 import { prototypeSavedUnsupportedMessage } from "../features/observe/android/CtrlProxyPrototypes";
 import type { AndroidPrototypeTransport } from "../features/prototype/androidPrototypeTransport";
 import type { PrototypeSpec } from "../features/prototype/prototypeSpec";
+import { hasElementAnchors } from "../features/prototype/prototypeAnchors";
 import type { UploadedPrototypeAsset } from "../features/prototype/prototypeAssetUploader";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
@@ -151,6 +152,14 @@ export async function performPrototypeSavedAction(
         errorCode: "unsupported_capability",
         error: prototypeSavedUnsupportedMessage(requestTypes[args.action]),
       };
+    }
+    if (args.action === "save" && hasElementAnchors(args.spec!)) {
+      return savedPrototypeFailure({
+        success: false,
+        errorCode: "invalid_spec",
+        error:
+          'Element anchors are resolved against the live screen and are not supported in a saved prototype; use {type:"bounds",bounds:{x,y,width,height}} anchors (dp) instead. Nothing was uploaded or saved.',
+      });
     }
     if (args.action === "listSaved") {
       const result = await deps.client.listSaved(args.timeoutMs);

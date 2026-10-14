@@ -25,6 +25,9 @@
 
 set -euo pipefail
 
+# shellcheck source=scripts/ios/run_with_timeout.sh disable=SC1091
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/ios/run_with_timeout.sh"
+
 gradle_cmd="${GRADLE_CMD:-./gradlew}"
 if [[ "${1:-}" == --prebuild ]]; then
   # These are the build (non-test) tasks the two suites would otherwise run
@@ -36,6 +39,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 reset_daemon_cmd="${RESET_DAEMON_CMD:-${script_dir}/reset-daemon-before-retry.sh}"
 permission_cmd="${PERMISSION_CMD:-${script_dir}/verify-sdk-ctrl-proxy-permission-contract.sh}"
 nav_graph_cmd="${NAV_GRAPH_CMD:-${script_dir}/navigation-graph-sdk-event-integration.sh}"
+saved_prototype_smoke_cmd="${SAVED_PROTOTYPE_SMOKE_CMD:-${script_dir}/saved-prototype-smoke.sh}"
 playground_tools="navigateTo,getNavigationGraph,explore"
 
 junit_status=0
@@ -69,6 +73,21 @@ echo "=== Playground Automobile emulator suite ==="
     && "$nav_graph_cmd" \
     && "$gradle_cmd" :playground:app:test --stacktrace --info
 ) || playground_status=$?
+
+echo "=== Resetting AutoMobile daemon before saved prototype smoke ==="
+"$reset_daemon_cmd" || echo "::warning title=Saved prototype smoke::daemon reset failed (advisory)"
+
+echo "=== Saved prototype smoke (advisory) ==="
+smoke_status=0
+run_with_timeout "${SAVED_PROTOTYPE_SMOKE_TIMEOUT_SECONDS:-600}" env -u AUTOMOBILE_ENABLED_TOOLS "$saved_prototype_smoke_cmd" || smoke_status=$?
+echo "Saved prototype smoke exit status: ${smoke_status} (advisory; does not fail the job)"
+if [[ "$smoke_status" -ne 0 ]]; then
+  if [[ "$smoke_status" -eq 124 ]]; then
+    echo "::warning title=Saved prototype smoke::saved prototype smoke timed out (advisory)"
+  else
+    echo "::warning title=Saved prototype smoke::saved prototype smoke failed (advisory)"
+  fi
+fi
 
 echo "JUnit Runner emulator suite exit status: ${junit_status}"
 echo "Playground Automobile emulator suite exit status: ${playground_status}"

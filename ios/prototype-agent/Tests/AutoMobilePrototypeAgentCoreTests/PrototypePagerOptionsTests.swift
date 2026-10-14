@@ -135,7 +135,26 @@ final class PrototypePagerOptionsTests: XCTestCase {
             ))
             XCTAssertEqual(layout.visiblePages(selected: 0, count: 5, viewportExtent: 300), [0, 1, 2])
             XCTAssertEqual(layout.visiblePages(selected: 0, count: 5, viewportExtent: 250), [0, 1, 2])
-            XCTAssertEqual(layout.visiblePages(selected: 4, count: 5, viewportExtent: 300), [4])
+            XCTAssertEqual(layout.visiblePages(selected: 3, count: 5, viewportExtent: 300), [2, 3, 4])
+            XCTAssertEqual(layout.visiblePages(selected: 4, count: 5, viewportExtent: 300), [2, 3, 4])
+            XCTAssertEqual(layout.visiblePages(selected: 4, count: 5, viewportExtent: 250), [2, 3, 4])
+            XCTAssertEqual(layout.visiblePages(selected: 1, count: 2, viewportExtent: 300), [0, 1])
+        }
+    }
+
+    func testVisibleFixedPagesNearContentEndWithPeekAndSpacing() throws {
+        for axis in ["horizontal", "vertical"] {
+            let layout = try PrototypePagerLayout(node: node(
+                #", "axis":"\#(axis)", "pageSpacing":20, "peek":{"start":20,"end":30}, "pageSize":{"dp":100}"#
+            ))
+            XCTAssertEqual(layout.visiblePages(selected: 3, count: 5, viewportExtent: 300), [2, 3, 4])
+            XCTAssertEqual(layout.visiblePages(selected: 4, count: 5, viewportExtent: 300), [2, 3, 4])
+            XCTAssertEqual(layout.visiblePages(selected: 1, count: 2, viewportExtent: 300), [0, 1])
+            let trailingPeek = try PrototypePagerLayout(node: node(
+                #", "axis":"\#(axis)", "peek":{"end":120}, "pageSize":{"dp":100}"#
+            ))
+            XCTAssertEqual(trailingPeek.visiblePages(selected: 3, count: 5, viewportExtent: 300), [3, 4])
+            XCTAssertEqual(trailingPeek.visiblePages(selected: 4, count: 5, viewportExtent: 300), [3, 4])
         }
     }
 
@@ -165,7 +184,10 @@ final class PrototypePagerOptionsTests: XCTestCase {
     func testFillWithoutPeekExposesOnlySelectedAndEmptyViewportExposesNothing() throws {
         for axis in ["horizontal", "vertical"] {
             let layout = try PrototypePagerLayout(node: node(#", "axis":"\#(axis)""#))
-            XCTAssertEqual(layout.visiblePages(selected: 2, count: 5, viewportExtent: 300), [2])
+            for selected in 0 ..< 5 {
+                XCTAssertEqual(layout.visiblePages(selected: selected, count: 5, viewportExtent: 300), [selected])
+            }
+            XCTAssertEqual(layout.visiblePages(selected: 0, count: 1, viewportExtent: 300), [0])
             XCTAssertEqual(layout.visiblePages(selected: 0, count: 0, viewportExtent: 300), [])
             XCTAssertEqual(layout.visiblePages(selected: 0, count: 5, viewportExtent: 0), [])
         }

@@ -9,6 +9,7 @@ import {
   prototypeSpecSchema,
 } from "../../../src/features/prototype/prototypeSpec";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
+import { renderPrototypeGuide } from "../../../src/features/prototype/prototypeGuide";
 import { prototypeOutputSchema, registerPrototypeTools } from "../../../src/server/prototypeTools";
 import { IosPrototypeTransport } from "../../../src/features/prototype/ios/iosPrototypeTransport";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
@@ -40,6 +41,18 @@ beforeAll(() => {
 });
 
 describe("pager option contract", () => {
+  test("guide distinguishes selected-page semantics by platform and renderer path", () => {
+    const guide = renderPrototypeGuide();
+    expect(guide).toContain(
+      "Android marks the current page selected only for pagers with positive peek or a fixed pageSize",
+    );
+    expect(guide).toContain(
+      "iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager",
+    );
+    expect(guide).toContain("plain pagers expose only the current page on both");
+    expect(guide).not.toContain("the current page is reported selected");
+  });
+
   test("component pager options use validator-style authored paths without mutating the spec", () => {
     const candidate = componentSpec();
     const original = structuredClone(candidate);

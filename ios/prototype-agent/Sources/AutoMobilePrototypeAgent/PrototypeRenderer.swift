@@ -932,6 +932,7 @@ struct PagerView: View {
     private var optionsPager: some View {
         let axes: Axis.Set = layout.vertical ? .vertical : .horizontal
         return GeometryReader { proxy in
+            // Visibility follows settled selection; the incoming page during a drag is exposed once selection updates.
             let visiblePages = layout.visiblePages(
                 selected: selection.wrappedValue, count: pages.count,
                 viewportExtent: Double(layout.vertical ? proxy.size.height : proxy.size.width)

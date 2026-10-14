@@ -98,7 +98,7 @@ struct PrototypePagerLayout: Equatable {
     let end: Double
     let pageSize: PrototypePagerPageSize
 
-    /// At rest the selected page starts at the leading content margin on either axis.
+    /// At rest the selected page aligns to the leading margin, bounded by the content end.
     /// Strict intersection excludes pages whose edge merely touches the viewport.
     func visiblePages(selected: Int, count: Int, viewportExtent: Double) -> [Int] {
         guard count > 0, viewportExtent.isFinite, viewportExtent > 0 else { return [] }
@@ -108,8 +108,10 @@ struct PrototypePagerLayout: Equatable {
         case let .fixed(points): extent = points
         }
         guard extent > 0 else { return [] }
+        let contentExtent = start + Double(count) * extent + Double(count - 1) * spacing + end
+        let leadingOffset = min(Double(selected) * (extent + spacing), max(0, contentExtent - viewportExtent))
         return (0 ..< count).filter { index in
-            let origin = start + Double(index - selected) * (extent + spacing)
+            let origin = start + Double(index) * (extent + spacing) - leadingOffset
             return origin < viewportExtent && origin + extent > 0
         }
     }

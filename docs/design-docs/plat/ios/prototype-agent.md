@@ -518,5 +518,5 @@ Pagers whose options all resolve to defaults (including explicit horizontal axis
 spacing, empty or zero peek, and fill page size) retain the paged TabView / wrap-size drag path. A vertical pager cannot
 have any vertical scroll ancestor (omitted scroll axis is vertical). Current page means
 the first fully visible page; page events, placeholders and navigation bindings keep
-their meaning. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; the current page is reported selected; pages fully off-screen are not exposed.
+their meaning. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed.
 Indicator and carousel remain deferred.

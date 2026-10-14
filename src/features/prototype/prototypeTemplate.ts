@@ -132,7 +132,7 @@ export function bindTyped(value: unknown, instance: Instance): unknown {
  * How a bindable field is bound: `text` and `emitName` render to text, `operand` keeps a single
  * placeholder's type, and `key` renders to text that must then be a literal state key.
  */
-export type FieldKind = "text" | "operand" | "emitName" | "key";
+export type FieldKind = "text" | "operand" | "emitName" | "key" | "emitBinding" | "emitContext";
 
 /** Receives each bindable field's value and path; its result replaces the value. */
 export type FieldVisitor = (
@@ -195,6 +195,23 @@ function mapAction(action: Raw, path: string, visit: FieldVisitor): Raw {
       break;
     case "emit":
       mapField(action, "name", path, "emitName", visit);
+      mapField(action, "context", path, "emitContext", visit);
+      if (record(action.context)) {
+        action.context = Object.fromEntries(
+          Object.entries(record(action.context)!).map(([name, value]) => {
+            const binding = record(value);
+            const at = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name)
+              ? `${path}.context.${name}`
+              : `${path}.context[${JSON.stringify(name)}]`;
+            return [
+              name,
+              binding && Object.hasOwn(binding, "state")
+                ? { ...binding, state: visit(binding.state, `${at}.state`, "key") }
+                : visit(value, at, "emitBinding"),
+            ];
+          }),
+        );
+      }
       break;
     case "toggle":
     case "increment":
@@ -284,6 +301,15 @@ export function mapBindableFields(node: Raw, path: string, visit: FieldVisitor):
 /** Binds every bindable field of one node to an instance, the way the device binds a template. */
 export function bindNodeFields(node: Raw, path: string, instance: Instance): Raw {
   return mapBindableFields(node, path, (value, _path, kind) => {
+    if (kind === "emitBinding" && instance.binding.index) {
+      const binding = record(value);
+      if (typeof binding?.item === "string") {
+        return { value: instance.values[binding.item] };
+      }
+      if (binding?.index === true) {
+        return { value: instance.index };
+      }
+    }
     if (typeof value !== "string") {
       return value;
     }

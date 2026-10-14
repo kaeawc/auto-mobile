@@ -604,6 +604,8 @@ export interface PrototypeEvent {
   kind: PrototypeEventKind | typeof UNKNOWN_PROTOTYPE_EVENT_KIND;
   name: string | null;
   payload: PrototypeJson;
+  context?: Record<string, PrototypeJson>;
+  contextTruncated?: true;
   state: PrototypeState;
   pages: Record<string, number>;
 }
@@ -1005,6 +1007,7 @@ export const PROTOTYPE_SHOW_IN_PLACE_CAPABILITY = "prototype_show_in_place_v1";
 export const PROTOTYPE_ANCHOR_CAPABILITY = "prototype_anchor_v1";
 
 /** Resolves read-only prototype data, JSON Pointer bindings and stable repeat keys. */
+export const PROTOTYPE_EMIT_CONTEXT_CAPABILITY = "prototype_emit_context_v1";
 export const PROTOTYPE_DATA_MODEL_CAPABILITY = "prototype_data_model_v1";
 
 /**

@@ -7,6 +7,7 @@ import {
   GUIDE_COMPONENTS,
   GUIDE_COST,
   GUIDE_DATA,
+  GUIDE_EMIT_CONTEXT,
   GUIDE_ERRORS,
   GUIDE_INTRO,
   GUIDE_PATCH,
@@ -24,7 +25,7 @@ export const ICON_LOOKUP_LIMIT = 100;
 
 interface Rule {
   kind: string;
-  values?: string[];
+  values?: (string | boolean)[];
   name?: string;
   item?: Rule;
   min?: number;
@@ -95,10 +96,11 @@ function variantLines(variants: Record<string, ObjectRule>, shared: Map<string, 
   });
 }
 
-const code = (values: readonly string[]): string => values.map((v) => `\`${v}\``).join(", ");
+const code = (values: readonly (string | boolean)[]): string =>
+  values.map((v) => `\`${v}\``).join(", ");
 
 function fieldRuleValues(definition: string, field: string): string[] {
-  return definitions[definition]?.fields?.[field]?.rule.values ?? [];
+  return (definitions[definition]?.fields?.[field]?.rule.values ?? []).map(String);
 }
 
 /** Markdown limits table; every value comes from the contract's `limits`. */
@@ -219,6 +221,7 @@ export function renderPrototypeGuide(): string {
     renderActions(),
     GUIDE_REPEAT,
     GUIDE_DATA,
+    GUIDE_EMIT_CONTEXT,
     GUIDE_PATCH,
     GUIDE_COMPONENTS,
     renderTheme(),

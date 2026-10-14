@@ -117,6 +117,15 @@ function checkOwnFields(node: Raw, path: string, scope: Scope): RepeatError | un
       first ??= fail(fieldPath, "Repeat placeholder in a data condition operand is not supported");
       return value;
     }
+    if (kind === "emitBinding") {
+      const binding = record(value);
+      if (
+        typeof binding?.item === "string" &&
+        !scope.items.every((item) => Object.hasOwn(item, binding.item as string))
+      ) {
+        first ??= fail(fieldPath, `Unknown repeat field ${JSON.stringify(binding.item)}`);
+      }
+    }
     first ??= fieldError(value, fieldPath, kind, scope);
     return value;
   });
@@ -127,6 +136,10 @@ function checkOwnFields(node: Raw, path: string, scope: Scope): RepeatError | un
 function checkLiteralKeys(node: Raw, path: string): RepeatError | undefined {
   let first: RepeatError | undefined;
   mapBindableFields(node, path, (value, fieldPath, kind) => {
+    const binding = kind === "emitBinding" ? record(value) : undefined;
+    if (binding && (Object.hasOwn(binding, "item") || Object.hasOwn(binding, "index"))) {
+      first ??= fail(fieldPath, "Emit item/index binding outside a repeat template");
+    }
     if (kind === "key" && typeof value === "string" && !STATE_KEY.test(value)) {
       first ??= fail(fieldPath, "State key placeholder outside a repeat template");
     }

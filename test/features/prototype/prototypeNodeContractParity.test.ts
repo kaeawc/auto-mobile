@@ -169,3 +169,28 @@ test("spec, repeat, and condition field sets stay in step with the data contract
     expect(validatePrototypeSpec(candidate).success).toBe(false);
   }
 });
+
+test("emit context Zod and record contract agree on binding forms and entry limits", () => {
+  const candidate = (context: unknown) =>
+    spec({ type: "text", text: "x", onTap: [{ type: "emit", name: "pick", context }] });
+  for (const context of [
+    { a: { state: "count" } },
+    { a: { data: "/row" } },
+    { a: { value: [true, null] } },
+    {},
+    Object.fromEntries(Array.from({ length: 16 }, (_, i) => [`e${i}`, { value: i }])),
+  ]) {
+    expect(prototypeSpecSchema.safeParse(candidate(context)).success).toBe(true);
+    expect(validatePrototypeSpec(candidate(context)).success).toBe(true);
+  }
+  for (const context of [
+    { "": { value: 1 } },
+    { a: { index: false } },
+    { a: { state: "x", value: 1 } },
+    { a: { unknown: 1 } },
+    Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`e${i}`, { value: i }])),
+  ]) {
+    expect(prototypeSpecSchema.safeParse(candidate(context)).success).toBe(false);
+    expect(validatePrototypeSpec(candidate(context)).success).toBe(false);
+  }
+});

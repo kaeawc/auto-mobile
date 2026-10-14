@@ -10,17 +10,28 @@ describe("InMemoryPrototypeStatusStore scope bound", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());
     const scope = { deviceId: "device", sessionUuid: "one" };
     store.record(scope, "show", { id: "panel" }, ok);
-    const pushed = { ...event(1), pages: { pager: 2 } };
+    const pushed = {
+      ...event(1),
+      pages: { pager: 2 },
+      context: { nested: { id: 3 } },
+      contextTruncated: true as const,
+    };
     store.recordEvent(scope, pushed);
     pushed.pages.pager = 9;
+    pushed.context.nested.id = 9;
     pushed.state.title = "changed";
     const status = store.status(scope);
     const snapshot = status.prototypes[0];
     expect(snapshot).toMatchObject({
       pages: { pager: 2 },
+      context: { nested: { id: 3 } },
+      contextTruncated: true,
       state: { title: "Hello" },
       lastKnown: true,
     });
+    if (snapshot.context) {
+      snapshot.context.nested = null;
+    }
     if (snapshot.pages && snapshot.state) {
       snapshot.pages.pager = 7;
       snapshot.state.title = "caller mutation";
@@ -28,6 +39,8 @@ describe("InMemoryPrototypeStatusStore scope bound", () => {
     store.record(scope, "show", { id: "panel" }, { success: false });
     expect(store.status(scope).prototypes[0]).toMatchObject({
       pages: { pager: 2 },
+      context: { nested: { id: 3 } },
+      contextTruncated: true,
       state: { title: "Hello" },
       lastKnown: true,
     });

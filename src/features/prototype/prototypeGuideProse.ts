@@ -99,6 +99,39 @@ Rejected (same paths in TypeScript and Kotlin):
   depth is unaffected because instances are siblings
 `;
 
+export const GUIDE_EMIT_CONTEXT = `### Emit context
+
+Use a stable \`emit.name\` such as \`pick\` and \`context: {id: {item: "id"}}\` to report a
+repeat item's id, instead of encoding the id into the event name. \`emit.payload\` stays literal
+and uninterpolated; context is resolved on the device when the emit action runs, after earlier
+actions in the same atomic \`onTap\` list. For example, setState then emit reads the new state.
+
+Each nonempty context name has a strict binding object with exactly one key:
+
+- \`{state: key}\` reads state; repeat placeholders such as \`liked_{item.id}\` bind to concrete keys.
+- \`{item: field}\` reads a typed repeat field; \`{index: true}\` reads its zero-based numeric index.
+  Both require a repeat template. The field must exist in every item; data-path repeats use the
+  same scalar projection as text placeholders. Expansion replaces these bindings with \`{value: ...}\`.
+- \`{page: pagerId}\` reads an existing pager's current numeric page.
+- \`{data: pointer}\` reads any JSON value via the existing data pointer syntax and
+  \`MAX_PROTOTYPE_DATA_POINTER_LENGTH\`; it also requires \`prototype_data_model_v1\`.
+- \`{value: json}\` is literal JSON, subject to the emit payload depth limit.
+
+Missing state keys and data paths resolve to null. \`MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES\` bounds the
+number of entries. The resolved object follows declaration order. Its compact JSON UTF-8 bytes
+are bounded by \`MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES\`; this runtime count uses actual serialized bytes,
+including multibyte strings, rather than the payload validator's conservative numeric cost.
+If over budget, keep the longest prefix of declared entries that fits and omit all remaining
+entries. An oversized first entry produces \`{}\`. The tap succeeds.
+
+A show using \`emit.context\` requires \`prototype_emit_context_v1\`; older devices are refused
+before upload or display. The \`prototype_event\` wire has \`context\` next to the unchanged
+\`payload\` only if the emit declared context (including an empty object). It has
+\`contextTruncated: true\` only when truncated; otherwise the field is omitted, never false.
+\`awaitEvent\` and host status preserve these fields.
+
+`;
+
 export const GUIDE_DATA = `## Data
 
 \`data\` is agent-owned, read-only content: nested objects, arrays, strings, finite numbers and

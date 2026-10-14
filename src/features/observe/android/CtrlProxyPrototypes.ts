@@ -12,6 +12,7 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import {
   actionSchema,
   prototypeSpecSchema,
+  prototypeJsonObjectSchema,
   type PrototypeSpec,
 } from "../../prototype/prototypeSpec";
 import {
@@ -81,6 +82,8 @@ export const prototypeEventSchema = prototypeEventEnvelopeSchema.extend({
   kind: z.enum(PROTOTYPE_EVENT_KINDS),
   name: z.string().nullable(),
   payload: actionSchema.options[0].shape.payload.unwrap(),
+  context: prototypeJsonObjectSchema.optional(),
+  contextTruncated: z.literal(true).optional(),
   state: prototypeSpecSchema.shape.state.unwrap(),
   pages: z.record(z.string().min(1), z.number().int().nonnegative().max(2147483647)).default({}),
 });

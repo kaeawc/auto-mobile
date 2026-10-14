@@ -174,6 +174,9 @@ function usesAtNode(node: Raw, path: string): Set<string> {
     fields.add(`${path}.repeat.key`);
   }
   mapBindableFields(node, path, (value, fieldPath, kind) => {
+    if (kind === "emitBinding" && typeof record(value)?.data === "string") {
+      fields.add(fieldPath);
+    }
     if (kind === "text" && typeof value === "string" && prototypeDataPlaceholders(value).length) {
       fields.add(fieldPath);
     }

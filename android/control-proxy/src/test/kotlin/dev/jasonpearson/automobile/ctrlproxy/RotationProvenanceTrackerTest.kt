@@ -10,6 +10,34 @@ import org.junit.Test
 
 class RotationProvenanceTrackerTest {
 
+  @Test
+  fun `fingerprint-only changes emit and transition frames omit absent fingerprints`() {
+    var fingerprint: PanelFingerprint? = PanelFingerprint(1080, 2364)
+    val frames = mutableListOf<DisplayTransition>()
+    val signal =
+      DisplayRotationChangeSignal(
+        null,
+        onTransition = { frames += it },
+        snapshotOverride = { id, change ->
+          DisplayTransition(change, id, null, 1080, 2364, 2, panelFingerprint = fingerprint)
+        },
+      )
+    signal.handleDisplayCallback("added", 4)
+    signal.handleDisplayCallback("changed", 4)
+    assertEquals(1, frames.size)
+    fingerprint = PanelFingerprint(2076, 2152)
+    signal.handleDisplayCallback("changed", 4)
+    assertEquals(2, frames.size)
+    assertTrue(
+      displayTransitionFrame(frames.last())
+        .contains("\"panelFingerprint\":{\"width\":2076,\"height\":2152}"),
+    )
+    fingerprint = null
+    signal.handleDisplayCallback("changed", 4)
+    assertEquals(3, frames.size)
+    assertFalse(displayTransitionFrame(frames.last()).contains("panelFingerprint"))
+  }
+
   interface TestStateCallback {
     fun onStateChanged(state: Int)
   }

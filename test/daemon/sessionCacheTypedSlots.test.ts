@@ -16,8 +16,10 @@ import type { KeepScreenAwakeState } from "../../src/utils/KeepScreenAwakeManage
  */
 class SpyKeepScreenAwakeRestorer implements KeepScreenAwakeRestorer {
   readonly restored: KeepScreenAwakeState[] = [];
-  async restore(state: KeepScreenAwakeState): Promise<void> {
+  async restore(state: KeepScreenAwakeState): Promise<{ status: "restored" }> {
     this.restored.push(state);
+
+    return { status: "restored" as const };
   }
 }
 

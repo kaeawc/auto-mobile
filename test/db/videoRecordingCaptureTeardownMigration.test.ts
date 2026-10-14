@@ -135,3 +135,36 @@ test("capture descriptor query excludes rows belonging to live peer daemons", as
     }),
   ).toHaveLength(1);
 });
+
+test("repository round-trips iOS host identity and preserves the Android descriptor", async () => {
+  await (await migration()).up(db);
+  const repo = new VideoRecordingRepository(db.withTables<Database>());
+  await repo.insertRecording(record);
+  expect((await repo.getRecording("rec"))?.captureTeardown).toEqual(descriptor);
+  const host = {
+    kind: "ios-host-recorder" as const,
+    hostPid: 42,
+    hostStartToken: "generation-a",
+    udid: "sim-id",
+    capturePath: "/kept/raw.mov",
+  };
+  await repo.updateRecording("rec", { captureTeardown: host });
+  expect((await repo.getRecording("rec"))?.captureTeardown).toEqual(host);
+});
+
+test.each([
+  '{"kind":"ios-host-recorder","hostStartToken":"generation-a","udid":"sim-id"}',
+  '{"kind":"ios-host-recorder","hostPid":42,"udid":"sim-id"}',
+])("incomplete iOS host descriptor %s warns and reads as absent", async (value) => {
+  await (await migration()).up(db);
+  const repo = new VideoRecordingRepository(db.withTables<Database>());
+  await repo.insertRecording(record);
+  await sql`UPDATE video_recordings SET capture_teardown_json=${value}`.execute(db);
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  try {
+    expect((await repo.getRecording("rec"))?.captureTeardown).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+  } finally {
+    warn.mockRestore();
+  }
+});

@@ -79,7 +79,10 @@ echo "=== Resetting AutoMobile daemon before saved prototype smoke ==="
 
 echo "=== Saved prototype smoke (advisory) ==="
 smoke_status=0
-run_with_timeout "${SAVED_PROTOTYPE_SMOKE_TIMEOUT_SECONDS:-600}" env -u AUTOMOBILE_ENABLED_TOOLS "$saved_prototype_smoke_cmd" || smoke_status=$?
+set +e
+run_with_timeout "${SAVED_PROTOTYPE_SMOKE_TIMEOUT_SECONDS:-600}" env -u AUTOMOBILE_ENABLED_TOOLS "$saved_prototype_smoke_cmd"
+smoke_status=$?
+set -e
 echo "Saved prototype smoke exit status: ${smoke_status} (advisory; does not fail the job)"
 if [[ "$smoke_status" -ne 0 ]]; then
   if [[ "$smoke_status" -eq 124 ]]; then

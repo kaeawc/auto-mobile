@@ -30,7 +30,10 @@ call_cli() {
   cli_status=0
   stdout_file="$(mktemp)"
   stderr_file="$(mktemp)"
-  cli "$@" >"$stdout_file" 2>"$stderr_file" || cli_status=$?
+  set +e
+  cli "$@" >"$stdout_file" 2>"$stderr_file"
+  cli_status=$?
+  set -e
   cli_stdout="$(cat "$stdout_file")"
   cli_stderr="$(cat "$stderr_file")"
   rm -f "$stdout_file" "$stderr_file"
@@ -55,7 +58,9 @@ delete_saved() {
 cleanup_saved() {
   local status=$?
   if [[ $status -ne 0 && -n "$saved_id" ]]; then
-    delete_saved || true
+    set +e
+    delete_saved
+    set -e
   fi
   if [[ "$acquired_session" -eq 1 ]]; then
     (exit "$status")
@@ -120,7 +125,11 @@ call_saved listSaved
 list_result="$cli_stdout"
 [[ "$cli_status" -eq 0 ]] || step_error listSaved "${list_result}${cli_stderr:+ $cli_stderr}"
 parsed="$(result_json "$list_result")"
-has_id "$parsed" || step_error listSaved "saved id ${saved_id} not found${cli_stderr:+: $cli_stderr}"
+set +e
+has_id "$parsed"
+has_id_status=$?
+set -e
+[[ "$has_id_status" -eq 0 ]] || step_error listSaved "saved id ${saved_id} not found${cli_stderr:+: $cli_stderr}"
 echo 'ok: listSaved'
 
 call_saved save --spec "$spec" --label "$label" --pin true
@@ -140,7 +149,8 @@ if [[ "$launch_available" -eq 1 ]]; then
   "$adb_bin" -s "$device_id" shell am start -W -n dev.jasonpearson.automobile.ctrlproxy/.prototype.SavedPrototypeActivity -d "automobile-saved-prototype:/${saved_id}" >/dev/null || step_error launch 'activity start failed'
   appeared=0
   for ((attempt=0; attempt<10; attempt++)); do
-    if "$adb_bin" -s "$device_id" shell dumpsys activity activities 2>/dev/null | grep -q SavedPrototypeActivity; then appeared=1; break; fi
+    activity_output="$("$adb_bin" -s "$device_id" shell dumpsys activity activities 2>/dev/null)"
+    if [[ "$activity_output" == *SavedPrototypeActivity* ]]; then appeared=1; break; fi
     sleep "${SMOKE_POLL_SLEEP:-1}"
   done
   [[ $appeared -eq 1 ]] || step_error launch 'SavedPrototypeActivity did not appear'
@@ -149,10 +159,15 @@ if [[ "$launch_available" -eq 1 ]]; then
 fi
 
 call_saved deleteSaved --id "$saved_id"
-[[ "$cli_status" -eq 0 && "$(jq -r '.success // false' <<< "$(result_json "$cli_stdout")")" == true ]] || step_error deleteSaved "delete failed${cli_stderr:+: $cli_stderr}"
+delete_result="$(result_json "$cli_stdout")"
+[[ "$cli_status" -eq 0 && "$(jq -r '.success // false' <<< "$delete_result")" == true ]] || step_error deleteSaved "delete failed${cli_stderr:+: $cli_stderr}"
 echo 'ok: deleteSaved'
 call_saved listSaved
 list_result="$cli_stdout"
 [[ "$cli_status" -eq 0 ]] || step_error listSaved "${list_result}${cli_stderr:+ $cli_stderr}"
 parsed="$(result_json "$list_result")"
-if has_id "$parsed"; then step_error deleteSaved "saved id ${saved_id} still listed"; fi
+set +e
+has_id "$parsed"
+has_id_status=$?
+set -e
+if [[ "$has_id_status" -eq 0 ]]; then step_error deleteSaved "saved id ${saved_id} still listed"; fi

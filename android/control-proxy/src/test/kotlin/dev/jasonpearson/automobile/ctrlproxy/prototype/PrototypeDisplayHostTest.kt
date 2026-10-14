@@ -46,6 +46,10 @@ class PrototypeDisplayHostTest {
       DefaultPrototypeHost(
         RuntimeEnvironment.getApplication(),
         defaultManager,
+        isViewAttached = { view ->
+          defaultManager.isViewAttached(view) ||
+            displays.managers.values.any { it.isViewAttached(view) }
+        },
         sdkInt = 30,
         mainThread = main,
         settleTimer = FakePrototypeSettleTimer(history),

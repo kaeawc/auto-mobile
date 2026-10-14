@@ -673,7 +673,17 @@ export function registerRecordingSessionCleanup(
   >,
   deps: RecordingSessionCleanupDeps = defaultRecordingSessionCleanupDeps,
 ): void {
-  const cleanup = (sessionId: string, deviceId: string): void => {
+  const cleanup = (
+    sessionId: string,
+    deviceId: string,
+    releaseOptions?: { deviceIdentityReplaced?: boolean },
+  ): void => {
+    if (releaseOptions?.deviceIdentityReplaced) {
+      void logHostOnlyAbandonFailure(() =>
+        deps.abandonRecordingsOnReplacedDevice(sessionId, deviceId),
+      );
+      return;
+    }
     if (!deps.hasRecordingsToStop(sessionId, deviceId)) {
       return;
     }
@@ -693,13 +703,7 @@ export function registerRecordingSessionCleanup(
       if (ids.length > 0) {
         idsCapturedAtRelease.set(sessionId, ids);
       }
-      if (releaseOptions?.deviceIdentityReplaced) {
-        void logHostOnlyAbandonFailure(() =>
-          deps.abandonRecordingsOnReplacedDevice(sessionId, deviceId),
-        );
-        return;
-      }
-      cleanup(sessionId, deviceId);
+      cleanup(sessionId, deviceId, releaseOptions);
     }
   });
   manager.onSessionDeviceUnbound(cleanup);

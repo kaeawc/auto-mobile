@@ -169,6 +169,7 @@ import {
   SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY,
   PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
+  PROTOTYPE_SAVED_CAPABILITY,
   ctrlProxyMissingRequestIdError,
   ctrlProxyRequests,
   serializeCtrlProxyRequest,
@@ -214,7 +215,11 @@ import { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
 import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyCertificates, type CertificateFileSystem } from "./CtrlProxyCertificates";
 import { CtrlProxyFocus, type FocusActionOutcome } from "./CtrlProxyFocus";
-import { CtrlProxyPrototypes, type PrototypeAssetRequestOptions } from "./CtrlProxyPrototypes";
+import {
+  CtrlProxyPrototypes,
+  prototypeSavedReplyFields,
+  type PrototypeAssetRequestOptions,
+} from "./CtrlProxyPrototypes";
 import type { PrototypeSpec } from "../../prototype/prototypeSpec";
 import type { PrototypeAssetUpload } from "../../prototype/prototypeAssets";
 import type {
@@ -487,6 +492,7 @@ interface WsCommitTextResultMessage extends WsRequestBase {
   type: "commit_text_result";
   trace?: unknown;
   insertedText?: string;
+  editorConsumed?: boolean;
   partialApplication?: boolean;
   committedUnits?: number;
 }
@@ -1373,6 +1379,20 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
   ): Promise<PrototypePatchReply>;
+  requestSavePrototype(
+    save: { spec: PrototypeSpec; label: string; icon?: string },
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult>;
+  requestListSavedPrototypes(
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult>;
+  requestDeleteSavedPrototype(
+    id: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult>;
   requestInspectPrototypes(timeoutMs?: number, perf?: PerformanceTracker): Promise<PrototypeResult>;
   requestPutPrototypeAsset(
     asset: PrototypeAssetUpload,
@@ -2519,7 +2539,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   protected override extraDelegateContextFields(): Partial<DelegateContext> {
     return {
-      isCommandSupported: (messageType) => this.isCommandSupported(messageType),
+      isCommandSupported: (messageType) =>
+        messageType === PROTOTYPE_SAVED_CAPABILITY
+          ? this.supportedCommands?.has(messageType) === true
+          : this.isCommandSupported(messageType),
       getSupportedCommands: () => this.getSupportedCommands(),
     };
   }
@@ -3963,6 +3986,27 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     perf?: PerformanceTracker,
   ): Promise<PrototypePatchReply> {
     return this.prototypes.requestPatchPrototype(patch, timeoutMs, perf);
+  }
+
+  requestSavePrototype(
+    save: { spec: PrototypeSpec; label: string; icon?: string },
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    return this.prototypes.requestSavePrototype(save, timeoutMs, perf);
+  }
+  requestListSavedPrototypes(
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    return this.prototypes.requestListSavedPrototypes(timeoutMs, perf);
+  }
+  requestDeleteSavedPrototype(
+    id: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    return this.prototypes.requestDeleteSavedPrototype(id, timeoutMs, perf);
   }
 
   requestInspectPrototypes(
@@ -6145,6 +6189,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this.resolvePendingResponse(message, (message): ImeCommitActionResult => ({
         success: message.success,
         ...(typeof message.insertedText === "string" ? { insertedText: message.insertedText } : {}),
+        ...(message.editorConsumed === true ? { editorConsumed: true } : {}),
         ...(Array.isArray(message.trace) &&
         message.trace.every((line): line is string => typeof line === "string")
           ? { trace: message.trace.slice(-256) }
@@ -6422,6 +6467,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           ? { missingAssets: message.missingAssets.filter((id) => typeof id === "string") }
           : {}),
         ...prototypePatchReplyFields(message),
+        ...prototypeSavedReplyFields(message),
         ...(Array.isArray(message.prototypes) ? { prototypes: message.prototypes } : {}),
         ...(typeof message.droppedEvents === "number"
           ? { droppedEvents: message.droppedEvents }

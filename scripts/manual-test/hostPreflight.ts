@@ -22,10 +22,12 @@ export type HostSleep =
   | { preventUserIdleSystemSleep: boolean; preventSystemSleep: boolean }
   | Unavailable;
 export type HostLid = { closed: boolean; clamshellCausesSleep?: boolean } | Unavailable;
+export type HostLowPower = { enabled: boolean } | Unavailable;
 export interface HostSections {
   power: HostPower;
   sleep: HostSleep;
   lid: HostLid;
+  lowPower: HostLowPower;
 }
 export interface HostPreflightReport extends HostStats, HostSections {
   warnings: string[];
@@ -40,6 +42,16 @@ export function parsePmsetBatt(text: string): HostPower {
     source: source === "AC Power" ? "ac" : source === "Battery Power" ? "battery" : "unknown",
     ...(chargePercent !== undefined && chargePercent <= 100 ? { chargePercent } : {}),
   };
+}
+export function parsePmsetSettings(text: string): HostLowPower {
+  const lowPowerValue = /^[ \t]*lowpowermode[ \t]+(\d+)\b/m.exec(text)?.[1];
+  if (lowPowerValue !== undefined) {
+    return { enabled: lowPowerValue !== "0" };
+  }
+  const powerModeValue = /^[ \t]*powermode[ \t]+(\d+)\b/m.exec(text)?.[1];
+  return powerModeValue === undefined
+    ? { unavailable: "pmset lowpowermode or powermode setting not reported" }
+    : { enabled: powerModeValue === "1" };
 }
 export function parsePmsetAssertions(text: string): HostSleep {
   const counters = text
@@ -66,7 +78,7 @@ export function buildHostPreflightReport(
   stats: HostStats,
   sections: HostSections,
 ): HostPreflightReport {
-  const { power, sleep, lid } = sections;
+  const { power, sleep, lid, lowPower } = sections;
   const warnings = powerWarnings(power, stats.platform);
   if (!("unavailable" in sleep) && !sleep.preventUserIdleSystemSleep) {
     warnings.push(
@@ -74,13 +86,20 @@ export function buildHostPreflightReport(
     );
   }
   warnings.push(...lidWarnings(lid));
+  if (!("unavailable" in lowPower) && lowPower.enabled) {
+    warnings.push(
+      "Low Power Mode is on; timings are unreliable and the host may throttle; turn it off before the batch.",
+    );
+  }
   if (stats.loadAverage[0] > 2 * stats.cpuCount) {
     warnings.push(
       "Host load exceeds twice the CPU count; wait for load to settle before measuring timings.",
     );
   }
   if (stats.platform === "darwin") {
-    for (const [name, section] of Object.entries(sections)) {
+    for (const [name, section] of Object.entries(sections).filter(
+      ([name]) => name !== "lowPower",
+    )) {
       if ("unavailable" in section) {
         warnings.push(
           `Host ${name} check is unavailable (${section.unavailable}); verify it before the batch.`,
@@ -155,8 +174,9 @@ export async function hostPreflight(
             parseIoregClamshell,
             deps,
           ),
+          lowPower: await captureSection("pmset", ["-g"], parsePmsetSettings, deps),
         }
-      : { power: unsupported, sleep: unsupported, lid: unsupported };
+      : { power: unsupported, sleep: unsupported, lid: unsupported, lowPower: unsupported };
   return buildHostPreflightReport(batchDir, stats, sections);
 }
 export async function recordHostPreflight(

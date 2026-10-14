@@ -49,7 +49,9 @@ async function harness() {
     timer,
     new FakeDeviceSessionPersistence(),
     () => new FakeDbWriteBarrier(),
-    () => ({ restore: async () => {} }),
+    () => ({
+      restore: async () => ({ status: "restored" as const }),
+    }),
     () => ({ restore: async () => {} }),
     (device) => ({ restore: (profile) => fake.restore(device.deviceId, profile) }),
   );

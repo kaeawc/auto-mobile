@@ -38,6 +38,8 @@ test("keep-awake retries pending at commit advertise their remaining teardown ca
           const signal = getAbortSignal();
           signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
         });
+
+        return { status: "restored" as const };
       },
     }),
   );
@@ -83,7 +85,9 @@ test("only the capped cleanup contributes a bound while an own-budget clock retr
     timer,
     new FakeDeviceSessionPersistence(),
     () => new FakeDbWriteBarrier(),
-    () => ({ restore: async () => {} }),
+    () => ({
+      restore: async () => ({ status: "restored" as const }),
+    }),
     () => ({ restore: async () => {} }),
     {
       networkCondition: () => ({
@@ -151,7 +155,9 @@ test("a release with no pending restores leaves no cleanup bound or timer", asyn
     timer,
     new FakeDeviceSessionPersistence(),
     () => new FakeDbWriteBarrier(),
-    () => ({ restore: async () => {} }),
+    () => ({
+      restore: async () => ({ status: "restored" as const }),
+    }),
     () => ({ restore: async () => {} }),
     () => ({ restore: async () => {} }),
   );
@@ -185,7 +191,9 @@ test("a bind refused while a released session's capped network restore is still 
     timer,
     new FakeDeviceSessionPersistence(),
     () => new FakeDbWriteBarrier(),
-    () => ({ restore: async () => {} }),
+    () => ({
+      restore: async () => ({ status: "restored" as const }),
+    }),
     () => ({ restore: async () => {} }),
     () => ({
       restore: () =>

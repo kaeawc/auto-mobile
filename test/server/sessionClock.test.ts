@@ -45,7 +45,7 @@ function harness(adapter = new FakeDeviceClockAdapter()) {
     timer,
     new FakeDeviceSessionPersistence(),
     () => new FakeDbWriteBarrier(),
-    () => ({ restore: async () => {} }),
+    () => ({ restore: async () => ({ status: "restored" as const }) }),
     () => ({ restore: async () => {} }),
     {
       networkCondition: () => ({ restore: async () => {} }),

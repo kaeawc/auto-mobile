@@ -84,7 +84,7 @@ describe("setDeviceState iOS Simulator app offline (#10264)", () => {
       timer,
       new FakeDeviceSessionPersistence(),
       () => new FakeDbWriteBarrier(),
-      () => ({ restore: async () => {} }),
+      () => ({ restore: async () => ({ status: "restored" as const }) }),
       () => ({ restore: async () => {} }),
       {
         networkCondition: () => ({ restore: async () => {} }),

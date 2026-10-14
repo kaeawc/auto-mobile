@@ -238,11 +238,14 @@ export async function acquireManagedSlotsThroughDaemon(
     if (preparationMs <= 0) {
       throw timeoutError();
     }
+    // The runner's start identity is proxy-only; older daemons reject unknown config keys.
+    const { executionOwnerStartIdentity: _executionOwnerStartIdentity, ...daemonConfig } = config;
+    void _executionOwnerStartIdentity;
     const reply = await ports.callDaemonMethod(
       DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD,
       {
         // The daemon's deadline is what is left of this one after connecting.
-        config: { ...config, preparationTimeoutMs: preparationMs },
+        config: { ...daemonConfig, preparationTimeoutMs: preparationMs },
         livenessOwnerToken: ports.livenessOwnerToken,
       },
       { timeoutMs: Math.max(1, remaining()), signal },

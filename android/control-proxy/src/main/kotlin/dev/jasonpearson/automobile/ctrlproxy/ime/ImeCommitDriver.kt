@@ -357,6 +357,7 @@ class ImeCommitDriver(
         "kind" to
           when (decision) {
             Reconciliation.Continue -> "continue"
+            is Reconciliation.Consumed -> "consumed"
             is Reconciliation.DropRejected -> "dropRejected"
             is Reconciliation.Resume -> "resume"
             is Reconciliation.Fail -> "fail"
@@ -367,6 +368,10 @@ class ImeCommitDriver(
       )
       when (decision) {
         Reconciliation.Continue -> next()
+        is Reconciliation.Consumed -> {
+          retainConfirmed(decision.confirmed, now)
+          next()
+        }
         is Reconciliation.DropRejected -> {
           dropRejected(decision.confirmed, now)
           next()
@@ -414,8 +419,8 @@ class ImeCommitDriver(
       retainConfirmed(confirmed, now)
       dispatchedPosition = requestPosition
       committedUnits = requestPosition
-      // A retained prefix cannot tell us whether a newline submitted the editor. The one
-      // permitted resend can repeat that action; there is no safe consumed-action signal.
+      // A missing last dispatched newline is treated as consumed before reaching this path.
+      // Other missing units may be resent once when the visible prefix advances.
       resumeAt(requestPosition)
     }
 
@@ -670,6 +675,8 @@ class ImeCommitDriver(
   internal sealed interface Reconciliation {
     data object Continue : Reconciliation
 
+    data class Consumed(val confirmed: Int) : Reconciliation
+
     data class Resume(val confirmed: Int) : Reconciliation
 
     data class DropRejected(val confirmed: Int) : Reconciliation
@@ -752,7 +759,7 @@ class ImeCommitDriver(
       return null
     }
 
-    /** Resend only a visible non-empty strict prefix that advances beyond the previous resume. */
+    /** Treat editor consumption separately from losses with an advancing visible prefix. */
     internal fun reconcileDecision(
       postDispatch: Boolean,
       startedByRestart: Boolean,
@@ -768,11 +775,15 @@ class ImeCommitDriver(
           if (postDispatch) Reconciliation.Succeed(delta) else Reconciliation.Continue
         confirmed != null && confirmed > 0 ->
           when {
+            confirmed == dispatched.size - 1 && dispatched[confirmed] == "\n" && startedByRestart ->
+              if (postDispatch) Reconciliation.Succeed(delta)
+              else Reconciliation.Consumed(confirmed)
             confirmed > lastResumeConfirmed -> Reconciliation.Resume(confirmed)
             postDispatch -> Reconciliation.Succeed(delta)
             else -> Reconciliation.DropRejected(confirmed)
           }
         postDispatch -> Reconciliation.Succeed(delta)
+        confirmed == 0 && startedByRestart -> Reconciliation.Consumed(0)
         confirmed == 0 -> Reconciliation.Fail(NONE_APPLIED_ERROR, delta)
         startedByRestart -> Reconciliation.Continue
         else -> Reconciliation.Fail(DISCONNECTED_ERROR, delta)

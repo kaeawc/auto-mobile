@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.models
 
+import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
@@ -64,6 +65,7 @@ constructor(
    * otherwise.
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val prototypeSuspended: Boolean? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val prototypeHiddenReason: PrototypeHiddenReason? = null,
 )
 
 @Serializable

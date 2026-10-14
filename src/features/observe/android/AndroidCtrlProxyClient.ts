@@ -1386,6 +1386,12 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
   ): Promise<PrototypeResult>;
+  requestPinSavedPrototype(
+    id: string,
+    icon?: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult>;
   requestListSavedPrototypes(
     timeoutMs?: number,
     perf?: PerformanceTracker,
@@ -3998,6 +4004,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     perf?: PerformanceTracker,
   ): Promise<PrototypeResult> {
     return this.prototypes.requestSavePrototype(save, timeoutMs, perf);
+  }
+  requestPinSavedPrototype(
+    id: string,
+    icon?: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    return this.prototypes.requestPinSavedPrototype(id, icon, timeoutMs, perf);
   }
   requestListSavedPrototypes(
     timeoutMs?: number,

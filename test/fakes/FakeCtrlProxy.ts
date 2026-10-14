@@ -115,6 +115,21 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   }
 
   readonly saveRequests: { spec: PrototypeSpec; label: string; icon?: string }[] = [];
+  readonly pinRequests: { id: string; icon?: string }[] = [];
+  private pinResult: PrototypeResult = { success: true };
+  setPinResult(result: PrototypeResult): void {
+    this.pinResult = result;
+  }
+  async requestPinSavedPrototype(
+    id: string,
+    icon?: string,
+    _timeoutMs?: number,
+    _perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    this.pinRequests.push({ id, ...(icon === undefined ? {} : { icon }) });
+    this.checkFailure("requestPinSavedPrototype");
+    return this.pinResult;
+  }
   readonly deleteRequests: string[] = [];
   listCalls = 0;
   private saveResult: PrototypeResult = { success: true };

@@ -143,6 +143,7 @@ class WebSocketServer(
         "save_prototype",
         "list_saved_prototypes",
         "delete_saved_prototype",
+        "pin_saved_prototype",
       ) + prototypeAssetRequestTypes
 
     /** Requests whose payload is typed user input, which may be a password. */

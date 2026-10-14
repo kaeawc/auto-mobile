@@ -192,6 +192,8 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     icon: String?,
   ) {}
 
+  override fun pinSavedPrototype(requestId: String?, id: String, icon: String?) {}
+
   override fun listSavedPrototypes(requestId: String?) {}
 
   override fun deleteSavedPrototype(requestId: String?, id: String) {}
@@ -570,6 +572,9 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     label: String,
     icon: String?,
   ) = record("savePrototype", requestId, spec, label, icon)
+
+  override fun pinSavedPrototype(requestId: String?, id: String, icon: String?) =
+    record("pinSavedPrototype", requestId, id, icon)
 
   override fun listSavedPrototypes(requestId: String?) = record("listSavedPrototypes", requestId)
 

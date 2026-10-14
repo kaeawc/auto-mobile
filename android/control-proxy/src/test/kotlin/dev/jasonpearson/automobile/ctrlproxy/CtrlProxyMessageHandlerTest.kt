@@ -1290,6 +1290,11 @@ class CtrlProxyMessageHandlerTest {
       listOf(null, json.decodeFromString<PrototypeSpec>(spec), "Panel", null),
       lastCall.second,
     )
+    dispatch("""{"type":"pin_saved_prototype","requestId":"pin","id":"panel","icon":"icon"}""")
+    assertEquals("pinSavedPrototype", lastCall.first)
+    assertEquals(listOf("pin", "panel", "icon"), lastCall.second)
+    dispatch("""{"type":"pin_saved_prototype","id":"panel"}""")
+    assertEquals(listOf(null, "panel", null), lastCall.second)
     dispatch("""{"type":"list_saved_prototypes","requestId":"list"}""")
     assertEquals("listSavedPrototypes", lastCall.first)
     assertEquals(listOf("list"), lastCall.second)

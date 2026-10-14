@@ -22070,6 +22070,9 @@
         "errorCode": {
           "type": "string",
           "enum": [
+            "pin_unsupported",
+            "device_locked",
+            "pin_failed",
             "invalid_id",
             "invalid_label",
             "spec_too_large",

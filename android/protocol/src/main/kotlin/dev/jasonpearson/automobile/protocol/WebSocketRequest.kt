@@ -511,6 +511,14 @@ data class SavePrototype(
 ) : WebSocketRequest()
 
 @Serializable
+@SerialName("pin_saved_prototype")
+data class PinSavedPrototype(
+  override val requestId: String? = null,
+  val id: String,
+  val icon: String? = null,
+) : WebSocketRequest()
+
+@Serializable
 @SerialName("list_saved_prototypes")
 data class ListSavedPrototypes(override val requestId: String? = null) : WebSocketRequest()
 

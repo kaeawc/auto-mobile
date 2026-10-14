@@ -528,3 +528,42 @@ existing SF Symbols mapping and never use Android Material glyphs. `platformNote
 reports the drawn-field and SF Symbol differences. Results are ordinary observable
 child nodes inside the prototype window, not a separate popup/dialog or a lazy
 list that drops rows.
+
+## Saved prototype on-disk layout (#12254)
+
+One saved prototype lives in the viewer app container:
+
+```text
+Documents/prototype/
+  manifest.json
+  spec.json
+  assets/<sha256>.png|jpg|webp
+  fonts/<sha256>.ttf|otf
+```
+
+Version 1 has the strict manifest shape
+`{"formatVersion":1,"specFile":"spec.json","assets":[{"id":"image","file":"assets/<sha256>.png","sha256":"<sha256>","mediaType":"image/png"}],"fonts":[]}`.
+Both arrays are always present. SHA-256 is lowercase hexadecimal over file bytes;
+identical bytes with the same media type share one content-addressed file. Paths
+must exactly match the media type, folder and hash. IDs are unique across both arrays.
+The shared asset contract caps count, per-file size and total bytes; spec and
+manifest caps are 1 MiB and 256 KiB respectively.
+
+The host writer stages a sibling `.tmp-<token>` directory, writes the manifest last,
+then renames into place. Replacement first backs up the old directory to
+`.old-<token>` and restores it if the commit rename fails. Callers serialize writes.
+The reader refuses unknown versions before validating version-specific fields and
+never changes any files. A bad manifest, spec, count or verified-byte total is corrupt;
+missing, unreadable, unsafe, empty/oversized or hash-mismatched assets are omitted
+from the verified snapshot and reported as sorted problems. The viewer can use its
+missing-asset placeholder and expose those problems through `inspect`.
+
+Unlike Android's many slug directories, iOS stores one prototype and has no manifest
+id, label or savedAt. Asset failures leave the prototype loadable; reading never
+repairs or deletes it. The writer permits spec references absent from the request;
+the reader reports these as missing manifest entries. The installer is separate (#12256).
+
+The implementations are `src/features/prototype/savedPrototypeLayout.ts` and
+`ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSavedLayout.swift`.
+Both test suites consume `test/fixtures/prototype-saved-layout/layout.json`, including
+the same expected manifest and file hashes. Fixture binaries are generated at test time.

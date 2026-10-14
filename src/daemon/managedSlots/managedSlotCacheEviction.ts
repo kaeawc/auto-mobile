@@ -37,10 +37,11 @@ export interface ManagedSlotEvictionSkip {
   reason: string;
   attempts?: number;
   failedDeletes?: number;
+  uncounted?: true;
   lastError?: string | null;
 }
 
-/** Free deletion markers stop reserving budget after this many failed native deletes. */
+/** Free deletion markers become eligible for the single exemption at this threshold. */
 export const MANAGED_SLOT_DELETION_UNCOUNTED_AFTER_ATTEMPTS = 3;
 
 export function isStuckFreeDeviceDeletion(
@@ -49,9 +50,36 @@ export function isStuckFreeDeviceDeletion(
   return (deletion?.failedDeletes ?? 0) >= MANAGED_SLOT_DELETION_UNCOUNTED_AFTER_ATTEMPTS;
 }
 
+/** Host-wide cap across all platforms, per registry snapshot. */
+export const MANAGED_SLOT_MAX_UNCOUNTED_STUCK_DELETIONS = 1;
+
+/** Exempt only the oldest unbound stuck marker; ties use platform then stable id, plain string order. */
+export function uncountedStuckFreeDeviceDeletions(
+  rows: readonly FreeSlotDeviceRecord[],
+  slotBound: readonly Pick<FreeSlotDeviceRecord, "platform" | "stableDeviceId">[] = [],
+): FreeSlotDeviceRecord[] {
+  return rows
+    .filter(
+      (row) =>
+        isStuckFreeDeviceDeletion(row.deletion) &&
+        !slotBound.some(
+          (device) =>
+            device.platform === row.platform && device.stableDeviceId === row.stableDeviceId,
+        ),
+    )
+    .sort(
+      (a, b) =>
+        a.deletion!.startedAtMs - b.deletion!.startedAtMs ||
+        compareText(a.platform, b.platform) ||
+        compareText(a.stableDeviceId, b.stableDeviceId),
+    )
+    .slice(0, MANAGED_SLOT_MAX_UNCOUNTED_STUCK_DELETIONS);
+}
+
 /** Shared refusal evidence for a journaled free-device deletion. */
 export function managedSlotDeletionSkip(
   row: FreeSlotDeviceRecord,
+  uncounted = false,
 ): ManagedSlotEvictionSkip | undefined {
   if (row.deletion === null) {
     return undefined;
@@ -63,6 +91,7 @@ export function managedSlotDeletionSkip(
     attempts: row.deletion.attempts,
     failedDeletes: row.deletion.failedDeletes,
     lastError: row.deletion.lastError,
+    ...(uncounted ? { uncounted: true as const } : {}),
   };
 }
 
@@ -178,6 +207,24 @@ export class DefaultManagedSlotEvictionSelector implements ManagedSlotEvictionSe
         });
       }
     }
+    const stuck = rows.filter((row) => isStuckFreeDeviceDeletion(row.deletion));
+    const bound = [];
+    for (const row of stuck) {
+      this.checkBudget(options);
+      if ((await registry.findDeviceHolder(row.platform, row.stableDeviceId))?.kind === "slot") {
+        bound.push(row);
+      }
+    }
+    const exempt = uncountedStuckFreeDeviceDeletions(stuck, bound);
+    selection.skipped = selection.skipped.map((row) => ({
+      ...row,
+      ...(exempt.some(
+        (device) =>
+          device.platform === row.platform && device.stableDeviceId === row.stableDeviceId,
+      )
+        ? { uncounted: true as const }
+        : {}),
+    }));
     selection.candidates.sort(
       (a, b) =>
         Number(b.absent === true) - Number(a.absent === true) ||

@@ -1,3 +1,11 @@
+import {
+  emulatorProcessEscapeHint,
+  EmulatorStillRunningError,
+  markEmulatorStopDispatched,
+  type EmulatorProcessIdentity,
+  type EmulatorProcessStopper,
+} from "./EmulatorProcessStop";
+import { AdbCommandTimeoutError } from "./AdbClient";
 import { errorMessage } from "../describeUnknownError";
 import { existsSync } from "node:fs";
 import { extname, resolve, isAbsolute } from "node:path";
@@ -60,6 +68,16 @@ import {
   defaultDiscoveryObservationSequence,
   type DiscoveryObservationSequence,
 } from "../DiscoveryObservationSequence";
+
+export const EMULATOR_CONSOLE_KILL_BOUND_MS = 10_000;
+interface EmulatorKillOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  force?: boolean;
+  processStop?: { stopper: EmulatorProcessStopper; expectedAvdName?: string };
+  /** Internal absolute deadline, set before discovery. */
+  deadlineMs?: number;
+}
 
 const MODERN_PLAY_IMAGE_MIN_API_LEVEL = 30;
 const MAX_LAUNCH_OUTPUT_LINES = 50;
@@ -214,7 +232,7 @@ interface OfflineTracker {
   deviceId: string | null;
   since: number | null;
   state?: TargetReadinessState;
-  /** A bounded `adb reconnect offline` recovery has been dispatched during this readiness invocation (monotonic once set). */
+  /** A bounded `adb -s <serial> reconnect` recovery has been dispatched during this readiness invocation (monotonic once set). */
   recoveryAttempted?: boolean;
 }
 
@@ -394,8 +412,8 @@ export interface AndroidEmulatorReadinessOptions {
   /**
    * The device was just created by a fresh provision, so its first boot is a
    * genuine cold boot (no quick-boot snapshot to restore). When its serial sits
-   * in ADB `offline` past a bounded threshold, attempt one `adb reconnect
-   * offline` re-detect, then continue readiness polling through the caller's
+   * in ADB `offline` past a bounded threshold, attempt one `adb -s <serial> reconnect`
+   * re-detect, then continue readiness polling through the caller's
    * timeout. A quick-boot-after-shutdown restore leaves this unset and skips
    * that recovery attempt.
    */
@@ -505,10 +523,7 @@ export interface AndroidEmulator {
    *   serial with nothing on it still refuses.
    * @returns The checked target after ADB accepts termination; callers confirm disappearance.
    */
-  killDevice(
-    device: BootedDevice,
-    options?: { timeoutMs?: number; signal?: AbortSignal; force?: boolean },
-  ): Promise<BootedDevice>;
+  killDevice(device: BootedDevice, options?: EmulatorKillOptions): Promise<BootedDevice>;
 
   /**
    * Wait for the emulator to be ready for use
@@ -1403,7 +1418,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
    *
    * `recoveryAttempted` is deliberately NOT reset: it is MONOTONIC for the
    * lifetime of a single `waitForEmulatorReady` invocation. A probe gap after
-   * the one-shot `adb reconnect offline` has been dispatched must not wipe that
+   * the one-shot `adb -s <serial> reconnect` has been dispatched must not wipe that
    * history, or a later re-confirmed offline would issue a SECOND reconnect.
    */
   private clearOfflineTracker(tracker: OfflineTracker): void {
@@ -1465,7 +1480,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
 
   /**
    * Bounded recovery for a fresh-provision cold boot whose serial is stuck in
-   * ADB `offline`. Runs at most one `adb reconnect offline` re-detect once the
+   * ADB `offline`. Runs at most one `adb -s <serial> reconnect` re-detect once the
    * serial has been offline past {@link FRESH_OFFLINE_RECOVERY_THRESHOLD_MS}.
    * The recovery never terminates readiness: normal polling continues until the
    * caller's deadline or a terminal emulator failure (issue #7078).
@@ -1543,7 +1558,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     return Math.min(currentDelayMs, thresholdDelayMs);
   }
 
-  /** Dispatch the single bounded `adb reconnect offline` re-detect for a stuck fresh boot. */
+  /** Dispatch the single bounded `adb -s <serial> reconnect` re-detect for a stuck fresh boot. */
   private async dispatchFreshOfflineReconnect(
     tracker: OfflineTracker,
     deviceId: string,
@@ -1560,22 +1575,22 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     );
     logger.warn(
       `Fresh provision '${avdName}' target ${deviceId} has been ADB-offline for ` +
-        `${now - offlineSince}ms; attempting 'adb reconnect offline' recovery`,
+        `${now - offlineSince}ms; attempting 'adb -s ${deviceId} reconnect' recovery`,
     );
     try {
-      await this.issueReconnectOffline(commandTimeoutMs, signal);
+      await this.issueReconnectOffline(deviceId, commandTimeoutMs, signal);
     } catch (error) {
       this.throwIfReadinessAborted(signal);
       // Best-effort recovery: readiness polling continues through its deadline.
       logger.warn(
-        `'adb reconnect offline' recovery for ${deviceId} failed: ${errorMessage(error)}`,
+        `'adb -s ${deviceId} reconnect' recovery for ${deviceId} failed: ${errorMessage(error)}`,
         error,
       );
     }
   }
 
   /**
-   * Issue exactly one adb reconnect offline re-detect. Shared by the
+   * Issue exactly one adb -s <serial> reconnect re-detect. Shared by the
    * fresh-provision readiness recovery ({@link dispatchFreshOfflineReconnect})
    * and the disconnect monitor's in-session offline recovery
    * ({@link recoverOfflineDevices}, #7536): noRetry keeps the real AdbClient
@@ -1583,10 +1598,14 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
    * executions), so one logical recovery issues exactly one reconnect command
    * (#7054).
    */
-  private async issueReconnectOffline(timeoutMs: number, signal: AbortSignal | undefined) {
+  private async issueReconnectOffline(
+    deviceId: string,
+    timeoutMs: number,
+    signal: AbortSignal | undefined,
+  ) {
     await this.adbFactory
       .create(null)
-      .executeCommand("reconnect offline", timeoutMs, undefined, true, signal);
+      .execute(["-s", deviceId, "reconnect"], { timeoutMs, noRetry: true, signal });
   }
 
   /**
@@ -1649,25 +1668,33 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
 
   /**
    * Bounded, best-effort recovery for session-bound serial(s) the disconnect
-   * monitor observed stuck in ADB offline (#7536). adb reconnect offline
-   * has no per-serial target — it re-detects every currently offline
-   * device — so one dispatch covers every candidate returned by
-   * {@link getOfflineDeviceIdsAmong}. Never throws except on abort: recovery
-   * failure here must not fail or block the disconnect monitor's sweep.
+   * monitor observed stuck in ADB offline (#7536). Each distinct serial gets
+   * one host-serial reconnect, accepted even for an offline transport. Dispatch
+   * concurrently so the sweep stays bounded by a single command timeout.
+   * Never throws except on abort: a serial's recovery failure must not prevent
+   * recovery of the others or fail the disconnect monitor's sweep.
    */
   async recoverOfflineDevices(
+    deviceIds: Iterable<string>,
     options: { timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<void> {
+    this.throwIfReadinessAborted(options.signal);
     const timeoutMs = options.timeoutMs ?? FRESH_OFFLINE_RECOVERY_COMMAND_TIMEOUT_MS;
-    try {
-      await this.issueReconnectOffline(timeoutMs, options.signal);
-    } catch (error) {
-      this.throwIfReadinessAborted(options.signal);
-      logger.warn(
-        `'adb reconnect offline' recovery for in-session offline device(s) failed: ${errorMessage(error)}`,
-        error,
-      );
-    }
+    await Promise.all(
+      [...new Set(deviceIds)].map(async (deviceId) => {
+        try {
+          await this.issueReconnectOffline(deviceId, timeoutMs, options.signal);
+        } catch (error) {
+          this.throwIfReadinessAborted(options.signal);
+          // Best-effort recovery: other serials and the disconnect sweep continue.
+          logger.warn(
+            `'adb -s ${deviceId} reconnect' recovery for in-session offline device failed: ${errorMessage(error)}`,
+            error,
+          );
+        }
+      }),
+    );
+    this.throwIfReadinessAborted(options.signal);
   }
 
   private targetReadinessState(targetState: AdbDeviceState | undefined): TargetReadinessState {
@@ -3969,10 +3996,8 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
    *   discovery that feeds it (#6864).
    * @returns The checked target after ADB accepts termination; callers confirm disappearance.
    */
-  async killDevice(
-    device: BootedDevice,
-    options: { timeoutMs?: number; signal?: AbortSignal; force?: boolean } = {},
-  ): Promise<BootedDevice> {
+  async killDevice(device: BootedDevice, options: EmulatorKillOptions = {}): Promise<BootedDevice> {
+    options = { ...options, deadlineMs: this.timer.now() + (options.timeoutMs ?? 30_000) };
     // Under `force` the rediscovery below is serial-only. Dropping the name
     // comparison alone was not enough: enrichment runs BEFORE the comparison
     // and probes every attached emulator sequentially at 2s apiece, so three
@@ -3981,14 +4006,7 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     // committed to killing whatever occupies this serial, every one of those
     // names is read and then discarded
     // ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
-    const runningEmulators = await this.getBootedDevicesChecked(
-      false,
-      {
-        bypassDeviceListCache: true,
-        skipNameEnrichment: options.force === true,
-      },
-      options.signal,
-    );
+    const runningEmulators = await this.discoverEmulatorsForKill(options);
     const emulator = runningEmulators.find((emu) => emu.deviceId === device.deviceId);
 
     if (!emulator || !emulator.deviceId) {
@@ -4014,6 +4032,16 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     // the forced kill on the caller's behalf a second time
     // ([#6874](https://github.com/kaeawc/auto-mobile/pull/6874) review).
     if (!options.force) {
+      if (this.shouldStopMuteEmulatorProcess(device, emulator, options)) {
+        await this.stopEmulatorProcess(
+          device,
+          options,
+          new ActionableError(
+            `Refusing to kill '${device.deviceId}': the emulator could not name itself.`,
+          ),
+        );
+        return device;
+      }
       if (emulator.name !== device.name) {
         throw new ActionableError(
           `Emulator '${device.deviceId}' identity changed before termination; refusing to kill its replacement.`,
@@ -4035,7 +4063,9 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
         throw new ActionableError(
           `Refusing to kill '${device.deviceId}': the emulator could not name itself, so this ` +
             "daemon cannot tell it apart from a replacement that took the serial. Resolve its AVD " +
-            `name and retry, or stop it by hand with \`adb -s ${device.deviceId} emu kill\`.`,
+            (options.processStop
+              ? `name and retry. ${await this.processStopEscapeHint(device, options)}`
+              : `name and retry, or stop it by hand with \`adb -s ${device.deviceId} emu kill\`.`),
         );
       }
     } else {
@@ -4051,8 +4081,8 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     // `shell reboot -p` halts the OS without it, so the next quick-boot of the
     // AVD resumes into a halted guest that never comes adb-online and burns the
     // whole getAndroid readiness budget (issue #6849 regression of #6845). The
-    // console kill is therefore the only termination primitive here; there is
-    // no `reboot -p` path.
+    // console kill remains preferred; a bounded process fallback is available
+    // only when the caller supplies process-table identity evidence.
     //
     // `adb emu` selects a device by serial only — the console subcommand ignores
     // `-t` and honours just `-s`/ANDROID_SERIAL, so `adb -t <id> emu kill` fails
@@ -4063,21 +4093,186 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
     // termination at all: the serial is the kill's identity, the discovery-time
     // check above refuses a replacement AVD found on that serial, and callers
     // confirm disappearance and incarnation afterwards.
-    await this.dispatchEmulatorConsoleKill(emulator, options);
+    await this.dispatchEmulatorConsoleKill(emulator, options, device);
     logger.info(`Requested termination of emulator '${device.name}'`);
     return emulator;
   }
 
+  private async discoverEmulatorsForKill(options: EmulatorKillOptions): Promise<BootedDevice[]> {
+    const discover = (signal?: AbortSignal) =>
+      this.getBootedDevicesChecked(
+        false,
+        {
+          bypassDeviceListCache: true,
+          skipNameEnrichment: options.force === true,
+        },
+        signal,
+      );
+    if (!options.processStop) {
+      return discover(options.signal);
+    }
+    const controller = new AbortController();
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, controller.signal])
+      : controller.signal;
+    return raceWithDeadline(() => discover(signal), {
+      timer: this.timer,
+      signal: options.signal,
+      timeoutMs: Math.max(0, (options.deadlineMs ?? this.timer.now()) - this.timer.now()),
+      label: "Emulator shutdown discovery",
+      onTimeout: () => controller.abort(),
+    });
+  }
+
   private async dispatchEmulatorConsoleKill(
     target: BootedDevice,
-    options: { timeoutMs?: number; signal?: AbortSignal },
+    options: EmulatorKillOptions,
+    identityTarget: BootedDevice = target,
   ): Promise<void> {
-    await this.adbFactory.create(target).execute(["emu", "kill"], {
-      timeoutMs: options.timeoutMs,
-      noRetry: true,
+    const remainingMs =
+      (options.deadlineMs ?? this.timer.now() + (options.timeoutMs ?? 30_000)) - this.timer.now();
+    const timeoutMs = options.processStop
+      ? Math.max(0, Math.min(remainingMs / 3, EMULATOR_CONSOLE_KILL_BOUND_MS))
+      : options.timeoutMs;
+    try {
+      await this.adbFactory.create(target).execute(["emu", "kill"], {
+        timeoutMs,
+        noRetry: true,
+        signal: options.signal,
+        waitForProcessSettlementAfterAbort: true,
+      });
+    } catch (error) {
+      if (!options.processStop) {
+        throw error;
+      }
+      options.signal?.throwIfAborted();
+      if (!(error instanceof AdbCommandTimeoutError)) {
+        throw error;
+      }
+      logger.warn(
+        `[AndroidEmulatorClient] console kill timed out for ${target.deviceId}; checking process identity`,
+        error,
+      );
+      try {
+        await this.stopEmulatorProcess(identityTarget, options, error);
+      } catch (stopError) {
+        throw markEmulatorStopDispatched(
+          stopError instanceof Error
+            ? stopError
+            : toActionableError(stopError, "Emulator stop failed after console kill"),
+        );
+      }
+    }
+  }
+
+  private shouldStopMuteEmulatorProcess(
+    device: BootedDevice,
+    emulator: BootedDevice,
+    options: EmulatorKillOptions,
+  ): boolean {
+    return Boolean(
+      options.processStop &&
+      this.isUnknownEmulatorName(emulator.name, emulator.deviceId) &&
+      this.processStopAvdName(device, options),
+    );
+  }
+
+  private processStopAvdName(
+    device: BootedDevice,
+    options: EmulatorKillOptions,
+  ): string | undefined {
+    return this.isUnknownEmulatorName(device.name, device.deviceId)
+      ? options.processStop?.expectedAvdName
+      : device.name;
+  }
+
+  private async processStopEscapeHint(
+    device: BootedDevice,
+    options: EmulatorKillOptions,
+    identity?: EmulatorProcessIdentity,
+  ): Promise<string> {
+    if (identity) {
+      return this.processIdentityEscapeHint(device, identity);
+    }
+    const stopper = options.processStop?.stopper;
+    if (!stopper) {
+      return emulatorProcessEscapeHint(device.deviceId);
+    }
+    const stopOptions = {
+      deadlineMs: options.deadlineMs ?? this.timer.now(),
       signal: options.signal,
-      waitForProcessSettlementAfterAbort: true,
-    });
+    };
+    const candidates = await stopper.describeSerial(device.deviceId, stopOptions);
+    if (candidates.length > 0) {
+      return emulatorProcessEscapeHint(device.deviceId, candidates);
+    }
+    const observed = await stopper.identify(
+      { serial: device.deviceId, avdName: this.processStopAvdName(device, options) ?? "" },
+      stopOptions,
+    );
+    return this.processIdentityEscapeHint(device, observed);
+  }
+
+  private processIdentityEscapeHint(
+    device: BootedDevice,
+    identity: EmulatorProcessIdentity,
+  ): string {
+    switch (identity.kind) {
+      case "absent":
+      case "unreadable":
+        return emulatorProcessEscapeHint(device.deviceId, [], identity.kind);
+      case "ambiguous":
+        return emulatorProcessEscapeHint(device.deviceId, identity.candidates);
+      default:
+        return emulatorProcessEscapeHint(device.deviceId, [identity]);
+    }
+  }
+
+  private async stopEmulatorProcess(
+    device: BootedDevice,
+    options: EmulatorKillOptions,
+    refusal: Error,
+  ): Promise<void> {
+    const avdName = this.processStopAvdName(device, options);
+    if (!options.processStop || !avdName) {
+      throw await this.processStopRefusal(device, options, refusal);
+    }
+    const outcome = await options.processStop.stopper.stop(
+      { serial: device.deviceId, avdName },
+      {
+        deadlineMs: options.deadlineMs ?? this.timer.now(),
+        signal: options.signal,
+      },
+    );
+    switch (outcome.kind) {
+      case "stopped":
+        return;
+      case "identity-mismatch":
+        throw new ActionableError(
+          `Emulator '${device.deviceId}' identity changed before termination; refusing to kill its replacement (AVD '${outcome.runningAvdName}').`,
+        );
+      case "still-running":
+        if (!outcome.signalled) {
+          throw new ActionableError(
+            `Emulator '${device.deviceId}' (AVD '${avdName}') is still running with pid ${outcome.pid}; no signal could be delivered (deadline spent or signal refused: permission denied or unsafe pid). ${emulatorProcessEscapeHint(device.deviceId, [{ pid: outcome.pid, command: outcome.command }])}`,
+          );
+        }
+        throw new EmulatorStillRunningError(outcome.pid, device.deviceId, avdName, outcome.command);
+      case "unidentified":
+        throw await this.processStopRefusal(device, options, refusal, outcome.identity);
+    }
+  }
+
+  private async processStopRefusal(
+    device: BootedDevice,
+    options: EmulatorKillOptions,
+    refusal: Error,
+    identity?: EmulatorProcessIdentity,
+  ): Promise<Error> {
+    const message = `${refusal.message} ${await this.processStopEscapeHint(device, options, identity)}`;
+    return refusal instanceof AdbCommandTimeoutError
+      ? new AdbCommandTimeoutError(message)
+      : new ActionableError(message, { cause: refusal });
   }
 
   /**
@@ -4098,9 +4293,15 @@ export class AndroidEmulatorClient implements AndroidEmulator, AndroidEmulatorFo
    */
   private async killEmulatorMissingFromOnlineList(
     device: BootedDevice,
-    options: { timeoutMs?: number; signal?: AbortSignal; force?: boolean },
+    options: EmulatorKillOptions,
   ): Promise<BootedDevice> {
-    const attachedState = await this.readAttachedStateForKill(device, options);
+    const stateOptions = options.processStop
+      ? {
+          ...options,
+          timeoutMs: Math.max(0, (options.deadlineMs ?? this.timer.now()) - this.timer.now()),
+        }
+      : options;
+    const attachedState = await this.readAttachedStateForKill(device, stateOptions);
     if (attachedState === undefined) {
       throw new ActionableError(`Emulator '${device.name}' is not running`);
     }

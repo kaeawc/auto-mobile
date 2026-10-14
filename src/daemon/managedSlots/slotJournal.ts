@@ -81,9 +81,14 @@ export const SLOT_JOURNAL_STOP_BUDGET_MS = 100;
 export const SLOT_JOURNAL_OVERDUE_DELETE_GRACE_MS = 1_000;
 export const SLOT_JOURNAL_MAX_ABANDONED_DELETES = 3;
 export const SLOT_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS = 6;
+/** Durability gets one caller-independent attempt without indefinitely holding its session. */
+export const SLOT_JOURNAL_REMOVAL_FLAG_WRITE_BUDGET_MS = 500;
 export const SLOT_JOURNAL_REGISTRY_RETRY_INITIAL_DELAY_MS = 25;
 export const SLOT_JOURNAL_REGISTRY_RETRY_MAX_DELAY_MS = 1_000;
 export const SLOT_JOURNAL_REGISTRY_RETRY_MAX_BLOCKED_WAIT_MS = 5_000;
+
+/** Registry removal work exceeded its fixed cap or the caller's deadline. */
+export class SlotJournalRemovalRegistryTimeout extends Error {}
 
 interface RemovalOperation {
   overdueAtMs?: number;
@@ -344,7 +349,7 @@ export class ManagedSlotJournal {
   private readonly isExecOwnerLive: SlotExecOwnerLiveness;
   private readonly backoff: BackoffPolicy;
   private readonly budgets: SlotJournalStageBudgets;
-  // Intent is in memory: death before a successful flag write leaves a later owner free to adopt.
+  // Memory bridges registry contention; only an unwritable flag can leave intent lost on death.
   private readonly removalIntents = new Set<number>();
   private readonly removalFlagPacing: RegistryRetryPacing;
 
@@ -390,6 +395,11 @@ export class ManagedSlotJournal {
       return entry;
     }
     this.markRemovalIntended(entry);
+    // Cancellation and an expired deadline only bound retries, never the first durability write.
+    const recorded = await this.tryRemovalFlag(entry, new AbortController().signal, true);
+    if (recorded) {
+      return recorded.kind === "advanced" ? recorded.entry : entry;
+    }
     if (options.deadlineMs !== undefined && this.deps.timer.now() >= options.deadlineMs) {
       logger.warn(`[SlotJournal] Removal flag for entry ${entry.id} missed its deadline.`);
       return entry;
@@ -426,46 +436,59 @@ export class ManagedSlotJournal {
     entry: SlotJournalEntry,
     signal: AbortSignal,
   ): Promise<SlotJournalEntry> {
-    for (let attempt = 1; attempt <= SLOT_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS; attempt++) {
+    for (let attempt = 2; attempt <= SLOT_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS; attempt++) {
       signal.throwIfAborted();
+      await this.removalFlagPacing.wait(this.removalFlagPacing.delay(attempt - 1), signal);
       const recorded = await this.tryRemovalFlag(entry, signal);
       if (recorded) {
-        if (recorded.kind === "advanced" || recorded.kind === "journal_conflict") {
-          this.removalIntents.delete(entry.id);
-        }
         return recorded.kind === "advanced" ? recorded.entry : entry;
-      }
-      if (attempt < SLOT_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS) {
-        await this.removalFlagPacing.wait(this.removalFlagPacing.delay(attempt), signal);
       }
     }
     logger.warn(`[SlotJournal] Removal flag for entry ${entry.id} exhausted registry retries.`);
     return entry;
   }
 
-  private async tryRemovalFlag(entry: SlotJournalEntry, signal: AbortSignal) {
+  private async tryRemovalFlag(entry: SlotJournalEntry, signal: AbortSignal, immediate = false) {
+    const startedMs = this.deps.timer.now();
+    const timeout = new Error(`Removal flag for entry ${entry.id} exceeded its write budget.`);
     try {
-      return await this.removalFlagPacing.run(
-        () =>
-          this.advanceStep(
-            entry,
-            {
-              expectedPhase: entry.phase,
-              phase: entry.phase,
-              target: {
-                removalRequested: true,
-                ...(entry.target.newStableId ? { newStableId: entry.target.newStableId } : {}),
-              },
+      const write = () =>
+        this.advanceStep(
+          entry,
+          {
+            expectedPhase: entry.phase,
+            phase: entry.phase,
+            target: {
+              removalRequested: true,
+              ...(entry.target.newStableId ? { newStableId: entry.target.newStableId } : {}),
             },
-            signal,
-          ),
-        (result) => result.kind === "advanced",
-        signal,
-      );
+          },
+          signal,
+        );
+      const recorded = await (immediate
+        ? raceWithDeadline(write, {
+            timer: this.deps.timer,
+            timeoutMs: SLOT_JOURNAL_REMOVAL_FLAG_WRITE_BUDGET_MS,
+            timeoutError: () => timeout,
+            label: `first removal flag write for entry ${entry.id}`,
+          })
+        : this.removalFlagPacing.run(write, (result) => result.kind === "advanced", signal));
+      if (recorded.kind === "advanced" || recorded.kind === "journal_conflict") {
+        this.removalIntents.delete(entry.id);
+      }
+      return recorded;
     } catch (error) {
+      if (error === timeout) {
+        logger.warn(`[SlotJournal] ${errorMessage(error)}`, error);
+        return { kind: "removal_flag_timed_out" as const };
+      }
       if (classifySqliteError(error) !== "retryable") {
         // Preserve non-retryable errors; the in-memory intent still prevents adoption.
+        logger.warn(`[SlotJournal] Removal flag failed: ${errorMessage(error)}`, error);
         throw error;
+      }
+      if (immediate) {
+        this.removalFlagPacing.noteBlocked(startedMs);
       }
       // Expected SQLite contention is retried on the shared pacing before any deletion.
       logger.debug(`[SlotJournal] Removal flag deferred: ${errorMessage(error)}`, error);
@@ -995,7 +1018,43 @@ export class ManagedSlotJournal {
     return pending ?? this.creationStep(entry, options);
   }
 
+  /** Registry work cannot hold an uncommitted cleanup beyond its request or fixed write cap. */
+  async removalRegistryStage<T>(operation: () => Promise<T>, deadlineMs?: number): Promise<T> {
+    const timeoutMs = Math.min(
+      SLOT_JOURNAL_REMOVAL_FLAG_WRITE_BUDGET_MS,
+      deadlineMs === undefined ? Infinity : Math.max(0, deadlineMs - this.deps.timer.now()),
+    );
+    return raceWithDeadline(operation, {
+      timer: this.deps.timer,
+      timeoutMs,
+      label: "uncommitted cleanup registry stage",
+      timeoutError: () =>
+        new SlotJournalRemovalRegistryTimeout(
+          "Removal deferred to journal redrive: registry stage timed out.",
+        ),
+    });
+  }
+
   private async creationStep(
+    entry: SlotJournalEntry,
+    options: { adopt: boolean; deadlineMs?: number },
+    signal?: AbortSignal,
+  ): Promise<Step> {
+    try {
+      return await this.creationRegistryStep(entry, options, signal);
+    } catch (error) {
+      if (!(error instanceof SlotJournalRemovalRegistryTimeout)) {
+        throw error;
+      }
+      const message = options.adopt
+        ? `Settling created entry ${entry.id} deferred to the next redrive: registry stage timed out`
+        : "Creation cleanup deferred to journal redrive: registry stage timed out";
+      logger.warn(`[SlotJournal] ${message}`, error);
+      return blocked(entry, "reconcile_in_progress", message);
+    }
+  }
+
+  private async creationRegistryStep(
     entry: SlotJournalEntry,
     options: { adopt: boolean; deadlineMs?: number },
     signal?: AbortSignal,
@@ -1003,10 +1062,20 @@ export class ManagedSlotJournal {
     checkCancellation(signal);
     const located = await this.locateCreated(entry, signal);
     if (located.kind === "absent") {
-      return this.closeStep(entry, "rolled_back", signal);
+      return this.removalRegistryStage(
+        () => this.closeStep(entry, "rolled_back", signal),
+        options.deadlineMs,
+      );
     }
     if (located.kind === "blocked") {
-      return this.recordBlocked(entry, located.reason, located.message, undefined, signal);
+      return this.removalBlocked(
+        entry,
+        located.reason,
+        located.message,
+        undefined,
+        signal,
+        options.deadlineMs,
+      );
     }
     const { device, stableId } = located;
     const locatedPending = this.pendingRemoval(
@@ -1018,16 +1087,22 @@ export class ManagedSlotJournal {
     if (locatedPending) {
       return locatedPending;
     }
-    const holder = await this.deps.registry.findDeviceHolder(
-      journalCreationPlatform(entry),
-      stableId,
+    const holder = await this.removalRegistryStage(
+      () => this.deps.registry.findDeviceHolder(journalCreationPlatform(entry), stableId),
+      options.deadlineMs,
     );
     checkCancellation(signal);
     if (holder) {
       // Bound to a slot or parked in the free pool: never ours to adopt or delete.
-      return this.closeStep(entry, "rolled_back", signal);
+      return this.removalRegistryStage(
+        () => this.closeStep(entry, "rolled_back", signal),
+        options.deadlineMs,
+      );
     }
-    const assignment = await this.deps.registry.getAssignment(keyOf(entry));
+    const assignment = await this.removalRegistryStage(
+      () => this.deps.registry.getAssignment(keyOf(entry)),
+      options.deadlineMs,
+    );
     checkCancellation(signal);
     const current = assignment !== null && sameBinding(assignment, entry.binding);
     const spec = recordedSpec(entry);
@@ -1077,7 +1152,14 @@ export class ManagedSlotJournal {
   }
 
   async advance(entry: SlotJournalEntry, input: Omit<AdvanceSlotJournalInput, "owner">) {
-    return this.advanceStep(entry, input);
+    const result = await this.advanceStep(entry, input);
+    if (
+      result.kind === "journal_conflict" ||
+      (result.kind === "advanced" && result.entry.target.removalRequested)
+    ) {
+      this.removalIntents.delete(entry.id);
+    }
+    return result;
   }
 
   private async advanceStep(
@@ -1433,14 +1515,18 @@ export class ManagedSlotJournal {
   ): Promise<Step> {
     if (!entry.target.removalRequested) {
       this.markRemovalIntended(entry);
-      const recorded = await this.advanceStep(
-        entry,
-        {
-          expectedPhase: entry.phase,
-          phase: entry.phase,
-          target: { removalRequested: true, newStableId: stableId },
-        },
-        signal,
+      const recorded = await this.removalRegistryStage(
+        () =>
+          this.advanceStep(
+            entry,
+            {
+              expectedPhase: entry.phase,
+              phase: entry.phase,
+              target: { removalRequested: true, newStableId: stableId },
+            },
+            signal,
+          ),
+        deadlineMs,
       );
       if (recorded.kind === "advanced" || recorded.kind === "journal_conflict") {
         this.removalIntents.delete(entry.id);
@@ -1456,12 +1542,13 @@ export class ManagedSlotJournal {
     }
     const claim = await this.describeClaim(entry, device, signal);
     if (claim.kind !== "free") {
-      return this.recordBlocked(
+      return this.removalBlocked(
         entry,
         claim.kind === "held" ? "device_busy" : "discovery_incomplete",
         `Uncommitted device '${stableId}' cannot be removed: ${claim.reason}`,
         { newStableId: stableId },
         signal,
+        deadlineMs,
       );
     }
     const deletion = await this.deleteDevice(
@@ -1475,22 +1562,27 @@ export class ManagedSlotJournal {
       signal,
     );
     if (deletion.kind === "failed") {
-      return this.recordBlocked(
+      return this.removalBlocked(
         entry,
         "cleanup_pending",
         `Removing uncommitted device '${stableId}' failed: ${deletion.message}`,
         { newStableId: stableId },
         signal,
+        deadlineMs,
       );
     }
-    const closed = await this.advanceStep(
-      entry,
-      {
-        expectedPhase: entry.phase,
-        phase: "rolled_back",
-        target: { newStableId: stableId },
-      },
-      signal,
+    const closed = await this.removalRegistryStage(
+      () =>
+        this.advanceStep(
+          entry,
+          {
+            expectedPhase: entry.phase,
+            phase: "rolled_back",
+            target: { newStableId: stableId },
+          },
+          signal,
+        ),
+      deadlineMs,
     );
     this.removalIntents.delete(entry.id);
     return { kind: "settled", entry: closed.kind === "advanced" ? closed.entry : entry };
@@ -1547,6 +1639,20 @@ export class ManagedSlotJournal {
   }
 
   // --- shared --------------------------------------------------------------------------------
+
+  private removalBlocked(
+    entry: SlotJournalEntry,
+    reason: SlotJournalBlockReason,
+    message: string,
+    target?: Partial<SlotJournalEntry["target"]>,
+    signal?: AbortSignal,
+    deadlineMs?: number,
+  ) {
+    return this.removalRegistryStage(
+      () => this.recordBlocked(entry, reason, message, target, signal),
+      deadlineMs,
+    );
+  }
 
   private async recordBlocked(
     entry: SlotJournalEntry,
@@ -1724,7 +1830,11 @@ export class ManagedSlotJournal {
         },
         (error) => ({ kind: "failed", message: errorMessage(error) }),
       );
-      return { ...result, nativeDeleteFailed: operation !== undefined && result.kind !== "absent" };
+      return {
+        ...result,
+        nativeDeleteFailed:
+          operation !== undefined && result.kind === "failed" && !result.notAttempted,
+      };
     } finally {
       if (operation) {
         this.inFlight.markRemovalOverdue(operation, this.deps.timer.now());

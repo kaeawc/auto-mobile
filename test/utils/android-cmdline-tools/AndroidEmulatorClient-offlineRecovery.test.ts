@@ -1,10 +1,11 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
   AndroidEmulatorClient,
   AndroidOfflineProbeError,
 } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { logger } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 function execResult(stdout: string) {
@@ -26,7 +27,7 @@ class RejectingDeviceStatesAdbExecutor extends FakeAdbExecutor {
 /**
  * Exercises the disconnect monitor's in-session offline recovery seam
  * (#7536): distinguishing offline-vs-absent candidates and issuing the
- * bounded, shared `adb reconnect offline` re-detect.
+ * bounded, serial-scoped reconnect.
  */
 describe("AndroidEmulatorClient.getOfflineDeviceIdsAmong", () => {
   test("returns candidates observed as ADB offline", async () => {
@@ -100,51 +101,91 @@ describe("AndroidEmulatorClient.getOfflineDeviceIdsAmong", () => {
 });
 
 describe("AndroidEmulatorClient.recoverOfflineDevices", () => {
-  test("issues exactly one noRetry 'adb reconnect offline'", async () => {
+  function recoveryClient(adb: FakeAdbExecutor, factory = new FakeAdbClientFactory(adb)) {
+    return new AndroidEmulatorClient(async () => execResult(""), null, new FakeTimer(), factory);
+  }
+
+  test("reconnects each distinct serial once with explicit argv and noRetry", async () => {
     const adb = new FakeAdbExecutor();
-    const client = new AndroidEmulatorClient(
-      async () => execResult(""),
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
+    const factory = new FakeAdbClientFactory(adb);
+    const signal = new AbortController().signal;
+    await recoveryClient(adb, factory).recoverOfflineDevices(
+      ["emulator-5554", "emulator-5558", "emulator-5554"],
+      { timeoutMs: 1234, signal },
     );
-
-    await client.recoverOfflineDevices();
-
-    const reconnectCalls = adb
-      .getCommandCalls()
-      .filter((call) => call.command.includes("reconnect offline"));
-    expect(reconnectCalls).toHaveLength(1);
-    expect(reconnectCalls[0]?.noRetry).toBe(true);
+    expect(adb.getExecutedArgv()).toEqual([
+      ["-s", "emulator-5554", "reconnect"],
+      ["-s", "emulator-5558", "reconnect"],
+    ]);
+    expect(adb.getCommandCalls()).toHaveLength(2);
+    for (const call of adb.getCommandCalls()) {
+      expect(call.noRetry).toBe(true);
+      expect(call.timeoutMs).toBe(1234);
+      expect(call.signal).toBe(signal);
+    }
+    expect(factory.getCalls().map((call) => call.device)).toEqual([null, null]);
   });
 
-  test("swallows a failed reconnect instead of throwing", async () => {
+  test("empty targets dispatch no command", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setCommandError("reconnect offline", new Error("adb server unreachable"));
-    const client = new AndroidEmulatorClient(
-      async () => execResult(""),
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-    );
-
-    await expect(client.recoverOfflineDevices()).resolves.toBeUndefined();
+    await recoveryClient(adb).recoverOfflineDevices([]);
+    expect(adb.getExecutedCommands()).toEqual([]);
+    expect(adb.getExecutedArgv()).toEqual([]);
   });
 
-  test("propagates an abort instead of swallowing it", async () => {
+  test("logs a serial's failed reconnect and still dispatches the other serial", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError("-s emulator-5554 reconnect", new Error("adb server unreachable"));
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await expect(
+        recoveryClient(adb).recoverOfflineDevices(["emulator-5554", "emulator-5558"]),
+      ).resolves.toBeUndefined();
+      expect(adb.getExecutedArgv()).toEqual([
+        ["-s", "emulator-5554", "reconnect"],
+        ["-s", "emulator-5558", "reconnect"],
+      ]);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("emulator-5554"),
+        expect.any(Error),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("dispatches serials concurrently before either reconnect settles", async () => {
+    const pending = Promise.withResolvers<ReturnType<typeof execResult>>();
+    class PendingAdb extends FakeAdbExecutor {
+      override async executeCommand(...args: Parameters<FakeAdbExecutor["executeCommand"]>) {
+        await super.executeCommand(...args);
+        return pending.promise;
+      }
+    }
+    const adb = new PendingAdb();
+    const recovery = recoveryClient(adb).recoverOfflineDevices(["emulator-5554", "emulator-5558"]);
+    await Promise.resolve();
+    expect(adb.getExecutedArgv()).toHaveLength(2);
+    pending.resolve(execResult(""));
+    await recovery;
+  });
+
+  test("propagates an already-aborted signal without dispatch", async () => {
     const adb = new FakeAdbExecutor();
     const controller = new AbortController();
-    adb.setCommandError("reconnect offline", new Error("aborted"));
     controller.abort(new Error("caller cancelled"));
-    const client = new AndroidEmulatorClient(
-      async () => execResult(""),
-      null,
-      new FakeTimer(),
-      new FakeAdbClientFactory(adb),
-    );
+    await expect(
+      recoveryClient(adb).recoverOfflineDevices(["emulator-5554"], { signal: controller.signal }),
+    ).rejects.toThrow("caller cancelled");
+    expect(adb.getExecutedArgv()).toEqual([]);
+  });
 
-    await expect(client.recoverOfflineDevices({ signal: controller.signal })).rejects.toThrow(
-      "caller cancelled",
-    );
+  test("propagates abort during a reconnect", async () => {
+    const adb = new FakeAdbExecutor();
+    const controller = new AbortController();
+    adb.abortAfterCommand("-s emulator-5554 reconnect", controller);
+    await expect(
+      recoveryClient(adb).recoverOfflineDevices(["emulator-5554"], { signal: controller.signal }),
+    ).rejects.toThrow();
   });
 });

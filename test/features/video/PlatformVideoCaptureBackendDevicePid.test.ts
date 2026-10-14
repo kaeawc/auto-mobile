@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import os from "node:os";
+import { DeviceUnreachableError } from "../../../src/models/DeviceUnreachableError";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
 import { PlatformVideoCaptureBackend } from "../../../src/features/video/PlatformVideoCaptureBackend";
@@ -299,6 +300,65 @@ describe("orphaned Android recorder teardown", () => {
     const backend = new PlatformVideoCaptureBackend(factory, new FakeTimer());
     return { backend, client: factory.getFakeClient() };
   }
+  test.each(["thrown", "returned"])("unanswered orphan probe is unreachable (%s)", async (mode) => {
+    const { backend, client } = harness();
+    const cause = new Error("probe timed out");
+    const execute = spyOn(client, "executeCommand").mockImplementation(async () => {
+      if (mode === "thrown") {
+        throw cause;
+      }
+      return { stdout: "", stderr: "", error: cause };
+    });
+    try {
+      const error = await backend
+        .forceStopOrphanedCapture(device, descriptor)
+        .catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(DeviceUnreachableError);
+      expect(error).toMatchObject({ cause });
+    } finally {
+      execute.mockRestore();
+    }
+  });
+  // Exercise the shared signal method used by live SIGINT/force-stop without launching a capture.
+  test.each(["thrown", "returned"])(
+    "live recorder probe retains its original error (%s)",
+    async (mode) => {
+      const { backend, client } = harness();
+      const cause = new Error("probe timed out");
+      const execute = spyOn(client, "executeCommand").mockImplementation(async () => {
+        if (mode === "thrown") {
+          throw cause;
+        }
+        return { stdout: "", stderr: "", error: cause };
+      });
+      const signal = backend as unknown as {
+        signalDeviceRecorder(
+          adb: typeof client,
+          descriptor: typeof descriptor,
+          pid: number,
+          signal: 2 | 9,
+        ): Promise<unknown>;
+      };
+      try {
+        for (const kind of [2, 9] as const) {
+          const error = await signal
+            .signalDeviceRecorder(client, descriptor, 4321, kind)
+            .catch((caught: unknown) => caught);
+          expect(error).not.toBeInstanceOf(DeviceUnreachableError);
+          if (mode === "thrown") {
+            expect(error).toBe(cause);
+          } else {
+            expect(error).toMatchObject({
+              message: "Could not inspect recorder pid 4321: probe timed out",
+              cause,
+            });
+          }
+        }
+      } finally {
+        execute.mockRestore();
+      }
+    },
+  );
   test("descriptor reads the pid learned after start", () => {
     const { backend } = harness();
     const devicePid: { pid?: number } = {};
@@ -380,7 +440,11 @@ describe("orphaned Android recorder teardown", () => {
   test("orphan still alive after kill is unconfirmed", async () => {
     const { backend, client } = harness();
     client.setCommandResult(PROBE, OUR_CMDLINE);
-    await expect(backend.forceStopOrphanedCapture(device, descriptor)).rejects.toThrow("confirm");
+    const error = await backend
+      .forceStopOrphanedCapture(device, descriptor)
+      .catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ message: expect.stringContaining("confirm") });
+    expect(error).not.toBeInstanceOf(DeviceUnreachableError);
   });
   test("orphan with no pid cannot be identified and sends no command", async () => {
     const { backend, client } = harness();

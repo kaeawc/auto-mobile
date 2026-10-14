@@ -33,6 +33,7 @@ import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadc
 import { getDaemonStreamDeviceLifecycleEmitter } from "../../src/daemon/streamDeviceLifecycleEvents";
 import { INTERNAL_TOOL_PARAM_NAMES } from "../../src/daemon/constants";
 import { InMemoryPrototypeStatusStore } from "../../src/features/prototype/PrototypeStatusStore";
+import { prototypeTextFieldBindings } from "../../src/features/prototype/prototypeTextTarget";
 import { FakePrototypeEventLifecycle } from "../fakes/FakePrototypeEventLifecycle";
 import { event } from "../helpers/prototypeTestEvent";
 import { runWithAbortSignal } from "../../src/utils/AbortContext";
@@ -67,6 +68,7 @@ describe("prototype MCP tool", () => {
     });
   });
   afterEach(() => {
+    prototypeTextFieldBindings.clear();
     unsubscribe();
     restore();
   });
@@ -134,6 +136,102 @@ describe("prototype MCP tool", () => {
     expect(result.response.isError).toBe(true);
     expect(result.payload.error).toContain(message);
     expect(client.getPrototypeHistory()).toEqual([]);
+  });
+
+  test("a successful show records text bindings and a sent refusal forgets them", async () => {
+    const fieldSpec = {
+      ...spec,
+      state: { name: "", other: "" },
+      root: { type: "textField", id: "field", testTag: "ptf", stateKey: "name" },
+    };
+    expect((await call({ action: "show", spec: fieldSpec })).payload.success).toBe(true);
+    const binding = prototypeTextFieldBindings.forDevice(device.deviceId);
+    expect(binding?.prototypeId).toBe(spec.id);
+    expect([...binding!.keys]).toEqual([
+      ["ptf", "name"],
+      ["field", "name"],
+    ]);
+    client.setPrototypeResult({ success: false, error: "refused" });
+    expect(
+      (
+        await call({
+          action: "show",
+          spec: { ...fieldSpec, root: { ...fieldSpec.root, stateKey: "other" } },
+        })
+      ).payload.success,
+    ).toBe(false);
+    expect(client.getPrototypeHistory()).toHaveLength(2);
+    expect(prototypeTextFieldBindings.forDevice(device.deviceId)).toBeUndefined();
+  });
+
+  for (const outcome of ["timeout", "throws", "unsent", "dismiss-id", "dismiss-all"] as const) {
+    test(`text bindings lifecycle ${outcome}`, async () => {
+      await call({ action: "show", spec });
+      const binding = prototypeTextFieldBindings.forDevice(device.deviceId);
+      expect(binding).toBeDefined();
+      if (outcome === "unsent") {
+        await call({ action: "show", spec: { ...spec, root: { type: "invalid" } } });
+        expect(client.getPrototypeHistory()).toHaveLength(1);
+        expect(prototypeTextFieldBindings.forDevice(device.deviceId)).toBe(binding);
+        return;
+      }
+      if (outcome === "timeout" || outcome === "throws") {
+        const request = spyOn(client, "requestShowPrototype").mockImplementation(async () => {
+          throw new Error(outcome === "timeout" ? "request timed out" : "thrown after dispatch");
+        });
+        try {
+          expect((await call({ action: "show", spec })).payload.success).toBe(false);
+        } finally {
+          request.mockRestore();
+        }
+      } else {
+        await call(
+          outcome === "dismiss-id"
+            ? { action: "dismiss", id: spec.id }
+            : { action: "dismiss", all: true },
+        );
+      }
+      expect(prototypeTextFieldBindings.forDevice(device.deviceId)).toBeUndefined();
+    });
+  }
+
+  test("a host exception after dispatch forgets text bindings", async () => {
+    await call({ action: "show", spec });
+    const error = new Error("host failed after dispatch");
+    const invalidate = spyOn(invalidator, "invalidate").mockImplementation(() => {
+      throw error;
+    });
+    try {
+      await expect(call({ action: "show", spec })).rejects.toBe(error);
+      expect(client.getPrototypeHistory()).toHaveLength(2);
+      expect(prototypeTextFieldBindings.forDevice(device.deviceId)).toBeUndefined();
+    } finally {
+      invalidate.mockRestore();
+    }
+  });
+
+  test("a dispatched superseded show forgets text bindings", async () => {
+    const sent = Promise.withResolvers<void>();
+    const reply = Promise.withResolvers<{ success: boolean }>();
+    let requests = 0;
+    const show = spyOn(client, "requestShowPrototype").mockImplementation(async () => {
+      if (++requests === 1) {
+        sent.resolve();
+        return reply.promise;
+      }
+      return { success: true };
+    });
+    try {
+      const first = call({ action: "show", spec });
+      await sent.promise;
+      await call({ action: "show", spec });
+      expect(prototypeTextFieldBindings.forDevice(device.deviceId)).toBeDefined();
+      reply.resolve({ success: true });
+      await first;
+      expect(prototypeTextFieldBindings.forDevice(device.deviceId)).toBeUndefined();
+    } finally {
+      show.mockRestore();
+    }
   });
 
   test("a spec with components is expanded on the host before it is sent (#11053)", async () => {

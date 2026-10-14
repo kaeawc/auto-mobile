@@ -2,6 +2,7 @@ import {
   AndroidAvdIdentityUnresolvedError,
   AndroidDeviceIdentityUnresolvedError,
 } from "../devices/deviceBootService";
+import { OrphanRecorderActiveError } from "./orphanRecorderRefusal";
 import { ActionableError } from "../models/ActionableError";
 import { TextIndeterminateError } from "../features/action/textTransportTimeout";
 import { McpError } from "@modelcontextprotocol/sdk/types.js";
@@ -170,6 +171,7 @@ function hasSelfDescribedRefusalPayload(
   | SessionOutsideBoundSessionError
   | InputDeviceOwnedError
   | DeviceGestureRecordingStartUnheldError
+  | OrphanRecorderActiveError
   | AppNotRunningError
   | ManagedSlotDiscoveryIncompleteError
   | ManagedSlotOwnershipUnconfirmedError {
@@ -185,6 +187,7 @@ function hasSelfDescribedRefusalPayload(
     SessionOutsideBoundSessionError,
     InputDeviceOwnedError,
     DeviceGestureRecordingStartUnheldError,
+    OrphanRecorderActiveError,
     AppNotRunningError,
     ManagedSlotDiscoveryIncompleteError,
     ManagedSlotOwnershipUnconfirmedError,

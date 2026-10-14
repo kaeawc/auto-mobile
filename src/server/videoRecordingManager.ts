@@ -1,3 +1,5 @@
+import { OrphanRecorderActiveError } from "./orphanRecorderRefusal";
+import type { StartupOrphanCaptures } from "./recordingTeardownRedrive";
 import { promises as fsPromises } from "node:fs";
 import path from "node:path";
 import { pathExists } from "../utils/filesystem/DefaultFileSystem";
@@ -196,6 +198,7 @@ interface VideoRecordingManagerDependencies {
   now: () => Date;
   /** The same live-owner snapshot used by daemon startup's device-session sweep. */
   liveDaemonSessionIds: ReadonlySet<string>;
+  daemonSessionId?: string;
   /**
    * Time-based retention + in-progress size-cap policy (issue #4762). Injected so
    * tests can drive the sweep/monitor with FakeTimer; defaults come from
@@ -296,6 +299,16 @@ export function fenceVideoRecordingStartsForIncarnationChange(
 const autoStopTimers = new Map<string, { timer: Timer; handle: NodeJS.Timeout }>();
 const highlightSessions = new Map<string, VideoRecordingHighlightSession>();
 const highlightSessionsByDeviceId = new Map<string, string>();
+let startupOrphanCaptures: StartupOrphanCaptures | undefined;
+
+export function setStartupOrphanCaptures(handle: StartupOrphanCaptures | undefined): void {
+  startupOrphanCaptures = handle;
+}
+
+export function getStartupOrphanCaptures(): StartupOrphanCaptures | undefined {
+  return startupOrphanCaptures;
+}
+
 /**
  * Who started each single-file recording, held in memory so session release can name the
  * recordings it is about to finalize without a database read (#10958). Entries for recordings
@@ -472,11 +485,30 @@ export async function initializeRecordingTeardownRedriveState(): Promise<
   return getVideoRecordingDependencies();
 }
 
+/** In-memory ownership avoids a repository read on the normal teardown path. */
+function ownsCaptureDescriptor(
+  recordingId: string,
+  deps: VideoRecordingManagerDependencies,
+  recorderDaemonSessionId?: string,
+): boolean {
+  return (
+    recordingOwners.has(recordingId) ||
+    deps.videoRecorderService.listActiveRecordingIds().includes(recordingId) ||
+    (deps.daemonSessionId !== undefined && recorderDaemonSessionId === deps.daemonSessionId)
+  );
+}
+
 async function refreshCaptureTeardown(
   recordingId: string,
   deps: VideoRecordingManagerDependencies,
 ): Promise<void> {
   try {
+    if (!ownsCaptureDescriptor(recordingId, deps)) {
+      const row = await deps.recordingRepository.getRecording(recordingId);
+      if (!deps.daemonSessionId || row?.recorderDaemonSessionId !== deps.daemonSessionId) {
+        return;
+      }
+    }
     await deps.recordingRepository.updateRecording(recordingId, {
       captureTeardown: hostOnlyRecordingTeardowns.has(recordingId)
         ? undefined
@@ -496,6 +528,7 @@ async function performVideoRecordingStateInitialization(
   const active = await deps.recordingRepository.listRecordings({
     status: "recording",
     excludeLiveDaemonSessionIds: deps.liveDaemonSessionIds,
+    ownDaemonSessionId: deps.daemonSessionId,
   });
   if (moduleDependencies === deps) {
     ensureRetentionSweep(deps);
@@ -531,6 +564,7 @@ async function getVideoRecordingDependencies(): Promise<VideoRecordingManagerDep
       timer: defaultTimer,
       now: () => new Date(),
       liveDaemonSessionIds: new Set(),
+      daemonSessionId: undefined,
       retentionPolicy: resolveVideoRetentionPolicy(),
       statFileSize: getFileSize,
       resolveAndroidDisplay: defaultResolveAndroidDisplay,
@@ -547,6 +581,7 @@ export async function setVideoRecordingManagerDependencies(
   deps: Partial<VideoRecordingManagerDependencies>,
 ): Promise<void> {
   const current = moduleDependencies ?? (await initialVideoRecordingDependencies(deps));
+  deps = { daemonSessionId: current.daemonSessionId, ...deps };
   moduleDependencies = {
     videoRecorderService: deps.videoRecorderService ?? current.videoRecorderService,
     recordingRepository: deps.recordingRepository ?? current.recordingRepository,
@@ -555,6 +590,7 @@ export async function setVideoRecordingManagerDependencies(
     timer: deps.timer ?? current.timer,
     now: deps.now ?? current.now,
     liveDaemonSessionIds: deps.liveDaemonSessionIds ?? current.liveDaemonSessionIds,
+    daemonSessionId: deps.daemonSessionId,
     retentionPolicy: deps.retentionPolicy ?? current.retentionPolicy,
     statFileSize: deps.statFileSize ?? current.statFileSize,
     resolveAndroidDisplay: deps.resolveAndroidDisplay ?? current.resolveAndroidDisplay,
@@ -573,6 +609,7 @@ async function initialVideoRecordingDependencies(
     timer: deps.timer ?? defaultTimer,
     now: deps.now ?? (() => new Date()),
     liveDaemonSessionIds: deps.liveDaemonSessionIds ?? new Set(),
+    daemonSessionId: deps.daemonSessionId,
     retentionPolicy: deps.retentionPolicy ?? resolveVideoRetentionPolicy(),
     statFileSize: deps.statFileSize ?? getFileSize,
     resolveAndroidDisplay: deps.resolveAndroidDisplay ?? defaultResolveAndroidDisplay,
@@ -1235,6 +1272,19 @@ async function ensureRecordingDeviceAvailable(
   signal: AbortSignal,
 ): Promise<void> {
   const { videoRecorderService, recordingRepository } = deps;
+  const orphans = startupOrphanCaptures?.list(device.deviceId) ?? [];
+  if (orphans.length > 0) {
+    try {
+      await startupOrphanCaptures!.stop(device.deviceId);
+    } catch (error) {
+      throw new OrphanRecorderActiveError(
+        device.deviceId,
+        orphans.map((row) => row.recordingId),
+        error,
+      );
+    }
+  }
+  signal.throwIfAborted();
   if (videoRecorderService.hasActiveRecordingForDevice(device.deviceId)) {
     throw new ActionableError(`Video recording already active for device ${device.deviceId}.`);
   }
@@ -1314,6 +1364,7 @@ async function persistStartedVideoRecording(
     recordedPanel: active.recordedPanel,
     transitions: active.recordedPanel ? [] : undefined,
     ownerSessionUuid: ownerAtInsert,
+    recorderDaemonSessionId: deps.daemonSessionId,
   });
   abortSignal.throwIfAborted();
   // An acquisition during insert may have claimed capture before its row existed.
@@ -1698,10 +1749,14 @@ async function interruptVideoRecordingWithDependencies(
 
   await recordingRepository.updateRecording(recordingId, {
     status: "interrupted",
-    captureTeardown:
-      options?.hostOnly || hostOnlyRecordingTeardowns.has(recordingId)
-        ? undefined
-        : deps.videoRecorderService.getCaptureTeardown(recordingId),
+    ...(ownsCaptureDescriptor(recordingId, deps, record.recorderDaemonSessionId)
+      ? {
+          captureTeardown:
+            options?.hostOnly || hostOnlyRecordingTeardowns.has(recordingId)
+              ? undefined
+              : deps.videoRecorderService.getCaptureTeardown(recordingId),
+        }
+      : {}),
     ownerSessionUuid: owner?.ownerSessionUuid ?? record.ownerSessionUuid,
     endedAt,
     lastAccessedAt: endedAt,

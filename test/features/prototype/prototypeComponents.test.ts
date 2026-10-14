@@ -161,3 +161,46 @@ describe("expandPrototypeComponents", () => {
     });
   });
 });
+
+test("data pointers and repeat identity pass through uses inside and outside repeats", () => {
+  const condition = { data: "/{props.x}", equals: 1 };
+  const component = { root: { type: "text", text: "{props.title}", visibleWhen: condition } };
+  const repeated = {
+    root: {
+      type: "column",
+      repeat: { items: { path: "/{props.x}" }, as: "item", key: "id" },
+      children: [{ type: "use", component: "label", props: { title: "{item.title}" } }],
+    },
+  };
+  const authored = {
+    ...spec(
+      {
+        type: "column",
+        children: [
+          { type: "use", component: "label", props: { title: "outside" } },
+          { type: "use", component: "list" },
+        ],
+      },
+      { label: component, list: repeated },
+    ),
+    data: { "{props.x}": [{ id: 7, title: "Latte" }] },
+  };
+  const expected = {
+    ...authored,
+    root: {
+      type: "column",
+      children: [
+        { type: "text", text: "outside", visibleWhen: condition },
+        {
+          ...repeated.root,
+          children: [{ type: "text", text: "{item.title}", visibleWhen: condition }],
+        },
+      ],
+    },
+  };
+  const expanded: Record<string, unknown> = { ...expected };
+  delete expanded.components;
+  const result = expandPrototypeComponents(authored);
+  expect(result.success && result.spec).toEqual(expanded);
+  expect(validatePrototypeSpec(authored).success).toBe(true);
+});

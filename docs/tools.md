@@ -642,10 +642,16 @@ response size, so use it only when the client needs image bytes in the tool resu
 
 ### prototype
 
+Data, `repeat.items {path}`, `repeat.key`, `{data:/pointer}` text and `{data: pointer}` conditions
+require `prototype_data_model_v1`; the host refuses an unsupported device before uploads or show.
+Data is agent-owned read-only nested content; state remains user-owned scalars. Bindings resolve
+once per show on the device; `status` remembers shown data beside state, `inspect` reports and
+adopts it, and dismiss clears it. See the [data model contract](design-docs/plat/android/prototype-ux.md#data-model-11673).
+
 The `prototype` tool (Android and iOS simulators) is omitted from discovery by default. Enable it
 with `setToolEnabled { toolName: "prototype", enabled: true }`. Its `action` is
 `show`, `dismiss`, `status`, `inspect`, or `awaitEvent`. `show` requires a full `spec` (id,
-window, optional state, root) and always renders the whole spec. Instead of an inline
+window, optional data and state, root) and always renders the whole spec. Instead of an inline
 `spec`, `show` accepts `specPath`, the absolute path of a local JSON file with the same spec
 (exactly one of the two): the daemon reads it, refuses a file over the spec byte limit (1 MiB)
 before reading it, validates it like an inline spec, and names the file in every error.

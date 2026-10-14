@@ -88,10 +88,13 @@ describe("automobile:prototype resource", () => {
     expect(cost).toBeGreaterThan(icons);
     expect(errors).toBeGreaterThan(cost);
     const section = guide.slice(cost, errors);
+    expect(section).toContain("a decorative `icon` or `image`");
+    expect(section).toContain("labelled by that text");
+    expect(section).toContain("where icons and images keep their node and label");
+    expect(section).not.toContain("Being changed (#12135)");
     for (const issue of [
       "#12133",
       "#12134",
-      "#12135",
       "#12136",
       "#12138",
       "#12139",
@@ -107,8 +110,9 @@ describe("automobile:prototype resource", () => {
     const blocks = [...renderPrototypeGuide().matchAll(/```json\n([\s\S]*?)```/g)].map((m) =>
       JSON.parse(m[1]),
     );
-    expect(blocks).toHaveLength(4);
-    const [minimal, list, components, appearanceCall] = blocks;
+    expect(blocks).toHaveLength(5);
+    const [minimal, list, data, components, appearanceCall] = blocks;
+    expect(validatePrototypeSpec(data)).toMatchObject({ success: true });
     expect(validatePrototypeSpec(minimal).success).toBe(true);
     // The light/dark section's example is a whole tool call, not a bare spec.
     expect(prototypeSchema.safeParse(appearanceCall)).toMatchObject({ success: true });
@@ -148,4 +152,25 @@ describe("automobile:prototype resource", () => {
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
     expect(section).toContain("(`override`), else\n   the device's own setting (`system`)");
   });
+});
+
+test("the Data guide describes bindings, ownership, reporting, capability and errors", () => {
+  const guide = renderPrototypeGuide();
+  const section = guide.slice(guide.indexOf("## Data"), guide.indexOf("## Reuse"));
+  for (const text of [
+    "agent-owned",
+    "read-only",
+    "RFC 6901",
+    "repeat.items: {path}",
+    "repeat.key",
+    "{data:/pointer}",
+    "prototype_data_model_v1",
+    "once per show",
+    "inspect",
+    "Events never carry data",
+  ]) {
+    expect(section).toContain(text);
+  }
+  expect(guide).toContain("Repeat placeholder in a data condition operand is not supported");
+  expect(guide).toContain("Requires key or data");
 });

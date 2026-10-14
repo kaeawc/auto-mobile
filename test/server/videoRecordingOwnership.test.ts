@@ -45,7 +45,10 @@ describe("video recording daemon ownership", () => {
     await db.destroy();
   });
 
-  async function configure(liveDaemonSessionIds: ReadonlySet<string>): Promise<void> {
+  async function configure(
+    liveDaemonSessionIds: ReadonlySet<string>,
+    daemonSessionId?: string,
+  ): Promise<void> {
     const deps = {
       videoRecorderService: new VideoRecorderService({
         backend,
@@ -62,15 +65,21 @@ describe("video recording daemon ownership", () => {
       retentionPolicy: { ttlMs: 0, sweepIntervalMs: 60_000, inProgressCheckIntervalMs: 15_000 },
       statFileSize: async () => 42,
       liveDaemonSessionIds,
+      daemonSessionId,
     };
     await setVideoRecordingManagerDependencies(deps);
   }
 
-  async function insertRecording(recordingId: string, ownerSessionUuid?: string): Promise<void> {
+  async function insertRecording(
+    recordingId: string,
+    ownerSessionUuid?: string,
+    recorderDaemonSessionId: string | null = "this-daemon",
+  ): Promise<void> {
     const timestamp = new Date(timer.now()).toISOString();
     const record: VideoRecordingRecord = {
       recordingId,
       ownerSessionUuid,
+      recorderDaemonSessionId: recorderDaemonSessionId ?? undefined,
       deviceId: recordingId,
       platform: "ios",
       status: "recording",
@@ -117,7 +126,7 @@ describe("video recording daemon ownership", () => {
     expect((await recordings.getRecording(active.recordingId))?.status).toBe("completed");
   });
 
-  test("restart preserves live peer rows and interrupts dead, missing, inactive and NULL owners", async () => {
+  test("restart preserves active peer owners and interrupts known dead recorders with dead, missing, inactive and NULL owners", async () => {
     await configure(new Set(["peer"]));
     await insertSession("peer-session", "peer");
     await insertSession("dead-session", "dead");
@@ -159,6 +168,24 @@ describe("video recording daemon ownership", () => {
     expect((await recordings.getRecording("orphan-recording"))?.status).toBe("interrupted");
     expect((await recordings.getRecording("legacy-recording"))?.status).toBe("interrupted");
   });
+
+  test.each([false, true])(
+    "restart handles a NULL recorder with a live self (peer: %s)",
+    async (peer) => {
+      await insertRecording("legacy-null-recorder", undefined, null);
+      await configure(
+        new Set(peer ? ["this-daemon", "peer-daemon"] : ["this-daemon"]),
+        "this-daemon",
+      );
+
+      await getVideoRecordingConfig();
+
+      expect((await recordings.getRecording("legacy-null-recorder"))?.status).toBe(
+        peer ? "recording" : "interrupted",
+      );
+      expect(backend.stopCalls).toEqual([]);
+    },
+  );
 
   test("implicit stop selects the local capture and leaves a peer recording untouched", async () => {
     await configure(new Set(["peer"]));

@@ -1,3 +1,4 @@
+import type { HierarchyLayer } from "../../models/HierarchyLayer";
 import { applicationWindowSafeTapPoint } from "../observe/HierarchyHitTest";
 import type { OwnPrototypeCoverRule } from "../observe/ApplicationWindowCover";
 import { isStrictlyScoped, propagateUniqueStrategy } from "../utility/ScopedSelection";
@@ -127,7 +128,9 @@ import {
 } from "./prototypeTapUnderSystemBars";
 import {
   assertAppGestureNotUnderPrototype,
+  hasOwnPrototype,
   scopeHierarchyForSelector,
+  scopeHierarchyToLayer,
 } from "../observe/hierarchyLayer";
 import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/androidTransientLoading";
 import {
@@ -400,8 +403,38 @@ export interface TapPreTapStabilitySeam {
 
 /** Internal focus evidence; symbol keys never enter JSON tool output. */
 export const tapFocusFailure: unique symbol = Symbol("tapFocusFailure");
+export const tapResolvedLayer: unique symbol = Symbol("tapResolvedLayer");
 export type TapFocusFailure = "not-found" | "no-visible-tap-area" | "navigation-bar";
-export type TapOnFocusResult = TapOnElementResult & { [tapFocusFailure]?: TapFocusFailure };
+/** Classify the already resolved node in the captured window scopes, without another read. */
+function resolvedElementLayer(
+  hierarchy: ViewHierarchyResult,
+  element: Element,
+  platform: "android" | "ios",
+): HierarchyLayer | undefined {
+  if (!hasOwnPrototype(hierarchy)) {
+    return undefined;
+  }
+  hierarchy = selectionHierarchyFor(element, hierarchy, platform);
+  const source = getHierarchyNodeSource(element);
+  if (!source) {
+    return undefined;
+  }
+  const parser = new DefaultElementParser();
+  for (const layer of ["prototype", "app"] as const) {
+    const entries = parser.flattenViewHierarchy(scopeHierarchyToLayer(hierarchy, layer), {
+      includeWindows: true,
+    });
+    if (entries.some((entry) => getHierarchyNodeSource(entry.element) === source)) {
+      return layer;
+    }
+  }
+  return undefined;
+}
+
+export type TapOnFocusResult = TapOnElementResult & {
+  [tapFocusFailure]?: TapFocusFailure;
+  [tapResolvedLayer]?: HierarchyLayer;
+};
 
 /** With no `layer`, a tap must avoid AutoMobile's own prototype windows as well (#10691). */
 function tapOwnPrototypeCoverRule(layer: TapOnElementOptions["layer"]): OwnPrototypeCoverRule {
@@ -3066,6 +3099,31 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return result.error;
   }
 
+  private isPrototypeWindowPending(
+    options: TapVerificationOptions,
+    hierarchy: ViewHierarchyResult,
+  ): boolean {
+    return (
+      options.layer === "prototype" &&
+      hierarchy.prototypeSuspended !== true &&
+      !hasOwnPrototype(hierarchy)
+    );
+  }
+
+  private findElementForSearch(
+    options: TapVerificationOptions,
+    hierarchy: ViewHierarchyResult,
+  ): ReturnType<TapOnElement["findElementInHierarchy"]> {
+    if (this.isPrototypeWindowPending(options, hierarchy)) {
+      // A successful show can precede the window's first accessibility capture.
+      return {
+        selection: { element: null, indexInMatches: -1, totalMatches: 0, strategy: "first" },
+        containerFound: false,
+      };
+    }
+    return this.findElementInHierarchy(options, hierarchy);
+  }
+
   private async searchForElement(
     options: TapVerificationOptions,
     observeResult: ObserveResult,
@@ -3104,7 +3162,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       observationScreenSize: observeResult.screenSize,
       display: observeResult.viewHierarchy,
     });
-    const initialSearch = this.findElementInHierarchy(
+    const initialSearch = this.findElementForSearch(
       this.withObservationScreenSize(options, observeResult),
       latestViewHierarchy,
     );
@@ -3174,7 +3232,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           lastHash = hash;
         }
 
-        const searchResult = this.findElementInHierarchy(
+        const searchResult = this.findElementForSearch(
           {
             ...options,
             screenSizeOptions: {
@@ -3208,6 +3266,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           break;
         }
       }
+    }
+
+    if (this.isPrototypeWindowPending(options, latestViewHierarchy)) {
+      scopeHierarchyForSelector(latestViewHierarchy, options.layer);
     }
 
     if (offScreenRejections > 0 && !element) {
@@ -3718,7 +3780,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       onDispatched: () => void;
       talkBack: AndroidDisplayTalkBackState;
     },
-  ): Promise<TapOnElementResult & { wasAlreadyFocused?: boolean; focusChanged?: boolean }> {
+  ): Promise<TapOnFocusResult & { wasAlreadyFocused?: boolean; focusChanged?: boolean }> {
     const { target, signal } = context;
     const prepared = await this.prepareAndroidDisplaySelection(options, context);
     if ("result" in prepared) {
@@ -3730,6 +3792,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       throw new TapTargetUnavailableError("Element not found on selected display", "not-found");
     }
     const selectedElement = this.buildSelectedElementMetadata(selection);
+    const resolvedLayer = resolvedElementLayer(hierarchy, element, this.device.platform);
     if (options.action === "focus") {
       if (!isFocusEditableElement(element)) {
         return {
@@ -3746,6 +3809,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           action: options.action,
           element,
           selectedElement,
+          [tapResolvedLayer]: resolvedLayer,
           wasAlreadyFocused: true,
           focusChanged: false,
           focusVerified: true,
@@ -3804,6 +3868,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       action: options.action,
       element,
       selectedElement,
+      [tapResolvedLayer]: resolvedLayer,
       ...warningsField(displayWarnings),
     };
   }
@@ -4425,6 +4490,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
                 element: element,
                 selectedElement: selectedElementMetadata,
                 searchUntil: searchOutcome.stats,
+                [tapResolvedLayer]: resolvedElementLayer(
+                  viewHierarchy,
+                  element,
+                  this.device.platform,
+                ),
                 wasAlreadyFocused: true,
                 focusChanged: false,
                 focusVerified: true,
@@ -4672,6 +4742,11 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
             success: true,
             action,
             element: tapElement,
+            [tapResolvedLayer]: resolvedElementLayer(
+              viewHierarchy,
+              focusTarget ?? tapElement,
+              this.device.platform,
+            ),
             selectedElement: selectedElementMetadata,
             searchUntil: searchOutcome.stats,
             ...(screenReaderNavigation ? { screenReaderNavigation } : {}),

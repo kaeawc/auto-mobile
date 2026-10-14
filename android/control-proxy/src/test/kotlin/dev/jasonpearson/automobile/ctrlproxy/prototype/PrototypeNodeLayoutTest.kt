@@ -10,12 +10,13 @@ import androidx.compose.ui.node.RootForTest
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.protocol.*
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -91,8 +92,19 @@ class PrototypeNodeLayoutTest {
             ),
         ),
       )
-    val button = root.tagged("done").boundsInRoot
-    val label = root.labelled("Done").boundsInRoot
+    val taggedBox = root.tagged("done")
+    val button = taggedBox.boundsInRoot
+    val label =
+      checkNotNull(
+          taggedBox.children.firstNotNullOfOrNull { child ->
+            child.find {
+              it.config.getOrNull(SemanticsProperties.Text)?.singleOrNull()?.text == "Done"
+            }
+          },
+        )
+        .boundsInRoot
+    assertEquals(listOf("Done"), taggedBox.config[SemanticsProperties.ContentDescription])
+    assertTrue(taggedBox.config.contains(SemanticsActions.OnClick))
     assertEquals(
       Rect(
         label.left - dp(24f),
@@ -276,8 +288,8 @@ class PrototypeNodeLayoutTest {
       root.tagged(tag).config.getOrElseNullable(SemanticsProperties.ContentDescription) { null }
     assertEquals(listOf("add"), label("fab"))
     assertEquals(listOf("settings"), label("settings"))
-    // Mixed content labels the container through its children, never as "row".
-    assertNull(label("save"))
+    // Mixed content with one text labels the container by that text, never its kind or icon name.
+    assertEquals(listOf("Save"), label("save"))
   }
 
   @Test

@@ -14,7 +14,7 @@ spec.
 
 The 2026-10-04 decisions supersede the issue's earlier proposals:
 
-- Envelope: `{ id, window, state?, root }`, with no `specVersion`. An older or
+- Envelope: `{ id, window, data?, state?, root }`, with no `specVersion`. An older or
   newer shape is rejected rather than migrated.
 - Every object is strict: unknown properties, unknown node/action types, explicit
   null for optional fields, and wrong types reject the entire spec with a path.
@@ -35,13 +35,14 @@ blanket focusability proposal).
 
 ## Envelope and limits
 
-| Property | Type / meaning                                                    |
-| -------- | ----------------------------------------------------------------- |
-| `id`     | Required nonempty prototype identifier string.                    |
-| `window` | Required window configuration below.                              |
-| `state`  | Optional flat object of string, finite number, or boolean values. |
-| `motion` | Optional `none` or `standard` (default). See Motion below.        |
-| `root`   | Required single node.                                             |
+| Property | Type / meaning                                                     |
+| -------- | ------------------------------------------------------------------ |
+| `id`     | Required nonempty prototype identifier string.                     |
+| `window` | Required window configuration below.                               |
+| `data`   | Optional agent-owned read-only nested JSON object; see Data model. |
+| `state`  | Optional flat object of string, finite number, or boolean values.  |
+| `motion` | Optional `none` or `standard` (default). See Motion below.         |
+| `root`   | Required single node.                                              |
 
 All numeric values are finite. State keys (including action/binding/condition
 keys) match `[A-Za-z_][A-Za-z0-9_]{0,63}`. No nested state, arrays, or nulls.
@@ -81,6 +82,145 @@ and scalar unions have explicit Kotlin serializers; only arbitrary emit payloads
 retain JsonElement. Validated integer model fields normalize decimal/exponent
 spellings before Kotlin decoding (e.g. `100.0` and `1e2` both mean 100). The protocol module has no API-dump
 plugin or API-check task; its published artifact includes the contract resource.
+
+## Data model (#11673)
+
+`data` is an optional top-level plain JSON object, owned by the agent and read-only on the device.
+Values may be objects, arrays, strings, finite numbers and booleans; null and non-JSON values are
+invalid. Object keys are arbitrary strings. `state` remains the user-owned scalar map: `setState`,
+`toggle`, `increment`, `decrement` only target declared state keys, including per-row keys. A key
+present only in data fails like any undeclared state key. A new full `show` replaces data.
+
+Limits come from `schemas/prototype-spec-contract.json`: `MAX_PROTOTYPE_DATA_BYTES` (262144),
+`MAX_PROTOTYPE_DATA_DEPTH` (8), `MAX_PROTOTYPE_DATA_ARRAY_ITEMS` (500), and
+`MAX_PROTOTYPE_DATA_POINTER_LENGTH` (256 UTF-16 code units). Data is depth 1; only containers add
+depth. The byte cost reuses the emit payload cost: 32 bytes per number, compact JSON UTF-8 for
+strings/booleans/keys, punctuation and separators. Every number costs 32 bytes regardless of its
+digits, so numeric-heavy data reaches the byte limit before its serialized size does.
+
+The shared Kotlin validator and resolver ship in `:protocol`, but CtrlProxy does not advertise `prototype_data_model_v1` yet (renderer wiring follows separately), so until it does the host refuses every data-model spec on Android; the iOS prototype agent advertises it.
+
+Pointers are nonempty RFC 6901 paths relative to data, matching `^(?:/(?:[^~/]|~[01])*)+$`.
+Split after the leading slash; decode `~1` to `/`, then `~0` to `~`. Resolution follows exact own
+object members, including empty or numeric-looking keys. Array indices match `0|[1-9][0-9]*` and
+must be in bounds; `01`, `-`, `1.0`, negative indices and traversal through a scalar are missing.
+No data means every path is missing. `/a/` accesses the empty key inside `a`.
+
+### Bindings and ordering
+
+```json
+{
+  "data": { "orders": [{ "id": 7, "title": "Latte", "total": 4.5 }], "cartCount": 1 },
+  "state": { "liked_7": false },
+  "root": {
+    "type": "column",
+    "repeat": { "items": { "path": "/orders" }, "as": "item", "key": "id" },
+    "children": [
+      {
+        "type": "text",
+        "text": "{item.title} ({data:/cartCount})",
+        "visibleWhen": { "data": "/cartCount", "gt": 0 },
+        "onTap": [{ "type": "toggle", "key": "liked_{item.id}" }]
+      }
+    ]
+  }
+}
+```
+
+- `repeat.items: {path}` must resolve to an array of objects (empty is valid). Only scalar members
+  with field-shaped names are projected into items. `repeat.key` names a field every item has;
+  its rendered values must be unique, for literal lists too.
+- `MAX_PROTOTYPE_REPEAT_PATH_CELLS` bounds the sum across path-bound repeat containers in
+  pre-order after component expansion, including empty templates. Each instantiated object item
+  costs the number of projected scalar members, or one cell if it has none. Literal repeats do
+  not count. After the three path-source checks, exceeding this budget fails at
+  `<node>.repeat.items.path` with `Repeat path cell limit exceeded`, before template projection.
+  Cell counts and immutable projected lists are cached by pointer within each validation call.
+- `{data:/pointer}` binds only the text-kind fields repeat already binds: text, button/FAB labels,
+  segmented option labels, app bar title/navigation/action labels, dialog title/text/button labels,
+  and snackbar text/action label. Missing, object or array values become empty text. Other braces
+  stay literal. A data string is inserted as plain text before repeat and state binding, so
+  `{item.x}`, `{index}` or `{key}` inside it bind afterwards exactly like authored text.
+  Data values cannot be escaped; inserted strings are never scanned again for data placeholders.
+  Pointers are untouched by component props.
+- A condition uses exactly one of `key`, `data`, `all`, `any`, `not`. A data condition has exactly
+  one comparison: `equals` (same scalar type and value), `notEquals` (its inverse, including missing
+  or non-scalar), `gt` or `lt` (numbers only, otherwise false). `equals`/`notEquals` operands are
+  literals; repeat placeholders there are rejected. `bottomSheet.openWhen` remains boolean state.
+
+The host validates data and repeat paths; the device resolves bindings once per show before
+repeat expansion. All data uses require `prototype_data_model_v1`; an older device is refused
+before uploads or show, with an update/relaunch hint. `status` reports the last successful show's
+data next to state; `inspect` reports and adopts device data. Absent data is omitted; dismiss
+clears it. Events never carry data.
+
+````
+
+
+`repeat.items` accepts a strict `{ "path": pointer }` alongside the unchanged literal list.
+The path must statically resolve to an array of objects within the literal repeat's item maximum.
+Empty arrays produce zero instances. Each item is projected to scalar members whose names match
+`^[A-Za-z_][A-Za-z0-9_]{0,63}$`; nested members stay in data and are invisible to repeat templates.
+Optional `repeat.key` names a projected field present in every item; identities use scalar text
+rendering and must be unique (7 and "7" collide). It also works on literal lists. Existing
+per-item field, state-key, action and expanded node/image checks still run. Repeat templates
+cannot nest repeats or pagers.
+
+`{data:<pointer>}` is recognised by a plain scan to the next closing brace; invalid placeholders
+stay literal and never make text invalid. It binds only text-kind fields: `text.text`,
+`button.label`, `fab.label`, `segmentedButton.options[].label`, `topAppBar.title`,
+`topAppBar.navigationIcon.label`, `topAppBar.actions[].label`, `dialog.title`, `dialog.text`,
+`dialog.confirm.label`, `dialog.dismiss.label`, `snackbar.text`, `snackbar.action.label`.
+It never binds state keys, operands, emit names/payloads or content descriptions. Scalars render
+normally (integral numbers without a decimal point or exponent); missing/object/array values
+render empty. Bind authored data text first, repeat placeholders second, state interpolation
+last. Inserted data strings and repeat item values are never rescanned for data placeholders.
+A data string is inserted as plain text: repeat placeholders (`{item.x}`, `{index}`) and state
+placeholders (`{key}`) inside it bind afterwards exactly like authored text. Data values cannot
+be escaped.
+Component props are never bound in `repeat.items.path` or a condition's `data`; `repeat.key`
+passes through expansion unchanged.
+
+Conditions select exactly one of `key`, `data`, `all`, `any`, `not`. A `key` or `data` form requires
+exactly one of `equals`, `notEquals`, `gt`, `lt`. Data `equals` needs the same scalar type and value
+(numbers by value; -0 equals 0). `notEquals` is its inverse, including missing/non-scalar values.
+`gt`/`lt` compare numbers only, otherwise false. `equals`/`notEquals` are literals: a repeat
+placeholder in a data operand is rejected; state operands still bind. `bottomSheet.openWhen`
+keeps its boolean `{key, equals}` form. Devices resolve bindings once per show before repeat
+expansion: path items are projected, text is bound, conditions become in-memory constants.
+The host performs validation only, preserving authored bindings on the wire.
+
+### Validation paths and reporting
+
+Data is walked depth-first, with sorted object keys and array index order. At each container,
+depth precedes array length, then children; the byte check runs last.
+
+| Path | Message |
+| --- | --- |
+| `data` | `Expected object` when the root is not a plain object |
+| Offending data container | `Data depth limit exceeded` or `Data array limit exceeded` |
+| Offending value, e.g. `data.orders[0].title` or `data["a b"]` | `Invalid data value` |
+| `data` after the walk | `Data byte limit exceeded` |
+| Pointer field | `Invalid pointer value` |
+| `<node>.repeat.items` | `Invalid union value` for neither array nor object |
+| `<node>.repeat.items.path` (in this order) | `Repeat path does not resolve to an array`; `Repeat path resolves to more than 128 items`; `Repeat path item <i> is not an object`; `Repeat path cell limit exceeded` |
+| Referencing template string | `Unknown repeat field "x"` (non-scalar members count as absent) |
+| `<node>.repeat.items.path` | `Bound state key "<k>" is invalid (repeat item <i>)`; literal repeats keep `<node>.repeat.items[i]` without the suffix |
+| `<node>.repeat.key` | `Unknown repeat field "<key>"`; `Duplicate repeat key "<text>" (items <i> and <j>)`, first colliding pair |
+| Condition `.key` | `Exactly one of key, data, all, any, not is required` |
+| Condition comparison field | `Requires key or data`; `Exactly one of equals, notEquals, gt, lt is required` |
+| Condition `.equals` / `.notEquals` in bindable visiting order | `Repeat placeholder in a data condition operand is not supported` |
+| `<node>.repeat` | Existing expanded node/image limit errors |
+
+All data-model uses require `prototype_data_model_v1`: top-level data, path items, repeat.key,
+data conditions or recognised text placeholders. The host refuses before any asset upload or
+show when the device does not advertise it. The refusal identifies the first usage field (data
+first, then node fields in document order, depth-first), counts other fields and gives an update
+or iOS relaunch hint plus a literal-content fallback.
+
+`inspect` reports optional data beside state, absent for specs without data. Host-local `status`
+remembers a deep copy of the last successful show's data, replaces it on inspect adoption, and
+clears it with the prototype. Events never carry data.
 
 ## Theme
 
@@ -758,7 +898,7 @@ list is a `column` with `repeat` whose single child is the row template).
     }
   ]
 }
-```
+````
 
 - `items` is a literal array of 1 to 32 objects declared in the spec. Each object
   maps state-style field names to scalar values (string, finite number, boolean);

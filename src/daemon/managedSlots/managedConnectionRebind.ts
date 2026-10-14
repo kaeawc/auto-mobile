@@ -21,6 +21,30 @@ const backoff = exponentialBackoff({ initialDelayMs: 50, maxDelayMs: 1_000 });
 
 export const MANAGED_CONNECTION_REBIND_WARN_AFTER_MS = 60_000;
 
+/** Registration answers share terminal intent and minimum pacing before and after ready. */
+export function classifyManagedConnectionRebindFailure(failure: unknown): {
+  action: "reconnect" | "fail" | "retry";
+  retryAfterMs: number;
+} {
+  const fields = failure !== null && typeof failure === "object" ? failure : {};
+  const code = Reflect.get(fields, "code");
+  const retryable = Reflect.get(fields, "retryable");
+  const retryAfterMs = Reflect.get(fields, "retryAfterMs");
+  const action =
+    failure instanceof DaemonShuttingDownError || code === DAEMON_SHUTTING_DOWN_ERROR_CODE
+      ? "reconnect"
+      : retryable === false || (typeof code === "string" && retryable !== true)
+        ? "fail"
+        : "retry";
+  return {
+    action,
+    retryAfterMs:
+      typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs)
+        ? Math.max(0, retryAfterMs)
+        : 0,
+  };
+}
+
 interface RetryChain {
   attempts: ManagedConnectionRebindAttempts;
   nextAttempt: number;
@@ -61,7 +85,6 @@ export class TimerManagedConnectionRebind implements ManagedConnectionRebind {
     if (this.chain !== chain) {
       return;
     }
-    const fields = failure !== null && typeof failure === "object" ? failure : {};
     if (!chain.attempts.stillWanted()) {
       this.cancel();
       return;
@@ -77,11 +100,7 @@ export class TimerManagedConnectionRebind implements ManagedConnectionRebind {
         `[ManagedSlots] Managed re-bind still pending for ${chain.attempts.describe?.() ?? "managed connection"} after ${elapsedMs} ms (${chain.nextAttempt} attempts): ${errorMessage(failure)}`,
       );
     }
-    const retryAfterMs = Reflect.get(fields, "retryAfterMs");
-    const minimum =
-      typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs)
-        ? Math.max(0, retryAfterMs)
-        : 0;
+    const minimum = classifyManagedConnectionRebindFailure(failure).retryAfterMs;
     const wait = Math.max(backoff.delayForAttempt(chain.nextAttempt++), minimum);
     chain.handle = this.timer.setTimeout(() => {
       chain.handle = undefined;
@@ -90,22 +109,15 @@ export class TimerManagedConnectionRebind implements ManagedConnectionRebind {
   }
 
   private refusalStopsRetries(failure: unknown): boolean {
-    const fields = failure !== null && typeof failure === "object" ? failure : {};
-    if (
-      failure instanceof DaemonShuttingDownError ||
-      Reflect.get(fields, "code") === DAEMON_SHUTTING_DOWN_ERROR_CODE
-    ) {
+    const { action } = classifyManagedConnectionRebindFailure(failure);
+    if (action === "reconnect") {
       // The socket is going away; the next connection re-binds its held sessions.
       logger.debug(
         `[ManagedSlots] Connection re-bind stopped for daemon shutdown: ${errorMessage(failure)}`,
       );
       return true;
     }
-    const retryable = Reflect.get(fields, "retryable");
-    if (
-      retryable === false ||
-      (typeof Reflect.get(fields, "code") === "string" && retryable !== true)
-    ) {
+    if (action === "fail") {
       logger.warn(
         `[ManagedSlots] Managed re-bind refused permanently; socket stays confined: ${errorMessage(failure)}`,
       );

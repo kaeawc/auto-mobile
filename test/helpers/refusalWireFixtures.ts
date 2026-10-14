@@ -1,3 +1,4 @@
+import { OrphanRecorderActiveError } from "../../src/server/orphanRecorderRefusal";
 import { HostBootAdmissionRegistryError } from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
 import { StageSessionDownloadsRefusal } from "../../src/server/downloadsFixtureService";
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
@@ -351,6 +352,11 @@ const BUILDERS: readonly FixtureEntry[] = [
     "target_identity_unresolved.device",
     "AndroidDeviceIdentityUnresolvedError via shapeToolCallError",
     () => shaped(new AndroidDeviceIdentityUnresolvedError(DEVICE)),
+  ],
+  [
+    "orphan_recorder_active",
+    "OrphanRecorderActiveError via shapeToolCallError",
+    () => shaped(new OrphanRecorderActiveError(DEVICE, ["startup-orphan"])),
   ],
   [
     "plan_execution_in_progress",
@@ -786,6 +792,7 @@ function budgetSlotFailure(): ManagedSlotsFailure {
             reason: "deletion_stuck",
             attempts: 5,
             failedDeletes: 3,
+            uncounted: true,
             lastError: "native delete keeps failing",
           },
         ],

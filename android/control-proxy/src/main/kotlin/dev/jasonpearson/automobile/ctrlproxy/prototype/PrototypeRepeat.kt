@@ -27,6 +27,8 @@ import dev.jasonpearson.automobile.protocol.PrototypeListItemCheckbox
 import dev.jasonpearson.automobile.protocol.PrototypeListItemNode
 import dev.jasonpearson.automobile.protocol.PrototypeListItemSwitch
 import dev.jasonpearson.automobile.protocol.PrototypeListItemTrailing
+import dev.jasonpearson.automobile.protocol.PrototypeMenuEntry
+import dev.jasonpearson.automobile.protocol.PrototypeMenuNode
 import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypePagerNode
 import dev.jasonpearson.automobile.protocol.PrototypeProgressNode
@@ -38,6 +40,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeRowNode
 import dev.jasonpearson.automobile.protocol.PrototypeScalar
 import dev.jasonpearson.automobile.protocol.PrototypeScrollNode
 import dev.jasonpearson.automobile.protocol.PrototypeSegmentedButtonNode
+import dev.jasonpearson.automobile.protocol.PrototypeSelectNode
 import dev.jasonpearson.automobile.protocol.PrototypeSetStateAction
 import dev.jasonpearson.automobile.protocol.PrototypeSliderNode
 import dev.jasonpearson.automobile.protocol.PrototypeSnackbarNode
@@ -228,6 +231,32 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         stateKey = instance.interpolate(stateKey),
+      )
+    is PrototypeSelectNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        stateKey = instance.interpolate(stateKey),
+        label = label?.let(instance::interpolate),
+        options = options.map { it.copy(label = instance.interpolate(it.label)) },
+      )
+    is PrototypeMenuNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        openWhen = openWhen.copy(key = instance.interpolate(openWhen.key)),
+        items =
+          items.map { item ->
+            if (item is PrototypeMenuEntry)
+              item.copy(
+                label = instance.interpolate(item.label),
+                trailingText = item.trailingText?.let(instance::interpolate),
+                onTap = item.onTap?.map { it.bound(instance) },
+              )
+            else item
+          },
       )
     is PrototypeListItemNode ->
       copy(

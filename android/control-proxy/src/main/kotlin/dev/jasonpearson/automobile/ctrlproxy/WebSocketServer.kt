@@ -386,6 +386,7 @@ class WebSocketServer(
     // ignore the field, so hosts keep reporting that an app-layer screenshot includes the
     // prototype.
     add("screenshot_hide_prototype_v1")
+    add("prototype_menus_v1")
     add("full_command_set_v1")
     // Every response to a request carrying requestId echoes it, including hierarchy_update for
     // request_hierarchy. Unsolicited pushes remain id-less; older hosts ignore unknown flags.

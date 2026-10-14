@@ -1,6 +1,18 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype.screenshot
 
 import android.app.Application
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import dev.jasonpearson.automobile.ctrlproxy.prototype.LocalPrototypeMenuLayers
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeMenuLayers
+import dev.jasonpearson.automobile.ctrlproxy.prototype.RenderPrototypeSelect
+import dev.jasonpearson.automobile.ctrlproxy.prototype.RenderPrototypeSelectOptions
+import dev.jasonpearson.automobile.ctrlproxy.prototype.mapPrototypeSpec
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -388,4 +400,39 @@ class PrototypeSpecContentScreenshotTest {
       validPrototypeFixture("theme-modes-colors", stateOverrides = mapOf("open" to OPEN)),
       pending = true,
     )
+
+  /** Pending until the baseline workflow records the new menu and select surfaces. */
+  @Test
+  fun menuOpen() =
+    prototypeScreenshotTest(
+      "menu_open",
+      validPrototypeFixture("menu-overflow", stateOverrides = mapOf("open" to OPEN)),
+      pending = true,
+    )
+
+  @Test
+  fun selectCollapsed() =
+    prototypeScreenshotTest(
+      "select_collapsed",
+      validPrototypeFixture("select-dropdown"),
+      pending = true,
+    )
+
+  @Test
+  fun selectExpanded() =
+    prototypeScreenshotTest("select_expanded", pending = true) {
+      val root = mapPrototypeSpec(validPrototypeFixture("select-dropdown")).root
+      val node = root.children.first()
+      renderComposable("select_expanded") {
+        val layers = remember { PrototypeMenuLayers().apply { expandedSelect = node.identity } }
+        CompositionLocalProvider(LocalPrototypeMenuLayers provides layers) {
+          Box(
+            Modifier.fillMaxSize().onGloballyPositioned { layers.windowBounds = it.boundsInRoot() }
+          ) {
+            RenderPrototypeSelect(node, Modifier)
+            RenderPrototypeSelectOptions(node) {}
+          }
+        }
+      }
+    }
 }

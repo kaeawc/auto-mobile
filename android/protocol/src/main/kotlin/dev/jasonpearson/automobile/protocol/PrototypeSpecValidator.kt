@@ -710,13 +710,22 @@ object PrototypeSpecValidator {
     path: String,
     stored: JsonPrimitive?,
   ): PrototypeSpecError? {
-    val name = if (value.text("type") == "segmentedButton") "Segmented button" else "Radio group"
+    val name =
+      when (value.text("type")) {
+        "segmentedButton" -> "Segmented button"
+        "select" -> "Select"
+        else -> "Radio group"
+      }
     if (stored == null || !stored.isString)
       return fail("$path.stateKey", "$name requires a string state key")
     val values = mutableSetOf<String?>()
     for ((index, option) in (value["options"] as? JsonArray).orEmpty().withIndex()) {
       if (!values.add((option as? JsonObject)?.text("value")))
-        return fail("$path.options[$index].value", "Duplicate radio option value")
+        return fail(
+          "$path.options[$index].value",
+          if (value.text("type") == "select") "Duplicate select option value"
+          else "Duplicate radio option value",
+        )
     }
     return null
   }
@@ -868,7 +877,7 @@ object PrototypeSpecValidator {
         (stored == null || stored.isString || stored.booleanOrNull == null)
     )
       return fail("$path.stateKey", "Toggle control requires a boolean state key")
-    if (value.text("type") in setOf("radioGroup", "segmentedButton")) {
+    if (value.text("type") in setOf("radioGroup", "segmentedButton", "select")) {
       radioGroupErrors(value, path, stored)?.let {
         return it
       }
@@ -892,7 +901,12 @@ object PrototypeSpecValidator {
 
   /** Nodes opened by a boolean `openWhen` key; an existing key must hold a boolean. */
   private val modalNames =
-    mapOf("bottomSheet" to "Sheet", "dialog" to "Dialog", "snackbar" to "Snackbar")
+    mapOf(
+      "bottomSheet" to "Sheet",
+      "dialog" to "Dialog",
+      "snackbar" to "Snackbar",
+      "menu" to "Menu",
+    )
 
   private fun openWhenErrors(
     value: JsonObject,

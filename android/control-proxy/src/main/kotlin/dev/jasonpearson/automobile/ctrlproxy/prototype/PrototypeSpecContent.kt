@@ -36,7 +36,9 @@ import androidx.compose.ui.graphics.ShaderBrush
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
@@ -127,13 +129,19 @@ fun PrototypeSpecContent(
 ) {
   PrototypeTheme(root, theme) {
     val anchorLocals = remember { PrototypeAnchorLocals() }
+    val menuLayers = remember { PrototypeMenuLayers() }
+    val menuParents = remember(root) { prototypeMenuParents(root) }
     CompositionLocalProvider(
       LocalPrototypeAnchorLocals provides anchorLocals,
+      LocalPrototypeMenuLayers provides menuLayers,
       LocalPrototypeRetainedSubtrees provides remember(root) { prototypeRetainedSubtrees(root) },
       LocalPrototypeHandleVisuals provides remember(root) { prototypeHandleVisuals(root) },
     ) {
       val fillsWindow = LocalPrototypeFillsWindow.current
-      Box(Modifier.semantics { testTagsAsResourceId = true }) {
+      Box(
+        Modifier.onGloballyPositioned { menuLayers.windowBounds = it.boundsInRoot() }
+          .semantics { testTagsAsResourceId = true }
+      ) {
         val modals = remember(root) { modalPrototypeSheets(root) }
         // An open dialog is modal: the page behind it leaves the accessibility tree, as it does
         // on iOS and as touches already do. A snackbar or sheet does not block the page.
@@ -148,13 +156,32 @@ fun PrototypeSpecContent(
         }
         modals.forEach { node ->
           key(node.identity) {
-            RenderPrototypeModal(node, interact)
+            if (node.role == "menu") {
+              val parent = menuParents[node.identity]
+              RenderPrototypeMenu(
+                node,
+                prototypeNodeModifier(node, interact),
+                parent?.let { menuLayers.bounds[it] } ?: menuLayers.windowBounds,
+                interact,
+              )
+            } else RenderPrototypeModal(node, interact)
             PrototypeAnchorLayer(
               remember(node) { layeredPrototypeAnchorsIn(node.children) },
               interact,
             )
           }
         }
+        val expanded = menuLayers.expandedSelect
+        val select =
+          expanded?.let { identity ->
+            visiblePrototypeSelect(root, identity)?.takeIf {
+              // A newly opened modal closes a dropdown on the page behind it.
+              modals.none { modal -> modal.role == "dialog" || modal.role == "menu" } ||
+                modals.any { modal -> visiblePrototypeSelect(modal, identity) != null }
+            }
+          }
+        if (select != null) RenderPrototypeSelectOptions(select, interact)
+        else if (expanded != null) SideEffect { menuLayers.expandedSelect = null }
       }
     }
   }
@@ -290,7 +317,11 @@ private fun RenderPrototypeModal(
   node: PrototypeRenderNode,
   interact: (PrototypeInteraction) -> Unit,
 ) {
-  val modifier = prototypeNodeModifier(node, interact)
+  val layers = LocalPrototypeMenuLayers.current
+  val boundsModifier =
+    if (node.children.any { it.role == "menu" }) Modifier.prototypeMenuBounds(node.identity, layers)
+    else Modifier
+  val modifier = boundsModifier.then(prototypeNodeModifier(node, interact))
   when (node.role) {
     "dialog" ->
       RenderPrototypeDialog(node, modifier, interact) {
@@ -413,7 +444,14 @@ private fun RenderPrototypeNodeContent(
   val traceEnabled = traceSink.isEnabled()
   if (traceEnabled) traceSink.begin(PrototypeTrace.NODE)
   LocalPrototypeCompositionProbe.current?.invoke(node.identity)
-  val modifier = parentModifier.then(prototypeNodeModifier(node, interact, weightAxis, windowRoot))
+  val layers = LocalPrototypeMenuLayers.current
+  val boundsModifier =
+    if (node.children.any { it.role == "menu" }) Modifier.prototypeMenuBounds(node.identity, layers)
+    else Modifier
+  val modifier =
+    parentModifier
+      .then(boundsModifier)
+      .then(prototypeNodeModifier(node, interact, weightAxis, windowRoot))
   // Only box/row/column with repeat or a direct visibleWhen child animate and clip their size.
   // Look through card/scroll/pager only; nested box/row/column own the animation their parent
   // follows.
@@ -538,6 +576,7 @@ private fun RenderPrototypeNodeContent(
     "bottomNav" -> RenderPrototypeNavigation(node, modifier, interact)
     "bottomSheet",
     "dialog",
+    "menu",
     "snackbar" -> Unit // Modal content is hoisted above the whole author tree, within this window.
     "iconButton" -> RenderPrototypeIconButton(node, modifier, interact)
     "fab" -> RenderPrototypeFab(node, modifier, interact)
@@ -553,6 +592,7 @@ private fun RenderPrototypeNodeContent(
     "checkbox" -> RenderPrototypeToggle(node, modifier, interact)
     "button" -> RenderPrototypeButton(node, modifier, interact)
     "radioGroup" -> RenderPrototypeRadioGroup(node, modifier, interact)
+    "select" -> RenderPrototypeSelect(node, modifier)
     "listItem" -> RenderPrototypeListItem(node, modifier, interact)
     "slider" -> RenderPrototypeSlider(node, modifier, interact)
     "chip" -> RenderPrototypeChip(node, modifier, interact)

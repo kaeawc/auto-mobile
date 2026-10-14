@@ -515,6 +515,72 @@ data class PrototypeRadioGroupNode(
   val options: List<PrototypeRadioOption>,
 ) : PrototypeNode()
 
+@SerialName("select")
+@Serializable
+data class PrototypeSelectNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val transition: String? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  val stateKey: String,
+  val options: List<PrototypeRadioOption>,
+  val label: String? = null,
+) : PrototypeNode()
+
+/** Menu entries have no discriminator; only a divider carries `type`. */
+@Serializable(with = PrototypeMenuItemSerializer::class) sealed class PrototypeMenuItem
+
+@Serializable
+data class PrototypeMenuEntry(
+  val label: String,
+  val icon: String? = null,
+  val trailingText: String? = null,
+  val enabled: Boolean? = null,
+  val onTap: List<PrototypeAction>? = null,
+) : PrototypeMenuItem()
+
+data object PrototypeMenuDivider : PrototypeMenuItem()
+
+object PrototypeMenuItemSerializer :
+  PrototypeJsonValueSerializer<PrototypeMenuItem>("PrototypeMenuItem") {
+  override fun fromJson(value: JsonElement): PrototypeMenuItem {
+    if (value is JsonObject && value["type"] == JsonPrimitive("divider")) {
+      require(value.keys == setOf("type")) { "Unknown property" }
+      return PrototypeMenuDivider
+    }
+    return PrototypeSpecValidator.json.decodeFromJsonElement<PrototypeMenuEntry>(value)
+  }
+
+  override fun toJson(value: PrototypeMenuItem): JsonElement =
+    when (value) {
+      is PrototypeMenuEntry -> PrototypeSpecValidator.json.encodeToJsonElement(value)
+      PrototypeMenuDivider -> buildJsonObject { put("type", "divider") }
+    }
+}
+
+@SerialName("menu")
+@Serializable
+data class PrototypeMenuNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val transition: String? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  val openWhen: PrototypeSheetCondition,
+  val items: List<PrototypeMenuItem>,
+) : PrototypeNode()
+
 /** The control at the end of a `listItem`: a bound switch or checkbox, or a decorative icon. */
 @Serializable sealed class PrototypeListItemTrailing
 

@@ -33,6 +33,8 @@ private val RETENTION_EXCLUDED_ROLES =
     "bottomSheet",
     "dialog",
     "snackbar",
+    "menu",
+    "select",
   )
 private val RETENTION_SPACED_ARRANGEMENTS = setOf("spaceBetween", "spaceAround", "spaceEvenly")
 

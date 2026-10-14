@@ -26,8 +26,11 @@ describe("managed-slot qualification documentation", () => {
   let compatibilityRows: string[][];
   beforeAll(() => {
     const root = new URL("../../", import.meta.url);
-    doc = readFileSync(new URL("docs/using/managed-slot-qualification.md", root), "utf8");
-    nav = readFileSync(new URL("mkdocs.yml", root), "utf8");
+    doc = readFileSync(
+      new URL("docs/using/managed-slot-qualification.md", root),
+      "utf8",
+    ).replaceAll("\r\n", "\n");
+    nav = readFileSync(new URL("mkdocs.yml", root), "utf8").replaceAll("\r\n", "\n");
     compatibility = JSON.parse(
       readFileSync(new URL("schemas/managed-slot-contract.json", root), "utf8"),
     ).compatibility;

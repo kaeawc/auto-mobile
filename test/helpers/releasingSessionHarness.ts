@@ -68,6 +68,7 @@ export function releasingSessionHarness() {
         restores.push(device.deviceId);
         restoreStarted.resolve();
         await finishRestore.promise;
+        return { status: "restored" as const };
       },
     }),
   );

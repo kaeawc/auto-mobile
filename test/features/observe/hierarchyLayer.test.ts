@@ -1,3 +1,5 @@
+import { PrototypeHiddenError } from "../../../src/features/prototype/prototypeHidden";
+import { PrototypeSuspendedError } from "../../../src/features/prototype/prototypeSuspended";
 import { describe, expect, test } from "bun:test";
 import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
 import {
@@ -372,4 +374,60 @@ test("gesture and focused-field string refusals describe suspension", () => {
     );
     expect(refusal).toContain("Bring that app back to the foreground");
   }
+});
+
+for (const reason of ["app_layer_window_hidden", "device_blocked"] as const) {
+  test(`hidden ${reason} refuses selectors and gestures, with suspension and visible precedence`, () => {
+    const hierarchy = { ...convertedCapture(), prototypeHiddenReason: reason };
+    const expected = new PrototypeHiddenError(reason);
+    for (const refuse of [
+      (frame: ViewHierarchyResult) => scopeHierarchyForSelector(frame, "prototype"),
+      (frame: ViewHierarchyResult) =>
+        assertGestureOnLayer(frame, "prototype", [{ x: 10, y: 10 }], "swipe"),
+    ]) {
+      expect(() => refuse(hierarchy)).toThrow(expected.message);
+      expect(() => refuse(hierarchy)).toThrow(PrototypeHiddenError);
+      try {
+        refuse(hierarchy);
+      } catch (error) {
+        if (!(error instanceof PrototypeHiddenError)) {
+          throw error;
+        }
+        expect(error.code).toBe("prototype_hidden");
+        expect(error.retryable).toBe(false);
+        expect(error.details).toEqual({ prototypeHiddenReason: reason });
+        expect(error.nextAction).toBe(expected.nextAction);
+      }
+      expect(() => refuse({ ...hierarchy, prototypeSuspended: true })).toThrow(
+        PrototypeSuspendedError,
+      );
+    }
+    expect(expected.code).toBe("prototype_hidden");
+    expect(expected.retryable).toBe(false);
+    expect(expected.details).toEqual({ prototypeHiddenReason: reason });
+    const visible = { ...captureWithPrototype(), prototypeHiddenReason: reason };
+    expect(scopeHierarchyForSelector(visible, "prototype")).toBeDefined();
+    const bounds = visible.windows!.find((window) => window.id === PROTOTYPE_WINDOW_ID)!.bounds!;
+    expect(() =>
+      assertGestureOnLayer(visible, "prototype", [{ x: bounds.left, y: bounds.top }], "swipe"),
+    ).not.toThrow();
+  });
+}
+test("older-device selector and gesture refusals retain exact text", () => {
+  const frame = convertedCapture();
+  expect(() => scopeHierarchyForSelector(frame, "prototype")).toThrow(
+    'layer "prototype" was requested, but no AutoMobile prototype is showing. Show the prototype first, or omit layer to search the whole screen.',
+  );
+  expect(layerGestureRefusal(frame, "prototype", [{ x: 1, y: 1 }], "swipe")).toBe(
+    'layer "prototype" was requested, but no AutoMobile prototype is showing. Show the prototype first, or omit layer to search the whole screen.',
+  );
+});
+
+test("hidden refusals pin both reason sentences and advice", () => {
+  expect(new PrototypeHiddenError("app_layer_window_hidden").message).toBe(
+    'layer "prototype" was requested, but the AutoMobile prototype is hidden: it was shown with window.layer "app" and the app in front hides app-layer windows drawn over it (system apps such as Settings do). Show it again without window.layer (the default layer draws over every app) or over a different app, or omit layer.',
+  );
+  expect(new PrototypeHiddenError("device_blocked").message).toBe(
+    'layer "prototype" was requested, but the AutoMobile prototype is hidden: the device is locked or its screen is off. Wake and unlock the device (the prototype returns with its state), or omit layer.',
+  );
 });

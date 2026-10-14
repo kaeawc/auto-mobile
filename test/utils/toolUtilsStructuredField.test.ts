@@ -1,3 +1,4 @@
+import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, test } from "bun:test";
 import {
   createStructuredToolResponse,
@@ -161,5 +162,40 @@ describe("createStructuredToolResponse typed envelope", () => {
     );
     expect(response.structuredContent).toBe("plain-string");
     expect("success" in response).toBe(false);
+  });
+});
+
+describe("structured response symbol metadata", () => {
+  test("strips enumerable symbols without mutating the original payload", () => {
+    const metadata = Symbol("internal");
+    const payload = {
+      success: false,
+      error: "failed",
+      nested: { value: 1 },
+      [metadata]: "prototype",
+    };
+    const response = createStructuredToolResponse(payload);
+
+    expect(CallToolResultSchema.parse(response).structuredContent).toEqual({
+      success: false,
+      error: "failed",
+      nested: payload.nested,
+    });
+    expect(Reflect.ownKeys(response.structuredContent)).toEqual(["success", "error", "nested"]);
+    expect(JSON.parse(response.content[0].text)).toEqual(response.structuredContent);
+    expect(getStructuredPayload(response)?.nested).toBe(payload.nested);
+    expect(response.success).toBe(false);
+    expect(response.error).toBe("failed");
+    expect(payload[metadata]).toBe("prototype");
+    expect(Object.getOwnPropertyDescriptor(payload, metadata)?.enumerable).toBe(true);
+  });
+
+  test("retains payload identity when symbols are absent or non-enumerable", () => {
+    const payload = { success: true };
+    expect(createStructuredToolResponse(payload).structuredContent).toBe(payload);
+    Object.defineProperty(payload, Symbol("internal"), { value: "app" });
+    const response = createStructuredToolResponse(payload);
+    expect(response.structuredContent).toBe(payload);
+    expect(CallToolResultSchema.parse(response).structuredContent).toEqual(payload);
   });
 });

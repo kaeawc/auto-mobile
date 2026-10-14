@@ -115,6 +115,9 @@ export const DAEMON_SHUTDOWN_STAGES = {
   "WebRTC stream socket server": writesDatabase(200),
   "video stream socket server": databaseFree(200),
   "iOS simulator capture helper pool": databaseFree(150),
+  // Helpers share TERM/KILL waits and use rolled-forward time; keep the process exit reserve.
+  "native helper registry": databaseFree(10),
+  "host adb children": databaseFree(10),
   "appearance sync scheduler": writesDatabase(25),
   "performance monitor": writesDatabase(25),
   "active HTTP sessions": writesDatabase(150),

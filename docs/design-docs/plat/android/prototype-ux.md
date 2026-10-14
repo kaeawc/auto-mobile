@@ -1551,3 +1551,38 @@ asset strings and count nav images as spec image uses; #9296 must remove its
 `specVersion` proposal. #9295's root-level opacity wording maps to
 `window.opacity`, and its focusability wording follows the later device findings.
 No sibling issues are edited as part of this implementation.
+
+
+## Saved prototype activity
+
+`SavedPrototypeLaunch.intent(context, id)` targets the explicit
+`SavedPrototypeActivity` component with data `automobile-saved-prototype:/<id>`
+(the single path segment is encoded with `Uri.Builder`) and
+`FLAG_ACTIVITY_NEW_DOCUMENT`. No extras are read: intents select only an id,
+never a spec or assets. `documentLaunchMode="intoExisting"` matches component and
+data via `Intent.filterEquals`, giving each id its own task while reusing the
+same id's task. Shortcut publishing may add flags; shortcut removal is deferred
+to #12265.
+
+The activity is `exported=false` with no intent filter. App-owned launches,
+including our pinned shortcut intents launched with the app's identity, can
+open it; other apps cannot render saved content or probe ids. An exported
+activity plus a signature permission would introduce an unnecessary external
+entry point, and exporting with an intent filter alone would let any app
+enumerate/launch saved entries. We rejected those alternatives; explicit,
+app-owned intents also avoid Android 15's stricter intent matching requirements.
+
+Saved entries live under `savedPrototypeRoot(context)`, the credential-encrypted
+app-private `filesDir/saved-prototypes` directory. Locked storage is checked
+before constructing or calling the store. Missing ids, deleted entries, corrupt
+content, unsupported format versions and locked storage have typed screens;
+raw storage messages and paths never reach the UI.
+
+The existing runtime and Compose renderer run in an activity window without
+accessibility service state, overlay ownership, idle timeout, disconnect
+dismissal or foreground-app scoping. Back, authored dismiss and HostDismiss
+finish the activity and emit exactly one `dismissed` event with reason `user`.
+A system process kill emits nothing. Offline events enter the process-level
+`SavedPrototypeEvents.buffer`; a registered delivery consumes an event only when
+it returns true. Future replay must synchronize on the buffer while draining or
+restoring it. The bounded buffer is in memory and does not survive process death.

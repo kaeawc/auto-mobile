@@ -110,23 +110,7 @@ function isManagedSlotsResult(value: unknown): value is ManagedSlotsResult {
   );
 }
 
-function classifyError(error: unknown, signal: AbortSignal | undefined): ManagedSlotsFailure {
-  if (signal?.aborted) {
-    return failure(
-      "cancelled",
-      "The proxy shut down while acquiring its managed slots.",
-      true,
-      "Relaunch the execution.",
-    );
-  }
-  if (error instanceof McpTimeoutError) {
-    return failure(
-      "timeout",
-      `Managed slot acquisition did not finish within the preparation deadline: ${errorMessage(error)}`,
-      true,
-      "Retry with a longer preparationTimeoutMs, and set the MCP init timeout at or above it.",
-    );
-  }
+function incompatibleDaemonFailure(error: unknown): ManagedSlotsFailure | undefined {
   if (error instanceof DaemonHandshakeMismatchError) {
     return failure(
       "contract_unsupported",
@@ -149,6 +133,30 @@ function classifyError(error: unknown, signal: AbortSignal | undefined): Managed
       false,
       "Restart the daemon from this client's installation (`auto-mobile --daemon restart`) so frontend and daemon match; nothing was changed.",
     );
+  }
+  return undefined;
+}
+
+function classifyError(error: unknown, signal: AbortSignal | undefined): ManagedSlotsFailure {
+  if (signal?.aborted) {
+    return failure(
+      "cancelled",
+      "The proxy shut down while acquiring its managed slots.",
+      true,
+      "Relaunch the execution.",
+    );
+  }
+  if (error instanceof McpTimeoutError) {
+    return failure(
+      "timeout",
+      `Managed slot acquisition did not finish within the preparation deadline: ${errorMessage(error)}`,
+      true,
+      "Retry with a longer preparationTimeoutMs, and set the MCP init timeout at or above it.",
+    );
+  }
+  const incompatibleDaemon = incompatibleDaemonFailure(error);
+  if (incompatibleDaemon) {
+    return incompatibleDaemon;
   }
   const code = (error as { code?: unknown } | null)?.code;
   if (typeof code === "string" && CONFIG_ERROR_CODES.has(code)) {

@@ -431,6 +431,8 @@ internal fun prototypeDescendants(node: PrototypeNode): List<PrototypeNode> =
     is PrototypeBoxNode -> node.children
     is PrototypeRowNode -> node.children
     is PrototypeColumnNode -> node.children
+    is PrototypeFlowNode -> node.children
+    is PrototypeGridNode -> node.children
     is PrototypePagerNode -> node.children
     is PrototypeCardNode -> node.children
     is PrototypeScrollNode -> listOf(node.child)

@@ -124,6 +124,7 @@ private fun PrototypeStyle.mergedOver(prototype: PrototypeStyle): PrototypeStyle
     alignment = prototype.alignment ?: alignment,
     arrangement = prototype.arrangement ?: arrangement,
     spacing = prototype.spacing ?: spacing,
+    runSpacing = prototype.runSpacing ?: runSpacing,
     textSize = prototype.textSize ?: textSize,
     fontWeight = prototype.fontWeight ?: fontWeight,
     color = prototype.color ?: color,

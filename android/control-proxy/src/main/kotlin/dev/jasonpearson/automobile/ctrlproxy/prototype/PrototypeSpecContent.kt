@@ -414,13 +414,17 @@ private fun RenderPrototypeNodeContent(
   if (traceEnabled) traceSink.begin(PrototypeTrace.NODE)
   LocalPrototypeCompositionProbe.current?.invoke(node.identity)
   val modifier = parentModifier.then(prototypeNodeModifier(node, interact, weightAxis, windowRoot))
-  // Only box/row/column with repeat or a direct visibleWhen child animate and clip their size.
-  // Look through card/scroll/pager only; nested box/row/column own the animation their parent
+  // Inline layout containers with repeat or a direct visibleWhen child animate and clip their size.
+  // Look through card/scroll/pager only; nested layout containers own the animation their parent
   // follows.
   // Others neither spring for text/style/image-load changes nor clip children with motion.
   val animatesSize =
     LocalPrototypeMotion.current &&
-      (node.role == "box" || node.role == "row" || node.role == "column") &&
+      (node.role == "box" ||
+        node.role == "row" ||
+        node.role == "column" ||
+        node.role == "flow" ||
+        node.role == "grid") &&
       prototypeContainerAnimatesSize(node)
   val containerModifier = modifier.prototypeAnimateSize(animatesSize)
   if (animatesSize)
@@ -461,6 +465,22 @@ private fun RenderPrototypeNodeContent(
               columnWeight(it),
               it.weightAxis(PrototypeWeightAxis.VERTICAL),
             )
+          }
+        }
+      }
+    "flow" ->
+      PrototypeFlowLayout(containerModifier, node.style.source) {
+        node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
+      }
+    "grid" ->
+      PrototypeGridLayout(
+        containerModifier,
+        (checkNotNull(node.source) as PrototypeGridNode).columns,
+        node.style.source,
+      ) {
+        node.children.forEach {
+          key(it.identity) {
+            RenderPrototypeNode(it, interact, Modifier.prototypeGridSpan(it.source?.span ?: 1))
           }
         }
       }
@@ -964,7 +984,7 @@ private fun prototypeNodeModifier(
 }
 
 private val SEMANTICS_FREE_CONTAINERS =
-  setOf("box", "row", "column", "scroll", "pager", "spacer", "card", "divider")
+  setOf("box", "row", "column", "flow", "grid", "scroll", "pager", "spacer", "card", "divider")
 
 /**
  * Navigation bars are labelled by their tabs, which carry the Tab role and selected state, so their
@@ -999,7 +1019,7 @@ internal fun isDecorativePrototypeVisual(node: PrototypeRenderNode, tappable: Bo
 
 private val VISUAL_TEXT_ROLES = setOf("text", "icon", "image")
 
-private val MERGEABLE_TAP_CONTAINERS = setOf("box", "row", "column", "card")
+private val MERGEABLE_TAP_CONTAINERS = setOf("box", "row", "column", "flow", "grid", "card")
 
 /** Preserve exact text selectors and every independently targetable descendant. */
 internal fun prototypeMergedTapLabel(node: PrototypeRenderNode, tappable: Boolean): String? {

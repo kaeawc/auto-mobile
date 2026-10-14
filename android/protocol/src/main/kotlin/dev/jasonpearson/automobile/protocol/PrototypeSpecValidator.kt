@@ -225,6 +225,7 @@ object PrototypeSpecValidator {
     val repeats = PrototypeRepeatData((value as? JsonObject)?.get("data") as? JsonObject)
     val error =
       walk(value, definitions.getValue("spec").jsonObject, "", context, 0)
+        ?: gridSpanErrors(context)
         ?: PrototypeRepeatValidator.validate(value, repeats)
         ?: pagerErrors(context)
         ?: stateTypeErrors(value, context, repeats)
@@ -238,6 +239,28 @@ object PrototypeSpecValidator {
     } catch (_: SerializationException) {
       PrototypeSpecValidation.Failure(fail("", "Internal model/contract mismatch"))
     }
+  }
+
+  /** A span belongs to the direct grid parent, including repeat templates. */
+  private fun gridSpanErrors(context: Context): PrototypeSpecError? {
+    val parents = mutableMapOf<String, JsonObject>()
+    for ((node, path) in context.nodes) {
+      if (node.containsKey("span")) {
+        val parent =
+          parents[path] ?: return fail("$path.span", "span requires a direct grid parent")
+        if (parent.text("type") != "grid") {
+          return fail("$path.span", "span requires a direct grid parent")
+        }
+        val columns = (parent["columns"] as? JsonPrimitive)?.doubleOrNull
+        if (columns != null && node.number("span", 0.0) > columns) {
+          return fail("$path.span", "span exceeds grid columns")
+        }
+      }
+      (node["children"] as? JsonArray)?.indices?.forEach { index ->
+        parents["$path.children[$index]"] = node
+      }
+    }
+    return null
   }
 
   // JSON integers include exponent/decimal spellings (1e2, 100.0). Kotlin's Int decoder

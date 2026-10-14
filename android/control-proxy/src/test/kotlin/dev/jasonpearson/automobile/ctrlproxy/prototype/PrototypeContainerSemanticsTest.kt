@@ -52,6 +52,60 @@ class PrototypeContainerSemanticsTest {
     all().mapNotNull { it.config.getOrNull(PrototypeRole) }
 
   @Test
+  fun `flow keeps children beyond maxLines in the semantics tree`() {
+    val root =
+      render(
+        PrototypeFlowNode(
+          testTag = "flow",
+          maxLines = 1,
+          style = PrototypeStyle(width = PrototypeDimension.Dp(80.0), spacing = 4.0),
+          children =
+            (0 until 8).map {
+              PrototypeTextNode(
+                testTag = "flow-$it",
+                text = "Item $it",
+                style = PrototypeStyle(width = PrototypeDimension.Dp(70.0)),
+              )
+            },
+        ),
+      )
+    assertEquals("flow", root.tagged("flow").config[PrototypeRole])
+    for (index in 0 until 8) assertTrue(
+      root.tagged("flow-$index").config.contains(SemanticsProperties.Text),
+    )
+  }
+
+  @Test
+  fun `grid keeps every repeated child in the semantics tree`() {
+    val root =
+      render(
+        PrototypeGridNode(
+          testTag = "grid",
+          contentDescription = "Results",
+          columns = PrototypeGridColumns.Fixed(2),
+          repeat =
+            PrototypeRepeat(
+              (0 until 8).map { mapOf("label" to PrototypeScalar.Text("Item $it")) },
+              "item",
+            ),
+          children = listOf(PrototypeTextNode(testTag = "cell", text = "{item.label}", span = 2)),
+        ),
+      )
+    assertEquals("grid", root.tagged("grid").config[PrototypeRole])
+    assertEquals(
+      listOf("Results"),
+      root.tagged("grid").config[SemanticsProperties.ContentDescription],
+    )
+    assertEquals(8, root.all().count { it.config.getOrNull(SemanticsProperties.TestTag) == "cell" })
+    assertEquals(
+      (0 until 8).map { "Item $it" },
+      root.all().flatMap {
+        it.config.getOrNull(SemanticsProperties.Text).orEmpty().map { text -> text.text }
+      },
+    )
+  }
+
+  @Test
   fun `layout containers with nothing to report are merged into their parent`() {
     val root =
       render(

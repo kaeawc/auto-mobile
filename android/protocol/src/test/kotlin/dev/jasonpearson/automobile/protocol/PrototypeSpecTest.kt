@@ -9,6 +9,51 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestFactory
 
 class PrototypeSpecTest {
+  @Test
+  fun `grid columns preserve untagged fixed and adaptive wire values`() {
+    val fixed = Json.decodeFromString<PrototypeGridColumns>("3e0")
+    assertEquals(PrototypeGridColumns.Fixed(3), fixed)
+    assertEquals("3", Json.encodeToString(PrototypeGridColumns.serializer(), fixed))
+    val adaptive = Json.decodeFromString<PrototypeGridColumns>("""{"minWidth":100.5}""")
+    assertEquals(PrototypeGridColumns.Adaptive(100.5), adaptive)
+    assertEquals(
+      """{"minWidth":100.5}""",
+      Json.encodeToString(PrototypeGridColumns.serializer(), adaptive),
+    )
+  }
+
+  @Test
+  fun `flow grid structural errors use shared contract rules`() {
+    val cases =
+      listOf(
+        Triple(
+          """{"type":"flow","children":[],"style":{"runSpacing":-1}}""",
+          "root.style.runSpacing",
+          "Invalid number value",
+        ),
+        Triple(
+          """{"type":"grid","children":[],"columns":13}""",
+          "root.columns",
+          "Invalid number value",
+        ),
+        Triple(
+          """{"type":"grid","children":[],"columns":{"minWidth":-1}}""",
+          "root.columns.minWidth",
+          "Invalid number value",
+        ),
+        Triple(
+          """{"type":"grid","children":[{"type":"text","text":"a","span":0}],"columns":2}""",
+          "root.children[0].span",
+          "Invalid number value",
+        ),
+      )
+    for ((root, path, message) in cases) {
+      val spec = """{"id":"test","window":{"placement":{"type":"fullscreen"}},"root":$root}"""
+      val result = PrototypeSpecValidator.validate(spec)
+      assertEquals(PrototypeSpecValidation.Failure(PrototypeSpecError(path, message)), result)
+    }
+  }
+
   @TestFactory
   fun validFixtures(): List<DynamicTest> = valid.map { file ->
     DynamicTest.dynamicTest("decode ${file.name}") {

@@ -73,6 +73,78 @@ class PrototypeNodeLayoutTest {
     value * RuntimeEnvironment.getApplication().resources.displayMetrics.density
 
   @Test
+  fun `grid measures equal columns and wraps a span that does not fit`() {
+    // Semantic bounds describe the drawn child, so fill the slot rather than wrap empty content.
+    val cellStyle =
+      PrototypeStyle(width = PrototypeDimension.Fill, height = PrototypeDimension.Dp(20.0))
+    val root =
+      render(
+        PrototypeGridNode(
+          columns = PrototypeGridColumns.Fixed(3),
+          style =
+            PrototypeStyle(width = PrototypeDimension.Dp(320.0), spacing = 10.0, runSpacing = 12.0),
+          children =
+            listOf(
+              PrototypeBoxNode(
+                testTag = "first",
+                span = 2,
+                style = cellStyle,
+                children = emptyList(),
+              ),
+              PrototypeBoxNode(
+                testTag = "second",
+                span = 2,
+                style = cellStyle,
+                children = emptyList(),
+              ),
+              PrototypeBoxNode(testTag = "third", style = cellStyle, children = emptyList()),
+            ),
+        ),
+      )
+    val first = root.tagged("first").boundsInRoot
+    val second = root.tagged("second").boundsInRoot
+    val third = root.tagged("third").boundsInRoot
+    assertEquals(dp(210f), first.width, 1f)
+    assertEquals(first.left, second.left, 1f)
+    assertEquals(first.bottom + dp(12f), second.top, 1f)
+    assertEquals(second.top, third.top, 1f)
+    assertEquals(second.right + dp(10f), third.left, 1f)
+    assertEquals(dp(100f), third.width, 1f)
+  }
+
+  @Test
+  fun `hidden grid child does not shift the span of a later child`() {
+    val root =
+      render(
+        PrototypeGridNode(
+          testTag = "grid",
+          columns = PrototypeGridColumns.Fixed(3),
+          style = PrototypeStyle(width = PrototypeDimension.Dp(320.0), spacing = 10.0),
+          children =
+            listOf(
+              PrototypeTextNode(
+                text = "hidden",
+                span = 1,
+                visibleWhen =
+                  PrototypeCondition(key = "show", equals = PrototypeScalar.BooleanValue(true)),
+              ),
+              PrototypeTextNode(
+                testTag = "visible",
+                text = "visible",
+                span = 2,
+                style = PrototypeStyle(width = PrototypeDimension.Fill),
+              ),
+            ),
+        ),
+      )
+    val grid = root.tagged("grid").boundsInRoot
+    val visible = root.tagged("visible").boundsInRoot
+    assertEquals(dp(210f), visible.width, 1f)
+    assertEquals(grid.left, visible.left, 1f)
+    assertEquals(grid.top, visible.top, 1f)
+  }
+
+  @Test
   fun `a padded tappable node reports its padding inside its bounds`() {
     val root =
       render(

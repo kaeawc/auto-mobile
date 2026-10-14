@@ -446,6 +446,27 @@ Known limits:
   PID plus identity once the read succeeds.
 - Windows has no start identity, so the owner is judged by PID alone.
 
+### Peer daemons and database lock contention
+
+Daemons sharing a data directory share `auto-mobile.db` (#11158, #11858).
+A peer's write lock blocks the event loop for one nominal 250 ms wait per attempt;
+the dialect yields between attempts within a 5 s per-statement retry budget
+(an in-flight attempt may exceed the budget by one wait plus backoff).
+The registry remains bounded at one nominal 250 ms wait per operation (#12104).
+
+| Session upsert: peer hold | Before: total / longest stall (ms) | After: total / longest stall (ms) |
+| ------------------------- | ---------------------------------- | --------------------------------- |
+| 1 s                       | 1007 / 1007                        | 1002 / 254                        |
+| 3 s                       | 3005 / 3005                        | 3011 / 258                        |
+| 8 s                       | 8001 / 8001                        | 8001 / 508                        |
+| 20 s (refused, busy)      | 10003 / 10003                      | 10305 / 504                       |
+
+Measured on macOS with Bun 1.3.14. The upsert runs two statements (prune, then write), so
+its longest stall can be two adjacent waits; single-statement writes and transactions stayed
+at or under 262 ms, and the per-statement success window is unchanged (about 5 s).
+
+Reproduce: `bun scripts/db/peer-write-lock-stall-probe.ts --holds 1000,3000,8000,20000`.
+
 ## Spec matching
 
 Matching is declarative, per slot, and the result reports a `disposition` of

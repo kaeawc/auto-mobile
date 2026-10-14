@@ -1102,6 +1102,7 @@ internal fun prototypeMergedTapLabel(node: PrototypeRenderNode, tappable: Boolea
   fun visit(child: PrototypeRenderNode): Boolean {
     if (
       child.testTag != null ||
+        child.spans?.any { it.onTap != null } == true ||
         !child.contentDescription.isNullOrEmpty() ||
         !child.source?.onTap.isNullOrEmpty() ||
         child.source?.visibleWhen != null ||

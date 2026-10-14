@@ -1013,8 +1013,10 @@ export const PROTOTYPE_DATA_MODEL_CAPABILITY = "prototype_data_model_v1";
  * `theme.colors.light` / `theme.colors.dark`, and `{light, dark}` image assets. A device without it
  * rejects or misdraws those forms, so the host refuses the show before sending.
  */
-export const PROTOTYPE_RICH_TEXT_CAPABILITY = "prototype_rich_text_v1";
 export const PROTOTYPE_THEME_MODES_CAPABILITY = "prototype_theme_modes_v1";
+
+/** Renders styled text spans and their independent tap actions. */
+export const PROTOTYPE_RICH_TEXT_CAPABILITY = "prototype_rich_text_v1";
 
 /** Future iOS capabilities that lift host-reported prototype platform differences. */
 export const PROTOTYPE_IDENTIFIER_TEST_TAG_ONLY_CAPABILITY =

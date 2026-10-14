@@ -2,6 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from 
 import {
   PROTOTYPE_PATCH_CAPABILITY,
   PROTOTYPE_DATA_MODEL_CAPABILITY,
+  PROTOTYPE_RICH_TEXT_CAPABILITY,
   type PrototypeResult,
 } from "../../src/features/observe/android/ctrlProxyProtocol";
 import { InMemoryPrototypeStatusStore } from "../../src/features/prototype/PrototypeStatusStore";
@@ -144,6 +145,54 @@ describe("prototype patch host", () => {
       }
       expect(proxy.patchRequests).toEqual([]);
       expect(agent.requests).toEqual([]);
+    },
+  );
+  test.each([android, ios])(
+    "$platform refuses rich text patch nodes without the capability and sends them with it",
+    async (device) => {
+      expect((await show(device)).success).toBe(true);
+      const ops = [
+        {
+          op: "replaceNode",
+          id: "label",
+          node: {
+            type: "text",
+            id: "label",
+            spans: [{ text: "Read " }, { text: "terms", onTap: [{ type: "emit", name: "terms" }] }],
+          },
+        },
+      ];
+      const refused = await patch(ops, {}, device);
+      expect(refused.success).toBe(false);
+      expect(refused.error).toContain("ops[0].node.spans");
+      expect(refused.error).toContain(PROTOTYPE_RICH_TEXT_CAPABILITY);
+      expect(proxy.patchRequests).toEqual([]);
+      expect(agent.patchRequests).toEqual([]);
+      expect((await patch(replace, {}, device)).success).toBe(true);
+      proxy.setSupportedCommands([
+        PROTOTYPE_PATCH_CAPABILITY,
+        PROTOTYPE_DATA_MODEL_CAPABILITY,
+        PROTOTYPE_RICH_TEXT_CAPABILITY,
+      ]);
+      agent.handshake.capabilities.push(PROTOTYPE_RICH_TEXT_CAPABILITY);
+      expect((await patch(ops, {}, device)).success).toBe(true);
+      const requests = device === android ? proxy.patchRequests : agent.patchRequests;
+      expect(requests).toEqual([
+        { id: "orders", ops: replace },
+        { id: "orders", ops },
+      ]);
+    },
+  );
+  test.each([android, ios])(
+    "$platform permits rich text shaped data values without the rich text capability",
+    async (device) => {
+      expect((await show(device)).success).toBe(true);
+      const ops = [
+        { op: "add", path: "/data/opaque", value: { type: "text", spans: [{ text: "terms" }] } },
+      ];
+      expect((await patch(ops, {}, device)).success).toBe(true);
+      const requests = device === android ? proxy.patchRequests : agent.patchRequests;
+      expect(requests).toEqual([{ id: "orders", ops }]);
     },
   );
   test.each([android, ios])(

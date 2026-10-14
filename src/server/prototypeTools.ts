@@ -966,16 +966,22 @@ async function themeModesRefusal(
   return { success: false, error: new ActionableError(message).message };
 }
 
-/** Refuses data bindings before any device request or asset upload. */
+/** Refuses rich text shows and patch replacement nodes before any device request or asset upload. */
 async function richTextRefusal(
   target: PrototypeTarget,
   args: z.infer<typeof prototypeSchema>,
   signal: AbortSignal | undefined,
 ): Promise<PrototypeResult | undefined> {
-  if (args.action !== "show" || args.spec === undefined) {
+  if (args.action !== "show" && args.action !== "patch") {
     return undefined;
   }
-  const fields = prototypeRichTextFields(args.spec);
+  const fields = prototypeRichTextFields(
+    args.action === "patch"
+      ? {
+          ops: (args.ops ?? []).map((op) => (op.op === "replaceNode" ? { node: op.node } : {})),
+        }
+      : args.spec,
+  );
   if (fields.length === 0) {
     return undefined;
   }
@@ -993,6 +999,7 @@ async function richTextRefusal(
       };
 }
 
+/** Refuses data bindings before any device request or asset upload. */
 async function dataModelRefusal(
   target: PrototypeTarget,
   args: z.infer<typeof prototypeSchema>,
@@ -1595,6 +1602,8 @@ async function performPrototypeAction(
           target.android
             ? target.android.supportsCommand(PROTOTYPE_PATCH_CAPABILITY)
             : target.ios?.supportsCapability(PROTOTYPE_PATCH_CAPABILITY) === true,
+        richTextRefusal: async () =>
+          (await richTextRefusal(target, args, signal))?.error ?? undefined,
         platform: device.platform === "android" ? "android" : "ios",
         queue,
         retire: (result) => retireObservation(cacheInvalidator, device, result),

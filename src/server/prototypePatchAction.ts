@@ -45,6 +45,7 @@ export interface PrototypePatchDependencies {
   store: Pick<PrototypeStatusStore, "shownSpecs" | "recordPatchedData">;
   transport: Pick<PrototypeTransport, "patch">;
   supportsPatch: () => Promise<boolean>;
+  richTextRefusal: () => Promise<string | undefined>;
   platform: "android" | "ios";
   queue: PrototypePatchQueue;
   /** Retires the device's cached observation after an applied patch. */
@@ -171,6 +172,10 @@ export async function performPrototypePatch(
   signal?.throwIfAborted();
   if (!supported) {
     return failure(new ActionableError(prototypePatchUnsupportedMessage(deps.platform)).message);
+  }
+  const richTextRefusal = await deps.richTextRefusal();
+  if (richTextRefusal) {
+    return failure(richTextRefusal);
   }
   if (args.baseRevision === undefined && prototypePatchTouchesState(args.ops)) {
     return failure("Invalid patch at baseRevision: required when a patch has /state ops");

@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   ManagedExecutionRelease,
+  managedExecutionSessionsFrom,
   type ManagedExecutionSessions,
   type ManagedExecutionWork,
 } from "../../../src/daemon/managedSlots/managedExecutionRelease";
+import type { KeepAwakeRestoreReport } from "../../../src/utils/KeepScreenAwakeManager";
+import { FakeDbWriteBarrier } from "../../fakes/FakeDbWriteBarrier";
 import type { SlotKey } from "../../../src/daemon/managedSlots/slotRegistry";
 import { SlotJournalInFlight } from "../../../src/daemon/managedSlots/slotJournal";
 import { MANAGED_EXECUTION_LIVENESS_POLICY } from "../../../src/daemon/managedExecutionLiveness";
@@ -71,6 +74,12 @@ class FakeSessions implements ManagedExecutionSessions {
   readonly forced: string[] = [];
   readonly cleanupInProgress = new Set<string>();
   hangRelease = false;
+  report: KeepAwakeRestoreReport | undefined;
+
+  getKeepAwakeRestoreReport(sessionId: string) {
+    expect(this.live.has(sessionId)).toBe(false);
+    return this.report;
+  }
 
   isSessionLive(sessionId: string): boolean {
     return this.live.has(sessionId);
@@ -193,6 +202,35 @@ describe("managed execution release (daemon/releaseExecution)", () => {
       execOwner: null,
     });
   });
+
+  test.each([undefined, "restored_to_baseline", "failed"] as const)(
+    "release result adds only a known keep-awake report (%s)",
+    async (reported) => {
+      const report: KeepAwakeRestoreReport = {
+        status: reported ?? "failed",
+        settings: [
+          reported === "restored_to_baseline"
+            ? { setting: "svc_stayon", value: "false" }
+            : { setting: "svc_stayon", error: "write rejected" },
+        ],
+      };
+      sessions.report = reported ? report : undefined;
+      const result = await drain.releaseExecution(S1);
+      expect(result).toEqual({
+        sessionId: S1,
+        outcome: "reusable_for_this_slot",
+        settlement: "confirmed",
+        alreadyReleased: false,
+        cancellationRequested: 0,
+        releaseForced: false,
+        device: DEVICE,
+        slots: [expect.objectContaining({ slotIndex: 0, execOwnerReleased: true })],
+        slotFailures: [],
+        ...(reported ? { keepAwakeRestore: report } : {}),
+      });
+      expect((await drain.releaseExecution(S1)).keepAwakeRestore).toEqual(sessions.report);
+    },
+  );
 
   test("generic allocation stays excluded after release; the slot's next execution may claim", async () => {
     await drain.releaseExecution(S1);
@@ -557,6 +595,30 @@ describe("managed execution release wiring", () => {
       await manager.releaseSession(S2);
 
       expect(policies).toEqual([MANAGED_EXECUTION_LIVENESS_POLICY, undefined]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("session adapter exposes the report only after teardown", async () => {
+    const report = {
+      status: "restored_to_baseline" as const,
+      settings: [{ setting: "svc_stayon" as const, value: "false" }],
+    };
+    const manager = new SessionManager(
+      new FakeTimer(),
+      new FakeDeviceSessionPersistence(),
+      () => new FakeDbWriteBarrier(),
+      () => ({ restore: async () => report }),
+    );
+    manager.stopCleanupTimer();
+    try {
+      await manager.createSession(S1, DEVICE, "android");
+      manager.setKeepScreenAwake(S1, { applied: true });
+      const sessions = managedExecutionSessionsFrom(manager, { releaseDevice: async () => {} });
+      expect(sessions.getKeepAwakeRestoreReport?.(S1)).toBeUndefined();
+      await sessions.releaseSession(S1);
+      expect(sessions.getKeepAwakeRestoreReport?.(S1)).toEqual(report);
     } finally {
       manager.stopCleanupTimer();
     }

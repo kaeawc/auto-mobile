@@ -1,3 +1,4 @@
+import type { PrototypePatchReply, PrototypePatchRequest } from "./prototypePatchWire";
 import type { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
 import type { PrototypeAssetRequestOptions } from "../observe/android/CtrlProxyPrototypes";
 import type {
@@ -20,6 +21,7 @@ export type AndroidPrototypeClient = Pick<
   AndroidCtrlProxyClient,
   | "requestShowPrototype"
   | "requestInspectPrototypes"
+  | "requestPatchPrototype"
   | "requestDismissPrototype"
   | "requestPutPrototypeAsset"
   | "requestRemovePrototypeAsset"
@@ -45,6 +47,10 @@ export class AndroidPrototypeTransport implements PrototypeTransport {
         options.appearance,
       ),
     );
+  }
+
+  patch(patch: PrototypePatchRequest, timeoutMs?: number): Promise<PrototypePatchReply> {
+    return this.client.requestPatchPrototype(patch, timeoutMs);
   }
 
   inspect(timeoutMs?: number): Promise<PrototypeResult> {

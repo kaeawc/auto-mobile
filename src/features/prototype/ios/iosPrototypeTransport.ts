@@ -1,3 +1,9 @@
+import {
+  prototypePatchReplyFields,
+  prototypePatchUnsupportedMessage,
+  type PrototypePatchRequest,
+  type PrototypePatchReply,
+} from "../prototypePatchWire";
 /**
  * The shared prototype transport over the injected iOS simulator prototype agent (#10568).
  *
@@ -14,6 +20,7 @@ import type { PrototypeAssetRequestOptions } from "../../observe/android/CtrlPro
 import { decodePrototypeEvent } from "../../observe/android/CtrlProxyPrototypes";
 import {
   PROTOTYPE_APPEARANCE_CAPABILITY,
+  PROTOTYPE_PATCH_CAPABILITY,
   PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
   SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY,
 } from "../../observe/android/ctrlProxyProtocol";
@@ -228,6 +235,27 @@ export class IosPrototypeTransport implements PrototypeTransport {
         ...(appearance === undefined ? {} : { appearance }),
       }),
     );
+  }
+
+  async patch(patch: PrototypePatchRequest): Promise<PrototypePatchReply> {
+    if (!this.supportsCapability(PROTOTYPE_PATCH_CAPABILITY)) {
+      return { success: false, delivery: "unsent", error: prototypePatchUnsupportedMessage("ios") };
+    }
+    try {
+      const reply = await this.agent.request("patch_prototype", {
+        id: patch.id,
+        ...(patch.baseRevision === undefined ? {} : { baseRevision: patch.baseRevision }),
+        ops: patch.ops,
+      });
+      return {
+        ...toPrototypeResult(reply),
+        ...prototypePatchReplyFields(reply),
+        delivery: "answered",
+      };
+    } catch (error) {
+      logger.warn("[prototype-agent] Patch request failed", error);
+      return { success: false, delivery: "indeterminate", error: errorMessage(error) };
+    }
   }
 
   async dismiss(target: PrototypeDismiss): Promise<PrototypeResult> {

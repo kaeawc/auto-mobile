@@ -75,15 +75,47 @@ describe("host starvation with a connected silent proxy (#11992)", () => {
   });
 
   for (const lostMs of [78_000, 40_000, 37_000, 35_000]) {
-    test(`a ${lostMs} ms stall credits 30 s and releases its silent connected owner`, async () => {
+    test(`a ${lostMs} ms stall is credited fully and holds its silent connected owner`, async () => {
       const { s, id, session } = await silentOwner();
       await stalledScan(s, lostMs);
-      // 6 + 2 + X - 30 = 56 / 18 / 15 / 13 s respectively; each exceeds lease + grace (8 s).
-      expect(session.stallForgivenAt).toBe(session.lastOwnerHeartbeat! + 30_000);
-      expect(s.isHeld(id)).toBe(false);
-      expect(s.releaseOf(id)?.reason).toBe("heartbeat-timeout");
+      // 6 + 2 + X - X = 8 s: the still-open owner receives the whole stall and is held.
+      expect(session.stallForgivenAt).toBe(session.lastOwnerHeartbeat! + lostMs);
+      expect(s.isHeld(id)).toBe(true);
+      expect(s.releaseOf(id)).toBeUndefined();
     });
   }
+
+  test("a transport closing during a 35 s stall receives 30 s credit and is released", async () => {
+    const { s, id, session } = await silentOwner();
+    s.lateTicks(SCAN_MS);
+    s.lateTicks(1);
+    await s.closeTransport();
+    expect(s.isHeld(id)).toBe(true);
+    expect(s.releaseOf(id)).toBeUndefined();
+    s.lateTicks(35_000 - 1);
+    await s.idle(0);
+    // Connected at gap start, closed at resume: 6 + 2 + 35 - 30 = 13 s > lease + grace.
+    expect(session.stallForgivenAt).toBe(session.lastOwnerHeartbeat! + 30_000);
+    expect(s.isHeld(id)).toBe(false);
+    expect(s.releaseOf(id)?.reason).toBe("heartbeat-timeout");
+  });
+
+  test("successive stalls exhaust 600 s of credit and release a still-connected silent owner", async () => {
+    const { s, id, session } = await silentOwner();
+    const heartbeatAt = session.lastOwnerHeartbeat!;
+    const heartbeatCount = s.heartbeatsBySession.get(id);
+    await stalledScan(s, 300_000);
+    expect(session.stallForgivenAt).toBe(heartbeatAt + 300_000);
+    expect(s.isHeld(id)).toBe(true);
+    expect(s.releaseOf(id)).toBeUndefined();
+    await stalledScan(s, 301_000);
+    // Only 300 s remain: 6 + 2 + 300 + 2 + 301 - 600 = 11 s > lease + grace.
+    expect(session.lastOwnerHeartbeat).toBe(heartbeatAt);
+    expect(s.heartbeatsBySession.get(id)).toBe(heartbeatCount);
+    expect(session.stallForgivenAt).toBe(heartbeatAt + 600_000);
+    expect(s.isHeld(id)).toBe(false);
+    expect(s.releaseOf(id)?.reason).toBe("heartbeat-timeout");
+  });
 
   test("a transport closed before the gap is still released", async () => {
     const { s, id, session } = await silentOwner();

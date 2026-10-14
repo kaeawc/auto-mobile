@@ -347,6 +347,7 @@ A managed-execution session uses the `managed-execution` liveness policy:
   start identity where readable, so a reused PID counts as the owner having exited;
   where that identity cannot be read, the PID alone is used. Stdin EOF ends the execution the same
   way. If the proxy is killed outright, the ~10 s no-heartbeat release applies.
+  See [Execution owner PID reuse](#execution-owner-pid-reuse) for the measured limits.
   Limit: with the default owner, a launch parent pid of 1 is treated as already
   orphaned and a parent pid of 0 (for example `docker exec`) as exited. When the
   runner is PID 1 in a container, or the proxy is started by `docker exec`, set
@@ -390,6 +391,77 @@ hint is short by the blocked time.
 Values are the defaults in `src/daemon/sessionLivenessWindows.ts`; see
 [Device ownership](device-ownership.md#when-a-session-is-released) for the
 general release rules.
+
+### Execution owner PID reuse
+
+The execution-owner watch records the owner as a PID plus the OS process start
+identity, and compares both on each check. On Linux the start identity is
+`/proc/<pid>/stat` field 22 plus the boot ID. On macOS it is the process start time.
+This section gives the numbers behind that design. They were measured for #12060
+on one macOS host (Darwin 25.6.0) under heavy parallel load (load average 250 to 400).
+
+| Measurement (macOS)                                              | Result                                                      |
+| ---------------------------------------------------------------- | ----------------------------------------------------------- |
+| PID range                                                        | Sequential up to 99,999, then wraps to 100                  |
+| Background PID allocation on the host                            | About 26 per second, so a given PID returns after about 1 h |
+| Spawn loop, 8 in parallel, until one exited PID was handed out   | 95,528 spawns in 69 s (1,377 per second)                    |
+| Serial spawn loop until a real successor held the owner's PID    | 177,990 spawns in 356 s                                     |
+| `sysctl kern.proc.pid` start time (in-process, `bun:ffi`)        | p50 0.03 ms, p95 0.04 ms                                    |
+| `ps -p <pid> -o lstart=` start time (child process, synchronous) | p50 6.4 ms, p95 51 ms, timeout 1 s                          |
+| Start identity from sysctl compared with `ps`                    | Identical for 1,889 of 1,889 host processes                 |
+
+What this means:
+
+- **The PID check alone is almost always enough.** The watch probes once a second, so
+  a PID-only check is fooled only if the owner's PID goes to a new process less than
+  a second after the owner exits. That needs a full PID wrap within one second, about
+  70 times faster than the fastest rate measured above. The start identity covers
+  the cases where checks pause for longer: a suspended proxy (laptop sleep,
+  `SIGSTOP`) or a long event-loop stall.
+- **Real reuse is detected.** In a native check, a real successor process held the
+  former owner's PID and `kill(pid, 0)` reported it alive. The watch with the
+  recorded start identity reported `owner-exited`. A watch with the PID alone
+  reported the owner as still alive.
+- **The identity is read cheaply on both platforms.** On macOS the proxy reads it in
+  process through `sysctl`, which works for processes of any user, including
+  PID 1. It compares the identity on every 1 s check. A matching result is cached for
+  1 s, so in practice a fresh read happens every 1 to 2 s. If `bun:ffi` cannot load,
+  the proxy falls back to `ps` and compares every fifth check, so reuse is detected
+  within about 5 s. On Linux, reading `/proc` is cheap and the identity is compared on
+  every check. Linux PID wrap rates were not measured. The default `pid_max` is
+  32,768, or 4,194,304 where systemd raises it (`/proc/sys/kernel/pid_max`).
+
+Known limits:
+
+- The identity is captured when the proxy starts, not when the runner chose
+  `executionOwnerPid`. If that PID already names a different process when the proxy
+  launches, the proxy adopts that process as the owner. Pass the PID of a process that
+  outlives the proxy launch, such as the runner itself.
+- If the identity cannot be read at startup, for example because `ps` timed out, the
+  watch uses the PID alone. It retries the capture on later checks and switches to
+  PID plus identity once the read succeeds.
+- Windows has no start identity, so the owner is judged by PID alone.
+
+### Peer daemons and database lock contention
+
+Daemons sharing a data directory share `auto-mobile.db` (#11158, #11858).
+A peer's write lock blocks the event loop for one nominal 250 ms wait per attempt;
+the dialect yields between attempts within a 5 s per-statement retry budget
+(an in-flight attempt may exceed the budget by one wait plus backoff).
+The registry remains bounded at one nominal 250 ms wait per operation (#12104).
+
+| Session upsert: peer hold | Before: total / longest stall (ms) | After: total / longest stall (ms) |
+| ------------------------- | ---------------------------------- | --------------------------------- |
+| 1 s                       | 1007 / 1007                        | 1002 / 254                        |
+| 3 s                       | 3005 / 3005                        | 3011 / 258                        |
+| 8 s                       | 8001 / 8001                        | 8001 / 508                        |
+| 20 s (refused, busy)      | 10003 / 10003                      | 10305 / 504                       |
+
+Measured on macOS with Bun 1.3.14. The upsert runs two statements (prune, then write), so
+its longest stall can be two adjacent waits; single-statement writes and transactions stayed
+at or under 262 ms, and the per-statement success window is unchanged (about 5 s).
+
+Reproduce: `bun scripts/db/peer-write-lock-stall-probe.ts --holds 1000,3000,8000,20000`.
 
 ## Spec matching
 

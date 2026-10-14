@@ -699,9 +699,9 @@ describe("fileLock primitive", () => {
       try {
         expect(() => releaseExclusiveLock(lockPath, 100)).not.toThrow();
         expect(warnSpy).toHaveBeenCalledWith(
-          `src/utils/fileLock.ts: failed to release exclusive lock at ${lockPath}: permission denied`,
+          `Failed to release exclusive lock at ${lockPath}; marker unlink exhausted`,
         );
-        expect(unlinkSpy).toHaveBeenCalledTimes(1);
+        expect(unlinkSpy).toHaveBeenCalledTimes(3);
       } finally {
         unlinkSpy.mockRestore();
         warnSpy.mockRestore();

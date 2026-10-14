@@ -4026,6 +4026,16 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       ?.getDisplay(displayId)
       .let(::panelUniqueIdOf)
 
+  private fun panelFingerprint(
+    displayId: Int,
+  ): dev.jasonpearson.automobile.ctrlproxy.models.PanelFingerprintInfo? =
+    (getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager)
+      ?.getDisplay(displayId)
+      .let(::panelFingerprintOf)
+      ?.let {
+        dev.jasonpearson.automobile.ctrlproxy.models.PanelFingerprintInfo(it.width, it.height)
+      }
+
   /** Get the top system inset (status bar height) for coordinate adjustment. */
   @Suppress("DEPRECATION")
   private fun getTopSystemInset(): Int {
@@ -4390,6 +4400,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         HierarchyMetadata(
           displayId = targetDisplayId,
           panelUniqueId = panelUniqueId(targetDisplayId),
+          panelFingerprint = panelFingerprint(targetDisplayId),
           screenWidth = screenDimensions?.width,
           screenHeight = screenDimensions?.height,
           rotation = rotation,
@@ -4664,6 +4675,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         HierarchyMetadata(
           displayId = targetDisplayId,
           panelUniqueId = panelUniqueId(targetDisplayId),
+          panelFingerprint = panelFingerprint(targetDisplayId),
           screenWidth = screenDimensions?.width,
           screenHeight = screenDimensions?.height,
           rotation = rotation,

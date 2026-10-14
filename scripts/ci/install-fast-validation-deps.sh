@@ -38,6 +38,10 @@ MAX_ATTEMPTS="${FAST_VALIDATION_DEPS_MAX_ATTEMPTS:-2}"
 RETRY_BASE_DELAY_SECONDS="${FAST_VALIDATION_DEPS_RETRY_BASE_DELAY_SECONDS:-5}"
 BATS_CLONE_DIR="${FAST_VALIDATION_DEPS_BATS_CLONE_DIR:-/tmp/bats-core}"
 BATS_INSTALL_PREFIX="${FAST_VALIDATION_DEPS_BATS_INSTALL_PREFIX:-/usr/local}"
+# bats-core is installed with sudo, so pin it to a release and verify the
+# commit (tags are mutable). Keep in step with the workflow installs.
+BATS_CORE_TAG="v1.14.0"
+BATS_CORE_COMMIT="eb7f42f8d608ac693d7a4b67474f6714ea68cfc5"
 XMLSTARLET_COMMAND="${FAST_VALIDATION_DEPS_XMLSTARLET_COMMAND:-xmlstarlet}"
 FALLBACK_MIRROR="${FAST_VALIDATION_DEPS_FALLBACK_MIRROR:-http://archive.ubuntu.com/ubuntu}"
 SELF="${BASH_SOURCE[0]}"
@@ -156,8 +160,11 @@ main() {
     # cleanup+clone pair is composed with `bash -c`.
     # shellcheck disable=SC2016 # $1 is deliberately expanded by the inner bash, not here.
     run_with_retry "clone bats-core" \
-      bash -c 'rm -rf "$1" && git clone --depth 1 https://github.com/bats-core/bats-core.git "$1"' \
-      _ "$BATS_CLONE_DIR"
+      bash -c 'rm -rf "$1" && git clone --depth 1 --branch "$2" https://github.com/bats-core/bats-core.git "$1"' \
+      _ "$BATS_CLONE_DIR" "$BATS_CORE_TAG"
+    bats_commit="$(git -C "$BATS_CLONE_DIR" rev-parse HEAD)"
+    [[ "$bats_commit" == "$BATS_CORE_COMMIT" ]] ||
+      die "bats-core ${BATS_CORE_TAG} resolved to ${bats_commit}, expected ${BATS_CORE_COMMIT}"
     run_with_retry "install bats-core" \
       sudo "${BATS_CLONE_DIR}/install.sh" "$BATS_INSTALL_PREFIX"
   fi

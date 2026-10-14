@@ -24,7 +24,10 @@
  */
 
 import { classifySqliteError } from "../../db/databaseFailureClassification";
-import { ManagedSlotDiscoveryIncompleteError } from "./managedSlotRefusal";
+import {
+  ManagedSlotDiscoveryIncompleteError,
+  ManagedSlotRegistrySchemaUnsupportedError,
+} from "./managedSlotRefusal";
 import { failure as reconcileFailure } from "./reconciler";
 import {
   MANAGED_EXECUTION_LIVENESS_POLICY,
@@ -111,6 +114,8 @@ export interface ManagedSlotAcquireOptions {
 }
 
 const ACQUISITION_NEXT_ACTION: Readonly<Record<string, string>> = {
+  registry_schema_unsupported:
+    "Upgrade this daemon and every daemon sharing the registry to the build that migrated it, restarting older daemons; nothing was changed.",
   scope_invalidated:
     "This runner incarnation was reset; launch with the current runnerIncarnation.",
   scope_transition_pending:
@@ -250,6 +255,15 @@ export class ManagedSlotAcquisition {
       registry = await this.deps.registry();
       admission = await this.admitScope(registry, identity, deadlineMs);
     } catch (error) {
+      if (error instanceof ManagedSlotRegistrySchemaUnsupportedError) {
+        logger.warn(`[ManagedSlots] Registry schema unsupported: ${errorMessage(error)}`, error);
+        return {
+          ...base(null),
+          outcome: "failed",
+          slots: [],
+          failure: acquisitionFailure(error.code, errorMessage(error), error.retryable),
+        };
+      }
       if (
         classifySqliteError(error) !== "retryable" &&
         !(error instanceof ManagedSlotDiscoveryIncompleteError)

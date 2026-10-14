@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import java.io.File
 import java.io.IOException
+import java.io.RandomAccessFile
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -30,7 +31,9 @@ class SavedPrototypeStoreTest {
     limits: SavedPrototypeLimits = SavedPrototypeLimits(),
     clock: () -> Long = { 42L },
     fault: (String) -> Unit = {},
-  ) = SavedPrototypeDirectoryStore(root, limits, clock, fault = fault, log = { _, _ -> })
+    files: FakeSavedPrototypeFileOperations = FakeSavedPrototypeFileOperations(),
+    log: (String, Exception?) -> Unit = { _, _ -> },
+  ) = SavedPrototypeDirectoryStore(root, limits, clock, fault = fault, log = log, files = files)
 
   private fun saved(store: SavedPrototypeStore, request: SavedPrototypeSaveRequest = request()) =
     store.save(request) as SavedPrototypeSaveResult.Saved
@@ -285,7 +288,13 @@ class SavedPrototypeStoreTest {
 
   @Test
   fun `forced slug collision probes extended hash for both ids`() {
-    val store = SavedPrototypeDirectoryStore(root, slugHash = { "a".repeat(64) }, log = { _, _ -> })
+    val store =
+      SavedPrototypeDirectoryStore(
+        root,
+        slugHash = { "a".repeat(64) },
+        log = { _, _ -> },
+        files = FakeSavedPrototypeFileOperations(),
+      )
     val first = saved(store, request("a!"))
     val second = saved(store, request("a?"))
     assertNotEquals(first.slug, second.slug)
@@ -330,7 +339,7 @@ class SavedPrototypeStoreTest {
 
   private fun corrupt(mutate: (File, SavedPrototypeLoadResult.Loaded) -> Unit) {
     val logs = mutableListOf<String>()
-    val store = SavedPrototypeDirectoryStore(root, log = { message, _ -> logs += message })
+    val store = store(log = { message, _ -> logs += message })
     val slug = saved(store, request().copy(assets = listOf(image))).slug
     saved(store, request("healthy"))
     mutate(manifest(slug), loaded(store))
@@ -390,6 +399,210 @@ class SavedPrototypeStoreTest {
     assertTrue(store().load("panel") is SavedPrototypeLoadResult.Corrupt)
     assertFalse(store().delete("panel"))
     assertEquals("blocked", root.readText())
+  }
+
+  @Test
+  fun `process interruption after delete rename never restores entry`() {
+    saved(store())
+    val deleting = store(fault = { if (it == "moved-delete") throw ProcessInterrupted() })
+    assertThrows(ProcessInterrupted::class.java) { deleting.delete("panel") }
+    assertTrue(root.list()!!.any { it.startsWith(".del-") })
+    assertSame(SavedPrototypeLoadResult.NotFound, store().load("panel"))
+    assertTrue(root.list()!!.isEmpty())
+  }
+
+  @Test
+  fun `partial delete failure never restores remaining files`() {
+    saved(store())
+    val files = FakeSavedPrototypeFileOperations()
+    var interrupted = false
+    files.beforeRemove = { entry ->
+      if (!interrupted) {
+        interrupted = true
+        assertTrue(File(entry, "spec.json").delete())
+      }
+      throw IOException("partial delete")
+    }
+    val deleting = store(SavedPrototypeLimits(maxSavedPrototypes = 1), files = files)
+    assertFalse(deleting.delete("panel"))
+    assertTrue(interrupted)
+    assertSame(SavedPrototypeLoadResult.NotFound, deleting.load("panel"))
+    assertTrue(root.list()!!.all { it.startsWith(".del-") })
+    saved(deleting, request("new"))
+    files.beforeRemove = {}
+    assertEquals(listOf("new"), deleting.list().map { it.id })
+    assertFalse(root.list()!!.any { it.startsWith(".del-") })
+  }
+
+  @Test
+  fun `unreadable manifest leftover does not consume saved count cap`() {
+    val store = store(SavedPrototypeLimits(maxSavedPrototypes = 1))
+    val slug = saved(store).slug
+    manifest(slug).writeText("bad")
+    assertTrue(store.list().isEmpty())
+    saved(store, request("new"))
+    assertEquals(listOf("new"), store.list().map { it.id })
+  }
+
+  @Test
+  fun `post commit cleanup failure is logged and save stays successful`() {
+    saved(store())
+    val files = FakeSavedPrototypeFileOperations()
+    files.beforeRemove = { throw IOException("cleanup failed") }
+    val logs = mutableListOf<String>()
+    val replacing = store(files = files, log = { message, _ -> logs += message })
+    val result = saved(replacing, request().copy(label = "New"))
+    assertTrue(result.replaced)
+    assertTrue(logs.isNotEmpty())
+    assertTrue(root.list()!!.any { it.startsWith(".old-") })
+    assertEquals("New", loaded(replacing).label)
+    files.beforeRemove = {}
+    assertEquals("New", loaded(replacing).label)
+    assertFalse(root.list()!!.any { it.startsWith(".old-") })
+  }
+
+  @Test
+  fun `factory memoizes canonical roots`() {
+    val first = SavedPrototypeStores.inDirectory(root)
+    val second = SavedPrototypeStores.inDirectory(File(root, "../saved"))
+    assertSame(first, second)
+  }
+
+  @Test
+  fun `future manifest with additional key is unsupported before strict decode`() {
+    val store = store()
+    val slug = saved(store).slug
+    changeManifest(slug, "formatVersion", JsonPrimitive(2))
+    changeManifest(slug, "future", JsonPrimitive(true))
+    assertEquals(SavedPrototypeLoadResult.UnsupportedFormat(2), store.load("panel"))
+  }
+
+  @Test
+  fun `save refuses future manifest and writes nothing`() {
+    val store = store()
+    val slug = saved(store).slug
+    changeManifest(slug, "formatVersion", JsonPrimitive(2))
+    changeManifest(slug, "future", JsonPrimitive(true))
+    val before = snapshot()
+    val result = store.save(request().copy(label = "New")) as SavedPrototypeSaveResult.Rejected
+    assertEquals(SavedPrototypeRejection.UNSUPPORTED_EXISTING, result.reason)
+    assertEquals(before, snapshot())
+  }
+
+  @Test
+  fun `save refuses parsable but invalid existing manifest`() {
+    val store = store()
+    val slug = saved(store).slug
+    changeManifest(slug, "extra", JsonPrimitive(true))
+    val before = snapshot()
+    val result = store.save(request()) as SavedPrototypeSaveResult.Rejected
+    assertEquals(SavedPrototypeRejection.UNSUPPORTED_EXISTING, result.reason)
+    assertEquals(before, snapshot())
+  }
+
+  @Test
+  fun `save refuses parsable primitive manifest`() {
+    val store = store()
+    val slug = saved(store).slug
+    // The JSON element parser accepts this bare token as a primitive, not a manifest object.
+    manifest(slug).writeText("bad")
+    val before = snapshot()
+    val result = store.save(request()) as SavedPrototypeSaveResult.Rejected
+    assertEquals(SavedPrototypeRejection.UNSUPPORTED_EXISTING, result.reason)
+    assertEquals(before, snapshot())
+  }
+
+  @Test
+  fun `save refuses corrupt spec when manifest remains parsable`() {
+    val store = store()
+    val slug = saved(store).slug
+    File(root, "$slug/spec.json").writeText("bad")
+    val before = snapshot()
+    val result = store.save(request()) as SavedPrototypeSaveResult.Rejected
+    assertEquals(SavedPrototypeRejection.UNSUPPORTED_EXISTING, result.reason)
+    assertEquals(before, snapshot())
+  }
+
+  @Test
+  fun `unparsable manifest can be replaced only at derived slug`() {
+    val store = store()
+    val slug = saved(store).slug
+    manifest(slug).writeText("{")
+    val unrelated = File(root, "unrelated")
+    assertTrue(unrelated.mkdir())
+    File(unrelated, "manifest.json").writeText("{")
+    val result = saved(store)
+    assertEquals(slug, result.slug)
+    assertTrue(result.replaced)
+    assertEquals("{", File(unrelated, "manifest.json").readText())
+  }
+
+  @Test
+  fun `invalid old recovery name is logged and removed without blocking store`() {
+    saved(store())
+    val stray = File(root, ".old-weird name")
+    assertTrue(stray.mkdir())
+    val logs = mutableListOf<String>()
+    val store = store(log = { message, _ -> logs += message })
+    assertEquals("Panel", loaded(store).label)
+    assertFalse(stray.exists())
+    assertTrue(logs.isNotEmpty())
+  }
+
+  @Test
+  fun `all staged files sync before commit with manifest last`() {
+    val files = FakeSavedPrototypeFileOperations()
+    files.beforeSync = { assertFalse(root.list()!!.any { name -> !name.startsWith(".") }) }
+    saved(store(files = files), request().copy(assets = listOf(image, font)))
+    assertEquals(4, files.synced.size)
+    assertEquals(listOf("spec.json", "manifest.json"), files.synced.takeLast(2).map { it.name })
+    assertTrue(
+      files.synced.all {
+        it.parentFile.name.startsWith(".tmp-") || it.parentFile.name in listOf("assets", "fonts")
+      },
+    )
+  }
+
+  @Test
+  fun `copied assets are also synced before replacement`() {
+    val files = FakeSavedPrototypeFileOperations()
+    val store = store(files = files)
+    val request = request().copy(assets = listOf(image))
+    saved(store, request)
+    files.synced.clear()
+    saved(store, request)
+    assertEquals(3, files.synced.size)
+    assertEquals("assets", files.synced.first().parentFile.name)
+    assertEquals("manifest.json", files.synced.last().name)
+  }
+
+  @Test
+  fun `asset sync failure refuses save and preserves existing entry`() {
+    saved(store())
+    val files = FakeSavedPrototypeFileOperations()
+    files.beforeSync = { throw IOException("sync failed") }
+    val result = store(files = files).save(request().copy(assets = listOf(image)))
+    assertTrue(result is SavedPrototypeSaveResult.Rejected)
+    assertEquals("Panel", loaded(store()).label)
+  }
+
+  @Test
+  fun `manifest sync failure is logged and best effort`() {
+    val files = FakeSavedPrototypeFileOperations()
+    files.beforeSync = { if (it.name == "manifest.json") throw IOException("sync unavailable") }
+    val logs = mutableListOf<String>()
+    saved(store(files = files, log = { message, _ -> logs += message }))
+    assertTrue(logs.isNotEmpty())
+    assertEquals("Panel", loaded(store()).label)
+  }
+
+  @Test
+  fun `oversized manifest is corrupt without reading manifest bytes`() {
+    val slug = saved(store()).slug
+    RandomAccessFile(manifest(slug), "rw").use { it.setLength(1024L * 1024 + 1) }
+    val files = FakeSavedPrototypeFileOperations()
+    files.beforeReadManifest = { throw AssertionError("oversized manifest must not be read") }
+    assertTrue(store(files = files).load("panel") is SavedPrototypeLoadResult.Corrupt)
   }
 
   @Test

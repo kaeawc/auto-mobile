@@ -2,6 +2,8 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
+import java.io.File
+import java.io.IOException
 
 /** Consumer fake: snapshots in memory, with explicit results for invalid specs. No file I/O. */
 internal class FakeSavedPrototypeStore(private val clock: () -> Long = { 0L }) :
@@ -38,4 +40,27 @@ internal class FakeSavedPrototypeStore(private val clock: () -> Long = { 0L }) :
     stored[id] ?: SavedPrototypeLoadResult.NotFound
 
   override fun delete(id: String): Boolean = stored.remove(id) != null
+}
+
+/** Real temporary-file I/O, with no disk sync and deterministic failure hooks. */
+internal class FakeSavedPrototypeFileOperations : SavedPrototypeFileOperations {
+  val synced = mutableListOf<File>()
+  var beforeSync: (File) -> Unit = {}
+  var beforeRemove: (File) -> Unit = {}
+  var beforeReadManifest: (File) -> Unit = {}
+
+  override fun sync(file: File) {
+    beforeSync(file)
+    synced += file
+  }
+
+  override fun remove(file: File) {
+    beforeRemove(file)
+    if (!file.deleteRecursively()) throw IOException("Cannot remove saved prototype directory")
+  }
+
+  override fun readManifest(file: File): String {
+    beforeReadManifest(file)
+    return file.readText(Charsets.UTF_8)
+  }
 }

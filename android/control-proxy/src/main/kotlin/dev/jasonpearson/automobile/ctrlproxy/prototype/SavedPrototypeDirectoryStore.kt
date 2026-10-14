@@ -4,6 +4,7 @@ import dev.jasonpearson.automobile.ctrlproxy.formatHexByte
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.security.MessageDigest
 import java.util.UUID
@@ -13,12 +14,22 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.intOrNull
 
 /**
  * One lock serializes all operations and recovery; no other lock is acquired. Whole entries are
  * staged, with the manifest written last. Unchanged verified hash files from the same slug are
  * copied into staging, avoiding rewriting request bytes (no hard links or non-SDK APIs). Fault
- * hooks run after each write/copy, after the manifest, and between replacement renames.
+ * hooks run after each write/copy, after the manifest, between replacement renames, and after the
+ * delete rename. Files are synced before commit, with the manifest synced last on a best-effort
+ * basis. Directories are not synced because this is not portable across supported Android SDKs.
+ * Factory callers share an instance per canonical root; direct instances are for isolated owners
+ * and tests and must not operate concurrently on the same root.
  */
 class SavedPrototypeDirectoryStore(
   private val root: File,
@@ -29,6 +40,7 @@ class SavedPrototypeDirectoryStore(
   private val log: (String, Exception?) -> Unit = { message, error ->
     Logger.getLogger("SavedPrototypeStore").log(Level.WARNING, message, error)
   },
+  private val files: SavedPrototypeFileOperations = DiskFiles,
 ) : SavedPrototypeStore {
   private val lock = Any()
   private val json = Json {
@@ -65,7 +77,13 @@ class SavedPrototypeDirectoryStore(
         recover()
         val target = find(request.id)
         val replaced = target.exists()
-        if (!replaced && entries().size >= limits.maxSavedPrototypes) {
+        if (replaced && !storage({ false }) { canReplace(target) }) {
+          return@storage rejected(
+            SavedPrototypeRejection.UNSUPPORTED_EXISTING,
+            "Existing saved prototype manifest cannot be replaced.",
+          )
+        }
+        if (!replaced && readableManifestCount() >= limits.maxSavedPrototypes) {
           return@storage rejected(
             SavedPrototypeRejection.SAVED_COUNT_LIMIT,
             "Saved prototype limit reached.",
@@ -91,14 +109,18 @@ class SavedPrototypeDirectoryStore(
                 sha256(previous.readBytes()) == hash
             ) {
               previous.copyTo(destination, overwrite = true)
+              files.sync(destination)
               fault("copied-asset")
             } else {
               destination.writeBytes(asset.bytes)
+              files.sync(destination)
               fault("wrote-asset")
             }
             Asset(asset.id, path, hash, asset.mediaType)
           }
-        File(stage, "spec.json").writeText(request.specJson, Charsets.UTF_8)
+        val specFile = File(stage, "spec.json")
+        specFile.writeText(request.specJson, Charsets.UTF_8)
+        files.sync(specFile)
         fault("wrote-spec")
         val manifest =
           Manifest(
@@ -110,7 +132,9 @@ class SavedPrototypeDirectoryStore(
             records.filterNot { isFontMimeType(it.mediaType) },
             records.filter { isFontMimeType(it.mediaType) },
           )
-        File(stage, "manifest.json").writeText(json.encodeToString(manifest), Charsets.UTF_8)
+        val manifestFile = File(stage, "manifest.json")
+        manifestFile.writeText(json.encodeToString(manifest), Charsets.UTF_8)
+        storage({ Unit }) { files.sync(manifestFile) }
         fault("wrote-manifest")
         val old = File(root, ".old-${target.name}--$token")
         if (replaced) move(target, old)
@@ -121,7 +145,8 @@ class SavedPrototypeDirectoryStore(
           if (replaced) move(old, target)
           throw error
         }
-        if (old.exists()) remove(old)
+        // The commit rename already succeeded. Recovery can retry cleanup without undoing it.
+        storage({ Unit }) { if (old.exists()) remove(old) }
         SavedPrototypeSaveResult.Saved(request.id, target.name, replaced)
       }
     }
@@ -160,9 +185,10 @@ class SavedPrototypeDirectoryStore(
         recover()
         val entry = find(id)
         if (!entry.exists()) return@storage false
-        val old = File(root, ".old-${entry.name}--${UUID.randomUUID()}")
-        move(entry, old)
-        remove(old)
+        val trash = File(root, ".del-${entry.name}--${UUID.randomUUID()}")
+        move(entry, trash)
+        fault("moved-delete")
+        remove(trash)
         true
       }
     }
@@ -205,9 +231,11 @@ class SavedPrototypeDirectoryStore(
 
   private fun read(entry: File): SavedPrototypeLoadResult =
     storage({ SavedPrototypeLoadResult.Corrupt("Unreadable saved prototype.") }) {
-      val manifest = manifest(entry)
-      if (manifest.formatVersion != SAVED_PROTOTYPE_FORMAT_VERSION)
-        return@storage SavedPrototypeLoadResult.UnsupportedFormat(manifest.formatVersion)
+      val document = manifestDocument(entry) ?: throw IOException("Missing or unparsable manifest")
+      val version = formatVersion(document)
+      if (version != SAVED_PROTOTYPE_FORMAT_VERSION)
+        return@storage SavedPrototypeLoadResult.UnsupportedFormat(version)
+      val manifest = json.decodeFromJsonElement<Manifest>(document)
       if (
         manifest.specFile != "spec.json" ||
           manifest.id.isEmpty() ||
@@ -275,8 +303,38 @@ class SavedPrototypeDirectoryStore(
       )
     }
 
-  private fun manifest(entry: File): Manifest =
-    json.decodeFromString(File(entry, "manifest.json").readText(Charsets.UTF_8))
+  private fun manifestDocument(entry: File): JsonElement? {
+    val file = File(entry, "manifest.json")
+    if (!file.exists()) return null
+    if (file.length() > MAX_MANIFEST_BYTES) throw IOException("Manifest exceeds byte cap")
+    val text = files.readManifest(file)
+    return try {
+      json.parseToJsonElement(text)
+    } catch (error: SerializationException) {
+      log("Saved prototype manifest is unparsable", error)
+      null
+    }
+  }
+
+  private fun formatVersion(document: JsonElement): Int =
+    ((document as? JsonObject)?.get("formatVersion") as? JsonPrimitive)?.intOrNull
+      ?: throw IOException("Missing or invalid manifest format version")
+
+  private fun canReplace(entry: File): Boolean {
+    val document = manifestDocument(entry) ?: return true
+    if (formatVersion(document) != SAVED_PROTOTYPE_FORMAT_VERSION) return false
+    return read(entry) is SavedPrototypeLoadResult.Loaded
+  }
+
+  private fun readableManifestCount(): Int =
+    entries().count { entry ->
+      storage({ false }) {
+        val document = manifestDocument(entry) ?: return@storage false
+        if (formatVersion(document) != SAVED_PROTOTYPE_FORMAT_VERSION) return@storage false
+        json.decodeFromJsonElement<Manifest>(document)
+        true
+      }
+    }
 
   private fun find(id: String): File {
     val prefix =
@@ -296,7 +354,10 @@ class SavedPrototypeDirectoryStore(
         if (free == null) free = candidate
         continue
       }
-      val storedId = storage<String?>({ null }) { manifest(candidate).id }
+      val storedId =
+        storage<String?>({ null }) {
+          ((manifestDocument(candidate) as? JsonObject)?.get("id") as? JsonPrimitive)?.contentOrNull
+        }
       if (storedId == id) return candidate
       if (storedId == null && unreadable == null) unreadable = candidate
     }
@@ -315,12 +376,16 @@ class SavedPrototypeDirectoryStore(
     for (entry in children().sortedBy { it.name }) {
       when {
         entry.name.startsWith(".tmp-") -> remove(entry)
+        entry.name.startsWith(".del-") -> storage({ Unit }) { remove(entry) }
         entry.name.startsWith(".old-") -> {
           val slug = entry.name.removePrefix(".old-").substringBeforeLast("--", "")
-          if (!Regex("[a-z0-9-]+-[a-f0-9]{12,64}").matches(slug))
-            throw IOException("Invalid recovery name")
+          if (!Regex("[a-z0-9-]+-[a-f0-9]{12,64}").matches(slug)) {
+            log("Removing invalid saved prototype recovery name: ${entry.name}", null)
+            storage({ Unit }) { remove(entry) }
+            continue
+          }
           val target = File(root, slug)
-          if (target.exists()) remove(entry) else move(entry, target)
+          if (target.exists()) storage({ Unit }) { remove(entry) } else move(entry, target)
         }
       }
     }
@@ -335,8 +400,18 @@ class SavedPrototypeDirectoryStore(
     if (!from.renameTo(to)) throw IOException("Cannot rename saved prototype directory")
   }
 
-  private fun remove(file: File) {
-    if (!file.deleteRecursively()) throw IOException("Cannot remove saved prototype directory")
+  private fun remove(file: File) = files.remove(file)
+
+  private object DiskFiles : SavedPrototypeFileOperations {
+    override fun sync(file: File) {
+      FileOutputStream(file, true).use { it.fd.sync() }
+    }
+
+    override fun remove(file: File) {
+      if (!file.deleteRecursively()) throw IOException("Cannot remove saved prototype directory")
+    }
+
+    override fun readManifest(file: File): String = file.readText(Charsets.UTF_8)
   }
 
   private inline fun <T> storage(failure: () -> T, block: () -> T): T =
@@ -357,6 +432,8 @@ class SavedPrototypeDirectoryStore(
     SavedPrototypeSaveResult.Rejected(reason, message)
 
   private companion object {
+    const val MAX_MANIFEST_BYTES = 1024L * 1024
+
     val extensions =
       mapOf(
         "image/png" to "png",

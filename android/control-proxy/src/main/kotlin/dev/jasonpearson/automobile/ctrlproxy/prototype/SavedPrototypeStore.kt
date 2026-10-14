@@ -44,6 +44,7 @@ enum class SavedPrototypeRejection {
   MISSING_ASSET,
   SAVED_COUNT_LIMIT,
   STORAGE_FAILURE,
+  UNSUPPORTED_EXISTING,
 }
 
 sealed interface SavedPrototypeSaveResult {
@@ -88,6 +89,9 @@ sealed interface SavedPrototypeLoadResult {
  * Call off the main thread. Credential-encrypted storage may be unavailable before first unlock:
  * save returns STORAGE_FAILURE, load returns Corrupt, delete returns false, and list returns empty.
  * List never throws for storage or corrupt data; unreadable entries are omitted with a log line.
+ * The saved-count cap counts only readable current-format manifests, without reading spec/assets.
+ * Saving refuses unreadable entries with a parsable manifest. A missing or unparsable manifest may
+ * be replaced only at a slug derived from the requested id; other directories are untouched.
  */
 interface SavedPrototypeStore {
   fun save(request: SavedPrototypeSaveRequest): SavedPrototypeSaveResult
@@ -99,6 +103,21 @@ interface SavedPrototypeStore {
   fun delete(id: String): Boolean
 }
 
+/** Injectable disk operations; tests can skip sync and model partial recursive deletion. */
+interface SavedPrototypeFileOperations {
+  fun sync(file: File)
+
+  fun remove(file: File)
+
+  fun readManifest(file: File): String
+}
+
 object SavedPrototypeStores {
-  fun inDirectory(root: File): SavedPrototypeStore = SavedPrototypeDirectoryStore(root)
+  private val stores = mutableMapOf<String, SavedPrototypeStore>()
+
+  @Synchronized
+  fun inDirectory(root: File): SavedPrototypeStore {
+    val path = root.canonicalPath
+    return stores.getOrPut(path) { SavedPrototypeDirectoryStore(File(path)) }
+  }
 }

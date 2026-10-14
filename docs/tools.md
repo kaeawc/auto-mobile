@@ -791,6 +791,15 @@ translucent, at 0.4 alpha; any other role is drawn unchanged. The per-mode forms
 `theme.colors.light` / `theme.colors.dark`) need a device advertising
 `prototype_theme_modes_v1`.
 
+Optional pager `axis` (horizontal default or vertical), `pageSpacing` (dp gap),
+strict `peek: {start?, end?}` and `pageSize` (`"fill"` default or strict `{dp}`)
+require `prototype_pager_options_v1` whenever explicitly present. Spacing and peek
+are finite 0..10000; fixed page size is finite 1e-6..10000 (`MAX_PROTOTYPE_PAGER_DP`).
+Missing spacing/peek sides mean 0, and `{}` peek is a no-op. Units are points on iOS.
+A vertical pager cannot have any vertical scroll ancestor (omitted axis is vertical).
+Current page is the first fully visible page; page events and navigation bindings
+keep their meaning, and non-current peek pages stay outside the semantics tree.
+
 #### iOS simulators
 
 On iOS simulators `prototype` is backed by a prototype agent injected into the app at launch

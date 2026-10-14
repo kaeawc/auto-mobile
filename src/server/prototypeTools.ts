@@ -51,6 +51,7 @@ import {
   PROTOTYPE_EVENT_KINDS,
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
   PROTOTYPE_THEME_MODES_CAPABILITY,
+  PROTOTYPE_PAGER_OPTIONS_CAPABILITY,
   PROTOTYPE_DATA_MODEL_CAPABILITY,
   PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
   PROTOTYPE_WINDOW_CHROME_CAPABILITY,
@@ -105,6 +106,10 @@ import {
   prototypeThemeModeFields,
   prototypeThemeModesUnsupportedMessage,
 } from "../features/prototype/prototypeThemeModes";
+import {
+  prototypePagerOptionFields,
+  prototypePagerOptionsUnsupportedMessage,
+} from "../features/prototype/prototypePagerOptions";
 import {
   parsePrototypeAppearance,
   PROTOTYPE_APPEARANCE_INPUTS,
@@ -893,6 +898,34 @@ async function themeModesRefusal(
   return { success: false, error: new ActionableError(message).message };
 }
 
+/** Refuses pager options before any device request or asset upload. */
+async function pagerOptionsRefusal(
+  target: PrototypeTarget,
+  args: z.infer<typeof prototypeSchema>,
+  signal: AbortSignal | undefined,
+): Promise<PrototypeResult | undefined> {
+  if (args.action !== "show" || args.spec === undefined) {
+    return undefined;
+  }
+  const fields = prototypePagerOptionFields(args.spec);
+  if (fields.length === 0) {
+    return undefined;
+  }
+  const supported = target.android
+    ? await target.android.supportsCommand(PROTOTYPE_PAGER_OPTIONS_CAPABILITY)
+    : target.ios?.supportsCapability(PROTOTYPE_PAGER_OPTIONS_CAPABILITY) === true;
+  // The lookup waits for connection and handshake; an abort during it must stop the show.
+  signal?.throwIfAborted();
+  if (supported) {
+    return undefined;
+  }
+  const message = prototypePagerOptionsUnsupportedMessage(
+    fields,
+    target.android ? "android" : "ios",
+  );
+  return { success: false, error: new ActionableError(message).message };
+}
+
 /** Refuses data bindings before any device request or asset upload. */
 async function dataModelRefusal(
   target: PrototypeTarget,
@@ -1352,6 +1385,7 @@ async function preflightMutation(
   const failure =
     iosResetRefusal(target, args) ??
     (await themeModesRefusal(target, args, signal)) ??
+    (await pagerOptionsRefusal(target, args, signal)) ??
     (await dataModelRefusal(target, args, signal)) ??
     (await appearanceRefusal(target, args, signal)) ??
     (await windowOptionsRefusal(target, args, signal));

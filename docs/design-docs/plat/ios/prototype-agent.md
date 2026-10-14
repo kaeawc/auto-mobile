@@ -503,3 +503,16 @@ Two data keys that are canonically equivalent Unicode strings collapse into one 
 Swift dictionary keys compare by canonical equivalence, unlike the host and Android.
 The agent re-checks data depth and array limits in the host's traversal order. It does not duplicate
 the host validator's data byte-cost rule; the existing 1 MiB whole-spec byte cap still bounds input.
+
+### Optional pager layout
+
+The shared pager contract (#12071) adds `axis` (horizontal by default), `pageSpacing`
+(default 0), strict `peek: {start?, end?}` (each default 0; `{}` is a no-op), and
+`pageSize` (`"fill"` by default or strict `{dp}`). Distances are finite points on iOS:
+spacing and peek are 0..10000, and fixed size is 1e-6..10000 (`MAX_PROTOTYPE_PAGER_DP`).
+Any explicit option requires `prototype_pager_options_v1`; the host refuses older agents
+with a relaunch hint. Agent implementation follows separately. A vertical pager cannot
+have any vertical scroll ancestor (omitted scroll axis is vertical). Current page means
+the first fully visible page; page events, placeholders and navigation bindings keep
+their meaning. Non-current peek neighbours remain outside the semantics tree.
+Indicator and carousel remain deferred.

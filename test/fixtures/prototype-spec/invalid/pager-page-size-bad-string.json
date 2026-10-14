@@ -1,0 +1,27 @@
+{
+  "spec": {
+    "id": "pager-options",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "pager",
+      "id": "pages",
+      "children": [
+        {
+          "type": "text",
+          "text": "One"
+        },
+        {
+          "type": "text",
+          "text": "Two"
+        }
+      ],
+      "pageSize": "wrap"
+    }
+  },
+  "expectedPath": "root.pageSize",
+  "expectedMessage": "Invalid enum value"
+}

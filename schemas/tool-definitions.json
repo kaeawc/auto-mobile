@@ -21517,6 +21517,47 @@
                       "type": "string",
                       "enum": ["pager"]
                     },
+                    "axis": {
+                      "type": "string",
+                      "enum": ["horizontal", "vertical"]
+                    },
+                    "pageSpacing": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 10000
+                    },
+                    "peek": {
+                      "type": "object",
+                      "properties": {
+                        "start": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/28/properties/pageSpacing"
+                        },
+                        "end": {
+                          "$ref": "#/properties/spec/properties/root/anyOf/28/properties/pageSpacing"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "pageSize": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": ["fill"]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "dp": {
+                              "type": "number",
+                              "minimum": 0.000001,
+                              "maximum": 10000
+                            }
+                          },
+                          "required": ["dp"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
                     "children": {
                       "type": "array",
                       "items": {

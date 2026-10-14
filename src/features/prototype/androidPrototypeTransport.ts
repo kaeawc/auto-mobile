@@ -47,7 +47,7 @@ export class AndroidPrototypeTransport implements PrototypeTransport {
         undefined,
         options.displayId,
         options.reset,
-        options.appearance,
+        { appearance: options.appearance, replaceOthers: options.replaceOthers },
       ),
     );
   }

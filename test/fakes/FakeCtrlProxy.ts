@@ -1,3 +1,4 @@
+import type { PrototypeShowOverrides } from "../../src/features/prototype/PrototypeTransport";
 import type {
   PrototypePatchReply,
   PrototypePatchRequest,
@@ -207,6 +208,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
         perf?: PerformanceTracker;
         displayId?: number;
         reset?: boolean;
+        replaceOthers?: boolean;
         appearance?: PrototypeAppearanceOverride;
       }
     | { method: "dismiss"; target: PrototypeDismiss; timeoutMs: number; perf?: PerformanceTracker }
@@ -238,9 +240,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     perf?: PerformanceTracker,
     displayId?: number,
     reset?: boolean,
-    appearance?: PrototypeAppearanceOverride,
+    appearance?: PrototypeAppearanceOverride | PrototypeShowOverrides,
   ): Promise<PrototypeResult> {
     this.checkFailure("requestShowPrototype");
+    const overrides = typeof appearance === "string" ? { appearance } : appearance;
     this.prototypeHistory.push({
       method: "show",
       spec,
@@ -248,7 +251,8 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       perf,
       ...(displayId === undefined ? {} : { displayId }),
       ...(reset === undefined ? {} : { reset }),
-      ...(appearance === undefined ? {} : { appearance }),
+      ...(overrides?.appearance === undefined ? {} : { appearance: overrides.appearance }),
+      ...(overrides?.replaceOthers === false ? { replaceOthers: false } : {}),
     });
     const hold = this.showHold;
     this.showHold = undefined;

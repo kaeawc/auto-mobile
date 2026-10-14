@@ -4,7 +4,10 @@ import {
   prototypeSavedUnsupportedMessage,
 } from "../../../../src/features/observe/android/CtrlProxyPrototypes";
 import { PROTOTYPE_SAVED_CAPABILITY } from "../../../../src/features/observe/android/ctrlProxyProtocol";
-import { PROTOTYPE_PATCH_CAPABILITY } from "../../../../src/features/observe/android/ctrlProxyProtocol";
+import {
+  PROTOTYPE_PATCH_CAPABILITY,
+  PROTOTYPE_MULTI_SURFACE_CAPABILITY,
+} from "../../../../src/features/observe/android/ctrlProxyProtocol";
 import { prototypePatchUnsupportedMessage } from "../../../../src/features/prototype/prototypePatchWire";
 import type { PrototypePatchOp } from "../../../../src/features/prototype/prototypePatch";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
@@ -855,6 +858,62 @@ describe("CtrlProxy prototypes", () => {
       send.mockRestore();
     }
   });
+
+  test.each([undefined, true, false])(
+    "replaceOthers %p is sent only when false",
+    async (replaceOthers) => {
+      const { client, socket, receive } = await harness([
+        "full_command_set_v1",
+        "request_id_echo_v1",
+        "show_prototype",
+        PROTOTYPE_MULTI_SURFACE_CAPABILITY,
+      ]);
+      const frames: Record<string, unknown>[] = [];
+      const send = spyOn(socket, "send").mockImplementation((data) => {
+        const frame = JSON.parse(String(data));
+        frames.push(frame);
+        void receive({
+          type: "prototype_result",
+          requestId: frame.requestId,
+          timestamp: 42,
+          success: true,
+        });
+      });
+      try {
+        expect(
+          await client.requestShowPrototype(spec, 5000, undefined, undefined, undefined, {
+            replaceOthers,
+          }),
+        ).toMatchObject({ success: true });
+        expect(frames).toHaveLength(1);
+        expect(Object.hasOwn(frames[0], "replaceOthers")).toBe(replaceOthers === false);
+        if (replaceOthers === false) {
+          expect(frames[0].replaceOthers).toBe(false);
+        }
+      } finally {
+        send.mockRestore();
+      }
+    },
+  );
+
+  test.each([null, ["full_command_set_v1", "request_id_echo_v1", "show_prototype"]])(
+    "replaceOthers false without the flag refuses before a device request (%j)",
+    async (commands) => {
+      const { client, socket } = await harness(commands);
+      const send = spyOn(socket, "send");
+      try {
+        await expectRefusal(
+          client.requestShowPrototype(spec, 5000, undefined, undefined, undefined, {
+            replaceOthers: false,
+          }),
+          "replaceOthers:false",
+        );
+        expect(send).not.toHaveBeenCalled();
+      } finally {
+        send.mockRestore();
+      }
+    },
+  );
 
   test("fake records prototype calls, configures results, and emits until unsubscribe", async () => {
     const fake = new FakeCtrlProxy(new FakeTimer());

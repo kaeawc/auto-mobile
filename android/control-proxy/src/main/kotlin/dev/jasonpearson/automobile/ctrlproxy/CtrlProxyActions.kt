@@ -371,6 +371,7 @@ interface CtrlProxyActions {
     displayId: Int?,
     reset: Boolean,
     appearance: PrototypeAppearanceOverride?,
+    replaceOthers: Boolean = true,
   )
 
   fun dismissPrototype(requestId: String?, id: String?, all: Boolean?)

@@ -414,12 +414,36 @@ describe("ManagedSlotReconciler", () => {
 
       const result = expectFailed(await reconciler.reconcile(request()));
 
-      expect(result.failure).toMatchObject({
+      expect(result.failure).toEqual({
         code: "capacity_exhausted",
         retryable: true,
+        message: "2 ios device(s) booted; limit is 2.",
+        nextAction: "Shut down a device or raise the boot limit, then retry.",
         capacity: { limit: 2, booted: 2, retryAfterMs: 5_000 },
       });
       expect(provisioner.calls).toHaveLength(0);
+      expect(await registry.getAssignment(key)).toBeNull();
+      expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+      capacity.result = { kind: "exhausted", limit: 2, booted: 1, retryAfterMs: 5_000 };
+      const retry = expectReady(await reconciler.reconcile(request()));
+      expect(retry.disposition).toBe("created");
+      expect(retry.assignment.generation).toBe(1);
+    });
+
+    test("unknown boot capacity removes the never-bound slot before creating", async () => {
+      capacity.result = { kind: "unknown", message: "boot inventory unavailable" };
+      const result = expectFailed(await reconciler.reconcile(request()));
+      expect(result.failure).toEqual({
+        code: "discovery_incomplete",
+        retryable: true,
+        message: "boot inventory unavailable",
+        nextAction: "Retry once device discovery completes; nothing destructive was done.",
+      });
+      expect(provisioner.calls).toEqual([]);
+      expect(await registry.getAssignment(key)).toBeNull();
+      expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+      capacity.result = { kind: "available" };
+      expect(expectReady(await reconciler.reconcile(request())).assignment.generation).toBe(1);
     });
 
     test("maps a boot-gate capacity refusal from provisioning to capacity_exhausted", async () => {
@@ -718,6 +742,130 @@ describe("ManagedSlotReconciler", () => {
     expect(retry.assignment.generation).toBe(1);
   });
 
+  describe("fresh creation pre-journal cleanup", () => {
+    let resolver: DefaultManagedSpecResolver;
+
+    beforeEach(() => {
+      resolver = new DefaultManagedSpecResolver();
+      reconciler = new ManagedSlotReconciler({
+        registry,
+        inventory,
+        matcher,
+        resolver,
+        provisioner,
+        deleter,
+        claims,
+        capacity,
+        timer,
+        idGenerator: new FakeIdGenerator(),
+        isExecOwnerLive: () => true,
+      });
+    });
+
+    test.each(["cancelled", "timeout"] as const)(
+      "%s at the pre-journal budget guard removes the never-bound slot",
+      async (code) => {
+        const controller = new AbortController();
+        const pending = request(SPEC_18, { signal: controller.signal });
+        // Adoption discovery is the last await before createAndCommit's first guard.
+        registry.listFreeDevices = async () => {
+          if (code === "cancelled") {
+            controller.abort();
+          } else {
+            timer.advanceTime(60_001);
+          }
+          return [];
+        };
+        const failed = expectFailed(await reconciler.reconcile(pending));
+        expect(failed.failure).toEqual({
+          code,
+          retryable: true,
+          message:
+            code === "cancelled"
+              ? "Slot preparation was cancelled."
+              : "Slot preparation deadline passed.",
+          nextAction:
+            code === "cancelled"
+              ? "The preparation was cancelled; retry when needed."
+              : "Retry with a longer preparation timeout.",
+        });
+        expect(provisioner.calls).toEqual([]);
+        expect(await registry.getAssignment(key)).toBeNull();
+        expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+      },
+    );
+
+    test("unsupported creation removes the never-bound slot", async () => {
+      resolver.checkCreatable = async () => ({
+        kind: "unsupported",
+        code: "spec_unsupported",
+        message: "creation catalog rejects this spec",
+      });
+      const failed = expectFailed(await reconciler.reconcile(request()));
+      expect(failed.failure).toEqual({
+        code: "spec_unsupported",
+        retryable: false,
+        message: "creation catalog rejects this spec",
+        nextAction: "Fix the requested spec; nothing was changed.",
+      });
+      expect(provisioner.calls).toEqual([]);
+      expect(await registry.getAssignment(key)).toBeNull();
+      expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+    });
+
+    test("pre-journal refusal preserves a row protected by an open journal entry", async () => {
+      capacity.check = async () => {
+        // A peer opens work after this reconciliation's redrive and before the refusal.
+        const opened = await registry.openSlotJournal(key, {
+          kind: "create",
+          phase: "creating",
+          owner: { daemonId: "peer", pid: 1002, processGenerationToken: "peer-start" },
+          target: {
+            oldStableId: null,
+            oldName: null,
+            newName: "peer-device",
+            newStableId: null,
+            requestedSpec: SPEC_18,
+            resolvedSpec: SPEC_18,
+            specFingerprint: null,
+          },
+          assignment: {
+            kind: "state",
+            expected: { generation: 0, stableDeviceId: null },
+            state: "provisioning",
+          },
+        });
+        expect(opened.kind).toBe("opened");
+        return { kind: "exhausted", limit: 1, booted: 1, retryAfterMs: 5_000 };
+      };
+      const failed = expectFailed(await reconciler.reconcile(request()));
+      expect(failed.failure.code).toBe("capacity_exhausted");
+      expect(await registry.getAssignment(key)).toMatchObject({
+        generation: 0,
+        stableDeviceId: null,
+        state: "provisioning",
+      });
+      expect(await registry.listOpenSlotJournal(key)).toHaveLength(1);
+      expect(provisioner.calls).toEqual([]);
+    });
+
+    test("cleanup failure preserves the exact pre-journal error", async () => {
+      const original = new Error("capacity unavailable");
+      capacity.check = async () => {
+        throw original;
+      };
+      let removals = 0;
+      registry.removeUnboundSlot = async () => {
+        removals += 1;
+        throw new Error("registry unavailable");
+      };
+      expect(await reconciler.reconcile(request()).catch((error: unknown) => error)).toBe(original);
+      expect(removals).toBe(1);
+      expect(provisioner.calls).toEqual([]);
+      expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+    });
+  });
+
   describe("fresh creation admission cleanup", () => {
     let admission: ManagedSlotResourceAdmission;
     let budget: ManagedSlotResourceBudget;
@@ -861,6 +1009,8 @@ describe("ManagedSlotReconciler", () => {
       await seedAssigned(SPEC_17);
       const before = await registry.getAssignment(key);
       admission = { kind: "unknown", message: "must not admit replacement" };
+      expect(before?.generation).toBe(1);
+      expect(before?.stableDeviceId).not.toBeNull();
       capacity.result = { kind: "exhausted", limit: 1, booted: 2, retryAfterMs: 5_000 };
       const failed = expectFailed(await reconciler.reconcile(request()));
       expect(failed.failure.code).toBe("capacity_exhausted");

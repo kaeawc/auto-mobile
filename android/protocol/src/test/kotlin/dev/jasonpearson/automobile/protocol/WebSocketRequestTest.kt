@@ -867,6 +867,25 @@ class WebSocketRequestTest {
   }
 
   @Test
+  fun `show_prototype replaceOthers defaults to omitted and false round trips`() {
+    val spec =
+      """{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}"""
+    val legacy = """{"type":"show_prototype","requestId":"r1","spec":$spec}"""
+    val decoded = assertIs<ShowPrototype>(json.decodeFromString<WebSocketRequest>(legacy))
+    assertTrue(decoded.replaceOthers)
+    assertEquals(legacy, json.encodeToString<WebSocketRequest>(decoded))
+    val explicitDefault =
+      """{"type":"show_prototype","requestId":"r1","spec":$spec,"replaceOthers":true}"""
+    assertEquals(decoded, json.decodeFromString<WebSocketRequest>(explicitDefault))
+    assertEquals(legacy, json.encodeToString<WebSocketRequest>(decoded.copy(replaceOthers = true)))
+    val additive =
+      """{"type":"show_prototype","requestId":"r1","spec":$spec,"replaceOthers":false}"""
+    val request = assertIs<ShowPrototype>(json.decodeFromString<WebSocketRequest>(additive))
+    assertFalse(request.replaceOthers)
+    assertEquals(additive, json.encodeToString<WebSocketRequest>(request))
+  }
+
+  @Test
   fun `show_prototype appearance is optional on the wire and round trips`() {
     val spec =
       """{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}"""

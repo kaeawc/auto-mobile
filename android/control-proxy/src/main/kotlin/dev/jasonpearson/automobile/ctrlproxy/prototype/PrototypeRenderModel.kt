@@ -89,10 +89,21 @@ data class PrototypeRenderModel(
       hasTextField = hasTextField,
       layer = layer,
       persistent = persistent,
+      opaqueSurface = prototypeOpaqueSurface(this),
     ) {
       PrototypeSpecContent(root, theme = theme)
     }
 }
+
+/**
+ * Window format is chosen at show time and is not re-evaluated for state-driven root changes. A
+ * visible, static root is the safe subset; metadata still accounts for a static fullscreen scrim.
+ */
+internal fun prototypeOpaqueSurface(model: PrototypeRenderModel): Boolean =
+  model.root.visible &&
+    model.root.source?.styleWhen.isNullOrEmpty() &&
+    model.root.source?.visibleWhen == null &&
+    prototypeWindowMetadata(model, dismissBarDrawn = false).opaque
 
 /**
  * Path spelling and traversal order match the protocol validator, including unsupported nodes.

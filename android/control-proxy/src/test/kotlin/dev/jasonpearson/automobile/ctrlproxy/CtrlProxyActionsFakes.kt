@@ -3,12 +3,15 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
+import kotlinx.serialization.json.JsonArray
 
 /**
  * No-op [CtrlProxyActions] base for tests that only care about a couple of actions — subclass and
  * override just those. Keeps partial test doubles concise now that the interface is non-optional.
  */
 open class NoOpCtrlProxyActions : CtrlProxyActions {
+  val patches = mutableListOf<List<Any?>>()
+
   override suspend fun requestHierarchy(disableAllFiltering: Boolean, requestId: String?) {}
 
   override fun requestHierarchyIfStale(sinceTimestamp: Long, requestId: String?) {}
@@ -163,6 +166,15 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
   ) {}
 
   override fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) {}
+
+  override fun patchPrototype(
+    requestId: String?,
+    id: String,
+    baseRevision: Long?,
+    ops: JsonArray,
+  ) {
+    patches += listOf(requestId, id, baseRevision, ops)
+  }
 
   override fun inspectPrototypes(requestId: String?) {}
 
@@ -528,6 +540,9 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) =
     record("dismissPrototype", requestId, id, all)
+
+  override fun patchPrototype(requestId: String?, id: String, baseRevision: Long?, ops: JsonArray) =
+    record("patchPrototype", requestId, id, baseRevision, ops)
 
   override fun inspectPrototypes(requestId: String?) = record("inspectPrototypes", requestId)
 

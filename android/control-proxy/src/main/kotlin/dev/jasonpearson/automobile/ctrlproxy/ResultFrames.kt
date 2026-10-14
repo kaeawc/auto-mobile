@@ -4,6 +4,7 @@ import dev.jasonpearson.automobile.protocol.NetworkMockRuleReportContract
 import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
 import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
+import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypeResult
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
@@ -153,6 +154,8 @@ internal fun prototypeResultFrame(
   error: String?,
   missingAssets: List<String> = emptyList(),
   appearance: PrototypeAppearance? = null,
+  revision: Long? = null,
+  conflict: PrototypePatchConflict? = null,
   hiddenReason: PrototypeHiddenReason? = null,
 ): String =
   resultFrameJson.encodeToString<WebSocketResponse>(
@@ -163,6 +166,8 @@ internal fun prototypeResultFrame(
       error = error,
       missingAssets = missingAssets.ifEmpty { null },
       appearance = appearance,
+      revision = revision,
+      conflict = conflict,
       hiddenReason = hiddenReason,
     ),
   )

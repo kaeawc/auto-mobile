@@ -1,0 +1,1 @@
+/bin/sleep 15 PATH=/usr/bin:/bin HOME=/nonexistent LANG=C MT_BATCH=/private/mt batch MT_DAEMON=P2 MT_PORT=3161

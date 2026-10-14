@@ -135,7 +135,12 @@ export function bindTyped(value: unknown, instance: Instance): unknown {
 export type FieldKind = "text" | "operand" | "emitName" | "key";
 
 /** Receives each bindable field's value and path; its result replaces the value. */
-export type FieldVisitor = (value: unknown, path: string, kind: FieldKind) => unknown;
+export type FieldVisitor = (
+  value: unknown,
+  path: string,
+  kind: FieldKind,
+  dataCondition?: boolean,
+) => unknown;
 
 function mapField(data: Raw, key: string, path: string, kind: FieldKind, visit: FieldVisitor) {
   if (data[key] !== undefined) {
@@ -171,8 +176,10 @@ function mapObject(
 
 function mapCondition(condition: Raw, path: string, visit: FieldVisitor): Raw {
   mapField(condition, "key", path, "key", visit);
-  mapField(condition, "equals", path, "operand", visit);
-  mapField(condition, "notEquals", path, "operand", visit);
+  const operandVisit: FieldVisitor = (value, fieldPath, kind) =>
+    visit(value, fieldPath, kind, Object.hasOwn(condition, "data"));
+  mapField(condition, "equals", path, "operand", operandVisit);
+  mapField(condition, "notEquals", path, "operand", operandVisit);
   mapObject(condition, "not", path, (entry, entryPath) => mapCondition(entry, entryPath, visit));
   for (const form of ["all", "any"]) {
     mapList(condition, form, path, (entry, entryPath) => mapCondition(entry, entryPath, visit));

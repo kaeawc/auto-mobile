@@ -45,6 +45,7 @@ import {
 } from "../../src/daemon/sessionManager";
 import { DefaultDeviceSettingsAccess } from "../../src/features/utility/DeviceSettingDefaults";
 import { SessionReleaseBroadcaster } from "../../src/server/sessionReleaseBroadcast";
+import { executionTracker } from "../../src/server/executionTracker";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -1679,6 +1680,9 @@ export class LivenessScenario {
     }
     this.rawClients.clear();
     this.killDaemonSide(this.daemon);
+    // The daemon wires its clock onto the process singleton; a stopped scenario must not answer
+    // for later files sharing that process (Windows CI).
+    executionTracker.setSessionClockOffsetProvider(() => 0);
     await this.managedSlots?.close();
     this.tools.uninstall();
     if (this.realStartAdmission) {

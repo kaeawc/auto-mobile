@@ -26,6 +26,7 @@ const invalid = files("invalid").map((name) => ({
   data: JSON.parse(readFileSync(join(fixtures, "invalid", name), "utf8")) as {
     spec: unknown;
     expectedPath: string;
+    expectedMessage?: string;
   },
 }));
 function tags(value: unknown, found: Set<string>): void {
@@ -104,6 +105,9 @@ describe("shared prototype contract", () => {
         throw new Error(`Accepted ${name}`);
       }
       expect(result.error.path).toBe(data.expectedPath);
+      if (data.expectedMessage !== undefined) {
+        expect(result.error.message).toBe(data.expectedMessage);
+      }
     });
   }
   test("raw UTF-8 byte limit includes whitespace and accepts its exact boundary", () => {

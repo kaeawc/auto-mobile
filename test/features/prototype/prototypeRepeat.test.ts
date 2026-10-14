@@ -238,3 +238,132 @@ describe("bound state keys (#11051)", () => {
     });
   });
 });
+
+describe("data-bound repeats", () => {
+  const dataSpec = (
+    items: unknown,
+    extra: Record<string, unknown> = {},
+    children: unknown[] = [{ type: "text", text: "{item.title}" }],
+  ) => ({
+    ...spec({
+      type: "column",
+      repeat: { items: { path: "/orders" }, as: "item", ...extra },
+      children,
+    }),
+    data: { orders: items },
+  });
+  test.each([
+    [undefined, "Repeat path does not resolve to an array"],
+    [1, "Repeat path does not resolve to an array"],
+    [
+      Array.from({ length: 129 }, () => ({ title: "x" })),
+      "Repeat path resolves to more than 128 items",
+    ],
+    [[{ title: "x" }, 1], "Repeat path item 1 is not an object"],
+  ])("path resolution %p", (items, message) => {
+    expect(repeatErrors(dataSpec(items))).toEqual({ path: "root.repeat.items.path", message });
+  });
+  test("empty arrays instantiate zero children", () => {
+    expect(validatePrototypeSpec(dataSpec([]))).toMatchObject({ success: true });
+  });
+  test("key fields must exist after projection; duplicates use rendered text", () => {
+    expect(repeatErrors(dataSpec([{ title: "a", id: {} }], { key: "id" }))).toEqual({
+      path: "root.repeat.key",
+      message: 'Unknown repeat field "id"',
+    });
+    expect(
+      repeatErrors(
+        dataSpec(
+          [
+            { title: "a", id: 7 },
+            { title: "b", id: "7" },
+          ],
+          { key: "id" },
+        ),
+      ),
+    ).toEqual({ path: "root.repeat.key", message: 'Duplicate repeat key "7" (items 0 and 1)' });
+    expect(repeatErrors(spec(list([{ type: "spacer" }], [{ id: 1 }, { id: 1 }])))).toBeUndefined();
+    const literal = {
+      ...list([{ type: "spacer" }], [{ id: 1 }, { id: 1 }]),
+      repeat: { as: "item", items: [{ id: 1 }, { id: 1 }], key: "id" },
+    };
+    expect(repeatErrors(spec(literal))).toEqual({
+      path: "root.repeat.key",
+      message: 'Duplicate repeat key "1" (items 0 and 1)',
+    });
+  });
+  test("path-bound invalid keys have a path location and item suffix; literals keep their location", () => {
+    const child = { type: "switch", stateKey: "liked_{item.id}" };
+    expect(repeatErrors(dataSpec([{ id: "bad-key" }], {}, [child]))).toEqual({
+      path: "root.repeat.items.path",
+      message: 'Bound state key "liked_bad-key" is invalid (repeat item 0)',
+    });
+    expect(repeatErrors(spec(list([child], [{ id: "bad-key" }])))).toEqual({
+      path: "root.repeat.items[0]",
+      message: 'Bound state key "liked_bad-key" is invalid',
+    });
+    expect(validatePrototypeSpec(dataSpec([{ id: 7 }], {}, [child]))).toEqual({
+      success: false,
+      error: {
+        path: "root.children[0].stateKey",
+        message: "Toggle control requires a boolean state key (repeat item 0)",
+      },
+    });
+  });
+  test("non-scalar item members are absent to templates", () => {
+    expect(repeatErrors(dataSpec([{ title: { text: "a" } }]))).toEqual({
+      path: "root.children[0].text",
+      message: 'Unknown repeat field "title"',
+    });
+  });
+  test("path-bound expansion overflow points to the repeat", () => {
+    expect(
+      repeatErrors(
+        dataSpec(
+          Array.from({ length: 128 }, () => ({})),
+          {},
+          Array.from({ length: 16 }, () => ({ type: "spacer" })),
+        ),
+      ),
+    ).toEqual({ path: "root.repeat", message: "Expanded node limit exceeded" });
+  });
+  test.each(["equals", "notEquals"])(
+    "data %s operands cannot contain repeat placeholders",
+    (comparison) => {
+      const child = {
+        type: "text",
+        text: "x",
+        visibleWhen: { data: "/n", [comparison]: "{item.id}" },
+      };
+      expect(repeatErrors(dataSpec([{ id: 7 }], {}, [child]))).toEqual({
+        path: `root.children[0].visibleWhen.${comparison}`,
+        message: "Repeat placeholder in a data condition operand is not supported",
+      });
+      expect(
+        repeatErrors(
+          dataSpec([{ id: 7 }], {}, [
+            { ...child, visibleWhen: { key: "n", [comparison]: "{item.id}" } },
+          ]),
+        ),
+      ).toBeUndefined();
+      expect(
+        repeatErrors(
+          dataSpec([{ id: 7 }], {}, [
+            { ...child, visibleWhen: { data: "/n", [comparison]: "{index}" } },
+          ]),
+        )?.message,
+      ).toBe("Repeat placeholder in a data condition operand is not supported");
+    },
+  );
+  test("data operands are checked in the bindable walk order", () => {
+    const child = {
+      type: "text",
+      text: "{item.missing}",
+      visibleWhen: { data: "/n", equals: "{index}" },
+    };
+    expect(repeatErrors(dataSpec([{}], {}, [child]))).toEqual({
+      path: "root.children[0].text",
+      message: 'Unknown repeat field "missing"',
+    });
+  });
+});

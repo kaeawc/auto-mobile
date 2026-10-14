@@ -111,22 +111,25 @@ Baseline: not yet recorded on a device
 
 ## Trace sections
 
-Specified, not yet in the renderer (#12128). The names are stable so Perfetto queries can be shared between
-measurements. All sections use the framework `android.os.Trace` (no new dependency); `Trace.isEnabled` and the
-async-section calls need API 29 and are skipped below it.
+All nine trace sections below are in the renderer (#12128).
+The names are stable so Perfetto queries can be shared between measurements. All sections use the
+framework `android.os.Trace` (no new dependency). All sections are emitted only while tracing
+is enabled via `Trace.isEnabled` (API 29+); below API 29 none is emitted and no `android.os.Trace`
+method is called. The async-section calls also need API 29.
 
-| Section name                   | Insertion point                                                                                                             | Kind                                                               |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `Prototype.interact`           | `PrototypeController.interact`, inside `mutex.withLock`, from after the stale-runtime check to the end                      | Async section (the body suspends and may resume on another thread) |
-| `Prototype.validateStateWrite` | `PrototypeRuntime.validated`, whole body                                                                                    | Synchronous                                                        |
-| `Prototype.prepareStateWrites` | `PrototypeRuntime.validated`, only the branch that calls `prepareStateWrites(from)` (first write, and after a host replace) | Synchronous, nested in `Prototype.validateStateWrite`              |
-| `Prototype.mapRenderTree`      | `PrototypeRenderMapper.map`, the miss path only (after the same-snapshot early return)                                      | Synchronous                                                        |
-| `Prototype.mapPrototypeSpec`   | `mapPrototypeSpec` in `PrototypeRenderModel.kt`, whole body (the uncached full mapping used outside a runtime)              | Synchronous                                                        |
-| `Prototype.syncAppearance`     | `PrototypeController.interact`, around `syncAppearance(runtime, model)` and `syncTextFieldFocus(model)`                     | Synchronous                                                        |
-| `Prototype.compose`            | `PrototypeRuntimeContent`, around the root `RenderPrototypeNode` call                                                       | Synchronous, begin/end without `try` (composable calls)            |
-| `Prototype.node`               | `RenderPrototypeNodeContent`, first and last statement of the body, only when `Trace.isEnabled()`                           | Synchronous, constant name; slices per frame = nodes recomposed    |
-| `Prototype.host.show`          | `PrototypeHost.showOnMain`, whole body                                                                                      | Synchronous                                                        |
+| Section name                   | Insertion point                                                                                                             | Kind                                                                         | Status      |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ----------- |
+| `Prototype.interact`           | `PrototypeController.interact`, inside `mutex.withLock`, from after the stale-runtime check to the end                      | Async section (the body suspends and may resume on another thread)           | in renderer |
+| `Prototype.validateStateWrite` | `PrototypeRuntime.validated`, whole body                                                                                    | Synchronous                                                                  | in renderer |
+| `Prototype.prepareStateWrites` | `PrototypeRuntime.validated`, only the branch that calls `prepareStateWrites(from)` (first write, and after a host replace) | Synchronous, nested in `Prototype.validateStateWrite`                        | in renderer |
+| `Prototype.mapRenderTree`      | `PrototypeRenderMapper.map`, the miss path only (after the same-snapshot early return)                                      | Synchronous                                                                  | in renderer |
+| `Prototype.mapPrototypeSpec`   | `mapPrototypeSpec` in `PrototypeRenderModel.kt`, whole body (the uncached full mapping used outside a runtime)              | Synchronous                                                                  | in renderer |
+| `Prototype.syncAppearance`     | `PrototypeController.interact`, around `syncAppearance(runtime, model)` and `syncTextFieldFocus(model)`                     | Async section (appearance event delivery and host focus updates can suspend) | in renderer |
+| `Prototype.compose`            | `PrototypeRuntimeContent`, around the `PrototypeSpecContent` call                                                           | Synchronous, begin/end without `try` (composable calls)                      | in renderer |
+| `Prototype.node`               | `RenderPrototypeNodeContent`, first and last statement of the body                                                          | Synchronous, constant name; slices per frame = nodes recomposed              | in renderer |
+| `Prototype.host.show`          | `PrototypeHost.showOnMain`, whole body                                                                                      | Synchronous                                                                  | in renderer |
 
-The slice count of `Prototype.node` inside one `Prototype.compose` is the number of nodes a state change
-recomposed, which is the epic's target metric; `Prototype.mapRenderTree` should appear at most once per
-`Prototype.interact`.
+Count `Prototype.node` slices per frame (per `Choreographer#doFrame`) to measure the number of nodes
+recomposed, which is the epic's target metric. Those inside `Prototype.compose` come from a new render
+model; node-local recompositions can run outside that slice. `Prototype.mapRenderTree` should appear
+at most once per `Prototype.interact`.

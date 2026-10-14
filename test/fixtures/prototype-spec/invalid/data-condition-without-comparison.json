@@ -1,0 +1,22 @@
+{
+  "spec": {
+    "id": "orders",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "x",
+      "visibleWhen": {
+        "data": "/n"
+      }
+    },
+    "data": {
+      "n": 1
+    }
+  },
+  "expectedPath": "root.visibleWhen.equals",
+  "expectedMessage": "Exactly one of equals, notEquals, gt, lt is required"
+}

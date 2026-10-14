@@ -96,7 +96,10 @@ class PrototypeContainerSemanticsTest {
         ),
       )
 
-    assertEquals(listOf("box", "row", "text", "box", "text"), root.kinds())
+    assertEquals(
+      listOf("box", "row", "box", "text"),
+      root.accessibilityNodes().mapNotNull { it.config.getOrNull(PrototypeRole) },
+    )
     val banner =
       root.all().first {
         it.config.getOrNull(SemanticsProperties.ContentDescription) == listOf("Banner")

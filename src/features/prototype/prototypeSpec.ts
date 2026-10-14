@@ -2,7 +2,15 @@ import { z } from "zod";
 import type { ElementContainerSelector } from "../../models/PinchOnOptions";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { BOUND_STATE_KEY_PATTERN } from "./prototypeTemplate";
-export const { MAX_PROTOTYPE_SPEC_BYTES, MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES } = contract.limits;
+export const {
+  MAX_PROTOTYPE_SPEC_BYTES,
+  MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES,
+  MAX_PROTOTYPE_DATA_BYTES,
+  MAX_PROTOTYPE_DATA_DEPTH,
+  MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
+  MAX_PROTOTYPE_DATA_POINTER_LENGTH,
+  MAX_PROTOTYPE_REPEAT_PATH_CELLS,
+} = contract.limits;
 export type PrototypeJson =
   | null
   | string
@@ -73,7 +81,24 @@ const selectorSchema = z
 // State-key fields also take repeat placeholders such as `liked_{item.id}` (#11051).
 const stateKeySchema = z.string().regex(BOUND_STATE_KEY_PATTERN);
 const scalarSchema = z.union([z.string(), z.number().finite(), z.boolean()]);
+export type PrototypeDataValue =
+  | string
+  | number
+  | boolean
+  | PrototypeDataValue[]
+  | { [key: string]: PrototypeDataValue };
+export type PrototypeData = Record<string, PrototypeDataValue>;
+const pointerSchema = z
+  .string()
+  .min(1)
+  .max(contract.limits.MAX_PROTOTYPE_DATA_POINTER_LENGTH)
+  .regex(/^(?:\/(?:[^~\/]|~[01])*)+$/);
+
 export type PrototypeCondition =
+  | { data: string; equals: string | number | boolean }
+  | { data: string; notEquals: string | number | boolean }
+  | { data: string; gt: number }
+  | { data: string; lt: number }
   | { key: string; equals: string | number | boolean }
   | { key: string; notEquals: string | number | boolean }
   | { key: string; gt: number }
@@ -85,6 +110,10 @@ let conditionUnion: z.ZodType<PrototypeCondition> | undefined;
 const conditionSchema: z.ZodType<PrototypeCondition> = z.lazy(
   () =>
     (conditionUnion ??= z.union([
+      z.object({ data: pointerSchema, equals: scalarSchema }).strict(),
+      z.object({ data: pointerSchema, notEquals: scalarSchema }).strict(),
+      z.object({ data: pointerSchema, gt: z.number().finite() }).strict(),
+      z.object({ data: pointerSchema, lt: z.number().finite() }).strict(),
       z.object({ key: stateKeySchema, equals: scalarSchema }).strict(),
       z.object({ key: stateKeySchema, notEquals: scalarSchema }).strict(),
       z.object({ key: stateKeySchema, gt: z.number().finite() }).strict(),
@@ -426,7 +455,14 @@ const repeatItemSchema = z.record(
   z.union([z.string(), z.number().finite(), z.boolean()]),
 );
 const repeatSchema = z
-  .object({ items: z.array(repeatItemSchema).min(1).max(128), as: keySchema })
+  .object({
+    items: z.union([
+      z.array(repeatItemSchema).min(1).max(128),
+      z.object({ path: pointerSchema }).strict(),
+    ]),
+    as: keySchema,
+    key: keySchema.optional(),
+  })
   .strict();
 const repeatShape = { repeat: repeatSchema.optional() };
 const boxBaseSchema = z
@@ -839,6 +875,15 @@ const specSchema = z
     id: z.string().min(1),
     window: windowSchema,
     theme: themeSchema.optional(),
+    data: z
+      .custom<PrototypeData>((value) => {
+        if (typeof value !== "object" || value === null || Array.isArray(value)) {
+          return false;
+        }
+        const prototype = Object.getPrototypeOf(value);
+        return prototype === Object.prototype || prototype === null;
+      })
+      .optional(),
     state: z
       .custom<Record<string, string | number | boolean>>(
         (value) =>

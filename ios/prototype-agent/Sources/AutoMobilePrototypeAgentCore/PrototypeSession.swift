@@ -75,6 +75,9 @@ struct PrototypeSession {
     /// `appearance_changed` event; nil while nothing is shown.
     private var reportedDark: Bool?
 
+    /// The shown spec owns data; device actions can only change state.
+    var data: [String: JSONValue]? { spec?.data }
+
     var isShown: Bool {
         spec != nil
     }

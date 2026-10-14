@@ -326,7 +326,9 @@ that reports directly, so read that job. "Advisory" means not in the ruleset: it
 never blocks a merge. Runs from before the `iOS`, `Android`, `Node Tests`, and
 `WebRTC` roll-ups were removed may still show them red.
 `bun scripts/ci/ci-time-to-green.ts` reports time-to-green against the live
-required list. Run
+required list. The `CI time-to-green report` workflow
+(`ci-time-to-green-report.yml`) publishes the last 24 hours of PR runs daily as
+its job summary and a 90-day artifact. Run
 `bash scripts/ci/classify-failure.sh <run-id>` before retrying or changing code;
 it identifies the specific upstream job and consults
 `scripts/ci/known-flakes.txt`. Do not re-fix documented non-fixes. Before

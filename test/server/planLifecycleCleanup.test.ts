@@ -526,6 +526,35 @@ describe("executePlan cleans every acquired device before release", () => {
     expect(marker("device-B")).toBeUndefined();
   });
 
+  test("failed cleanup passes the plan app id and cleanup step as its retry key", async () => {
+    await acquire(devices.slice(0, 1));
+    cleanup.softFailuresRemaining.set("device-A", 3);
+    const mark = spyOn(sessionManager, "markDeviceNeedsAppCleanup");
+    try {
+      for (const clearAppData of [true, false, true]) {
+        await lifecycle.afterExecution(
+          input({
+            // Keep the same session while exercising each failed cleanup immediately.
+            shouldResolveDevice: false,
+            args: {
+              cleanupAppId: "com.example.chat",
+              cleanupClearAppData: clearAppData,
+            },
+          }),
+        );
+      }
+      expect(mark).toHaveBeenCalledTimes(3);
+      expect(mark.mock.calls.map((call) => call[3])).toEqual([
+        "com.example.chat:clearAppData",
+        "com.example.chat:terminateApp",
+        "com.example.chat:clearAppData",
+      ]);
+      expect(sessionManager.getSession("base")).not.toBeNull();
+    } finally {
+      mark.mockRestore();
+    }
+  });
+
   test("a clean cleanup marks nothing", async () => {
     await acquire(devices.slice(0, 2));
     await lifecycle.afterExecution(input());

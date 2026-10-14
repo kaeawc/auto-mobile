@@ -82,7 +82,15 @@ object PrototypeRepeatTemplate {
 
   /** [text] with `{index}` and `{alias.field}` bound to one item; unknown fields stay literal. */
   fun bind(text: String, alias: String, item: Map<String, JsonElement>, index: Int): String =
-    segments(text, alias).joinToString("") { segment ->
+    bind(segments(text, alias), alias, item, index)
+
+  internal fun bind(
+    segments: List<PrototypeRepeatSegment>,
+    alias: String,
+    item: Map<String, JsonElement>,
+    index: Int,
+  ): String =
+    segments.joinToString("") { segment ->
       when (segment) {
         is PrototypeRepeatSegment.Literal -> segment.text
         is PrototypeRepeatSegment.Index -> index.toString()
@@ -281,7 +289,11 @@ internal object PrototypeRepeatValidator {
 
   private class Budget(var nodes: Int = 0, var images: Int = 0)
 
-  private class RepeatState(val data: PrototypeRepeatData, var cells: Int = 0)
+  private class RepeatState(
+    val data: PrototypeRepeatData,
+    var cells: Int = 0,
+    var total: Long = 0,
+  )
 
   private val stateKeyPattern = Regex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 
@@ -306,8 +318,13 @@ internal object PrototypeRepeatValidator {
   private fun hasPlaceholder(text: String, alias: String): Boolean =
     PrototypeRepeatTemplate.segments(text, alias).any { it !is PrototypeRepeatSegment.Literal }
 
-  private fun unknownField(text: String, path: String, scope: Scope): PrototypeSpecError? {
-    for (name in PrototypeRepeatTemplate.fieldReferences(text, scope.alias)) {
+  private fun unknownField(
+    segments: List<PrototypeRepeatSegment>,
+    path: String,
+    scope: Scope,
+  ): PrototypeSpecError? {
+    val names = segments.filterIsInstance<PrototypeRepeatSegment.Field>().map { it.name }.distinct()
+    for (name in names) {
       if (!scope.items.all { it.containsKey(name) }) {
         return fail(path, "Unknown repeat field ${JsonPrimitive(name)}")
       }
@@ -316,21 +333,30 @@ internal object PrototypeRepeatValidator {
   }
 
   /** An emit name must stay non-empty for every item once its placeholders are bound. */
-  private fun emptyEmitName(text: String, path: String, scope: Scope): PrototypeSpecError? {
+  private fun emptyEmitName(
+    segments: List<PrototypeRepeatSegment>,
+    path: String,
+    scope: Scope,
+  ): PrototypeSpecError? {
     val empty =
       scope.items.withIndex().indexOfFirst { (index, item) ->
-        PrototypeRepeatTemplate.bind(text, scope.alias, item, index).isEmpty()
+        PrototypeRepeatTemplate.bind(segments, scope.alias, item, index).isEmpty()
       }
     return if (empty < 0) null else fail(path, "Expanded emit name is empty for item $empty")
   }
 
   /** A state key must bind to a literal key for every item; the failing item is reported. */
-  private fun invalidBoundKey(key: String, path: String, scope: Scope): PrototypeSpecError? {
-    if (!hasPlaceholder(key, scope.alias)) {
+  private fun invalidBoundKey(
+    key: String,
+    segments: List<PrototypeRepeatSegment>,
+    path: String,
+    scope: Scope,
+  ): PrototypeSpecError? {
+    if (segments.all { it is PrototypeRepeatSegment.Literal }) {
       return if (stateKeyPattern.matches(key)) null else fail(path, "Invalid key value")
     }
     for ((index, item) in scope.items.withIndex()) {
-      val bound = PrototypeRepeatTemplate.bind(key, scope.alias, item, index)
+      val bound = PrototypeRepeatTemplate.bind(segments, scope.alias, item, index)
       if (!stateKeyPattern.matches(bound)) {
         return fail(
           if (scope.pathBound) "${scope.path}.repeat.items.path"
@@ -343,36 +369,118 @@ internal object PrototypeRepeatValidator {
     return null
   }
 
+  /** Count placeholders once, then evaluate field multiplicities per item. */
+  private fun repeatTextError(
+    text: String,
+    segments: List<PrototypeRepeatSegment>,
+    path: String,
+    scope: Scope,
+    state: RepeatState,
+    dataRecognized: Boolean,
+  ): PrototypeSpecError? {
+    val fields = mutableMapOf<String, Int>()
+    var indices = 0
+    for (segment in segments) {
+      when (segment) {
+        is PrototypeRepeatSegment.Index -> indices++
+        is PrototypeRepeatSegment.Field -> fields[segment.name] = (fields[segment.name] ?: 0) + 1
+        is PrototypeRepeatSegment.Literal -> Unit
+      }
+    }
+    if (!dataRecognized && indices == 0 && fields.isEmpty()) return null
+    for ((index, item) in scope.items.withIndex()) {
+      var length = indices.toLong() * index.toString().length
+      if (length > PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH)
+        return fail(path, "Substituted text length limit exceeded")
+      for ((name, count) in fields) {
+        val value = item[name] as? JsonPrimitive
+        length += count.toLong() * (value?.let(PrototypeRepeatTemplate::rendered)?.length ?: 0)
+        if (length > PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH)
+          return fail(path, "Substituted text length limit exceeded")
+      }
+      if (!chargeText(state, text.length.toLong() + length))
+        return fail(path, "Substituted text total limit exceeded")
+    }
+    return null
+  }
+
+  private fun chargeText(state: RepeatState, length: Long): Boolean {
+    state.total += length
+    return state.total <= PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL
+  }
+
+  private fun dataTextError(path: String, state: RepeatState): PrototypeSpecError =
+    fail(
+      path,
+      if (state.total > PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL)
+        "Substituted text total limit exceeded"
+      else "Substituted text length limit exceeded",
+    )
+
   private fun fieldError(
     value: JsonElement?,
     path: String,
     kind: PrototypeBindableKind,
     scope: Scope,
+    state: RepeatState,
   ): PrototypeSpecError? {
     val text = value.string() ?: return null
-    if (kind == PrototypeBindableKind.DATA_OPERAND && hasPlaceholder(text, scope.alias)) {
+    val authored = PrototypeRepeatTemplate.segments(text, scope.alias)
+    if (
+      kind == PrototypeBindableKind.DATA_OPERAND &&
+        authored.any { it !is PrototypeRepeatSegment.Literal }
+    ) {
       return fail(path, "Repeat placeholder in a data condition operand is not supported")
     }
-    unknownField(text, path, scope)?.let {
+    unknownField(authored, path, scope)?.let {
+      return it
+    }
+    var dataRecognized = false
+    val resolved =
+      if (kind == PrototypeBindableKind.TEXT)
+        state.data.text(text) {
+          dataRecognized = true
+          chargeText(state, it)
+        }
+      else text
+    if (resolved == null) return dataTextError(path, state)
+    val segments =
+      if (resolved == text) authored else PrototypeRepeatTemplate.segments(resolved, scope.alias)
+    repeatTextError(resolved, segments, path, scope, state, dataRecognized)?.let {
       return it
     }
     return when (kind) {
-      PrototypeBindableKind.EMIT_NAME -> emptyEmitName(text, path, scope)
-      PrototypeBindableKind.KEY -> invalidBoundKey(text, path, scope)
+      PrototypeBindableKind.EMIT_NAME -> emptyEmitName(segments, path, scope)
+      PrototypeBindableKind.KEY -> invalidBoundKey(text, segments, path, scope)
       else -> null
     }
   }
 
-  private fun checkOwnFields(node: JsonObject, path: String, scope: Scope): PrototypeSpecError? =
+  private fun checkOwnFields(
+    node: JsonObject,
+    path: String,
+    scope: Scope,
+    state: RepeatState,
+  ): PrototypeSpecError? =
     PrototypeBindableFields.first(node, path) { value, fieldPath, kind ->
-      fieldError(value, fieldPath, kind, scope)
+      fieldError(value, fieldPath, kind, scope, state)
     }
 
   /** Outside every template a state key is literal, so a placeholder there is an invalid key. */
-  private fun checkLiteralKeys(node: JsonObject, path: String): PrototypeSpecError? =
+  private fun checkLiteralKeys(
+    node: JsonObject,
+    path: String,
+    state: RepeatState,
+  ): PrototypeSpecError? =
     PrototypeBindableFields.first(node, path) { value, fieldPath, kind ->
       val text = value.string()
-      if (kind == PrototypeBindableKind.KEY && text != null && !stateKeyPattern.matches(text))
+      if (
+        kind == PrototypeBindableKind.TEXT &&
+          text != null &&
+          state.data.text(text) { chargeText(state, it) } == null
+      )
+        dataTextError(fieldPath, state)
+      else if (kind == PrototypeBindableKind.KEY && text != null && !stateKeyPattern.matches(text))
         fail(fieldPath, "State key placeholder outside a repeat template")
       else null
     }
@@ -462,7 +570,9 @@ internal object PrototypeRepeatValidator {
       if (node.text("type") == "stack")
         return fail(path, "Stack cannot appear inside a repeat template")
     }
-    val own = if (scope != null) checkOwnFields(node, path, scope) else checkLiteralKeys(node, path)
+    val own =
+      if (scope != null) checkOwnFields(node, path, scope, state)
+      else checkLiteralKeys(node, path, state)
     if (own != null) return own
     repeatSourceError(node, path, state)?.let {
       return it

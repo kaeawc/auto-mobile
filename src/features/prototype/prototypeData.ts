@@ -1,6 +1,6 @@
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_DATA_MODEL_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
-import { mapBindableFields, record, STATE_KEY, type Raw } from "./prototypeTemplate";
+import { mapBindableFields, record, renderScalar, STATE_KEY, type Raw } from "./prototypeTemplate";
 
 /** RFC 6901 pointers relative to data; the whole-document empty pointer is excluded. */
 export function isPrototypeDataPointer(value: unknown): value is string {
@@ -42,8 +42,9 @@ export function resolvePrototypeDataPointer(data: unknown, pointer: string): unk
 }
 
 /** Plain scan: malformed or unrelated braces stay literal and cannot invalidate text. */
-export function prototypeDataPlaceholders(text: string): string[] {
-  const pointers: string[] = [];
+function* dataPlaceholderSpans(
+  text: string,
+): Generator<{ pointer: string; start: number; end: number }> {
   let cursor = 0;
   while (cursor < text.length) {
     if (text[cursor] !== "{" || !text.startsWith("data:", cursor + 1)) {
@@ -61,13 +62,28 @@ export function prototypeDataPlaceholders(text: string): string[] {
     const inner = close === end ? "" : text.slice(cursor + 1, close);
     const pointer = inner.startsWith("data:") ? inner.slice(5) : "";
     if (isPrototypeDataPointer(pointer)) {
-      pointers.push(pointer);
+      yield { pointer, start: cursor, end: close + 1 };
       cursor = close + 1;
     } else {
       cursor++;
     }
   }
-  return pointers;
+}
+
+/** Recognised pointers in authored order, using the same scan as text substitution. */
+export function prototypeDataPlaceholders(text: string): string[] {
+  return Array.from(dataPlaceholderSpans(text), ({ pointer }) => pointer);
+}
+
+/** Replacements are inserted once and never scanned again for data placeholders. */
+export function bindPrototypeDataText(text: string, resolve: (pointer: string) => string): string {
+  const parts: string[] = [];
+  let cursor = 0;
+  for (const span of dataPlaceholderSpans(text)) {
+    parts.push(text.slice(cursor, span.start), resolve(span.pointer));
+    cursor = span.end;
+  }
+  return cursor === 0 ? text : parts.join("") + text.slice(cursor);
 }
 
 function projectableMember(key: string, member: unknown): boolean {
@@ -88,6 +104,7 @@ export function projectPrototypeDataItem(value: Raw): Raw {
 
 /** One validation's pointer cache, shared by source, template, expansion and state checks. */
 export class PrototypeRepeatData {
+  private readonly renderings = new Map<string, string>();
   private readonly sources = new Map<string, unknown>();
   private readonly counts = new Map<string, number>();
   private readonly projections = new Map<string, readonly Readonly<Raw>[]>();
@@ -99,6 +116,42 @@ export class PrototypeRepeatData {
       this.sources.set(pointer, resolvePrototypeDataPointer(this.data, pointer));
     }
     return this.sources.get(pointer);
+  }
+
+  rendered(pointer: string): string {
+    const cached = this.renderings.get(pointer);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const value = this.source(pointer);
+    const rendered =
+      typeof value === "string" ||
+      typeof value === "boolean" ||
+      (typeof value === "number" && Number.isFinite(value))
+        ? renderScalar(value)
+        : "";
+    this.renderings.set(pointer, rendered);
+    return rendered;
+  }
+
+  /** Undefined signals an oversized substitution; never construct that resolved string. */
+  text(text: string, charge: (length: number) => boolean): string | undefined {
+    let recognized = false;
+    let length = 0;
+    for (const { pointer } of dataPlaceholderSpans(text)) {
+      recognized = true;
+      length += this.rendered(pointer).length;
+      if (length > contract.limits.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH) {
+        return undefined;
+      }
+    }
+    if (!recognized) {
+      return text;
+    }
+    if (!charge(text.length + length)) {
+      return undefined;
+    }
+    return bindPrototypeDataText(text, (pointer) => this.rendered(pointer));
   }
 
   cells(pointer: string): number {

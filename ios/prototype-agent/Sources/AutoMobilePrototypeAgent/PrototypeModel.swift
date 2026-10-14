@@ -103,8 +103,11 @@ final class PrototypeModel {
 
     @ObservationIgnored private let clock: PrototypeClock
 
-    init(clock: PrototypeClock = SystemPrototypeClock()) {
+    let mode: PrototypeLifecycleMode
+
+    init(clock: PrototypeClock = SystemPrototypeClock(), mode: PrototypeLifecycleMode = .session) {
         self.clock = clock
+        self.mode = mode
     }
 
     /// Local override of the five-minute idle TTL; no wire field carries it. Applies from the next
@@ -159,7 +162,7 @@ final class PrototypeModel {
         showRevision += 1
         syncSnackbarTimeouts()
         // An accepted show, including a same-id replace, is activity.
-        idleTimer.arm()
+        if mode.expiresWhenIdle { idleTimer.arm() }
         onVisibilityChange?(true)
     }
 
@@ -224,7 +227,7 @@ final class PrototypeModel {
         // SwiftUI reports the settled page on appear; only a page that changed is activity.
         let before = session.pages[pager]
         apply(activity: false) { $0.setPage(pager, target) }
-        if session.isShown, session.pages[pager] != before { idleTimer.arm() }
+        if session.isShown, session.pages[pager] != before, mode.expiresWhenIdle { idleTimer.arm() }
     }
 
     func toggle(_ key: String, then actions: [PrototypeAction]) {
@@ -268,6 +271,7 @@ final class PrototypeModel {
     /// The last host connection is gone: the prototype ends with `reason: disconnect` and its
     /// uploaded assets are dropped, shown or not (Android's `onClientCountChanged(0)`).
     func hostDisconnected() {
+        guard mode.endsWithHost else { return }
         dismiss(reason: .disconnect)
         if !assets.isEmpty {
             assets = [:]
@@ -288,7 +292,7 @@ final class PrototypeModel {
         // redraw value-holding controls so they show those values instead of the refused input.
         if PrototypeRefusedChange.leftValuesUnchanged(before: previous, after: next) { refusedChangeRevision += 1 }
         if session.isShown {
-            if activity { idleTimer.arm() }
+            if activity, mode.expiresWhenIdle { idleTimer.arm() }
         } else {
             idleTimer.cancel()
         }

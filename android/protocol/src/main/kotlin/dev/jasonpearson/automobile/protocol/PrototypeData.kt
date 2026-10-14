@@ -102,6 +102,7 @@ internal object PrototypeDataValues {
 
 /** Per-call caches; JSON values are read-only and projected rows are shared, never mutated. */
 internal class PrototypeRepeatData(private val data: JsonObject?) {
+  private val renderings = mutableMapOf<String, String>()
   private val sources = mutableMapOf<String, JsonArray?>()
   private val counts = mutableMapOf<String, Int>()
   private val projections = mutableMapOf<String, List<JsonObject>>()
@@ -113,6 +114,15 @@ internal class PrototypeRepeatData(private val data: JsonObject?) {
     }
     return sources[pointer]
   }
+
+  fun rendered(pointer: String): String =
+    renderings.getOrPut(pointer) {
+      PrototypeDataValues.rendered(PrototypeDataPointer.resolve(data, pointer))
+    }
+
+  /** Null signals an oversized substitution; never construct that resolved string. */
+  fun text(text: String, charge: (Long) -> Boolean): String? =
+    PrototypeDataText.boundedBind(text, ::rendered, charge)
 
   fun cells(pointer: String): Int =
     counts.getOrPut(pointer) {
@@ -175,11 +185,36 @@ internal object PrototypeDataText {
 
   fun hasBinding(text: String): Boolean = placeholders(text).isNotEmpty()
 
-  fun bind(text: String, data: JsonObject?): String = buildString {
+  fun boundedBind(
+    text: String,
+    resolve: (String) -> String,
+    charge: (Long) -> Boolean,
+  ): String? {
+    val spans = placeholders(text)
+    var length = 0L
+    for (span in spans) {
+      length += resolve(span.pointer).length
+      if (length > PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH) return null
+    }
+    if (spans.isEmpty()) return text
+    if (!charge(text.length.toLong() + length)) return null
+    return bind(text, spans, resolve)
+  }
+
+  fun bind(text: String, data: JsonObject?): String =
+    bind(text, placeholders(text)) { pointer ->
+      PrototypeDataValues.rendered(PrototypeDataPointer.resolve(data, pointer))
+    }
+
+  private fun bind(
+    text: String,
+    spans: List<Placeholder>,
+    resolve: (String) -> String,
+  ): String = buildString {
     var cursor = 0
-    for (placeholder in placeholders(text)) {
+    for (placeholder in spans) {
       append(text.substring(cursor, placeholder.start))
-      append(PrototypeDataValues.rendered(PrototypeDataPointer.resolve(data, placeholder.pointer)))
+      append(resolve(placeholder.pointer))
       cursor = placeholder.end
     }
     append(text.substring(cursor))

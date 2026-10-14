@@ -72,13 +72,15 @@ final class PrototypeStackTests: XCTestCase {
 
     /// Invalid fixtures wrap the spec and expectedPath, as PrototypeThemeModesTests does.
     func testSharedInvalidStackFixturesRejectAtTheHostPath() throws {
-        let names = try FileManager.default.contentsOfDirectory(
-            at: fixtures.appendingPathComponent("invalid"),
-            includingPropertiesForKeys: nil
-        )
-        .filter { $0.pathExtension == "json" && $0.lastPathComponent.contains("stack") }
+        let names = [
+            "dangling-stack.json",
+            "duplicate-stack.json",
+            "stack-unknown-screen.json",
+            "stack-unknown-start.json",
+        ]
         XCTAssertEqual(names.count, 4)
-        for file in names {
+        for name in names {
+            let file = fixtures.appendingPathComponent("invalid").appendingPathComponent(name)
             let wrapper = try JSONDecoder().decode(JSONValue.self, from: Data(contentsOf: file))
             guard case let .object(fields) = wrapper else { return XCTFail("Expected fixture object") }
             let value = try XCTUnwrap(fields["spec"])

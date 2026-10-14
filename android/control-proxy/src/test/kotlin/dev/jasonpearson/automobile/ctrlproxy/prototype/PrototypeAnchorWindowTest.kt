@@ -31,6 +31,7 @@ class PrototypeAnchorWindowTest {
       DefaultPrototypeHost(
         RuntimeEnvironment.getApplication(),
         manager,
+        isViewAttached = manager::isViewAttached,
         sdkInt = 30,
         mainThread = main,
         settleTimer = FakePrototypeSettleTimer(history),

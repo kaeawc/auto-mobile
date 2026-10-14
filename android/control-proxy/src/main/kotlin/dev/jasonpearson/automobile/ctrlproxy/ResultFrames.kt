@@ -4,8 +4,8 @@ import dev.jasonpearson.automobile.protocol.NetworkMockRuleReportContract
 import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
 import dev.jasonpearson.automobile.protocol.PrototypeResult
-import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
+import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import kotlinx.serialization.encodeToString

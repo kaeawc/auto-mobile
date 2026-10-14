@@ -117,8 +117,10 @@ class PrototypeSpecTest {
     assertEquals("nav", stack.id)
     assertEquals("home", stack.start)
     assertEquals(setOf("home", "detail", "third"), stack.screens.keys)
-    val actions = (stack.screens.getValue("home") as PrototypeColumnNode).children
-      .flatMap { it.onTap.orEmpty() }
+    val actions =
+      (stack.screens.getValue("home") as PrototypeColumnNode).children.flatMap {
+        it.onTap.orEmpty()
+      }
     assertEquals(
       listOf(
         PrototypePushAction("nav", "detail"),
@@ -128,25 +130,28 @@ class PrototypeSpecTest {
       ),
       actions,
     )
-    val expected = mapOf(
-      "stack-unknown-start.json" to "root.start",
-      "stack-unknown-screen.json" to "root.screens[\"home\"].onTap[0].screen",
-      "dangling-stack.json" to "root.screens[\"home\"].onTap[0].stack",
-      "duplicate-stack.json" to "root.children[1].id",
-    )
+    val expected =
+      mapOf(
+        "stack-unknown-start.json" to "root.start",
+        "stack-unknown-screen.json" to "root.screens[\"home\"].onTap[0].screen",
+        "dangling-stack.json" to "root.screens[\"home\"].onTap[0].stack",
+        "duplicate-stack.json" to "root.children[1].id",
+      )
     assertTrue(invalid.map { it.name }.containsAll(expected.keys))
     // invalidFixtures also loads every future stack-*.json and checks its declared error path.
     for ((name, path) in expected) {
       val file = invalid.single { it.name == name }
-      val result = PrototypeSpecValidator.validate(invalidSpec.getValue(file))
-        as PrototypeSpecValidation.Failure
+      val result =
+        PrototypeSpecValidator.validate(invalidSpec.getValue(file))
+          as PrototypeSpecValidation.Failure
       assertEquals(path, result.error.path, name)
     }
   }
 
   @Test
   fun `stack accepts common fields and arbitrary screen names and normalizes nested integers`() {
-    val input = """{"id":"a","window":{"placement":{"type":"fullscreen"}},"root":{
+    val input =
+      """{"id":"a","window":{"placement":{"type":"fullscreen"}},"root":{
       "type":"stack","id":"nav","start":"screen 0","testTag":"nav","contentDescription":"Navigation",
       "style":{"width":{"dp":320}},"screens":{"screen 0":{"type":"text","text":"Home","style":{"fontWeight":400.0}},
       "__proto__":{"type":"scroll","child":{"type":"text","text":"Hidden"}}}}}"""
@@ -168,11 +173,15 @@ class PrototypeSpecTest {
       assertEquals("Screen count out of range", result.error.message)
     }
     val screens = (0 until 32).joinToString(",", "{", "}") { "\"$it\":{\"type\":\"spacer\"}" }
-    assertTrue(PrototypeSpecValidator.validate(spec(screens, "0")) is PrototypeSpecValidation.Success)
-    val empty = PrototypeSpecValidator.validate(spec("""{"":{"type":"spacer"}}"""))
-      as PrototypeSpecValidation.Failure
+    assertTrue(
+      PrototypeSpecValidator.validate(spec(screens, "0")) is PrototypeSpecValidation.Success,
+    )
+    val empty =
+      PrototypeSpecValidator.validate(spec("""{"":{"type":"spacer"}}"""))
+        as PrototypeSpecValidation.Failure
     assertEquals("root.screens[\"\"]", empty.error.path)
-    val repeat = """{"id":"a","window":{"placement":{"type":"fullscreen"}},"root":{"type":"column",
+    val repeat =
+      """{"id":"a","window":{"placement":{"type":"fullscreen"}},"root":{"type":"column",
       "repeat":{"as":"item","items":[{"label":"x"}]},"children":[{"type":"stack","id":"nav",
       "start":"home","screens":{"home":{"type":"spacer"}}}]}}"""
     val result = PrototypeSpecValidator.validate(repeat) as PrototypeSpecValidation.Failure
@@ -184,22 +193,32 @@ class PrototypeSpecTest {
   fun `hidden stack screens count toward tree depth and expanded node limits`() {
     val encoder = Json { classDiscriminator = "type" }
     fun rejected(hidden: PrototypeNode): PrototypeSpecError {
-      val root = PrototypeStackNode("nav", start = "home", screens = linkedMapOf(
-        "home" to PrototypeSpacerNode(), "hidden" to hidden,
-      ))
+      val root =
+        PrototypeStackNode(
+          "nav",
+          start = "home",
+          screens =
+            linkedMapOf(
+              "home" to PrototypeSpacerNode(),
+              "hidden" to hidden,
+            ),
+        )
       val spec = PrototypeSpec("a", PrototypeWindow(PrototypeFullscreenPlacement()), root = root)
-      return (PrototypeSpecValidator.validate(encoder.encodeToString(PrototypeSpec.serializer(), spec))
-        as PrototypeSpecValidation.Failure).error
+      return (PrototypeSpecValidator.validate(
+          encoder.encodeToString(PrototypeSpec.serializer(), spec),
+        ) as PrototypeSpecValidation.Failure)
+        .error
     }
     var deep: PrototypeNode = PrototypeSpacerNode()
     repeat(PrototypeSpecValidator.MAX_PROTOTYPE_DEPTH) {
       deep = PrototypeColumnNode(children = listOf(deep))
     }
     assertEquals("Tree depth limit exceeded", rejected(deep).message)
-    val wide = PrototypeColumnNode(
-      children = List(16) { PrototypeSpacerNode() },
-      repeat = PrototypeRepeat(List(128) { mapOf("label" to PrototypeScalar.Text("x")) }, "item"),
-    )
+    val wide =
+      PrototypeColumnNode(
+        children = List(16) { PrototypeSpacerNode() },
+        repeat = PrototypeRepeat(List(128) { mapOf("label" to PrototypeScalar.Text("x")) }, "item"),
+      )
     assertTrue(rejected(wide).message.contains("node limit", ignoreCase = true))
   }
 

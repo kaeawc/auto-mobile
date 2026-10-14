@@ -707,23 +707,15 @@ struct PrototypeRootView: View {
         // Android: the hosts keep no safe area (`PrototypeKeyboardLift.hostSafeAreaRegions`), and
         // this ignores every region too, so no second lift can stack on the sheet's (#11042).
         .ignoresSafeArea()
-        .overlay(alignment: .leading) {
-            if model.stackPopTarget != nil {
-                // Reserve only the active Back edge. A full-root simultaneous drag also turns a
-                // nested pager; a full-root high-priority drag consumes non-edge scrolls too.
-                // Both hosts need this strip because UIKit routes each touch to just one layer.
-                Color.clear
-                    .frame(width: 20)
-                    .frame(maxHeight: .infinity)
-                    .contentShape(Rectangle())
-                    .accessibilityHidden(true)
-                    .gesture(DragGesture(minimumDistance: 60, coordinateSpace: .local).onEnded { value in
-                        if value.startLocation.x >= 0, value.startLocation.x <= 20, value.translation.width >= 60 {
-                            model.popTopmostStack()
-                        }
-                    })
+        // Observe edge drags alongside authored gestures without reserving a tappable strip.
+        .simultaneousGesture(DragGesture(minimumDistance: 10, coordinateSpace: .local).onEnded { value in
+            if value.startLocation.x <= 20,
+               value.translation.width >= 60,
+               abs(value.translation.height) < abs(value.translation.width)
+            {
+                model.popTopmostStack()
             }
-        }
+        })
     }
 
     /// The spec's anchored nodes, above its tree and below its modals, as Android's anchor layer.

@@ -188,8 +188,8 @@ class PrototypeController(
    * ([displayId] is ignored) and each pager keeps its page, matched by pager id and clamped to the
    * new page count. Each stack keeps its path with removed screen names dropped (or its start
    * screen when none remain). The new spec's state is authoritative; values the user changed are
-   * not carried over. Otherwise (another id, nothing shown, or [reset]) it is a fresh show on [displayId],
-   * where null means the default display, exactly as before display targeting.
+   * not carried over. Otherwise (another id, nothing shown, or [reset]) it is a fresh show on
+   * [displayId], where null means the default display, exactly as before display targeting.
    *
    * [appearance] stands in for the device's light or dark setting for this show; null follows the
    * device. It belongs to the show, so an in-place show without it follows the device again.
@@ -303,7 +303,7 @@ class PrototypeController(
     val interactive =
       request.copy(
         hasTextField = mappedSpec.hasTextField,
-        hasStackBack = runtime.current.stacks.values.any { it.depth > 1 },
+        hasStackBack = runtime.hasPoppableStack(mappedSpec),
         theme = theme,
         onHostDismiss = { interact(runtime, PrototypeInteraction.HostDismiss) },
         onHostBack = { interact(runtime, PrototypeInteraction.Back) },
@@ -697,15 +697,14 @@ class PrototypeController(
     }
 
   /**
-   * A visible text field in the CURRENT tree may hold input focus, so a
-   * page swipe, tab change or sheet open/close can flip it. Stack navigation also takes focus
-   * while any path has more than one entry; otherwise Back and key input to the app
-   * behind would be swallowed. A failed flip keeps the old request and is retried on the next
-   * change.
+   * A visible text field in the CURRENT tree may hold input focus, so a page swipe, tab change or
+   * sheet open/close can flip it. Stack navigation also takes focus while a visible eligible stack
+   * can pop; otherwise Back and key input to the app behind would be swallowed. A failed flip keeps
+   * the old request and is retried on the next change.
    */
   private suspend fun syncTextFieldFocus(model: PrototypeRenderModel) {
     val request = activeRequest ?: return
-    val stackBack = activeRuntime?.current?.stacks?.values?.any { it.depth > 1 } == true
+    val stackBack = activeRuntime?.hasPoppableStack(model) == true
     var updated = request
     if (stackBack != request.hasStackBack) {
       if (host.setStackBackEnabled(stackBack) || !host.isShowing) {

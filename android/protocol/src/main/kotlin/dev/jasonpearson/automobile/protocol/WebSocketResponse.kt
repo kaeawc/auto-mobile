@@ -823,7 +823,8 @@ data class PrototypeStatusEntry(
   @EncodeDefault(EncodeDefault.Mode.NEVER) val appearance: PrototypeAppearance? = null,
   /** The shown spec's read-only data; absent when the spec has none. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val data: JsonObject? = null,
-  @EncodeDefault(EncodeDefault.Mode.NEVER) val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
 )
 
 @Serializable
@@ -857,7 +858,8 @@ data class PrototypeEvent(
   val payload: JsonElement?,
   val state: Map<String, PrototypeScalar>,
   val pages: Map<String, Int> = emptyMap(),
-  @EncodeDefault(EncodeDefault.Mode.NEVER) val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
 ) : WebSocketResponse()
 
 // =============================================================================

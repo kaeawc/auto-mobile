@@ -151,7 +151,7 @@ class PrototypeRuntime(
     if (!current.active) return
     when (interaction) {
       PrototypeInteraction.HostDismiss -> dismiss()
-      // Paths in hidden screens still retain focus while navigated. If none is visible and
+      // Hidden screens retain their paths but cannot take stack Back focus. If none is visible and
       // eligible, preserve the existing Back dismissal rather than changing a hidden screen.
       PrototypeInteraction.Back -> if (!popTopmostStack()) dismiss()
       is PrototypeInteraction.Tap -> control(emptyMap(), interaction.actions)
@@ -260,15 +260,19 @@ class PrototypeRuntime(
             if (
               path.size >= PrototypeSpecValidator.MAX_PROTOTYPE_STACK_DEPTH ||
                 !node.screens.containsKey(action.screen)
-            ) path else path + action.screen
+            )
+              path
+            else path + action.screen
           }
-        is PrototypePopAction -> changeStack(action.stack) { _, path ->
-          if (path.size == 1) path else path.dropLast(1)
-        }
+        is PrototypePopAction ->
+          changeStack(action.stack) { _, path ->
+            if (path.size == 1) path else path.dropLast(1)
+          }
         is PrototypePopToRootAction -> changeStack(action.stack) { node, _ -> listOf(node.start) }
-        is PrototypeReplaceAction -> changeStack(action.stack) { node, path ->
-          if (!node.screens.containsKey(action.screen)) path else path.dropLast(1) + action.screen
-        }
+        is PrototypeReplaceAction ->
+          changeStack(action.stack) { node, path ->
+            if (!node.screens.containsKey(action.screen)) path else path.dropLast(1) + action.screen
+          }
         PrototypeDismissAction -> dismiss()
         else ->
           writes[index]?.let { (key, spec) ->
@@ -355,12 +359,24 @@ class PrototypeRuntime(
   /** Framework-free Back policy; the controller serializes this with other interactions. */
   suspend fun popTopmostStack(): Boolean {
     if (!current.active) return false
-    val root = renderModel().root
+    val id = stackPopTarget(renderModel().root, current.stacks) ?: return false
+    changeStack(id) { _, path -> path.dropLast(1) }
+    return true
+  }
+
+  /** Focus and Back dispatch use exactly the same visible target selection. */
+  fun hasPoppableStack(model: PrototypeRenderModel = renderModel()): Boolean =
+    current.active && stackPopTarget(model.root, current.stacks) != null
+
+  private fun stackPopTarget(
+    root: PrototypeRenderNode,
+    stacks: Map<String, PrototypeStackSnapshot>,
+  ): String? {
     var target: String? = null
     fun visit(node: PrototypeRenderNode) {
       if (!node.visible || node.role in PROTOTYPE_MODAL_ROLES) return
       val stack = node.source as? PrototypeStackNode
-      if (stack != null && (current.stacks[stack.id]?.depth ?: 1) > 1) target = stack.id
+      if (stack != null && (stacks[stack.id]?.depth ?: 1) > 1) target = stack.id
       // Visit parents before children: a nested top-screen stack wins over its ancestor.
       // Among siblings the last eligible stack in document order wins, matching render order.
       val children =
@@ -371,9 +387,7 @@ class PrototypeRuntime(
     visit(root)
     // Hoisted modals render last; stacks in their visible bodies take Back before inline ones.
     modalPrototypeSheets(root).forEach { modal -> modal.children.forEach(::visit) }
-    val id = target ?: return false
-    changeStack(id) { _, path -> path.dropLast(1) }
-    return true
+    return target
   }
 
   private suspend fun changeStack(
@@ -493,12 +507,16 @@ class PrototypeRuntime(
       pagerCounts(spec.root).mapValues { (id, count) ->
         (previous[id] ?: 0).coerceIn(0, count - 1)
       },
-      stacks = stackNodes(spec.root).mapValues { (id, node) ->
-        val path =
-          previousStacks[id]?.path.orEmpty().filter { node.screens.containsKey(it) }
-            .take(PrototypeSpecValidator.MAX_PROTOTYPE_STACK_DEPTH)
-        PrototypeStackSnapshot(path.ifEmpty { listOf(node.start) })
-      },
+      stacks =
+        stackNodes(spec.root).mapValues { (id, node) ->
+          val path =
+            previousStacks[id]
+              ?.path
+              .orEmpty()
+              .filter { node.screens.containsKey(it) }
+              .take(PrototypeSpecValidator.MAX_PROTOTYPE_STACK_DEPTH)
+          PrototypeStackSnapshot(path.ifEmpty { listOf(node.start) })
+        },
     )
 }
 

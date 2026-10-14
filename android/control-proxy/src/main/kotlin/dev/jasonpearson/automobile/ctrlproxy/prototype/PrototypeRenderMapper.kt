@@ -58,8 +58,10 @@ internal class PrototypeRenderMapper {
       val resolved = resolveLocked(spec)
       previousModel?.let { model ->
         if (
-          previousSpec?.root === resolved.root && previousSpec == resolved &&
-            previousPages == pages && previousStacks == stacks
+          previousSpec?.root === resolved.root &&
+            previousSpec == resolved &&
+            previousPages == pages &&
+            previousStacks == stacks
         ) {
           return@synchronized model
         }

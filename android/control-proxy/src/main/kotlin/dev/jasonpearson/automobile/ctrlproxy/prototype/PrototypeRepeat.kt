@@ -29,8 +29,6 @@ import dev.jasonpearson.automobile.protocol.PrototypeListItemSwitch
 import dev.jasonpearson.automobile.protocol.PrototypeListItemTrailing
 import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypePagerNode
-import dev.jasonpearson.automobile.protocol.PrototypeStackNode
-import kotlinx.serialization.json.JsonPrimitive
 import dev.jasonpearson.automobile.protocol.PrototypeProgressNode
 import dev.jasonpearson.automobile.protocol.PrototypeRadioGroupNode
 import dev.jasonpearson.automobile.protocol.PrototypeRepeat
@@ -44,6 +42,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeSetStateAction
 import dev.jasonpearson.automobile.protocol.PrototypeSliderNode
 import dev.jasonpearson.automobile.protocol.PrototypeSnackbarNode
 import dev.jasonpearson.automobile.protocol.PrototypeSpacerNode
+import dev.jasonpearson.automobile.protocol.PrototypeStackNode
 import dev.jasonpearson.automobile.protocol.PrototypeStyleWhen
 import dev.jasonpearson.automobile.protocol.PrototypeSwitchNode
 import dev.jasonpearson.automobile.protocol.PrototypeTabBarNode
@@ -52,6 +51,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeTextNode
 import dev.jasonpearson.automobile.protocol.PrototypeTimePickerNode
 import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
 import dev.jasonpearson.automobile.protocol.PrototypeTopAppBarNode
+import kotlinx.serialization.json.JsonPrimitive
 
 /** A child to render and the path it is rendered under (also its stable Compose identity). */
 internal data class PrototypeChildEntry(val node: PrototypeNode, val path: String)

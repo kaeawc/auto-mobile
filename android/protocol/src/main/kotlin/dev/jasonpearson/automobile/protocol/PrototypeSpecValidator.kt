@@ -605,8 +605,7 @@ object PrototypeSpecValidator {
     for (name in screens.keys.sorted()) {
       val at = "$path[${canonicalString(name)}]"
       if (name.isEmpty()) return fail(at, "Empty screen name")
-      val error =
-        walk(screens.getValue(name), rule.getValue("item").jsonObject, at, context, depth)
+      val error = walk(screens.getValue(name), rule.getValue("item").jsonObject, at, context, depth)
       if (error != null) return error
     }
     return null

@@ -56,7 +56,9 @@ class PrototypeMaterialSemanticsTest {
       Settings.Global.ANIMATOR_DURATION_SCALE,
       0f,
     )
-    activity.setContent { PrototypeSpecContent(mapPrototypeSpec(spec, stacks = stacks).root) { interactions += it } }
+    activity.setContent {
+      PrototypeSpecContent(mapPrototypeSpec(spec, stacks = stacks).root) { interactions += it }
+    }
     // An indeterminate progress indicator reschedules a frame forever. Robolectric's Choreographer
     // posts each frame at the current virtual time, so idle() (and idleFor) never gets past it and
     // every frame appends to the ShadowTrace queue until the heap is gone (9 minutes, ~1 GB dump).
@@ -94,17 +96,25 @@ class PrototypeMaterialSemanticsTest {
 
   @Test
   fun `only the stack top screen is present in the accessibility semantics tree`() {
-    val root = PrototypeStackNode("nav", start = "home", testTag = "nav", screens = linkedMapOf(
-      "home" to PrototypeTextNode(testTag = "home", text = "Home"),
-      "detail" to PrototypeButtonNode(testTag = "detail", label = "Detail"),
-      "third" to PrototypeTextFieldNode(testTag = "third", stateKey = "query"),
-    ))
+    val root =
+      PrototypeStackNode(
+        "nav",
+        start = "home",
+        testTag = "nav",
+        screens =
+          linkedMapOf(
+            "home" to PrototypeTextNode(testTag = "home", text = "Home"),
+            "detail" to PrototypeButtonNode(testTag = "detail", label = "Detail"),
+            "third" to PrototypeTextFieldNode(testTag = "third", stateKey = "query"),
+          ),
+      )
     val state = mapOf("query" to PrototypeScalar.Text("Hidden field"))
     val home = render(root, state)
     assertTrue(home.findTagged("home") != null)
     assertNull(home.findTagged("detail"))
     assertNull(home.findTagged("third"))
-    val detail = render(root, state, stacks = mapOf("nav" to PrototypeStackSnapshot(listOf("home", "detail"))))
+    val detail =
+      render(root, state, stacks = mapOf("nav" to PrototypeStackSnapshot(listOf("home", "detail"))))
     assertNull(detail.findTagged("home"))
     assertTrue(detail.findTagged("detail") != null)
     assertNull(detail.findTagged("third"))

@@ -298,9 +298,11 @@ object PrototypeDataResolver {
       return JsonObject(
         node +
           ("screens" to
-            JsonObject(screens.mapValues { (_, entry) ->
-              if (entry is JsonObject) transform(entry) else entry
-            })),
+            JsonObject(
+              screens.mapValues { (_, entry) ->
+                if (entry is JsonObject) transform(entry) else entry
+              },
+            )),
       )
     val children = node["children"] as? JsonArray ?: return node
     return JsonObject(

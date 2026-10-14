@@ -121,7 +121,8 @@ fun mapPrototypeSpec(
     guardPrototypeTree(resolved.root)
     prototypeRenderModel(
       resolved,
-      PrototypeNodeMapping(resolved.state.orEmpty(), pages, stacks = stacks).map(resolved.root, "root"),
+      PrototypeNodeMapping(resolved.state.orEmpty(), pages, stacks = stacks)
+        .map(resolved.root, "root"),
     )
   }
 

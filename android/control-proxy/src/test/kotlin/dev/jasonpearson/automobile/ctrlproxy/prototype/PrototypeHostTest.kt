@@ -1170,21 +1170,22 @@ class PrototypeHostTest {
     )
 
   @Test
-  fun `on API 33 stack Back alone registers the callback and text focus remains independent`() = runTest {
-    val api33 = hostOnApi(33)
-    var backs = 0
-    assertTrue(api33.show(PrototypeRequest(onHostBack = { backs++ })))
-    assertTrue(registrar.calls.isEmpty())
-    assertTrue(api33.setStackBackEnabled(true))
-    assertEquals(listOf("register"), registrar.calls)
-    registrar.callback!!()
-    assertEquals(1, backs)
-    assertTrue(api33.setTextFieldVisible(true))
-    assertTrue(api33.setStackBackEnabled(false))
-    assertEquals(listOf("register"), registrar.calls)
-    assertTrue(api33.setTextFieldVisible(false))
-    assertEquals(listOf("register", "unregister"), registrar.calls)
-  }
+  fun `on API 33 stack Back alone registers the callback and text focus remains independent`() =
+    runTest {
+      val api33 = hostOnApi(33)
+      var backs = 0
+      assertTrue(api33.show(PrototypeRequest(onHostBack = { backs++ })))
+      assertTrue(registrar.calls.isEmpty())
+      assertTrue(api33.setStackBackEnabled(true))
+      assertEquals(listOf("register"), registrar.calls)
+      registrar.callback!!()
+      assertEquals(1, backs)
+      assertTrue(api33.setTextFieldVisible(true))
+      assertTrue(api33.setStackBackEnabled(false))
+      assertEquals(listOf("register"), registrar.calls)
+      assertTrue(api33.setTextFieldVisible(false))
+      assertEquals(listOf("register", "unregister"), registrar.calls)
+    }
 
   @Test
   fun `on API 33 the back callback follows focusability and both back routes dismiss once`() =

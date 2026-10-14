@@ -214,11 +214,11 @@ interface PrototypeHost {
  * restore-or-abandon pass promptly instead of waiting for an unrelated event. Same constraints.
  *
  * While a text field is visible or a stack can pop the window is focusable. Back first navigates
- * through the controller; without navigation it dismisses the prototype through
- * the request's `onHostDismiss` on [backScope], the same `user`-reason path as the fullscreen
- * dismiss row. Back arrives as a key event below API 33 and as an OnBackInvokedCallback (registered
- * through [backRegistrarFactory] only while focusable) from API 33; both call one target. Without a
- * visible text field or navigated stack the window is not focusable and never sees Back at all.
+ * through the controller; without navigation it dismisses the prototype through the request's
+ * `onHostDismiss` on [backScope], the same `user`-reason path as the fullscreen dismiss row. Back
+ * arrives as a key event below API 33 and as an OnBackInvokedCallback (registered through
+ * [backRegistrarFactory] only while focusable) from API 33; both call one target. Without a visible
+ * text field or navigated stack the window is not focusable and never sees Back at all.
  *
  * [context] must be the service/display context used for the default display; [densityProvider]
  * defaults to its resources. A request for any other display takes its context, WindowManager and

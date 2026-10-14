@@ -111,8 +111,8 @@ import dev.jasonpearson.automobile.protocol.NodeSelector
 import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
-import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
+import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import dev.jasonpearson.automobile.protocol.ScreenshotResult as ProtocolScreenshotResult
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
 import dev.jasonpearson.automobile.protocol.SdkBroadcastEvent

@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import android.view.KeyEvent
 import dev.jasonpearson.automobile.ctrlproxy.CtrlProxyMessageHandler
 import dev.jasonpearson.automobile.ctrlproxy.NoOpCtrlProxyActions
 import dev.jasonpearson.automobile.ctrlproxy.prototypeResultFrame
@@ -68,26 +69,175 @@ class PrototypeControllerTest {
       assertTrue(results.last().error.orEmpty(), results.last().error.orEmpty().contains(error))
   }
 
-  private fun stackSpec(screens: Map<String, PrototypeNode> = linkedMapOf(
-    "home" to PrototypeTextNode(text = "Home"),
-    "detail" to PrototypeTextNode(text = "Detail"),
-    "third" to PrototypeTextNode(text = "Third"),
-  ), start: String = "home") = spec().copy(root = PrototypeStackNode("nav", start = start, screens = screens))
+  private fun stackSpec(
+    screens: Map<String, PrototypeNode> =
+      linkedMapOf(
+        "home" to PrototypeTextNode(text = "Home"),
+        "detail" to PrototypeTextNode(text = "Detail"),
+        "third" to PrototypeTextNode(text = "Third"),
+      ),
+    start: String = "home",
+  ) = spec().copy(root = PrototypeStackNode("nav", start = start, screens = screens))
+
+  private fun assertStackBackFocus(enabled: Boolean) {
+    val request = host.requests.last()
+    assertFalse(request.hasTextField)
+    assertEquals(enabled, request.hasStackBack)
+    assertEquals(enabled, request.focusable)
+    assertEquals(enabled, checkNotNull(controller.activeRuntime).hasPoppableStack())
+    assertEquals(
+      if (enabled) PrototypeBackDecision.CONSUME else PrototypeBackDecision.PASS,
+      prototypeBackDecision(request.focusable, KeyEvent.KEYCODE_BACK, KeyEvent.ACTION_DOWN, false),
+    )
+    assertEquals(
+      if (enabled) PrototypeBackDecision.DISMISS else PrototypeBackDecision.PASS,
+      prototypeBackDecision(request.focusable, KeyEvent.KEYCODE_BACK, KeyEvent.ACTION_UP, false),
+    )
+  }
+
+  @Test
+  fun `off-page stack keeps depth without taking Back and page changes release focus`() = runTest {
+    val panel =
+      spec()
+        .copy(
+          root =
+            PrototypePagerNode(
+              "pager",
+              children = listOf(PrototypeSpacerNode(), stackSpec().root),
+            ),
+        )
+    controller.show("show", panel)
+    var runtime = checkNotNull(controller.activeRuntime)
+    controller.interact(
+      runtime,
+      PrototypeInteraction.Tap(listOf(PrototypePushAction("nav", "detail"))),
+    )
+    assertEquals(2, runtime.current.stacks.getValue("nav").depth)
+    assertStackBackFocus(false)
+    assertFalse(runtime.popTopmostStack())
+    // Retained off-page navigation must not take focus on a same-id show either.
+    controller.show("same", panel)
+    runtime = checkNotNull(controller.activeRuntime)
+    assertEquals(2, runtime.current.stacks.getValue("nav").depth)
+    assertStackBackFocus(false)
+    controller.interact(runtime, PrototypeInteraction.SettledPage("pager", 1))
+    assertStackBackFocus(true)
+    controller.interact(runtime, PrototypeInteraction.SettledPage("pager", 0))
+    assertStackBackFocus(false)
+    controller.interact(runtime, PrototypeInteraction.SettledPage("pager", 1))
+    checkNotNull(host.requests.last().onHostBack).invoke()
+    assertEquals(1, runtime.current.stacks.getValue("nav").depth)
+    assertStackBackFocus(false)
+    assertTrue(controller.isShowing)
+    assertEquals(0, dismissed)
+  }
+
+  @Test
+  fun `hidden ancestor releases stack Back focus when visibleWhen state changes`() = runTest {
+    controller.show(
+      "show",
+      spec()
+        .copy(
+          root =
+            PrototypeColumnNode(
+              children = listOf(stackSpec().root),
+              visibleWhen = PrototypeCondition("open", PrototypeScalar.BooleanValue(true)),
+            ),
+          state = mapOf("open" to PrototypeScalar.BooleanValue(false)),
+        ),
+    )
+    val runtime = checkNotNull(controller.activeRuntime)
+    controller.interact(
+      runtime,
+      PrototypeInteraction.Tap(listOf(PrototypePushAction("nav", "detail"))),
+    )
+    assertEquals(2, runtime.current.stacks.getValue("nav").depth)
+    assertStackBackFocus(false)
+    assertFalse(runtime.popTopmostStack())
+    controller.interact(
+      runtime,
+      PrototypeInteraction.Tap(
+        listOf(PrototypeSetStateAction("open", PrototypeScalar.BooleanValue(true))),
+      ),
+    )
+    assertStackBackFocus(true)
+    controller.interact(
+      runtime,
+      PrototypeInteraction.Tap(
+        listOf(PrototypeSetStateAction("open", PrototypeScalar.BooleanValue(false))),
+      ),
+    )
+    assertStackBackFocus(false)
+    assertEquals(2, runtime.current.stacks.getValue("nav").depth)
+    assertTrue(controller.isShowing)
+    assertEquals(0, dismissed)
+  }
+
+  @Test
+  fun `opening and closing a modal recomputes stack Back focus`() = runTest {
+    val condition = PrototypeSheetCondition("open", true)
+    controller.show(
+      "show",
+      spec()
+        .copy(
+          root =
+            PrototypeDialogNode(
+              openWhen = condition,
+              confirm = PrototypeDialogButton("OK"),
+              child = stackSpec().root,
+            ),
+          state = mapOf("open" to PrototypeScalar.BooleanValue(false)),
+        ),
+    )
+    val runtime = checkNotNull(controller.activeRuntime)
+    controller.interact(
+      runtime,
+      PrototypeInteraction.Tap(listOf(PrototypePushAction("nav", "detail"))),
+    )
+    assertStackBackFocus(false)
+    assertFalse(runtime.popTopmostStack())
+    controller.interact(
+      runtime,
+      PrototypeInteraction.Tap(
+        listOf(PrototypeSetStateAction("open", PrototypeScalar.BooleanValue(true))),
+      ),
+    )
+    assertStackBackFocus(true)
+    controller.interact(runtime, PrototypeInteraction.CloseModal(condition))
+    assertStackBackFocus(false)
+    assertEquals(2, runtime.current.stacks.getValue("nav").depth)
+    assertTrue(controller.isShowing)
+    assertEquals(0, dismissed)
+  }
 
   @Test
   fun `re-show keeps stack paths clamps screens and reset starts fresh`() = runTest {
     controller.show("show", stackSpec())
     val first = checkNotNull(controller.activeRuntime)
-    controller.interact(first, PrototypeInteraction.Tap(listOf(
-      PrototypePushAction("nav", "detail"), PrototypePushAction("nav", "third"),
-    )))
+    controller.interact(
+      first,
+      PrototypeInteraction.Tap(
+        listOf(
+          PrototypePushAction("nav", "detail"),
+          PrototypePushAction("nav", "third"),
+        ),
+      ),
+    )
     controller.show("same", stackSpec())
-    assertEquals(listOf("home", "detail", "third"),
-      controller.activeRuntime!!.current.stacks.getValue("nav").path)
+    assertEquals(
+      listOf("home", "detail", "third"),
+      controller.activeRuntime!!.current.stacks.getValue("nav").path,
+    )
     val screens = (stackSpec().root as PrototypeStackNode).screens
     controller.show("clamp", stackSpec(screens - "detail"))
-    assertEquals(listOf("home", "third"), controller.activeRuntime!!.current.stacks.getValue("nav").path)
-    controller.show("empty-path", stackSpec(mapOf("detail" to screens.getValue("detail")), "detail"))
+    assertEquals(
+      listOf("home", "third"),
+      controller.activeRuntime!!.current.stacks.getValue("nav").path,
+    )
+    controller.show(
+      "empty-path",
+      stackSpec(mapOf("detail" to screens.getValue("detail")), "detail"),
+    )
     assertEquals(listOf("detail"), controller.activeRuntime!!.current.stacks.getValue("nav").path)
     controller.show("reset", stackSpec(), reset = true)
     assertEquals(listOf("home"), controller.activeRuntime!!.current.stacks.getValue("nav").path)
@@ -97,50 +247,79 @@ class PrototypeControllerTest {
   }
 
   @Test
-  fun `stack Back focuses without a field pops before dismissal and root releases Back`() = runTest {
-    controller.show("show", stackSpec())
-    val runtime = checkNotNull(controller.activeRuntime)
-    assertFalse(host.requests.last().focusable)
-    controller.interact(runtime, PrototypeInteraction.Tap(listOf(PrototypePushAction("nav", "detail"))))
-    assertTrue(host.requests.last().hasStackBack)
-    assertTrue(host.requests.last().focusable)
-    assertFalse(host.requests.last().hasTextField)
-    checkNotNull(host.requests.last().onHostBack).invoke()
-    assertTrue(controller.isShowing)
-    assertEquals(1, runtime.current.stacks.getValue("nav").depth)
-    assertFalse(host.requests.last().focusable)
-    assertEquals(0, dismissed)
-    assertEquals(listOf(PrototypeEventKind.SCREEN_CHANGED, PrototypeEventKind.SCREEN_CHANGED),
-      events.map { it.kind })
-    // The close control still dismisses, regardless of a stack's depth.
-    controller.interact(runtime, PrototypeInteraction.Tap(listOf(PrototypePushAction("nav", "detail"))))
-    host.requests.last().onHostDismiss()
-    assertFalse(controller.isShowing)
-    assertEquals(1, dismissed)
-  }
+  fun `stack Back focuses without a field pops before dismissal and root releases Back`() =
+    runTest {
+      controller.show("show", stackSpec())
+      val runtime = checkNotNull(controller.activeRuntime)
+      assertFalse(host.requests.last().focusable)
+      controller.interact(
+        runtime,
+        PrototypeInteraction.Tap(listOf(PrototypePushAction("nav", "detail"))),
+      )
+      assertTrue(host.requests.last().hasStackBack)
+      assertTrue(host.requests.last().focusable)
+      assertFalse(host.requests.last().hasTextField)
+      checkNotNull(host.requests.last().onHostBack).invoke()
+      assertTrue(controller.isShowing)
+      assertEquals(1, runtime.current.stacks.getValue("nav").depth)
+      assertFalse(host.requests.last().focusable)
+      assertEquals(0, dismissed)
+      assertEquals(
+        listOf(PrototypeEventKind.SCREEN_CHANGED, PrototypeEventKind.SCREEN_CHANGED),
+        events.map { it.kind },
+      )
+      // The close control still dismisses, regardless of a stack's depth.
+      controller.interact(
+        runtime,
+        PrototypeInteraction.Tap(listOf(PrototypePushAction("nav", "detail"))),
+      )
+      host.requests.last().onHostDismiss()
+      assertFalse(controller.isShowing)
+      assertEquals(1, dismissed)
+    }
 
   @Test
   fun `show results and inspect carry the same wire stack snapshot beside pages`() = runTest {
     val frames = mutableListOf<PrototypeResult>()
-    fun record(frame: String) { frames += json.decodeFromString<WebSocketResponse>(frame) as PrototypeResult }
-    val sink = object : PrototypeResultSink {
-      override suspend fun send(requestId: String?, success: Boolean, error: String?) {
-        record(prototypeResultFrame(requestId, success, error))
-      }
-      override suspend fun sendShownNavigation(requestId: String?, missingAssets: List<String>,
-        appearance: PrototypeAppearance, pages: Map<String, Int>, stacks: Map<String, PrototypeStackSnapshot>) {
-        record(prototypeResultFrame(requestId, true, null, missingAssets, appearance, pages, stacks))
-      }
-      override suspend fun sendPrototypeStatus(requestId: String?, prototypes: List<PrototypeStatusEntry>, droppedEvents: Long) {
-        record(prototypeStatusFrame(requestId, prototypes, droppedEvents))
-      }
+    fun record(frame: String) {
+      frames += json.decodeFromString<WebSocketResponse>(frame) as PrototypeResult
     }
-    val controller = PrototypeController(host, sink, lifecycle = PrototypeLifecycle(FakePrototypeTimer()))
+    val sink =
+      object : PrototypeResultSink {
+        override suspend fun send(requestId: String?, success: Boolean, error: String?) {
+          record(prototypeResultFrame(requestId, success, error))
+        }
+
+        override suspend fun sendShownNavigation(
+          requestId: String?,
+          missingAssets: List<String>,
+          appearance: PrototypeAppearance,
+          pages: Map<String, Int>,
+          stacks: Map<String, PrototypeStackSnapshot>,
+        ) {
+          record(
+            prototypeResultFrame(requestId, true, null, missingAssets, appearance, pages, stacks),
+          )
+        }
+
+        override suspend fun sendPrototypeStatus(
+          requestId: String?,
+          prototypes: List<PrototypeStatusEntry>,
+          droppedEvents: Long,
+        ) {
+          record(prototypeStatusFrame(requestId, prototypes, droppedEvents))
+        }
+      }
+    val controller =
+      PrototypeController(host, sink, lifecycle = PrototypeLifecycle(FakePrototypeTimer()))
     controller.show("show", stackSpec())
     assertEquals(emptyMap<String, Int>(), frames.last().pages)
     assertEquals(mapOf("nav" to PrototypeStackSnapshot(listOf("home"))), frames.last().stacks)
     val runtime = checkNotNull(controller.activeRuntime)
-    controller.interact(runtime, PrototypeInteraction.Tap(listOf(PrototypePushAction("nav", "detail"))))
+    controller.interact(
+      runtime,
+      PrototypeInteraction.Tap(listOf(PrototypePushAction("nav", "detail"))),
+    )
     controller.inspect("inspect")
     val status = frames.last().prototypes!!.single()
     assertEquals(runtime.current.pages, status.pages)

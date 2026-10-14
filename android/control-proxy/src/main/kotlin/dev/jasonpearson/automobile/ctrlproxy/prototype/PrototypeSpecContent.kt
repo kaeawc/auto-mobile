@@ -533,10 +533,11 @@ private fun RenderPrototypeNodeContent(
         node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
       }
     }
-    "stack" -> Box(modifier, contentAlignment = node.style.alignment) {
-      // Only the runtime's top screen exists here; navigation has no transition in this slice.
-      node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
-    }
+    "stack" ->
+      Box(modifier, contentAlignment = node.style.alignment) {
+        // Only the runtime's top screen exists here; navigation has no transition in this slice.
+        node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
+      }
     "pager" -> RenderPrototypePager(node, modifier, interact)
     "tabBar",
     "bottomNav" -> RenderPrototypeNavigation(node, modifier, interact)

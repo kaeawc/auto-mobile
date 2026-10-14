@@ -19,8 +19,9 @@ interface PrototypeBackCallbackRegistrar {
 /**
  * Registers the Back callback exactly while the prototype window is focusable (a text field is
  * visible, or stack navigation can pop) and the platform delivers Back as a callback. Below
- * [PROTOTYPE_BACK_CALLBACK_MIN_SDK] the key-event path in the window root is the only route, so nothing is ever registered. Both
- * routes end in the same [onBack] target; the controller makes a repeated dismissal a no-op.
+ * [PROTOTYPE_BACK_CALLBACK_MIN_SDK] the key-event path in the window root is the only route, so
+ * nothing is ever registered. Both routes end in the same [onBack] target; the controller makes a
+ * repeated dismissal a no-op.
  */
 internal class PrototypeBackBinding(
   private val sdkInt: Int,

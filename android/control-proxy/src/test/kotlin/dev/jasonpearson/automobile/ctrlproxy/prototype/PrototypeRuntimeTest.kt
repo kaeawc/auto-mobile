@@ -32,157 +32,248 @@ class PrototypeRuntimeTest {
 
   private fun tap(vararg actions: PrototypeAction) = PrototypeInteraction.Tap(actions.toList())
 
-  private fun stack(id: String = "nav") = PrototypeStackNode(
-    id, start = "home", screens = linkedMapOf(
-      "home" to PrototypeTextNode(text = "Home"),
-      "detail" to PrototypeTextNode(text = "Detail"),
-      "third" to PrototypeTextNode(text = "Third"),
-    ),
-  )
+  private fun stack(id: String = "nav") =
+    PrototypeStackNode(
+      id,
+      start = "home",
+      screens =
+        linkedMapOf(
+          "home" to PrototypeTextNode(text = "Home"),
+          "detail" to PrototypeTextNode(text = "Detail"),
+          "third" to PrototypeTextNode(text = "Third"),
+        ),
+    )
 
   @Test
-  fun `stack actions change only navigation and emit top or depth changes with full context`() = runTest {
-    val runtime = runtime(spec(PrototypeColumnNode(children = listOf(stack(),
-      PrototypePagerNode("pager", children = List(2) { PrototypeSpacerNode() }))),
-      mapOf("label" to PrototypeScalar.Text("kept"))))
-    runtime.handle(tap(
-      PrototypePushAction("nav", "detail"),
-      PrototypePushAction("nav", "detail"),
-      PrototypeReplaceAction("nav", "third"),
-      PrototypeReplaceAction("nav", "third"),
-      PrototypePopAction("nav"),
-      PrototypePopToRootAction("nav"),
-      PrototypePopAction("nav"),
-      PrototypeReplaceAction("nav", "detail"),
-      PrototypePopToRootAction("nav"),
-    ))
-    assertEquals(PrototypeStackSnapshot(listOf("home")), runtime.current.stacks["nav"])
-    assertEquals(listOf("detail", "detail", "third", "detail", "home", "detail", "home"),
-      events.map { it.payload!!.jsonObject.getValue("screen").jsonPrimitive.content })
-    assertEquals(listOf(2, 3, 3, 2, 1, 1, 1),
-      events.map { it.payload!!.jsonObject.getValue("depth").jsonPrimitive.int })
-    assertTrue(events.all { it.kind == PrototypeEventKind.SCREEN_CHANGED && it.name == "nav" })
-    assertTrue(events.all { it.timestamp == 42L && it.pages == mapOf("pager" to 0) && it.state == runtime.current.state })
-    assertEquals((1L..7L).toList(), events.map { it.sequence })
-    assertEquals(listOf("home", "detail", "detail"), events[1].stacks.getValue("nav").path)
-    assertEquals(3, events[1].stacks.getValue("nav").depth)
-  }
-
-  @Test
-  fun `stack root pops and same replacements are silent and push is ignored at the depth cap`() = runTest {
-    val runtime = runtime(spec(stack()))
-    runtime.handle(tap(PrototypePopAction("nav"), PrototypePopToRootAction("nav"),
-      PrototypeReplaceAction("nav", "home")))
-    assertTrue(events.isEmpty())
-    assertFalse(runtime.popTopmostStack())
-    repeat(PrototypeSpecValidator.MAX_PROTOTYPE_STACK_DEPTH - 1) {
-      runtime.handle(tap(PrototypePushAction("nav", "detail")))
+  fun `stack actions change only navigation and emit top or depth changes with full context`() =
+    runTest {
+      val runtime =
+        runtime(
+          spec(
+            PrototypeColumnNode(
+              children =
+                listOf(
+                  stack(),
+                  PrototypePagerNode("pager", children = List(2) { PrototypeSpacerNode() }),
+                ),
+            ),
+            mapOf("label" to PrototypeScalar.Text("kept")),
+          ),
+        )
+      runtime.handle(
+        tap(
+          PrototypePushAction("nav", "detail"),
+          PrototypePushAction("nav", "detail"),
+          PrototypeReplaceAction("nav", "third"),
+          PrototypeReplaceAction("nav", "third"),
+          PrototypePopAction("nav"),
+          PrototypePopToRootAction("nav"),
+          PrototypePopAction("nav"),
+          PrototypeReplaceAction("nav", "detail"),
+          PrototypePopToRootAction("nav"),
+        ),
+      )
+      assertEquals(PrototypeStackSnapshot(listOf("home")), runtime.current.stacks["nav"])
+      assertEquals(
+        listOf("detail", "detail", "third", "detail", "home", "detail", "home"),
+        events.map { it.payload!!.jsonObject.getValue("screen").jsonPrimitive.content },
+      )
+      assertEquals(
+        listOf(2, 3, 3, 2, 1, 1, 1),
+        events.map { it.payload!!.jsonObject.getValue("depth").jsonPrimitive.int },
+      )
+      assertTrue(events.all { it.kind == PrototypeEventKind.SCREEN_CHANGED && it.name == "nav" })
+      assertTrue(
+        events.all {
+          it.timestamp == 42L &&
+            it.pages == mapOf("pager" to 0) &&
+            it.state == runtime.current.state
+        },
+      )
+      assertEquals((1L..7L).toList(), events.map { it.sequence })
+      assertEquals(listOf("home", "detail", "detail"), events[1].stacks.getValue("nav").path)
+      assertEquals(3, events[1].stacks.getValue("nav").depth)
     }
-    val before = runtime.current
-    val count = events.size
-    runtime.handle(tap(PrototypePushAction("nav", "third")))
-    assertSame(before, runtime.current)
-    assertEquals(32, runtime.current.stacks.getValue("nav").depth)
-    assertEquals(count, events.size)
-  }
 
   @Test
-  fun `stack paths survive replacement and clamp removed screens falling back to new start`() = runTest {
-    val runtime = runtime(spec(stack()))
-    runtime.handle(tap(PrototypePushAction("nav", "detail"), PrototypePushAction("nav", "third")))
-    val revised = stack().copy(start = "detail", screens = stack().screens - "third")
-    runtime.replace(spec(revised))
-    assertEquals(listOf("home", "detail"), runtime.current.stacks.getValue("nav").path)
-    runtime.replace(spec(revised.copy(start = "third", screens = mapOf("third" to PrototypeSpacerNode()))))
-    assertEquals(listOf("third"), runtime.current.stacks.getValue("nav").path)
-    assertEquals(2, events.size)
-    runtime.replace(spec(PrototypeSpacerNode()))
-    assertTrue(runtime.current.stacks.isEmpty())
-  }
+  fun `stack root pops and same replacements are silent and push is ignored at the depth cap`() =
+    runTest {
+      val runtime = runtime(spec(stack()))
+      runtime.handle(
+        tap(
+          PrototypePopAction("nav"),
+          PrototypePopToRootAction("nav"),
+          PrototypeReplaceAction("nav", "home"),
+        ),
+      )
+      assertTrue(events.isEmpty())
+      assertFalse(runtime.popTopmostStack())
+      repeat(PrototypeSpecValidator.MAX_PROTOTYPE_STACK_DEPTH - 1) {
+        runtime.handle(tap(PrototypePushAction("nav", "detail")))
+      }
+      val before = runtime.current
+      val count = events.size
+      runtime.handle(tap(PrototypePushAction("nav", "third")))
+      assertSame(before, runtime.current)
+      assertEquals(32, runtime.current.stacks.getValue("nav").depth)
+      assertEquals(count, events.size)
+    }
 
   @Test
-  fun `Back pops nested top screen stacks before ancestors and the last sibling before the first`() = runTest {
-    val outer = stack("outer").copy(screens = stack().screens + ("detail" to stack("inner")))
-    val runtime = runtime(spec(PrototypeColumnNode(children = listOf(outer, stack("sibling")))))
-    runtime.handle(tap(PrototypePushAction("outer", "detail"), PrototypePushAction("inner", "detail")))
-    assertTrue(runtime.popTopmostStack())
-    assertEquals(listOf("home"), runtime.current.stacks.getValue("inner").path)
-    assertEquals(2, runtime.current.stacks.getValue("outer").depth)
-    runtime.handle(tap(PrototypePushAction("inner", "detail"), PrototypePushAction("sibling", "detail")))
-    assertTrue(runtime.popTopmostStack())
-    assertEquals(1, runtime.current.stacks.getValue("sibling").depth)
-    assertTrue(runtime.popTopmostStack())
-    assertEquals(1, runtime.current.stacks.getValue("inner").depth)
-    assertTrue(runtime.popTopmostStack())
-    assertEquals(1, runtime.current.stacks.getValue("outer").depth)
-    assertFalse(runtime.popTopmostStack())
-  }
+  fun `stack paths survive replacement and clamp removed screens falling back to new start`() =
+    runTest {
+      val runtime = runtime(spec(stack()))
+      runtime.handle(tap(PrototypePushAction("nav", "detail"), PrototypePushAction("nav", "third")))
+      val revised = stack().copy(start = "detail", screens = stack().screens - "third")
+      runtime.replace(spec(revised))
+      assertEquals(listOf("home", "detail"), runtime.current.stacks.getValue("nav").path)
+      runtime.replace(
+        spec(revised.copy(start = "third", screens = mapOf("third" to PrototypeSpacerNode()))),
+      )
+      assertEquals(listOf("third"), runtime.current.stacks.getValue("nav").path)
+      assertEquals(2, events.size)
+      runtime.replace(spec(PrototypeSpacerNode()))
+      assertTrue(runtime.current.stacks.isEmpty())
+    }
 
   @Test
-  fun `Back ignores stacks in inactive screens pager pages hidden nodes and closed modals`() = runTest {
-    val hidden = stack("hidden").copy(visibleWhen = PrototypeCondition("open", PrototypeScalar.BooleanValue(true)))
-    val outer = stack("outer").copy(screens = stack().screens + ("third" to stack("inactive")))
-    val pager = PrototypePagerNode("pager", children = listOf(PrototypeSpacerNode(), stack("offpage")))
-    val modal = PrototypeDialogNode(openWhen = PrototypeSheetCondition("open", true),
-      confirm = PrototypeDialogButton("OK"), child = stack("modal"))
-    val runtime = runtime(spec(PrototypeColumnNode(children = listOf(outer, hidden, pager, modal)),
-      mapOf("open" to PrototypeScalar.BooleanValue(false))))
-    runtime.handle(tap(*listOf("inactive", "hidden", "offpage", "modal").map {
-      PrototypePushAction(it, "detail") }.toTypedArray()))
-    assertFalse(runtime.popTopmostStack())
-    runtime.handle(tap(PrototypePushAction("outer", "third")))
-    assertTrue(runtime.popTopmostStack())
-    assertEquals(1, runtime.current.stacks.getValue("inactive").depth)
-    runtime.handle(tap(PrototypeSetStateAction("open", PrototypeScalar.BooleanValue(true))))
-    assertTrue(runtime.popTopmostStack())
-    assertEquals(1, runtime.current.stacks.getValue("modal").depth)
-    assertEquals(2, runtime.current.stacks.getValue("hidden").depth)
-  }
+  fun `Back pops nested top screen stacks before ancestors and the last sibling before the first`() =
+    runTest {
+      val outer = stack("outer").copy(screens = stack().screens + ("detail" to stack("inner")))
+      val runtime = runtime(spec(PrototypeColumnNode(children = listOf(outer, stack("sibling")))))
+      runtime.handle(
+        tap(PrototypePushAction("outer", "detail"), PrototypePushAction("inner", "detail")),
+      )
+      assertTrue(runtime.popTopmostStack())
+      assertEquals(listOf("home"), runtime.current.stacks.getValue("inner").path)
+      assertEquals(2, runtime.current.stacks.getValue("outer").depth)
+      runtime.handle(
+        tap(PrototypePushAction("inner", "detail"), PrototypePushAction("sibling", "detail")),
+      )
+      assertTrue(runtime.popTopmostStack())
+      assertEquals(1, runtime.current.stacks.getValue("sibling").depth)
+      assertTrue(runtime.popTopmostStack())
+      assertEquals(1, runtime.current.stacks.getValue("inner").depth)
+      assertTrue(runtime.popTopmostStack())
+      assertEquals(1, runtime.current.stacks.getValue("outer").depth)
+      assertFalse(runtime.popTopmostStack())
+    }
 
   @Test
-  fun `stack mapping excludes hidden fields modals and anchors and invalidates cached top screens`() = runTest {
-    val hidden = PrototypeColumnNode(children = listOf(
-      PrototypeTextNode(text = "{data:/title}", anchor = PrototypeBoundsAnchor(
-        PrototypeBounds(0.0, 0.0, 20.0, 20.0))),
-      PrototypeTextFieldNode(stateKey = "query"),
-      PrototypeBottomSheetNode(child = PrototypeTextNode(text = "Sheet"),
-        openWhen = PrototypeSheetCondition("open", true), detents = listOf(PrototypeDetent.Full)),
-    ))
-    val node = stack().copy(screens = stack().screens + ("detail" to hidden))
-    val runtime = runtime(spec(node, mapOf(
-      "query" to PrototypeScalar.Text(""), "open" to PrototypeScalar.BooleanValue(true),
-    )).copy(data = buildJsonObject { put("title", "Bound") }))
-    val first = runtime.renderModel()
-    assertEquals("Home", first.root.children.single().text)
-    assertFalse(first.hasTextField)
-    assertTrue(modalPrototypeSheets(first.root).isEmpty())
-    assertTrue(layeredPrototypeAnchors(first.root).isEmpty())
-    assertSame(first, runtime.renderModel())
-    runtime.handle(tap(PrototypePushAction("nav", "detail")))
-    val detail = runtime.renderModel()
-    assertNotSame(first, detail)
-    assertSame(detail, runtime.renderModel())
-    assertTrue(detail.hasTextField)
-    assertEquals("Bound", detail.root.children.single().children.first().text)
-    assertEquals(1, modalPrototypeSheets(detail.root).size)
-    assertEquals(1, layeredPrototypeAnchors(detail.root).size)
-    runtime.handle(tap(PrototypePopAction("nav")))
-    assertEquals("Home", runtime.renderModel().root.children.single().text)
-    assertFalse(runtime.renderModel().hasTextField)
-  }
+  fun `Back ignores stacks in inactive screens pager pages hidden nodes and closed modals`() =
+    runTest {
+      val hidden =
+        stack("hidden")
+          .copy(visibleWhen = PrototypeCondition("open", PrototypeScalar.BooleanValue(true)))
+      val outer = stack("outer").copy(screens = stack().screens + ("third" to stack("inactive")))
+      val pager =
+        PrototypePagerNode("pager", children = listOf(PrototypeSpacerNode(), stack("offpage")))
+      val modal =
+        PrototypeDialogNode(
+          openWhen = PrototypeSheetCondition("open", true),
+          confirm = PrototypeDialogButton("OK"),
+          child = stack("modal"),
+        )
+      val runtime =
+        runtime(
+          spec(
+            PrototypeColumnNode(children = listOf(outer, hidden, pager, modal)),
+            mapOf("open" to PrototypeScalar.BooleanValue(false)),
+          ),
+        )
+      runtime.handle(
+        tap(
+          *listOf("inactive", "hidden", "offpage", "modal")
+            .map {
+              PrototypePushAction(it, "detail")
+            }
+            .toTypedArray(),
+        ),
+      )
+      assertFalse(runtime.hasPoppableStack())
+      assertFalse(runtime.popTopmostStack())
+      runtime.handle(tap(PrototypePushAction("outer", "third")))
+      assertTrue(runtime.hasPoppableStack())
+      assertTrue(runtime.popTopmostStack())
+      assertEquals(1, runtime.current.stacks.getValue("inactive").depth)
+      runtime.handle(tap(PrototypeSetStateAction("open", PrototypeScalar.BooleanValue(true))))
+      assertTrue(runtime.popTopmostStack())
+      assertEquals(1, runtime.current.stacks.getValue("modal").depth)
+      assertEquals(2, runtime.current.stacks.getValue("hidden").depth)
+    }
 
   @Test
-  fun `Back with no stack above root returns false and the interaction retains dismissal behavior`() = runTest {
-    assertFalse(runtime(spec(PrototypeSpacerNode())).popTopmostStack())
-    var dismissals = 0
-    val runtime = runtime(spec(stack())) { dismissals++; true }
-    assertFalse(runtime.popTopmostStack())
-    assertTrue(events.isEmpty())
-    runtime.handle(PrototypeInteraction.Back)
-    assertEquals(1, dismissals)
-    assertEquals(PrototypeEventKind.DISMISSED, events.single().kind)
-    assertFalse(runtime.popTopmostStack())
-  }
+  fun `stack mapping excludes hidden fields modals and anchors and invalidates cached top screens`() =
+    runTest {
+      val hidden =
+        PrototypeColumnNode(
+          children =
+            listOf(
+              PrototypeTextNode(
+                text = "{data:/title}",
+                anchor =
+                  PrototypeBoundsAnchor(
+                    PrototypeBounds(0.0, 0.0, 20.0, 20.0),
+                  ),
+              ),
+              PrototypeTextFieldNode(stateKey = "query"),
+              PrototypeBottomSheetNode(
+                child = PrototypeTextNode(text = "Sheet"),
+                openWhen = PrototypeSheetCondition("open", true),
+                detents = listOf(PrototypeDetent.Full),
+              ),
+            ),
+        )
+      val node = stack().copy(screens = stack().screens + ("detail" to hidden))
+      val runtime =
+        runtime(
+          spec(
+              node,
+              mapOf(
+                "query" to PrototypeScalar.Text(""),
+                "open" to PrototypeScalar.BooleanValue(true),
+              ),
+            )
+            .copy(data = buildJsonObject { put("title", "Bound") }),
+        )
+      val first = runtime.renderModel()
+      assertEquals("Home", first.root.children.single().text)
+      assertFalse(first.hasTextField)
+      assertTrue(modalPrototypeSheets(first.root).isEmpty())
+      assertTrue(layeredPrototypeAnchors(first.root).isEmpty())
+      assertSame(first, runtime.renderModel())
+      runtime.handle(tap(PrototypePushAction("nav", "detail")))
+      val detail = runtime.renderModel()
+      assertNotSame(first, detail)
+      assertSame(detail, runtime.renderModel())
+      assertTrue(detail.hasTextField)
+      assertEquals("Bound", detail.root.children.single().children.first().text)
+      assertEquals(1, modalPrototypeSheets(detail.root).size)
+      assertEquals(1, layeredPrototypeAnchors(detail.root).size)
+      runtime.handle(tap(PrototypePopAction("nav")))
+      assertEquals("Home", runtime.renderModel().root.children.single().text)
+      assertFalse(runtime.renderModel().hasTextField)
+    }
+
+  @Test
+  fun `Back with no stack above root returns false and the interaction retains dismissal behavior`() =
+    runTest {
+      assertFalse(runtime(spec(PrototypeSpacerNode())).popTopmostStack())
+      var dismissals = 0
+      val runtime =
+        runtime(spec(stack())) {
+          dismissals++
+          true
+        }
+      assertFalse(runtime.hasPoppableStack())
+      assertFalse(runtime.popTopmostStack())
+      assertTrue(events.isEmpty())
+      runtime.handle(PrototypeInteraction.Back)
+      assertEquals(1, dismissals)
+      assertEquals(PrototypeEventKind.DISMISSED, events.single().kind)
+      assertFalse(runtime.hasPoppableStack())
+      assertFalse(runtime.popTopmostStack())
+    }
 
   @Test
   fun `three writes prepare once and replacement invalidates the lazy preparation`() = runTest {

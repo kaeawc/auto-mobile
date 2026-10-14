@@ -51,7 +51,7 @@ has_id() {
 }
 
 delete_saved() {
-  call_cli --session-uuid "$session_uuid" --deviceId "$device_id" prototype --action deleteSaved --id "$saved_id"
+  call_cli prototype --session-uuid "$session_uuid" --deviceId "$device_id" --action deleteSaved --id "$saved_id"
   [[ "$cli_status" -eq 0 && "$(jq -r '.success // false' <<< "$(result_json "$cli_stdout")")" == true ]]
 }
 
@@ -90,7 +90,7 @@ if [[ -z "$session_uuid" ]]; then
   trap cleanup_saved EXIT
 fi
 
-call_saved() { call_cli --session-uuid "$session_uuid" --deviceId "$device_id" prototype --action "$1" "${@:2}"; }
+call_saved() { call_cli prototype --session-uuid "$session_uuid" --deviceId "$device_id" --action "$1" "${@:2}"; }
 list_result=""
 list_status=0
 call_saved listSaved

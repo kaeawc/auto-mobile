@@ -7,8 +7,19 @@ setup() {
   : > "$CALLS"
   cat > "$TEST_DIR/cli" <<'EOF'
 #!/usr/bin/env bash
-printf 'cli %s\n' "$*" >> "$CALLS"
-case "${CLI_MODE:-happy}:$*" in
+original_args="$*"
+printf 'cli %s\n' "$original_args" >> "$CALLS"
+if [[ "${1:-}" == --session-uuid ]]; then
+  shift 2
+elif [[ "${1:-}" == --session-uuid=* ]]; then
+  shift
+fi
+tool_name="${1:-}"
+if [[ "$tool_name" == --* ]]; then
+  echo "Error: unknown tool $tool_name" >&2
+  exit 2
+fi
+case "${CLI_MODE:-happy}:$original_args" in
   *'getAndroid'*) printf '{"runtime":{"session":{"sessionUuid":"acquired-session"}}}\n';;
   unsupported:*) printf '{"success":false,"errorCode":"unsupported_capability"}\n'; exit 1;;
   invalid:*) echo 'Error: invalid action listSaved'; exit 2;;
@@ -81,6 +92,28 @@ run_smoke() {
   [[ "$output" == *'ok: save'*'ok: listSaved'*'skipped: pin step: pinning not available in this build'*'ok: launch'*'ok: deleteSaved'* ]]
 }
 
+@test "fake CLI rejects global options before the tool name" {
+  run "$TEST_DIR/cli" --session-uuid s --deviceId d prototype --action listSaved
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'Error: unknown tool --deviceId'* ]]
+}
+
+@test "happy path CLI calls put a tool name before parameter flags" {
+  run_smoke
+  [ "$status" -eq 0 ]
+  while IFS= read -r line; do
+    [[ "$line" == cli\ * ]] || continue
+    read -r -a args <<< "${line#cli }"
+    if [[ "${args[0]:-}" == --session-uuid ]]; then
+      args=("${args[@]:2}")
+    elif [[ "${args[0]:-}" == --session-uuid=* ]]; then
+      args=("${args[@]:1}")
+    fi
+    [ -n "${args[0]:-}" ]
+    [[ "${args[0]}" != --* ]]
+  done < "$CALLS"
+}
+
 @test "pin reports a supported pinned result" {
   run_smoke CLI_MODE=pinned
   [ "$status" -eq 0 ]
@@ -126,6 +159,7 @@ run_smoke() {
 if [[ "$*" == '--daemon release-session '* ]]; then
   printf 'release %s\n' "$*" >> "$CALLS"
 else
+  shift 3 # The real CLI consumes --debug --embedded-sdk --cli before tool args.
   exec "$TEST_DIR/cli" "$@"
 fi
 EOF

@@ -59,7 +59,7 @@ export interface ManagedSlotProxyAcquisitionPorts {
     options: { timeoutMs: number; signal?: AbortSignal },
   ): Promise<unknown>;
   /** Record the daemon's grants synchronously, before attempting any hold. */
-  trackAcquiredSessions(sessionUuids: readonly string[]): void;
+  trackAcquiredSessions(sessionUuids: readonly string[], scopeKey?: string | null): void;
   /** Bind, claim and heartbeat a slot's session; stop establishing once the signal aborts. */
   holdSession(sessionUuid: string, signal: AbortSignal): Promise<void>;
   /** Release every tracked session and drop the proxy's hold on them. */
@@ -240,7 +240,7 @@ export async function acquireManagedSlotsThroughDaemon(
   }
   const sessionUuids = managedSlotSessions(result);
   // No await between learning the grants and registering close's cleanup responsibility.
-  ports.trackAcquiredSessions(sessionUuids);
+  ports.trackAcquiredSessions(sessionUuids, result.scope.scopeKey);
   return await holdReadySessions(result, ports, sessionUuids, remaining, timeoutError, signal);
 }
 

@@ -216,6 +216,51 @@ class PrototypeSpecTest {
   }
 
   @Test
+  fun `pager options default to null`() {
+    val pager =
+      Json.decodeFromString(
+        PrototypePagerNode.serializer(),
+        """{"id":"pages","children":[]}""",
+      )
+    assertNull(pager.axis)
+    assertNull(pager.pageSpacing)
+    assertNull(pager.peek)
+    assertNull(pager.pageSize)
+  }
+
+  @Test
+  fun `pager options decode every field and MAX_PROTOTYPE_PAGER_DP boundaries`() {
+    assertEquals(10000, PrototypeSpecValidator.MAX_PROTOTYPE_PAGER_DP)
+    val children = (decoded("pager-options.json").root as PrototypeColumnNode).children
+    val peek = children[0] as PrototypePagerNode
+    assertEquals("horizontal", peek.axis)
+    assertEquals(8.0, peek.pageSpacing)
+    assertEquals(PrototypePagerPeek(12.0, 24.0), peek.peek)
+    assertEquals(PrototypePagerPageSize.Dp(180.0), peek.pageSize)
+    val all = children[2] as PrototypePagerNode
+    assertEquals("vertical", all.axis)
+    assertEquals(10000.0, all.pageSpacing)
+    assertEquals(PrototypePagerPeek(0.0, 10000.0), all.peek)
+    assertEquals(PrototypePagerPageSize.Dp(0.000001), all.pageSize)
+    val fill = children[4] as PrototypePagerNode
+    assertEquals(PrototypePagerPeek(), fill.peek)
+    assertEquals(PrototypePagerPageSize.Fill, fill.pageSize)
+  }
+
+  @Test
+  fun `pager page size uses the existing strict dp serializer shape`() {
+    for (size in listOf(PrototypePagerPageSize.Fill, PrototypePagerPageSize.Dp(120.5))) {
+      val encoded = Json.encodeToString(PrototypePagerPageSize.serializer(), size)
+      assertEquals(size, Json.decodeFromString(PrototypePagerPageSize.serializer(), encoded))
+    }
+    for (bad in listOf("\"wrap\"", """{"dp":0}""", """{"dp":10001}""", """{"dp":1,"extra":2}""")) {
+      assertThrows(kotlinx.serialization.SerializationException::class.java) {
+        Json.decodeFromString(PrototypePagerPageSize.serializer(), bad)
+      }
+    }
+  }
+
+  @Test
   fun `per-mode colours decode as pairs and single values in every colour slot`() {
     val spec = decoded("theme-modes-colors.json")
     val placement = spec.window.placement as PrototypeFullscreenPlacement

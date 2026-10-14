@@ -9,7 +9,7 @@
     "root": {
       "type": "pager",
       "id": "p",
-      "axis": "horizontal",
+      "axis": "diagonal",
       "children": [
         {
           "type": "spacer"

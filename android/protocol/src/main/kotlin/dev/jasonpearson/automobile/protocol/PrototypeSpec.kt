@@ -980,7 +980,13 @@ data class PrototypePagerNode(
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   override val span: Int? = null,
   val children: List<PrototypeNode>,
+  val axis: String? = null,
+  val pageSpacing: Double? = null,
+  val peek: PrototypePagerPeek? = null,
+  val pageSize: PrototypePagerPageSize? = null,
 ) : PrototypeNode()
+
+@Serializable data class PrototypePagerPeek(val start: Double? = null, val end: Double? = null)
 
 @SerialName("tabBar")
 @Serializable

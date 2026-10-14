@@ -490,6 +490,17 @@ function pagerErrors(context: Context): PrototypeValidationError | undefined {
       return fail(`${path}.id`, "Duplicate pager id");
     }
     pagers.add(value.id);
+    if (
+      value.axis === "vertical" &&
+      context.nodes.some(
+        ({ value: ancestor, path: ancestorPath }) =>
+          ancestor.type === "scroll" &&
+          ancestor.axis !== "horizontal" &&
+          path.startsWith(`${ancestorPath}.`),
+      )
+    ) {
+      return fail(`${path}.axis`, "A vertical pager cannot appear inside a vertical scroll");
+    }
   }
   for (const { value, path } of [...context.nodes, ...context.actions]) {
     if (typeof value.pager === "string" && !pagers.has(value.pager)) {

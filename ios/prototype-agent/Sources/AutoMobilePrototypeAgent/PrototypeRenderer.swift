@@ -992,8 +992,72 @@ struct PagerView: View {
         return false
     }
 
+    private var layout: PrototypePagerLayout { PrototypePagerLayout(node: node) }
+
+    /// A nil scroll position is a transient layout state, not a page change.
+    private var pageBinding: Binding<Int?> {
+        Binding(
+            get: { selection.wrappedValue },
+            set: { if let page = $0 { selection.wrappedValue = page } }
+        )
+    }
+
+    @ViewBuilder
+    private func optionPage(_ index: Int, _ page: PrototypeNode, visiblePages: [Int]) -> some View {
+        let axes: Axis.Set = layout.vertical ? .vertical : .horizontal
+        let content = NodeView(node: page, model: model)
+            .environment(\.pagerContext, PagerContext(page: index, count: pages.count))
+            .accessibilityHidden(!visiblePages.contains(index))
+            .accessibilityAddTraits(index == selection.wrappedValue ? .isSelected : [])
+        switch layout.pageSize {
+        case .fill:
+            content.containerRelativeFrame(axes)
+        case let .fixed(points):
+            content.frame(
+                width: layout.vertical ? nil : CGFloat(points),
+                height: layout.vertical ? CGFloat(points) : nil
+            )
+        }
+    }
+
+    private var optionsPager: some View {
+        let axes: Axis.Set = layout.vertical ? .vertical : .horizontal
+        return GeometryReader { proxy in
+            // Visibility follows settled selection; the incoming page during a drag is exposed once selection updates.
+            let visiblePages = layout.visiblePages(
+                selected: selection.wrappedValue, count: pages.count,
+                viewportExtent: Double(layout.vertical ? proxy.size.height : proxy.size.width)
+            )
+            ScrollView(axes) {
+                if layout.vertical {
+                    LazyVStack(spacing: CGFloat(layout.spacing)) {
+                        ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
+                            optionPage(index, page, visiblePages: visiblePages).id(index)
+                        }
+                    }
+                    .scrollTargetLayout()
+                } else {
+                    LazyHStack(spacing: CGFloat(layout.spacing)) {
+                        ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
+                            optionPage(index, page, visiblePages: visiblePages).id(index)
+                        }
+                    }
+                    .scrollTargetLayout()
+                }
+            }
+            .scrollTargetBehavior(.viewAligned)
+            .scrollPosition(id: pageBinding, anchor: layout.vertical ? .top : .leading)
+            .contentMargins(layout.vertical ? .top : .leading, CGFloat(layout.start), for: .scrollContent)
+            .contentMargins(layout.vertical ? .bottom : .trailing, CGFloat(layout.end), for: .scrollContent)
+            .scrollIndicators(.hidden)
+            .animation(pageAnimation, value: selection.wrappedValue)
+        }
+    }
+
     var body: some View {
-        if fills {
+        if !layout.legacy {
+            optionsPager
+        } else if fills {
             let _: Int = model.refusedChanges
             TabView(selection: selection) {
                 ForEach(Array(pages.enumerated()), id: \.offset) { index, page in

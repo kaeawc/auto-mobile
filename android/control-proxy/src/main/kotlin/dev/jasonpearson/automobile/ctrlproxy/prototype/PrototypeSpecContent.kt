@@ -6,11 +6,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.snapping.SnapPosition
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerScope
+import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -724,7 +727,7 @@ private fun RenderPrototypeTextField(
   }
 }
 
-/** Keeps at most one page before and one after current, only with fill and bounded height. */
+/** Retains neighbours only when cross-axis filling and bounded height allow it. */
 @Composable
 private fun RenderPrototypePager(
   node: PrototypeRenderNode,
@@ -732,6 +735,10 @@ private fun RenderPrototypePager(
   interact: (PrototypeInteraction) -> Unit,
 ) {
   val source = node.source as? PrototypePagerNode ?: return
+  val markSelectedPage =
+    (source.peek?.start ?: 0.0) > 0.0 ||
+      (source.peek?.end ?: 0.0) > 0.0 ||
+      source.pageSize is PrototypePagerPageSize.Dp
   val pager = rememberPagerState(initialPage = node.page) { node.children.size }
   val animate = LocalPrototypeMotion.current
   // Keyed on motion too: turning motion off mid-scroll cancels the animation and snaps to the page.
@@ -748,7 +755,7 @@ private fun RenderPrototypePager(
         interact(PrototypeInteraction.PagerMotion(source.id, page, scrolling))
       }
   }
-  val fill = prototypePageFill(node.style.source)
+  val fill = prototypePageFill(node.style.source, source.axis, source.pageSize)
   val pageModifier =
     Modifier.then(if (fill.width) Modifier.fillMaxWidth() else Modifier)
       .then(if (fill.height) Modifier.fillMaxHeight() else Modifier)
@@ -758,24 +765,55 @@ private fun RenderPrototypePager(
     val placeable = measurable.measure(constraints)
     layout(placeable.width, placeable.height) { placeable.place(0, 0) }
   }
-  val keepNeighbours = fill.height && boundedHeight
-  HorizontalPager(
-    pager,
-    pagerModifier,
-    beyondViewportPageCount = if (keepNeighbours) 1 else 0,
-    key = { node.children[it].identity },
-  ) { page ->
+  // Preserve the horizontal pager's retention rule; vertical pages fill across the width.
+  val keepNeighbours =
+    if (source.axis == "vertical") fill.width && boundedHeight else fill.height && boundedHeight
+  val pageContent: @Composable PagerScope.(Int) -> Unit = { page ->
     val onScreen by
       remember(pager, page) {
         derivedStateOf {
-          page == pager.currentPage ||
-            (pager.currentPageOffsetFraction > 0f && page == pager.currentPage + 1) ||
-            (pager.currentPageOffsetFraction < 0f && page == pager.currentPage - 1)
+          pager.layoutInfo.visiblePagesInfo.any { it.index == page }
         }
       }
-    Box(pageModifier.then(if (onScreen) Modifier else Modifier.clearAndSetSemantics {})) {
+    Box(
+      pageModifier.then(
+        when {
+          !onScreen -> Modifier.clearAndSetSemantics {}
+          markSelectedPage -> Modifier.semantics { selected = page == pager.currentPage }
+          else -> Modifier
+        },
+      ),
+    ) {
       RenderPrototypeNode(node.children[page], interact)
     }
+  }
+  val padding = pagerContentPadding(source.axis, source.peek)
+  val size = pagerPageSize(source.pageSize)
+  val spacing = pagerPageSpacing(source.pageSpacing)
+  if (source.axis == "vertical") {
+    VerticalPager(
+      pager,
+      pagerModifier,
+      contentPadding = padding,
+      pageSize = size,
+      pageSpacing = spacing,
+      snapPosition = SnapPosition.Start,
+      beyondViewportPageCount = if (keepNeighbours) 1 else 0,
+      key = { node.children[it].identity },
+      pageContent = pageContent,
+    )
+  } else {
+    HorizontalPager(
+      pager,
+      pagerModifier,
+      contentPadding = padding,
+      pageSize = size,
+      pageSpacing = spacing,
+      snapPosition = SnapPosition.Start,
+      beyondViewportPageCount = if (keepNeighbours) 1 else 0,
+      key = { node.children[it].identity },
+      pageContent = pageContent,
+    )
   }
 }
 

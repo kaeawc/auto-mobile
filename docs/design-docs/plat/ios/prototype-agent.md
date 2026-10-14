@@ -534,6 +534,22 @@ a child's span does not fit. Optional integer `span >= 1` is valid only on a
 direct grid child and cannot exceed fixed columns; the renderer clamps spans
 to the resolved runtime count. Shared fixtures define host validation behavior.
 
+### Optional pager layout
+
+The shared pager contract (#12071) adds `axis` (horizontal by default), `pageSpacing`
+(default 0), strict `peek: {start?, end?}` (each default 0; `{}` is a no-op), and
+`pageSize` (`"fill"` by default or strict `{dp}`). Distances are finite points on iOS:
+spacing and peek are 0..10000, and fixed size is 1e-6..10000 (`MAX_PROTOTYPE_PAGER_DP`).
+Any explicit option requires `prototype_pager_options_v1`; the host refuses older agents
+with a relaunch hint. iOS renders non-default options with a native view-aligned ScrollView,
+lazy horizontal/vertical stacks, scroll content margins and viewport or fixed page frames.
+Pagers whose options all resolve to defaults (including explicit horizontal axis, zero
+spacing, empty or zero peek, and fill page size) retain the paged TabView / wrap-size drag path. A vertical pager cannot
+have any vertical scroll ancestor (omitted scroll axis is vertical). Current page means
+the first fully visible page; page events, placeholders and navigation bindings keep
+their meaning. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed.
+Indicator and carousel remain deferred.
+
 ## Saved prototype on-disk layout (#12254)
 
 One saved prototype lives in the viewer app container:

@@ -43,6 +43,7 @@ object PrototypeSpecValidator {
   private val definitions = contract.getValue("definitions").jsonObject
   private val limits = contract.getValue("limits").jsonObject
   val MAX_PROTOTYPE_NODES: Int = limit("MAX_PROTOTYPE_NODES")
+  val MAX_PROTOTYPE_PAGER_DP: Int = limit("MAX_PROTOTYPE_PAGER_DP")
   val MAX_PROTOTYPE_DEPTH: Int = limit("MAX_PROTOTYPE_DEPTH")
   val MAX_PROTOTYPE_IMAGES: Int = limit("MAX_PROTOTYPE_IMAGES")
   val MAX_PROTOTYPE_SPEC_BYTES: Int = limit("MAX_PROTOTYPE_SPEC_BYTES")
@@ -721,6 +722,15 @@ object PrototypeSpecValidator {
       if (value.text("type") != "pager") continue
       val id = checkNotNull(value.text("id"))
       if (!pagers.add(id)) return fail("$path.id", "Duplicate pager id")
+      if (
+        value.text("axis") == "vertical" &&
+          context.nodes.any { (ancestor, ancestorPath) ->
+            ancestor.text("type") == "scroll" &&
+              ancestor.text("axis") != "horizontal" &&
+              path.startsWith("$ancestorPath.")
+          }
+      )
+        return fail("$path.axis", "A vertical pager cannot appear inside a vertical scroll")
     }
     for ((value, path) in context.nodes + context.actions) {
       val pager = value.text("pager") ?: continue

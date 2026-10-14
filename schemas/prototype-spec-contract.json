@@ -15,7 +15,8 @@
     "MAX_PROTOTYPE_REPEAT_PATH_CELLS": 65536,
     "MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH": 16384,
     "MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL": 4194304,
-    "MAX_PROTOTYPE_PATCH_OPS": 64
+    "MAX_PROTOTYPE_PATCH_OPS": 64,
+    "MAX_PROTOTYPE_PAGER_DP": 10000
   },
   "definitions": {
     "offset": {
@@ -4996,6 +4997,49 @@
                 "unique": false
               },
               "optional": false
+            },
+            "axis": {
+              "rule": {
+                "kind": "enum",
+                "values": ["horizontal", "vertical"]
+              },
+              "optional": true
+            },
+            "pageSpacing": {
+              "rule": {
+                "kind": "ref",
+                "name": "pagerDp"
+              },
+              "optional": true
+            },
+            "peek": {
+              "rule": {
+                "kind": "object",
+                "fields": {
+                  "start": {
+                    "rule": {
+                      "kind": "ref",
+                      "name": "pagerDp"
+                    },
+                    "optional": true
+                  },
+                  "end": {
+                    "rule": {
+                      "kind": "ref",
+                      "name": "pagerDp"
+                    },
+                    "optional": true
+                  }
+                }
+              },
+              "optional": true
+            },
+            "pageSize": {
+              "rule": {
+                "kind": "ref",
+                "name": "pagerPageSize"
+              },
+              "optional": true
             }
           }
         },
@@ -8343,6 +8387,35 @@
           "optional": true
         }
       }
+    },
+    "pagerDp": {
+      "kind": "number",
+      "integer": false,
+      "min": 0,
+      "max": 10000
+    },
+    "pagerPageSize": {
+      "kind": "choice",
+      "options": [
+        {
+          "kind": "enum",
+          "values": ["fill"]
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "dp": {
+              "rule": {
+                "kind": "number",
+                "integer": false,
+                "min": 0.000001,
+                "max": 10000
+              },
+              "optional": false
+            }
+          }
+        }
+      ]
     }
   }
 }

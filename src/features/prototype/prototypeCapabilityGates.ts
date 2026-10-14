@@ -2,6 +2,7 @@ import {
   PROTOTYPE_THEME_MODES_CAPABILITY,
   PROTOTYPE_DATA_MODEL_CAPABILITY,
   PROTOTYPE_FLOW_GRID_CAPABILITY,
+  PROTOTYPE_PAGER_OPTIONS_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
 import {
   prototypeThemeModeFields,
@@ -14,6 +15,10 @@ import {
   prototypeTextFieldOptionsUnsupportedMessage,
 } from "./prototypeTextFieldOptions";
 import { prototypeFlowGridFields, prototypeFlowGridUnsupportedMessage } from "./prototypeFlowGrid";
+import {
+  prototypePagerOptionFields,
+  prototypePagerOptionsUnsupportedMessage,
+} from "./prototypePagerOptions";
 
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
@@ -42,6 +47,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_FLOW_GRID_CAPABILITY,
     fields: prototypeFlowGridFields,
     unsupportedMessage: prototypeFlowGridUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_PAGER_OPTIONS_CAPABILITY,
+    fields: prototypePagerOptionFields,
+    unsupportedMessage: prototypePagerOptionsUnsupportedMessage,
   },
 ];
 

@@ -10,6 +10,7 @@ export const {
   MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
   MAX_PROTOTYPE_DATA_POINTER_LENGTH,
   MAX_PROTOTYPE_REPEAT_PATH_CELLS,
+  MAX_PROTOTYPE_PAGER_DP,
   MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH,
   MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL,
 } = contract.limits;
@@ -741,8 +742,26 @@ const scrollBaseSchema = z
     axis: z.enum(["vertical", "horizontal"]).default("vertical"),
   })
   .strict();
+// Pager distances share the contract's 10000 dp dimension ceiling.
+const pagerDpSchema = z.number().finite().min(0).max(MAX_PROTOTYPE_PAGER_DP);
 const pagerBaseSchema = z
-  .object({ ...commonNodeShape, type: z.enum(["pager"]), id: z.string().min(1) })
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["pager"]),
+    id: z.string().min(1),
+    axis: z.enum(["horizontal", "vertical"]).optional(),
+    pageSpacing: pagerDpSchema.optional(),
+    peek: z
+      .object({ start: pagerDpSchema.optional(), end: pagerDpSchema.optional() })
+      .strict()
+      .optional(),
+    pageSize: z
+      .union([
+        z.enum(["fill"]),
+        z.object({ dp: z.number().finite().min(1e-6).max(MAX_PROTOTYPE_PAGER_DP) }).strict(),
+      ])
+      .optional(),
+  })
   .strict();
 const tabBarBaseSchema = z
   .object({

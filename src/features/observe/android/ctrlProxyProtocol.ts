@@ -1845,3 +1845,5 @@ export const ctrlProxyRequests = {
     return { type: "stop_recording" };
   },
 } as const;
+
+export const PROTOTYPE_PAGER_OPTIONS_CAPABILITY = "prototype_pager_options_v1";

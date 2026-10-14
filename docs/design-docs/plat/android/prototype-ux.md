@@ -18,7 +18,9 @@ The 2026-10-04 decisions supersede the issue's earlier proposals:
   newer shape is rejected rather than migrated.
 - Every object is strict: unknown properties, unknown node/action types, explicit
   null for optional fields, and wrong types reject the entire spec with a path.
-- Scroll supports both axes. Pager is horizontal, full-page only, with no axis.
+- Scroll supports both axes. Amended for #12071: pager defaults to horizontal full-page
+  paging and optionally accepts `axis`, `pageSpacing`, `peek` and `pageSize` on a device
+  advertising `prototype_pager_options_v1`. Indicator and carousel remain deferred.
 - Navigation includes `tabBar` and author-positioned `bottomNav`, bound to a pager
   or a number state key.
 - Windows are edge-to-edge. Safe-area padding is an explicit node opt-in.
@@ -496,7 +498,7 @@ layout room.
 | `timePicker`      | Required distinct `hourKey` and `minuteKey` naming initialized integers 0..23 and 0..59; optional `is24Hour` boolean, default the device setting.                                                                                           |
 | `datePicker`      | Required `stateKey` naming an initialized `YYYY-MM-DD` string, a real date in years 1900..2100.                                                                                                                                             |
 | `scroll`          | Required single `child`; optional `axis`: `vertical` (default), `horizontal`. Free scrolling, with no page snapping.                                                                                                                        |
-| `pager`           | Required `id` and nonempty `children` array. Each child is one full-size page; horizontal swipe only.                                                                                                                                       |
+| `pager`           | Required `id` and nonempty `children` array. Each child is one page; defaults to horizontal, full-size paging. Optional `axis`, `pageSpacing`, `peek`, `pageSize` (see Pager options below).                                                                                                                                       |
 | `tabBar`          | Required `items`; exactly one `pager` or `stateKey`; optional `scrollable` boolean, default false.                                                                                                                                          |
 | `bottomNav`       | Required 2–5 `items`; exactly one `pager` or `stateKey`. Author positions it, typically last in a column.                                                                                                                                   |
 | `bottomSheet`     | Required single `child`, `openWhen`, and `detents`; optional `scrim`, `dragHandle`, `dismissOnSwipe`.                                                                                                                                       |
@@ -719,6 +721,31 @@ properties that do not apply to a node have no rendering effect; their shape is
 still validated. Omitted layout/text properties use Compose/system defaults.
 Start/end use layout direction, including RTL.
 
+### Pager options
+
+Any explicit `axis`, `pageSpacing`, `peek` or `pageSize` requires
+`prototype_pager_options_v1`; an older device is refused before anything is shown,
+even for explicit default values. Omission keeps existing behaviour.
+
+- `axis`: `"horizontal"` (default) or `"vertical"`.
+- `pageSpacing`: finite dp gap, 0..10000 (default 0).
+- `peek`: strict `{start?: number, end?: number}`, each finite dp in 0..10000,
+  exposing neighbouring pages along the main axis. Missing sides default to 0;
+  `{}` is accepted as a no-op.
+- `pageSize`: `"fill"` (default) or strict `{dp: number}`, finite 1e-6..10000,
+  allowing several pages per viewport. The shared limit is `MAX_PROTOTYPE_PAGER_DP`.
+
+A vertical pager cannot have any vertical scroll ancestor (omitted scroll axis is
+vertical), even through intervening containers or horizontal scrolls. A vertical
+pager inside only a horizontal scroll is valid; horizontal pagers stay valid.
+The error is at the pager's `.axis`: "A vertical pager cannot appear inside a vertical scroll".
+
+Current page means the first fully visible page: fixed sizes snap at Start; fill
+uses the usual settled page. `page_changed`, `{page}` / `{pageCount}`, `setPage` and
+navigation pager bindings keep their meaning. Stable keys and neighbour retention
+stay unchanged. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed. Indicator and carousel remain deferred. On iOS dp means points.
+
+
 ## Icons and images
 
 Built-in Material names are the 2,075 icons of `material-icons-extended`, written
@@ -737,6 +764,7 @@ shape, so image nodes use `{type: "image", asset: "opaque-id"}` and nav items
 use `image: "opaque-id"`. Asset existence is not validated here. A missing asset
 renders a visible placeholder and reports a result under #9301; image bytes,
 MIME types, URLs, cache paths, and screenshot handles are not spec properties.
+
 
 ### Asset transport (#9301, first slice)
 

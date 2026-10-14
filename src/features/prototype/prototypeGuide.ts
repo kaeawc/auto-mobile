@@ -1,7 +1,10 @@
 import { PROTOTYPE_PLATFORM_DIFFERENCES } from "./prototypePlatformNotes";
 import iconSymbols from "../../../schemas/prototype-ios-icon-symbols.json";
 import contract from "../../../schemas/prototype-spec-contract.json";
-import { PROTOTYPE_THEME_MODES_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import {
+  PROTOTYPE_PAGER_OPTIONS_CAPABILITY,
+  PROTOTYPE_THEME_MODES_CAPABILITY,
+} from "../observe/android/ctrlProxyProtocol";
 import {
   GUIDE_APPEARANCE,
   GUIDE_COMPONENTS,
@@ -124,6 +127,9 @@ function renderNodes(): string {
     common,
     "",
     ...variantLines(variants, shared),
+    "",
+    `Pager options require \`${PROTOTYPE_PAGER_OPTIONS_CAPABILITY}\` whenever any is explicitly present (including default values): \`axis\` is horizontal (default) or vertical; \`pageSpacing\` is the dp gap (default 0); \`peek: {start?, end?}\` leaves neighbouring pages visible along the main axis (default 0 on each side, \`{}\` is a no-op); \`pageSize\` is fill (default) or \`{dp}\` for fixed-size pages. Distances are finite, spacing and peek are 0..${contract.limits.MAX_PROTOTYPE_PAGER_DP}, and fixed page size is 1e-6..${contract.limits.MAX_PROTOTYPE_PAGER_DP} (\`MAX_PROTOTYPE_PAGER_DP\`). Objects are strict. On iOS dp means points. A vertical pager cannot have any vertical scroll ancestor, including a scroll with omitted axis; a horizontal scroll ancestor is allowed. Every visible page (including partly visible peek and fixed-size pages) is exposed to accessibility, observe and tapOn; Android marks the current page selected only for pagers with positive peek or a fixed pageSize; iOS marks it selected on the options path (a pager with any non-default option) and not on the legacy paged pager; plain pagers expose only the current page on both. Pages fully off-screen are not exposed.`,
+    "The current page is the first fully visible page (fixed-size pages snap at Start; fill uses the usual settled page). page_changed, {page}/{pageCount}, setPage and tabBar/bottomNav pager bindings keep their meaning. Fully off-screen retained neighbours stay outside the semantics tree; stable keys and neighbour retention are unchanged. Indicator and carousel remain deferred.",
   ].join("\n");
 }
 

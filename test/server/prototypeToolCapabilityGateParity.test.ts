@@ -34,6 +34,15 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
     label: "Liked",
   }),
   prototype_flow_grid_v1: fixture({ type: "flow", id: "label", children: [label] }),
+  prototype_pager_options_v1: {
+    ...fixture({
+      type: "pager",
+      id: "label",
+      axis: "horizontal",
+      pageSize: "fill",
+      children: [{ type: "spacer" }],
+    }),
+  },
 };
 function fixture(root: Record<string, unknown>) {
   return {
@@ -133,7 +142,10 @@ test.each(cases)(
     expect((await show(device, base)).success).toBe(true);
     const before = store.shownSpecs.read(device.deviceId, base.id);
     const sent = agent.requests.length;
-    expect(await patch(device, ops)).toEqual({ success: false, error: refusedShow.error });
+    const refusedPatch = await patch(device, ops);
+    expect(refusedPatch.success).toBe(false);
+    expect(refusedPatch.error).toContain(capability);
+    expect(refusedPatch.error).toBe(refusedShow.error);
     expect(requests(device)).toEqual([]);
     expect(proxy.getPrototypeHistory()).toHaveLength(device.platform === "android" ? 1 : 0);
     expect(agent.requests).toHaveLength(sent);

@@ -218,6 +218,7 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
   function daemonClient(): FakeDaemonClient {
     const client = new FakeDaemonClient({
       daemonMethodResults: new Map<string, unknown>([["tools/list", { tools: [] }]]),
+      resourceResult: { contents: [] },
       toolResultFor: (name, params) =>
         name === "getAndroid" || name === "getApple"
           ? {
@@ -633,6 +634,89 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
       await client.close();
       await server.close();
     }
+  });
+
+  test("plain restart loss permits the released bound session screenshot but fences named tools", async () => {
+    const proxy = createProxy();
+    await acquireBoth(proxy);
+    await outageThroughHandover(proxy);
+    await restartAwaitingOwner();
+    await sessionManager.releaseSession("ios-session", "rehydration-owner-timeout");
+    await advance(INTERVAL_MS);
+
+    expect(proxy.getTerminalSessionRelease()).toEqual({
+      sessionUuid: "ios-session",
+      reason: "rehydration-owner-timeout",
+    });
+    await expect(
+      proxy.readResource("automobile:device-session/ios-session/screenshot"),
+    ).resolves.toEqual({ contents: [] });
+    const named = proxy.callTool("observe", { sessionUuid: "ios-session" });
+    await expect(named).rejects.toBeInstanceOf(DaemonBoundSessionExpiredError);
+    await expect(named).rejects.toMatchObject({
+      sessionUuid: "ios-session",
+      reason: "rehydration-owner-timeout",
+    });
+  });
+
+  test("plain restart losses name each lost session and preserve the one-shot implicit release", async () => {
+    const proxy = createProxy();
+    await acquireBoth(proxy);
+    await outageThroughHandover(proxy);
+    await restartAwaitingOwner();
+    await sessionManager.releaseSession("android-session", "heartbeat-timeout");
+    await sessionManager.releaseSession("ios-session", "rehydration-owner-timeout");
+    await advance(INTERVAL_MS);
+
+    // The held loss is its own refusal, even while another UUID is the terminal binding.
+    await expect(
+      proxy.callTool("observe", { sessionUuid: "android-session" }),
+    ).rejects.toBeInstanceOf(DaemonBoundSessionExpiredError);
+    await expect(
+      proxy.callTool("observe", { sessionUuid: "android-session" }),
+    ).rejects.toMatchObject({
+      sessionUuid: "android-session",
+      reason: "heartbeat-timeout",
+    });
+    // Naming the held loss does not consume the latest binding's one-shot implicit report.
+    await expect(proxy.callTool("observe", {})).rejects.toBeInstanceOf(
+      DaemonConnectionSessionReleasedError,
+    );
+    expect(JSON.parse(textBlocks(await proxy.callTool("observe", {}))[0])).toEqual({});
+    await expect(proxy.callTool("observe", { sessionUuid: "ios-session" })).rejects.toBeInstanceOf(
+      DaemonBoundSessionExpiredError,
+    );
+    await expect(proxy.callTool("observe", { sessionUuid: "ios-session" })).rejects.toMatchObject({
+      sessionUuid: "ios-session",
+      reason: "rehydration-owner-timeout",
+    });
+
+    // A successor offering those UUIDs again still requires an explicit reacquisition.
+    await restartAwaitingOwner();
+    // Reacquiring the latest UUID clears its loss and leaves no terminal binding.
+    await proxy.callTool("getApple", {});
+    expect(proxy.getTerminalSessionRelease()).toBeUndefined();
+    expect(
+      JSON.parse(textBlocks(await proxy.callTool("observe", { sessionUuid: "ios-session" }))[0]),
+    ).toEqual({
+      observed: "ios-session",
+    });
+    await expect(
+      proxy.callTool("observe", { sessionUuid: "android-session" }),
+    ).rejects.toMatchObject({
+      name: "DaemonBoundSessionExpiredError",
+      sessionUuid: "android-session",
+      reason: "heartbeat-timeout",
+    });
+    await proxy.callTool("getAndroid", {});
+    expect(
+      JSON.parse(
+        textBlocks(await proxy.callTool("observe", { sessionUuid: "android-session" }))[0],
+      ),
+    ).toEqual({
+      observed: "android-session",
+    });
+    expect(handovers.map((handover) => handover.code)).toEqual(["daemon_stalled"]);
   });
 
   test("PIN: same-daemon released sessions still report proxy_stalled by the daemon", async () => {

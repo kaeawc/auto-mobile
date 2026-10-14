@@ -1519,6 +1519,8 @@ export class DaemonMcpProxy {
       proxyJudged?: true;
     }
   >();
+  /** Plain restart losses remain fenced by UUID after their stall handovers end (#12282). */
+  private readonly plainRestartSessionLosses = new Map<string, string>();
   /** Bounded per-session recovery when heartbeat acknowledgements stop (#10053). */
   private readonly livenessRecovery: LivenessRecovery;
   /** The call-wait bound of the current stretch of liveness recovery (#10508). */
@@ -5567,6 +5569,23 @@ export class DaemonMcpProxy {
     this.throwIfFencedForCaller(explicitSessionUuid);
   }
 
+  private throwIfPlainRestartSessionLost(sessionUuid?: string): void {
+    if (sessionUuid === undefined) {
+      return;
+    }
+    const reason = this.plainRestartSessionLosses.get(sessionUuid);
+    if (reason === undefined) {
+      return;
+    }
+    const terminal = this.terminalBoundSession;
+    const release =
+      this.pendingHeldSessionPlatformLosses.get(sessionUuid)?.release ??
+      (terminal?.sessionUuid === sessionUuid ? terminal.release : undefined);
+    const answer = new DaemonBoundSessionExpiredError(sessionUuid, reason, release);
+    this.noteReleaseSurfacedBy(answer);
+    throw answer;
+  }
+
   // Surface a terminal fence to a caller, distinguishing whether the caller
   // referenced the fenced session. A client-declared binding (explicit
   // `sessionUuid`, or the same UUID named again) — or any explicit reference to
@@ -5582,6 +5601,7 @@ export class DaemonMcpProxy {
   // semantics for every binding — and self-heals: the next call reaches this gate
   // and gets the provenance-aware error.
   private throwIfFencedForCaller(explicitSessionUuid?: string): void {
+    this.throwIfPlainRestartSessionLost(explicitSessionUuid);
     const terminal = this.terminalBoundSession;
     if (!terminal) {
       return;
@@ -5946,6 +5966,9 @@ export class DaemonMcpProxy {
    * for the connection.
    */
   private throwIfBoundSessionFenced(allowReleasedSession = false, namedSessionUuid?: string): void {
+    if (!allowReleasedSession) {
+      this.throwIfPlainRestartSessionLost(namedSessionUuid);
+    }
     if (
       this.terminalBoundSession &&
       !allowReleasedSession &&
@@ -6247,6 +6270,7 @@ export class DaemonMcpProxy {
     }
     this.claimableSessions.add(sessionId);
     this.pendingHeldSessionPlatformLosses.delete(sessionId);
+    this.plainRestartSessionLosses.delete(sessionId);
     this.ownedDeviceSessions.add(sessionId);
     this.rememberSessionDevice(sessionId, session.deviceId);
     if (session.platform !== undefined) {
@@ -7131,6 +7155,7 @@ export class DaemonMcpProxy {
     }
     this.stallHandovers.delete(sessionUuid);
     this.pendingHeldSessionPlatformLosses.delete(sessionUuid);
+    this.plainRestartSessionLosses.delete(sessionUuid);
     this.resumedStallNotices.set(sessionUuid, {
       handover: record.handover,
       ...(restart ? { restart } : {}),
@@ -7315,6 +7340,7 @@ export class DaemonMcpProxy {
     if (!restarted) {
       return false;
     }
+    this.plainRestartSessionLosses.set(sessionUuid, releaseReason);
     this.recordHeldSessionTerminalLoss(sessionUuid, releaseReason);
     if (this.terminalBoundSession?.sessionUuid === sessionUuid) {
       this.fenceBoundSessionUuid(sessionUuid, releaseReason);
@@ -7694,6 +7720,7 @@ export class DaemonMcpProxy {
   private holdPreviousBinding(nextSessionUuid: string): void {
     const previous = this.boundSessionUuid;
     this.pendingHeldSessionPlatformLosses.delete(nextSessionUuid);
+    this.plainRestartSessionLosses.delete(nextSessionUuid);
     this.otherHeldSessions.delete(nextSessionUuid);
     this.latestBindingConflict = undefined;
     // Only a session this proxy claims stays held: an args-named one was never heartbeated (#10664).
@@ -7994,6 +8021,7 @@ export class DaemonMcpProxy {
     ) {
       this.otherHeldSessions.set(sessionUuid, { claimSent: false, lastUsedAt: this.timer.now() });
       this.pendingHeldSessionPlatformLosses.delete(sessionUuid);
+      this.plainRestartSessionLosses.delete(sessionUuid);
     }
     this.syncHeartbeatKeeper();
   }
@@ -8475,6 +8503,7 @@ export class DaemonMcpProxy {
   // its provenance (issue #5689).
   private updateBoundSessionUuid(sessionUuid: string): void {
     this.pendingHeldSessionPlatformLosses.delete(sessionUuid);
+    this.plainRestartSessionLosses.delete(sessionUuid);
     // A held session that becomes the binding again keeps its idle clock: the call that named it
     // may be a read, and the daemon's echo already credited it when it was use (#11348).
     const heldLastUsedAt = this.otherHeldSessions.get(sessionUuid)?.lastUsedAt;
@@ -9011,6 +9040,7 @@ export class DaemonMcpProxy {
     this.resumedStallNotices.clear();
     this.pendingSessionLosses.clear();
     this.pendingHeldSessionPlatformLosses.clear();
+    this.plainRestartSessionLosses.clear();
     this.livenessHandoverListeners.clear();
     this.ownedDeviceSessions.clear();
     this.terminalBoundSession = undefined;

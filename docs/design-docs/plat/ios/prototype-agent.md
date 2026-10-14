@@ -545,3 +545,22 @@ The implementations are `src/features/prototype/savedPrototypeLayout.ts` and
 `ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSavedLayout.swift`.
 Both test suites consume `test/fixtures/prototype-saved-layout/layout.json`, including
 the same expected manifest and file hashes. Fixture binaries are generated at test time.
+
+## Viewer template release asset
+
+Release automation also ships `AutoMobilePrototypeViewer.zip`, containing a single
+top-level `PrototypeViewer.app/` directory. The universal arm64 + x86_64 simulator
+app is ad-hoc signed by `scripts/ios/prototype-viewer-build.sh`, then packaged with
+`ditto -c -k --keepParent` by `scripts/ios/build-prototype-viewer-release.sh` to
+preserve its executable mode and signature. `build-prototype-viewer.yml` verifies
+both architectures, `MinimumOSVersion`, the signature, and the absence of
+`Assets.car`, `InfoPlist.strings`, and `CFBundleIconName` before uploading it.
+
+Prepare Release records the archive SHA-256 in `prototypeViewerSha256` alongside
+`prototypeAgentSha256`, verifies the downloaded candidate archive against that
+pin, and includes `prototype-viewer` in artifact provenance. Release reuses that
+verified artifact and publishes its checksum in the release notes. Older registry
+entries omit the optional viewer pin and resolve to "viewer unavailable". The
+host template provider resolves an explicit path, then `AUTOMOBILE_IOS_PROTOTYPE_VIEWER`,
+then configured local builds, then a checksum-pinned release cache or download
+(unless `AUTOMOBILE_SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD` is enabled).

@@ -65,6 +65,11 @@ write_release_ts() {
     filter_line="
     networkFilterSha256: \"$5\","
   fi
+  local viewer_line=""
+  if [ "$#" -ge 6 ]; then
+    viewer_line="
+    prototypeViewerSha256: \"$6\","
+  fi
   cat > "$PROJECT/src/constants/release.ts" <<EOF
 export interface ReleaseChecksumEntry {
   version: string;
@@ -74,6 +79,7 @@ export interface ReleaseChecksumEntry {
   videoJarSha256?: string;
   screenCaptureHelperSha256?: string;
   prototypeAgentSha256?: string;
+  prototypeViewerSha256?: string;
   networkFilterSha256?: string;
 }
 
@@ -82,7 +88,7 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     version: "1.0.0",
     apkSha256: "",
     ipaSha256: "$1",
-    runnerSha256: "",$video_line$helper_line$prototype_line$filter_line
+    runnerSha256: "",$video_line$helper_line$prototype_line$filter_line$viewer_line
   },
 ];
 EOF
@@ -242,4 +248,26 @@ EOF
   rm -rf "$bin"
   [ "$status" -eq 0 ]
   [ "$output" = "$ART_SHA" ]
+}
+
+@test "matching prototypeViewerSha256 verifies successfully (prototypeviewer platform)" {
+  write_release_ts "" "" "" "" "" "$ART_SHA"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" prototypeviewer
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verified successfully"* ]]
+}
+@test "absent prototypeViewerSha256 reports 'no checksum', not a mismatch" {
+  write_release_ts "" "" "$ART_SHA"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" prototypeviewer
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"No SHA256 checksum found"* ]]
+}
+@test "mismatched prototypeViewerSha256 reports a mismatch" {
+  write_release_ts "" "" "" "" "" "0000000000000000000000000000000000000000000000000000000000000000"
+  cd "$PROJECT"
+  run bash "$ABS_SCRIPT" "$ARTIFACT" prototypeviewer
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"SHA256 mismatch"* ]]
 }

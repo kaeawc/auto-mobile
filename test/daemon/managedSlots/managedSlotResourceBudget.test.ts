@@ -848,6 +848,69 @@ describe("managed-slot total-resource budget", () => {
     expect(evictor.calls).toEqual([]);
   });
 
+  test("exhaustion exposes assigned idle rows and orphan while retained stays empty", async () => {
+    await assignManagedSlotDevice(registry, "android", "idle-a", "a");
+    await assignManagedSlotDevice(registry, "ios", "idle-b", "b");
+    inventory.devices.push({ platform: "android", name: "amslot-orphan", deviceId: "orphan-id" });
+    const mine = await creation("amslot-new");
+    const result = await budget(2).admitCreation({ journalEntryId: mine.id });
+    expect(result).toMatchObject({
+      kind: "exhausted",
+      usage: {
+        total: 4,
+        active: 0,
+        assignedIdle: 2,
+        cached: 0,
+        preparing: 1,
+        deleting: 0,
+        orphaned: 1,
+      },
+      retained: [],
+    });
+    expect(result.kind === "exhausted" && result.charged).toEqual([
+      { platform: "android", stableDeviceId: "idle-a", kind: "assigned_idle" },
+      { platform: "ios", stableDeviceId: "idle-b", kind: "assigned_idle" },
+      { platform: "android", stableDeviceId: "amslot-new", kind: "preparing" },
+      { platform: "android", stableDeviceId: "amslot-orphan", kind: "orphaned" },
+    ]);
+  });
+
+  test("charged identifies free cache and stuck deletion including the exemption", async () => {
+    await cache("amslot-free");
+    await markedCache(3, 3, "amslot-stuck-a");
+    await markedCache(3, 3, "amslot-stuck-b");
+    const mine = await creation("amslot-new");
+    const result = await budget(1).admitCreation({ journalEntryId: mine.id });
+    expect(result).toMatchObject({
+      kind: "exhausted",
+      usage: {
+        total: 3,
+        active: 0,
+        assignedIdle: 0,
+        cached: 1,
+        preparing: 1,
+        deleting: 1,
+        orphaned: 0,
+      },
+    });
+    expect(result.kind === "exhausted" && result.charged).toContainEqual({
+      platform: "android",
+      stableDeviceId: "amslot-free",
+      kind: "free",
+    });
+    expect(result.kind === "exhausted" && result.charged).toContainEqual({
+      platform: "android",
+      stableDeviceId: "amslot-stuck-a",
+      kind: "deletion_stuck",
+      uncounted: true,
+    });
+    expect(result.kind === "exhausted" && result.charged).toContainEqual({
+      platform: "android",
+      stableDeviceId: "amslot-stuck-b",
+      kind: "deletion_stuck",
+    });
+  });
+
   test("lost row adopted meanwhile is re-read and never counted as freed", async () => {
     await cache("amslot-cache");
     const mine = await creation("amslot-new");

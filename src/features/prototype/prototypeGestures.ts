@@ -1,4 +1,5 @@
 import contract from "../../../schemas/prototype-spec-contract.json";
+import { PROTOTYPE_GESTURES_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { record } from "./prototypeTemplate";
 
 const gestureFields = ["onLongPress", "onDoubleTap"] as const;
@@ -43,4 +44,17 @@ export function prototypeGestureFields(spec: unknown): string[] {
       nodeGestureFields(record(definition)?.root, `components.${name}.root`),
     ),
   ];
+}
+
+/** Refusal for a device that cannot execute authored prototype gesture actions. */
+export function prototypeGesturesUnsupportedMessage(
+  fields: readonly string[],
+  platform: "android" | "ios",
+): string {
+  const device = platform === "android" ? "connected CtrlProxy" : "connected iOS prototype agent";
+  const update =
+    platform === "android"
+      ? "Update the connected CtrlProxy"
+      : "Relaunch the app with launchApp prototype: true to load the agent built for this AutoMobile version";
+  return `The ${device} does not advertise ${PROTOTYPE_GESTURES_CAPABILITY}, so it cannot run gesture fields: ${fields.join(", ")}. Nothing was shown. ${update}, or remove onLongPress and onDoubleTap.`;
 }

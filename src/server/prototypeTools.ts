@@ -4,11 +4,7 @@ import {
   performPrototypePatch,
   type PrototypePatchQueue,
 } from "./prototypePatchAction";
-import { applyPrototypePatch, MAX_PROTOTYPE_PATCH_OPS } from "../features/prototype/prototypePatch";
-import {
-  prototypeSearchBarFields,
-  prototypeSearchBarUnsupportedMessage,
-} from "../features/prototype/prototypeSearchBar";
+import { MAX_PROTOTYPE_PATCH_OPS } from "../features/prototype/prototypePatch";
 import type { ShownSpecJson } from "../features/prototype/PrototypeShownSpecs";
 import { prototypePlatformNotes } from "../features/prototype/prototypePlatformNotes";
 import { recordPrototypeTextShow } from "../features/prototype/prototypeTextTarget";
@@ -62,9 +58,6 @@ import {
   PROTOTYPE_DISPLAY_CAPABILITY,
   PROTOTYPE_EVENT_KINDS,
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
-  PROTOTYPE_THEME_MODES_CAPABILITY,
-  PROTOTYPE_DATA_MODEL_CAPABILITY,
-  PROTOTYPE_SEARCH_BAR_CAPABILITY,
   PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
   PROTOTYPE_WINDOW_CHROME_CAPABILITY,
   PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
@@ -110,14 +103,7 @@ import {
   prototypeWindowOptionsUnsupportedMessage,
   requestedPrototypeWindowOptions,
 } from "../features/prototype/prototypeWindowOptions";
-import {
-  prototypeDataModelFields,
-  prototypeDataModelUnsupportedMessage,
-} from "../features/prototype/prototypeData";
-import {
-  prototypeThemeModeFields,
-  prototypeThemeModesUnsupportedMessage,
-} from "../features/prototype/prototypeThemeModes";
+import { prototypeRequiredCapabilities } from "../features/prototype/prototypeCapabilityGates";
 import {
   parsePrototypeAppearance,
   PROTOTYPE_APPEARANCE_INPUTS,
@@ -939,84 +925,24 @@ function appLayerGrant(
   };
 }
 
-/**
- * Refuses, before anything is sent, a spec that uses a per-mode form (#11218) on a device whose
- * renderer does not resolve them: an older device rejects the spec or draws one mode's value.
- */
-async function themeModesRefusal(
+/** Refuses spec-introduced features before a show or patch reaches the device. */
+export async function specCapabilityRefusal(
   target: PrototypeTarget,
-  args: z.infer<typeof prototypeSchema>,
+  spec: unknown,
   signal: AbortSignal | undefined,
 ): Promise<PrototypeResult | undefined> {
-  if (args.action !== "show" || args.spec === undefined) {
-    return undefined;
+  for (const gate of prototypeRequiredCapabilities(spec)) {
+    const supported = target.android
+      ? await target.android.supportsCommand(gate.capability)
+      : target.ios?.supportsCapability(gate.capability) === true;
+    // A capability lookup may wait for the connection and handshake.
+    signal?.throwIfAborted();
+    if (!supported) {
+      const message = gate.unsupportedMessage(gate.fields, target.android ? "android" : "ios");
+      return { success: false, error: new ActionableError(message).message };
+    }
   }
-  const fields = prototypeThemeModeFields(args.spec);
-  if (fields.length === 0) {
-    return undefined;
-  }
-  const supported = target.android
-    ? await target.android.supportsCommand(PROTOTYPE_THEME_MODES_CAPABILITY)
-    : target.ios?.supportsCapability(PROTOTYPE_THEME_MODES_CAPABILITY) === true;
-  // The lookup waits for connection and handshake; an abort during it must stop the show.
-  signal?.throwIfAborted();
-  if (supported) {
-    return undefined;
-  }
-  const message = prototypeThemeModesUnsupportedMessage(fields, target.android ? "android" : "ios");
-  return { success: false, error: new ActionableError(message).message };
-}
-
-/** Refuses search bars before any device request or asset upload. */
-async function searchBarRefusal(
-  target: PrototypeTarget,
-  spec: PrototypeSpec | undefined,
-  signal: AbortSignal | undefined,
-): Promise<PrototypeResult | undefined> {
-  if (!spec) {
-    return undefined;
-  }
-  const fields = prototypeSearchBarFields(spec);
-  if (fields.length === 0) {
-    return undefined;
-  }
-  const supported = target.android
-    ? await target.android.supportsCommand(PROTOTYPE_SEARCH_BAR_CAPABILITY)
-    : target.ios?.supportsCapability(PROTOTYPE_SEARCH_BAR_CAPABILITY) === true;
-  signal?.throwIfAborted();
-  return supported
-    ? undefined
-    : {
-        success: false,
-        error: new ActionableError(
-          prototypeSearchBarUnsupportedMessage(fields, target.android ? "android" : "ios"),
-        ).message,
-      };
-}
-
-/** Refuses data bindings before any device request or asset upload. */
-async function dataModelRefusal(
-  target: PrototypeTarget,
-  args: z.infer<typeof prototypeSchema>,
-  signal: AbortSignal | undefined,
-): Promise<PrototypeResult | undefined> {
-  if (args.action !== "show" || args.spec === undefined) {
-    return undefined;
-  }
-  const fields = prototypeDataModelFields(args.spec);
-  if (fields.length === 0) {
-    return undefined;
-  }
-  const supported = target.android
-    ? await target.android.supportsCommand(PROTOTYPE_DATA_MODEL_CAPABILITY)
-    : target.ios?.supportsCapability(PROTOTYPE_DATA_MODEL_CAPABILITY) === true;
-  // The lookup waits for connection and handshake; an abort during it must stop the show.
-  signal?.throwIfAborted();
-  if (supported) {
-    return undefined;
-  }
-  const message = prototypeDataModelUnsupportedMessage(fields, target.android ? "android" : "ios");
-  return { success: false, error: new ActionableError(message).message };
+  return undefined;
 }
 
 /**
@@ -1452,13 +1378,9 @@ async function preflightMutation(
   }
   const failure =
     iosResetRefusal(target, args) ??
-    (await themeModesRefusal(target, args, signal)) ??
-    (await dataModelRefusal(target, args, signal)) ??
-    (await searchBarRefusal(
-      target,
-      args.action === "show" ? (args.spec as PrototypeSpec) : undefined,
-      signal,
-    )) ??
+    (args.action === "show" && args.spec !== undefined
+      ? await specCapabilityRefusal(target, args.spec, signal)
+      : undefined) ??
     (await appearanceRefusal(target, args, signal)) ??
     (await windowOptionsRefusal(target, args, signal));
   if (failure) {
@@ -1596,29 +1518,13 @@ async function performPrototypeAction(
     return performPrototypePatch(
       {
         store,
-        transport: {
-          patch: async (patch, timeoutMs) => {
-            // The patch queue has already validated the result. Reuse its pure application
-            // here to gate the resulting tree immediately before dispatch, inside that queue.
-            const read = store.shownSpecs.read(device.deviceId, patch.id);
-            if (read.kind !== "known") {
-              return target.transport.patch(patch, timeoutMs);
-            }
-            const applied = applyPrototypePatch(read.spec, patch.ops, { stateTests: "skip" });
-            const validated = applied.success ? validatePrototypeSpec(applied.spec) : undefined;
-            const refusal = validated?.success
-              ? await searchBarRefusal(target, validated.data, signal)
-              : undefined;
-            if (refusal) {
-              return { ...refusal, delivery: "unsent" };
-            }
-            return target.transport.patch(patch, timeoutMs);
-          },
-        },
+        transport: target.transport,
         supportsPatch: async () =>
           target.android
             ? target.android.supportsCommand(PROTOTYPE_PATCH_CAPABILITY)
             : target.ios?.supportsCapability(PROTOTYPE_PATCH_CAPABILITY) === true,
+        specRefusal: async (spec) =>
+          (await specCapabilityRefusal(target, spec, signal))?.error ?? undefined,
         platform: device.platform === "android" ? "android" : "ios",
         queue,
         retire: (result) => retireObservation(cacheInvalidator, device, result),

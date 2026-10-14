@@ -578,6 +578,33 @@ describe("managed slot journal redrive", () => {
   });
 
   describe("durable local owner", () => {
+    test("SimulatorStillShuttingDown deletion stays pending and obeys durable backoff", async () => {
+      const oldId = await seedOldDevice();
+      deleter.failWith = "SimulatorStillShuttingDown: stop phase failed";
+      const result = expectFailed(await daemon("daemon-1").reconcile(request()));
+      expect(result.failure).toMatchObject({ code: "cleanup_pending" });
+      liveDaemons.delete("daemon-1");
+      const journal = daemon("daemon-2").journal;
+      const [entry] = await registry.listOpenSlotJournal(key);
+      expect(entry.phase).toBe("deleting");
+      expect(entry.nextAttemptAtMs).toBeGreaterThan(timer.now());
+      expect(deleter.calls).toHaveLength(1);
+      timer.setCurrentTime(entry.nextAttemptAtMs - 1);
+      expect(await journal.runPass()).toMatchObject({ skipped: 1, settled: [] });
+      expect(deleter.calls).toHaveLength(1);
+      timer.advanceTime(1);
+      expect(await journal.runPass()).toMatchObject({
+        settled: [],
+        blocked: [expect.objectContaining({ reason: "cleanup_pending" })],
+      });
+      expect(deleter.calls).toHaveLength(2);
+      const [retry] = await registry.listOpenSlotJournal(key);
+      expect(retry.phase).toBe("deleting");
+      expect(retry.attempts).toBe(entry.attempts + 1);
+      expect(inventory.has(oldId)).toBe(true);
+      expect((await registry.getAssignment(key))?.stableDeviceId).toBe(oldId);
+    });
+
     test("failed cleanup backs off fairly and is never abandoned", async () => {
       const oldId = await seedOldDevice();
       deleter.failWith = "simctl delete failed";

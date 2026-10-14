@@ -2,7 +2,10 @@ import { PROTOTYPE_SEARCH_BAR_CAPABILITY } from "../observe/android/ctrlProxyPro
 import type { PrototypeNode, PrototypeSpec } from "./prototypeSpec";
 
 /** Node paths in tree order, including results and repeat templates; no I/O or mutation. */
-export function prototypeSearchBarFields(spec: PrototypeSpec): string[] {
+export function prototypeSearchBarFields(spec: unknown): string[] {
+  if (typeof spec !== "object" || spec === null || !("root" in spec)) {
+    return [];
+  }
   const fields: string[] = [];
   const visit = (node: PrototypeNode, path: string): void => {
     if (node.type === "searchBar") {
@@ -15,7 +18,7 @@ export function prototypeSearchBarFields(spec: PrototypeSpec): string[] {
       node.children.forEach((child, index) => visit(child, `${path}.children[${index}]`));
     }
   };
-  visit(spec.root, "root");
+  visit((spec as PrototypeSpec).root, "root");
   return fields;
 }
 

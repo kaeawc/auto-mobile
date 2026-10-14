@@ -65,6 +65,11 @@ import { PassiveWorkPolicy, parsePassiveWorkSettings } from "./PassiveWorkPolicy
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import { PlanDeviceLossMonitor, type PlanDeviceLossPort } from "./deviceDisconnectHandler";
 import { DevicePool, type PooledDevice } from "./devicePool";
+import { ForwardLeaseForeignDeviceOwnership } from "./foreignDeviceOwnership";
+import {
+  createForeignCtrlProxyForwardEvidence,
+  type ForeignCtrlProxyForwardEvidence,
+} from "../features/observe/android/foreignCtrlProxyForwardEvidence";
 import { DeviceOwnedByOtherDaemonError } from "./deviceAcquisitionRefusals";
 import {
   assertControlNotOnForeignDaemonDevice,
@@ -345,6 +350,7 @@ import {
 } from "../features/performance/PerformanceMonitor";
 import {
   initializeRecordingTeardownRedriveState,
+  setStartupOrphanCaptures,
   interruptVideoRecording,
   listActiveVideoRecordings,
   setVideoRecordingManagerDependencies,
@@ -841,6 +847,8 @@ export class Daemon {
     ) => AbandonedScopeReclaimJournal,
     /** Free-pool device reclamation (#11337); not armed under `bun test`. */
     private readonly freeDeviceReclaimerFactory: FreeDeviceReclaimerFactory = createDefaultFreeDeviceReclaimer,
+    /** Host forward evidence is supplied by the production entry point only (#12220). */
+    private readonly foreignCtrlProxyForwardEvidence?: ForeignCtrlProxyForwardEvidence,
   ) {
     installDefaultProvisionedDeviceTransportFence();
     this.startupCompletion = new Promise<void>((resolve, reject) => {
@@ -1245,6 +1253,18 @@ export class Daemon {
       daemonSessionId: this.daemonSessionId,
       timer: this.timer,
       managedSlotExclusion: this.managedSlotExclusionFactory(this.timer),
+      ...(this.foreignCtrlProxyForwardEvidence
+        ? {
+            foreignDeviceOwnership: new ForwardLeaseForeignDeviceOwnership(
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              this.timer,
+              this.foreignCtrlProxyForwardEvidence,
+            ),
+          }
+        : {}),
       managedExecutionOwnership: () => this.managedExecutionReowner,
       missingDeviceMisses: this.deviceDisconnectMisses,
       installedAppsRepository: this.installedAppsRepository,
@@ -1717,6 +1737,9 @@ export class Daemon {
               [...state.liveDaemonSessionIds].filter((id) => id !== this.daemonSessionId),
             ),
             ownedCaptureIds: () => state.videoRecorderService.listActiveRecordingIds(),
+            onStartupOrphans: setStartupOrphanCaptures,
+            onDeviceProcessStarted: (listener) =>
+              this.devicePool.setDeviceProcessStartedListener(listener),
             onDeviceIncarnationAssigned: (listener) => {
               this.recorderDeviceIncarnationListener = listener;
             },
@@ -5170,7 +5193,10 @@ export class Daemon {
         "daemon-restart",
         liveDaemonSessionIds,
       );
-      await setVideoRecordingManagerDependencies({ liveDaemonSessionIds });
+      await setVideoRecordingManagerDependencies({
+        liveDaemonSessionIds,
+        daemonSessionId: this.daemonSessionId,
+      });
       logger.info(
         `[Daemon] Cleared old daemon session caches, current session: ${this.daemonSessionId}`,
       );
@@ -5769,6 +5795,30 @@ export class Daemon {
  * Start the daemon process
  */
 export async function startDaemon(options: DaemonOptions = {}): Promise<void> {
-  const daemon = new Daemon(options);
+  const daemon = new Daemon(
+    options,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    createForeignCtrlProxyForwardEvidence(),
+  );
   await daemon.start();
 }

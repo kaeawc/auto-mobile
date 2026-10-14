@@ -1,0 +1,337 @@
+{
+  "spec": {
+    "id": "resolve",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "text",
+          "text": "0",
+          "visibleWhen": {
+            "data": "/n",
+            "equals": 7
+          }
+        },
+        {
+          "type": "text",
+          "text": "1",
+          "visibleWhen": {
+            "data": "/n",
+            "equals": "7"
+          }
+        },
+        {
+          "type": "text",
+          "text": "2",
+          "visibleWhen": {
+            "data": "/missing",
+            "notEquals": 7
+          }
+        },
+        {
+          "type": "text",
+          "text": "3",
+          "visibleWhen": {
+            "data": "/b",
+            "notEquals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "4",
+          "visibleWhen": {
+            "data": "/n",
+            "gt": 6
+          }
+        },
+        {
+          "type": "text",
+          "text": "5",
+          "visibleWhen": {
+            "data": "/s",
+            "gt": 0
+          }
+        },
+        {
+          "type": "text",
+          "text": "6",
+          "visibleWhen": {
+            "data": "/n",
+            "lt": 8
+          }
+        },
+        {
+          "type": "text",
+          "text": "7",
+          "visibleWhen": {
+            "data": "/n",
+            "lt": 7
+          }
+        },
+        {
+          "type": "text",
+          "text": "nested",
+          "visibleWhen": {
+            "all": [
+              {
+                "data": "/b",
+                "equals": true
+              },
+              {
+                "any": [
+                  {
+                    "data": "/n",
+                    "lt": 0
+                  },
+                  {
+                    "not": {
+                      "data": "/s",
+                      "equals": "hello"
+                    }
+                  }
+                ]
+              },
+              {
+                "key": "open",
+                "equals": true
+              }
+            ]
+          },
+          "styleWhen": [
+            {
+              "when": {
+                "data": "/n",
+                "equals": 7
+              },
+              "style": {
+                "alpha": 0.5
+              }
+            },
+            {
+              "when": {
+                "data": "/array",
+                "equals": 0
+              },
+              "style": {
+                "alpha": 1.0
+              }
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "negative zero",
+          "visibleWhen": {
+            "data": "/zero",
+            "equals": 0
+          }
+        },
+        {
+          "type": "text",
+          "text": "numeric value",
+          "visibleWhen": {
+            "data": "/n",
+            "equals": 7.0
+          }
+        },
+        {
+          "type": "text",
+          "text": "boolean versus number",
+          "visibleWhen": {
+            "data": "/b",
+            "equals": 1
+          }
+        },
+        {
+          "type": "text",
+          "text": "string versus boolean",
+          "visibleWhen": {
+            "data": "/trueString",
+            "equals": true
+          }
+        },
+        {
+          "type": "text",
+          "text": "object not equals",
+          "visibleWhen": {
+            "data": "/object",
+            "notEquals": 1
+          }
+        },
+        {
+          "type": "text",
+          "text": "string is not numeric",
+          "visibleWhen": {
+            "data": "/s",
+            "gt": 0
+          }
+        }
+      ]
+    },
+    "data": {
+      "n": 7,
+      "s": "hello",
+      "b": true,
+      "array": [],
+      "zero": -0.0,
+      "object": {},
+      "trueString": "true"
+    },
+    "state": {
+      "open": false
+    }
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "text",
+        "text": "0",
+        "visibleWhen": {
+          "all": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "1",
+        "visibleWhen": {
+          "any": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "2",
+        "visibleWhen": {
+          "all": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "3",
+        "visibleWhen": {
+          "any": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "4",
+        "visibleWhen": {
+          "all": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "5",
+        "visibleWhen": {
+          "any": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "6",
+        "visibleWhen": {
+          "all": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "7",
+        "visibleWhen": {
+          "any": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "nested",
+        "visibleWhen": {
+          "all": [
+            {
+              "all": []
+            },
+            {
+              "any": [
+                {
+                  "any": []
+                },
+                {
+                  "not": {
+                    "all": []
+                  }
+                }
+              ]
+            },
+            {
+              "key": "open",
+              "equals": true
+            }
+          ]
+        },
+        "styleWhen": [
+          {
+            "when": {
+              "all": []
+            },
+            "style": {
+              "alpha": 0.5
+            }
+          },
+          {
+            "when": {
+              "any": []
+            },
+            "style": {
+              "alpha": 1.0
+            }
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "text": "negative zero",
+        "visibleWhen": {
+          "all": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "numeric value",
+        "visibleWhen": {
+          "all": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "boolean versus number",
+        "visibleWhen": {
+          "any": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "string versus boolean",
+        "visibleWhen": {
+          "any": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "object not equals",
+        "visibleWhen": {
+          "all": []
+        }
+      },
+      {
+        "type": "text",
+        "text": "string is not numeric",
+        "visibleWhen": {
+          "any": []
+        }
+      }
+    ]
+  }
+}

@@ -1,9 +1,10 @@
+import { isEmulatorQemuProcess } from "../../utils/android-cmdline-tools/EmulatorProcessStop";
+export { isEmulatorQemuProcess } from "../../utils/android-cmdline-tools/EmulatorProcessStop";
 import type { AdbDeviceState } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { HostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { nodeHostOsInfo, type HostOsInfo } from "../iosSimFleet/FleetHostSource";
-import type { AndroidProcessRow } from "./procProcessTable";
 import {
   ProcessTableReader,
   type ProcessTableReadOptions,
@@ -76,24 +77,6 @@ export function adbEmulatorSerialLister(
       .filter((deviceId) => deviceId.startsWith("emulator-"));
     return [...new Set(serials)];
   };
-}
-
-/** The SDK's own layout: `<sdk>/emulator/qemu/<os>-<arch>/qemu-system-<arch>[-headless]`. */
-const SDK_QEMU_EXECUTABLE = /\/qemu\/[^/\s]+\/qemu-system-[^/\s]*(?:\s|$)/;
-
-/**
- * The emulator's guest runs in a `qemu-system-<arch>` process (one per running emulator).
- *
- * `ps` prints the command line with no quoting, so where the executable path ends is a guess:
- * it is taken to end before the first ` -`, which keeps a path with spaces whole. A directory
- * whose name holds ` -` ("OneDrive - Work") cuts that guess short and hid the emulator from the
- * count (#11588), so a command naming the SDK's qemu executable counts wherever its path was cut.
- * A wrong guess that way round counts a process that is not an emulator: fail closed.
- */
-export function isEmulatorQemuProcess(row: Pick<AndroidProcessRow, "command">): boolean {
-  const executable = row.command.split(" -")[0] ?? "";
-  const name = executable.slice(executable.lastIndexOf("/") + 1).trim();
-  return name.startsWith("qemu-system-") || SDK_QEMU_EXECUTABLE.test(row.command);
 }
 
 /** Read-only source backed by the adb listing, `ps` and the `os` host totals. */

@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 import "./harnessLogSink";
 import { harnessChildEnvironment, type HarnessLogSinkOverride } from "./harnessLogSink";
-/** Private manual-test launcher. Never signals processes or deletes directories, devices, AVDs
- * or simulators. Stop delegates only to the explicitly isolated daemon's CLI. */
+/** Private manual-test launcher. Signals only a recorded daemon PID whose identity the private
+ * control socket confirmed. Never signals device processes or deletes directories, devices,
+ * AVDs or simulators. Unconfirmed daemon stops delegate to the product CLI. */
 import { execFile, spawn } from "node:child_process";
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { Socket } from "node:net";
@@ -11,11 +12,14 @@ import {
   AdbHostResponseAccumulator,
   type AdbHostResponse,
 } from "./adbHostQuery";
-import { homedir, userInfo } from "node:os";
+import { homedir, userInfo, platform, loadavg, cpus, freemem, totalmem } from "node:os";
+import { tryAcquireExclusiveLock, releaseExclusiveLock } from "../../src/utils/fileLock";
+import { hostPreflight, recordHostPreflight, type HostStats } from "./hostPreflight";
+import { bootGate, bootGateOptions, BOOT_GATE_FLAGS, type BootGateCommand } from "./bootGate";
 import { isAbsolute, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
-import { defaultTimer } from "../../src/utils/SystemTimer";
+import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 import { defaultIdGenerator } from "../../src/utils/IdGenerator";
 import { probeControlSocket, type ControlSocketProbeResult } from "./controlSocketProbe";
 import { privateDaemonStatus, privateDaemonDeviceStatus } from "./privateDaemonStatus";
@@ -35,7 +39,17 @@ import {
   type PrivateDaemonSpec,
 } from "./privateDaemonEnv";
 
+import { privateDaemonStop } from "./privateDaemonStop";
+import {
+  privateDaemonDevices,
+  recordHostBaseline,
+  type BatchDevicesCommand,
+} from "./privateDaemonDevices";
+
 export type PrivateDaemonCommand =
+  | BootGateCommand
+  | { op: "preflight"; batchDir: string; strict: boolean }
+  | BatchDevicesCommand
   | { op: "init"; options: PrivateDaemonBatchOptions }
   | {
       op: "start" | "stop" | "status" | "env" | "wrappers";
@@ -43,6 +57,7 @@ export type PrivateDaemonCommand =
       daemon?: number;
       extraFlags: string[];
       devices?: boolean;
+      waitMs?: number;
     };
 const optionsSchema = z
   .object({
@@ -52,6 +67,14 @@ const optionsSchema = z
     auxRoot: z.string().optional(),
     serverPath: z.string(),
     splitAdbCoordination: z.boolean().optional(),
+    protectedDevices: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .refine((value) => !value.startsWith("--")),
+      )
+      .optional(),
     orphanIdleMs: z.number().optional(),
     extraEnv: z.record(z.string()).optional(),
     daemonEnv: z.record(z.record(z.string())).optional(),
@@ -60,11 +83,7 @@ const optionsSchema = z
   })
   .strict();
 const manifestSchema = z.object({ options: optionsSchema, specs: z.array(z.unknown()) }).strict();
-import {
-  PRIVATE_DAEMON_COMMANDS,
-  PRIVATE_DAEMON_FLAGS,
-  privateDaemonHelp,
-} from "./privateDaemonHelp";
+import { PRIVATE_DAEMON_COMMANDS, privateDaemonHelp } from "./privateDaemonHelp";
 import { extraEnvRefusal, daemonArgsRefusal } from "./privateDaemonEnv";
 import { writePrivateDaemonWrappers } from "./privateDaemonWrappers";
 const commands: readonly string[] = PRIVATE_DAEMON_COMMANDS;
@@ -77,6 +96,11 @@ interface ParsedValues {
   extraFlags: string[];
   split: boolean;
   devices: boolean;
+  protectedDevices: string[];
+  deviceSelectors: string[];
+  dryRun: boolean;
+  strict: boolean;
+  bootCommand: string[];
 }
 function recordEnvironment(state: ParsedValues, flag: string, token: string): string | undefined {
   const match = flag === "--daemon-env" ? /^(\d+):(.*)$/.exec(token) : undefined;
@@ -105,6 +129,10 @@ function recordDaemonArg(state: ParsedValues, token: string): void {
   }
 }
 function assignValue(state: ParsedValues, flag: string, value: string): string | undefined {
+  if (flag === "--protect" || flag === "--device") {
+    (flag === "--protect" ? state.protectedDevices : state.deviceSelectors).push(value);
+    return undefined;
+  }
   if (flag === "--daemon-arg") {
     recordDaemonArg(state, value);
     return undefined;
@@ -118,6 +146,39 @@ function assignValue(state: ParsedValues, flag: string, value: string): string |
   state.values[flag] = value;
   return undefined;
 }
+function valueFlagsForCommand(op: string): string[] {
+  if (op === "boot-gate") {
+    return BOOT_GATE_FLAGS;
+  }
+  if (op === "preflight") {
+    return ["--batch-dir"];
+  }
+  if (op === "init") {
+    return [
+      "--batch-dir",
+      "--count",
+      "--base-port",
+      "--aux-root",
+      "--server",
+      "--orphan-idle-ms",
+      "--env",
+      "--daemon-env",
+      "--daemon-arg",
+      "--protect",
+    ];
+  }
+  const flags = ["--batch-dir", "--daemon"];
+  if (op === "stop") {
+    flags.push("--wait-ms");
+  }
+  if (op === "devices" || op === "shutdown-devices") {
+    flags.push("--timeout-ms");
+  }
+  if (op === "shutdown-devices") {
+    flags.push("--device");
+  }
+  return flags;
+}
 function readValueArgument(
   op: string,
   args: string[],
@@ -126,13 +187,7 @@ function readValueArgument(
 ): { next: number; error?: string } {
   const inline = args[i].startsWith("--daemon-arg=");
   const flag = inline ? "--daemon-arg" : args[i];
-  const allowed =
-    op === "init"
-      ? Object.keys(PRIVATE_DAEMON_FLAGS).filter(
-          (key) =>
-            !["--daemon", "--devices", "--", "--help", "--split-adb-coordination"].includes(key),
-        )
-      : ["--batch-dir", "--daemon"];
+  const allowed = valueFlagsForCommand(op);
   if (!allowed.includes(flag)) {
     return { next: i, error: `Unknown flag ${flag} for ${op}.` };
   }
@@ -150,18 +205,9 @@ function readArguments(op: string, args: string[], state: ParsedValues): string 
       return "HELP";
     }
     if (raw === "--") {
-      if (op !== "start") {
-        return "Only start accepts extra daemon flags.";
-      }
-      state.extraFlags.push(...args.slice(i + 1));
-      break;
+      return readPassthrough(op, args.slice(i + 1), state);
     }
-    if (raw === "--split-adb-coordination" && op === "init") {
-      state.split = true;
-      continue;
-    }
-    if (raw === "--devices" && op === "status") {
-      state.devices = true;
+    if (readBooleanFlag(op, raw, state)) {
       continue;
     }
     const result = readValueArgument(op, args, i, state);
@@ -175,6 +221,34 @@ function readArguments(op: string, args: string[], state: ParsedValues): string 
     ...state.daemonArgs,
     ...Object.values(state.daemonArgsByDaemon).flat(),
   ]);
+}
+function readPassthrough(op: string, tokens: string[], state: ParsedValues): string | undefined {
+  if (op === "boot-gate") {
+    if (!tokens.length) {
+      return "-- requires a command.";
+    }
+    state.bootCommand = tokens;
+    return undefined;
+  }
+  if (op !== "start") {
+    return "Only start and boot-gate accept -- passthrough.";
+  }
+  state.extraFlags.push(...tokens);
+  return daemonArgsRefusal(tokens);
+}
+function readBooleanFlag(op: string, flag: string, state: ParsedValues): boolean {
+  const flags: Record<string, { op: string; key: "split" | "dryRun" | "devices" | "strict" }> = {
+    "--split-adb-coordination": { op: "init", key: "split" },
+    "--dry-run": { op: "shutdown-devices", key: "dryRun" },
+    "--devices": { op: "status", key: "devices" },
+    "--strict": { op: "preflight", key: "strict" },
+  };
+  const match = flags[flag];
+  if (!match || match.op !== op) {
+    return false;
+  }
+  state[match.key] = true;
+  return true;
 }
 function initOptions(state: ParsedValues): PrivateDaemonCommand | { error: string } {
   const { values } = state;
@@ -192,6 +266,7 @@ function initOptions(state: ParsedValues): PrivateDaemonCommand | { error: strin
     daemonArgsByDaemon: state.daemonArgsByDaemon,
     splitAdbCoordination: state.split,
     auxRoot: values["--aux-root"],
+    ...(state.protectedDevices.length ? { protectedDevices: state.protectedDevices } : {}),
     orphanIdleMs: Number(values["--orphan-idle-ms"] ?? 0),
   };
   if (![options.count, options.basePort, options.orphanIdleMs].every(Number.isSafeInteger)) {
@@ -228,6 +303,11 @@ export function parsePrivateDaemonArgs(
     extraFlags: [],
     split: false,
     devices: false,
+    protectedDevices: [],
+    deviceSelectors: [],
+    dryRun: false,
+    strict: false,
+    bootCommand: [],
   };
   const error = readArguments(op, args, state);
   if (error === "HELP") {
@@ -242,6 +322,12 @@ export function parsePrivateDaemonArgs(
   if (op === "init") {
     return initOptions(state);
   }
+  if (op === "preflight") {
+    return { op, batchDir: state.values["--batch-dir"], strict: state.strict };
+  }
+  if (op === "boot-gate") {
+    return bootGateOptions(state.values, state.bootCommand);
+  }
   return existingCommand(op, state);
 }
 function existingCommand(
@@ -249,12 +335,19 @@ function existingCommand(
   state: ParsedValues,
 ): ExistingBatchCommand | { error: string } {
   const raw = state.values["--daemon"];
-  const daemon = raw === undefined ? undefined : Number(raw);
-  if (raw !== undefined && (!/^\d+$/.test(raw) || !Number.isSafeInteger(daemon) || daemon! < 1)) {
+  const daemon = raw === undefined ? undefined : durationArgument(raw, 1, 1);
+  if (raw !== undefined && daemon === undefined) {
     return { error: "--daemon must be a positive integer." };
   }
   if ((op === "stop" || op === "env") && daemon === undefined) {
     return { error: `${op} requires --daemon K.` };
+  }
+  if (op === "devices" || op === "shutdown-devices") {
+    return deviceCommand(op, state, daemon);
+  }
+  const waitMs = durationArgument(state.values["--wait-ms"], 30000, 0);
+  if (waitMs === undefined) {
+    return { error: "--wait-ms must be an integer >= 0." };
   }
   return {
     op: op as "start" | "stop" | "status" | "env" | "wrappers",
@@ -262,9 +355,53 @@ function existingCommand(
     daemon,
     extraFlags: state.extraFlags,
     devices: state.devices,
+    ...(op === "stop" ? { waitMs } : {}),
   };
 }
+function deviceCommand(
+  op: "devices" | "shutdown-devices",
+  state: ParsedValues,
+  daemon: number | undefined,
+): BatchDevicesCommand | { error: string } {
+  const timeoutMs = durationArgument(
+    state.values["--timeout-ms"],
+    op === "devices" ? 30000 : 60000,
+    1,
+  );
+  if (timeoutMs === undefined) {
+    return { error: "--timeout-ms must be a positive integer." };
+  }
+  return {
+    op,
+    batchDir: state.values["--batch-dir"],
+    daemon,
+    extraFlags: [],
+    timeoutMs,
+    ...(op === "shutdown-devices"
+      ? { deviceSelectors: state.deviceSelectors, dryRun: state.dryRun }
+      : {}),
+  };
+}
+function durationArgument(
+  raw: string | undefined,
+  fallback: number,
+  minimum: number,
+): number | undefined {
+  const value = Number(raw ?? fallback);
+  return (raw === undefined || /^\d+$/.test(raw)) && Number.isSafeInteger(value) && value >= minimum
+    ? value
+    : undefined;
+}
 export interface PrivateDaemonCliDeps {
+  timer: Timer;
+  hostStats(): HostStats;
+  bootLock: { tryAcquire(path: string, role: string): boolean; release(path: string): void };
+  signalPid(pid: number, signal: NodeJS.Signals): void;
+  requestSocket(
+    path: string,
+    request: { method: string; params?: unknown; timeoutMs: number },
+  ): Promise<{ success: boolean; result?: unknown; error?: string; code?: string | number }>;
+
   runtimePath: string;
   repoRoot: string;
   removeFile(path: string): void;
@@ -335,7 +472,23 @@ function readPrivateBatch(
   batchDir: string,
   deps: PrivateDaemonCliDeps,
 ): { options: PrivateDaemonBatchOptions; specs: PrivateDaemonSpec[] } {
-  // Validate the requested read path before opening any manifest.
+  validateBatchPath(batchDir, deps);
+  const manifest = manifestSchema.parse(JSON.parse(deps.readFile(join(batchDir, "batch.json"))));
+  const options = manifest.options;
+  const specs = derivePrivateDaemonBatch(options);
+  if (resolve(options.batchDir) !== resolve(batchDir)) {
+    throw new Error("Tampered batch manifest: batch directory does not match.");
+  }
+  if (!isDeepStrictEqual(manifest.specs, specs)) {
+    throw new Error(
+      olderManifestMessage(manifest.specs, specs) ??
+        "Tampered batch manifest: options/specs must match the canonical private derivation.",
+    );
+  }
+  return { options, specs };
+}
+function validateBatchPath(batchDir: string, deps: PrivateDaemonCliDeps): void {
+  // Validate the requested path before any host probe or manifest read.
   const provisional: PrivateDaemonBatchOptions = {
     batchDir,
     count: 1,
@@ -350,19 +503,6 @@ function readPrivateBatch(
   if (pathError) {
     throw new Error(pathError);
   }
-  const manifest = manifestSchema.parse(JSON.parse(deps.readFile(join(batchDir, "batch.json"))));
-  const options = manifest.options;
-  const specs = derivePrivateDaemonBatch(options);
-  if (resolve(options.batchDir) !== resolve(batchDir)) {
-    throw new Error("Tampered batch manifest: batch directory does not match.");
-  }
-  if (!isDeepStrictEqual(manifest.specs, specs)) {
-    throw new Error(
-      olderManifestMessage(manifest.specs, specs) ??
-        "Tampered batch manifest: options/specs must match the canonical private derivation.",
-    );
-  }
-  return { options, specs };
 }
 function initializeBatch(
   options: PrivateDaemonBatchOptions,
@@ -395,7 +535,10 @@ function initializeBatch(
   deps.writeFile(manifestPath, JSON.stringify({ options, specs }, null, 2));
   writePrivateDaemonWrappers(options.batchDir, specs, deps);
 }
-type ExistingBatchCommand = Exclude<PrivateDaemonCommand, { op: "init" }>;
+type ExistingBatchCommand = Exclude<
+  PrivateDaemonCommand,
+  { op: "init" | "preflight" | "boot-gate" }
+>;
 function preflightStart(specs: PrivateDaemonSpec[], deps: PrivateDaemonCliDeps): void {
   for (const spec of specs) {
     const record = pidRecord(spec.pidFilePath, deps);
@@ -429,9 +572,6 @@ async function runLifecycle(
   if (result.exitCode !== 0) {
     return result.exitCode;
   }
-  if (command.op === "stop") {
-    deps.removeFile(spec.plainPidFilePath);
-  }
   if (command.op === "start") {
     const record = pidRecord(spec.pidFilePath, deps);
     if (!record) {
@@ -451,12 +591,23 @@ async function runLifecycle(
   }
   return 0;
 }
-async function runExistingBatch(
-  command: ExistingBatchCommand,
-  options: PrivateDaemonBatchOptions,
+async function logBatchStatus(
   specs: PrivateDaemonSpec[],
+  devices: boolean,
   deps: PrivateDaemonCliDeps,
 ): Promise<number> {
+  for (const spec of specs) {
+    deps.log(JSON.stringify(await privateDaemonStatus(spec, deps)));
+  }
+  if (devices) {
+    deps.log(JSON.stringify(await privateDaemonDeviceStatus(specs, deps)));
+  }
+  return 0;
+}
+function selectBatchSpecs(
+  command: ExistingBatchCommand,
+  specs: PrivateDaemonSpec[],
+): PrivateDaemonSpec[] {
   const selected =
     command.daemon === undefined ? specs : specs.filter((spec) => spec.index === command.daemon);
   if (!selected.length) {
@@ -466,21 +617,32 @@ async function runExistingBatch(
   if (argError) {
     throw new Error(argError);
   }
+  return selected;
+}
+async function runExistingBatch(
+  command: ExistingBatchCommand,
+  options: PrivateDaemonBatchOptions,
+  specs: PrivateDaemonSpec[],
+  deps: PrivateDaemonCliDeps,
+): Promise<number> {
+  const selected = selectBatchSpecs(command, specs);
+  if (command.op === "stop") {
+    return privateDaemonStop(selected[0], options, command.waitMs ?? 30000, deps);
+  }
+  if (command.op === "devices" || command.op === "shutdown-devices") {
+    return privateDaemonDevices(command, options, selected, deps);
+  }
   if (command.op === "wrappers") {
     writePrivateDaemonWrappers(options.batchDir, selected, deps);
     return 0;
   }
   if (command.op === "status") {
-    for (const spec of selected) {
-      deps.log(JSON.stringify(await privateDaemonStatus(spec, deps)));
-    }
-    if (command.devices) {
-      deps.log(JSON.stringify(await privateDaemonDeviceStatus(selected, deps)));
-    }
-    return 0;
+    return logBatchStatus(selected, command.devices ?? false, deps);
   }
   if (command.op === "start") {
     preflightStart(selected, deps);
+    await recordHostPreflight(options.batchDir, deps);
+    await recordHostBaseline(options.batchDir, deps);
   }
   for (const spec of selected) {
     if (command.op === "env") {
@@ -494,11 +656,23 @@ async function runExistingBatch(
   }
   return 0;
 }
+async function runPreflightCommand(
+  command: Extract<PrivateDaemonCommand, { op: "preflight" }>,
+  deps: PrivateDaemonCliDeps,
+): Promise<number> {
+  const report = await hostPreflight(command.batchDir, deps);
+  deps.log(JSON.stringify(report));
+  return command.strict && report.warnings.length ? 1 : 0;
+}
 export async function runPrivateDaemonCommand(
   command: PrivateDaemonCommand,
   deps: PrivateDaemonCliDeps,
 ): Promise<number> {
   try {
+    if (command.op === "preflight") {
+      validateBatchPath(command.batchDir, deps);
+      return await runPreflightCommand(command, deps);
+    }
     const { options, specs } =
       command.op === "init"
         ? { options: command.options, specs: derivePrivateDaemonBatch(command.options) }
@@ -515,7 +689,11 @@ export async function runPrivateDaemonCommand(
     }
     if (command.op === "init") {
       initializeBatch(options, specs, deps);
+      await recordHostPreflight(options.batchDir, deps);
       return 0;
+    }
+    if (command.op === "boot-gate") {
+      return await bootGate(command, deps);
     }
     return await runExistingBatch(command, options, specs, deps);
   } catch (error) {
@@ -534,8 +712,48 @@ export async function main(): Promise<number> {
     console.log(parsed.help);
     return 0;
   }
-  const { connectFrameSocket } = await import("./daemon-frame");
+  const { connectFrameSocket, connectWithDeadline, FrameRpc } = await import("./daemon-frame");
   return runPrivateDaemonCommand(parsed, {
+    timer: defaultTimer,
+    hostStats: () => ({
+      platform: platform(),
+      loadAverage: loadavg(),
+      cpuCount: cpus().length,
+      freeMemoryBytes: freemem(),
+      totalMemoryBytes: totalmem(),
+    }),
+    bootLock: {
+      tryAcquire: (path, role) =>
+        tryAcquireExclusiveLock(path, { pid: process.pid, metadata: role }),
+      release: (path) => releaseExclusiveLock(path, process.pid),
+    },
+    signalPid: (pid, signal) => {
+      process.kill(pid, signal);
+    },
+    requestSocket: async (path, request) => {
+      const startedAt = defaultTimer.now();
+      const connection = await connectWithDeadline(
+        connectFrameSocket,
+        path,
+        defaultTimer,
+        request.timeoutMs,
+      );
+      const rpc = new FrameRpc(connection, {
+        timer: defaultTimer,
+        ids: defaultIdGenerator,
+        out: () => {},
+      });
+      try {
+        const remainingMs = request.timeoutMs - (defaultTimer.now() - startedAt);
+        if (remainingMs <= 0) {
+          throw new Error(`${request.method} timed out while connecting.`);
+        }
+        return await rpc.request(request.method, request.params, remainingMs);
+      } finally {
+        rpc.fail(new Error("Private daemon request finished."));
+        connection.destroy();
+      }
+    },
     runtimePath: process.execPath,
     repoRoot: resolve(import.meta.dir, "../.."),
     removeFile: (path) => rmSync(path, { force: true }),

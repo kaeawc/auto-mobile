@@ -5,6 +5,7 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 
 /**
  * Sealed class hierarchy for all outbound WebSocket messages from Android to MCP server.
@@ -809,6 +810,8 @@ data class PrototypeStatusEntry(
   @EncodeDefault(EncodeDefault.Mode.NEVER) val suspended: Boolean = false,
   /** The mode it is drawn in right now (`prototype_appearance_v1`). Omitted by older APKs. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val appearance: PrototypeAppearance? = null,
+  /** The shown spec's read-only data; absent when the spec has none. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val data: JsonObject? = null,
 )
 
 @Serializable

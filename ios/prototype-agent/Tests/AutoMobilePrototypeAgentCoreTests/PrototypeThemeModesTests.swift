@@ -41,6 +41,7 @@ final class PrototypeThemeModesTests: XCTestCase {
             "get_prototype_status", "prototype_show_in_place_v1", "prototype_anchor_v1", "hide_for_capture",
             "restore_after_capture", "screenshot_hide_prototype_v1", "prototype_inspect_v1",
             "prototype_theme_modes_v1", "prototype_appearance_v1", "prototype_window_chrome_v1",
+            "prototype_data_model_v1",
         ])
     }
 

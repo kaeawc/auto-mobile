@@ -1,3 +1,6 @@
+import { PrototypeAgentSuspendedError } from "../../../../src/features/prototype/ios/prototypeAgentSuspended";
+import { PrototypeAgentRequestTimeoutError } from "../../../../src/features/prototype/ios/prototypeAgentClient";
+import { ActionableError, toActionableError } from "../../../../src/models/ActionableError";
 import { describe, expect, test } from "bun:test";
 import {
   captureHideDeadlineMs,
@@ -17,10 +20,13 @@ function fakeAgent(
     success: true,
     ...(type === "restore_after_capture" ? { restored: true } : {}),
   }),
+  requestCalls?: Parameters<PrototypeAgentClient["request"]>[],
 ): PrototypeAgentClient {
   return {
     handshake: { agentVersion: "t", protocolVersion: 1, capabilities },
-    async request(type: PrototypeAgentRequestType, body?: PrototypeAgentMessage) {
+    async request(...args: Parameters<PrototypeAgentClient["request"]>) {
+      requestCalls?.push(args);
+      const [type, body] = args;
       calls.push(
         body?.deadlineMs !== undefined
           ? `${type}:${body.deadlineMs}`
@@ -231,5 +237,39 @@ describe("IosPrototypeTransport.captureWithPrototypeHidden", () => {
       );
       expect(bodies).toEqual([]);
     });
+  });
+});
+
+describe("iOS status suspension deadline", () => {
+  test("only status uses the 3000 ms override", async () => {
+    const requestCalls: Parameters<PrototypeAgentClient["request"]>[] = [];
+    const agent = fakeAgent([], [], undefined, requestCalls);
+    const transport = new IosPrototypeTransport(agent);
+    await transport.status();
+    expect(requestCalls[0]).toEqual(["get_prototype_status", undefined, { timeoutMs: 3000 }]);
+    await transport.show({ id: "test", root: { type: "text", text: "Hello" } });
+    await transport.dismiss({ all: true });
+    expect(requestCalls[1]).toHaveLength(2);
+    expect(requestCalls[2]).toHaveLength(2);
+  });
+  test("status timeout gives foreground guidance and preserves its cause and inspect message", async () => {
+    const timeout = new PrototypeAgentRequestTimeoutError("get_prototype_status", 3000);
+    const transport = new IosPrototypeTransport(fakeAgent([], [], () => timeout));
+    const error = await transport.status().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ActionableError);
+    expect(error).toBeInstanceOf(PrototypeAgentSuspendedError);
+    expect(error).not.toHaveProperty("code");
+    expect(error).toMatchObject({
+      name: "PrototypeAgentSuspendedError",
+      cause: timeout,
+      message:
+        "Prototype agent did not answer get_prototype_status within 3000 ms. iOS suspends an app that is not in the foreground, and the prototype agent injected into it, so the prototype's app is most likely in the background. Bring that app back to the foreground with launchApp (the prototype returns with its state), then retry.",
+    });
+    expect(toActionableError(error, "Prototype inspect failed")).toBe(error);
+  });
+  test("connection errors propagate unchanged", async () => {
+    const error = new ActionableError("connection closed");
+    const transport = new IosPrototypeTransport(fakeAgent([], [], () => error));
+    await expect(transport.status()).rejects.toBe(error);
   });
 });

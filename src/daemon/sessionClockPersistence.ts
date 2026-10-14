@@ -68,6 +68,14 @@ class WrittenStamps {
 
   remember(sessionUuid: string, field: StampField, stamp: WrittenStamp): void {
     const entry = this.bySession.get(sessionUuid) ?? {};
+    // Activity rows keep their newer last-used stamp when a stale write finally retries.
+    if (
+      field === "lastUsed" &&
+      entry.lastUsed &&
+      stamp.sessionClockMs < entry.lastUsed.sessionClockMs
+    ) {
+      return;
+    }
     // Re-insert so the most recently written session is the last to be evicted.
     this.bySession.delete(sessionUuid);
     this.bySession.set(sessionUuid, { ...entry, [field]: stamp });
@@ -82,6 +90,11 @@ class WrittenStamps {
   recall(sessionUuid: string, field: StampField, wallMs: number): number | undefined {
     const stamp = this.bySession.get(sessionUuid)?.[field];
     return stamp?.wallMs === wallMs ? stamp.sessionClockMs : undefined;
+  }
+
+  wallStamp(sessionUuid: string, field: StampField, sessionClockMs: number): number | undefined {
+    const stamp = this.bySession.get(sessionUuid)?.[field];
+    return stamp?.sessionClockMs === sessionClockMs ? stamp.wallMs : undefined;
   }
 }
 
@@ -124,9 +137,11 @@ class SessionClockPersistence implements DeviceSessionPersistence {
     private readonly frame: SessionClockFrame,
   ) {}
 
-  /** `sessionClockMs` as wall ms, remembered so this daemon reads its own stamp back exactly. */
+  /** Reuse unchanged instants' stamps so conversion jitter cannot make a policy write stale. */
   private store(sessionUuid: string, field: StampField, sessionClockMs: number): number {
-    const wallMs = this.frame.toWall(sessionClockMs);
+    const wallMs =
+      this.written.wallStamp(sessionUuid, field, sessionClockMs) ??
+      this.frame.toWall(sessionClockMs);
     this.written.remember(sessionUuid, field, { wallMs, sessionClockMs });
     return wallMs;
   }

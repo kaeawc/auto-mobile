@@ -9,7 +9,7 @@ Use the \`prototype\` tool with \`action: "show"\` and a full \`spec\`. A show w
 prototype already on screen replaces it; there is no partial update. A large or script-generated spec can be written to a local JSON file and
 shown with \`specPath\` (an absolute path the daemon reads) in place of \`spec\`; give exactly one of
 the two. The spec is
-\`{id, window, theme?, state?, motion?, root}\`. State values are flat scalars (string, finite
+\`{id, window, theme?, data?, state?, motion?, root}\`. State values are flat scalars (string, finite
 number, boolean). State keys match \`[A-Za-z_][A-Za-z0-9_]{0,63}\`.
 
 Minimal spec:
@@ -70,10 +70,10 @@ itself is not repeated). A list is a \`column\` with \`repeat\` whose single chi
 Grammar:
 
 - \`{index}\` is the zero-based position; \`{<as>.<field>}\` reads a field of the current item.
-- Items are literal objects of scalar fields (no nesting); \`as\` is a state-key-shaped identifier.
+- Literal items are objects of scalar fields (no nesting); \`as\` is a state-key-shaped identifier.
   A state key cannot hold a list.
 - Placeholders are bound in a template child's \`text\`, the label/title/text fields of components
-  (button, fab, segmentedButton options, topAppBar, dialog, snackbar), condition operands
+  (button, fab, segmentedButton options, topAppBar, dialog, snackbar), state condition operands
   (\`equals\`/\`notEquals\` strings), \`setState.value\` and \`emit.name\`. \`emit.payload\` is not bound.
   Anything else, including a \`{key}\` state placeholder and other braces, is left untouched.
 - State keys bind too: \`stateKey\`, \`hourKey\`/\`minuteKey\`, a list item's trailing \`stateKey\`,
@@ -94,6 +94,63 @@ Rejected (same paths in TypeScript and Kotlin):
   or a state-key placeholder outside every template
 - an expanded tree that exceeds the node or image limit (fails at the container's \`repeat\`);
   depth is unaffected because instances are siblings
+`;
+
+export const GUIDE_DATA = `## Data
+
+\`data\` is agent-owned, read-only content: nested objects, arrays, strings, finite numbers and
+booleans, without null. \`state\` remains the user-owned scalar map; actions only write declared
+state keys. Only a new full show replaces data. See the generated Limits table.
+The data byte limit uses the \`emit.payload\` cost: every number costs 32 bytes regardless of
+its digits, so numeric-heavy data reaches the limit before its serialized size does.
+
+\`MAX_PROTOTYPE_REPEAT_PATH_CELLS\` bounds all path-bound repeats after component expansion,
+including empty templates. An instantiated object item costs one cell per projected scalar member,
+with a minimum of one cell. Literal repeats do not count. Containers are checked in pre-order;
+a crossing container fails at \`repeat.items.path\` with \`Repeat path cell limit exceeded\`, after
+its three path-source checks and before template projection.
+
+Pointers are nonempty RFC 6901 paths relative to data, beginning with \`/\`; decode \`~1\` as \`/\`
+and \`~0\` as \`~\`. Object keys are exact own members; array indices are \`0\` or a positive decimal
+without leading zeros. An empty key uses a trailing slash. Invalid escapes and overlong pointers
+are rejected; a missing text path renders empty.
+
+\`\`\`json
+{
+  "id": "orders",
+  "window": { "placement": { "type": "fullscreen" } },
+  "data": { "orders": [{ "id": 7, "title": "Latte", "total": 4.5 }], "cartCount": 1 },
+  "state": { "liked_7": false },
+  "root": {
+    "type": "column",
+    "repeat": { "items": { "path": "/orders" }, "as": "item", "key": "id" },
+    "children": [{ "type": "text", "text": "{item.title} ({data:/cartCount})",
+      "visibleWhen": { "data": "/cartCount", "gt": 0 },
+      "onTap": [{ "type": "toggle", "key": "liked_{item.id}" }] }]
+  }
+}
+\`\`\`
+
+- \`repeat.items: {path}\` must resolve to an array of objects (empty is valid). Only scalar members
+  with field-shaped names are projected into items. \`repeat.key\` names a field every item has;
+  its rendered values must be unique, for literal lists too.
+- \`{data:/pointer}\` binds only the text-kind fields repeat already binds: text, button/FAB labels,
+  segmented option labels, app bar title/navigation/action labels, dialog title/text/button labels,
+  and snackbar text/action label. Missing, object or array values become empty text. Other braces
+  stay literal. A data string is inserted as plain text before repeat and state binding, so
+  \`{item.x}\`, \`{index}\` or \`{key}\` inside it bind afterwards exactly like authored text.
+  Data values cannot be escaped; inserted strings are never scanned again for data placeholders.
+  Pointers are untouched by component props.
+- A condition uses exactly one of \`key\`, \`data\`, \`all\`, \`any\`, \`not\`. A data condition has exactly
+  one comparison: \`equals\` (same scalar type and value), \`notEquals\` (its inverse, including missing
+  or non-scalar), \`gt\` or \`lt\` (numbers only, otherwise false). \`equals\`/\`notEquals\` operands are
+  literals; repeat placeholders there are rejected. \`bottomSheet.openWhen\` remains boolean state.
+
+The host validates data and repeat paths; the device resolves bindings once per show before
+repeat expansion. All data uses require \`prototype_data_model_v1\`; an older device is refused
+before uploads or show, with an update/relaunch hint. \`status\` reports the last successful show's
+data next to state; \`inspect\` reports and adopts device data. Absent data is omitted; dismiss
+clears it. Events never carry data.
 `;
 
 export const GUIDE_COMPONENTS = `## Reuse: components
@@ -270,13 +327,19 @@ Authoring choices:
   bitmap sized to the node, so many small images in a list cost more than one strip image. Decode
   is cached and runs off the main thread. Further per-recomposition work in images and icons is
   *being changed (#12138)*. The iOS image path was not checked.
-- **Accessibility nodes.** On Android every node reports an accessibility node except a layout
-  container (\`box\`, \`row\`, \`column\`, \`scroll\`, \`pager\`, \`card\`, \`divider\`, \`spacer\`) that
-  is not tappable and has no text, \`testTag\`, content description or state. Every \`text\`,
-  \`icon\` and \`image\` is therefore one, and a \`testTag\` or an \`onTap\` on a container adds one.
-  Give a \`testTag\` only to nodes you will look up. Every accessibility node is work whenever
-  \`observe\` or a screen reader reads the tree. *Being changed (#12135):* decorative icons and
-  images are exposed and labelled with their role name.
+- **Accessibility nodes.** On Android a decorative \`icon\` or \`image\` (not tappable,
+  no \`testTag\`, no \`contentDescription\`) reports no node, except inside a tappable node with
+  no text of its own and no \`contentDescription\`, where icons and images keep their node and label
+  because they are the only way to find it. A tappable \`box\`,
+  \`row\`, \`column\` or \`card\` whose only text is one \`text\` node is one node
+  labelled by that text when its descendants have no independent tags, actions, descriptions,
+  controls or visibility conditions. Other non-tappable text, icon and image nodes are never labelled
+  with their kind; empty tappable ones keep the kind as their only selector handle. An unlabelled,
+  non-tappable layout container (\`box\`, \`row\`, \`column\`, \`scroll\`, \`pager\`, \`card\`,
+  \`divider\`, \`spacer\`) with no text, \`testTag\`, content description or state also reports
+  no node. Every text, tagged node and tappable node stays targetable. Give a \`testTag\` only to
+  nodes you will look up. Every accessibility node is work whenever \`observe\` or a screen reader
+  reads the tree.
 - **Long lists.** A \`scroll\` node builds all of its children up front on both platforms, so a
   long list inside \`scroll\` pays for every row when it is shown. *Being changed on Android
   (#12139).* \`repeat\` expands to real nodes that count against the node limit.
@@ -299,6 +362,15 @@ export const GUIDE_ERRORS = `## Common validation errors
 | Message | Fix |
 | --- | --- |
 | \`Unknown prototype icon name\` | Look the name up with \`automobile:prototype/icons?query=<word>\`. |
+| \`Expected object\` / \`Invalid data value\` | Data must be an object of nested JSON values without null or nonfinite numbers. |
+| \`Data depth limit exceeded\` / \`Data array limit exceeded\` / \`Data byte limit exceeded\` | Reduce data to the generated limits. |
+| \`Invalid pointer value\` | Use a nonempty RFC 6901 pointer within the pointer limit. |
+| \`Repeat path does not resolve to an array\` / \`Repeat path resolves to more than 128 items\` / \`Repeat path item <i> is not an object\` | Point to an array of objects within the repeat item limit. |
+| \`Duplicate repeat key "x" (items <i> and <j>)\` | Give every item a unique rendered identity. |
+| \`Bound state key "x" is invalid (repeat item <i>)\` | A path-bound key must form a valid state key; error is at repeat.items.path. |
+| \`Requires key or data\` | Supply one condition source with exactly one comparison. |
+| \`Repeat path cell limit exceeded\` | Reduce path-bound repeats or the scalar members projected per item; see \`MAX_PROTOTYPE_REPEAT_PATH_CELLS\`. |
+| \`Repeat placeholder in a data condition operand is not supported\` | Use a literal operand; state conditions still bind repeat operands. |
 | \`Unknown repeat field "x"\` | Every item needs the field the placeholder names. |
 | \`Missing component prop "x"\` / \`Unused component prop\` | Pass exactly the props the component's \`{props.*}\` placeholders name. |
 | \`Expanded node limit exceeded\` | Fewer items or a smaller template; the limit counts every instance. |

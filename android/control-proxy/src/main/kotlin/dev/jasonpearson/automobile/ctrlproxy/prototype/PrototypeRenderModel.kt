@@ -113,13 +113,14 @@ fun guardPrototypeTree(root: PrototypeNode) {
 fun mapPrototypeSpec(
   spec: PrototypeSpec,
   pages: Map<String, Int> = emptyMap(),
-): PrototypeRenderModel {
-  guardPrototypeTree(spec.root)
-  return prototypeRenderModel(
-    spec,
-    PrototypeNodeMapping(spec.state.orEmpty(), pages).map(spec.root, "root"),
-  )
-}
+): PrototypeRenderModel =
+  PrototypeTrace.section(PrototypeTrace.MAP_PROTOTYPE_SPEC) {
+    guardPrototypeTree(spec.root)
+    prototypeRenderModel(
+      spec,
+      PrototypeNodeMapping(spec.state.orEmpty(), pages).map(spec.root, "root"),
+    )
+  }
 
 internal fun prototypeRenderModel(spec: PrototypeSpec, mapped: PrototypeRenderNode) =
   PrototypeRenderModel(

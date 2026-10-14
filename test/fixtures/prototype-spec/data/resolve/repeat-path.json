@@ -1,0 +1,61 @@
+{
+  "spec": {
+    "id": "resolve",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": {
+          "path": "/orders"
+        },
+        "as": "item",
+        "key": "id"
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "{item.title}"
+        }
+      ]
+    },
+    "data": {
+      "orders": [
+        {
+          "id": "one",
+          "title": "Latte",
+          "total": 4.5,
+          "active": true,
+          "details": {
+            "size": "large"
+          },
+          "bad name": 7
+        }
+      ]
+    }
+  },
+  "root": {
+    "type": "column",
+    "repeat": {
+      "items": [
+        {
+          "id": "one",
+          "title": "Latte",
+          "total": 4.5,
+          "active": true
+        }
+      ],
+      "as": "item",
+      "key": "id"
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "{item.title}"
+      }
+    ]
+  }
+}

@@ -1,3 +1,4 @@
+import { FakeEmulatorProcessStopper } from "../fakes/FakeEmulatorProcessStopper";
 import { describe, expect, spyOn } from "bun:test";
 import {
   getDeviceToolsDependencies,
@@ -477,6 +478,7 @@ describe("reserved device stop policy", () => {
         f.pool.getDevice(f.device.deviceId)!.avdName = f.device.name;
         f.manager.setBootedDevices("android", [unknown]);
         setDeviceToolsDependencies({
+          androidEmulatorProcessStopper: new FakeEmulatorProcessStopper(),
           resolveRunningAndroidAvdName: async () => {
             if (mode === "throws") {
               throw new Error("console transport transitional");

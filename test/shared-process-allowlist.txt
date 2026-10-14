@@ -798,7 +798,6 @@ test/models/ActionableError.test.ts
 test/models/BaseActionResult.test.ts
 test/models/androidAvdCapabilityInventory.test.ts
 test/models/formFactor.test.ts
-test/models/managedSlotConfig.test.ts
 test/models/removedTools.test.ts
 test/models/screenScaleMetadata.test.ts
 test/package/noBundledCoordinationServer.guard.test.ts

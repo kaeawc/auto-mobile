@@ -164,7 +164,7 @@ describe("prototype patch host", () => {
       ];
       const refused = await patch(ops, {}, device);
       expect(refused.success).toBe(false);
-      expect(refused.error).toContain("ops[0].node.spans");
+      expect(refused.error).toContain("root.children[0].spans");
       expect(refused.error).toContain(PROTOTYPE_RICH_TEXT_CAPABILITY);
       expect(proxy.patchRequests).toEqual([]);
       expect(agent.patchRequests).toEqual([]);

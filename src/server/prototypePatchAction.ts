@@ -45,7 +45,8 @@ export interface PrototypePatchDependencies {
   store: Pick<PrototypeStatusStore, "shownSpecs" | "recordPatchedData">;
   transport: Pick<PrototypeTransport, "patch">;
   supportsPatch: () => Promise<boolean>;
-  richTextRefusal: () => Promise<string | undefined>;
+  /** Checks spec-level capabilities on the complete validated patch result. */
+  specRefusal?: (spec: unknown) => Promise<string | undefined>;
   platform: "android" | "ios";
   queue: PrototypePatchQueue;
   /** Retires the device's cached observation after an applied patch. */
@@ -129,6 +130,10 @@ async function queuedPatch(
   if (!("spec" in applied)) {
     return applied;
   }
+  const refused = await deps.specRefusal?.(applied.spec);
+  if (refused !== undefined) {
+    return failure(refused);
+  }
   signal?.throwIfAborted();
   const result = await sendPatch(deps, args);
   if (result.delivery === "indeterminate") {
@@ -151,13 +156,21 @@ async function queuedPatch(
     deps.store.recordPatchedData(deviceId, args.id, applied.validated.data);
   }
   deps.retire(result);
+  return successfulPatchOutput(fields.revision, committed, args.id);
+}
+
+function successfulPatchOutput(
+  revision: number | undefined,
+  committed: boolean,
+  id: string,
+): PrototypePatchOutput {
   return {
     success: true,
-    ...(fields.revision === undefined ? {} : { revision: fields.revision }),
+    ...(revision === undefined ? {} : { revision }),
     ...(committed
       ? {}
       : {
-          warning: `A show on this device overlapped this patch, so the host no longer tracks prototype ${args.id}'s spec: show it again before the next patch.`,
+          warning: `A show on this device overlapped this patch, so the host no longer tracks prototype ${id}'s spec: show it again before the next patch.`,
         }),
   };
 }
@@ -172,10 +185,6 @@ export async function performPrototypePatch(
   signal?.throwIfAborted();
   if (!supported) {
     return failure(new ActionableError(prototypePatchUnsupportedMessage(deps.platform)).message);
-  }
-  const richTextRefusal = await deps.richTextRefusal();
-  if (richTextRefusal) {
-    return failure(richTextRefusal);
   }
   if (args.baseRevision === undefined && prototypePatchTouchesState(args.ops)) {
     return failure("Invalid patch at baseRevision: required when a patch has /state ops");

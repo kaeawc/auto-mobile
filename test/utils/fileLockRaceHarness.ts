@@ -773,11 +773,45 @@ function isLegacySelfBlock(fs: FakeLockFileSystem, actor: Actor): boolean {
   return retained !== undefined && actor.legacyPublications?.has(retained.ino) === true;
 }
 
+/** A reopen shares the owner's bytes, so only its own publication identities name a non-holder. */
+function isNamedNonHolder(fs: FakeLockFileSystem, actor: Actor): boolean {
+  if (!actor.reopenOwner) {
+    return isNamed(fs, actor);
+  }
+  return [PATH, `${PATH}.displaced`].some((name) => {
+    const node = fs.peek(name);
+    return (
+      node !== undefined &&
+      (node.ino === actor.publicationIno || actor.publicationCopies?.has(node.ino) === true)
+    );
+  });
+}
+
+function retryNonHolder(actor: Actor): void {
+  if (tryAcquireExclusiveLock(PATH, actor.options)) {
+    releaseExclusiveLock(PATH, actor.pid, actor.options.ownerToken, actor.options.fileSystem);
+  }
+}
+
 function finishRetainedSchedule(context: RetainedContext): void {
   const { f, actors } = context;
   f.fs.failure = undefined;
   assertReleasedActors(f.fs, actors);
   const live = actors.filter((a) => f.live.has(a.pid) && a.phase !== "crashed");
+  // C5 includes reopens and runs BEFORE an on-behalf release can hide identical doomed bytes.
+  const toldFalse = live.filter((a) => !a.releaseReturned);
+  for (const actor of toldFalse.filter((a) => isNamedNonHolder(f.fs, a))) {
+    if (
+      !isLegacySelfBlock(f.fs, actor) &&
+      (!actor.options.fileSystem || !hasPendingBackOut(actor.options.fileSystem, PATH))
+    ) {
+      throw new Error(`live non-holder ${actor.pid} is named with no pending back-out`);
+    }
+  }
+  // Consult a reopen's own pending entries before its R2 owner's identical-bytes release.
+  for (const actor of toldFalse.filter((a) => a.reopenOwner)) {
+    retryNonHolder(actor);
+  }
   // The ONLY two releases made on an actor's behalf, both documented residuals:
   // R2 — a holder whose release missed its privately displaced publication, restored afterwards;
   // legacy self-block — a doomed wx publication (no identity proof) retained at F.
@@ -787,20 +821,9 @@ function finishRetainedSchedule(context: RetainedContext): void {
   )) {
     releaseExclusiveLock(PATH, actor.pid, actor.options.ownerToken, actor.options.fileSystem);
   }
-  // Every other process told "not acquired" never held. If it is still named at P or F, its own
-  // process must remember a pending back-out, or nothing will ever remove that name: stuck.
-  const toldFalse = live.filter((a) => !a.releaseReturned && !a.reopenOwner);
-  for (const actor of toldFalse.filter((a) => isNamed(f.fs, a))) {
-    if (!actor.options.fileSystem || !hasPendingBackOut(actor.options.fileSystem, PATH)) {
-      throw new Error(`live non-holder ${actor.pid} is named with no pending back-out`);
-    }
-  }
-  // What a real process does next: one more attempt with its original options, which drains
-  // its pending back-out (and releases if it now legitimately acquires).
-  for (const actor of toldFalse) {
-    if (tryAcquireExclusiveLock(PATH, actor.options)) {
-      releaseExclusiveLock(PATH, actor.pid, actor.options.ownerToken, actor.options.fileSystem);
-    }
+  // Every other non-holder makes one more real attempt with its original options.
+  for (const actor of toldFalse.filter((a) => !a.reopenOwner)) {
+    retryNonHolder(actor);
   }
   if (actors.every((actor) => actor.phase !== "crashed")) {
     expect(

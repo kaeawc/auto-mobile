@@ -13,6 +13,8 @@ export class FakeLockFileSystem implements LockFileSystem {
   private readonly directories = new Set<string>(["/", "."]);
   private readonly descriptors = new Map<number, FileNode>();
   private nextInode = 1;
+  /** Test-only: simulate filesystem inode reuse on the next created file. */
+  nextInodeOverride?: number;
   private nextDescriptor = 1;
   readonly operations: { op: keyof LockFileSystem; path: string }[] = [];
   failure?: (op: keyof LockFileSystem, path: string) => string | undefined;
@@ -51,7 +53,9 @@ export class FakeLockFileSystem implements LockFileSystem {
     if (!this.directories.has(dirname(path))) {
       throw this.error("ENOENT", path);
     }
-    const node = { ino: this.nextInode++, mtimeMs: this.now(), raw };
+    const ino = this.nextInodeOverride ?? this.nextInode++;
+    this.nextInodeOverride = undefined;
+    const node = { ino, mtimeMs: this.now(), raw };
     this.files.set(path, node);
     return node;
   }

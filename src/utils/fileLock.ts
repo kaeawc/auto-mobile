@@ -57,6 +57,10 @@ interface DoomedPublication {
   ino?: number;
   mtimeMs?: number;
 }
+/**
+ * Eviction residual: more than 8 doomed publications per path or 64 paths per filesystem
+ * object evicts the oldest entry; its publication can then stay named until its process exits.
+ */
 interface PendingBackOut {
   publications: DoomedPublication[];
   markers: Set<string>;
@@ -867,7 +871,7 @@ function* checkRetainedLock(
   const published: DoomedPublication =
     (tmp ? yield* samplePublication(tmp, publishedContent, fileSystem) : undefined) ??
     ({ raw: publishedContent } satisfies DoomedPublication);
-  const current = yield* removeRememberedRetained(path, retained, pid, fileSystem);
+  const current = yield* removePriorRetainedPublication(path, retained, published, pid, fileSystem);
   if (current === "absent") {
     return true;
   }
@@ -881,6 +885,22 @@ function* checkRetainedLock(
     }
   }
   return yield* settleRetainedPublication(path, current, published, pid, fileSystem);
+}
+
+/** F2: distinguish this call's retained publication from remembered earlier doomed instances. */
+function* removePriorRetainedPublication(
+  path: string,
+  retained: LockSample | "unreadable",
+  published: DoomedPublication,
+  pid: number,
+  fileSystem: LockFileSystem,
+): Steps<LockSample | "absent" | "unreadable"> {
+  if (typeof retained !== "string" && hasIdentity(published) && sameSample(published, retained)) {
+    // Inode reuse makes this identity the new publication, never an earlier doomed one.
+    forgetBackOuts(path, fileSystem, (known) => isSamePublication(known, published));
+    return retained;
+  }
+  return yield* removeRememberedRetained(path, retained, pid, fileSystem);
 }
 
 function* settleRetainedPublication(
@@ -905,6 +925,11 @@ function* settleRetainedPublication(
     return true; // Another actor already completed this publication; keep both names untouched.
   }
   if (publication === "older") {
+    if (hasIdentity(published)) {
+      // F1: D may be in a displacer's private marker; its identity cannot match the older hold.
+      rememberBackOut(path, fileSystem, published);
+    }
+    // Legacy wx has no identity: preserve the documented same-bytes self-block residual.
     return false; // An older same-owner hold is authoritative; P is absent, foreign or unreadable.
   }
   if (publication === "blocked" && hasIdentity(published)) {

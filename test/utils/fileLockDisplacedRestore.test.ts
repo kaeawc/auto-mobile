@@ -1603,3 +1603,101 @@ test.each(["guard-contended", "claim-failed"] as const)(
       expect(hasPendingBackOut(view, PATH)).toBe(false);
     }),
 );
+
+/** Review-4 schedule: G is retained at F; a reopen publishes D into a stale release's marker. */
+function olderBranchReopen() {
+  const f = fixture(raw(707));
+  [707, 606, 808].forEach((pid) => f.live.add(pid));
+  const stale707 = staleReleaser(f, 707, 606);
+  releaseExclusiveLock(PATH, 606, "owner-606", f.fs);
+  expect(f.acquire(808).finish()).toBe(true);
+  const stale808 = staleReleaser(f, 808, 303);
+  f.fs.failure = failRestore;
+  stale808.finish();
+  f.fs.failure = undefined;
+  const genuine = { ...f.fs.peek(F)! };
+  const own = f.process(303);
+  const opener = new Racer(acquireExclusiveLockSteps(PATH, own));
+  opener.until(
+    (s) =>
+      s.op === "readText" &&
+      s.path === PATH &&
+      opener.trace.some((t) => t.op === "stat" && t.path === F),
+  );
+  const doomed = { ...f.fs.peek(PATH)! };
+  expect(doomed.raw).toBe(genuine.raw);
+  expect(doomed.ino).not.toBe(genuine.ino);
+  return { f, stale707, own, opener, genuine, doomed };
+}
+
+test("F1: an older-branch own publication displaced in flight is remembered and drained when linked back", () =>
+  quiet(() => {
+    const { f, stale707, own, opener, doomed } = olderBranchReopen();
+    stale707.advance(); // 707 renames D to its private marker before the opener reads P.
+    expect(opener.finish()).toBe(false);
+    expect(hasPendingBackOut(own.fileSystem!, PATH)).toBe(true);
+    releaseExclusiveLock(PATH, 303, "owner-303", own.fileSystem);
+    expect(f.fs.peek(F)).toBeUndefined();
+    expect(f.fs.peek(PATH)).toBeUndefined();
+    stale707.finish(); // G is gone; the stale release links D back onto P.
+    expect(f.fs.peek(PATH)).toEqual(doomed);
+    expect(f.acquire(404).finish()).toBe(false);
+    acquiresFresh(f, own, doomed);
+    expect(hasPendingBackOut(own.fileSystem!, PATH)).toBe(false);
+  }));
+
+test("F1: the older branch never touches the genuine older hold", () =>
+  quiet(() => {
+    const { f, stale707, own, opener, genuine, doomed } = olderBranchReopen();
+    stale707.advance();
+    expect(opener.finish()).toBe(false);
+    expect(f.fs.peek(F)).toEqual(genuine);
+    stale707.finish();
+    expect(f.fs.peek(PATH)).toEqual(doomed);
+    // Draining D must leave G's different inode and identical bytes authoritative.
+    expect(tryAcquireExclusiveLock(PATH, own)).toBe(false);
+    expect(f.fs.peek(F)).toEqual(genuine);
+    expect(f.fs.peek(PATH)).toEqual(genuine);
+    expect(hasPendingBackOut(own.fileSystem!, PATH)).toBe(false);
+  }));
+
+test("F1: a transient EIO in the older branch remembers the displaced publication", () =>
+  quiet(() => {
+    const { f, stale707, own, opener, genuine } = olderBranchReopen();
+    stale707.advance();
+    f.fs.failure = (op, path) => (op === "readText" && path === PATH ? "EIO" : undefined);
+    expect(opener.finish()).toBe(false);
+    f.fs.failure = undefined;
+    expect(hasPendingBackOut(own.fileSystem!, PATH)).toBe(true);
+    expect(f.fs.peek(F)).toEqual(genuine);
+  }));
+
+test("F2: a reused doomed inode retained at F is this call's publication, not a pending doomed one", () =>
+  quiet(() => {
+    const { f, c, own, view, doomed } = displacedDuringBackOut();
+    expect(c.finish()).toBe(false);
+    releaseExclusiveLock(PATH, 101, "owner-101", f.fs);
+    // The doomed inode no longer exists, but its pending identity survives until reuse is proven.
+    for (const name of f.fs.paths().filter((name) => f.fs.peek(name)?.ino === doomed.ino)) {
+      f.fs.unlink(name);
+    }
+    f.fs.seed(PATH, raw(707));
+    const stale707 = staleReleaser(f, 707, 606);
+    releaseExclusiveLock(PATH, 606, "owner-606", f.fs);
+    expect(hasPendingBackOut(view, PATH)).toBe(true);
+    f.fs.nextInodeOverride = doomed.ino;
+    const acquirer = new Racer(acquireExclusiveLockSteps(PATH, own));
+    acquirer.until((s) => s.op === "stat" && s.path === F);
+    expect(f.fs.peek(PATH)).toEqual(doomed); // Same ino, mtimeMs and raw; this is the new publication.
+    f.fs.failure = failRestore;
+    stale707.finish();
+    f.fs.failure = undefined;
+    expect(f.fs.peek(F)).toEqual(doomed);
+    expect(acquirer.finish()).toBe(true);
+    expect(f.fs.peek(F)).toEqual(doomed);
+    expect(f.fs.peek(PATH)).toEqual(doomed);
+    expect(hasPendingBackOut(view, PATH)).toBe(false);
+    expect(f.acquire(404).finish()).toBe(false);
+    releaseExclusiveLock(PATH, 303, "owner-303", view);
+    expect(f.acquire(404).finish()).toBe(true);
+  }));

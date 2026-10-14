@@ -238,6 +238,7 @@ import {
 
 // Import types
 import type { DelegateContext } from "../shared/types";
+import { defaultSavedPrototypeMirror } from "../../prototype/savedPrototypeMirror";
 import type {
   HierarchyDelegateContext,
   CertificatesDelegateContext,
@@ -2539,6 +2540,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   protected override extraDelegateContextFields(): Partial<DelegateContext> {
     return {
+      savedPrototypeMirror: { serial: this.device.deviceId, mirror: defaultSavedPrototypeMirror() },
       isCommandSupported: (messageType) =>
         messageType === PROTOTYPE_SAVED_CAPABILITY
           ? this.supportedCommands?.has(messageType) === true

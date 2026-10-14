@@ -712,13 +712,7 @@ export class CtrlProxyPrototypes {
     if (message.type === "patch_prototype" && supports(PROTOTYPE_PATCH_CAPABILITY) !== true) {
       throw new ActionableError(prototypePatchUnsupportedMessage("android"));
     }
-    if (
-      message.type === "show_prototype" &&
-      message.replaceOthers === false &&
-      supports(PROTOTYPE_MULTI_SURFACE_CAPABILITY) !== true
-    ) {
-      throw new ActionableError(prototypeMultiSurfaceUnsupportedMessage());
-    }
+    this.requireMultiSurfaceSupport(message, supports);
     const type = message.type;
     if (
       [
@@ -749,6 +743,26 @@ export class CtrlProxyPrototypes {
     ) {
       // Never send displayId to a device that would ignore it and show on the default display.
       throw new ActionableError(prototypeDisplayUnsupportedMessage(message.displayId));
+    }
+  }
+
+  private requireMultiSurfaceSupport(
+    message:
+      | ShowPrototypeMessage
+      | DismissPrototypeMessage
+      | InspectPrototypesMessage
+      | PatchPrototypeMessage
+      | SavePrototypeMessage
+      | ListSavedPrototypesMessage
+      | DeleteSavedPrototypeMessage,
+    supports: (command: string) => boolean | undefined,
+  ): void {
+    if (
+      message.type === "show_prototype" &&
+      message.replaceOthers === false &&
+      supports(PROTOTYPE_MULTI_SURFACE_CAPABILITY) !== true
+    ) {
+      throw new ActionableError(prototypeMultiSurfaceUnsupportedMessage());
     }
   }
 

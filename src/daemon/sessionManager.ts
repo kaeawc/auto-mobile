@@ -53,7 +53,11 @@ import { logger } from "../utils/logger";
 import { readEnvPositiveInteger } from "../utils/envNumbers";
 import { isDeviceLossCancellationReason } from "../utils/deviceLossCancellationReason";
 import { BootedDevice, Platform } from "../models";
-import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
+import {
+  KeepScreenAwakeManager,
+  KeepScreenAwakeState,
+  type KeepScreenAwakeRestoreOutcome,
+} from "../utils/KeepScreenAwakeManager";
 import {
   DeviceSessionNotActiveError,
   DeviceSessionRepository,
@@ -185,7 +189,7 @@ export class SessionActivityPersistenceError extends ActionableError {
  * payload to `restore` — the behavioral half of the #2973 typed-slot round trip.
  */
 export interface KeepScreenAwakeRestorer {
-  restore(state: KeepScreenAwakeState): Promise<void>;
+  restore(state: KeepScreenAwakeState): Promise<KeepScreenAwakeRestoreOutcome>;
 }
 
 /** Original simulator enrollment restored when a session releases its device. */
@@ -9429,7 +9433,19 @@ export class SessionManager {
       (_signal, identitySignal) =>
         this.keepScreenAwakeRestorerFactory(device)
           .restore(target.state)
-          .then(() => identitySignal.throwIfAborted()),
+          .then((outcome) => {
+            identitySignal.throwIfAborted();
+            if (outcome.status === "failed") {
+              throw new Error(
+                outcome.failures.map(({ setting, error }) => `${setting}: ${error}`).join("; "),
+              );
+            }
+            if (outcome.status === "skipped" && outcome.reason === "unknown_prior_state") {
+              logger.warn(
+                `Skipped keep-awake restore for session ${target.sessionId}, device ${target.deviceId}, setting ${outcome.setting}: prior state unknown`,
+              );
+            }
+          }),
       target.restoreGeneration,
     );
     this.clearRestoreHealth(target, "keep-screen-awake");

@@ -242,7 +242,7 @@ describe("KeepScreenAwakeManager", () => {
       () => failingSettingsClient,
     );
 
-    await mgr.restore({
+    const outcome = await mgr.restore({
       applied: true,
       method: "settings",
       originalStayOnWhilePluggedIn: "0",
@@ -250,6 +250,7 @@ describe("KeepScreenAwakeManager", () => {
       appliedSettings: { stayOnWhilePluggedIn: true, screenOffTimeout: true },
     });
 
+    expect(outcome).toEqual({ status: "restored" });
     expect(adb.called("settings put global stay_on_while_plugged_in 0")).toBe(true);
     expect(adb.called("settings put system screen_off_timeout 60000")).toBe(true);
   });
@@ -262,7 +263,10 @@ describe("KeepScreenAwakeManager", () => {
       () => failingSettingsClient,
     );
 
-    await mgr.restore({ applied: false, skipReason: "disabled" });
+    expect(await mgr.restore({ applied: false, skipReason: "disabled" })).toEqual({
+      status: "skipped",
+      reason: "not_applied",
+    });
 
     expect(adb.calls.length).toBe(0);
   });
@@ -483,6 +487,87 @@ describe("KeepScreenAwakeManager restore branches", () => {
       makeFactory(adb),
       () => failingSettingsClient,
     ).restore({ applied: true, method: "svc", svcWasEnabled: false });
+    expect(adb.calls).toEqual([]);
+  });
+});
+
+describe("typed restore outcomes", () => {
+  const stayOn = "shell settings put global stay_on_while_plugged_in 7";
+  const timeout = "shell settings put system screen_off_timeout 60000";
+  const disable = "shell svc power stayon false";
+  const settingsState: KeepScreenAwakeState = {
+    applied: true,
+    method: "settings",
+    originalStayOnWhilePluggedIn: "7",
+    originalScreenOffTimeout: "60000",
+    appliedSettings: { stayOnWhilePluggedIn: true, screenOffTimeout: true },
+  };
+  test.each([
+    {
+      name: "svc enabled setting failure",
+      state: { applied: true, method: "svc", originalStayOnWhilePluggedIn: "7" },
+      reject: [stayOn],
+      failures: [
+        { setting: "stay_on_while_plugged_in", error: `fake adb: command failed: ${stayOn}` },
+      ],
+    },
+    {
+      name: "svc disable failure",
+      state: { applied: true, method: "svc", svcWasEnabled: false },
+      reject: [disable],
+      failures: [{ setting: "svc_stayon", error: `fake adb: command failed: ${disable}` }],
+    },
+    {
+      name: "timeout failure only",
+      state: settingsState,
+      reject: [timeout],
+      failures: [{ setting: "screen_off_timeout", error: `fake adb: command failed: ${timeout}` }],
+    },
+    {
+      name: "both settings fail",
+      state: settingsState,
+      reject: [stayOn, timeout],
+      failures: [
+        { setting: "stay_on_while_plugged_in", error: `fake adb: command failed: ${stayOn}` },
+        { setting: "screen_off_timeout", error: `fake adb: command failed: ${timeout}` },
+      ],
+    },
+  ] as Array<{
+    name: string;
+    state: KeepScreenAwakeState;
+    reject: string[];
+    failures: Array<{ setting: string; error: string }>;
+  }>)("$name", async ({ state, reject, failures }) => {
+    const adb = new FakeAdb({ reject });
+    const mgr = new KeepScreenAwakeManager(
+      physicalDevice,
+      makeFactory(adb),
+      () => failingSettingsClient,
+    );
+    expect(await mgr.restore(state)).toEqual({ status: "failed", failures });
+    if (state.method === "settings") {
+      expect(adb.calls).toEqual([stayOn, timeout]);
+    }
+  });
+  test.each([
+    { applied: true, method: "svc" },
+    {
+      applied: true,
+      method: "settings",
+      appliedSettings: { stayOnWhilePluggedIn: true, screenOffTimeout: false },
+    },
+  ] as KeepScreenAwakeState[])("unknown prior state is skipped: %j", async (state) => {
+    const adb = new FakeAdb();
+    const mgr = new KeepScreenAwakeManager(
+      physicalDevice,
+      makeFactory(adb),
+      () => failingSettingsClient,
+    );
+    expect(await mgr.restore(state)).toEqual({
+      status: "skipped",
+      reason: "unknown_prior_state",
+      setting: "stay_on_while_plugged_in",
+    });
     expect(adb.calls).toEqual([]);
   });
 });

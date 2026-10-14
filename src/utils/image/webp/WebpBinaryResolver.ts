@@ -11,6 +11,10 @@ import { DefaultFileDownloader, type FileDownloader } from "../../FileDownloader
 import { DefaultHostCommandExecutor, type HostProcessExecutor } from "../../HostCommandExecutor";
 import { logger } from "../../logger";
 import { resolveAutoMobileBaseDir } from "../../tempDir";
+import { defaultTimer, type Timer } from "../../SystemTimer";
+import { raceWithDeadline } from "../../raceWithDeadline";
+
+export const WEBP_CODEC_TIMEOUT_MS = 30_000;
 
 const LIBWEBP_VERSION = "1.6.0";
 const WEBP_DOWNLOAD_BASE_URL =
@@ -46,6 +50,8 @@ export const defaultWebpBinaryFileSystem: WebpBinaryFileSystem = {
 };
 
 export interface WebpBinaryResolverOptions {
+  timer?: Timer;
+  codecTimeoutMs?: number;
   fileSystem?: WebpBinaryFileSystem;
   projectRoot?: string;
   /** Explicit cache directory override; defaults to <data dir>/libwebp at use time. */
@@ -79,6 +85,8 @@ export interface WebpBinaryProvider {
 }
 
 export class WebpBinaryResolver implements WebpBinaryProvider {
+  private readonly timer: Timer | undefined;
+  private readonly codecTimeoutMs: number | undefined;
   private readonly projectRoot: string;
   private readonly cacheDir: string | undefined;
   private readonly platform: NodeJS.Platform;
@@ -91,6 +99,8 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
   private readonly fileSystem: WebpBinaryFileSystem;
 
   constructor(options: WebpBinaryResolverOptions = {}) {
+    this.timer = options.timer;
+    this.codecTimeoutMs = options.codecTimeoutMs;
     this.projectRoot = options.projectRoot ?? defaultProjectRoot();
     this.cacheDir = options.cacheDir;
     this.platform = options.platform ?? process.platform;
@@ -149,14 +159,39 @@ export class WebpBinaryResolver implements WebpBinaryProvider {
     child.stderr.on("data", (data) =>
       stderr.push(Buffer.isBuffer(data) ? data : Buffer.from(data)),
     );
-    const completion = waitForCompletion(child, child.stdin, toolName, envVar, stderr);
-    try {
-      child.stdin.end(input);
-    } catch (error) {
-      throw actionableProcessError(toolName, envVar, `stdin write failed: ${errorMessage(error)}`);
-    }
-
-    await completion;
+    const codecTimeoutMs = this.codecTimeoutMs ?? WEBP_CODEC_TIMEOUT_MS;
+    await raceWithDeadline(
+      () => {
+        const completion = waitForCompletion(child, child.stdin!, toolName, envVar, stderr);
+        try {
+          child.stdin!.end(input);
+        } catch (error) {
+          // The completion listeners remain responsible for late process events.
+          void completion.catch(() => undefined);
+          throw actionableProcessError(
+            toolName,
+            envVar,
+            `stdin write failed: ${errorMessage(error)}`,
+          );
+        }
+        return completion;
+      },
+      {
+        timer: this.timer ?? defaultTimer,
+        timeoutMs: codecTimeoutMs,
+        label: toolName,
+        timeoutError: () =>
+          actionableProcessError(toolName, envVar, `timed out after ${codecTimeoutMs}ms`),
+        onTimeout: () => {
+          try {
+            child.kill("SIGKILL");
+          } catch (error) {
+            // Signal delivery can race process exit; preserve the actionable deadline error.
+            logger.debug(`${toolName} deadline SIGKILL failed: ${errorMessage(error)}`, error);
+          }
+        },
+      },
+    );
     return Buffer.concat(stdout);
   }
 

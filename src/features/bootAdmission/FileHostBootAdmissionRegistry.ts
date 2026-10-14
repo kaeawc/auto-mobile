@@ -1,4 +1,8 @@
 import { defaultLockOwnerGenerationProbe } from "../../daemon/lockOwnerGeneration";
+import {
+  isConfirmedRecycledProcess,
+  readProcessGenerationTokenForPid,
+} from "../../daemon/daemonFiles";
 import { readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
@@ -27,8 +31,10 @@ import {
 const recordSchema = z.object({
   id: z.string().min(1),
   ownerPid: z.number().int().positive(),
+  ownerGenerationToken: z.string().optional(),
   deviceId: z.string().optional(),
   processId: z.number().int().positive().optional(),
+  processGenerationToken: z.string().optional(),
   admittedUntilMs: z.number().finite().optional(),
   handedOffUntilMs: z.number().finite().optional(),
 });
@@ -44,6 +50,7 @@ export interface FileHostBootAdmissionRegistryOptions {
   timer?: Timer;
   pid?: number;
   isProcessRunning?: (pid: number) => boolean;
+  readProcessGenerationToken?: (pid: number) => string | undefined;
   ownerGeneration?: LockOwnerGenerationProbe;
   idGenerator?: IdGenerator;
   lockMaxAgeMs?: number;
@@ -254,7 +261,12 @@ export class FileHostBootAdmissionRegistry implements HostBootAdmissionRegistry 
 
   private isStale(record: HostBootAdmissionRecord): boolean {
     if (record.handedOffUntilMs !== undefined) {
-      return this.timer.now() >= record.handedOffUntilMs;
+      return (
+        this.timer.now() >= record.handedOffUntilMs ||
+        (record.processId !== undefined &&
+          this.isProvablyGone(record.ownerPid, record.ownerGenerationToken) &&
+          this.isProvablyGone(record.processId, record.processGenerationToken))
+      );
     }
     return (
       !this.running(record.ownerPid) ||
@@ -262,10 +274,39 @@ export class FileHostBootAdmissionRegistry implements HostBootAdmissionRegistry 
     );
   }
 
+  private isProvablyGone(pid: number, recordedToken: string | undefined): boolean {
+    return (
+      !this.running(pid) ||
+      isConfirmedRecycledProcess(
+        pid,
+        { processGenerationToken: recordedToken },
+        this.options.readProcessGenerationToken ?? readProcessGenerationTokenForPid,
+        "host boot admission record",
+      )
+    );
+  }
+
+  private readToken(pid: number): string | undefined {
+    try {
+      return (this.options.readProcessGenerationToken ?? readProcessGenerationTokenForPid)(pid);
+    } catch (error) {
+      logger.warn(
+        `[BootAdmission] Failed to capture process generation token for PID ${pid}: ${errorMessage(error)}`,
+        error,
+      );
+      return undefined;
+    }
+  }
+
   publish(
     fields: Pick<HostBootAdmissionRecord, "deviceId" | "admittedUntilMs"> = {},
   ): PublishedBootAdmission {
-    let record: HostBootAdmissionRecord = { id: this.ids.next(), ownerPid: this.pid, ...fields };
+    let record: HostBootAdmissionRecord = {
+      id: this.ids.next(),
+      ownerPid: this.pid,
+      ownerGenerationToken: this.readToken(this.pid),
+      ...fields,
+    };
     this.write(record);
     let removed = false;
     return {
@@ -277,6 +318,9 @@ export class FileHostBootAdmissionRegistry implements HostBootAdmissionRegistry 
           ...record,
           ...Object.fromEntries(Object.entries(update).filter(([, value]) => value !== undefined)),
         };
+        if (update.processId !== undefined) {
+          next.processGenerationToken = this.readToken(update.processId);
+        }
         this.write(next);
         record = next;
       },

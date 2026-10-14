@@ -14,6 +14,7 @@ import {
 } from "../../fakes/FakeEmulatorProcessStopper";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { logger } from "../../../src/utils/logger";
+import { FakeLockOwnerGenerationProbe } from "../../fakes/FakeLockOwnerGenerationProbe";
 
 const rows = parsePsSnapshot(
   readFileSync(
@@ -34,6 +35,63 @@ function fixture() {
   const stopper = new ProcessTableEmulatorProcessStopper(table, signaler, timer);
   return { table, signaler, timer, stopper, options: { deadlineMs: 30_000 } };
 }
+
+test.each([
+  "after-term",
+  "before-read",
+  "before-kill",
+  "after-kill",
+  "unknown",
+  "unavailable",
+] as const)("emulator stop generation fence handles %s", async (stage) => {
+  const f = fixture();
+  const generation = new FakeLockOwnerGenerationProbe();
+  f.signaler.exitOn = stage === "unknown" || stage === "unavailable" ? "SIGKILL" : undefined;
+  if (stage === "unavailable") {
+    generation.token = undefined;
+  }
+  generation.onCompare = () => {
+    if (stage === "unknown") {
+      return "unknown";
+    }
+    if (stage === "after-term") {
+      return "different";
+    }
+    return (stage === "before-kill" && f.table.calls.length === 2) ||
+      (stage === "after-kill" && f.signaler.signals.length === 2)
+      ? "different"
+      : "same";
+  };
+  // Change identity in the final wait's liveness probe, after its generation check.
+  if (stage === "before-read") {
+    const running = f.signaler.isRunning.bind(f.signaler);
+    f.signaler.isRunning = (pid) => {
+      if (f.timer.now() >= EMULATOR_TERM_GRACE_MS) {
+        generation.onCompare = () => "different";
+      }
+      return running(pid);
+    };
+  }
+  const stopper = new ProcessTableEmulatorProcessStopper(f.table, f.signaler, f.timer, {
+    processGeneration: generation,
+  });
+  const killed = ["after-kill", "unknown", "unavailable"].includes(stage);
+  expect(await stopper.stop(target, f.options)).toEqual({
+    kind: "stopped",
+    pid: 75134,
+    signal: killed ? "SIGKILL" : "SIGTERM",
+  });
+  expect(generation.currentCalls).toEqual([75134]);
+  expect(f.signaler.signals).toEqual(
+    killed
+      ? [
+          { pid: 75134, signal: "SIGTERM" },
+          { pid: 75134, signal: "SIGKILL" },
+        ]
+      : [{ pid: 75134, signal: "SIGTERM" }],
+  );
+  expect(f.table.calls).toHaveLength(["after-term", "before-read"].includes(stage) ? 1 : 2);
+});
 
 test("captured windowed and headless qemu rows prove identity; adb and helpers are decoys", async () => {
   const f = fixture();
@@ -137,7 +195,11 @@ test("failed and pending reads are unreadable inside the caller bound", async ()
 
 test("TERM followed by exit is stopped without another read", async () => {
   const f = fixture();
-  expect(await f.stopper.stop(target, f.options)).toEqual({
+  const generation = new FakeLockOwnerGenerationProbe();
+  const stopper = new ProcessTableEmulatorProcessStopper(f.table, f.signaler, f.timer, {
+    processGeneration: generation,
+  });
+  expect(await stopper.stop(target, f.options)).toEqual({
     kind: "stopped",
     pid: 75134,
     signal: "SIGTERM",
@@ -145,6 +207,7 @@ test("TERM followed by exit is stopped without another read", async () => {
   expect(f.signaler.signals).toEqual([{ pid: 75134, signal: "SIGTERM" }]);
   expect(f.table.calls).toHaveLength(1);
   expect(f.timer.getSleepHistory()).toEqual([]);
+  expect(generation.compareCalls).toEqual([]);
 });
 
 test("TERM exit is observed through FakeTimer polling", async () => {

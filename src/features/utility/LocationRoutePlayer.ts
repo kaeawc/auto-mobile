@@ -315,7 +315,19 @@ export function registerLocationRouteSessionCleanup(
 ): void {
   const registry = options?.registry ?? defaultLocationRouteRegistry;
   const mockLocationClears = options?.mockLocationClears ?? defaultMockLocationClearRegistry;
-  const cleanup = (sessionId: string, deviceId: string): void => {
+  const cleanup = (
+    sessionId: string,
+    deviceId: string,
+    releaseOptions?: { deviceIdentityReplaced?: boolean },
+  ): void => {
+    if (releaseOptions?.deviceIdentityReplaced) {
+      registry.forget(deviceId);
+      mockLocationClears.retireDevice(deviceId);
+      logger.debug(
+        `Location cleanup for session ${sessionId} on replaced serial ${deviceId}: skipped location clear and device playback`,
+      );
+      return;
+    }
     const active = registry.isActive(deviceId);
     const settled = active ? registry.stopAndSettle(deviceId) : Promise.resolve();
     if (active) {
@@ -340,15 +352,7 @@ export function registerLocationRouteSessionCleanup(
     if (releaseOptions?.upgradeOnly) {
       return;
     }
-    if (releaseOptions?.deviceIdentityReplaced) {
-      registry.forget(deviceId);
-      mockLocationClears.retireDevice(deviceId);
-      logger.debug(
-        `Location cleanup for session ${sessionId} on replaced serial ${deviceId}: skipped location clear and device playback`,
-      );
-      return;
-    }
-    cleanup(sessionId, deviceId);
+    cleanup(sessionId, deviceId, releaseOptions);
   });
   manager.onSessionDeviceUnbound(cleanup);
 }

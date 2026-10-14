@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import android.util.Log
 import dev.jasonpearson.automobile.protocol.*
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,6 +23,9 @@ data class PrototypeRuntimeSnapshot(
    * adopts the value whenever the epoch moves; see [TextChange].
    */
   val textEpochs: Map<String, Int> = emptyMap(),
+  val revision: Long = 0L,
+  /** Removed keys keep their stamp so a stale add cannot resurrect them unnoticed. */
+  val stateRevisions: Map<String, Long> = emptyMap(),
 ) {
   val state: Map<String, PrototypeScalar>
     get() = spec.state.orEmpty()
@@ -104,6 +109,8 @@ class PrototypeRuntime(
   private val nextSequence: () -> Long,
   private val requestDismiss: suspend () -> Boolean = { true },
   previousPages: Map<String, Int> = emptyMap(),
+  initialRevision: Long = 0L,
+  private val nextRevision: (() -> Long)? = null,
 ) {
   @Volatile private var stateWriteValidator: PrototypeStateWriteValidator? = null
   internal var prepareStateWrites: (PrototypeSpec) -> PrototypeStateWriteValidator = {
@@ -118,7 +125,14 @@ class PrototypeRuntime(
   internal val renderMappingPasses: Int
     get() = renderMapper.mappingPasses
 
-  private val mutableSnapshot = MutableStateFlow(snapshot(spec, previousPages))
+  private val mutableSnapshot =
+    MutableStateFlow(
+      snapshot(spec, previousPages)
+        .copy(
+          revision = initialRevision,
+          stateRevisions = spec.state.orEmpty().keys.associateWith { initialRevision },
+        ),
+    )
   val snapshots = mutableSnapshot.asStateFlow()
   val current: PrototypeRuntimeSnapshot
     get() = snapshots.value
@@ -126,18 +140,133 @@ class PrototypeRuntime(
   fun replace(spec: PrototypeSpec) {
     if (!current.active) return
     stateWriteValidator = null
-    val next = snapshot(spec, current.pages)
+    mutableSnapshot.value = replacementSnapshot(spec)
+  }
+
+  /** Authoritative text replacement shares its epoch handling with patch commits. */
+  private fun replacementSnapshot(spec: PrototypeSpec): PrototypeRuntimeSnapshot {
+    val before = current
+    val next = snapshot(spec, before.pages)
     val changed =
-      (current.state.keys + next.state.keys).filter { key ->
-        current.state[key] != next.state[key] &&
-          (current.state[key] is PrototypeScalar.Text || next.state[key] is PrototypeScalar.Text)
+      (before.state.keys + next.state.keys).filter { key ->
+        before.state[key] != next.state[key] &&
+          (before.state[key] is PrototypeScalar.Text || next.state[key] is PrototypeScalar.Text)
       }
+    return next.copy(
+      textEpochs = before.textEpochs + changed.associateWith { (before.textEpochs[it] ?: 0) + 1 },
+      revision = before.revision,
+      stateRevisions = before.stateRevisions,
+    )
+  }
+
+  sealed interface PatchResult {
+    data class Applied(val revision: Long) : PatchResult
+
+    data class Conflict(val revision: Long, val state: Map<String, PrototypeScalar>) : PatchResult
+
+    data class Rejected(val message: String, val revision: Long) : PatchResult
+  }
+
+  /** Plans and validates against live state, then commits into this same runtime. */
+  suspend fun patch(
+    baseRevision: Long?,
+    ops: JsonArray,
+    json: Json,
+    validate: (JsonObject) -> PrototypeSpec,
+  ): PatchResult {
+    val before = current
+    if (!before.active) return PatchResult.Rejected("Prototype is inactive", before.revision)
+    if (PrototypePatch.touchesState(ops)) {
+      if (baseRevision == null) {
+        return PatchResult.Rejected(
+          "baseRevision is required when a patch has /state ops",
+          before.revision,
+        )
+      }
+      if (baseRevision > before.revision) {
+        return PatchResult.Rejected(
+          "baseRevision $baseRevision is newer than the device revision ${before.revision}",
+          before.revision,
+        )
+      }
+      val changed =
+        ops
+          .mapNotNull { op ->
+            val path = (op as? JsonObject)?.get("path") as? JsonPrimitive
+            if (path?.isString == true && path.content.startsWith("/state/")) {
+              PrototypeDataPointer.tokens(path.content.removePrefix("/state")).firstOrNull()
+            } else null
+          }
+          .distinct()
+          .filter { key -> before.stateRevisions[key]?.let { it > baseRevision } == true }
+      if (changed.isNotEmpty()) {
+        return PatchResult.Conflict(before.revision, before.state.filterKeys { it in changed })
+      }
+    }
+    val patched =
+      when (
+        val result =
+          PrototypePatch.apply(
+            json.encodeToJsonElement(before.spec),
+            ops,
+            PrototypePatch.StateTests.EVALUATE,
+          )
+      ) {
+        is PrototypePatch.Result.Failure ->
+          return PatchResult.Rejected(
+            "${result.error.path}: ${result.error.message}",
+            before.revision,
+          )
+        is PrototypePatch.Result.Success -> result.spec
+      }
+    val spec =
+      try {
+        validate(patched).also {
+          require(
+            it.id == before.spec.id &&
+              it.window == before.spec.window &&
+              it.theme == before.spec.theme,
+          ) {
+            "Patch must keep prototype id, window and theme"
+          }
+        }
+      } catch (error: CancellationException) {
+        throw error
+      } catch (error: Exception) {
+        return PatchResult.Rejected(error.message ?: "Invalid prototype patch", before.revision)
+      }
+    val changed =
+      (before.state.keys + spec.state.orEmpty().keys).filter {
+        before.state[it] != spec.state.orEmpty()[it]
+      }
+    val next = replacementSnapshot(spec)
+    // Validate Compose sizes with a disposable mapper so rejected candidates cannot alter the
+    // runtime's resolve cache, cached model or renderMappingPasses before the snapshot is
+    // committed.
+    try {
+      PrototypeRenderMapper().map(next.spec, next.pages)
+    } catch (error: IllegalArgumentException) {
+      return PatchResult.Rejected(error.message ?: "Invalid prototype patch", before.revision)
+    }
+    val revision = allocateRevision()
+    stateWriteValidator = null
     mutableSnapshot.value =
       next.copy(
-        textEpochs =
-          current.textEpochs + changed.associateWith { (current.textEpochs[it] ?: 0) + 1 },
+        revision = revision,
+        stateRevisions = before.stateRevisions + changed.associateWith { revision },
       )
+    // The commit is authoritative even if an ancillary event sink fails. Cancellation propagates.
+    try {
+      emitStateChange(changed.filter { it in current.state })
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: Exception) {
+      Log.w("PrototypeRuntime", "Prototype patch change delivery failed", error)
+    }
+    return PatchResult.Applied(revision)
   }
+
+  private fun allocateRevision(): Long = nextRevision?.invoke() ?: (current.revision + 1L)
 
   fun close() {
     mutableSnapshot.value = current.copy(active = false)
@@ -145,6 +274,32 @@ class PrototypeRuntime(
 
   suspend fun handle(interaction: PrototypeInteraction) {
     if (!current.active) return
+    try {
+      handleInteraction(interaction)
+    } finally {
+      interactionRevision = null
+    }
+  }
+
+  private var interactionRevision: Long? = null
+
+  /** Every accepted state write in one interaction shares a revision, even if a key is restored. */
+  private fun writeInteractionSpec(spec: PrototypeSpec) {
+    val changed =
+      (current.state.keys + spec.state.orEmpty().keys).filter {
+        current.state[it] != spec.state.orEmpty()[it]
+      }
+    if (changed.isEmpty()) return
+    val revision = interactionRevision ?: allocateRevision().also { interactionRevision = it }
+    mutableSnapshot.value =
+      current.copy(
+        spec = spec,
+        revision = revision,
+        stateRevisions = current.stateRevisions + changed.associateWith { revision },
+      )
+  }
+
+  private suspend fun handleInteraction(interaction: PrototypeInteraction) {
     when (interaction) {
       PrototypeInteraction.HostDismiss -> dismiss()
       is PrototypeInteraction.Tap -> control(emptyMap(), interaction.actions)
@@ -199,7 +354,7 @@ class PrototypeRuntime(
     val written = if (moved.isEmpty()) current.spec else validated(current.spec, moved)
     val writes = plannedWrites(actions, written)
     if (moved.isNotEmpty()) {
-      mutableSnapshot.value = current.copy(spec = written)
+      writeInteractionSpec(written)
       emitStateChange(moved.keys.toList())
     }
     run(actions, writes)
@@ -251,7 +406,7 @@ class PrototypeRuntime(
         PrototypeDismissAction -> dismiss()
         else ->
           writes[index]?.let { (key, spec) ->
-            mutableSnapshot.value = current.copy(spec = spec)
+            writeInteractionSpec(spec)
             touched += key
           }
       }

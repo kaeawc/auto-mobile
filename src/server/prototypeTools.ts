@@ -518,8 +518,10 @@ function validateAwaitEventInput(
 }
 
 /** status and inspect show nothing on the device: reads (#10965). The rest are control. */
+const PROTOTYPE_READ_ACTIONS: readonly string[] = ["status", "inspect"];
+
 function isPrototypeReadAction(args: z.infer<typeof prototypeSchema>): boolean {
-  return args.action === "status" || args.action === "inspect";
+  return PROTOTYPE_READ_ACTIONS.includes(args.action);
 }
 
 function prototypeScope(
@@ -2725,6 +2727,7 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
       defaultEnabled: false,
       outputSchema: prototypeOutputSchema,
       deviceReadOnly: isPrototypeReadAction,
+      deviceReadOnlyArgs: [{ argument: "action", values: PROTOTYPE_READ_ACTIONS }],
     },
   );
   const dispose = prototypeRegistrationDisposer(host);

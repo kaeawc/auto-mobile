@@ -1,11 +1,15 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
+import androidx.compose.runtime.BroadcastFrameClock
+import androidx.compose.runtime.Recomposer
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.node.RootForTest
+import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -13,6 +17,11 @@ import androidx.compose.ui.semantics.getOrNull
 import dev.jasonpearson.automobile.ctrlproxy.prototype.screenshot.validPrototypeFixture
 import dev.jasonpearson.automobile.protocol.*
 import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.android.asCoroutineDispatcher
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -26,8 +35,10 @@ import org.robolectric.Shadows.shadowOf
 @RunWith(RobolectricTestRunner::class)
 class PrototypeSemanticsNodeCountTest {
   companion object {
-    // BEFORE: 394 semantics nodes, 349 role nodes.
-    private const val BENCHMARK_SEMANTICS_NODES = 364
+    // BEFORE: 394 semantics nodes, 349 role nodes (first-composition count, before the pager's
+    // bounded-height recomposition). 364 was the same unsettled count after the change; the
+    // settled render adds one node, the off-screen neighbour page's cleared box.
+    private const val BENCHMARK_SEMANTICS_NODES = 365
     private const val BENCHMARK_ROLE_NODES = 319
     // component-gallery BEFORE: 19 semantics nodes, 15 role nodes.
     // No decorative icon/image or single-text tappable container; pinned to show no change.
@@ -193,19 +204,57 @@ internal fun SemanticsNode.hasExactPrototypeText(text: String): Boolean =
   config.getOrNull(SemanticsProperties.Text).orEmpty().any { it.text == text } ||
     config.getOrNull(SemanticsProperties.ContentDescription).orEmpty().any { it == text }
 
-/** Same unmerged-owner harness as PrototypeContainerSemanticsTest, with activity cleanup. */
+/**
+ * Owns its Recomposer and frame clock because an earlier Robolectric test in the same JVM can leave
+ * the shared main-thread AndroidUiDispatcher with a dropped frame/trampoline dispatch. This starves
+ * later recompositions, including the pager's bounded-height update that composes its neighbour
+ * page, making node counts depend on test order.
+ */
 internal class PrototypeSemanticsRender(val spec: PrototypeSpec) : AutoCloseable {
+  companion object {
+    private const val MAX_SETTLE_FRAMES = 10
+    private const val FRAME_INTERVAL_NANOS = 16_000_000L
+  }
+
   val model = mapPrototypeSpec(spec)
   private val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+  private val looper = shadowOf(Looper.getMainLooper())
+  private val frameClock = BroadcastFrameClock()
+  private val scope =
+    CoroutineScope(Handler(Looper.getMainLooper()).asCoroutineDispatcher() + frameClock + Job())
+  private val recomposer = Recomposer(scope.coroutineContext)
   val nodes: List<SemanticsNode>
 
   init {
-    activity.get().setContent { PrototypeSpecContent(model.root, spec.theme) }
-    shadowOf(Looper.getMainLooper()).idle()
+    scope.launch { recomposer.runRecomposeAndApplyChanges() }
+    nodes = runCatching { render() }.onFailure { close() }.getOrThrow()
+  }
+
+  private fun render(): List<SemanticsNode> {
+    val contentView = ComposeView(activity.get())
+    contentView.setParentCompositionContext(recomposer)
+    activity.get().setContentView(contentView)
+    contentView.setContent { PrototypeSpecContent(model.root, spec.theme) }
     val view = checkNotNull(composeView(activity.get().window.decorView)) as RootForTest
+    settle(view)
     val root = view.semanticsOwner.unmergedRootSemanticsNode
     // The renderer's testTagsAsResourceId box is the single content root, not an authored node.
-    nodes = root.children.single().children.flatMap { it.accessibilityNodes() }
+    return root.children.single().children.flatMap { it.accessibilityNodes() }
+  }
+
+  private fun settle(root: RootForTest) {
+    var frameTimeNanos = 0L
+    repeat(MAX_SETTLE_FRAMES + 1) { index ->
+      looper.idle()
+      root.measureAndLayoutForTest()
+      Snapshot.sendApplyNotifications()
+      if (!recomposer.hasPendingWork) return
+      if (index < MAX_SETTLE_FRAMES) {
+        frameTimeNanos += FRAME_INTERVAL_NANOS
+        frameClock.sendFrame(frameTimeNanos)
+      }
+    }
+    error("${spec.id} composition did not settle in $MAX_SETTLE_FRAMES frames")
   }
 
   private fun composeView(view: View): View? =
@@ -215,7 +264,9 @@ internal class PrototypeSemanticsRender(val spec: PrototypeSpec) : AutoCloseable
     else null
 
   override fun close() {
+    recomposer.cancel()
+    scope.cancel()
     activity.pause().stop().destroy()
-    shadowOf(Looper.getMainLooper()).idle()
+    looper.idle()
   }
 }

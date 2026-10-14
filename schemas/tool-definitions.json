@@ -18541,6 +18541,12 @@
         },
         "keyCode": {
           "type": "number"
+        },
+        "code": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
         }
       },
       "required": ["message"],

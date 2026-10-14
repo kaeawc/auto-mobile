@@ -553,6 +553,9 @@ function surfaceTyped(fixture: RefusalSurfaceFixture): {
     expect(Object.hasOwn(payload, "retryable"), fixture.name).toBe(false);
     return { typed: { code: String(payload.errorCode) } };
   }
+  if (fixture.surface === "press-button-result") {
+    return { typed: payload as TypedFields };
+  }
   if (fixture.surface === "delete-device") {
     const text = (payload as unknown as RefusalWireResult).content[0].text;
     const failure = (JSON.parse(text) as { failure: Record<string, unknown> }).failure;

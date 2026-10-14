@@ -75,6 +75,8 @@ describe("registerSession during lazy idle expiry (#12042)", () => {
         restore: async () => {
           restoreStarted = true;
           await restored.promise;
+
+          return { status: "restored" as const };
         },
       }),
     );

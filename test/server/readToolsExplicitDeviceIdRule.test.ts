@@ -37,6 +37,7 @@ import {
 } from "../../src/server/resourceDeviceResolver";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { snapshotPlatformDeviceManagerFactory } from "../helpers/platformDeviceManagerSnapshot";
 import {
   AndroidEmulatorClient,
   resetAndroidInventoryEnrichmentCache,
@@ -590,12 +591,18 @@ for (const platform of ["android", "ios"] as const) {
     const observed = observedReadiness.get(platform) ?? new Map<string, boolean>();
     if (observed.size === EXPECTED.length) {
       expect([...observed.keys()].sort()).toEqual(EXPECTED);
-      expect([...observed].filter(([, ran]) => ran).map(([name]) => name)).toEqual(
-        READS_THAT_READY_UNHELD[platform],
-      );
-      expect([...observed].filter(([, ran]) => !ran).map(([name]) => name)).toEqual(
-        READS_WITHOUT_UNHELD_READINESS[platform],
-      );
+      expect(
+        [...observed]
+          .filter(([, ran]) => ran)
+          .map(([name]) => name)
+          .sort(),
+      ).toEqual(READS_THAT_READY_UNHELD[platform]);
+      expect(
+        [...observed]
+          .filter(([, ran]) => !ran)
+          .map(([name]) => name)
+          .sort(),
+      ).toEqual(READS_WITHOUT_UNHELD_READINESS[platform]);
     } else {
       for (const [name, ran] of observed) {
         expect(EXPECTED).toContain(name);
@@ -1019,7 +1026,9 @@ function installProbeInventory(column: (typeof probeColumns)[number]): void {
     new FakeVirtualDeviceLifecycleCoordinator(),
     current.timer,
   );
-  const previous = PlatformDeviceManagerFactory.getInstance();
+  const restoreFactory = snapshotPlatformDeviceManagerFactory();
+  const previousInstance = Reflect.get(PlatformDeviceManagerFactory, "instance");
+  const previousInjectedManager = Reflect.get(PlatformDeviceManagerFactory, "injectedManager");
   PlatformDeviceManagerFactory.setInstance(inventory);
   statusListing = () => listBootedDevicesForReadWithStatus("android", "read-rule-probe");
   restoreProbeInventory = async () => {
@@ -1040,8 +1049,11 @@ function installProbeInventory(column: (typeof probeColumns)[number]): void {
       );
     } finally {
       resetAndroidInventoryEnrichmentCache();
-      PlatformDeviceManagerFactory.setInstance(previous);
-      expect(PlatformDeviceManagerFactory.getInstance()).toBe(previous);
+      restoreFactory();
+      expect(Reflect.get(PlatformDeviceManagerFactory, "instance")).toBe(previousInstance);
+      expect(Reflect.get(PlatformDeviceManagerFactory, "injectedManager")).toBe(
+        previousInjectedManager,
+      );
     }
   };
 }

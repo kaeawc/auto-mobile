@@ -25,6 +25,7 @@ const PUBLISH_LOCK = [
   op("unlink", "lock-tmp"),
   op("writeFile", "lock-tmp"),
   op("link", "lock"),
+  op("stat", "displaced"),
   op("unlink", "lock-tmp"),
 ];
 const REMOVE_STALE = [
@@ -60,6 +61,9 @@ function prepare(unrelated: number, raw = "99\nstale") {
     if (path === PATH) {
       return "lock";
     }
+    if (path === `${PATH}.displaced`) {
+      return "displaced";
+    }
     if (path === dirname(PATH)) {
       return "dir";
     }
@@ -89,7 +93,7 @@ function prepare(unrelated: number, raw = "99\nstale") {
 }
 
 test.each([0, 100])(
-  "uncontended acquire then release, %d unrelated entries: 11 total / 7 writes",
+  "uncontended acquire then release, %d unrelated entries: 13 total / 7 writes",
   (unrelated) => {
     const f = prepare(unrelated);
     f.fs.unlink(PATH);
@@ -102,12 +106,13 @@ test.each([0, 100])(
         op("mkdir", "dir"),
         op("list", "dir"),
         ...PUBLISH_LOCK,
+        op("readText", "displaced"),
         op("readText", "lock"),
         op("rename", "lock"),
         op("readText", "marker"),
         op("unlink", "marker"),
       ],
-      11,
+      13,
       7,
     );
   },
@@ -120,7 +125,7 @@ test.each(["202\nlive", ""])("contended live/young-ownerless %j: 2 total / 0 wri
   expect(f.fs.operations.some(({ op }) => op === "list")).toBe(false);
 });
 
-test.each([0, 100])("dead owner, k=0, %d unrelated entries: 20 total / 12 writes", (unrelated) => {
+test.each([0, 100])("dead owner, k=0, %d unrelated entries: 21 total / 12 writes", (unrelated) => {
   const f = prepare(unrelated);
   expect(tryAcquireExclusiveLock(PATH, f.options(101))).toBe(true);
   f.verify(
@@ -132,13 +137,13 @@ test.each([0, 100])("dead owner, k=0, %d unrelated entries: 20 total / 12 writes
       op("readText", "guard.0"),
       op("unlink", "guard.0"),
     ],
-    20,
+    21,
     12,
   );
 });
 
 test.each([0, 100])(
-  "dead owner and dead guard, k=1, %d unrelated entries: 35 total / 21 writes",
+  "dead owner and dead guard, k=1, %d unrelated entries: 36 total / 21 writes",
   (unrelated) => {
     const f = prepare(unrelated);
     f.fs.seed(`${f.base}.0`, "98\ndead", 0);
@@ -165,7 +170,7 @@ test.each([0, 100])(
         op("readText", "guard.0"),
         op("unlink", "guard.0"),
       ],
-      35,
+      36,
       21,
     );
   },
@@ -175,6 +180,7 @@ const FREE_RELEASE = [
   op("stat", "lock"),
   op("mkdir", "dir"),
   ...PUBLISH_LOCK,
+  op("readText", "displaced"),
   op("readText", "lock"),
   op("rename", "lock"),
   op("readText", "marker"),
@@ -182,7 +188,7 @@ const FREE_RELEASE = [
 ];
 
 test.each([0, 100])(
-  "steady second acquire: 10 total / 7 writes, %d unrelated entries",
+  "steady second acquire: 12 total / 7 writes, %d unrelated entries",
   (unrelated) => {
     const f = prepare(unrelated);
     f.fs.unlink(PATH);
@@ -191,13 +197,13 @@ test.each([0, 100])(
     releaseExclusiveLock(PATH, 101, "owner-101", f.fs);
     f.verify(
       [FREE_RELEASE[0], FREE_RELEASE[1], op("list", "dir"), ...FREE_RELEASE.slice(2)],
-      11,
+      13,
       7,
     );
     f.fs.operations.length = 0;
     expect(tryAcquireExclusiveLock(PATH, f.options(101))).toBe(true);
     releaseExclusiveLock(PATH, 101, "owner-101", f.fs);
-    f.verify(FREE_RELEASE, 10, 7);
+    f.verify(FREE_RELEASE, 12, 7);
     expect(f.fs.operations.filter(({ op }) => op === "list")).toHaveLength(0);
   },
 );
@@ -232,7 +238,7 @@ test("listing interval is inclusive at 300000ms", () => {
   expect(fileLock.OWN_TMP_SWEEP_INTERVAL_MS).toBe(300_000);
 });
 
-test("dead-owner reclaim after listing: 19 total / 12 writes", () => {
+test("dead-owner reclaim after listing: 20 total / 12 writes", () => {
   const f = prepare(0);
   expect(tryAcquireExclusiveLock("/locks/other.lock", f.options(101))).toBe(true);
   releaseExclusiveLock("/locks/other.lock", 101, "owner-101", f.fs);
@@ -246,7 +252,7 @@ test("dead-owner reclaim after listing: 19 total / 12 writes", () => {
       op("readText", "guard.0"),
       op("unlink", "guard.0"),
     ],
-    19,
+    20,
     12,
   );
 });

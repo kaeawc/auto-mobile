@@ -18,8 +18,10 @@ import dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ViewHierarchy
 import dev.jasonpearson.automobile.ctrlproxy.models.WindowInfo
+import dev.jasonpearson.automobile.ctrlproxy.prototype.DEFAULT_CTRL_PROXY_PACKAGE
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWindowMetadata
 import dev.jasonpearson.automobile.ctrlproxy.prototype.hasPrototypeTitle
+import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import kotlin.math.max
 import kotlin.math.min
 
@@ -44,6 +46,11 @@ internal constructor(
     },
   /** Whether a prototype is hidden because its app left the foreground (#10261). */
   private val prototypeSuspended: () -> Boolean = { false },
+  private val prototypeHiddenReason:
+    (displayId: Int, ownPrototypeWindowCaptured: Boolean?) -> PrototypeHiddenReason? =
+    { _, _ ->
+      null
+    },
 ) {
 
   internal data class DisplayWindows(val displayId: Int, val windows: List<AccessibilityWindowInfo>)
@@ -261,6 +268,7 @@ internal constructor(
         contentHiddenRegions = contentHiddenRegions?.takeIf { it.isNotEmpty() },
         truncationReasons = budget.truncationReasons().ifEmpty { null },
         prototypeSuspended = prototypeSuspended().takeIf { it },
+        prototypeHiddenReason = prototypeHiddenReason(displayId ?: Display.DEFAULT_DISPLAY, null),
       )
     } catch (e: Exception) {
       Log.e(TAG, "Error extracting view hierarchy", e)
@@ -692,6 +700,13 @@ internal constructor(
           detectContentHiddenRegions(contentHiddenRegionRoots, screenDimensions),
         truncationReasons = budget.truncationReasons().ifEmpty { null },
         prototypeSuspended = prototypeSuspended().takeIf { it },
+        prototypeHiddenReason =
+          prototypeHiddenReason(
+            displayId ?: windowInfos.firstOrNull()?.displayId ?: Display.DEFAULT_DISPLAY,
+            windowEntries.any {
+              it.isOwnPrototype && it.packageName == DEFAULT_CTRL_PROXY_PACKAGE
+            },
+          ),
       )
     } finally {
       accessibilityFocusedNode?.recycle()

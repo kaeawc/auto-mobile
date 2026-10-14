@@ -60,6 +60,171 @@ class PrototypeControllerTest {
       root = PrototypeTextNode(text = "{name}"),
     )
 
+  private class HiddenFixture {
+    val host = FakePrototypeHost()
+    val shown = mutableListOf<PrototypeHiddenReason?>()
+    val statuses = mutableListOf<PrototypeStatusEntry>()
+    val probes = mutableListOf<Int>()
+    val delays = mutableListOf<Long>()
+    var blocked = false
+    var suspended = false
+    var onScreen: (Int) -> Boolean? = { false }
+    var wait: suspend (Long) -> Unit = { delays += it }
+    val controller =
+      PrototypeController(
+        host,
+        object : PrototypeResultSink {
+          override suspend fun send(requestId: String?, success: Boolean, error: String?) {
+            check(success) { error.orEmpty() }
+          }
+
+          override suspend fun sendShown(
+            requestId: String?,
+            missingAssets: List<String>,
+            appearance: PrototypeAppearance,
+            hiddenReason: PrototypeHiddenReason?,
+          ) {
+            shown += hiddenReason
+          }
+
+          override suspend fun sendPrototypeStatus(
+            requestId: String?,
+            prototypes: List<PrototypeStatusEntry>,
+            droppedEvents: Long,
+          ) {
+            statuses.addAll(prototypes)
+          }
+        },
+        lifecycle = PrototypeLifecycle(FakePrototypeTimer(), isBlocked = { blocked }),
+        foreground =
+          object : PrototypeForegroundScope {
+            override val suspended: Boolean
+              get() = this@HiddenFixture.suspended
+
+            override fun anchor() = Unit
+
+            override fun release() = Unit
+          },
+        windowOnScreen =
+          PrototypeWindowOnScreen { displayId ->
+            probes += displayId
+            onScreen(probes.size)
+          },
+        settle = { wait(it) },
+      )
+
+    suspend fun show(layer: String = "app", displayId: Int = 0, reset: Boolean = false) {
+      controller.show(
+        "show",
+        PrototypeSpec(
+          "panel",
+          PrototypeWindow(PrototypeFullscreenPlacement(), layer = layer),
+          root = PrototypeTextNode(text = "Panel"),
+        ),
+        displayId = displayId,
+        reset = reset,
+      )
+    }
+  }
+
+  @Test
+  fun `hidden decision distinguishes runtime layer display capture block and suspension`() =
+    runTest {
+      val fixture = HiddenFixture()
+      val controller = fixture.controller
+      assertNull(controller.hiddenReason(0, false))
+      fixture.show(displayId = 2)
+      assertEquals(PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN, controller.hiddenReason(2, false))
+      assertNull(controller.hiddenReason(0, false))
+      assertNull(controller.hiddenReason(2, null))
+      assertNull(controller.hiddenReason(2, true))
+      fixture.host.isHiddenForCapture = true
+      assertNull(controller.hiddenReason(2, false))
+      fixture.host.isHiddenForCapture = false
+      fixture.blocked = true
+      assertEquals(PrototypeHiddenReason.DEVICE_BLOCKED, controller.hiddenReason(0, null))
+      fixture.suspended = true
+      assertNull(controller.hiddenReason(2, false))
+      fixture.suspended = false
+      fixture.blocked = false
+      fixture.show(layer = "system")
+      assertNull(controller.hiddenReason(2, false))
+      fixture.blocked = true
+      assertEquals(PrototypeHiddenReason.DEVICE_BLOCKED, controller.hiddenReason(2, false))
+    }
+
+  @Test
+  fun `app show confirms five absent windows using four injected waits`() = runTest {
+    val fixture = HiddenFixture()
+    fixture.show()
+    assertEquals(listOf(0, 0, 0, 0, 0), fixture.probes)
+    assertEquals(listOf(100L, 100L, 100L, 100L), fixture.delays)
+    assertEquals(listOf(PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN), fixture.shown)
+    // In-place and fresh replacement replies use the same confirmation path.
+    fixture.show()
+    assertEquals(10, fixture.probes.size)
+    assertEquals(PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN, fixture.shown.last())
+    fixture.show(reset = true)
+    assertEquals(15, fixture.probes.size)
+    assertEquals(PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN, fixture.shown.last())
+  }
+
+  @Test
+  fun `show stops probing at visible or unknown and skips system and blocked windows`() = runTest {
+    val visible = HiddenFixture()
+    visible.onScreen = { it == 2 }
+    visible.show()
+    assertEquals(2, visible.probes.size)
+    assertEquals(listOf(100L), visible.delays)
+    assertNull(visible.shown.single())
+    val unknown = HiddenFixture()
+    unknown.onScreen = { null }
+    unknown.show()
+    assertEquals(1, unknown.probes.size)
+    assertTrue(unknown.delays.isEmpty())
+    assertNull(unknown.shown.single())
+    val system = HiddenFixture()
+    system.show("system")
+    assertTrue(system.probes.isEmpty())
+    assertNull(system.shown.single())
+    for (layer in listOf("system", "app")) {
+      val blocked = HiddenFixture()
+      blocked.blocked = true
+      blocked.show(layer)
+      assertTrue(blocked.probes.isEmpty())
+      assertTrue(blocked.delays.isEmpty())
+      assertEquals(PrototypeHiddenReason.DEVICE_BLOCKED, blocked.shown.single())
+    }
+  }
+
+  @Test
+  fun `inspect reports hidden app window but suspension retains its own flag`() = runTest {
+    val fixture = HiddenFixture()
+    fixture.show()
+    fixture.controller.inspect("inspect")
+    assertEquals(
+      PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN,
+      fixture.statuses.last().hiddenReason,
+    )
+    fixture.suspended = true
+    fixture.controller.inspect("suspended")
+    assertTrue(fixture.statuses.last().suspended)
+    assertNull(fixture.statuses.last().hiddenReason)
+  }
+
+  @Test
+  fun `show settle cancellation propagates without a reply`() = runTest {
+    val fixture = HiddenFixture()
+    fixture.wait = { throw CancellationException("cancelled") }
+    try {
+      fixture.show()
+      fail("Expected cancellation")
+    } catch (_: CancellationException) {
+      assertTrue(fixture.shown.isEmpty())
+      assertEquals(1, fixture.probes.size)
+    }
+  }
+
   private fun assertResult(id: String, success: Boolean, error: String? = null) {
     assertEquals(id, results.last().requestId)
     assertEquals(success, results.last().success)

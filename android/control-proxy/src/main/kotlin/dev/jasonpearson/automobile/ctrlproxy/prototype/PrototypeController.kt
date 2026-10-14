@@ -5,11 +5,13 @@ import android.view.Display
 import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeDataResolver
+import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -18,6 +20,11 @@ import kotlinx.serialization.json.Json
 
 /** The CtrlProxy application id, named in errors that tell the host which package to grant. */
 const val DEFAULT_CTRL_PROXY_PACKAGE = "dev.jasonpearson.automobile.ctrlproxy"
+
+/** Whether our prototype window is among accessibility windows on [displayId]; null is unknown. */
+fun interface PrototypeWindowOnScreen {
+  fun isOnScreen(displayId: Int): Boolean?
+}
 
 fun interface PrototypeResultSink {
   suspend fun send(requestId: String?, success: Boolean, error: String?)
@@ -42,6 +49,7 @@ fun interface PrototypeResultSink {
     requestId: String?,
     missingAssets: List<String>,
     appearance: PrototypeAppearance,
+    hiddenReason: PrototypeHiddenReason? = null,
   ) =
     if (missingAssets.isEmpty()) send(requestId, true, null)
     else sendWithMissingAssets(requestId, true, null, missingAssets)
@@ -99,6 +107,8 @@ class PrototypeController(
   private val foreground: PrototypeForegroundScope = NoPrototypeForegroundScope,
   /** The device's light or dark setting and dynamic-colour palette, read at every resolve. */
   private val deviceAppearance: PrototypeDeviceAppearance = NoPrototypeDeviceAppearance,
+  private val windowOnScreen: PrototypeWindowOnScreen = PrototypeWindowOnScreen { null },
+  private val settle: suspend (Long) -> Unit = { delay(it) },
 ) {
   val isShowing: Boolean
     get() = host.isShowing
@@ -242,6 +252,30 @@ class PrototypeController(
     guardPrototypeTree(resolved.root)
     if (resolved.root !== validated.root) requireResolvedPrototypeAnchors(resolved.root)
     return validated
+  }
+
+  /** Snapshot decision, like windowMetadata: no controller mutex is acquired. */
+  fun hiddenReason(displayId: Int, ownWindowCaptured: Boolean?): PrototypeHiddenReason? =
+    when {
+      activeRuntime == null || isSuspendedByForeground -> null
+      lifecycle.isBlocked() -> PrototypeHiddenReason.DEVICE_BLOCKED
+      host.isHiddenForCapture -> null
+      isAppLayerShowing && displayId == shownDisplayId() && ownWindowCaptured == false ->
+        PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN
+      else -> null
+    }
+
+  private suspend fun shownHiddenReason(): PrototypeHiddenReason? {
+    hiddenReason(shownDisplayId(), null)?.let {
+      return it
+    }
+    if (!isAppLayerShowing || isSuspendedByForeground || host.isHiddenForCapture) return null
+    repeat(5) { probe ->
+      val captured = windowOnScreen.isOnScreen(shownDisplayId())
+      if (captured != false) return hiddenReason(shownDisplayId(), captured)
+      if (probe < 4) settle(100L)
+    }
+    return hiddenReason(shownDisplayId(), false)
   }
 
   private fun shownDisplayId(): Int = activeRequest?.displayId ?: Display.DEFAULT_DISPLAY
@@ -473,7 +507,8 @@ class PrototypeController(
       }
     val missing = outcome.missingAssets
     val appearance = outcome.appearance
-    if (error == null && appearance != null) sink.sendShown(requestId, missing, appearance)
+    if (error == null && appearance != null)
+      sink.sendShown(requestId, missing, appearance, shownHiddenReason())
     else if (missing.isEmpty()) sink.send(requestId, error == null, error)
     else sink.sendWithMissingAssets(requestId, error == null, error, missing)
   }
@@ -552,6 +587,7 @@ class PrototypeController(
       pages = runtime.current.pages.toMap(),
       lastSequence = sequences[id] ?: 0L,
       suspended = foreground.suspended,
+      hiddenReason = hiddenReason(shownDisplayId(), windowOnScreen.isOnScreen(shownDisplayId())),
       appearance = activeTheme?.value?.appearance,
     )
   }

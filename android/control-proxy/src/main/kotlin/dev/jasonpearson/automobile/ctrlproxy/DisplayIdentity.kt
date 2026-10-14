@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import android.util.Log
 import android.view.Display
+import java.lang.reflect.InvocationTargetException
 
 private const val TAG = "DisplayIdentity"
 
@@ -37,21 +38,36 @@ internal class PanelUniqueIdResolver<D : Any>(
     // Serialize invocation too, so no caller can invoke after another caller latches a failure.
     return synchronized(lock) {
       if (resolved && accessor == null) return@synchronized null
-      val value =
-        try {
-          if (!resolved) {
-            resolved = true
-            accessor = lookup()
+      if (!resolved) {
+        resolved = true
+        accessor =
+          try {
+            lookup()
+          } catch (error: Exception) {
+            return@synchronized unavailable(error)
+          } catch (error: LinkageError) {
+            return@synchronized unavailable(error)
           }
-          accessor?.invoke(display)
-        } catch (e: Exception) {
-          return@synchronized unavailable(e)
-        } catch (e: LinkageError) {
-          return@synchronized unavailable(e)
-        }
-      if (accessor == null) unavailable(null) else value
+        if (accessor == null) return@synchronized unavailable(null)
+      }
+      try {
+        accessor?.invoke(display)
+      } catch (error: Exception) {
+        if (isAccessFailure(error)) unavailable(error) else null
+      } catch (error: LinkageError) {
+        unavailable(error)
+      }
     }
   }
+
+  private fun isAccessFailure(error: Throwable): Boolean =
+    when (error) {
+      is IllegalAccessException,
+      is SecurityException,
+      is LinkageError -> true
+      is InvocationTargetException -> error.cause?.let(::isAccessFailure) == true
+      else -> false
+    }
 
   private fun unavailable(error: Throwable?): String? {
     resolved = true

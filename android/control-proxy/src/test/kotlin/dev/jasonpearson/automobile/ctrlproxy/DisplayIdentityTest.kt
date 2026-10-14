@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import java.lang.reflect.InvocationTargetException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -87,7 +88,7 @@ class DisplayIdentityTest {
   }
 
   @Test
-  fun `third invocation failure permanently disables the accessor`() {
+  fun `third access failure permanently disables the accessor`() {
     var lookups = 0
     var invocations = 0
     val errors = mutableListOf<Throwable?>()
@@ -114,6 +115,61 @@ class DisplayIdentityTest {
     assertEquals(3, invocations)
     assertEquals(1, errors.size)
     assertSame(denial, errors.single())
+  }
+
+  @Test
+  fun `third transient invocation failure leaves the accessor available`() {
+    var lookups = 0
+    var invocations = 0
+    var unavailable = 0
+    val resolver =
+      PanelUniqueIdResolver<FakeDisplay>(
+        lookup = {
+          lookups++
+          val read: (FakeDisplay) -> String? = { display ->
+            invocations++
+            if (invocations == 3) throw InvocationTargetException(RuntimeException("temporary"))
+            display.id
+          }
+          read
+        },
+        onUnavailable = { unavailable++ },
+      )
+    val display = FakeDisplay("local:1")
+    repeat(2) { assertEquals("local:1", resolver.resolve(display)) }
+    assertNull(resolver.resolve(display))
+    assertEquals("local:1", resolver.resolve(display))
+    assertEquals(1, lookups)
+    assertEquals(4, invocations)
+    assertEquals(0, unavailable)
+  }
+
+  @Test
+  fun `wrapped access failures and linkage failures latch once`() {
+    listOf(
+        IllegalAccessException("denied"),
+        SecurityException("denied"),
+        LinkageError("denied"),
+        InvocationTargetException(SecurityException("denied")),
+        InvocationTargetException(LinkageError("denied")),
+      )
+      .forEach { failure ->
+        var calls = 0
+        var unavailable = 0
+        val resolver =
+          PanelUniqueIdResolver<FakeDisplay>(
+            lookup = {
+              { _ ->
+                calls++
+                throw failure
+              }
+            },
+            onUnavailable = { unavailable++ },
+          )
+        repeat(4) { assertNull(resolver.resolve(FakeDisplay("local:1"))) }
+        assertEquals(1, calls)
+        assertEquals(1, unavailable)
+      }
   }
 
   @Test

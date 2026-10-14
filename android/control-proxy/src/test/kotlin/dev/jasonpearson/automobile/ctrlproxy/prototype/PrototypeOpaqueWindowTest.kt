@@ -8,9 +8,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
-@RunWith(RobolectricTestRunner::class)
-@Config(sdk = [30])
-class PrototypeOpaqueWindowTest {
+class PrototypeWindowOpaqueTest {
   private fun opaqueRequest() =
     PrototypeRequest(
       placement = PrototypePlacement.Fullscreen(),
@@ -44,7 +42,11 @@ class PrototypeOpaqueWindowTest {
       prototypeWindowOpaque(PrototypeRequest(placement = PrototypePlacement.Fullscreen())),
     )
   }
+}
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [30])
+class PrototypeOpaqueWindowTest {
   private fun spec(
     background: PrototypeModeValue? = PrototypeModeValue.Single("#FF101010"),
     cornerRadius: PrototypeCornerRadius? = null,
@@ -75,6 +77,53 @@ class PrototypeOpaqueWindowTest {
     // Direct render-model requests retain the legacy bar; host eligibility is checked separately.
     assertFalse(prototypeWindowOpaque(request))
     assertTrue(prototypeWindowOpaque(request.copy(chrome = PrototypeWindowChrome.NONE)))
+  }
+
+  @Test
+  fun `root with conditional styles cannot opt into an opaque surface`() {
+    val spec = spec()
+    val root = spec.root as PrototypeBoxNode
+    val conditional =
+      root.copy(
+        styleWhen =
+          listOf(
+            PrototypeStyleWhen(
+              PrototypeCondition(key = "dim", equals = PrototypeScalar.BooleanValue(true)),
+              PrototypeStyle(background = PrototypeModeValue.Single("#80101010")),
+            ),
+          ),
+      )
+    val model = mapPrototypeSpec(spec.copy(root = conditional))
+    assertTrue(prototypeWindowMetadata(model, dismissBarDrawn = false).opaque)
+    assertFalse(model.request().opaqueSurface)
+    assertTrue(
+      mapPrototypeSpec(spec.copy(root = root.copy(styleWhen = emptyList())))
+        .request()
+        .opaqueSurface,
+    )
+  }
+
+  @Test
+  fun `visible root with a visibility condition cannot opt into an opaque surface`() {
+    val spec = spec()
+    val root =
+      (spec.root as PrototypeBoxNode).copy(
+        visibleWhen =
+          PrototypeCondition(key = "shown", equals = PrototypeScalar.BooleanValue(true)),
+      )
+    val model =
+      mapPrototypeSpec(
+        spec.copy(root = root, state = mapOf("shown" to PrototypeScalar.BooleanValue(true))),
+      )
+    assertTrue(model.root.visible)
+    assertTrue(prototypeWindowMetadata(model, dismissBarDrawn = false).opaque)
+    assertFalse(model.request().opaqueSurface)
+  }
+
+  @Test
+  fun `hidden root cannot opt into an opaque surface`() {
+    val model = mapPrototypeSpec(spec())
+    assertFalse(model.copy(root = model.root.copy(visible = false)).request().opaqueSurface)
   }
 
   @Test

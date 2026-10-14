@@ -538,7 +538,12 @@ class DefaultPrototypeHost(
     require(percent in 0..100) { "Opacity must be in 0..100" }
     mainThread.onMain {
       window?.let {
-        it.request = it.request.copy(opacityPercent = percent)
+        val previousRequest = it.request
+        val newRequest = previousRequest.copy(opacityPercent = percent)
+        it.request = newRequest
+        if (prototypeWindowOpaque(previousRequest) != prototypeWindowOpaque(newRequest)) {
+          relayoutOnMain(it)
+        }
         applyContent(it)
       }
     }

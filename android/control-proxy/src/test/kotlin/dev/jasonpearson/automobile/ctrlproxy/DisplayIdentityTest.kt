@@ -12,6 +12,31 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DisplayIdentityTest {
+  @Test
+  fun `unavailable mode read omits fingerprint and permits the next read`() {
+    val error = IllegalStateException("Unable to locate mode id=1")
+    val errors = mutableListOf<IllegalStateException>()
+    assertNull(readPanelFingerprint(readMode = { throw error }, onUnavailable = { errors.add(it) }))
+    assertSame(error, errors.single())
+    assertEquals(
+      PanelFingerprint(2076, 2152),
+      readPanelFingerprint(
+        readMode = { panelFingerprintFromSize(2076, 2152) },
+        onUnavailable = { errors.add(it) },
+      ),
+    )
+    assertEquals(1, errors.size)
+  }
+
+  @Test
+  fun `fingerprint reader requires positive native dimensions`() {
+    assertEquals(PanelFingerprint(2076, 2152), panelFingerprintFromSize(2076, 2152))
+    for ((width, height) in listOf(0 to 1, 1 to 0, -1 to 1, 1 to -1)) {
+      assertNull(panelFingerprintFromSize(width, height))
+    }
+    assertNull(panelFingerprintOf(null))
+  }
+
   private class FakeDisplay(var id: String)
 
   @Test

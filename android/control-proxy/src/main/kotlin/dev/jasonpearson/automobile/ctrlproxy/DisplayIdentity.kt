@@ -89,3 +89,31 @@ internal class PanelUniqueIdResolver<D : Any>(
     return null
   }
 }
+
+/** Native panel dimensions, independent of logical display rotation and overrides. */
+internal data class PanelFingerprint(val width: Int, val height: Int)
+
+internal fun panelFingerprintFromSize(width: Int, height: Int): PanelFingerprint? =
+  if (width > 0 && height > 0) PanelFingerprint(width, height) else null
+
+internal fun panelFingerprintOf(display: Display?): PanelFingerprint? =
+  readPanelFingerprint(
+    readMode = {
+      display?.mode?.let { panelFingerprintFromSize(it.physicalWidth, it.physicalHeight) }
+    },
+    onUnavailable = { error ->
+      Log.d(TAG, "Display.getMode() is unavailable; panelFingerprint will be omitted", error)
+    },
+  )
+
+internal fun readPanelFingerprint(
+  readMode: () -> PanelFingerprint?,
+  onUnavailable: (IllegalStateException) -> Unit,
+): PanelFingerprint? =
+  try {
+    readMode()
+  } catch (error: IllegalStateException) {
+    // A mode change can invalidate this optional identity hint; capture can safely continue.
+    onUnavailable(error)
+    null
+  }

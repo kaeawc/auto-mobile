@@ -1,4 +1,5 @@
 import type { PrototypeHiddenReason } from "../features/prototype/prototypeHidden";
+import type { PanelFingerprint } from "./DisplayPanel";
 import { ElementBounds } from "./ElementBounds";
 import { RecompositionMetrics, RecompositionNodeInfo } from "./Recomposition";
 import type { CtrlProxyReconnectStatus } from "./CtrlProxyReconnectStatus";
@@ -46,6 +47,7 @@ export interface ViewHierarchyResult {
   hierarchyServiceStarted?: boolean;
   displayId?: number | null;
   panelUniqueId?: string | null;
+  panelFingerprint?: PanelFingerprint;
   /** Daemon-assigned sequence if this exact hierarchy was forwarded to the observation stream. */
   captureSequence?: number;
   hierarchy: Hierarchy;

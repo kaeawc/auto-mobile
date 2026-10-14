@@ -1,3 +1,5 @@
+import { parseAndroidDeviceDisplays } from "../../../src/utils/android-cmdline-tools/AndroidDisplayInventory";
+import { panelKeyForFingerprint } from "../../../src/models/DisplayPanel";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   DisplayTransitionTracker,
@@ -899,4 +901,199 @@ describe("display transitions", () => {
       displayTransitions.reset(sameSized.deviceId);
     }
   });
+});
+
+const fingerprintInventory = parseAndroidDeviceDisplays(
+  readFileSync(
+    new URL(
+      "../../fixtures/android-display/fold-pixel10pf-api36/fold-open-surfaceflinger.txt",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+  readFileSync(
+    new URL(
+      "../../fixtures/android-display/fold-pixel10pf-api36/fold-open-displays.txt",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+  readFileSync(
+    new URL(
+      "../../fixtures/android-display/fold-pixel10pf-api36/fold-print-states.txt",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
+)!;
+
+describe("fingerprint pushed panel identity", () => {
+  test("state-first fold ignores the old fingerprint until the complementary display push", () => {
+    for (const oldFingerprint of [undefined, { width: 2076, height: 2152 }]) {
+      const resolved: Array<{ width: number; height: number }> = [];
+      const tracker = new DisplayTransitionTracker(
+        () => {},
+        () => {},
+        (_id, size) => {
+          resolved.push(size);
+          return panelKeyForFingerprint(fingerprintInventory.panels, size);
+        },
+      );
+      tracker.record("state-first", {
+        display: { key: "4619827259835644672", role: "inner", posture: "opened", generation: 0 },
+        screenSize: { width: 2076, height: 2152 },
+      });
+      const emitted: Array<string | undefined> = [];
+      tracker.subscribe("state-first", (panel) => emitted.push(panel?.key));
+      tracker.notifyAndroidTransition("state-first", {
+        change: "device_state",
+        displayId: 0,
+        deviceState: 1,
+        width: 2076,
+        height: 2152,
+        panelFingerprint: oldFingerprint,
+      });
+      expect(emitted).toEqual([undefined]);
+      expect(resolved).toEqual([]);
+      expect(tracker["pendingPushes"].get("state-first")?.panel).toBeUndefined();
+      const newFingerprint = { width: 1080, height: 2364 };
+      tracker.notifyAndroidTransition("state-first", {
+        change: "changed",
+        displayId: 0,
+        ...newFingerprint,
+        panelFingerprint: newFingerprint,
+      });
+      expect(resolved).toEqual([newFingerprint]);
+      expect(tracker["pendingPushes"].get("state-first")?.panel).toEqual({
+        key: "4619827551948147201",
+        ...newFingerprint,
+      });
+      expect(emitted).toEqual([undefined]);
+      expect(tracker.revision("state-first")).toBe(1);
+      expect(
+        tracker.record("state-first", {
+          display: { key: "4619827551948147201", role: "cover", posture: "closed", generation: 1 },
+          screenSize: newFingerprint,
+        }),
+      ).toBe(false);
+      expect(tracker.revision("state-first")).toBe(1);
+    }
+  });
+
+  test("rotation with a resolved panel is swallowed for a placeholder or the same identified panel", () => {
+    for (const key of ["0", "4619827259835644672"]) {
+      let calls = 0;
+      const tracker = new DisplayTransitionTracker(
+        () => {},
+        () => {},
+        () => {
+          calls++;
+          return "4619827259835644672";
+        },
+      );
+      tracker.record("fingerprint", {
+        display: { key, role: "inner", posture: "opened", generation: 0 },
+        screenSize: { width: 2076, height: 2152 },
+      });
+      tracker.notifyAndroidTransition("fingerprint", {
+        change: "changed",
+        displayId: 0,
+        width: 2152,
+        height: 2076,
+        panelFingerprint: { width: 2076, height: 2152 },
+      });
+      expect(calls).toBe(1);
+      expect(tracker.revision("fingerprint")).toBe(0);
+    }
+  });
+  test("fold resolves once before invalidation and retains the new pending panel", () => {
+    const order: string[] = [];
+    const tracker = new DisplayTransitionTracker(
+      () => {},
+      () => {
+        order.push("drop");
+      },
+      (_id, size) => {
+        order.push("resolve");
+        return panelKeyForFingerprint(fingerprintInventory.panels, size);
+      },
+    );
+    tracker.record("fold", {
+      display: { key: "4619827259835644672", role: "inner", posture: "opened", generation: 0 },
+      screenSize: { width: 2076, height: 2152 },
+    });
+    const emitted: string[] = [];
+    tracker.subscribe("fold", (panel) => {
+      if (panel) {
+        emitted.push(panel.key);
+      }
+    });
+    tracker.notifyAndroidTransition("fold", {
+      change: "changed",
+      displayId: 0,
+      width: 1080,
+      height: 2364,
+      panelFingerprint: { width: 1080, height: 2364 },
+    });
+    expect(order).toEqual(["resolve", "drop"]);
+    expect(emitted).toEqual(["4619827551948147201"]);
+    expect(tracker.revision("fold")).toBe(1);
+    tracker.notifyAndroidTransition("fold", {
+      change: "changed",
+      displayId: 0,
+      width: 2364,
+      height: 1080,
+      panelUniqueId: "local:4619827551948147201",
+    });
+    expect(tracker.revision("fold")).toBe(1);
+  });
+  test("old frames do not invoke the resolver and still swallow rotation", () => {
+    let calls = 0;
+    const tracker = new DisplayTransitionTracker(
+      () => {},
+      () => {},
+      () => {
+        calls++;
+        return "other";
+      },
+    );
+    tracker.record("old", {
+      display: { key: "inner", role: "inner", posture: "opened", generation: 0 },
+      screenSize: { width: 2076, height: 2152 },
+    });
+    tracker.notifyAndroidTransition("old", {
+      change: "changed",
+      displayId: 0,
+      width: 2152,
+      height: 2076,
+    });
+    expect(calls).toBe(0);
+    expect(tracker.revision("old")).toBe(0);
+  });
+});
+
+test("real pushed unique id wins over conflicting fingerprint evidence", () => {
+  let calls = 0;
+  const tracker = new DisplayTransitionTracker(
+    () => {},
+    () => {},
+    () => {
+      calls++;
+      return "cover";
+    },
+  );
+  const emitted: string[] = [];
+  tracker.subscribe("precedence", (panel) => {
+    if (panel) {
+      emitted.push(panel.key);
+    }
+  });
+  tracker.notifyAndroidTransition("precedence", {
+    change: "added",
+    displayId: 0,
+    panelUniqueId: "local:inner",
+    panelFingerprint: { width: 1080, height: 2364 },
+  });
+  expect(calls).toBe(0);
+  expect(emitted).toEqual(["inner"]);
 });

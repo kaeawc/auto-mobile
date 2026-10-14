@@ -32,6 +32,7 @@ internal data class DisplayTransition(
   val state: Int?,
   val deviceState: Int? = null,
   val rotation: Int? = null,
+  val panelFingerprint: PanelFingerprint? = null,
 )
 
 internal class DisplayRotationChangeSignal(
@@ -63,13 +64,15 @@ internal class DisplayRotationChangeSignal(
       size.y,
       display.state,
       rotation = display.rotation,
+      panelFingerprint = panelFingerprintOf(display),
     )
   }
 
   internal fun emitTransition(change: String, displayId: Int, deviceState: Int? = null) {
     val current = snapshot(displayId, change)
     if (change == "changed" && current == null) return
-    val transition = current ?: lastDisplays[displayId]?.copy(change = change)
+    val transition =
+      current ?: lastDisplays[displayId]?.copy(change = change, panelFingerprint = null)
     val previous = lastDisplays[displayId]
     if (
       change == "changed" &&
@@ -79,6 +82,7 @@ internal class DisplayRotationChangeSignal(
         current.height == previous.height &&
         current.state == previous.state &&
         current.panelUniqueId == previous.panelUniqueId &&
+        current.panelFingerprint == previous.panelFingerprint &&
         current.rotation == previous.rotation
     )
       return

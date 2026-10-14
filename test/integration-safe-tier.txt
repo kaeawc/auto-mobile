@@ -120,6 +120,7 @@ test/db/navigationRetention.integration.test.ts | safe | in-memory DB; file remo
 test/db/navigationSuggestionProvenanceMigration.integration.test.ts | safe | in-memory DB
 test/db/networkEventRepository.integration.test.ts | safe | in-memory DB
 test/db/normalizeStorageEvent.integration.test.ts | safe | in-memory DB
+test/db/peerWriteLockStall.integration.test.ts | unsafe | spawns real bun processes holding SQLite write locks
 test/db/performanceAuditRepository.integration.test.ts | safe | in-memory DB
 test/db/performanceLiveMetricsMigration.integration.test.ts | safe | in-memory DB
 test/db/predictionHistoryRepository.integration.test.ts | safe | in-memory DB

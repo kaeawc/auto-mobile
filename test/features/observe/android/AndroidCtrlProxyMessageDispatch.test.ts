@@ -1,3 +1,4 @@
+import { displayTransitionFromWire } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   AndroidCtrlProxyClient,
@@ -393,4 +394,26 @@ test("connected greeting records gesture display capability without gating core 
   expect(context.isCommandSupported?.("gesture_display_id_v1")).toBe(false);
   proxy["supportedCommands"] = null;
   expect(context.isCommandSupported?.("gesture_display_id_v1")).toBe(false);
+});
+
+test("display transition accepts only positive integer native fingerprints", () => {
+  const frame = { change: "changed", displayId: 4 };
+  const panelFingerprint = { width: 2076, height: 2152 };
+  expect(displayTransitionFromWire({ ...frame, panelFingerprint })).toEqual({
+    ...frame,
+    panelFingerprint,
+  });
+  for (const invalid of [
+    null,
+    "size",
+    { width: "1", height: 2 },
+    { width: 0, height: 2 },
+    { width: 1, height: -1 },
+    { width: 1.5, height: 2 },
+    { width: 1 },
+    { width: 2, height: 0.5 },
+  ]) {
+    expect(displayTransitionFromWire({ ...frame, panelFingerprint: invalid })).toEqual(frame);
+  }
+  expect(displayTransitionFromWire(frame)).toEqual(frame);
 });

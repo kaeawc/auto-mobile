@@ -1636,3 +1636,32 @@ describe("sanitizeObserveResult", () => {
     });
   });
 });
+
+test("panel fingerprints stay internal in every output projection while unique id stays unchanged", () => {
+  const obs = {
+    viewHierarchy: {
+      hierarchy: {},
+      panelUniqueId: "local:123",
+      panelFingerprint: { width: 1080, height: 2364 },
+    },
+  } as ObserveResult;
+  obs.rawViewHierarchy = {
+    json: JSON.stringify(obs.viewHierarchy, null, 2),
+    source: "accessibility-service",
+    timestamp: 0,
+    device: { deviceId: "fingerprint", platform: "android" },
+  };
+  for (const cfg of [
+    { project: "full" },
+    { project: "full", trimNodes: false, compact: false },
+    { project: "skeleton" },
+  ] satisfies SanitizeObserveConfig[]) {
+    const out = sanitizeObserveResult(obs, cfg);
+    expect(JSON.stringify(out)).not.toContain("panelFingerprint");
+    if (cfg.project === "full") {
+      expect(out.viewHierarchy?.panelUniqueId).toBe("local:123");
+    }
+    expect(JSON.parse(out.rawViewHierarchy!.json!).panelUniqueId).toBe("local:123");
+  }
+  expect(obs.viewHierarchy?.panelFingerprint).toEqual({ width: 1080, height: 2364 });
+});

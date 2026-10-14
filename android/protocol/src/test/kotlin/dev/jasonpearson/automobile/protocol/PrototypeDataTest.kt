@@ -9,6 +9,45 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestFactory
 
 class PrototypeDataTest {
+  @Test
+  fun `hidden reasons are additive and absent legacy frames decode to null`() {
+    val legacyResult = """{"timestamp":42,"requestId":null,"success":true,"error":null}"""
+    val legacyStatus =
+      """{"id":"panel","persistent":false,"state":{},"pages":{},"lastSequence":0}"""
+    val encoder = Json { encodeDefaults = true }
+    val result = PrototypeResult(timestamp = 42, success = true)
+    val status = PrototypeStatusEntry("panel", false, emptyMap(), lastSequence = 0)
+    assertEquals(legacyResult, encoder.encodeToString(PrototypeResult.serializer(), result))
+    assertEquals(legacyStatus, encoder.encodeToString(PrototypeStatusEntry.serializer(), status))
+    assertNull(encoder.decodeFromString(PrototypeResult.serializer(), legacyResult).hiddenReason)
+    assertNull(
+      encoder.decodeFromString(PrototypeStatusEntry.serializer(), legacyStatus).hiddenReason,
+    )
+    for ((reason, wire) in
+      listOf(
+        PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN to "app_layer_window_hidden",
+        PrototypeHiddenReason.DEVICE_BLOCKED to "device_blocked",
+      )) {
+      val resultFrame =
+        encoder.encodeToString(PrototypeResult.serializer(), result.copy(hiddenReason = reason))
+      assertEquals(legacyResult.dropLast(1) + ",\"hiddenReason\":\"$wire\"}", resultFrame)
+      val statusFrame =
+        encoder.encodeToString(
+          PrototypeStatusEntry.serializer(),
+          status.copy(hiddenReason = reason),
+        )
+      assertEquals(legacyStatus.dropLast(1) + ",\"hiddenReason\":\"$wire\"}", statusFrame)
+      assertEquals(
+        reason,
+        encoder.decodeFromString(PrototypeResult.serializer(), resultFrame).hiddenReason,
+      )
+      assertEquals(
+        reason,
+        encoder.decodeFromString(PrototypeStatusEntry.serializer(), statusFrame).hiddenReason,
+      )
+    }
+  }
+
   @TestFactory
   fun pointers(): List<DynamicTest> =
     pointerFixture.getValue("cases").jsonArray.map { entry ->

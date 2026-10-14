@@ -1257,6 +1257,9 @@ export class CtrlProxyHierarchy {
           },
           packageName: resolvedPackageName,
           windows: accessibilityHierarchy.windows,
+          ...(accessibilityHierarchy.prototypeSuspended === true
+            ? { prototypeSuspended: true }
+            : {}),
           contentHiddenRegions: accessibilityHierarchy.contentHiddenRegions,
           intentChooserDetected: accessibilityHierarchy.intentChooserDetected,
           notificationPermissionDetected: accessibilityHierarchy.notificationPermissionDetected,
@@ -1307,6 +1310,7 @@ export class CtrlProxyHierarchy {
         hierarchy: convertedHierarchy,
         packageName: resolvedPackageName,
         windows: linkWindowRoots(convertedHierarchy, accessibilityHierarchy.windows),
+        ...(accessibilityHierarchy.prototypeSuspended === true ? { prototypeSuspended: true } : {}),
         contentHiddenRegions: accessibilityHierarchy.contentHiddenRegions,
         intentChooserDetected: accessibilityHierarchy.intentChooserDetected,
         notificationPermissionDetected: accessibilityHierarchy.notificationPermissionDetected,
@@ -1343,6 +1347,7 @@ export class CtrlProxyHierarchy {
       logger.warn(`[CTRL_PROXY] Format conversion failed after ${duration}ms: ${error}`);
 
       return {
+        ...(accessibilityHierarchy.prototypeSuspended === true ? { prototypeSuspended: true } : {}),
         hierarchy: {
           error: "Failed to convert accessibility service hierarchy format",
         },

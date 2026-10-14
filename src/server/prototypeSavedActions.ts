@@ -46,6 +46,10 @@ export interface PrototypeSavedDependencies {
   signal?: AbortSignal;
 }
 export const savedPrototypeErrorMessages: Record<SavedPrototypeErrorCode, string> = {
+  pin_unsupported: "This launcher does not support pinned shortcuts; save without pin.",
+  device_locked: "Unlock the device and retry saving with pin.",
+  pin_failed:
+    "The launcher refused the pinned shortcut; retry or accept the saved prototype without a shortcut.",
   invalid_id: "Use a valid saved prototype id.",
   invalid_label: "Use a non-empty label of at most 120 characters.",
   spec_too_large: "Reduce the saved prototype spec size and retry.",

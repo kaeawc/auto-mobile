@@ -1017,6 +1017,21 @@ export function prototypeHasStack(spec: unknown): boolean {
   return false;
 }
 
+/** Finds stack use in the full authored spec, including reusable component definitions. */
+export function prototypeStackFields(spec: unknown): string[] {
+  const value = record(spec);
+  if (!value) {
+    return [];
+  }
+  const components = record(value.components) ?? {};
+  return [
+    ...(prototypeHasStack(spec) ? ["root"] : []),
+    ...Object.entries(components).flatMap(([name, component]) =>
+      prototypeHasStack({ root: record(component)?.root }) ? [`components.${name}.root`] : [],
+    ),
+  ];
+}
+
 /** Shared unsent refusal, following the theme-mode capability refusal wording. */
 export function prototypeStackUnsupportedMessage(platform: "android" | "ios"): string {
   const device = platform === "ios" ? "connected iOS prototype agent" : "connected CtrlProxy";

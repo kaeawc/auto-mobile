@@ -24,7 +24,7 @@ launch metadata are intentionally excluded.
 | `AUTOMOBILE_LOG_FORMAT`, `AUTO_MOBILE_LOG_FORMAT`                                   | Log serialization: `text` or newline-delimited `json`; case-insensitive, trimmed.                                                                                                                                             | `text`                                                     |
 | `AUTOMOBILE_LOG_SINK`, `AUTO_MOBILE_LOG_SINK`                                       | Log destination: `file`, `stderr`, `both`; case-insensitive, trimmed.                                                                                                                                                         | `file`                                                     |
 | `AUTOMOBILE_LOG_LEVEL`, `AUTO_MOBILE_LOG_LEVEL`                                     | Initial logging threshold: `debug`, `info`, `warn`/`warning`, `error`, `none`/`silent`; case-insensitive, trimmed.                                                                                                            | `info`                                                     |
-| `AUTOMOBILE_COORDINATION_DIR`, `AUTO_MOBILE_COORDINATION_DIR`                       | Shared cross-process CtrlProxy forwarding lease root; must be an absolute path shared by cooperating agents.                                                                                                                  | OS account home `.auto-mobile`                             |
+| `AUTOMOBILE_COORDINATION_DIR`, `AUTO_MOBILE_COORDINATION_DIR`                       | Shared cross-process CtrlProxy forwarding lease root, iOS CtrlProxy bundle cache (`ctrl-proxy-ios`), and signing entitlements (`ctrl-proxy/entitlements`); must be an absolute path shared by cooperating agents.             | OS account home `.auto-mobile`                             |
 | `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR`, `AUTO_MOBILE_ADB_SERVER_COORDINATION_DIR` | Root of per-ADB-server device allocation claims and Android boot admissions, and of the managed-slot registry; all ignore `AUTOMOBILE_COORDINATION_DIR`. Must be an absolute path shared by every daemon on one ADB server.   | OS account home `.auto-mobile/adb-servers`                 |
 | `AUTOMOBILE_TOOL_OUTPUTS_DIR`, `AUTO_MOBILE_TOOL_OUTPUTS_DIR`                       | Directory for large CLI tool-output artifacts; filesystem path. CLI `--tool-outputs-dir` wins.                                                                                                                                | resolved data directory `tool_outputs`                     |
 | `AUTOMOBILE_DEBUG`                                                                  | Enable CLI debug logging; exact `1` enables; debug mode also asks a capable control-proxy for the IME commit trace and attaches it to `sendKeys` command results as `imeTrace`.                                               | off                                                        |
@@ -46,8 +46,13 @@ export AUTOMOBILE_ALLOW_SHARED_DAEMON_NAMESPACE=1
 Device snapshots, video archives and downloaded libwebp tools default to stores
 under `AUTOMOBILE_DATA_DIR`. This setting does not move the SQLite database
 (`AUTOMOBILE_DB_DIR` / `AUTOMOBILE_DB_PATH`), auxiliary daemon sockets
-(`AUTOMOBILE_AUX_SOCKET_DIR`), or coordination directories
-(`AUTOMOBILE_COORDINATION_DIR` / `AUTOMOBILE_ADB_SERVER_COORDINATION_DIR`).
+(`AUTOMOBILE_AUX_SOCKET_DIR`), or coordination directories, which remain under
+the home directory regardless of `AUTOMOBILE_DATA_DIR`. Set
+`AUTOMOBILE_COORDINATION_DIR` to relocate coordination state, including the iOS
+CtrlProxy bundle cache (`ctrl-proxy-ios`) and signing entitlements
+(`ctrl-proxy/entitlements`). The iOS bundle cache can also be relocated with
+`AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR`. ADB server coordination also accepts
+`AUTOMOBILE_ADB_SERVER_COORDINATION_DIR`.
 
 Set `AUTOMOBILE_COORDINATION_DIR` when the OS account home is read-only or when
 AutoMobile agents that share an ADB server need an explicit shared lease root.

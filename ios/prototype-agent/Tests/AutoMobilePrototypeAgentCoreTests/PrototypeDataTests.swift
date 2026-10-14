@@ -326,4 +326,38 @@ final class PrototypeDataTests: XCTestCase {
         XCTAssertEqual(cache.items("/é"), .array([.object(["id": .number(1)])]))
         XCTAssertEqual(cache.items("/e\u{0301}"), .array([]))
     }
+
+    func testDataCountingSharesBindingGrammarAndCountsOnlyReplacementUTF16() {
+        let exact = String(repeating: "😀", count: 8192)
+        let data: [String: JSONValue] = ["b": .string(exact), "s": .string("x"), "object": .object([:])]
+        XCTAssertFalse(PrototypeDataText.exceedsSubstitutionLimit("{data:/b}", data: data))
+        XCTAssertTrue(PrototypeDataText.exceedsSubstitutionLimit("{data:/b}{data:/s}", data: data))
+        XCTAssertEqual(PrototypeDataText.bind("{data:/b}", data: data), exact)
+        let ignored = "{data:bad}{data:/missing}{data:/object}"
+        XCTAssertFalse(PrototypeDataText.exceedsSubstitutionLimit(ignored, data: data))
+        XCTAssertEqual(PrototypeDataText.bind(ignored, data: data), "{data:bad}")
+        let literal = String(repeating: "x", count: 20000) + "{data:/s}"
+        XCTAssertFalse(PrototypeDataText.exceedsSubstitutionLimit(literal, data: data))
+        XCTAssertEqual(PrototypeDataText.bind(literal, data: data), String(repeating: "x", count: 20001))
+    }
+
+    func testSharedSubstitutedTextTotalBoundaries() throws {
+        _ = try JSONDecoder().decode(
+            PrototypeSpec.self, from: fixture("valid/substituted-text-total-exact.json")
+        )
+        for name in ["substituted-text-total-data-limit", "substituted-text-total-repeat-limit"] {
+            let wrapper = try object(JSONDecoder().decode(
+                JSONValue.self, from: fixture("invalid/\(name).json")
+            ))
+            let spec = try XCTUnwrap(wrapper["spec"])
+            let path = try XCTUnwrap(wrapper["expectedPath"]?.stringValue)
+            let message = try XCTUnwrap(wrapper["expectedMessage"]?.stringValue)
+            XCTAssertThrowsError(try JSONDecoder().decode(PrototypeSpec.self, from: encoded(spec))) { error in
+                guard case let DecodingError.dataCorrupted(context) = error else {
+                    return XCTFail("Unexpected error: \(error)")
+                }
+                XCTAssertEqual(context.debugDescription, "\(path): \(message)")
+            }
+        }
+    }
 }

@@ -1,3 +1,5 @@
+import { getNativeHelperRegistry } from "../utils/nativeHelpers/NativeHelperRegistry";
+import { terminateActiveAdbProcesses } from "../utils/android-cmdline-tools/AdbClient";
 import type { SessionReleaseReason } from "./releaseReasons";
 import {
   createDefaultManagedSlotExclusion,
@@ -5419,6 +5421,22 @@ export class Daemon {
         "simulator capture helper processes exiting",
         () => iosSimulatorCaptureHelperPool.shutdown(),
       ),
+      shutdownStage(
+        "native helper registry",
+        "tracked helper processes exiting",
+        async (context) => {
+          await getNativeHelperRegistry().shutdown({
+            timer: this.timer,
+            graceMs: Math.min(500, Math.max(0, (context.remainingMs() - 1) / 2)),
+          });
+        },
+      ),
+      shutdownStage("host adb children", "host adb children exiting", async (context) => {
+        await terminateActiveAdbProcesses({
+          timer: this.timer,
+          graceMs: Math.min(500, Math.max(0, (context.remainingMs() - 1) / 2)),
+        });
+      }),
       shutdownStage("appearance sync scheduler", "an in-flight appearance sync", () =>
         stopAppearanceSyncScheduler(),
       ),

@@ -272,8 +272,8 @@ struct PrototypeListItemView: View {
 
     private func row(isOn: Bool) -> some View {
         HStack(spacing: 16) {
-            if let leading = node.leadingIcon {
-                PrototypeGlyph(symbol: prototypeSymbol(leading))
+            if let symbol = prototypeSymbol(node.leadingIcon) {
+                PrototypeGlyph(symbol: symbol)
                     .foregroundColor(colors.authored(style?.color) ?? colors.contentVariant)
             }
             VStack(alignment: .leading, spacing: 2) {
@@ -300,7 +300,9 @@ struct PrototypeListItemView: View {
         case "checkbox":
             PrototypeGlyph(symbol: isOn ? "checkmark.square.fill" : "square")
         case "icon":
-            PrototypeGlyph(symbol: prototypeSymbol(node.trailing?.name)).foregroundColor(colors.contentVariant)
+            if let symbol = prototypeSymbol(node.trailing?.name) {
+                PrototypeGlyph(symbol: symbol).foregroundColor(colors.contentVariant)
+            }
         default:
             EmptyView()
         }
@@ -366,14 +368,16 @@ struct PrototypeIconButtonView: View {
             .authored(style?.color) ??
             (variant == "filled" ? colors.onPrimary : variant == "tonal" ? colors.onTonal : colors.content)
         Button { model.activate(.node(node)) } label: {
-            PrototypeGlyph(symbol: prototypeSymbol(node.icon))
-                .font(.system(size: 20))
-                .foregroundColor(tint)
-                .frame(width: 40, height: 40)
-                .background(Circle().fill(fill))
-                .overlay(Circle().stroke(variant == "outlined" ? colors.outline : .clear, lineWidth: 1))
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
+            ZStack {
+                if let symbol = prototypeSymbol(node.icon) { PrototypeGlyph(symbol: symbol) }
+            }
+            .font(.system(size: 20))
+            .foregroundColor(tint)
+            .frame(width: 40, height: 40)
+            .background(Circle().fill(fill))
+            .overlay(Circle().stroke(variant == "outlined" ? colors.outline : .clear, lineWidth: 1))
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -396,7 +400,9 @@ struct PrototypeFabView: View {
         }
         Button { model.activate(.node(node)) } label: {
             HStack(spacing: 12) {
-                PrototypeGlyph(symbol: prototypeSymbol(node.icon)).font(.system(size: side >= 96 ? 36 : 22))
+                if let symbol = prototypeSymbol(node.icon) {
+                    PrototypeGlyph(symbol: symbol).font(.system(size: side >= 96 ? 36 : 22))
+                }
                 if let label = node.label { Text(label).font(.body.weight(.medium)) }
             }
             .foregroundColor(colors.authored(style?.color) ?? colors.primary)
@@ -509,11 +515,13 @@ struct PrototypeTopAppBarView: View {
 
     private func button(_ action: PrototypeAppBarAction, identifier: String?) -> some View {
         Button { model.activate(.appBarButton(action)) } label: {
-            PrototypeGlyph(symbol: prototypeSymbol(action.icon))
-                .font(.system(size: 20))
-                .foregroundColor(colors.authored(style?.color) ?? colors.content)
-                .frame(width: 48, height: 48)
-                .contentShape(Rectangle())
+            ZStack {
+                if let symbol = prototypeSymbol(action.icon) { PrototypeGlyph(symbol: symbol) }
+            }
+            .font(.system(size: 20))
+            .foregroundColor(colors.authored(style?.color) ?? colors.content)
+            .frame(width: 48, height: 48)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(action.label)
@@ -816,11 +824,11 @@ struct PrototypeDialogView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if let icon = node.icon {
+            if let symbol = prototypeSymbol(node.icon) {
                 // Decorative, as Android's dialog icon (contentDescription = null). Drawn as a text
                 // glyph: a bare SF Symbol Image still surfaced as an image element on iOS 26 despite
                 // accessibilityHidden.
-                PrototypeGlyph(symbol: prototypeSymbol(icon, fallback: "info.circle"))
+                PrototypeGlyph(symbol: symbol)
                     .font(.title2)
                     .frame(maxWidth: .infinity)
             }

@@ -15,7 +15,10 @@ import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
  * for state-changing actions. The validator guarantees exactly one form per condition; a state key
  * of the wrong type simply fails numeric comparisons instead of throwing.
  */
-internal fun PrototypeCondition.holds(state: Map<String, PrototypeScalar>): Boolean {
+internal fun PrototypeCondition.holds(
+  state: Map<String, PrototypeScalar>,
+  validity: Map<String, Boolean> = emptyMap(),
+): Boolean {
   val stored = key?.let { state[it] }
   val number = (stored as? PrototypeScalar.Numeric)?.value
   val all = all
@@ -23,14 +26,16 @@ internal fun PrototypeCondition.holds(state: Map<String, PrototypeScalar>): Bool
   val not = not
   val gt = gt
   val lt = lt
+  val valid = valid
   return when {
+    valid != null -> valid.keys().all { validity[it] == true }
     key != null && equals != null -> stored.sameValue(equals)
     key != null && notEquals != null -> !stored.sameValue(notEquals)
     gt != null -> number != null && number > gt
     lt != null -> number != null && number < lt
-    all != null -> all.all { it.holds(state) }
-    any != null -> any.any { it.holds(state) }
-    not != null -> !not.holds(state)
+    all != null -> all.all { it.holds(state, validity) }
+    any != null -> any.any { it.holds(state, validity) }
+    not != null -> !not.holds(state, validity)
     else -> false
   }
 }
@@ -45,13 +50,13 @@ private fun PrototypeScalar?.sameValue(other: PrototypeScalar?): Boolean =
 
 /** The flipped value, or null when the key no longer holds a boolean (the action is a no-op). */
 internal fun PrototypeToggleAction.nextValue(
-  state: Map<String, PrototypeScalar>,
+  state: Map<String, PrototypeScalar>
 ): PrototypeScalar? =
   (state[key] as? PrototypeScalar.BooleanValue)?.let { PrototypeScalar.BooleanValue(!it.value) }
 
 /** The stepped value, or null when the key is not numeric or the result would not be finite. */
 internal fun PrototypeIncrementAction.nextValue(
-  state: Map<String, PrototypeScalar>,
+  state: Map<String, PrototypeScalar>
 ): PrototypeScalar? {
   val current = (state[key] as? PrototypeScalar.Numeric)?.value ?: return null
   val next = current + (by ?: 1.0)
@@ -60,7 +65,7 @@ internal fun PrototypeIncrementAction.nextValue(
 
 /** The stepped-down value: [PrototypeIncrementAction] with the sign of `by` flipped (default 1). */
 internal fun PrototypeDecrementAction.nextValue(
-  state: Map<String, PrototypeScalar>,
+  state: Map<String, PrototypeScalar>
 ): PrototypeScalar? {
   val current = (state[key] as? PrototypeScalar.Numeric)?.value ?: return null
   val next = current - (by ?: 1.0)
@@ -72,7 +77,7 @@ internal fun PrototypeDecrementAction.nextValue(
  * nothing: it is not a state action, or it is a toggle or step that is a no-op for the stored type.
  */
 internal fun PrototypeAction.stateWrite(
-  state: Map<String, PrototypeScalar>,
+  state: Map<String, PrototypeScalar>
 ): Pair<String, PrototypeScalar>? =
   when (this) {
     is PrototypeSetStateAction -> key to value
@@ -92,10 +97,11 @@ internal fun resolvePrototypeStyle(
   base: PrototypeStyle?,
   styleWhen: List<PrototypeStyleWhen>?,
   state: Map<String, PrototypeScalar>,
+  validity: Map<String, Boolean> = emptyMap(),
 ): PrototypeStyle {
   var resolved = base ?: PrototypeStyle()
   for (entry in styleWhen.orEmpty()) {
-    if (entry.`when`.holds(state)) resolved = resolved.mergedOver(entry.style)
+    if (entry.`when`.holds(state, validity)) resolved = resolved.mergedOver(entry.style)
   }
   return resolved
 }

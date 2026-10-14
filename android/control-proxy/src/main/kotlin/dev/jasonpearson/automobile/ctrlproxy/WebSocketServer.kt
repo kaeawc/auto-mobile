@@ -297,24 +297,25 @@ class WebSocketServer(
     }
 
     // kotlinx omits the path for a missing discriminator; match its input object structurally.
-    private fun decodeFailurePath(raw: String, cause: String): String? = runCatching {
-      val target =
-        lenientJson.parseToJsonElement(cause.substringAfter("JSON input:", "").trim())
-          as? JsonObject ?: return@runCatching null
-      fun findPath(value: JsonElement, path: String): String? =
-        when {
-          value == target -> path
-          value is JsonObject ->
-            value.entries.firstNotNullOfOrNull { (key, child) -> findPath(child, "$path.$key") }
-          value is JsonArray ->
-            value.withIndex().firstNotNullOfOrNull { (index, child) ->
-              findPath(child, "$path[$index]")
+    private fun decodeFailurePath(raw: String, cause: String): String? =
+      runCatching {
+          val target =
+            lenientJson.parseToJsonElement(cause.substringAfter("JSON input:", "").trim())
+              as? JsonObject ?: return@runCatching null
+          fun findPath(value: JsonElement, path: String): String? =
+            when {
+              value == target -> path
+              value is JsonObject ->
+                value.entries.firstNotNullOfOrNull { (key, child) -> findPath(child, "$path.$key") }
+              value is JsonArray ->
+                value.withIndex().firstNotNullOfOrNull { (index, child) ->
+                  findPath(child, "$path[$index]")
+                }
+              else -> null
             }
-          else -> null
+          findPath(lenientJson.parseToJsonElement(raw), "$")
         }
-      findPath(lenientJson.parseToJsonElement(raw), "$")
-    }
-      .getOrNull()
+        .getOrNull()
   }
 
   internal fun supportedCommands(): List<String> = buildList {
@@ -357,6 +358,8 @@ class WebSocketServer(
     // APKs reject data, {path} items, repeat.key and data conditions as unknown, and draw
     // {data:/x} text literally, so hosts refuse such a spec for a device lacking this flag.
     add("prototype_data_model_v1")
+    // Prototype checks expose validity and guard actions; older APKs ignore these spec fields.
+    add("prototype_checks_v1")
     // show_prototype honours appearance (device, light or dark as the system setting); a shown
     // prototype re-themes when the device setting or palette changes and says so with an
     // appearance_changed prototype_event; the show result and each inspect entry carry the resolved
@@ -579,22 +582,23 @@ class WebSocketServer(
       // An explicit start replaces any pending internal retry budget.
       startRetryJob?.cancel()
       startRetryJob = null
-      startRetryJob = scope.launch {
-        synchronized(startLock) {
-          if (!coroutineContext.isActive || server != null || tryStart()) return@launch
-        }
-        for (retry in 1 until MAX_START_ATTEMPTS) {
-          delay(START_RETRY_BASE_DELAY_MS * (1L shl (retry - 1)))
+      startRetryJob =
+        scope.launch {
           synchronized(startLock) {
-            onRetryLockAcquired()
             if (!coroutineContext.isActive || server != null || tryStart()) return@launch
-            if (retry == MAX_START_ATTEMPTS - 1) {
-              Log.e(TAG, "WebSocket server failed to start after $MAX_START_ATTEMPTS attempts")
-              onPermanentStartFailure()
+          }
+          for (retry in 1 until MAX_START_ATTEMPTS) {
+            delay(START_RETRY_BASE_DELAY_MS * (1L shl (retry - 1)))
+            synchronized(startLock) {
+              onRetryLockAcquired()
+              if (!coroutineContext.isActive || server != null || tryStart()) return@launch
+              if (retry == MAX_START_ATTEMPTS - 1) {
+                Log.e(TAG, "WebSocket server failed to start after $MAX_START_ATTEMPTS attempts")
+                onPermanentStartFailure()
+              }
             }
           }
         }
-      }
     }
   }
 
@@ -635,8 +639,8 @@ class WebSocketServer(
                             id = connectionId,
                             supportedCommands = supportedCommands(),
                           ),
-                        ),
-                      ),
+                        )
+                      )
                     )
                   }
                   if (!greetingSent) {
@@ -1019,10 +1023,7 @@ class WebSocketServer(
   }
 
   /** Send a typed terminal failure only to the client whose inbound message failed. */
-  private suspend fun sendErrorResponse(
-    connection: ConnectedClient,
-    response: WebSocketResponse,
-  ) {
+  private suspend fun sendErrorResponse(connection: ConnectedClient, response: WebSocketResponse) {
     val message = responseJson.encodeToString(WebSocketResponse.serializer(), response)
     correlationRequestId(response)?.let { requestId ->
       synchronized(connections) { requestConnections.remove(requestId) }
@@ -1078,9 +1079,7 @@ class WebSocketServer(
   /** Suspends until a client is currently connected, including after a reconnect. */
   suspend fun awaitClientConnection() {
     val connection =
-      synchronized(connections) {
-        if (connections.isEmpty()) activeClientConnection else null
-      }
+      synchronized(connections) { if (connections.isEmpty()) activeClientConnection else null }
     connection?.await()
   }
 
@@ -1202,9 +1201,7 @@ class WebSocketServer(
     // (#3190, #6621); their handler errors and queue-full rejections target the origin directly.
     val recordsOwner = recordsRequestOwner(request)
     if (recordsOwner) {
-      request.requestId?.let { requestId ->
-        registerRequestOwner(requestId, connection)
-      }
+      request.requestId?.let { requestId -> registerRequestOwner(requestId, connection) }
     }
     // The read loop enqueues; one per-client FIFO worker executes commands in wire order.
     // Owned replies retain atomic owner routing; unowned errors target this origin directly and

@@ -25,6 +25,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.center
 import androidx.compose.ui.graphics.Brush
@@ -40,6 +41,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -141,7 +143,7 @@ fun PrototypeSpecContent(
         // The page box takes the fill: it is the root's parent and must measure the window.
         Box(
           Modifier.then(if (fillsWindow) Modifier.fillWhenEmpty() else Modifier)
-            .then(if (pageBlocked) Modifier.clearAndSetSemantics {} else Modifier),
+            .then(if (pageBlocked) Modifier.clearAndSetSemantics {} else Modifier)
         ) {
           RenderPrototypeNode(root, interact, windowRoot = true)
           PrototypeAnchorLayer(remember(root) { layeredPrototypeAnchors(root) }, interact)
@@ -252,7 +254,7 @@ private fun PrototypeAnchorLayer(
       anchors.forEach { anchor ->
         key(anchor.node.identity) { LayeredAnchorEntry(anchor, interact) }
       }
-    },
+    }
   ) { measurables, constraints ->
     val loose = constraints.copy(minWidth = 0, minHeight = 0)
     val placeables = measurables.map { it.measure(loose) }
@@ -382,7 +384,7 @@ private fun RenderPrototypeVisibility(
   }
   if (node.visible) history.clearSettledHidden()
   CompositionLocalProvider(
-    LocalPrototypeShowEpoch provides LocalPrototypeShowEpoch.current + history.epoch,
+    LocalPrototypeShowEpoch provides LocalPrototypeShowEpoch.current + history.epoch
   ) {
     if (LocalPrototypeMotion.current) {
       AnimatedVisibility(
@@ -413,7 +415,25 @@ private fun RenderPrototypeNodeContent(
   val traceEnabled = traceSink.isEnabled()
   if (traceEnabled) traceSink.begin(PrototypeTrace.NODE)
   LocalPrototypeCompositionProbe.current?.invoke(node.identity)
-  val modifier = parentModifier.then(prototypeNodeModifier(node, interact, weightAxis, windowRoot))
+  val controlInteract: (PrototypeInteraction) -> Unit = { interaction ->
+    if (node.source?.enabledCondition() != null)
+      interact(PrototypeInteraction.Guarded(node.identity, interaction))
+    else interact(interaction)
+  }
+  var focused by remember(node.identity) { mutableStateOf(false) }
+  val focusModifier =
+    if (node.source?.checks().isNullOrEmpty()) Modifier
+    else
+      Modifier.onFocusChanged { focus ->
+        if (focused && !focus.hasFocus) {
+          controlInteract(PrototypeInteraction.Blur(node.source.checkedKeys()))
+        }
+        focused = focus.hasFocus
+      }
+  val modifier =
+    (if (node.errorMessage != null && node.role != "textField") Modifier else parentModifier)
+      .then(prototypeNodeModifier(node, controlInteract, weightAxis, windowRoot))
+      .then(focusModifier)
   // Only box/row/column with repeat or a direct visibleWhen child animate and clip their size.
   // Look through card/scroll/pager only; nested box/row/column own the animation their parent
   // follows.
@@ -518,8 +538,8 @@ private fun RenderPrototypeNodeContent(
             .defaultMinSize(24.dp, 24.dp)
             .background(
               prototypeThemedColor(node.style.background, node.style.source.background)
-                ?: prototypePlaceholderColor(MaterialTheme.colorScheme),
-            ),
+                ?: prototypePlaceholderColor(MaterialTheme.colorScheme)
+            )
         )
     }
     "image" -> PrototypeImageContent(node, modifier)
@@ -539,23 +559,38 @@ private fun RenderPrototypeNodeContent(
     "bottomSheet",
     "dialog",
     "snackbar" -> Unit // Modal content is hoisted above the whole author tree, within this window.
-    "iconButton" -> RenderPrototypeIconButton(node, modifier, interact)
-    "fab" -> RenderPrototypeFab(node, modifier, interact)
+    "iconButton" -> RenderPrototypeIconButton(node, modifier, controlInteract)
+    "fab" -> RenderPrototypeFab(node, modifier, controlInteract)
     "segmentedButton" -> RenderPrototypeSegmentedButton(node, modifier, interact)
     "topAppBar" -> RenderPrototypeTopAppBar(node, modifier, interact)
     "divider" -> RenderPrototypeDivider(node, modifier)
     "badge" -> RenderPrototypeBadge(node, modifier)
     "progress" -> RenderPrototypeProgress(node, modifier)
-    "timePicker" -> RenderPrototypeTimePicker(node, modifier, interact)
-    "datePicker" -> RenderPrototypeDatePicker(node, modifier, interact)
-    "textField" -> RenderPrototypeTextField(node, modifier, interact)
+    "timePicker" ->
+      PrototypeCheckedControl(node, parentModifier) {
+        RenderPrototypeTimePicker(node, modifier, controlInteract)
+      }
+    "datePicker" ->
+      PrototypeCheckedControl(node, parentModifier) {
+        RenderPrototypeDatePicker(node, modifier, controlInteract)
+      }
+    "textField" -> RenderPrototypeTextField(node, modifier, controlInteract)
     "switch",
-    "checkbox" -> RenderPrototypeToggle(node, modifier, interact)
-    "button" -> RenderPrototypeButton(node, modifier, interact)
-    "radioGroup" -> RenderPrototypeRadioGroup(node, modifier, interact)
-    "listItem" -> RenderPrototypeListItem(node, modifier, interact)
-    "slider" -> RenderPrototypeSlider(node, modifier, interact)
-    "chip" -> RenderPrototypeChip(node, modifier, interact)
+    "checkbox" ->
+      PrototypeCheckedControl(node, parentModifier) {
+        RenderPrototypeToggle(node, modifier, controlInteract)
+      }
+    "button" -> RenderPrototypeButton(node, modifier, controlInteract)
+    "radioGroup" ->
+      PrototypeCheckedControl(node, parentModifier) {
+        RenderPrototypeRadioGroup(node, modifier, controlInteract)
+      }
+    "listItem" -> RenderPrototypeListItem(node, modifier, controlInteract)
+    "slider" ->
+      PrototypeCheckedControl(node, parentModifier) {
+        RenderPrototypeSlider(node, modifier, controlInteract)
+      }
+    "chip" -> RenderPrototypeChip(node, modifier, controlInteract)
     "card" ->
       RenderPrototypeCard(node, modifier) {
         node.children.forEach {
@@ -599,14 +634,15 @@ private fun RenderPrototypeTextField(
     }
   }
   var fieldModifier = modifier.focusRequester(focus)
-  if (actions.isNotEmpty())
-    fieldModifier = fieldModifier.semantics {
-      onClick {
-        focus.requestFocus()
-        interact(PrototypeInteraction.Tap(actions))
-        true
+  if (node.enabled && actions.isNotEmpty())
+    fieldModifier =
+      fieldModifier.semantics {
+        onClick {
+          focus.requestFocus()
+          interact(PrototypeInteraction.Tap(actions))
+          true
+        }
       }
-    }
   // Material's editable field supplies SetText semantics and the keyboard input connection.
   TextField(
     shown,
@@ -617,6 +653,9 @@ private fun RenderPrototypeTextField(
       }
     },
     modifier = fieldModifier,
+    enabled = node.enabled,
+    isError = node.errorMessage != null,
+    supportingText = node.errorMessage?.let { { PrototypeErrorCaption(node) } },
     interactionSource = presses,
     placeholder = { Text(source.placeholder.orEmpty()) },
   )
@@ -651,11 +690,13 @@ private fun RenderPrototypePager(
     Modifier.then(if (fill.width) Modifier.fillMaxWidth() else Modifier)
       .then(if (fill.height) Modifier.fillMaxHeight() else Modifier)
   var boundedHeight by remember { mutableStateOf(false) }
-  val pagerModifier = modifier.layout { measurable, constraints ->
-    if (boundedHeight != constraints.hasBoundedHeight) boundedHeight = constraints.hasBoundedHeight
-    val placeable = measurable.measure(constraints)
-    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
-  }
+  val pagerModifier =
+    modifier.layout { measurable, constraints ->
+      if (boundedHeight != constraints.hasBoundedHeight)
+        boundedHeight = constraints.hasBoundedHeight
+      val placeable = measurable.measure(constraints)
+      layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+    }
   val keepNeighbours = fill.height && boundedHeight
   HorizontalPager(
     pager,
@@ -758,9 +799,9 @@ private fun RenderPrototypeSheet(
       Modifier.fillMaxSize()
         .background(
           prototypeThemedScrim(null, source.scrim)
-            ?: prototypeSheetScrimFallback(prototypePalette()),
+            ?: prototypeSheetScrimFallback(prototypePalette())
         )
-        .clickable { interact(PrototypeInteraction.SheetDismiss(source.openWhen)) },
+        .clickable { interact(PrototypeInteraction.SheetDismiss(source.openWhen)) }
     )
     Column(
       modifier
@@ -772,7 +813,7 @@ private fun RenderPrototypeSheet(
           // fill would cover them, so the surface is only the fallback when neither is authored.
           if (node.style.source.background == null && node.style.source.gradient == null)
             Modifier.background(MaterialTheme.colorScheme.surface)
-          else Modifier,
+          else Modifier
         )
         .pointerInput(heights, height, source.dismissOnSwipe) {
           detectVerticalDragGestures(
@@ -794,14 +835,14 @@ private fun RenderPrototypeSheet(
         .clickable {
           if (!source.onTap.isNullOrEmpty())
             interact(PrototypeInteraction.Tap(source.onTap.orEmpty()))
-        },
+        }
     ) {
       if (source.dragHandle)
         Box(
           Modifier.align(Alignment.CenterHorizontally)
             .padding(8.dp)
             .size(32.dp, 4.dp)
-            .background(prototypeHandleColor(MaterialTheme.colorScheme), RoundedCornerShape(2.dp)),
+            .background(prototypeHandleColor(MaterialTheme.colorScheme), RoundedCornerShape(2.dp))
         )
       node.children.forEach {
         key(it.identity) {
@@ -831,7 +872,7 @@ private fun prototypeNodeModifier(
     (node.role == "icon" || node.role == "image") &&
       node.identity in LocalPrototypeHandleVisuals.current
   val presses = remember { MutableInteractionSource() }
-  var modifier: Modifier = Modifier
+  var modifier: Modifier = if (node.enabled) Modifier else Modifier.semantics { disabled() }
   // Outermost: the anchor fixes where the whole node, offset and touch target included, lands on
   // screen (#9316). The host resolved element anchors to screen dp bounds before sending.
   val anchor = node.source?.anchor as? PrototypeBoundsAnchor
@@ -877,7 +918,11 @@ private fun prototypeNodeModifier(
   // is tappable, its ripple covers it, and its accessibility bounds are its drawn bounds (#10435).
   if (tappable) {
     modifier =
-      modifier.clickable(interactionSource = presses, indication = LocalIndication.current) {
+      modifier.clickable(
+        enabled = node.enabled,
+        interactionSource = presses,
+        indication = LocalIndication.current,
+      ) {
         interact(PrototypeInteraction.Tap(actions))
       }
   }
@@ -899,29 +944,31 @@ private fun prototypeNodeModifier(
       remember(node, tappable) { prototypeMergedTapLabel(node, tappable) }
     } else null
   if (mergedTapLabel != null) {
-    modifier = modifier.clearAndSetSemantics {
-      text = AnnotatedString(mergedTapLabel)
-      contentDescription = mergedTapLabel
-      this[PrototypeRole] = node.role
-      state?.let { stateDescription = it }
-      node.testTag?.let { testTag = it }
-    }
+    modifier =
+      modifier.clearAndSetSemantics {
+        text = AnnotatedString(mergedTapLabel)
+        contentDescription = mergedTapLabel
+        this[PrototypeRole] = node.role
+        state?.let { stateDescription = it }
+        node.testTag?.let { testTag = it }
+      }
   } else if (
     !isSemanticsFreeContainer(node, tappable, description, state) &&
       (handleVisual || !isDecorativePrototypeVisual(node, tappable))
   ) {
-    modifier = modifier.semantics {
-      if (node.role != "textField" && node.role !in SEMANTICS_FREE_CONTAINERS) {
-        text = AnnotatedString(node.text)
+    modifier =
+      modifier.semantics {
+        if (node.role != "textField" && node.role !in SEMANTICS_FREE_CONTAINERS) {
+          text = AnnotatedString(node.text)
+        }
+        this[PrototypeRole] = node.role
+        if (node.role == "icon" || node.role == "image") role = Role.Image
+        // Compose has no native role for text or layout containers; the kind travels in
+        // PrototypeRole.
+        description?.let { contentDescription = it }
+        state?.let { stateDescription = it }
+        node.testTag?.let { testTag = it }
       }
-      this[PrototypeRole] = node.role
-      if (node.role == "icon" || node.role == "image") role = Role.Image
-      // Compose has no native role for text or layout containers; the kind travels in
-      // PrototypeRole.
-      description?.let { contentDescription = it }
-      state?.let { stateDescription = it }
-      node.testTag?.let { testTag = it }
-    }
   }
   val insetFloor = LocalPrototypeInsetFloor.current
   node.safeArea?.let { safeArea ->
@@ -934,7 +981,7 @@ private fun prototypeNodeModifier(
             "cutout" -> WindowInsets.displayCutout
             "ime" -> WindowInsets.ime
             else -> WindowInsets(0, 0, 0, 0)
-          },
+          }
         )
     }
     val sides =
@@ -1158,9 +1205,7 @@ internal enum class PrototypeWeightAxis {
 
 /** [axis] when this child carries a `weight`, so its own size on that axis does not wrap. */
 private fun PrototypeRenderNode.weightAxis(axis: PrototypeWeightAxis): PrototypeWeightAxis? =
-  axis.takeIf {
-    style.source.weight != null
-  }
+  axis.takeIf { style.source.weight != null }
 
 /** Child `weight` takes the remaining main-axis space; only meaningful inside a Row. */
 private fun RowScope.rowWeight(child: PrototypeRenderNode): Modifier =
@@ -1203,3 +1248,30 @@ private fun prototypeGradientBrush(gradient: PrototypeGradient, palette: Prototy
         }
       }
   }
+
+/** Error captions remain separate semantic nodes so their tags are inspectable. */
+@Composable
+internal fun PrototypeErrorCaption(node: PrototypeRenderNode) {
+  node.errorMessage?.let { message ->
+    Text(
+      message,
+      Modifier.semantics { prototypePartTag(node.testTag, "error")?.let { testTag = it } },
+      color = MaterialTheme.colorScheme.error,
+      style = MaterialTheme.typography.bodySmall,
+    )
+  }
+}
+
+@Composable
+private fun PrototypeCheckedControl(
+  node: PrototypeRenderNode,
+  parentModifier: Modifier,
+  content: @Composable () -> Unit,
+) {
+  if (node.errorMessage == null) content()
+  else
+    Column(parentModifier) {
+      content()
+      PrototypeErrorCaption(node)
+    }
+}

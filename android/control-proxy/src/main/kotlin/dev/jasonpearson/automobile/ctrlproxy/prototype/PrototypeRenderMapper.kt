@@ -18,9 +18,7 @@ internal class PrototypeRenderCache(val root: PrototypeNode) {
   fun children(node: PrototypeNode, path: String): List<PrototypeChildEntry> =
     entries
       .getOrPut(node) { mutableMapOf() }
-      .getOrPut(path) {
-        validatedPrototypeChildren(node, path)
-      }
+      .getOrPut(path) { validatedPrototypeChildren(node, path) }
 }
 
 /**
@@ -36,6 +34,7 @@ internal class PrototypeRenderMapper {
   private var resolvedRoot: PrototypeNode? = null
   private var cache: PrototypeRenderCache? = null
   private var previousSpec: PrototypeSpec? = null
+  private var previousShownErrors: Set<String>? = null
   private var previousPages: Map<String, Int>? = null
   private var previousModel: PrototypeRenderModel? = null
   private var previousNodes: Map<String, PrototypeRenderNode> = emptyMap()
@@ -47,12 +46,19 @@ internal class PrototypeRenderMapper {
   internal val lastResolvedSpec: PrototypeSpec?
     get() = synchronized(lock) { resolvedSpec }
 
-  fun map(spec: PrototypeSpec, pages: Map<String, Int>): PrototypeRenderModel =
+  fun map(
+    spec: PrototypeSpec,
+    pages: Map<String, Int>,
+    shownErrors: Set<String> = emptySet(),
+  ): PrototypeRenderModel =
     synchronized(lock) {
       val resolved = resolveLocked(spec)
       previousModel?.let { model ->
         if (
-          previousSpec?.root === resolved.root && previousSpec == resolved && previousPages == pages
+          previousSpec?.root === resolved.root &&
+            previousSpec == resolved &&
+            previousPages == pages &&
+            previousShownErrors == shownErrors
         ) {
           return@synchronized model
         }
@@ -60,11 +66,20 @@ internal class PrototypeRenderMapper {
       PrototypeTrace.section(PrototypeTrace.MAP_RENDER_TREE) {
         val static =
           cache?.takeIf { it.root === resolved.root } ?: PrototypeRenderCache(resolved.root)
-        val mapping = PrototypeNodeMapping(resolved.state.orEmpty(), pages, static, previousNodes)
+        val mapping =
+          PrototypeNodeMapping(
+            resolved.state.orEmpty(),
+            pages,
+            static,
+            previousNodes,
+            prototypeValidity(checkedPrototypeNodes(resolved.root), resolved.state.orEmpty()),
+            shownErrors,
+          )
         val model = prototypeRenderModel(resolved, mapping.map(resolved.root, "root"))
         cache = static
         previousSpec = resolved
         previousPages = pages
+        previousShownErrors = shownErrors
         previousModel = model
         previousNodes = mapping.nodes
         passes++

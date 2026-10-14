@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -8,7 +7,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.toggleable
@@ -23,15 +21,12 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ElevatedButton
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
-import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Slider
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -90,16 +85,20 @@ internal fun RenderPrototypeToggle(
   val isSwitch = node.role == "switch"
   Row(
     Modifier.minimumInteractiveComponentSize()
-      .toggleable(node.checked, role = if (isSwitch) Role.Switch else Role.Checkbox) {
+      .toggleable(
+        node.checked,
+        enabled = node.enabled,
+        role = if (isSwitch) Role.Switch else Role.Checkbox,
+      ) {
         interact(PrototypeInteraction.Toggle(key, actions))
       }
       .then(modifier),
     horizontalArrangement = Arrangement.spacedBy(12.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    if (!isSwitch) Checkbox(node.checked, onCheckedChange = null)
+    if (!isSwitch) Checkbox(node.checked, onCheckedChange = null, enabled = node.enabled)
     if (node.text.isNotEmpty()) PrototypeComponentLabel(node)
-    if (isSwitch) Switch(node.checked, onCheckedChange = null)
+    if (isSwitch) Switch(node.checked, onCheckedChange = null, enabled = node.enabled)
   }
 }
 
@@ -132,10 +131,38 @@ internal fun RenderPrototypeButton(
     PrototypeComponentLabel(node)
   }
   when (source.variant) {
-    "tonal" -> FilledTonalButton(onClick, modifier, contentPadding = padding, content = content)
-    "elevated" -> ElevatedButton(onClick, modifier, contentPadding = padding, content = content)
-    "outlined" -> OutlinedButton(onClick, modifier, contentPadding = padding, content = content)
-    "text" -> TextButton(onClick, modifier, contentPadding = padding, content = content)
+    "tonal" ->
+      FilledTonalButton(
+        onClick,
+        modifier,
+        enabled = node.enabled,
+        contentPadding = padding,
+        content = content,
+      )
+    "elevated" ->
+      ElevatedButton(
+        onClick,
+        modifier,
+        enabled = node.enabled,
+        contentPadding = padding,
+        content = content,
+      )
+    "outlined" ->
+      OutlinedButton(
+        onClick,
+        modifier,
+        enabled = node.enabled,
+        contentPadding = padding,
+        content = content,
+      )
+    "text" ->
+      TextButton(
+        onClick,
+        modifier,
+        enabled = node.enabled,
+        contentPadding = padding,
+        content = content,
+      )
     else ->
       // An authored gradient is painted behind the button, so its container must not cover it.
       Button(
@@ -145,6 +172,7 @@ internal fun RenderPrototypeButton(
           if (node.style.source.gradient != null)
             ButtonDefaults.buttonColors(containerColor = Color.Transparent)
           else ButtonDefaults.buttonColors(),
+        enabled = node.enabled,
         contentPadding = padding,
         content = content,
       )
@@ -167,11 +195,7 @@ internal fun prototypeForeground(node: PrototypeRenderNode): Color =
 /** The node-level semantics already carry the label, so the drawn text adds none of its own. */
 @Composable
 private fun PrototypeComponentLabel(node: PrototypeRenderNode) {
-  Text(
-    node.text,
-    Modifier.clearAndSetSemantics {},
-    color = prototypeForeground(node),
-  )
+  Text(node.text, Modifier.clearAndSetSemantics {}, color = prototypeForeground(node))
 }
 
 /** The step-aligned, in-range value a drag or set-progress lands on, rounded to micro-units. */
@@ -209,10 +233,10 @@ internal fun RenderPrototypeSlider(
     modifier.semantics(mergeDescendants = true) {
       progressBarRangeInfo = ProgressBarRangeInfo(node.sliderValue.toFloat(), range, steps)
       setProgress {
-        change(it)
-        true
+        if (node.enabled) change(it)
+        node.enabled
       }
-    },
+    }
   ) {
     if (node.text.isNotEmpty()) PrototypeComponentLabel(node)
     Slider(
@@ -220,6 +244,7 @@ internal fun RenderPrototypeSlider(
       change,
       Modifier.fillMaxWidth(),
       valueRange = range,
+      enabled = node.enabled,
       steps = steps,
     )
   }
@@ -243,32 +268,28 @@ internal fun RenderPrototypeChip(
       { if (actions.isNotEmpty()) interact(PrototypeInteraction.Tap(actions)) },
       { PrototypeComponentLabel(node) },
       modifier,
+      enabled = node.enabled,
     )
     return
   }
-  val colors = MaterialTheme.colorScheme
   Row(
     Modifier.minimumInteractiveComponentSize()
-      .toggleable(node.checked, role = Role.Checkbox) {
+      .toggleable(node.checked, enabled = node.enabled, role = Role.Checkbox) {
         interact(PrototypeInteraction.Toggle(key, actions))
       }
-      .then(modifier),
+      .then(modifier)
   ) {
-    Surface(
-      shape = FilterChipDefaults.shape,
-      color = if (node.checked) colors.secondaryContainer else Color.Transparent,
-      contentColor = if (node.checked) colors.onSecondaryContainer else colors.onSurfaceVariant,
-      border = if (node.checked) null else BorderStroke(1.dp, colors.outlineVariant),
-    ) {
-      Row(
-        Modifier.height(FilterChipDefaults.Height).padding(horizontal = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        if (node.checked) Icon(Icons.Default.Check, null, Modifier.size(18.dp))
-        ProvideTextStyle(MaterialTheme.typography.labelLarge) { PrototypeComponentLabel(node) }
-      }
-    }
+    FilterChip(
+      selected = node.checked,
+      onClick = { interact(PrototypeInteraction.Toggle(key, actions)) },
+      label = { PrototypeComponentLabel(node) },
+      modifier = Modifier.clearAndSetSemantics {},
+      enabled = node.enabled,
+      leadingIcon =
+        if (node.checked) {
+          { Icon(Icons.Default.Check, null, Modifier.size(18.dp)) }
+        } else null,
+    )
   }
 }
 

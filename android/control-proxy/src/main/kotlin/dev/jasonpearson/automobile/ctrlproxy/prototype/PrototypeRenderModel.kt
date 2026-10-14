@@ -69,6 +69,8 @@ data class PrototypeRenderNode(
   val minute: Int = 0,
   /** The authored `contentDescription`, state placeholders resolved; null when not authored. */
   val contentDescription: String? = null,
+  val enabled: Boolean = true,
+  val errorMessage: String? = null,
 )
 
 @Immutable
@@ -113,13 +115,21 @@ fun guardPrototypeTree(root: PrototypeNode) {
 fun mapPrototypeSpec(
   spec: PrototypeSpec,
   pages: Map<String, Int> = emptyMap(),
+  shownErrors: Set<String> = emptySet(),
 ): PrototypeRenderModel =
   PrototypeTrace.section(PrototypeTrace.MAP_PROTOTYPE_SPEC) {
     val resolved = PrototypeDataResolver.resolve(spec)
     guardPrototypeTree(resolved.root)
     prototypeRenderModel(
       resolved,
-      PrototypeNodeMapping(resolved.state.orEmpty(), pages).map(resolved.root, "root"),
+      PrototypeNodeMapping(
+          resolved.state.orEmpty(),
+          pages,
+          validity =
+            prototypeValidity(checkedPrototypeNodes(resolved.root), resolved.state.orEmpty()),
+          shownErrors = shownErrors,
+        )
+        .map(resolved.root, "root"),
     )
   }
 
@@ -141,6 +151,8 @@ internal class PrototypeNodeMapping(
   private val pages: Map<String, Int>,
   private val cache: PrototypeRenderCache? = null,
   private val previous: Map<String, PrototypeRenderNode> = emptyMap(),
+  private val validity: Map<String, Boolean> = emptyMap(),
+  private val shownErrors: Set<String> = emptySet(),
 ) {
   val nodes = mutableMapOf<String, PrototypeRenderNode>()
 
@@ -161,9 +173,8 @@ internal class PrototypeNodeMapping(
     val entries = cache?.children(node, path) ?: validatedPrototypeChildren(node, path)
     val role = prototypeNodeRole(node)
     val text = prototypeNodeText(node, state, localState, inPager)
-    val children = entries.map { (child, childPath) ->
-      map(child, childPath, if (inPager) localState else null)
-    }
+    val children =
+      entries.map { (child, childPath) -> map(child, childPath, if (inPager) localState else null) }
     val pager =
       when (node) {
         is PrototypeTabBarNode -> node.pager
@@ -185,7 +196,7 @@ internal class PrototypeNodeMapping(
     val selected =
       pager?.let { pages[it] } ?: (state[stateKey] as? PrototypeScalar.Numeric)?.value?.toInt() ?: 0
     val old = previous[path]
-    val resolved = resolvePrototypeStyle(node.style, node.styleWhen, localState)
+    val resolved = resolvePrototypeStyle(node.style, node.styleWhen, localState, validity)
     val style =
       old?.style?.takeIf { it.source === resolved || it.source == resolved }
         ?: mapPrototypeStyle(resolved)
@@ -194,7 +205,7 @@ internal class PrototypeNodeMapping(
         role,
         text,
         node.testTag,
-        node.visibleWhen?.holds(localState) ?: true,
+        node.visibleWhen?.holds(localState, validity) ?: true,
         style,
         node.safeAreaPadding,
         prototypeNodeIconName(node),
@@ -205,6 +216,8 @@ internal class PrototypeNodeMapping(
         selected.coerceIn(0, (items.size - 1).coerceAtLeast(0)),
         prototypeOpenWhen(node)?.let { state[it.key] == PrototypeScalar.BooleanValue(it.equals) }
           ?: false,
+        enabled = node.enabledCondition()?.holds(localState, validity) ?: true,
+        errorMessage = prototypeShownError(node, state, shownErrors),
         checked =
           (prototypeToggleKey(node) ?: prototypeListItemToggleKey(node))?.let {
             state[it] == PrototypeScalar.BooleanValue(true)
@@ -248,7 +261,7 @@ internal fun validatedPrototypeChildren(
   return prototypeChildEntries(node, path)
 }
 
-private fun prototypeNodeRole(node: PrototypeNode): String =
+internal fun prototypeNodeRole(node: PrototypeNode): String =
   when (node) {
     is PrototypeBoxNode -> "box"
     is PrototypeRowNode -> "row"
@@ -688,7 +701,8 @@ private fun anchorsBelow(parent: PrototypeRenderNode, ancestors: List<PrototypeR
 private fun anchorsAmong(
   children: List<PrototypeRenderNode>,
   ancestors: List<PrototypeRenderNode>,
-): List<LayeredPrototypeAnchor> = children.flatMap { child ->
-  (if (isLayeredPrototypeAnchor(child)) listOf(LayeredPrototypeAnchor(child, ancestors))
-  else emptyList()) + anchorsBelow(child, ancestors + child)
-}
+): List<LayeredPrototypeAnchor> =
+  children.flatMap { child ->
+    (if (isLayeredPrototypeAnchor(child)) listOf(LayeredPrototypeAnchor(child, ancestors))
+    else emptyList()) + anchorsBelow(child, ancestors + child)
+  }

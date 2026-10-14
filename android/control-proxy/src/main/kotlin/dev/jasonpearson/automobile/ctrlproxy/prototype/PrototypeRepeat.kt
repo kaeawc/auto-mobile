@@ -50,6 +50,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeTextNode
 import dev.jasonpearson.automobile.protocol.PrototypeTimePickerNode
 import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
 import dev.jasonpearson.automobile.protocol.PrototypeTopAppBarNode
+import dev.jasonpearson.automobile.protocol.PrototypeValidityKeys
 
 /** A child to render and the path it is rendered under (also its stable Compose identity). */
 internal data class PrototypeChildEntry(val node: PrototypeNode, val path: String)
@@ -168,6 +169,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
     is PrototypeSpacerNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
     is PrototypeTextFieldNode ->
       copy(
+        enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
@@ -189,6 +191,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeSwitchNode ->
       copy(
+        enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
@@ -196,6 +199,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeCheckboxNode ->
       copy(
+        enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
@@ -203,6 +207,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeButtonNode ->
       copy(
+        enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
@@ -210,6 +215,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeSliderNode ->
       copy(
+        enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
@@ -217,6 +223,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeChipNode ->
       copy(
+        enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
@@ -224,6 +231,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeRadioGroupNode ->
       copy(
+        enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
@@ -231,6 +239,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeListItemNode ->
       copy(
+        enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
@@ -249,9 +258,15 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         child = child?.bound(instance),
       )
     is PrototypeIconButtonNode ->
-      copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+      copy(
+        enabledWhen = enabledWhen?.bound(instance),
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+      )
     is PrototypeFabNode ->
       copy(
+        enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
@@ -294,6 +309,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeTimePickerNode ->
       copy(
+        enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
@@ -302,6 +318,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeDatePickerNode ->
       copy(
+        enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
@@ -327,7 +344,11 @@ private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
   when (this) {
     is PrototypeSetStateAction ->
       copy(key = instance.interpolate(key), value = instance.interpolateScalar(value))
-    is PrototypeEmitAction -> copy(name = instance.interpolate(name))
+    is PrototypeEmitAction ->
+      copy(
+        name = instance.interpolate(name),
+        requireValid = requireValid?.map(instance::interpolate),
+      )
     is PrototypeToggleAction -> copy(key = instance.interpolate(key))
     is PrototypeIncrementAction -> copy(key = instance.interpolate(key))
     is PrototypeDecrementAction -> copy(key = instance.interpolate(key))
@@ -336,6 +357,7 @@ private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
 
 private fun PrototypeCondition.bound(instance: RepeatInstance): PrototypeCondition =
   copy(
+    valid = valid?.let { PrototypeValidityKeys.Multiple(it.keys().map(instance::interpolate)) },
     key = key?.let(instance::interpolate),
     equals = equals?.let(instance::interpolateScalar),
     notEquals = notEquals?.let(instance::interpolateScalar),

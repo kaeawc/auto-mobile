@@ -18,19 +18,25 @@ data class PrototypeCheckEvaluation(val valid: Boolean, val firstFailingMessage:
 
 /** Pure checks over a scalar; time pickers call this independently for hour and minute bindings. */
 object PrototypeChecks {
-  // ECMAScript whitespace, shared by required and formats; portable pattern s is ASCII instead.
-  private const val WHITESPACE =
-    "\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF"
-  private val blank = Pattern.compile("[$WHITESPACE]*")
+  // ECMAScript whitespace for required and formats; portable pattern s is ASCII instead.
+  // Keep these as literals so the source-level ICU guard can inspect each complete pattern.
+  private val blank =
+    Pattern.compile(
+      "[\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]*"
+    )
   private val formats =
     mapOf(
       PrototypeCheckFormat.EMAIL to
-        Pattern.compile("[^${WHITESPACE}@]+@[^${WHITESPACE}@]+\\.[^${WHITESPACE}@]+"),
+        Pattern.compile(
+          "[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF@]+@[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF@]+\\.[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF@]+"
+        ),
       PrototypeCheckFormat.PHONE to Pattern.compile("\\+?[0-9 ()-]{7,15}"),
       PrototypeCheckFormat.DIGITS to Pattern.compile("[0-9]+"),
       PrototypeCheckFormat.DECIMAL to Pattern.compile("-?[0-9]+(\\.[0-9]+)?"),
       PrototypeCheckFormat.URL to
-        Pattern.compile("https?://[^${WHITESPACE}/?#]+([/?#][^$WHITESPACE]*)?"),
+        Pattern.compile(
+          "https?://[^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF/?#]+([/?#][^\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]*)?"
+        ),
     )
 
   fun formatPasses(text: String, format: PrototypeCheckFormat): Boolean =

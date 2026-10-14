@@ -1,0 +1,30 @@
+{
+  "spec": {
+    "id": "orders",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": {
+          "path": "/orders"
+        },
+        "as": "item"
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "{item.title}"
+        }
+      ]
+    },
+    "data": {
+      "orders": [1]
+    }
+  },
+  "expectedPath": "root.repeat.items.path",
+  "expectedMessage": "Repeat path item 0 is not an object"
+}

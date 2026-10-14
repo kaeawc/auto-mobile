@@ -142,3 +142,30 @@ describe("prototype node contract parity", () => {
     }
   });
 });
+
+test("spec, repeat, and condition field sets stay in step with the data contract", () => {
+  expect(Object.keys(prototypeSpecSchema.shape).sort()).toEqual(
+    Object.keys(contract.definitions.spec.fields).sort(),
+  );
+  const valid = {
+    id: "orders",
+    window: { placement: { type: "fullscreen" } },
+    data: { orders: [{ id: 7 }] },
+    root: {
+      type: "column",
+      repeat: { items: { path: "/orders" }, as: "item", key: "id" },
+      children: [{ type: "text", text: "x", visibleWhen: { data: "/orders/0/id", equals: 7 } }],
+    },
+  };
+  expect(prototypeSpecSchema.safeParse(valid).success).toBe(true);
+  expect(validatePrototypeSpec(valid).success).toBe(true);
+  for (const condition of [
+    { data: "/n", key: "n", equals: 1 },
+    { data: "/n" },
+    { data: "/n", equals: 1, gt: 0 },
+  ]) {
+    const candidate = { ...valid, root: { type: "text", text: "x", visibleWhen: condition } };
+    expect(prototypeSpecSchema.safeParse(candidate).success).toBe(false);
+    expect(validatePrototypeSpec(candidate).success).toBe(false);
+  }
+});

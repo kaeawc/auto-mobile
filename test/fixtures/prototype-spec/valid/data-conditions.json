@@ -1,0 +1,74 @@
+{
+  "id": "orders",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "text",
+    "text": "ok",
+    "visibleWhen": {
+      "all": [
+        {
+          "data": "/n",
+          "equals": 1
+        },
+        {
+          "any": [
+            {
+              "data": "/n",
+              "notEquals": 0
+            },
+            {
+              "not": {
+                "data": "/n",
+                "lt": 0
+              }
+            }
+          ]
+        },
+        {
+          "data": "/n",
+          "gt": 0
+        }
+      ]
+    },
+    "styleWhen": [
+      {
+        "when": {
+          "all": [
+            {
+              "data": "/n",
+              "equals": 1
+            },
+            {
+              "any": [
+                {
+                  "data": "/n",
+                  "notEquals": 0
+                },
+                {
+                  "not": {
+                    "data": "/n",
+                    "lt": 0
+                  }
+                }
+              ]
+            },
+            {
+              "data": "/n",
+              "gt": 0
+            }
+          ]
+        },
+        "style": {
+          "color": "#FFFFFF"
+        }
+      }
+    ]
+  },
+  "data": {
+    "n": 1
+  }
+}

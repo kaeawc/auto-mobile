@@ -1,3 +1,4 @@
+import { PrototypeRepeatData } from "./prototypeData";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
   bindCheckedKeys,
@@ -5,6 +6,7 @@ import {
   bindText,
   mapBindableFields,
   record,
+  renderScalar,
   STATE_KEY,
   templateFieldReferences,
   templateSegments,
@@ -31,7 +33,8 @@ interface Scope {
   /** The repeat container's path; instance errors are reported at its `repeat.items[i]`. */
   path: string;
   binding: Binding;
-  items: Raw[];
+  items: readonly Readonly<Raw>[];
+  pathBound: boolean;
 }
 
 const fail = (path: string, message: string): RepeatError => ({ path, message });
@@ -77,8 +80,10 @@ function invalidBoundKey(key: string, path: string, scope: Scope): RepeatError |
     const bound = bindText(key, instance(scope, scope.items[index], index));
     if (!STATE_KEY.test(bound)) {
       return fail(
-        `${scope.path}.repeat.items[${index}]`,
-        `Bound state key ${JSON.stringify(bound)} is invalid`,
+        scope.pathBound
+          ? `${scope.path}.repeat.items.path`
+          : `${scope.path}.repeat.items[${index}]`,
+        `Bound state key ${JSON.stringify(bound)} is invalid${scope.pathBound ? ` (repeat item ${index})` : ""}`,
       );
     }
   }
@@ -107,7 +112,11 @@ function fieldError(
 /** The first error among a template node's own bindable fields, in visiting order. */
 function checkOwnFields(node: Raw, path: string, scope: Scope): RepeatError | undefined {
   let first: RepeatError | undefined;
-  mapBindableFields(node, path, (value, fieldPath, kind) => {
+  mapBindableFields(node, path, (value, fieldPath, kind, dataCondition) => {
+    if (dataCondition && typeof value === "string" && hasPlaceholder(value, scope.binding)) {
+      first ??= fail(fieldPath, "Repeat placeholder in a data condition operand is not supported");
+      return value;
+    }
     first ??= fieldError(value, fieldPath, kind, scope);
     return value;
   });
@@ -143,19 +152,34 @@ function childrenOf(node: Raw, path: string): Child[] {
   });
 }
 
-function scopeOf(node: Raw, path: string): Scope | undefined {
+interface RepeatState {
+  data: PrototypeRepeatData;
+  cells: number;
+}
+
+function scopeOf(node: Raw, path: string, data: PrototypeRepeatData): Scope | undefined {
   const repeat = record(node.repeat);
-  const items = Array.isArray(repeat?.items) ? (repeat.items as unknown[]) : [];
+  const source = record(repeat?.items);
+  const literal: unknown[] = Array.isArray(repeat?.items) ? repeat.items : [];
   return repeat && typeof repeat.as === "string"
     ? {
         path,
         binding: { alias: repeat.as, index: true },
-        items: items.filter((item): item is Raw => record(item) !== undefined),
+        items:
+          source && typeof source.path === "string"
+            ? data.items(source.path)
+            : literal.filter((item): item is Raw => record(item) !== undefined),
+        pathBound: source !== undefined,
       }
     : undefined;
 }
 
-function templateErrors(node: Raw, path: string, scope?: Scope): RepeatError | undefined {
+function templateErrors(
+  node: Raw,
+  path: string,
+  state: RepeatState,
+  scope?: Scope,
+): RepeatError | undefined {
   if (scope) {
     if (node.repeat !== undefined) {
       return fail(`${path}.repeat`, "Nested repeat is not supported");
@@ -168,12 +192,82 @@ function templateErrors(node: Raw, path: string, scope?: Scope): RepeatError | u
   if (own) {
     return own;
   }
-  const childScope = scopeOf(node, path) ?? scope;
+  const repeatError = repeatSourceErrors(node, path, state);
+  if (repeatError) {
+    return repeatError;
+  }
+  const ownScope = scopeOf(node, path, state.data);
+  const childScope = ownScope ?? scope;
   for (const child of childrenOf(node, path)) {
-    const error = templateErrors(child.node, child.path, childScope);
+    const error = templateErrors(child.node, child.path, state, childScope);
     if (error) {
       return error;
     }
+  }
+  return repeatIdentityError(node, path, ownScope);
+}
+
+function repeatIdentityError(
+  node: Raw,
+  path: string,
+  scope: Scope | undefined,
+): RepeatError | undefined {
+  const key = record(node.repeat)?.key;
+  return scope && typeof key === "string"
+    ? repeatKeyError(scope.items, key, `${path}.repeat.key`)
+    : undefined;
+}
+
+const MAX_REPEAT_ITEMS =
+  contract.definitions.repeat.fields.items.rule.options.find((option) => option.kind === "array")
+    ?.max ?? Infinity;
+
+function repeatSourceErrors(node: Raw, path: string, state: RepeatState): RepeatError | undefined {
+  const repeat = record(node.repeat);
+  if (!repeat) {
+    return undefined;
+  }
+  const source = record(repeat.items);
+  if (source && typeof source.path === "string") {
+    const items = state.data.source(source.path);
+    const at = `${path}.repeat.items.path`;
+    if (!Array.isArray(items)) {
+      return fail(at, "Repeat path does not resolve to an array");
+    }
+    if (items.length > MAX_REPEAT_ITEMS) {
+      return fail(at, `Repeat path resolves to more than ${MAX_REPEAT_ITEMS} items`);
+    }
+    const invalid = items.findIndex((item) => !record(item));
+    if (invalid >= 0) {
+      return fail(at, `Repeat path item ${invalid} is not an object`);
+    }
+    state.cells += state.data.cells(source.path);
+    if (state.cells > contract.limits.MAX_PROTOTYPE_REPEAT_PATH_CELLS) {
+      return fail(at, "Repeat path cell limit exceeded");
+    }
+  }
+  return undefined;
+}
+
+function repeatKeyError(
+  items: readonly Readonly<Raw>[],
+  key: string,
+  path: string,
+): RepeatError | undefined {
+  if (items.some((item) => !Object.hasOwn(item, key))) {
+    return fail(path, `Unknown repeat field ${JSON.stringify(key)}`);
+  }
+  const seen = new Map<string, number>();
+  for (const [index, item] of items.entries()) {
+    const text = renderScalar(item[key]);
+    const first = seen.get(text);
+    if (first !== undefined) {
+      return fail(
+        path,
+        `Duplicate repeat key ${JSON.stringify(text)} (items ${first} and ${index})`,
+      );
+    }
+    seen.set(text, index);
   }
   return undefined;
 }
@@ -213,6 +307,7 @@ function expandedErrors(
   node: Raw,
   path: string,
   budget: Budget,
+  data: PrototypeRepeatData,
   repeatPath?: string,
 ): RepeatError | undefined {
   const at = repeatPath ?? path;
@@ -224,12 +319,12 @@ function expandedErrors(
   if (budget.images > contract.limits.MAX_PROTOTYPE_IMAGES) {
     return fail(at, "Expanded image limit exceeded");
   }
-  const scope = scopeOf(node, path);
+  const scope = scopeOf(node, path, data);
   const instances = scope ? scope.items.length : 1;
   const nestedPath = scope ? `${path}.repeat` : repeatPath;
   for (let instance = 0; instance < instances; instance++) {
     for (const child of childrenOf(node, path)) {
-      const error = expandedErrors(child.node, child.path, budget, nestedPath);
+      const error = expandedErrors(child.node, child.path, budget, data, nestedPath);
       if (error) {
         return error;
       }
@@ -239,23 +334,27 @@ function expandedErrors(
 }
 
 /** First repeat-related error in traversal order, or undefined when the spec's repeats are sound. */
-export function repeatErrors(spec: unknown): RepeatError | undefined {
+export function repeatErrors(
+  spec: unknown,
+  data = new PrototypeRepeatData(record(spec)?.data),
+): RepeatError | undefined {
   const root = record(record(spec)?.root);
   if (!root) {
     return undefined;
   }
   return (
-    templateErrors(root, "root") ?? expandedErrors(root, "root", { nodes: 0, images: 0 }, undefined)
+    templateErrors(root, "root", { data, cells: 0 }) ??
+    expandedErrors(root, "root", { nodes: 0, images: 0 }, data, undefined)
   );
 }
 
-function collectScopes(node: Raw, path: string, scopes: Scope[]): void {
-  const scope = scopeOf(node, path);
+function collectScopes(node: Raw, path: string, scopes: Scope[], data: PrototypeRepeatData): void {
+  const scope = scopeOf(node, path, data);
   if (scope) {
     scopes.push(scope);
   }
   for (const child of childrenOf(node, path)) {
-    collectScopes(child.node, child.path, scopes);
+    collectScopes(child.node, child.path, scopes, data);
   }
 }
 
@@ -277,11 +376,12 @@ export interface KeyInstance<T> {
 export function repeatKeyInstances<T extends { value: Raw; path: string }>(
   spec: unknown,
   located: T[],
+  data = new PrototypeRepeatData(record(spec)?.data),
 ): KeyInstance<T>[] {
   const root = record(record(spec)?.root);
   const scopes: Scope[] = [];
   if (root) {
-    collectScopes(root, "root", scopes);
+    collectScopes(root, "root", scopes, data);
   }
   return located.flatMap((entry) => {
     const scope = scopes.find((candidate) => entry.path.startsWith(`${candidate.path}.children[`));

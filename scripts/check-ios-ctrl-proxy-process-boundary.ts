@@ -10,6 +10,10 @@ const PROCESS_TOOLS = new Set(["ps", "pgrep", "kill", "lsof"]);
 const SHELLS = new Set(["sh", "/bin/sh", "bash", "/bin/bash", "zsh", "/bin/zsh"]);
 const EXCEPTIONS = new Map<string, string>([
   [
+    "src/devices/hostEmulatorProcessStopper.ts",
+    "Read-only ps probe of an Android emulator pid's process group; never touches the iOS runner.",
+  ],
+  [
     "src/features/performance/PerformanceMonitor.ts",
     "Collects app metrics, not CtrlProxy lifecycle state.",
   ],

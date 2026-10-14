@@ -677,6 +677,31 @@ export class SqliteSlotRegistry implements SlotRegistry {
     });
   }
 
+  async removeUnboundSlot(
+    key: SlotKey,
+    expected: { generation: number; stableDeviceId: null },
+  ): Promise<boolean> {
+    assertValidSlotKey(key);
+    return this.db.transaction().execute(async (trx) => {
+      if (await this.readOpenJournal(trx, key)) {
+        return false;
+      }
+      const deleted = await trx
+        .deleteFrom("slot_assignments")
+        .where("scope_key", "=", key.scopeKey)
+        .where("slot_index", "=", key.slotIndex)
+        .where("generation", "=", expected.generation)
+        .where("stable_device_id", "is", null)
+        .where("state", "=", "provisioning")
+        .where("exec_owner_daemon_id", "is", null)
+        .where("exec_owner_pid", "is", null)
+        .where("exec_owner_process_token", "is", null)
+        .where("exec_session_uuid", "is", null)
+        .executeTakeFirst();
+      return deleted.numDeletedRows > 0n;
+    });
+  }
+
   async commitBinding(
     key: SlotKey,
     expected: SlotBindingExpectation,

@@ -319,15 +319,21 @@ describe("pressButtonHandler (registered handler wiring)", () => {
 
   test("a failure sets isError and reports the failure, not a completed press", async () => {
     setPressButtonFactory(() => ({
-      execute: async () => fakeResult({ error: "Unsupported button: back" }),
+      execute: async () =>
+        fakeResult({
+          error: "iOS has no menu hardware button",
+          code: "unsupported_button",
+          retryable: false,
+        }),
     }));
 
     const response = (await pressButtonHandler(fakeDevice, args)) as ToolResponse;
     expect(response.isError).toBe(true);
     expect(parsePayload(response).message).toBe(
-      "Failed to press button back: Unsupported button: back",
+      "Failed to press button back: iOS has no menu hardware button",
     );
     expect(parsePayload(response).success).toBe(false);
+    expect(parsePayload(response)).toMatchObject({ code: "unsupported_button", retryable: false });
   });
 
   test("a success has no isError and the unchanged success message", async () => {

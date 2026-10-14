@@ -1,0 +1,13 @@
+{
+  "surface": "press-button-result",
+  "name": "unsupported_button",
+  "builder": "PressButton.unsupportedIosButtonResult",
+  "payload": {
+    "success": false,
+    "button": "menu",
+    "keyCode": -1,
+    "code": "unsupported_button",
+    "retryable": false,
+    "error": "iOS has no menu hardware button"
+  }
+}

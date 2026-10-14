@@ -60,6 +60,14 @@
         </intent-filter>
       </activity>
 
+      <activity
+        android:name=".prototype.SavedPrototypeActivity"
+        android:exported="false"
+        android:documentLaunchMode="intoExisting"
+        android:excludeFromRecents="false"
+        android:theme="@style/Theme.Automobileandroid"
+        android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|uiMode|locale|fontScale|density|layoutDirection|keyboard|navigation" />
+
       <!-- AutoMobile CtrlProxy Service -->
       <service
         android:name=".CtrlProxy"

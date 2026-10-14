@@ -26,6 +26,11 @@ import { sendCommand, type SendCommandOptions } from "../DeviceServiceUtils";
 import type { DelegateContext } from "./types";
 import {
   ctrlProxyRequests,
+  PROTOTYPE_SAVED_CAPABILITY,
+  isSavedPrototypeErrorCode,
+  type SavePrototypeMessage,
+  type ListSavedPrototypesMessage,
+  type DeleteSavedPrototypeMessage,
   PROTOTYPE_DISPLAY_CAPABILITY,
   PROTOTYPE_PATCH_CAPABILITY,
   type PatchPrototypeMessage,
@@ -52,6 +57,46 @@ export function prototypeDisplayUnsupportedMessage(displayId: number): string {
 /** Shared by the client transport guard and the tool-level refusal. */
 export function prototypeInspectUnsupportedMessage(): string {
   return `inspect_prototypes: the connected CtrlProxy does not advertise ${PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY}, so it cannot report the prototypes it is showing or replay events buffered while no host was connected; update the connected CtrlProxy.`;
+}
+
+/** Shared refusal for saved prototype requests. */
+export function prototypeSavedUnsupportedMessage(type: string): string {
+  return `${type}: the connected CtrlProxy does not advertise ${PROTOTYPE_SAVED_CAPABILITY}; update the connected CtrlProxy.`;
+}
+const savedInfoSchema = z.object({ id: z.string(), slug: z.string(), replaced: z.boolean() });
+const savedEntrySchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  slug: z.string(),
+  savedAt: z.number().finite(),
+  pinned: z.boolean(),
+});
+/** Keeps well-formed saved reply fields; a malformed list is omitted as a whole. */
+export function prototypeSavedReplyFields(
+  reply: unknown,
+): Pick<PrototypeResult, "saved" | "savedPrototypes" | "errorCode"> {
+  const envelope = z
+    .object({
+      saved: z.unknown().optional(),
+      savedPrototypes: z.unknown().optional(),
+      errorCode: z.unknown().optional(),
+    })
+    .safeParse(reply);
+  if (!envelope.success) {
+    return {};
+  }
+  const saved = savedInfoSchema.safeParse(envelope.data.saved);
+  const savedPrototypes = z.array(savedEntrySchema).safeParse(envelope.data.savedPrototypes);
+  if (envelope.data.savedPrototypes !== undefined && !savedPrototypes.success) {
+    logger.warn("[CTRL_PROXY] Dropping malformed savedPrototypes", savedPrototypes.error);
+  }
+  return {
+    ...(saved.success ? { saved: saved.data } : {}),
+    ...(savedPrototypes.success ? { savedPrototypes: savedPrototypes.data } : {}),
+    ...(isSavedPrototypeErrorCode(envelope.data.errorCode)
+      ? { errorCode: envelope.data.errorCode }
+      : {}),
+  };
 }
 
 /** Transport controls shared by asset upload and removal. */
@@ -126,7 +171,31 @@ function isKnownPrototypeEventKind(kind: string): boolean {
   return (PROTOTYPE_EVENT_KINDS as readonly string[]).includes(kind);
 }
 
+/** Match uploaded IDs throughout JSON; explicit asset values identify untracked references too. */
+function collectPrototypeStrings(
+  value: unknown,
+  strings: Set<string>,
+  references: Set<string>,
+  assetValue = false,
+): void {
+  if (typeof value === "string") {
+    strings.add(value);
+    if (assetValue) {
+      references.add(value);
+    }
+  } else if (Array.isArray(value)) {
+    for (const child of value) {
+      collectPrototypeStrings(child, strings, references, assetValue);
+    }
+  } else if (typeof value === "object" && value !== null) {
+    for (const [key, child] of Object.entries(value)) {
+      collectPrototypeStrings(child, strings, references, assetValue || key === "asset");
+    }
+  }
+}
+
 export class CtrlProxyPrototypes {
+  private readonly uploadedAssets = new Map<string, PrototypeAssetUpload>();
   private readonly listeners = new Set<(event: PrototypeEvent) => void>();
   /** Pushes that arrived with no subscriber; bounded like the device's offline ring. */
   private readonly staged: PrototypeEvent[] = [];
@@ -161,6 +230,102 @@ export class CtrlProxyPrototypes {
       timeoutMs,
       perf,
     );
+  }
+
+  /** Assets must already be uploaded with requestPutPrototypeAsset in this same session. */
+  async requestSavePrototype(
+    save: { spec: PrototypeSpec; label: string; icon?: string },
+    timeoutMs = 5000,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    this.validateSpec(save.spec);
+    if (typeof save.label !== "string" || save.label.length === 0 || save.label.length > 120) {
+      throw new ActionableError(
+        "Invalid saved prototype label: expected a non-empty string of at most 120 characters",
+      );
+    }
+    if (
+      save.icon !== undefined &&
+      (typeof save.icon !== "string" || prototypeAssetIdProblem(save.icon) !== null)
+    ) {
+      throw new ActionableError(
+        "Invalid saved prototype icon: expected a valid asset id; explicit nulls are rejected",
+      );
+    }
+    const reply = await this.request(
+      ctrlProxyRequests.savePrototype({ requestId: "", ...save }),
+      timeoutMs,
+      perf,
+    );
+    if (reply.success && !reply.error) {
+      await this.mirrorSave(save, reply);
+    }
+    return reply;
+  }
+  requestListSavedPrototypes(
+    timeoutMs = 5000,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    return this.request(ctrlProxyRequests.listSavedPrototypes({ requestId: "" }), timeoutMs, perf);
+  }
+  async requestDeleteSavedPrototype(
+    id: string,
+    timeoutMs = 5000,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    if (typeof id !== "string" || id.length === 0) {
+      throw new ActionableError("Invalid saved prototype id: expected a non-empty string");
+    }
+    const reply = await this.request(
+      ctrlProxyRequests.deleteSavedPrototype({ requestId: "", id }),
+      timeoutMs,
+      perf,
+    );
+    const recorder = this.context.savedPrototypeMirror;
+    if (reply.success && !reply.error && recorder) {
+      try {
+        await recorder.mirror.remove(recorder.serial, id);
+      } catch (error) {
+        logger.warn(`[CTRL_PROXY] Failed to remove saved prototype mirror ${id}`, error);
+      }
+    }
+    return reply;
+  }
+
+  private async mirrorSave(
+    save: { spec: PrototypeSpec; label: string; icon?: string },
+    reply: PrototypeResult,
+  ): Promise<void> {
+    const recorder = this.context.savedPrototypeMirror;
+    if (!recorder) {
+      return;
+    }
+    try {
+      const strings = new Set<string>();
+      const references = new Set<string>();
+      collectPrototypeStrings(save.spec, strings, references);
+      if (save.icon !== undefined) {
+        references.add(save.icon);
+      }
+      const ids = new Set([...strings].filter((id) => this.uploadedAssets.has(id)));
+      for (const id of references) {
+        ids.add(id);
+      }
+      const assets = [...ids].map((id) => {
+        const asset = this.uploadedAssets.get(id);
+        if (!asset) {
+          logger.warn(`[CTRL_PROXY] Saved prototype ${save.spec.id} mirror missing asset ${id}`);
+        }
+        return asset ? { ...asset, bytes: asset.bytes.slice() } : { id };
+      });
+      await recorder.mirror.record(recorder.serial, {
+        id: reply.saved?.id ?? save.spec.id,
+        ...save,
+        assets,
+      });
+    } catch (error) {
+      logger.warn(`[CTRL_PROXY] Failed to mirror saved prototype ${save.spec.id}`, error);
+    }
   }
 
   async requestPatchPrototype(
@@ -247,7 +412,8 @@ export class CtrlProxyPrototypes {
     const dataBase64 = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString(
       "base64",
     );
-    return this.sendAssetRequest(
+    const snapshot = { ...asset, bytes: Uint8Array.from(asset.bytes) };
+    const reply = await this.sendAssetRequest(
       ctrlProxyRequests.putPrototypeAsset({
         requestId: "",
         id: asset.id,
@@ -257,6 +423,10 @@ export class CtrlProxyPrototypes {
       `Upload of prototype asset '${asset.id}'`,
       options,
     );
+    if (reply.success && !reply.error) {
+      this.uploadedAssets.set(asset.id, snapshot);
+    }
+    return reply;
   }
 
   /** Removes one asset. Idempotent on the device: an unknown id still succeeds. */
@@ -268,11 +438,15 @@ export class CtrlProxyPrototypes {
     if (problem !== null) {
       throw new ActionableError(`Invalid prototype asset: ${problem}`);
     }
-    return this.sendAssetRequest(
+    const reply = await this.sendAssetRequest(
       ctrlProxyRequests.removePrototypeAsset({ requestId: "", id }),
       `Removal of prototype asset '${id}'`,
       options,
     );
+    if (reply.success && !reply.error) {
+      this.uploadedAssets.delete(id);
+    }
+    return reply;
   }
 
   private async sendAssetRequest(
@@ -381,7 +555,10 @@ export class CtrlProxyPrototypes {
       | ShowPrototypeMessage
       | DismissPrototypeMessage
       | InspectPrototypesMessage
-      | PatchPrototypeMessage,
+      | PatchPrototypeMessage
+      | SavePrototypeMessage
+      | ListSavedPrototypesMessage
+      | DeleteSavedPrototypeMessage,
     timeoutMs: number,
     perf?: PerformanceTracker,
     deliveryOptions: Pick<SendCommandOptions<PrototypeResult>, "onDispatch" | "timeoutError"> = {},
@@ -414,13 +591,22 @@ export class CtrlProxyPrototypes {
       | ShowPrototypeMessage
       | DismissPrototypeMessage
       | InspectPrototypesMessage
-      | PatchPrototypeMessage,
+      | PatchPrototypeMessage
+      | SavePrototypeMessage
+      | ListSavedPrototypesMessage
+      | DeleteSavedPrototypeMessage,
   ): void {
     const supports = (command: string) => this.context.isCommandSupported?.(command);
     if (message.type === "patch_prototype" && supports(PROTOTYPE_PATCH_CAPABILITY) !== true) {
       throw new ActionableError(prototypePatchUnsupportedMessage("android"));
     }
     const type = message.type;
+    if (
+      ["save_prototype", "list_saved_prototypes", "delete_saved_prototype"].includes(type) &&
+      supports(PROTOTYPE_SAVED_CAPABILITY) !== true
+    ) {
+      throw new ActionableError(prototypeSavedUnsupportedMessage(type));
+    }
     if (supports(type) === false) {
       throw new ActionableError(
         `${type}: this CtrlProxy build does not support prototypes; update the connected CtrlProxy.`,

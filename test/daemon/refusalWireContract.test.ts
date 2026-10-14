@@ -138,7 +138,10 @@ const refusalErrorModules: Readonly<Record<string, Readonly<Record<string, unkno
 };
 
 /** Only non-wire codes may bypass the module map; the inventory rejects stale exemptions. */
-const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {};
+const EXEMPT_CODED_ERROR_MODULES: Readonly<Record<string, string>> = {
+  "features/prototype/ios/iosPrototypeInstallerErrors":
+    "Host installer library errors; no MCP/tool boundary until #12257 wires the installer.",
+};
 
 interface CodedErrorModule {
   module: string;

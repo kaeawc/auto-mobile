@@ -53,6 +53,8 @@ export interface PrototypeEventState {
   stacks?: PrototypeEvent["stacks"];
   state: PrototypeEvent["state"];
   lastKnown: true;
+  context?: PrototypeEvent["context"];
+  contextTruncated?: true;
 }
 export interface AdoptedPrototype {
   data?: PrototypeData;
@@ -168,6 +170,10 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
                 pages: { ...snapshot.pages },
                 ...(snapshot.stacks ? { stacks: structuredClone(snapshot.stacks) } : {}),
                 state: { ...snapshot.state },
+                ...(snapshot.context === undefined
+                  ? {}
+                  : { context: structuredClone(snapshot.context) }),
+                ...(snapshot.contextTruncated === true ? { contextTruncated: true as const } : {}),
                 lastKnown: true as const,
               }
             : {}),
@@ -257,6 +263,8 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       pages: { ...event.pages },
       ...(event.stacks ? { stacks: structuredClone(event.stacks) } : {}),
       state: { ...event.state },
+      ...(event.context === undefined ? {} : { context: structuredClone(event.context) }),
+      ...(event.contextTruncated === true ? { contextTruncated: true as const } : {}),
       lastKnown: true,
     };
     const shown = stored.shown.get(event.id);

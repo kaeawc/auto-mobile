@@ -398,7 +398,7 @@ class PrototypeRuntime(
     for ((index, action) in actions.withIndex()) {
       if (!current.active) break
       when (action) {
-        is PrototypeEmitAction -> emit(PrototypeEventKind.EMIT, action.name, action.payload)
+        is PrototypeEmitAction -> emitAction(action)
         is PrototypeSetPageAction -> {
           val page = current.pages[action.pager] ?: continue
           setPage(
@@ -632,10 +632,30 @@ class PrototypeRuntime(
     )
   }
 
+  private suspend fun emitAction(action: PrototypeEmitAction) {
+    val resolved =
+      action.context?.let { bindings ->
+        EmitContextResolver.resolve(
+          bindings,
+          object : EmitContextInputs {
+            override fun state(key: String): JsonElement? =
+              current.state[key]?.let(EmitContextResolver::scalar)
+
+            override fun page(id: String): Int? = current.pages[id]
+
+            override fun data(pointer: String): JsonElement? =
+              PrototypeDataPointer.resolve(current.spec.data, pointer)
+          },
+        )
+      }
+    emit(PrototypeEventKind.EMIT, action.name, action.payload, resolved)
+  }
+
   private suspend fun emit(
     kind: PrototypeEventKind,
     name: String? = null,
     payload: JsonElement? = null,
+    resolved: ResolvedEmitContext? = null,
   ) {
     sink.send(
       PrototypeEvent(
@@ -648,6 +668,8 @@ class PrototypeRuntime(
         current.state.toMap(),
         current.pages.toMap(),
         current.stacks.toMap(),
+        context = resolved?.context,
+        contextTruncated = resolved?.contextTruncated,
       ),
     )
   }

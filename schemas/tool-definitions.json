@@ -19208,7 +19208,88 @@
                                 "type": "string",
                                 "minLength": 1
                               },
-                              "payload": {}
+                              "payload": {},
+                              "context": {
+                                "allOf": [
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                      "anyOf": [
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "state": {
+                                              "type": "string",
+                                              "pattern": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:index|[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$"
+                                            }
+                                          },
+                                          "required": ["state"],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "item": {
+                                              "type": "string",
+                                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                                            }
+                                          },
+                                          "required": ["item"],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "index": {
+                                              "type": "boolean",
+                                              "const": true
+                                            }
+                                          },
+                                          "required": ["index"],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "page": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "required": ["page"],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "data": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 256,
+                                              "pattern": "^(?:\\/(?:[^~\\/]|~[01])*)+$"
+                                            }
+                                          },
+                                          "required": ["data"],
+                                          "additionalProperties": false
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "value": {
+                                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/payload"
+                                            }
+                                          },
+                                          "required": ["value"],
+                                          "additionalProperties": false
+                                        }
+                                      ]
+                                    },
+                                    "propertyNames": {
+                                      "minLength": 1
+                                    }
+                                  }
+                                ]
+                              }
                             },
                             "required": ["type", "name"],
                             "additionalProperties": false
@@ -19249,8 +19330,7 @@
                                 "enum": ["setState"]
                               },
                               "key": {
-                                "type": "string",
-                                "pattern": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:index|[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                               },
                               "value": {
                                 "anyOf": [
@@ -19277,7 +19357,7 @@
                                 "enum": ["toggle"]
                               },
                               "key": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                               }
                             },
                             "required": ["type", "key"],
@@ -19291,7 +19371,7 @@
                                 "enum": ["increment"]
                               },
                               "key": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                               },
                               "by": {
                                 "type": "number"
@@ -19308,7 +19388,7 @@
                                 "enum": ["decrement"]
                               },
                               "key": {
-                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                                "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                               },
                               "by": {
                                 "type": "number"
@@ -19758,10 +19838,7 @@
                                 "type": "object",
                                 "properties": {
                                   "data": {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": 256,
-                                    "pattern": "^(?:\\/(?:[^~\\/]|~[01])*)+$"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4/properties/data"
                                   },
                                   "equals": {
                                     "anyOf": [
@@ -19784,7 +19861,7 @@
                                 "type": "object",
                                 "properties": {
                                   "data": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/data"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4/properties/data"
                                   },
                                   "notEquals": {
                                     "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/equals"
@@ -19797,7 +19874,7 @@
                                 "type": "object",
                                 "properties": {
                                   "data": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/data"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4/properties/data"
                                   },
                                   "gt": {
                                     "type": "number"
@@ -19810,7 +19887,7 @@
                                 "type": "object",
                                 "properties": {
                                   "data": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/data"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4/properties/data"
                                   },
                                   "lt": {
                                     "type": "number"
@@ -19823,7 +19900,7 @@
                                 "type": "object",
                                 "properties": {
                                   "key": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                                   },
                                   "equals": {
                                     "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/equals"
@@ -19836,7 +19913,7 @@
                                 "type": "object",
                                 "properties": {
                                   "key": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                                   },
                                   "notEquals": {
                                     "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/equals"
@@ -19849,7 +19926,7 @@
                                 "type": "object",
                                 "properties": {
                                   "key": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                                   },
                                   "gt": {
                                     "type": "number"
@@ -19862,7 +19939,7 @@
                                 "type": "object",
                                 "properties": {
                                   "key": {
-                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                                    "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                                   },
                                   "lt": {
                                     "type": "number"
@@ -20109,7 +20186,7 @@
                               "type": "object",
                               "properties": {
                                 "path": {
-                                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen/items/properties/when/anyOf/0/properties/data"
+                                  "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/4/properties/data"
                                 }
                               },
                               "required": ["path"],
@@ -20118,11 +20195,10 @@
                           ]
                         },
                         "as": {
-                          "type": "string",
-                          "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
                         },
                         "key": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/repeat/properties/as"
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/1/properties/item"
                         }
                       },
                       "required": ["items", "as"],
@@ -20716,7 +20792,7 @@
                       "enum": ["textField"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "placeholder": {
                       "type": "string"
@@ -20803,7 +20879,7 @@
                       "enum": ["searchBar"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "placeholder": {
                       "$ref": "#/properties/spec/properties/root/anyOf/9/properties/placeholder"
@@ -20839,7 +20915,7 @@
                       "maxItems": 2
                     },
                     "activeKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "variant": {
                       "type": "string",
@@ -20896,7 +20972,7 @@
                       "enum": ["switch"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "label": {
                       "type": "string",
@@ -20947,7 +21023,7 @@
                       "enum": ["checkbox"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "label": {
                       "type": "string",
@@ -21053,7 +21129,7 @@
                       "enum": ["radioGroup"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "options": {
                       "type": "array",
@@ -21120,7 +21196,7 @@
                       "enum": ["select"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "label": {
                       "type": "string",
@@ -21211,7 +21287,7 @@
                               "enum": ["switch"]
                             },
                             "stateKey": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                             }
                           },
                           "required": ["type", "stateKey"],
@@ -21225,7 +21301,7 @@
                               "enum": ["checkbox"]
                             },
                             "stateKey": {
-                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                              "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                             }
                           },
                           "required": ["type", "stateKey"],
@@ -21292,7 +21368,7 @@
                       "enum": ["slider"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "label": {
                       "type": "string",
@@ -21360,7 +21436,7 @@
                       "enum": ["assist", "filter", "input", "suggestion"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     }
                   },
                   "required": ["type", "label"],
@@ -21574,7 +21650,7 @@
                       "enum": ["segmentedButton"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "options": {
                       "type": "array",
@@ -21804,7 +21880,7 @@
                       "enum": ["linear", "circular"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "max": {
                       "type": "number"
@@ -21857,7 +21933,7 @@
                       "type": "object",
                       "properties": {
                         "key": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                          "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                         },
                         "equals": {
                           "type": "boolean"
@@ -22091,10 +22167,10 @@
                       "enum": ["timePicker"]
                     },
                     "hourKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "minuteKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "is24Hour": {
                       "type": "boolean"
@@ -22144,7 +22220,7 @@
                       "enum": ["datePicker"]
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     }
                   },
                   "required": ["type", "stateKey"],
@@ -22412,7 +22488,7 @@
                       "minLength": 1
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     },
                     "scrollable": {
                       "type": "boolean"
@@ -22474,7 +22550,7 @@
                       "minLength": 1
                     },
                     "stateKey": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/0/properties/context/allOf/0/additionalProperties/anyOf/0/properties/state"
                     }
                   },
                   "required": ["type", "items"],
@@ -22957,6 +23033,24 @@
                   "$ref": "#/$defs/__schema0"
                 }
               },
+              "context": {
+                "allOf": [
+                  {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "$ref": "#/$defs/__schema1"
+                    }
+                  },
+                  {}
+                ]
+              },
+              "contextTruncated": {
+                "type": "boolean",
+                "const": true
+              },
               "lastKnown": {
                 "description": "Pages, stacks and state are the last reported device snapshot, not a live device query",
                 "type": "boolean",
@@ -23134,7 +23228,25 @@
               ]
             },
             "payload": {
-              "$ref": "#/$defs/__schema1"
+              "$ref": "#/$defs/__schema2"
+            },
+            "context": {
+              "allOf": [
+                {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "$ref": "#/$defs/__schema1"
+                  }
+                },
+                {}
+              ]
+            },
+            "contextTruncated": {
+              "type": "boolean",
+              "const": true
             },
             "state": {
               "type": "object",
@@ -23429,6 +23541,37 @@
               },
               "additionalProperties": {
                 "$ref": "#/$defs/__schema1"
+              }
+            }
+          ]
+        },
+        "__schema2": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema2"
+              }
+            },
+            {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema2"
               }
             }
           ]

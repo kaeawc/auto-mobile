@@ -610,6 +610,8 @@ export interface PrototypeEvent {
   kind: PrototypeEventKind | typeof UNKNOWN_PROTOTYPE_EVENT_KIND;
   name: string | null;
   payload: PrototypeJson;
+  context?: Record<string, PrototypeJson>;
+  contextTruncated?: true;
   state: PrototypeState;
   pages: Record<string, number>;
   stacks?: Record<string, { path: string[]; depth: number }>;
@@ -1018,6 +1020,7 @@ export const PROTOTYPE_TEXT_FIELD_OPTIONS_CAPABILITY = "prototype_text_field_opt
 export const PROTOTYPE_MENUS_CAPABILITY = "prototype_menus_v1";
 
 /** Resolves read-only prototype data, JSON Pointer bindings and stable repeat keys. */
+export const PROTOTYPE_EMIT_CONTEXT_CAPABILITY = "prototype_emit_context_v1";
 export const PROTOTYPE_DATA_MODEL_CAPABILITY = "prototype_data_model_v1";
 /** Editable in-tree search field with active results and submit/trailing actions. */
 export const PROTOTYPE_SEARCH_BAR_CAPABILITY = "prototype_search_bar_v1";

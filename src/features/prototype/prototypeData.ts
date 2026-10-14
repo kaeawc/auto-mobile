@@ -4,6 +4,7 @@ import {
   PROTOTYPE_MENUS_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
 import { mapBindableFields, record, renderScalar, STATE_KEY, type Raw } from "./prototypeTemplate";
+import { prototypeSpecForDevice } from "./prototypeComponents";
 
 /** RFC 6901 pointers relative to data; the whole-document empty pointer is excluded. */
 export function isPrototypeDataPointer(value: unknown): value is string {
@@ -230,6 +231,9 @@ function usesAtNode(node: Raw, path: string): Set<string> {
     fields.add(`${path}.repeat.key`);
   }
   mapBindableFields(node, path, (value, fieldPath, kind) => {
+    if (kind === "emitBinding" && typeof record(value)?.data === "string") {
+      fields.add(fieldPath);
+    }
     if (kind === "text" && typeof value === "string" && prototypeDataPlaceholders(value).length) {
       fields.add(fieldPath);
     }
@@ -285,7 +289,7 @@ function documentFields(value: unknown, path: string, fields: Set<string>): stri
 }
 
 export function prototypeDataModelFields(spec: unknown): string[] {
-  const object = record(spec);
+  const object = record(prototypeSpecForDevice(spec));
   return object
     ? [...(Object.hasOwn(object, "data") ? ["data"] : []), ...nodeFields(object.root, "root")]
     : [];

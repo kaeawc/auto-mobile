@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import dev.jasonpearson.automobile.protocol.EmitContextResolver
 import dev.jasonpearson.automobile.protocol.PrototypeAction
 import dev.jasonpearson.automobile.protocol.PrototypeAppBarAction
 import dev.jasonpearson.automobile.protocol.PrototypeBadgeNode
@@ -443,7 +444,19 @@ private fun PrototypeAction.bound(instance: RepeatInstance): PrototypeAction =
   when (this) {
     is PrototypeSetStateAction ->
       copy(key = instance.interpolate(key), value = instance.interpolateScalar(value))
-    is PrototypeEmitAction -> copy(name = instance.interpolate(name))
+    is PrototypeEmitAction ->
+      copy(
+        name = instance.interpolate(name),
+        context =
+          context?.let {
+            PrototypeRepeatTemplate.bindEmitContext(
+              it,
+              instance.alias,
+              instance.item.mapValues { (_, value) -> EmitContextResolver.scalar(value) },
+              instance.index,
+            )
+          },
+      )
     is PrototypeToggleAction -> copy(key = instance.interpolate(key))
     is PrototypeIncrementAction -> copy(key = instance.interpolate(key))
     is PrototypeDecrementAction -> copy(key = instance.interpolate(key))

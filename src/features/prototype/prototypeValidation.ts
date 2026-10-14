@@ -30,7 +30,8 @@ interface Rule {
   atLeastOne?: boolean;
   item?: Rule;
   options?: Rule[];
-  values?: string[];
+  values?: (string | boolean)[];
+  maxEntries?: number;
   fields?: Record<string, { rule: Rule; optional: boolean } | undefined>;
   variants?: Record<string, Rule>;
 }
@@ -374,6 +375,32 @@ function visitScreenMap(
   }
   return undefined;
 }
+function visitRecord(
+  value: unknown,
+  rule: Rule,
+  path: string,
+  context: Context,
+  depth: number,
+): PrototypeValidationError | undefined {
+  const data = object(value);
+  if (!data) {
+    return fail(path, "Expected object");
+  }
+  if (Object.keys(data).length > (rule.maxEntries ?? Infinity)) {
+    return fail(path, "Record entry limit exceeded");
+  }
+  for (const [key, child] of Object.entries(data)) {
+    const at = keyPath(path, key);
+    if (key.length === 0) {
+      return fail(at, "Invalid context name");
+    }
+    const error = walk(child, rule.item ?? { kind: "json" }, at, context, depth);
+    if (error) {
+      return error;
+    }
+  }
+  return undefined;
+}
 function numberValid(value: unknown, rule: Rule): boolean {
   return (
     typeof value === "number" &&
@@ -398,8 +425,13 @@ const primitiveChecks: Record<string, (value: unknown, rule: Rule) => boolean> =
     typeof value === "string" ||
     typeof value === "boolean" ||
     (typeof value === "number" && Number.isFinite(value)),
-  enum: (value, rule) => typeof value === "string" && (rule.values ?? []).includes(value),
-  json: (value, rule) => jsonCost(value) <= (rule.maxBytes ?? Infinity),
+  enum: (value, rule) =>
+    (typeof value === "string" || typeof value === "boolean") &&
+    (rule.values ?? []).includes(value),
+  json: (value, rule) => {
+    const cost = jsonCost(value);
+    return Number.isFinite(cost) && cost <= (rule.maxBytes ?? Infinity);
+  },
 };
 // Reserve 32 bytes per finite number so lexical exponent/decimal spellings cannot
 // change payload acceptance between JavaScript and JVM JSON decoders.
@@ -530,6 +562,7 @@ function walk(
     array: visitArray,
     map: visitMap,
     screenMap: visitScreenMap,
+    record: visitRecord,
     choice: visitChoice,
   };
   const handler = handlers[rule.kind];
@@ -575,6 +608,19 @@ function stackActionErrors(
   }
   return undefined;
 }
+/** Context uses the same pager-id set as setPage; only structurally valid emits carry context. */
+function emitContextPagerError(
+  { value, path }: Located,
+  pagers: ReadonlySet<string>,
+): PrototypeValidationError | undefined {
+  for (const [name, binding] of Object.entries(object(value.context) ?? {})) {
+    const page = object(binding)?.page;
+    if (typeof page === "string" && !pagers.has(page)) {
+      return fail(keyPath(`${path}.context`, name), "Unknown pager id");
+    }
+  }
+  return undefined;
+}
 function pagerErrors(context: Context): PrototypeValidationError | undefined {
   const pagers = new Set<string>();
   for (const { value, path } of context.nodes) {
@@ -600,6 +646,12 @@ function pagerErrors(context: Context): PrototypeValidationError | undefined {
   for (const { value, path } of [...context.nodes, ...context.actions]) {
     if (typeof value.pager === "string" && !pagers.has(value.pager)) {
       return fail(`${path}.pager`, "Unknown pager id");
+    }
+  }
+  for (const action of context.actions) {
+    const error = emitContextPagerError(action, pagers);
+    if (error) {
+      return error;
     }
   }
   return undefined;

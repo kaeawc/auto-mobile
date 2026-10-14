@@ -68,6 +68,10 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
     start: "home",
     screens: { home: { type: "text", text: "Home" } },
   }),
+  prototype_emit_context_v1: fixture({
+    ...label,
+    onTap: [{ type: "emit", name: "pick", context: { id: { state: "liked" } } }],
+  }),
 };
 function fixture(root: Record<string, unknown>) {
   return {

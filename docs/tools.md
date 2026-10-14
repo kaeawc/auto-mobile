@@ -735,6 +735,10 @@ no screenshot. Nodes include box/row/column/flow/grid (flow/grid require `protot
 Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker
 bound to state keys, and scroll/pager/tabBar/bottomNav/bottomSheet; actions are
 emit/setPage/setState/toggle/increment/decrement/dismiss.
+`emit.context` resolves named state/item/index/page/data/value bindings and requires
+`prototype_emit_context_v1` (data bindings also require `prototype_data_model_v1`).
+Events return `context`, with `contextTruncated: true` only when the resolved UTF-8 JSON
+exceeds the byte budget; the longest fitting prefix is kept.
 A spec may also carry a `theme` (light/dark mode, a seed colour, per-role colour
 overrides, typography and shapes), per-node `style` and `styleWhen` fields,
 `transition` on `visibleWhen` nodes, and a spec-level `motion` of `none` to make

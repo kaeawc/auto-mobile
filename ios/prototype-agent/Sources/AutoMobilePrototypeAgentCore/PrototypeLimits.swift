@@ -9,6 +9,9 @@ import Foundation
 enum PrototypeLimits {
     static let maxStackScreens = 32
     static let maxStackDepth = 32
+    static let maxEmitContextEntries = 16
+    static let maxEmitPayloadBytes = 4096
+    static let maxEmitPayloadDepth = 24
     static let maxPatchOps = 64
     static let maxNodes = 2000
     static let maxDepth = 24
@@ -55,7 +58,7 @@ enum PrototypeLimits {
         }
     }
 
-    private static func dataMemberPath(_ path: String, key: String) -> String {
+    static func dataMemberPath(_ path: String, key: String) -> String {
         let scalars = key.unicodeScalars
         func initial(_ scalar: Unicode.Scalar) -> Bool {
             ("A" ... "Z").contains(scalar) || ("a" ... "z").contains(scalar) || scalar == "_"

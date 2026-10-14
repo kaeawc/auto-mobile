@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.protocol
 
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.doubleOrNull
@@ -99,6 +100,31 @@ object PrototypeRepeatTemplate {
       }
     }
 
+  /** CtrlProxy's repeat expander uses this typed binding operation; payload is never interpolated. */
+  fun bindEmitContext(
+    context: Map<String, EmitContextBinding>,
+    alias: String,
+    item: Map<String, JsonElement>,
+    index: Int,
+  ): Map<String, EmitContextBinding> = context.mapValues { (_, binding) ->
+    when {
+      "item" in binding ->
+        JsonObject(
+          mapOf("value" to (item[binding.getValue("item").jsonPrimitive.content] ?: JsonNull)),
+        )
+      "index" in binding -> JsonObject(mapOf("value" to JsonPrimitive(index)))
+      "state" in binding ->
+        JsonObject(
+          binding +
+            ("state" to
+              JsonPrimitive(
+                bind(binding.getValue("state").jsonPrimitive.content, alias, item, index),
+              )),
+        )
+      else -> binding
+    }
+  }
+
   /** Integral numbers render without a decimal point or exponent at any magnitude. */
   fun rendered(value: JsonPrimitive): String {
     if (value.isString) return value.content
@@ -129,6 +155,7 @@ internal enum class PrototypeBindableKind {
   OPERAND,
   DATA_OPERAND,
   EMIT_NAME,
+  EMIT_BINDING,
   KEY,
 }
 
@@ -138,6 +165,8 @@ internal enum class PrototypeBindableKind {
  * state-key fields. Stops at the first non-null result of [visit].
  */
 internal object PrototypeBindableFields {
+  private val contextNamePattern = Regex("^[A-Za-z_][A-Za-z0-9_]*$")
+
   fun <T : Any> first(
     node: JsonObject,
     path: String,
@@ -190,12 +219,31 @@ internal object PrototypeBindableFields {
         "setState" ->
           field(action, "key", path, PrototypeBindableKind.KEY)
             ?: field(action, "value", path, PrototypeBindableKind.OPERAND)
-        "emit" -> field(action, "name", path, PrototypeBindableKind.EMIT_NAME)
+        "emit" ->
+          field(action, "name", path, PrototypeBindableKind.EMIT_NAME) ?: emitContext(action, path)
         "toggle",
         "increment",
         "decrement" -> field(action, "key", path, PrototypeBindableKind.KEY)
         else -> null
       }
+
+    fun emitContext(action: JsonObject, path: String): T? {
+      val context = action["context"] as? JsonObject ?: return null
+      for ((name, value) in context) {
+        val at =
+          if (contextNamePattern.matches(name)) "$path.context.$name"
+          else "$path.context[" + JsonPrimitive(name).toString() + "]"
+        visit(value, at, PrototypeBindableKind.EMIT_BINDING)?.let {
+          return it
+        }
+        (value as? JsonObject)?.let { binding ->
+          field(binding, "state", at, PrototypeBindableKind.KEY)?.let {
+            return it
+          }
+        }
+      }
+      return null
+    }
 
     fun actions(data: JsonObject, path: String): T? {
       for (field in listOf("onTap", "onLongPress", "onDoubleTap")) {
@@ -450,6 +498,11 @@ internal object PrototypeRepeatValidator {
     scope: Scope,
     state: RepeatState,
   ): PrototypeSpecError? {
+    if (kind == PrototypeBindableKind.EMIT_BINDING) {
+      val field = (value as? JsonObject)?.text("item")
+      if (field != null && !scope.items.all { it.containsKey(field) })
+        return fail(path, "Unknown repeat field ${JsonPrimitive(field)}")
+    }
     val text = value.string() ?: return null
     val authored = PrototypeRepeatTemplate.segments(text, scope.alias)
     if (
@@ -500,7 +553,14 @@ internal object PrototypeRepeatValidator {
   ): PrototypeSpecError? =
     PrototypeBindableFields.first(node, path) { value, fieldPath, kind ->
       val text = value.string()
+      val binding = value as? JsonObject
       if (
+        kind == PrototypeBindableKind.EMIT_BINDING &&
+          binding != null &&
+          ("item" in binding || "index" in binding)
+      )
+        fail(fieldPath, "Emit item/index binding outside a repeat template")
+      else if (
         kind == PrototypeBindableKind.TEXT &&
           text != null &&
           state.data.text(text) { chargeText(state, it) } == null

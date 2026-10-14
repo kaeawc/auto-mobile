@@ -38,6 +38,7 @@ enum PrototypeAgentProtocol {
         richTextCapability,
         menusCapability,
         stackCapability,
+        emitContextCapability,
     ]
     /// A same-id `show_prototype` replaces the prototype in place keeping pager pages and stack paths, and
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
@@ -97,6 +98,8 @@ enum PrototypeAgentProtocol {
     static let richTextCapability = "prototype_rich_text_v1"
     /// In-window menus and exposed select option lists.
     static let menusCapability = "prototype_menus_v1"
+    // ORCHESTRATOR-CHOSEN gate; fold into PROTOTYPE_SPEC_CAPABILITY_GATES when it lands
+    static let emitContextCapability = "prototype_emit_context_v1"
     /// Draws icons from schemas/prototype-ios-icon-symbols.json and honours filled/outlined
     /// icon variants where the table has those forms.
     static let iconSfSymbolsCapability = "prototype_icon_sf_symbols_v1"

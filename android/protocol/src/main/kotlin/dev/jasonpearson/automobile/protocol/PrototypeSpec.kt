@@ -264,6 +264,7 @@ data class PrototypeFloatingPlacement(
 data class PrototypeEmitAction(
   val name: String,
   val payload: JsonElement? = null,
+  val context: Map<String, EmitContextBinding>? = null,
 ) : PrototypeAction()
 
 @SerialName("setPage")

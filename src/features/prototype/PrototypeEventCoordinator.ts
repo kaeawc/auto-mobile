@@ -259,6 +259,8 @@ export class PrototypeEventCoordinator {
       kind: event.kind,
       name: event.name,
       payload: event.payload,
+      ...(event.context === undefined ? {} : { context: event.context }),
+      ...(event.contextTruncated === true ? { contextTruncated: true as const } : {}),
       state: event.state,
       pages: event.pages,
       ...(event.stacks ? { stacks: structuredClone(event.stacks) } : {}),

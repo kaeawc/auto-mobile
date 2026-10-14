@@ -13,6 +13,7 @@ import { prototypeFlowGridUnsupportedMessage } from "../../../src/features/proto
 import { prototypePagerOptionsUnsupportedMessage } from "../../../src/features/prototype/prototypePagerOptions";
 import { prototypeGesturesUnsupportedMessage } from "../../../src/features/prototype/prototypeGestures";
 import { prototypeSearchBarUnsupportedMessage } from "../../../src/features/prototype/prototypeSearchBar";
+import { prototypeEmitContextUnsupportedMessage } from "../../../src/features/prototype/prototypeEmitContext";
 import { prototypeRichTextUnsupportedMessage } from "../../../src/features/prototype/prototypeRichText";
 
 test("plain and non-spec inputs require no capability", () => {
@@ -37,6 +38,11 @@ test("required gates report fields and original messages", () => {
         { type: "textField", label: "Name" },
         { type: "grid", columns: 2 },
         { type: "searchBar", id: "search" },
+        {
+          type: "button",
+          label: "Pick",
+          onTap: [{ type: "emit", name: "pick", context: { a: { value: 1 } } }],
+        },
         { type: "menu", id: "more", items: [{ label: "Open" }] },
         {
           type: "stack",
@@ -58,6 +64,7 @@ test("required gates report fields and original messages", () => {
     "prototype_rich_text_v1",
     "prototype_menus_v1",
     "prototype_stack_v1",
+    "prototype_emit_context_v1",
   ]);
   expect(required.map((gate) => gate.fields)).toEqual([
     ["root.children[0].style.background"],
@@ -67,8 +74,9 @@ test("required gates report fields and original messages", () => {
     ["root.onLongPress", "root.onDoubleTap"],
     ["root.children[3]"],
     ["components.rich.root.spans"],
-    ["root.children[4]"],
+    ["root.children[5]"],
     ["root"],
+    ["root.children[4].onTap[0].context"],
   ]);
   expect(required.map((gate) => gate.unsupportedMessage)).toEqual([
     prototypeThemeModesUnsupportedMessage,
@@ -80,6 +88,7 @@ test("required gates report fields and original messages", () => {
     prototypeRichTextUnsupportedMessage,
     prototypeMenusUnsupportedMessage,
     expect.any(Function),
+    prototypeEmitContextUnsupportedMessage,
   ]);
   expect(
     PROTOTYPE_SPEC_CAPABILITY_GATES.map((gate) => gate.fields(spec)).filter((f) => f.length > 0),

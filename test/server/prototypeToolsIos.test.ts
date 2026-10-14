@@ -122,12 +122,38 @@ describe("prototype tool on an iOS simulator", () => {
 
   test("agent prototype_event pushes reach awaitEvent through the shared coordinator", async () => {
     await call({ action: "show", spec });
-    agent.emit({ ...event(1, "panel", "emit", "save") });
+    const pushed = {
+      ...event(1, "panel", "emit", "save"),
+      context: { id: 3, nested: [true, null] },
+      contextTruncated: true as const,
+    };
+    agent.emit(pushed);
     const { payload } = await call({ action: "awaitEvent", id: "panel" });
-    expect({ type: "prototype_event", ...payload.event }).toEqual(
-      event(1, "panel", "emit", "save"),
-    );
+    expect({ type: "prototype_event", ...payload.event }).toEqual(pushed);
     expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("emit context requires the iOS agent capability before uploading assets", async () => {
+    const withContext = {
+      ...spec,
+      root: { ...spec.root, onTap: [{ type: "emit", name: "pick", context: {} }] },
+    };
+    const { payload } = await call({
+      action: "show",
+      spec: withContext,
+      assets: [{ id: "logo", path: "/img/logo.png" }],
+    });
+    expect(payload.success).toBe(false);
+    expect(payload.error).toContain("prototype_emit_context_v1");
+    expect(payload.error).toContain("root.onTap[0].context");
+    expect(payload.error).toContain("Relaunch");
+    expect(agent.requests).toEqual([]);
+    const capable = new FakePrototypeAgentClient({
+      ...agent.handshake,
+      capabilities: [...agent.handshake.capabilities, "prototype_emit_context_v1"],
+    });
+    connections.agents.set(simulator.deviceId, capable);
+    expect((await call({ action: "show", spec: withContext })).payload.success).toBe(true);
   });
 
   test("an agent request failure is a prototype failure, not a thrown error", async () => {

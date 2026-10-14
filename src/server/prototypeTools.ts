@@ -626,6 +626,8 @@ const prototypeEventOutputSchema = z.object({
   kind: z.enum(PROTOTYPE_EVENT_KINDS),
   name: z.string().nullable(),
   payload: z.json(),
+  context: z.record(z.string(), z.json()).and(z.unknown()).optional(),
+  contextTruncated: z.literal(true).optional(),
   state: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
   pages: z.record(z.string(), z.number().int().nonnegative()),
   stacks: z
@@ -675,6 +677,8 @@ export const prototypeOutputSchema = z.object({
           .describe("Last reported stack paths and depths; absent when the device reports none"),
         state: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
         data: dataOutput,
+        context: prototypeEventOutputSchema.shape.context,
+        contextTruncated: prototypeEventOutputSchema.shape.contextTruncated,
         lastKnown: z
           .literal(true)
           .optional()

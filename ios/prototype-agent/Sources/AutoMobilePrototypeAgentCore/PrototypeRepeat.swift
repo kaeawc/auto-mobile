@@ -169,6 +169,109 @@ enum PrototypeRepeat {
     }
 }
 
+/// Only emit-context scope checks are added here; full spec cross-field validation stays on the host.
+extension PrototypeRepeat {
+    static func validateEmitContexts(_ root: JSONValue, data: [String: JSONValue]?) throws {
+        var repeats = PrototypeRepeatData(data: data)
+        try validateEmitContexts(root, path: "root", scope: nil, repeats: &repeats)
+    }
+
+    private struct EmitScope {
+        let alias: String
+        let items: [JSONValue]
+    }
+
+    private static func validateEmitContexts(
+        _ node: JSONValue, path: String, scope: EmitScope?, repeats: inout PrototypeRepeatData
+    )
+        throws
+    {
+        guard case let .object(fields) = node else { return }
+        try validateEmitActions(fields["onTap"], path: "\(path).onTap", scope: scope)
+        // Existing composite-part action locations, matching Instance.bindComponentActions.
+        for part in ["navigationIcon", "confirm", "dismiss", "action"] {
+            if case let .object(member)? = fields[part] {
+                try validateEmitActions(member["onTap"], path: "\(path).\(part).onTap", scope: scope)
+            }
+        }
+        if case let .array(actions)? = fields["actions"] {
+            for (index, action) in actions.enumerated() {
+                if case let .object(member) = action {
+                    try validateEmitActions(member["onTap"], path: "\(path).actions[\(index)].onTap", scope: scope)
+                }
+            }
+        }
+        var childScope = scope
+        if case let .object(spec)? = fields["repeat"], let alias = spec["as"]?.stringValue {
+            let items: JSONValue
+            if case let .object(source)? = spec["items"], let pointer = source["path"]?.stringValue {
+                items = repeats.items(pointer)
+            } else {
+                items = spec["items"] ?? .array([])
+            }
+            if case let .array(rows) = items { childScope = EmitScope(alias: alias, items: rows) }
+        }
+        if case let .array(children)? = fields["children"] {
+            for (index, child) in children.enumerated() {
+                try validateEmitContexts(
+                    child,
+                    path: "\(path).children[\(index)]",
+                    scope: childScope,
+                    repeats: &repeats
+                )
+            }
+        }
+        if let child = fields["child"] {
+            try validateEmitContexts(child, path: "\(path).child", scope: childScope, repeats: &repeats)
+        }
+    }
+
+    private static func validateEmitActions(_ raw: JSONValue?, path: String, scope: EmitScope?) throws {
+        guard case let .array(actions)? = raw else { return }
+        for (index, rawAction) in actions.enumerated() {
+            guard case let .object(action) = rawAction, action["type"] == .string("emit"),
+                  let context = action["context"] else { continue }
+            let contextPath = "\(path)[\(index)].context"
+            let bindings = try PrototypeEmitContext.validate(context, path: contextPath)
+            for name in bindings.keys.sorted(by: { $0.utf8.lexicographicallyPrecedes($1.utf8) }) {
+                guard case let .object(binding)? = bindings[name] else { continue }
+                let bindingPath = PrototypeLimits.dataMemberPath(contextPath, key: name)
+                if binding["item"] != nil || binding["index"] != nil {
+                    guard let scope else {
+                        throw PrototypeEmitContext.violation(
+                            bindingPath,
+                            "Emit item/index binding outside a repeat template"
+                        )
+                    }
+                    if let field = binding["item"]?
+                        .stringValue { try requireEmitField(field, at: bindingPath, scope: scope) }
+                }
+                if let key = binding["state"]?.stringValue, let scope {
+                    for segment in segments(key, alias: scope.alias) {
+                        if case let .field(field) = segment { try requireEmitField(
+                            field,
+                            at: "\(bindingPath).state",
+                            scope: scope
+                        ) }
+                    }
+                }
+            }
+        }
+    }
+
+    private static func requireEmitField(_ field: String, at path: String, scope: EmitScope) throws {
+        guard scope.items.allSatisfy({ row in
+            if case let .object(fields) = row { return fields[field] != nil }
+            return false
+        }) else {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .withoutEscapingSlashes
+            let quoted = try String(decoding: encoder.encode(field), as: UTF8.self)
+            throw PrototypeEmitContext.violation(path, "Unknown repeat field \(quoted)")
+        }
+    }
+}
+
 private struct Instance {
     let alias: String
     let item: [String: JSONValue]
@@ -281,6 +384,17 @@ private struct Instance {
             bindString("key", in: &fields)
         case .string("emit")?:
             if case let .string(name)? = fields["name"] { fields["name"] = .string(interpolate(name)) }
+            if case let .object(context)? = fields["context"] {
+                fields["context"] = .object(context.mapValues { raw in
+                    guard case var .object(binding) = raw else { return raw }
+                    if let field = binding["item"]?.stringValue {
+                        return .object(["value": item[field] ?? .null])
+                    }
+                    if binding["index"] == .bool(true) { return .object(["value": .number(Double(index))]) }
+                    bindString("state", in: &binding)
+                    return .object(binding)
+                })
+            }
         default:
             break
         }

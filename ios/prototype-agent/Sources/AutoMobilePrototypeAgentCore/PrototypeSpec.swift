@@ -120,6 +120,7 @@ struct PrototypeSpec: Decodable {
         try PrototypeLimits.guardAuthoredTree(raw)
         try PrototypeLimits.guardRepeatPathCells(raw, data: data)
         try PrototypeMenus.validateAuthoredText(raw)
+        try PrototypeRepeat.validateEmitContexts(raw, data: data)
         try PrototypeLimits.guardSubstitutedText(raw, data: data)
         let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
         try PrototypeLimits.guardTree(resolved)
@@ -422,6 +423,7 @@ struct PrototypeAction: Decodable, Sendable {
     let type: String
     let name: String?
     let payload: JSONValue?
+    let context: PrototypeEmitContext?
     let pager: String?
     let page: JSONValue?
     let stack: String?

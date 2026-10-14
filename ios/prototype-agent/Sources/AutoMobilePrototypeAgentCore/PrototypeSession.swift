@@ -23,10 +23,14 @@ struct PrototypeEvent: Equatable {
     let state: [String: JSONValue]
     let pages: [String: Int]
     let stacks: [String: PrototypeStackSnapshot]
+    var resolvedContext: PrototypeResolvedEmitContext?
+
+    var context: [String: JSONValue]? { resolvedContext?.context }
+    var contextTruncated: Bool? { resolvedContext?.contextTruncated }
 
     /// The wire object, in the shape of `PrototypeEvent` in `ctrlProxyProtocol.ts`.
     func wireObject(timestamp: Int) -> [String: Any] {
-        [
+        var object: [String: Any] = [
             "type": "prototype_event",
             "timestamp": timestamp,
             "id": id,
@@ -38,6 +42,9 @@ struct PrototypeEvent: Equatable {
             "pages": pages,
             "stacks": stacks.mapValues(\.wireObject),
         ]
+        if let context { object["context"] = JSONValue.object(context).foundationObject }
+        if contextTruncated == true { object["contextTruncated"] = true }
+        return object
     }
 }
 
@@ -262,7 +269,8 @@ struct PrototypeSession {
             guard isShown else { break }
             switch action.type {
             case "emit":
-                events += emit(kind: "emit", name: action.name, payload: action.payload ?? .null)
+                let context = action.context?.resolve(EmitContextInputs(state: state, pages: pages, dataModel: data))
+                events += emit(kind: "emit", name: action.name, payload: action.payload ?? .null, context: context)
             case "push", "pop", "popToRoot", "replace":
                 events += runStack(action)
             case "setPage":
@@ -451,7 +459,11 @@ struct PrototypeSession {
         return events
     }
 
-    private mutating func emit(kind: String, name: String?, payload: JSONValue) -> [PrototypeEvent] {
+    private mutating func emit(
+        kind: String, name: String?, payload: JSONValue, context: PrototypeResolvedEmitContext? = nil
+    )
+        -> [PrototypeEvent]
+    {
         guard let id = spec?.id else { return [] }
         let sequence = (sequences[id] ?? 0) + 1
         sequences[id] = sequence
@@ -463,7 +475,8 @@ struct PrototypeSession {
             payload: payload,
             state: state,
             pages: pages,
-            stacks: stacks
+            stacks: stacks,
+            resolvedContext: context
         )]
     }
 
@@ -523,4 +536,15 @@ enum PrototypeTestHooks {
         guard gatedRequestTypes.contains(requestType), !enabled else { return nil }
         return "\(requestType) is a test hook; launch the app with \(environmentKey)=1 to enable it"
     }
+}
+
+/// Value snapshots keep pure lookups independent of the session's mutation machinery.
+private struct EmitContextInputs: PrototypeEmitContextInputs {
+    let state: [String: JSONValue]
+    let pages: [String: Int]
+    let dataModel: [String: JSONValue]?
+
+    func state(_ key: String) -> JSONValue? { state[key] }
+    func page(_ id: String) -> Int? { pages[id] }
+    func data(_ pointer: String) -> JSONValue? { PrototypeDataPointer.resolve(dataModel, pointer: pointer) }
 }

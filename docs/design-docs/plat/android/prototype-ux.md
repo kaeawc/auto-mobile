@@ -51,13 +51,14 @@ keys) match `[A-Za-z_][A-Za-z0-9_]{0,63}`. No nested state, arrays, or nulls.
 Prototype IDs, pager IDs, tags, event names, and asset IDs are opaque nonempty
 strings; they do not share the state-key restriction.
 
-| Constant                           | Value           | Counting rule                                                                                      |
-| ---------------------------------- | --------------- | -------------------------------------------------------------------------------------------------- |
-| `MAX_PROTOTYPE_NODES`              | 2000            | Includes root and every child/page/sheet child; `repeat` templates count once per instance.        |
-| `MAX_PROTOTYPE_DEPTH`              | 24              | Root has depth 1; only node nesting counts.                                                        |
-| `MAX_PROTOTYPE_IMAGES`             | 32              | Counts image nodes and nav item image uses, including hidden ones; repeated asset IDs count again. |
-| `MAX_PROTOTYPE_SPEC_BYTES`         | 1048576 (1 MiB) | UTF-8 bytes of raw JSON, including whitespace.                                                     |
-| `MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES` | 4096 (4 KiB)    | Conservative compact JSON byte budget for each emit payload; numbers reserve 32 bytes.             |
+| Constant                             | Value           | Counting rule                                                                                      |
+| ------------------------------------ | --------------- | -------------------------------------------------------------------------------------------------- |
+| `MAX_PROTOTYPE_NODES`                | 2000            | Includes root and every child/page/sheet child; `repeat` templates count once per instance.        |
+| `MAX_PROTOTYPE_DEPTH`                | 24              | Root has depth 1; only node nesting counts.                                                        |
+| `MAX_PROTOTYPE_IMAGES`               | 32              | Counts image nodes and nav item image uses, including hidden ones; repeated asset IDs count again. |
+| `MAX_PROTOTYPE_SPEC_BYTES`           | 1048576 (1 MiB) | UTF-8 bytes of raw JSON, including whitespace.                                                     |
+| `MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES` | 16              | Maximum named bindings per emit.context.                                                           |
+| `MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES`   | 4096 (4 KiB)    | Conservative compact JSON byte budget for each emit payload; numbers reserve 32 bytes.             |
 
 Navigation item `image` uses also count toward `MAX_PROTOTYPE_IMAGES`. Assets have
 separate transport and decoded-memory limits in #9301. These spec limits keep
@@ -881,13 +882,45 @@ scale 0 it snaps, so a screenshot taken mid-press is still deterministic.
 
 | Action `type` | Properties                                                                                                                                                 |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `emit`        | Required nonempty `name`; optional arbitrary JSON `payload` up to the 4 KiB conservative compact JSON budget (null and nested JSON allowed).               |
+| `emit`        | Required nonempty `name`; optional `context` of named bindings (see Emit context below); optional arbitrary JSON `payload` up to the 4 KiB conservative compact JSON budget (null and nested JSON allowed).               |
 | `setPage`     | Required existing `pager` ID; required `page`: `next`, `prev`, or nonnegative integer index up to 2147483647. Renderer clamps to available pages.          |
 | `setState`    | Required state `key` and scalar `value`; creates or replaces a key.                                                                                        |
 | `toggle`      | Required `key` that the spec's `state` declares as a boolean; flips it.                                                                                    |
 | `increment`   | Required `key` that `state` declares as a finite number; adds optional finite `by` (default 1, negative values decrement). Non-finite results are ignored. |
 | `decrement`   | Same as `increment` but subtracts `by` (default 1); `decrement` with a negative `by` adds. Non-finite results are ignored.                                 |
 | `dismiss`     | No additional properties.                                                                                                                                  |
+
+### Emit context
+
+Use a stable `emit.name` such as `pick` and `context: {id: {item: "id"}}` to report a
+repeat item's id, instead of encoding the id into the event name. `emit.payload` stays literal
+and uninterpolated; context is resolved on the device when the emit action runs, after earlier
+actions in the same atomic `onTap` list. For example, setState then emit reads the new state.
+
+Each nonempty context name has a strict binding object with exactly one key:
+
+- `{state: key}` reads state; repeat placeholders such as `liked_{item.id}` bind to concrete keys.
+- `{item: field}` reads a typed repeat field; `{index: true}` reads its zero-based numeric index.
+  Both require a repeat template. The field must exist in every item; data-path repeats use the
+  same scalar projection as text placeholders. Expansion replaces these bindings with `{value: ...}`.
+- `{page: pagerId}` reads an existing pager's current numeric page.
+- `{data: pointer}` reads any JSON value via the existing data pointer syntax and
+  `MAX_PROTOTYPE_DATA_POINTER_LENGTH`; it also requires `prototype_data_model_v1`.
+- `{value: json}` is literal JSON, subject to the emit payload depth limit.
+
+Missing state keys and data paths resolve to null. `MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES` bounds the
+number of entries. The resolved object's compact JSON UTF-8 bytes
+are bounded by `MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES`; this runtime count includes multibyte strings
+and compact JSON numbers, rather than the payload validator's conservative numeric cost.
+If over budget, sort entries by ascending name (byte-wise UTF-8 order), keep the longest prefix
+that fits and omit all remaining entries. An oversized first entry produces `{}`. The tap succeeds.
+
+A show or patch replacement using `emit.context` requires `prototype_emit_context_v1`; older
+devices are refused before upload, display or patch dispatch. The `prototype_event` wire has `context` next to the unchanged
+`payload` only if the emit declared context (including an empty object). It has
+`contextTruncated: true` only when truncated; otherwise the field is omitted, never false.
+`awaitEvent` and host status preserve these fields.
+
 
 No scripts, callbacks, expressions, or implicit navigation. `setState` must
 preserve any text-field, selection, or sheet binding's scalar type at runtime;

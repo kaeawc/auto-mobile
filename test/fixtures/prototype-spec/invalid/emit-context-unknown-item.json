@@ -1,0 +1,52 @@
+{
+  "spec": {
+    "id": "emit-context",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": [
+          {
+            "id": 1,
+            "active": true,
+            "title": "A"
+          },
+          {
+            "id": 2,
+            "active": false,
+            "title": "B"
+          },
+          {
+            "id": 3,
+            "active": true,
+            "title": "C"
+          }
+        ],
+        "as": "item"
+      },
+      "children": [
+        {
+          "type": "text",
+          "text": "Emit",
+          "onTap": [
+            {
+              "type": "emit",
+              "name": "pick",
+              "context": {
+                "id": {
+                  "item": "missing"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].onTap[0].context.id",
+  "expectedMessage": "Unknown repeat field \"missing\""
+}

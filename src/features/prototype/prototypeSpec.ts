@@ -7,6 +7,7 @@ export const {
   MAX_PROTOTYPE_SPEC_BYTES,
   MAX_PROTOTYPE_TEXT_SPANS,
   MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES,
+  MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES,
   MAX_PROTOTYPE_DATA_BYTES,
   MAX_PROTOTYPE_DATA_DEPTH,
   MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
@@ -41,6 +42,7 @@ const jsonValueSchema: z.ZodType<PrototypeJson> = z.lazy(
 const prototypeJsonSchema = z.custom<PrototypeJson>(
   (value) => jsonValueSchema.safeParse(value).success,
 );
+export const prototypeJsonObjectSchema = z.record(prototypeJsonSchema).and(z.unknown());
 // Icon names are the closed list of Material icons the Android renderer bundles
 // (androidx material-icons-extended); the shared contract is the single source.
 const iconNames: ReadonlySet<string> = new Set(contract.definitions.iconName.values);
@@ -407,12 +409,27 @@ export const placementSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 ]);
+export const prototypeEmitContextBindingSchema = z.union([
+  z.object({ state: stateKeySchema }).strict(),
+  z.object({ item: keySchema }).strict(),
+  z.object({ index: z.literal(true) }).strict(),
+  z.object({ page: z.string().min(1) }).strict(),
+  z.object({ data: pointerSchema }).strict(),
+  z.object({ value: prototypeJsonSchema }).strict(),
+]);
+export type PrototypeEmitContextBinding = z.infer<typeof prototypeEmitContextBindingSchema>;
+// Retain arbitrary context names (Zod 3 record output alone drops __proto__).
+export const prototypeEmitContextSchema = z
+  .record(z.string().min(1), prototypeEmitContextBindingSchema)
+  .and(z.unknown())
+  .refine((context) => Object.keys(context).length <= MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES);
 export const actionSchema = z.discriminatedUnion("type", [
   z
     .object({
       type: z.enum(["emit"]),
       name: z.string().min(1),
       payload: prototypeJsonSchema.optional(),
+      context: prototypeEmitContextSchema.optional(),
     })
     .strict(),
   z

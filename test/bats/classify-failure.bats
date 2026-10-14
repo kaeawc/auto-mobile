@@ -860,6 +860,17 @@ RUNNER_SHUTDOWN_LOG=$'##[error]The runner has received a shutdown signal. This c
 }
 
 # Unit-shard infra retry (#10583): lines as scripts/test-ts.sh prints them.
+@test "reruns a calibrated contended unit timeout before the both-attempts signature" {
+  for job in "Node Unit Tests (ubuntu-latest)" "Node TypeScript Build and Test (windows-latest)"; do
+    runner_shutdown_fixture "$job"
+    run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" \
+      FAKE_RUNNER_LOG=$'RUNNER-CONTENDED: unit shard 0 hit its 720s wall-clock budget after a retry on a starved runner (probe slowdown 8x >= 4x); not retrying on the same runner. Re-run the job to get a fresh runner.\nTIMEOUT: unit shard 0 exceeded its wall-clock budget after a retry' bash "$SCRIPT" 123
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"RERUN-DONT-FIX — runner starved (calibration probe slowdown above threshold), not a code regression"* ]]
+    [[ "$output" != *"INVESTIGATE"* ]]
+  done
+}
+
 @test "investigates a unit shard that timed out on both attempts of its infra retry" {
   runner_shutdown_fixture "Node Unit Tests (ubuntu-latest)"
   run env PATH="$FAKE_BIN:$PATH" CLASSIFY_FIXTURE="$FIXTURE" FAKE_RUNNER_LOG=$'RETRY: unit shard 2 hit its 720s wall-clock budget (exit 124) after 721s; retrying once with the same budget\nTIMEOUT: unit shard 2 exceeded its wall-clock budget after a retry\ntest-ts: unit shards total wall=1450s status=124 retried=1' bash "$SCRIPT" 123

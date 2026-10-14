@@ -23,13 +23,16 @@ import type { DeviceImageDiscovery, PlatformDeviceManager } from "../../../src/d
 import { AndroidAvdProvenanceCache } from "../../../src/utils/AndroidAvdProvenanceCache";
 import { ResourceRegistry } from "../../../src/server/resourceRegistry";
 import { spyOn } from "bun:test";
+import { snapshotPlatformDeviceManagerFactory } from "../../helpers/platformDeviceManagerSnapshot";
 
 describe("Device Image Resources with Fakes", () => {
   let fakeDeviceUtils: FakeDeviceUtils;
   let fakeAvdManager: FakeAvdManager;
   let fakeSimCtl: FakeSimCtlClient;
+  let restoreFactory: (() => void) | undefined;
 
   beforeEach(() => {
+    restoreFactory = snapshotPlatformDeviceManagerFactory();
     AndroidAvdProvenanceCache.resetForTests();
     resetAndroidDeviceImageResourceCache();
     fakeDeviceUtils = new FakeDeviceUtils();
@@ -38,6 +41,8 @@ describe("Device Image Resources with Fakes", () => {
   });
 
   afterEach(() => {
+    restoreFactory?.();
+    restoreFactory = undefined;
     resetAndroidDeviceImageResourceCache();
     AndroidAvdProvenanceCache.resetForTests();
   });

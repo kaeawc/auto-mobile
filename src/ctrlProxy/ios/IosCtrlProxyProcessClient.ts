@@ -268,12 +268,17 @@ export class IosCtrlProxyProcessClient {
     }
   }
 
+  captureProcessGeneration(pid: number): string | undefined {
+    return this.processGeneration.current(pid);
+  }
+
   async terminateProcessTree(
     pid: number,
     deadline?: number,
     options: {
       skipGraceful?: boolean;
       expectedDeviceId?: string;
+      expectedGenerationToken?: string;
       preKillDeadlineMs?: number;
     } = {},
   ): Promise<void> {
@@ -286,6 +291,7 @@ export class IosCtrlProxyProcessClient {
         options.expectedDeviceId,
         options.preKillDeadlineMs ?? deadline,
         options.preKillDeadlineMs !== undefined,
+        options.expectedGenerationToken,
       )
     ) {
       return;
@@ -297,7 +303,10 @@ export class IosCtrlProxyProcessClient {
         )
       : { descendants: await this.findDescendantProcessIds(pid, deadline), error: undefined };
     const descendants = discovery.descendants;
-    const identities = this.captureTerminationIdentities([pid, ...descendants]);
+    const identities = this.captureTerminationIdentities(
+      [pid, ...descendants],
+      options.expectedGenerationToken,
+    );
     if (options.skipGraceful) {
       await this.signalGroup(pid, "KILL", deadline, identities);
       await this.signalPids([pid], "KILL", deadline, identities);
@@ -357,17 +366,28 @@ export class IosCtrlProxyProcessClient {
   }
 
   /**
-   * When a caller names the device it believes owns `pid`, prove the PID is
-   * still that owned runner before signaling. Returns true only when ownership
-   * is affirmatively disconfirmed (skip the kill). An inconclusive probe throws
-   * so a recycled PID cannot be signaled without confirmed ownership.
+   * Check the caller's launch generation before discovery or signaling. When
+   * it names a device, also prove the PID is still that device's owned runner.
+   * Returns true only when identity/ownership is affirmatively disconfirmed
+   * (skip the kill). An inconclusive device ownership probe throws so a recycled
+   * PID cannot be signaled without confirmed device ownership.
    */
   private async isTerminationTargetForeign(
     pid: number,
     expectedDeviceId: string | undefined,
     deadline?: number,
     failOpenAfterBudget: boolean = false,
+    expectedGenerationToken?: string,
   ): Promise<boolean> {
+    // No launch token or an unknown/unreadable comparison preserves PID-only behavior.
+    if (
+      this.hasChangedIdentity(pid, {
+        tokens: new Map([[pid, expectedGenerationToken]]),
+        dropped: new Set(),
+      })
+    ) {
+      return true;
+    }
     if (expectedDeviceId === undefined) {
       return false;
     }
@@ -411,9 +431,20 @@ export class IosCtrlProxyProcessClient {
     await this.waitForExit([pid], undefined, identities);
   }
 
-  private captureTerminationIdentities(pids: number[]): TerminationIdentities {
+  private captureTerminationIdentities(
+    pids: number[],
+    expectedRootToken?: string,
+  ): TerminationIdentities {
     return {
-      tokens: new Map(pids.map((pid) => [pid, this.processGeneration.current(pid)])),
+      // Keep the launch identity across discovery and every later signal/wait check.
+      tokens: new Map(
+        pids.map((pid, index) => [
+          pid,
+          index === 0
+            ? (expectedRootToken ?? this.processGeneration.current(pid))
+            : this.processGeneration.current(pid),
+        ]),
+      ),
       dropped: new Set(),
     };
   }

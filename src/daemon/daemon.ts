@@ -1315,6 +1315,14 @@ export class Daemon {
         this.deviceSessionRegistry.onDeviceDisconnected(deviceId);
         // Full removal: prune AFTER epoch retirement, which also invalidates frames.
         this.deviceDataStreamServer?.removeDeviceFrames(deviceId);
+        if (platform === "android") {
+          void AndroidCtrlProxyClient.evictAfterDeviceRemoval(deviceId).catch((error) => {
+            logger.warn(
+              `[Daemon] Failed to stop Android CtrlProxy for removed device ${deviceId}: ${errorMessage(error)}`,
+              error,
+            );
+          });
+        }
         if (platform === "ios") {
           void IOSCtrlProxyManager.evictAfterDeviceRemoval(deviceId).catch((error) => {
             logger.warn(

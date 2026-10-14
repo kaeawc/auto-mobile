@@ -1,3 +1,6 @@
+import { PROTOTYPE_PATCH_CAPABILITY } from "../../../../src/features/observe/android/ctrlProxyProtocol";
+import { prototypePatchUnsupportedMessage } from "../../../../src/features/prototype/prototypePatchWire";
+import type { PrototypePatchOp } from "../../../../src/features/prototype/prototypePatch";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { MAX_PROTOTYPE_SPEC_BYTES } from "../../../../src/features/prototype/prototypeSpec";
@@ -664,3 +667,127 @@ describe("CtrlProxy prototypes", () => {
     }
   });
 });
+
+describe("CtrlProxy patch transport", () => {
+  test("request name without capability is refused before send", async () => {
+    const { client, socket } = await harness([
+      "full_command_set_v1",
+      "request_id_echo_v1",
+      "patch_prototype",
+    ]);
+    const send = spyOn(socket, "send");
+    try {
+      expect(await client.requestPatchPrototype({ id: "orders", ops: patchOps })).toMatchObject({
+        success: false,
+        delivery: "unsent",
+        error: prototypePatchUnsupportedMessage("android"),
+      });
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      send.mockRestore();
+    }
+  });
+  test.each(["timeout", "close", "beforeSend", "notConnected"])(
+    "patch delivery after %s",
+    async (outcome) => {
+      const { client, socket, timer } = await harness([
+        "full_command_set_v1",
+        "request_id_echo_v1",
+        "patch_prototype",
+        PROTOTYPE_PATCH_CAPABILITY,
+      ]);
+      const send = spyOn(socket, "send").mockImplementation(() => {
+        if (outcome === "beforeSend") {
+          throw new Error("write failed");
+        }
+      });
+      if (outcome === "notConnected") {
+        spyOn(client, "ensureConnected").mockResolvedValue(false);
+      }
+      try {
+        const pending = client.requestPatchPrototype({ id: "orders", ops: patchOps }, 50);
+        for (let i = 0; i < 20; i++) {
+          await Promise.resolve();
+        }
+        if (outcome === "timeout") {
+          timer.advanceTime(50);
+        }
+        if (outcome === "close") {
+          client["requestManager"].cancelAll(new Error("socket closed"));
+        }
+        expect(await pending).toMatchObject({
+          success: false,
+          delivery: outcome === "timeout" || outcome === "close" ? "indeterminate" : "unsent",
+        });
+        if (outcome === "notConnected") {
+          expect(send).not.toHaveBeenCalled();
+        }
+        expect(client["requestManager"].getPendingCount()).toBe(0);
+      } finally {
+        send.mockRestore();
+      }
+    },
+  );
+  test("patch frame and sanitized reply fields", async () => {
+    const { client, socket, receive } = await harness([
+      "full_command_set_v1",
+      "request_id_echo_v1",
+      "patch_prototype",
+      PROTOTYPE_PATCH_CAPABILITY,
+    ]);
+    const frames: Record<string, unknown>[] = [];
+    const send = spyOn(socket, "send").mockImplementation((data) => {
+      frames.push(JSON.parse(String(data)));
+    });
+    try {
+      for (const baseRevision of [undefined, 12]) {
+        const pending = client.requestPatchPrototype({
+          id: "orders",
+          ops: patchOps,
+          ...(baseRevision === undefined ? {} : { baseRevision }),
+        });
+        for (let i = 0; i < 20; i++) {
+          await Promise.resolve();
+        }
+        const frame = frames.at(-1)!;
+        expect(frame).toEqual({
+          type: "patch_prototype",
+          requestId: frame.requestId,
+          id: "orders",
+          ops: patchOps,
+          ...(baseRevision === undefined ? {} : { baseRevision }),
+        });
+        await receive({
+          type: "prototype_result",
+          requestId: frame.requestId,
+          success: true,
+          revision: 13,
+          conflict: { revision: 12, state: { enabled: true } },
+        });
+        expect(await pending).toMatchObject({
+          delivery: "answered",
+          revision: 13,
+          conflict: { revision: 12, state: { enabled: true } },
+        });
+      }
+      const pending = client.requestPatchPrototype({ id: "orders", ops: patchOps });
+      for (let i = 0; i < 20; i++) {
+        await Promise.resolve();
+      }
+      await receive({
+        type: "prototype_result",
+        requestId: frames.at(-1)!.requestId,
+        success: false,
+        revision: -1,
+        conflict: { revision: 1, state: { "bad-key": true } },
+      });
+      const result = await pending;
+      expect(result).not.toHaveProperty("revision");
+      expect(result).not.toHaveProperty("conflict");
+    } finally {
+      send.mockRestore();
+    }
+  });
+});
+
+const patchOps: PrototypePatchOp[] = [{ op: "replace", path: "/data/cartCount", value: 2 }];

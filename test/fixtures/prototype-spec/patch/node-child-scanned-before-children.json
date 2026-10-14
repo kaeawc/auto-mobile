@@ -1,0 +1,103 @@
+{
+  "spec": {
+    "id": "patch-demo",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "count": 1,
+      "orders": [
+        {
+          "id": 1,
+          "title": "Tea"
+        },
+        {
+          "id": 2,
+          "title": "Coffee"
+        }
+      ],
+      "meta": {
+        "a": true,
+        "b": false
+      },
+      "a/b": {
+        "c~d": "old"
+      }
+    },
+    "state": {
+      "enabled": true,
+      "label": "Ready",
+      "total": 1
+    },
+    "root": {
+      "type": "column",
+      "id": "root",
+      "children": [
+        {
+          "type": "card",
+          "id": "card",
+          "children": [
+            {
+              "type": "text",
+              "id": "title",
+              "text": "Orders"
+            }
+          ]
+        },
+        {
+          "type": "column",
+          "id": "repeater",
+          "repeat": {
+            "items": {
+              "path": "/orders"
+            },
+            "as": "item"
+          },
+          "children": [
+            {
+              "type": "text",
+              "id": "row",
+              "text": "{item.title}"
+            }
+          ]
+        },
+        {
+          "type": "switch",
+          "id": "toggle",
+          "stateKey": "enabled"
+        }
+      ]
+    }
+  },
+  "ops": [
+    {
+      "op": "replaceNode",
+      "id": "card",
+      "node": {
+        "type": "card",
+        "id": "card",
+        "child": {
+          "type": "text",
+          "id": "badAnchor",
+          "text": "X",
+          "anchor": {
+            "type": "element",
+            "target": "title"
+          }
+        },
+        "children": [
+          {
+            "type": "use",
+            "id": "badUse",
+            "component": "Thing"
+          }
+        ]
+      }
+    }
+  ],
+  "stage": "apply",
+  "expectedPath": "ops[0].node.child.anchor.type",
+  "expectedMessage": "Element anchors are resolved by show: use a bounds anchor or use show"
+}

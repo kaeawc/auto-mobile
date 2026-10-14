@@ -180,6 +180,32 @@ class PrototypePatchRuntimeTest {
   }
 
   @Test
+  fun `future base revision rejects state ops without committing or emitting`() = runTest {
+    val runtime = show()
+    val before = runtime.current
+    val model = runtime.renderModel()
+    val passes = runtime.renderMappingPasses
+    val future = before.revision + 1
+    patch("""[{"op":"replace","path":"/state/query","value":"new"}]""", future)
+    assertFalse(results.last().success)
+    assertEquals(
+      "baseRevision $future is newer than the device revision ${before.revision}",
+      results.last().error,
+    )
+    assertEquals(before.revision, results.last().revision)
+    assertNull(results.last().conflict)
+    assertSame(before, runtime.current)
+    assertSame(model, runtime.renderModel())
+    assertEquals(passes, runtime.renderMappingPasses)
+    assertTrue(events.isEmpty())
+    // A non-state patch does not use baseRevision as a precondition.
+    patch("""[{"op":"replace","path":"/data/title","value":"new"}]""", future)
+    assertTrue(results.last().success)
+    assertEquals(before.revision + 1, results.last().revision)
+    assertTrue(events.isEmpty())
+  }
+
+  @Test
   fun `missing base failing tests and invalid results leave the entire snapshot unchanged`() =
     runTest {
       val runtime = show()
@@ -224,6 +250,55 @@ class PrototypePatchRuntimeTest {
     assertEquals("ops[0].id: Unknown node id", results.last().error)
     assertSame(before, runtime.current)
   }
+
+  @Test
+  fun `unrenderable node patch preserves the entire snapshot cached model and revision`() =
+    runTest {
+      val runtime = show()
+      patch(
+        """[{"op":"replace","path":"/state/query","value":"authoritative"}]""",
+        runtime.current.revision,
+      )
+      assertTrue(results.last().success)
+      controller.interact(runtime, PrototypeInteraction.SettledPage("pager", 1))
+      val before = runtime.current
+      assertEquals(1, before.pages["pager"])
+      assertEquals(1, before.textEpochs["query"])
+      val model = runtime.renderModel()
+      val passes = runtime.renderMappingPasses
+      events.clear()
+      patch(
+        """[
+        {"op":"replace","path":"/data/title","value":"candidate"},
+        {"op":"replace","path":"/state/query","value":"candidate"},
+        {"op":"replaceNode","id":"pager","node":{"type":"pager","id":"pager","children":[{"type":"text","text":"only"}],"style":{"elevation":1e300}}}
+      ]""",
+        before.revision,
+      )
+      assertFalse(results.last().success)
+      assertEquals(
+        "root.children[3].style.elevation: Size cannot be represented in Compose dp",
+        results.last().error,
+      )
+      assertEquals(before.revision, results.last().revision)
+      assertNull(results.last().conflict)
+      assertSame(runtime, controller.activeRuntime)
+      // Snapshot identity covers spec, state, revisions, pager clamping and text epochs together.
+      assertSame(before, runtime.current)
+      assertEquals(passes, runtime.renderMappingPasses)
+      assertSame(model, runtime.renderModel())
+      assertEquals(passes, runtime.renderMappingPasses)
+      assertTrue(events.isEmpty())
+      // Rejection must not consume the controller's revision allocator or poison later mapping.
+      patch("""[{"op":"replace","path":"/data/title","value":"accepted"}]""")
+      assertTrue(results.last().success)
+      assertEquals(before.revision + 1, results.last().revision)
+      assertEquals("accepted", runtime.renderModel().root.children[0].text)
+      assertEquals(before.pages, runtime.current.pages)
+      assertEquals(before.textEpochs, runtime.current.textEpochs)
+      assertEquals(before.state, runtime.current.state)
+      assertTrue(events.isEmpty())
+    }
 
   @Test
   fun `interactions advance once for several keys but noops and pages do not and reshow continues`() =
@@ -330,9 +405,13 @@ class PrototypePatchRuntimeTest {
 
   @Test
   fun `focus sync failure after committing a node patch still reports applied`() = runTest {
+    val focusCalls = mutableListOf<Boolean>()
     val throwingHost =
       object : PrototypeHost by host {
-        override suspend fun setTextFieldVisible(visible: Boolean): Boolean = error("focus failed")
+        override suspend fun setTextFieldVisible(visible: Boolean): Boolean {
+          focusCalls += visible
+          error("focus failed")
+        }
       }
     val throwing =
       PrototypeController(
@@ -361,6 +440,7 @@ class PrototypePatchRuntimeTest {
     )
     assertTrue(results.last().success)
     assertEquals(revision + 1, results.last().revision)
+    assertEquals(listOf(false), focusCalls)
     assertEquals("committed", runtime.renderModel().root.children.single().text)
     assertTrue(host.calls.none { it == "replace" })
   }

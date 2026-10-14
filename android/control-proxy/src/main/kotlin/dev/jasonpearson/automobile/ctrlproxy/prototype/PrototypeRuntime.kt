@@ -183,6 +183,12 @@ class PrototypeRuntime(
           before.revision,
         )
       }
+      if (baseRevision > before.revision) {
+        return PatchResult.Rejected(
+          "baseRevision $baseRevision is newer than the device revision ${before.revision}",
+          before.revision,
+        )
+      }
       val changed =
         ops
           .mapNotNull { op ->
@@ -234,6 +240,14 @@ class PrototypeRuntime(
         before.state[it] != spec.state.orEmpty()[it]
       }
     val next = replacementSnapshot(spec)
+    // Validate Compose sizes with a disposable mapper so rejected candidates cannot alter the
+    // runtime's resolve cache, cached model or renderMappingPasses before the snapshot is
+    // committed.
+    try {
+      PrototypeRenderMapper().map(next.spec, next.pages)
+    } catch (error: IllegalArgumentException) {
+      return PatchResult.Rejected(error.message ?: "Invalid prototype patch", before.revision)
+    }
     val revision = allocateRevision()
     stateWriteValidator = null
     mutableSnapshot.value =

@@ -353,7 +353,7 @@ struct PrototypeCardView: View {
             ? colors.surfaceHigh
             : colors.surface
         VStack(alignment: .leading, spacing: style?.spacing ?? 0) {
-            ForEach(node.drawnChildren(holds: model.holds), id: \.offset) { entry in
+            ForEach(node.drawnChildren(holds: model.holds, stacks: model.stacks), id: \.offset) { entry in
                 NodeView(node: entry.node, model: model, inStackSlot: true)
             }
         }
@@ -938,7 +938,7 @@ struct PrototypeModalLayer: View {
     let model: PrototypeModel
 
     var body: some View {
-        let modals = model.spec?.root.openModals(state: model.state, pages: model.pages) ?? []
+        let modals = model.spec?.root.openModals(state: model.state, pages: model.pages, stacks: model.stacks) ?? []
         ZStack {
             ForEach(Array(modals.enumerated()), id: \.offset) { index, node in
                 if node.type == "menu" {
@@ -965,6 +965,7 @@ struct PrototypeModalLayer: View {
                         in: node.childEntries(path: "modal\(index)"),
                         state: model.state,
                         pages: model.pages,
+                        stacks: model.stacks,
                         retainExiting: PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
                             .enabled
                     ),
@@ -982,7 +983,9 @@ struct PrototypeModalLayer: View {
             }
         }
         .onChange(of: modals.dialogIdentities) { before, _ in
-            if prototypeModalChangeEndsEditing(from: before, to: modals) { model.endEditing() }
+            if prototypeModalChangeEndsEditing(
+                from: before, to: modals, state: model.state, pages: model.pages, stacks: model.stacks
+            ) { model.endEditing() }
         }
     }
 }

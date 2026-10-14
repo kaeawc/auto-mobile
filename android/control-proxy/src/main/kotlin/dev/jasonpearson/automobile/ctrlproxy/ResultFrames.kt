@@ -6,6 +6,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeEvent
 import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypeResult
+import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import dev.jasonpearson.automobile.protocol.SetNetworkMockRulesResult
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
@@ -156,6 +157,8 @@ internal fun prototypeResultFrame(
   appearance: PrototypeAppearance? = null,
   revision: Long? = null,
   conflict: PrototypePatchConflict? = null,
+  pages: Map<String, Int>? = null,
+  stacks: Map<String, PrototypeStackSnapshot>? = null,
   hiddenReason: PrototypeHiddenReason? = null,
 ): String =
   resultFrameJson.encodeToString<WebSocketResponse>(
@@ -168,6 +171,8 @@ internal fun prototypeResultFrame(
       appearance = appearance,
       revision = revision,
       conflict = conflict,
+      pages = pages,
+      stacks = stacks,
       hiddenReason = hiddenReason,
     ),
   )

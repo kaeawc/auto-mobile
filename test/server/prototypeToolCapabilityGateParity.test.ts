@@ -62,6 +62,12 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
     openWhen: { key: "liked", equals: true },
     items: [{ label: "Open" }],
   }),
+  prototype_stack_v1: fixture({
+    id: "label",
+    type: "stack",
+    start: "home",
+    screens: { home: { type: "text", text: "Home" } },
+  }),
 };
 function fixture(root: Record<string, unknown>) {
   return {

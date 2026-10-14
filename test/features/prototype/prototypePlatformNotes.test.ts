@@ -88,7 +88,7 @@ describe("prototype platform notes", () => {
     ).toEqual([]);
   });
   test.each(
-    PROTOTYPE_PLATFORM_DIFFERENCES.map(
+    PROTOTYPE_PLATFORM_DIFFERENCES.filter(({ capability }) => capability !== undefined).map(
       ({ construct, capability }) => [construct, capability] as const,
     ),
   )("%s is lifted by its capability", (construct, capability) => {
@@ -225,7 +225,7 @@ describe("prototype platform notes", () => {
     ]);
     expect(JSON.stringify(nested)).toBe(before);
   });
-  test("guide generates all five platform differences from the table", () => {
+  test("guide generates every platform difference from the table", () => {
     const guide = renderPrototypeGuide();
     expect(guide).toContain("## Platform differences");
     expect(guide).toContain("platformNotes");
@@ -237,7 +237,9 @@ describe("prototype platform notes", () => {
       if (!difference.construct.startsWith("icon.")) {
         expect(guide).toContain(difference.detail);
       }
-      expect(guide).toContain(difference.capability);
+      if (difference.capability) {
+        expect(guide).toContain(difference.capability);
+      }
     }
   });
 });
@@ -374,4 +376,20 @@ describe("text field platform notes", () => {
       ),
     ).toEqual([]);
   });
+});
+
+test("stack back gesture remains a platform difference on capable devices", () => {
+  const stackSpec = specFor({
+    type: "stack",
+    id: "nav",
+    start: "home",
+    screens: { home: { type: "text", text: "Home" } },
+  });
+  expect(prototypePlatformNotes(stackSpec, "ios", () => true)).toEqual([
+    expect.objectContaining({
+      construct: "stack",
+      paths: ["root"],
+      detail: expect.stringContaining("left-edge swipe"),
+    }),
+  ]);
 });

@@ -44,38 +44,61 @@ extension PrototypeNode {
     /// Open dialogs and snackbars in tree order, as Android's `modalPrototypeSheets`: hidden subtrees
     /// and closed modals are skipped, a pager contributes only its current page, and an open
     /// modal's own content is searched too.
-    func openModals(state: [String: JSONValue], pages: [String: Int]) -> [PrototypeNode] {
+    func openModals(
+        state: [String: JSONValue],
+        pages: [String: Int],
+        stacks: [String: PrototypeStackSnapshot] = [:]
+    )
+        -> [PrototypeNode]
+    {
         if let visibleWhen, !visibleWhen.holds(state) { return [] }
         let modal = prototypeModalTypes.contains(type)
-        if modal, !(openWhen?.holds(state) ?? false) { return [] }
-        var nested = children ?? []
-        if type == "pager" {
-            let page = id.flatMap { pages[$0] } ?? 0
-            nested = nested.indices.contains(page) ? [nested[page]] : []
-        }
-        if let child, type != "searchBar" || searchBarActive(state: state) { nested.append(child) }
-        return (modal ? [self] : []) + nested.flatMap { $0.openModals(state: state, pages: pages) }
+        if modal || type == "bottomSheet", !(openWhen?.holds(state) ?? false) { return [] }
+        let nested = currentChildEntries(
+            path: "root", pages: pages, stacks: stacks, state: state, clampPagerPage: false
+        ).map(\.node)
+        return (modal ? [self] : []) + nested.flatMap { $0.openModals(state: state, pages: pages, stacks: stacks) }
     }
 
-    /// Whether an open dialog makes the page behind it inert (hidden from accessibility); a
+    /// Whether an open dialog or menu makes the page behind it inert (hidden from accessibility); a
     /// snackbar does not block the page, as on Android.
-    func blocksPage(state: [String: JSONValue], pages: [String: Int]) -> Bool {
-        openModals(state: state, pages: pages).contains { ["dialog", "menu"].contains($0.type) }
+    func blocksPage(
+        state: [String: JSONValue],
+        pages: [String: Int],
+        stacks: [String: PrototypeStackSnapshot] = [:]
+    )
+        -> Bool
+    {
+        openModals(state: state, pages: pages, stacks: stacks).contains { ["dialog", "menu"].contains($0.type) }
     }
 
     /// How the page and the anchor layer expose their nodes to accessibility under this root.
-    func layerAccessibility(state: [String: JSONValue], pages: [String: Int]) -> PrototypeLayerAccessibility {
-        PrototypeLayerAccessibility(inert: blocksPage(state: state, pages: pages))
+    func layerAccessibility(
+        state: [String: JSONValue],
+        pages: [String: Int],
+        stacks: [String: PrototypeStackSnapshot] = [:]
+    )
+        -> PrototypeLayerAccessibility
+    {
+        PrototypeLayerAccessibility(inert: blocksPage(state: state, pages: pages, stacks: stacks))
     }
 
     /// The node or composite part whose identifier is `identifier`, depth-first in tree order.
     /// Parts of a closed dialog or snackbar are not on screen, so they never match.
-    func tapTarget(identifier wanted: String, state: [String: JSONValue]) -> PrototypeTapTarget? {
+    func tapTarget(
+        identifier wanted: String, state: [String: JSONValue], pages: [String: Int] = [:],
+        stacks: [String: PrototypeStackSnapshot] = [:]
+    )
+        -> PrototypeTapTarget?
+    {
+        if let visibleWhen, !visibleWhen.holds(state) { return nil }
+        if prototypeModalTypes.contains(type) || type == "bottomSheet",
+           !(openWhen?.holds(state) ?? false) { return nil }
         if identifier == wanted { return .node(self) }
         if let part = part(named: wanted, state: state) { return part }
-        let nestedChild = type == "searchBar" && !searchBarActive(state: state) ? nil : child
-        for node in (children ?? []) + [nestedChild].compactMap({ $0 }) {
-            if let match = node.tapTarget(identifier: wanted, state: state) { return match }
+        for entry in currentChildEntries(path: "root", pages: pages, stacks: stacks, state: state) {
+            if let match = entry.node
+                .tapTarget(identifier: wanted, state: state, pages: pages, stacks: stacks) { return match }
         }
         return nil
     }

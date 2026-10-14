@@ -1,4 +1,5 @@
 import {
+  PROTOTYPE_STACK_CAPABILITY,
   PROTOTYPE_THEME_MODES_CAPABILITY,
   PROTOTYPE_DATA_MODEL_CAPABILITY,
   PROTOTYPE_FLOW_GRID_CAPABILITY,
@@ -8,6 +9,7 @@ import {
   PROTOTYPE_RICH_TEXT_CAPABILITY,
   PROTOTYPE_MENUS_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
+import { prototypeStackFields, prototypeStackUnsupportedMessage } from "./prototypeSpec";
 import {
   prototypeThemeModeFields,
   prototypeThemeModesUnsupportedMessage,
@@ -83,6 +85,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_MENUS_CAPABILITY,
     fields: prototypeMenuFields,
     unsupportedMessage: prototypeMenusUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_STACK_CAPABILITY,
+    fields: prototypeStackFields,
+    unsupportedMessage: (_fields, platform) => prototypeStackUnsupportedMessage(platform),
   },
 ];
 

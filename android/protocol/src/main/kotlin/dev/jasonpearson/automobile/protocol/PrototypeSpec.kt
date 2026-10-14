@@ -273,6 +273,22 @@ data class PrototypeSetPageAction(
   val page: PrototypePageTarget,
 ) : PrototypeAction()
 
+@SerialName("push")
+@Serializable
+data class PrototypePushAction(val stack: String, val screen: String) : PrototypeAction()
+
+@SerialName("pop")
+@Serializable
+data class PrototypePopAction(val stack: String) : PrototypeAction()
+
+@SerialName("popToRoot")
+@Serializable
+data class PrototypePopToRootAction(val stack: String) : PrototypeAction()
+
+@SerialName("replace")
+@Serializable
+data class PrototypeReplaceAction(val stack: String, val screen: String) : PrototypeAction()
+
 @SerialName("setState")
 @Serializable
 data class PrototypeSetStateAction(
@@ -1122,6 +1138,26 @@ data class PrototypePagerNode(
 ) : PrototypeNode()
 
 @Serializable data class PrototypePagerPeek(val start: Double? = null, val end: Double? = null)
+
+@SerialName("stack")
+@Serializable
+data class PrototypeStackNode(
+  override val id: String,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val onLongPress: List<PrototypeAction>? = null,
+  override val onDoubleTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val transition: String? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  override val span: Int? = null,
+  val start: String,
+  val screens: Map<String, PrototypeNode>,
+) : PrototypeNode()
 
 @SerialName("tabBar")
 @Serializable

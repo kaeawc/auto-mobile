@@ -58,6 +58,7 @@ final class PrototypeAppearanceTests: XCTestCase {
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains("prototype_search_bar_v1"))
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains("prototype_rich_text_v1"))
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains("prototype_menus_v1"))
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains("prototype_stack_v1"))
         var gate = PrototypeConnectionGate(token: "0123456789abcdef-launch-token")
         let hello = try? JSONSerialization.data(withJSONObject: [
             "type": "hello", "token": "0123456789abcdef-launch-token",

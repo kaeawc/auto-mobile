@@ -68,6 +68,7 @@ enum PrototypeStateValidator {
         actions += (node.menuItems ?? []).flatMap { $0.entry?.onTap ?? [] }
         node.children?.forEach { collect($0, nodes: &nodes, actions: &actions) }
         if let child = node.child { collect(child, nodes: &nodes, actions: &actions) }
+        node.screens?.values.forEach { collect($0, nodes: &nodes, actions: &actions) }
     }
 
     // MARK: Binding rules

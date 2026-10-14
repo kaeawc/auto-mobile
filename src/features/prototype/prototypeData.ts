@@ -251,6 +251,11 @@ function nodeFields(value: unknown, path: string): string[] {
   }
   const fields = usesAtNode(node, path);
   return Object.entries(node).flatMap(([key, child]) => {
+    if (key === "screens" && node.type === "stack") {
+      return Object.entries(record(child) ?? {}).flatMap(([name, entry]) =>
+        nodeFields(entry, `${path}.screens[${JSON.stringify(name)}]`),
+      );
+    }
     if (key === "child") {
       return nodeFields(child, `${path}.child`);
     }

@@ -48,6 +48,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeSetStateAction
 import dev.jasonpearson.automobile.protocol.PrototypeSliderNode
 import dev.jasonpearson.automobile.protocol.PrototypeSnackbarNode
 import dev.jasonpearson.automobile.protocol.PrototypeSpacerNode
+import dev.jasonpearson.automobile.protocol.PrototypeStackNode
 import dev.jasonpearson.automobile.protocol.PrototypeStyleWhen
 import dev.jasonpearson.automobile.protocol.PrototypeSwitchNode
 import dev.jasonpearson.automobile.protocol.PrototypeTabBarNode
@@ -56,6 +57,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeTextNode
 import dev.jasonpearson.automobile.protocol.PrototypeTimePickerNode
 import dev.jasonpearson.automobile.protocol.PrototypeToggleAction
 import dev.jasonpearson.automobile.protocol.PrototypeTopAppBarNode
+import kotlinx.serialization.json.JsonPrimitive
 
 /** A child to render and the path it is rendered under (also its stable Compose identity). */
 internal data class PrototypeChildEntry(val node: PrototypeNode, val path: String)
@@ -90,6 +92,10 @@ internal fun prototypeChildEntries(
   path: String,
   bind: Boolean = true,
 ): List<PrototypeChildEntry> {
+  if (node is PrototypeStackNode)
+    return node.screens.map { (name, child) ->
+      PrototypeChildEntry(child, "$path.screens[${JsonPrimitive(name)}]")
+    }
   val children = prototypeDescendants(node)
   val repeat = node.repeatSpec()
   if (repeat == null) {
@@ -164,6 +170,15 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         styleWhen = styleWhen,
         visibleWhen = visibleWhen,
         children = children.bound(),
+      )
+    is PrototypeStackNode ->
+      copy(
+        onTap = onTap,
+        onLongPress = onLongPress,
+        onDoubleTap = onDoubleTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        screens = screens.mapValues { (_, child) -> child.bound(instance) },
       )
     is PrototypePagerNode ->
       copy(

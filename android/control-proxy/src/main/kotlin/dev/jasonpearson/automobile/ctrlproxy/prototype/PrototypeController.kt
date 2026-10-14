@@ -10,6 +10,7 @@ import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
+import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -64,6 +65,16 @@ fun interface PrototypeResultSink {
     revision: Long?,
     conflict: PrototypePatchConflict?,
   ) = send(requestId, success, error)
+
+  /** Show navigation context; the default preserves existing sink implementations. */
+  suspend fun sendShownNavigation(
+    requestId: String?,
+    missingAssets: List<String>,
+    appearance: PrototypeAppearance,
+    pages: Map<String, Int>,
+    stacks: Map<String, PrototypeStackSnapshot>,
+    hiddenReason: PrototypeHiddenReason? = null,
+  ) = sendShown(requestId, missingAssets, appearance, hiddenReason)
 
   /** The reply to `inspect_prototypes`. Sinks that predate it answer a bare success. */
   suspend fun sendPrototypeStatus(
@@ -226,9 +237,10 @@ class PrototypeController(
    * Always renders the full [spec]. When [spec]'s id is the prototype on screen and [reset] is
    * false, it replaces that prototype in place: it stays on the display it was shown on
    * ([displayId] is ignored) and each pager keeps its page, matched by pager id and clamped to the
-   * new page count. The new spec's state is authoritative; values the user changed are not carried
-   * over. Otherwise (another id, nothing shown, or [reset]) it is a fresh show on [displayId],
-   * where null means the default display, exactly as before display targeting.
+   * new page count. Each stack keeps its path with removed screen names dropped (or its start
+   * screen when none remain). The new spec's state is authoritative; values the user changed are
+   * not carried over. Otherwise (another id, nothing shown, or [reset]) it is a fresh show on
+   * [displayId], where null means the default display, exactly as before display targeting.
    *
    * [appearance] stands in for the device's light or dark setting for this show; null follows the
    * device. It belongs to the show, so an in-place show without it follows the device again.
@@ -249,7 +261,12 @@ class PrototypeController(
         displayId = if (inPlace) shownDisplayId() else displayId ?: Display.DEFAULT_DISPLAY,
         appearance = appearance,
       )
-      Outcome(missingAssets(), activeTheme?.value?.appearance)
+      Outcome(
+        missingAssets = missingAssets(),
+        appearance = activeTheme?.value?.appearance,
+        pages = activeRuntime?.current?.pages,
+        stacks = activeRuntime?.current?.stacks,
+      )
     }
 
   suspend fun patch(requestId: String?, id: String, baseRevision: Long?, ops: JsonArray) =
@@ -305,6 +322,8 @@ class PrototypeController(
     val error: String? = null,
     val revision: Long? = null,
     val conflict: PrototypePatchConflict? = null,
+    val pages: Map<String, Int>? = null,
+    val stacks: Map<String, PrototypeStackSnapshot>? = null,
   )
 
   /** Referenced assets the store lacks, for the active spec. Never fails the request. */
@@ -395,14 +414,17 @@ class PrototypeController(
         previousPages = if (preservePages) previous?.current?.pages.orEmpty() else emptyMap(),
         initialRevision = nextRevision(validated.id),
         nextRevision = { nextRevision(validated.id) },
+        previousStacks = if (preservePages) previous?.current?.stacks.orEmpty() else emptyMap(),
       )
     val mappedSpec = runtime.renderModel()
     val theme = MutableStateFlow(shownTheme(mappedSpec, appearance))
     val interactive =
       request.copy(
         hasTextField = mappedSpec.hasTextField,
+        hasStackBack = runtime.hasPoppableStack(mappedSpec),
         theme = theme,
         onHostDismiss = { interact(runtime, PrototypeInteraction.HostDismiss) },
+        onHostBack = { interact(runtime, PrototypeInteraction.Back) },
         content = {
           PrototypeRuntimeContent(runtime, images, fonts) { interaction ->
             interact(runtime, interaction)
@@ -619,7 +641,14 @@ class PrototypeController(
           ?: activeRuntime?.current?.takeIf { it.active && it.spec.id == patchId }?.revision
       sink.sendPatched(requestId, error == null, error, revision, outcome.conflict)
     } else if (error == null && appearance != null)
-      sink.sendShown(requestId, missing, appearance, shownHiddenReason())
+      sink.sendShownNavigation(
+        requestId,
+        missing,
+        appearance,
+        outcome.pages.orEmpty(),
+        outcome.stacks.orEmpty(),
+        shownHiddenReason(),
+      )
     else if (missing.isEmpty()) sink.send(requestId, error == null, error)
     else sink.sendWithMissingAssets(requestId, error == null, error, missing)
   }
@@ -697,6 +726,7 @@ class PrototypeController(
       state = runtime.current.state.toMap(),
       data = runtime.current.spec.data,
       pages = runtime.current.pages.toMap(),
+      stacks = runtime.current.stacks.toMap(),
       lastSequence = sequences[id] ?: 0L,
       suspended = foreground.suspended,
       hiddenReason = shownHiddenReason(),
@@ -818,18 +848,26 @@ class PrototypeController(
     }
 
   /**
-   * The window may hold input focus only while a text field is visible in the CURRENT tree, so a
-   * page swipe, tab change or sheet open/close can flip it; otherwise Back and key input to the app
-   * behind would be swallowed. A failed flip keeps the old request and is retried on the next
-   * change.
+   * A visible text field in the CURRENT tree may hold input focus, so a page swipe, tab change or
+   * sheet open/close can flip it. Stack navigation also takes focus while a visible eligible stack
+   * can pop; otherwise Back and key input to the app behind would be swallowed. A failed flip keeps
+   * the old request and is retried on the next change.
    */
   private suspend fun syncTextFieldFocus(model: PrototypeRenderModel) {
     val request = activeRequest ?: return
+    val stackBack = activeRuntime?.hasPoppableStack(model) == true
+    var updated = request
+    if (stackBack != request.hasStackBack) {
+      if (host.setStackBackEnabled(stackBack) || !host.isShowing) {
+        updated = request.copy(hasStackBack = stackBack)
+        activeRequest = updated
+      } else Log.w("PrototypeController", "Prototype host failed to update stack Back focusability")
+    }
     val visible = model.hasTextField
-    if (visible == request.hasTextField) return
+    if (visible == updated.hasTextField) return
     // A window cleared as detached is restored from activeRequest, so record the change for it.
     if (host.setTextFieldVisible(visible) || !host.isShowing)
-      activeRequest = request.copy(hasTextField = visible)
+      activeRequest = updated.copy(hasTextField = visible)
     else Log.w("PrototypeController", "Prototype host failed to update window focusability")
   }
 

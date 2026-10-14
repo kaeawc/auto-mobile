@@ -515,6 +515,13 @@ internal object PrototypeRepeatValidator {
     (node["child"] as? JsonObject)?.let {
       return listOf(Child(it, "$path.child"))
     }
+    (node["screens"] as? JsonObject)?.let { screens ->
+      return screens.entries.mapNotNull { (name, value) ->
+        (value as? JsonObject)?.let {
+          Child(it, "$path.screens[${JsonPrimitive(name)}]")
+        }
+      }
+    }
     return (node["children"] as? JsonArray).orEmpty().mapIndexedNotNull { index, entry ->
       (entry as? JsonObject)?.let { Child(it, "$path.children[$index]") }
     }
@@ -586,6 +593,8 @@ internal object PrototypeRepeatValidator {
       if (node.containsKey("repeat")) return fail("$path.repeat", "Nested repeat is not supported")
       if (node.text("type") == "pager")
         return fail(path, "Pager cannot appear inside a repeat template")
+      if (node.text("type") == "stack")
+        return fail(path, "Stack cannot appear inside a repeat template")
     }
     val own =
       if (scope != null) checkOwnFields(node, path, scope, state)

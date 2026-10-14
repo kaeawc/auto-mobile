@@ -1,3 +1,8 @@
+import {
+  PROTOTYPE_ACTION_TYPES,
+  actionSchema,
+} from "../../../src/features/prototype/prototypeSpec";
+import { PROTOTYPE_EVENT_KINDS } from "../../../src/features/observe/android/ctrlProxyProtocol";
 import { describe, expect, test } from "bun:test";
 import type { z } from "zod";
 import contract from "../../../schemas/prototype-spec-contract.json";
@@ -200,4 +205,14 @@ test.each(["menu", "select"])("%s participates in common node contract parity", 
   expect(Object.keys(contractNodes[type].fields)).toEqual(
     expect.arrayContaining(COMMON_NODE_FIELDS),
   );
+});
+
+test("stack actions and events agree with the shared contract", () => {
+  expect(Object.keys(contract.definitions.action.variants).sort()).toEqual(
+    [...PROTOTYPE_ACTION_TYPES].sort(),
+  );
+  expect(actionSchema.options.map((option) => option.shape.type.options[0]).sort()).toEqual(
+    [...PROTOTYPE_ACTION_TYPES].sort(),
+  );
+  expect([...contract.eventKinds].sort()).toEqual([...PROTOTYPE_EVENT_KINDS].sort());
 });

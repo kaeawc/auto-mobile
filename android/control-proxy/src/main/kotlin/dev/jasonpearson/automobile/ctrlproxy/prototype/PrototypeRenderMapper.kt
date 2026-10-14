@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 import dev.jasonpearson.automobile.protocol.PrototypeDataResolver
 import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
+import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
 import java.util.IdentityHashMap
 import kotlinx.serialization.json.JsonObject
 
@@ -37,6 +38,7 @@ internal class PrototypeRenderMapper {
   private var cache: PrototypeRenderCache? = null
   private var previousSpec: PrototypeSpec? = null
   private var previousPages: Map<String, Int>? = null
+  private var previousStacks: Map<String, PrototypeStackSnapshot>? = null
   private var previousModel: PrototypeRenderModel? = null
   private var previousNodes: Map<String, PrototypeRenderNode> = emptyMap()
   private var passes = 0
@@ -47,12 +49,19 @@ internal class PrototypeRenderMapper {
   internal val lastResolvedSpec: PrototypeSpec?
     get() = synchronized(lock) { resolvedSpec }
 
-  fun map(spec: PrototypeSpec, pages: Map<String, Int>): PrototypeRenderModel =
+  fun map(
+    spec: PrototypeSpec,
+    pages: Map<String, Int>,
+    stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
+  ): PrototypeRenderModel =
     synchronized(lock) {
       val resolved = resolveLocked(spec)
       previousModel?.let { model ->
         if (
-          previousSpec?.root === resolved.root && previousSpec == resolved && previousPages == pages
+          previousSpec?.root === resolved.root &&
+            previousSpec == resolved &&
+            previousPages == pages &&
+            previousStacks == stacks
         ) {
           return@synchronized model
         }
@@ -60,11 +69,13 @@ internal class PrototypeRenderMapper {
       PrototypeTrace.section(PrototypeTrace.MAP_RENDER_TREE) {
         val static =
           cache?.takeIf { it.root === resolved.root } ?: PrototypeRenderCache(resolved.root)
-        val mapping = PrototypeNodeMapping(resolved.state.orEmpty(), pages, static, previousNodes)
+        val mapping =
+          PrototypeNodeMapping(resolved.state.orEmpty(), pages, static, previousNodes, stacks)
         val model = prototypeRenderModel(resolved, mapping.map(resolved.root, "root"))
         cache = static
         previousSpec = resolved
         previousPages = pages
+        previousStacks = stacks
         previousModel = model
         previousNodes = mapping.nodes
         passes++

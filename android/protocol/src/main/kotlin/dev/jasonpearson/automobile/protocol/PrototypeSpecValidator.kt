@@ -60,6 +60,8 @@ object PrototypeSpecValidator {
   val MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH: Int = limit("MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH")
   val MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL: Int = limit("MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL")
   val MAX_PROTOTYPE_DATA_POINTER_LENGTH: Int = limit("MAX_PROTOTYPE_DATA_POINTER_LENGTH")
+  val MAX_PROTOTYPE_STACK_SCREENS: Int = limit("MAX_PROTOTYPE_STACK_SCREENS")
+  val MAX_PROTOTYPE_STACK_DEPTH: Int = limit("MAX_PROTOTYPE_STACK_DEPTH")
   internal val maxRepeatItems: Int =
     definitions
       .getValue("repeat")
@@ -233,6 +235,7 @@ object PrototypeSpecValidator {
         ?: gridSpanErrors(context)
         ?: PrototypeRepeatValidator.validate(value, repeats)
         ?: pagerErrors(context)
+        ?: stackErrors(context)
         ?: stateTypeErrors(value, context, repeats)
     if (error != null) return PrototypeSpecValidation.Failure(error)
     return try {
@@ -291,6 +294,12 @@ object PrototypeSpecValidator {
           },
         )
       }
+      "screenMap" ->
+        JsonObject(
+          (value as JsonObject).mapValues { (_, child) ->
+            normalizeIntegers(child, rule.getValue("item").jsonObject)
+          },
+        )
       "array" ->
         JsonArray(
           (value as JsonArray).map { normalizeIntegers(it, rule.getValue("item").jsonObject) },
@@ -402,6 +411,7 @@ object PrototypeSpecValidator {
       "object" -> visitObject(value, rule, path, context, depth)
       "array" -> visitArray(value, rule, path, context, depth)
       "map" -> visitMap(value, rule, path, context, depth)
+      "screenMap" -> visitScreenMap(value, rule, path, context, depth)
       "choice" -> visitChoice(value, rule, path, context, depth)
       "data" -> dataError(value)
       else ->
@@ -624,6 +634,25 @@ object PrototypeSpecValidator {
     return null
   }
 
+  private fun visitScreenMap(
+    value: JsonElement,
+    rule: JsonObject,
+    path: String,
+    context: Context,
+    depth: Int,
+  ): PrototypeSpecError? {
+    val screens = value as? JsonObject ?: return fail(path, "Expected object")
+    if (screens.size !in 1..MAX_PROTOTYPE_STACK_SCREENS)
+      return fail(path, "Screen count out of range")
+    for (name in screens.keys.sorted()) {
+      val at = "$path[${canonicalString(name)}]"
+      if (name.isEmpty()) return fail(at, "Empty screen name")
+      val error = walk(screens.getValue(name), rule.getValue("item").jsonObject, at, context, depth)
+      if (error != null) return error
+    }
+    return null
+  }
+
   private fun visitChoice(
     value: JsonElement,
     rule: JsonObject,
@@ -730,6 +759,27 @@ object PrototypeSpecValidator {
       return canonicalString(value.content).toByteArray(Charsets.UTF_8).size.toDouble()
     if (value.booleanOrNull != null) return value.toString().length.toDouble()
     return if (value.doubleOrNull?.isFinite() == true) 32.0 else Double.POSITIVE_INFINITY
+  }
+
+  private fun stackErrors(context: Context): PrototypeSpecError? {
+    val stacks = mutableMapOf<String, JsonObject>()
+    for ((value, path) in context.nodes) {
+      if (value.text("type") != "stack") continue
+      val id = checkNotNull(value.text("id"))
+      if (stacks.containsKey(id)) return fail("$path.id", "Duplicate stack id")
+      val screens = value.getValue("screens").jsonObject
+      val start = checkNotNull(value.text("start"))
+      if (!screens.containsKey(start)) return fail("$path.start", "Unknown start screen")
+      stacks[id] = screens
+    }
+    for ((value, path) in context.actions) {
+      val id = value.text("stack") ?: continue
+      val screens = stacks[id] ?: return fail("$path.stack", "Unknown stack id")
+      val screen = value.text("screen")
+      if (screen != null && !screens.containsKey(screen))
+        return fail("$path.screen", "Unknown stack screen")
+    }
+    return null
   }
 
   private fun pagerErrors(context: Context): PrototypeSpecError? {

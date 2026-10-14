@@ -7,6 +7,8 @@ import Foundation
 /// The constants repeat `schemas/prototype-spec-contract.json`; `PrototypeLimitsTests` fails when they
 /// drift from it.
 enum PrototypeLimits {
+    static let maxStackScreens = 32
+    static let maxStackDepth = 32
     static let maxPatchOps = 64
     static let maxNodes = 2000
     static let maxDepth = 24
@@ -111,6 +113,13 @@ enum PrototypeLimits {
                     try visitCells(child, path: "\(path).children[\(index)]", depth: depth + 1)
                 }
             }
+            if case let .object(screens)? = fields["screens"] {
+                for name in screens.keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
+                    if let screen = screens[name] {
+                        try visitCells(screen, path: PrototypeStacks.screenPath(path, name: name), depth: depth + 1)
+                    }
+                }
+            }
         }
         try visitCells(root, path: "root", depth: 1)
     }
@@ -127,6 +136,13 @@ enum PrototypeLimits {
         if case let .array(children)? = fields["children"] {
             for (index, value) in children.enumerated() {
                 try child(value, at: "\(path).children[\(index)]")
+            }
+        }
+        if case let .object(screens)? = fields["screens"] {
+            for name in screens.keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
+                if let screen = screens[name] {
+                    try child(screen, at: PrototypeStacks.screenPath(path, name: name))
+                }
             }
         }
     }
@@ -157,6 +173,19 @@ enum PrototypeLimits {
         }
         if let child = fields["child"] {
             try visit(child, path: "\(path).child", depth: depth + 1, authored: authored, count: &count)
+        }
+        if case let .object(screens)? = fields["screens"] {
+            for name in screens.keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
+                if let screen = screens[name] {
+                    try visit(
+                        screen,
+                        path: PrototypeStacks.screenPath(path, name: name),
+                        depth: depth + 1,
+                        authored: authored,
+                        count: &count
+                    )
+                }
+            }
         }
     }
 
@@ -190,7 +219,7 @@ enum PrototypeLimits {
     /// Structural traversal, never instance expansion: all descendants of an uncounted template
     /// consume this budget once, including nested repeats and single-child nodes.
     private static func visitAuthoredTemplates(
-        _ node: JSONValue, path: String, depth: Int, template: Bool, count: inout Int
+        _ node: JSONValue, path: String, depth: Int, template: Bool, count: inout Int, insideRepeat: Bool = false
     )
         throws
     {
@@ -201,19 +230,33 @@ enum PrototypeLimits {
         }
         if depth > maxDepth { throw violation(path, "Tree depth limit exceeded") }
         if template { try guardTextSpans(fields, path: path) }
+        if insideRepeat, fields["type"]?.stringValue == "stack" {
+            throw violation(path, "Stack cannot appear inside a repeat template")
+        }
         let childTemplate = template || hasUncountedTemplate(fields)
         if case let .array(children)? = fields["children"] {
             for (index, child) in children.enumerated() {
                 try visitAuthoredTemplates(
                     child, path: "\(path).children[\(index)]", depth: depth + 1,
-                    template: childTemplate, count: &count
+                    template: childTemplate, count: &count, insideRepeat: insideRepeat || fields["repeat"] != nil
                 )
             }
         }
         if let child = fields["child"] {
             try visitAuthoredTemplates(
-                child, path: "\(path).child", depth: depth + 1, template: childTemplate, count: &count
+                child, path: "\(path).child", depth: depth + 1, template: childTemplate, count: &count,
+                insideRepeat: insideRepeat || fields["repeat"] != nil
             )
+        }
+        if case let .object(screens)? = fields["screens"] {
+            for name in screens.keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) }) {
+                if let screen = screens[name] {
+                    try visitAuthoredTemplates(
+                        screen, path: PrototypeStacks.screenPath(path, name: name), depth: depth + 1,
+                        template: childTemplate, count: &count, insideRepeat: insideRepeat || fields["repeat"] != nil
+                    )
+                }
+            }
         }
     }
 

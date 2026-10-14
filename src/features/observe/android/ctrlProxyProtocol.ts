@@ -540,6 +540,7 @@ export interface PrototypeResult {
   missingAssets?: string[];
   /** Only the reply to `inspect_prototypes`: the prototypes the device is showing right now. */
   prototypes?: PrototypeStatusEntry[];
+  stacks?: Record<string, { path: string[]; depth: number }>;
   /** Only with `prototypes`: events the device dropped from its offline buffer since it started. */
   droppedEvents?: number;
   /** Only a successful `show_prototype` reply from a device advertising prototype_appearance_v1. */
@@ -555,6 +556,7 @@ export interface PrototypeStatusEntry {
   persistent: boolean;
   state: PrototypeState;
   pages: Record<string, number>;
+  stacks?: Record<string, { path: string[]; depth: number }>;
   /** Highest `prototype_event` sequence the device allocated for this prototype; no rewind. */
   lastSequence: number;
   /** True while the prototype's app is not in front: hidden, state kept, back with the app. */
@@ -583,6 +585,7 @@ export interface PrototypeAssetResult extends PrototypeResult {
 export const PROTOTYPE_EVENT_KINDS = [
   "emit",
   "page_changed",
+  "screen_changed",
   "dismissed",
   "appearance_changed",
 ] as const;
@@ -609,6 +612,7 @@ export interface PrototypeEvent {
   payload: PrototypeJson;
   state: PrototypeState;
   pages: Record<string, number>;
+  stacks?: Record<string, { path: string[]; depth: number }>;
 }
 
 // =============================================================================
@@ -1021,6 +1025,9 @@ export const PROTOTYPE_SEARCH_BAR_CAPABILITY = "prototype_search_bar_v1";
 /** Runs long-press and double-tap action lists on generic prototype gesture nodes. */
 export const PROTOTYPE_GESTURES_CAPABILITY = "prototype_gestures_v1";
 
+/** Screen stacks and push/pop/popToRoot/replace actions with screen_changed snapshots. */
+export const PROTOTYPE_STACK_CAPABILITY = "prototype_stack_v1";
+
 /**
  * Advertised by a CtrlProxy or iOS prototype agent whose renderer resolves the per-mode spec forms
  * (#11218): `{light, dark}` colour pairs, role names in gradient stops and scrims,
@@ -1097,6 +1104,7 @@ export const ANDROID_CAPABILITY_FLAGS = [
   PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
   PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
+  PROTOTYPE_STACK_CAPABILITY,
   PROTOTYPE_ANCHOR_CAPABILITY,
   NETWORK_MOCK_RULES_REPORT_CAPABILITY,
   PROTOTYPE_WINDOW_METADATA_CAPABILITY,

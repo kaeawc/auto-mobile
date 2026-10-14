@@ -12,6 +12,7 @@ import type { PrototypeSpec } from "./prototypeSpec";
 
 export type PrototypePlatformNoteConstruct =
   | "rich-text-links"
+  | "stack"
   | "node.id"
   | "bottomSheet.dismissOnSwipe"
   | "bottomSheet.detents"
@@ -211,6 +212,14 @@ export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly (PlatformDifference & {
     occurrencePath: ({ node, path }) =>
       node?.type === "textField" && node.label !== undefined ? `${path}.label` : undefined,
   },
+  {
+    construct: "stack",
+    platform: "ios",
+    effect: "substituted",
+    detail:
+      "iOS pops a stack with the left-edge swipe (no system back button chrome); Android uses system Back above depth 1.",
+    occurrencePath: ({ node, path }) => (node?.type === "stack" ? path : undefined),
+  },
 ];
 
 const mappedSymbols: Readonly<
@@ -283,6 +292,11 @@ function occurrences(
   switch (rule.kind) {
     case "ref":
       referenceOccurrences(value, rule.name!, path, found, nodeType);
+      break;
+    case "screenMap":
+      Object.entries(value as Record<string, unknown>).forEach(([name, child]) =>
+        occurrences(child, rule.item!, `${path}[${JSON.stringify(name)}]`, found),
+      );
       break;
     case "array":
       (value as unknown[]).forEach((entry, index) =>

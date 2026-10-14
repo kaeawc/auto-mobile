@@ -261,6 +261,7 @@ export class PrototypeEventCoordinator {
       payload: event.payload,
       state: event.state,
       pages: event.pages,
+      ...(event.stacks ? { stacks: structuredClone(event.stacks) } : {}),
       timestamp: event.timestamp,
     };
     return { event: delivered, ...entry.buffer.status() };

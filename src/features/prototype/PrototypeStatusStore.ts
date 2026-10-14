@@ -13,6 +13,7 @@ import type { PrototypeWindowChrome } from "./prototypeWindowChrome";
 
 export type PrototypeMutation = "show" | "dismiss";
 export interface PrototypeLastResult {
+  stacks?: PrototypeEvent["stacks"];
   data?: PrototypeData;
   id?: string;
   all?: true;
@@ -49,6 +50,7 @@ export interface PrototypeLastResult {
 }
 export interface PrototypeEventState {
   pages: PrototypeEvent["pages"];
+  stacks?: PrototypeEvent["stacks"];
   state: PrototypeEvent["state"];
   lastKnown: true;
 }
@@ -60,6 +62,7 @@ export interface AdoptedPrototype {
   hiddenReason?: PrototypeHiddenReason;
   appearance?: ShownPrototypeAppearance;
   pages: PrototypeEvent["pages"];
+  stacks?: PrototypeEvent["stacks"];
   state: PrototypeEvent["state"];
 }
 export interface PrototypeStatus {
@@ -123,9 +126,12 @@ function shownData(
   action: PrototypeMutation,
   result: PrototypeResult,
   data: PrototypeData | undefined,
-): { data?: PrototypeData } {
-  return action === "show" && result.success && data !== undefined
-    ? { data: structuredClone(data) }
+): { data?: PrototypeData; stacks?: PrototypeEvent["stacks"] } {
+  return action === "show" && result.success
+    ? {
+        ...(data === undefined ? {} : { data: structuredClone(data) }),
+        ...(result.stacks ? { stacks: structuredClone(result.stacks) } : {}),
+      }
     : {};
 }
 
@@ -150,17 +156,23 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     const stored = this.scopes.get(JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]));
     const snapshot = stored?.snapshot;
     return {
-      prototypes: Array.from(stored?.shown.values() ?? [], (entry) => ({
-        ...entry,
-        ...(entry.data === undefined ? {} : { data: structuredClone(entry.data) }),
-        ...(snapshot && snapshot.id === entry.id
-          ? {
-              pages: { ...snapshot.pages },
-              state: { ...snapshot.state },
-              lastKnown: true as const,
-            }
-          : {}),
-      })),
+      prototypes: Array.from(stored?.shown.values() ?? [], (entry) => {
+        const { stacks, ...presence } = entry;
+        const current = snapshot && snapshot.id === entry.id;
+        return {
+          ...presence,
+          ...(!current && stacks ? { stacks: structuredClone(stacks) } : {}),
+          ...(entry.data === undefined ? {} : { data: structuredClone(entry.data) }),
+          ...(snapshot && snapshot.id === entry.id
+            ? {
+                pages: { ...snapshot.pages },
+                ...(snapshot.stacks ? { stacks: structuredClone(snapshot.stacks) } : {}),
+                state: { ...snapshot.state },
+                lastKnown: true as const,
+              }
+            : {}),
+        };
+      }),
       ...(stored?.lastResult ? { lastResult: { ...stored.lastResult } } : {}),
     };
   }
@@ -218,6 +230,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     stored.snapshot = {
       id: prototype.id,
       pages: { ...prototype.pages },
+      ...(prototype.stacks ? { stacks: structuredClone(prototype.stacks) } : {}),
       state: { ...prototype.state },
       lastKnown: true,
     };
@@ -242,6 +255,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     stored.pendingSnapshot = {
       id: event.id,
       pages: { ...event.pages },
+      ...(event.stacks ? { stacks: structuredClone(event.stacks) } : {}),
       state: { ...event.state },
       lastKnown: true,
     };

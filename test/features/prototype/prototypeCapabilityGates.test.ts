@@ -38,6 +38,12 @@ test("required gates report fields and original messages", () => {
         { type: "grid", columns: 2 },
         { type: "searchBar", id: "search" },
         { type: "menu", id: "more", items: [{ label: "Open" }] },
+        {
+          type: "stack",
+          id: "nav",
+          start: "home",
+          screens: { home: { type: "text", text: "Home" } },
+        },
       ],
     },
   };
@@ -51,6 +57,7 @@ test("required gates report fields and original messages", () => {
     "prototype_search_bar_v1",
     "prototype_rich_text_v1",
     "prototype_menus_v1",
+    "prototype_stack_v1",
   ]);
   expect(required.map((gate) => gate.fields)).toEqual([
     ["root.children[0].style.background"],
@@ -61,6 +68,7 @@ test("required gates report fields and original messages", () => {
     ["root.children[3]"],
     ["components.rich.root.spans"],
     ["root.children[4]"],
+    ["root"],
   ]);
   expect(required.map((gate) => gate.unsupportedMessage)).toEqual([
     prototypeThemeModesUnsupportedMessage,
@@ -71,6 +79,7 @@ test("required gates report fields and original messages", () => {
     prototypeSearchBarUnsupportedMessage,
     prototypeRichTextUnsupportedMessage,
     prototypeMenusUnsupportedMessage,
+    expect.any(Function),
   ]);
   expect(
     PROTOTYPE_SPEC_CAPABILITY_GATES.map((gate) => gate.fields(spec)).filter((f) => f.length > 0),

@@ -328,6 +328,17 @@ object PrototypeDataResolver {
   private fun mapChildren(node: JsonObject, transform: (JsonObject) -> JsonObject): JsonObject {
     val child = node["child"] as? JsonObject
     if (child != null) return JsonObject(node + ("child" to transform(child)))
+    val screens = node["screens"] as? JsonObject
+    if (screens != null)
+      return JsonObject(
+        node +
+          ("screens" to
+            JsonObject(
+              screens.mapValues { (_, entry) ->
+                if (entry is JsonObject) transform(entry) else entry
+              },
+            )),
+      )
     val children = node["children"] as? JsonArray ?: return node
     return JsonObject(
       node +
@@ -371,6 +382,9 @@ object PrototypeDataResolver {
       if (child != null) hasBindings(child)
       else
         (node["children"] as? JsonArray).orEmpty().filterIsInstance<JsonObject>().any(::hasBindings)
-    return own || nested
+    val screensBound =
+      (node["screens"] as? JsonObject)?.values?.filterIsInstance<JsonObject>()?.any(::hasBindings)
+        ?: false
+    return own || nested || screensBound
   }
 }

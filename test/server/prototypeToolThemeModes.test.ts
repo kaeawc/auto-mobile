@@ -105,6 +105,21 @@ describe("prototype show with per-mode spec forms (#11218)", () => {
     return prototypeOutputSchema.parse(response.structuredContent);
   }
   const agentShows = () => agent.requests.filter((request) => request.type === "show_prototype");
+  test.each([android, ios])(
+    "refuses stack navigation on $platform without capability",
+    async (device) => {
+      client.setSupportedCommands([]);
+      const payload = await call(device, {
+        ...plain,
+        root: { type: "stack", id: "nav", start: "home", screens: { home: plain.root } },
+      });
+      expect(payload.success).toBe(false);
+      expect(payload.error).toContain("prototype_stack_v1");
+      expect(payload.error).toContain("Nothing was shown");
+      expect(client.getPrototypeHistory()).toHaveLength(0);
+      expect(agentShows()).toHaveLength(0);
+    },
+  );
 
   test.each(["flow", "grid"])(
     "%s is refused without the wrapping capability and sent with it",

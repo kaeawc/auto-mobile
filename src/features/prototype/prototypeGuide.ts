@@ -64,6 +64,8 @@ function describeRule(rule: Rule): string {
     case "boundKey":
       // A state key; inside a repeat template it may also hold placeholders (see Lists).
       return "key";
+    case "screenMap":
+      return `screen-name → node (${rule.min}..${rule.max} entries)`;
     case "array":
       return describeArray(rule);
     case "choice":
@@ -223,7 +225,7 @@ function renderPlatformDifferences(): string {
     "- `icon.variant`: filled/outlined map where a form exists; rounded/sharp/twoTone and forms absent from the table draw the default symbol. A successful show lists affected paths under `platformNotes`. Material parity remains a future option behind `prototype_icon_variant_v1`.",
     ...PROTOTYPE_PLATFORM_DIFFERENCES.filter(({ construct }) => !construct.startsWith("icon.")).map(
       ({ construct, platform, effect, capability, detail }) =>
-        `- \`${construct}\`: ${platform}, ${effect}. ${detail} A successful show lists affected paths under \`platformNotes\`; lifted by \`${capability}\`.`,
+        `- \`${construct}\`: ${platform}, ${effect}. ${detail} A successful show lists affected paths under \`platformNotes\`${capability ? `; lifted by \`${capability}\`` : ""}.`,
     ),
     ...PROTOTYPE_SEARCH_BAR_PLATFORM_DIFFERENCES.map(
       ({ construct, detail }) => `- \`${construct}\`: ${detail}`,

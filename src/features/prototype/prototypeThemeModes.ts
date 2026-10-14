@@ -84,5 +84,8 @@ function nodeFields(value: unknown, path: string): string[] {
       nodeFields(child, `${path}.children[${index}]`),
     ),
     ...nodeFields(node.child, `${path}.child`),
+    ...Object.entries(node.type === "stack" ? (record(node.screens) ?? {}) : {}).flatMap(
+      ([name, child]) => nodeFields(child, `${path}.screens[${JSON.stringify(name)}]`),
+    ),
   ];
 }

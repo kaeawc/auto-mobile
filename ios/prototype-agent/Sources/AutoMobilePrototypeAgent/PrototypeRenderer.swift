@@ -216,7 +216,7 @@ struct NodeView: View {
     }
 
     private var layoutSignature: [String] {
-        node.containerLayoutSignature(state: model.state) { model.holds($0) }
+        node.containerLayoutSignature(state: model.state, stacks: model.stacks) { model.holds($0) }
     }
 
     /// An anchored node is drawn by its window's anchor layer, never in its parent's slot.
@@ -306,6 +306,15 @@ struct NodeView: View {
             ScrollView(node.axis == "horizontal" ? .horizontal : .vertical) {
                 if let child = node.child { NodeView(node: child, model: model) }
             }
+        case "stack":
+            if let screen = node.currentScreen(stacks: model.stacks), let top = node.screens?[screen] {
+                // Only the top view exists: inactive screens are absent from the native
+                // accessibility tree as well as from rendering. Navigation is instant.
+                NodeView(node: top, model: model)
+                    .id(screen)
+                    .transition(.identity)
+                    .animation(nil, value: screen)
+            }
         case "pager":
             PagerView(node: node, model: model)
         case "tabBar", "bottomNav":
@@ -359,7 +368,7 @@ struct NodeView: View {
     }
 
     @ViewBuilder private var children: some View {
-        ForEach(node.drawnChildren(holds: model.holds), id: \.offset) { entry in
+        ForEach(node.drawnChildren(holds: model.holds, stacks: model.stacks), id: \.offset) { entry in
             NodeView(node: entry.node, model: model, inStackSlot: true)
         }
     }
@@ -370,14 +379,14 @@ struct NodeView: View {
     }
 
     private var hasWeightedChild: Bool {
-        node.drawnChildren(holds: model.holds).contains { weight(of: $0.node) != nil }
+        node.drawnChildren(holds: model.holds, stacks: model.stacks).contains { weight(of: $0.node) != nil }
     }
 
     /// A row or column whose children share the main axis by `weight` (Android's `Modifier.weight`):
     /// see `PrototypeWeightedStack`. It adds no arrangement spacers: a weight takes the free space.
     private func weightedStack(axis: PrototypeAxis) -> some View {
         PrototypeWeightedStackLayout(axis: axis, spacing: style?.spacing ?? 0) {
-            ForEach(node.drawnChildren(holds: model.holds), id: \.offset) { entry in
+            ForEach(node.drawnChildren(holds: model.holds, stacks: model.stacks), id: \.offset) { entry in
                 NodeView(node: entry.node, model: model, inStackSlot: true, stackAxis: axis)
                     .layoutValue(key: PrototypeWeightKey.self, value: weight(of: entry.node))
             }
@@ -389,7 +398,7 @@ struct NodeView: View {
     /// wrap-sized row or column does not grow to fill its parent.
     @ViewBuilder
     private func arranged(horizontal _: Bool) -> some View {
-        let nodes = node.drawnChildren(holds: model.holds)
+        let nodes = node.drawnChildren(holds: model.holds, stacks: model.stacks)
         let mode = style?.arrangement ?? "start"
         let outer = mode == "spaceAround" || mode == "spaceEvenly"
         if outer { Spacer(minLength: 0) }

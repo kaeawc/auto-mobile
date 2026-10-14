@@ -185,6 +185,7 @@ private let prototypeInlineContainerTypes: Set<String> = [
     "scroll",
     "card",
     "pager",
+    "stack",
     "bottomSheet",
     "searchBar",
 ]
@@ -192,6 +193,12 @@ private let prototypeInlineContainerTypes: Set<String> = [
 extension PrototypeNode {
     /// Child nodes in tree order with their paths: `child`, else `children` (the spec contract).
     func childEntries(path: String) -> [(node: PrototypeNode, path: String)] {
+        if type == "stack" {
+            return (screens ?? [:]).keys.sorted(by: { $0.utf16.lexicographicallyPrecedes($1.utf16) })
+                .compactMap { name in
+                    screens?[name].map { ($0, PrototypeStacks.screenPath(path, name: name)) }
+                }
+        }
         if let child { return [(child, "\(path).child")] }
         return (children ?? []).enumerated().map { ($0.element, "\(path).children[\($0.offset)]") }
     }
@@ -220,17 +227,26 @@ extension PrototypeNode {
         path: String = "root",
         state: [String: JSONValue],
         pages: [String: Int],
+        stacks: [String: PrototypeStackSnapshot] = [:],
         retainExiting: Bool = false
     )
         -> [PrototypeAnchoredNode]
     {
-        layeredAnchors(path: path, state: state, pages: pages, retainExiting: retainExiting, shown: true)
+        layeredAnchors(
+            path: path,
+            state: state,
+            pages: pages,
+            stacks: stacks,
+            retainExiting: retainExiting,
+            shown: true
+        )
     }
 
     private func layeredAnchors(
         path: String,
         state: [String: JSONValue],
         pages: [String: Int],
+        stacks: [String: PrototypeStackSnapshot] = [:],
         retainExiting: Bool,
         shown: Bool
     )
@@ -244,14 +260,9 @@ extension PrototypeNode {
         guard prototypeInlineContainerTypes.contains(type) else { return [] }
         if type == "bottomSheet", !(openWhen?.holds(state) ?? false) { return [] }
         if type == "searchBar", !searchBarActive(state: state) { return [] }
-        var entries = childEntries(path: path)
-        if type == "pager" {
-            // The renderer's clamp: a page past the end shows the last one.
-            let page = Swift.min(id.flatMap { pages[$0] } ?? 0, Swift.max(entries.count - 1, 0))
-            entries = entries.indices.contains(page) ? [entries[page]] : []
-        }
+        let entries = currentChildEntries(path: path, pages: pages, stacks: stacks, state: state)
         return PrototypeNode.layeredAnchors(
-            in: entries, state: state, pages: pages, retainExiting: retainExiting, ancestorsShown: shown
+            in: entries, state: state, pages: pages, stacks: stacks, retainExiting: retainExiting, ancestorsShown: shown
         )
     }
 
@@ -260,6 +271,7 @@ extension PrototypeNode {
         in entries: [(node: PrototypeNode, path: String)],
         state: [String: JSONValue],
         pages: [String: Int],
+        stacks: [String: PrototypeStackSnapshot] = [:],
         retainExiting: Bool = false,
         ancestorsShown: Bool = true
     )
@@ -270,7 +282,8 @@ extension PrototypeNode {
                 [PrototypeAnchoredNode(node: entry.node, path: entry.path, anchor: $0, ancestorsShown: ancestorsShown)]
             } ?? []
             return own + entry.node.layeredAnchors(
-                path: entry.path, state: state, pages: pages, retainExiting: retainExiting, shown: ancestorsShown
+                path: entry.path, state: state, pages: pages, stacks: stacks, retainExiting: retainExiting,
+                shown: ancestorsShown
             )
         }
     }
@@ -280,11 +293,12 @@ extension PrototypeNode {
     func windowAnchorLayer(
         state: [String: JSONValue],
         pages: [String: Int],
+        stacks: [String: PrototypeStackSnapshot] = [:],
         retainExiting: Bool = false
     )
         -> [PrototypeAnchoredNode]
     {
         let own = anchor.map { [PrototypeAnchoredNode(node: self, path: "root", anchor: $0)] } ?? []
-        return own + layeredAnchors(state: state, pages: pages, retainExiting: retainExiting)
+        return own + layeredAnchors(state: state, pages: pages, stacks: stacks, retainExiting: retainExiting)
     }
 }

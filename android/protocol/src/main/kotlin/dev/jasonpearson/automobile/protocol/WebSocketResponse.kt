@@ -760,6 +760,9 @@ data class PrototypeResult(
   /** Only patch replies report revisions, including refusals for a matching shown prototype. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val revision: Long? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val conflict: PrototypePatchConflict? = null,
+  /** Navigation state after a successful show; absent from other results. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val pages: Map<String, Int>? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val stacks: Map<String, PrototypeStackSnapshot>? = null,
   /** Only a successful show reply: why the existing prototype is hidden. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val hiddenReason: PrototypeHiddenReason? = null,
 ) : WebSocketResponse()
@@ -807,6 +810,14 @@ data class PrototypeAppearance(
   val deviceDark: Boolean,
 )
 
+/** Wire navigation snapshot; depth always equals the number of path entries. */
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class PrototypeStackSnapshot(
+  val path: List<String>,
+  @EncodeDefault(EncodeDefault.Mode.ALWAYS) val depth: Int = path.size,
+)
+
 /**
  * One prototype the device is showing. [id] is the prototype id, which is its spec id.
  * [lastSequence] is the highest `prototype_event` sequence allocated for it, so a host resumes from
@@ -829,6 +840,8 @@ data class PrototypeStatusEntry(
   @EncodeDefault(EncodeDefault.Mode.NEVER) val appearance: PrototypeAppearance? = null,
   /** The shown spec's read-only data; absent when the spec has none. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val data: JsonObject? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
 )
 
 @Serializable
@@ -836,6 +849,8 @@ enum class PrototypeEventKind {
   @SerialName("emit") EMIT,
   /** A pager settled on another page: `name` is the pager id, the payload the new page index. */
   @SerialName("page_changed") PAGE_CHANGED,
+  /** A stack changed top or depth: `name` is its id, payload is `{screen, depth}`. */
+  @SerialName("screen_changed") SCREEN_CHANGED,
   @SerialName("dismissed") DISMISSED,
   /**
    * The resolved light or dark mode of a shown prototype changed (`prototype_appearance_v1`). The
@@ -860,6 +875,8 @@ data class PrototypeEvent(
   val payload: JsonElement?,
   val state: Map<String, PrototypeScalar>,
   val pages: Map<String, Int> = emptyMap(),
+  @EncodeDefault(EncodeDefault.Mode.NEVER)
+  val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
 ) : WebSocketResponse()
 
 // =============================================================================

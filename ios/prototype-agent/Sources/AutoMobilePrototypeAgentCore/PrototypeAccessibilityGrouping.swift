@@ -12,6 +12,6 @@ func prototypeAccessibilityGrouping(type: String, tappable: Bool) -> Accessibili
     ].contains(type) {
         return .contain
     }
-    guard ["box", "row", "column", "flow", "grid", "scroll", "pager", "card"].contains(type) else { return .leaf }
+    guard ["box", "row", "column", "flow", "grid", "scroll", "pager", "stack", "card"].contains(type) else { return .leaf }
     return tappable ? .combine : .contain
 }

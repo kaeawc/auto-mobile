@@ -65,6 +65,9 @@ enum PrototypeRepeat {
         }
         fields["repeat"] = nil
         if let child = fields["child"] { fields["child"] = expand(child) }
+        if case let .object(screens)? = fields["screens"] {
+            fields["screens"] = .object(screens.mapValues(expand))
+        }
         return .object(fields)
     }
 
@@ -195,6 +198,9 @@ private struct Instance {
             fields["children"] = .array(children.map(bind))
         }
         if let child = fields["child"] { fields["child"] = bind(child) }
+        if case let .object(screens)? = fields["screens"] {
+            fields["screens"] = .object(screens.mapValues(bind))
+        }
         return .object(fields)
     }
 

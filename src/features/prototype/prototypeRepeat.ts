@@ -237,6 +237,12 @@ interface Child {
 }
 
 function childrenOf(node: Raw, path: string): Child[] {
+  if (node.type === "stack") {
+    return Object.entries(record(node.screens) ?? {}).flatMap(([name, value]) => {
+      const child = record(value);
+      return child ? [{ node: child, path: `${path}.screens[${JSON.stringify(name)}]` }] : [];
+    });
+  }
   const single = record(node.child);
   if (single) {
     return [{ node: single, path: `${path}.child` }];
@@ -280,6 +286,9 @@ function templateErrors(
   if (scope) {
     if (node.repeat !== undefined) {
       return fail(`${path}.repeat`, "Nested repeat is not supported");
+    }
+    if (node.type === "stack") {
+      return fail(path, "Stack cannot appear inside a repeat template");
     }
     if (node.type === "pager") {
       return fail(path, "Pager cannot appear inside a repeat template");

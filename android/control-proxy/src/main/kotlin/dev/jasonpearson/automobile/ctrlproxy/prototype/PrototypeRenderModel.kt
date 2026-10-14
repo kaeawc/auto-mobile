@@ -14,6 +14,7 @@ import dev.jasonpearson.automobile.protocol.*
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlinx.serialization.json.JsonPrimitive
 
 /** Immutable, device-free inputs for the Compose adapter. All numeric sizes remain dp. */
 @Immutable
@@ -125,13 +126,15 @@ fun guardPrototypeTree(root: PrototypeNode) {
 fun mapPrototypeSpec(
   spec: PrototypeSpec,
   pages: Map<String, Int> = emptyMap(),
+  stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
 ): PrototypeRenderModel =
   PrototypeTrace.section(PrototypeTrace.MAP_PROTOTYPE_SPEC) {
     val resolved = PrototypeDataResolver.resolve(spec)
     guardPrototypeTree(resolved.root)
     prototypeRenderModel(
       resolved,
-      PrototypeNodeMapping(resolved.state.orEmpty(), pages).map(resolved.root, "root"),
+      PrototypeNodeMapping(resolved.state.orEmpty(), pages, stacks = stacks)
+        .map(resolved.root, "root"),
     )
   }
 
@@ -153,6 +156,7 @@ internal class PrototypeNodeMapping(
   private val pages: Map<String, Int>,
   private val cache: PrototypeRenderCache? = null,
   private val previous: Map<String, PrototypeRenderNode> = emptyMap(),
+  private val stacks: Map<String, PrototypeStackSnapshot> = emptyMap(),
 ) {
   val nodes = mutableMapOf<String, PrototypeRenderNode>()
 
@@ -170,7 +174,14 @@ internal class PrototypeNodeMapping(
           )
       else pagerState ?: state
     val inPager = node is PrototypePagerNode || pagerState != null
-    val entries = cache?.children(node, path) ?: validatedPrototypeChildren(node, path)
+    val allEntries = cache?.children(node, path) ?: validatedPrototypeChildren(node, path)
+    // Hidden stack screens are never mapped into the rendered tree (including modal/anchor layers).
+    val entries =
+      if (node is PrototypeStackNode) {
+        val screen = stacks[node.id]?.path?.lastOrNull() ?: node.start
+        val screenPath = "$path.screens[${JsonPrimitive(screen)}]"
+        allEntries.filter { it.path == screenPath }
+      } else allEntries
     val role = prototypeNodeRole(node)
     val text = prototypeNodeText(node, state, localState, inPager)
     val visibleEntries =
@@ -305,6 +316,7 @@ private fun prototypeNodeRole(node: PrototypeNode): String =
     is PrototypeDatePickerNode -> "datePicker"
     is PrototypeScrollNode -> "scroll"
     is PrototypePagerNode -> "pager"
+    is PrototypeStackNode -> "stack"
     is PrototypeTabBarNode -> "tabBar"
     is PrototypeBottomNavNode -> "bottomNav"
     is PrototypeBottomSheetNode -> "bottomSheet"
@@ -704,7 +716,7 @@ fun modalPrototypeSheets(node: PrototypeRenderNode): List<PrototypeRenderNode> {
 
 /** Roles that compose their children inline through the node renderer; others never draw them. */
 private val PROTOTYPE_INLINE_CONTAINER_ROLES =
-  setOf("box", "row", "column", "flow", "grid", "scroll", "card", "pager", "searchBar")
+  setOf("box", "row", "column", "flow", "grid", "scroll", "card", "pager", "searchBar", "stack")
 
 /** A non-root anchored node: drawn in the window-level anchor layer, never in its parent. */
 internal fun isLayeredPrototypeAnchor(node: PrototypeRenderNode): Boolean =

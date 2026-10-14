@@ -462,6 +462,11 @@ scripts/ios/video-recording-start-stop-integration.sh
 
 The script uses an already booted iPhone simulator when available, otherwise it uses AutoMobile product boot. It requires `bun`, `xcrun`, `jq`, `ffmpeg`, and `ffprobe`, records for `AUTOMOBILE_IOS_VIDEO_RECORDING_WAIT_MS` milliseconds when set, and fails if the finalized `.mp4` is missing, empty, unreadable, or lacks a video stream.
 
+## Artifact Qualification
+
+- `release/write-build-info.ts` - Runs at `prepack`; writes reproducible source SHA, tracked-file dirtiness, package version, and native-resource checksum pins to `dist/build-info.json`. Skips with a warning when `dist/` is absent.
+- `qualification/artifactIdentity.ts` - Identifies an installed or extracted package, refuses source checkouts and mismatched expected SHAs, checks packed assets and native pins, and records the published managed-slot contract. Run `bun run qualify:identity --package-dir <dir>`; optional flags: `--tarball <tgz>`, `--expected-integrity <sri>`, `--repo <dir>`, `--expect-source-sha <sha>`, `--native-assets-dir <dir>`, `--out <file>`. Emits JSON plus checks on stderr; exits 0 identified, 1 refused, 2 usage error. Published-package proof requires matching expected tarball integrity.
+
 ## CI Integration
 
 The following scripts are invoked by GitHub Actions workflows:

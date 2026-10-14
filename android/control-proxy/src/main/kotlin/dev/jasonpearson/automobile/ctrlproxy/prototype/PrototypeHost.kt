@@ -126,6 +126,10 @@ data class PrototypeRequest(
  * window behaves as show. Read state is a snapshot, not a cross-thread compound transaction.
  */
 interface PrototypeHost {
+  /** True only during a temporary screenshot hide. */
+  val isHiddenForCapture: Boolean
+    get() = false
+
   val isShowing: Boolean
   val currentPlacement: PrototypePlacement?
   val isTouchThroughActive: Boolean
@@ -241,6 +245,7 @@ class DefaultPrototypeHost(
     ::viewPrototypeEscapeScheduler,
   private val escapeTouchSlop: (Context) -> Int = { ViewConfiguration.get(it).scaledTouchSlop },
   private val dispatchToContent: ((MotionEvent) -> Boolean)? = null,
+  private val isViewAttached: (View) -> Boolean = { it.isAttachedToWindow },
 ) : PrototypeHost {
   private class Window(
     val view: PrototypeComposeView,
@@ -261,6 +266,9 @@ class DefaultPrototypeHost(
   private var destroyed = false
   private val gestureMutex = Mutex()
   private val captureMutex = Mutex()
+
+  override val isHiddenForCapture: Boolean
+    get() = window?.view?.visibility == View.INVISIBLE
 
   override val isShowing: Boolean
     get() = window != null
@@ -493,6 +501,8 @@ class DefaultPrototypeHost(
     current.anchoredOrigin?.let { applyAnchoredOrigin(params, it) }
     if (touchThroughToken != null)
       params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+    if (copyParams(current.params).copyFrom(params) == 0 && isViewAttached(current.view))
+      return true
     return update(current, params)
   }
 

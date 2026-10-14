@@ -98,7 +98,7 @@ describe("device restart reserves the entire recovery window", () => {
       () => ({
         restore: () => {
           keepAwakeStarted = true;
-          return keepAwakeGate.promise;
+          return keepAwakeGate.promise.then(() => ({ status: "restored" as const }));
         },
       }),
     );
@@ -131,7 +131,7 @@ describe("device restart reserves the entire recovery window", () => {
         () => ({
           restore: () => {
             keepAwakeStarted = true;
-            return keepAwakeGate.promise;
+            return keepAwakeGate.promise.then(() => ({ status: "restored" as const }));
           },
         }),
       );

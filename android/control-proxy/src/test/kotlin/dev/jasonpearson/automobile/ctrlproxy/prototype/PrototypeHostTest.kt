@@ -92,6 +92,7 @@ class PrototypeHostTest {
       DefaultPrototypeHost(
         RuntimeEnvironment.getApplication(),
         manager,
+        isViewAttached = manager::isViewAttached,
         sdkInt = 30,
         mainThread = main,
         settleTimer = timer,
@@ -423,6 +424,21 @@ class PrototypeHostTest {
   }
 
   @Test
+  fun `idle relayout skips window updates and a density change updates once`() = runTest {
+    assertTrue(
+      host.show(PrototypeRequest(PrototypePlacement.Sheet(PrototypePlacement.Edge.BOTTOM, 20f))),
+    )
+    repeat(100) { assertTrue(host.relayout()) }
+    assertTrue(manager.updated.isEmpty())
+    density = 3f
+    assertTrue(host.relayout())
+    assertEquals(1, manager.updated.size)
+    assertEquals(60, manager.updated.single().height)
+    assertTrue(host.relayout())
+    assertEquals(1, manager.updated.size)
+  }
+
+  @Test
   fun `relayout refreshes density without recreating view owner or composition and keeps touch through`() =
     runTest {
       host.show(
@@ -680,7 +696,8 @@ class PrototypeHostTest {
 
   @Test
   fun `retryable update failure and normal dismiss do not report a lost window`() = runTest {
-    host.show()
+    host.show(PrototypeRequest(PrototypePlacement.Sheet(PrototypePlacement.Edge.BOTTOM, 20f)))
+    density = 3f
     manager.failUpdate = true
     assertFalse(host.relayout())
     assertTrue(host.isShowing)
@@ -1139,6 +1156,7 @@ class PrototypeHostTest {
     DefaultPrototypeHost(
       RuntimeEnvironment.getApplication(),
       manager,
+      isViewAttached = manager::isViewAttached,
       sdkInt = sdk,
       mainThread = main,
       settleTimer = timer,

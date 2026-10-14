@@ -356,6 +356,7 @@ describe("AdbClient.getBootedAndroidDevices", () => {
 
     expect(receivedSignal).toBeUndefined();
     expect(child.killCalls).toEqual([]);
+    child.emit("exit", 0, null);
   });
 
   test("does not spawn when cancellation arrives during executable resolution", async () => {

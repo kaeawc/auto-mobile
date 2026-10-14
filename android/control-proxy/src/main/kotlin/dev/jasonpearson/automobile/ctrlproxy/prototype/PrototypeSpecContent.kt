@@ -1,10 +1,12 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -817,6 +819,7 @@ private fun RenderPrototypeSheet(
   }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun prototypeNodeModifier(
   node: PrototypeRenderNode,
@@ -877,8 +880,24 @@ private fun prototypeNodeModifier(
   // is tappable, its ripple covers it, and its accessibility bounds are its drawn bounds (#10435).
   if (tappable) {
     modifier =
-      modifier.clickable(interactionSource = presses, indication = LocalIndication.current) {
-        interact(PrototypeInteraction.Tap(actions))
+      if (node.source?.onLongPress != null || node.source?.onDoubleTap != null) {
+        modifier.combinedClickable(
+          interactionSource = presses,
+          indication = LocalIndication.current,
+          onClick = { if (actions.isNotEmpty()) interact(PrototypeInteraction.Tap(actions)) },
+          onLongClick =
+            node.source?.onLongPress?.let { longPress ->
+              { interact(PrototypeInteraction.Tap(longPress)) }
+            },
+          onDoubleClick =
+            node.source?.onDoubleTap?.let { doubleTap ->
+              { interact(PrototypeInteraction.Tap(doubleTap)) }
+            },
+        )
+      } else {
+        modifier.clickable(interactionSource = presses, indication = LocalIndication.current) {
+          interact(PrototypeInteraction.Tap(actions))
+        }
       }
   }
   val description =
@@ -1015,7 +1034,7 @@ internal fun prototypeMergedTapLabel(node: PrototypeRenderNode, tappable: Boolea
     if (
       child.testTag != null ||
         !child.contentDescription.isNullOrEmpty() ||
-        !child.source?.onTap.isNullOrEmpty() ||
+        prototypeNodeTappable(child) ||
         child.source?.visibleWhen != null ||
         child.source?.anchor != null
     )
@@ -1072,9 +1091,8 @@ private fun prototypeIconOnlyLabel(children: List<PrototypeRenderNode>): String?
   val only = children.filter { it.visible }.singleOrNull() ?: return null
   return when {
     only.role == "icon" -> only.iconName?.takeIf { it.isNotEmpty() }
-    only.role in SEMANTICS_FREE_CONTAINERS &&
-      only.text.isEmpty() &&
-      only.source?.onTap.isNullOrEmpty() -> prototypeIconOnlyLabel(only.children)
+    only.role in SEMANTICS_FREE_CONTAINERS && only.text.isEmpty() && !prototypeNodeTappable(only) ->
+      prototypeIconOnlyLabel(only.children)
     else -> null
   }
 }

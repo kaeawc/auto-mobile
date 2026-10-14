@@ -75,6 +75,11 @@ class PrototypeSpecTest {
         node.serialName to ((0 until node.elementsCount).map(node::getElementName) + "type").toSet()
       }
     assertEquals(variants.keys, models.keys)
+    val gestureTypes = setOf("box", "row", "column", "text", "image", "icon", "card")
+    for ((type, fields) in models) {
+      assertEquals(type in gestureTypes, "onLongPress" in fields, type)
+      assertEquals(type in gestureTypes, "onDoubleTap" in fields, type)
+    }
     for ((type, variant) in variants) {
       assertEquals(variant.jsonObject.getValue("fields").jsonObject.keys, models[type], type)
     }

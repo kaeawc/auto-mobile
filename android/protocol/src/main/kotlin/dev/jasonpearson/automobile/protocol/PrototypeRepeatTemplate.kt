@@ -190,9 +190,11 @@ internal object PrototypeBindableFields {
       }
 
     fun actions(data: JsonObject, path: String): T? {
-      for ((action, actionPath) in objects(data, "onTap", path)) {
-        action(action, actionPath)?.let {
-          return it
+      for (field in listOf("onTap", "onLongPress", "onDoubleTap")) {
+        for ((action, actionPath) in objects(data, field, path)) {
+          action(action, actionPath)?.let {
+            return it
+          }
         }
       }
       return null

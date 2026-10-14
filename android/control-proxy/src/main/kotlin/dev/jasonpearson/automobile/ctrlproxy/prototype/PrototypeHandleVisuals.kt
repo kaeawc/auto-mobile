@@ -6,7 +6,9 @@ internal val LocalPrototypeHandleVisuals = compositionLocalOf<Set<String>> { emp
 
 /** The renderer's generic tap handler, excluding roles whose components own their actions. */
 internal fun prototypeNodeTappable(node: PrototypeRenderNode): Boolean =
-  !node.source?.onTap.isNullOrEmpty() &&
+  (!node.source?.onTap.isNullOrEmpty() ||
+    !node.source?.onLongPress.isNullOrEmpty() ||
+    !node.source?.onDoubleTap.isNullOrEmpty()) &&
     node.role != "textField" &&
     node.role !in PROTOTYPE_MODAL_ROLES &&
     node.role !in PROTOTYPE_COMPONENT_ROLES &&

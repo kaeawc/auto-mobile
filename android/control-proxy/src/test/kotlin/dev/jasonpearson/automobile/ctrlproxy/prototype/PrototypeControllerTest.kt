@@ -60,11 +60,320 @@ class PrototypeControllerTest {
       root = PrototypeTextNode(text = "{name}"),
     )
 
+  private class HiddenFixture {
+    val host = FakePrototypeHost()
+    val shown = mutableListOf<PrototypeHiddenReason?>()
+    val statuses = mutableListOf<PrototypeStatusEntry>()
+    val probes = mutableListOf<Int>()
+    val delays = mutableListOf<Long>()
+    var blocked = false
+    var suspended = false
+    var onScreen: (Int) -> Boolean? = { false }
+    var wait: suspend (Long) -> Unit = { delays += it }
+    val controller =
+      PrototypeController(
+        host,
+        object : PrototypeResultSink {
+          override suspend fun send(requestId: String?, success: Boolean, error: String?) {
+            check(success) { error.orEmpty() }
+          }
+
+          override suspend fun sendShown(
+            requestId: String?,
+            missingAssets: List<String>,
+            appearance: PrototypeAppearance,
+            hiddenReason: PrototypeHiddenReason?,
+          ) {
+            shown += hiddenReason
+          }
+
+          override suspend fun sendPrototypeStatus(
+            requestId: String?,
+            prototypes: List<PrototypeStatusEntry>,
+            droppedEvents: Long,
+          ) {
+            statuses.addAll(prototypes)
+          }
+        },
+        lifecycle = PrototypeLifecycle(FakePrototypeTimer(), isBlocked = { blocked }),
+        foreground =
+          object : PrototypeForegroundScope {
+            override val suspended: Boolean
+              get() = this@HiddenFixture.suspended
+
+            override fun anchor() = Unit
+
+            override fun release() = Unit
+          },
+        windowOnScreen =
+          PrototypeWindowOnScreen { displayId ->
+            probes += displayId
+            onScreen(probes.size)
+          },
+        settle = { wait(it) },
+      )
+
+    suspend fun show(layer: String = "app", displayId: Int = 0, reset: Boolean = false) {
+      controller.show(
+        "show",
+        PrototypeSpec(
+          "panel",
+          PrototypeWindow(PrototypeFullscreenPlacement(), layer = layer),
+          root = PrototypeTextNode(text = "Panel"),
+        ),
+        displayId = displayId,
+        reset = reset,
+      )
+    }
+  }
+
+  @Test
+  fun `window probe reads only titled candidates and preserves unknown`() {
+    val ownPackage = "dev.jasonpearson.automobile.ctrlproxy"
+    val reads = mutableListOf<String?>()
+    fun probe(windows: List<Triple<Int, String, String?>>?): Boolean? =
+      prototypeWindowOnScreen(
+        windows,
+        hasTitle = { hasPrototypeTitle(it.first, it.second) },
+        rootPackage = {
+          reads += it.third
+          it.third
+        },
+        ownPackage = ownPackage,
+      )
+    val type = android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM
+    assertNull(probe(null))
+    assertNull(probe(listOf(Triple(type, PROTOTYPE_WINDOW_TITLE, null))))
+    assertEquals(true, probe(listOf(Triple(type, PROTOTYPE_WINDOW_TITLE, ownPackage))))
+    reads.clear()
+    assertEquals(false, probe(listOf(Triple(type, "Highlight", ownPackage))))
+    assertEquals(false, probe(listOf(Triple(1, PROTOTYPE_WINDOW_TITLE, ownPackage))))
+    assertTrue(reads.isEmpty())
+    assertEquals(false, probe(listOf(Triple(type, PROTOTYPE_WINDOW_TITLE, "other.app"))))
+  }
+
+  @Test
+  fun `inspect uses bounded confirmation and stops at visible or unknown`() = runTest {
+    for (result in listOf(true, false, null)) {
+      val fixture = HiddenFixture()
+      fixture.onScreen = { true }
+      fixture.show()
+      fixture.probes.clear()
+      fixture.delays.clear()
+      fixture.onScreen = { attempt -> if (result == true && attempt < 3) false else result }
+      fixture.controller.inspect("inspect")
+      val expectedProbes =
+        when (result) {
+          true -> 3
+          false -> 5
+          null -> 1
+        }
+      assertEquals(List(expectedProbes) { 0 }, fixture.probes)
+      assertEquals(List(expectedProbes - 1) { 100L }, fixture.delays)
+      assertEquals(
+        if (result == false) PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN else null,
+        fixture.statuses.single().hiddenReason,
+      )
+    }
+  }
+
+  @Test
+  fun `hidden decision distinguishes runtime layer display capture block and suspension`() =
+    runTest {
+      val fixture = HiddenFixture()
+      val controller = fixture.controller
+      assertNull(controller.hiddenReason(0, false))
+      fixture.show(displayId = 2)
+      assertEquals(PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN, controller.hiddenReason(2, false))
+      assertNull(controller.hiddenReason(0, false))
+      assertNull(controller.hiddenReason(2, null))
+      assertNull(controller.hiddenReason(2, true))
+      fixture.host.isHiddenForCapture = true
+      assertNull(controller.hiddenReason(2, false))
+      fixture.host.isHiddenForCapture = false
+      fixture.blocked = true
+      assertEquals(PrototypeHiddenReason.DEVICE_BLOCKED, controller.hiddenReason(0, null))
+      fixture.suspended = true
+      assertNull(controller.hiddenReason(2, false))
+      fixture.suspended = false
+      fixture.blocked = false
+      fixture.show(layer = "system")
+      assertNull(controller.hiddenReason(2, false))
+      fixture.blocked = true
+      assertEquals(PrototypeHiddenReason.DEVICE_BLOCKED, controller.hiddenReason(2, false))
+    }
+
+  @Test
+  fun `app show confirms five absent windows using four injected waits`() = runTest {
+    val fixture = HiddenFixture()
+    fixture.show()
+    assertEquals(listOf(0, 0, 0, 0, 0), fixture.probes)
+    assertEquals(listOf(100L, 100L, 100L, 100L), fixture.delays)
+    assertEquals(listOf(PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN), fixture.shown)
+    // In-place and fresh replacement replies use the same confirmation path.
+    fixture.show()
+    assertEquals(10, fixture.probes.size)
+    assertEquals(PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN, fixture.shown.last())
+    fixture.show(reset = true)
+    assertEquals(15, fixture.probes.size)
+    assertEquals(PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN, fixture.shown.last())
+  }
+
+  @Test
+  fun `show stops probing at visible or unknown and skips system and blocked windows`() = runTest {
+    val visible = HiddenFixture()
+    visible.onScreen = { it == 2 }
+    visible.show()
+    assertEquals(2, visible.probes.size)
+    assertEquals(listOf(100L), visible.delays)
+    assertNull(visible.shown.single())
+    val unknown = HiddenFixture()
+    unknown.onScreen = { null }
+    unknown.show()
+    assertEquals(1, unknown.probes.size)
+    assertTrue(unknown.delays.isEmpty())
+    assertNull(unknown.shown.single())
+    val system = HiddenFixture()
+    system.show("system")
+    assertTrue(system.probes.isEmpty())
+    assertNull(system.shown.single())
+    for (layer in listOf("system", "app")) {
+      val blocked = HiddenFixture()
+      blocked.blocked = true
+      blocked.show(layer)
+      assertTrue(blocked.probes.isEmpty())
+      assertTrue(blocked.delays.isEmpty())
+      assertEquals(PrototypeHiddenReason.DEVICE_BLOCKED, blocked.shown.single())
+    }
+  }
+
+  @Test
+  fun `inspect reports hidden app window but suspension retains its own flag`() = runTest {
+    val fixture = HiddenFixture()
+    fixture.show()
+    fixture.controller.inspect("inspect")
+    assertEquals(
+      PrototypeHiddenReason.APP_LAYER_WINDOW_HIDDEN,
+      fixture.statuses.last().hiddenReason,
+    )
+    fixture.suspended = true
+    fixture.controller.inspect("suspended")
+    assertTrue(fixture.statuses.last().suspended)
+    assertNull(fixture.statuses.last().hiddenReason)
+  }
+
+  @Test
+  fun `show settle cancellation propagates without a reply`() = runTest {
+    val fixture = HiddenFixture()
+    fixture.wait = { throw CancellationException("cancelled") }
+    try {
+      fixture.show()
+      fail("Expected cancellation")
+    } catch (_: CancellationException) {
+      assertTrue(fixture.shown.isEmpty())
+      assertEquals(1, fixture.probes.size)
+    }
+  }
+
   private fun assertResult(id: String, success: Boolean, error: String? = null) {
     assertEquals(id, results.last().requestId)
     assertEquals(success, results.last().success)
     if (error != null)
       assertTrue(results.last().error.orEmpty(), results.last().error.orEmpty().contains(error))
+  }
+
+  @Test
+  fun `idle configuration keeps mapping passes stable but always relayouts`() = runTest {
+    val device = FakePrototypeDeviceAppearance()
+    val subject =
+      PrototypeController(
+        host,
+        PrototypeResultSink { _, _, _ -> },
+        lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
+        deviceAppearance = device,
+      )
+    subject.show("show", spec())
+    val runtime = checkNotNull(subject.activeRuntime)
+    val passes = runtime.renderMappingPasses
+    repeat(100) { subject.onConfigurationChanged() }
+    assertEquals(passes, runtime.renderMappingPasses)
+    assertEquals(100, host.calls.count { it == "relayout" })
+  }
+
+  @Test
+  fun `configuration sync follows device palette snapshot interaction and override changes`() =
+    runTest {
+      val device = FakePrototypeDeviceAppearance()
+      val subject =
+        PrototypeController(
+          host,
+          PrototypeResultSink { _, _, _ -> },
+          eventSink = PrototypeEventSink { events += it },
+          lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
+          deviceAppearance = device,
+        )
+      val initial = spec().copy(state = mapOf("name" to PrototypeScalar.Text("old")))
+      subject.show("show", initial)
+      val runtime = checkNotNull(subject.activeRuntime)
+      device.dark = true
+      subject.onConfigurationChanged()
+      repeat(100) { subject.onConfigurationChanged() }
+      assertEquals(1, events.count { it.kind == PrototypeEventKind.APPEARANCE_CHANGED })
+      assertTrue(checkNotNull(host.requests.last().theme).value.appearance.dark)
+      device.paletteKey = 42
+      subject.onConfigurationChanged()
+      assertEquals(42, checkNotNull(host.requests.last().theme).value.paletteKey)
+      assertEquals(1, events.count { it.kind == PrototypeEventKind.APPEARANCE_CHANGED })
+      val passes = runtime.renderMappingPasses
+      runtime.replace(initial.copy(state = mapOf("name" to PrototypeScalar.Text("replaced"))))
+      subject.onConfigurationChanged()
+      assertEquals(passes + 1, runtime.renderMappingPasses)
+      subject.interact(
+        runtime,
+        PrototypeInteraction.Tap(
+          listOf(
+            PrototypeSetStateAction("name", PrototypeScalar.Text("tapped")),
+          ),
+        ),
+      )
+      assertEquals(passes + 2, runtime.renderMappingPasses)
+      subject.onConfigurationChanged()
+      assertEquals(passes + 2, runtime.renderMappingPasses)
+      subject.show("override", initial, appearance = PrototypeAppearanceOverride.LIGHT)
+      assertFalse(checkNotNull(host.requests.last().theme).value.appearance.dark)
+      val replacement = checkNotNull(subject.activeRuntime)
+      val replacementPasses = replacement.renderMappingPasses
+      subject.onConfigurationChanged()
+      assertEquals(replacementPasses, replacement.renderMappingPasses)
+    }
+
+  @Test
+  fun `failed appearance sync does not retain the previous successful key`() = runTest {
+    val device = FakePrototypeDeviceAppearance()
+    var rejectAppearance = true
+    val subject =
+      PrototypeController(
+        host,
+        PrototypeResultSink { _, _, _ -> },
+        eventSink =
+          PrototypeEventSink {
+            if (it.kind == PrototypeEventKind.APPEARANCE_CHANGED && rejectAppearance)
+              throw IllegalStateException("Rejected appearance event")
+            events += it
+          },
+        lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
+        deviceAppearance = device,
+      )
+    subject.show("show", spec())
+    device.dark = true
+    subject.onConfigurationChanged()
+    assertTrue(checkNotNull(host.requests.last().theme).value.appearance.dark)
+    rejectAppearance = false
+    device.dark = false
+    subject.onConfigurationChanged()
+    assertFalse(checkNotNull(host.requests.last().theme).value.appearance.dark)
+    assertEquals(1, events.count { it.kind == PrototypeEventKind.APPEARANCE_CHANGED })
+    assertEquals(2, host.calls.count { it == "relayout" })
   }
 
   @Test

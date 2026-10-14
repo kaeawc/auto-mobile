@@ -9,6 +9,7 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import {
   ProcessTableEmulatorProcessStopper,
   isSafeEmulatorProcessPid,
+  type EmulatorGroupProbe,
   type EmulatorProcessSignaler,
   type EmulatorProcessStopper,
 } from "../utils/android-cmdline-tools/EmulatorProcessStop";
@@ -16,38 +17,47 @@ import {
 type ProcessGroupRow = { pid: number; pgid: number; command: string };
 
 /** ps's first two columns are integers; the remainder is the exact command, including spaces. */
-function parseProcessGroups(stdout: string): ProcessGroupRow[] {
-  return stdout.split("\n").flatMap((line) => {
+function parseProcessGroups(stdout: string): ProcessGroupRow[] | undefined {
+  const rows: ProcessGroupRow[] = [];
+  for (const line of stdout.split("\n")) {
+    if (!line.trim()) {
+      continue;
+    }
     const columns = /^\s*(\d+)\s+(\d+)\s+(.+)$/.exec(line);
-    if (!columns) {
-      return [];
+    if (!columns || !columns[3].trim()) {
+      return undefined;
     }
     const pid = Number(columns[1]);
     const pgid = Number(columns[2]);
-    return Number.isSafeInteger(pid) && Number.isSafeInteger(pgid)
-      ? [{ pid, pgid, command: columns[3] }]
-      : [];
-  });
+    if (!Number.isSafeInteger(pid) || !Number.isSafeInteger(pgid)) {
+      return undefined;
+    }
+    rows.push({ pid, pgid, command: columns[3] });
+  }
+  return rows;
 }
 
 function provenOwnGroup(
-  rows: ProcessGroupRow[],
+  rows: ProcessGroupRow[] | undefined,
   identity: { pid: number; command: string },
   ownPid: number,
-): number | undefined {
+): EmulatorGroupProbe {
+  if (!rows) {
+    return { kind: "unproven" };
+  }
   const candidates = rows.filter((row) => row.pid === identity.pid);
   const owners = rows.filter((row) => row.pid === ownPid);
   const row = candidates[0];
   const owner = owners[0];
-  return candidates.length === 1 &&
-    owners.length === 1 &&
-    row.command === identity.command &&
-    row.pgid === row.pid &&
-    row.pgid > 1 &&
-    owner.pgid > 0 &&
-    row.pgid !== owner.pgid
-    ? row.pgid
-    : undefined;
+  if (owners.length !== 1 || owner.pgid <= 0 || candidates.length > 1) {
+    return { kind: "unproven" };
+  }
+  if (!row || row.command !== identity.command) {
+    return { kind: "absent" };
+  }
+  return row.pgid === row.pid && row.pgid > 1 && row.pgid !== owner.pgid
+    ? { kind: "own-group", pgid: row.pgid }
+    : { kind: "shared" };
 }
 
 /** Host signalling leaf; the executor seam keeps process-group proof tool-free in tests. */
@@ -61,20 +71,21 @@ export class HostEmulatorProcessSignaler implements EmulatorProcessSignaler {
   async resolveOwnGroup(
     identity: { pid: number; command: string },
     options: { signal?: AbortSignal; deadlineMs: number },
-  ): Promise<number | undefined> {
+  ): Promise<EmulatorGroupProbe> {
     const ownPid = this.options.ownPid ?? process.pid;
     if (
       (this.options.platform ?? process.platform) === "win32" ||
+      !Number.isSafeInteger(identity.pid) ||
       !isSafeEmulatorProcessPid(identity.pid, ownPid)
     ) {
-      return undefined;
+      return { kind: "unproven" };
     }
     const controller = new AbortController();
     const signal = options.signal
       ? AbortSignal.any([options.signal, controller.signal])
       : controller.signal;
     try {
-      const timeoutMs = Math.min(1000, options.deadlineMs - this.timer.now());
+      const timeoutMs = Math.min(500, options.deadlineMs - this.timer.now());
       if (timeoutMs <= 0) {
         throw new Error("Process group probe deadline already spent");
       }
@@ -99,7 +110,7 @@ export class HostEmulatorProcessSignaler implements EmulatorProcessSignaler {
         `[EmulatorProcessStop] group probe failed for pid ${identity.pid}: ${errorMessage(error)}`,
         error,
       );
-      return undefined;
+      return { kind: "unproven" };
     }
   }
 

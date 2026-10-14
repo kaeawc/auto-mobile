@@ -18,14 +18,19 @@ export interface EmulatorProcessTableSource {
     deadlineMs?: number;
   }): Promise<{ value?: EmulatorHostProcessRow[]; error?: string }>;
 }
+export type EmulatorGroupProbe =
+  | { kind: "own-group"; pgid: number }
+  | { kind: "shared" }
+  | { kind: "absent" }
+  | { kind: "unproven" };
 export interface EmulatorProcessSignaler {
   signal(pid: number, signal: "SIGTERM" | "SIGKILL"): void;
   isRunning(pid: number): boolean;
-  /** Return a group only after proving this command leads a group separate from the daemon. */
+  /** Distinguish a proven separate group, a shared group, and a gone or unproven process. */
   resolveOwnGroup?(
     identity: { pid: number; command: string },
     options: { signal?: AbortSignal; deadlineMs: number },
-  ): Promise<number | undefined>;
+  ): Promise<EmulatorGroupProbe>;
   signalGroup?(pgid: number, signal: "SIGTERM" | "SIGKILL"): void;
 }
 type Candidate = { pid: number; command: string };
@@ -240,8 +245,15 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
     if (this.timer.now() >= options.deadlineMs) {
       return this.stillRunning(identity, false);
     }
-    const group = await this.resolveOwnGroup(identity, stopOptions);
+    const probe = await this.resolveOwnGroup(identity, stopOptions);
     options.signal?.throwIfAborted();
+    if (probe.kind === "absent") {
+      logger.warn(
+        `[EmulatorProcessStop] pid ${identity.pid} disappeared or changed command before SIGTERM; leaving its replacement untouched`,
+      );
+      return { kind: "stopped", pid: identity.pid, signal: "SIGTERM" };
+    }
+    const group = probe.kind === "own-group" ? probe.pgid : undefined;
     // A pid can exit and be reused; send TERM immediately after the single group probe.
     const termSentAt = this.timer.now();
     const term = this.send(identity, "SIGTERM", group);
@@ -271,9 +283,12 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
   private async resolveOwnGroup(
     identity: Candidate,
     options: StopOptions,
-  ): Promise<number | undefined> {
+  ): Promise<EmulatorGroupProbe> {
     if (!this.signaler.resolveOwnGroup) {
-      return undefined;
+      logger.warn(
+        `[EmulatorProcessStop] own group unproven for pid ${identity.pid}; signalling pid only`,
+      );
+      return { kind: "unproven" };
     }
     const controller = new AbortController();
     const signal = options.signal
@@ -298,20 +313,28 @@ export class ProcessTableEmulatorProcessStopper implements EmulatorProcessStoppe
           onTimeout: () => controller.abort(),
         },
       );
-      if (group === identity.pid && group > 1 && this.signaler.signalGroup) {
+      if (group.kind === "shared" || group.kind === "absent") {
+        return group;
+      }
+      if (
+        group.kind === "own-group" &&
+        group.pgid === identity.pid &&
+        group.pgid > 1 &&
+        this.signaler.signalGroup
+      ) {
         return group;
       }
       logger.warn(
         `[EmulatorProcessStop] own group unproven for pid ${identity.pid}; signalling pid only`,
       );
-      return undefined;
+      return { kind: "unproven" };
     } catch (error) {
       options.signal?.throwIfAborted();
       logger.warn(
         `[EmulatorProcessStop] own group unavailable for pid ${identity.pid}; signalling pid only: ${errorMessage(error)}`,
         error,
       );
-      return undefined;
+      return { kind: "unproven" };
     }
   }
 

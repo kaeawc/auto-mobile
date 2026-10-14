@@ -1019,6 +1019,7 @@ export const PROTOTYPE_DATA_MODEL_CAPABILITY = "prototype_data_model_v1";
  * `theme.colors.light` / `theme.colors.dark`, and `{light, dark}` image assets. A device without it
  * rejects or misdraws those forms, so the host refuses the show before sending.
  */
+export const PROTOTYPE_FLOW_GRID_CAPABILITY = "prototype_flow_grid_v1";
 export const PROTOTYPE_THEME_MODES_CAPABILITY = "prototype_theme_modes_v1";
 
 /** Future iOS capabilities that lift host-reported prototype platform differences. */

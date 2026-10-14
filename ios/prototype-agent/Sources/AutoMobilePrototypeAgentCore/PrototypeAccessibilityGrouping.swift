@@ -9,6 +9,6 @@ func prototypeAccessibilityGrouping(type: String, tappable: Bool) -> Accessibili
     if ["radioGroup", "segmentedButton", "topAppBar", "dialog", "snackbar", "bottomSheet"].contains(type) {
         return .contain
     }
-    guard ["box", "row", "column", "scroll", "pager", "card"].contains(type) else { return .leaf }
+    guard ["box", "row", "column", "flow", "grid", "scroll", "pager", "card"].contains(type) else { return .leaf }
     return tappable ? .combine : .contain
 }

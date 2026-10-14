@@ -519,6 +519,21 @@ advertise it today). `maxLength` draws a counter and produces no platform note.
 Open question: secure values remain in state and `change` events/`inspect`; this slice
 does not redact them. Platform implementation follows in a later pass.
 
+## Flow and grid contract (not device-verified)
+
+`prototype_flow_grid_v1` gates `flow` (wrapping row) and `grid`. Both support
+children and repeat, with normal node/depth budgets. Flow's optional integer
+`maxLines >= 1` clips overflow visually without removing hierarchy children.
+`style.spacing` is the item gap; finite nonnegative `style.runSpacing` is the
+line/row gap and has the same bounds as spacing (meaningful only on flow/grid).
+Grid requires integer `columns` in 1..12 or `{minWidth: dp}` (finite, > 0).
+Spacing applies to both axes unless runSpacing overrides the row gap. Grid is
+always non-lazy, preserves every child in the hierarchy, and never scrolls
+itself; authors wrap it in `scroll`. Row-major placement starts a new row when
+a child's span does not fit. Optional integer `span >= 1` is valid only on a
+direct grid child and cannot exceed fixed columns; the renderer clamps spans
+to the resolved runtime count. Shared fixtures define host validation behavior.
+
 ## Saved prototype on-disk layout (#12254)
 
 One saved prototype lives in the viewer app container:

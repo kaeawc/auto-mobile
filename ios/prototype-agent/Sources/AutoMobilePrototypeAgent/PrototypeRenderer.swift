@@ -266,6 +266,22 @@ struct NodeView: View {
                 VStack(alignment: .leading, spacing: style?.spacing ?? 0) { arranged(horizontal: false) }
                     .animation(sizeAnimation, value: layoutSignature)
             }
+        case "flow":
+            PrototypeFlowLayout(
+                spacing: style?.spacing ?? 0, runSpacing: style?.runSpacing ?? 0, maxLines: node.maxLines
+            ) { children }
+                .clipped()
+                .animation(sizeAnimation, value: layoutSignature)
+        case "grid":
+            PrototypeGridLayout(
+                columns: node.columns ?? .fixed(1), spacing: style?.spacing ?? 0, runSpacing: style?.runSpacing
+            ) {
+                ForEach(node.drawnChildren(holds: model.holds), id: \.offset) { entry in
+                    NodeView(node: entry.node, model: model, inStackSlot: true)
+                        .layoutValue(key: PrototypeGridSpanKey.self, value: entry.node.span ?? 1)
+                }
+            }
+            .animation(sizeAnimation, value: layoutSignature)
         case "text":
             textView
         case "image":
@@ -737,7 +753,7 @@ struct NodeView: View {
             case "end": return .trailing
             default: return .leading
             }
-        case "column":
+        case "column", "flow", "grid":
             switch style?.arrangement {
             case "center": return .leading
             case "end": return .bottomLeading
@@ -757,6 +773,81 @@ struct NodeView: View {
             bottom: edges.contains("bottom") ? all.bottom : 0,
             right: edges.contains("end") ? all.right : 0
         )
+    }
+}
+
+private struct PrototypeGridSpanKey: LayoutValueKey {
+    static let defaultValue = 1
+}
+
+/// Thin SwiftUI adapters over Core's eager, device-free placement maths. Custom Layout placements
+/// mirror automatically in RTL, just like PrototypeWeightedStackLayout.
+private struct PrototypeFlowLayout: Layout {
+    let spacing: Double
+    let runSpacing: Double
+    let maxLines: Int?
+
+    private func frames(proposal: ProposedViewSize, subviews: Subviews) -> PrototypeFlowGridFrames {
+        let width = proposal.width.flatMap { $0.isFinite ? Double($0) : nil }
+        let sizes = subviews.map { child in
+            let size = child.sizeThatFits(ProposedViewSize(width: width.map { CGFloat($0) }, height: nil))
+            return (width: Double(size.width), height: Double(size.height))
+        }
+        return PrototypeFlowPlacement.frames(
+            sizes: sizes, available: width, spacing: spacing, runSpacing: runSpacing, maxLines: maxLines
+        )
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
+        let result = frames(proposal: proposal, subviews: subviews)
+        return CGSize(width: result.width, height: result.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) {
+        let result = frames(proposal: ProposedViewSize(width: bounds.width, height: nil), subviews: subviews)
+        for (index, child) in subviews.enumerated() {
+            let frame = result.children[index]
+            // Overflow remains placed below the clipped container, with its view and semantics
+            // intact. Never hide, omit or lazily instantiate a child to enforce maxLines.
+            child.place(
+                at: CGPoint(x: bounds.minX + frame.x, y: bounds.minY + frame.y), anchor: .topLeading,
+                proposal: ProposedViewSize(width: frame.width, height: frame.height)
+            )
+        }
+    }
+}
+
+private struct PrototypeGridLayout: Layout {
+    let columns: PrototypeGridColumns
+    let spacing: Double
+    let runSpacing: Double?
+
+    private func frames(proposal: ProposedViewSize, subviews: Subviews) -> PrototypeFlowGridFrames {
+        PrototypeGridPlacement.frames(
+            columns: columns,
+            available: proposal.width.flatMap { $0.isFinite ? Double($0) : nil },
+            spacing: spacing, runSpacing: runSpacing,
+            spans: subviews.map { $0[PrototypeGridSpanKey.self] }
+        ) { index, width in
+            let size = subviews[index].sizeThatFits(ProposedViewSize(width: width.map { CGFloat($0) }, height: nil))
+            return (Double(size.width), Double(size.height))
+        }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
+        let result = frames(proposal: proposal, subviews: subviews)
+        return CGSize(width: result.width, height: result.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) {
+        let result = frames(proposal: ProposedViewSize(width: bounds.width, height: nil), subviews: subviews)
+        for (index, child) in subviews.enumerated() {
+            let frame = result.children[index]
+            child.place(
+                at: CGPoint(x: bounds.minX + frame.x, y: bounds.minY + frame.y), anchor: .topLeading,
+                proposal: ProposedViewSize(width: frame.width, height: frame.height)
+            )
+        }
     }
 }
 

@@ -322,6 +322,7 @@ const styleSchema = z
       .enum(["start", "center", "end", "spaceBetween", "spaceAround", "spaceEvenly"])
       .optional(),
     spacing: z.number().finite().min(0).max(10000).optional(),
+    runSpacing: z.number().finite().min(0).max(10000).optional(),
     textSize: z.number().finite().min(1e-6).max(1000).optional(),
     fontWeight: z.number().finite().int().min(100).max(900).optional(),
     color: colorValueSchema.optional(),
@@ -448,6 +449,7 @@ export const actionSchema = z.discriminatedUnion("type", [
   z.object({ type: z.enum(["dismiss"]) }).strict(),
 ]);
 const commonNodeShape = {
+  span: z.number().finite().int().min(1).optional(),
   id: z.string().min(1).optional(),
   testTag: z.string().min(1).optional(),
   // The node's accessible label, read by observe and screen readers in place of its text (#10446).
@@ -484,6 +486,25 @@ const rowBaseSchema = z
   .strict();
 const columnBaseSchema = z
   .object({ ...commonNodeShape, ...repeatShape, type: z.enum(["column"]) })
+  .strict();
+const flowBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    ...repeatShape,
+    type: z.enum(["flow"]),
+    maxLines: z.number().finite().int().min(1).optional(),
+  })
+  .strict();
+const gridBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    ...repeatShape,
+    type: z.enum(["grid"]),
+    columns: z.union([
+      z.number().finite().int().min(1).max(12),
+      z.object({ minWidth: z.number().finite().positive() }).strict(),
+    ]),
+  })
   .strict();
 const textBaseSchema = z
   .object({ ...commonNodeShape, type: z.enum(["text"]), text: z.string() })
@@ -757,6 +778,8 @@ export type PrototypeNode =
   | (z.infer<typeof boxBaseSchema> & { children: PrototypeNode[] })
   | (z.infer<typeof rowBaseSchema> & { children: PrototypeNode[] })
   | (z.infer<typeof columnBaseSchema> & { children: PrototypeNode[] })
+  | (z.infer<typeof flowBaseSchema> & { children: PrototypeNode[] })
+  | (z.infer<typeof gridBaseSchema> & { children: PrototypeNode[] })
   | z.infer<typeof textBaseSchema>
   | z.infer<typeof imageBaseSchema>
   | z.infer<typeof iconBaseSchema>
@@ -793,6 +816,8 @@ export const prototypeNodeSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown
       boxBaseSchema.extend({ children: z.array(z.lazy(() => prototypeNodeSchema)).min(0) }),
       rowBaseSchema.extend({ children: z.array(z.lazy(() => prototypeNodeSchema)).min(0) }),
       columnBaseSchema.extend({ children: z.array(z.lazy(() => prototypeNodeSchema)).min(0) }),
+      flowBaseSchema.extend({ children: z.array(z.lazy(() => prototypeNodeSchema)).min(0) }),
+      gridBaseSchema.extend({ children: z.array(z.lazy(() => prototypeNodeSchema)).min(0) }),
       textBaseSchema,
       imageBaseSchema,
       iconBaseSchema,
@@ -924,6 +949,8 @@ export const PROTOTYPE_NODE_TYPES = [
   "box",
   "row",
   "column",
+  "flow",
+  "grid",
   "text",
   "image",
   "icon",

@@ -64,7 +64,18 @@ it is absent for sheet/floating windows, dismiss, failed show and adopted protot
 
 export const GUIDE_REPEAT = `## Lists: repeat
 
-A \`box\`, \`row\` or \`column\` may declare \`repeat: {items, as}\`. Its \`children\` are the template and
+Wrapping containers require \`prototype_flow_grid_v1\`. A \`flow\` is a wrapping row:
+\`style.spacing\` is the item gap, and \`style.runSpacing\` is the line gap (finite dp >= 0,
+with the same bounds as spacing). Optional \`maxLines\` is an integer >= 1; overflow is
+clipped visually, while all children stay in the hierarchy and count toward node/depth budgets.
+A \`grid\` requires \`columns\`: an integer 1..12 or \`{minWidth: dp}\` with finite dp > 0.
+Spacing applies to both axes unless runSpacing overrides the row gap. runSpacing is meaningful
+only on flow/grid. Grid is always non-lazy and never scrolls itself; wrap it in \`scroll\`.
+Children are placed row-major; a span that does not fit the row starts a new row. Optional
+\`span\` is an integer >= 1 on any node shape, but is valid only on a direct grid child;
+it must not exceed fixed columns. Adaptive runtime spans are clamped to the resolved count.
+
+A \`box\`, \`row\`, \`column\`, \`flow\` or \`grid\` may declare \`repeat: {items, as}\`. Its \`children\` are the template and
 are instantiated once per item, in order, as siblings inside the same container (the container
 itself is not repeated). A list is a \`column\` with \`repeat\` whose single child is the row template.
 
@@ -343,7 +354,7 @@ Authoring choices:
 - **\`visibleWhen\` transition.** The default transition (no \`transition\`, or \`expand\`) animates
   the node's size, which re-measures its siblings while it runs. Use \`transition: "fade"\`,
   \`"slide"\` or \`"none"\` unless the size change is the point. *Being changed (#12136):* every
-  \`box\`, \`row\` and \`column\` also animates its own size whenever its children change while
+  \`box\`, \`row\`, \`column\`, \`flow\` and \`grid\` also animates its own size whenever its children change while
   motion is on, so a size change below a container is animated by that container whatever
   transition the child chose. iOS does the same per container, from a layout signature computed
   from the container's children on each state change.
@@ -365,11 +376,11 @@ Authoring choices:
   no \`testTag\`, no \`contentDescription\`) reports no node, except inside a tappable node with
   no text of its own and no \`contentDescription\`, where icons and images keep their node and label
   because they are the only way to find it. A tappable \`box\`,
-  \`row\`, \`column\` or \`card\` whose only text is one \`text\` node is one node
+  \`row\`, \`column\`, \`flow\`, \`grid\` or \`card\` whose only text is one \`text\` node is one node
   labelled by that text when its descendants have no independent tags, actions, descriptions,
   controls or visibility conditions. Other non-tappable text, icon and image nodes are never labelled
   with their kind; empty tappable ones keep the kind as their only selector handle. An unlabelled,
-  non-tappable layout container (\`box\`, \`row\`, \`column\`, \`scroll\`, \`pager\`, \`card\`,
+  non-tappable layout container (\`box\`, \`row\`, \`column\`, \`flow\`, \`grid\`, \`scroll\`, \`pager\`, \`card\`,
   \`divider\`, \`spacer\`) with no text, \`testTag\`, content description or state also reports
   no node. Every text, tagged node and tappable node stays targetable. Give a \`testTag\` only to
   nodes you will look up. Every accessibility node is work whenever \`observe\` or a screen reader

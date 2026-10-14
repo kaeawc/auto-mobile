@@ -1,6 +1,7 @@
 import {
   PROTOTYPE_THEME_MODES_CAPABILITY,
   PROTOTYPE_DATA_MODEL_CAPABILITY,
+  PROTOTYPE_FLOW_GRID_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
 import {
   prototypeThemeModeFields,
@@ -12,6 +13,7 @@ import {
   prototypeTextFieldOptionFields,
   prototypeTextFieldOptionsUnsupportedMessage,
 } from "./prototypeTextFieldOptions";
+import { prototypeFlowGridFields, prototypeFlowGridUnsupportedMessage } from "./prototypeFlowGrid";
 
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
@@ -35,6 +37,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_TEXT_FIELD_OPTIONS_CAPABILITY,
     fields: prototypeTextFieldOptionFields,
     unsupportedMessage: prototypeTextFieldOptionsUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_FLOW_GRID_CAPABILITY,
+    fields: prototypeFlowGridFields,
+    unsupportedMessage: prototypeFlowGridUnsupportedMessage,
   },
 ];
 

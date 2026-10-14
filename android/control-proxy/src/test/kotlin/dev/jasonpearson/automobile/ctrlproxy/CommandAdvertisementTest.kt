@@ -35,6 +35,7 @@ class CommandAdvertisementTest {
       "prototype_window_options_v1",
       "prototype_window_chrome_v1",
       "prototype_theme_modes_v1",
+      "prototype_flow_grid_v1",
       "prototype_data_model_v1",
       "prototype_text_field_options_v1",
       "prototype_appearance_v1",
@@ -70,6 +71,7 @@ class CommandAdvertisementTest {
       assertTrue(commands.contains("prototype_window_options_v1"))
       assertTrue(commands.contains("prototype_window_chrome_v1"))
       assertTrue(commands.contains("prototype_theme_modes_v1"))
+      assertTrue(commands.contains("prototype_flow_grid_v1"))
       assertTrue(commands.contains("prototype_data_model_v1"))
       assertTrue(commands.contains("prototype_text_field_options_v1"))
       assertTrue(commands.contains("prototype_appearance_v1"))

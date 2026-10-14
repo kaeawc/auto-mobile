@@ -238,6 +238,24 @@ struct Padding: Decodable {
     let end: Double?
 }
 
+/// Fixed columns or adaptive equal-width slots. Positivity is enforced by the host;
+/// placement clamps direct-client values defensively without duplicating its validator.
+enum PrototypeGridColumns: Decodable, Equatable {
+    case fixed(Int)
+    case adaptive(minWidth: Double)
+
+    private struct Adaptive: Decodable { let minWidth: Double }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let count = try? container.decode(Int.self) {
+            self = .fixed(count)
+        } else {
+            self = try .adaptive(minWidth: container.decode(Adaptive.self).minWidth)
+        }
+    }
+}
+
 struct Border: Decodable {
     let width: Double
     let color: PrototypeModeValue
@@ -318,6 +336,7 @@ struct Style: Decodable {
     let alignment: String?
     let arrangement: String?
     let spacing: Double?
+    let runSpacing: Double?
     let textSize: Double?
     let fontWeight: Int?
     let color: PrototypeModeValue?
@@ -357,6 +376,7 @@ struct Style: Decodable {
             alignment: prototype.alignment ?? alignment,
             arrangement: prototype.arrangement ?? arrangement,
             spacing: prototype.spacing ?? spacing,
+            runSpacing: prototype.runSpacing ?? runSpacing,
             textSize: prototype.textSize ?? textSize,
             fontWeight: prototype.fontWeight ?? fontWeight,
             color: prototype.color ?? color,
@@ -543,6 +563,11 @@ final class PrototypeNode: Decodable {
     /// Screen placement resolved by the host (#9316); see `PrototypeAnchor`.
     let anchor: PrototypeAnchor?
     let children: [PrototypeNode]?
+    /// Flow line cap; clipped overflow children remain in the hierarchy.
+    let maxLines: Int?
+    let columns: PrototypeGridColumns?
+    /// A direct grid child's requested column span, on every node shape.
+    let span: Int?
     let child: PrototypeNode?
     let text: String?
     /// Authored accessible label (#10446); wins over the label derived from text or icon.

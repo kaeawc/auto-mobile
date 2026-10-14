@@ -905,6 +905,32 @@ function stateTypeErrors(
     stateActionErrors(checked, data)
   );
 }
+/** Span belongs to the immediate grid parent, including repeat templates. */
+function gridSpanErrors(context: Context): PrototypeValidationError | undefined {
+  const parents = new Map<string, Record<string, unknown>>();
+  for (const { value, path } of context.nodes) {
+    if (value.span !== undefined) {
+      const parent = parents.get(path);
+      if (parent?.type !== "grid") {
+        return fail(`${path}.span`, "span requires a direct grid parent");
+      }
+      if (
+        typeof parent.columns === "number" &&
+        typeof value.span === "number" &&
+        value.span > parent.columns
+      ) {
+        return fail(`${path}.span`, "span exceeds grid columns");
+      }
+    }
+    if (Array.isArray(value.children)) {
+      for (const index of value.children.keys()) {
+        parents.set(`${path}.children[${index}]`, value);
+      }
+    }
+  }
+  return undefined;
+}
+
 function validateValue(value: unknown): PrototypeValidationResult {
   const context: Context = {
     nodes: [],
@@ -917,6 +943,7 @@ function validateValue(value: unknown): PrototypeValidationResult {
   const repeats = new PrototypeRepeatData(data.data);
   const error =
     walk(value, definitions.spec, "", context, 0) ??
+    gridSpanErrors(context) ??
     repeatErrors(value, repeats) ??
     pagerErrors(context) ??
     stateTypeErrors(value, context, data, repeats);

@@ -353,6 +353,7 @@ class WebSocketServer(
     // it expects a string and fails the whole show, and draws a role-named stop transparent, so
     // hosts refuse such a spec for a device lacking this flag.
     add("prototype_theme_modes_v1")
+    add("prototype_flow_grid_v1")
     // Prototype specs resolve read-only data, path repeat items, and data text/conditions. Older
     // APKs reject data, {path} items, repeat.key and data conditions as unknown, and draw
     // {data:/x} text literally, so hosts refuse such a spec for a device lacking this flag.

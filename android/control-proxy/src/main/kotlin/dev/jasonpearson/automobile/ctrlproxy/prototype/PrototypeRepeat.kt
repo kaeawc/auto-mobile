@@ -19,6 +19,8 @@ import dev.jasonpearson.automobile.protocol.PrototypeDialogNode
 import dev.jasonpearson.automobile.protocol.PrototypeDividerNode
 import dev.jasonpearson.automobile.protocol.PrototypeEmitAction
 import dev.jasonpearson.automobile.protocol.PrototypeFabNode
+import dev.jasonpearson.automobile.protocol.PrototypeFlowNode
+import dev.jasonpearson.automobile.protocol.PrototypeGridNode
 import dev.jasonpearson.automobile.protocol.PrototypeIconButtonNode
 import dev.jasonpearson.automobile.protocol.PrototypeIconNode
 import dev.jasonpearson.automobile.protocol.PrototypeImageNode
@@ -65,6 +67,8 @@ private fun PrototypeNode.repeatSpec(): PrototypeRepeat? =
     is PrototypeBoxNode -> repeat
     is PrototypeRowNode -> repeat
     is PrototypeColumnNode -> repeat
+    is PrototypeFlowNode -> repeat
+    is PrototypeGridNode -> repeat
     else -> null
   }
 
@@ -126,6 +130,20 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
         children = children.bound(),
       )
     is PrototypeColumnNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        children = children.bound(),
+      )
+    is PrototypeFlowNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        children = children.bound(),
+      )
+    is PrototypeGridNode ->
       copy(
         onTap = onTap,
         styleWhen = styleWhen,

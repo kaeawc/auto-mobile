@@ -29,6 +29,26 @@ class PrototypeSpecContentScreenshotTest {
     val OPEN = JsonPrimitive(true)
   }
 
+  @Test fun flowBasic() = prototypeScreenshotTest("flow_basic", validPrototypeFixture("flow-basic"))
+
+  @Test
+  fun flowMaxLinesRepeat() =
+    prototypeScreenshotTest("flow_max_lines_repeat", validPrototypeFixture("flow-max-lines-repeat"))
+
+  @Test
+  fun gridFixedColumnsSpan() =
+    prototypeScreenshotTest(
+      "grid_fixed_columns_span",
+      validPrototypeFixture("grid-fixed-columns-span"),
+    )
+
+  @Test
+  fun gridAdaptiveMinWidth() =
+    prototypeScreenshotTest(
+      "grid_adaptive_min_width",
+      validPrototypeFixture("grid-adaptive-min-width"),
+    )
+
   // Pending: #11298 changed the image placeholder colours (surfaceVariant instead of LightGray), so
   // this baseline must be re-recorded by the Linux workflow described above.
   /** Every node type and style token in one fullscreen tree. */

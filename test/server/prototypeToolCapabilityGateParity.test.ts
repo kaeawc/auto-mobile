@@ -33,6 +33,7 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
     stateKey: "name",
     label: "Liked",
   }),
+  prototype_flow_grid_v1: fixture({ type: "flow", id: "label", children: [label] }),
 };
 function fixture(root: Record<string, unknown>) {
   return {

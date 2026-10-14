@@ -264,6 +264,8 @@ private fun prototypeNodeRole(node: PrototypeNode): String =
     is PrototypeBoxNode -> "box"
     is PrototypeRowNode -> "row"
     is PrototypeColumnNode -> "column"
+    is PrototypeFlowNode -> "flow"
+    is PrototypeGridNode -> "grid"
     is PrototypeTextNode -> "text"
     is PrototypeImageNode -> "image"
     is PrototypeIconNode -> "icon"
@@ -650,7 +652,7 @@ fun modalPrototypeSheets(node: PrototypeRenderNode): List<PrototypeRenderNode> {
 
 /** Roles that compose their children inline through the node renderer; others never draw them. */
 private val PROTOTYPE_INLINE_CONTAINER_ROLES =
-  setOf("box", "row", "column", "scroll", "card", "pager")
+  setOf("box", "row", "column", "flow", "grid", "scroll", "card", "pager")
 
 /** A non-root anchored node: drawn in the window-level anchor layer, never in its parent. */
 internal fun isLayeredPrototypeAnchor(node: PrototypeRenderNode): Boolean =

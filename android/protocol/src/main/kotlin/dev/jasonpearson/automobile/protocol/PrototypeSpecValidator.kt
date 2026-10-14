@@ -465,6 +465,8 @@ object PrototypeSpecValidator {
   ): PrototypeSpecError? {
     val data = value as? JsonObject ?: return fail(path, "Expected object")
     val fields = rule.getValue("fields").jsonObject
+    if (data.text("type") == "searchBar" && "child" in data && "activeKey" !in data)
+      return fail("$path.child", "Search bar child requires activeKey")
     for (key in (data.keys + fields.keys).sorted()) {
       val childPath = keyPath(path, key)
       val field = fields[key] as? JsonObject ?: return fail(childPath, "Unknown property")
@@ -861,8 +863,16 @@ object PrototypeSpecValidator {
     }
     val key = value.text("stateKey") ?: return null
     val stored = state[key] as? JsonPrimitive
-    if (value.text("type") == "textField" && stored?.isString != true)
+    if (value.text("type") in setOf("textField", "searchBar") && stored?.isString != true)
       return fail("$path.stateKey", "Text field requires a string state key")
+    if (value.text("type") == "searchBar") {
+      val active = value.text("activeKey")?.let { state[it] as? JsonPrimitive }
+      if (
+        value.text("activeKey") != null &&
+          (active == null || active.isString || active.booleanOrNull == null)
+      )
+        return fail("$path.activeKey", "Search bar requires a boolean active key")
+    }
     if (
       value.text("type") in setOf("switch", "checkbox") &&
         (stored == null || stored.isString || stored.booleanOrNull == null)
@@ -933,6 +943,7 @@ object PrototypeSpecValidator {
   private fun boundKeys(value: JsonObject): List<String> =
     listOfNotNull(
       value.text("stateKey"),
+      value.text("activeKey"),
       value.text("hourKey"),
       value.text("minuteKey"),
       (value["trailing"] as? JsonObject)?.text("stateKey"),

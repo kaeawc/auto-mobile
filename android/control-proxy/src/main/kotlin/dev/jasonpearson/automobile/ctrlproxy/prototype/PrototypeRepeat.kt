@@ -37,6 +37,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeRepeatTemplate
 import dev.jasonpearson.automobile.protocol.PrototypeRowNode
 import dev.jasonpearson.automobile.protocol.PrototypeScalar
 import dev.jasonpearson.automobile.protocol.PrototypeScrollNode
+import dev.jasonpearson.automobile.protocol.PrototypeSearchBarNode
 import dev.jasonpearson.automobile.protocol.PrototypeSegmentedButtonNode
 import dev.jasonpearson.automobile.protocol.PrototypeSetStateAction
 import dev.jasonpearson.automobile.protocol.PrototypeSliderNode
@@ -84,7 +85,10 @@ internal fun prototypeChildEntries(
   val repeat = node.repeatSpec()
   if (repeat == null) {
     val single =
-      node is PrototypeScrollNode || node is PrototypeBottomSheetNode || node is PrototypeDialogNode
+      node is PrototypeScrollNode ||
+        node is PrototypeBottomSheetNode ||
+        node is PrototypeDialogNode ||
+        node is PrototypeSearchBarNode
     return children.mapIndexed { index, child ->
       PrototypeChildEntry(child, if (single) "$path.child" else "$path.children[$index]")
     }
@@ -166,6 +170,18 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
     is PrototypeImageNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
     is PrototypeIconNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
     is PrototypeSpacerNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
+    is PrototypeSearchBarNode ->
+      copy(
+        onTap = onTap,
+        styleWhen = styleWhen,
+        visibleWhen = visibleWhen,
+        stateKey = instance.interpolate(stateKey),
+        activeKey = activeKey?.let(instance::interpolate),
+        placeholder = placeholder?.let(instance::interpolate),
+        trailingActions = trailingActions?.map { it.bound(instance) },
+        onSubmit = onSubmit?.map { it.bound(instance) },
+        child = child?.bound(instance),
+      )
     is PrototypeTextFieldNode ->
       copy(
         onTap = onTap,

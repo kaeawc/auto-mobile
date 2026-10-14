@@ -444,6 +444,29 @@ data class PrototypeTextFieldNode(
   val placeholder: String? = null,
 ) : PrototypeNode()
 
+@SerialName("searchBar")
+@Serializable
+data class PrototypeSearchBarNode(
+  override val id: String? = null,
+  override val testTag: String? = null,
+  override val contentDescription: String? = null,
+  override val onTap: List<PrototypeAction>? = null,
+  override val style: PrototypeStyle? = null,
+  override val styleWhen: List<PrototypeStyleWhen>? = null,
+  override val visibleWhen: PrototypeCondition? = null,
+  override val transition: String? = null,
+  override val anchor: PrototypeAnchor? = null,
+  override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
+  val stateKey: String,
+  val placeholder: String? = null,
+  val leadingIcon: String? = null,
+  val trailingActions: List<PrototypeAppBarAction>? = null,
+  val activeKey: String? = null,
+  val variant: String? = null,
+  val onSubmit: List<PrototypeAction>? = null,
+  val child: PrototypeNode? = null,
+) : PrototypeNode()
+
 @SerialName("switch")
 @Serializable
 data class PrototypeSwitchNode(

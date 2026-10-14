@@ -218,6 +218,14 @@ internal object PrototypeBindableFields {
             ?: objects(node, "actions", path).firstNotNullOfOrNull { (entry, entryPath) ->
               part(entry, entryPath)
             }
+        "searchBar" ->
+          field(node, "placeholder", path, PrototypeBindableKind.TEXT)
+            ?: objects(node, "trailingActions", path).firstNotNullOfOrNull { (entry, entryPath) ->
+              part(entry, entryPath)
+            }
+            ?: objects(node, "onSubmit", path).firstNotNullOfOrNull { (entry, entryPath) ->
+              action(entry, entryPath)
+            }
         "dialog" ->
           field(node, "title", path, PrototypeBindableKind.TEXT)
             ?: field(node, "text", path, PrototypeBindableKind.TEXT)
@@ -230,7 +238,7 @@ internal object PrototypeBindableFields {
       }
 
     fun keys(node: JsonObject, path: String): T? {
-      for (key in listOf("stateKey", "hourKey", "minuteKey")) {
+      for (key in listOf("stateKey", "activeKey", "hourKey", "minuteKey")) {
         field(node, key, path, PrototypeBindableKind.KEY)?.let {
           return it
         }
@@ -517,7 +525,7 @@ internal object PrototypeRepeatValidator {
     return scopes
   }
 
-  private val checkedKeyFields = listOf("key", "stateKey", "hourKey", "minuteKey")
+  private val checkedKeyFields = listOf("key", "stateKey", "activeKey", "hourKey", "minuteKey")
 
   /** The state-key values the validator type-checks: node keys and an action's `key`. */
   private fun checkedKeys(value: JsonObject): List<String> =

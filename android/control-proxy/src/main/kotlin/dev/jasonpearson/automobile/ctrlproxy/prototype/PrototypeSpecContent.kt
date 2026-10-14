@@ -548,6 +548,19 @@ private fun RenderPrototypeNodeContent(
     "progress" -> RenderPrototypeProgress(node, modifier)
     "timePicker" -> RenderPrototypeTimePicker(node, modifier, interact)
     "datePicker" -> RenderPrototypeDatePicker(node, modifier, interact)
+    "searchBar" ->
+      RenderPrototypeSearchBar(node, modifier, interact) {
+        node.children.forEach { child ->
+          key(child.identity) {
+            RenderPrototypeNode(
+              child,
+              interact,
+              columnWeight(child),
+              child.weightAxis(PrototypeWeightAxis.VERTICAL),
+            )
+          }
+        }
+      }
     "textField" -> RenderPrototypeTextField(node, modifier, interact)
     "switch",
     "checkbox" -> RenderPrototypeToggle(node, modifier, interact)
@@ -582,13 +595,37 @@ private fun RenderPrototypeTextField(
   interact: (PrototypeInteraction) -> Unit,
 ) {
   val source = node.source as? PrototypeTextFieldNode ?: return
+  RenderPrototypeEditableField(node, source.stateKey, source.onTap.orEmpty(), modifier, interact) {
+    shown,
+    change,
+    fieldModifier,
+    presses ->
+    TextField(
+      shown,
+      change,
+      modifier = fieldModifier,
+      interactionSource = presses,
+      placeholder = { Text(source.placeholder.orEmpty()) },
+    )
+  }
+}
+
+/** One edit/reconciliation and action path for every editable prototype field. */
+@Composable
+internal fun RenderPrototypeEditableField(
+  node: PrototypeRenderNode,
+  stateKey: String,
+  actions: List<PrototypeAction>,
+  modifier: Modifier,
+  interact: (PrototypeInteraction) -> Unit,
+  field: @Composable (String, (String) -> Unit, Modifier, MutableInteractionSource) -> Unit,
+) {
   val presses = remember { MutableInteractionSource() }
   val focus = remember { FocusRequester() }
-  val actions = source.onTap.orEmpty()
   // The shown value is local state, updated synchronously by the IME's own edits; the controller
   // is told afterwards. Binding it to node.text would show the controller's lagging echo, so fast
   // commitText input could be applied against a stale value.
-  val epoch = LocalPrototypeTextEpochs.current[source.stateKey] ?: 0
+  val epoch = LocalPrototypeTextEpochs.current[stateKey] ?: 0
   val sync = remember { PrototypeTextFieldSync(node.text, epoch) }
   var shown by remember { mutableStateOf(sync.text) }
   LaunchedEffect(node.text, epoch) { if (sync.observe(node.text, epoch)) shown = sync.text }
@@ -607,18 +644,16 @@ private fun RenderPrototypeTextField(
         true
       }
     }
-  // Material's editable field supplies SetText semantics and the keyboard input connection.
-  TextField(
+  field(
     shown,
     { value ->
       if (sync.edit(value)) {
         shown = value
-        interact(PrototypeInteraction.TextChange(source.stateKey, value, sync.epoch))
+        interact(PrototypeInteraction.TextChange(stateKey, value, sync.epoch))
       }
     },
-    modifier = fieldModifier,
-    interactionSource = presses,
-    placeholder = { Text(source.placeholder.orEmpty()) },
+    fieldModifier,
+    presses,
   )
 }
 
@@ -907,11 +942,14 @@ private fun prototypeNodeModifier(
       node.testTag?.let { testTag = it }
     }
   } else if (
-    !isSemanticsFreeContainer(node, tappable, description, state) &&
+    node.role != "searchBar" &&
+      !isSemanticsFreeContainer(node, tappable, description, state) &&
       (handleVisual || !isDecorativePrototypeVisual(node, tappable))
   ) {
     modifier = modifier.semantics {
-      if (node.role != "textField" && node.role !in SEMANTICS_FREE_CONTAINERS) {
+      if (
+        node.role !in setOf("textField", "searchBar") && node.role !in SEMANTICS_FREE_CONTAINERS
+      ) {
         text = AnnotatedString(node.text)
       }
       this[PrototypeRole] = node.role

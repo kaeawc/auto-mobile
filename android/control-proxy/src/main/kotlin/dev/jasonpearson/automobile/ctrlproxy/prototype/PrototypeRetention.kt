@@ -26,6 +26,7 @@ private val RETENTION_INLINE_ROLES = setOf("box", "row", "column", "scroll", "ca
 private val RETENTION_EXCLUDED_ROLES =
   setOf(
     "textField",
+    "searchBar",
     "pager",
     "timePicker",
     "datePicker",

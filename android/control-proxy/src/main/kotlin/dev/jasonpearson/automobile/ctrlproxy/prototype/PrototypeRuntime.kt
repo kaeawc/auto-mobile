@@ -436,6 +436,7 @@ internal fun prototypeDescendants(node: PrototypeNode): List<PrototypeNode> =
     is PrototypeScrollNode -> listOf(node.child)
     is PrototypeBottomSheetNode -> listOf(node.child)
     is PrototypeDialogNode -> listOfNotNull(node.child)
+    is PrototypeSearchBarNode -> listOfNotNull(node.child)
     else -> emptyList()
   }
 

@@ -1290,6 +1290,23 @@ describe("IME commit trace wire response", () => {
 describe("device-confirmed consumed editor input", () => {
   const confirmed = { deviceSucceeded: true, editorConsumed: true };
   test.each([
+    ["three long lines", Array.from({ length: 3 }, () => "a".repeat(50)).join("\n"), 51],
+    ["long single line", "a".repeat(200), 150],
+    ["forty lines", Array.from({ length: 40 }, () => "abcd").join("\n"), 60],
+  ] as const)("accepts a restart after a long prefix: %s", (_name, sent, start) => {
+    expect(imeInsertedTextMatches(sent.slice(start), sent, confirmed)).toBe(true);
+  });
+  test.each([
+    ["!", "hello world!"],
+    ["4", "555-1234"],
+    ["\n", "abc\n"],
+  ])("rejects insufficient restart evidence %j from %j", (inserted, sent) => {
+    expect(imeInsertedTextMatches(inserted, sent, confirmed)).toBe(false);
+  });
+  test("rejects a miss at the 4096-character limit", () => {
+    expect(imeInsertedTextMatches("b", "a".repeat(4096), confirmed)).toBe(false);
+  });
+  test.each([
     ["helloworld", "hello\nworld"],
     ["cd", "ab cd"],
     ["cdEF", "ab cd\nef"],

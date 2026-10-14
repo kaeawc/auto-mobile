@@ -342,7 +342,9 @@ jobs:
           else
             # Ubuntu apt 'bats' is the old sstephenson/bats which doesn't
             # capture stderr in run output. Install bats-core from source.
-            git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core
+            git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
+            # Tags are mutable; the install runs under sudo, so check the commit.
+            test "$(git -C /tmp/bats-core rev-parse HEAD)" = "eb7f42f8d608ac693d7a4b67474f6714ea68cfc5"
             sudo /tmp/bats-core/install.sh /usr/local
           fi
           if command -v shellcheck &>/dev/null; then
@@ -403,6 +405,8 @@ jobs:
             echo "bats already installed: $(bats --version)"
           else
             git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
+            # Tags are mutable; the install runs under sudo, so check the commit.
+            test "$(git -C /tmp/bats-core rev-parse HEAD)" = "eb7f42f8d608ac693d7a4b67474f6714ea68cfc5"
             sudo /tmp/bats-core/install.sh /usr/local
           fi
           if command -v shellcheck &>/dev/null; then

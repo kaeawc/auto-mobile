@@ -1,4 +1,5 @@
 import { PROTOTYPE_PLATFORM_DIFFERENCES } from "./prototypePlatformNotes";
+import iconSymbols from "../../../schemas/prototype-ios-icon-symbols.json";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_THEME_MODES_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import {
@@ -195,7 +196,12 @@ function renderPlatformDifferences(): string {
   return [
     "## Platform differences",
     "",
-    ...PROTOTYPE_PLATFORM_DIFFERENCES.map(
+    `iOS draws SF Symbols: ${Object.keys(iconSymbols.mapped).length} of ${contract.definitions.iconName.values.length} contract names are mapped in schemas/prototype-ios-icon-symbols.json. Unmapped names draw a placeholder symbol. Agents advertise prototype_icon_sf_symbols_v1; older agents should be relaunched with a current agent.`,
+    'With no variant, iOS draws the name\'s default SF Symbol, which is often the outline form; pass `variant: "filled"` on an `icon` node for the closest match to Android where the table has a filled form.',
+    "",
+    "- `icon.name`: unmapped names draw a placeholder; a successful show lists affected paths under `platformNotes`. Material parity remains a future option behind `prototype_icon_set_material_v1`.",
+    "- `icon.variant`: filled/outlined map where a form exists; rounded/sharp/twoTone and forms absent from the table draw the default symbol. A successful show lists affected paths under `platformNotes`. Material parity remains a future option behind `prototype_icon_variant_v1`.",
+    ...PROTOTYPE_PLATFORM_DIFFERENCES.filter(({ construct }) => !construct.startsWith("icon.")).map(
       ({ construct, platform, effect, capability, detail }) =>
         `- \`${construct}\`: ${platform}, ${effect}. ${detail} A successful show lists affected paths under \`platformNotes\`; lifted by \`${capability}\`.`,
     ),

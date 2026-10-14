@@ -1,3 +1,4 @@
+import { panelFingerprintFromWire } from "../../../models/DisplayPanel";
 import { normalizeHierarchyOptionalFields } from "../truncationReasons";
 import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import { DUMPSYS_MAX_BUFFER } from "../../../utils/android-cmdline-tools/dumpsysLimits";
@@ -1252,11 +1253,15 @@ export class CtrlProxyHierarchy {
           captureSequence: accessibilityHierarchy.captureSequence,
           displayId: accessibilityHierarchy.displayId,
           panelUniqueId: accessibilityHierarchy.panelUniqueId,
+          panelFingerprint: panelFingerprintFromWire(accessibilityHierarchy.panelFingerprint),
           hierarchy: {
             error: errorMessage,
           },
           packageName: resolvedPackageName,
           windows: accessibilityHierarchy.windows,
+          ...(accessibilityHierarchy.prototypeSuspended === true
+            ? { prototypeSuspended: true }
+            : {}),
           contentHiddenRegions: accessibilityHierarchy.contentHiddenRegions,
           intentChooserDetected: accessibilityHierarchy.intentChooserDetected,
           notificationPermissionDetected: accessibilityHierarchy.notificationPermissionDetected,
@@ -1304,9 +1309,11 @@ export class CtrlProxyHierarchy {
         captureSequence: accessibilityHierarchy.captureSequence,
         displayId: accessibilityHierarchy.displayId,
         panelUniqueId: accessibilityHierarchy.panelUniqueId,
+        panelFingerprint: panelFingerprintFromWire(accessibilityHierarchy.panelFingerprint),
         hierarchy: convertedHierarchy,
         packageName: resolvedPackageName,
         windows: linkWindowRoots(convertedHierarchy, accessibilityHierarchy.windows),
+        ...(accessibilityHierarchy.prototypeSuspended === true ? { prototypeSuspended: true } : {}),
         contentHiddenRegions: accessibilityHierarchy.contentHiddenRegions,
         intentChooserDetected: accessibilityHierarchy.intentChooserDetected,
         notificationPermissionDetected: accessibilityHierarchy.notificationPermissionDetected,
@@ -1343,6 +1350,7 @@ export class CtrlProxyHierarchy {
       logger.warn(`[CTRL_PROXY] Format conversion failed after ${duration}ms: ${error}`);
 
       return {
+        ...(accessibilityHierarchy.prototypeSuspended === true ? { prototypeSuspended: true } : {}),
         hierarchy: {
           error: "Failed to convert accessibility service hierarchy format",
         },

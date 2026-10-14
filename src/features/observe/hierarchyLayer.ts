@@ -1,5 +1,5 @@
 import { CTRL_PROXY_PACKAGE } from "../../ctrlProxy/constants";
-import { PROTOTYPE_SUSPENDED_REASON } from "../prototype/prototypeSuspended";
+import { PrototypeSuspendedError } from "../prototype/prototypeSuspended";
 import { ActionableError } from "../../models/ActionableError";
 import type { Element } from "../../models/Element";
 import type { HierarchyLayer } from "../../models/HierarchyLayer";
@@ -356,9 +356,7 @@ const NO_PROTOTYPE_SHOWING =
   'layer "prototype" was requested, but no AutoMobile prototype is showing. ' +
   "Show the prototype first, or omit layer to search the whole screen.";
 
-const PROTOTYPE_SUSPENDED =
-  `layer "prototype" was requested, but ${PROTOTYPE_SUSPENDED_REASON}. ` +
-  "Bring that app back to the foreground (the prototype returns with its state), or omit layer.";
+const PROTOTYPE_SUSPENDED = new PrototypeSuspendedError().message;
 
 /** The refusal for `layer: "prototype"` with no prototype window in the capture. */
 function noPrototypeMessage(hierarchy: ViewHierarchyResult | undefined): string {
@@ -374,7 +372,9 @@ export function scopeHierarchyForSelector(
   layer: HierarchyLayer | undefined,
 ): ViewHierarchyResult {
   if (layer === "prototype" && !hasOwnPrototype(hierarchy)) {
-    throw new ActionableError(noPrototypeMessage(hierarchy));
+    throw hierarchy.prototypeSuspended === true
+      ? new PrototypeSuspendedError()
+      : new ActionableError(noPrototypeMessage(hierarchy));
   }
   return scopeHierarchyToLayer(hierarchy, layer);
 }
@@ -489,7 +489,11 @@ export function assertGestureOnLayer(
 ): void {
   const refusal = layerGestureRefusal(hierarchy, layer, points, action);
   if (refusal) {
-    throw new ActionableError(refusal);
+    throw layer === "prototype" &&
+      hierarchy?.prototypeSuspended === true &&
+      !hasOwnPrototype(hierarchy)
+      ? new PrototypeSuspendedError()
+      : new ActionableError(refusal);
   }
 }
 

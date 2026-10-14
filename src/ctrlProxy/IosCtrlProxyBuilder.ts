@@ -312,6 +312,9 @@ export class IosCtrlProxyBuilder {
       bundleCacheDir:
         config.bundleCacheDir ||
         process.env.AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR ||
+        // Shared downloaded bundle cache stays coordinated across data dirs.
+        // AUTOMOBILE_COORDINATION_DIR relocates it; the cache-specific variable
+        // above can relocate it independently.
         getSharedAutoMobileDir(IosCtrlProxyBuilder.DEFAULT_BUNDLE_CACHE_SUBDIR),
     };
     this.downloader = dependencies.downloader ?? new DefaultIOSCtrlProxyBundleDownloader();

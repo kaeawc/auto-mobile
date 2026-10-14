@@ -157,6 +157,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   private voiceOverActivateResult: CtrlProxyActionResult | null = null;
   private setVoiceOverEnabledResult: CtrlProxyActionResult | null = null;
   private multiFingerSwipeResult: CtrlProxySwipeResult | null = null;
+  private pressButtonResult: IOSDispatchResult<CtrlProxyPressButtonResult> | null = null;
   private actionResult: CtrlProxyActionResult | null = null;
   private clipboardResult: CtrlProxyClipboardResult | null = null;
   private clipboardResults: CtrlProxyClipboardResult[] = [];
@@ -236,6 +237,10 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     } else {
       this.failureMap.set(operation, error);
     }
+  }
+
+  setPressButtonResult(result: IOSDispatchResult<CtrlProxyPressButtonResult> | null): void {
+    this.pressButtonResult = result;
   }
 
   /**
@@ -1075,11 +1080,15 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     await this.applyDelay("pressButton");
     this.checkFailure("pressButton");
 
-    return {
-      success: true,
-      totalTimeMs: 100,
-      perfTiming: this.performanceTiming || undefined,
-    };
+    return (
+      this.pressButtonResult ?? {
+        success: true,
+        totalTimeMs: 100,
+        dispatched: true,
+        acknowledged: true,
+        perfTiming: this.performanceTiming || undefined,
+      }
+    );
   }
 
   async requestRecentApps(

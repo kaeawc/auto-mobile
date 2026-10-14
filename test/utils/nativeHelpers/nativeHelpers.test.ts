@@ -59,7 +59,7 @@ describe("native helper orphan sweep", () => {
     async (identity) => {
       const h = harness();
       h.control.processes.set(10, identity);
-      expect((await h.sweep()).skippedLiveOwner).toBe(1);
+      expect((await settle(h.sweep(), h.timer)).skippedLiveOwner).toBe(1);
       expect(h.control.signals).toEqual([]);
       expect(h.store.list()).toHaveLength(1);
     },
@@ -82,7 +82,7 @@ describe("native helper orphan sweep", () => {
     h.control.processes.set(10, "replacement");
     expect((await settle(h.sweep(), h.timer)).reaped).toBe(1);
   });
-  test.each(["replacement", undefined, null])(
+  test.each(["replacement", null])(
     "removes a stale helper with identity %s without signalling",
     async (identity) => {
       const h = harness();
@@ -114,7 +114,7 @@ describe("native helper orphan sweep", () => {
     const h = harness();
     h.store.write({ ...h.record, ownerPid: 30 });
     h.control.processes.set(30, "owner");
-    expect((await h.sweep()).skippedLiveOwner).toBe(1);
+    expect((await settle(h.sweep(), h.timer)).skippedLiveOwner).toBe(1);
     expect(h.control.signals).toEqual([]);
   });
   test("deadline leaves later records and prevents escalation after expiry", async () => {
@@ -256,3 +256,97 @@ test.each(["before TERM", "during grace"])(
     expect(h.store.list()).toHaveLength(1);
   },
 );
+
+test.each(["darwin-utc:now", "other:now", "darwin:changed"])(
+  "incomparable owner identity %s retains helpers",
+  async (identity) => {
+    const h = harness();
+    h.control.incomparableIdentities.add(identity);
+    h.store.write({ ...h.record, ownerStartIdentity: "darwin:old" });
+    h.control.processes.set(10, identity);
+    expect((await settle(h.sweep(), h.timer)).skippedLiveOwner).toBe(1);
+    expect(h.control.signals).toEqual([]);
+    expect(h.store.list()).toHaveLength(1);
+  },
+);
+
+test("different comparable owner generation permits cleanup", async () => {
+  const h = harness();
+  h.store.write({ ...h.record, ownerStartIdentity: "linux:old" });
+  h.control.processes.set(10, "linux:new");
+  expect((await settle(h.sweep(), h.timer)).reaped).toBe(1);
+});
+
+test.each([undefined, "other:helper", "darwin:new"])(
+  "unverifiable running helper %s is retained before TERM",
+  async (identity) => {
+    const h = harness();
+    if (identity !== undefined) {
+      h.control.incomparableIdentities.add(identity);
+    }
+    h.store.write({ ...h.record, startIdentity: "darwin:old" });
+    h.control.processes.set(20, identity);
+    expect((await h.sweep()).failed).toBe(1);
+    expect(h.control.signals).toEqual([]);
+    expect(h.store.list()).toHaveLength(1);
+    expect(h.logger.at("warn")).toHaveLength(1);
+  },
+);
+
+test.each([undefined, "other:helper"])(
+  "sweep retains unverifiable identity %s after TERM",
+  async (identity) => {
+    const h = harness();
+    if (identity !== undefined) {
+      h.control.incomparableIdentities.add(identity);
+    }
+    h.control.onSignal = (pid) => h.control.processes.set(pid, identity);
+    expect((await settle(h.sweep(), h.timer)).failed).toBe(1);
+    expect(h.control.signals.map((s) => s.signal)).toEqual(["SIGTERM"]);
+    expect(h.store.list()).toHaveLength(1);
+    expect(h.logger.at("warn")).toHaveLength(1);
+  },
+);
+
+test.each(["before TERM", "during grace"])(
+  "registry retains incomparable identity %s",
+  async (when) => {
+    const h = harness();
+    h.control.incomparableIdentities.add("other:helper");
+    h.control.processes.set(30, "self");
+    h.registry.track(
+      Object.assign(new EventEmitter(), { pid: 20, exitCode: null, signalCode: null }),
+      { kind: "adb", processGroup: false },
+    );
+    if (when === "before TERM") {
+      h.control.processes.set(20, "other:helper");
+    } else {
+      h.control.onSignal = (pid) => h.control.processes.set(pid, "other:helper");
+    }
+    expect((await settle(h.registry.shutdown({ graceMs: 10 }), h.timer)).failed).toBe(1);
+    expect(h.control.signals.map((s) => s.signal)).toEqual(
+      when === "before TERM" ? [] : ["SIGTERM"],
+    );
+    expect(h.store.list()).toHaveLength(1);
+  },
+);
+
+test("sweep does not remove a rewritten record after helper exit", async () => {
+  const h = harness();
+  h.control.onSignal = (pid) => {
+    h.control.processes.delete(pid);
+    h.store.write({ ...h.record, startIdentity: "replacement" });
+  };
+  expect((await h.sweep()).reaped).toBe(1);
+  expect(h.store.list()[0]?.startIdentity).toBe("replacement");
+});
+
+test("registry exit does not remove a rewritten stored record", () => {
+  const h = harness();
+  h.control.processes.set(30, "self");
+  const child = Object.assign(new EventEmitter(), { pid: 20, exitCode: null, signalCode: null });
+  h.registry.track(child, { kind: "adb", processGroup: false });
+  h.store.write({ ...h.record, startIdentity: "replacement" });
+  child.emit("exit");
+  expect(h.store.list()[0]?.startIdentity).toBe("replacement");
+});

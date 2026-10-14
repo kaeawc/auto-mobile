@@ -1,10 +1,14 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import android.app.Activity
+import android.graphics.PixelFormat
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager.LayoutParams
+import android.view.accessibility.AccessibilityEvent
+import android.widget.FrameLayout
 import androidx.compose.ui.platform.AbstractComposeView
 import androidx.compose.ui.platform.ComposeView
 import androidx.lifecycle.Lifecycle
@@ -33,6 +37,7 @@ import org.junit.Before
 import org.junit.BeforeClass
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
@@ -73,6 +78,10 @@ class PrototypeHostTest {
   private var blocked = false
   private var lost = 0
   private lateinit var escapeScheduler: FakePrototypeEscapeScheduler
+  private lateinit var accessibilityScheduler: FakePrototypeEscapeScheduler
+  private lateinit var accessibilityView: PrototypeComposeView
+  private lateinit var accessibilityChild: View
+  private var accessibilityNow = 0L
   private val contentTouches = mutableListOf<Int>()
   private var contentHandlesTouch = true
 
@@ -85,6 +94,18 @@ class PrototypeHostTest {
     blocked = false
     lost = 0
     escapeScheduler = FakePrototypeEscapeScheduler()
+    accessibilityScheduler = FakePrototypeEscapeScheduler()
+    accessibilityNow = 0L
+    accessibilityView =
+      PrototypeComposeView(
+        RuntimeEnvironment.getApplication(),
+        decide = { PrototypeBackDecision.PASS },
+        onBack = {},
+        escapeSchedulerFactory = { escapeScheduler },
+        accessibilitySchedulerFactory = { accessibilityScheduler },
+        nowMs = { accessibilityNow },
+      )
+    accessibilityChild = View(RuntimeEnvironment.getApplication())
     main = FakePrototypeMainThread()
     timer = FakePrototypeSettleTimer(history)
     manager = RecordingPrototypeWindowManager(main, history)
@@ -115,6 +136,75 @@ class PrototypeHostTest {
 
   private fun chromelessRequest() =
     PrototypeRequest(PrototypePlacement.Fullscreen(), chrome = PrototypeWindowChrome.NONE)
+
+  private fun requestContentChanged(changeTypes: Int): Boolean {
+    val event =
+      AccessibilityEvent.obtain(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED).apply {
+        contentChangeTypes = changeTypes
+      }
+    return try {
+      accessibilityView.onRequestSendAccessibilityEvent(accessibilityChild, event)
+    } finally {
+      event.recycle()
+    }
+  }
+
+  @Test
+  fun `subtree accessibility changes are swallowed and schedule one trailing callback`() {
+    assertFalse(requestContentChanged(AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE))
+    assertTrue(accessibilityScheduler.tasks.isEmpty())
+    accessibilityNow = 10L
+    assertFalse(requestContentChanged(AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE))
+    assertEquals(240L, accessibilityScheduler.tasks.single().due)
+    assertFalse(requestContentChanged(AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE))
+    assertEquals(1, accessibilityScheduler.tasks.size)
+  }
+
+  @Test
+  fun `text and pane accessibility changes delegate without touching the coalescer`() {
+    for (changeTypes in
+      listOf(
+        AccessibilityEvent.CONTENT_CHANGE_TYPE_TEXT,
+        AccessibilityEvent.CONTENT_CHANGE_TYPE_PANE_TITLE,
+      )) {
+      assertTrue(requestContentChanged(changeTypes))
+      accessibilityNow += 10L
+      assertTrue(requestContentChanged(changeTypes))
+      assertTrue(accessibilityScheduler.tasks.isEmpty())
+    }
+    assertEquals(0, accessibilityScheduler.cancelled)
+    // Pass-through events must not consume the leading coalescer emission either.
+    assertFalse(requestContentChanged(AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE))
+    assertTrue(accessibilityScheduler.tasks.isEmpty())
+  }
+
+  @Test
+  fun `detaching cancels the pending accessibility trailing callback and resets coalescing`() {
+    val controller = Robolectric.buildActivity(Activity::class.java).setup()
+    try {
+      val activity = controller.get()
+      val container = FrameLayout(activity)
+      activity.setContentView(container)
+      controller.visible()
+      container.addView(accessibilityView)
+      assertTrue(accessibilityView.isAttachedToWindow)
+
+      assertFalse(requestContentChanged(AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE))
+      accessibilityNow = 10L
+      assertFalse(requestContentChanged(AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE))
+      val pending = accessibilityScheduler.tasks.single()
+      container.removeView(accessibilityView)
+      assertFalse(accessibilityView.isAttachedToWindow)
+      assertTrue(pending.cancelled)
+      assertEquals(1, accessibilityScheduler.cancelled)
+      accessibilityScheduler.advanceBy(250L)
+      assertFalse(pending.fired)
+      assertFalse(requestContentChanged(AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE))
+      assertEquals(1, accessibilityScheduler.tasks.size)
+    } finally {
+      controller.pause().stop().destroy()
+    }
+  }
 
   @Test
   fun `show traces one balanced host section including a blocked early return`() = runTest {
@@ -735,6 +825,41 @@ class PrototypeHostTest {
     assertEquals(0, manager.updated.size)
     assertEquals(0, manager.removals)
   }
+
+  @Test
+  fun `opaque fullscreen opacity changes update the window format only when opacity crosses full`() =
+    runTest {
+      assertTrue(host.show(chromelessRequest().copy(opaqueSurface = true)))
+      assertEquals(PixelFormat.OPAQUE, manager.added.single().format)
+      assertEquals(0, manager.updated.size)
+
+      host.setOpacity(90)
+      assertEquals(1, manager.updated.size)
+      assertEquals(PixelFormat.TRANSLUCENT, manager.updated.last().format)
+
+      host.setOpacity(100)
+      assertEquals(2, manager.updated.size)
+      assertEquals(PixelFormat.OPAQUE, manager.updated.last().format)
+
+      host.setOpacity(100)
+      assertEquals(2, manager.updated.size)
+      assertEquals(1, manager.added.size)
+      assertEquals(0, manager.removals)
+    }
+
+  @Test
+  fun `translucent fullscreen opacity changes apply content without updating the window`() =
+    runTest {
+      assertTrue(host.show(chromelessRequest().copy(opaqueSurface = true, opacityPercent = 90)))
+      assertEquals(PixelFormat.TRANSLUCENT, manager.added.single().format)
+
+      host.setOpacity(80)
+      host.setOpacity(0)
+      host.setOpacity(90)
+      assertEquals(0, manager.updated.size)
+      assertEquals(1, manager.added.size)
+      assertEquals(0, manager.removals)
+    }
 
   @Test
   fun `opacity rejects invalid requests and setter values`() = runTest {

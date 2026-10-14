@@ -103,7 +103,7 @@ export class NativeHelperRegistry implements NativeHelperTracker {
     }
     this.tracked.delete(record.pid);
     try {
-      this.store.remove(record.pid);
+      this.store.remove(record.pid, record.startIdentity);
     } catch (error) {
       this.log.warn(
         `[NATIVE_HELPERS] Failed to remove exited helper ${record.pid}: ${errorMessage(error)}`,
@@ -136,10 +136,14 @@ export class NativeHelperRegistry implements NativeHelperTracker {
       try {
         const running = this.control.isRunning(record.pid);
         const identity = running ? this.control.readStartIdentity(record.pid) : undefined;
-        if (running && identity === undefined) {
+        if (
+          running &&
+          (identity === undefined ||
+            this.control.compareStartIdentity(record.startIdentity, identity) === "incomparable")
+        ) {
           // Uncertain identity is not proof this owned helper exited; keep it for a later sweep.
           this.log.debug(
-            `[NATIVE_HELPERS] Retaining helper ${record.pid}: shutdown identity unavailable`,
+            `[NATIVE_HELPERS] Retaining helper ${record.pid}: shutdown identity unverifiable`,
           );
           summary.failed++;
           continue;

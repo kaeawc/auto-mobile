@@ -501,6 +501,24 @@ data class PatchPrototype(
   val ops: JsonArray,
 ) : WebSocketRequest()
 
+@Serializable
+@SerialName("save_prototype")
+data class SavePrototype(
+  override val requestId: String? = null,
+  val spec: PrototypeSpec,
+  val label: String,
+  val icon: String? = null,
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("list_saved_prototypes")
+data class ListSavedPrototypes(override val requestId: String? = null) : WebSocketRequest()
+
+@Serializable
+@SerialName("delete_saved_prototype")
+data class DeleteSavedPrototype(override val requestId: String? = null, val id: String) :
+  WebSocketRequest()
+
 /**
  * Uploads one prototype image asset, replacing any asset with the same [id]. [dataBase64] is the
  * encoded image (PNG, JPEG or WebP) in standard base64 without line breaks. Answered by one

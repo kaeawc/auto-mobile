@@ -9,6 +9,16 @@ private func line(_ object: [String: Any]) throws -> Data {
 }
 
 final class PrototypeAgentConfigurationTests: XCTestCase {
+    func testAndroidIdentifierAndSheetParityCapabilities() {
+        XCTAssertEqual(PrototypeAgentProtocol.identifierTestTagOnlyCapability, "prototype_identifier_test_tag_only_v1")
+        XCTAssertEqual(PrototypeAgentProtocol.bottomSheetDragCapability, "prototype_bottom_sheet_drag_v1")
+        XCTAssertTrue(
+            PrototypeAgentProtocol.capabilities
+                .contains(PrototypeAgentProtocol.identifierTestTagOnlyCapability)
+        )
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.bottomSheetDragCapability))
+    }
+
     func testTheAgentAdvertisesSfSymbolsWithoutMaterialParity() {
         XCTAssertEqual(PrototypeAgentProtocol.iconSfSymbolsCapability, "prototype_icon_sf_symbols_v1")
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.iconSfSymbolsCapability))

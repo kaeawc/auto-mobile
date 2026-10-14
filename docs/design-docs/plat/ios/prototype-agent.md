@@ -40,8 +40,8 @@ screenshots (#10943, #10988) and the renderer and accessibility fixes that follo
 | [Patch (#11675)](../android/prototype-ux.md#patch-11675)                              | Not implemented: the agent does not advertise `prototype_patch_v1` (the pure applier and shared fixtures exist in the agent core).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Non-scalar state values (`null`, array, object)                                       | Refused at `show`, as Android and the host schema do: state is string, number or boolean only                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Foreground scoping to the shown-over app                                              | Not needed: the agent lives in the app, so backgrounding the app hides its window                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| Accessibility identifier fallback (`node.id`)                                         | Uses `testTag ?? id`, including `<id>.<part>` for composite parts; host reports `platformNotes`, lifted by `prototype_identifier_test_tag_only_v1`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| Bottom sheet swipe-dismiss and detent dragging                                        | Opens at the first detent; no drag or swipe-dismiss; host reports `platformNotes`, lifted by `prototype_bottom_sheet_drag_v1`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Accessibility identifier fallback (`node.id`)                                         | Matches Android: only `testTag`, including `<testTag>.<part>` for composite parts. Advertises `prototype_identifier_test_tag_only_v1`; host lifts the platform note.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Bottom sheet swipe-dismiss and detent dragging                                        | Matches Android: opens at the first detent, drags between detents, and swipes to dismiss (`dismissOnSwipe` defaults to true). Advertises `prototype_bottom_sheet_drag_v1`; host lifts the platform note.                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Built-in icon coverage                                                                | Mapped and explicitly unmapped contract names are listed in `schemas/prototype-ios-icon-symbols.json`; unmapped names draw `questionmark.square` (reviewable list: `ios/prototype-agent/ICON-SYMBOLS.md`). Advertises `prototype_icon_sf_symbols_v1`; host reports affected paths and names under `platformNotes`.                                                                                                                                                                                                                                                                                                                                                   |
 | Icon node `variant`                                                                   | Filled/outlined use their SF Symbol form where the table has it; absent forms and rounded/sharp/twoTone draw the default symbol. With no variant, the default SF Symbol is often outlined; use `variant: "filled"` for the closest Android match where available. Runtime lookup tries the chosen form, the default symbol if different, then `questionmark.square`. Host reports substitutions in `platformNotes`.                                                                                                                                                                                                                                                  |
 
@@ -506,3 +506,42 @@ Two data keys that are canonically equivalent Unicode strings collapse into one 
 Swift dictionary keys compare by canonical equivalence, unlike the host and Android.
 The agent re-checks data depth and array limits in the host's traversal order. It does not duplicate
 the host validator's data byte-cost rule; the existing 1 MiB whole-spec byte cap still bounds input.
+
+## Saved prototype on-disk layout (#12254)
+
+One saved prototype lives in the viewer app container:
+
+```text
+Documents/prototype/
+  manifest.json
+  spec.json
+  assets/<sha256>.png|jpg|webp
+  fonts/<sha256>.ttf|otf
+```
+
+Version 1 has the strict manifest shape
+`{"formatVersion":1,"specFile":"spec.json","assets":[{"id":"image","file":"assets/<sha256>.png","sha256":"<sha256>","mediaType":"image/png"}],"fonts":[]}`.
+Both arrays are always present. SHA-256 is lowercase hexadecimal over file bytes;
+identical bytes with the same media type share one content-addressed file. Paths
+must exactly match the media type, folder and hash. IDs are unique across both arrays.
+The shared asset contract caps count, per-file size and total bytes; spec and
+manifest caps are 1 MiB and 256 KiB respectively.
+
+The host writer stages a sibling `.tmp-<token>` directory, writes the manifest last,
+then renames into place. Replacement first backs up the old directory to
+`.old-<token>` and restores it if the commit rename fails. Callers serialize writes.
+The reader refuses unknown versions before validating version-specific fields and
+never changes any files. A bad manifest, spec, count or verified-byte total is corrupt;
+missing, unreadable, unsafe, empty/oversized or hash-mismatched assets are omitted
+from the verified snapshot and reported as sorted problems. The viewer can use its
+missing-asset placeholder and expose those problems through `inspect`.
+
+Unlike Android's many slug directories, iOS stores one prototype and has no manifest
+id, label or savedAt. Asset failures leave the prototype loadable; reading never
+repairs or deletes it. The writer permits spec references absent from the request;
+the reader reports these as missing manifest entries. The installer is separate (#12256).
+
+The implementations are `src/features/prototype/savedPrototypeLayout.ts` and
+`ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSavedLayout.swift`.
+Both test suites consume `test/fixtures/prototype-saved-layout/layout.json`, including
+the same expected manifest and file hashes. Fixture binaries are generated at test time.

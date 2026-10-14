@@ -247,6 +247,7 @@ export function registerAccessibilityTools() {
       // The check form (no talkback/voiceover) reads (#10965); a toggle is control.
       deviceReadOnly: (args: AccessibilityArgs) =>
         args.talkback === undefined && args.voiceover === undefined,
+      deviceReadOnlyArgs: [{ absentArguments: ["talkback", "voiceover"] }],
     },
   );
 }

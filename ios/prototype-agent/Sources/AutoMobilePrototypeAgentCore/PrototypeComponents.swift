@@ -9,9 +9,9 @@ import Foundation
 let prototypeModalTypes: Set<String> = ["dialog", "snackbar"]
 
 extension PrototypeNode {
-    /// The accessibility identifier: `testTag`, else `id`.
+    /// The accessibility identifier is only the authored `testTag`, as on Android.
     var identifier: String? {
-        testTag ?? id
+        testTag
     }
 
     /// The identifier of a part of a composite node: the node's identifier, a dot, then the part

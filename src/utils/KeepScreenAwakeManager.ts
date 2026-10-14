@@ -38,6 +38,12 @@ type BaselineSetting = {
   value: string;
 };
 
+/** Serializable release evidence when restoration could not recover the original settings. */
+export interface KeepAwakeRestoreReport {
+  status: "restored_to_baseline" | "failed";
+  settings: Array<{ setting: string; value?: string; error?: string }>;
+}
+
 export type KeepScreenAwakeRestoreOutcome =
   | { status: "restored" }
   | { status: "restored_to_baseline"; settings: ReadonlyArray<BaselineSetting> }

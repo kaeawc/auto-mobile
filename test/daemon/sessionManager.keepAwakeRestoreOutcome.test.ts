@@ -110,6 +110,8 @@ beforeAll(async () => {
     fixtures.set(String(failures), await harness(failures));
   }
   fixtures.set("mixed", await harness(1, false, true));
+  fixtures.set("mixed-final", await harness(Infinity, false, true));
+  fixtures.set("retry-baseline", await harness(1, true));
   for (const baseline of [false, true]) {
     fixtures.set(String(baseline), await harness(0, baseline));
   }
@@ -122,10 +124,12 @@ test.each([1, 2])(
     h.warn.mockClear();
     await h.release();
     expect(h.calls).toBe(1);
+    expect(h.manager.getKeepAwakeRestoreReport("old")).toBeUndefined();
     for (let attempt = 0; attempt < failures; attempt++) {
       await h.step(250);
     }
     expect(h.calls).toBe(failures + 1);
+    expect(h.manager.getKeepAwakeRestoreReport("old")).toBeUndefined();
     expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
     expect(h.manager.hasDeviceCleanupInProgress(device.deviceId)).toBe(false);
     expect(await h.pool.assignDeviceToSession("next", "android")).toBe(device.deviceId);
@@ -146,6 +150,13 @@ test("bounded failed outcomes mark the slot unhealthy until recovery restores it
   await h.step(250);
   await h.step(250);
   expect(h.calls).toBe(3);
+  expect(h.manager.getKeepAwakeRestoreReport("old")).toEqual({
+    status: "failed",
+    settings: [
+      { setting: "screen_off_timeout", error: "restore unavailable" },
+      { setting: "stay_on_while_plugged_in", error: "write rejected" },
+    ],
+  });
   expect(h.pool.getDeviceHealthMarker(device.deviceId)?.reason).toBe("keep-screen-awake");
   expect(h.pool.getStats().idle).toBe(0);
   await expect(
@@ -154,6 +165,7 @@ test("bounded failed outcomes mark the slot unhealthy until recovery restores it
   h.succeed();
   await h.step(1000);
   expect(h.calls).toBe(4);
+  expect(h.manager.getKeepAwakeRestoreReport("old")).toBeUndefined();
   expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
   expect(await h.pool.assignDeviceToSession("next", "android")).toBe(device.deviceId);
 });
@@ -166,6 +178,14 @@ test.each([false, true])(
     await h.release();
     await h.step(500);
     expect(h.calls).toBe(1);
+    expect(h.manager.getKeepAwakeRestoreReport("old")).toEqual(
+      baseline
+        ? {
+            status: "restored_to_baseline",
+            settings: [{ setting: "screen_off_timeout", value: "60000" }],
+          }
+        : undefined,
+    );
     expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
     expect(await h.pool.assignDeviceToSession("next", "android")).toBe(device.deviceId);
     if (baseline) {
@@ -192,4 +212,31 @@ test("mixed failure reports the baseline writes in the retry error", async () =>
   ).toBe(true);
   await h.step(250);
   expect(h.calls).toBe(2);
+});
+
+test("final mixed failure includes both errors and successful baseline writes", async () => {
+  const h = fixtures.get("mixed-final")!;
+  await h.release();
+  expect(h.manager.getKeepAwakeRestoreReport("old")).toBeUndefined();
+  await h.step(250);
+  expect(h.manager.getKeepAwakeRestoreReport("old")).toBeUndefined();
+  await h.step(250);
+  expect(h.manager.getKeepAwakeRestoreReport("old")).toEqual({
+    status: "failed",
+    settings: [
+      { setting: "screen_off_timeout", error: "restore unavailable" },
+      { setting: "stay_on_while_plugged_in", value: "0" },
+    ],
+  });
+});
+
+test("a retry restoring to baseline reports the final baseline", async () => {
+  const h = fixtures.get("retry-baseline")!;
+  await h.release();
+  expect(h.manager.getKeepAwakeRestoreReport("old")).toBeUndefined();
+  await h.step(250);
+  expect(h.manager.getKeepAwakeRestoreReport("old")).toEqual({
+    status: "restored_to_baseline",
+    settings: [{ setting: "screen_off_timeout", value: "60000" }],
+  });
 });

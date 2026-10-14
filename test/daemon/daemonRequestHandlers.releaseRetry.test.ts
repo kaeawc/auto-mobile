@@ -185,6 +185,37 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
     expect(pool.getDevice(deviceId)).toMatchObject({ sessionId: replacementId, status: "busy" });
   });
 
+  test.each([undefined, "restored_to_baseline", "failed"] as const)(
+    "release result adds only a known keep-awake report (%s)",
+    async (reported) => {
+      const report = {
+        status: reported ?? "restored_to_baseline",
+        settings: [
+          reported === "failed"
+            ? { setting: "screen_off_timeout", error: "write rejected" }
+            : { setting: "screen_off_timeout", value: "60000" },
+        ],
+      };
+      const getter = spyOn(manager, "getKeepAwakeRestoreReport").mockImplementation(() => {
+        expect(manager.hasSession(sessionId)).toBe(false);
+        return reported ? report : undefined;
+      });
+      try {
+        expect(await release()).toEqual({
+          success: true,
+          result: {
+            message: `Session ${sessionId} released`,
+            device: deviceId,
+            alreadyReleased: false,
+            ...(reported ? { keepAwakeRestore: report } : {}),
+          },
+        });
+      } finally {
+        getter.mockRestore();
+      }
+    },
+  );
+
   test("normal release and genuinely absent retries remain idempotent", async () => {
     const free = spyOn(pool, "releaseDevice");
     try {

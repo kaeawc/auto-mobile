@@ -35,6 +35,7 @@ import {
   type LivenessClaimOutcome,
   type LivenessReleaseOutcome,
   Session,
+  type SessionManager,
   type SessionReleaseSnapshot,
 } from "./sessionManager";
 import { sessionForIngress } from "./sessionForIngress";
@@ -151,7 +152,7 @@ export interface DaemonStateAccess {
   getManagedSlotAcquisition?(): Pick<ManagedSlotAcquisition, "acquire"> | undefined;
   /** Re-stamps a re-bound managed connection's slots with this daemon as their owner (#11275). */
   getManagedExecutionReowner?(): Pick<ManagedExecutionReowner, "reown"> | undefined;
-  getSessionManager(): {
+  getSessionManager(): Partial<Pick<SessionManager, "getKeepAwakeRestoreReport">> & {
     hasSession(sessionId: string): boolean;
     getSession(sessionId: string): Session | null;
     /** Admission/liveness judgement; never starts lazy release. */
@@ -1897,12 +1898,14 @@ async function releaseBoundSession(
       return deviceId;
     },
   });
+  const keepAwakeRestore = manager.getKeepAwakeRestoreReport?.(sessionId);
   return {
     success: true,
     result: {
       message: `Session ${sessionId} released`,
       device: deviceId,
       alreadyReleased: false,
+      ...(keepAwakeRestore ? { keepAwakeRestore } : {}),
     },
   };
 }

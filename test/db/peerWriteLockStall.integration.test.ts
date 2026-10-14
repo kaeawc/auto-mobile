@@ -15,6 +15,9 @@ test("real peer write locks leave the event loop responsive", async () => {
       cwd: fileURLToPath(new URL("../../", import.meta.url)),
       stdout: "pipe",
       stderr: "pipe",
+      // Bound the probe below the test timeout, even if its event loop hangs.
+      timeout: 55_000,
+      killSignal: "SIGKILL",
     },
   );
   const [output, errors, exitCode] = await Promise.all([

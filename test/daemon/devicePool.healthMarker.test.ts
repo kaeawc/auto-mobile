@@ -1,3 +1,8 @@
+import type { ChildProcess } from "node:child_process";
+import { FakeChildProcess } from "../fakes/FakeChildProcess";
+import { redriveUnconfirmedCaptureTeardowns } from "../../src/server/recordingTeardownRedrive";
+import { FakeVideoRecordingRepository } from "../fakes/FakeVideoRecordingRepository";
+import { DEFAULT_VIDEO_RECORDING_CONFIG } from "../../src/features/video/VideoRecorderService";
 import { afterEach, expect, spyOn, test } from "bun:test";
 import { logger } from "../../src/utils/logger";
 import { DevicePool } from "../../src/daemon/devicePool";
@@ -39,6 +44,7 @@ afterEach(() => {
 async function harness(
   count = 1,
   assigned?: (deviceId: string, incarnation: number, visible: number | undefined) => void,
+  started?: (deviceId: string) => void | Promise<void>,
 ) {
   const timer = new FakeTimer();
   timer.setCurrentTime(1000);
@@ -77,6 +83,7 @@ async function harness(
         assigned?.(id, incarnation, pool.getDeviceIncarnation(id)),
     }),
   );
+  pool.setDeviceProcessStartedListener(started);
   await pool.initializeWithDevices(devices);
   return {
     timer,
@@ -1120,7 +1127,7 @@ test("#12112 recording-teardown refusal carries its real recovery bound", async 
   expect(await typedAllocationError(h)).toMatchObject({ retryAfterMs: remainingBound });
 });
 
-test("#12112 recording-teardown refusal is permanent after three dispatched failures", async () => {
+test("#12112 recording-teardown refusal reports the re-check after three dispatched failures", async () => {
   const h = await harness();
   let calls = 0;
   h.manager.markDeviceNeedsRecorderTeardown(
@@ -1142,10 +1149,11 @@ test("#12112 recording-teardown refusal is permanent after three dispatched fail
     code: "device_unhealthy",
     deviceId: device.deviceId,
     reason: "recording-teardown",
-    retryable: false,
-    recovering: false,
+    retryable: true,
+    recovering: true,
+    retryAfterMs: 185_000,
   });
-  expect(error).not.toHaveProperty("retryAfterMs", expect.any(Number));
+  expect(error).toHaveProperty("retryAfterMs", 185_000);
   expect(error).toHaveProperty(
     "message",
     expect.stringContaining(
@@ -1248,6 +1256,147 @@ test("throwing incarnation listener warns and does not break initialization or r
         String(message).includes("incarnation listener failed"),
       ),
     ).toHaveLength(2);
+  } finally {
+    warn.mockRestore();
+  }
+});
+
+test("pool signals only a newly tracked spawned Android process", async () => {
+  const started: string[] = [];
+  const h = await harness(1, undefined, (id) => started.push(id));
+  const pool = h.pool as unknown as {
+    trackStartedDeviceProcess(
+      device: typeof device,
+      child: ChildProcess | undefined,
+    ): Promise<void>;
+  };
+  await pool.trackStartedDeviceProcess(device, undefined);
+  expect(started).toEqual([]);
+  const child = new FakeChildProcess();
+  await pool.trackStartedDeviceProcess(device, child as unknown as ChildProcess);
+  expect(started).toEqual([device.deviceId]);
+  await pool.trackStartedDeviceProcess(device, child as unknown as ChildProcess);
+  expect(started).toEqual([device.deviceId]);
+});
+
+async function startupPoolHarness(forceStop: () => Promise<void>) {
+  let assigned: ((id: string) => void) | undefined;
+  let started: ((id: string) => void | Promise<void>) | undefined;
+  const h = await harness(
+    1,
+    (id) => assigned?.(id),
+    (id) => started?.(id),
+  );
+  const repo = new FakeVideoRecordingRepository();
+  await repo.insertRecording({
+    recordingId: "old-process",
+    deviceId: device.deviceId,
+    platform: "android",
+    status: "interrupted",
+    fileName: "old.mp4",
+    filePath: "/unused/old.mp4",
+    format: "mp4",
+    sizeBytes: 0,
+    createdAt: "1970-01-01T00:00:00.000Z",
+    startedAt: "1970-01-01T00:00:00.000Z",
+    lastAccessedAt: "1970-01-01T00:00:00.000Z",
+    config: DEFAULT_VIDEO_RECORDING_CONFIG,
+    captureTeardown: {
+      kind: "android-screenrecord",
+      devicePid: 11483,
+      deviceTempPath: "/sdcard/old.mp4",
+    },
+  });
+  await redriveUnconfirmedCaptureTeardowns(h.manager, {
+    recordingRepository: repo,
+    liveDaemonSessionIds: new Set(),
+    ownedCaptureIds: () => [],
+    getDevice: () => device,
+    getDeviceIncarnation: (id) => h.pool.getDeviceIncarnation(id),
+    onDeviceIncarnationAssigned: (listener) => {
+      assigned = listener;
+    },
+    onDeviceProcessStarted: (listener) => {
+      started = listener;
+    },
+    forceStopOrphanedCapture: forceStop,
+    now: () => h.timer.now(),
+    timer: h.timer,
+  });
+  return { ...h, repo };
+}
+
+test("removed startup orphan is acquirable on the first bind with a newly started process", async () => {
+  let commands = 0;
+  const h = await startupPoolHarness(async () => {
+    commands++;
+  });
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeDefined();
+  await h.pool.removeDevice(device.deviceId);
+  await h.pool.addDevice(device);
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeDefined();
+  expect(
+    await h.pool.bindOrReuseDeviceSession(
+      "fresh",
+      device.deviceId,
+      "android",
+      undefined,
+      new FakeChildProcess() as unknown as ChildProcess,
+    ),
+  ).toBe("fresh");
+  expect(commands).toBe(1);
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
+});
+
+test("process-start listener deadline releases real pool tracking with quarantine intact", async () => {
+  const gate = Promise.withResolvers<void>();
+  let commands = 0;
+  const h = await startupPoolHarness(async () => {
+    commands++;
+    await gate.promise;
+  });
+  const pool = h.pool as unknown as {
+    trackStartedDeviceProcess(device: typeof device, child: ChildProcess): Promise<void>;
+  };
+  let settled = false;
+  const tracking = pool
+    .trackStartedDeviceProcess(device, new FakeChildProcess() as unknown as ChildProcess)
+    .then(() => {
+      settled = true;
+    });
+  await flush();
+  expect(commands).toBe(1);
+  expect(settled).toBe(false);
+  await h.timer.advanceTimeAsync(4999, flush);
+  expect(settled).toBe(false);
+  await h.timer.advanceTimeAsync(1, flush);
+  await tracking;
+  expect(h.pool.getDeviceHealthMarker(device.deviceId)?.reason).toBe("recording-teardown");
+  expect((await h.repo.getRecording("old-process"))?.captureTeardown).toBeDefined();
+  expect(commands).toBe(1);
+  // Settle the underlying confirmation for teardown; the deadline never overlaps probes.
+  gate.resolve();
+  await flush();
+  h.timer.reset();
+});
+
+test("a rejected process-start listener warns without failing real pool tracking", async () => {
+  const failure = new Error("listener failed");
+  const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  const h = await harness(1, undefined, () => {
+    throw failure;
+  });
+  const pool = h.pool as unknown as {
+    trackStartedDeviceProcess(device: typeof device, child: ChildProcess): Promise<void>;
+  };
+  const child = new FakeChildProcess() as unknown as ChildProcess;
+  try {
+    await expect(pool.trackStartedDeviceProcess(device, child)).resolves.toBeUndefined();
+    expect(h.pool.hasStartedDeviceProcess(device.deviceId, child)).toBe(true);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("process-start listener failed"),
+      failure,
+    );
   } finally {
     warn.mockRestore();
   }

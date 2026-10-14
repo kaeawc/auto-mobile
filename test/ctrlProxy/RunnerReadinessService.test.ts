@@ -3,6 +3,7 @@ import { CtrlProxyInspectionError } from "../../src/ctrlProxy/CtrlProxyManager";
 import { logger } from "../../src/utils/logger";
 import type { BootedDevice } from "../../src/models";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
+import { DeviceOwnedByOtherDaemonError } from "../../src/daemon/deviceAcquisitionRefusals";
 import {
   RunnerReadinessError,
   RunnerReadinessService,
@@ -676,6 +677,30 @@ describe("RunnerReadinessService", () => {
       expect(error).toBeInstanceOf(RunnerReadinessError);
       expect((error as RunnerReadinessError).diagnosticCause).toBe(loss);
     }
+  });
+
+  test("#12220 preserves typed foreign owner cause without retrying runner setup", async () => {
+    const manager = new FakeAndroidManager();
+    const refusal = new DeviceOwnedByOtherDaemonError("emulator-5554", 4242);
+    let attempts = 0;
+    manager.ensureCompatibleVersion = async () => {
+      attempts++;
+      return { status: "failed", error: refusal.message, cause: refusal };
+    };
+    const { service, timer } = createService({ androidManager: manager });
+    const error = await service
+      .ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "android",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 10_000,
+      })
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    expect((error as RunnerReadinessError).diagnosticCause).toBe(refusal);
+    expect((error as RunnerReadinessError).deadlineExhausted).toBe(false);
+    expect(attempts).toBe(1);
+    expect(timer.now()).toBe(0);
   });
 
   test("classifies the setup failure without treating device names as diagnostics", async () => {

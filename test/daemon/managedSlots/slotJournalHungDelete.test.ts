@@ -380,7 +380,7 @@ describe("bounded abandoned journal deletes", () => {
     });
   }
 
-  test("readiness discard retains intent when registry flag writes stay busy", async () => {
+  test("readiness discard retains intent when its atomic created write is busy", async () => {
     const h = await harness();
     await h.journal.close(h.entry!, "rolled_back");
     h.inventory.devices.length = 0;
@@ -407,13 +407,9 @@ describe("bounded abandoned journal deletes", () => {
       deadlineMs: 20_000,
     });
     await flush();
-    for (let i = 0; i < SLOT_JOURNAL_REMOVAL_FLAG_MAX_ATTEMPTS - 1; i++) {
-      h.timer.advanceTime(Math.min(25 * 2 ** i, 1_000));
-      await flush();
-    }
     expect(await result).toMatchObject({
       outcome: "failed",
-      failure: { code: "readiness_incomplete" },
+      failure: { code: "discovery_incomplete" },
     });
     h.registry.advanceSlotJournal = advance;
     expect(await reconciler.journal.runPass()).toMatchObject({

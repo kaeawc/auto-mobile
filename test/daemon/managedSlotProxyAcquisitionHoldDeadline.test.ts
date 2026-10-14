@@ -154,6 +154,17 @@ describe("managed slot proxy acquisition hold deadline", () => {
     warnings.push(spyOn(logger, "warn").mockImplementation(() => {}));
   }
 
+  test("tracks the in-flight scope key together with the acquired sessions before holding", async () => {
+    const r = rig();
+    const track = spyOn(r.ports, "trackAcquiredSessions");
+    try {
+      expect(await acquireManagedSlotsThroughDaemon(CONFIG, r.ports)).toBe(READY_RESULT);
+      expect(track).toHaveBeenCalledWith([SESSION], READY_RESULT.scope.scopeKey);
+    } finally {
+      track.mockRestore();
+    }
+  });
+
   test("a stalled hold times out retryably, nulls slot sessions, releases once, and aborts the hold signal", async () => {
     silenceWarnings();
     const parked = Promise.withResolvers<void>();

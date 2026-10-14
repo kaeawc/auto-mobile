@@ -628,7 +628,8 @@
               "reason": "deletion_stuck",
               "attempts": 5,
               "failedDeletes": 3,
-              "lastError": "native delete keeps failing"
+              "lastError": "native delete keeps failing",
+              "uncounted": true
             }
           ],
           "evictionFailures": [

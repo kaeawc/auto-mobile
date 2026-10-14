@@ -5,6 +5,10 @@
       "expected": "fail",
       "fields": { "code": "prototype_suspended", "retryable": false, "acquireNewSession": false }
     },
+    "orphan_recorder_active": {
+      "expected": "retry",
+      "fields": { "code": "orphan_recorder_active", "retryable": true, "acquireNewSession": false }
+    },
     "ambiguous_session_selector": {
       "expected": "fail",
       "fields": {

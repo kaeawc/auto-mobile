@@ -2,7 +2,7 @@ package dev.jasonpearson.automobile.protocol
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.*
 
 @Serializable
 data class PrototypeOffset(
@@ -45,6 +45,7 @@ data class PrototypeCondition(
   val all: List<PrototypeCondition>? = null,
   val any: List<PrototypeCondition>? = null,
   val not: PrototypeCondition? = null,
+  val data: String? = null,
 )
 
 @Serializable
@@ -151,8 +152,46 @@ data class PrototypeStyle(
  * A literal list template: the container's children are instantiated once per [items] entry, with
  * `{as.field}` and `{index}` bound per instance. Each item maps field names to scalar values.
  */
+@Serializable(with = PrototypeRepeatSerializer::class)
+data class PrototypeRepeat(
+  val items: List<Map<String, PrototypeScalar>>,
+  val `as`: String,
+  val itemsPath: String? = null,
+  val key: String? = null,
+)
+
 @Serializable
-data class PrototypeRepeat(val items: List<Map<String, PrototypeScalar>>, val `as`: String)
+private data class PrototypeRepeatWire(
+  val items: JsonElement,
+  val `as`: String,
+  val key: String? = null,
+)
+
+/** Keeps the source pointer in `items.path`, never as a wire-level `itemsPath` member. */
+object PrototypeRepeatSerializer :
+  PrototypeJsonValueSerializer<PrototypeRepeat>("PrototypeRepeat") {
+  override fun fromJson(value: JsonElement): PrototypeRepeat {
+    val json = PrototypeSpecValidator.json
+    val wire = json.decodeFromJsonElement<PrototypeRepeatWire>(value)
+    val source = wire.items as? JsonObject
+    val pointer = source?.get("path") as? JsonPrimitive
+    if (source != null && (source.keys != setOf("path") || pointer?.isString != true)) {
+      throw kotlinx.serialization.SerializationException("Expected repeat path")
+    }
+    val items =
+      if (source == null) json.decodeFromJsonElement<List<Map<String, PrototypeScalar>>>(wire.items)
+      else emptyList()
+    return PrototypeRepeat(items, wire.`as`, pointer?.content, wire.key)
+  }
+
+  override fun toJson(value: PrototypeRepeat): JsonElement {
+    val json = PrototypeSpecValidator.json
+    val items =
+      value.itemsPath?.let { buildJsonObject { put("path", it) } }
+        ?: json.encodeToJsonElement(value.items)
+    return json.encodeToJsonElement(PrototypeRepeatWire(items, value.`as`, value.key))
+  }
+}
 
 @Serializable
 data class PrototypeStyleWhen(val `when`: PrototypeCondition, val style: PrototypeStyle)
@@ -981,4 +1020,5 @@ data class PrototypeSpec(
   val theme: PrototypeSpecTheme? = null,
   /** `none` opts out of prototype animation; absent or `standard` follows the system scale. */
   val motion: String? = null,
+  val data: JsonObject? = null,
 )

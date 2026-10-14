@@ -20,6 +20,9 @@ beforeEach(async () => {
   await highlightsUp(db);
   await ownerUp(db);
   await displayUp(db);
+  await (
+    await import("../../src/db/migrations/2026_10_13_000_video_recording_recorder_daemon")
+  ).up(db);
 });
 afterEach(async () => {
   await db.destroy();
@@ -114,7 +117,11 @@ test("capture descriptor query excludes rows belonging to live peer daemons", as
   );
   await sql`INSERT INTO device_sessions VALUES ('peer-owner','active','peer-daemon')`.execute(db);
   const repo = new VideoRecordingRepository(db.withTables<Database>());
-  await repo.insertRecording({ ...record, ownerSessionUuid: "peer-owner" });
+  await repo.insertRecording({
+    ...record,
+    ownerSessionUuid: "peer-owner",
+    recorderDaemonSessionId: "peer-daemon",
+  });
   expect(
     await repo.listRecordings({
       hasCaptureTeardown: true,

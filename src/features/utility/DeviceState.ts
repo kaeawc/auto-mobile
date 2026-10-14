@@ -2512,6 +2512,8 @@ export class DeviceState {
     const udid = this.device.deviceId.toUpperCase();
     const rules = (status.rules ?? [])
       .filter((rule) => rule.target.simulator.udid.toUpperCase() === udid)
+      // Shaped rules are reported in a later change.
+      .filter((rule) => rule.condition === "offline")
       .map((rule): IosAppNetworkRuleState => ({
         appId: rule.target.bundleId,
         profile: rule.condition,
@@ -2911,6 +2913,12 @@ export class DeviceState {
           verified: false,
           error: iosRuleRefusalError(rule.bundleId, result.outcome),
         };
+      case "upgrade_required":
+        return this.iosApplyResult(base, context, {
+          kind: "not_ready",
+          state: "unavailable",
+          detail: result.detail,
+        });
       case "not_ready":
         return {
           ...base,

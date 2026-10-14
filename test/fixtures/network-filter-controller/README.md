@@ -93,3 +93,10 @@ the line; run each capture and `cmp` separately if the shell uses `set -e`.
 Inside a restricted sandbox, add `--disable-sandbox --scratch-path ios/network-filter/.build`
 to SwiftPM commands and keep shared/module caches inside the worktree. Implementation
 validation builds and runs pure tests only; binary captures belong to the driver.
+
+## Released version-3 argument rejections
+
+`v3-app/` contains captured output from the released version-3 controller built
+from commit `546da330ab`, run unsigned with argument-error invocations only.
+These invocations reject `--contract-version` before signing checks or provider
+contact, exit 2, and pin the host's safe offline fallback and shaped upgrade result.

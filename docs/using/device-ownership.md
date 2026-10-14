@@ -636,6 +636,18 @@ Owner decisions 2026-10-09 (#10982):
   and selecting or pinning the current device. The only settings it may write are
   the accessibility settings that enable CtrlProxy. A later control call still
   performs appearance sync and current-device selection or pinning.
+- A device held by a shared allocation claim or forwarding lease, a managed slot,
+  or an unrecorded CtrlProxy forward with a live foreign client PID is held for
+  this readiness decision (#12220). The forward's PID stays evidence while that
+  PID is alive and its forwarded port remains listed, even if its connection
+  disappears; an idle lease relinquish does not erase it. A known forwarded port
+  whose client probe fails is also held. Reads of such a running device use the
+  installed read-only path without CtrlProxy setup or settings writes. Foreign
+  claims and forwards refuse control with retryable `device_owned_by_other_daemon`
+  (`ownerPid` omitted when unknown); managed slots use their own typed refusal.
+  An unnamed control call never selects a foreign-held device automatically.
+  Pass the `deviceId` of a device this daemon may drive, or acquire one with
+  `getAndroid`/`getApple` and pass its `sessionUuid`.
 - A sessionless read boots a stopped device only when the call explicitly passes
   its `deviceId` (owner decision 2026-10-11, follow-up to #11641). Every device-aware
   read tool, including `observe`, accepts a running device's serial or iOS UDID,
@@ -682,6 +694,33 @@ setup through that path. These are the exact sets pinned
 by `test/server/readToolsExplicitDeviceIdRule.test.ts`: 18 of 21 tools on each platform.
 The handlers are stubbed in that test; platform-specific feature support is separate
 from target resolution and readiness.
+
+This readiness exception applies only when ownership by another daemon is ruled out. A shared
+claim or forwarding lease, a managed slot, or an unrecorded CtrlProxy forward
+with a live or remembered-live foreign client PID keeps the device on the
+installed read-only path, regardless of a **Yes** entry. If a listed forward's
+client ownership is unknown, reads still use that path and control gets a typed
+refusal without an `ownerPid`. Explicit-device control refusals advise retrying after
+the owning daemon releases the device, or choosing another device. A call naming no
+device advises passing the `deviceId` of a device this daemon may drive, or acquiring
+one with `getAndroid`/`getApple` and passing its `sessionUuid`. A daemon removes forwards its coordination directory recorded when no foreign client
+is connected. An unrecorded forward with no client connected on either probe,
+whose owner this daemon never saw connected, is treated as a leftover and reclaimed
+(the existing #10690 rule). A remembered PID protects its forward while that PID
+is alive; PID reuse cannot be distinguished by this liveness-only check. The existing
+process-incarnation probe launches `ps` on macOS and is not used on this hot path.
+An unreadable forward list with no known port warns and leaves the pool's ordinary
+claim decision in place; a readiness guard performs no writes, skips readiness for
+a read, and fails control with a distinct, non-coded adb failure asking for a retry.
+Cancellation propagates as cancellation. A peer using a different coordination
+directory with **no forward**, or an unrecorded forward whose disconnected owner
+was never observed, leaves no live forward evidence for this check to detect.
+Once this daemon's own CtrlProxy client is connected and responsive, it does not
+re-read forward ownership on each call. An older-release daemon that later connects
+through its own forward to the same device is therefore not detected by that fast
+path. The pool gate still refuses sessionless control in daemon mode on its next
+ownership read. Pool-level forward evidence is supplied by the daemon process
+entry point. Direct (non-daemon) mode is protected by the CtrlProxy manager guard alone.
 
 | Tool                    | Android                                     | iOS simulator                               |
 | ----------------------- | ------------------------------------------- | ------------------------------------------- |
@@ -803,7 +842,15 @@ refusal fails at once with each device's reason. Healthy candidates remain
 eligible; reads remain allowed on marked devices. Skipped recovery ticks re-arm
 the same attempt, and only a dispatched restore consumes one of the three
 attempts.
-Recorder teardown composes all unconfirmed retries for the device incarnation; new or replaced retries get a fresh attempt budget, and a later mark also retries work left unconfirmed after exhaustion. Recorder rows from a successful startup read remain tracked when discovery pools a device later or assigns it a new incarnation: quarantine is synchronous before binding, and late redrive rechecks local and peer ownership before device commands; a descriptor with no pid and no finite expiry quarantines one incarnation only. A failed startup read leaves the descriptors for the next daemon start.
+Recorder teardown composes all unconfirmed retries for the device incarnation; new or replaced retries get a fresh attempt budget, and a later mark also retries work left unconfirmed after exhaustion. Recorder rows from a successful startup read remain tracked when discovery pools a device later or assigns it a new incarnation: quarantine is synchronous before binding, and late redrive rechecks local and peer ownership before device commands; a descriptor with no pid and no finite expiry quarantines one incarnation only. A held device keeps its startup orphan until the owner stops it by recording id, the next recording start stops it before starting another capture, or the session releases the device. Stop-by-id and start return retryable `orphan_recorder_active` if the recorder cannot be confirmed stopped; retry or stop it by id. For a pid-less orphan with a valid `startedAt`, `orphan_recorder_active` clears by itself once the 185-second hard limit has passed. A pid-less orphan with an unparsable `startedAt` is no longer listed, found or stopped after its first marked incarnation. Confirmed teardown clears its descriptor and immediately clears a startup quarantine whose whole retry batch is confirmed. A failed startup read keeps the descriptors but creates no orphan handle: a recording start cannot see a pre-restart recorder until the next daemon start.
+
+Recorder teardown consumes an attempt only after reaching the device: an unanswered pid identity probe or missing pooled device re-arms the same attempt and delay when every failing entry is unreachable. A reached failure consumes it, even alongside unreachable entries. Timed-out work settles before another dispatch and follows the same rule. Unreachable re-arms keep reporting recovering with a retry deadline; marker/incarnation retirement ends recovery, and shutdown ends it on a skipped tick or after an unreachable dispatch. Reached failures keep their existing shutdown behaviour.
+
+After three reached failures, recording teardown schedules one re-check 185 seconds after exhaustion (screenrecord's 180-second hard limit plus a 5-second margin). While waiting, recovering remains true with a retry deadline. The same outstanding retry set then gets three fresh attempts; a second exhaustion holds the marker with recovering false and no further timer. A new mark starts recovery immediately. Retired markers/incarnations and shutdown cancel or ignore this unreferenced timer. App cleanup gets no hard-limit re-check.
+
+When this daemon tracks the spawned emulator process serving a device, it awaits the orphan handle's confirmation for startup-retained rows and deferred work, bounded by 5 seconds. Android quick-boot snapshots can restore a recorder with the same pid and cmdline, so process start alone is not proof: the device must confirm the pid is absent, belongs to another process, or was killed with exit confirmed. Descriptors are cleared only on confirmation, and a fully confirmed retry batch is withdrawn before the bind health check. An unreachable device, a pid-less row before its hard limit, or a deadline leaves descriptors and quarantine intact for normal recovery; independent release cleanup and locally owned recordings remain protected. An adb reconnect or externally started emulator has no such signal and keeps the usual incarnation redrive.
+
+A refusal whose every listed device is recovering with reason recording-teardown leaves an unowned, unprovisioned Android cold boot running for a retry, unless the request was aborted. Non-recovering markers and other health reasons still cancel that cold boot.
 
 In a plan failure result, top-level `deviceId` and `platform` identify the plan's device, while `devices[]` identifies the refused devices and top-level `reason`, `recovering`, `code`, `retryable`, and any `retryAfterMs` retain the refusal evidence.
 

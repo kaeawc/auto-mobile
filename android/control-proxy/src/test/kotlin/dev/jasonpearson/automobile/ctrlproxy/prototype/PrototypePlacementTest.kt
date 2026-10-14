@@ -44,6 +44,22 @@ class PrototypePlacementTest {
   }
 
   @Test
+  fun `only fullscreen can opt into an opaque pixel format`() {
+    placements().forEach { placement ->
+      val opaque = prototypeLayoutParams(placement, false, 2.5f, 30, opaque = true)
+      assertEquals(
+        if (placement is PrototypePlacement.Fullscreen) PixelFormat.OPAQUE
+        else PixelFormat.TRANSLUCENT,
+        opaque.format,
+      )
+      assertEquals(
+        PixelFormat.TRANSLUCENT,
+        prototypeLayoutParams(placement, false, 2.5f, 30, opaque = false).format,
+      )
+    }
+  }
+
+  @Test
   fun `sheets anchor all edges and convert size with display density`() {
     val expectedGravity = listOf(Gravity.TOP, Gravity.BOTTOM, Gravity.START, Gravity.END)
     PrototypePlacement.Edge.entries.forEachIndexed { index, edge ->

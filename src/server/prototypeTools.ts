@@ -1,3 +1,4 @@
+import { parsePrototypeHiddenReason } from "../features/prototype/prototypeHidden";
 import { prototypeAppLayerVisibilityOutput } from "../features/prototype/prototypeAppLayerVisibility";
 import {
   createPrototypePatchQueue,
@@ -561,6 +562,12 @@ const lastResultSchema = z.object({
     .describe(
       "Adopted prototypes only: true when the device keeps the prototype after the host disconnects (window.persistence: device), false when it ends with the session",
     ),
+  hiddenReason: z
+    .enum(["app_layer_window_hidden", "device_blocked"])
+    .optional()
+    .describe(
+      "Android: the prototype exists but is not visible, and why; absent when visible, when suspended, or with an older CtrlProxy",
+    ),
   suspended: z
     .literal(true)
     .optional()
@@ -704,13 +711,13 @@ export const prototypeOutputSchema = z.object({
     .literal(false)
     .optional()
     .describe(
-      'show with window.layer "app" on Android: no prototype window was on screen after the show; absent when visible or not checked',
+      "Android show: no prototype window was on screen after an app-layer show, or the device reports device_blocked for any layer; absent when visible or not checked",
     ),
   notVisibleReason: z
-    .enum(["no_prototype_window_on_screen"])
+    .enum(["no_prototype_window_on_screen", "app_layer_window_hidden", "device_blocked"])
     .optional()
     .describe(
-      'show with window.layer "app" on Android: why visible is false. no_prototype_window_on_screen: the window was created but the screen does not show it, usually because the app in front hides app-layer windows; absent when visible or not checked',
+      "Android show: why visible is false. app_layer_window_hidden: the app in front hides app-layer windows; device_blocked: the device is locked or its screen is off. no_prototype_window_on_screen: older-device app-layer confirmation found no window on screen; absent when visible or not checked",
     ),
   warning: z
     .string()
@@ -1658,6 +1665,7 @@ async function performMutation(
       android: prototypeTarget.android !== undefined,
       action: args.action,
       success: result.success,
+      hiddenReason: parsePrototypeHiddenReason(result.hiddenReason),
       spec: sendArgs.spec as PrototypeSpec,
       superseded: () => isSuperseded(commits, scope, target, generation),
       capture: () =>
@@ -2034,6 +2042,13 @@ const devicePrototypeEntrySchema = z.object({
   data: dataInput.optional(),
   pages: z.record(z.string(), z.number().int().nonnegative()).default({}),
   lastSequence: z.number().int().nonnegative(),
+  hiddenReason: z
+    .enum(["app_layer_window_hidden", "device_blocked"])
+    .optional()
+    .catch(undefined)
+    .describe(
+      "Android: the prototype exists but is not visible, and why; absent when visible, when suspended, or with an older CtrlProxy",
+    ),
   suspended: z.boolean().optional(),
   // Absent from a device without prototype_appearance_v1; a malformed one is dropped, not guessed.
   appearance: z.unknown().optional().transform(parsePrototypeAppearance),

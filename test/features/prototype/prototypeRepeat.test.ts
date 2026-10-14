@@ -416,3 +416,224 @@ describe("data-bound repeats", () => {
     });
   });
 });
+
+describe("substituted text length", () => {
+  const error = (path: string) => ({
+    success: false,
+    error: { path, message: "Substituted text length limit exceeded" },
+  });
+  const text = (value: string) => ({ type: "text", text: value });
+  test("data amplification is rejected without building the replacement", () => {
+    const input = { ...spec(text("{data:/b}".repeat(80_000))), data: { b: "x".repeat(200_000) } };
+    expect(validatePrototypeSpec(input)).toEqual(error("root.text"));
+  });
+  test.each([16_384, 16_385])("data boundary %i", (length) => {
+    const input = { ...spec(text("{data:/b}")), data: { b: "x".repeat(length) } };
+    expect(validatePrototypeSpec(input)).toEqual(
+      length === 16_384 ? expect.objectContaining({ success: true }) : error("root.text"),
+    );
+  });
+  test.each([
+    ["text", text("{item.b}{item.b}"), "text"],
+    [
+      "emit",
+      { ...text("tap"), onTap: [{ type: "emit", name: "{item.b}{item.b}" }] },
+      "onTap[0].name",
+    ],
+    [
+      "operand",
+      { ...text("tap"), onTap: [{ type: "setState", key: "k", value: "{item.b}{item.b}" }] },
+      "onTap[0].value",
+    ],
+  ] as const)("repeat %s is capped", (_name, child, field) => {
+    expect(
+      validatePrototypeSpec({
+        ...spec(list([child], [{ b: "x".repeat(8193) }])),
+        state: { k: "" },
+      }),
+    ).toEqual(error(`root.children[0].${field}`));
+  });
+  test("repeat key amplification uses the fixed error before binding", () => {
+    const child = { ...text("tap"), onTap: [{ type: "toggle", key: "{item.b}".repeat(2000) }] };
+    expect(validatePrototypeSpec(spec(list([child], [{ b: "x".repeat(100_000) }])))).toEqual(
+      error("root.children[0].onTap[0].key"),
+    );
+  });
+  test("repeat counts index and each item's own rendered length", () => {
+    expect(
+      validatePrototypeSpec(
+        spec(
+          list(
+            [text("{index}".repeat(8193))],
+            Array.from({ length: 11 }, () => ({})),
+          ),
+        ),
+      ),
+    ).toEqual(error("root.children[0].text"));
+    expect(
+      validatePrototypeSpec(
+        spec(list([text("{item.b}{item.b}")], [{ b: "s" }, { b: "x".repeat(8193) }])),
+      ),
+    ).toEqual(error("root.children[0].text"));
+  });
+  test("data cascades into repeat and path items use the same bound", () => {
+    const root = list([text("{data:/t}")], [{ b: "x".repeat(8193) }]);
+    expect(validatePrototypeSpec({ ...spec(root), data: { t: "{item.b}{item.b}" } })).toEqual(
+      error("root.children[0].text"),
+    );
+    expect(
+      validatePrototypeSpec({
+        ...spec({
+          ...root,
+          repeat: { items: { path: "/rows" }, as: "item" },
+          children: [text("{item.b}{item.b}")],
+        }),
+        data: { rows: [{ b: "x".repeat(8193) }] },
+      }),
+    ).toEqual(error("root.children[0].text"));
+  });
+  test("literal characters and mutable state replacements do not count", () => {
+    for (const input of [
+      spec(text("x".repeat(20_000))),
+      { ...spec(text("x".repeat(20_000) + "{data:/s}")), data: { s: "short" } },
+      { ...spec(text("{b}".repeat(1000))), state: { b: "x".repeat(100_000) } },
+    ]) {
+      expect(validatePrototypeSpec(input).success).toBe(true);
+    }
+  });
+  test("unknown authored repeat fields win before the length error", () => {
+    expect(
+      validatePrototypeSpec({
+        ...spec(list([text("{item.missing}{data:/b}")], [{}])),
+        data: { b: "x".repeat(16_385) },
+      }),
+    ).toEqual({
+      success: false,
+      error: { path: "root.children[0].text", message: 'Unknown repeat field "missing"' },
+    });
+  });
+});
+
+describe("substituted text total", () => {
+  const text = (value: string) => ({ type: "text", text: value });
+  const totalError = (path: string) => ({
+    success: false,
+    error: { path, message: "Substituted text total limit exceeded" },
+  });
+  test.each([1, 2])("data-resolved text is charged per repeat item with %i fields", (count) => {
+    const input = {
+      ...spec(
+        list(
+          Array.from({ length: count }, () => text("{data:/b}")),
+          Array.from({ length: 128 }, () => ({})),
+          "i",
+        ),
+      ),
+      data: { b: "x".repeat(16375) },
+    };
+    const result = validatePrototypeSpec(input);
+    if (count === 1) {
+      expect(result.success).toBe(true);
+    } else {
+      expect(result).toEqual(totalError("root.children[1].text"));
+    }
+  });
+  test("literal text inside a repeat is not charged", () => {
+    const input = spec(
+      list(
+        [text("x".repeat(16384)), text("x".repeat(16384))],
+        Array.from({ length: 128 }, () => ({})),
+        "i",
+      ),
+    );
+    expect(validatePrototypeSpec(input).success).toBe(true);
+  });
+  test("data outside a repeat is charged once at the exact total", () => {
+    const input = JSON.parse(
+      readFileSync(
+        join(
+          import.meta.dir,
+          "../../fixtures/prototype-spec/valid/substituted-text-total-exact.json",
+        ),
+        "utf8",
+      ),
+    );
+    expect(validatePrototypeSpec(input).success).toBe(true);
+  });
+  test("condition operands reach exactly the total", () => {
+    const operand = { key: "k", equals: "{item.b}y" };
+    const child = {
+      ...text("t"),
+      visibleWhen: {
+        all: Array.from({ length: 16 }, () => ({ any: Array.from({ length: 16 }, () => operand) })),
+      },
+    };
+    const input = { ...spec(list([child], [{ b: "x".repeat(16375) }])), state: { k: "" } };
+    expect(validatePrototypeSpec(input).success).toBe(true);
+  });
+  test("condition operands share the running total", () => {
+    const operand = { key: "k", equals: "{item.b}y" };
+    const child = {
+      ...text("t"),
+      visibleWhen: {
+        all: Array.from({ length: 16 }, () => ({ any: Array.from({ length: 16 }, () => operand) })),
+      },
+    };
+    const input = {
+      ...spec(list([child, { ...text("t"), visibleWhen: operand }], [{ b: "x".repeat(16375) }])),
+      state: { k: "" },
+    };
+    expect(validatePrototypeSpec(input)).toEqual(totalError("root.children[1].visibleWhen.equals"));
+  });
+  test.each([64, 65])("repeat total charges each item in order with %i fields", (count) => {
+    const input = spec(
+      list(
+        Array.from({ length: count }, () => text("{i.b}")),
+        Array.from({ length: 4 }, () => ({ b: "x".repeat(16379) })),
+        "i",
+      ),
+    );
+    // {i.b} is five units; each field/item charges exactly 16384.
+    const result = validatePrototypeSpec(input);
+    if (count === 64) {
+      expect(result.success).toBe(true);
+    } else {
+      expect(result).toEqual(totalError("root.children[64].text"));
+    }
+  });
+  test("per-field error wins on the first item before its total charge", () => {
+    const input = spec(list([text("{item.b}{item.b}")], [{ b: "x".repeat(8193) }]));
+    expect(validatePrototypeSpec(input)).toEqual({
+      success: false,
+      error: { path: "root.children[0].text", message: "Substituted text length limit exceeded" },
+    });
+  });
+  test("unknown field wins before both substitution limits", () => {
+    const input = {
+      ...spec(list([text("{item.missing}{data:/b}")], [{}])),
+      data: { b: "x".repeat(16385) },
+    };
+    expect(validatePrototypeSpec(input)).toEqual({
+      success: false,
+      error: { path: "root.children[0].text", message: 'Unknown repeat field "missing"' },
+    });
+  });
+  test("unknown field wins before crossing the total", () => {
+    const operand = { key: "k", equals: "{item.b}y" };
+    const child = {
+      ...text("t"),
+      visibleWhen: {
+        all: Array.from({ length: 16 }, () => ({ any: Array.from({ length: 16 }, () => operand) })),
+      },
+    };
+    const input = {
+      ...spec(list([child, text("{item.missing}{data:/s}")], [{ b: "x".repeat(16375) }])),
+      state: { k: "" },
+      data: { s: "" },
+    };
+    expect(validatePrototypeSpec(input)).toEqual({
+      success: false,
+      error: { path: "root.children[1].text", message: 'Unknown repeat field "missing"' },
+    });
+  });
+});

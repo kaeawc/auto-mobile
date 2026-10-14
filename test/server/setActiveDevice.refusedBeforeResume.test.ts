@@ -12,6 +12,7 @@ import type { BootedDevice } from "../../src/models";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { registerUtilityTools } from "../../src/server/utilityTools";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { snapshotPlatformDeviceManagerFactory } from "../helpers/platformDeviceManagerSnapshot";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -44,7 +45,7 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
   let sessions: SessionManager;
   let client: AndroidCtrlProxyClient;
   let restoreProviders: () => void;
-  let previousFactory: ReturnType<typeof PlatformDeviceManagerFactory.getInstance>;
+  let restoreFactory: () => void;
 
   const arrange = async (): Promise<void> => {
     restoreProviders = installFakeCtrlProxyManagers();
@@ -56,7 +57,7 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
     );
     const utils = new FakeDeviceUtils();
     utils.setBootedDevices("android", [device]);
-    previousFactory = PlatformDeviceManagerFactory.getInstance();
+    restoreFactory = snapshotPlatformDeviceManagerFactory();
     PlatformDeviceManagerFactory.setInstance(utils);
     const pool = new DevicePool(
       createDevicePoolDependencies(sessions, "hunt-rearm-daemon", { timer, deviceManager: utils }),
@@ -88,7 +89,7 @@ describe("a refused setActiveDevice from a non-holder leaves the holder's CtrlPr
     AndroidCtrlProxyClient.clearInstanceRegistryForTesting();
     sessions.stopCleanupTimer();
     DaemonState.getInstance().reset();
-    PlatformDeviceManagerFactory.setInstance(previousFactory);
+    restoreFactory();
     restoreProviders();
   };
   beforeEach(arrange);

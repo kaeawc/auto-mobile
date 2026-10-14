@@ -518,6 +518,20 @@ class DatabaseInspectorProviderTest {
   }
 
   @Test
+  fun `read-only capability reports enforcement`() {
+    DatabaseInspector.initialize(context)
+    DatabaseInspector.setEnabled(true)
+
+    val result =
+      provider.callWithCapabilities("getReadOnlyCapability", null, mutationCapabilities(false))
+
+    assertTrue(result.getBoolean("success"))
+    val response = JSONObject(result.getString("result") ?: throw AssertionError("no result JSON"))
+    assertEquals(1, response.length())
+    assertTrue(response.getBoolean("readOnlyEnforced"))
+  }
+
+  @Test
   fun `ordinary sql errors retain their existing provider error type`() {
     DatabaseInspector.initialize(context)
     DatabaseInspector.setEnabled(true)

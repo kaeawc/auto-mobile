@@ -1,0 +1,13 @@
+{
+  "code": "sdk_too_old",
+  "builder": "SdkTooOldError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"com.example.app on device 'emulator-5554' requires AutoMobile SDK 0.0.85 or newer to enforce read-only database access while another session holds the device. Upgrade the SDK in the app or ask the holder.\",\"code\":\"sdk_too_old\",\"deviceId\":\"emulator-5554\",\"minimumSdkVersion\":\"0.0.85\",\"retryable\":false}"
+      }
+    ],
+    "isError": true
+  }
+}

@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { isProcessRunning } from "../processLiveness";
 import { sortedReaddirSync } from "../io";
 import { getTempDir } from "../tempDir";
 import { logger, type Logger } from "../logger";
@@ -18,16 +19,19 @@ export interface NativeHelperRecord {
 
 export interface NativeHelperRecordStore {
   write(record: NativeHelperRecord): void;
-  remove(pid: number): void;
+  remove(pid: number, expectedStartIdentity?: string): void;
   list(): NativeHelperRecord[];
 }
 
 let writeSequence = 0;
 
-/** Corrupt records are warned about and left untouched: no age guess can authorize a kill. */
+/** Quarantine corrupt records once; no age guess can authorize a kill. */
 export class FileNativeHelperRecordStore implements NativeHelperRecordStore {
   corruptRecordsSkipped = 0;
-  constructor(private readonly log: Logger = logger) {}
+  constructor(
+    private readonly log: Logger = logger,
+    private readonly isWriterRunning: (pid: number) => boolean = isProcessRunning,
+  ) {}
 
   private directory(): string {
     const directory = getTempDir("native-helpers");
@@ -47,8 +51,28 @@ export class FileNativeHelperRecordStore implements NativeHelperRecordStore {
     }
   }
 
-  remove(pid: number): void {
-    this.removeFile(join(this.directory(), `${pid}.json`));
+  remove(pid: number, expectedStartIdentity?: string): void {
+    const path = join(this.directory(), `${pid}.json`);
+    if (expectedStartIdentity !== undefined) {
+      try {
+        const record: unknown = JSON.parse(readFileSync(path, "utf8"));
+        if (!isNativeHelperRecord(record) || record.startIdentity !== expectedStartIdentity) {
+          return;
+        }
+      } catch (error) {
+        if (isMissingFile(error)) {
+          // Another cleanup already removed this record; retaining absence is safe.
+          this.log.debug(`[NATIVE_HELPERS] Record ${pid} disappeared before removal`);
+        } else {
+          this.log.warn(
+            `[NATIVE_HELPERS] Cannot verify record ${pid} before removal: ${errorMessage(error)}`,
+            error,
+          );
+        }
+        return;
+      }
+    }
+    this.removeFile(path);
   }
 
   list(): NativeHelperRecord[] {
@@ -56,6 +80,10 @@ export class FileNativeHelperRecordStore implements NativeHelperRecordStore {
     this.corruptRecordsSkipped = 0;
     const records: NativeHelperRecord[] = [];
     for (const file of sortedReaddirSync(directory)) {
+      if (file.endsWith(".tmp")) {
+        this.quarantineTemporaryFile(directory, file);
+        continue;
+      }
       if (!file.endsWith(".json")) {
         continue;
       }
@@ -63,7 +91,7 @@ export class FileNativeHelperRecordStore implements NativeHelperRecordStore {
         const record: unknown = JSON.parse(readFileSync(join(directory, file), "utf8"));
         if (!isNativeHelperRecord(record) || file !== `${record.pid}.json`) {
           this.corruptRecordsSkipped++;
-          this.log.warn(`[NATIVE_HELPERS] Skipping corrupt record ${file}`);
+          this.quarantine(directory, file);
           continue;
         }
         records.push(record);
@@ -73,14 +101,46 @@ export class FileNativeHelperRecordStore implements NativeHelperRecordStore {
           this.log.debug(`[NATIVE_HELPERS] Record ${file} disappeared during listing`);
         } else {
           this.corruptRecordsSkipped++;
-          this.log.warn(
-            `[NATIVE_HELPERS] Skipping unreadable record ${file}: ${errorMessage(error)}`,
-            error,
-          );
+          this.quarantine(directory, file, error);
         }
       }
     }
     return records;
+  }
+
+  private quarantineTemporaryFile(directory: string, file: string): void {
+    const match = /^(\d+)\.json\.(\d+)\.(\d+)\.tmp$/.exec(file);
+    const writerPid = match ? Number(match[2]) : undefined;
+    if (
+      writerPid === undefined ||
+      !Number.isSafeInteger(writerPid) ||
+      writerPid <= 0 ||
+      !this.isWriterRunning(writerPid)
+    ) {
+      this.corruptRecordsSkipped++;
+      this.quarantine(directory, file);
+    }
+  }
+
+  private quarantine(directory: string, file: string, reason?: unknown): void {
+    const quarantined = `${file}.corrupt`;
+    try {
+      renameSync(join(directory, file), join(directory, quarantined));
+      this.log.warn(
+        `[NATIVE_HELPERS] Quarantined corrupt record ${file} as ${quarantined}`,
+        reason,
+      );
+    } catch (error) {
+      if (isMissingFile(error)) {
+        // Concurrent cleanup removed the source; there is nothing left to quarantine.
+        this.log.debug(`[NATIVE_HELPERS] Record ${file} disappeared before quarantine`);
+      } else {
+        this.log.warn(
+          `[NATIVE_HELPERS] Cannot quarantine ${file} as ${quarantined}: ${errorMessage(error)}`,
+          error,
+        );
+      }
+    }
   }
 
   private removeFile(path: string): void {

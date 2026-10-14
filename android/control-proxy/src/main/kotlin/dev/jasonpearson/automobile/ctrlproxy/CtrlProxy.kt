@@ -115,6 +115,7 @@ import dev.jasonpearson.automobile.protocol.NodeSelector
 import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
+import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import dev.jasonpearson.automobile.protocol.ScreenshotResult as ProtocolScreenshotResult
@@ -172,6 +173,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
@@ -1134,6 +1136,28 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
 
+      override suspend fun sendPatched(
+        requestId: String?,
+        success: Boolean,
+        error: String?,
+        revision: Long?,
+        conflict: PrototypePatchConflict?,
+      ) {
+        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+          resultBroadcaster.guard(requestId, "prototype_result") {
+            webSocketServer.broadcastWithPerf { _ ->
+              prototypeResultFrame(
+                requestId,
+                success,
+                error,
+                revision = revision,
+                conflict = conflict,
+              )
+            }
+          }
+        }
+      }
+
       override suspend fun sendShown(
         requestId: String?,
         missingAssets: List<String>,
@@ -1143,7 +1167,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
           resultBroadcaster.guard(requestId, "prototype_result") {
             webSocketServer.broadcastWithPerf { _ ->
-              prototypeResultFrame(requestId, true, null, missingAssets, appearance, hiddenReason)
+              prototypeResultFrame(
+                requestId,
+                true,
+                null,
+                missingAssets,
+                appearance,
+                hiddenReason = hiddenReason,
+              )
             }
           }
         }
@@ -3321,6 +3352,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) {
     launchRequestScope(requestId) { prototypeController.dismiss(requestId, id, all) }
+  }
+
+  override fun patchPrototype(requestId: String?, id: String, baseRevision: Long?, ops: JsonArray) {
+    launchRequestScope(requestId) { prototypeController.patch(requestId, id, baseRevision, ops) }
   }
 
   override fun inspectPrototypes(requestId: String?) {

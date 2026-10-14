@@ -145,8 +145,8 @@ class SavedPrototypeDirectoryStore(
           if (replaced) move(old, target)
           throw error
         }
-        // The commit rename already succeeded. Recovery can retry cleanup without undoing it.
-        storage({ Unit }) { if (old.exists()) remove(old) }
+        // Retire the backup before cleanup so recovery cannot restore a committed replacement.
+        if (old.exists()) retireOld(old)
         SavedPrototypeSaveResult.Saved(request.id, target.name, replaced)
       }
     }
@@ -375,7 +375,7 @@ class SavedPrototypeDirectoryStore(
   private fun recover() {
     for (entry in children().sortedBy { it.name }) {
       when {
-        entry.name.startsWith(".tmp-") -> remove(entry)
+        entry.name.startsWith(".tmp-") -> storage({ Unit }) { remove(entry) }
         entry.name.startsWith(".del-") -> storage({ Unit }) { remove(entry) }
         entry.name.startsWith(".old-") -> {
           val slug = entry.name.removePrefix(".old-").substringBeforeLast("--", "")
@@ -385,10 +385,20 @@ class SavedPrototypeDirectoryStore(
             continue
           }
           val target = File(root, slug)
-          if (target.exists()) storage({ Unit }) { remove(entry) } else move(entry, target)
+          if (target.exists()) retireOld(entry) else move(entry, target)
         }
       }
     }
+  }
+
+  private fun retireOld(old: File) {
+    val trash = File(root, ".del-${old.name.removePrefix(".old-")}")
+    val cleanup =
+      storage({ old }) {
+        move(old, trash)
+        trash
+      }
+    storage({ Unit }) { remove(cleanup) }
   }
 
   private fun directory(file: File) {

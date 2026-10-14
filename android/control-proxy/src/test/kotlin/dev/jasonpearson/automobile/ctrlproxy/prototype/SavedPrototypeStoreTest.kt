@@ -454,11 +454,88 @@ class SavedPrototypeStoreTest {
     val result = saved(replacing, request().copy(label = "New"))
     assertTrue(result.replaced)
     assertTrue(logs.isNotEmpty())
-    assertTrue(root.list()!!.any { it.startsWith(".old-") })
+    assertTrue(root.list()!!.any { it.startsWith(".del-") })
+    assertFalse(root.list()!!.any { it.startsWith(".old-") })
     assertEquals("New", loaded(replacing).label)
     files.beforeRemove = {}
     assertEquals("New", loaded(replacing).label)
-    assertFalse(root.list()!!.any { it.startsWith(".old-") })
+    assertFalse(root.list()!!.any { it.startsWith(".") })
+  }
+
+  @Test
+  fun `failed replacement cleanup cannot resurrect a deleted prototype`() {
+    saved(store())
+    val files = FakeSavedPrototypeFileOperations()
+    var leftover: File? = null
+    files.beforeRemove = { entry ->
+      if (leftover == null) leftover = entry
+      if (entry == leftover) throw IOException("backup cleanup failed")
+    }
+    val replacing = store(files = files)
+    assertTrue(saved(replacing, request().copy(label = "New")).replaced)
+    assertTrue(leftover!!.exists())
+    assertTrue(replacing.delete("panel"))
+    assertTrue(leftover!!.exists())
+    val fresh = store(files = files)
+    assertSame(SavedPrototypeLoadResult.NotFound, fresh.load("panel"))
+    assertTrue(fresh.list().isEmpty())
+    files.beforeRemove = {}
+    assertTrue(fresh.list().isEmpty())
+    assertTrue(root.list()!!.isEmpty())
+  }
+
+  @Test
+  fun `recovery retires old backup with existing target before failed cleanup`() {
+    val slug = saved(store()).slug
+    val old = File(root, ".old-$slug--recovery")
+    File(root, slug).copyRecursively(old)
+    val files = FakeSavedPrototypeFileOperations()
+    files.beforeRemove = { throw IOException("backup cleanup failed") }
+    val recovering = store(files = files)
+    assertEquals("Panel", loaded(recovering).label)
+    assertFalse(old.exists())
+    assertTrue(File(root, ".del-$slug--recovery").isDirectory)
+    files.beforeRemove = {}
+    assertTrue(recovering.delete("panel"))
+    assertSame(SavedPrototypeLoadResult.NotFound, store().load("panel"))
+    assertTrue(store().list().isEmpty())
+  }
+
+  @Test
+  fun `failed backup retirement logs and falls back to removing old directory`() {
+    val slug = saved(store()).slug
+    val old = File(root, ".old-$slug--recovery")
+    File(root, slug).copyRecursively(old)
+    val trash = File(root, ".del-$slug--recovery")
+    assertTrue(trash.mkdir())
+    File(trash, "blocked").writeText("blocked")
+    val files = FakeSavedPrototypeFileOperations()
+    files.beforeRemove = { if (it == trash) throw IOException("trash cleanup failed") }
+    val logs = mutableListOf<String>()
+    val recovering = store(files = files, log = { message, _ -> logs += message })
+    assertEquals("Panel", loaded(recovering).label)
+    assertFalse(old.exists())
+    assertTrue(trash.exists())
+    assertEquals(2, logs.size)
+  }
+
+  @Test
+  fun `stuck staging cleanup is logged without blocking list or save`() {
+    saved(store())
+    val stage = File(root, ".tmp-stuck")
+    assertTrue(stage.mkdir())
+    val files = FakeSavedPrototypeFileOperations()
+    files.beforeRemove = { if (it == stage) throw IOException("staging cleanup failed") }
+    val logs = mutableListOf<String>()
+    val recovering = store(files = files, log = { message, _ -> logs += message })
+    assertEquals(listOf("panel"), recovering.list().map { it.id })
+    saved(recovering, request("new"))
+    assertEquals(setOf("panel", "new"), recovering.list().map { it.id }.toSet())
+    assertTrue(stage.exists())
+    assertTrue(logs.isNotEmpty())
+    files.beforeRemove = {}
+    assertEquals(2, recovering.list().size)
+    assertFalse(stage.exists())
   }
 
   @Test

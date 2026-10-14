@@ -628,9 +628,9 @@ prototype shows, or keep display text in a string key.
 ## Style
 
 All properties are optional. Sizes, padding, offsets, radii, and spacing use dp.
-Numeric lengths are capped at 10000, including fixed dimensions, bounds width/height,
+Numeric lengths are capped at 10000, including fixed dimensions, bounds x/y/width/height,
 size constraints, padding, corner radii, border width, spacing, sheet height and fixed detents.
-Offsets range from -10000 to 10000. Elevation is capped at 1000; text size and line height
+Offsets and bounds x/y range from -10000 to 10000. Elevation is capped at 1000; text size and line height
 are positive and capped at 1000, and letter spacing ranges from -1000 to 1000.
 Weight and aspect ratio range from 0.000001 to 10000. All endpoints are inclusive.
 

@@ -156,9 +156,17 @@ internal class FakePrototypeHost : PrototypeHost {
     return accept
   }
 
-  override suspend fun show(request: PrototypeRequest) = display("show", request)
+  var beforeShow: suspend () -> Unit = {}
 
-  override suspend fun replace(request: PrototypeRequest) = display("replace", request)
+  override suspend fun show(request: PrototypeRequest): Boolean {
+    beforeShow()
+    return display("show", request)
+  }
+
+  override suspend fun replace(request: PrototypeRequest): Boolean {
+    beforeShow()
+    return display("replace", request)
+  }
 
   override suspend fun relayout(): Boolean {
     calls += "relayout"
@@ -194,13 +202,21 @@ internal class FakePrototypeHost : PrototypeHost {
 
   override suspend fun <T> withTouchThrough(settleMillis: Long, block: suspend () -> T): T = block()
 
+  var captureHidden = false
+  var captureExcluded = true
+
   override suspend fun <T> withHiddenForCapture(
     frameTimeoutMillis: Long,
     maxHiddenMillis: Long,
     block: suspend () -> T,
   ): PrototypeHiddenCapture<T> {
     calls += "hideForCapture"
-    return PrototypeHiddenCapture(block(), prototypeExcluded = true)
+    captureHidden = true
+    try {
+      return PrototypeHiddenCapture(block(), prototypeExcluded = captureExcluded)
+    } finally {
+      captureHidden = false
+    }
   }
 }
 

@@ -1917,20 +1917,29 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       overlayDrawer.attachOverlayManager(overlayManager)
       if (!::prototypeController.isInitialized) {
         val prototypeDisplays = AndroidPrototypeDisplays(this)
+        // Locks are shared safety facts; foreground suspension is request-local per surface.
+        val prototypeWindowBlocked = {
+          val keyguard = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+          val power = getSystemService(Context.POWER_SERVICE) as? PowerManager
+          keyguard?.isKeyguardLocked != false || power?.isInteractive != true
+        }
+        val createPrototypeHost = {
+          DefaultPrototypeHost(
+            context = this,
+            displayWindows = prototypeDisplays,
+            onWindowAttached = {
+              ownWindowTypeMemo.clear()
+              overlayManager.setPrototypeAttached(true)
+            },
+            onWindowLost = ::refreshPrototypeWindow,
+            isBlocked = prototypeWindowBlocked,
+            imeInset = PrototypeImeInset { displayId -> prototypeImeLiftPx(displayId) },
+            backScope = serviceScope,
+          )
+        }
         prototypeController =
           PrototypeController(
-            DefaultPrototypeHost(
-              context = this,
-              displayWindows = prototypeDisplays,
-              onWindowAttached = {
-                ownWindowTypeMemo.clear()
-                overlayManager.setPrototypeAttached(true)
-              },
-              onWindowLost = ::refreshPrototypeWindow,
-              isBlocked = ::isPrototypeBlocked,
-              imeInset = PrototypeImeInset { displayId -> prototypeImeLiftPx(displayId) },
-              backScope = serviceScope,
-            ),
+            createPrototypeHost(),
             prototypeResultSink,
             onDismissed = {
               ownWindowTypeMemo.clear()
@@ -1941,7 +1950,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             lifecycle =
               PrototypeLifecycle(
                 CoroutinePrototypeScheduler(serviceScope),
-                isBlocked = ::isPrototypeBlocked,
+                isBlocked = prototypeWindowBlocked,
                 observerSession = {
                   if (::webSocketServer.isInitialized) webSocketServer.observerSessionGeneration()
                   else 0
@@ -2000,6 +2009,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             fonts = prototypeFonts,
             foreground = prototypeForeground,
             deviceAppearance = AndroidPrototypeDeviceAppearance(this),
+            hostFactory = createPrototypeHost,
           )
         // Service start: drop anything a previous process left in the cache directory.
         prototypeAssets.purgeLeftovers()
@@ -3400,9 +3410,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     displayId: Int?,
     reset: Boolean,
     appearance: PrototypeAppearanceOverride?,
+    replaceOthers: Boolean,
   ) {
     launchRequestScope(requestId) {
-      prototypeController.show(requestId, spec, displayId, reset, appearance)
+      prototypeController.show(requestId, spec, displayId, reset, appearance, replaceOthers)
     }
   }
 
@@ -3709,17 +3720,6 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     } catch (e: Exception) {
       Log.e(TAG, "Failed to broadcast network error simulation", e)
     }
-  }
-
-  private fun isPrototypeBlocked(): Boolean {
-    val keyguard = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
-    val power = getSystemService(Context.POWER_SERVICE) as? PowerManager
-    // Missing safety services fail closed rather than allowing a prototype over an unknown lock
-    // state.
-    return keyguard?.isKeyguardLocked != false ||
-      power?.isInteractive != true ||
-      // Another app is in front: hidden like a lock, but tracked separately (#10261).
-      prototypeForeground.suspended
   }
 
   /** The application in front, from the accessibility windows; null when none qualifies. */

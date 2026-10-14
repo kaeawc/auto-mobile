@@ -1,3 +1,4 @@
+import type { PrototypeShowOverrides } from "../../prototype/PrototypeTransport";
 import {
   prototypePatchReplyFields,
   prototypePatchUnsupportedMessage,
@@ -33,6 +34,7 @@ import {
   type ListSavedPrototypesMessage,
   type DeleteSavedPrototypeMessage,
   PROTOTYPE_DISPLAY_CAPABILITY,
+  PROTOTYPE_MULTI_SURFACE_CAPABILITY,
   PROTOTYPE_PATCH_CAPABILITY,
   type PatchPrototypeMessage,
   PROTOTYPE_EVENT_KINDS,
@@ -53,6 +55,11 @@ import {
 /** Shared by the client transport guard and the tool-level refusal. */
 export function prototypeDisplayUnsupportedMessage(displayId: number): string {
   return `show_prototype: the connected CtrlProxy does not advertise ${PROTOTYPE_DISPLAY_CAPABILITY}, so it cannot show a prototype on display ${displayId} and would place it on the default display; update the connected CtrlProxy or omit display.`;
+}
+
+/** Shared by the client transport guard and the tool-level refusal. */
+export function prototypeMultiSurfaceUnsupportedMessage(): string {
+  return `show_prototype: the connected CtrlProxy does not advertise ${PROTOTYPE_MULTI_SURFACE_CAPABILITY}, so it cannot honour replaceOthers:false. Nothing was shown. Update the connected CtrlProxy, or omit replaceOthers to replace the other prototypes.`;
 }
 
 /** Shared by the client transport guard and the tool-level refusal. */
@@ -245,6 +252,7 @@ export class CtrlProxyPrototypes {
    * starts a same-id show fresh instead of replacing it in place; false/undefined send nothing.
    * [appearance] pins the system setting for this show; the caller passes it only for a device
    * advertising `prototype_appearance_v1`, and undefined (follow the device) sends nothing.
+   * An options object also carries replaceOthers; only false is sent, capability-gated before dispatch.
    */
   async requestShowPrototype(
     spec: PrototypeSpec,
@@ -252,9 +260,10 @@ export class CtrlProxyPrototypes {
     perf?: PerformanceTracker,
     displayId?: number,
     reset?: boolean,
-    appearance?: PrototypeAppearanceOverride,
+    appearance?: PrototypeAppearanceOverride | PrototypeShowOverrides,
   ): Promise<PrototypeResult> {
     this.validateSpec(spec);
+    const overrides = typeof appearance === "string" ? { appearance } : appearance;
     const target = displayId === undefined || displayId === 0 ? undefined : displayId;
     return this.request(
       ctrlProxyRequests.showPrototype({
@@ -262,7 +271,8 @@ export class CtrlProxyPrototypes {
         spec,
         displayId: target,
         reset,
-        appearance,
+        appearance: overrides?.appearance,
+        replaceOthers: overrides?.replaceOthers,
       }),
       timeoutMs,
       perf,
@@ -701,6 +711,13 @@ export class CtrlProxyPrototypes {
     const supports = (command: string) => this.context.isCommandSupported?.(command);
     if (message.type === "patch_prototype" && supports(PROTOTYPE_PATCH_CAPABILITY) !== true) {
       throw new ActionableError(prototypePatchUnsupportedMessage("android"));
+    }
+    if (
+      message.type === "show_prototype" &&
+      message.replaceOthers === false &&
+      supports(PROTOTYPE_MULTI_SURFACE_CAPABILITY) !== true
+    ) {
+      throw new ActionableError(prototypeMultiSurfaceUnsupportedMessage());
     }
     const type = message.type;
     if (

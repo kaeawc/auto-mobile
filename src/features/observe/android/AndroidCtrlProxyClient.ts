@@ -1,3 +1,4 @@
+import type { PrototypeShowOverrides } from "../../prototype/PrototypeTransport";
 import { panelFingerprintFromWire, type PanelFingerprint } from "../../../models/DisplayPanel";
 import {
   prototypePatchReplyFields,
@@ -170,6 +171,7 @@ import {
   PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
   PROTOTYPE_SAVED_CAPABILITY,
+  PROTOTYPE_MULTI_SURFACE_CAPABILITY,
   ctrlProxyMissingRequestIdError,
   ctrlProxyRequests,
   serializeCtrlProxyRequest,
@@ -1369,7 +1371,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     perf?: PerformanceTracker,
     displayId?: number,
     reset?: boolean,
-    appearance?: PrototypeAppearanceOverride,
+    appearance?: PrototypeAppearanceOverride | PrototypeShowOverrides,
   ): Promise<PrototypeResult>;
   requestDismissPrototype(
     target: PrototypeDismiss,
@@ -3972,7 +3974,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     perf?: PerformanceTracker,
     displayId?: number,
     reset?: boolean,
-    appearance?: PrototypeAppearanceOverride,
+    appearance?: PrototypeAppearanceOverride | PrototypeShowOverrides,
   ): Promise<PrototypeResult> {
     return this.prototypes.requestShowPrototype(
       spec,
@@ -7584,11 +7586,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
     // Legacy behavior for services that predate full_command_set_v1 (older APKs).
     if (
-      messageType === "gesture_display_id_v1" ||
-      messageType === "tap_double_v1" ||
-      messageType === PROTOTYPE_DISPLAY_CAPABILITY ||
-      messageType === PROTOTYPE_WINDOW_OPTIONS_CAPABILITY ||
-      messageType === PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY
+      [
+        "gesture_display_id_v1",
+        "tap_double_v1",
+        PROTOTYPE_DISPLAY_CAPABILITY,
+        PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
+        PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
+        PROTOTYPE_MULTI_SURFACE_CAPABILITY,
+      ].includes(messageType)
     ) {
       return this.supportedCommands?.has(messageType) === true;
     }

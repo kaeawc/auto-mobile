@@ -453,6 +453,8 @@ export interface ShowPrototypeMessage {
    * always starts fresh, which is what `reset` asks for.
    */
   reset?: true;
+  /** Only false is sent; retaining siblings requires prototype_multi_surface_v1. */
+  replaceOthers?: false;
   /**
    * What "the system setting" means for this show: `light` or `dark` pins it, without changing the
    * device. Omitted for the device's own setting. Requires prototype_appearance_v1: an older device
@@ -1084,6 +1086,9 @@ export const PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY = "prototype_persistence_re
  */
 export const PROTOTYPE_SHOW_IN_PLACE_CAPABILITY = "prototype_show_in_place_v1";
 
+// ORCHESTRATOR-CHOSEN: to be folded into the PROTOTYPE_SPEC_CAPABILITY_GATES registry (briefs/prototype-capability-gate-registry)
+export const PROTOTYPE_MULTI_SURFACE_CAPABILITY = "prototype_multi_surface_v1";
+
 /**
  * Advertised by a CtrlProxy whose prototype renderer lays an anchored node out at its screen-space dp
  * bounds, relative to its own window's origin (#9316). An older device decodes anchors and ignores
@@ -1165,6 +1170,7 @@ export const ANDROID_CAPABILITY_FLAGS = [
   PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
   PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
+  PROTOTYPE_MULTI_SURFACE_CAPABILITY,
   PROTOTYPE_ANCHOR_CAPABILITY,
   NETWORK_MOCK_RULES_REPORT_CAPABILITY,
   PROTOTYPE_WINDOW_METADATA_CAPABILITY,
@@ -1598,6 +1604,7 @@ export const ctrlProxyRequests = {
     spec: PrototypeSpec;
     displayId?: number;
     reset?: boolean;
+    replaceOthers?: boolean;
     appearance?: PrototypeAppearanceOverride;
   }): ShowPrototypeMessage {
     return {
@@ -1606,6 +1613,7 @@ export const ctrlProxyRequests = {
       spec: args.spec,
       ...(args.displayId === undefined ? {} : { displayId: args.displayId }),
       ...(args.reset === true ? { reset: true as const } : {}),
+      ...(args.replaceOthers === false ? { replaceOthers: false as const } : {}),
       ...(args.appearance === undefined ? {} : { appearance: args.appearance }),
     };
   },

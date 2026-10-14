@@ -31,7 +31,7 @@ export function createLockOwnerGenerationProbe(
   const captureDisabled =
     deps.captureDisabled ?? (() => testOverrides.processGenerationCaptureDisabled?.() ?? false);
   const ttl = deps.sameVerdictTtlMs ?? 1_000;
-  const currentTokens = new Map<number, string>();
+  const currentTokens = new Map<number, { token: string; at: number }>();
   const unavailableCurrent = new Map<number, number>();
   const sameVerdicts = new Map<number, { token?: string; at: number }>();
 
@@ -57,6 +57,11 @@ export function createLockOwnerGenerationProbe(
         return undefined;
       }
       const at = now();
+      for (const [ownerPid, memo] of currentTokens) {
+        if (at - memo.at >= ttl) {
+          currentTokens.delete(ownerPid);
+        }
+      }
       for (const [ownerPid, sampledAt] of unavailableCurrent) {
         if (at - sampledAt >= ttl) {
           unavailableCurrent.delete(ownerPid);
@@ -65,9 +70,13 @@ export function createLockOwnerGenerationProbe(
       if (unavailableCurrent.has(pid)) {
         return undefined;
       }
-      const token = currentTokens.get(pid) ?? read(pid);
+      const memo = currentTokens.get(pid);
+      if (memo) {
+        return memo.token;
+      }
+      const token = read(pid);
       if (token !== undefined) {
-        currentTokens.set(pid, token);
+        currentTokens.set(pid, { token, at: now() });
       } else {
         unavailableCurrent.set(pid, now());
       }

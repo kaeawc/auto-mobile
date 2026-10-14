@@ -1,3 +1,4 @@
+import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";
 import { withProxyOwnerToken } from "../helpers/proxyOwnerToken";
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
@@ -57,8 +58,10 @@ describe("reads after a terminal release of a result-minted session (#11483)", (
   let tapError: Error | undefined;
   /** The result the daemon answers the gated `tapOn` with. */
   let tapResult: unknown;
+  let omitReadArgShapes = false;
 
   function setupHarness(): void {
+    omitReadArgShapes = false;
     timer = new FakeTimer();
     tapGate = undefined;
     tapError = undefined;
@@ -99,6 +102,15 @@ describe("reads after a terminal release of a result-minted session (#11483)", (
       autoStartDaemon: false,
       timer,
       idGenerator: new FakeIdGenerator(),
+      staticToolDefinitionsProvider: () =>
+        getStaticToolDefinitions().map((definition) => {
+          if (!omitReadArgShapes || definition.name !== "clipboard") {
+            return definition;
+          }
+          const meta = { ...definition._meta };
+          delete meta["automobile/deviceReadOnlyArgs"];
+          return { ...definition, _meta: meta };
+        }),
       heartbeatTimeoutMs: 4_000,
       heartbeatIntervalMs: INTERVAL_MS,
     });
@@ -300,6 +312,41 @@ describe("reads after a terminal release of a result-minted session (#11483)", (
       withProxyOwnerToken({ deviceId: ANDROID.deviceId }, "fake-1"),
     );
     expect(client.callToolCalls.length).toBe(forwardedBefore + 1);
+  });
+
+  test("clipboard get is sessionless after release, while set retains the control fence", async () => {
+    await releaseManagedBinding();
+    const forwardedBefore = client.callToolCalls.length;
+    await expect(
+      proxy.callTool("clipboard", { action: "get", deviceId: ANDROID.deviceId }),
+    ).resolves.toEqual({ content: [{ type: "text", text: "ok" }] });
+    expect(client.callToolCalls.at(-1)).toEqual({
+      toolName: "clipboard",
+      params: withProxyOwnerToken({ action: "get", deviceId: ANDROID.deviceId }, "fake-1"),
+    });
+    for (const [name, args] of [
+      ["clipboard", { action: "set", deviceId: ANDROID.deviceId, text: "hello" }],
+      ["tapOn", { deviceId: ANDROID.deviceId, text: "OK" }],
+    ] as const) {
+      await expect(proxy.callTool(name, args)).rejects.toMatchObject({
+        sessionUuid: ANDROID.sessionUuid,
+        reason: "cleanup-expired",
+      });
+      await expect(proxy.callTool(name, args)).rejects.toBeInstanceOf(
+        DaemonBoundSessionExpiredError,
+      );
+    }
+    expect(client.callToolCalls.length).toBe(forwardedBefore + 1);
+  });
+
+  test("older clipboard definitions without argument shapes retain the release fence", async () => {
+    omitReadArgShapes = true;
+    await releaseManagedBinding();
+    const forwardedBefore = client.callToolCalls.length;
+    await expect(
+      proxy.callTool("clipboard", { action: "get", deviceId: ANDROID.deviceId }),
+    ).rejects.toBeInstanceOf(DaemonBoundSessionExpiredError);
+    expect(client.callToolCalls.length).toBe(forwardedBefore);
   });
 
   test("a non-managed result-minted read without a device remains sessionless after release", async () => {

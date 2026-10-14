@@ -64,6 +64,12 @@ export interface ReleaseChecksumEntry {
    */
   prototypeAgentSha256?: string;
   /**
+   * SHA-256 of the universal ad-hoc-signed iOS-simulator prototype-viewer archive
+   * (`AutoMobilePrototypeViewer.zip`, #12255). Optional: releases that
+   * predate it degrade to "viewer unavailable".
+   */
+  prototypeViewerSha256?: string;
+  /**
    * SHA-256 of the signed, notarized universal macOS Network Filter app archive
    * (`automobile-network-filter-macos-universal.zip`, packed with
    * `ditto -c -k --keepParent` so the nested system extension keeps its
@@ -975,6 +981,30 @@ export function resolvePrototypeAgentChecksum(
   registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
   return entryForPinnedVersion(env, registry)?.prototypeAgentSha256 ?? "";
+}
+
+/** Fixed GitHub Release asset for the universal ad-hoc-signed iOS-simulator prototype viewer (#12255). */
+export const PROTOTYPE_VIEWER_ARCHIVE_FILENAME = "AutoMobilePrototypeViewer.zip";
+
+/** Download URL for the iOS-simulator prototype-viewer archive. */
+export function resolvePrototypeViewerUrl(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return buildReleaseAssetUrl(
+    PROTOTYPE_VIEWER_ARCHIVE_FILENAME,
+    resolvePinnedVersion(env),
+    resolveAssetBaseUrl(env),
+    registry,
+  );
+}
+
+/** Expected prototype-viewer archive SHA-256 for the pinned version; "" when unknown. */
+export function resolvePrototypeViewerChecksum(
+  env: EnvLike = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): string {
+  return entryForPinnedVersion(env, registry)?.prototypeViewerSha256 ?? "";
 }
 
 /** Download URL for the signed macOS ScreenCaptureKit helper archive. */

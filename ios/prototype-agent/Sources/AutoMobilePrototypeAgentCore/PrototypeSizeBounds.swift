@@ -12,7 +12,8 @@ enum PrototypeSizeBounds {
     static let ranges: [String: [String: ClosedRange<Double>]] = [
         "dimension": ["dp": 0 ... maxLength],
         "detent": ["dp": minPositive ... maxLength],
-        "bounds": ["width": 0 ... maxLength, "height": 0 ... maxLength],
+        "bounds": ["x": -maxLength ... maxLength, "y": -maxLength ... maxLength,
+                   "width": 0 ... maxLength, "height": 0 ... maxLength],
         "offset": ["x": -maxLength ... maxLength, "y": -maxLength ... maxLength],
         "padding": ["top": 0 ... maxLength, "bottom": 0 ... maxLength,
                     "start": 0 ... maxLength, "end": 0 ... maxLength],

@@ -13,6 +13,8 @@ import { resolve } from "path";
 import type { HighlightShape } from "../../../../src/models/VisualHighlight";
 import type { NetworkMockRuleSync } from "../../../../src/server/networkMockRules";
 import {
+  SAVED_PROTOTYPE_ERROR_CODES,
+  isSavedPrototypeErrorCode,
   ctrlProxyRequests,
   serializeCtrlProxyRequest,
   KNOWN_REQUEST_TYPES,
@@ -177,6 +179,9 @@ const KOTLIN_SERIAL_NAMES = [
   "dismiss_prototype",
   "inspect_prototypes",
   "patch_prototype",
+  "save_prototype",
+  "list_saved_prototypes",
+  "delete_saved_prototype",
   "put_prototype_asset",
   "remove_prototype_asset",
   "request_hierarchy",
@@ -372,6 +377,50 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
       name: "inspect (shared Kotlin literal)",
       actual: serializeCtrlProxyRequest(ctrlProxyRequests.inspectPrototypes({ requestId: "r8" })),
       expected: '{"type":"inspect_prototypes","requestId":"r8"}',
+    },
+    {
+      builder: "savePrototype",
+      name: "save omitted icon",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.savePrototype({
+          requestId: "r10",
+          spec: prototypeSpec,
+          label: "Panel",
+          icon: undefined,
+        }),
+      ),
+      expected:
+        '{"type":"save_prototype","requestId":"r10","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}},"label":"Panel"}',
+    },
+    {
+      builder: "savePrototype",
+      name: "save with icon",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.savePrototype({
+          requestId: "r10",
+          spec: prototypeSpec,
+          label: "Panel",
+          icon: "hero",
+        }),
+      ),
+      expected:
+        '{"type":"save_prototype","requestId":"r10","spec":{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}},"label":"Panel","icon":"hero"}',
+    },
+    {
+      builder: "listSavedPrototypes",
+      name: "list saved",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.listSavedPrototypes({ requestId: "r11" }),
+      ),
+      expected: '{"type":"list_saved_prototypes","requestId":"r11"}',
+    },
+    {
+      builder: "deleteSavedPrototype",
+      name: "delete saved",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.deleteSavedPrototype({ requestId: "r12", id: "panel" }),
+      ),
+      expected: '{"type":"delete_saved_prototype","requestId":"r12","id":"panel"}',
     },
     {
       builder: "patchPrototype",
@@ -1070,9 +1119,9 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
   // total builder count is pinned. Ship builder #45 without a row and this fails — not a silently
   // uncovered send site. `request_two_finger_swipe` has no builder here by design (it goes through
   // the shared sendCommand path, asserted in CtrlProxyGestures.test.ts), so it is not a builder key.
-  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 49", () => {
+  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 52", () => {
     const builderNames = Object.keys(ctrlProxyRequests);
-    expect(builderNames.length).toBe(49);
+    expect(builderNames.length).toBe(52);
     const covered = new Set(cases.map((row) => row.builder));
     expect([...covered].sort()).toEqual([...builderNames].sort());
   });
@@ -1109,4 +1158,36 @@ test("IME trace opt-in serializes after the timeout", () => {
   ).toBe(
     '{"type":"request_commit_text","requestId":"trace-1","text":"value","timeoutMs":1500,"trace":true}',
   );
+});
+
+// android/protocol/src/main/kotlin/dev/jasonpearson/automobile/protocol/WebSocketResponse.kt:
+// SavedPrototypeErrorCode @SerialName values, in declaration order.
+test("saved prototype error codes match Kotlin", () => {
+  const kotlinCodes = [
+    "invalid_id",
+    "invalid_label",
+    "spec_too_large",
+    "invalid_spec",
+    "invalid_asset_id",
+    "duplicate_asset_id",
+    "unsupported_mime_type",
+    "empty_asset",
+    "asset_too_large",
+    "count_limit",
+    "total_limit",
+    "missing_asset",
+    "saved_count_limit",
+    "storage_failure",
+    "unsupported_existing",
+    "not_found",
+    "unsupported_format",
+    "internal_error",
+  ];
+  expect(SAVED_PROTOTYPE_ERROR_CODES).toEqual(kotlinCodes);
+  for (const code of kotlinCodes) {
+    expect(isSavedPrototypeErrorCode(code)).toBe(true);
+  }
+  for (const code of ["future", null, 1, undefined]) {
+    expect(isSavedPrototypeErrorCode(code)).toBe(false);
+  }
 });

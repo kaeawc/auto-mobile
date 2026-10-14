@@ -931,7 +931,11 @@ export type ExpiryReleaseExecutionCanceller = (
  */
 export type DeviceAcquisitionExecutionCanceller = (deviceId: string, sessionId: string) => void;
 
-export type SessionDeviceUnboundCallback = (sessionId: string, deviceId: string) => void;
+export type SessionDeviceUnboundCallback = (
+  sessionId: string,
+  deviceId: string,
+  options?: Pick<SessionReleaseOptions, "deviceIdentityReplaced">,
+) => void;
 
 /** A recovery claim carries its release stamp on this daemon's session clock. */
 type ClaimedCreationRow = RecoverableRowIncarnation & {
@@ -2262,8 +2266,13 @@ export class SessionManager {
   /** Pause rather than consume a retry: a superseded handoff still owns its original baseline. */
   private async dispatchDeviceRestore(
     deviceId: string,
-    restore: (signal: AbortSignal, identitySignal: AbortSignal) => Promise<void>,
+    restore: (
+      signal: AbortSignal,
+      identitySignal: AbortSignal,
+      acknowledge: () => void,
+    ) => Promise<void>,
     generation = this.replacedRestoreGenerations.get(deviceId) ?? 0,
+    teardownStep?: number,
   ): Promise<void> {
     if (this.identityReplacementFences.has(deviceId)) {
       if (!(await this.waitForIdentityReplacement(deviceId, generation))) {
@@ -2279,12 +2288,34 @@ export class SessionManager {
       this.activeRestoreControllers.set(deviceId, controllers);
     }
     controllers.add(controller);
+    const teardown = Array.from(this.activeReleasePromises)
+      .filter(
+        (release) =>
+          teardownStep !== undefined &&
+          release.teardownStep === teardownStep &&
+          release.stage === "teardown" &&
+          release.session.assignedDevice === deviceId,
+      )
+      .map((release) => ({ release, step: release.teardownStep }));
     try {
       // Clients still receive the ambient abort, but a successful late acknowledgement only
       // becomes a failed restore for identity replacement, as ordinary teardown did on main.
       const ambient = getAbortSignal();
       const signal = ambient ? AbortSignal.any([ambient, controller.signal]) : controller.signal;
-      await runWithAbortSignal(signal, () => restore(signal, controller.signal));
+      await runWithAbortSignal(signal, () =>
+        restore(signal, controller.signal, () => {
+          // An acknowledged write already restored A, even if its handoff mark is later revoked.
+          for (const { release, step } of teardown) {
+            if (release.identityReplacement && step !== undefined) {
+              release.identityReplacement.resumeStep = Math.max(
+                release.identityReplacement.resumeStep,
+                step + 1,
+              );
+            }
+          }
+          controller.signal.throwIfAborted();
+        }),
+      );
     } finally {
       controllers.delete(controller);
       if (controllers.size === 0) {
@@ -5995,6 +6026,7 @@ export class SessionManager {
       await this.restoreReleasedRowAfterReassert(existing);
     }
     const previousDevice = existing.assignedDevice;
+    const replacementFence = this.identityReplacementFences.get(previousDevice);
     const oldView: Session = { ...existing, cacheData: { ...existing.cacheData } };
     const expiry = this.peekNetworkConditionExpiry(existing.sessionId);
     const lease = this.iosAppNetworkLeases.active(existing.sessionId);
@@ -6002,7 +6034,44 @@ export class SessionManager {
     // publishing B, so neither can address B with A's state. Undo resumes the original deadline.
     this.cancelNetworkConditionExpiry(existing.sessionId);
     this.iosAppNetworkLeases.stop(existing.sessionId);
-    if (deferCleanup) {
+    // A replaced release waits for this rebind: its restore fence must not hold up the rebind.
+    if (replacementFence) {
+      const generation = this.replacedRestoreGenerations.get(previousDevice) ?? 0;
+      const incarnation = this.deviceHealth?.incarnation(previousDevice);
+      const releases = [...replacementFence.releases];
+      const mayRestore = () => {
+        const holder = this.getSessionForDevice(previousDevice);
+        return (
+          (holder === null || holder === oldView.sessionId) &&
+          this.restoreIncarnationIsCurrent({
+            deviceId: previousDevice,
+            incarnation,
+            restoreGeneration: generation,
+          })
+        );
+      };
+      // The pending release owns the handoff verdict. Retain A's view until its fence settles,
+      // without making the rebind (which that release awaits) wait for restoration.
+      const cleanup = runOutsideRequestContext(async () => {
+        const current = await this.waitForIdentityReplacement(previousDevice, generation);
+        const replaced = !current || releases.some(releaseWasForced) || !mayRestore();
+        this.notifySessionDeviceUnbound(oldView.sessionId, previousDevice, {
+          deviceIdentityReplaced: replaced,
+        });
+        if (replaced) {
+          return;
+        }
+        const pending = await this.restoreRebindOverrides(oldView, mayRestore);
+        this.trackPendingTeardownCleanup(previousDevice, pending);
+        await Promise.allSettled(pending);
+      }).catch((error: unknown) => {
+        logger.warn(
+          `Fenced rebind cleanup failed on ${previousDevice}: ${errorMessage(error)}`,
+          error,
+        );
+      });
+      this.registerPendingDeviceCleanup(previousDevice, cleanup);
+    } else if (deferCleanup) {
       const cleanup = this.deferRebindOverrides(
         oldView,
         () => {
@@ -6017,7 +6086,10 @@ export class SessionManager {
       );
       deferCleanup(cleanup);
     } else {
-      const pending = await this.restoreRebindOverrides(existing);
+      const pending = await this.restoreRebindOverrides(
+        existing,
+        () => !this.identityReplacementFences.has(previousDevice),
+      );
       if (pending.length > 0) {
         this.trackPendingTeardownCleanup(previousDevice, pending);
       }
@@ -6046,7 +6118,11 @@ export class SessionManager {
       // Full: the replacement (including the same AVD on another serial) has its own screen.
       this.notifyDeviceOwnershipChange(assignedDevice, "full");
     }
-    this.notifySessionDeviceUnbound(existing.sessionId, previousDevice);
+    if (!replacementFence) {
+      this.notifySessionDeviceUnbound(existing.sessionId, previousDevice, {
+        deviceIdentityReplaced: this.identityReplacementFences.has(previousDevice),
+      });
+    }
     return existing;
   }
 
@@ -9459,11 +9535,11 @@ export class SessionManager {
     };
     await this.dispatchDeviceRestore(
       target.deviceId,
-      (_signal, identitySignal) =>
+      (_signal, _identitySignal, acknowledge) =>
         this.keepScreenAwakeRestorerFactory(device)
           .restore(target.state)
           .then((outcome) => {
-            identitySignal.throwIfAborted();
+            acknowledge();
             if (outcome.status === "failed") {
               const error = new KeepAwakeRestoreError(
                 outcome.failures.map(({ setting, error }) => `${setting}: ${error}`).join("; ") +
@@ -9490,6 +9566,7 @@ export class SessionManager {
             }
           }),
       target.restoreGeneration,
+      1,
     );
     this.clearRestoreHealth(target, "keep-screen-awake");
   }
@@ -9502,6 +9579,11 @@ export class SessionManager {
   ): Promise<void> {
     let lastError = initialError;
     for (let attempt = 1; attempt <= KEEP_SCREEN_AWAKE_RESTORE_RETRY_ATTEMPTS; attempt++) {
+      if (
+        !(await this.waitForIdentityReplacement(target.deviceId, target.restoreGeneration ?? 0))
+      ) {
+        return;
+      }
       if (forced()) {
         // The device may belong to the next owner: never retry against it (#11058).
         logger.warn(
@@ -9510,6 +9592,11 @@ export class SessionManager {
         return;
       }
       await this.timer.sleep(KEEP_SCREEN_AWAKE_RESTORE_RETRY_DELAY_MS);
+      if (
+        !(await this.waitForIdentityReplacement(target.deviceId, target.restoreGeneration ?? 0))
+      ) {
+        return;
+      }
       if (forced() || !this.restoreIncarnationIsCurrent(target)) {
         return;
       }
@@ -9570,11 +9657,12 @@ export class SessionManager {
     }
     await this.dispatchDeviceRestore(
       target.deviceId,
-      (_signal, identitySignal) =>
+      (_signal, _identitySignal, acknowledge) =>
         this.biometricEnrollmentRestorerFactory(device)
           .restore(target.enrollment)
-          .then(() => identitySignal.throwIfAborted()),
+          .then(acknowledge),
       target.restoreGeneration,
+      2,
     );
     this.clearRestoreHealth(target, "biometric-enrollment");
   }
@@ -9762,7 +9850,7 @@ export class SessionManager {
     const restore = () =>
       this.dispatchDeviceRestore(
         deviceId,
-        (fenceSignal, identitySignal) =>
+        (fenceSignal, identitySignal, acknowledge) =>
           defaultDeviceClockRestoreRegistry.runExclusive(
             deviceId,
             async () => {
@@ -9773,7 +9861,7 @@ export class SessionManager {
               const dispatchSignal = AbortSignal.any([target.controller.signal, fenceSignal]);
               identitySignal.throwIfAborted();
               await this.clockRestorerFactory(device).restore(target.state, dispatchSignal);
-              identitySignal.throwIfAborted();
+              acknowledge();
               target.controller.signal.throwIfAborted();
               defaultDeviceClockRestoreRegistry.restored(deviceId, target.state);
               target.clear();
@@ -9792,6 +9880,7 @@ export class SessionManager {
             signal,
           ),
         generation,
+        4,
       );
     const restoration = restore().then(
       () => ({ outcome: "restored" as const }),
@@ -9972,12 +10061,12 @@ export class SessionManager {
     const restore = () =>
       this.dispatchDeviceRestore(
         deviceId,
-        async (fenceSignal, identitySignal) => {
+        async (fenceSignal, identitySignal, acknowledge) => {
           const dispatchSignal = AbortSignal.any([target.controller.signal, fenceSignal]);
           target.controller.signal.throwIfAborted();
           identitySignal.throwIfAborted();
           await this.rotationRestorerFactory(device).restore(target.state, dispatchSignal);
-          identitySignal.throwIfAborted();
+          acknowledge();
           target.controller.signal.throwIfAborted();
           target.clear();
           const targets = this.pendingRotationRestores.get(deviceId);
@@ -9989,6 +10078,7 @@ export class SessionManager {
           }
         },
         generation,
+        5,
       );
     const restoration = restore().then(
       () => ({ outcome: "restored" as const }),
@@ -10275,12 +10365,12 @@ export class SessionManager {
     const restore = () =>
       this.dispatchDeviceRestore(
         deviceId,
-        async (fenceSignal, identitySignal) => {
+        async (fenceSignal, identitySignal, acknowledge) => {
           const dispatchSignal = AbortSignal.any([target.controller.signal, fenceSignal]);
           target.controller.signal.throwIfAborted();
           identitySignal.throwIfAborted();
           await this.screenReaderRestorerFactory(device).restore(target.state, dispatchSignal);
-          identitySignal.throwIfAborted();
+          acknowledge();
           target.controller.signal.throwIfAborted();
           target.clear();
           const targets = this.pendingScreenReaderRestores.get(deviceId);
@@ -10292,6 +10382,7 @@ export class SessionManager {
           }
         },
         generation,
+        6,
       );
     const restoration = restore().then(
       () => ({ outcome: "restored" as const }),
@@ -10678,11 +10769,10 @@ export class SessionManager {
     }
     await this.dispatchDeviceRestore(
       target.deviceId,
-      (_signal, identitySignal) =>
-        this.networkConditionRestorerFactory(device)
-          .restore(target.profile)
-          .then(() => identitySignal.throwIfAborted()),
+      (_signal, _identitySignal, acknowledge) =>
+        this.networkConditionRestorerFactory(device).restore(target.profile).then(acknowledge),
       target.restoreGeneration,
+      3,
     );
     this.clearRestoreHealth(target, "network-condition");
   }
@@ -11090,10 +11180,14 @@ export class SessionManager {
     });
   }
 
-  private notifySessionDeviceUnbound(sessionId: string, deviceId: string): void {
+  private notifySessionDeviceUnbound(
+    sessionId: string,
+    deviceId: string,
+    options?: Pick<SessionReleaseOptions, "deviceIdentityReplaced">,
+  ): void {
     for (const callback of this.deviceUnboundCallbacks) {
       try {
-        callback(sessionId, deviceId);
+        callback(sessionId, deviceId, options);
       } catch (error) {
         logger.warn(`Session device-unbound callback failed for ${sessionId}: ${error}`);
       }

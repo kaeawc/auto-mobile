@@ -68,6 +68,100 @@ class PrototypeControllerTest {
   }
 
   @Test
+  fun `idle configuration keeps mapping passes stable but always relayouts`() = runTest {
+    val device = FakePrototypeDeviceAppearance()
+    val subject =
+      PrototypeController(
+        host,
+        PrototypeResultSink { _, _, _ -> },
+        lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
+        deviceAppearance = device,
+      )
+    subject.show("show", spec())
+    val runtime = checkNotNull(subject.activeRuntime)
+    val passes = runtime.renderMappingPasses
+    repeat(100) { subject.onConfigurationChanged() }
+    assertEquals(passes, runtime.renderMappingPasses)
+    assertEquals(100, host.calls.count { it == "relayout" })
+  }
+
+  @Test
+  fun `configuration sync follows device palette snapshot interaction and override changes`() =
+    runTest {
+      val device = FakePrototypeDeviceAppearance()
+      val subject =
+        PrototypeController(
+          host,
+          PrototypeResultSink { _, _, _ -> },
+          eventSink = PrototypeEventSink { events += it },
+          lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
+          deviceAppearance = device,
+        )
+      val initial = spec().copy(state = mapOf("name" to PrototypeScalar.Text("old")))
+      subject.show("show", initial)
+      val runtime = checkNotNull(subject.activeRuntime)
+      device.dark = true
+      subject.onConfigurationChanged()
+      repeat(100) { subject.onConfigurationChanged() }
+      assertEquals(1, events.count { it.kind == PrototypeEventKind.APPEARANCE_CHANGED })
+      assertTrue(checkNotNull(host.requests.last().theme).value.appearance.dark)
+      device.paletteKey = 42
+      subject.onConfigurationChanged()
+      assertEquals(42, checkNotNull(host.requests.last().theme).value.paletteKey)
+      assertEquals(1, events.count { it.kind == PrototypeEventKind.APPEARANCE_CHANGED })
+      val passes = runtime.renderMappingPasses
+      runtime.replace(initial.copy(state = mapOf("name" to PrototypeScalar.Text("replaced"))))
+      subject.onConfigurationChanged()
+      assertEquals(passes + 1, runtime.renderMappingPasses)
+      subject.interact(
+        runtime,
+        PrototypeInteraction.Tap(
+          listOf(
+            PrototypeSetStateAction("name", PrototypeScalar.Text("tapped")),
+          ),
+        ),
+      )
+      assertEquals(passes + 2, runtime.renderMappingPasses)
+      subject.onConfigurationChanged()
+      assertEquals(passes + 2, runtime.renderMappingPasses)
+      subject.show("override", initial, appearance = PrototypeAppearanceOverride.LIGHT)
+      assertFalse(checkNotNull(host.requests.last().theme).value.appearance.dark)
+      val replacement = checkNotNull(subject.activeRuntime)
+      val replacementPasses = replacement.renderMappingPasses
+      subject.onConfigurationChanged()
+      assertEquals(replacementPasses, replacement.renderMappingPasses)
+    }
+
+  @Test
+  fun `failed appearance sync does not retain the previous successful key`() = runTest {
+    val device = FakePrototypeDeviceAppearance()
+    var rejectAppearance = true
+    val subject =
+      PrototypeController(
+        host,
+        PrototypeResultSink { _, _, _ -> },
+        eventSink =
+          PrototypeEventSink {
+            if (it.kind == PrototypeEventKind.APPEARANCE_CHANGED && rejectAppearance)
+              throw IllegalStateException("Rejected appearance event")
+            events += it
+          },
+        lifecycle = PrototypeLifecycle(FakePrototypeTimer()),
+        deviceAppearance = device,
+      )
+    subject.show("show", spec())
+    device.dark = true
+    subject.onConfigurationChanged()
+    assertTrue(checkNotNull(host.requests.last().theme).value.appearance.dark)
+    rejectAppearance = false
+    device.dark = false
+    subject.onConfigurationChanged()
+    assertFalse(checkNotNull(host.requests.last().theme).value.appearance.dark)
+    assertEquals(1, events.count { it.kind == PrototypeEventKind.APPEARANCE_CHANGED })
+    assertEquals(2, host.calls.count { it == "relayout" })
+  }
+
+  @Test
   fun `interaction traces appearance sync inside one async section and skips stale runtime`() =
     runTest {
       controller.show("show", spec())

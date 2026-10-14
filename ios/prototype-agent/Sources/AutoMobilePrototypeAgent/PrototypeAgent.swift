@@ -331,7 +331,7 @@ final class PrototypeAgent: NSObject {
                 switch model.simulateTap(identifier: identifier) {
                 case .success: result(true)
                 case .failure(.notShown): result(false, "No prototype is shown")
-                case .failure(.notFound): result(false, "No node with id or testTag \(identifier)")
+                case .failure(.notFound): result(false, "No node with testTag \(identifier)")
                 case .failure(.notTappable): result(false, "Node \(identifier) has no onTap")
                 }
             case "show_prototype":

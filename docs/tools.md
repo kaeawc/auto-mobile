@@ -728,7 +728,7 @@ Target via `deviceId`, `platform`, `device`, or `sessionUuid`; the shared
 `keepScreenAwake` option also applies. `timeoutMs` bounds device requests
 (default 5000 ms). Validation uses the existing prototype schema and limits
 before contacting CtrlProxy. Verify rendering with `observe`; prototype returns
-no screenshot. Nodes include box/row/column, text/image/icon/spacer/textField,
+no screenshot. Nodes include box/row/column/flow/grid (flow/grid require `prototype_flow_grid_v1`), text/image/icon/spacer/textField,
 Material switch/checkbox/button/radioGroup/listItem/slider/chip/card/iconButton/fab/segmentedButton/topAppBar/divider/badge/progress/dialog/snackbar/timePicker/datePicker
 bound to state keys, and scroll/pager/tabBar/bottomNav/bottomSheet; actions are
 emit/setPage/setState/toggle/increment/decrement/dismiss.

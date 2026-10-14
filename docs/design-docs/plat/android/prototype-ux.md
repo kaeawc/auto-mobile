@@ -1493,3 +1493,18 @@ asset strings and count nav images as spec image uses; #9296 must remove its
 `specVersion` proposal. #9295's root-level opacity wording maps to
 `window.opacity`, and its focusability wording follows the later device findings.
 No sibling issues are edited as part of this implementation.
+
+## Flow and grid contract (not device-verified)
+
+`prototype_flow_grid_v1` gates `flow` (wrapping row) and `grid`. Both support
+children and repeat, with normal node/depth budgets. Flow's optional integer
+`maxLines >= 1` clips overflow visually without removing hierarchy children.
+`style.spacing` is the item gap; finite nonnegative `style.runSpacing` is the
+line/row gap and has the same bounds as spacing (meaningful only on flow/grid).
+Grid requires integer `columns` in 1..12 or `{minWidth: dp}` (finite, > 0).
+Spacing applies to both axes unless runSpacing overrides the row gap. Grid is
+always non-lazy, preserves every child in the hierarchy, and never scrolls
+itself; authors wrap it in `scroll`. Row-major placement starts a new row when
+a child's span does not fit. Optional integer `span >= 1` is valid only on a
+direct grid child and cannot exceed fixed columns; the renderer clamps spans
+to the resolved runtime count. Shared fixtures define host validation behavior.

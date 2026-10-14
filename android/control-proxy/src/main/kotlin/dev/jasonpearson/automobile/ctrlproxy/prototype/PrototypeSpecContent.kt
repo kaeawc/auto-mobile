@@ -878,21 +878,17 @@ private fun prototypeNodeModifier(
   }
   // Click handling and semantics go before the inset and authored padding, so the whole drawn node
   // is tappable, its ripple covers it, and its accessibility bounds are its drawn bounds (#10435).
+  val longPress = node.source?.onLongPress
+  val doubleTap = node.source?.onDoubleTap
   if (tappable) {
     modifier =
-      if (node.source?.onLongPress != null || node.source?.onDoubleTap != null) {
+      if (longPress != null || doubleTap != null) {
         modifier.combinedClickable(
           interactionSource = presses,
           indication = LocalIndication.current,
           onClick = { if (actions.isNotEmpty()) interact(PrototypeInteraction.Tap(actions)) },
-          onLongClick =
-            node.source?.onLongPress?.let { longPress ->
-              { interact(PrototypeInteraction.Tap(longPress)) }
-            },
-          onDoubleClick =
-            node.source?.onDoubleTap?.let { doubleTap ->
-              { interact(PrototypeInteraction.Tap(doubleTap)) }
-            },
+          onLongClick = longPress?.let { { interact(PrototypeInteraction.Tap(it)) } },
+          onDoubleClick = doubleTap?.let { { interact(PrototypeInteraction.Tap(it)) } },
         )
       } else {
         modifier.clickable(interactionSource = presses, indication = LocalIndication.current) {

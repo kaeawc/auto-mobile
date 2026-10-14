@@ -1,3 +1,8 @@
+import type { PrototypePatchOp } from "../../prototype/prototypePatch";
+import type {
+  PrototypePatchConflict,
+  PrototypePatchRequest,
+} from "../../prototype/prototypePatchWire";
 /**
  * ctrlProxyProtocol - Typed request contract for the Android control-proxy WebSocket client.
  *
@@ -482,6 +487,16 @@ export type DismissPrototypeMessage = {
  * `prototypes`; events the device buffered while no host was connected arrive first, as ordinary
  * `prototype_event` frames. Only sent to a device advertising `prototype_persistence_replay_v1`.
  */
+/** `@SerialName("patch_prototype")` → `PatchPrototype`. Only sent to a device advertising `prototype_patch_v1`. */
+export interface PatchPrototypeMessage {
+  type: "patch_prototype";
+  requestId: string;
+  id: string;
+  baseRevision?: number;
+  ops: readonly PrototypePatchOp[];
+}
+export const PROTOTYPE_PATCH_CAPABILITY = "prototype_patch_v1";
+
 export interface InspectPrototypesMessage {
   type: "inspect_prototypes";
   requestId: string;
@@ -506,6 +521,10 @@ export interface RemovePrototypeAssetMessage {
 }
 
 export interface PrototypeResult {
+  /** Only the reply to patch_prototype from a device advertising prototype_patch_v1. */
+  revision?: number;
+  /** Only the reply to patch_prototype from a device advertising prototype_patch_v1. */
+  conflict?: PrototypePatchConflict;
   success: boolean;
   totalTimeMs?: number;
   error?: string | null;
@@ -887,6 +906,7 @@ export type CtrlProxyRequest =
   | ShowPrototypeMessage
   | DismissPrototypeMessage
   | InspectPrototypesMessage
+  | PatchPrototypeMessage
   | PutPrototypeAssetMessage
   | RemovePrototypeAssetMessage
   | AddHighlightMessage
@@ -1208,6 +1228,7 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   show_prototype: true,
   dismiss_prototype: true,
   inspect_prototypes: true,
+  patch_prototype: true,
   put_prototype_asset: true,
   remove_prototype_asset: true,
   list_preference_files: true,
@@ -1494,6 +1515,16 @@ export const ctrlProxyRequests = {
       ...(args.displayId === undefined ? {} : { displayId: args.displayId }),
       ...(args.reset === true ? { reset: true as const } : {}),
       ...(args.appearance === undefined ? {} : { appearance: args.appearance }),
+    };
+  },
+
+  patchPrototype(args: { requestId: string } & PrototypePatchRequest): PatchPrototypeMessage {
+    return {
+      type: "patch_prototype",
+      requestId: args.requestId,
+      id: args.id,
+      ...(args.baseRevision === undefined ? {} : { baseRevision: args.baseRevision }),
+      ops: args.ops,
     };
   },
 

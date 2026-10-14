@@ -135,7 +135,7 @@ class WebSocketServer(
      * Prototype requests answer a malformed frame with a `prototype_result` rather than an error.
      */
     private val prototypeRequestTypes =
-      setOf("show_prototype", "dismiss_prototype", "inspect_prototypes") +
+      setOf("show_prototype", "dismiss_prototype", "inspect_prototypes", "patch_prototype") +
         prototypeAssetRequestTypes
 
     /** Requests whose payload is typed user input, which may be a password. */

@@ -1,6 +1,10 @@
 import { PrototypeAgentSuspendedError } from "../../../../src/features/prototype/ios/prototypeAgentSuspended";
 import { PrototypeAgentRequestTimeoutError } from "../../../../src/features/prototype/ios/prototypeAgentClient";
 import { ActionableError, toActionableError } from "../../../../src/models/ActionableError";
+import { PROTOTYPE_PATCH_CAPABILITY } from "../../../../src/features/observe/android/ctrlProxyProtocol";
+import { prototypePatchUnsupportedMessage } from "../../../../src/features/prototype/prototypePatchWire";
+import type { PrototypePatchOp } from "../../../../src/features/prototype/prototypePatch";
+import { FakePrototypeAgentClient } from "../../../fakes/FakePrototypeAgentClient";
 import { describe, expect, test } from "bun:test";
 import {
   captureHideDeadlineMs,
@@ -273,3 +277,71 @@ describe("iOS status suspension deadline", () => {
     await expect(transport.status()).rejects.toBe(error);
   });
 });
+
+describe("iOS patch transport", () => {
+  test("refuses without the capability even if the request name is advertised", async () => {
+    const agent = new FakePrototypeAgentClient({
+      agentVersion: "old",
+      protocolVersion: 1,
+      capabilities: ["patch_prototype"],
+    });
+    const transport = new IosPrototypeTransport(agent);
+    expect(await transport.patch({ id: "orders", ops: patchOps })).toEqual({
+      success: false,
+      delivery: "unsent",
+      error: prototypePatchUnsupportedMessage("ios"),
+    });
+    expect(agent.requests).toEqual([]);
+  });
+  test("request rejection is indeterminate after issuance", async () => {
+    const agent = new FakePrototypeAgentClient({
+      agentVersion: "new",
+      protocolVersion: 1,
+      capabilities: [PROTOTYPE_PATCH_CAPABILITY],
+    });
+    agent.setPatchResult(new Error("socket closed"));
+    expect(await new IosPrototypeTransport(agent).patch({ id: "orders", ops: patchOps })).toEqual({
+      success: false,
+      delivery: "indeterminate",
+      error: "socket closed",
+    });
+    expect(agent.patchRequests).toHaveLength(1);
+  });
+  test("patch frame omits absent baseRevision and sanitizes revision and conflict", async () => {
+    const agent = new FakePrototypeAgentClient({
+      agentVersion: "new",
+      protocolVersion: 1,
+      capabilities: [PROTOTYPE_PATCH_CAPABILITY],
+    });
+    const transport = new IosPrototypeTransport(agent);
+    agent.setPatchResult({ success: true, revision: 13 });
+    expect(await transport.patch({ id: "orders", ops: patchOps })).toMatchObject({
+      success: true,
+      delivery: "answered",
+      revision: 13,
+    });
+    expect(agent.patchRequests[0]).toEqual({ id: "orders", ops: patchOps });
+    const conflict = { revision: 14, state: { enabled: true } };
+    agent.setPatchResult({ success: false, error: "conflict", conflict });
+    expect(await transport.patch({ id: "orders", ops: patchOps, baseRevision: 12 })).toMatchObject({
+      success: false,
+      conflict,
+    });
+    expect(agent.patchRequests[1]).toEqual({ id: "orders", ops: patchOps, baseRevision: 12 });
+    for (const fields of [
+      { revision: -1, conflict: { revision: 2, state: { bad: null } } },
+      { revision: 1.5, conflict: { revision: 2, state: { "bad-key": 1 } } },
+      {
+        revision: Number.MAX_SAFE_INTEGER + 1,
+        conflict: { revision: 2, state: { bad: Infinity } },
+      },
+    ]) {
+      agent.setPatchResult({ success: false, ...fields });
+      const result = await transport.patch({ id: "orders", ops: patchOps });
+      expect(result).not.toHaveProperty("revision");
+      expect(result).not.toHaveProperty("conflict");
+    }
+  });
+});
+
+const patchOps: PrototypePatchOp[] = [{ op: "replace", path: "/data/cartCount", value: 2 }];

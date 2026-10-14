@@ -37,6 +37,60 @@ class PrototypeSpecTest {
   }
 
   @Test
+  fun `text field options decode every new field`() {
+    val root = decoded("text-field-options.json").root as PrototypeColumnNode
+    val fields = root.children.filterIsInstance<PrototypeTextFieldNode>()
+    val name = fields[0]
+    assertEquals("Name", name.label)
+    assertEquals("outlined", name.variant)
+    assertEquals("Your full name", name.supportingText)
+    assertEquals("text", name.keyboardType)
+    assertEquals("filled", fields[1].variant)
+    assertEquals("number", fields[1].keyboardType)
+    assertEquals(4, fields[1].maxLength)
+    assertEquals("password", fields[2].keyboardType)
+    assertEquals(true, fields[2].secure)
+    assertEquals(true, fields[3].multiline)
+    assertEquals(2, fields[3].minLines)
+    assertEquals(5, fields[3].maxLines)
+    val legacy = PrototypeTextFieldNode(stateKey = "name")
+    assertNull(legacy.label)
+    assertNull(legacy.variant)
+    assertNull(legacy.supportingText)
+    assertNull(legacy.keyboardType)
+    assertNull(legacy.secure)
+    assertNull(legacy.multiline)
+    assertNull(legacy.minLines)
+    assertNull(legacy.maxLines)
+    assertNull(legacy.maxLength)
+  }
+
+  @Test
+  fun `text field relationships follow host precedence and count UTF-16 units`() {
+    fun error(options: String, stored: String = "Ada"): PrototypeSpecError {
+      val spec =
+        """{"id":"a","window":{"placement":{"type":"fullscreen"}},"state":{"k":"$stored"},"root":{"type":"textField","stateKey":"k",$options}}"""
+      return (PrototypeSpecValidator.validate(spec) as PrototypeSpecValidation.Failure).error
+    }
+    assertEquals(
+      PrototypeSpecError("root.minLines", "Requires multiline: true"),
+      error(""""minLines":4,"maxLines":2,"maxLength":1"""),
+    )
+    assertEquals(
+      PrototypeSpecError("root.multiline", "Multiline text cannot be secure"),
+      error(""""multiline":true,"secure":true,"minLines":4,"maxLines":2,"maxLength":1"""),
+    )
+    assertEquals(
+      PrototypeSpecError("root.minLines", "minLines cannot exceed maxLines"),
+      error(""""multiline":true,"minLines":4,"maxLines":2,"maxLength":1"""),
+    )
+    assertEquals(
+      PrototypeSpecError("root.stateKey", "Text field value exceeds maxLength"),
+      error(""""maxLength":1""", "😀"),
+    )
+  }
+
+  @Test
   fun `fixtures are nonempty and cover every node action and placement`() {
     assertTrue(valid.isNotEmpty())
     assertTrue(invalid.isNotEmpty())

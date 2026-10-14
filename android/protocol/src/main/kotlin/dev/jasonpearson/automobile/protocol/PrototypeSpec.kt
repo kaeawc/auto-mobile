@@ -442,6 +442,15 @@ data class PrototypeTextFieldNode(
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val stateKey: String,
   val placeholder: String? = null,
+  val label: String? = null,
+  val variant: String? = null,
+  val supportingText: String? = null,
+  val keyboardType: String? = null,
+  val secure: Boolean? = null,
+  val multiline: Boolean? = null,
+  val minLines: Int? = null,
+  val maxLines: Int? = null,
+  val maxLength: Int? = null,
 ) : PrototypeNode()
 
 @SerialName("switch")

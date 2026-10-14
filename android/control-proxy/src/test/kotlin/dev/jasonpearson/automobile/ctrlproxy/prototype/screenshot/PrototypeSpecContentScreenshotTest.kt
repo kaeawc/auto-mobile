@@ -32,6 +32,15 @@ class PrototypeSpecContentScreenshotTest {
   // Pending: #11298 changed the image placeholder colours (surfaceVariant instead of LightGray), so
   // this baseline must be re-recorded by the Linux workflow described above.
   /** Every node type and style token in one fullscreen tree. */
+  // Recorded by the Linux workflow; pending verification until its first golden is committed.
+  @Test
+  fun textFieldOptions() =
+    prototypeScreenshotTest(
+      "text_field_options",
+      validPrototypeFixture("text-field-options"),
+      pending = true,
+    )
+
   @Test
   fun fullscreenAllNodes() =
     prototypeScreenshotTest(

@@ -828,6 +828,31 @@ object PrototypeSpecValidator {
     else null
   }
 
+  /** Individual fields are contract-typed; relationships follow the host's textFieldErrors. */
+  private fun textFieldErrors(
+    value: JsonObject,
+    path: String,
+    stored: JsonPrimitive?,
+  ): PrototypeSpecError? {
+    if (stored?.isString != true)
+      return fail("$path.stateKey", "Text field requires a string state key")
+    val lineField = listOf("minLines", "maxLines").firstOrNull { value.containsKey(it) }
+    if (!value.flag("multiline") && lineField != null)
+      return fail("$path.$lineField", "Requires multiline: true")
+    if (
+      value.flag("multiline") && (value.flag("secure") || value.text("keyboardType") == "password")
+    )
+      return fail("$path.multiline", "Multiline text cannot be secure")
+    val minLines = (value["minLines"] as? JsonPrimitive)?.intOrNull
+    val maxLines = (value["maxLines"] as? JsonPrimitive)?.intOrNull
+    if (minLines != null && maxLines != null && minLines > maxLines)
+      return fail("$path.minLines", "minLines cannot exceed maxLines")
+    val maxLength = (value["maxLength"] as? JsonPrimitive)?.intOrNull
+    if (maxLength != null && stored.content.length > maxLength)
+      return fail("$path.stateKey", "Text field value exceeds maxLength")
+    return null
+  }
+
   private fun componentBindingErrors(
     value: JsonObject,
     path: String,
@@ -835,6 +860,7 @@ object PrototypeSpecValidator {
   ): PrototypeSpecError? {
     val stored = value.text("stateKey")?.let { state[it] as? JsonPrimitive }
     return when (value.text("type")) {
+      "textField" -> textFieldErrors(value, path, stored)
       "slider" -> sliderErrors(value, path, stored)
       "chip" -> chipErrors(value, path, stored)
       "fab" -> fabErrors(value, path)

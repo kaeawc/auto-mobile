@@ -357,6 +357,9 @@ class WebSocketServer(
     // APKs reject data, {path} items, repeat.key and data conditions as unknown, and draw
     // {data:/x} text literally, so hosts refuse such a spec for a device lacking this flag.
     add("prototype_data_model_v1")
+    // Prototype text fields honour labels, variants, keyboard/security, line limits and maxLength.
+    // Older APKs reject these fields as unknown, so hosts require this flag before sending them.
+    add("prototype_text_field_options_v1")
     // show_prototype honours appearance (device, light or dark as the system setting); a shown
     // prototype re-themes when the device setting or palette changes and says so with an
     // appearance_changed prototype_event; the show result and each inspect entry carry the resolved

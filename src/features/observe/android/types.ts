@@ -116,6 +116,7 @@ export interface AccessibilityNodeSelector {
  * Interface for accessibility hierarchy data from the device.
  */
 export interface AccessibilityHierarchy {
+  prototypeSuspended?: boolean;
   displayId?: number | null;
   panelUniqueId?: string | null;
   /** Daemon sequence assigned when this capture was forwarded to the observation stream. */

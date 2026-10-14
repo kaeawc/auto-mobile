@@ -1,10 +1,12 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import dev.jasonpearson.automobile.protocol.PrototypeDataResolver
 import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import java.util.IdentityHashMap
+import kotlinx.serialization.json.JsonObject
 
-/** Static validation and repeat binding belong to one authored root, with identity-based keys. */
+/** Static validation and repeat binding belong to one resolved root, with identity-based keys. */
 internal class PrototypeRenderCache(val root: PrototypeNode) {
   private val entries =
     IdentityHashMap<PrototypeNode, MutableMap<String, List<PrototypeChildEntry>>>()
@@ -27,6 +29,11 @@ internal class PrototypeRenderCache(val root: PrototypeNode) {
  */
 internal class PrototypeRenderMapper {
   private val lock = Any()
+  private var authoredSpec: PrototypeSpec? = null
+  private var resolvedSpec: PrototypeSpec? = null
+  private var sourceRoot: PrototypeNode? = null
+  private var sourceData: JsonObject? = null
+  private var resolvedRoot: PrototypeNode? = null
   private var cache: PrototypeRenderCache? = null
   private var previousSpec: PrototypeSpec? = null
   private var previousPages: Map<String, Int>? = null
@@ -37,19 +44,26 @@ internal class PrototypeRenderMapper {
   internal val mappingPasses: Int
     get() = synchronized(lock) { passes }
 
+  internal val lastResolvedSpec: PrototypeSpec?
+    get() = synchronized(lock) { resolvedSpec }
+
   fun map(spec: PrototypeSpec, pages: Map<String, Int>): PrototypeRenderModel =
     synchronized(lock) {
+      val resolved = resolveLocked(spec)
       previousModel?.let { model ->
-        if (previousSpec?.root === spec.root && previousSpec == spec && previousPages == pages) {
+        if (
+          previousSpec?.root === resolved.root && previousSpec == resolved && previousPages == pages
+        ) {
           return@synchronized model
         }
       }
       PrototypeTrace.section(PrototypeTrace.MAP_RENDER_TREE) {
-        val static = cache?.takeIf { it.root === spec.root } ?: PrototypeRenderCache(spec.root)
-        val mapping = PrototypeNodeMapping(spec.state.orEmpty(), pages, static, previousNodes)
-        val model = prototypeRenderModel(spec, mapping.map(spec.root, "root"))
+        val static =
+          cache?.takeIf { it.root === resolved.root } ?: PrototypeRenderCache(resolved.root)
+        val mapping = PrototypeNodeMapping(resolved.state.orEmpty(), pages, static, previousNodes)
+        val model = prototypeRenderModel(resolved, mapping.map(resolved.root, "root"))
         cache = static
-        previousSpec = spec
+        previousSpec = resolved
         previousPages = pages
         previousModel = model
         previousNodes = mapping.nodes
@@ -57,4 +71,22 @@ internal class PrototypeRenderMapper {
         model
       }
     }
+
+  /** Called only under [lock]; state writes preserve both authored cache keys. */
+  private fun resolveLocked(spec: PrototypeSpec): PrototypeSpec {
+    if (authoredSpec === spec) return checkNotNull(resolvedSpec)
+    val root =
+      if (sourceRoot === spec.root && sourceData === spec.data) checkNotNull(resolvedRoot)
+      else {
+        PrototypeDataResolver.resolve(spec).root.also {
+          sourceRoot = spec.root
+          sourceData = spec.data
+          resolvedRoot = it
+        }
+      }
+    val resolved = if (root === spec.root) spec else spec.copy(root = root)
+    authoredSpec = spec
+    resolvedSpec = resolved
+    return resolved
+  }
 }

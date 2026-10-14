@@ -1,3 +1,7 @@
+import {
+  AndroidAvdIdentityUnresolvedError,
+  AndroidDeviceIdentityUnresolvedError,
+} from "../devices/deviceBootService";
 import { OrphanRecorderActiveError } from "./orphanRecorderRefusal";
 import { ActionableError } from "../models/ActionableError";
 import { TextIndeterminateError } from "../features/action/textTransportTimeout";
@@ -157,6 +161,8 @@ function toolCallErrorText(error: unknown, message: string): string {
 function hasSelfDescribedRefusalPayload(
   error: unknown,
 ): error is
+  | AndroidAvdIdentityUnresolvedError
+  | AndroidDeviceIdentityUnresolvedError
   | DeviceUnhealthyError
   | PlanExecutionInProgressError
   | AmbiguousDeviceTargetError
@@ -171,6 +177,8 @@ function hasSelfDescribedRefusalPayload(
   | ManagedSlotDiscoveryIncompleteError
   | ManagedSlotOwnershipUnconfirmedError {
   return [
+    AndroidAvdIdentityUnresolvedError,
+    AndroidDeviceIdentityUnresolvedError,
     DeviceUnhealthyError,
     PlanExecutionInProgressError,
     AmbiguousDeviceTargetError,

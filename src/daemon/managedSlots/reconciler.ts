@@ -90,7 +90,9 @@ import {
  *   mismatch; it fails retryable `discovery_incomplete` without destructive work.
  * - Every registry mutation compare-and-sets `(generation, stableDeviceId)`, so a lost race never
  *   overwrites a newer binding. A deletion that fails leaves the old binding as `cleanup_pending`;
- *   a creation that fails after a verified deletion leaves the slot empty (`provisioning`).
+ *   a replacement creation that fails after verified deletion leaves the slot empty (`provisioning`).
+ *   A failed fresh creation removes its never-bound row only after journal rollback proves absence;
+ *   an open journal retains the row for redrive.
  * - Boot capacity fails immediately with retryable `capacity_exhausted` (owner decision): the
  *   reconciler never waits for capacity, never creates a device it could not boot, and checks
  *   before it deletes the device a replacement would not be able to boot.
@@ -1888,7 +1890,10 @@ export class ManagedSlotReconciler {
       } catch (error) {
         // The provision path rolls back its own partial creation; settle the entry on proof of
         // absence, or leave it open for redrive when a leftover may exist.
-        await this.settleFailedCreate(context, entry);
+        const settled = await this.settleFailedCreate(context, entry);
+        if (replacing === undefined) {
+          await this.removeFailedUnboundSlot(context, assignment, settled);
+        }
         throw new ReconcileAbort(provisionFailure(error));
       }
       return await this.readyOrReleaseOnBusy(provisioned, async (release) => {
@@ -2068,22 +2073,50 @@ export class ManagedSlotReconciler {
     );
   }
 
+  private async removeFailedUnboundSlot(
+    context: ReconcileContext,
+    assignment: SlotAssignmentRecord,
+    settled: SlotJournalEntry | undefined,
+  ): Promise<void> {
+    if (
+      assignment.generation !== 0 ||
+      assignment.stableDeviceId !== null ||
+      settled?.phase !== "rolled_back"
+    ) {
+      return;
+    }
+    try {
+      await this.deps.registry.removeUnboundSlot(context.request.key, {
+        generation: assignment.generation,
+        stableDeviceId: null,
+      });
+    } catch (error) {
+      logger.warn(
+        `[ManagedSlots] removing never-bound slot after failed creation entry ${settled.id} failed: ` +
+          errorMessage(error),
+        error,
+      );
+    }
+  }
+
   /** Roll back on proven absence; otherwise discover leftovers and retain cleanup for redrive. */
   private async settleFailedCreate(
     context: ReconcileContext,
     entry: SlotJournalEntry,
     absenceProven = false,
-  ): Promise<void> {
+  ): Promise<SlotJournalEntry | undefined> {
     try {
       if (absenceProven) {
-        this.noteJournal(context, (await this.journal.close(entry, "rolled_back")).entry);
-        return;
+        const settled = (await this.journal.close(entry, "rolled_back")).entry;
+        this.noteJournal(context, settled);
+        return settled;
       }
       const settled = await this.journal.settleCreation(entry, {
         adopt: false,
         deadlineMs: context.request.deadlineMs,
       });
       this.noteJournal(context, settled.entry);
+      return settled.entry;
     } catch (error) {
       logger.warn(
         `[ManagedSlots] settling failed creation entry ${entry.id} failed; redrive will retry: ` +

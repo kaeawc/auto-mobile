@@ -90,7 +90,9 @@ import {
  *   mismatch; it fails retryable `discovery_incomplete` without destructive work.
  * - Every registry mutation compare-and-sets `(generation, stableDeviceId)`, so a lost race never
  *   overwrites a newer binding. A deletion that fails leaves the old binding as `cleanup_pending`;
- *   a creation that fails after a verified deletion leaves the slot empty (`provisioning`).
+ *   a replacement creation that fails after verified deletion leaves the slot empty (`provisioning`).
+ *   A failed fresh creation removes its never-bound row only after journal rollback proves absence;
+ *   an open journal retains the row for redrive.
  * - Boot capacity fails immediately with retryable `capacity_exhausted` (owner decision): the
  *   reconciler never waits for capacity, never creates a device it could not boot, and checks
  *   before it deletes the device a replacement would not be able to boot.
@@ -1004,10 +1006,12 @@ function refused(
 }
 
 /**
- * The model "any model" creates for an iOS runtime: the last (newest, in simctl's catalog order)
- * iPhone whose runtime range supports it, else the last iPhone with no range metadata (simctl
- * stays the authority). An explicit family selects that family's types instead. Undefined when
- * the runtime is missing or unavailable, or no type in the selected family fits.
+ * The model "any model" creates for an iOS runtime: a supported iPhone (excluding iPods),
+ * else one with unknown runtime compatibility (simctl stays the authority). An explicit family
+ * selects that family's types instead. Within each tier, parseable iPhone/iPad model identifiers
+ * outrank unparseable ones: highest major generation, then lowest minor variant, then shortest
+ * name, then ascending identifier wins. Unparseable entries retain last-in-catalog selection.
+ * Undefined when the runtime is missing or unavailable, or no selected-family type fits.
  */
 export function chooseIosDeviceType(
   runtimeId: string,
@@ -1021,14 +1025,32 @@ export function chooseIosDeviceType(
   }
   const candidates = deviceTypes.filter((entry) =>
     family === undefined
-      ? entry.productFamily === "iPhone"
+      ? entry.productFamily === "iPhone" && !entry.modelIdentifier?.startsWith("iPod")
       : inferIosFormFactor(entry.identifier) === family,
   );
   const statusOf = (entry: AppleDeviceType) =>
     evaluateRuntimeCompatibility(entry, runtime.version).status;
   const supported = candidates.filter((entry) => statusOf(entry) === "supported");
   const unknown = candidates.filter((entry) => statusOf(entry) === "unknown");
-  return (supported.at(-1) ?? unknown.at(-1))?.identifier;
+  return (
+    supported.toSorted(compareNewestDeviceType).at(-1) ??
+    unknown.toSorted(compareNewestDeviceType).at(-1)
+  )?.identifier;
+}
+
+/** Positive means preferred; stable sorting retains catalog order for unparseable models. */
+function compareNewestDeviceType(a: AppleDeviceType, b: AppleDeviceType): number {
+  const aModel = /^(iPhone|iPad)(\d+),(\d+)$/.exec(a.modelIdentifier ?? "");
+  const bModel = /^(iPhone|iPad)(\d+),(\d+)$/.exec(b.modelIdentifier ?? "");
+  if (!aModel || !bModel) {
+    return Number(Boolean(aModel)) - Number(Boolean(bModel));
+  }
+  return (
+    Number(aModel[2]) - Number(bModel[2]) ||
+    Number(bModel[3]) - Number(aModel[3]) ||
+    b.name.length - a.name.length ||
+    (a.identifier < b.identifier ? 1 : a.identifier > b.identifier ? -1 : 0)
+  );
 }
 
 class ReconcileAbort extends Error {
@@ -1869,7 +1891,7 @@ export class ManagedSlotReconciler {
     this.journal.inFlight.add(entry.id);
     try {
       if (replacing === undefined && this.deps.resourceBudget) {
-        await this.admitFreshCreation(context, entry);
+        await this.admitFreshCreation(context, assignment, entry);
       }
       let provisioned: ManagedSlotProvisionedDevice;
       try {
@@ -1888,7 +1910,10 @@ export class ManagedSlotReconciler {
       } catch (error) {
         // The provision path rolls back its own partial creation; settle the entry on proof of
         // absence, or leave it open for redrive when a leftover may exist.
-        await this.settleFailedCreate(context, entry);
+        const settled = await this.settleFailedCreate(context, entry);
+        if (replacing === undefined) {
+          await this.removeFailedUnboundSlot(context, assignment, settled);
+        }
         throw new ReconcileAbort(provisionFailure(error));
       }
       return await this.readyOrReleaseOnBusy(provisioned, async (release) => {
@@ -2035,6 +2060,7 @@ export class ManagedSlotReconciler {
   /** Reserve total-resource capacity before any native creation. */
   private async admitFreshCreation(
     context: ReconcileContext,
+    assignment: SlotAssignmentRecord,
     entry: SlotJournalEntry,
   ): Promise<void> {
     let admission: ManagedSlotResourceAdmission;
@@ -2047,7 +2073,8 @@ export class ManagedSlotReconciler {
       // Admission can consume the remaining preparation time even when it finds room.
       this.checkBudget(context.request);
     } catch (error) {
-      await this.settleFailedCreate(context, entry, true);
+      const settled = await this.settleFailedCreate(context, entry, true);
+      await this.removeFailedUnboundSlot(context, assignment, settled);
       // Cancellation retains its identity for the reconciler's existing handling.
       throw error;
     }
@@ -2056,16 +2083,43 @@ export class ManagedSlotReconciler {
     }
     // Native creation has not been called: absence is already proven, including when discovery
     // itself is incomplete. Close directly rather than rediscovering a device that never existed.
-    await this.settleFailedCreate(context, entry, true);
+    const settled = await this.settleFailedCreate(context, entry, true);
+    await this.removeFailedUnboundSlot(context, assignment, settled);
     if (admission.kind === "unknown") {
       throw new ReconcileAbort(failure("discovery_incomplete", admission.message));
     }
-    const { limit, usage, retained, evictionFailures } = admission;
+    const { limit, usage, charged, retained, evictionFailures } = admission;
     throw new ReconcileAbort(
       failure("managed_slot_budget_exhausted", "Managed-slot total-resource budget is exhausted.", {
-        budget: { limit, usage, retained, evictionFailures },
+        budget: { limit, usage, charged, retained, evictionFailures },
       }),
     );
+  }
+
+  private async removeFailedUnboundSlot(
+    context: ReconcileContext,
+    assignment: SlotAssignmentRecord,
+    settled: SlotJournalEntry | undefined,
+  ): Promise<void> {
+    if (
+      assignment.generation !== 0 ||
+      assignment.stableDeviceId !== null ||
+      settled?.phase !== "rolled_back"
+    ) {
+      return;
+    }
+    try {
+      await this.deps.registry.removeUnboundSlot(context.request.key, {
+        generation: assignment.generation,
+        stableDeviceId: null,
+      });
+    } catch (error) {
+      logger.warn(
+        `[ManagedSlots] removing never-bound slot after failed creation entry ${settled.id} failed: ` +
+          errorMessage(error),
+        error,
+      );
+    }
   }
 
   /** Roll back on proven absence; otherwise discover leftovers and retain cleanup for redrive. */
@@ -2073,17 +2127,19 @@ export class ManagedSlotReconciler {
     context: ReconcileContext,
     entry: SlotJournalEntry,
     absenceProven = false,
-  ): Promise<void> {
+  ): Promise<SlotJournalEntry | undefined> {
     try {
       if (absenceProven) {
-        this.noteJournal(context, (await this.journal.close(entry, "rolled_back")).entry);
-        return;
+        const settled = (await this.journal.close(entry, "rolled_back")).entry;
+        this.noteJournal(context, settled);
+        return settled;
       }
       const settled = await this.journal.settleCreation(entry, {
         adopt: false,
         deadlineMs: context.request.deadlineMs,
       });
       this.noteJournal(context, settled.entry);
+      return settled.entry;
     } catch (error) {
       logger.warn(
         `[ManagedSlots] settling failed creation entry ${entry.id} failed; redrive will retry: ` +

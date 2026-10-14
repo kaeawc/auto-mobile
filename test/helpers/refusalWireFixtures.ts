@@ -1,3 +1,4 @@
+import { PrototypeHiddenError } from "../../src/features/prototype/prototypeHidden";
 import { PrototypeSuspendedError } from "../../src/features/prototype/prototypeSuspended";
 import { OrphanRecorderActiveError } from "../../src/server/orphanRecorderRefusal";
 import { HostBootAdmissionRegistryError } from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
@@ -108,6 +109,7 @@ import {
   DeviceAssignedToManagedSlotError,
   DeviceOutsideManagedSlotsError,
   ManagedSlotDiscoveryIncompleteError,
+  ManagedSlotRegistrySchemaUnsupportedError,
   ManagedSlotOwnershipUnconfirmedError,
   ManagedSlotOwnershipLostError,
 } from "../../src/daemon/managedSlots/managedSlotRefusal";
@@ -426,6 +428,11 @@ const BUILDERS: readonly FixtureEntry[] = [
     () => shaped(deviceAssignedToOtherSessionError(DEVICE, "holder-session", SESSION)),
   ],
   [
+    "prototype_hidden",
+    "PrototypeHiddenError via shapeToolCallError",
+    () => shaped(new PrototypeHiddenError("app_layer_window_hidden")),
+  ],
+  [
     "prototype_suspended",
     "PrototypeSuspendedError via shapeToolCallError",
     () => shaped(new PrototypeSuspendedError()),
@@ -697,6 +704,7 @@ export const MANAGED_SLOT_FIXTURE_PREFIX = "managed_slot_acquisition_failed.";
 const OWN_FAILURE_RETRYABLE: Readonly<Record<ManagedSlotAcquisitionOwnFailureCode, boolean>> = {
   managed_slot_config_invalid: false,
   contract_unsupported: false,
+  registry_schema_unsupported: false,
   managed_slot_group_unsupported: false,
   managed_slots_unsupported: false,
   scope_invalidated: false,
@@ -800,6 +808,16 @@ function budgetSlotFailure(): ManagedSlotsFailure {
             failedDeletes: 3,
             uncounted: true,
             lastError: "native delete keeps failing",
+          },
+        ],
+        charged: [
+          { platform: "android", stableDeviceId: "active-device", kind: "assigned_active" },
+          { platform: "android", stableDeviceId: "amslot-kept", kind: "deletion_stuck" },
+          {
+            platform: "android",
+            stableDeviceId: "amslot-stuck",
+            kind: "deletion_stuck",
+            uncounted: true,
           },
         ],
         evictionFailures: [
@@ -1072,6 +1090,7 @@ function terminalAtAdmission(releaseReason: SessionReleaseReason): TerminalSessi
 }
 
 const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
+  ["prototype_hidden", () => new PrototypeHiddenError("app_layer_window_hidden")],
   ["prototype_suspended", () => new PrototypeSuspendedError()],
   ["device_unhealthy", () => unhealthyRefusal()],
   ["device_unhealthy.permanent", () => unhealthyRefusal("permanent")],
@@ -1324,6 +1343,10 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
   string
 >([
   [
+    ManagedSlotRegistrySchemaUnsupportedError,
+    "internal registry-open refusal; ManagedSlotAcquisition maps it to the fixture-covered registry_schema_unsupported acquisition failure before serialization",
+  ],
+  [
     HostBootAdmissionRegistryError,
     "internal host-lock failure; AndroidBootAdmissionGate maps it to discovery_incomplete before the wire",
   ],
@@ -1404,6 +1427,8 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
 
 /** Codes that exist as named constants but never reach a client as a typed JSON refusal. */
 export const UNFIXTURED_REFUSAL_CODES: Readonly<Record<string, string>> = {
+  registry_schema_unsupported:
+    "internal registry-open code mapped to the acquisition failure fixtured under managed_slot_acquisition_failed.registry_schema_unsupported",
   daemon_session_not_found:
     "a daemon socket response field (`code` beside `error`) for an unknown session, not an MCP tool result body",
   bound_session_lost:

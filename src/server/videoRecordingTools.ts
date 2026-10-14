@@ -973,17 +973,11 @@ async function tryStopStartupOrphan(
         `Stopped startup recorder ${recordingId} has no persisted metadata.`,
       );
     }
-    return createJSONToolResponse({
-      action: "stop",
-      count: 1,
-      recordings: [
-        {
-          ...stopResultEntry(metadata, row),
-          status: "interrupted",
-          warning: "The capture was interrupted by a daemon restart and its recorder was stopped.",
-        },
-      ],
-    });
+    return {
+      ...stopResultEntry(metadata, row),
+      status: "interrupted",
+      warning: "The capture was interrupted by a daemon restart and its recorder was stopped.",
+    };
   }
   return undefined;
 }
@@ -1010,7 +1004,7 @@ async function stopRecordingById(
     requesterMcpSessionId,
   );
   if (stoppedOrphan) {
-    return stoppedOrphan;
+    return createJSONToolResponse({ action: "stop", count: 1, recordings: [stoppedOrphan] });
   }
   const heldOwner = heldVideoRecordingOwner(recordingId);
   const activeRecords = await listActiveVideoRecordings();
@@ -1295,6 +1289,49 @@ async function stopDeviceRecordings(device: BootedDevice, args: VideoRecordingAr
   return stopResolvedDeviceRecordings(device, args);
 }
 
+/** Reuse the by-id owner check and teardown for every retained orphan on this device. */
+async function stopStartupOrphansForDevice(
+  target: BootedDevice,
+  args: VideoRecordingArgs,
+  latest: VideoRecordingRecord | undefined,
+  singleTarget: boolean,
+) {
+  const orphans = (getStartupOrphanCaptures()?.list(target.deviceId) ?? []).filter(
+    (orphan) => heldVideoRecordingOwner(orphan.recordingId) === undefined,
+  );
+  if (
+    orphans.length === 0 ||
+    (latest && !orphans.some((orphan) => orphan.recordingId === latest.recordingId))
+  ) {
+    return undefined;
+  }
+  const results: Array<Record<string, unknown>> = [];
+  const failures: Array<Record<string, unknown>> = [];
+  for (const orphan of orphans) {
+    try {
+      const stopped = await tryStopStartupOrphan(
+        orphan.recordingId,
+        args.sessionUuid,
+        mcpSessionIdOf(args),
+      );
+      if (stopped) {
+        results.push(stopped);
+      }
+    } catch (error) {
+      if (error instanceof OrphanRecorderActiveError && singleTarget && orphans.length === 1) {
+        throw error;
+      }
+      logger.warn(`[VideoRecording] Failed to stop startup orphan ${orphan.recordingId}`, error);
+      failures.push({
+        deviceId: target.deviceId,
+        platform: target.platform,
+        error: errorMessage(error),
+      });
+    }
+  }
+  return { results, failures };
+}
+
 async function stopResolvedDeviceRecordings(device: BootedDevice, args: VideoRecordingArgs) {
   const results: Array<Record<string, unknown>> = [];
   const failures: Array<Record<string, unknown>> = [];
@@ -1320,7 +1357,19 @@ async function stopResolvedDeviceRecordings(device: BootedDevice, args: VideoRec
     if (deviceSessions.length === 0) {
       activeRecords ??= await listActiveVideoRecordings({ platform: device.platform });
       const matches = activeRecords.filter((record) => record.deviceId === target.deviceId);
-      if (matches.length === 0) {
+      const latest = matches.length > 0 ? selectLatestRecording(matches) : undefined;
+      const stoppedOrphans = await stopStartupOrphansForDevice(
+        target,
+        args,
+        latest,
+        targetDevices.length === 1,
+      );
+      if (stoppedOrphans) {
+        results.push(...stoppedOrphans.results);
+        failures.push(...stoppedOrphans.failures);
+        continue;
+      }
+      if (!latest) {
         failures.push({
           deviceId: target.deviceId,
           platform: target.platform,
@@ -1329,29 +1378,11 @@ async function stopResolvedDeviceRecordings(device: BootedDevice, args: VideoRec
         continue;
       }
 
-      const latest = selectLatestRecording(matches);
       try {
         const { metadata, evictedRecordingIds: evicted } = await stopVideoRecording(
           latest.recordingId,
         );
-        const codec = metadata.codec ?? "unknown";
-        const durationMs = metadata.durationMs ?? 0;
-        const sizeBytes = metadata.sizeBytes ?? 0;
-
-        results.push({
-          recordingId: metadata.recordingId,
-          filePath: metadata.filePath,
-          durationMs,
-          videoDurationMs: metadata.videoDurationMs,
-          sizeBytes,
-          codec,
-          recordedPanel: metadata.recordedPanel,
-          transitions: metadata.transitions,
-          warnings: metadata.warnings,
-          metadata: { ...metadata, durationMs, sizeBytes, codec },
-          deviceId: target.deviceId,
-          platform: target.platform,
-        });
+        results.push({ ...stopResultEntry(metadata, target), warnings: metadata.warnings });
 
         appendEvictedRecordingIds(evictedRecordingIds, evicted);
       } catch (error) {

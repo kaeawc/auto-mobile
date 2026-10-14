@@ -20,6 +20,7 @@ import dev.jasonpearson.automobile.protocol.InstallCaCertFromPath
 import dev.jasonpearson.automobile.protocol.ListDataStores
 import dev.jasonpearson.automobile.protocol.ListPreferenceFiles
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
+import dev.jasonpearson.automobile.protocol.PatchPrototype
 import dev.jasonpearson.automobile.protocol.PinchResult
 import dev.jasonpearson.automobile.protocol.PrototypeResult
 import dev.jasonpearson.automobile.protocol.PutPrototypeAsset
@@ -511,6 +512,15 @@ class CtrlProxyMessageHandler(
         actions.dismissPrototype(request.requestId, request.id, request.all)
       }
       is InspectPrototypes -> actions.inspectPrototypes(request.requestId)
+      is PatchPrototype ->
+        return PrototypeResult(
+          timestamp = System.currentTimeMillis(),
+          requestId = request.requestId,
+          success = false,
+          error =
+            "patch_prototype: this CtrlProxy does not advertise prototype_patch_v1 and cannot patch a " +
+              "shown prototype; send the whole spec with show_prototype",
+        )
       is PutPrototypeAsset ->
         actions.putPrototypeAsset(
           request.requestId,

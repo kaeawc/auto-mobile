@@ -73,6 +73,7 @@ async function harness() {
       restore: async () => {
         await behavior.gate;
         writes.push("restore");
+        return { status: "restored" as const };
       },
     }),
     undefined,

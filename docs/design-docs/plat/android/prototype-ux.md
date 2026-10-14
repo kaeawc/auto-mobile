@@ -136,6 +136,19 @@ No data means every path is missing. `/a/` accesses the empty key inside `a`.
   not count. After the three path-source checks, exceeding this budget fails at
   `<node>.repeat.items.path` with `Repeat path cell limit exceeded`, before template projection.
   Cell counts and immutable projected lists are cached by pointer within each validation call.
+- `MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH` (16384 UTF-16 code units) bounds the sum of
+  replacement lengths per bindable field at each substitution stage: data in text-kind fields,
+  then repeat in every bindable field for each item, including repeat placeholders inserted by
+  data. Literal characters and unresolved repeat placeholders contribute zero; state placeholders
+  are not validated because state can change after show.
+  `MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL` (4194304 UTF-16 code units) also bounds rebuilt text
+  per validation: each recognized data stage and each repeat item charges authored stage length
+  plus replacement length, including literal units and placeholder tokens. Inside a repeat, a
+  data-resolved field is also charged once per item, even without repeat placeholders. Purely
+  literal fields and state placeholders are not charged. Crossing the total fails at the field path
+  with `Substituted text total limit exceeded`.
+  During state interpolation, a replacement that would exceed the per-call substitution limit stays
+  as written, and later placeholders may still substitute.
 - `{data:/pointer}` binds only the text-kind fields repeat already binds: text, button/FAB labels,
   segmented option labels, app bar title/navigation/action labels, dialog title/text/button labels,
   and snackbar text/action label. Missing, object or array values become empty text. Other braces
@@ -221,6 +234,8 @@ depth precedes array length, then children; the byte check runs last.
 | Pointer field | `Invalid pointer value` |
 | `<node>.repeat.items` | `Invalid union value` for neither array nor object |
 | `<node>.repeat.items.path` (in this order) | `Repeat path does not resolve to an array`; `Repeat path resolves to more than 128 items`; `Repeat path item <i> is not an object`; `Repeat path cell limit exceeded` |
+| Bindable field | `Substituted text total limit exceeded` (reduce bindable fields, replacement lengths or repeat items; `MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL`) |
+| Authored bindable field, e.g. `root.children[0].text` or `root.children[0].onTap[0].name` | `Substituted text length limit exceeded` (after unknown repeat fields, before bound key/empty emit checks) |
 | Referencing template string | `Unknown repeat field "x"` (non-scalar members count as absent) |
 | `<node>.repeat.items.path` | `Bound state key "<k>" is invalid (repeat item <i>)`; literal repeats keep `<node>.repeat.items[i]` without the suffix |
 | `<node>.repeat.key` | `Unknown repeat field "<key>"`; `Duplicate repeat key "<text>" (items <i> and <j>)`, first colliding pair |
@@ -1030,9 +1045,67 @@ written once.
   Nodes outside every component keep their authored paths, because a `use` expands
   to exactly one node.
 
+### Patch (#11675)
+
+Use `show` for a new screen or a window, theme or root change. Use `patch` for
+content (`/data`), state (`/state`) or one node by id (`replaceNode`). The host action,
+wire contract and capability gate exist, but **no device advertises
+`prototype_patch_v1` yet**. Every patch is refused before sending: update CtrlProxy
+on Android, or relaunch the app with `launchApp prototype: true` on iOS when a
+supporting agent is available; until then, send the whole spec with `show`.
+
+`{action:"patch", id, ops, baseRevision?}` sends a `patch_prototype` frame
+`{requestId, id, baseRevision?, ops}` only to a device advertising
+`prototype_patch_v1`. Android and iOS use `prototype_result` replies. Success
+carries `revision`; a state conflict carries
+`{success:false,error,conflict:{revision,state:{key:scalar}}}`. Revisions are
+non-negative safe integers; conflict values are strings, booleans or finite
+numbers with valid state keys. Malformed reply fields are dropped. Show, status,
+inspect and events do not report revisions through this host contract.
+
+Ops apply in order, completely or not at all. `add`, `replace`, `remove` and
+`test` address `/data` or `/data` followed by an RFC 6901 JSON pointer: `~0`
+escapes `~`, `~1` escapes `/`; array indices are canonical non-negative decimal
+integers, and `-` appends for `add` only. Parent paths must exist. `replace`,
+`remove` and `test` require the addressed value to exist. `add`, `replace` and
+`test` carry `value`; `remove` does not. State ops address exactly
+`/state/<key>`, where keys match `[A-Za-z_][A-Za-z0-9_]{0,63}` and values are
+strings, booleans or finite numbers.
+
+`replaceNode` carries `{op:"replaceNode",id,node}`. The id must identify exactly
+one node in the tree, cannot be the root or inside a repeat, and the replacement
+must keep that id. Replacement nodes cannot contain `use` nodes or element
+anchors. Inline the component, use a bounds anchor, or use `show`.
+
+The agent writes data; the user writes state. Data-only patches and patches
+containing only data ops and `replaceNode` ignore `baseRevision`. Any state op,
+including `test`, requires `baseRevision`. A device supporting the capability
+must refuse the whole patch with `conflict` if the user changed a touched state
+key since that revision, returning the current revision and those keys' values.
+
+There are at most 64 ops, the frame is capped at 1 MiB, and the resulting whole
+spec must satisfy every spec/data limit, including node count and depth. The
+host tracks a cloned copy of the device spec from the last acknowledged show,
+with components expanded and anchors resolved. It applies ops to a copy and
+runs the full validator before sending. Errors preserve deterministic paths.
+The host validates state ops against the agent-declared state and leaves value
+comparison for `/state` `test` to the device; its copy cannot know user edits.
+
+Patches are FIFO per device, with one in flight at a time. A pending show makes
+patch refuse as busy. Shows are not delayed by patches. If a dispatched show
+and an acknowledged patch overlap, their device-side order is unknown: the host
+forgets its spec, warns, and requires a further successful show before patching.
+A failed dispatched show, dismissed event, successful dismiss, session release,
+device removal or unbinding also ends tracking. An adopted different id ends
+tracking; inspecting the same tracked id retains it. A timeout or connection loss after
+patch dispatch is indeterminate and requires a new show. A failure before dispatch
+keeps the tracked copy. An atomic device
+refusal leaves the tracked copy unchanged. A successful patch refreshes shown
+status data without changing `lastResult`, timestamps or event snapshots.
+
 ### Re-showing a prototype
 
-`show_prototype` always carries a full spec; there is no partial update (#10490).
+`show_prototype` always carries a full spec; `patch_prototype` is the gated content/state/node contract (#11675).
 When `spec.id` is the prototype already on screen and `reset` is absent or false,
 the device replaces it in place: it keeps the display the prototype is on (the
 request's `displayId` is ignored), and each pager keeps its settled page,
@@ -1264,10 +1337,13 @@ allocation) and when the app returns the same runtime is shown again. A
   hierarchy capture carries top-level `prototypeSuspended: true`, so `layer: "prototype"`
   calls fail with "hidden because the app it was shown over is not in front" instead
   of "no prototype is showing".
+  `inspect` also reports optional `hiddenReason`: `app_layer_window_hidden` when the app in front hides an app-layer window, or `device_blocked` when locked or the screen is off. The host carries it into status and uses it for `prototype_hidden` layer refusals. A show reports `visible: false` with the same `notVisibleReason`; older devices retain `no_prototype_window_on_screen` for app-layer confirmation. Hidden reasons are absent when visible or suspended.
+
   The host stores `suspended` from `inspect` and surfaces it on `prototype` status
   entries (host-local, so it is as fresh as the last `inspect`; a new `show` or an
   `inspect` after the app returns clears it), and an `awaitEvent` that times out on
   a suspended prototype carries the same explanation as a `warning`. Absent on iOS.
+
 - **Separate from other hides.** Suspension is its own state
   (`PrototypeForegroundTracker.suspended`). The host's `isBlocked` is the lock-screen
   check OR suspension, so any restore path (unlock, relayout, or a future capture-time

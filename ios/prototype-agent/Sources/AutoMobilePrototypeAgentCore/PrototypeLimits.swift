@@ -7,6 +7,7 @@ import Foundation
 /// The constants repeat `schemas/prototype-spec-contract.json`; `PrototypeLimitsTests` fails when they
 /// drift from it.
 enum PrototypeLimits {
+    static let maxPatchOps = 64
     static let maxNodes = 2000
     static let maxDepth = 24
     static let maxRepeatItems = 128

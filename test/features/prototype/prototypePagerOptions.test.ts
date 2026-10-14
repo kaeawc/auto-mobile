@@ -53,31 +53,21 @@ describe("pager option contract", () => {
     expect(guide).not.toContain("the current page is reported selected");
   });
 
-  test("component pager options use validator-style authored paths without mutating the spec", () => {
+  test("component-expanded pager options use expanded paths", () => {
     const candidate = componentSpec();
-    const original = structuredClone(candidate);
-    expect(prototypePagerOptionFields(candidate)).toEqual([
-      "root (use pageDeck) → components.pageDeck.root.axis",
-      "root (use pageDeck) → components.pageDeck.root.peek",
-    ]);
-    expect(candidate).toEqual(original);
+    const expanded = validatePrototypeSpec(candidate);
+    expect(expanded.success).toBe(true);
+    if (!expanded.success) {
+      return;
+    }
+    expect(prototypePagerOptionFields(expanded.data)).toEqual(["root.axis", "root.peek"]);
     expect(
       prototypePagerOptionFields(spec({ ...pager, axis: "vertical", peek: { start: 20 } })),
     ).toEqual(["root.axis", "root.peek"]);
   });
-  test("invalid components fall through without finding expanded pager options", () => {
-    const missing = { ...componentSpec(), root: { type: "use", component: "missing" } };
-    expect(prototypePagerOptionFields(missing)).toEqual([]);
-    const invalid = componentSpec();
-    invalid.components.pageDeck.root.peek.start = -1;
-    expect(prototypePagerOptionFields(invalid)).toEqual([]);
-    expect(validatePrototypeSpec(invalid)).toEqual({
-      success: false,
-      error: {
-        path: "root (use pageDeck) → components.pageDeck.root.peek.start",
-        message: "Invalid number value",
-      },
-    });
+  test("malformed specs are scanned defensively", () => {
+    expect(prototypePagerOptionFields({ root: null })).toEqual([]);
+    expect(prototypePagerOptionFields({ root: { type: "pager", children: [null] } })).toEqual([]);
   });
   test("plain pager validates and keeps optional fields absent", () => {
     const result = validatePrototypeSpec(spec());

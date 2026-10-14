@@ -28,29 +28,13 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
   }),
   prototype_data_model_v1: fixture({ ...label, text: "{data:/x}" }),
   prototype_pager_options_v1: {
-    minimalSpec: {
-      ...base,
-      root: {
-        type: "pager",
-        id: "label",
-        axis: "horizontal",
-        pageSize: "fill",
-        children: [{ type: "spacer" }],
-      },
-    },
-    ops: [
-      {
-        op: "replaceNode",
-        id: "label",
-        node: {
-          type: "pager",
-          id: "label",
-          axis: "horizontal",
-          pageSize: "fill",
-          children: [{ type: "spacer" }],
-        },
-      },
-    ],
+    ...fixture({
+      type: "pager",
+      id: "label",
+      axis: "horizontal",
+      pageSize: "fill",
+      children: [{ type: "spacer" }],
+    }),
   },
 };
 function fixture(root: typeof label & Record<string, unknown>) {
@@ -145,11 +129,7 @@ test.each(cases)(
     const refusedPatch = await patch(device, ops);
     expect(refusedPatch.success).toBe(false);
     expect(refusedPatch.error).toContain(capability);
-    if (capability === "prototype_pager_options_v1") {
-      expect(refusedPatch.error).toContain("root.children[0].axis");
-    } else {
-      expect(refusedPatch.error).toBe(refusedShow.error);
-    }
+    expect(refusedPatch.error).toBe(refusedShow.error);
     expect(requests(device)).toEqual([]);
     expect(proxy.getPrototypeHistory()).toHaveLength(device.platform === "android" ? 1 : 0);
     expect(agent.requests).toHaveLength(sent);

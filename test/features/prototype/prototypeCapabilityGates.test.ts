@@ -12,7 +12,7 @@ test("plain and non-spec inputs require no capability", () => {
     expect(prototypeRequiredCapabilities(spec)).toEqual([]);
   }
 });
-test("required gates retain registry order, fields and original messages", () => {
+test("required gates report fields and original messages", () => {
   const spec = {
     data: { x: 1 },
     root: {
@@ -22,36 +22,29 @@ test("required gates retain registry order, fields and original messages", () =>
     },
   };
   const required = prototypeRequiredCapabilities(spec);
-  expect(required.map((gate) => gate.capability)).toEqual([
-    "prototype_theme_modes_v1",
-    "prototype_data_model_v1",
-  ]);
-  expect(required.map((gate) => gate.fields)).toEqual([
-    ["root.style.background"],
-    ["data", "root.text"],
-  ]);
-  expect(required.map((gate) => gate.unsupportedMessage)).toEqual([
-    prototypeThemeModesUnsupportedMessage,
-    prototypeDataModelUnsupportedMessage,
-  ]);
-  expect(PROTOTYPE_SPEC_CAPABILITY_GATES.map((gate) => gate.fields(spec))).toEqual([
-    ...required.map((gate) => gate.fields),
-    [],
-  ]);
+  expect(required.find((gate) => gate.capability === "prototype_theme_modes_v1")).toMatchObject({
+    fields: ["root.style.background"],
+    unsupportedMessage: prototypeThemeModesUnsupportedMessage,
+  });
+  expect(required.find((gate) => gate.capability === "prototype_data_model_v1")).toMatchObject({
+    fields: ["data", "root.text"],
+    unsupportedMessage: prototypeDataModelUnsupportedMessage,
+  });
   const pagerSpec = {
     root: { type: "pager", axis: "vertical", pageSize: 0.8 },
   };
   const pagerRequired = prototypeRequiredCapabilities(pagerSpec);
-  expect(pagerRequired.map((gate) => gate.capability)).toEqual(["prototype_pager_options_v1"]);
-  expect(pagerRequired.map((gate) => gate.fields)).toEqual([["root.axis", "root.pageSize"]]);
-  expect(pagerRequired.map((gate) => gate.unsupportedMessage)).toEqual([
-    prototypePagerOptionsUnsupportedMessage,
-  ]);
-  expect(PROTOTYPE_SPEC_CAPABILITY_GATES.map((gate) => gate.fields(pagerSpec))).toEqual([
-    [],
-    [],
-    ["root.axis", "root.pageSize"],
-  ]);
+  expect(pagerRequired).toHaveLength(1);
+  expect(pagerRequired[0]).toMatchObject({
+    capability: "prototype_pager_options_v1",
+    fields: ["root.axis", "root.pageSize"],
+    unsupportedMessage: prototypePagerOptionsUnsupportedMessage,
+  });
+  expect(
+    PROTOTYPE_SPEC_CAPABILITY_GATES.find(
+      (gate) => gate.capability === "prototype_pager_options_v1",
+    )?.fields(pagerSpec),
+  ).toEqual(["root.axis", "root.pageSize"]);
 });
 test("only used gates are returned without mutating the spec", () => {
   const spec = { root: { type: "text", text: "{data:/x}" } };

@@ -13,11 +13,10 @@ final class PrototypeViewerSpecTests: XCTestCase {
         """.utf8)
     }
 
-    private func load(_ documents: Data? = nil, bundle: Data? = nil) -> PrototypeViewerContent {
+    private func load(_ bundle: Data? = nil) -> PrototypeViewerContent {
         var files: [String: Data] = [:]
-        files["documents"] = documents
         files["bundle"] = bundle
-        return PrototypeViewerSpecLoader(reader: FakeReader(files: files), locations: ["documents", "bundle"]).load()
+        return PrototypeViewerSpecLoader(reader: FakeReader(files: files), locations: ["bundle"]).load()
     }
 
     private func assertInvalid(
@@ -41,18 +40,12 @@ final class PrototypeViewerSpecTests: XCTestCase {
         guard case .none = load() else { return XCTFail("Expected no saved prototype") }
     }
 
-    func testDocumentsWins() {
-        guard case let .loaded(spec, _) = load(spec(id: "documents"), bundle: spec(id: "bundle")) else {
-            return XCTFail("Expected documents prototype")
-        }
-        XCTAssertEqual(spec.id, "documents")
-    }
-
-    func testBundleFallback() {
-        guard case let .loaded(spec, _) = load(bundle: spec(id: "bundle")) else {
+    func testBundledDemo() {
+        guard case let .loaded(spec, _) = load(spec(id: "bundle")) else {
             return XCTFail("Expected bundled prototype")
         }
         XCTAssertEqual(spec.id, "bundle")
+        XCTAssertEqual(PrototypeViewerLayoutLoader.documentsDirectoryName, "prototype")
     }
 
     func testValidSpecByteCount() throws {
@@ -122,10 +115,6 @@ final class PrototypeViewerSpecTests: XCTestCase {
 
     func testWhitespaceFile() {
         assertInvalid(load(Data(" \n\t".utf8)), pathContains: "$", messageContains: "empty")
-    }
-
-    func testInvalidDocumentsDoesNotFallBack() {
-        assertInvalid(load(Data(), bundle: spec()), messageContains: "empty")
     }
 
     func testUnresolvedElementAnchor() {

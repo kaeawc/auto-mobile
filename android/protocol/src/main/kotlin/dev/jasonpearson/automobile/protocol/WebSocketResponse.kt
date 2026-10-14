@@ -760,6 +760,9 @@ data class PrototypeResult(
   @EncodeDefault(EncodeDefault.Mode.NEVER) val saved: SavedPrototypeInfo? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val savedPrototypes: List<SavedPrototypeEntry>? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val errorCode: SavedPrototypeErrorCode? = null,
+  /** Only patch replies report revisions, including refusals for a matching shown prototype. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val revision: Long? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val conflict: PrototypePatchConflict? = null,
   /** Only a successful show reply: why the existing prototype is hidden. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val hiddenReason: PrototypeHiddenReason? = null,
 ) : WebSocketResponse()
@@ -796,6 +799,9 @@ enum class SavedPrototypeErrorCode {
   @SerialName("unsupported_format") UNSUPPORTED_FORMAT,
   @SerialName("internal_error") INTERNAL_ERROR,
 }
+
+@Serializable
+data class PrototypePatchConflict(val revision: Long, val state: Map<String, PrototypeScalar>)
 
 @Serializable
 enum class PrototypeHiddenReason {

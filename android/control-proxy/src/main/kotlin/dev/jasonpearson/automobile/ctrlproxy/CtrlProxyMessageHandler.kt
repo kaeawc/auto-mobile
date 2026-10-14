@@ -520,14 +520,7 @@ class CtrlProxyMessageHandler(
       is ListSavedPrototypes -> actions.listSavedPrototypes(request.requestId)
       is DeleteSavedPrototype -> actions.deleteSavedPrototype(request.requestId, request.id)
       is PatchPrototype ->
-        return PrototypeResult(
-          timestamp = System.currentTimeMillis(),
-          requestId = request.requestId,
-          success = false,
-          error =
-            "patch_prototype: this CtrlProxy does not advertise prototype_patch_v1 and cannot patch a " +
-              "shown prototype; send the whole spec with show_prototype",
-        )
+        actions.patchPrototype(request.requestId, request.id, request.baseRevision, request.ops)
       is PutPrototypeAsset ->
         actions.putPrototypeAsset(
           request.requestId,

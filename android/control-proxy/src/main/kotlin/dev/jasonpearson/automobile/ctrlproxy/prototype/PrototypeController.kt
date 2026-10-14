@@ -6,6 +6,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeDataResolver
 import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
+import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidation
 import dev.jasonpearson.automobile.protocol.PrototypeSpecValidator
@@ -17,6 +18,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 
 /** The CtrlProxy application id, named in errors that tell the host which package to grant. */
 const val DEFAULT_CTRL_PROXY_PACKAGE = "dev.jasonpearson.automobile.ctrlproxy"
@@ -69,6 +72,14 @@ fun interface PrototypeResultSink {
   ) =
     if (missingAssets.isEmpty()) send(requestId, true, null)
     else sendWithMissingAssets(requestId, true, null, missingAssets)
+
+  suspend fun sendPatched(
+    requestId: String?,
+    success: Boolean,
+    error: String?,
+    revision: Long?,
+    conflict: PrototypePatchConflict?,
+  ) = send(requestId, success, error)
 
   /** The reply to `inspect_prototypes`. Sinks that predate it answer a bare success. */
   suspend fun sendPrototypeStatus(
@@ -182,6 +193,11 @@ class PrototypeController(
 
   // Controller lifetime ledger: same-id show/dismiss/re-show and reconnect never rewind sequences.
   private val sequences = mutableMapOf<String, Long>()
+  private val revisions = mutableMapOf<String, Long>()
+
+  private fun nextRevision(id: String): Long =
+    ((revisions[id] ?: 0L) + 1L).also { revisions[id] = it }
+
   private var destroyed = false
   private var activeObserverSession = 0
   // A disconnect dismissal whose window removal failed; retried on the next lifecycle signal.
@@ -252,6 +268,37 @@ class PrototypeController(
       Outcome(missingAssets(), activeTheme?.value?.appearance)
     }
 
+  suspend fun patch(requestId: String?, id: String, baseRevision: Long?, ops: JsonArray) =
+    execute(requestId, patchId = id) {
+      val runtime = activeRuntime?.takeIf { it.current.active && it.current.spec.id == id }
+      if (runtime == null) Outcome(error = "Unknown prototype id: $id")
+      else {
+        when (val result = runtime.patch(baseRevision, ops, json, ::validate)) {
+          is PrototypeRuntime.PatchResult.Rejected ->
+            Outcome(error = result.message, revision = result.revision)
+          is PrototypeRuntime.PatchResult.Conflict ->
+            Outcome(
+              error = "conflict: state changed after baseRevision $baseRevision",
+              revision = result.revision,
+              conflict = PrototypePatchConflict(result.revision, result.state),
+            )
+          is PrototypeRuntime.PatchResult.Applied -> {
+            try {
+              armIdle(runtime)
+              val model = runtime.renderModel()
+              syncAppearance(runtime, model)
+              syncTextFieldFocus(model)
+            } catch (error: CancellationException) {
+              throw error
+            } catch (error: Exception) {
+              Log.w("PrototypeController", "Prototype interaction failed", error)
+            }
+            Outcome(revision = result.revision)
+          }
+        }
+      }
+    }
+
   suspend fun dismiss(requestId: String?, id: String?, all: Boolean?) =
     execute(requestId) {
       require(all == true || (id != null && activeRuntime?.current?.spec?.id == id)) {
@@ -271,6 +318,9 @@ class PrototypeController(
   private data class Outcome(
     val missingAssets: List<String> = emptyList(),
     val appearance: PrototypeAppearance? = null,
+    val error: String? = null,
+    val revision: Long? = null,
+    val conflict: PrototypePatchConflict? = null,
   )
 
   /** Referenced assets the store lacks, for the active spec. Never fails the request. */
@@ -278,6 +328,13 @@ class PrototypeController(
     val spec = activeRuntime?.current?.spec ?: return emptyList()
     return prototypeAssetReferences(spec.root).filterNot(hasAsset)
   }
+
+  private fun validate(spec: JsonObject): PrototypeSpec =
+    when (val validation = PrototypeSpecValidator.validate(spec.toString())) {
+      is PrototypeSpecValidation.Failure ->
+        error("${validation.error.path}: ${validation.error.message}")
+      is PrototypeSpecValidation.Success -> validate(validation.spec)
+    }
 
   private fun validate(spec: PrototypeSpec): PrototypeSpec {
     guardPrototypeTree(spec.root)
@@ -352,6 +409,8 @@ class PrototypeController(
         },
         requestDismiss = { removeActive() },
         previousPages = if (preservePages) previous?.current?.pages.orEmpty() else emptyMap(),
+        initialRevision = nextRevision(validated.id),
+        nextRevision = { nextRevision(validated.id) },
       )
     val mappedSpec = runtime.renderModel()
     val theme = MutableStateFlow(shownTheme(mappedSpec, appearance))
@@ -551,13 +610,17 @@ class PrototypeController(
     }
 
   /** [action]'s missing asset ids are reported as a warning, never as a failure. */
-  private suspend fun execute(requestId: String?, action: suspend () -> Outcome) = mutex.withLock {
+  private suspend fun execute(
+    requestId: String?,
+    patchId: String? = null,
+    action: suspend () -> Outcome,
+  ) = mutex.withLock {
     var outcome = Outcome()
     val error =
       try {
         check(!destroyed) { "Prototype host destroyed" }
         outcome = action()
-        null
+        outcome.error
       } catch (error: CancellationException) {
         throw error
       } catch (error: Exception) {
@@ -566,7 +629,12 @@ class PrototypeController(
       }
     val missing = outcome.missingAssets
     val appearance = outcome.appearance
-    if (error == null && appearance != null)
+    if (patchId != null) {
+      val revision =
+        outcome.revision
+          ?: activeRuntime?.current?.takeIf { it.active && it.spec.id == patchId }?.revision
+      sink.sendPatched(requestId, error == null, error, revision, outcome.conflict)
+    } else if (error == null && appearance != null)
       sink.sendShown(requestId, missing, appearance, shownHiddenReason())
     else if (missing.isEmpty()) sink.send(requestId, error == null, error)
     else sink.sendWithMissingAssets(requestId, error == null, error, missing)

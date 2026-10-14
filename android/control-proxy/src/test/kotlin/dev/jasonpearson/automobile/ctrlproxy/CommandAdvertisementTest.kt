@@ -40,6 +40,7 @@ class CommandAdvertisementTest {
       "prototype_appearance_v1",
       "prototype_persistence_replay_v1",
       "prototype_show_in_place_v1",
+      "prototype_patch_v1",
       "prototype_anchor_v1",
       "prototype_window_metadata_v1",
       "screenshot_hide_prototype_v1",
@@ -77,7 +78,7 @@ class CommandAdvertisementTest {
       assertTrue(commands.contains("prototype_anchor_v1"))
       assertTrue(commands.contains("inspect_prototypes"))
       assertTrue(commands.contains("patch_prototype"))
-      assertFalse(commands.contains("prototype_patch_v1"))
+      assertTrue(commands.contains("prototype_patch_v1"))
       assertTrue(commands.contains("network_mock_rules_report_v1"))
       assertTrue(commands.contains("prototype_window_metadata_v1"))
       assertTrue(commands.contains("screenshot_hide_prototype_v1"))

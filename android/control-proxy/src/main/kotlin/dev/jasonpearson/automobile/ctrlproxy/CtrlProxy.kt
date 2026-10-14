@@ -118,6 +118,7 @@ import dev.jasonpearson.automobile.protocol.NodeSelector
 import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
+import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
 import dev.jasonpearson.automobile.protocol.SavedPrototypeEntry
@@ -178,6 +179,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
@@ -1168,6 +1170,28 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
 
+      override suspend fun sendPatched(
+        requestId: String?,
+        success: Boolean,
+        error: String?,
+        revision: Long?,
+        conflict: PrototypePatchConflict?,
+      ) {
+        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+          resultBroadcaster.guard(requestId, "prototype_result") {
+            webSocketServer.broadcastWithPerf { _ ->
+              prototypeResultFrame(
+                requestId,
+                success,
+                error,
+                revision = revision,
+                conflict = conflict,
+              )
+            }
+          }
+        }
+      }
+
       override suspend fun sendShown(
         requestId: String?,
         missingAssets: List<String>,
@@ -1177,7 +1201,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
           resultBroadcaster.guard(requestId, "prototype_result") {
             webSocketServer.broadcastWithPerf { _ ->
-              prototypeResultFrame(requestId, true, null, missingAssets, appearance, hiddenReason)
+              prototypeResultFrame(
+                requestId,
+                true,
+                null,
+                missingAssets,
+                appearance,
+                hiddenReason = hiddenReason,
+              )
             }
           }
         }
@@ -3081,6 +3112,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             result.committedUnits,
             result.insertedText,
             if (trace) result.trace else null,
+            editorConsumed = result.editorConsumed,
           )
         }
       }
@@ -3379,6 +3411,10 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun deleteSavedPrototype(requestId: String?, id: String) {
     launchRequestScope(requestId) { savedPrototypeController.delete(requestId, id) }
+  }
+
+  override fun patchPrototype(requestId: String?, id: String, baseRevision: Long?, ops: JsonArray) {
+    launchRequestScope(requestId) { prototypeController.patch(requestId, id, baseRevision, ops) }
   }
 
   override fun inspectPrototypes(requestId: String?) {
@@ -7831,6 +7867,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     committedUnits: Int = 0,
     insertedText: String? = null,
     trace: List<String>? = null,
+    editorConsumed: Boolean = false,
   ) {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
       Log.d(TAG, "WebSocket server not running, skipping commit text result broadcast")
@@ -7845,6 +7882,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           if (partialApplication) put("partialApplication", true)
           if (committedUnits > 0) put("committedUnits", committedUnits)
           if (insertedText != null) put("insertedText", insertedText)
+          if (editorConsumed) put("editorConsumed", true)
           if (trace != null) put("trace", Json.encodeToJsonElement(trace))
           if (error != null) {
             put("error", error)

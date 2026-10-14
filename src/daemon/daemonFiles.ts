@@ -18,6 +18,11 @@ import { isProcessRunning } from "../utils/processLiveness";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import { sortedReaddirSync } from "../utils/io";
 
+export {
+  compareProcessGenerationTokens,
+  type ProcessGenerationTokenComparison,
+} from "./processGeneration";
+
 // Register hoisted functions only: no discovery/read or logger access at module
 // initialization. CLI/MCP/doctor and daemon imports all share this wiring. A
 // logger-only path retains launch logs conservatively until this module loads.

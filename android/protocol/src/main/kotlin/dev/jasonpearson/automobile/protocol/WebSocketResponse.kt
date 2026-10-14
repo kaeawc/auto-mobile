@@ -757,7 +757,17 @@ data class PrototypeResult(
    * to (`prototype_appearance_v1`). Omitted by every other result and by older APKs.
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val appearance: PrototypeAppearance? = null,
+  /** Only a successful show reply: why the existing prototype is hidden. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val hiddenReason: PrototypeHiddenReason? = null,
 ) : WebSocketResponse()
+
+@Serializable
+enum class PrototypeHiddenReason {
+  /** An attached app-layer window is absent from the accessibility windows on screen. */
+  @SerialName("app_layer_window_hidden") APP_LAYER_WINDOW_HIDDEN,
+  /** Locked, noninteractive, or unable to establish a safe device lock state. */
+  @SerialName("device_blocked") DEVICE_BLOCKED,
+}
 
 @Serializable
 enum class PrototypeAppearanceMode {
@@ -808,6 +818,7 @@ data class PrototypeStatusEntry(
    * kept, and it returns with the app. Omitted when false and by older APKs.
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val suspended: Boolean = false,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val hiddenReason: PrototypeHiddenReason? = null,
   /** The mode it is drawn in right now (`prototype_appearance_v1`). Omitted by older APKs. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val appearance: PrototypeAppearance? = null,
   /** The shown spec's read-only data; absent when the spec has none. */

@@ -94,6 +94,7 @@ struct PrototypeSpec: Decodable {
     }
 
     init(from decoder: Decoder) throws {
+        try PrototypeSizeBounds.validate(JSONValue(from: decoder))
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         window = try container.decode(WindowSpec.self, forKey: .window)
@@ -119,6 +120,7 @@ struct PrototypeSpec: Decodable {
         try PrototypeLimits.guardAuthoredTree(raw)
         try PrototypeLimits.guardRepeatPathCells(raw, data: data)
         try PrototypeRepeat.validateEmitContexts(raw, data: data)
+        try PrototypeLimits.guardSubstitutedText(raw, data: data)
         let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
         try PrototypeLimits.guardTree(resolved)
         root = try JSONDecoder().decode(

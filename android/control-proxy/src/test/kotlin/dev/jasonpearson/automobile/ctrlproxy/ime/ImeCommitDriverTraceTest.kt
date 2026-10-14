@@ -223,12 +223,12 @@ class ImeCommitDriverTraceTest {
   }
 
   @Test
-  fun `consume to empty records none applied failure`() {
+  fun `consume to empty records consumed decision and continues`() {
     val replay = replay("consume", true)
-    assertFalse(replay.result.success)
-    assertTrue(replay.lines.any { it.endsWith("kind=fail confirmed=0 reason=noneApplied") })
-    assertTrue(replay.lines.last().endsWith("code=noneApplied"))
+    assertTrue(replay.result.success)
+    assertTrue(replay.lines.any { it.endsWith("kind=consumed confirmed=0") })
     assertFalse(replay.lines.any { it.contains("event=resend") })
+    assertFalse(replay.lines.any { it.contains("reason=noneApplied") })
   }
 
   @Test

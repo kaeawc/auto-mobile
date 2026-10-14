@@ -1,3 +1,4 @@
+import type { PrototypeHiddenReason } from "../../prototype/prototypeHidden";
 /**
  * ctrlProxyProtocol - Typed request contract for the Android control-proxy WebSocket client.
  *
@@ -506,6 +507,7 @@ export interface RemovePrototypeAssetMessage {
 }
 
 export interface PrototypeResult {
+  hiddenReason?: PrototypeHiddenReason;
   success: boolean;
   totalTimeMs?: number;
   error?: string | null;
@@ -538,6 +540,7 @@ export interface PrototypeStatusEntry {
   lastSequence: number;
   /** True while the prototype's app is not in front: hidden, state kept, back with the app. */
   suspended?: boolean;
+  hiddenReason?: PrototypeHiddenReason;
   /** The mode it is drawn in right now; only from a device advertising prototype_appearance_v1. */
   appearance?: PrototypeAppearance;
 }

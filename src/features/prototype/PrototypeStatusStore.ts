@@ -1,3 +1,4 @@
+import type { PrototypeHiddenReason } from "./prototypeHidden";
 import type { PrototypeData } from "./prototypeSpec";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
@@ -28,6 +29,7 @@ export interface PrototypeLastResult {
    * in front (as of the last `inspect`). Absent when visible and always on iOS.
    */
   suspended?: true;
+  hiddenReason?: PrototypeHiddenReason;
   displayId?: number;
   /** Host-resolved chrome for a successful fullscreen show; absent for adopted prototypes. */
   chrome?: PrototypeWindowChrome;
@@ -54,6 +56,7 @@ export interface AdoptedPrototype {
   id: string;
   persistent?: boolean;
   suspended?: boolean;
+  hiddenReason?: PrototypeHiddenReason;
   appearance?: ShownPrototypeAppearance;
   pages: PrototypeEvent["pages"];
   state: PrototypeEvent["state"];
@@ -197,6 +200,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       adopted: true,
       ...(prototype.persistent === undefined ? {} : { persistent: prototype.persistent }),
       ...(prototype.suspended === true ? { suspended: true as const } : {}),
+      ...(prototype.hiddenReason ? { hiddenReason: prototype.hiddenReason } : {}),
       ...(prototype.appearance ? { appearance: { ...prototype.appearance } } : {}),
       success: true,
       timestamp: this.clock.now(),

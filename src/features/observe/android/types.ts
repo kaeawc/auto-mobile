@@ -1,3 +1,4 @@
+import type { PrototypeHiddenReason } from "../../prototype/prototypeHidden";
 /**
  * Shared types for CtrlProxyClient delegates.
  *
@@ -117,6 +118,7 @@ export interface AccessibilityNodeSelector {
  */
 export interface AccessibilityHierarchy {
   prototypeSuspended?: boolean;
+  prototypeHiddenReason?: PrototypeHiddenReason;
   displayId?: number | null;
   panelUniqueId?: string | null;
   /** Daemon sequence assigned when this capture was forwarded to the observation stream. */

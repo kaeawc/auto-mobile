@@ -1264,10 +1264,13 @@ allocation) and when the app returns the same runtime is shown again. A
   hierarchy capture carries top-level `prototypeSuspended: true`, so `layer: "prototype"`
   calls fail with "hidden because the app it was shown over is not in front" instead
   of "no prototype is showing".
+  `inspect` also reports optional `hiddenReason`: `app_layer_window_hidden` when the app in front hides an app-layer window, or `device_blocked` when locked or the screen is off. The host carries it into status and uses it for `prototype_hidden` layer refusals. A show reports `visible: false` with the same `notVisibleReason`; older devices retain `no_prototype_window_on_screen` for app-layer confirmation. Hidden reasons are absent when visible or suspended.
+
   The host stores `suspended` from `inspect` and surfaces it on `prototype` status
   entries (host-local, so it is as fresh as the last `inspect`; a new `show` or an
   `inspect` after the app returns clears it), and an `awaitEvent` that times out on
   a suspended prototype carries the same explanation as a `warning`. Absent on iOS.
+
 - **Separate from other hides.** Suspension is its own state
   (`PrototypeForegroundTracker.suspended`). The host's `isBlocked` is the lock-screen
   check OR suspension, so any restore path (unlock, relayout, or a future capture-time

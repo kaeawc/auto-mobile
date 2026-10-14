@@ -1,3 +1,4 @@
+import { PrototypeHiddenError } from "../prototype/prototypeHidden";
 import { CTRL_PROXY_PACKAGE } from "../../ctrlProxy/constants";
 import { PrototypeSuspendedError } from "../prototype/prototypeSuspended";
 import { ActionableError } from "../../models/ActionableError";
@@ -360,7 +361,11 @@ const PROTOTYPE_SUSPENDED = new PrototypeSuspendedError().message;
 
 /** The refusal for `layer: "prototype"` with no prototype window in the capture. */
 function noPrototypeMessage(hierarchy: ViewHierarchyResult | undefined): string {
-  return hierarchy?.prototypeSuspended === true ? PROTOTYPE_SUSPENDED : NO_PROTOTYPE_SHOWING;
+  return hierarchy?.prototypeSuspended === true
+    ? PROTOTYPE_SUSPENDED
+    : hierarchy?.prototypeHiddenReason
+      ? new PrototypeHiddenError(hierarchy.prototypeHiddenReason).message
+      : NO_PROTOTYPE_SHOWING;
 }
 
 /**
@@ -374,7 +379,9 @@ export function scopeHierarchyForSelector(
   if (layer === "prototype" && !hasOwnPrototype(hierarchy)) {
     throw hierarchy.prototypeSuspended === true
       ? new PrototypeSuspendedError()
-      : new ActionableError(noPrototypeMessage(hierarchy));
+      : hierarchy.prototypeHiddenReason
+        ? new PrototypeHiddenError(hierarchy.prototypeHiddenReason)
+        : new ActionableError(noPrototypeMessage(hierarchy));
   }
   return scopeHierarchyToLayer(hierarchy, layer);
 }
@@ -493,7 +500,9 @@ export function assertGestureOnLayer(
       hierarchy?.prototypeSuspended === true &&
       !hasOwnPrototype(hierarchy)
       ? new PrototypeSuspendedError()
-      : new ActionableError(refusal);
+      : layer === "prototype" && hierarchy?.prototypeHiddenReason && !hasOwnPrototype(hierarchy)
+        ? new PrototypeHiddenError(hierarchy.prototypeHiddenReason)
+        : new ActionableError(refusal);
   }
 }
 

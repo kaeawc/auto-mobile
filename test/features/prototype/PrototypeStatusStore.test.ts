@@ -332,3 +332,15 @@ test("data is copied on show, adoption and every read, preserved on failure, and
   store.record(scope, "dismiss", { id: "orders" }, ok);
   expect(store.status(scope).prototypes).toEqual([]);
 });
+
+test("inspect hidden reason is stored and cleared when the next inspect omits it", () => {
+  const store = new InMemoryPrototypeStatusStore(new FakeTimer());
+  const scope = { deviceId: "hidden" };
+  const entry = { id: "panel", state: {}, pages: {}, persistent: true };
+  for (const hiddenReason of ["app_layer_window_hidden", "device_blocked"] as const) {
+    store.adopt(scope, { ...entry, hiddenReason });
+    expect(store.status(scope).prototypes[0].hiddenReason).toBe(hiddenReason);
+    store.adopt(scope, entry);
+    expect(store.status(scope).prototypes[0]).not.toHaveProperty("hiddenReason");
+  }
+});

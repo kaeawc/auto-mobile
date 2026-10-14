@@ -4,7 +4,10 @@ import type {
   HierarchyCaptureRequest,
   HierarchySnapshot,
 } from "../../../src/features/observe/HierarchyCapture";
-import { confirmPrototypeAppLayerVisibility } from "../../../src/features/prototype/prototypeAppLayerVisibility";
+import {
+  confirmPrototypeAppLayerVisibility,
+  prototypeAppLayerVisibilityOutput,
+} from "../../../src/features/prototype/prototypeAppLayerVisibility";
 import { logger } from "../../../src/utils/logger";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
@@ -14,7 +17,11 @@ import {
 
 const absent = capturedTwoWindowHierarchy();
 const present = capturedAppLayerPrototypeHierarchy();
-function fixture(frames: Array<typeof absent | Error>, signal?: AbortSignal) {
+function fixture(
+  frames: Array<typeof absent | Error>,
+  signal?: AbortSignal,
+  hiddenReason?: "app_layer_window_hidden" | "device_blocked",
+) {
   const requests: HierarchyCaptureRequest[] = [];
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
@@ -38,7 +45,7 @@ function fixture(frames: Array<typeof absent | Error>, signal?: AbortSignal) {
   return {
     requests,
     timer,
-    run: () => confirmPrototypeAppLayerVisibility(capture, timer, 7, signal),
+    run: () => confirmPrototypeAppLayerVisibility(capture, timer, 7, signal, hiddenReason),
   };
 }
 describe("app-layer visibility confirmation", () => {
@@ -120,5 +127,64 @@ describe("app-layer visibility confirmation", () => {
     const f = fixture([absent], controller.signal);
     expect(await f.run()).toBeUndefined();
     expect(f.requests).toHaveLength(0);
+  });
+});
+
+for (const reason of ["app_layer_window_hidden", "device_blocked"] as const) {
+  test(`capture hidden reason ${reason} wins over show hint and lacks window evidence`, async () => {
+    const frame = { ...absent, windows: [], prototypeHiddenReason: reason };
+    const f = fixture([absent, absent, frame], undefined, "app_layer_window_hidden");
+    expect(await f.run()).toMatchObject({ visible: false, notVisibleReason: reason });
+  });
+  test(`show hidden reason ${reason} is fallback; visible wins`, async () => {
+    expect(await fixture([absent, absent, absent], undefined, reason).run()).toMatchObject({
+      visible: false,
+      notVisibleReason: reason,
+    });
+    expect(
+      await fixture([{ ...present, prototypeHiddenReason: reason }], undefined, reason).run(),
+    ).toBeUndefined();
+  });
+}
+test("blocked system-layer output skips capture and superseded shows add nothing", async () => {
+  const request = {
+    android: true,
+    action: "show",
+    success: true,
+    spec: { id: "panel", root: { type: "text" as const, text: "Hello" } },
+    hiddenReason: "device_blocked" as const,
+    superseded: () => false,
+    capture: () => {
+      throw new Error("capture must not be requested");
+    },
+  };
+  expect(await prototypeAppLayerVisibilityOutput(request)).toEqual({
+    visible: false,
+    notVisibleReason: "device_blocked",
+    warning:
+      "The AutoMobile prototype is hidden: the device is locked or its screen is off. Wake and unlock the device (the prototype returns with its state).",
+  });
+  expect(await prototypeAppLayerVisibilityOutput({ ...request, superseded: () => true })).toEqual(
+    {},
+  );
+});
+test("older-device output is byte-identical", async () => {
+  expect(await fixture([absent, absent, absent]).run()).toEqual({
+    visible: false,
+    notVisibleReason: "no_prototype_window_on_screen",
+    warning: `The prototype was shown with window.layer "app" but no prototype window is on screen. The app in front (${absent.packageName}) most likely hides app-layer windows drawn over it (system apps such as Settings do); a locked device hides it too. Until it is visible, layer "prototype" calls will report that no prototype is showing. Show it again without window.layer (the default layer draws over every app) or over a different app, or dismiss it.`,
+  });
+});
+
+test("only the last capture supplies a hidden reason; show fallback names the foreground package", async () => {
+  const f = fixture(
+    [{ ...absent, prototypeHiddenReason: "device_blocked" }, absent, absent],
+    undefined,
+    "app_layer_window_hidden",
+  );
+  expect(await f.run()).toEqual({
+    visible: false,
+    notVisibleReason: "app_layer_window_hidden",
+    warning: `The AutoMobile prototype is hidden: it was shown with window.layer "app" and the app in front (${absent.packageName}) hides app-layer windows drawn over it (system apps such as Settings do). Show it again without window.layer (the default layer draws over every app) or over a different app.`,
   });
 });

@@ -5,7 +5,10 @@ import {
   repeatErrors,
   repeatFieldReferences,
 } from "../../../src/features/prototype/prototypeRepeat";
-import { BOUND_STATE_KEY_PATTERN } from "../../../src/features/prototype/prototypeTemplate";
+import {
+  BOUND_STATE_KEY_PATTERN,
+  bindNodeFields,
+} from "../../../src/features/prototype/prototypeTemplate";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 
 const spec = (root: unknown) => ({
@@ -34,6 +37,52 @@ describe("repeatFieldReferences", () => {
 });
 
 describe("repeatErrors", () => {
+  test("searchBar binds placeholder, result child, trailing labels and actions", () => {
+    const search = {
+      type: "searchBar",
+      stateKey: "query_{item.x}",
+      activeKey: "active_{item.x}",
+      placeholder: "Find {item.x}",
+      trailingActions: [
+        {
+          icon: "close",
+          label: "Clear {item.x}",
+          onTap: [{ type: "setState", key: "query_{item.x}", value: "" }],
+        },
+      ],
+      onSubmit: [{ type: "emit", name: "submit_{item.x}" }],
+      child: { type: "text", text: "Result {item.x}" },
+    };
+    const candidate = {
+      ...spec(list([search], [{ x: "one" }])),
+      state: { query_one: "", active_one: true },
+    };
+    expect(validatePrototypeSpec(candidate).success).toBe(true);
+    const instance = { binding: { alias: "item", index: true }, values: { x: "one" }, index: 0 };
+    expect(bindNodeFields(search, "root.children[0]", instance)).toMatchObject({
+      stateKey: "query_one",
+      activeKey: "active_one",
+      placeholder: "Find one",
+      trailingActions: [{ label: "Clear one", onTap: [{ key: "query_one" }] }],
+      onSubmit: [{ name: "submit_one" }],
+    });
+    expect(bindNodeFields(search.child, "root.children[0].child", instance)).toMatchObject({
+      text: "Result one",
+    });
+    for (const [field, node] of [
+      ["placeholder", { ...search, placeholder: "{item.nope}" }],
+      [
+        "trailingActions[0].label",
+        { ...search, trailingActions: [{ icon: "close", label: "{item.nope}" }] },
+      ],
+      ["child.text", { ...search, child: { type: "text", text: "{item.nope}" } }],
+      ["onSubmit[0].name", { ...search, onSubmit: [{ type: "emit", name: "{item.nope}" }] }],
+    ] as const) {
+      expect(repeatErrors({ ...candidate, root: list([node], [{ x: "one" }]) })?.path).toBe(
+        `root.children[0].${field}`,
+      );
+    }
+  });
   test("specs without repeat have no repeat errors", () => {
     expect(repeatErrors(spec({ type: "spacer" }))).toBeUndefined();
     expect(repeatErrors("not a spec")).toBeUndefined();

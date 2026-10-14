@@ -504,3 +504,25 @@ Two data keys that are canonically equivalent Unicode strings collapse into one 
 Swift dictionary keys compare by canonical equivalence, unlike the host and Android.
 The agent re-checks data depth and array limits in the host's traversal order. It does not duplicate
 the host validator's data byte-cost rule; the existing 1 MiB whole-spec byte cap still bounds input.
+
+## Search bar contract (#12069)
+
+The shared `searchBar` node requires a string `stateKey` initialized in state.
+It accepts optional `placeholder`, catalog `leadingIcon`, one or two
+`trailingActions` (`{icon, label, onTap?}` with a nonempty accessibility label),
+boolean-state `activeKey`, `variant` (`bar` by default or `docked`), `onSubmit`
+actions and a single `child`. A child requires activeKey; true shows it. Bar
+expands to fill its parent; docked stays in place with results under the field.
+Typing shares the text-field state-write and `change` event path; keyboard search
+runs onSubmit. A visible bar counts as a text field for focus and host sendKeys.
+All ordinary child/action validation and template walks apply.
+
+The later iOS agent implementation must advertise `prototype_search_bar_v1`.
+Until then the host refuses show and patch results using searchBar before any
+device request. SwiftUI draws the field in the prototype window: leading
+magnifying glass, text field, clear button when nonempty, and trailing actions.
+Do not use `.searchable`, which requires a NavigationStack. Icons map through the
+existing SF Symbols mapping and never use Android Material glyphs. `platformNotes`
+reports the drawn-field and SF Symbol differences. Results are ordinary observable
+child nodes inside the prototype window, not a separate popup/dialog or a lazy
+list that drops rows.

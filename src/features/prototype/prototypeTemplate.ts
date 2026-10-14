@@ -232,6 +232,11 @@ const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVis
     mapObject(node, "navigationIcon", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
     mapList(node, "actions", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
   },
+  searchBar: (node, path, visit) => {
+    mapField(node, "placeholder", path, "text", visit);
+    mapList(node, "trailingActions", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
+    mapList(node, "onSubmit", path, (entry, entryPath) => mapAction(entry, entryPath, visit));
+  },
   dialog: (node, path, visit) => {
     mapField(node, "title", path, "text", visit);
     mapField(node, "text", path, "text", visit);
@@ -246,7 +251,7 @@ const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVis
 
 /** State-key fields a node binds besides its condition and action keys. */
 function mapNodeKeys(node: Raw, path: string, visit: FieldVisitor): void {
-  for (const field of ["stateKey", "hourKey", "minuteKey"]) {
+  for (const field of ["stateKey", "activeKey", "hourKey", "minuteKey"]) {
     mapField(node, field, path, "key", visit);
   }
   for (const part of ["trailing", "openWhen"]) {
@@ -296,6 +301,7 @@ export function checkedKeyValues(value: Raw): unknown[] {
   return [
     value.key,
     value.stateKey,
+    value.activeKey,
     value.hourKey,
     value.minuteKey,
     record(value.trailing)?.stateKey,
@@ -307,7 +313,7 @@ export function checkedKeyValues(value: Raw): unknown[] {
 export function bindCheckedKeys(value: Raw, instance: Instance): Raw {
   const copy = { ...value };
   const bind = (entry: unknown) => (typeof entry === "string" ? bindText(entry, instance) : entry);
-  for (const field of ["key", "stateKey", "hourKey", "minuteKey"]) {
+  for (const field of ["key", "stateKey", "activeKey", "hourKey", "minuteKey"]) {
     if (copy[field] !== undefined) {
       copy[field] = bind(copy[field]);
     }

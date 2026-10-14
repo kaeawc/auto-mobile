@@ -1551,3 +1551,30 @@ asset strings and count nav images as spec image uses; #9296 must remove its
 `specVersion` proposal. #9295's root-level opacity wording maps to
 `window.opacity`, and its focusability wording follows the later device findings.
 No sibling issues are edited as part of this implementation.
+
+## Search bar contract (#12069)
+
+`searchBar` requires `stateKey` naming an initialized string query. Optional
+`placeholder` follows `textField` rules; optional `leadingIcon` uses the same
+catalog as `button.icon`. Optional `trailingActions` has one or two
+`{icon, label, onTap?}` items, with a required catalog icon and nonempty accessible
+label. `onSubmit` is an optional ordinary action list for the keyboard search action.
+Typing reuses the text-field state-write and `change` event path. A visible search
+bar is a text target and makes the prototype window focusable for the IME.
+
+Optional `activeKey` names an initialized boolean. While true, the optional single
+`child` results subtree is shown. A child without activeKey is invalid; activeKey
+without a child is valid. `variant` is `bar` (default, expands to fill its parent
+while active) or `docked` (stays in place, results directly under the field).
+The child, submit actions and trailing actions participate in ordinary validation,
+limits, unique ids, state checks, emit-name collection, template binding, anchors
+and text-target walks. Repeat placeholders bind in the placeholder and trailing labels.
+
+Show and patch results containing the node require `prototype_search_bar_v1`;
+the host refuses them before any device request if it is absent. This pass adds
+the shared contract and host only. The later Compose implementation must use
+material3 `SearchBarDefaults.InputField` inside an in-tree `Surface`/`Column`,
+pinned to the material3 supplied by `androidx-compose-bom` in
+`android/gradle/libs.versions.toml`. Results are ordinary rows inside the prototype
+window, not a SearchBar popup/dialog or lazy list that drops rows, so `observe`
+sees every result row.

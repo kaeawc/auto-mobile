@@ -28,6 +28,26 @@ Minimal spec:
 
 A \`{key}\` placeholder in a \`text\` node reads the state value of that key.
 
+## Search field and results
+
+\`searchBar.stateKey\` names an initialized string query. Editing uses the same state write
+and \`change\` event as a text field; keyboard search runs \`onSubmit\`. A visible search bar
+is an editable text target for \`sendKeys\` and makes the window focusable for the keyboard.
+\`placeholder\` follows text-field rules. \`leadingIcon\` and each trailing action's required
+\`icon\` use the icon catalog; its required nonempty \`label\` is the accessibility label,
+and \`onTap\` runs ordinary actions.
+\`activeKey\` names an initialized boolean: true shows the optional single \`child\`.
+A child requires activeKey; activeKey without a child is allowed.
+\`variant: "bar"\` (default) expands to fill its parent when active; \`"docked"\` stays in
+place and draws results directly underneath. Results are ordinary nodes inside the prototype
+window, so \`observe\` sees every row; use a column of literal rows rather than a lazy list.
+Child nodes and submit/trailing actions participate in all normal validation and template walks;
+repeat placeholders bind in the placeholder, trailing labels and actions as in other controls.
+Show and patches producing a search bar require \`prototype_search_bar_v1\` and are refused
+before device requests when it is absent. The Android and iOS implementations ship in later passes.
+iOS uses a drawn field with SF Symbol icons, not SwiftUI \`.searchable\`; these differences
+are reported in \`platformNotes\`.
+
 ## Fullscreen host chrome
 
 \`window.chrome\` is \`"none"\` (default) or \`"bar"\`, fullscreen only, on a device advertising

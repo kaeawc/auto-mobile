@@ -1,4 +1,7 @@
-import { PROTOTYPE_PLATFORM_DIFFERENCES } from "./prototypePlatformNotes";
+import {
+  PROTOTYPE_PLATFORM_DIFFERENCES,
+  PROTOTYPE_SEARCH_BAR_PLATFORM_DIFFERENCES,
+} from "./prototypePlatformNotes";
 import iconSymbols from "../../../schemas/prototype-ios-icon-symbols.json";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_THEME_MODES_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
@@ -132,7 +135,7 @@ function renderActions(): string {
   return [
     "## Actions",
     "",
-    "Used in `onTap` lists.",
+    "Used in `onTap` and searchBar `onSubmit` lists.",
     "",
     ...variantLines(variants, new Map()),
   ].join("\n");
@@ -205,6 +208,9 @@ function renderPlatformDifferences(): string {
     ...PROTOTYPE_PLATFORM_DIFFERENCES.filter(({ construct }) => !construct.startsWith("icon.")).map(
       ({ construct, platform, effect, capability, detail }) =>
         `- \`${construct}\`: ${platform}, ${effect}. ${detail} A successful show lists affected paths under \`platformNotes\`; lifted by \`${capability}\`.`,
+    ),
+    ...PROTOTYPE_SEARCH_BAR_PLATFORM_DIFFERENCES.map(
+      ({ construct, detail }) => `- \`${construct}\`: ${detail}`,
     ),
   ].join("\n");
 }

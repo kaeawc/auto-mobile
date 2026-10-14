@@ -1006,6 +1006,8 @@ export const PROTOTYPE_ANCHOR_CAPABILITY = "prototype_anchor_v1";
 
 /** Resolves read-only prototype data, JSON Pointer bindings and stable repeat keys. */
 export const PROTOTYPE_DATA_MODEL_CAPABILITY = "prototype_data_model_v1";
+/** Editable in-tree search field with active results and submit/trailing actions. */
+export const PROTOTYPE_SEARCH_BAR_CAPABILITY = "prototype_search_bar_v1";
 
 /**
  * Advertised by a CtrlProxy or iOS prototype agent whose renderer resolves the per-mode spec forms

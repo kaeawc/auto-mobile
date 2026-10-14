@@ -36,7 +36,7 @@ export interface MirrorFileSystem {
   rm(target: string): Promise<void>;
   rename(from: string, to: string): Promise<void>;
 }
-const disk: MirrorFileSystem = {
+export const disk: MirrorFileSystem = {
   mkdir: async (directory) => {
     await fs.mkdir(directory, { recursive: true });
   },
@@ -68,7 +68,7 @@ const manifestSchema = z
   .strict();
 
 // Hash UTF-16 code units so even distinct unpaired surrogates stay distinct on every platform.
-function segment(value: string): string {
+export function segment(value: string): string {
   return `s-${createHash("sha256").update(value, "utf16le").digest("hex")}`;
 }
 function absent(error: unknown): boolean {

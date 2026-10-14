@@ -1004,10 +1004,12 @@ function refused(
 }
 
 /**
- * The model "any model" creates for an iOS runtime: the last (newest, in simctl's catalog order)
- * iPhone whose runtime range supports it, else the last iPhone with no range metadata (simctl
- * stays the authority). An explicit family selects that family's types instead. Undefined when
- * the runtime is missing or unavailable, or no type in the selected family fits.
+ * The model "any model" creates for an iOS runtime: a supported iPhone (excluding iPods),
+ * else one with unknown runtime compatibility (simctl stays the authority). An explicit family
+ * selects that family's types instead. Within each tier, parseable iPhone/iPad model identifiers
+ * outrank unparseable ones: highest major generation, then lowest minor variant, then shortest
+ * name, then ascending identifier wins. Unparseable entries retain last-in-catalog selection.
+ * Undefined when the runtime is missing or unavailable, or no selected-family type fits.
  */
 export function chooseIosDeviceType(
   runtimeId: string,
@@ -1021,14 +1023,32 @@ export function chooseIosDeviceType(
   }
   const candidates = deviceTypes.filter((entry) =>
     family === undefined
-      ? entry.productFamily === "iPhone"
+      ? entry.productFamily === "iPhone" && !entry.modelIdentifier?.startsWith("iPod")
       : inferIosFormFactor(entry.identifier) === family,
   );
   const statusOf = (entry: AppleDeviceType) =>
     evaluateRuntimeCompatibility(entry, runtime.version).status;
   const supported = candidates.filter((entry) => statusOf(entry) === "supported");
   const unknown = candidates.filter((entry) => statusOf(entry) === "unknown");
-  return (supported.at(-1) ?? unknown.at(-1))?.identifier;
+  return (
+    supported.toSorted(compareNewestDeviceType).at(-1) ??
+    unknown.toSorted(compareNewestDeviceType).at(-1)
+  )?.identifier;
+}
+
+/** Positive means preferred; stable sorting retains catalog order for unparseable models. */
+function compareNewestDeviceType(a: AppleDeviceType, b: AppleDeviceType): number {
+  const aModel = /^(iPhone|iPad)(\d+),(\d+)$/.exec(a.modelIdentifier ?? "");
+  const bModel = /^(iPhone|iPad)(\d+),(\d+)$/.exec(b.modelIdentifier ?? "");
+  if (!aModel || !bModel) {
+    return Number(Boolean(aModel)) - Number(Boolean(bModel));
+  }
+  return (
+    Number(aModel[2]) - Number(bModel[2]) ||
+    Number(bModel[3]) - Number(aModel[3]) ||
+    b.name.length - a.name.length ||
+    (a.identifier < b.identifier ? 1 : a.identifier > b.identifier ? -1 : 0)
+  );
 }
 
 class ReconcileAbort extends Error {

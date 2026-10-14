@@ -6,6 +6,21 @@ import {
 import { resolvePrototypeDataPointer } from "./prototypeData";
 import { expandPrototypeComponents } from "./prototypeComponents";
 import { mapBindableFields, record } from "./prototypeTemplate";
+import { PROTOTYPE_EMIT_CONTEXT_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+
+/** Existing actionable refusal shared by show and patch capability checks. */
+export function prototypeEmitContextUnsupportedMessage(
+  fields: readonly string[],
+  platform: "android" | "ios",
+): string {
+  const device = platform === "android" ? "connected CtrlProxy" : "connected iOS prototype agent";
+  const update =
+    platform === "android"
+      ? "Update the connected CtrlProxy"
+      : "Relaunch the app with launchApp prototype: true to load the agent built for this AutoMobile version";
+  const more = fields.length > 1 ? ` (and ${fields.length - 1} more)` : "";
+  return `The ${device} does not advertise ${PROTOTYPE_EMIT_CONTEXT_CAPABILITY}, so it cannot resolve emit.context at ${fields[0]}${more}. Nothing was shown. ${update}, or omit emit.context.`;
+}
 
 /** Runtime inputs are read at the emit action, after preceding actions have committed. */
 export interface PrototypeEmitContextInputs {

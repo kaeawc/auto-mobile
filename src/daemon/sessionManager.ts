@@ -11803,7 +11803,11 @@ export class SessionManager {
       return;
     }
     const now = this.sessionNow();
+    const previousHeartbeat = session.lastHeartbeat;
     session.lastHeartbeat = now;
+    logger.debug(
+      `Heartbeat accepted for session ${sessionId}; previous heartbeat age=${Math.max(0, now - previousHeartbeat)}ms`,
+    );
     // Only a heartbeat advances the owner lease; both the socket and HTTP routes admit one only
     // from the owner (or a tokenless client on a session no proxy owns).
     session.lastOwnerHeartbeat = now;
@@ -12500,10 +12504,11 @@ export class SessionManager {
    * `gapBeganAt`, when given, narrows full lease forgiveness (#11080) to owners live at the
    * gap's start (`ownerLeaseLiveAt`). A live owner is forgiven in full however long the gap.
    * An owned session whose socket was connected at that instant also receives awake-stall credit
-   * (#11992), capped in total between raw owner heartbeats at MAX_CREDIBLE_DAEMON_STALL_MS (30 s).
+   * (#11992), capped in total between raw owner heartbeats at 600 s if still connected at resume,
+   * otherwise MAX_CREDIBLE_DAEMON_STALL_MS (30 s).
    * Sleep contributes no credit to this extra rule. Without another owner heartbeat, even an
    * always-open socket is released once its raw heartbeat age exceeds heartbeatTimeoutMs +
-   * SUSPECT_GRACE_MS + MAX_CREDIBLE_DAEMON_STALL_MS, plus one scan. With no late tick, the existing
+   * SUSPECT_GRACE_MS + that cap, plus one scan. With no late tick, the existing
    * lease + grace + one scan bound is unchanged (10 s at defaults). Returns sessions considered.
    *
    * Observer registrations are excused the same gap under the same rule (#11554): it is handed

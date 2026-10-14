@@ -45,8 +45,8 @@ export interface PrototypePatchDependencies {
   store: Pick<PrototypeStatusStore, "shownSpecs" | "recordPatchedData">;
   transport: Pick<PrototypeTransport, "patch">;
   supportsPatch: () => Promise<boolean>;
-  /** Refuses unsupported features in validated ops before transport or host commit. */
-  refusePatch?: () => Promise<PrototypeResult | undefined>;
+  /** Checks spec-level capabilities on the complete validated patch result. */
+  specRefusal?: (spec: unknown) => Promise<string | undefined>;
   platform: "android" | "ios";
   queue: PrototypePatchQueue;
   /** Retires the device's cached observation after an applied patch. */
@@ -92,13 +92,7 @@ function patchSpec(
 async function sendPatch(
   deps: PrototypePatchDependencies,
   args: PrototypePatchArgs,
-  signal?: AbortSignal,
 ): Promise<PrototypePatchReply> {
-  const refusal = await deps.refusePatch?.();
-  signal?.throwIfAborted();
-  if (refusal) {
-    return { ...refusal, delivery: "unsent" };
-  }
   try {
     return await deps.transport.patch(
       {
@@ -136,8 +130,12 @@ async function queuedPatch(
   if (!("spec" in applied)) {
     return applied;
   }
+  const refused = await deps.specRefusal?.(applied.spec);
+  if (refused !== undefined) {
+    return failure(refused);
+  }
   signal?.throwIfAborted();
-  const result = await sendPatch(deps, args, signal);
+  const result = await sendPatch(deps, args);
   if (result.delivery === "indeterminate") {
     deps.store.shownSpecs.abandon(deviceId);
     return failure(
@@ -158,13 +156,21 @@ async function queuedPatch(
     deps.store.recordPatchedData(deviceId, args.id, applied.validated.data);
   }
   deps.retire(result);
+  return successfulPatchOutput(fields.revision, committed, args.id);
+}
+
+function successfulPatchOutput(
+  revision: number | undefined,
+  committed: boolean,
+  id: string,
+): PrototypePatchOutput {
   return {
     success: true,
-    ...(fields.revision === undefined ? {} : { revision: fields.revision }),
+    ...(revision === undefined ? {} : { revision }),
     ...(committed
       ? {}
       : {
-          warning: `A show on this device overlapped this patch, so the host no longer tracks prototype ${args.id}'s spec: show it again before the next patch.`,
+          warning: `A show on this device overlapped this patch, so the host no longer tracks prototype ${id}'s spec: show it again before the next patch.`,
         }),
   };
 }

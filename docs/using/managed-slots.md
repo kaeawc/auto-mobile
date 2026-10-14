@@ -856,8 +856,9 @@ deadline passing during admission returns `timeout`.
 A full budget returns `managed_slot_budget_exhausted`, `retryable: true`, with no
 `retryAfterMs` because recovery has no time bound. Its `budget` evidence contains
 `limit`, category `usage` (including `total` and `orphaned`), protected `retained`
-entries with reasons, and `evictionFailures`. Reset or release managed slot scopes
-that are no longer needed, or raise `AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES`, then retry.
+entries with reasons, `evictionFailures`, and `charged` rows identifying every device
+counted against the budget, including assigned and orphaned devices. Reset or release
+managed slot scopes that are no longer needed, or raise `AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES`, then retry.
 This refusal is separate from `capacity_exhausted`, which concerns boot limits.
 `usage.total` includes the refused request's own `preparing` reservation, so it can
 read as the limit plus one or more. Pending deletions are named in `retained` with

@@ -171,7 +171,7 @@ describe("prototype patch host", () => {
       );
       expect(result.success).toBe(false);
       expect(result.error).toContain(PROTOTYPE_EMIT_CONTEXT_CAPABILITY);
-      expect(result.error).toContain("root (use row) → components.row.root.onTap[0].context");
+      expect(result.error).toContain("root.onTap[0].context");
       expect(proxy.getPrototypeHistory()).toEqual([]);
       expect(agent.requests).toEqual([]);
     },
@@ -202,21 +202,27 @@ describe("prototype patch host", () => {
         expect(result.success).toBe(false);
         expect(result.error).toContain(PROTOTYPE_EMIT_CONTEXT_CAPABILITY);
         expect(result.error).toContain(
-          `ops[0].node${nested ? ".children[0]" : ""}.onTap[0].context`,
+          `root.children[0]${nested ? ".children[0]" : ""}.onTap[0].context`,
         );
-        expect(result.error).toContain("Nothing was patched.");
+        expect(result.error).toContain("Nothing was shown.");
         expect(requests).toEqual([]);
         expect(store.shownSpecs.read(device.deviceId, "orders")).toEqual(before);
-        proxy.setSupportedCommands([PROTOTYPE_PATCH_CAPABILITY, PROTOTYPE_EMIT_CONTEXT_CAPABILITY]);
+        proxy.setSupportedCommands([
+          PROTOTYPE_PATCH_CAPABILITY,
+          PROTOTYPE_EMIT_CONTEXT_CAPABILITY,
+          "prototype_data_model_v1",
+        ]);
         agent.handshake.capabilities.push(PROTOTYPE_EMIT_CONTEXT_CAPABILITY);
-        expect((await patch(ops, {}, device)).success).toBe(true);
+        agent.handshake.capabilities.push("prototype_data_model_v1");
+        const accepted = await patch(ops, {}, device);
+        expect(accepted).toEqual({ success: true });
         expect(requests).toEqual([{ id: "orders", ops }]);
       },
     );
   }
 
   test.each([android, ios])(
-    "$platform refuses context even when a later replacement removes it",
+    "$platform accepts a patch when a later replacement removes emit context",
     async (device) => {
       await show(device);
       const result = await patch(
@@ -236,11 +242,9 @@ describe("prototype patch host", () => {
         {},
         device,
       );
-      expect(result.success).toBe(false);
-      expect(result.error).toContain(PROTOTYPE_EMIT_CONTEXT_CAPABILITY);
-      expect(result.error).toContain("ops[0].node.onTap[0].context");
-      expect(proxy.patchRequests).toEqual([]);
-      expect(agent.patchRequests).toEqual([]);
+      expect(result.success).toBe(true);
+      expect(proxy.patchRequests).toHaveLength(device === android ? 1 : 0);
+      expect(agent.patchRequests).toHaveLength(device === ios ? 1 : 0);
     },
   );
 

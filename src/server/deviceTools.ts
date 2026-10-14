@@ -1,14 +1,9 @@
 import {
-  ProcessTableEmulatorProcessStopper,
-  isSafeEmulatorProcessPid,
   emulatorProcessEscapeHint,
   type EmulatorProcessStopper,
 } from "../utils/android-cmdline-tools/EmulatorProcessStop";
-import { ProcessTableReader } from "../features/bootAdmission/processTableRetry";
-import { nodeProcFs } from "../features/bootAdmission/procProcessTable";
-import { DefaultHostCommandExecutor } from "../utils/HostCommandExecutor";
+import { getHostEmulatorProcessStopper } from "../devices/hostEmulatorProcessStopper";
 import { managedSlotPoolGate } from "../daemon/managedSlots/managedSlotPoolGate";
-import { defaultLockOwnerGenerationProbe } from "../daemon/lockOwnerGeneration";
 import type { QrPosterWriter } from "../utils/qr/QrPosterWriter";
 import {
   DefaultDeviceResourceObserver,
@@ -3489,46 +3484,7 @@ export async function verifyTeardownAbsence(
 }
 
 function createAndroidEmulatorProcessStopper(): EmulatorProcessStopper {
-  const timer = getDeviceToolsDependencies().timer;
-  return new ProcessTableEmulatorProcessStopper(
-    new ProcessTableReader(new DefaultHostCommandExecutor(), {
-      timer,
-      processTableSupported: process.platform !== "win32",
-      procFs: process.platform === "linux" ? nodeProcFs : undefined,
-    }),
-    {
-      signal: (pid, signal) => {
-        if (!isSafeEmulatorProcessPid(pid)) {
-          throw new ActionableError(`Refusing to signal unsafe emulator pid ${pid}`);
-        }
-        process.kill(pid, signal);
-      },
-      isRunning: (pid) => {
-        try {
-          process.kill(pid, 0);
-          return true;
-        } catch (error) {
-          if (
-            typeof error === "object" &&
-            error !== null &&
-            "code" in error &&
-            error.code === "ESRCH"
-          ) {
-            // ESRCH means the process exited, so reporting absence is safe.
-            logger.debug(`[DeviceTools] emulator pid ${pid} exited`);
-            return false;
-          }
-          logger.warn(
-            `[DeviceTools] could not probe emulator pid ${pid}; treating it as running`,
-            error,
-          );
-          return true;
-        }
-      },
-    },
-    timer,
-    { processGeneration: defaultLockOwnerGenerationProbe },
-  );
+  return getHostEmulatorProcessStopper(getDeviceToolsDependencies().timer);
 }
 
 let moduleDependencies: DeviceToolsDependencies | null = null;

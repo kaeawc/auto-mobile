@@ -1,3 +1,7 @@
+import { NativeHelperRegistry } from "../../../src/utils/nativeHelpers/NativeHelperRegistry";
+import { FakeNativeHelperRecordStore } from "../../fakes/FakeNativeHelperRecordStore";
+import { FakeNativeHelperProcessControl } from "../../fakes/FakeNativeHelperProcessControl";
+import { FakeLogger } from "../../fakes/FakeLogger";
 import { describe, expect, spyOn, test } from "bun:test";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
@@ -16,6 +20,12 @@ import {
   type FrameDeliveryScheduler,
   type MalformedFrameError,
 } from "../../../src/features/screen-stream";
+
+const testNativeHelperRegistry = new NativeHelperRegistry({
+  store: new FakeNativeHelperRecordStore(),
+  control: new FakeNativeHelperProcessControl(),
+  logger: new FakeLogger(),
+});
 
 function encodeFrame(
   width: number,
@@ -49,6 +59,7 @@ function withFakeSpawner(
   const fake = new FakeChildProcess(timer);
   const spawnArgs = { command: "", args: [] as string[] };
   const helper = new IosScreenCaptureHelper({
+    nativeHelperRegistry: testNativeHelperRegistry,
     binaryPath: "/fake/screen-capture-helper",
     target,
     timer,
@@ -132,6 +143,7 @@ describe("IosScreenCaptureHelper", () => {
     (fps) => {
       const fake = new FakeChildProcess();
       const helper = new IosScreenCaptureHelper({
+        nativeHelperRegistry: testNativeHelperRegistry,
         binaryPath: "/fake/screen-capture-helper",
         target: { kind: "simulator", windowID: 1, fps },
         spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
@@ -160,6 +172,7 @@ describe("IosScreenCaptureHelper", () => {
     const scheduler = new ManualFrameDeliveryScheduler();
     let now = 1_000;
     const helper = new IosScreenCaptureHelper({
+      nativeHelperRegistry: testNativeHelperRegistry,
       binaryPath: "/fake/screen-capture-helper",
       target: { kind: "device" },
       now: () => now,
@@ -680,6 +693,7 @@ describe("IosScreenCaptureHelper", () => {
       return true;
     };
     const helper = new IosScreenCaptureHelper({
+      nativeHelperRegistry: testNativeHelperRegistry,
       binaryPath: "/fake/screen-capture-helper",
       target: { kind: "simulator", windowID: 1 },
       spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
@@ -712,6 +726,7 @@ describe("IosScreenCaptureHelper", () => {
         return true;
       };
       const helper = new IosScreenCaptureHelper({
+        nativeHelperRegistry: testNativeHelperRegistry,
         binaryPath: "/fake/screen-capture-helper",
         target: { kind: "simulator", windowID: 1 },
         spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
@@ -745,6 +760,7 @@ describe("IosScreenCaptureHelper", () => {
       return true;
     };
     const helper = new IosScreenCaptureHelper({
+      nativeHelperRegistry: testNativeHelperRegistry,
       binaryPath: "/fake/screen-capture-helper",
       target: { kind: "simulator", windowID: 1 },
       spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
@@ -785,4 +801,38 @@ describe("IosScreenCaptureHelper", () => {
     expect(lines).toHaveLength(1);
     expect(lines[0].length).toBeGreaterThan(64 * 1024);
   });
+});
+
+test("tracks capture helper with the detached process-group flag on darwin", () => {
+  const timer = new FakeTimer();
+  const child = new FakeChildProcess(timer);
+  const store = new FakeNativeHelperRecordStore();
+  const control = new FakeNativeHelperProcessControl();
+  control.processes.set(child.pid!, "capture");
+  control.processes.set(30, "owner");
+  const nativeHelperRegistry = new NativeHelperRegistry({
+    timer,
+    store,
+    control,
+    ownPid: 30,
+    logger: new FakeLogger(),
+  });
+  const helper = new IosScreenCaptureHelper({
+    binaryPath: "/fake/helper",
+    target: { kind: "simulator", windowID: 42 },
+    timer,
+    nativeHelperRegistry,
+    spawner: () => child as ChildProcessWithoutNullStreams,
+  });
+  helper.start();
+  expect(store.list()).toEqual([
+    expect.objectContaining({
+      kind: "ios-capture-helper",
+      pid: child.pid,
+      processGroup: process.platform === "darwin",
+    }),
+  ]);
+  child.simulateExit();
+  timer.advanceTime(0);
+  expect(store.list()).toEqual([]);
 });

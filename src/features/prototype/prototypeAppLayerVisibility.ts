@@ -1,3 +1,4 @@
+import { prototypeHiddenWarning, type PrototypeHiddenReason } from "./prototypeHidden";
 import type { PrototypeSpec } from "./prototypeSpec";
 import type { ViewHierarchyResult } from "../../models";
 import { requestedPrototypeWindowOptions } from "./prototypeWindowOptions";
@@ -12,7 +13,7 @@ const APP_LAYER_VISIBILITY_CAPTURE_TIMEOUT_MS = 1000;
 
 interface AppLayerNotVisible {
   visible: false;
-  notVisibleReason: "no_prototype_window_on_screen";
+  notVisibleReason: "no_prototype_window_on_screen" | PrototypeHiddenReason;
   warning: string;
 }
 
@@ -22,6 +23,7 @@ export async function confirmPrototypeAppLayerVisibility(
   timer: Timer,
   displayId: number | undefined,
   signal: AbortSignal | undefined,
+  hiddenReason?: PrototypeHiddenReason,
 ): Promise<AppLayerNotVisible | undefined> {
   try {
     for (let attempt = 0; attempt < APP_LAYER_VISIBILITY_CAPTURES; attempt++) {
@@ -40,10 +42,7 @@ export async function confirmPrototypeAppLayerVisibility(
         await timer.sleep(APP_LAYER_VISIBILITY_RETRY_MS);
         continue;
       }
-      if (hasNoAppLayerVisibilityEvidence(snapshot.hierarchy)) {
-        return undefined;
-      }
-      return appLayerNotVisible(snapshot.hierarchy);
+      return decideAppLayerVisibility(snapshot.hierarchy, hiddenReason);
     }
   } catch (error) {
     if (signal?.aborted) {
@@ -55,6 +54,24 @@ export async function confirmPrototypeAppLayerVisibility(
     return undefined;
   }
   return undefined;
+}
+
+function decideAppLayerVisibility(
+  hierarchy: ViewHierarchyResult,
+  hiddenReason?: PrototypeHiddenReason,
+): AppLayerNotVisible | undefined {
+  if (!hierarchy.prototypeHiddenReason && hasNoAppLayerVisibilityEvidence(hierarchy)) {
+    return undefined;
+  }
+  const reason = hierarchy.prototypeHiddenReason ?? hiddenReason;
+  if (reason) {
+    return {
+      visible: false,
+      notVisibleReason: reason,
+      warning: prototypeHiddenWarning(reason, hierarchy.packageName),
+    };
+  }
+  return appLayerNotVisible(hierarchy);
 }
 
 function hasNoAppLayerVisibilityEvidence(hierarchy: ViewHierarchyResult): boolean {
@@ -75,9 +92,10 @@ function appLayerNotVisible(hierarchy: ViewHierarchyResult): AppLayerNotVisible 
   };
 }
 
-/** Keep the mutation path unchanged unless the sent Android app-layer show needs confirmation. */
+/** Surface device blocking for any Android show; confirm app-layer visibility after dispatch. */
 export async function prototypeAppLayerVisibilityOutput(request: {
   android: boolean;
+  hiddenReason?: PrototypeHiddenReason;
   action: string;
   success: boolean;
   spec: PrototypeSpec;
@@ -87,13 +105,17 @@ export async function prototypeAppLayerVisibilityOutput(request: {
   displayId?: number;
   signal?: AbortSignal;
 }): Promise<Partial<AppLayerNotVisible>> {
-  if (
-    !request.android ||
-    request.action !== "show" ||
-    !request.success ||
-    request.superseded() ||
-    !requestedPrototypeWindowOptions(request.spec).appLayer
-  ) {
+  if (!request.android || request.action !== "show" || !request.success || request.superseded()) {
+    return {};
+  }
+  if (request.hiddenReason === "device_blocked") {
+    return {
+      visible: false,
+      notVisibleReason: "device_blocked",
+      warning: prototypeHiddenWarning("device_blocked"),
+    };
+  }
+  if (!requestedPrototypeWindowOptions(request.spec).appLayer) {
     return {};
   }
   const visibility = await confirmPrototypeAppLayerVisibility(
@@ -101,6 +123,7 @@ export async function prototypeAppLayerVisibilityOutput(request: {
     request.timer ?? defaultTimer,
     request.displayId,
     request.signal,
+    request.hiddenReason,
   );
   return request.superseded() ? {} : (visibility ?? {});
 }

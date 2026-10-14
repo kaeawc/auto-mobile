@@ -10,6 +10,8 @@ export const {
   MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
   MAX_PROTOTYPE_DATA_POINTER_LENGTH,
   MAX_PROTOTYPE_REPEAT_PATH_CELLS,
+  MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH,
+  MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL,
 } = contract.limits;
 export type PrototypeJson =
   | null
@@ -44,13 +46,18 @@ const iconNameSchema = z.string().refine((name) => iconNames.has(name), {
 });
 const iconVariantSchema = z.enum(["filled", "outlined", "rounded", "sharp", "twoTone"]);
 const keySchema = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/);
-const offsetSchema = z.object({ x: z.number().finite(), y: z.number().finite() }).strict();
+const offsetSchema = z
+  .object({
+    x: z.number().finite().min(-10000).max(10000),
+    y: z.number().finite().min(-10000).max(10000),
+  })
+  .strict();
 const boundsSchema = z
   .object({
     x: z.number().finite(),
     y: z.number().finite(),
-    width: z.number().finite().min(0),
-    height: z.number().finite().min(0),
+    width: z.number().finite().min(0).max(10000),
+    height: z.number().finite().min(0).max(10000),
   })
   .strict();
 // Reuse the existing interaction contract's type; anchors reject ambiguous selection.
@@ -138,18 +145,18 @@ const safeAreaPaddingSchema = z
   .strict();
 const dimensionSchema = z.union([
   z.enum(["fill", "wrap"]),
-  z.object({ dp: z.number().finite().min(0) }).strict(),
+  z.object({ dp: z.number().finite().min(0).max(10000) }).strict(),
 ]);
 const detentSchema = z.union([
   z.enum(["half", "full"]),
-  z.object({ dp: z.number().finite().min(1e-6) }).strict(),
+  z.object({ dp: z.number().finite().min(1e-6).max(10000) }).strict(),
 ]);
 const paddingSchema = z
   .object({
-    top: z.number().finite().min(0).optional(),
-    bottom: z.number().finite().min(0).optional(),
-    start: z.number().finite().min(0).optional(),
-    end: z.number().finite().min(0).optional(),
+    top: z.number().finite().min(0).max(10000).optional(),
+    bottom: z.number().finite().min(0).max(10000).optional(),
+    start: z.number().finite().min(0).max(10000).optional(),
+    end: z.number().finite().min(0).max(10000).optional(),
   })
   .strict();
 /** Material 3 ColorScheme roles a colour field can name instead of a hex value. */
@@ -204,10 +211,10 @@ const CORNER_RADIUS_TOKENS = [
 /** Per-corner dp radii; an omitted corner is square. */
 const cornerRadiiSchema = z
   .object({
-    topStart: z.number().finite().min(0).optional(),
-    topEnd: z.number().finite().min(0).optional(),
-    bottomEnd: z.number().finite().min(0).optional(),
-    bottomStart: z.number().finite().min(0).optional(),
+    topStart: z.number().finite().min(0).max(10000).optional(),
+    topEnd: z.number().finite().min(0).max(10000).optional(),
+    bottomEnd: z.number().finite().min(0).max(10000).optional(),
+    bottomStart: z.number().finite().min(0).max(10000).optional(),
   })
   .strict();
 const hexColorSchema = z.string().regex(/^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/);
@@ -231,7 +238,7 @@ const imageAssetSchema = z.union([
 export type PrototypeImageAsset = z.infer<typeof imageAssetSchema>;
 const borderSchema = z
   .object({
-    width: z.number().finite().min(0),
+    width: z.number().finite().min(0).max(10000),
     color: colorValueSchema,
   })
   .strict();
@@ -276,21 +283,25 @@ const styleSchema = z
   .object({
     width: dimensionSchema.optional(),
     height: dimensionSchema.optional(),
-    weight: z.number().finite().min(1e-6).optional(),
-    minWidth: z.number().finite().min(0).optional(),
-    maxWidth: z.number().finite().min(0).optional(),
-    minHeight: z.number().finite().min(0).optional(),
-    maxHeight: z.number().finite().min(0).optional(),
+    weight: z.number().finite().min(1e-6).max(10000).optional(),
+    minWidth: z.number().finite().min(0).max(10000).optional(),
+    maxWidth: z.number().finite().min(0).max(10000).optional(),
+    minHeight: z.number().finite().min(0).max(10000).optional(),
+    maxHeight: z.number().finite().min(0).max(10000).optional(),
     padding: paddingSchema.optional(),
     background: colorValueSchema.optional(),
     cornerRadius: z
-      .union([z.number().finite().min(0), z.enum(CORNER_RADIUS_TOKENS), cornerRadiiSchema])
+      .union([
+        z.number().finite().min(0).max(10000),
+        z.enum(CORNER_RADIUS_TOKENS),
+        cornerRadiiSchema,
+      ])
       .optional(),
     border: borderSchema.optional(),
-    elevation: z.number().finite().min(0).optional(),
+    elevation: z.number().finite().min(0).max(1000).optional(),
     shadowColor: colorValueSchema.optional(),
     gradient: gradientSchema.optional(),
-    aspectRatio: z.number().finite().min(1e-6).optional(),
+    aspectRatio: z.number().finite().min(1e-6).max(10000).optional(),
     offset: offsetSchema.optional(),
     alpha: z.number().finite().min(0).max(1).optional(),
     pressScale: z.number().finite().min(0.5).max(1).optional(),
@@ -310,14 +321,14 @@ const styleSchema = z
     arrangement: z
       .enum(["start", "center", "end", "spaceBetween", "spaceAround", "spaceEvenly"])
       .optional(),
-    spacing: z.number().finite().min(0).optional(),
-    textSize: z.number().finite().min(1e-6).optional(),
+    spacing: z.number().finite().min(0).max(10000).optional(),
+    textSize: z.number().finite().min(1e-6).max(1000).optional(),
     fontWeight: z.number().finite().int().min(100).max(900).optional(),
     color: colorValueSchema.optional(),
     textAlign: z.enum(["start", "center", "end", "justify"]).optional(),
     maxLines: z.number().finite().int().min(1).max(2147483647).optional(),
-    lineHeight: z.number().finite().min(1e-6).optional(),
-    letterSpacing: z.number().finite().optional(),
+    lineHeight: z.number().finite().min(1e-6).max(1000).optional(),
+    letterSpacing: z.number().finite().min(-1000).max(1000).optional(),
     textDecoration: z.enum(["none", "underline", "lineThrough", "underlineLineThrough"]).optional(),
     fontStyle: z.enum(["normal", "italic"]).optional(),
     overflow: z.enum(["clip", "ellipsis", "visible"]).optional(),
@@ -371,7 +382,7 @@ export const placementSchema = z.discriminatedUnion("type", [
     .object({
       type: z.enum(["sheet"]),
       edge: z.enum(["top", "bottom"]),
-      height: z.number().finite().min(1e-6),
+      height: z.number().finite().min(1e-6).max(10000),
     })
     .strict(),
   z

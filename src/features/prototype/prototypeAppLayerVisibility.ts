@@ -42,21 +42,7 @@ export async function confirmPrototypeAppLayerVisibility(
         await timer.sleep(APP_LAYER_VISIBILITY_RETRY_MS);
         continue;
       }
-      if (
-        !snapshot.hierarchy.prototypeHiddenReason &&
-        hasNoAppLayerVisibilityEvidence(snapshot.hierarchy)
-      ) {
-        return undefined;
-      }
-      const reason = snapshot.hierarchy.prototypeHiddenReason ?? hiddenReason;
-      if (reason) {
-        return {
-          visible: false,
-          notVisibleReason: reason,
-          warning: prototypeHiddenWarning(reason, snapshot.hierarchy.packageName),
-        };
-      }
-      return appLayerNotVisible(snapshot.hierarchy);
+      return decideAppLayerVisibility(snapshot.hierarchy, hiddenReason);
     }
   } catch (error) {
     if (signal?.aborted) {
@@ -68,6 +54,24 @@ export async function confirmPrototypeAppLayerVisibility(
     return undefined;
   }
   return undefined;
+}
+
+function decideAppLayerVisibility(
+  hierarchy: ViewHierarchyResult,
+  hiddenReason?: PrototypeHiddenReason,
+): AppLayerNotVisible | undefined {
+  if (!hierarchy.prototypeHiddenReason && hasNoAppLayerVisibilityEvidence(hierarchy)) {
+    return undefined;
+  }
+  const reason = hierarchy.prototypeHiddenReason ?? hiddenReason;
+  if (reason) {
+    return {
+      visible: false,
+      notVisibleReason: reason,
+      warning: prototypeHiddenWarning(reason, hierarchy.packageName),
+    };
+  }
+  return appLayerNotVisible(hierarchy);
 }
 
 function hasNoAppLayerVisibilityEvidence(hierarchy: ViewHierarchyResult): boolean {

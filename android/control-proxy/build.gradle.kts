@@ -6,6 +6,7 @@ import org.gradle.api.tasks.PathSensitivity
 
 plugins {
   id("automobile.kotlin-common")
+  id("automobile.robolectric-sdk-pin")
   id("automobile.android-app-signing")
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.serialization)
@@ -48,10 +49,9 @@ android {
 
   buildFeatures { compose = true }
 
-  // Robolectric needs the merged resources to render Compose Material 3 off-device (its components
-  // read library string resources); used by the prototype renderer screenshot tests. The default
-  // Robolectric SDK this would otherwise change is pinned in
-  // src/test/resources/robolectric.properties.
+  // Robolectric needs merged resources to render Compose Material 3 off-device. The
+  // verifyRobolectricSdkPin guard checks the properties pin; the guard caps pins at SDK 35 (36+
+  // fails on JDK 21).
   testOptions { unitTests.isIncludeAndroidResources = true }
 
   compileOptions {

@@ -10,4 +10,5 @@ dependencies {
   implementation(libs.kgp)
   implementation(libs.agp)
   implementation("dev.detekt:detekt-gradle-plugin:${libs.versions.detekt.get()}")
+  testImplementation(libs.junit)
 }

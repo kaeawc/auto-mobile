@@ -1,3 +1,8 @@
+import {
+  prototypeSavedReplyFields,
+  prototypeSavedUnsupportedMessage,
+} from "../../../../src/features/observe/android/CtrlProxyPrototypes";
+import { PROTOTYPE_SAVED_CAPABILITY } from "../../../../src/features/observe/android/ctrlProxyProtocol";
 import { PROTOTYPE_PATCH_CAPABILITY } from "../../../../src/features/observe/android/ctrlProxyProtocol";
 import { prototypePatchUnsupportedMessage } from "../../../../src/features/prototype/prototypePatchWire";
 import type { PrototypePatchOp } from "../../../../src/features/prototype/prototypePatch";
@@ -791,3 +796,200 @@ describe("CtrlProxy patch transport", () => {
 });
 
 const patchOps: PrototypePatchOp[] = [{ op: "replace", path: "/data/cartCount", value: 2 }];
+
+const savedCommands = [
+  "full_command_set_v1",
+  "request_id_echo_v1",
+  "save_prototype",
+  "list_saved_prototypes",
+  "delete_saved_prototype",
+];
+const savedInfo = { id: "panel", slug: "panel", replaced: false };
+const savedEntries = [{ id: "panel", label: "Panel", slug: "panel", savedAt: 42, pinned: true }];
+const savedRequests = [
+  {
+    type: "save_prototype",
+    run: (client: AndroidCtrlProxyClient) =>
+      client.requestSavePrototype({ spec, label: "Panel", icon: "hero" }),
+    params: { spec, label: "Panel", icon: "hero" },
+    reply: { saved: savedInfo },
+  },
+  {
+    type: "list_saved_prototypes",
+    run: (client: AndroidCtrlProxyClient) => client.requestListSavedPrototypes(),
+    params: {},
+    reply: { savedPrototypes: savedEntries },
+  },
+  {
+    type: "delete_saved_prototype",
+    run: (client: AndroidCtrlProxyClient) => client.requestDeleteSavedPrototype("panel"),
+    params: { id: "panel" },
+    reply: {},
+  },
+];
+describe("CtrlProxy saved prototype transport", () => {
+  test.each(savedRequests)(
+    "$type sends and decodes saved results and refusals",
+    async ({ type, run, params, reply }) => {
+      const { client, socket, receive } = await harness([
+        ...savedCommands,
+        PROTOTYPE_SAVED_CAPABILITY,
+      ]);
+      const frames: Record<string, unknown>[] = [];
+      let refusal = false;
+      const send = spyOn(socket, "send").mockImplementation((data) => {
+        const frame = JSON.parse(String(data));
+        frames.push(frame);
+        void receive({
+          type: "prototype_result",
+          requestId: frame.requestId,
+          success: !refusal,
+          ...(refusal ? { error: "missing", errorCode: "not_found" } : reply),
+          futureField: { value: 1 },
+        });
+      });
+      try {
+        expect(await run(client)).toMatchObject({ success: true, ...reply });
+        expect(frames[0]).toEqual({ type, requestId: frames[0]?.requestId, ...params });
+        refusal = true;
+        expect(await run(client)).toMatchObject({ success: false, errorCode: "not_found" });
+      } finally {
+        send.mockRestore();
+      }
+    },
+  );
+  for (const commands of [savedCommands, null]) {
+    test.each(savedRequests)(
+      `$type refuses before send with ${commands === null ? "unknown" : "missing"} capability`,
+      async ({ type, run }) => {
+        const { client, socket } = await harness(commands);
+        const send = spyOn(socket, "send");
+        try {
+          await expect(run(client)).rejects.toBeInstanceOf(ActionableError);
+          await expect(run(client)).rejects.toThrow(prototypeSavedUnsupportedMessage(type));
+          expect(send).not.toHaveBeenCalled();
+        } finally {
+          send.mockRestore();
+        }
+      },
+    );
+  }
+  test.each([
+    { name: "invalid spec", save: { spec: { ...spec, unexpected: true }, label: "Panel" } },
+    { name: "long label", save: { spec, label: "x".repeat(121) } },
+    { name: "empty label", save: { spec, label: "" } },
+    { name: "bad icon", save: { spec, label: "Panel", icon: "" } },
+  ])("rejects $name before connecting or sending", async ({ save }) => {
+    const { client, socket } = await harness([...savedCommands, PROTOTYPE_SAVED_CAPABILITY]);
+    const connect = spyOn(client, "ensureConnected");
+    const send = spyOn(socket, "send");
+    try {
+      await expect(client.requestSavePrototype(save)).rejects.toBeInstanceOf(ActionableError);
+      expect(connect).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      connect.mockRestore();
+      send.mockRestore();
+    }
+  });
+  test.each([null, 4])("rejects non-string icon %p before connecting", async (icon) => {
+    const { client, socket } = await harness([...savedCommands, PROTOTYPE_SAVED_CAPABILITY]);
+    const connect = spyOn(client, "ensureConnected");
+    const send = spyOn(socket, "send");
+    try {
+      // Exercise invalid wire input while retaining the public string-only API.
+      // @ts-expect-error explicit nulls and non-strings are rejected at runtime
+      await expect(client.requestSavePrototype({ spec, label: "Panel", icon })).rejects.toThrow(
+        "explicit nulls are rejected",
+      );
+      expect(connect).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      connect.mockRestore();
+      send.mockRestore();
+    }
+  });
+  test("rejects empty delete id before connecting", async () => {
+    const { client, socket } = await harness([...savedCommands, PROTOTYPE_SAVED_CAPABILITY]);
+    const connect = spyOn(client, "ensureConnected");
+    const send = spyOn(socket, "send");
+    try {
+      await expect(client.requestDeleteSavedPrototype("")).rejects.toBeInstanceOf(ActionableError);
+      expect(connect).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      connect.mockRestore();
+      send.mockRestore();
+    }
+  });
+  test("reply decoder validates saved fields and drops a whole malformed list", () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(
+        prototypeSavedReplyFields({
+          saved: savedInfo,
+          savedPrototypes: savedEntries,
+          errorCode: "not_found",
+          future: 1,
+        }),
+      ).toEqual({ saved: savedInfo, savedPrototypes: savedEntries, errorCode: "not_found" });
+      expect(
+        prototypeSavedReplyFields({
+          saved: { ...savedInfo, replaced: 1 },
+          savedPrototypes: [...savedEntries, { ...savedEntries[0], pinned: "yes" }],
+          errorCode: "future",
+        }),
+      ).toEqual({});
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(prototypeSavedReplyFields({ savedPrototypes: [] })).toEqual({ savedPrototypes: [] });
+      expect(prototypeSavedReplyFields(null)).toEqual({});
+    } finally {
+      warn.mockRestore();
+    }
+  });
+  test("malformed list and unknown error code are omitted at the client reply boundary", async () => {
+    const { client, socket, receive } = await harness([
+      ...savedCommands,
+      PROTOTYPE_SAVED_CAPABILITY,
+    ]);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const send = spyOn(socket, "send").mockImplementation((data) => {
+      void receive({
+        type: "prototype_result",
+        requestId: JSON.parse(String(data)).requestId,
+        success: true,
+        savedPrototypes: [...savedEntries, { ...savedEntries[0], savedAt: "yesterday" }],
+        errorCode: "future",
+        extra: true,
+      });
+    });
+    try {
+      const result = await client.requestListSavedPrototypes();
+      expect(result).not.toHaveProperty("savedPrototypes");
+      expect(result).not.toHaveProperty("errorCode");
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      send.mockRestore();
+      warn.mockRestore();
+    }
+  });
+  test("fake records saved calls and returns configured results", async () => {
+    const fake = new FakeCtrlProxy(new FakeTimer());
+    fake.setSaveResult({ success: true, saved: savedInfo });
+    fake.setListSavedResult({ success: true, savedPrototypes: savedEntries });
+    fake.setDeleteResult({ success: false, errorCode: "not_found" });
+    const save = { spec, label: "Panel", icon: "hero" };
+    expect(await fake.requestSavePrototype(save)).toEqual({ success: true, saved: savedInfo });
+    expect(await fake.requestListSavedPrototypes()).toEqual({
+      success: true,
+      savedPrototypes: savedEntries,
+    });
+    expect(await fake.requestDeleteSavedPrototype("panel")).toEqual({
+      success: false,
+      errorCode: "not_found",
+    });
+    expect(fake.saveRequests).toEqual([save]);
+    expect(fake.listCalls).toBe(1);
+    expect(fake.deleteRequests).toEqual(["panel"]);
+  });
+});

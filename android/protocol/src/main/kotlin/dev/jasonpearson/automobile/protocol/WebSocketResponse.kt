@@ -757,12 +757,48 @@ data class PrototypeResult(
    * to (`prototype_appearance_v1`). Omitted by every other result and by older APKs.
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val appearance: PrototypeAppearance? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val saved: SavedPrototypeInfo? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val savedPrototypes: List<SavedPrototypeEntry>? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val errorCode: SavedPrototypeErrorCode? = null,
   /** Only patch replies report revisions, including refusals for a matching shown prototype. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val revision: Long? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val conflict: PrototypePatchConflict? = null,
   /** Only a successful show reply: why the existing prototype is hidden. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val hiddenReason: PrototypeHiddenReason? = null,
 ) : WebSocketResponse()
+
+@Serializable data class SavedPrototypeInfo(val id: String, val slug: String, val replaced: Boolean)
+
+@Serializable
+data class SavedPrototypeEntry(
+  val id: String,
+  val label: String,
+  val slug: String,
+  val savedAt: Long,
+  val pinned: Boolean,
+)
+
+@Serializable
+enum class SavedPrototypeErrorCode {
+  @SerialName("invalid_id") INVALID_ID,
+  @SerialName("invalid_label") INVALID_LABEL,
+  @SerialName("spec_too_large") SPEC_TOO_LARGE,
+  @SerialName("invalid_spec") INVALID_SPEC,
+  @SerialName("invalid_asset_id") INVALID_ASSET_ID,
+  @SerialName("duplicate_asset_id") DUPLICATE_ASSET_ID,
+  @SerialName("unsupported_mime_type") UNSUPPORTED_MIME_TYPE,
+  @SerialName("empty_asset") EMPTY_ASSET,
+  @SerialName("asset_too_large") ASSET_TOO_LARGE,
+  @SerialName("count_limit") COUNT_LIMIT,
+  @SerialName("total_limit") TOTAL_LIMIT,
+  @SerialName("missing_asset") MISSING_ASSET,
+  @SerialName("saved_count_limit") SAVED_COUNT_LIMIT,
+  @SerialName("storage_failure") STORAGE_FAILURE,
+  @SerialName("unsupported_existing") UNSUPPORTED_EXISTING,
+  @SerialName("not_found") NOT_FOUND,
+  @SerialName("unsupported_format") UNSUPPORTED_FORMAT,
+  @SerialName("internal_error") INTERNAL_ERROR,
+}
 
 @Serializable
 data class PrototypePatchConflict(val revision: Long, val state: Map<String, PrototypeScalar>)

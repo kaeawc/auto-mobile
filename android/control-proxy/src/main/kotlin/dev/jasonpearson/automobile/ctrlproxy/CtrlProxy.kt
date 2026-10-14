@@ -63,6 +63,7 @@ import dev.jasonpearson.automobile.ctrlproxy.perf.SystemTimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDeviceAppearance
 import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidPrototypeDisplays
+import dev.jasonpearson.automobile.ctrlproxy.prototype.AndroidSavedPrototypeShortcuts
 import dev.jasonpearson.automobile.ctrlproxy.prototype.BitmapPrototypeImageDecoder
 import dev.jasonpearson.automobile.ctrlproxy.prototype.ComposePrototypeFontLoader
 import dev.jasonpearson.automobile.ctrlproxy.prototype.CoroutinePrototypeScheduler
@@ -84,6 +85,8 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLifecycle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRefreshCoalescer
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeResultSink
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWindowOnScreen
+import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeController
+import dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeStores
 import dev.jasonpearson.automobile.ctrlproxy.prototype.hasPrototypeTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.imeLiftPx
 import dev.jasonpearson.automobile.ctrlproxy.prototype.isPrototypeWindow
@@ -118,6 +121,9 @@ import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
+import dev.jasonpearson.automobile.protocol.SavedPrototypeEntry
+import dev.jasonpearson.automobile.protocol.SavedPrototypeErrorCode
+import dev.jasonpearson.automobile.protocol.SavedPrototypeInfo
 import dev.jasonpearson.automobile.protocol.ScreenshotResult as ProtocolScreenshotResult
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
 import dev.jasonpearson.automobile.protocol.SdkBroadcastEvent
@@ -1136,6 +1142,34 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
 
+      override suspend fun sendSaved(requestId: String?, saved: SavedPrototypeInfo) {
+        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+          resultBroadcaster.guard(requestId, "prototype_result") {
+            webSocketServer.broadcastWithPerf { _ -> prototypeSavedFrame(requestId, saved) }
+          }
+        }
+      }
+
+      override suspend fun sendSavedList(requestId: String?, entries: List<SavedPrototypeEntry>) {
+        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+          resultBroadcaster.guard(requestId, "prototype_result") {
+            webSocketServer.broadcastWithPerf { _ -> prototypeSavedListFrame(requestId, entries) }
+          }
+        }
+      }
+
+      override suspend fun sendRefusal(
+        requestId: String?,
+        code: SavedPrototypeErrorCode,
+        error: String,
+      ) {
+        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+          resultBroadcaster.guard(requestId, "prototype_result") {
+            webSocketServer.broadcastWithPerf { _ -> prototypeRefusalFrame(requestId, code, error) }
+          }
+        }
+      }
+
       override suspend fun sendPatched(
         requestId: String?,
         success: Boolean,
@@ -1219,6 +1253,14 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   // Loaded custom fonts (`fontFamily: {asset}`), dropped when the store changes an asset.
   private val prototypeFonts by lazy {
     PrototypeFontCache(prototypeAssets, ComposePrototypeFontLoader())
+  }
+  private val savedPrototypeController by lazy {
+    SavedPrototypeController(
+      SavedPrototypeStores.inDirectory(File(filesDir, "saved-prototypes")),
+      prototypeAssets,
+      AndroidSavedPrototypeShortcuts(this),
+      prototypeResultSink,
+    )
   }
   private val prototypeAssetController by lazy {
     PrototypeAssetController(
@@ -3352,6 +3394,23 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   override fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) {
     launchRequestScope(requestId) { prototypeController.dismiss(requestId, id, all) }
+  }
+
+  override fun savePrototype(
+    requestId: String?,
+    spec: PrototypeSpec,
+    label: String,
+    icon: String?,
+  ) {
+    launchRequestScope(requestId) { savedPrototypeController.save(requestId, spec, label, icon) }
+  }
+
+  override fun listSavedPrototypes(requestId: String?) {
+    launchRequestScope(requestId) { savedPrototypeController.list(requestId) }
+  }
+
+  override fun deleteSavedPrototype(requestId: String?, id: String) {
+    launchRequestScope(requestId) { savedPrototypeController.delete(requestId, id) }
   }
 
   override fun patchPrototype(requestId: String?, id: String, baseRevision: Long?, ops: JsonArray) {

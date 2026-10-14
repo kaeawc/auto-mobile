@@ -30,12 +30,42 @@ const spec = (root: unknown = pager) => ({
   window: { placement: { type: "fullscreen" } },
   root,
 });
+const componentSpec = () => ({
+  ...spec({ type: "use", component: "pageDeck" }),
+  components: { pageDeck: { root: { ...pager, axis: "vertical", peek: { start: 20 } } } },
+});
 
 beforeAll(() => {
   validatePrototypeSpec(spec());
 });
 
 describe("pager option contract", () => {
+  test("component pager options use validator-style authored paths without mutating the spec", () => {
+    const candidate = componentSpec();
+    const original = structuredClone(candidate);
+    expect(prototypePagerOptionFields(candidate)).toEqual([
+      "root (use pageDeck) → components.pageDeck.root.axis",
+      "root (use pageDeck) → components.pageDeck.root.peek",
+    ]);
+    expect(candidate).toEqual(original);
+    expect(
+      prototypePagerOptionFields(spec({ ...pager, axis: "vertical", peek: { start: 20 } })),
+    ).toEqual(["root.axis", "root.peek"]);
+  });
+  test("invalid components fall through without finding expanded pager options", () => {
+    const missing = { ...componentSpec(), root: { type: "use", component: "missing" } };
+    expect(prototypePagerOptionFields(missing)).toEqual([]);
+    const invalid = componentSpec();
+    invalid.components.pageDeck.root.peek.start = -1;
+    expect(prototypePagerOptionFields(invalid)).toEqual([]);
+    expect(validatePrototypeSpec(invalid)).toEqual({
+      success: false,
+      error: {
+        path: "root (use pageDeck) → components.pageDeck.root.peek.start",
+        message: "Invalid number value",
+      },
+    });
+  });
   test("plain pager validates and keeps optional fields absent", () => {
     const result = validatePrototypeSpec(spec());
     expect(result.success).toBe(true);
@@ -165,13 +195,15 @@ describe("pager options host refusal", () => {
       cacheInvalidator: new FakeDeviceWindowCacheInvalidator(),
     });
   }
-  const run = (device: BootedDevice, root: unknown, signal?: AbortSignal) =>
+  const runSpec = (device: BootedDevice, candidate: unknown, signal?: AbortSignal) =>
     ToolRegistry.getTool("prototype")!.deviceAwareHandler!(
       device,
-      { action: "show", spec: spec(root) },
+      { action: "show", spec: candidate },
       undefined,
       signal,
     );
+  const run = (device: BootedDevice, root: unknown, signal?: AbortSignal) =>
+    runSpec(device, spec(root), signal);
   beforeAll(async () => {
     const restoreWarmup = preserveToolRegistry();
     register();
@@ -192,6 +224,41 @@ describe("pager options host refusal", () => {
     unsubscribe();
     restore();
   });
+  test.each([android, ios])(
+    "$platform refuses pager options expanded from components",
+    async (device) => {
+      const candidate = componentSpec();
+      const result = prototypeOutputSchema.parse(
+        (await runSpec(device, candidate)).structuredContent,
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(
+        prototypePagerOptionsUnsupportedMessage(
+          ["root.axis", "root.peek"],
+          device.platform === "ios" ? "ios" : "android",
+        ),
+      );
+      expect(client.getPrototypeHistory()).toEqual([]);
+      expect(agent.requests).toEqual([]);
+    },
+  );
+  test.each([android, ios])(
+    "$platform keeps component validation errors before pager refusal",
+    async (device) => {
+      const candidate = componentSpec();
+      candidate.components.pageDeck.root.peek.start = -1;
+      const result = prototypeOutputSchema.parse(
+        (await runSpec(device, candidate)).structuredContent,
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("root (use pageDeck) → components.pageDeck.root.peek.start");
+      expect(result.error).toContain("Invalid number value");
+      expect(result.error).not.toContain(PROTOTYPE_PAGER_OPTIONS_CAPABILITY);
+      expect(lookups).not.toContain(PROTOTYPE_PAGER_OPTIONS_CAPABILITY);
+      expect(client.getPrototypeHistory()).toEqual([]);
+      expect(agent.requests).toEqual([]);
+    },
+  );
   test.each([android, ios])(
     "$platform refuses each explicit option on an unsupported device",
     async (device) => {

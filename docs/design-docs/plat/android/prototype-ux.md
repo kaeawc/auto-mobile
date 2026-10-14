@@ -705,7 +705,9 @@ Current page means the first fully visible page: fixed sizes snap at Start; fill
 uses the usual settled page. `page_changed`, `{page}` / `{pageCount}`, `setPage` and
 navigation pager bindings keep their meaning. Stable keys and neighbour retention
 stay unchanged; non-current pages, including peek neighbours, stay outside the
-semantics tree. Indicator and carousel remain deferred. On iOS dp means points.
+semantics tree. With a fixed `pageSize`, pages other than the current one are not
+exposed to accessibility, observe or tapOn even when fully visible; use tabBar/setPage
+to move. Indicator and carousel remain deferred. On iOS dp means points.
 
 
 ## Icons and images

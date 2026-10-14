@@ -799,6 +799,8 @@ Missing spacing/peek sides mean 0, and `{}` peek is a no-op. Units are points on
 A vertical pager cannot have any vertical scroll ancestor (omitted axis is vertical).
 Current page is the first fully visible page; page events and navigation bindings
 keep their meaning, and non-current peek pages stay outside the semantics tree.
+With a fixed `pageSize`, pages other than the current one are not exposed to
+accessibility, observe or tapOn even when fully visible; use tabBar/setPage to move.
 
 ### Patch (#11675)
 

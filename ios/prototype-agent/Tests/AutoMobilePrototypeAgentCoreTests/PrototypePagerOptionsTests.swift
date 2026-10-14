@@ -102,8 +102,12 @@ final class PrototypePagerOptionsTests: XCTestCase {
         XCTAssertEqual(legacy.start, 0)
         XCTAssertEqual(legacy.end, 0)
         XCTAssertEqual(legacy.pageSize, .fill)
-        for options in [#", "axis":"horizontal""#, #", "pageSpacing":0"#, #", "peek":{}"#, #", "pageSize":"fill""#] {
-            XCTAssertFalse(try PrototypePagerLayout(node: node(options)).legacy, options)
+        for options in [
+            #", "axis":"horizontal""#, #", "pageSpacing":0"#, #", "peek":{}"#, #", "pageSize":"fill""#,
+            #", "peek":{"start":0}"#, #", "peek":{"end":0}"#, #", "peek":{"start":0,"end":0}"#,
+            #", "axis":"horizontal", "pageSpacing":0, "peek":{"start":0,"end":0}, "pageSize":"fill""#,
+        ] {
+            XCTAssertEqual(try PrototypePagerLayout(node: node(options)), legacy, options)
         }
     }
 

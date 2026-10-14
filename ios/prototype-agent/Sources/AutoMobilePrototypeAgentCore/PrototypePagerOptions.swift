@@ -99,11 +99,12 @@ struct PrototypePagerLayout: Equatable {
     let pageSize: PrototypePagerPageSize
 
     init(node: PrototypeNode) {
-        legacy = node.axis == nil && node.pageSpacing == nil && node.peek == nil && node.pageSize == nil
         vertical = node.axis == "vertical"
         spacing = node.pageSpacing ?? 0
         start = node.peek?.start ?? 0
         end = node.peek?.end ?? 0
         pageSize = node.pageSize ?? .fill
+        legacy = (node.axis == nil || node.axis == "horizontal") &&
+            spacing == 0 && start == 0 && end == 0 && pageSize == .fill
     }
 }

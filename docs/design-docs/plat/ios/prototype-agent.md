@@ -512,9 +512,10 @@ The shared pager contract (#12071) adds `axis` (horizontal by default), `pageSpa
 `pageSize` (`"fill"` by default or strict `{dp}`). Distances are finite points on iOS:
 spacing and peek are 0..10000, and fixed size is 1e-6..10000 (`MAX_PROTOTYPE_PAGER_DP`).
 Any explicit option requires `prototype_pager_options_v1`; the host refuses older agents
-with a relaunch hint. iOS renders explicit options with a native view-aligned ScrollView,
+with a relaunch hint. iOS renders non-default options with a native view-aligned ScrollView,
 lazy horizontal/vertical stacks, scroll content margins and viewport or fixed page frames.
-Pagers without options retain the paged TabView / wrap-size drag path. A vertical pager cannot
+Pagers whose options all resolve to defaults (including explicit horizontal axis, zero
+spacing, empty or zero peek, and fill page size) retain the paged TabView / wrap-size drag path. A vertical pager cannot
 have any vertical scroll ancestor (omitted scroll axis is vertical). Current page means
 the first fully visible page; page events, placeholders and navigation bindings keep
 their meaning. Non-current peek neighbours remain outside the semantics tree.

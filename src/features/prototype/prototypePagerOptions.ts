@@ -1,9 +1,17 @@
 import { PROTOTYPE_PAGER_OPTIONS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import { expandPrototypeComponents } from "./prototypeComponents";
 import { record } from "./prototypeTemplate";
+import { validatePrototypeSpec } from "./prototypeValidation";
 
 /** Explicit pager options need the capability, even when they request the default behaviour. */
 export function prototypePagerOptionFields(spec: unknown): string[] {
-  return nodeFields(record(spec)?.root, "root");
+  // Use the same pure expansion as prototypeSpecForDevice, retaining validator-style paths.
+  const expansion = expandPrototypeComponents(spec);
+  if (!expansion.success || (expansion.expanded && !validatePrototypeSpec(spec).success)) {
+    // Invalid component specs must keep their existing validation/refusal behaviour.
+    return nodeFields(record(spec)?.root, "root");
+  }
+  return nodeFields(record(expansion.spec)?.root, "root").map(expansion.locate);
 }
 
 function nodeFields(value: unknown, path: string): string[] {

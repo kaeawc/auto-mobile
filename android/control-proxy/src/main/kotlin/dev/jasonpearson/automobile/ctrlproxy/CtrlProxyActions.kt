@@ -379,6 +379,12 @@ interface CtrlProxyActions {
 
   fun inspectPrototypes(requestId: String?)
 
+  fun savePrototype(requestId: String?, spec: PrototypeSpec, label: String, icon: String?)
+
+  fun listSavedPrototypes(requestId: String?)
+
+  fun deleteSavedPrototype(requestId: String?, id: String)
+
   fun putPrototypeAsset(requestId: String?, id: String, mimeType: String, dataBase64: String)
 
   fun removePrototypeAsset(requestId: String?, id: String)

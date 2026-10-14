@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscription
 import dev.jasonpearson.automobile.protocol.AddHighlight
 import dev.jasonpearson.automobile.protocol.ClearPreferences
+import dev.jasonpearson.automobile.protocol.DeleteSavedPrototype
 import dev.jasonpearson.automobile.protocol.DiscoverKeystore
 import dev.jasonpearson.automobile.protocol.DismissPrototype
 import dev.jasonpearson.automobile.protocol.DragResult
@@ -19,6 +20,7 @@ import dev.jasonpearson.automobile.protocol.InstallCaCert
 import dev.jasonpearson.automobile.protocol.InstallCaCertFromPath
 import dev.jasonpearson.automobile.protocol.ListDataStores
 import dev.jasonpearson.automobile.protocol.ListPreferenceFiles
+import dev.jasonpearson.automobile.protocol.ListSavedPrototypes
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
 import dev.jasonpearson.automobile.protocol.PatchPrototype
 import dev.jasonpearson.automobile.protocol.PinchResult
@@ -60,6 +62,7 @@ import dev.jasonpearson.automobile.protocol.RequestSettingsPut
 import dev.jasonpearson.automobile.protocol.RequestSwipe
 import dev.jasonpearson.automobile.protocol.RequestTapCoordinates
 import dev.jasonpearson.automobile.protocol.RequestTwoFingerSwipe
+import dev.jasonpearson.automobile.protocol.SavePrototype
 import dev.jasonpearson.automobile.protocol.SetAccessibilityFlags
 import dev.jasonpearson.automobile.protocol.SetHierarchyInterval
 import dev.jasonpearson.automobile.protocol.SetNetworkErrorSimulation
@@ -512,6 +515,10 @@ class CtrlProxyMessageHandler(
         actions.dismissPrototype(request.requestId, request.id, request.all)
       }
       is InspectPrototypes -> actions.inspectPrototypes(request.requestId)
+      is SavePrototype ->
+        actions.savePrototype(request.requestId, request.spec, request.label, request.icon)
+      is ListSavedPrototypes -> actions.listSavedPrototypes(request.requestId)
+      is DeleteSavedPrototype -> actions.deleteSavedPrototype(request.requestId, request.id)
       is PatchPrototype ->
         actions.patchPrototype(request.requestId, request.id, request.baseRevision, request.ops)
       is PutPrototypeAsset ->

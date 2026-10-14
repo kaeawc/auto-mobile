@@ -1274,6 +1274,31 @@ class CtrlProxyMessageHandlerTest {
   }
 
   @Test
+  fun `dispatch saved prototype requests with all arguments`() = runTest {
+    val spec =
+      """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Hello"}}"""
+    dispatch(
+      """{"type":"save_prototype","requestId":"save","spec":$spec,"label":"Panel","icon":"icon"}""",
+    )
+    assertEquals("savePrototype", lastCall.first)
+    assertEquals(
+      listOf("save", json.decodeFromString<PrototypeSpec>(spec), "Panel", "icon"),
+      lastCall.second,
+    )
+    dispatch("""{"type":"save_prototype","spec":$spec,"label":"Panel"}""")
+    assertEquals(
+      listOf(null, json.decodeFromString<PrototypeSpec>(spec), "Panel", null),
+      lastCall.second,
+    )
+    dispatch("""{"type":"list_saved_prototypes","requestId":"list"}""")
+    assertEquals("listSavedPrototypes", lastCall.first)
+    assertEquals(listOf("list"), lastCall.second)
+    dispatch("""{"type":"delete_saved_prototype","requestId":"delete","id":"panel"}""")
+    assertEquals("deleteSavedPrototype", lastCall.first)
+    assertEquals(listOf("delete", "panel"), lastCall.second)
+  }
+
+  @Test
   fun `dispatch inspect prototypes request`() = runTest {
     dispatch("""{"type":"inspect_prototypes","requestId":"i"}""")
     assertEquals("inspectPrototypes", lastCall.first)

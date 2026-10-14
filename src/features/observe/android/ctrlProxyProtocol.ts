@@ -498,6 +498,66 @@ export interface PatchPrototypeMessage {
 }
 export const PROTOTYPE_PATCH_CAPABILITY = "prototype_patch_v1";
 
+export const PROTOTYPE_SAVED_CAPABILITY = "prototype_saved_v1";
+
+/** `@SerialName("save_prototype")` → `SavePrototype`. */
+export interface SavePrototypeMessage {
+  type: "save_prototype";
+  requestId: string;
+  spec: PrototypeSpec;
+  label: string;
+  icon?: string;
+}
+/** `@SerialName("list_saved_prototypes")` → `ListSavedPrototypes`. */
+export interface ListSavedPrototypesMessage {
+  type: "list_saved_prototypes";
+  requestId: string;
+}
+/** `@SerialName("delete_saved_prototype")` → `DeleteSavedPrototype`. */
+export interface DeleteSavedPrototypeMessage {
+  type: "delete_saved_prototype";
+  requestId: string;
+  id: string;
+}
+export interface SavedPrototypeInfo {
+  id: string;
+  slug: string;
+  replaced: boolean;
+}
+export interface SavedPrototypeEntry {
+  id: string;
+  label: string;
+  slug: string;
+  savedAt: number;
+  pinned: boolean;
+}
+export const SAVED_PROTOTYPE_ERROR_CODES = [
+  "invalid_id",
+  "invalid_label",
+  "spec_too_large",
+  "invalid_spec",
+  "invalid_asset_id",
+  "duplicate_asset_id",
+  "unsupported_mime_type",
+  "empty_asset",
+  "asset_too_large",
+  "count_limit",
+  "total_limit",
+  "missing_asset",
+  "saved_count_limit",
+  "storage_failure",
+  "unsupported_existing",
+  "not_found",
+  "unsupported_format",
+  "internal_error",
+] as const;
+export type SavedPrototypeErrorCode = (typeof SAVED_PROTOTYPE_ERROR_CODES)[number];
+export function isSavedPrototypeErrorCode(value: unknown): value is SavedPrototypeErrorCode {
+  return (
+    typeof value === "string" && (SAVED_PROTOTYPE_ERROR_CODES as readonly string[]).includes(value)
+  );
+}
+
 export interface InspectPrototypesMessage {
   type: "inspect_prototypes";
   requestId: string;
@@ -522,6 +582,9 @@ export interface RemovePrototypeAssetMessage {
 }
 
 export interface PrototypeResult {
+  saved?: SavedPrototypeInfo;
+  savedPrototypes?: SavedPrototypeEntry[];
+  errorCode?: SavedPrototypeErrorCode;
   hiddenReason?: PrototypeHiddenReason;
   /** Only the reply to patch_prototype from a device advertising prototype_patch_v1. */
   revision?: number;
@@ -910,6 +973,9 @@ export type CtrlProxyRequest =
   | DismissPrototypeMessage
   | InspectPrototypesMessage
   | PatchPrototypeMessage
+  | SavePrototypeMessage
+  | ListSavedPrototypesMessage
+  | DeleteSavedPrototypeMessage
   | PutPrototypeAssetMessage
   | RemovePrototypeAssetMessage
   | AddHighlightMessage
@@ -1076,6 +1142,7 @@ export const ANDROID_CAPABILITY_FLAGS = [
   "ime_commit_trace_v1",
   "gesture_display_id_v1",
   "tap_double_v1",
+  PROTOTYPE_SAVED_CAPABILITY,
   PROTOTYPE_DISPLAY_CAPABILITY,
   PROTOTYPE_WINDOW_OPTIONS_CAPABILITY,
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
@@ -1232,6 +1299,9 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   dismiss_prototype: true,
   inspect_prototypes: true,
   patch_prototype: true,
+  save_prototype: true,
+  list_saved_prototypes: true,
+  delete_saved_prototype: true,
   put_prototype_asset: true,
   remove_prototype_asset: true,
   list_preference_files: true,
@@ -1521,6 +1591,26 @@ export const ctrlProxyRequests = {
     };
   },
 
+  savePrototype(args: {
+    requestId: string;
+    spec: PrototypeSpec;
+    label: string;
+    icon?: string;
+  }): SavePrototypeMessage {
+    return {
+      type: "save_prototype",
+      requestId: args.requestId,
+      spec: args.spec,
+      label: args.label,
+      ...(args.icon === undefined ? {} : { icon: args.icon }),
+    };
+  },
+  listSavedPrototypes(args: { requestId: string }): ListSavedPrototypesMessage {
+    return { type: "list_saved_prototypes", requestId: args.requestId };
+  },
+  deleteSavedPrototype(args: { requestId: string; id: string }): DeleteSavedPrototypeMessage {
+    return { type: "delete_saved_prototype", requestId: args.requestId, id: args.id };
+  },
   patchPrototype(args: { requestId: string } & PrototypePatchRequest): PatchPrototypeMessage {
     return {
       type: "patch_prototype",

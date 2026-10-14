@@ -1,3 +1,4 @@
+import { PrototypeHiddenError } from "../features/prototype/prototypeHidden";
 import {
   AndroidAvdIdentityUnresolvedError,
   AndroidDeviceIdentityUnresolvedError,
@@ -238,7 +239,7 @@ function typedRefusalPayload(error: unknown): Record<string, unknown> | undefine
 }
 
 function prototypeSuspendedPayload(error: unknown): Record<string, unknown> | undefined {
-  if (error instanceof PrototypeSuspendedError) {
+  if (error instanceof PrototypeSuspendedError || error instanceof PrototypeHiddenError) {
     return {
       code: error.code,
       retryable: error.retryable,

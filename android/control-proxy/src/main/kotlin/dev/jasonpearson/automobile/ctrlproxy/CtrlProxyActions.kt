@@ -5,6 +5,7 @@ import dev.jasonpearson.automobile.protocol.ImeTextDelivery
 import dev.jasonpearson.automobile.protocol.NodeSelector
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
+import kotlinx.serialization.json.JsonArray
 
 /**
  * The device actions a decoded [dev.jasonpearson.automobile.protocol.WebSocketRequest] can trigger.
@@ -374,7 +375,15 @@ interface CtrlProxyActions {
 
   fun dismissPrototype(requestId: String?, id: String?, all: Boolean?)
 
+  fun patchPrototype(requestId: String?, id: String, baseRevision: Long?, ops: JsonArray)
+
   fun inspectPrototypes(requestId: String?)
+
+  fun savePrototype(requestId: String?, spec: PrototypeSpec, label: String, icon: String?)
+
+  fun listSavedPrototypes(requestId: String?)
+
+  fun deleteSavedPrototype(requestId: String?, id: String)
 
   fun putPrototypeAsset(requestId: String?, id: String, mimeType: String, dataBase64: String)
 

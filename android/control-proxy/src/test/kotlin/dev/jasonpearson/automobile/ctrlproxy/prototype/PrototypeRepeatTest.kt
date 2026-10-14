@@ -36,6 +36,32 @@ class PrototypeRepeatTest {
     )
 
   @Test
+  fun `keyed identities follow text and numeric keys through reorder and missing keys use index`() {
+    fun entries(rows: List<Map<String, PrototypeScalar>>, bind: Boolean) =
+      prototypeChildEntries(
+        PrototypeColumnNode(
+          children = listOf(PrototypeTextNode(text = "{item.label}")),
+          repeat = PrototypeRepeat(rows, "item", key = "id"),
+        ),
+        "root",
+        bind = bind,
+      )
+    assertEquals(
+      listOf("root.repeat[a].children[0]", "root.repeat[7].children[0]"),
+      entries(items, bind = true).map { it.path },
+    )
+    assertEquals(entries(items, bind = true).reversed(), entries(items.reversed(), bind = true))
+    assertEquals(
+      "root.repeat[0].children[0]",
+      entries(listOf(mapOf("label" to PrototypeScalar.Text("missing"))), bind = true).single().path,
+    )
+    assertEquals(
+      listOf("root.repeat[0].children[0]", "root.repeat[1].children[0]"),
+      entries(items, bind = false).map { it.path },
+    )
+  }
+
+  @Test
   fun `children are instantiated per item with text bound and stable per index identities`() {
     val model =
       mapPrototypeSpec(

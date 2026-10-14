@@ -1,10 +1,19 @@
+import {
+  CtrlProxyPrototypes,
+  prototypeSavedReplyFields,
+  prototypeSavedUnsupportedMessage,
+} from "../../../../src/features/observe/android/CtrlProxyPrototypes";
+import { PROTOTYPE_SAVED_CAPABILITY } from "../../../../src/features/observe/android/ctrlProxyProtocol";
 import { PROTOTYPE_PATCH_CAPABILITY } from "../../../../src/features/observe/android/ctrlProxyProtocol";
 import { prototypePatchUnsupportedMessage } from "../../../../src/features/prototype/prototypePatchWire";
 import type { PrototypePatchOp } from "../../../../src/features/prototype/prototypePatch";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { MAX_PROTOTYPE_SPEC_BYTES } from "../../../../src/features/prototype/prototypeSpec";
-import type { PrototypeEvent } from "../../../../src/features/observe/android/ctrlProxyProtocol";
+import type {
+  PrototypeEvent,
+  PrototypeResult,
+} from "../../../../src/features/observe/android/ctrlProxyProtocol";
 import { ActionableError } from "../../../../src/models/ActionableError";
 import { PortManager } from "../../../../src/utils/PortManager";
 import { logger } from "../../../../src/utils/logger";
@@ -13,6 +22,8 @@ import { FakeInstalledAppsRepository } from "../../../fakes/FakeInstalledAppsRep
 import { FakeCtrlProxy } from "../../../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeWebSocket } from "../../../fakes/FakeWebSocket";
+import { FakeSavedPrototypeMirror } from "../../../fakes/FakeSavedPrototypeMirror";
+import type { SavedPrototypeMirror } from "../../../../src/features/prototype/savedPrototypeMirror";
 
 const spec = {
   id: "panel",
@@ -38,6 +49,7 @@ async function harness(
     "show_prototype",
     "dismiss_prototype",
   ],
+  mirror?: SavedPrototypeMirror,
 ) {
   PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
   const timer = new FakeTimer();
@@ -50,6 +62,11 @@ async function harness(
     new FakeInstalledAppsRepository(),
   );
   clients.push(client);
+  const extraContext = client["extraDelegateContextFields"].bind(client);
+  client["extraDelegateContextFields"] = () => ({
+    ...extraContext(),
+    savedPrototypeMirror: mirror ? { serial: "prototype-test", mirror } : undefined,
+  });
   await Promise.resolve();
   client["ws"] = socket as unknown as WebSocket;
   spyOn(client, "ensureConnected").mockResolvedValue(true);
@@ -75,6 +92,154 @@ afterEach(async () => {
     await client.close();
   }
   PortManager.setPortAvailabilityCheckerForTesting(null);
+});
+
+describe("saved prototype host recorder", () => {
+  async function recorder(mirror?: SavedPrototypeMirror) {
+    const { client, socket } = await harness(
+      [
+        "full_command_set_v1",
+        "request_id_echo_v1",
+        PROTOTYPE_SAVED_CAPABILITY,
+        "save_prototype",
+        "delete_saved_prototype",
+        "put_prototype_asset",
+        "remove_prototype_asset",
+      ],
+      mirror,
+    );
+    const delegate = new CtrlProxyPrototypes(client["createDelegateContext"]());
+    let reply: PrototypeResult = { success: true, error: null };
+    const send = spyOn(socket, "send").mockImplementation((data) => {
+      const message: { requestId: string } = JSON.parse(String(data));
+      client["requestManager"].resolve(message.requestId, reply);
+    });
+    return {
+      delegate,
+      send,
+      client,
+      reply: (success: boolean, savedId?: string) => {
+        reply = {
+          success,
+          error: success ? null : "refused",
+          ...(savedId ? { saved: { id: savedId, slug: "slug", replaced: false } } : {}),
+        };
+      },
+    };
+  }
+  const asset = { id: "photo", mimeType: "image/png" as const, bytes: new Uint8Array([1, 2]) };
+  test("successful save mirrors tracked strings anywhere in spec plus icon; deletion removes", async () => {
+    const mirror = new FakeSavedPrototypeMirror();
+    const { delegate, send } = await recorder(mirror);
+    try {
+      await delegate.requestPutPrototypeAsset(asset);
+      await delegate.requestPutPrototypeAsset({ ...asset, id: "icon" });
+      await delegate.requestPutPrototypeAsset({ ...asset, id: "unused" });
+      const savedSpec = { ...spec, data: { nested: { values: ["photo"] } } };
+      expect(
+        (await delegate.requestSavePrototype({ spec: savedSpec, label: "Panel", icon: "icon" }))
+          .success,
+      ).toBe(true);
+      expect(await mirror.list("prototype-test")).toEqual([
+        {
+          id: "panel",
+          spec: savedSpec,
+          label: "Panel",
+          icon: "icon",
+          assets: [asset, { ...asset, id: "icon" }],
+        },
+      ]);
+      await delegate.requestDeleteSavedPrototype("panel");
+      expect(await mirror.list("prototype-test")).toEqual([]);
+    } finally {
+      send.mockRestore();
+    }
+  });
+  test("failed save and delete leave mirror unchanged", async () => {
+    const mirror = new FakeSavedPrototypeMirror();
+    const { delegate, send, reply } = await recorder(mirror);
+    try {
+      reply(false);
+      await delegate.requestSavePrototype({ spec, label: "Panel" });
+      expect(await mirror.list("prototype-test")).toEqual([]);
+      reply(true);
+      await delegate.requestSavePrototype({ spec, label: "Panel" });
+      reply(false);
+      await delegate.requestDeleteSavedPrototype("panel");
+      expect(await mirror.list("prototype-test")).toHaveLength(1);
+    } finally {
+      send.mockRestore();
+    }
+  });
+  test("mirror failures warn and preserve successful save and delete results", async () => {
+    const mirror = new FakeSavedPrototypeMirror();
+    mirror.error = new Error("mirror unavailable");
+    const { delegate, send } = await recorder(mirror);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect((await delegate.requestSavePrototype({ spec, label: "Panel" })).success).toBe(true);
+      expect((await delegate.requestDeleteSavedPrototype("panel")).success).toBe(true);
+      expect(warn.mock.calls.filter((call) => call[1] === mirror.error)).toHaveLength(2);
+    } finally {
+      send.mockRestore();
+      warn.mockRestore();
+    }
+  });
+  test("removed assets are recorded as missing and failed uploads are not tracked", async () => {
+    const mirror = new FakeSavedPrototypeMirror();
+    const { delegate, send, reply } = await recorder(mirror);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await delegate.requestPutPrototypeAsset(asset);
+      await delegate.requestRemovePrototypeAsset(asset.id);
+      reply(false);
+      await delegate.requestPutPrototypeAsset({ ...asset, id: "icon" });
+      reply(true);
+      await delegate.requestSavePrototype({
+        spec: { ...spec, root: { type: "image", asset: "photo" } },
+        label: "Panel",
+        icon: "icon",
+      });
+      expect((await mirror.list("prototype-test"))[0].assets).toEqual([
+        { id: "photo" },
+        { id: "icon" },
+      ]);
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      send.mockRestore();
+      warn.mockRestore();
+    }
+  });
+  test("absent mirror context is a no-op", async () => {
+    const { delegate, send } = await recorder();
+    try {
+      expect((await delegate.requestSavePrototype({ spec, label: "Panel" })).success).toBe(true);
+      expect((await delegate.requestDeleteSavedPrototype("panel")).success).toBe(true);
+    } finally {
+      send.mockRestore();
+    }
+  });
+  test("uses saved reply ID, detaches uploaded bytes and keeps an asset after failed removal", async () => {
+    const mirror = new FakeSavedPrototypeMirror();
+    const { delegate, send, reply } = await recorder(mirror);
+    const bytes = Buffer.from([1, 2]);
+    try {
+      await delegate.requestPutPrototypeAsset({ ...asset, bytes });
+      bytes.fill(9);
+      reply(false);
+      await delegate.requestRemovePrototypeAsset(asset.id);
+      reply(true, "saved-id");
+      await delegate.requestSavePrototype({
+        spec: { ...spec, data: { reference: "photo" } },
+        label: "Panel",
+      });
+      const saved = (await mirror.list("prototype-test"))[0];
+      expect(saved.id).toBe("saved-id");
+      expect(saved.assets).toEqual([asset]);
+    } finally {
+      send.mockRestore();
+    }
+  });
 });
 
 describe("CtrlProxy prototypes", () => {
@@ -791,3 +956,200 @@ describe("CtrlProxy patch transport", () => {
 });
 
 const patchOps: PrototypePatchOp[] = [{ op: "replace", path: "/data/cartCount", value: 2 }];
+
+const savedCommands = [
+  "full_command_set_v1",
+  "request_id_echo_v1",
+  "save_prototype",
+  "list_saved_prototypes",
+  "delete_saved_prototype",
+];
+const savedInfo = { id: "panel", slug: "panel", replaced: false };
+const savedEntries = [{ id: "panel", label: "Panel", slug: "panel", savedAt: 42, pinned: true }];
+const savedRequests = [
+  {
+    type: "save_prototype",
+    run: (client: AndroidCtrlProxyClient) =>
+      client.requestSavePrototype({ spec, label: "Panel", icon: "hero" }),
+    params: { spec, label: "Panel", icon: "hero" },
+    reply: { saved: savedInfo },
+  },
+  {
+    type: "list_saved_prototypes",
+    run: (client: AndroidCtrlProxyClient) => client.requestListSavedPrototypes(),
+    params: {},
+    reply: { savedPrototypes: savedEntries },
+  },
+  {
+    type: "delete_saved_prototype",
+    run: (client: AndroidCtrlProxyClient) => client.requestDeleteSavedPrototype("panel"),
+    params: { id: "panel" },
+    reply: {},
+  },
+];
+describe("CtrlProxy saved prototype transport", () => {
+  test.each(savedRequests)(
+    "$type sends and decodes saved results and refusals",
+    async ({ type, run, params, reply }) => {
+      const { client, socket, receive } = await harness([
+        ...savedCommands,
+        PROTOTYPE_SAVED_CAPABILITY,
+      ]);
+      const frames: Record<string, unknown>[] = [];
+      let refusal = false;
+      const send = spyOn(socket, "send").mockImplementation((data) => {
+        const frame = JSON.parse(String(data));
+        frames.push(frame);
+        void receive({
+          type: "prototype_result",
+          requestId: frame.requestId,
+          success: !refusal,
+          ...(refusal ? { error: "missing", errorCode: "not_found" } : reply),
+          futureField: { value: 1 },
+        });
+      });
+      try {
+        expect(await run(client)).toMatchObject({ success: true, ...reply });
+        expect(frames[0]).toEqual({ type, requestId: frames[0]?.requestId, ...params });
+        refusal = true;
+        expect(await run(client)).toMatchObject({ success: false, errorCode: "not_found" });
+      } finally {
+        send.mockRestore();
+      }
+    },
+  );
+  for (const commands of [savedCommands, null]) {
+    test.each(savedRequests)(
+      `$type refuses before send with ${commands === null ? "unknown" : "missing"} capability`,
+      async ({ type, run }) => {
+        const { client, socket } = await harness(commands);
+        const send = spyOn(socket, "send");
+        try {
+          await expect(run(client)).rejects.toBeInstanceOf(ActionableError);
+          await expect(run(client)).rejects.toThrow(prototypeSavedUnsupportedMessage(type));
+          expect(send).not.toHaveBeenCalled();
+        } finally {
+          send.mockRestore();
+        }
+      },
+    );
+  }
+  test.each([
+    { name: "invalid spec", save: { spec: { ...spec, unexpected: true }, label: "Panel" } },
+    { name: "long label", save: { spec, label: "x".repeat(121) } },
+    { name: "empty label", save: { spec, label: "" } },
+    { name: "bad icon", save: { spec, label: "Panel", icon: "" } },
+  ])("rejects $name before connecting or sending", async ({ save }) => {
+    const { client, socket } = await harness([...savedCommands, PROTOTYPE_SAVED_CAPABILITY]);
+    const connect = spyOn(client, "ensureConnected");
+    const send = spyOn(socket, "send");
+    try {
+      await expect(client.requestSavePrototype(save)).rejects.toBeInstanceOf(ActionableError);
+      expect(connect).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      connect.mockRestore();
+      send.mockRestore();
+    }
+  });
+  test.each([null, 4])("rejects non-string icon %p before connecting", async (icon) => {
+    const { client, socket } = await harness([...savedCommands, PROTOTYPE_SAVED_CAPABILITY]);
+    const connect = spyOn(client, "ensureConnected");
+    const send = spyOn(socket, "send");
+    try {
+      // Exercise invalid wire input while retaining the public string-only API.
+      // @ts-expect-error explicit nulls and non-strings are rejected at runtime
+      await expect(client.requestSavePrototype({ spec, label: "Panel", icon })).rejects.toThrow(
+        "explicit nulls are rejected",
+      );
+      expect(connect).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      connect.mockRestore();
+      send.mockRestore();
+    }
+  });
+  test("rejects empty delete id before connecting", async () => {
+    const { client, socket } = await harness([...savedCommands, PROTOTYPE_SAVED_CAPABILITY]);
+    const connect = spyOn(client, "ensureConnected");
+    const send = spyOn(socket, "send");
+    try {
+      await expect(client.requestDeleteSavedPrototype("")).rejects.toBeInstanceOf(ActionableError);
+      expect(connect).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      connect.mockRestore();
+      send.mockRestore();
+    }
+  });
+  test("reply decoder validates saved fields and drops a whole malformed list", () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(
+        prototypeSavedReplyFields({
+          saved: savedInfo,
+          savedPrototypes: savedEntries,
+          errorCode: "not_found",
+          future: 1,
+        }),
+      ).toEqual({ saved: savedInfo, savedPrototypes: savedEntries, errorCode: "not_found" });
+      expect(
+        prototypeSavedReplyFields({
+          saved: { ...savedInfo, replaced: 1 },
+          savedPrototypes: [...savedEntries, { ...savedEntries[0], pinned: "yes" }],
+          errorCode: "future",
+        }),
+      ).toEqual({});
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(prototypeSavedReplyFields({ savedPrototypes: [] })).toEqual({ savedPrototypes: [] });
+      expect(prototypeSavedReplyFields(null)).toEqual({});
+    } finally {
+      warn.mockRestore();
+    }
+  });
+  test("malformed list and unknown error code are omitted at the client reply boundary", async () => {
+    const { client, socket, receive } = await harness([
+      ...savedCommands,
+      PROTOTYPE_SAVED_CAPABILITY,
+    ]);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    const send = spyOn(socket, "send").mockImplementation((data) => {
+      void receive({
+        type: "prototype_result",
+        requestId: JSON.parse(String(data)).requestId,
+        success: true,
+        savedPrototypes: [...savedEntries, { ...savedEntries[0], savedAt: "yesterday" }],
+        errorCode: "future",
+        extra: true,
+      });
+    });
+    try {
+      const result = await client.requestListSavedPrototypes();
+      expect(result).not.toHaveProperty("savedPrototypes");
+      expect(result).not.toHaveProperty("errorCode");
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      send.mockRestore();
+      warn.mockRestore();
+    }
+  });
+  test("fake records saved calls and returns configured results", async () => {
+    const fake = new FakeCtrlProxy(new FakeTimer());
+    fake.setSaveResult({ success: true, saved: savedInfo });
+    fake.setListSavedResult({ success: true, savedPrototypes: savedEntries });
+    fake.setDeleteResult({ success: false, errorCode: "not_found" });
+    const save = { spec, label: "Panel", icon: "hero" };
+    expect(await fake.requestSavePrototype(save)).toEqual({ success: true, saved: savedInfo });
+    expect(await fake.requestListSavedPrototypes()).toEqual({
+      success: true,
+      savedPrototypes: savedEntries,
+    });
+    expect(await fake.requestDeleteSavedPrototype("panel")).toEqual({
+      success: false,
+      errorCode: "not_found",
+    });
+    expect(fake.saveRequests).toEqual([save]);
+    expect(fake.listCalls).toBe(1);
+    expect(fake.deleteRequests).toEqual(["panel"]);
+  });
+});

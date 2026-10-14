@@ -5191,19 +5191,20 @@ export class DaemonMcpProxy {
 
   /**
    * Read-only access never requires a session (owner decision 2026-10-09, #10971). After the
-   * binding is released and one call has been told so, a read-only tool that names no session is
-   * forwarded without one: the daemon serves it on its read-only device path. Control tools keep
-   * the fence and its reacquire guidance, as does a liveness handover, which every call reports
-   * until the harness acts on it. A managed execution keeps the fence for reads without a deviceId.
+   * binding is released, a managed read-only tool naming a deviceId and no session is forwarded
+   * without a session immediately, without marking the release as reported. Non-managed reads
+   * require one call to report the release first. The daemon serves these on its read-only device
+   * path. Control tools and managed reads without a deviceId keep the fence, as does a liveness
+   * handover, which every call reports until the harness acts on it.
    */
   private isSessionlessReadAfterRelease(name: string, args: Record<string, unknown>): boolean {
     const terminal = this.terminalBoundSession;
     return (
       terminal !== undefined &&
-      this.releaseSurfacedFor === terminal.sessionUuid &&
       !this.stallHandovers.has(terminal.sessionUuid) &&
-      (managedSlotForSession(this.managedSlotsResult, terminal.sessionUuid) === null ||
-        (typeof args.deviceId === "string" && args.deviceId.trim().length > 0)) &&
+      (managedSlotForSession(this.managedSlotsResult, terminal.sessionUuid) !== null
+        ? typeof args.deviceId === "string" && args.deviceId.trim().length > 0
+        : this.releaseSurfacedFor === terminal.sessionUuid) &&
       this.isDeviceReadOnlyTool(name)
     );
   }

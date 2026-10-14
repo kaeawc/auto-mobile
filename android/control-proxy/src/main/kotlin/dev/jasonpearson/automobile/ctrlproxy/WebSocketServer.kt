@@ -371,6 +371,8 @@ class WebSocketServer(
     // reset
     // is set. Older APKs ignore reset and re-show fresh; hosts warn that pages restarted (#10642).
     add("prototype_show_in_place_v1")
+    // Atomic in-place data, state and node patches report revisions and state conflicts (#11675).
+    add("prototype_patch_v1")
     // Prototype nodes with a bounds anchor are laid out at those screen dp bounds, relative to the
     // window's own origin. Older APKs decode anchors and ignore them, so hosts refuse anchors
     // there.

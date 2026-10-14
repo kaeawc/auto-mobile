@@ -59,6 +59,7 @@ data class ImeCommitResult(
   val committedUnits: Int = 0,
   val insertedText: String? = null,
   val trace: List<String>? = null,
+  val editorConsumed: Boolean = false,
 )
 
 /**
@@ -91,6 +92,7 @@ class ImeCommitDriver(
 
   private var completed = false
   private var committedUnits = 0
+  private var editorConsumed = false
   private var completion: ((ImeCommitResult) -> Unit)? = null
   private var restoreId: String? = null
   private var hardDeadlineMs = Long.MAX_VALUE
@@ -136,7 +138,13 @@ class ImeCommitDriver(
       "committedUnits" to committedUnits,
       "code" to if (outcome.success) "ok" else failureCode(outcome.error),
     )
-    completion?.invoke(outcome.copy(committedUnits = committedUnits, insertedText = delta))
+    completion?.invoke(
+      outcome.copy(
+        committedUnits = committedUnits,
+        insertedText = delta,
+        editorConsumed = outcome.success && editorConsumed,
+      ),
+    )
   }
 
   /**
@@ -369,6 +377,7 @@ class ImeCommitDriver(
       when (decision) {
         Reconciliation.Continue -> next()
         is Reconciliation.Consumed -> {
+          editorConsumed = true
           retainConfirmed(decision.confirmed, now)
           next()
         }

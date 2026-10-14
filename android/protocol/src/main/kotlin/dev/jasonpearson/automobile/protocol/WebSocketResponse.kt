@@ -757,9 +757,15 @@ data class PrototypeResult(
    * to (`prototype_appearance_v1`). Omitted by every other result and by older APKs.
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val appearance: PrototypeAppearance? = null,
+  /** Only patch replies report revisions, including refusals for a matching shown prototype. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val revision: Long? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val conflict: PrototypePatchConflict? = null,
   /** Only a successful show reply: why the existing prototype is hidden. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val hiddenReason: PrototypeHiddenReason? = null,
 ) : WebSocketResponse()
+
+@Serializable
+data class PrototypePatchConflict(val revision: Long, val state: Map<String, PrototypeScalar>)
 
 @Serializable
 enum class PrototypeHiddenReason {

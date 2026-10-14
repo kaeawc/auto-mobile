@@ -1257,19 +1257,20 @@ class CtrlProxyMessageHandlerTest {
     }
 
   @Test
-  fun `patch prototype returns one typed refusal without invoking actions`() = runTest {
-    val before = calls.size
+  fun `patch prototype dispatches asynchronously with every patch field`() = runTest {
     val response =
       dispatchForResponse(
         """{"type":"patch_prototype","requestId":"r9","id":"orders","baseRevision":12,"ops":[{"op":"replace","path":"/data/cartCount","value":2}]}""",
       )
-    assertTrue(response is PrototypeResult)
-    val result = response as PrototypeResult
-    assertFalse(result.success)
-    assertEquals("r9", result.requestId)
-    assertTrue(result.error.orEmpty().contains("prototype_patch_v1"))
-    assertTrue(result.error.orEmpty().contains("show_prototype"))
-    assertEquals(before, calls.size)
+    assertNull(response)
+    assertEquals("patchPrototype", lastCall.first)
+    assertEquals(listOf("r9", "orders", 12L), lastCall.second.take(3))
+    assertEquals(
+      kotlinx.serialization.json.Json.parseToJsonElement(
+        """[{"op":"replace","path":"/data/cartCount","value":2}]""",
+      ),
+      lastCall.second[3],
+    )
   }
 
   @Test

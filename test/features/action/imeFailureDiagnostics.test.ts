@@ -8,6 +8,7 @@ import {
   IME_EDITOR_SYNC_LOST_ERROR,
   IME_INSERTED_TEXT_UNAVAILABLE_WARNING,
   verifyImeCommitResult,
+  verifyImeInsertedText,
 } from "../../../src/features/action/imeFailureDiagnostics";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { android, createSendKeysHarness, focused } from "./SendKeysTestHarness";
@@ -1004,4 +1005,19 @@ describe("IME inserted delta verification", () => {
     expect(result.success).toBe(true);
     expect(result.commands[0]).not.toHaveProperty("insertedText");
   });
+});
+
+test.each([true, false])("verification honours editorConsumed=%s", (editorConsumed) => {
+  const result = verifyImeInsertedText(
+    {
+      success: true,
+      insertedText: "helloworld",
+      ...(editorConsumed ? { editorConsumed: true } : {}),
+    },
+    "hello\nworld",
+  );
+  expect(result.success).toBe(editorConsumed);
+  if (!editorConsumed) {
+    expect(result.error).toContain("IME partial commit");
+  }
 });

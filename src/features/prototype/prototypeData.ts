@@ -1,6 +1,7 @@
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_DATA_MODEL_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { mapBindableFields, record, STATE_KEY, type Raw } from "./prototypeTemplate";
+import { prototypeSpecForDevice } from "./prototypeComponents";
 
 /** RFC 6901 pointers relative to data; the whole-document empty pointer is excluded. */
 export function isPrototypeDataPointer(value: unknown): value is string {
@@ -227,7 +228,7 @@ function documentFields(value: unknown, path: string, fields: Set<string>): stri
 }
 
 export function prototypeDataModelFields(spec: unknown): string[] {
-  const object = record(spec);
+  const object = record(prototypeSpecForDevice(spec));
   return object
     ? [...(Object.hasOwn(object, "data") ? ["data"] : []), ...nodeFields(object.root, "root")]
     : [];

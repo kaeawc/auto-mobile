@@ -45,6 +45,8 @@ export interface PrototypePatchDependencies {
   store: Pick<PrototypeStatusStore, "shownSpecs" | "recordPatchedData">;
   transport: Pick<PrototypeTransport, "patch">;
   supportsPatch: () => Promise<boolean>;
+  /** Refuses unsupported features in validated ops before transport or host commit. */
+  refusePatch?: () => Promise<PrototypeResult | undefined>;
   platform: "android" | "ios";
   queue: PrototypePatchQueue;
   /** Retires the device's cached observation after an applied patch. */
@@ -90,7 +92,13 @@ function patchSpec(
 async function sendPatch(
   deps: PrototypePatchDependencies,
   args: PrototypePatchArgs,
+  signal?: AbortSignal,
 ): Promise<PrototypePatchReply> {
+  const refusal = await deps.refusePatch?.();
+  signal?.throwIfAborted();
+  if (refusal) {
+    return { ...refusal, delivery: "unsent" };
+  }
   try {
     return await deps.transport.patch(
       {
@@ -129,7 +137,7 @@ async function queuedPatch(
     return applied;
   }
   signal?.throwIfAborted();
-  const result = await sendPatch(deps, args);
+  const result = await sendPatch(deps, args, signal);
   if (result.delivery === "indeterminate") {
     deps.store.shownSpecs.abandon(deviceId);
     return failure(

@@ -23,6 +23,7 @@ import { decodePrototypeEvent } from "../../../src/features/observe/android/Ctrl
 import { event } from "../../helpers/prototypeTestEvent";
 import { prototypeOutputSchema } from "../../../src/server/prototypeTools";
 import { renderPrototypeGuide } from "../../../src/features/prototype/prototypeGuide";
+import { prototypeSpecForDevice } from "../../../src/features/prototype/prototypeComponents";
 
 interface Fixture {
   name: string;
@@ -113,6 +114,64 @@ test("context discovery includes empty contexts and nested part actions, exclude
       },
     }),
   ).toEqual([]);
+});
+
+test("context discovery expands component uses and reports their authored location", () => {
+  const spec = {
+    components: {
+      row: {
+        root: {
+          type: "button",
+          label: "Pick",
+          onTap: [{ type: "emit", name: "x", context: { a: { value: 1 } } }],
+        },
+      },
+    },
+    root: { type: "use", component: "row" },
+  };
+  expect(prototypeEmitContextFields(spec)).toEqual([
+    "root (use row) → components.row.root.onTap[0].context",
+  ]);
+  expect(prototypeEmitContextFields(prototypeSpecForDevice(spec))).toEqual([
+    "root.onTap[0].context",
+  ]);
+  expect(prototypeEmitContextFields({ ...spec, root: { type: "text", text: "Unused" } })).toEqual(
+    [],
+  );
+});
+
+test("data capability discovery expands component emit bindings with the same device spec", () => {
+  expect(
+    prototypeDataModelFields({
+      components: {
+        row: {
+          root: {
+            type: "button",
+            label: "Pick",
+            onTap: [{ type: "emit", name: "x", context: { a: { data: "/a" } } }],
+          },
+        },
+      },
+      root: { type: "use", component: "row" },
+    }),
+  ).toEqual(["root.onTap[0].context.a"]);
+});
+
+test.each([
+  ["dialog", "confirm"],
+  ["dialog", "dismiss"],
+  ["snackbar", "action"],
+  ["topAppBar", "navigationIcon"],
+  ["topAppBar", "actions"],
+])("context discovery visits component-expanded %s %s actions", (type, part) => {
+  const action = { label: "Pick", onTap: [{ type: "emit", name: "x", context: {} }] };
+  const spec = {
+    components: { row: { root: { type, [part]: part === "actions" ? [action] : action } } },
+    root: { type: "column", child: { type: "use", component: "row" } },
+  };
+  expect(prototypeEmitContextFields(spec)).toEqual([
+    `root.child (use row) → components.row.root.${part}${part === "actions" ? "[0]" : ""}.onTap[0].context`,
+  ]);
 });
 
 test("guide documents context wire, atomic reads and limits", () => {

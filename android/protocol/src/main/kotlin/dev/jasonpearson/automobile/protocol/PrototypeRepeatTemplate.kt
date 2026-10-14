@@ -92,7 +92,7 @@ object PrototypeRepeatTemplate {
       }
     }
 
-  /** Both device expanders use this typed binding operation; payload is never interpolated. */
+  /** CtrlProxy's repeat expander uses this typed binding operation; payload is never interpolated. */
   fun bindEmitContext(
     context: Map<String, EmitContextBinding>,
     alias: String,

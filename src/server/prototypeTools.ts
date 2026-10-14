@@ -969,13 +969,10 @@ async function themeModesRefusal(
 // ORCHESTRATOR-CHOSEN gate; fold into PROTOTYPE_SPEC_CAPABILITY_GATES when it lands
 async function emitContextRefusal(
   target: PrototypeTarget,
-  args: z.infer<typeof prototypeSchema>,
+  fields: string[],
+  action: "show" | "patch",
   signal: AbortSignal | undefined,
 ): Promise<PrototypeResult | undefined> {
-  if (args.action !== "show" || args.spec === undefined) {
-    return undefined;
-  }
-  const fields = prototypeEmitContextFields(args.spec);
   if (fields.length === 0) {
     return undefined;
   }
@@ -994,7 +991,7 @@ async function emitContextRefusal(
   return {
     success: false,
     error: new ActionableError(
-      `The ${device} does not advertise ${PROTOTYPE_EMIT_CONTEXT_CAPABILITY}, so it cannot resolve emit.context at ${fields[0]}${more}. Nothing was shown. ${update}, or omit emit.context.`,
+      `The ${device} does not advertise ${PROTOTYPE_EMIT_CONTEXT_CAPABILITY}, so it cannot resolve emit.context at ${fields[0]}${more}. Nothing was ${action === "patch" ? "patched" : "shown"}. ${update}, or omit emit.context.`,
     ).message,
   };
 }
@@ -1437,7 +1434,7 @@ async function preflightMutation(
   dependencies: Pick<
     PrototypeToolDependencies,
     "adbFactory" | "lastRenderedObservation" | "anchorHierarchyCaptureFactory"
-  >,
+  > & { authoredSpec?: unknown },
   signal: AbortSignal | undefined,
 ): Promise<PreflightStage> {
   const chrome = await windowChromeRefusal(target, args, signal);
@@ -1459,7 +1456,14 @@ async function preflightMutation(
     iosResetRefusal(target, args) ??
     (await themeModesRefusal(target, args, signal)) ??
     (await dataModelRefusal(target, args, signal)) ??
-    (await emitContextRefusal(target, args, signal)) ??
+    (await emitContextRefusal(
+      target,
+      args.action === "show"
+        ? prototypeEmitContextFields(dependencies.authoredSpec ?? args.spec)
+        : [],
+      "show",
+      signal,
+    )) ??
     (await appearanceRefusal(target, args, signal)) ??
     (await windowOptionsRefusal(target, args, signal));
   if (failure) {
@@ -1540,6 +1544,7 @@ function subscribePrototypeDeviceUnbound(
 }
 
 type PrototypeHandlerDependencies = {
+  authoredSpec?: unknown;
   store: PrototypeStatusStore;
   events: PrototypeEventCoordinator;
   target: PrototypeTarget;
@@ -1602,6 +1607,19 @@ async function performPrototypeAction(
           target.android
             ? target.android.supportsCommand(PROTOTYPE_PATCH_CAPABILITY)
             : target.ios?.supportsCapability(PROTOTYPE_PATCH_CAPABILITY) === true,
+        refusePatch: () =>
+          emitContextRefusal(
+            target,
+            args.ops!.flatMap((op, index) =>
+              op.op === "replaceNode"
+                ? prototypeEmitContextFields({ root: op.node }).map(
+                    (path) => `ops[${index}].node${path.slice(4)}`,
+                  )
+                : [],
+            ),
+            "patch",
+            signal,
+          ),
         platform: device.platform === "android" ? "android" : "ios",
         queue,
         retire: (result) => retireObservation(cacheInvalidator, device, result),
@@ -2757,6 +2775,7 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
       });
     }
     const handlerDependencies: PrototypeHandlerDependencies = {
+      authoredSpec: loaded.args.spec,
       store,
       events,
       target,

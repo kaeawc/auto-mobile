@@ -119,13 +119,13 @@ Each nonempty context name has a strict binding object with exactly one key:
 
 Missing state keys and data paths resolve to null. \`MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES\` bounds the
 number of entries. The resolved object's compact JSON UTF-8 bytes
-are bounded by \`MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES\`; this runtime count uses actual serialized bytes,
-including multibyte strings, rather than the payload validator's conservative numeric cost.
+are bounded by \`MAX_PROTOTYPE_EMIT_PAYLOAD_BYTES\`; this runtime count includes multibyte strings
+and compact JSON numbers, rather than the payload validator's conservative numeric cost.
 If over budget, sort entries by ascending name (byte-wise UTF-8 order), keep the longest prefix
 that fits and omit all remaining entries. An oversized first entry produces \`{}\`. The tap succeeds.
 
-A show using \`emit.context\` requires \`prototype_emit_context_v1\`; older devices are refused
-before upload or display. The \`prototype_event\` wire has \`context\` next to the unchanged
+A show or patch replacement using \`emit.context\` requires \`prototype_emit_context_v1\`; older
+devices are refused before upload, display or patch dispatch. The \`prototype_event\` wire has \`context\` next to the unchanged
 \`payload\` only if the emit declared context (including an empty object). It has
 \`contextTruncated: true\` only when truncated; otherwise the field is omitted, never false.
 \`awaitEvent\` and host status preserve these fields.

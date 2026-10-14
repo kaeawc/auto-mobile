@@ -101,10 +101,41 @@ struct PrototypeEmitContext: Decodable {
     }
 
     private static func fits(_ context: [String: JSONValue]) -> Bool {
+        guard let count = jsonByteCount(.object(context)) else { return false }
+        return count <= PrototypeLimits.maxEmitPayloadBytes
+    }
+
+    /// Foundation supplies JSON string escaping; number sizes follow the host's JSON.stringify.
+    /// Count recursively so numbers in data objects/arrays use the same spelling as scalar bindings.
+    private static func jsonByteCount(_ value: JSONValue) -> Int? {
+        switch value {
+        case .null: return 4
+        case let .bool(value): return value ? 4 : 5
+        case let .number(value):
+            guard value.isFinite else { return nil }
+            return PrototypeScalarText.jsonNumber(value).utf8.count
+        case let .array(items):
+            var count = 2 + max(0, items.count - 1)
+            for item in items {
+                guard let bytes = jsonByteCount(item) else { return nil }
+                count += bytes
+            }
+            return count
+        case let .object(fields):
+            var count = 2 + max(0, fields.count - 1)
+            for (key, item) in fields {
+                guard let keyBytes = jsonByteCount(.string(key)), let bytes = jsonByteCount(item) else { return nil }
+                count += keyBytes + 1 + bytes
+            }
+            return count
+        case let .string(value): return quotedByteCount(value)
+        }
+    }
+
+    private static func quotedByteCount(_ value: String) -> Int? {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .withoutEscapingSlashes
-        guard let bytes = try? encoder.encode(JSONValue.object(context)) else { return false }
-        return bytes.count <= PrototypeLimits.maxEmitPayloadBytes
+        return (try? encoder.encode(value))?.count
     }
 
     static func violation(_ path: String, _ message: String) -> DecodingError {

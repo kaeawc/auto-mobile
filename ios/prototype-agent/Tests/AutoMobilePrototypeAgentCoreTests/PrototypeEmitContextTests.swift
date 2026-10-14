@@ -122,6 +122,52 @@ final class PrototypeEmitContextTests: XCTestCase {
 
     func testResolveUtf8NameOrderTruncation() throws { try resolution("utf8-name-order-truncation") }
 
+    func testJsonNumberSpelling() {
+        let cases: [(Double, String)] = [
+            (0, "0"), (-0.0, "0"), (42, "42"), (-42, "-42"), (0.5, "0.5"),
+            (1e-7, "1e-7"), (-1e-7, "-1e-7"), (1e-6, "0.000001"),
+            (9_007_199_254_740_992, "9007199254740992"),
+            (1e16, "10000000000000000"), (1e20, "100000000000000000000"),
+            (1e21, "1e+21"), (-1e21, "-1e+21"), (0.1 + 0.2, "0.30000000000000004"),
+            (123_456_789_012_345_680_000.0, "123456789012345680000"),
+        ]
+        for (value, expected) in cases {
+            XCTAssertEqual(PrototypeScalarText.jsonNumber(value), expected)
+        }
+        // Interpolated text retains its existing exact integral spelling.
+        XCTAssertEqual(PrototypeScalarText.render(1e21), "1000000000000000000000")
+    }
+
+    private func numberBoundary(_ value: Double, spelling: String) throws {
+        // An array also checks that nested numbers use the same size rule as scalar bindings.
+        let overhead = "{\"a\":[\(spelling)],\"z\":\"\"}".utf8.count
+        let padding = String(repeating: "x", count: PrototypeLimits.maxEmitPayloadBytes - overhead)
+        func resolve(_ text: String) throws -> PrototypeResolvedEmitContext {
+            let raw = JSONValue.object([
+                "a": .object(["value": .array([.number(value)])]),
+                "z": .object(["value": .string(text)]),
+            ])
+            let context = try JSONDecoder().decode(PrototypeEmitContext.self, from: JSONEncoder().encode(raw))
+            return context.resolve(FakeInputs(values: [:], pages: [:], model: [:]))
+        }
+        let exact = try resolve(padding)
+        XCTAssertEqual(exact.context, ["a": .array([.number(value)]), "z": .string(padding)])
+        XCTAssertNil(exact.contextTruncated)
+        let oversized = try resolve(padding + "x")
+        XCTAssertEqual(oversized.context, ["a": .array([.number(value)])])
+        XCTAssertEqual(oversized.contextTruncated, true)
+    }
+
+    func testWholeDoubleSizeBoundary() throws { try numberBoundary(42, spelling: "42") }
+
+    func testFractionSizeBoundary() throws { try numberBoundary(0.5, spelling: "0.5") }
+
+    func testSmallExponentSizeBoundary() throws { try numberBoundary(1e-7, spelling: "1e-7") }
+
+    func testLargeWholeDoubleSizeBoundary() throws { try numberBoundary(1e16, spelling: "10000000000000000") }
+
+    func testLargeExponentSizeBoundary() throws { try numberBoundary(1e21, spelling: "1e+21") }
+
     func testValid16Entries() throws { try valid("16-entries") }
 
     func testValidArbitraryNames() throws { try valid("arbitrary-names") }

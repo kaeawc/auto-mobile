@@ -4,6 +4,7 @@ import {
   type PrototypeJson,
 } from "./prototypeSpec";
 import { resolvePrototypeDataPointer } from "./prototypeData";
+import { expandPrototypeComponents } from "./prototypeComponents";
 import { mapBindableFields, record } from "./prototypeTemplate";
 
 /** Runtime inputs are read at the emit action, after preceding actions have committed. */
@@ -61,6 +62,10 @@ export function resolveEmitContext(
 
 /** Uses the shared action visitor, including actions on dialog/app-bar parts. */
 export function prototypeEmitContextFields(spec: unknown): string[] {
+  const expansion = expandPrototypeComponents(spec);
+  if (!expansion.success) {
+    return [];
+  }
   const fields: string[] = [];
   function walk(value: unknown, path: string): void {
     const node = record(value);
@@ -82,6 +87,6 @@ export function prototypeEmitContextFields(spec: unknown): string[] {
       }
     }
   }
-  walk(record(spec)?.root, "root");
-  return fields;
+  walk(record(expansion.spec)?.root, "root");
+  return fields.map(expansion.locate);
 }

@@ -2014,6 +2014,28 @@ describe("behaviours only narrow tests protected (#11444, #10655)", () => {
     expect(own.applied).toEqual([`${DEVICE_A}:dark`]);
   });
 
+  test("the holder's appearance set restarts its idle window; the device is freed one window after the set", async () => {
+    scenario = await LivenessScenario.start();
+    const holder = await scenario.acquire();
+    const idleStretch = IDLE_WINDOW_MS - 30_000;
+    await scenario.idle(idleStretch);
+
+    const own = await scenario.appearanceSet(holder, "dark");
+    expect(own.response.success).toBe(true);
+    expect(own.applied).toEqual([`${DEVICE_A}:dark`]);
+    const appearanceEndedAt = scenario.timer.now();
+
+    // Held side: past the acquisition's window, but inside the appearance call's window.
+    await scenario.idle(idleStretch);
+    expectHeld(holder, DEVICE_A);
+
+    // Released side: the tracked appearance execution's end is the last tool use.
+    const releasedAt = await scenario.idleUntilReleased(holder, IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+    expect(releasedAt).toBeGreaterThan(appearanceEndedAt + IDLE_WINDOW_MS);
+    expect(releasedAt).toBeLessThanOrEqual(appearanceEndedAt + IDLE_WINDOW_MS + RELEASE_SLACK_MS);
+    expectFreed(DEVICE_A);
+  });
+
   test("an idle release while a recording finalize hangs frees the device at the cap, and the recording is marked incomplete (#10957)", async () => {
     scenario = await LivenessScenario.start();
     scenario.recordingStopHangs = true;

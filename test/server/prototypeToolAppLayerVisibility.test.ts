@@ -196,3 +196,77 @@ test("visibility warning composes with the existing same-id show warning", async
     'The prototype was shown with window.layer "app" but no prototype window is on screen.',
   );
 });
+
+for (const reason of ["app_layer_window_hidden", "device_blocked"] as const) {
+  test(`show uses captured hidden reason ${reason}`, async () => {
+    frame = { ...absent, prototypeHiddenReason: reason };
+    expect(await call("app")).toMatchObject({
+      success: true,
+      visible: false,
+      notVisibleReason: reason,
+    });
+  });
+}
+test("system-layer blocked show makes no capture", async () => {
+  client.setPrototypeResult({ success: true, hiddenReason: "device_blocked" });
+  expect(await call()).toMatchObject({
+    success: true,
+    visible: false,
+    notVisibleReason: "device_blocked",
+  });
+  expect(requests).toHaveLength(0);
+});
+test("capture hint beats show reply, and a visible window beats hints", async () => {
+  client.setPrototypeResult({ success: true, hiddenReason: "app_layer_window_hidden" });
+  frame = { ...absent, prototypeHiddenReason: "device_blocked" };
+  expect((await call("app")).notVisibleReason).toBe("device_blocked");
+  frame = { ...present, prototypeHiddenReason: "app_layer_window_hidden" };
+  expect(await call("app")).not.toHaveProperty("visible");
+});
+test("show reply supplies app-layer reason when captures omit it", async () => {
+  client.setPrototypeResult({ success: true, hiddenReason: "app_layer_window_hidden" });
+  expect((await call("app")).notVisibleReason).toBe("app_layer_window_hidden");
+});
+
+test("inspect and host status surface hidden reason and clear absent device fields", async () => {
+  client.setSupportedCommands(["prototype_persistence_replay_v1"]);
+  const entry = { id: "panel", state: {}, pages: {}, persistent: true, lastSequence: 0 };
+  const tool = ToolRegistry.getTool("prototype")!.deviceAwareHandler!;
+  for (const hiddenReason of ["app_layer_window_hidden", "device_blocked"] as const) {
+    client.setInspectReply({ success: true, prototypes: [{ ...entry, hiddenReason }] });
+    for (const action of ["inspect", "status"]) {
+      const response = await tool(android, { action }, undefined);
+      expect(
+        prototypeOutputSchema.parse(response.structuredContent).prototypes?.[0].hiddenReason,
+      ).toBe(hiddenReason);
+    }
+  }
+  client.setInspectReply({ success: true, prototypes: [entry] });
+  for (const action of ["inspect", "status"]) {
+    const response = await tool(android, { action }, undefined);
+    expect(
+      prototypeOutputSchema.parse(response.structuredContent).prototypes?.[0],
+    ).not.toHaveProperty("hiddenReason");
+  }
+});
+
+test("older-device app-layer tool output deep-equals the previous output", async () => {
+  expect(await call("app")).toEqual({
+    success: true,
+    lastResult: { id: "panel", lastAction: "show", chrome: "bar", success: true, timestamp: 0 },
+    visible: false,
+    notVisibleReason: "no_prototype_window_on_screen",
+    warning: `The prototype was shown with window.layer "app" but no prototype window is on screen. The app in front (${absent.packageName}) most likely hides app-layer windows drawn over it (system apps such as Settings do); a locked device hides it too. Until it is visible, layer "prototype" calls will report that no prototype is showing. Show it again without window.layer (the default layer draws over every app) or over a different app, or dismiss it.`,
+  });
+});
+
+test("suspended capture ignores the show hidden hint but retains its own reason", async () => {
+  client.setPrototypeResult({ success: true, hiddenReason: "app_layer_window_hidden" });
+  frame = { ...absent, prototypeSuspended: true };
+  const result = await call("app");
+  expect(result.success).toBe(true);
+  expect(result).not.toHaveProperty("visible");
+  expect(result).not.toHaveProperty("notVisibleReason");
+  frame = { ...frame, prototypeHiddenReason: "device_blocked" };
+  expect((await call("app")).notVisibleReason).toBe("device_blocked");
+});

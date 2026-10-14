@@ -126,6 +126,10 @@ data class PrototypeRequest(
  * window behaves as show. Read state is a snapshot, not a cross-thread compound transaction.
  */
 interface PrototypeHost {
+  /** True only during a temporary screenshot hide. */
+  val isHiddenForCapture: Boolean
+    get() = false
+
   val isShowing: Boolean
   val currentPlacement: PrototypePlacement?
   val isTouchThroughActive: Boolean
@@ -261,6 +265,9 @@ class DefaultPrototypeHost(
   private var destroyed = false
   private val gestureMutex = Mutex()
   private val captureMutex = Mutex()
+
+  override val isHiddenForCapture: Boolean
+    get() = window?.view?.visibility == View.INVISIBLE
 
   override val isShowing: Boolean
     get() = window != null

@@ -82,9 +82,12 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeInset
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeWindow
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeLifecycle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeResultSink
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeWindowOnScreen
+import dev.jasonpearson.automobile.ctrlproxy.prototype.hasPrototypeTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.imeLiftPx
 import dev.jasonpearson.automobile.ctrlproxy.prototype.isPrototypeWindow
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeForegroundFromWindows
+import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeWindowOnScreen
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.protocol.AnrData
 import dev.jasonpearson.automobile.protocol.AnrEvent
@@ -110,6 +113,7 @@ import dev.jasonpearson.automobile.protocol.NetworkEventResponse
 import dev.jasonpearson.automobile.protocol.NodeSelector
 import dev.jasonpearson.automobile.protocol.PrototypeAppearance
 import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
+import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypeSpec
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
@@ -1019,6 +1023,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     ViewHierarchyExtractor(
       recompositionStore,
       workStats,
+      prototypeHiddenReason = { displayId, captured ->
+        if (::prototypeController.isInitialized)
+          prototypeController.hiddenReason(displayId, captured)
+        else null
+      },
       prototypeSuspended = {
         ::prototypeController.isInitialized && prototypeController.isSuspendedByForeground
       },
@@ -1147,11 +1156,19 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         requestId: String?,
         missingAssets: List<String>,
         appearance: PrototypeAppearance,
+        hiddenReason: PrototypeHiddenReason?,
       ) {
         if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
           resultBroadcaster.guard(requestId, "prototype_result") {
             webSocketServer.broadcastWithPerf { _ ->
-              prototypeResultFrame(requestId, true, null, missingAssets, appearance)
+              prototypeResultFrame(
+                requestId,
+                true,
+                null,
+                missingAssets,
+                appearance,
+                hiddenReason = hiddenReason,
+              )
             }
           }
         }
@@ -1879,6 +1896,34 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                   resultBroadcaster.guard(null, "prototype_event") {
                     webSocketServer.broadcastWithPerf { _ -> prototypeEventFrame(event) }
                   }
+                }
+              },
+            windowOnScreen =
+              PrototypeWindowOnScreen { displayId ->
+                try {
+                  val selected =
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                      // A null framework list is unavailable, rather than evidence of absence.
+                      windows?.let {
+                        if (displayId == Display.DEFAULT_DISPLAY) it else null
+                      }
+                    } else viewHierarchyExtractor.selectDisplayWindows(this, displayId).windows
+                  prototypeWindowOnScreen(
+                    selected,
+                    hasTitle = { hasPrototypeTitle(it.type, it.title) },
+                    rootPackage = { window ->
+                      val root = window.root
+                      try {
+                        root?.packageName?.toString()
+                      } finally {
+                        root?.recycle()
+                      }
+                    },
+                    ownPackage = packageName,
+                  )
+                } catch (error: Exception) {
+                  Log.d(TAG, "Could not determine prototype window visibility", error)
+                  null
                 }
               },
             displays = prototypeDisplays,

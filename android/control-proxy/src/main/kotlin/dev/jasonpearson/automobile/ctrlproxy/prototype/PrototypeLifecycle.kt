@@ -59,6 +59,10 @@ class PrototypeLifecycle(
     require(ttlMillis > 0) { "Prototype idle TTL must be positive" }
   }
 
+  /** An independent timer slot with the same injected scheduler and live device/session facts. */
+  internal fun fork(): PrototypeLifecycle =
+    PrototypeLifecycle(scheduler, ttlMillis, isBlocked, observerSession, clientCount)
+
   fun arm(delayMillis: Long = ttlMillis, onExpired: suspend (Long) -> Unit) {
     cancel()
     val token = generation

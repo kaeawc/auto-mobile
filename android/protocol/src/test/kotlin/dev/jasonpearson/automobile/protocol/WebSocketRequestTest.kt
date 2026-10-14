@@ -22,6 +22,20 @@ class WebSocketRequestTest {
   }
 
   @Test
+  fun `pin saved prototype decodes optional icon`() {
+    assertEquals(
+      PinSavedPrototype("pin", "panel", "icon"),
+      json.decodeFromString<WebSocketRequest>(
+        """{"type":"pin_saved_prototype","requestId":"pin","id":"panel","icon":"icon"}""",
+      ),
+    )
+    assertEquals(
+      PinSavedPrototype(id = "panel"),
+      json.decodeFromString<WebSocketRequest>("""{"type":"pin_saved_prototype","id":"panel"}"""),
+    )
+  }
+
+  @Test
   fun `saved prototype requests decode correlated and default fields`() {
     val spec =
       """{"id":"panel","window":{"placement":{"type":"fullscreen"}},"root":{"type":"text","text":"Hello"}}"""
@@ -850,6 +864,25 @@ class WebSocketRequestTest {
     val request = assertIs<ShowPrototype>(json.decodeFromString<WebSocketRequest>(explicit))
     assertEquals(2, request.displayId)
     assertEquals(explicit, json.encodeToString<WebSocketRequest>(request))
+  }
+
+  @Test
+  fun `show_prototype replaceOthers defaults to omitted and false round trips`() {
+    val spec =
+      """{"id":"panel","window":{"placement":{"type":"fullscreen"},"opacity":90},"root":{"type":"text","text":"Hello"}}"""
+    val legacy = """{"type":"show_prototype","requestId":"r1","spec":$spec}"""
+    val decoded = assertIs<ShowPrototype>(json.decodeFromString<WebSocketRequest>(legacy))
+    assertTrue(decoded.replaceOthers)
+    assertEquals(legacy, json.encodeToString<WebSocketRequest>(decoded))
+    val explicitDefault =
+      """{"type":"show_prototype","requestId":"r1","spec":$spec,"replaceOthers":true}"""
+    assertEquals(decoded, json.decodeFromString<WebSocketRequest>(explicitDefault))
+    assertEquals(legacy, json.encodeToString<WebSocketRequest>(decoded.copy(replaceOthers = true)))
+    val additive =
+      """{"type":"show_prototype","requestId":"r1","spec":$spec,"replaceOthers":false}"""
+    val request = assertIs<ShowPrototype>(json.decodeFromString<WebSocketRequest>(additive))
+    assertFalse(request.replaceOthers)
+    assertEquals(additive, json.encodeToString<WebSocketRequest>(request))
   }
 
   @Test

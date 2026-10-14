@@ -453,6 +453,8 @@ export interface ShowPrototypeMessage {
    * always starts fresh, which is what `reset` asks for.
    */
   reset?: true;
+  /** Only false is sent; retaining siblings requires prototype_multi_surface_v1. */
+  replaceOthers?: false;
   /**
    * What "the system setting" means for this show: `light` or `dark` pins it, without changing the
    * device. Omitted for the device's own setting. Requires prototype_appearance_v1: an older device
@@ -519,10 +521,23 @@ export interface DeleteSavedPrototypeMessage {
   requestId: string;
   id: string;
 }
+export interface PinSavedPrototypeMessage {
+  type: "pin_saved_prototype";
+  requestId: string;
+  id: string;
+  icon?: string;
+}
+export interface SavedPrototypePinInfo {
+  id: string;
+  status: "requested" | "already_pinned";
+  shortcut?: SavedPrototypeShortcutUpdate;
+}
+export type SavedPrototypeShortcutUpdate = "updated" | "rate_limited";
 export interface SavedPrototypeInfo {
   id: string;
   slug: string;
   replaced: boolean;
+  shortcut?: SavedPrototypeShortcutUpdate;
 }
 export interface SavedPrototypeEntry {
   id: string;
@@ -532,6 +547,9 @@ export interface SavedPrototypeEntry {
   pinned: boolean;
 }
 export const SAVED_PROTOTYPE_ERROR_CODES = [
+  "pin_unsupported",
+  "device_locked",
+  "pin_failed",
   "invalid_id",
   "invalid_label",
   "spec_too_large",
@@ -583,6 +601,7 @@ export interface RemovePrototypeAssetMessage {
 
 export interface PrototypeResult {
   saved?: SavedPrototypeInfo;
+  pin?: SavedPrototypePinInfo;
   savedPrototypes?: SavedPrototypeEntry[];
   errorCode?: SavedPrototypeErrorCode;
   hiddenReason?: PrototypeHiddenReason;
@@ -986,6 +1005,7 @@ export type CtrlProxyRequest =
   | InspectPrototypesMessage
   | PatchPrototypeMessage
   | SavePrototypeMessage
+  | PinSavedPrototypeMessage
   | ListSavedPrototypesMessage
   | DeleteSavedPrototypeMessage
   | PutPrototypeAssetMessage
@@ -1077,6 +1097,9 @@ export const PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY = "prototype_persistence_re
  * `reset` and re-shows the prototype fresh, so pages restart (#10642).
  */
 export const PROTOTYPE_SHOW_IN_PLACE_CAPABILITY = "prototype_show_in_place_v1";
+
+// ORCHESTRATOR-CHOSEN: to be folded into the PROTOTYPE_SPEC_CAPABILITY_GATES registry (briefs/prototype-capability-gate-registry)
+export const PROTOTYPE_MULTI_SURFACE_CAPABILITY = "prototype_multi_surface_v1";
 
 /**
  * Advertised by a CtrlProxy whose prototype renderer lays an anchored node out at its screen-space dp
@@ -1182,6 +1205,7 @@ export const ANDROID_CAPABILITY_FLAGS = [
   PROTOTYPE_PERSISTENCE_REPLAY_CAPABILITY,
   PROTOTYPE_SHOW_IN_PLACE_CAPABILITY,
   PROTOTYPE_STACK_CAPABILITY,
+  PROTOTYPE_MULTI_SURFACE_CAPABILITY,
   PROTOTYPE_ANCHOR_CAPABILITY,
   NETWORK_MOCK_RULES_REPORT_CAPABILITY,
   PROTOTYPE_WINDOW_METADATA_CAPABILITY,
@@ -1335,6 +1359,7 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   inspect_prototypes: true,
   patch_prototype: true,
   save_prototype: true,
+  pin_saved_prototype: true,
   list_saved_prototypes: true,
   delete_saved_prototype: true,
   put_prototype_asset: true,
@@ -1614,6 +1639,7 @@ export const ctrlProxyRequests = {
     spec: PrototypeSpec;
     displayId?: number;
     reset?: boolean;
+    replaceOthers?: boolean;
     appearance?: PrototypeAppearanceOverride;
   }): ShowPrototypeMessage {
     return {
@@ -1622,6 +1648,7 @@ export const ctrlProxyRequests = {
       spec: args.spec,
       ...(args.displayId === undefined ? {} : { displayId: args.displayId }),
       ...(args.reset === true ? { reset: true as const } : {}),
+      ...(args.replaceOthers === false ? { replaceOthers: false as const } : {}),
       ...(args.appearance === undefined ? {} : { appearance: args.appearance }),
     };
   },
@@ -1637,6 +1664,18 @@ export const ctrlProxyRequests = {
       requestId: args.requestId,
       spec: args.spec,
       label: args.label,
+      ...(args.icon === undefined ? {} : { icon: args.icon }),
+    };
+  },
+  pinSavedPrototype(args: {
+    requestId: string;
+    id: string;
+    icon?: string;
+  }): PinSavedPrototypeMessage {
+    return {
+      type: "pin_saved_prototype",
+      requestId: args.requestId,
+      id: args.id,
       ...(args.icon === undefined ? {} : { icon: args.icon }),
     };
   },

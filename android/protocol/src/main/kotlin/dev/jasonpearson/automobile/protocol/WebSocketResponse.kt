@@ -768,9 +768,37 @@ data class PrototypeResult(
   @EncodeDefault(EncodeDefault.Mode.NEVER) val stacks: Map<String, PrototypeStackSnapshot>? = null,
   /** Only a successful show reply: why the existing prototype is hidden. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val hiddenReason: PrototypeHiddenReason? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val pin: SavedPrototypePinInfo? = null,
 ) : WebSocketResponse()
 
-@Serializable data class SavedPrototypeInfo(val id: String, val slug: String, val replaced: Boolean)
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class SavedPrototypeInfo(
+  val id: String,
+  val slug: String,
+  val replaced: Boolean,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val shortcut: SavedPrototypeShortcutUpdate? = null,
+)
+
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class SavedPrototypePinInfo(
+  val id: String,
+  val status: SavedPrototypePinStatus,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val shortcut: SavedPrototypeShortcutUpdate? = null,
+)
+
+@Serializable
+enum class SavedPrototypePinStatus {
+  @SerialName("requested") REQUESTED,
+  @SerialName("already_pinned") ALREADY_PINNED,
+}
+
+@Serializable
+enum class SavedPrototypeShortcutUpdate {
+  @SerialName("updated") UPDATED,
+  @SerialName("rate_limited") RATE_LIMITED,
+}
 
 @Serializable
 data class SavedPrototypeEntry(
@@ -783,6 +811,9 @@ data class SavedPrototypeEntry(
 
 @Serializable
 enum class SavedPrototypeErrorCode {
+  @SerialName("pin_unsupported") PIN_UNSUPPORTED,
+  @SerialName("device_locked") DEVICE_LOCKED,
+  @SerialName("pin_failed") PIN_FAILED,
   @SerialName("invalid_id") INVALID_ID,
   @SerialName("invalid_label") INVALID_LABEL,
   @SerialName("spec_too_large") SPEC_TOO_LARGE,

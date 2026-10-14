@@ -10,6 +10,7 @@ import {
 import { prototypeSavedUnsupportedMessage } from "../features/observe/android/CtrlProxyPrototypes";
 import type { AndroidPrototypeTransport } from "../features/prototype/androidPrototypeTransport";
 import type { PrototypeSpec } from "../features/prototype/prototypeSpec";
+import { hasElementAnchors } from "../features/prototype/prototypeAnchors";
 import type { UploadedPrototypeAsset } from "../features/prototype/prototypeAssetUploader";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
@@ -45,6 +46,10 @@ export interface PrototypeSavedDependencies {
   signal?: AbortSignal;
 }
 export const savedPrototypeErrorMessages: Record<SavedPrototypeErrorCode, string> = {
+  pin_unsupported: "This launcher does not support pinned shortcuts; save without pin.",
+  device_locked: "Unlock the device and retry saving with pin.",
+  pin_failed:
+    "The launcher refused the pinned shortcut; retry or accept the saved prototype without a shortcut.",
   invalid_id: "Use a valid saved prototype id.",
   invalid_label: "Use a non-empty label of at most 120 characters.",
   spec_too_large: "Reduce the saved prototype spec size and retry.",
@@ -151,6 +156,14 @@ export async function performPrototypeSavedAction(
         errorCode: "unsupported_capability",
         error: prototypeSavedUnsupportedMessage(requestTypes[args.action]),
       };
+    }
+    if (args.action === "save" && hasElementAnchors(args.spec!)) {
+      return savedPrototypeFailure({
+        success: false,
+        errorCode: "invalid_spec",
+        error:
+          'Element anchors are resolved against the live screen and are not supported in a saved prototype; use {type:"bounds",bounds:{x,y,width,height}} anchors (dp) instead. Nothing was uploaded or saved.',
+      });
     }
     if (args.action === "listSaved") {
       const result = await deps.client.listSaved(args.timeoutMs);

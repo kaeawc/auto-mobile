@@ -151,6 +151,8 @@ describe("CtrlProxy command support", () => {
         "prototype_persistence_replay_v1",
         "prototype_show_in_place_v1",
         "prototype_stack_v1",
+        "prototype_multi_surface_v1",
+        "prototype_saved_v1",
         "prototype_anchor_v1",
         "prototype_window_metadata_v1",
         "get_sdk_capabilities",

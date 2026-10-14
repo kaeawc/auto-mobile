@@ -729,8 +729,9 @@ class PrototypeControllerTest {
           displayId: Int?,
           reset: Boolean,
           appearance: PrototypeAppearanceOverride?,
+          replaceOthers: Boolean,
         ) {
-          launch { controller.show(requestId, spec, displayId, reset, appearance) }
+          launch { controller.show(requestId, spec, displayId, reset, appearance, replaceOthers) }
         }
 
         override fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) {

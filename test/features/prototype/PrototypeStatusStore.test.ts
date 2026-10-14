@@ -112,10 +112,14 @@ describe("InMemoryPrototypeStatusStore scope bound", () => {
         lastKnown: true,
       },
     ]);
-    // The device holds one prototype: a different report replaces the earlier presence.
+    // Each reported id retains the earlier siblings and their snapshots.
     store.adopt(scope, { id: "other", pages: {}, state: {} });
-    expect(store.status(scope).prototypes.map((entry) => entry.id)).toEqual(["other"]);
+    expect(store.status(scope).prototypes.map((entry) => entry.id)).toEqual(["panel", "other"]);
     store.dismissed(scope, "other");
+    expect(store.status(scope).prototypes).toMatchObject([
+      { id: "panel", state: { title: "typed" } },
+    ]);
+    store.dismissed(scope, "panel");
     expect(store.status(scope).prototypes).toEqual([]);
   });
 });
@@ -387,7 +391,7 @@ describe("patch spec and data hooks", () => {
     store.recordPatchedData("device", "other", { count: 3 });
     expect(store.status(scope).prototypes[0].data).toEqual({ count: 1 });
   });
-  test.each(["dismissed", "dismiss", "all", "clearDevice", "clearSession", "adopt"])(
+  test.each(["dismissed", "dismiss", "all", "clearDevice", "clearSession"])(
     "%s removes tracked specs",
     (hook) => {
       const store = new InMemoryPrototypeStatusStore(new FakeTimer());
@@ -407,17 +411,16 @@ describe("patch spec and data hooks", () => {
       if (hook === "clearSession") {
         store.clearSession("one");
       }
-      if (hook === "adopt") {
-        store.adopt(scope, { id: "other", pages: {}, state: {} });
-      }
+
       expect(store.shownSpecs.read("device", "panel")).toEqual({ kind: "unknown" });
     },
   );
-  test("failed dismiss, wrong-id dismissal and same-id adoption retain the spec", () => {
+  test("failed dismiss, wrong-id dismissal and sibling/same-id adoption retain the spec", () => {
     const store = new InMemoryPrototypeStatusStore(new FakeTimer());
     track(store);
     store.record(scope, "dismiss", { id: "panel" }, { success: false });
     store.dismissed(scope, "other");
+    store.adopt(scope, { id: "other", pages: {}, state: {} });
     store.adopt(scope, { id: "panel", pages: {}, state: {} });
     expect(store.shownSpecs.read("device", "panel").kind).toBe("known");
   });

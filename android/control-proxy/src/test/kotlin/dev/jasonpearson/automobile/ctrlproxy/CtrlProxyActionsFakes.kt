@@ -163,6 +163,7 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     displayId: Int?,
     reset: Boolean,
     appearance: PrototypeAppearanceOverride?,
+    replaceOthers: Boolean,
   ) {}
 
   override fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) {}
@@ -191,6 +192,8 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     label: String,
     icon: String?,
   ) {}
+
+  override fun pinSavedPrototype(requestId: String?, id: String, icon: String?) {}
 
   override fun listSavedPrototypes(requestId: String?) {}
 
@@ -547,7 +550,8 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     displayId: Int?,
     reset: Boolean,
     appearance: PrototypeAppearanceOverride?,
-  ) = record("showPrototype", requestId, spec, displayId, reset, appearance)
+    replaceOthers: Boolean,
+  ) = record("showPrototype", requestId, spec, displayId, reset, appearance, replaceOthers)
 
   override fun dismissPrototype(requestId: String?, id: String?, all: Boolean?) =
     record("dismissPrototype", requestId, id, all)
@@ -570,6 +574,9 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     label: String,
     icon: String?,
   ) = record("savePrototype", requestId, spec, label, icon)
+
+  override fun pinSavedPrototype(requestId: String?, id: String, icon: String?) =
+    record("pinSavedPrototype", requestId, id, icon)
 
   override fun listSavedPrototypes(requestId: String?) = record("listSavedPrototypes", requestId)
 

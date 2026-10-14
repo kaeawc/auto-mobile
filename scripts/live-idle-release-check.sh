@@ -682,9 +682,7 @@ active_control_call() {
       result=$?
     fi
     [[ "${result}" -eq 3 ]] || die "active control call failed with status ${result}"
-    if [[ -z "${active_control_error}" ]]; then
-      active_control_error="tools/call returned an error: $(jq -c '.result.content' <<< "${last_response}")"
-    fi
+    active_control_error="tools/call returned an error: $(jq -c '.result.content' <<< "${last_response}")"
     ((active_recoveries < 3)) || die "${active_control_error}"
     active_recoveries=$((active_recoveries + 1))
     log "active: adb lost ${serial} (transient); waiting for it to return"
@@ -708,11 +706,17 @@ scenario_active() {
     active_control_call "$(jq -cn --arg session "${session_id}" '{sessionUuid: $session}')"
     query_device_entry
     [[ -n "${entry}" ]] || die "${serial} was released after $((now - start)) ms while the proxy heartbeated and called tools"
+    local held_session
+    held_session="$(entry_field "${entry}" sessionId)"
+    [[ "${held_session}" == "${session_id}" ]] || die "active: ${serial} is now held by session ${held_session}, not ${session_id}"
     sleep_ms "${call_interval_ms}"
     now="$(now_ms)"
   done
   query_device_entry
   [[ -n "${entry}" ]] || die "${serial} was released at the end of the active window"
+  local held_session
+  held_session="$(entry_field "${entry}" sessionId)"
+  [[ "${held_session}" == "${session_id}" ]] || die "active: ${serial} is now held by session ${held_session}, not ${session_id}"
   log "active: held for $((now - start)) ms of calls (idle window ${idle_timeout_ms} ms)"
   release_by_proxy_exit
   finish_scenario

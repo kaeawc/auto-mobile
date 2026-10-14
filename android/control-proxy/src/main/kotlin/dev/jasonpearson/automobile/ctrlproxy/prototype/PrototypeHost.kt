@@ -116,6 +116,10 @@ data class PrototypeRequest(
    * so this must account for all reachable palettes, not just the currently shown one.
    */
   val opaqueSurface: Boolean = false,
+  /** Foreground scoping belongs to this surface; locks remain a host-wide safety check. */
+  val isSuspended: () -> Boolean = { false },
+  /** Re-add a re-shown surface above its siblings while retaining its runtime state. */
+  val bringToFront: Boolean = false,
   val onHostDismiss: suspend () -> Unit = {},
   /** Navigation takes Back even without an editable field; IME handling stays separate. */
   val hasStackBack: Boolean = false,
@@ -324,7 +328,7 @@ class DefaultPrototypeHost(
 
   private fun showOnMain(request: PrototypeRequest): Boolean =
     PrototypeTrace.section(PrototypeTrace.HOST_SHOW) {
-      if (destroyed || isBlocked()) return@section false
+      if (destroyed || isBlocked() || request.isSuspended()) return@section false
       val current = window
       // An in-place update keeps the window's own display target; a fresh context per update would
       // be created on every non-default-display request only to be discarded. A window's type
@@ -351,7 +355,7 @@ class DefaultPrototypeHost(
       // New content places its own anchored root again, so a replaced spec starts from its
       // placement.
       inPlace?.anchoredOrigin = null
-      if (inPlace != null) updateInPlace(inPlace, request, params)
+      if (inPlace != null && !request.bringToFront) updateInPlace(inPlace, request, params)
       else addWindow(target, request, params, replacing = current)
     }
 
@@ -501,7 +505,7 @@ class DefaultPrototypeHost(
 
   override suspend fun relayout(): Boolean = mainThread.onMain {
     val current = window ?: return@onMain true
-    if (isBlocked()) return@onMain dismissOnMain()
+    if (isBlocked() || current.request.isSuspended()) return@onMain dismissOnMain()
     relayoutOnMain(current)
   }
 
@@ -700,7 +704,8 @@ class DefaultPrototypeHost(
   private suspend fun restoreAfterCapture(view: View) {
     try {
       mainThread.onMain {
-        if (!isBlocked()) view.visibility = View.VISIBLE
+        if (!isBlocked() && window?.request?.isSuspended?.invoke() != true)
+          view.visibility = View.VISIBLE
         else if (window?.view === view) dismissOnMain()
       }
     } catch (error: Exception) {

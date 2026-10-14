@@ -5,11 +5,15 @@ import {
   prototypeSavedUnsupportedMessage,
 } from "../../../../src/features/observe/android/CtrlProxyPrototypes";
 import { PROTOTYPE_SAVED_CAPABILITY } from "../../../../src/features/observe/android/ctrlProxyProtocol";
-import { PROTOTYPE_PATCH_CAPABILITY } from "../../../../src/features/observe/android/ctrlProxyProtocol";
+import {
+  PROTOTYPE_PATCH_CAPABILITY,
+  PROTOTYPE_MULTI_SURFACE_CAPABILITY,
+} from "../../../../src/features/observe/android/ctrlProxyProtocol";
 import { prototypePatchUnsupportedMessage } from "../../../../src/features/prototype/prototypePatchWire";
 import type { PrototypePatchOp } from "../../../../src/features/prototype/prototypePatch";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
+import { MAX_PROTOTYPE_ASSET_ID_LENGTH } from "../../../../src/features/prototype/prototypeAssets";
 import { MAX_PROTOTYPE_SPEC_BYTES } from "../../../../src/features/prototype/prototypeSpec";
 import type {
   PrototypeEvent,
@@ -25,6 +29,10 @@ import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeWebSocket } from "../../../fakes/FakeWebSocket";
 import { FakeSavedPrototypeMirror } from "../../../fakes/FakeSavedPrototypeMirror";
 import type { SavedPrototypeMirror } from "../../../../src/features/prototype/savedPrototypeMirror";
+
+import { FilePrototypeAssetCache } from "../../../../src/features/prototype/prototypeAssetCache";
+import { FakeMirrorFileSystem } from "../../../fakes/FakeMirrorFileSystem";
+import { FakePrototypeAssetCache } from "../../../fakes/FakePrototypeAssetCache";
 
 const spec = {
   id: "panel",
@@ -51,6 +59,7 @@ async function harness(
     "dismiss_prototype",
   ],
   mirror?: SavedPrototypeMirror,
+  cache: FakePrototypeAssetCache | undefined = new FakePrototypeAssetCache(),
 ) {
   PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
   const timer = new FakeTimer();
@@ -67,6 +76,7 @@ async function harness(
   client["extraDelegateContextFields"] = () => ({
     ...extraContext(),
     savedPrototypeMirror: mirror ? { serial: "prototype-test", mirror } : undefined,
+    prototypeAssetCache: cache ? { serial: "prototype-test", cache } : undefined,
   });
   await Promise.resolve();
   client["ws"] = socket as unknown as WebSocket;
@@ -96,7 +106,7 @@ afterEach(async () => {
 });
 
 describe("saved prototype host recorder", () => {
-  async function recorder(mirror?: SavedPrototypeMirror) {
+  async function recorder(mirror?: SavedPrototypeMirror, cache = new FakePrototypeAssetCache()) {
     const { client, socket } = await harness(
       [
         "full_command_set_v1",
@@ -108,6 +118,7 @@ describe("saved prototype host recorder", () => {
         "remove_prototype_asset",
       ],
       mirror,
+      cache,
     );
     const delegate = new CtrlProxyPrototypes(client["createDelegateContext"]());
     let reply: PrototypeResult = { success: true, error: null };
@@ -129,6 +140,223 @@ describe("saved prototype host recorder", () => {
     };
   }
   const asset = { id: "photo", mimeType: "image/png" as const, bytes: new Uint8Array([1, 2]) };
+  test.each(["get", "ids"])("cache %s failure still records the mirror", async (operation) => {
+    const mirror = new FakeSavedPrototypeMirror();
+    const cache = new FakePrototypeAssetCache();
+    const { delegate, send, reply } = await recorder(mirror, cache);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await cache.put("prototype-test", asset);
+      const error = new Error("cache read failed");
+      if (operation === "get") {
+        cache.getErrors.set("missing", error);
+      } else {
+        cache.idsError = error;
+      }
+      reply(true, "saved-id");
+      await delegate.requestSavePrototype({
+        spec: {
+          ...spec,
+          root: {
+            type: "tabBar",
+            stateKey: "tab",
+            items: [{ label: "Photo", image: { light: "photo", dark: "missing" } }],
+          },
+          state: { tab: 0 },
+        },
+        label: "Panel",
+      });
+      expect((await mirror.list("prototype-test"))[0].assets).toEqual([asset, { id: "missing" }]);
+      expect(
+        warn.mock.calls.some(
+          ([message, cause]) =>
+            String(message).includes("saved-id") &&
+            cause === error &&
+            (operation === "ids" || String(message).includes("missing")),
+        ),
+      ).toBe(true);
+    } finally {
+      send.mockRestore();
+      warn.mockRestore();
+    }
+  });
+  test("throwing cache root still records explicit assets as missing", async () => {
+    const mirror = new FakeSavedPrototypeMirror();
+    const { client, send, reply } = await recorder(mirror);
+    const context = client["createDelegateContext"]();
+    const error = new Error("root unavailable");
+    context.prototypeAssetCache = {
+      serial: "prototype-test",
+      cache: new FilePrototypeAssetCache(
+        new FakeMirrorFileSystem(),
+        () => {
+          throw error;
+        },
+        () => 0,
+      ),
+    };
+    const delegate = new CtrlProxyPrototypes(context);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      reply(true, "saved-id");
+      await delegate.requestSavePrototype({
+        spec: { ...spec, root: { type: "image", asset: "photo" } },
+        label: "Panel",
+      });
+      expect((await mirror.list("prototype-test"))[0].assets).toEqual([{ id: "photo" }]);
+      expect(
+        warn.mock.calls.filter(
+          ([message, cause]) => String(message).includes("saved-id") && cause === error,
+        ),
+      ).toHaveLength(2);
+    } finally {
+      send.mockRestore();
+      warn.mockRestore();
+    }
+  });
+  test.each([false, true])(
+    "arbitrary state and action payload keys only match cached ids (%p)",
+    async (cached) => {
+      const mirror = new FakeSavedPrototypeMirror();
+      const cache = new FakePrototypeAssetCache();
+      const { delegate, send } = await recorder(mirror, cache);
+      try {
+        if (cached) {
+          await cache.put("prototype-test", asset);
+        }
+        await delegate.requestSavePrototype({
+          spec: {
+            ...spec,
+            state: { image: "https://state", asset: "photo" },
+            root: {
+              type: "button",
+              label: "Send",
+              onTap: [
+                {
+                  type: "emit",
+                  name: "send",
+                  payload: {
+                    image: "https://payload",
+                    nested: [{ asset: "payload-asset", image: "photo" }],
+                  },
+                },
+              ],
+            },
+          },
+          label: "Panel",
+        });
+        expect((await mirror.list("prototype-test"))[0].assets).toEqual(cached ? [asset] : []);
+      } finally {
+        send.mockRestore();
+      }
+    },
+  );
+  test.each([
+    { type: "image" as const, asset: "photo" },
+    { type: "tabBar" as const, stateKey: "tab", items: [{ label: "Photo", image: "photo" }] },
+    {
+      type: "tabBar" as const,
+      stateKey: "tab",
+      items: [{ label: "Photo", image: { light: "photo", dark: "dark" } }],
+    },
+  ])("new delegate retains cached references after restart: %j", async (root) => {
+    const mirror = new FakeSavedPrototypeMirror();
+    const cache = new FakePrototypeAssetCache();
+    const first = await recorder(mirror, cache);
+    const second = await recorder(mirror, cache);
+    try {
+      await first.delegate.requestPutPrototypeAsset(asset);
+      await first.delegate.requestPutPrototypeAsset({ ...asset, id: "dark" });
+      await second.delegate.requestSavePrototype({
+        spec: { ...spec, state: { tab: 0 }, root },
+        label: "Panel",
+      });
+      const assets = (await mirror.list("prototype-test"))[0].assets;
+      expect(assets).toContainEqual(asset);
+      if (typeof root === "object" && "items" in root && typeof root.items[0].image === "object") {
+        expect(assets).toContainEqual({ ...asset, id: "dark" });
+      }
+    } finally {
+      first.send.mockRestore();
+      second.send.mockRestore();
+    }
+  });
+  test("unknown image is recorded missing and warned with saved id", async () => {
+    const mirror = new FakeSavedPrototypeMirror();
+    const { delegate, send, reply } = await recorder(mirror);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      reply(true, "saved-id");
+      await delegate.requestSavePrototype({
+        spec: {
+          ...spec,
+          state: { tab: 0 },
+          root: { type: "tabBar", stateKey: "tab", items: [{ label: "Photo", image: "unknown" }] },
+        },
+        label: "Panel",
+      });
+      expect((await mirror.list("prototype-test"))[0].assets).toEqual([{ id: "unknown" }]);
+      expect(
+        warn.mock.calls.some(
+          ([message]) =>
+            String(message).includes("saved-id") && String(message).includes("unknown"),
+        ),
+      ).toBe(true);
+    } finally {
+      send.mockRestore();
+      warn.mockRestore();
+    }
+  });
+  test("absent cache records all explicit references as missing after upload", async () => {
+    const mirror = new FakeSavedPrototypeMirror();
+    const { delegate, client, send } = await recorder(mirror);
+    const context = client["createDelegateContext"]();
+    delete context.prototypeAssetCache;
+    const withoutCache = new CtrlProxyPrototypes(context);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await delegate.requestPutPrototypeAsset(asset);
+      await withoutCache.requestSavePrototype({
+        spec: {
+          ...spec,
+          state: { tab: 0 },
+          root: {
+            type: "tabBar",
+            stateKey: "tab",
+            items: [{ label: "Photo", image: { light: "photo", dark: "dark" } }],
+          },
+        },
+        label: "Panel",
+        icon: "icon",
+      });
+      expect((await mirror.list("prototype-test"))[0].assets).toEqual([
+        { id: "photo" },
+        { id: "dark" },
+        { id: "icon" },
+      ]);
+      expect(warn).toHaveBeenCalledTimes(3);
+    } finally {
+      send.mockRestore();
+      warn.mockRestore();
+    }
+  });
+  test("successful removal deletes cache and failed cache put preserves upload success", async () => {
+    const cache = new FakePrototypeAssetCache();
+    const { delegate, send } = await recorder(undefined, cache);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await delegate.requestPutPrototypeAsset(asset);
+      expect(await cache.get("prototype-test", "photo")).toEqual(asset);
+      await delegate.requestRemovePrototypeAsset("photo");
+      expect(await cache.get("prototype-test", "photo")).toBeUndefined();
+      cache.putError = new Error("cache unavailable");
+      expect((await delegate.requestPutPrototypeAsset(asset)).success).toBe(true);
+      expect(warn.mock.calls.some((call) => call[1] === cache.putError)).toBe(true);
+    } finally {
+      send.mockRestore();
+      warn.mockRestore();
+    }
+  });
   test("successful save mirrors tracked strings anywhere in spec plus icon; deletion removes", async () => {
     const mirror = new FakeSavedPrototypeMirror();
     const { delegate, send } = await recorder(mirror);
@@ -632,6 +860,62 @@ describe("CtrlProxy prototypes", () => {
     }
   });
 
+  test.each([undefined, true, false])(
+    "replaceOthers %p is sent only when false",
+    async (replaceOthers) => {
+      const { client, socket, receive } = await harness([
+        "full_command_set_v1",
+        "request_id_echo_v1",
+        "show_prototype",
+        PROTOTYPE_MULTI_SURFACE_CAPABILITY,
+      ]);
+      const frames: Record<string, unknown>[] = [];
+      const send = spyOn(socket, "send").mockImplementation((data) => {
+        const frame = JSON.parse(String(data));
+        frames.push(frame);
+        void receive({
+          type: "prototype_result",
+          requestId: frame.requestId,
+          timestamp: 42,
+          success: true,
+        });
+      });
+      try {
+        expect(
+          await client.requestShowPrototype(spec, 5000, undefined, undefined, undefined, {
+            replaceOthers,
+          }),
+        ).toMatchObject({ success: true });
+        expect(frames).toHaveLength(1);
+        expect(Object.hasOwn(frames[0], "replaceOthers")).toBe(replaceOthers === false);
+        if (replaceOthers === false) {
+          expect(frames[0].replaceOthers).toBe(false);
+        }
+      } finally {
+        send.mockRestore();
+      }
+    },
+  );
+
+  test.each([null, ["full_command_set_v1", "request_id_echo_v1", "show_prototype"]])(
+    "replaceOthers false without the flag refuses before a device request (%j)",
+    async (commands) => {
+      const { client, socket } = await harness(commands);
+      const send = spyOn(socket, "send");
+      try {
+        await expectRefusal(
+          client.requestShowPrototype(spec, 5000, undefined, undefined, undefined, {
+            replaceOthers: false,
+          }),
+          "replaceOthers:false",
+        );
+        expect(send).not.toHaveBeenCalled();
+      } finally {
+        send.mockRestore();
+      }
+    },
+  );
+
   test("fake records prototype calls, configures results, and emits until unsubscribe", async () => {
     const fake = new FakeCtrlProxy(new FakeTimer());
     const failure = { success: false, error: "configured" };
@@ -1023,10 +1307,23 @@ const savedCommands = [
   "save_prototype",
   "list_saved_prototypes",
   "delete_saved_prototype",
+  "pin_saved_prototype",
 ];
 const savedInfo = { id: "panel", slug: "panel", replaced: false };
 const savedEntries = [{ id: "panel", label: "Panel", slug: "panel", savedAt: 42, pinned: true }];
 const savedRequests = [
+  {
+    type: "pin_saved_prototype",
+    run: (client: AndroidCtrlProxyClient) => client.requestPinSavedPrototype("panel", "hero"),
+    params: { id: "panel", icon: "hero" },
+    reply: { pin: { id: "panel", status: "requested" } },
+  },
+  ...(["updated", "rate_limited"] as const).map((shortcut) => ({
+    type: "pin_saved_prototype",
+    run: (client: AndroidCtrlProxyClient) => client.requestPinSavedPrototype("panel"),
+    params: { id: "panel" },
+    reply: { pin: { id: "panel", status: "already_pinned", shortcut } },
+  })),
   {
     type: "save_prototype",
     run: (client: AndroidCtrlProxyClient) =>
@@ -1211,5 +1508,76 @@ describe("CtrlProxy saved prototype transport", () => {
     expect(fake.saveRequests).toEqual([save]);
     expect(fake.listCalls).toBe(1);
     expect(fake.deleteRequests).toEqual(["panel"]);
+  });
+});
+
+describe("saved shortcut reply validation", () => {
+  test.each(["requested", "already_pinned"])("accepts pin status %s", (status) => {
+    expect(prototypeSavedReplyFields({ pin: { id: "panel", status } })).toEqual({
+      pin: { id: "panel", status },
+    });
+  });
+  test.each(["updated", "rate_limited"])("accepts shortcut update %s", (shortcut) => {
+    expect(prototypeSavedReplyFields({ saved: { ...savedInfo, shortcut } })).toEqual({
+      saved: { ...savedInfo, shortcut },
+    });
+    const pin = { id: "panel", status: "already_pinned", shortcut };
+    expect(prototypeSavedReplyFields({ pin })).toEqual({ pin });
+  });
+  test.each([null, "future", 3, { status: "requested" }, { id: "panel", status: "future" }])(
+    "drops malformed pin %p",
+    (pin) => {
+      expect(prototypeSavedReplyFields({ pin })).toEqual({});
+    },
+  );
+  test.each([null, "future", 3, {}])(
+    "drops malformed shortcut %p while retaining saved info",
+    (shortcut) => {
+      expect(prototypeSavedReplyFields({ saved: { ...savedInfo, shortcut } })).toEqual({
+        saved: savedInfo,
+      });
+      const pin = { id: "panel", status: "already_pinned" };
+      expect(prototypeSavedReplyFields({ pin: { ...pin, shortcut } })).toEqual({ pin });
+    },
+  );
+  test.each(["pin_unsupported", "device_locked", "pin_failed"])("accepts %s", (errorCode) => {
+    expect(prototypeSavedReplyFields({ errorCode })).toEqual({ errorCode });
+  });
+  test.each([
+    { id: "", icon: undefined },
+    { id: "panel", icon: "" },
+    { id: "panel", icon: "x".repeat(MAX_PROTOTYPE_ASSET_ID_LENGTH + 1) },
+  ])("refuses invalid pin %p before connecting", async ({ id, icon }) => {
+    const { client, socket } = await harness([...savedCommands, PROTOTYPE_SAVED_CAPABILITY]);
+    const connect = spyOn(client, "ensureConnected");
+    const send = spyOn(socket, "send");
+    try {
+      await expect(client.requestPinSavedPrototype(id, icon)).rejects.toBeInstanceOf(
+        ActionableError,
+      );
+      expect(connect).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      connect.mockRestore();
+      send.mockRestore();
+    }
+  });
+  test.each([null, 4])("refuses non-string pin icon %p", async (icon) => {
+    const { client } = await harness([...savedCommands, PROTOTYPE_SAVED_CAPABILITY]);
+    // @ts-expect-error Exercise invalid runtime input.
+    await expect(client.requestPinSavedPrototype("panel", icon)).rejects.toBeInstanceOf(
+      ActionableError,
+    );
+  });
+  test("fake records pin requests and returns configured result", async () => {
+    const fake = new FakeCtrlProxy();
+    const result = {
+      success: true,
+      pin: { id: "panel", status: "already_pinned" as const, shortcut: "rate_limited" as const },
+    };
+    fake.setPinResult(result);
+    expect(await fake.requestPinSavedPrototype("panel", "hero")).toEqual(result);
+    expect(await fake.requestPinSavedPrototype("panel")).toEqual(result);
+    expect(fake.pinRequests).toEqual([{ id: "panel", icon: "hero" }, { id: "panel" }]);
   });
 });

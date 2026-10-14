@@ -84,6 +84,10 @@ export { SCREENSHOT_HIDE_PROTOTYPE_CAPABILITY };
  */
 export const IOS_PROTOTYPE_INSPECT_CAPABILITY = "prototype_inspect_v1";
 
+// ORCHESTRATOR-CHOSEN: iOS multi-window parity is a follow-up.
+export const IOS_PROTOTYPE_MULTI_SURFACE_UNSUPPORTED_MESSAGE =
+  "iOS shows one prototype at a time; replaceOthers:false is Android only (prototype_multi_surface_v1)";
+
 /** The agent restores the prototype by itself after this long, even if the host never asks. */
 export const DEFAULT_CAPTURE_HIDE_DEADLINE_MS = 1500;
 
@@ -225,6 +229,9 @@ export class IosPrototypeTransport implements PrototypeTransport {
   async show(spec: PrototypeSpec, options: PrototypeShowOptions = {}): Promise<PrototypeResult> {
     if (prototypeHasStack(spec) && !this.supportsCapability(PROTOTYPE_STACK_CAPABILITY)) {
       throw new ActionableError(prototypeStackUnsupportedMessage("ios"));
+    }
+    if (options.replaceOthers === false) {
+      throw new ActionableError(IOS_PROTOTYPE_MULTI_SURFACE_UNSUPPORTED_MESSAGE);
     }
     if (options.reset === true && !this.supportsCapability(PROTOTYPE_SHOW_IN_PLACE_CAPABILITY)) {
       throw new ActionableError(

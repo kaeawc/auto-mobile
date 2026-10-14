@@ -1,3 +1,8 @@
+import {
+  defaultRecordingCodecProbe,
+  probeDurationMs,
+  type RecordingCodecProbe,
+} from "../features/video/recordingCodec";
 import { OrphanRecorderActiveError } from "./orphanRecorderRefusal";
 import type { StartupOrphanCaptures } from "./recordingTeardownRedrive";
 import { promises as fsPromises } from "node:fs";
@@ -211,6 +216,7 @@ interface VideoRecordingManagerDependencies {
    * missing file.
    */
   statFileSize: (filePath: string) => Promise<number>;
+  codecProbe: RecordingCodecProbe;
   resolveAndroidDisplay: (
     device: BootedDevice,
     request?: string,
@@ -569,6 +575,7 @@ async function getVideoRecordingDependencies(): Promise<VideoRecordingManagerDep
       daemonSessionId: undefined,
       retentionPolicy: resolveVideoRetentionPolicy(),
       statFileSize: getFileSize,
+      codecProbe: defaultRecordingCodecProbe,
       resolveAndroidDisplay: defaultResolveAndroidDisplay,
     };
   }
@@ -594,10 +601,28 @@ export async function setVideoRecordingManagerDependencies(
     liveDaemonSessionIds: deps.liveDaemonSessionIds ?? current.liveDaemonSessionIds,
     daemonSessionId: deps.daemonSessionId,
     retentionPolicy: deps.retentionPolicy ?? current.retentionPolicy,
-    statFileSize: deps.statFileSize ?? current.statFileSize,
+    ...recordingArtifactDependencies(deps, current),
     resolveAndroidDisplay: deps.resolveAndroidDisplay ?? current.resolveAndroidDisplay,
   };
   resetVideoRecordingManagerState();
+}
+
+type RecordingArtifactDependencies = Pick<
+  VideoRecordingManagerDependencies,
+  "statFileSize" | "codecProbe"
+>;
+
+function recordingArtifactDependencies(
+  deps: Partial<RecordingArtifactDependencies>,
+  defaults: RecordingArtifactDependencies = {
+    statFileSize: getFileSize,
+    codecProbe: defaultRecordingCodecProbe,
+  },
+): RecordingArtifactDependencies {
+  return {
+    statFileSize: deps.statFileSize ?? defaults.statFileSize,
+    codecProbe: deps.codecProbe ?? defaults.codecProbe,
+  };
 }
 
 async function initialVideoRecordingDependencies(
@@ -613,7 +638,7 @@ async function initialVideoRecordingDependencies(
     liveDaemonSessionIds: deps.liveDaemonSessionIds ?? new Set(),
     daemonSessionId: deps.daemonSessionId,
     retentionPolicy: deps.retentionPolicy ?? resolveVideoRetentionPolicy(),
-    statFileSize: deps.statFileSize ?? getFileSize,
+    ...recordingArtifactDependencies(deps),
     resolveAndroidDisplay: deps.resolveAndroidDisplay ?? defaultResolveAndroidDisplay,
   };
 }
@@ -1215,6 +1240,7 @@ function toMetadata(record: VideoRecordingRecord): VideoRecordingMetadata {
     format: record.format,
     sizeBytes: record.sizeBytes,
     durationMs: record.durationMs,
+    videoDurationMs: record.videoDurationMs,
     codec: record.codec,
     outputName: record.outputName,
     createdAt: record.createdAt,
@@ -1720,6 +1746,47 @@ async function stopActiveVideoRecording(
 export async function interruptVideoRecording(recordingId: string): Promise<void> {
   const deps = await getVideoRecordingDependencies();
   await interruptVideoRecordingWithDependencies(recordingId, deps);
+}
+
+/** Adopt a finalized host capture only when the planned output never acquired bytes. */
+export async function adoptOrphanCaptureArtifact(
+  recordingId: string,
+  capturePath: string,
+): Promise<VideoRecordingMetadata | undefined> {
+  const deps = await getVideoRecordingDependencies();
+  const record = await deps.recordingRepository.getRecording(recordingId);
+  if (!record || (await deps.statFileSize(record.filePath)) > 0) {
+    return undefined;
+  }
+  const sizeBytes = await deps.statFileSize(capturePath);
+  if (sizeBytes <= 0) {
+    return undefined;
+  }
+  const format = path.extname(capturePath).slice(1).toLowerCase();
+  if (format !== "mov" && format !== "mp4") {
+    logger.warn(`[VideoRecording] Unsupported orphan capture container: ${format}`);
+    return undefined;
+  }
+  const codec = await deps.codecProbe.codec(capturePath);
+  if (codec === undefined) {
+    logger.warn(
+      `[VideoRecording] Could not probe the raw orphan capture at ${redactHomeDir(capturePath)}`,
+    );
+    return undefined;
+  }
+  const videoDurationMs = await probeDurationMs(deps.codecProbe, capturePath);
+  const artifact = {
+    filePath: capturePath,
+    fileName: path.basename(capturePath),
+    format,
+    sizeBytes,
+    codec,
+    videoDurationMs,
+  } satisfies Partial<VideoRecordingMetadata>;
+  await deps.recordingRepository.updateRecording(recordingId, artifact);
+  await notifyVideoRecordingResources([recordingId]);
+  // Preserve optional probe metadata in this response even when the repository does not persist it.
+  return { ...toMetadata(record), ...artifact };
 }
 
 async function interruptVideoRecordingWithDependencies(

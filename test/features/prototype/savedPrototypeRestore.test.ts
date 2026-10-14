@@ -90,7 +90,7 @@ test("missing bytes fail before any upload; mirror failure returns a typed repor
   const { mirror, device, calls } = harness();
   await mirror.record("serial", { ...entry, assets: [...entry.assets, { id: "missing" }] });
   expect((await restoreSavedPrototypes("serial", mirror, device)).failed).toMatchObject([
-    { id: "one", code: "asset_unavailable" },
+    { id: "one", code: "asset_unavailable", reason: "Missing mirrored assets: missing" },
   ]);
   expect(calls).toEqual([]);
   mirror.error = new Error("mirror unavailable");

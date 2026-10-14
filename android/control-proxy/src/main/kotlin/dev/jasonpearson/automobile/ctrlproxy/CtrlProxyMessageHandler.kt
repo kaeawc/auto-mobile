@@ -23,6 +23,7 @@ import dev.jasonpearson.automobile.protocol.ListPreferenceFiles
 import dev.jasonpearson.automobile.protocol.ListSavedPrototypes
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
 import dev.jasonpearson.automobile.protocol.PatchPrototype
+import dev.jasonpearson.automobile.protocol.PinSavedPrototype
 import dev.jasonpearson.automobile.protocol.PinchResult
 import dev.jasonpearson.automobile.protocol.PrototypeResult
 import dev.jasonpearson.automobile.protocol.PutPrototypeAsset
@@ -501,6 +502,7 @@ class CtrlProxyMessageHandler(
           request.displayId,
           request.reset,
           request.appearance,
+          request.replaceOthers,
         )
       }
       is DismissPrototype -> {
@@ -517,6 +519,7 @@ class CtrlProxyMessageHandler(
       is InspectPrototypes -> actions.inspectPrototypes(request.requestId)
       is SavePrototype ->
         actions.savePrototype(request.requestId, request.spec, request.label, request.icon)
+      is PinSavedPrototype -> actions.pinSavedPrototype(request.requestId, request.id, request.icon)
       is ListSavedPrototypes -> actions.listSavedPrototypes(request.requestId)
       is DeleteSavedPrototype -> actions.deleteSavedPrototype(request.requestId, request.id)
       is PatchPrototype ->

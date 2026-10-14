@@ -166,6 +166,44 @@ describe("prototype saved actions", () => {
     expect(order).toEqual(["upload", "save"]);
     expect(proxy.saveRequests).toEqual([{ spec, label: "My demo", icon: "logo" }]);
   });
+  test("save refuses element anchors before reading or uploading assets", async () => {
+    const anchored = {
+      ...spec,
+      root: {
+        type: "text" as const,
+        text: "Hello",
+        anchor: {
+          type: "element" as const,
+          selector: { text: "Continue" },
+          alignment: "cover" as const,
+        },
+      },
+    };
+    expect(
+      prototypeSchema.safeParse({ action: "save", spec: anchored, assets, icon: "logo" }).success,
+    ).toBe(true);
+    const output = await save({ spec: anchored, assets, icon: "logo" });
+    expect(output).toMatchObject({ success: false, errorCode: "invalid_spec" });
+    expect(output.error?.toLowerCase()).toContain("element anchors");
+    expect(output.error).toContain("bounds");
+    expect(output.error?.toLowerCase()).toContain("nothing was uploaded or saved");
+    expect(reader.reads).toEqual([]);
+    expect(proxy.getPrototypeAssetHistory()).toEqual([]);
+    expect(proxy.saveRequests).toEqual([]);
+    expect(output.uploadedAssets).toBeUndefined();
+  });
+  test("save accepts bounds anchors", async () => {
+    const anchored = {
+      ...spec,
+      root: {
+        type: "text" as const,
+        text: "Hello",
+        anchor: { type: "bounds" as const, bounds: { x: 1, y: 2, width: 30, height: 40 } },
+      },
+    };
+    expect(await save({ spec: anchored })).toMatchObject({ success: true });
+    expect(proxy.saveRequests).toHaveLength(1);
+  });
   test("upload failure ends save", async () => {
     reader.addFile("/img/second.png", png);
     const put = proxy.requestPutPrototypeAsset.bind(proxy);
@@ -178,6 +216,7 @@ describe("prototype saved actions", () => {
     const output = await save({ assets: [...assets, { id: "second", path: "/img/second.png" }] });
     expect(output.success).toBe(false);
     expect(output.error).toContain("The prototype was not saved.");
+    expect(output.error).not.toContain("The new spec was not sent");
     expect(output.uploadedAssets).toEqual([{ id: "logo", bytes: 12, mimeType: "image/png" }]);
     expect(proxy.saveRequests).toEqual([]);
   });

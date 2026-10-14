@@ -1168,7 +1168,7 @@ key since that revision, returning the current revision and those keys' values.
 
 There are at most 64 ops, the frame is capped at 1 MiB, and the resulting whole
 spec must satisfy every spec/data limit, including node count and depth. The
-host tracks a cloned copy of the device spec from the last acknowledged show,
+host tracks a cloned copy of each id's device spec from its last acknowledged show,
 with components expanded and anchors resolved. It applies ops to a copy and
 runs the full validator before sending. Errors preserve deterministic paths.
 The host validates state ops against the agent-declared state and leaves value
@@ -1179,8 +1179,9 @@ patch refuse as busy. Shows are not delayed by patches. If a dispatched show
 and an acknowledged patch overlap, their device-side order is unknown: the host
 forgets its spec, warns, and requires a further successful show before patching.
 A failed dispatched show, dismissed event, successful dismiss, session release,
-device removal or unbinding also ends tracking. An adopted different id ends
-tracking; inspecting the same tracked id retains it. A timeout or connection loss after
+device removal or unbinding also ends tracking. Inspect retains each reported tracked id
+and drops missing ids; adopted siblings do not end its tracking. A fifth-surface refusal
+with `replaceOthers: false` also retains the acknowledged specs. A timeout or connection loss after
 patch dispatch is indeterminate and requires a new show. A failure before dispatch
 keeps the tracked copy. An atomic device
 refusal leaves the tracked copy unchanged. A successful patch refreshes shown
@@ -1851,3 +1852,16 @@ it returns true. Sequence numbers are allocated per prototype id for the process
 lifetime and continue across activity recreation and document relaunch. Future
 replay must synchronize on the buffer while draining or
 restoring it. The bounded buffer is in memory and does not survive process death.
+
+### Multiple surfaces (phase 1)
+
+On Android, `show` with `replaceOthers: false` adds another prototype window, requiring
+`prototype_multi_surface_v1`. Up to four distinct ids can be shown; a fifth is refused with the
+ids already shown, leaving them unchanged. Showing an existing id with `replaceOthers: false`
+replaces only that prototype. Omitted or `true` replaces the other prototypes.
+`dismiss {id}` removes only that id; `dismiss {all: true}` removes all. `status` lists every
+shown prototype by id, and `inspect` reconciles the full device list. State, patches and
+`awaitEvent {id}` remain independent per prototype.
+
+Not yet supported in this phase: `stateGroup` / shared state groups, `window.z`, selective
+observe exclusion, cross-window focus, iOS multi-window parity, or `prototype_state_groups_v1`.

@@ -371,6 +371,7 @@ interface CtrlProxyActions {
     displayId: Int?,
     reset: Boolean,
     appearance: PrototypeAppearanceOverride?,
+    replaceOthers: Boolean = true,
   )
 
   fun dismissPrototype(requestId: String?, id: String?, all: Boolean?)
@@ -380,6 +381,8 @@ interface CtrlProxyActions {
   fun inspectPrototypes(requestId: String?)
 
   fun savePrototype(requestId: String?, spec: PrototypeSpec, label: String, icon: String?)
+
+  fun pinSavedPrototype(requestId: String?, id: String, icon: String?)
 
   fun listSavedPrototypes(requestId: String?)
 

@@ -78,11 +78,11 @@ export interface PrototypeScope {
 export interface PrototypeStatusStore {
   status(scope: PrototypeScope): PrototypeStatus;
   /**
-   * The prototype currently shown with this id on the device, from any session. The device holds one
-   * active prototype, so whether a same-id show replaces in place is a device-wide fact.
+   * The prototype currently shown with this id on the device, from any session. Whether a same-id show
+   * replaces in place is a device-wide fact, independently of its siblings.
    */
   shownOnDevice(deviceId: string, id: string): PrototypeLastResult | undefined;
-  startShow(scope: PrototypeScope): void;
+  startShow(scope: PrototypeScope, id?: string): void;
   /**
    * A show is about to be sent. An accepted appearance change before its result is recorded
    * cannot be ordered against that result, so its presence must carry no appearance (#11416).
@@ -90,7 +90,7 @@ export interface PrototypeStatusStore {
   beginShowDispatch(deviceId: string, id: string): void;
   /**
    * The device reported this prototype as showing (`inspect`). Presence and its last known
-   * pages/state come from the device, replacing whatever the host remembered for the device.
+   * pages/state come from the device, replacing whatever the host remembered for this id.
    */
   adopt(scope: PrototypeScope, prototype: AdoptedPrototype): void;
   recordEvent(scope: PrototypeScope, event: PrototypeEvent): void;
@@ -116,12 +116,13 @@ export interface PrototypeStatusStore {
 export interface PrototypeRecordDetails {
   data?: PrototypeData;
   chrome?: PrototypeWindowChrome;
+  replaceOthers?: boolean;
 }
 interface StoredPrototypeStatus extends PrototypeScope {
   shown: Map<string, PrototypeLastResult>;
   lastResult?: PrototypeLastResult;
-  snapshot?: PrototypeEventState & { id: string };
-  pendingSnapshot?: PrototypeEventState & { id: string };
+  snapshots?: Map<string, PrototypeEventState>;
+  pendingSnapshots?: Map<string, PrototypeEventState>;
 }
 
 function shownData(
@@ -143,6 +144,45 @@ function shownData(
  */
 export const MAX_PROTOTYPE_STATUS_SCOPES = 128;
 
+function eventSnapshot(event: PrototypeEvent): PrototypeEventState {
+  return {
+    pages: { ...event.pages },
+    ...(event.stacks ? { stacks: structuredClone(event.stacks) } : {}),
+    state: { ...event.state },
+    ...(event.context === undefined ? {} : { context: structuredClone(event.context) }),
+    ...(event.contextTruncated === true ? { contextTruncated: true as const } : {}),
+    lastKnown: true,
+  };
+}
+
+function snapshotOverlay(snapshot: PrototypeEventState | undefined): Partial<PrototypeEventState> {
+  if (!snapshot) {
+    return {};
+  }
+  return {
+    pages: { ...snapshot.pages },
+    ...(snapshot.stacks ? { stacks: structuredClone(snapshot.stacks) } : {}),
+    state: { ...snapshot.state },
+    ...(snapshot.context === undefined ? {} : { context: structuredClone(snapshot.context) }),
+    ...(snapshot.contextTruncated === true ? { contextTruncated: true as const } : {}),
+    lastKnown: true as const,
+  };
+}
+
+/** One shown entry, overlaid with its last known snapshot when the device reported one. */
+function presenceWithSnapshot(
+  entry: PrototypeLastResult,
+  snapshot: PrototypeEventState | undefined,
+): PrototypeLastResult & Partial<PrototypeEventState> {
+  const { stacks, ...presence } = entry;
+  return {
+    ...presence,
+    ...(!snapshot && stacks ? { stacks: structuredClone(stacks) } : {}),
+    ...(entry.data === undefined ? {} : { data: structuredClone(entry.data) }),
+    ...snapshotOverlay(snapshot),
+  };
+}
+
 /** Successful shows establish presence; host dismissals and terminal device events remove it. */
 export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
   private readonly scopes = new Map<string, StoredPrototypeStatus>();
@@ -156,29 +196,11 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
 
   status(scope: PrototypeScope): PrototypeStatus {
     const stored = this.scopes.get(JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]));
-    const snapshot = stored?.snapshot;
+
     return {
-      prototypes: Array.from(stored?.shown.values() ?? [], (entry) => {
-        const { stacks, ...presence } = entry;
-        const current = snapshot && snapshot.id === entry.id;
-        return {
-          ...presence,
-          ...(!current && stacks ? { stacks: structuredClone(stacks) } : {}),
-          ...(entry.data === undefined ? {} : { data: structuredClone(entry.data) }),
-          ...(snapshot && snapshot.id === entry.id
-            ? {
-                pages: { ...snapshot.pages },
-                ...(snapshot.stacks ? { stacks: structuredClone(snapshot.stacks) } : {}),
-                state: { ...snapshot.state },
-                ...(snapshot.context === undefined
-                  ? {}
-                  : { context: structuredClone(snapshot.context) }),
-                ...(snapshot.contextTruncated === true ? { contextTruncated: true as const } : {}),
-                lastKnown: true as const,
-              }
-            : {}),
-        };
-      }),
+      prototypes: Array.from(stored?.shown.values() ?? [], (entry) =>
+        presenceWithSnapshot(entry, entry.id ? stored?.snapshots?.get(entry.id) : undefined),
+      ),
       ...(stored?.lastResult ? { lastResult: { ...stored.lastResult } } : {}),
     };
   }
@@ -194,10 +216,14 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
   }
 
   /** Only events after this show attempt can establish its successful snapshot. */
-  startShow(scope: PrototypeScope): void {
+  startShow(scope: PrototypeScope, id?: string): void {
     const stored = this.scopes.get(JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]));
     if (stored) {
-      stored.pendingSnapshot = undefined;
+      if (id === undefined) {
+        stored.pendingSnapshots?.clear();
+      } else {
+        stored.pendingSnapshots?.delete(id);
+      }
     }
   }
 
@@ -208,14 +234,13 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
   }
 
   adopt(scope: PrototypeScope, prototype: AdoptedPrototype): void {
-    this.shownSpecs.retainOnly(scope.deviceId, prototype.id);
     const key = JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]);
     const stored = this.scopes.get(key) ?? {
       ...scope,
       shown: new Map<string, PrototypeLastResult>(),
     };
-    // The device holds one prototype; what it reports replaces every session's presence.
-    this.clearShown(scope.deviceId);
+    // Adoption transfers this id to the inspecting scope while retaining its siblings.
+    this.clearShown(scope.deviceId, prototype.id);
     const entry: PrototypeLastResult = {
       id: prototype.id,
       lastAction: "show",
@@ -232,14 +257,14 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       ...entry,
       ...shownData("show", { success: true }, prototype.data),
     });
-    stored.pendingSnapshot = undefined;
-    stored.snapshot = {
-      id: prototype.id,
+    stored.pendingSnapshots?.delete(prototype.id);
+    stored.snapshots ??= new Map();
+    stored.snapshots.set(prototype.id, {
       pages: { ...prototype.pages },
       ...(prototype.stacks ? { stacks: structuredClone(prototype.stacks) } : {}),
       state: { ...prototype.state },
       lastKnown: true,
-    };
+    });
     this.remember(key, stored);
   }
 
@@ -258,18 +283,13 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       ...scope,
       shown: new Map<string, PrototypeLastResult>(),
     };
-    stored.pendingSnapshot = {
-      id: event.id,
-      pages: { ...event.pages },
-      ...(event.stacks ? { stacks: structuredClone(event.stacks) } : {}),
-      state: { ...event.state },
-      ...(event.context === undefined ? {} : { context: structuredClone(event.context) }),
-      ...(event.contextTruncated === true ? { contextTruncated: true as const } : {}),
-      lastKnown: true,
-    };
+    stored.pendingSnapshots ??= new Map();
+    const snapshot = eventSnapshot(event);
+    stored.pendingSnapshots.set(event.id, snapshot);
     const shown = stored.shown.get(event.id);
     if (shown) {
-      stored.snapshot = stored.pendingSnapshot;
+      stored.snapshots ??= new Map();
+      stored.snapshots.set(event.id, snapshot);
       if (event.kind === "appearance_changed") {
         this.recordAppearanceChange(stored, shown, event);
       }
@@ -298,7 +318,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     target: { id?: string; all?: true },
     result: PrototypeResult,
     displayId?: number,
-    details?: PrototypeRecordDetails,
+    details: PrototypeRecordDetails = {},
   ): PrototypeLastResult {
     const key = JSON.stringify([scope.sessionUuid ?? null, scope.deviceId]);
     const existing = this.scopes.get(key);
@@ -312,7 +332,7 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       target,
       result,
       displayId ?? shownDisplay,
-      details?.chrome,
+      details.chrome,
     );
     const presence = this.consumeShowDispatch(scope.deviceId, entry);
     if (!existing && !result.success) {
@@ -324,7 +344,11 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       lastResult: entry,
     };
     stored.lastResult = entry;
-    this.updatePresence(stored, { ...presence, ...shownData(action, result, details?.data) });
+    this.updatePresence(
+      stored,
+      { ...presence, ...shownData(action, result, details.data) },
+      details.replaceOthers,
+    );
     this.remember(key, stored);
     return structuredClone(entry);
   }
@@ -377,13 +401,13 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     }
   }
 
-  private updatePresence(stored: StoredPrototypeStatus, entry: PrototypeLastResult): void {
+  private updatePresence(
+    stored: StoredPrototypeStatus,
+    entry: PrototypeLastResult,
+    replaceOthers?: boolean,
+  ): void {
     if (entry.lastAction === "show" && entry.success && entry.id) {
-      // The device has one active prototype; replacement invalidates every session's presence.
-      const snapshot = stored.pendingSnapshot;
-      this.clearShown(stored.deviceId);
-      stored.snapshot = snapshot?.id === entry.id ? snapshot : undefined;
-      stored.shown.set(entry.id, entry);
+      this.showPresence(stored, entry, replaceOthers);
     } else if (entry.lastAction === "dismiss" && entry.success) {
       this.shownSpecs.forget(stored.deviceId, entry.all ? undefined : entry.id);
       if (entry.all) {
@@ -395,6 +419,24 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
     // Any other outcome (a refused or failed show or dismiss) leaves the prototype still on screen
     // exactly as it was: its adopted/persistent/suspended flags, display and appearance stay, and
     // the failure is reported through the call's result and `lastResult` (#11394).
+  }
+
+  private showPresence(
+    stored: StoredPrototypeStatus,
+    entry: PrototypeLastResult,
+    replaceOthers?: boolean,
+  ): void {
+    if (!entry.id) {
+      return;
+    }
+    // Default replacement clears siblings; an additive show replaces only its own id.
+    const snapshot = stored.pendingSnapshots?.get(entry.id);
+    this.clearShown(stored.deviceId, replaceOthers === false ? entry.id : undefined);
+    stored.snapshots ??= new Map();
+    if (snapshot) {
+      stored.snapshots.set(entry.id, snapshot);
+    }
+    stored.shown.set(entry.id, entry);
   }
 
   clearDevice(deviceId: string): void {
@@ -466,11 +508,12 @@ export class InMemoryPrototypeStatusStore implements PrototypeStatusStore {
       if (known.deviceId !== deviceId) {
         continue;
       }
-      if (id === undefined || known.pendingSnapshot?.id === id) {
-        known.pendingSnapshot = undefined;
-      }
-      if (id === undefined || known.snapshot?.id === id) {
-        known.snapshot = undefined;
+      if (id === undefined) {
+        known.pendingSnapshots?.clear();
+        known.snapshots?.clear();
+      } else {
+        known.pendingSnapshots?.delete(id);
+        known.snapshots?.delete(id);
       }
       if (id === undefined) {
         known.shown.clear();

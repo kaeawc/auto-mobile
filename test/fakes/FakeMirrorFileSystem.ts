@@ -7,6 +7,8 @@ export class FakeMirrorFileSystem implements MirrorFileSystem {
   readonly files = new Map<string, Uint8Array>();
   readonly directories = new Set<string>();
   failWrite = false;
+  failWriteTo: string | undefined;
+  failReadFrom: string | undefined;
   failRenameTo: string | undefined;
   async mkdir(directory: string): Promise<void> {
     this.directories.add(directory);
@@ -16,7 +18,7 @@ export class FakeMirrorFileSystem implements MirrorFileSystem {
     }
   }
   async writeFile(file: string, data: string | Uint8Array): Promise<void> {
-    if (this.failWrite) {
+    if (this.failWrite || (this.failWriteTo && file.endsWith(this.failWriteTo))) {
       throw new Error("write failed");
     }
     if (!this.directories.has(path.dirname(file))) {
@@ -25,9 +27,12 @@ export class FakeMirrorFileSystem implements MirrorFileSystem {
     this.files.set(file, typeof data === "string" ? new TextEncoder().encode(data) : data.slice());
   }
   async readFile(file: string): Promise<Uint8Array> {
+    if (this.failReadFrom && file.endsWith(this.failReadFrom)) {
+      throw Object.assign(new Error("read failed"), { code: "EIO" });
+    }
     const bytes = this.files.get(file);
     if (!bytes) {
-      throw new Error("missing file");
+      throw Object.assign(new Error("missing file"), { code: "ENOENT" });
     }
     return bytes.slice();
   }
@@ -64,6 +69,12 @@ export class FakeMirrorFileSystem implements MirrorFileSystem {
     if (to === this.failRenameTo) {
       this.failRenameTo = undefined;
       throw new Error("rename failed");
+    }
+    const file = this.files.get(from);
+    if (file) {
+      this.files.set(to, file);
+      this.files.delete(from);
+      return;
     }
     if (!this.directories.has(from)) {
       throw new Error("missing directory");

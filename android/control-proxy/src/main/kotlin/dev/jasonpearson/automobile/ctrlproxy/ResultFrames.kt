@@ -180,6 +180,19 @@ internal fun prototypeResultFrame(
     ),
   )
 
+internal fun prototypePinnedFrame(
+  requestId: String?,
+  pin: dev.jasonpearson.automobile.protocol.SavedPrototypePinInfo,
+): String =
+  resultFrameJson.encodeToString<WebSocketResponse>(
+    PrototypeResult(
+      timestamp = System.currentTimeMillis(),
+      requestId = requestId,
+      success = true,
+      pin = pin,
+    ),
+  )
+
 internal fun prototypeSavedFrame(requestId: String?, saved: SavedPrototypeInfo): String =
   resultFrameJson.encodeToString<WebSocketResponse>(
     PrototypeResult(

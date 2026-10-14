@@ -446,7 +446,7 @@ export function checkMutation(
   }
   const operations = f.fs.operations.slice(start);
   if (sampledMarker && !failedOperations.has(`readText:${pending.value?.path}`)) {
-    actor.restoreOwner = actors.find(
+    actor.restoreOwner = actors.findLast(
       (other) =>
         other.publicationIno === sampledMarker.ino ||
         other.publicationCopies?.has(sampledMarker.ino),
@@ -460,7 +460,7 @@ export function checkMutation(
     operations.some((op) => op.path === PATH && op.op === "openExclusive")
   ) {
     // An exclusive restore can copy even an empty legacy publication; its new inode
-    // belongs to the displaced writer, never to the stale releasing actor (1366).
+    // belongs to the publishing actor, including a reopen, never its identical-bytes owner.
     actor.restoreOwner.publicationCopies ??= new Set();
     actor.restoreOwner.publicationCopies.add(f.fs.peek(PATH)!.ino);
   }
@@ -476,6 +476,7 @@ export function checkMutation(
   if (
     trackResiduals &&
     wasAcquiring &&
+    !actor.restoreOwner &&
     pathWasAbsent &&
     f.fs.peek(PATH) &&
     operations.some((op) => op.path === PATH && ["link", "openExclusive"].includes(op.op)) &&
@@ -655,11 +656,12 @@ function setRetainedFailures(context: RetainedContext, actor: Actor): void {
   // Actors are only appended; a reopen has its own index even when its PID matches.
   const actorIndex = context.actors.indexOf(actor);
   const linkFails = random.next() < 0.45;
+  const restoreLinkFails = f.fs.peek(`${PATH}.displaced`) !== undefined && random.next() < 0.3;
   const copyFails = random.next() < 0.65;
   const readFails = random.next() < 0.03;
   const renameFails = random.next() < 0.03;
   f.fs.failure = (op, path) => {
-    if (op === "link" && linkFails) {
+    if (op === "link" && (linkFails || (path === PATH && actor.restoreOwner && restoreLinkFails))) {
       return "ENOTSUP";
     }
     if (op === "openExclusive" && path === PATH && copyFails) {

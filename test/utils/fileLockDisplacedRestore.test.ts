@@ -458,12 +458,7 @@ test.each([
   10138,
   17165,
 ])("retained property seed %d", (seed) => {
-  const warn = spyOn(logger, "warn").mockImplementation(() => {});
-  try {
-    runRetainedSchedule(seed);
-  } finally {
-    warn.mockRestore();
-  }
+  quiet(() => runRetainedSchedule(seed));
 });
 
 test("takeover removes a still-live same-instance F under its existing guard", () => {
@@ -890,12 +885,13 @@ test("R2: drained back-out with another instance now at P leaves it alone and ke
     f.fs.seed(PATH, raw(404));
     for (let call = 0; call < 2; call++) {
       // The doomed publication was not verifiably removed (a displacer may link it back), so
-      // the identity entry stays: one stat(P) per call, and a foreign inode is never touched.
+      // the identity entry stays: stat(P) plus one byte check; a foreign lock is never touched.
       f.fs.operations.length = 0;
       expect(f.acquire(303).finish()).toBe(false);
       expect(f.fs.peek(PATH)?.raw).toBe(raw(404));
       expect(f.fs.operations).toEqual([
         { op: "stat", path: PATH },
+        { op: "readText", path: PATH },
         { op: "stat", path: PATH },
         { op: "readText", path: PATH },
       ]);
@@ -1180,7 +1176,9 @@ test("V1: an exhausted marker verification read during back-out is remembered an
 });
 
 test("V2: re-acquiring while holding through F never deletes the genuine hold", () => {
-  const f = retained();
+  const f = fixture();
+  expect(f.acquire(101).finish()).toBe(true);
+  f.fs.rename(PATH, F);
   const held = { ...f.fs.peek(F)! };
   // The stale displacer's read predates both new publications.
   f.fs.seed(PATH, raw(909));
@@ -1246,13 +1244,14 @@ test("V1: a successful foreign marker verification restores the foreign lock and
     f.fs.operations.filter((s) => s.op === "readText" && s.path.includes(".202.release.")),
   ).toHaveLength(1);
   // S2: the back-out never claimed its own publication, so it is not complete; the identity
-  // entry costs one stat(P) and never touches the restored foreign lock.
+  // entry costs stat(P) plus one byte check and never touches the restored foreign lock.
   expect(hasPendingBackOut(f.fs, PATH)).toBe(true);
   f.fs.operations.length = 0;
   expect(f.acquire(202).finish()).toBe(false);
   expect(f.fs.peek(PATH)?.raw).toBe(raw(303));
   expect(f.fs.operations).toEqual([
     { op: "stat", path: PATH },
+    { op: "readText", path: PATH },
     { op: "stat", path: PATH },
     { op: "readText", path: PATH },
   ]);
@@ -1272,20 +1271,27 @@ const linksToPath = (racer: Racer<boolean>) =>
   racer.trace.filter((s) => s.op === "link" && s.path === PATH).length;
 
 /** P held by `taker`, plus a stale releaser of `pid` paused before rename(P): its read predates every later publication. */
-function staleReleaser(f: ReturnType<typeof fixture>, pid: number, taker: number) {
+function staleReleaser(
+  f: ReturnType<typeof fixture>,
+  pid: number,
+  taker: number,
+  takerOptions = f.options(taker),
+) {
   f.live.add(pid);
   f.live.add(taker);
   const stale = new Racer(releaseExclusiveLockSteps(PATH, pid, `owner-${pid}`, f.fs));
   stale.until((s) => s.op === "rename" && s.path === PATH);
-  expect(takeOverExclusiveLock(PATH, { pid, token: `owner-${pid}` }, f.options(taker))).toBe(true);
+  expect(takeOverExclusiveLock(PATH, { pid, token: `owner-${pid}` }, takerOptions)).toBe(true);
   return stale;
 }
 
 function quiet<T>(body: () => T): T {
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
+  const debug = spyOn(logger, "debug").mockImplementation(() => {});
   try {
     return body();
   } finally {
+    debug.mockRestore();
     warn.mockRestore();
   }
 }
@@ -1326,22 +1332,24 @@ test("S1: a blocked own publication leaves a foreign P alone", () =>
     expect(hasPendingBackOut(f.fs, PATH)).toBe(true);
   }));
 
-test("C7: a pending identity entry costs one stat(P) per lock call until it leaves", () =>
+test("C7: a pending identity entry costs stat(P) plus at most one byte check per lock call", () =>
   quiet(() => {
     const { f, a } = ownRetainedWithPeer();
     expect(a.finish()).toBe(false);
     const drain = { op: "stat", path: PATH } as const;
-    const sample = [drain, { op: "readText", path: PATH }] as const;
+    const bytes = { op: "readText", path: PATH } as const;
+    const sample = [drain, bytes] as const;
     f.fs.operations.length = 0;
     expect(f.acquire(303).finish()).toBe(false);
-    expect(f.fs.operations).toEqual([drain, ...sample]);
+    expect(f.fs.operations).toEqual([drain, bytes, ...sample]);
     f.fs.operations.length = 0;
     expect(takeOverExclusiveLock(PATH, { pid: 909, token: "gone" }, f.options(303))).toBe(false);
-    expect(f.fs.operations).toEqual([drain, ...sample]);
+    expect(f.fs.operations).toEqual([drain, bytes, ...sample]);
     f.fs.operations.length = 0;
     releaseExclusiveLock(PATH, 303, "owner-303", f.fs);
     expect(f.fs.operations).toEqual([
       drain,
+      bytes,
       { op: "readText", path: F },
       { op: "readText", path: PATH },
     ]);
@@ -1522,7 +1530,9 @@ test("C2: at most 8 doomed publications are remembered per path; the oldest is e
     const doomed: number[] = [];
     for (let i = 0; i < 9; i++) {
       f.fs.failure = (op, path) => (op === "rename" && path === PATH ? "EBUSY" : undefined);
-      expect(f.acquire(303).finish()).toBe(false);
+      expect(tryAcquireExclusiveLock(PATH, { ...f.options(303), metadata: `doomed-${i}` })).toBe(
+        false,
+      );
       f.fs.failure = undefined;
       doomed.push(f.fs.peek(PATH)!.ino);
       f.fs.rename(PATH, `${PATH}.away-${i}`); // As if a displacer held it in a private marker...
@@ -1611,12 +1621,12 @@ function olderBranchReopen() {
   const stale707 = staleReleaser(f, 707, 606);
   releaseExclusiveLock(PATH, 606, "owner-606", f.fs);
   expect(f.acquire(808).finish()).toBe(true);
-  const stale808 = staleReleaser(f, 808, 303);
+  const own = f.process(303);
+  const stale808 = staleReleaser(f, 808, 303, own);
   f.fs.failure = failRestore;
   stale808.finish();
   f.fs.failure = undefined;
   const genuine = { ...f.fs.peek(F)! };
-  const own = f.process(303);
   const opener = new Racer(acquireExclusiveLockSteps(PATH, own));
   opener.until(
     (s) =>
@@ -1687,7 +1697,7 @@ test("F2: a reused doomed inode retained at F is this call's publication, not a 
     expect(hasPendingBackOut(view, PATH)).toBe(true);
     f.fs.nextInodeOverride = doomed.ino;
     const acquirer = new Racer(acquireExclusiveLockSteps(PATH, own));
-    acquirer.until((s) => s.op === "stat" && s.path === F);
+    acquirer.until((s) => s.op === "stat" && s.path === F && linksToPath(acquirer) > 0);
     expect(f.fs.peek(PATH)).toEqual(doomed); // Same ino, mtimeMs and raw; this is the new publication.
     f.fs.failure = failRestore;
     stale707.finish();
@@ -1700,4 +1710,170 @@ test("F2: a reused doomed inode retained at F is this call's publication, not a 
     expect(f.acquire(404).finish()).toBe(false);
     releaseExclusiveLock(PATH, 303, "owner-303", view);
     expect(f.acquire(404).finish()).toBe(true);
+  }));
+
+/** Review-5: a foreign retained holder forces D to back out into a stale release's marker. */
+function copyRestoredDoomed() {
+  const f = fixture(raw(707));
+  [707, 606, 808, 303].forEach((pid) => f.live.add(pid));
+  const stale707 = staleReleaser(f, 707, 606);
+  releaseExclusiveLock(PATH, 606, "owner-606", f.fs);
+  f.fs.seed(F, raw(808));
+  const own = f.process(303);
+  const opener = new Racer(acquireExclusiveLockSteps(PATH, own));
+  opener.until((s) => s.op === "stat" && s.path === F && linksToPath(opener) > 0);
+  const doomed = { ...f.fs.peek(PATH)! };
+  stale707.advance();
+  f.fs.failure = (op, path) => (op === "link" && path === PATH ? "ENOTSUP" : undefined);
+  expect(opener.finish()).toBe(false);
+  expect(hasPendingBackOut(own.fileSystem!, PATH)).toBe(true);
+  copyRestore(f, stale707);
+  expect(f.fs.peek(PATH)?.raw).toBe(doomed.raw);
+  expect(f.fs.peek(PATH)?.ino).not.toBe(doomed.ino);
+  return { f, own, doomed };
+}
+
+function copyRestore(f: ReturnType<typeof fixture>, stale: Racer<void>) {
+  f.fs.failure = (op, path) => (op === "link" && path === PATH ? "ENOTSUP" : undefined);
+  stale.finish();
+  f.fs.failure = undefined;
+}
+
+test("copy-restored doomed publication is drained by exact bytes on the next lock call", () =>
+  quiet(() => {
+    const { f, own, doomed } = copyRestoredDoomed();
+    releaseExclusiveLock(PATH, 808, "owner-808", f.process(808).fileSystem);
+    acquiresFresh(f, own, doomed);
+    expect(hasPendingBackOut(own.fileSystem!, PATH)).toBe(false);
+  }));
+
+test("the F1 older-branch variant with a copy restore is drained", () =>
+  quiet(() => {
+    const { f, stale707, own, opener, doomed } = olderBranchReopen();
+    stale707.advance();
+    expect(opener.finish()).toBe(false);
+    releaseExclusiveLock(PATH, 303, "owner-303", own.fileSystem);
+    copyRestore(f, stale707);
+    expect(f.fs.peek(PATH)?.ino).not.toBe(doomed.ino);
+    acquiresFresh(f, own, doomed);
+  }));
+
+test("a genuine hold with identical bytes is never removed by the by-bytes drain", () =>
+  quiet(() => {
+    const { f, stale707, own, opener, genuine, doomed } = olderBranchReopen();
+    stale707.advance();
+    expect(opener.finish()).toBe(false);
+    copyRestore(f, stale707);
+    const copy = { ...f.fs.peek(PATH)! };
+    for (let i = 0; i < 3; i++) {
+      expect(tryAcquireExclusiveLock(PATH, own)).toBe(false);
+      expect(f.fs.peek(F)).toEqual(genuine);
+      expect(f.fs.peek(PATH)).toEqual(copy);
+    }
+    // Retain another in-flight copy: after G's release, these bytes become drainable.
+    f.fs.seed(`${PATH}.held-copy`, doomed.raw);
+    releaseExclusiveLock(PATH, 303, "owner-303", own.fileSystem);
+    expect(f.fs.peek(PATH)).toBeUndefined();
+    expect(f.fs.peek(F)).toBeUndefined();
+    f.fs.rename(`${PATH}.held-copy`, PATH);
+    acquiresFresh(f, own, doomed);
+  }));
+
+test("by-bytes drain of F", () =>
+  quiet(() => {
+    const { f, own, doomed } = copyRestoredDoomed();
+    releaseExclusiveLock(PATH, 808, "owner-808", f.process(808).fileSystem);
+    f.fs.rename(PATH, F);
+    expect(f.fs.peek(F)?.ino).not.toBe(doomed.ino);
+    acquiresFresh(f, own, doomed);
+    expect(hasPendingBackOut(own.fileSystem!, PATH)).toBe(false);
+  }));
+
+function pendingBeforeInFlightPublication() {
+  const f = fixture(raw(707));
+  [707, 606, 808, 303].forEach((pid) => f.live.add(pid));
+  const stale = new Racer(releaseExclusiveLockSteps(PATH, 707, "owner-707", f.fs));
+  stale.until((s) => s.op === "rename" && s.path === PATH);
+  expect(takeOverExclusiveLock(PATH, { pid: 707, token: "owner-707" }, f.options(606))).toBe(true);
+  releaseExclusiveLock(PATH, 606, "owner-606", f.fs);
+  f.fs.seed(`${PATH}.displaced`, raw(808));
+  const own = f.process(303);
+  const doomed = new Racer(acquireExclusiveLockSteps(PATH, own));
+  doomed.until(
+    (s) =>
+      s.op === "stat" &&
+      s.path === `${PATH}.displaced` &&
+      doomed.trace.some((t) => t.op === "link" && t.path === PATH),
+  );
+  const d = { ...f.fs.peek(PATH)! };
+  stale.advance(); // D is now privately displaced and never restored during this schedule.
+  f.fs.failure = (op, path) => (op === "link" && path === PATH ? "ENOTSUP" : undefined);
+  expect(doomed.finish()).toBe(false);
+  f.fs.failure = undefined;
+  expect(hasPendingBackOut(own.fileSystem!, PATH)).toBe(true);
+  releaseExclusiveLock(PATH, 808, "owner-808", f.process(808).fileSystem);
+  expect(f.fs.peek(PATH)).toBeUndefined();
+  return { f, own, d };
+}
+
+test("interleaved same-process acquires never let a by-bytes drain remove an in-flight publication", () =>
+  quiet(() => {
+    const { f, own, d } = pendingBeforeInFlightPublication();
+    const first = new Racer(acquireExclusiveLockSteps(PATH, own));
+    first.until(
+      (s) =>
+        s.op === "stat" &&
+        s.path === `${PATH}.displaced` &&
+        first.trace.some((t) => t.op === "link" && t.path === PATH),
+    );
+    const g = { ...f.fs.peek(PATH)! };
+    expect(g.raw).toBe(d.raw);
+    expect(g.ino).not.toBe(d.ino);
+    const secondResult = tryAcquireExclusiveLock(PATH, own);
+    const h = { ...f.fs.peek(PATH)! };
+    const firstResult = first.finish();
+
+    expect(firstResult && secondResult).toBe(false);
+    expect(firstResult).toBe(true);
+    expect(secondResult).toBe(false);
+    expect(h).toEqual(g);
+    expect(f.fs.peek(PATH)).toEqual(g);
+    expect(hasPendingBackOut(own.fileSystem!, PATH)).toBe(true);
+  }));
+
+test("in-flight retained bytes stay protected after another identical-byte acquire exits", () =>
+  quiet(() => {
+    const { f, own } = pendingBeforeInFlightPublication();
+    const first = new Racer(acquireExclusiveLockSteps(PATH, own));
+    first.until((s) => s.op === "stat" && s.path === F && linksToPath(first) > 0);
+    const genuine = { ...f.fs.peek(PATH)! };
+    f.fs.rename(PATH, F);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      expect(tryAcquireExclusiveLock(PATH, own)).toBe(false);
+      expect(f.fs.peek(F)).toEqual(genuine);
+      expect(f.fs.peek(PATH)).toEqual(genuine);
+      expect(hasPendingBackOut(own.fileSystem!, PATH)).toBe(true);
+    }
+    expect(first.finish()).toBe(true);
+    releaseExclusiveLock(PATH, 303, "owner-303", own.fileSystem);
+    expect(f.fs.peek(PATH)).toBeUndefined();
+    expect(f.fs.peek(F)).toBeUndefined();
+  }));
+
+test("an abandoned acquire conservatively keeps its publication bytes protected", () =>
+  quiet(() => {
+    const { f, own } = pendingBeforeInFlightPublication();
+    const abandoned = new Racer(acquireExclusiveLockSteps(PATH, own));
+    abandoned.until((s) => s.op === "stat" && s.path === F && linksToPath(abandoned) > 0);
+    const publication = { ...f.fs.peek(PATH)! };
+    f.fs.unlink(PATH);
+    f.fs.seed(PATH, publication.raw); // A new inode with the abandoned actor's exact bytes.
+    const copy = { ...f.fs.peek(PATH)! };
+    expect(copy.ino).not.toBe(publication.ino);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      expect(tryAcquireExclusiveLock(PATH, own)).toBe(false);
+      expect(f.fs.peek(PATH)).toEqual(copy);
+      expect(hasPendingBackOut(own.fileSystem!, PATH)).toBe(true);
+    }
+    // No return()/finish(): a crashed harness actor leaves its flag set in this view.
   }));

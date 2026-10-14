@@ -4,8 +4,8 @@
  * The agent speaks the CtrlProxy prototype message names, so requests and `prototype_event` pushes
  * map one to one. It has no `update_prototype` (#10550): a same-id `show` replaces the prototype.
  * It has no display targeting. `reset` is forwarded to start a same-id show fresh, and `appearance`
- * to pin the system setting (an agent advertising `prototype_appearance_v1` only). Per-call `timeoutMs` is not forwarded: the agent client applies
- * its own request timeout to every request.
+ * to pin the system setting (an agent advertising `prototype_appearance_v1` only). Transport per-call `timeoutMs` is not forwarded. Status uses a short client deadline to detect
+ * a suspended app; other requests use the agent client's default request timeout.
  */
 import { ActionableError } from "../../../models/ActionableError";
 import { errorMessage } from "../../../utils/describeUnknownError";
@@ -38,6 +38,11 @@ import type {
   PrototypeShowOptions,
   PrototypeTransport,
 } from "../PrototypeTransport";
+import { PrototypeAgentRequestTimeoutError } from "./prototypeAgentClient";
+import {
+  IOS_PROTOTYPE_STATUS_TIMEOUT_MS,
+  PrototypeAgentSuspendedError,
+} from "./prototypeAgentSuspended";
 import type {
   PrototypeAgentClient,
   PrototypeAgentMessage,
@@ -267,7 +272,17 @@ export class IosPrototypeTransport implements PrototypeTransport {
   }
 
   async status(): Promise<PrototypeDeviceStatus> {
-    const result = await this.agent.request("get_prototype_status");
+    let result: PrototypeAgentResult;
+    try {
+      result = await this.agent.request("get_prototype_status", undefined, {
+        timeoutMs: IOS_PROTOTYPE_STATUS_TIMEOUT_MS,
+      });
+    } catch (error) {
+      if (error instanceof PrototypeAgentRequestTimeoutError) {
+        throw new PrototypeAgentSuspendedError(error.timeoutMs, { cause: error });
+      }
+      throw error;
+    }
     return {
       success: result.success,
       ...(typeof result.error === "string" ? { error: result.error } : {}),

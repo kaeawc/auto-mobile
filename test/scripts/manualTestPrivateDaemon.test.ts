@@ -3,102 +3,69 @@ import { join, resolve } from "node:path";
 import {
   parsePrivateDaemonArgs,
   runPrivateDaemonCommand,
-  type PrivateDaemonCliDeps,
-  type PrivateDaemonCommand,
 } from "../../scripts/manual-test/private-daemon";
-import {
-  derivePrivateDaemonBatch,
-  type PrivateDaemonBatchOptions,
-} from "../../scripts/manual-test/privateDaemonEnv";
+import { derivePrivateDaemonBatch } from "../../scripts/manual-test/privateDaemonEnv";
+import { fixture, options, parsed } from "./manualTestPrivateDaemonFixture";
 const posixTest = process.platform === "win32" ? test.skip : test;
-const options: PrivateDaemonBatchOptions = {
-  batchDir: resolve("/mt-batch"),
-  count: 2,
-  basePort: 3160,
-  auxRoot: resolve("/mt-aux"),
-  serverPath: resolve("/built/index.js"),
-};
-function parsed(args: string[]): PrivateDaemonCommand {
-  const result = parsePrivateDaemonArgs(args);
-  if ("help" in result) {
-    throw new Error("Unexpected help");
-  }
-  if ("error" in result) {
-    throw new Error(result.error);
-  }
-  return result;
-}
-function fixture() {
-  const files = new Map<string, string>();
-  const writes: string[] = [],
-    dirs: Array<[string, number]> = [],
-    logs: string[] = [];
-  const removes: string[] = [],
-    modes: Array<[string, number]> = [],
-    captures: Array<{
-      command: string;
-      args: string[];
-      env: Record<string, string>;
-      timeoutMs: number;
-    }> = [];
-  const launches: Array<{ command: string; args: string[]; env: Record<string, string> }> = [];
-  const deps: PrivateDaemonCliDeps = {
-    runtimePath: resolve("/fake/runtime"),
-    repoRoot: resolve("/fake/repo"),
-    removeFile: (path) => {
-      removes.push(path);
-      files.delete(path);
-    },
-    chmod: (path, mode) => {
-      modes.push([path, mode]);
-    },
-    runCapture: async (command, args, env, timeoutMs) => {
-      captures.push({ command, args, env, timeoutMs });
-      return {
-        exitCode: 0,
-        stdout: '{"devices":{"runtime":[{"udid":"sim1","name":"fake","state":"Booted"}]}}',
-        stderr: "",
-      };
-    },
-    probeSocket: async () => ({ alive: false, reason: "not running" }),
-    queryAdbHost: async () => {
-      throw Object.assign(new Error("refused"), { code: "ECONNREFUSED" });
-    },
-    host: { homeDirs: [resolve("/home/fake")], uid: 4242, canonicalize: resolve },
-    env: {
-      AUTOMOBILE_MANAGED_SLOT_CONFIG: "inherited",
-      AUTOMOBILE_DB_PATH: "/wrong-db",
-      KEEP: "kept",
-    },
-    readFile: (path) => {
-      const text = files.get(path);
-      if (text === undefined) {
-        throw new Error(`Missing fake file ${path}`);
+test.each(["mkdir", "writeFile"])(
+  "F5 failing baseline %s preserves launch result",
+  async (kind) => {
+    const f = fixture();
+    await runPrivateDaemonCommand({ op: "init", options }, f.deps);
+    const mkdir = f.deps.mkdir;
+    f.deps.mkdir = (path, mode) => {
+      if (kind === "mkdir" && path === join(options.batchDir, "shared")) {
+        throw new Error("baseline mkdir failed");
       }
-      return text;
-    },
-    writeFile: (path, text) => {
-      files.set(path, text);
-      writes.push(path);
-    },
-    mkdir: (path, mode) => {
-      dirs.push([path, mode]);
-    },
-    exists: (path) => files.has(path),
-    isPidAlive: () => false,
-    log: (text) => {
-      logs.push(text);
-    },
-    runCommand: async (command, args, env) => {
-      launches.push({ command, args, env });
-      if (args[2] === "start") {
-        files.set(env.AUTOMOBILE_DAEMON_PID_FILE_PATH, JSON.stringify({ pid: 1234 }));
+      mkdir(path, mode);
+    };
+    const write = f.deps.writeFile;
+    f.deps.writeFile = (path, text) => {
+      if (kind === "writeFile" && path.endsWith("host-devices-at-start.json")) {
+        throw new Error("baseline write failed");
       }
-      return { exitCode: 0 };
-    },
-  };
-  return { files, writes, dirs, logs, launches, removes, modes, captures, deps };
-}
+      write(path, text);
+    };
+    f.deps.runCommand = async (command, args, env) => {
+      f.launches.push({ command, args, env });
+      return { exitCode: 7 };
+    };
+    expect(
+      await runPrivateDaemonCommand(parsed(["start", "--batch-dir", options.batchDir]), f.deps),
+    ).toBe(7);
+    expect(f.launches).toHaveLength(1);
+    expect(f.logs.filter((line) => line.startsWith("BASELINE WARNING:"))).toEqual([
+      expect.stringContaining("provenance will be unknown"),
+    ]);
+  },
+);
+test("F8 help documents evidence, refusals, launch exit codes and gate limitations", () => {
+  const help = parsePrivateDaemonArgs(["--help"]);
+  if (!("help" in help)) {
+    throw new Error("Expected help");
+  }
+  for (const text of [
+    "batch-inferred",
+    "foreign",
+    "bootedBy",
+    "processAvdName",
+    "ps eww",
+    "not yet been observed on a live batch",
+    "inferred-not-stopped",
+    "device ID (serial/UDID)",
+    "ambiguous selector stops nothing",
+    "ambiguous",
+    "held-by-other-daemon",
+    "daemonErrors",
+    "device_already_stopped",
+    "start propagates",
+    "--wait-ms 0",
+    "best-effort",
+    "PID is gone",
+  ]) {
+    expect(help.help).toContain(text);
+  }
+});
 posixTest("parses each command and exact start passthrough", () => {
   expect(
     parsed([
@@ -130,7 +97,7 @@ posixTest("parses each command and exact start passthrough", () => {
     "--plan-execution-lock-scope",
     "session",
   ]);
-  if (start.op === "init") {
+  if (start.op !== "start") {
     throw new Error("wrong op");
   }
   expect(start.extraFlags).toEqual(["--debug", "--plan-execution-lock-scope", "session"]);
@@ -169,6 +136,7 @@ posixTest("init writes only private manifest/env/0700 dirs, refuses overwrite", 
         join(options.batchDir, "bin", `${name}${index}`),
       ),
     ),
+    join(options.batchDir, "shared", "preflight-0.json"),
   ]);
   expect(f.dirs.every(([, mode]) => mode === 0o700)).toBe(true);
   expect(JSON.parse(f.files.get(join(options.batchDir, "batch.json"))!).specs).toEqual(
@@ -224,7 +192,7 @@ posixTest("start refuses any live pid before launching the batch", async () => {
   ).toBe(2);
   expect(f.launches).toEqual([]);
 });
-posixTest("stop only launches isolated daemon stop; status and env never launch", async () => {
+posixTest("gone stop, status and env never launch", async () => {
   const f = fixture();
   await runPrivateDaemonCommand({ op: "init", options }, f.deps);
   f.writes.length = 0;
@@ -235,7 +203,7 @@ posixTest("stop only launches isolated daemon stop; status and env never launch"
       f.deps,
     ),
   ).toBe(0);
-  expect(f.launches[0].args).toEqual([options.serverPath, "--daemon", "stop"]);
+  expect(f.launches).toEqual([]);
   expect(f.writes).toEqual([]);
   expect(f.dirs).toEqual([]);
   f.files.set(join(options.batchDir, "daemon1", "pid.txt"), "1234\n");
@@ -244,8 +212,7 @@ posixTest("stop only launches isolated daemon stop; status and env never launch"
     parsed(["env", "--batch-dir", options.batchDir, "--daemon", "1"]),
     f.deps,
   );
-  expect(f.launches).toHaveLength(1);
-  expect(f.launches[0].command).toBe(f.deps.runtimePath);
+  expect(f.launches).toHaveLength(0);
   expect(f.logs.at(-1)).toBe(join(options.batchDir, "daemon1", "env.sh"));
 });
 posixTest("tampered specs/default options are refused before a launch", async () => {
@@ -344,7 +311,7 @@ posixTest(
       parsed(["start", "--batch-dir", options.batchDir, "--daemon", "2", "--", "--debug"]),
       f.deps,
     );
-    expect(f.launches[1].args.slice(3)).toEqual([
+    expect(f.launches[0].args.slice(3)).toEqual([
       "--port",
       "3161",
       "--strict-port",
@@ -352,8 +319,8 @@ posixTest(
       "--tool-call-recording",
       "--debug",
     ]);
-    expect(f.launches[1].env.NOTE).toBe("private");
-    expect(JSON.parse(f.logs.at(-1)!).args).toEqual(f.launches[1].args.slice(3));
+    expect(f.launches[0].env.NOTE).toBe("private");
+    expect(JSON.parse(f.logs.at(-1)!).args).toEqual(f.launches[0].args.slice(3));
     expect(f.files.get(spec.plainPidFilePath)).toBe("1234\n");
   },
 );
@@ -364,12 +331,15 @@ posixTest(
     await runPrivateDaemonCommand({ op: "init", options }, f.deps);
     const spec = derivePrivateDaemonBatch(options)[0];
     f.files.set(spec.plainPidFilePath, "22\n");
+    f.files.set(spec.pidFilePath, '{"pid":22}');
+    f.deps.isPidAlive = () => true;
     f.deps.runCommand = async () => ({ exitCode: 7 });
     const stop = parsed(["stop", "--batch-dir", options.batchDir, "--daemon", "1"]);
-    expect(await runPrivateDaemonCommand(stop, f.deps)).toBe(7);
+    expect(await runPrivateDaemonCommand(stop, f.deps)).toBe(1);
     expect(f.files.get(spec.plainPidFilePath)).toBe("22\n");
     expect(f.removes).toEqual([]);
     f.files.delete(spec.plainPidFilePath);
+    f.deps.isPidAlive = () => false;
     f.deps.runCommand = async () => ({ exitCode: 0 });
     expect(await runPrivateDaemonCommand(stop, f.deps)).toBe(0);
   },

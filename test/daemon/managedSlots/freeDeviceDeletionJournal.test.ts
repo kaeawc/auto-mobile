@@ -2,6 +2,7 @@ import { warmedTests } from "../../helpers/warmedTests";
 import { afterAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { ManagedSlotJournal } from "../../../src/daemon/managedSlots/slotJournal";
 import {
+  isStuckFreeDeviceDeletion,
   DefaultManagedSlotEvictionSelector,
   JournaledManagedSlotCacheEvictor,
 } from "../../../src/daemon/managedSlots/managedSlotCacheEviction";
@@ -398,6 +399,36 @@ describe("journaled free-pool deletion", () => {
       failedDeletes: 0,
     });
     expect(deleter.calls).toEqual([]);
+  });
+
+  test("startup refusals keep reserving room until the workflow is registered", async () => {
+    await marked();
+    const driver = journal(OWNER, undefined, 100);
+    const original = deleter.deleteAndVerifyAbsence.bind(deleter);
+    deleter.deleteAndVerifyAbsence = async () => ({
+      kind: "failed",
+      message: "not registered",
+      notAttempted: { reason: "workflow_unavailable" },
+    });
+    for (let count = 1; count <= 4; count++) {
+      await driver.runPass();
+      const rows = await registry.listFreeDeviceDeletions();
+      expect(rows[0].deletion).toMatchObject({
+        attempts: count,
+        failedDeletes: 0,
+        lastError: "not registered",
+      });
+      expect(isStuckFreeDeviceDeletion(rows[0].deletion)).toBe(false);
+      expect(
+        computeManagedSlotResourceUsage(await registry.snapshotManagedSlotResources()),
+      ).toMatchObject({ deleting: 1, cached: 0 });
+      expect(rows[0].deletion!.nextAttemptAtMs).toBeGreaterThan(timer.now());
+      timer.setCurrentTime(rows[0].deletion!.nextAttemptAtMs);
+    }
+    deleter.deleteAndVerifyAbsence = original;
+    expect((await driver.runPass()).freeDeviceDeletions).toMatchObject([{ outcome: "absent" }]);
+    expect(await registry.listFreeDeviceDeletions()).toEqual([]);
+    expect(inventory.has("amslot-cache")).toBe(false);
   });
 
   test("three native failures become stuck and takeover preserves the counter", async () => {

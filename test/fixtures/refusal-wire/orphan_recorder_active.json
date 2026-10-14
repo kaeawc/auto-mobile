@@ -1,0 +1,13 @@
+{
+  "code": "orphan_recorder_active",
+  "builder": "OrphanRecorderActiveError via shapeToolCallError",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\"success\":false,\"error\":\"A recorder from before the daemon restart is still running on device 'emulator-5554' and could not be stopped. Retry or stop it by id (startup-orphan).\",\"code\":\"orphan_recorder_active\",\"message\":\"A recorder from before the daemon restart is still running on device 'emulator-5554' and could not be stopped. Retry or stop it by id (startup-orphan).\",\"retryable\":true,\"deviceId\":\"emulator-5554\",\"recordingIds\":[\"startup-orphan\"]}"
+      }
+    ],
+    "isError": true
+  }
+}

@@ -75,6 +75,7 @@ const SIMCTL_COMMAND_TIMEOUT_MS = 60_000;
  */
 const STATE_READ_RETRY_BACKOFF_MS = 250;
 const SHUTDOWN_SETTLE_MS = 10_000;
+const LAUNCHD_SIM_PROBE_TIMEOUT_MS = 2_000;
 const SHUTDOWN_SETTLE_BACKOFF = fixedBackoff(1_000);
 
 export interface AppleDevice {
@@ -139,6 +140,26 @@ export type SimctlScreenshotFailureReason =
  * one as not applicable rather than incomplete (#11605).
  */
 export class SimctlUnavailableError extends ActionableError {}
+
+export class SimulatorStillShuttingDownError extends ActionableError {
+  constructor(
+    readonly udid: string,
+    readonly deviceName: string,
+    readonly lastState: string | undefined,
+    readonly waitedMs: number,
+    readonly launchdSimPid?: number,
+  ) {
+    super(
+      `simctl shutdown returned but iOS simulator '${deviceName}' (${udid}) was still ${lastState ?? "unknown"} after ${waitedMs} ms.` +
+        " The shutdown may still complete; check with xcrun simctl list devices. Retrying is safe." +
+        (launchdSimPid === undefined
+          ? ""
+          : ` Its launchd_sim process is pid ${launchdSimPid}; this daemon did not signal it, CoreSimulator may respawn it.`) +
+        " An application displaying the device can also keep it booted.",
+    );
+    this.name = "SimulatorStillShuttingDownError";
+  }
+}
 
 export class SimctlScreenshotError extends Error {
   readonly reason: SimctlScreenshotFailureReason;
@@ -1482,21 +1503,26 @@ export class SimCtlClient implements SimCtl {
   }
 
   private async verifyShutdownSettled(device: BootedDevice, signal?: AbortSignal): Promise<void> {
-    const deadlineMs = this.timer.now() + SHUTDOWN_SETTLE_MS;
+    const startedMs = this.timer.now();
+    const deadlineMs = startedMs + SHUTDOWN_SETTLE_MS;
+    let observedShutdown = false;
     let state: string | undefined;
     for (let attempt = 1; ; attempt++) {
       signal?.throwIfAborted();
       const remainingMs = deadlineMs - this.timer.now();
       if (remainingMs <= 0) {
-        if (state !== "Shutdown") {
-          throw new ActionableError(
-            `iOS simulator '${device.name}' did not remain Shutdown after shutdown (state: ${state ?? "unknown"}).`,
-          );
-        }
+        await this.assertShutdownSettled(device, state, observedShutdown, startedMs, signal);
         return;
       }
       try {
-        state = await this.readSimulatorState(device.deviceId, remainingMs);
+        state = await raceWithDeadline(
+          () => this.readSimulatorState(device.deviceId, remainingMs),
+          {
+            timer: this.timer,
+            signal,
+            label: "iOS simulator shutdown state read",
+          },
+        );
       } catch (error) {
         signal?.throwIfAborted();
         if (
@@ -1510,15 +1536,83 @@ export class SimCtlClient implements SimCtl {
           `[iOS] Keeping confirmed Shutdown for ${device.deviceId} after late state read failed: ${errorMessage(error)}`,
         );
       }
-      if (state === "Booted") {
+      if (observedShutdown && state === "Booted") {
         throw await this.revivedSimulatorError(device, signal);
       }
-      await this.timer.sleep(
-        Math.min(
-          SHUTDOWN_SETTLE_BACKOFF.delayForAttempt(attempt),
-          Math.max(0, deadlineMs - this.timer.now()),
-        ),
+      observedShutdown ||= state === "Shutdown";
+      await raceWithDeadline(
+        () =>
+          this.timer.sleep(
+            Math.min(
+              SHUTDOWN_SETTLE_BACKOFF.delayForAttempt(attempt),
+              Math.max(0, deadlineMs - this.timer.now()),
+            ),
+          ),
+        { timer: this.timer, signal, label: "iOS simulator shutdown polling" },
       );
+    }
+  }
+
+  private async assertShutdownSettled(
+    device: BootedDevice,
+    state: string | undefined,
+    observedShutdown: boolean,
+    startedMs: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (state === "Shutdown") {
+      return;
+    }
+    if (!observedShutdown && state !== undefined) {
+      const waitedMs = this.timer.now() - startedMs;
+      const pid = await this.probeLaunchdSimPid(device.deviceId, signal);
+      throw new SimulatorStillShuttingDownError(device.deviceId, device.name, state, waitedMs, pid);
+    }
+    throw new ActionableError(
+      `iOS simulator '${device.name}' did not remain Shutdown after shutdown (state: ${state ?? "unknown"}).`,
+    );
+  }
+
+  private async probeLaunchdSimPid(
+    udid: string,
+    signal?: AbortSignal,
+  ): Promise<number | undefined> {
+    const timeoutError = new Error("launchd_sim process probe timed out");
+    try {
+      const result = await raceWithDeadline(
+        () =>
+          this.execAsync(
+            "pgrep",
+            [
+              "-f",
+              `launchd_sim .*CoreSimulator/Devices/${udid}/data/var/run/launchd_bootstrap[.]plist`,
+            ],
+            undefined,
+            signal,
+          ),
+        {
+          timer: this.timer,
+          timeoutMs: LAUNCHD_SIM_PROBE_TIMEOUT_MS,
+          signal,
+          label: "launchd_sim process probe",
+          timeoutError: () => timeoutError,
+        },
+      );
+      const pid = Number(result.stdout.trim().match(/^\d+$/m)?.[0]);
+      if (Number.isSafeInteger(pid) && pid > 0) {
+        return pid;
+      }
+      logger.debug(`[iOS] launchd_sim process probe found no PID for ${udid}`);
+      return undefined;
+    } catch (error) {
+      signal?.throwIfAborted();
+      // pgrep exits 1 with no match; PID enrichment is optional and never authorizes signalling.
+      if (error === timeoutError) {
+        logger.warn(`[iOS] launchd_sim process probe timed out for ${udid}`);
+      } else {
+        logger.debug(`[iOS] launchd_sim process probe found no process: ${errorMessage(error)}`);
+      }
+      return undefined;
     }
   }
 

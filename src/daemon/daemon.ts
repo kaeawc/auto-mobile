@@ -350,6 +350,7 @@ import {
 } from "../features/performance/PerformanceMonitor";
 import {
   initializeRecordingTeardownRedriveState,
+  setStartupOrphanCaptures,
   interruptVideoRecording,
   listActiveVideoRecordings,
   setVideoRecordingManagerDependencies,
@@ -1736,6 +1737,9 @@ export class Daemon {
               [...state.liveDaemonSessionIds].filter((id) => id !== this.daemonSessionId),
             ),
             ownedCaptureIds: () => state.videoRecorderService.listActiveRecordingIds(),
+            onStartupOrphans: setStartupOrphanCaptures,
+            onDeviceProcessStarted: (listener) =>
+              this.devicePool.setDeviceProcessStartedListener(listener),
             onDeviceIncarnationAssigned: (listener) => {
               this.recorderDeviceIncarnationListener = listener;
             },
@@ -5189,7 +5193,10 @@ export class Daemon {
         "daemon-restart",
         liveDaemonSessionIds,
       );
-      await setVideoRecordingManagerDependencies({ liveDaemonSessionIds });
+      await setVideoRecordingManagerDependencies({
+        liveDaemonSessionIds,
+        daemonSessionId: this.daemonSessionId,
+      });
       logger.info(
         `[Daemon] Cleared old daemon session caches, current session: ${this.daemonSessionId}`,
       );

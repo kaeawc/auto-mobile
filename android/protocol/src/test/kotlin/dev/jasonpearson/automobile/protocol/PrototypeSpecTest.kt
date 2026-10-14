@@ -30,6 +30,9 @@ class PrototypeSpecTest {
         fixture.getValue("expectedPath").jsonPrimitive.content,
         (result as PrototypeSpecValidation.Failure).error.path,
       )
+      fixture["expectedMessage"]?.let { expected ->
+        assertEquals(expected.jsonPrimitive.content, result.error.message)
+      }
     }
   }
 
@@ -358,11 +361,7 @@ class PrototypeSpecTest {
     @BeforeAll
     @JvmStatic
     fun loadFixtures() {
-      val relative = "test/fixtures/prototype-spec"
-      val directory =
-        generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) { it.parentFile }
-          .map { File(it, relative) }
-          .firstOrNull { it.isDirectory } ?: error("Could not locate $relative")
+      val directory = fixtureDirectory()
       valid =
         File(directory, "valid")
           .listFiles()
@@ -386,4 +385,14 @@ class PrototypeSpecTest {
       }
     }
   }
+}
+
+/** Shared repository-root lookup for the protocol fixture suites. */
+internal fun fixtureDirectory(): File {
+  val relative = "test/fixtures/prototype-spec"
+  return generateSequence(File(System.getProperty("user.dir") ?: ".").absoluteFile) {
+      it.parentFile
+    }
+    .map { File(it, relative) }
+    .firstOrNull { it.isDirectory } ?: error("Could not locate $relative")
 }

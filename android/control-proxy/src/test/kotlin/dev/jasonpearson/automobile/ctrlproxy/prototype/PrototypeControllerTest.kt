@@ -11,6 +11,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -21,6 +22,13 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
 class PrototypeControllerTest {
+  private val originalTraceSink = PrototypeTrace.sink
+
+  @After
+  fun restoreTraceSink() {
+    PrototypeTrace.sink = originalTraceSink
+  }
+
   private val host = FakePrototypeHost()
   private val events = mutableListOf<PrototypeEvent>()
   private var connected = true
@@ -58,6 +66,36 @@ class PrototypeControllerTest {
     if (error != null)
       assertTrue(results.last().error.orEmpty(), results.last().error.orEmpty().contains(error))
   }
+
+  @Test
+  fun `interaction traces appearance sync inside one async section and skips stale runtime`() =
+    runTest {
+      controller.show("show", spec())
+      val runtime = checkNotNull(controller.activeRuntime)
+      // Warm the cached render model before recording the interaction's own sections.
+      runtime.renderModel()
+      val trace = FakePrototypeTraceSink()
+      PrototypeTrace.sink = trace
+      controller.interact(runtime, PrototypeInteraction.Tap(emptyList()))
+      val interact = trace.asyncCookies[0]
+      val appearance = trace.asyncCookies[1]
+      assertNotEquals(interact, appearance)
+      assertEquals(
+        listOf(
+          "beginAsync:Prototype.interact:$interact",
+          "beginAsync:Prototype.syncAppearance:$appearance",
+          "endAsync:Prototype.syncAppearance:$appearance",
+          "endAsync:Prototype.interact:$interact",
+        ),
+        trace.events,
+      )
+      assertTrue(trace.openSections.isEmpty())
+      controller.show("replace", spec("replacement"))
+      trace.events.clear()
+      controller.interact(runtime, PrototypeInteraction.Tap(emptyList()))
+      assertTrue(trace.events.isEmpty())
+      assertTrue(trace.openSections.isEmpty())
+    }
 
   @Test
   fun `controller applies chrome defaults and explicit overrides to the host request`() = runTest {

@@ -716,13 +716,7 @@ struct NodeView: View {
     /// Containers get their own accessibility element so a testTag names the container instead of
     /// being copied onto every descendant. A tappable container reads as one button.
     private var grouping: AccessibilityGrouping {
-        // Composite controls always contain their parts, so each part keeps its own
-        // `<tag>.<part>` identifier, label and selected state.
-        if ["radioGroup", "segmentedButton", "topAppBar", "dialog", "snackbar"].contains(node.type) {
-            return .contain
-        }
-        guard ["box", "row", "column", "scroll", "pager", "card"].contains(node.type) else { return .leaf }
-        return node.onTap == nil ? .contain : .combine
+        prototypeAccessibilityGrouping(type: node.type, tappable: node.onTap != nil)
     }
 
     private var contentAlignment: Alignment {
@@ -821,12 +815,6 @@ private struct TapModifier: ViewModifier {
             content
         }
     }
-}
-
-enum AccessibilityGrouping {
-    case leaf
-    case contain
-    case combine
 }
 
 @MainActor

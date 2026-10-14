@@ -293,6 +293,7 @@ final class PrototypeModel {
             "assets": assets.keys.sorted(),
             "lastSequence": session.lastSequence,
         ]
+        if let data = session.data { status["data"] = JSONValue.object(data).foundationObject }
         // Only a shown prototype has a resolved mode.
         if let appearance = session.appearance { status["appearance"] = appearance.wireObject }
         return status

@@ -29,6 +29,7 @@ export interface PrivateDaemonBatchOptions {
   auxRoot?: string;
   serverPath: string;
   splitAdbCoordination?: boolean;
+  protectedDevices?: string[];
   orphanIdleMs?: number;
   extraEnv?: Record<string, string>;
   daemonEnv?: Record<string, Record<string, string>>;

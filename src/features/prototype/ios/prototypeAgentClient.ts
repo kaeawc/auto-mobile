@@ -57,6 +57,16 @@ export type PrototypeAgentRequestType =
   // AUTOMOBILE_PROTOTYPE_AGENT_TEST_HOOKS=1 (scripts/ios/prototype-agent-smoke.sh does that).
   | "simulate_tap";
 
+export class PrototypeAgentRequestTimeoutError extends ActionableError {
+  constructor(
+    readonly requestType: PrototypeAgentRequestType,
+    readonly timeoutMs: number,
+  ) {
+    super(`Prototype agent did not answer ${requestType} within ${timeoutMs} ms.`);
+    this.name = "PrototypeAgentRequestTimeoutError";
+  }
+}
+
 export type PrototypeAgentMessage = Record<string, unknown>;
 
 export interface PrototypeAgentResult extends PrototypeAgentMessage {
@@ -77,6 +87,7 @@ export interface PrototypeAgentClient {
   request(
     type: PrototypeAgentRequestType,
     body?: PrototypeAgentMessage,
+    options?: { timeoutMs?: number },
   ): Promise<PrototypeAgentResult>;
   /** Subscribes to `prototype_event` pushes; returns an unsubscribe function. */
   onEvent(listener: (event: PrototypeAgentMessage) => void): () => void;
@@ -259,6 +270,7 @@ class SocketPrototypeAgentClient implements PrototypeAgentClient {
   request(
     type: PrototypeAgentRequestType,
     body: PrototypeAgentMessage = {},
+    options: { timeoutMs?: number } = {},
   ): Promise<PrototypeAgentResult> {
     if (this.closedError !== undefined) {
       return Promise.reject(this.closedError);
@@ -271,16 +283,13 @@ class SocketPrototypeAgentClient implements PrototypeAgentClient {
         ),
       );
     }
+    const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs;
     const requestId = `r${this.nextRequestId++}`;
     return new Promise((resolve, reject) => {
       const timeout = this.timer.setTimeout(() => {
         this.waiters.delete(requestId);
-        reject(
-          new ActionableError(
-            `Prototype agent did not answer ${type} within ${this.requestTimeoutMs} ms.`,
-          ),
-        );
-      }, this.requestTimeoutMs);
+        reject(new PrototypeAgentRequestTimeoutError(type, timeoutMs));
+      }, timeoutMs);
       this.waiters.set(requestId, { resolve, reject, timeout });
       this.send({ ...body, type, requestId });
     });

@@ -3099,6 +3099,31 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
     return result.error;
   }
 
+  private isPrototypeWindowPending(
+    options: TapVerificationOptions,
+    hierarchy: ViewHierarchyResult,
+  ): boolean {
+    return (
+      options.layer === "prototype" &&
+      hierarchy.prototypeSuspended !== true &&
+      !hasOwnPrototype(hierarchy)
+    );
+  }
+
+  private findElementForSearch(
+    options: TapVerificationOptions,
+    hierarchy: ViewHierarchyResult,
+  ): ReturnType<TapOnElement["findElementInHierarchy"]> {
+    if (this.isPrototypeWindowPending(options, hierarchy)) {
+      // A successful show can precede the window's first accessibility capture.
+      return {
+        selection: { element: null, indexInMatches: -1, totalMatches: 0, strategy: "first" },
+        containerFound: false,
+      };
+    }
+    return this.findElementInHierarchy(options, hierarchy);
+  }
+
   private async searchForElement(
     options: TapVerificationOptions,
     observeResult: ObserveResult,
@@ -3137,7 +3162,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
       observationScreenSize: observeResult.screenSize,
       display: observeResult.viewHierarchy,
     });
-    const initialSearch = this.findElementInHierarchy(
+    const initialSearch = this.findElementForSearch(
       this.withObservationScreenSize(options, observeResult),
       latestViewHierarchy,
     );
@@ -3207,7 +3232,7 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           lastHash = hash;
         }
 
-        const searchResult = this.findElementInHierarchy(
+        const searchResult = this.findElementForSearch(
           {
             ...options,
             screenSizeOptions: {
@@ -3241,6 +3266,10 @@ export class TapOnElement extends BaseVisualChange implements TapPreTapStability
           break;
         }
       }
+    }
+
+    if (this.isPrototypeWindowPending(options, latestViewHierarchy)) {
+      scopeHierarchyForSelector(latestViewHierarchy, options.layer);
     }
 
     if (offScreenRejections > 0 && !element) {

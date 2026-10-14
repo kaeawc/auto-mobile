@@ -1,5 +1,10 @@
 import { panelFingerprintFromWire, type PanelFingerprint } from "../../../models/DisplayPanel";
 import {
+  prototypePatchReplyFields,
+  type PrototypePatchRequest,
+  type PrototypePatchReply,
+} from "../../prototype/prototypePatchWire";
+import {
   describeForeignCtrlProxyForwards,
   listedCtrlProxyForwardPorts,
   parseOwnPortForward,
@@ -142,7 +147,10 @@ import { serverConfig } from "../../../utils/ServerConfig";
 import { TelemetryRecorder } from "../../telemetry/TelemetryRecorder";
 import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import { getSdkFrameMetricsStore } from "../../performance/SdkFrameMetricsStore";
-import { registerDeviceIncarnationListener } from "../../../utils/deviceIncarnation";
+import {
+  deviceIncarnationToken,
+  registerDeviceIncarnationListener,
+} from "../../../utils/deviceIncarnation";
 import type { StackTraceElement } from "../../../server/failuresResources";
 import { NetworkState, simulationRemainingMs } from "../../../server/NetworkState";
 import {
@@ -1360,6 +1368,11 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number,
     perf?: PerformanceTracker,
   ): Promise<PrototypeResult>;
+  requestPatchPrototype(
+    patch: PrototypePatchRequest,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypePatchReply>;
   requestInspectPrototypes(timeoutMs?: number, perf?: PerformanceTracker): Promise<PrototypeResult>;
   requestPutPrototypeAsset(
     asset: PrototypeAssetUpload,
@@ -1580,6 +1593,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Distinct from a transient websocket disconnect (onConnectionClosed), which
   // must still allow the ADB fallback.
   private closed: boolean = false;
+  private incarnationToken: string | undefined;
+  private readinessHolds = 0;
+  private forwardSetupFailure: string | undefined;
   private readonly inFlightMessageHandlers = new Set<Promise<void>>();
   // Match the bounded ADB forward-removal confirmation window during teardown.
   private static readonly INBOUND_HANDLER_DRAIN_TIMEOUT_MS = 2000;
@@ -1762,6 +1778,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.sdkEventIngestorInstance = sdkEventIngestor ?? null;
     this.loggerInstance = loggerInstance;
     this.device = device;
+    this.incarnationToken = AndroidCtrlProxyClient.currentIncarnationToken(device.deviceId);
     this.adb = adb;
     this.idGenerator = idGenerator;
     this.transientObserver = transientObserver === true;
@@ -1823,6 +1840,25 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       AndroidCtrlProxyClient.instances.set(deviceId, retired);
       return retired;
     }
+    const currentToken = AndroidCtrlProxyClient.currentIncarnationToken(deviceId);
+    const existing = AndroidCtrlProxyClient.instances.get(deviceId);
+    if (
+      existing?.incarnationToken !== undefined &&
+      currentToken !== undefined &&
+      existing.incarnationToken !== currentToken
+    ) {
+      logger.info(
+        `[CTRL_PROXY] Replacing client for ${deviceId}: incarnation ${existing.incarnationToken} -> ${currentToken}`,
+      );
+      void AndroidCtrlProxyClient.evictAfterDeviceRemoval(deviceId).catch((error) => {
+        logger.warn(
+          `[CTRL_PROXY] Failed to close old incarnation client for ${deviceId}: ${errorMessage(error)}`,
+          error,
+        );
+      });
+    } else if (existing && existing.incarnationToken === undefined) {
+      existing.incarnationToken = currentToken;
+    }
     if (!AndroidCtrlProxyClient.instances.has(deviceId)) {
       logger.debug(`[CTRL_PROXY] Creating singleton for device: ${deviceId}`);
       AndroidCtrlProxyClient.instances.set(
@@ -1831,6 +1867,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       );
     }
     return AndroidCtrlProxyClient.instances.get(deviceId)!;
+  }
+
+  private static currentIncarnationToken(deviceId: string): string | undefined {
+    // A retired client serves no runtime; preserve its inert resolution path.
+    return AndroidCtrlProxyClient.retiredDeviceIds.has(deviceId)
+      ? undefined
+      : deviceIncarnationToken(deviceId);
   }
 
   public static getExistingInstance(deviceId: string): AndroidCtrlProxyClient | null {
@@ -1945,6 +1988,38 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
+  /** Evict before asynchronous cleanup so a reused serial gets a new client and port. */
+  public static async evictAfterDeviceRemoval(deviceId: string): Promise<void> {
+    const client = AndroidCtrlProxyClient.getExistingInstance(deviceId);
+    if (!client) {
+      return;
+    }
+    client.invalidateForShutdownRecovery();
+    await client.close();
+  }
+
+  public isClosed(): boolean {
+    return this.closed;
+  }
+
+  public beginReadinessHold(): () => void {
+    this.readinessHolds++;
+    let released = false;
+    return () => {
+      if (!released) {
+        released = true;
+        this.readinessHolds--;
+      }
+    };
+  }
+
+  public getForwardFailureCause(): string | undefined {
+    if (this.closed) {
+      return `CtrlProxy client for ${this.device.deviceId} was closed (forwarding lease released or device removed) before an adb forward was established`;
+    }
+    return this.forwardSetupFailure;
+  }
+
   /** Devices whose singleton client holds the cross-process forwarding lease. */
   public static getForwardLeaseHeldDeviceIds(): string[] {
     return [...AndroidCtrlProxyClient.instances.entries()]
@@ -1977,7 +2052,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     return {
       // A live detached observer is a read in progress even between its requests.
       inFlightRequests:
-        activities.reduce((sum, activity) => sum + activity.inFlightRequests, 0) + observers,
+        activities.reduce((sum, activity) => sum + activity.inFlightRequests, 0) +
+        observers +
+        clients.reduce((sum, client) => sum + client.readinessHolds, 0),
       idleForMs: lastTimes.length === 0 ? null : Math.max(0, timer.now() - Math.max(...lastTimes)),
     };
   }
@@ -3880,6 +3957,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   ): Promise<PrototypeResult> {
     return this.prototypes.requestDismissPrototype(target, timeoutMs, perf);
   }
+  requestPatchPrototype(
+    patch: PrototypePatchRequest,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<PrototypePatchReply> {
+    return this.prototypes.requestPatchPrototype(patch, timeoutMs, perf);
+  }
+
   requestInspectPrototypes(
     timeoutMs?: number,
     perf?: PerformanceTracker,
@@ -5354,6 +5439,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     if (this.closed) {
       return;
     }
+    this.forwardSetupFailure = undefined;
     await this.acquireCtrlProxyForwardLease();
     // Verify port forwarding is still active even if we think it's set up
     // Port forwarding can be lost if ADB server restarts or emulator restarts
@@ -5407,6 +5493,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this.portForwardingSetup = true;
       logger.debug(`[CTRL_PROXY] Port forwarding setup complete (localhost:${this.localPort})`);
     } catch (error) {
+      this.forwardSetupFailure = `Failed to establish adb forward for ${this.device.deviceId}: ${errorMessage(error)}`;
       logger.warn(`[CTRL_PROXY] Failed to setup port forwarding: ${error}`);
       throw error;
     }
@@ -6334,6 +6421,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         ...(Array.isArray(message.missingAssets) && message.missingAssets.length > 0
           ? { missingAssets: message.missingAssets.filter((id) => typeof id === "string") }
           : {}),
+        ...prototypePatchReplyFields(message),
         ...(Array.isArray(message.prototypes) ? { prototypes: message.prototypes } : {}),
         ...(typeof message.droppedEvents === "number"
           ? { droppedEvents: message.droppedEvents }
@@ -7631,6 +7719,14 @@ function compactifyNode(node: AccessibilityNode): Record<string, unknown> {
 
 registerDeviceIncarnationListener({
   name: "ctrlproxy-client",
+  onDeviceIdentityReplaced: (deviceId) => {
+    void AndroidCtrlProxyClient.evictAfterDeviceRemoval(deviceId).catch((error) => {
+      logger.warn(
+        `[CTRL_PROXY] Failed to close replaced device ${deviceId}: ${errorMessage(error)}`,
+        error,
+      );
+    });
+  },
   onDeviceIncarnationChanged: async (deviceId) =>
     await AndroidCtrlProxyClient.invalidateForDeviceIncarnation(deviceId),
 });

@@ -203,6 +203,7 @@ function describeUploaded(uploaded: readonly UploadedPrototypeAsset[]): string {
 const OUTCOME_AFTER_STOP = {
   show: "The new spec was not sent; a prototype already showing stays as it was.",
   resend: "The prototype stays as first sent, with placeholders for the missing assets.",
+  save: "The prototype was not saved.",
 } as const;
 
 /**
@@ -213,7 +214,7 @@ const OUTCOME_AFTER_STOP = {
 export async function uploadPrototypeAssets(
   client: PrototypeAssetPutClient,
   assets: readonly PrototypeAssetUpload[],
-  options: { signal?: AbortSignal; action: "show" | "resend" },
+  options: { signal?: AbortSignal; action: "show" | "resend" | "save" },
 ): Promise<PrototypeAssetUploadOutcome> {
   const uploaded: UploadedPrototypeAsset[] = [];
   const stop = (reason: string): PrototypeAssetUploadOutcome => ({

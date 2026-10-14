@@ -1,9 +1,10 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createProxyMcpServer } from "../../src/server/proxyServer";
+import { createProxyMcpServer, noActiveDeviceSessionResult } from "../../src/server/proxyServer";
 import {
   DaemonBoundSessionExpiredError,
+  DaemonConnectionSessionReleasedError,
   DaemonMcpProxy,
   RECOVERABLE_NOT_FOUND_HEARTBEAT_WINDOW_MS,
 } from "../../src/daemon/daemonMcpProxy";
@@ -152,6 +153,7 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
   let reaped: Array<{ sessionId: string; reason: string }>;
   let daemonManager: FakeDaemonManager;
   let daemonInstance: string;
+  let acquiredAppleSessionUuid: string;
   let heartbeatUnavailable: boolean;
   let heartbeats: Array<Record<string, unknown>>;
   let refusals: string[];
@@ -226,7 +228,8 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
                     runtime: {
                       deviceId: DEVICES[name === "getAndroid" ? "android-session" : "ios-session"],
                       session: {
-                        sessionUuid: name === "getAndroid" ? "android-session" : "ios-session",
+                        sessionUuid:
+                          name === "getAndroid" ? "android-session" : acquiredAppleSessionUuid,
                       },
                     },
                   }),
@@ -362,6 +365,7 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
     daemonManager = new FakeDaemonManager();
     daemonManager.statusResult = { ...daemonManager.statusResult, version: DAEMON_VERSION };
     daemonInstance = "daemon-1";
+    acquiredAppleSessionUuid = "ios-session";
     heartbeatUnavailable = false;
     heartbeats = [];
     refusals = [];
@@ -583,17 +587,47 @@ describe("a daemon that resumes after a stall keeps its sessions (#10989)", () =
     try {
       await server.connect(serverTransport);
       await client.connect(clientTransport);
-      for (const args of [{}, { sessionUuid: "ios-session" }]) {
-        const result = await client.callTool({ name: "observe", arguments: args });
-        expect(result.isError).toBe(true);
-        const payload = JSON.parse(textBlocks(result)[0]);
-        expect(payload.error).toMatchObject({
-          code: "session_ownership_lost",
-          sessionUuid: "ios-session",
-          reason: "rehydration-owner-timeout",
-          recovery: { action: "acquire_replacement_session" },
-        });
-      }
+      // Discovery remains available without consuming the first implicit release report (#9997).
+      const discovery = await Promise.allSettled([client.listTools(), client.listResources()]);
+      expect(discovery).toEqual([
+        { status: "fulfilled", value: { tools: [] } },
+        { status: "fulfilled", value: { resources: [] } },
+      ]);
+      const implicit = await client.callTool({ name: "observe", arguments: {} });
+      expect(implicit).toEqual(
+        noActiveDeviceSessionResult(
+          new DaemonConnectionSessionReleasedError("rehydration-owner-timeout"),
+        ),
+      );
+      // As after a normal keeper release, the next implicit read goes through without a session.
+      const nextImplicit = await client.callTool({ name: "observe", arguments: {} });
+      expect(nextImplicit.isError).toBeFalsy();
+      expect(JSON.parse(textBlocks(nextImplicit)[0])).toEqual({});
+      const named = await client.callTool({
+        name: "observe",
+        arguments: { sessionUuid: "ios-session" },
+      });
+      expect(named.isError).toBe(true);
+      expect(JSON.parse(textBlocks(named)[0]).error).toMatchObject({
+        code: "session_ownership_lost",
+        sessionUuid: "ios-session",
+        reason: "rehydration-owner-timeout",
+        recovery: { action: "acquire_replacement_session" },
+      });
+      acquiredAppleSessionUuid = "replacement-ios-session";
+      await sessionManager.createSession(
+        acquiredAppleSessionUuid,
+        DEVICES["ios-session"],
+        "ios",
+        60_000,
+        LEASE_MS,
+      );
+      const acquired = await client.callTool({ name: "getApple", arguments: {} });
+      expect(acquired.isError).toBeFalsy();
+      expect(proxy.getTerminalSessionRelease()).toBeUndefined();
+      const rebound = await client.callTool({ name: "observe", arguments: {} });
+      expect(rebound.isError).toBeFalsy();
+      expect(JSON.parse(textBlocks(rebound)[0])).toEqual({ observed: acquiredAppleSessionUuid });
       expect(handovers.map((handover) => handover.code)).toEqual(["daemon_stalled"]);
     } finally {
       await client.close();

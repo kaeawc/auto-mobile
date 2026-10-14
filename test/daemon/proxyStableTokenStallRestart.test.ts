@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client";
 import {
@@ -68,6 +68,47 @@ describe("stable-token resume after a daemon stall and restart (#11018)", () => 
   let handovers: LivenessHandover[];
   let spies: Array<ReturnType<typeof spyOn>>;
   let proxy: DaemonMcpProxy;
+
+  beforeAll(async () => {
+    // Warm a separate fake connection; each scenario still owns a fresh proxy and sessions.
+    const warmTimer = new LivenessTimer();
+    const warmManager = new FakeDaemonManager();
+    warmManager.statusResult = { ...warmManager.statusResult, version: DAEMON_VERSION };
+    const warmProxy = new DaemonMcpProxy({
+      livenessOwnerToken: "warm-stable-token",
+      clientFactory: () =>
+        new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+          toolResultFor: (name) => ({
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  runtime: {
+                    deviceId: `warm-${name}-device`,
+                    session: { sessionUuid: `warm-${name}-session` },
+                  },
+                }),
+              },
+            ],
+          }),
+        }),
+      daemonManager: warmManager,
+      autoStartDaemon: false,
+      timer: warmTimer,
+      heartbeatTimeoutMs: LEASE_MS,
+      heartbeatIntervalMs: INTERVAL_MS,
+    });
+    const available = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    try {
+      await warmProxy.callTool("getAndroid", {});
+      await warmProxy.callTool("getApple", {});
+      await warmTimer.advanceTimeAsync(INTERVAL_MS * 2);
+    } finally {
+      await warmProxy.close();
+      available.mockRestore();
+    }
+  });
 
   function daemonState(): DaemonStateAccess {
     return {
@@ -158,7 +199,7 @@ describe("stable-token resume after a daemon stall and restart (#11018)", () => 
       .map((call) => call.params);
   }
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     timer = new LivenessTimer();
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     sessionManager.stopCleanupTimer();
@@ -189,11 +230,6 @@ describe("stable-token resume after a daemon stall and restart (#11018)", () => 
       heartbeatIntervalMs: INTERVAL_MS,
     });
     proxy.onLivenessHandover((handover) => handovers.push(handover));
-    // Establish the fake transport outside the unit timing budget; it owns no sessions yet.
-    await proxy.listTools();
-    await proxy.callTool("getAndroid", {});
-    await proxy.callTool("getApple", {});
-    await advance(INTERVAL_MS * 2);
   });
 
   afterEach(async () => {
@@ -230,6 +266,10 @@ describe("stable-token resume after a daemon stall and restart (#11018)", () => 
   }
 
   test("reconnect leaves handed-over sessions pinned; the restart probe reclaims them and warns once", async () => {
+    await proxy.callTool("getAndroid", {});
+    await proxy.callTool("getApple", {});
+    await advance(INTERVAL_MS * 2);
+
     stalled = true;
     await settleByFakeEvents(
       timer,

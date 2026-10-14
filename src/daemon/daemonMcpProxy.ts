@@ -7318,8 +7318,6 @@ export class DaemonMcpProxy {
     this.recordHeldSessionTerminalLoss(sessionUuid, releaseReason);
     if (this.terminalBoundSession?.sessionUuid === sessionUuid) {
       this.fenceBoundSessionUuid(sessionUuid, releaseReason);
-      // An implicit call must name this restart loss too, through session_ownership_lost.
-      this.terminalBoundSession.fromResultMint = false;
     }
     this.forgetSessionLivenessState(sessionUuid);
     this.ownedDeviceSessions.delete(sessionUuid);

@@ -36,6 +36,75 @@ class PrototypeRepeatTest {
     )
 
   @Test
+  fun `repeat binds every check message and preserves check operands`() {
+    val checks =
+      listOf(
+        PrototypeCheck.Required("Required {item.label}"),
+        PrototypeCheck.MinLength(2.0, "Short {index}"),
+        PrototypeCheck.MaxLength(20.0, "Long {item.label}"),
+        PrototypeCheck.Min(1.0, "Min {item.label}"),
+        PrototypeCheck.Max(10.0, "Max {item.label}"),
+        PrototypeCheck.Format(PrototypeCheckFormat.DIGITS, "Digits {item.label}"),
+        PrototypeCheck.Pattern("a{2}", "Pattern {item.label}"),
+      )
+    val entries =
+      prototypeChildEntries(
+        list(
+          PrototypeTextFieldNode(stateKey = "value_{index}", checks = checks),
+          PrototypeSwitchNode(stateKey = "flag_{index}", checks = checks),
+          PrototypeCheckboxNode(stateKey = "flag_{index}", checks = checks),
+          PrototypeSliderNode(stateKey = "number_{index}", min = 0.0, max = 10.0, checks = checks),
+          PrototypeRadioGroupNode(
+            stateKey = "value_{index}",
+            options = emptyList(),
+            checks = checks,
+          ),
+          PrototypeTimePickerNode(
+            hourKey = "number_{index}",
+            minuteKey = "number_{index}",
+            checks = checks,
+          ),
+          PrototypeDatePickerNode(stateKey = "value_{index}", checks = checks),
+        ),
+        "root",
+      )
+    val boundChecks = entries.map { entry ->
+      when (val node = entry.node) {
+        is PrototypeTextFieldNode -> node.checks
+        is PrototypeSwitchNode -> node.checks
+        is PrototypeCheckboxNode -> node.checks
+        is PrototypeSliderNode -> node.checks
+        is PrototypeRadioGroupNode -> node.checks
+        is PrototypeTimePickerNode -> node.checks
+        is PrototypeDatePickerNode -> node.checks
+        else -> error("Unexpected input")
+      }!!
+    }
+    for ((index, bound) in boundChecks.withIndex()) {
+      val label = if (index < 7) "Alpha" else "Beta"
+      val itemIndex = index / 7
+      assertEquals(
+        listOf(
+          "Required $label",
+          "Short $itemIndex",
+          "Long $label",
+          "Min $label",
+          "Max $label",
+          "Digits $label",
+          "Pattern $label",
+        ),
+        bound.map { it.message },
+      )
+      assertEquals(
+        checks[1].let { it as PrototypeCheck.MinLength }.minLength,
+        (bound[1] as PrototypeCheck.MinLength).minLength,
+        0.0,
+      )
+      assertEquals("a{2}", (bound.last() as PrototypeCheck.Pattern).pattern)
+    }
+  }
+
+  @Test
   fun `children are instantiated per item with text bound and stable per index identities`() {
     val model =
       mapPrototypeSpec(

@@ -19,6 +19,19 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestFactory
 
 class PrototypeChecksTest {
+  @Test
+  fun `variable quantifier budget counts optional and bounded forms`() {
+    for (pattern in listOf("a?b?c?", "a{1,2}b{2,3}c{3,4}", "a{1,}b?c+")) {
+      assertEquals(
+        PrototypeCheckPatternResult(false, "pattern has too many variable quantifiers (max 2)"),
+        PrototypeCheckPattern.parse(pattern),
+      )
+    }
+    for (pattern in listOf("(a?){2}", "((a?))+")) assertFalse(
+      PrototypeCheckPattern.parse(pattern).ok,
+    )
+  }
+
   @TestFactory
   fun authoredAnchors(): List<DynamicTest> =
     listOf("a$\\s", "a$.", "a$\\S").flatMap { pattern ->

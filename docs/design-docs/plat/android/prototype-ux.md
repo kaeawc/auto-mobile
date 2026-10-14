@@ -1594,7 +1594,9 @@ escaped metacharacters, anchors ^ $, groups `(…)` / `(?:…)`, alternation |, 
 Reject backreferences, lookahead/behind, named groups, lazy/possessive quantifiers, Unicode
 properties, inline flags, word boundaries `\b` / `\B`, and every other escape (including
 `\n`, `\x`, `\u`; use literal characters). Empty classes are rejected. A group repeated more
-than once cannot contain alternation or another quantifier with maximum >1, transitively.
+than once cannot contain alternation or any variable quantifier (maximum > minimum), transitively.
+At most two variable quantifiers are allowed in the entire pattern: ? * + {n,} and {n,m} when
+m>n. Fixed {n} quantifiers inside repeated groups remain allowed.
 Thus `(a|b)+`, `(a+)+`, `(a*)*` and `((ab)+)+` are rejected. Optional groups remain allowed.
 These exact rules and error substrings are pinned in the language-neutral checks fixtures.
 

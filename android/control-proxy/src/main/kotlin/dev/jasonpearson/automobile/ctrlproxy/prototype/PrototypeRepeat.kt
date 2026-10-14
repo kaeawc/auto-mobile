@@ -8,6 +8,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeBottomSheetNode
 import dev.jasonpearson.automobile.protocol.PrototypeBoxNode
 import dev.jasonpearson.automobile.protocol.PrototypeButtonNode
 import dev.jasonpearson.automobile.protocol.PrototypeCardNode
+import dev.jasonpearson.automobile.protocol.PrototypeCheck
 import dev.jasonpearson.automobile.protocol.PrototypeCheckboxNode
 import dev.jasonpearson.automobile.protocol.PrototypeChipNode
 import dev.jasonpearson.automobile.protocol.PrototypeColumnNode
@@ -169,6 +170,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
     is PrototypeSpacerNode -> copy(onTap = onTap, styleWhen = styleWhen, visibleWhen = visibleWhen)
     is PrototypeTextFieldNode ->
       copy(
+        checks = checks?.map { it.bound(instance) },
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
@@ -191,6 +193,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeSwitchNode ->
       copy(
+        checks = checks?.map { it.bound(instance) },
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
@@ -199,6 +202,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeCheckboxNode ->
       copy(
+        checks = checks?.map { it.bound(instance) },
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
@@ -215,6 +219,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeSliderNode ->
       copy(
+        checks = checks?.map { it.bound(instance) },
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
@@ -231,6 +236,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeRadioGroupNode ->
       copy(
+        checks = checks?.map { it.bound(instance) },
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
@@ -309,6 +315,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeTimePickerNode ->
       copy(
+        checks = checks?.map { it.bound(instance) },
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
@@ -318,6 +325,7 @@ private fun PrototypeNode.bound(instance: RepeatInstance): PrototypeNode {
       )
     is PrototypeDatePickerNode ->
       copy(
+        checks = checks?.map { it.bound(instance) },
         enabledWhen = enabledWhen?.bound(instance),
         onTap = onTap,
         styleWhen = styleWhen,
@@ -395,3 +403,16 @@ private fun RepeatInstance.interpolate(text: String): String =
         item[segment.name]?.renderedText() ?: "{$alias.${segment.name}}"
     }
   }
+
+private fun PrototypeCheck.bound(instance: RepeatInstance): PrototypeCheck {
+  val message = instance.interpolate(message)
+  return when (this) {
+    is PrototypeCheck.Required -> copy(message = message)
+    is PrototypeCheck.MinLength -> copy(message = message)
+    is PrototypeCheck.MaxLength -> copy(message = message)
+    is PrototypeCheck.Min -> copy(message = message)
+    is PrototypeCheck.Max -> copy(message = message)
+    is PrototypeCheck.Format -> copy(message = message)
+    is PrototypeCheck.Pattern -> copy(message = message)
+  }
+}

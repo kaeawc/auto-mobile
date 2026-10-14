@@ -170,5 +170,21 @@
   {
     "pattern": "*a",
     "messageSubstrings": ["Unexpected metacharacter"]
+  },
+  {
+    "pattern": "\\d*\\d*\\d*\\d*x",
+    "messageSubstrings": ["pattern has too many variable quantifiers (max 2)"]
+  },
+  {
+    "pattern": "(a?){30}a{30}",
+    "messageSubstrings": ["Repeated group"]
+  },
+  {
+    "pattern": "a*b*c*",
+    "messageSubstrings": ["pattern has too many variable quantifiers (max 2)"]
+  },
+  {
+    "pattern": "a+b+c+d",
+    "messageSubstrings": ["pattern has too many variable quantifiers (max 2)"]
   }
 ]

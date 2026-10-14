@@ -4,8 +4,9 @@ import java.util.regex.Pattern
 
 /**
  * Portable regex grammar: a group repeated more than once must not transitively contain alternation
- * or another quantifier with maximum > 1. Optional groups and repeated fixed sequences are legal.
- * Bounds are <=100; source length counts UTF-16 units.
+ * or any variable quantifier (max > min). At most two variable quantifiers are allowed in the
+ * entire pattern to reject polynomial/exponential backtracking blowups. Optional groups and
+ * repeated fixed sequences are legal. Bounds are <=100; source length counts UTF-16 units.
  */
 data class PrototypeCheckPatternResult(val ok: Boolean, val message: String? = null)
 
@@ -63,11 +64,13 @@ object PrototypeCheckPattern {
     }
   }
 
-  private data class Body(var repeated: Boolean = false, var alternation: Boolean = false)
+  private data class Body(var variable: Boolean = false, var alternation: Boolean = false)
 
   private class Parser(val source: String) {
     var cursor = 0
     var error: String? = null
+    var variableQuantifiers = 0
+    var variable = false
 
     fun parse(): PrototypeCheckPatternResult {
       if (source.length > 128)
@@ -99,10 +102,10 @@ object PrototypeCheckPattern {
         val maximum = quantifier()
         val repeated = maximum != null && maximum > 1
         if (maximum != null && (char == '^' || char == '$')) fail("Anchor cannot be quantified")
-        if (repeated && atom != null && (atom.repeated || atom.alternation)) {
+        if (repeated && atom != null && (atom.variable || atom.alternation)) {
           fail("Repeated group contains repetition or alternation")
         }
-        body.repeated = body.repeated || repeated || atom?.repeated == true
+        body.variable = body.variable || variable || atom?.variable == true
         body.alternation = body.alternation || atom?.alternation == true
       }
       if (group && error == null) fail("Unclosed group")
@@ -191,20 +194,25 @@ object PrototypeCheckPattern {
     }
 
     fun quantifier(): Double? {
+      variable = false
       val maximum =
         when (peek()) {
           '?' -> {
             cursor++
+            variable = true
             1.0
           }
           '*',
           '+' -> {
             cursor++
+            variable = true
             Double.POSITIVE_INFINITY
           }
           '{' -> boundedQuantifier()
           else -> null
         }
+      if (variable && ++variableQuantifiers > 2)
+        fail("pattern has too many variable quantifiers (max 2)")
       if (maximum != null)
         when (peek()) {
           '?' -> fail("Lazy quantifiers are not supported")
@@ -229,6 +237,7 @@ object PrototypeCheckPattern {
       if (minimum > 100 || (maximum.isFinite() && maximum > 100))
         fail("Quantifier bounds must be <=100")
       else if (minimum > maximum) fail("Quantifier minimum exceeds maximum")
+      variable = maximum > minimum
       cursor += match.value.length
       return maximum
     }

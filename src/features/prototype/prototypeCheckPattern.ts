@@ -1,8 +1,9 @@
 /**
  * prototype_checks_v1 portable regex grammar (also the Kotlin/Swift fixture contract).
  * Reject every group repeated more than once whose transitive body contains alternation or
- * another quantifier with maximum > 1. This deliberately rejects (a|b)+, (a+)+ and (a*)*;
- * optional groups and repetitions of fixed, unquantified sequences remain legal.
+ * any variable quantifier (max > min). At most two variable quantifiers are allowed
+ * in the entire pattern. This rejects polynomial/exponential backtracking blowups;
+ * optional groups and repetitions of fixed sequences remain legal.
  * Bounds are <=100 (open upper bounds, * and + are unbounded). Length is UTF-16 code units.
  * Matching is whole-value, Unicode scalar aware, with ASCII d/w/s classes. s is exactly
  * space, tab, CR, LF, FF and VT. Dot excludes CR, LF, U+2028 and U+2029.
@@ -10,7 +11,7 @@
  */
 export type CheckPatternResult = { ok: true } | { ok: false; message: string };
 interface Body {
-  repeated: boolean;
+  variable: boolean;
   alternation: boolean;
 }
 const escaped = "^$\\.*+?()[]{}|/-";
@@ -18,6 +19,8 @@ const escaped = "^$\\.*+?()[]{}|/-";
 class PatternParser {
   private cursor = 0;
   private error?: string;
+  private variableQuantifiers = 0;
+  private variable = false;
   constructor(private readonly source: string) {}
 
   parse(): CheckPatternResult {
@@ -31,7 +34,7 @@ class PatternParser {
     this.error ??= message;
   }
   private body(group: boolean): Body {
-    const body: Body = { repeated: false, alternation: false };
+    const body: Body = { variable: false, alternation: false };
     while (this.cursor < this.source.length && !this.error) {
       const char = this.source[this.cursor];
       if (char === ")") {
@@ -64,14 +67,14 @@ class PatternParser {
     if (repeated && this.unsafeBody(atom)) {
       this.fail("Repeated group contains repetition or alternation");
     }
-    this.mergeBody(body, atom, repeated);
+    this.mergeBody(body, atom, this.variable);
   }
-  private mergeBody(body: Body, atom: Body | undefined, repeated: boolean): void {
-    body.repeated ||= repeated || atom?.repeated === true;
+  private mergeBody(body: Body, atom: Body | undefined, variable: boolean): void {
+    body.variable ||= variable || atom?.variable === true;
     body.alternation ||= atom?.alternation === true;
   }
   private unsafeBody(body: Body | undefined): boolean {
-    return body !== undefined && (body.repeated || body.alternation);
+    return body !== undefined && (body.variable || body.alternation);
   }
   private atom(): Body | undefined {
     const char = this.source[this.cursor++];
@@ -167,13 +170,16 @@ class PatternParser {
   }
   private quantifier(): number | undefined {
     const char = this.source[this.cursor];
+    this.variable = false;
     let max: number | undefined;
     if (char === "?" || char === "*" || char === "+") {
       this.cursor++;
       max = char === "?" ? 1 : Infinity;
+      this.variable = true;
     } else if (char === "{") {
       max = this.boundedQuantifier();
     }
+    this.countVariableQuantifier();
     if (max !== undefined) {
       const next = this.source[this.cursor];
       if (next === "?") {
@@ -185,6 +191,11 @@ class PatternParser {
       }
     }
     return max;
+  }
+  private countVariableQuantifier(): void {
+    if (this.variable && ++this.variableQuantifiers > 2) {
+      this.fail("pattern has too many variable quantifiers (max 2)");
+    }
   }
   private boundedQuantifier(): number | undefined {
     const match = /^\{([0-9]+)(?:,([0-9]*))?\}/.exec(this.source.slice(this.cursor));
@@ -199,6 +210,7 @@ class PatternParser {
     } else if (min > max) {
       this.fail("Quantifier minimum exceeds maximum");
     }
+    this.variable = max > min;
     this.cursor += match[0].length;
     return max;
   }

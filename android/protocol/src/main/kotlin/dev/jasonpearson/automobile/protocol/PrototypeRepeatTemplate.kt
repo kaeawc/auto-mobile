@@ -267,6 +267,7 @@ internal object PrototypeBindableFields {
       }
       return component(node, path)
         ?: condition(node["enabledWhen"], "$path.enabledWhen")
+        // Bind only the message as text; pattern source and other check operands stay literal.
         ?: objects(node, "checks", path).firstNotNullOfOrNull { (entry, entryPath) ->
           field(entry, "message", entryPath, PrototypeBindableKind.TEXT)
         }

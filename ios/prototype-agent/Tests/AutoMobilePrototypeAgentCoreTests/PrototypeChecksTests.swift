@@ -21,11 +21,37 @@ final class PrototypeChecksTests: XCTestCase {
         }
         let entries = try JSONDecoder().decode([Entry].self, from: fixture("checks/pattern-parity.json"))
         for entry in entries {
+            XCTAssertTrue(PrototypeCheckPattern.withinLimits(entry.pattern), entry.pattern)
             XCTAssertEqual(
                 PrototypeCheckPattern.matches(entry.pattern, entry.value),
                 entry.matches,
                 "\(entry.pattern): \(entry.value.debugDescription)"
             )
+        }
+    }
+
+    func testSharedBacktrackingRejections() throws {
+        struct Entry: Decodable {
+            let pattern: String
+            let messageSubstrings: [String]
+        }
+        let entries = try JSONDecoder().decode([Entry].self, from: fixture("checks/pattern-rejected.json"))
+        for entry in entries where entry.messageSubstrings.contains(where: {
+            $0.contains("Repeated group") || $0.contains("variable quantifiers") || $0.contains("bounds")
+        }) {
+            XCTAssertFalse(PrototypeCheckPattern.withinLimits(entry.pattern), entry.pattern)
+            XCTAssertFalse(PrototypeCheckPattern.matches(entry.pattern, "a"), entry.pattern)
+        }
+        for pattern in ["a?b?c?", "a{1,2}b{2,3}c{3,4}", "a{1,}b?c+", "((a?))+", "a{3,2}"] {
+            XCTAssertFalse(PrototypeCheckPattern.withinLimits(pattern), pattern)
+        }
+        for name in ["pattern-44", "pattern-45", "pattern-46", "pattern-47"] {
+            let wrapper = try JSONDecoder().decode(
+                [String: JSONValue].self,
+                from: fixture("invalid/checks-\(name).json")
+            )
+            let spec = try XCTUnwrap(wrapper["spec"])
+            XCTAssertThrowsError(try JSONDecoder().decode(PrototypeSpec.self, from: JSONEncoder().encode(spec)), name)
         }
     }
 
@@ -106,7 +132,15 @@ final class PrototypeChecksTests: XCTestCase {
             spec["root"] = root
             _ = try JSONDecoder().decode(PrototypeSpec.self, from: JSONEncoder().encode(JSONValue.object(spec)))
         }
-        for pattern in [String(repeating: "a", count: 129), "a{101}", "a{0,101}"] {
+        for pattern in [
+            String(repeating: "a", count: 129),
+            "a{101}",
+            "a{0,101}",
+            #"\d*\d*\d*\d*x"#,
+            "(a?){30}a{30}",
+            "a*b*c*",
+            "a+b+c+d",
+        ] {
             XCTAssertThrowsError(try decode(.object([
                 "type": .string("textField"), "stateKey": .string("textField"),
                 "checks": .array([.object(["pattern": .string(pattern), "message": .string("Pattern")])]),

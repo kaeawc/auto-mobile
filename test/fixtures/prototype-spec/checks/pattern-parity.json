@@ -598,5 +598,35 @@
     "pattern": "a\\|b",
     "value": "ab",
     "matches": false
+  },
+  {
+    "pattern": "(a{2}){2}",
+    "value": "aaaa",
+    "matches": true
+  },
+  {
+    "pattern": "(a{2}){2}",
+    "value": "aaa",
+    "matches": false
+  },
+  {
+    "pattern": "a?b?",
+    "value": "ab",
+    "matches": true
+  },
+  {
+    "pattern": "a{1,2}b{2,3}",
+    "value": "abb",
+    "matches": true
+  },
+  {
+    "pattern": "[?*+]{2}\\?\\*",
+    "value": "?*?*",
+    "matches": true
+  },
+  {
+    "pattern": "^[0-9]{5}(-[0-9]{4})?$",
+    "value": "12345-6789",
+    "matches": true
   }
 ]

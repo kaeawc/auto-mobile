@@ -103,3 +103,15 @@ test("repeat and component bind validity keys, guards, and error messages, leavi
     }),
   ).toMatchObject({ success: true });
 });
+
+test("variable quantifier budget counts optional and bounded forms, not literal syntax", () => {
+  for (const pattern of ["a?b?c?", "a{1,2}b{2,3}c{3,4}", "a{1,}b?c+"]) {
+    expect(parseCheckPattern(pattern)).toEqual({
+      ok: false,
+      message: "pattern has too many variable quantifiers (max 2)",
+    });
+  }
+  for (const pattern of ["(a?){2}", "((a?))+"]) {
+    expect(parseCheckPattern(pattern).ok).toBe(false);
+  }
+});

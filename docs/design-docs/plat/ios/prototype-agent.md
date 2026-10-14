@@ -519,6 +519,8 @@ Documents/prototype/
   fonts/<sha256>.ttf|otf
 ```
 
+Same-id `show` write-through replaces only `spec.json` inside the layout, and only when the layout was loaded.
+
 Version 1 has the strict manifest shape
 `{"formatVersion":1,"specFile":"spec.json","assets":[{"id":"image","file":"assets/<sha256>.png","sha256":"<sha256>","mediaType":"image/png"}],"fonts":[]}`.
 Both arrays are always present. SHA-256 is lowercase hexadecimal over file bytes;

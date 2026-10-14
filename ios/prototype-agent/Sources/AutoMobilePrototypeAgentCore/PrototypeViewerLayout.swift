@@ -23,6 +23,7 @@ struct PrototypeViewerLaunch {
     let registeredImageIds: [String]
     let fontFaces: [String: String]
     let problems: [PrototypeSavedProblem]
+    var fromSavedLayout = false
 }
 
 struct PrototypeViewerLayoutLoader {
@@ -88,7 +89,7 @@ struct PrototypeViewerLayoutLoader {
         }
         return PrototypeViewerLaunch(
             content: .loaded(saved.spec, specBytes: specBytes),
-            registeredImageIds: images, fontFaces: fonts, problems: problems
+            registeredImageIds: images, fontFaces: fonts, problems: problems, fromSavedLayout: true
         )
     }
 

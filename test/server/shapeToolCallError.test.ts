@@ -1,3 +1,5 @@
+import { AndroidAvdIdentityUnresolvedError } from "../../src/devices/deviceBootService";
+import { ActionableError } from "../../src/models/ActionableError";
 import { SessionReleasedDuringCallError } from "../../src/daemon/sessionReleasedDuringCall";
 import { mcpRequestFailureDetails } from "../../src/daemon/socketServer";
 import { TextIndeterminateError } from "../../src/features/action/textTransportTimeout";
@@ -19,7 +21,6 @@ import { errorMessage } from "../../src/utils/describeUnknownError";
 import { logger } from "../../src/utils/logger";
 import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessService";
 import { typedRefusalFields } from "../../src/models/typedRefusalFields";
-import { ActionableError } from "../../src/models/ActionableError";
 
 import { DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS } from "../../src/daemon/deviceAcquisitionRefusals";
 
@@ -214,6 +215,49 @@ describe("shapeToolCallError", () => {
     expect(error.message).toBe(
       "Cannot safely recover session session-a: android device 'Pixel_8_API_35' is unavailable or already in use. The session can still resume if the device returns before the recovery window ends (120 seconds remaining); otherwise acquire a new device with getAndroid or getApple.",
     );
+  });
+
+  test("shapes an unresolved AVD identity with one candidate", () => {
+    const error = new AndroidAvdIdentityUnresolvedError("Pixel_8_API_35", ["emulator-5556"]);
+    expect(error.message).toBe(
+      "target_identity_unresolved: Cannot prove whether Android AVD 'Pixel_8_API_35' is already running; AVD name is unavailable for emulator-5556. Retry after identity discovery recovers.",
+    );
+    expect(isTypedToolRefusal(error)).toBe(true);
+    expect(JSON.parse(shapeToolCallError(error, context).content[0].text)).toEqual({
+      success: false,
+      error: error.message,
+      code: "target_identity_unresolved",
+      retryable: true,
+      retryAfterMs: 1000,
+      deviceId: "emulator-5556",
+      avdName: "Pixel_8_API_35",
+      candidateSerials: ["emulator-5556"],
+    });
+  });
+
+  test("shapes an unresolved AVD identity without selecting multiple candidates", () => {
+    const error = new AndroidAvdIdentityUnresolvedError("Pixel_8_API_35", [
+      "emulator-5554",
+      "emulator-5556",
+    ]);
+    expect(isTypedToolRefusal(error)).toBe(true);
+    const payload = JSON.parse(shapeToolCallError(error, context).content[0].text);
+    expect(payload).toEqual({
+      success: false,
+      error: error.message,
+      code: "target_identity_unresolved",
+      retryable: true,
+      retryAfterMs: 1000,
+      avdName: "Pixel_8_API_35",
+      candidateSerials: ["emulator-5554", "emulator-5556"],
+    });
+    expect(payload).not.toHaveProperty("deviceId");
+  });
+
+  test("keeps a plain ActionableError untyped", () => {
+    const error = new ActionableError("x");
+    expect(isTypedToolRefusal(error)).toBe(false);
+    expect(shapeToolCallError(error, context).content[0].text).toBe("Error: x");
   });
 
   test("shapes a plain Error", () => {

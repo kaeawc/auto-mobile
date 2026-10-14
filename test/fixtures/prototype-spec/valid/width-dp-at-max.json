@@ -1,0 +1,16 @@
+{
+  "id": "size-bounds",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "spacer",
+    "style": {
+      "width": {
+        "dp": 10000
+      }
+    }
+  }
+}

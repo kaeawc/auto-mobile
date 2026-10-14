@@ -83,6 +83,7 @@ async function setup(saved = true) {
       if ((kind === "rotation" && behavior.rotationFails) || kind === behavior.failingKind) {
         throw new Error("restore not confirmed");
       }
+      return { status: "restored" as const };
     },
   });
   const sessions = new SessionManager(

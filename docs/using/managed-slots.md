@@ -89,21 +89,26 @@ anything else is a file path. The config is incompatible with
 it; agent-facing tools cannot change it. Parsing is strict (unknown fields are
 rejected) and happens before any daemon or device work.
 
-| Field                  | Type                   | Notes                                                                                                                                                         |
-| ---------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `contractVersion`      | `1`                    | Required. Any other value fails with `contract_unsupported`.                                                                                                  |
-| `managedHostScope`     | string, 1-256 chars    | Required. Identifies the managed host.                                                                                                                        |
-| `runnerNamespace`      | string, 1-256 chars    | Required. Identifies the runner.                                                                                                                              |
-| `runnerIncarnation`    | string, 1-256 chars    | Required. Identifies the runner's boot. A new value starts a new scope.                                                                                       |
-| `executionAttempt`     | string, 1-256 chars    | Optional. Correlation only, never authorization.                                                                                                              |
-| `localSlotCapacity`    | integer >= 1           | Required. V1 accepts exactly `1`.                                                                                                                             |
-| `requests`             | array, at least 1      | Required. V1 accepts exactly one request. Duplicate `slotIndex` values are invalid.                                                                           |
-| `preparationTimeoutMs` | positive integer       | Optional. Upper bound is `MAX_PROVISION_DEVICE_TIMEOUT_MS`.                                                                                                   |
-| `idleTimeoutMs`        | integer 120000-3600000 | Optional. Stored idle window: 2 to 60 minutes, default 2 minutes; live-owned executions are exempt.                                                           |
-| `executionOwnerPid`    | positive integer       | Optional. Supervising process whose exit ends the execution even while the proxy's parent lives (for example a wrapper shell). Defaults to the launch parent. |
+| Field                         | Type                   | Notes                                                                                                                                                         |
+| ----------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `contractVersion`             | `1`                    | Required. Any other value fails with `contract_unsupported`.                                                                                                  |
+| `managedHostScope`            | string, 1-256 chars    | Required. Identifies the managed host.                                                                                                                        |
+| `runnerNamespace`             | string, 1-256 chars    | Required. Identifies the runner.                                                                                                                              |
+| `runnerIncarnation`           | string, 1-256 chars    | Required. Identifies the runner's boot. A new value starts a new scope.                                                                                       |
+| `executionAttempt`            | string, 1-256 chars    | Optional. Correlation only, never authorization.                                                                                                              |
+| `localSlotCapacity`           | integer >= 1           | Required. V1 accepts exactly `1`.                                                                                                                             |
+| `requests`                    | array, at least 1      | Required. V1 accepts exactly one request. Duplicate `slotIndex` values are invalid.                                                                           |
+| `preparationTimeoutMs`        | positive integer       | Optional. Upper bound is `MAX_PROVISION_DEVICE_TIMEOUT_MS`.                                                                                                   |
+| `idleTimeoutMs`               | integer 120000-3600000 | Optional. Stored idle window: 2 to 60 minutes, default 2 minutes; live-owned executions are exempt.                                                           |
+| `executionOwnerPid`           | positive integer       | Optional. Supervising process whose exit ends the execution even while the proxy's parent lives (for example a wrapper shell). Defaults to the launch parent. |
+| `executionOwnerStartIdentity` | string, 1-256 chars    | Optional. Runner's own start identity; requires `executionOwnerPid`. Proxy-only, never forwarded to the daemon.                                               |
 
 If `executionOwnerPid` is set, the proxy checks at startup that it names a
 running process and otherwise fails with `managed_slot_config_invalid`.
+If `executionOwnerStartIdentity` is also set, a different start identity causes
+the same refusal. An unknown or unreadable identity falls back to trusting the
+PID alone. Use AutoMobile's opaque token format: `linux:<boot_id>:<starttime ticks>`
+on Linux or `darwin-utc:<C-locale ps lstart rendered in UTC>` on macOS.
 
 Each entry of `requests`:
 
@@ -188,6 +193,38 @@ connected to a newer daemon has nothing to negotiate: the older proxy's own
 schema rejects `deviceFamily` at launch as `managed_slot_config_invalid`. A raw
 socket client that skips the probe and sends an unknown spec key to a daemon
 still gets strict `managed_slot_config_invalid` naming the key.
+
+### Mixed versions and upgrades
+
+Every daemon on a host shares one registry file (see Concepts; the
+`AUTOMOBILE_ADB_SERVER_COORDINATION_DIR` override creates a separate one). That
+file is the host coordination boundary. Each frontend (STDIO proxy) talks to
+exactly one daemon over its socket. The registry schema is the set of slot
+registry migrations a build knows (`SLOT_REGISTRY_MIGRATIONS`). It is
+independent of `contractVersion` and of the capability tokens.
+
+| Combination                                                                                                                                              | Supported | Behaviour                                                                                                                                                                                                                                                  |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Current daemon opening a registry written by an older slot schema                                                                                        | yes       | Migrated forward on open, under the cross-process migration lock. Assignments, execution owners, journal entries, free-pool deletion markers and total-resource charges are kept. Pinned by a captured schema-004 registry.                                |
+| Daemon restarted against a registry it already migrated                                                                                                  | yes       | No migration runs. State is read as it was left.                                                                                                                                                                                                           |
+| Daemons with the same registry schema sharing one registry                                                                                               | yes       | The normal multi-daemon case.                                                                                                                                                                                                                              |
+| Daemon opening a registry migrated by a newer build (unknown migration names)                                                                            | no        | Non-retryable `registry_schema_unsupported` before any write: no bookkeeping table, lock row, migration or DDL. Acquisition fails with that code. Generic device reads fail closed with `discovery_incomplete`. Upgrade every daemon sharing the registry. |
+| Older daemon left running while a newer daemon migrates the shared registry                                                                              | no        | The refusal runs only when a daemon opens the registry. A daemon that opened it earlier is not re-checked. Stop or restart every daemon sharing the registry when you upgrade one.                                                                         |
+| Daemon from a package without managed slots (0.0.84 and earlier) on a host with slots                                                                    | no        | It never reads the registry, so it cannot honour assignments. Do not run it beside a managed-slot daemon on the same devices.                                                                                                                              |
+| Newer frontend connecting to an older daemon that it may restart                                                                                         | yes       | The proxy restarts the daemon from its own installation before acquiring, so both sides match.                                                                                                                                                             |
+| Frontend and daemon versions or builds that still differ (older frontend, auto-start disabled, restart did not match, or a daemon swapped after connect) | no        | Non-retryable `contract_unsupported` before the capability probe or acquisition. Restart the daemon from the frontend's installation (`auto-mobile --daemon restart`). Nothing was changed. A restart `cooldown` stays retryable `daemon_unavailable`.     |
+| Frontend that requires `managed-slots/v1`, with a daemon that does not advertise it                                                                      | no        | `contract_unsupported` before the acquisition is sent. A daemon advertising only unknown tokens (for example a future `managed-slots/v2`) is treated the same way.                                                                                         |
+| Frontend with a daemon that advertises `managed-slots/v1` plus unknown extra tokens                                                                      | yes       | Unknown tokens are ignored. The acquisition request is identical to the one sent to a daemon that advertises only `managed-slots/v1`.                                                                                                                      |
+| Config `contractVersion` other than `1`                                                                                                                  | no        | `contract_unsupported` before any daemon call.                                                                                                                                                                                                             |
+| Frontend using an optional field (`deviceFamily`) with a daemon lacking its capability                                                                   | no        | `contract_unsupported` before the acquisition is sent (see Version negotiation above).                                                                                                                                                                     |
+
+Any unknown migration name makes the schema unsupported, even an additive one.
+There is no partial-compatibility list. An upgraded fleet must restart all of
+its daemons together. The refusal is new: builds before it open a newer registry
+without checking (#12060). Clients without handshake fields skip the identity
+gate (legacy clients). The recording-teardown health marker is daemon-local and
+in memory. It is not part of the registry. After a restart, the per-daemon
+database's persisted recorder teardown state redrives it.
 
 ## Lifecycle
 
@@ -347,6 +384,7 @@ A managed-execution session uses the `managed-execution` liveness policy:
   start identity where readable, so a reused PID counts as the owner having exited;
   where that identity cannot be read, the PID alone is used. Stdin EOF ends the execution the same
   way. If the proxy is killed outright, the ~10 s no-heartbeat release applies.
+  See [Execution owner PID reuse](#execution-owner-pid-reuse) for the measured limits.
   Limit: with the default owner, a launch parent pid of 1 is treated as already
   orphaned and a parent pid of 0 (for example `docker exec`) as exited. When the
   runner is PID 1 in a container, or the proxy is started by `docker exec`, set
@@ -390,6 +428,55 @@ hint is short by the blocked time.
 Values are the defaults in `src/daemon/sessionLivenessWindows.ts`; see
 [Device ownership](device-ownership.md#when-a-session-is-released) for the
 general release rules.
+
+### Execution owner PID reuse
+
+The execution-owner watch records the owner as a PID plus the OS process start
+identity, and compares both on each check. On Linux the start identity is
+`/proc/<pid>/stat` field 22 plus the boot ID. On macOS it is the process start time.
+This section gives the numbers behind that design. They were measured for #12060
+on one macOS host (Darwin 25.6.0) under heavy parallel load (load average 250 to 400).
+
+| Measurement (macOS)                                              | Result                                                      |
+| ---------------------------------------------------------------- | ----------------------------------------------------------- |
+| PID range                                                        | Sequential up to 99,999, then wraps to 100                  |
+| Background PID allocation on the host                            | About 26 per second, so a given PID returns after about 1 h |
+| Spawn loop, 8 in parallel, until one exited PID was handed out   | 95,528 spawns in 69 s (1,377 per second)                    |
+| Serial spawn loop until a real successor held the owner's PID    | 177,990 spawns in 356 s                                     |
+| `sysctl kern.proc.pid` start time (in-process, `bun:ffi`)        | p50 0.03 ms, p95 0.04 ms                                    |
+| `ps -p <pid> -o lstart=` start time (child process, synchronous) | p50 6.4 ms, p95 51 ms, timeout 1 s                          |
+| Start identity from sysctl compared with `ps`                    | Identical for 1,889 of 1,889 host processes                 |
+
+What this means:
+
+- **The PID check alone is almost always enough.** The watch probes once a second, so
+  a PID-only check is fooled only if the owner's PID goes to a new process less than
+  a second after the owner exits. That needs a full PID wrap within one second, about
+  70 times faster than the fastest rate measured above. The start identity covers
+  the cases where checks pause for longer: a suspended proxy (laptop sleep,
+  `SIGSTOP`) or a long event-loop stall.
+- **Real reuse is detected.** In a native check, a real successor process held the
+  former owner's PID and `kill(pid, 0)` reported it alive. The watch with the
+  recorded start identity reported `owner-exited`. A watch with the PID alone
+  reported the owner as still alive.
+- **The identity is read cheaply on both platforms.** On macOS the proxy reads it in
+  process through `sysctl`, which works for processes of any user, including
+  PID 1. It compares the identity on every 1 s check. A matching result is cached for
+  1 s, so in practice a fresh read happens every 1 to 2 s. If `bun:ffi` cannot load,
+  the proxy falls back to `ps` and compares every fifth check, so reuse is detected
+  within about 5 s. On Linux, reading `/proc` is cheap and the identity is compared on
+  every check. Linux PID wrap rates were not measured. The default `pid_max` is
+  32,768, or 4,194,304 where systemd raises it (`/proc/sys/kernel/pid_max`).
+
+Known limits:
+
+- By default, the identity is captured when the proxy starts. A runner can close
+  the gap between choosing `executionOwnerPid` and proxy launch by passing its own
+  `executionOwnerStartIdentity`; a readable mismatch refuses startup.
+- If the identity cannot be read at startup, for example because `ps` timed out, the
+  watch uses the PID alone. It retries the capture on later checks and switches to
+  PID plus identity once the read succeeds.
+- Windows has no start identity, so the owner is judged by PID alone.
 
 ### Peer daemons and database lock contention
 
@@ -687,6 +774,8 @@ value**. A daemon with the variable unset creates without admission and is not
 ordered against participating daemons. All daemons sharing the registry must run
 a build with the `deletion_failed_deletes` column: upgrade them together. Older
 daemons record attempts without adding failed deletes, so their markers stay counted.
+Builds that check the registry schema refuse a newer one outright (see
+[Mixed versions and upgrades](#mixed-versions-and-upgrades)).
 
 The ledger counts active devices, assigned idle devices, cached free-pool images
 (including stopped images), creation reservations, deleting or cleanup-pending
@@ -767,8 +856,9 @@ deadline passing during admission returns `timeout`.
 A full budget returns `managed_slot_budget_exhausted`, `retryable: true`, with no
 `retryAfterMs` because recovery has no time bound. Its `budget` evidence contains
 `limit`, category `usage` (including `total` and `orphaned`), protected `retained`
-entries with reasons, and `evictionFailures`. Reset or release managed slot scopes
-that are no longer needed, or raise `AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES`, then retry.
+entries with reasons, `evictionFailures`, and `charged` rows identifying every device
+counted against the budget, including assigned and orphaned devices. Reset or release
+managed slot scopes that are no longer needed, or raise `AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES`, then retry.
 This refusal is separate from `capacity_exhausted`, which concerns boot limits.
 `usage.total` includes the refused request's own `preparing` reservation, so it can
 read as the limit plus one or more. Pending deletions are named in `retained` with
@@ -781,27 +871,28 @@ exceed the limit by at most one uncounted stuck marker at a time. The exempt
 
 ## Error codes
 
-| Code                                | Retryable | Meaning                                                                                                                                                                                                                   |
-| ----------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `managed_slot_config_invalid`       | no        | Config is not valid JSON, fails the strict schema, has duplicate `slotIndex`, an out-of-range `idleTimeoutMs`, a dead `executionOwnerPid`, or is combined with `--initial-session-uuid` / `--no-proxy`.                   |
-| `contract_unsupported`              | no        | `contractVersion` is not supported by this build or daemon, or the daemon lacks a capability a config field requires (`managed-slots/v1.deviceFamily`).                                                                   |
-| `managed_slot_group_unsupported`    | no        | `localSlotCapacity` or `requests` exceeds one slot and device.                                                                                                                                                            |
-| `managed_slots_unsupported`         | no        | A config was supplied but this build does not serve managed slots.                                                                                                                                                        |
-| `spec_unsupported`                  | no        | The requested spec is malformed, or names an Android image, iOS runtime or iOS device type this host has not installed; nothing was changed.                                                                              |
-| `runtime_incompatible`              | no        | An installed iOS runtime that is unavailable, or outside the requested (or every listed) iPhone model's supported range; nothing was changed.                                                                             |
-| `slot_in_use`                       | yes       | A live execution already holds the slot.                                                                                                                                                                                  |
-| `slot_settling`                     | yes       | The previous execution's released work is still settling.                                                                                                                                                                 |
-| `stale_session`                     | yes       | An earlier execution's session on the slot device could not be released.                                                                                                                                                  |
-| `scope_invalidated`                 | no        | The request's incarnation was reset and never accepts work again.                                                                                                                                                         |
-| `scope_transition_pending`          | yes       | A scope reset is waiting for owners or cleanup to settle.                                                                                                                                                                 |
-| `cleanup_pending`                   | yes       | A prior deletion or release has not been confirmed.                                                                                                                                                                       |
-| `discovery_incomplete`              | yes       | Device inventory or the slot registry was partial, so absence cannot be proven.                                                                                                                                           |
-| `capacity_exhausted`                | yes       | Boot refused at the platform's booted-device limit.                                                                                                                                                                       |
-| `managed_slot_budget_exhausted`     | yes       | Total-resource budget is full. `budget` carries limit, usage, retained reasons and eviction failures; reset/release unused scopes or raise `AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES`, then retry. No retry delay is promised. |
-| `device_assigned_to_managed_slot`   | no        | Generic control or lifecycle on a device assigned to a slot (or in the free pool).                                                                                                                                        |
-| `device_outside_managed_slots`      | no        | A managed connection touched a device, session or tool outside its own slots.                                                                                                                                             |
-| `managed_slot_acquisition_failed`   | no        | Tool call on a proxy whose acquisition failed; carries the underlying failure.                                                                                                                                            |
-| `managed_slot_registration_refused` | no        | `daemon/registerSession` refused to bind a connection to managed sessions it cannot prove it holds.                                                                                                                       |
+| Code                                | Retryable | Meaning                                                                                                                                                                                                                                                                                                        |
+| ----------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `managed_slot_config_invalid`       | no        | Config is not valid JSON, fails the strict schema, has duplicate `slotIndex`, an out-of-range `idleTimeoutMs`, a dead `executionOwnerPid`, or an `executionOwnerStartIdentity` that names a different process than `executionOwnerPid` now holds, or is combined with `--initial-session-uuid` / `--no-proxy`. |
+| `contract_unsupported`              | no        | `contractVersion` is not supported by this build or daemon, or the daemon lacks a capability a config field requires (`managed-slots/v1.deviceFamily`).                                                                                                                                                        |
+| `registry_schema_unsupported`       | no        | The shared registry was migrated by a newer build. Nothing was changed. Upgrade every daemon sharing it.                                                                                                                                                                                                       |
+| `managed_slot_group_unsupported`    | no        | `localSlotCapacity` or `requests` exceeds one slot and device.                                                                                                                                                                                                                                                 |
+| `managed_slots_unsupported`         | no        | A config was supplied but this build does not serve managed slots.                                                                                                                                                                                                                                             |
+| `spec_unsupported`                  | no        | The requested spec is malformed, or names an Android image, iOS runtime or iOS device type this host has not installed; nothing was changed.                                                                                                                                                                   |
+| `runtime_incompatible`              | no        | An installed iOS runtime that is unavailable, or outside the requested (or every listed) iPhone model's supported range; nothing was changed.                                                                                                                                                                  |
+| `slot_in_use`                       | yes       | A live execution already holds the slot.                                                                                                                                                                                                                                                                       |
+| `slot_settling`                     | yes       | The previous execution's released work is still settling.                                                                                                                                                                                                                                                      |
+| `stale_session`                     | yes       | An earlier execution's session on the slot device could not be released.                                                                                                                                                                                                                                       |
+| `scope_invalidated`                 | no        | The request's incarnation was reset and never accepts work again.                                                                                                                                                                                                                                              |
+| `scope_transition_pending`          | yes       | A scope reset is waiting for owners or cleanup to settle.                                                                                                                                                                                                                                                      |
+| `cleanup_pending`                   | yes       | A prior deletion or release has not been confirmed.                                                                                                                                                                                                                                                            |
+| `discovery_incomplete`              | yes       | Device inventory or the slot registry was partial, so absence cannot be proven.                                                                                                                                                                                                                                |
+| `capacity_exhausted`                | yes       | Boot refused at the platform's booted-device limit.                                                                                                                                                                                                                                                            |
+| `managed_slot_budget_exhausted`     | yes       | Total-resource budget is full. `budget` carries limit, usage, retained reasons and eviction failures; reset/release unused scopes or raise `AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES`, then retry. No retry delay is promised.                                                                                      |
+| `device_assigned_to_managed_slot`   | no        | Generic control or lifecycle on a device assigned to a slot (or in the free pool).                                                                                                                                                                                                                             |
+| `device_outside_managed_slots`      | no        | A managed connection touched a device, session or tool outside its own slots.                                                                                                                                                                                                                                  |
+| `managed_slot_acquisition_failed`   | no        | Tool call on a proxy whose acquisition failed; carries the underlying failure.                                                                                                                                                                                                                                 |
+| `managed_slot_registration_refused` | no        | `daemon/registerSession` refused to bind a connection to managed sessions it cannot prove it holds.                                                                                                                                                                                                            |
 
 Other reconciler codes that can appear in a slot's `failure`: `scope_not_valid`,
 `device_busy`, `reconcile_in_progress`, `concurrent_modification`,
@@ -838,8 +929,51 @@ The failure path was also exercised: a malformed runtime (`"android-36"`) served
 MCP in under a second with outcome `failed`, `spec_unsupported`, zero tools,
 `managed_slot_acquisition_failed` on every call and no AVD created.
 
+## Native descendants after cancellation and daemon death
+
+This section answers one #12060 research gate: whether request-owned host
+processes end, or stay durably fenced, after request cancellation, daemon
+SIGTERM and daemon SIGKILL. Retained emulators and simulators are the device,
+not unwanted descendants.
+
+Evidence levels: **proven** means
+`test/integration/nativeDescendantLifecycle.integration.test.ts` shows it with
+real `sleep`/`sh`/`cat`/`bun` processes going through the production spawn helpers. **Faked**
+means unit tests with fakes cover it. **Code** means it comes from reading the
+source only. No device was used for any of these levels.
+
+| Process (spawn site)                                                                                                                            | Owner                                                             | Request cancel                                                                                                                               | Daemon SIGTERM                                                                                       | Daemon SIGKILL                                                                                            | Durable record / next-start sweep                                                                                                                                                                 |
+| ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| One-shot host commands: `xcrun simctl`, `ps`, `pgrep`, `kill`, `plutil` (`DefaultHostCommandExecutor.executeCommand`, `execFile` with `signal`) | request                                                           | SIGTERM to the direct child (**proven**). A forked grandchild keeps running (**proven**).                                                    | No stage; the request abort covers it (**code**)                                                     | Survives until it exits on its own (**code**)                                                             | None. Short-lived.                                                                                                                                                                                |
+| One-shot `adb` (`AdbClient` exec)                                                                                                               | request                                                           | SIGTERM, then SIGKILL after a grace when settlement is awaited (**faked**)                                                                   | No stage. `AdbClient.activeProcesses` is never read at shutdown (**code**)                           | Host `adb` survives until it exits (**code**)                                                             | None                                                                                                                                                                                              |
+| Long-lived `adb` children: `getevent`, H.264 encoders, ffmpeg-backend `screenrecord` (`AdbClient.spawn`)                                        | request signal by default; `abortSignalScope: "startup"` opts out | SIGTERM to host `adb`. The device-side process relies on adb tearing down the shell (**code**)                                               | Owning servers' stop stages (**code**)                                                               | Host `adb` survives while it does not write to the dead pipe. The device side is unverified.              | None                                                                                                                                                                                              |
+| Android file recording `screenrecord` (`PlatformVideoCaptureBackend`)                                                                           | recording, detached from the request after start                  | Startup abort kills it; a failed start cleans up the device pid (**faked**)                                                                  | Recording stop, then force stop, then interrupt, each bounded (`childProcessCleanup.ts`) (**faked**) | Host `adb` and device `screenrecord` survive                                                              | Yes: `capture_teardown_json` (device pid and path). `redriveUnconfirmedCaptureTeardowns` runs at startup (**faked**). The host `adb` pid is not recorded.                                         |
+| iOS `simctl io recordVideo` and the live ffmpeg encode (`FfmpegVideoProcessingBackend`)                                                         | recording                                                         | Startup abort SIGKILLs it (**code**)                                                                                                         | Recording stop stages (**code**)                                                                     | Survives; a partial `.mov` remains                                                                        | Recording row only, with no capture descriptor, so there is no process redrive.                                                                                                                   |
+| `avdmanager` / `sdkmanager` (`runAndroidCommand`)                                                                                               | request                                                           | SIGTERM, then SIGKILL after `terminationGraceMs` (**proven**, including a TERM-ignoring child)                                               | No stage; the request abort covers it                                                                | Survives (piped stdio)                                                                                    | None. Short-lived.                                                                                                                                                                                |
+| Emulator cold boot (`AndroidEmulatorClient` launch)                                                                                             | request until booted, then the retained device                    | `terminateColdBootProcess`: SIGTERM, 1 s, SIGKILL, 1 s, direct pid. SIGTERM is **proven** on a stand-in; the SIGKILL escalation is **faked** | No stage: emulators are retained                                                                     | Survives. The next daemon sees a running emulator.                                                        | No pid record. Booted emulators are intentionally retained.                                                                                                                                       |
+| CtrlProxy iOS runner `xcodebuild test-without-building` (`IOSCtrlProxyManager`, `detached: true`)                                               | device                                                            | Not request-owned. Startup retirement group-kills `-pid`.                                                                                    | `IOSCtrlProxyManager.shutdownAll`, then `terminateProcessTree` (group plus descendants) (**faked**)  | Survives, reparented to launchd                                                                           | No record. The command shape is the identity. The startup sweep (`startOrphanRunnerReapOnStartup`) reaps only orphaned (ppid 1) daemon-shaped trees and leaves a parented one alone (**proven**). |
+| `iproxy` tunnel (physical iOS) (`IosTunnelClient`)                                                                                              | device                                                            | Not request-owned                                                                                                                            | Instance stop: SIGTERM, then SIGKILL (**faked**)                                                     | Survives                                                                                                  | None. The startup sweep matches `CtrlProxy` runners only, not `iproxy`.                                                                                                                           |
+| Simulator screen-capture helper (`IosScreenCaptureHelper`, `detached` on macOS)                                                                 | daemon pool                                                       | Not request-owned                                                                                                                            | `iosSimulatorCaptureHelperPool.shutdown()`: SIGTERM, then group SIGKILL after the grace (**faked**)  | Survives in its own process group. The capture path ignores stdin EOF by design (`ControlChannel.swift`). | None                                                                                                                                                                                              |
+| Simulator highlight helper (`SimulatorHighlights`)                                                                                              | daemon, cached per device                                         | The reply wait aborts; the helper stays                                                                                                      | No stage (**code**)                                                                                  | Exits on stdin EOF (`main.swift`, highlight mode). The same EOF shape is **proven** with `cat`.           | None needed                                                                                                                                                                                       |
+| `cwebp` / `dwebp` (`WebpBinaryResolver`)                                                                                                        | caller                                                            | Not tied to the request. Bounded: SIGKILL after `WEBP_CODEC_TIMEOUT_MS` (30 s) (**proven**).                                                 | No stage                                                                                             | Finishes on stdin EOF (input truncated if not fully flushed) or dies on SIGPIPE (**code**)                | None. Short-lived.                                                                                                                                                                                |
+| Generic long-lived spawn with ignored stdin (the `adb spawn`, `iproxy` and `xcodebuild` stdio shape)                                            | —                                                                 | —                                                                                                                                            | —                                                                                                    | Keeps running after the parent's SIGKILL, reparented to launchd (**proven**)                              | —                                                                                                                                                                                                 |
+
+Boundaries this release does not close (follow-ups):
+
+- Request cancellation of one-shot commands is direct-child-only. A tool that
+  forks and does not forward SIGTERM can outlive the request. Whether
+  `xcrun` forks `simctl` instead of exec-ing it is unverified.
+- After daemon SIGKILL, only two sweeps run: the iOS runner sweep and the Android
+  `screenrecord` teardown redrive. There is no sweep for an orphaned `iproxy`,
+  the detached simulator capture helper, `simctl io recordVideo`, or host `adb`
+  children.
+- `AdbClient.spawn` binds long-lived children to the ambient request signal
+  unless the caller opts out. They therefore end with the request or session
+  that started them, by design or not; each caller must choose.
+
 ## Related
 
+- [Managed-slot qualification](managed-slot-qualification.md)
 - [Device ownership](device-ownership.md): session holds, release rules and reads.
 - [Environment variables](environment-variables.md): heartbeat and idle tuning.
 - [Managed Macs and CI runners](managed-macs.md).

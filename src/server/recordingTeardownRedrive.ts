@@ -5,7 +5,10 @@ import type {
   VideoRecordingRecord,
   VideoRecordingRepository,
 } from "../db/videoRecordingRepository";
-import type { VideoCaptureTeardownDescriptor } from "../features/video/VideoRecorderService";
+import type {
+  OrphanCaptureStopOptions,
+  VideoCaptureTeardownDescriptor,
+} from "../features/video/VideoRecorderService";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "../features/video/androidScreenrecord";
 import { ActionableError, type BootedDevice } from "../models";
 import { logger } from "../utils/logger";
@@ -25,7 +28,7 @@ export interface StartupOrphanCaptures {
     recordingId: string,
   ): { recordingId: string; deviceId: string; ownerSessionUuid?: string } | undefined;
   /** Stop and acknowledge startup rows; reject when teardown remains unconfirmed. */
-  stop(deviceId: string, recordingId?: string): Promise<void>;
+  stop(deviceId: string, recordingId?: string, options?: OrphanCaptureStopOptions): Promise<void>;
 }
 
 export interface RecordingTeardownRedriveDeps {
@@ -35,8 +38,9 @@ export interface RecordingTeardownRedriveDeps {
   getDevice(deviceId: string): BootedDevice | undefined;
   getDeviceIncarnation(deviceId: string): number | undefined;
   forceStopOrphanedCapture(
-    device: BootedDevice,
+    device: BootedDevice | undefined,
     descriptor: VideoCaptureTeardownDescriptor,
+    options?: OrphanCaptureStopOptions,
   ): Promise<void>;
   onStartupOrphans?(handle: StartupOrphanCaptures): void;
   onDeviceProcessStarted?(listener: (deviceId: string) => void | Promise<void>): void;
@@ -70,7 +74,7 @@ export async function redriveUnconfirmedCaptureTeardowns(
 ): Promise<boolean> {
   const byDevice = new Map<string, RetainedCaptureRow[]>();
   const pending = new Map<string, PendingRedrive>();
-  const redrivenIncarnations = new Map<string, number>();
+  const redrivenIncarnations = new Map<string, number | undefined>();
   let subscribedPending = false;
   const orphans = createStartupOrphanCaptures(byDevice, deps);
   const redriveDevice = (deviceId: string, hookDriven: boolean): void => {
@@ -88,7 +92,10 @@ export async function redriveUnconfirmedCaptureTeardowns(
     ) {
       return;
     }
-    if (incarnation === undefined) {
+    if (
+      incarnation === undefined &&
+      records.some((row) => row.captureTeardown?.kind !== "ios-host-recorder")
+    ) {
       logger.warn(
         `[RecordingTeardownRedrive] Device ${deviceId} has no pool incarnation; retaining capture descriptors until the device is pooled`,
       );
@@ -105,7 +112,16 @@ export async function redriveUnconfirmedCaptureTeardowns(
         subscribedPending = true;
       }
     } else {
-      markOrphanedCaptures(manager, deviceId, records, deps, hookDriven);
+      if (incarnation === undefined) {
+        // Host identities can be confirmed before the device is added to the pool.
+        manager.registerPendingDeviceCleanup(
+          deviceId,
+          confirmReleasedCaptures(manager, deviceId, records, deps, hookDriven),
+          INCOMPLETE_MARK_GRACE_MS,
+        );
+      } else {
+        markOrphanedCaptures(manager, deviceId, records, deps, hookDriven);
+      }
     }
   };
   // Install before the startup read yields: its loop handles devices added during the read.
@@ -116,7 +132,7 @@ export async function redriveUnconfirmedCaptureTeardowns(
     }
     try {
       // Quick-boot snapshots can restore a recorder: a new child is not teardown proof.
-      await raceWithDeadline(() => orphans.stop(deviceId), {
+      await raceWithDeadline(() => orphans.stop(deviceId, undefined, { mode: "background" }), {
         timer: deps.timer,
         timeoutMs: INCOMPLETE_MARK_GRACE_MS,
         label: `Process-start orphan recorder teardown on ${deviceId}`,
@@ -184,12 +200,12 @@ function createStartupOrphanCaptures(
       }
       return undefined;
     },
-    stop: async (deviceId, recordingId) => {
+    stop: async (deviceId, recordingId, options) => {
       const records = retained(deviceId).filter(
         (row) => !recordingId || row.recordingId === recordingId,
       );
       try {
-        await retryOrphanedCaptures(deviceId, records, deps, false);
+        await retryOrphanedCaptures(deviceId, records, deps, false, false, options?.mode ?? "user");
       } finally {
         // A disposer belongs to a whole registered batch, not to an individual row.
         const batches = new Set(records.map((row) => row.withdrawRetry));
@@ -213,7 +229,7 @@ function canRedriveCapture(row: RetainedCaptureRow, incarnation: number | undefi
     incarnation === undefined ||
     row.firstMarkedIncarnation === undefined ||
     row.firstMarkedIncarnation === incarnation ||
-    row.captureTeardown?.devicePid !== undefined ||
+    hasConfirmableIdentity(row.captureTeardown) ||
     Number.isFinite(orphanExpiresAt(row))
   ) {
     return true;
@@ -268,11 +284,18 @@ function subscribePendingRedrive(
     if (!work) {
       return;
     }
-    const { records, hookDriven } = work;
+    const { hookDriven } = work;
+    let { records } = work;
     pending.delete(deviceId);
     if (identityReplaced) {
-      void clearReplacedDescriptors(records, deps);
-      return;
+      void clearReplacedDescriptors(
+        records.filter((row) => row.captureTeardown?.kind !== "ios-host-recorder"),
+        deps,
+      );
+      records = records.filter((row) => row.captureTeardown?.kind === "ios-host-recorder");
+      if (records.length === 0) {
+        return;
+      }
     }
     manager.registerPendingDeviceCleanup(
       deviceId,
@@ -341,6 +364,7 @@ async function retryOrphanedCaptures(
   deps: RecordingTeardownRedriveDeps,
   waitForExpiry: boolean,
   hookDriven = false,
+  mode: "user" | "background" = "background",
 ): Promise<void> {
   const unconfirmed: string[] = [];
   const failures: unknown[] = [];
@@ -349,7 +373,7 @@ async function retryOrphanedCaptures(
       continue;
     }
     try {
-      await confirmRetainedCapture(row, deps, waitForExpiry, hookDriven);
+      await confirmRetainedCapture(row, deps, waitForExpiry, hookDriven, mode);
     } catch (error) {
       logger.warn(
         `[RecordingTeardownRedrive] Teardown unconfirmed for ${row.recordingId} on ${deviceId}`,
@@ -376,10 +400,11 @@ async function confirmRetainedCapture(
   deps: RecordingTeardownRedriveDeps,
   waitForExpiry: boolean,
   hookDriven: boolean,
+  mode: "user" | "background",
 ): Promise<void> {
   // A caller preflight never joins a health retry waiting for a pid-less hard limit.
-  if (!waitForExpiry && row.captureTeardown?.devicePid === undefined && row.captureTeardown) {
-    await confirmOrphanedCapture(row, deps, false);
+  if (!waitForExpiry && !hasConfirmableIdentity(row.captureTeardown) && row.captureTeardown) {
+    await confirmOrphanedCapture(row, deps, false, mode);
   }
   if (row.confirmation) {
     return row.confirmation;
@@ -392,7 +417,7 @@ async function confirmRetainedCapture(
     if (!descriptor || deps.ownedCaptureIds().includes(row.recordingId)) {
       return;
     }
-    await confirmOrphanedCapture(row, deps, waitForExpiry);
+    await confirmOrphanedCapture(row, deps, waitForExpiry, mode);
     // Identity replacement can retire this row while device confirmation yields.
     if (row.captureTeardown !== descriptor) {
       return;
@@ -431,8 +456,14 @@ async function hookRowStillUnconfirmed(
   return false;
 }
 
+function hasConfirmableIdentity(descriptor: VideoCaptureTeardownDescriptor | undefined): boolean {
+  return descriptor?.kind === "ios-host-recorder"
+    ? descriptor.hostPid !== undefined
+    : descriptor?.devicePid !== undefined;
+}
+
 function orphanExpiresAt(row: VideoRecordingRecord): number {
-  if (row.captureTeardown?.devicePid !== undefined || !row.captureTeardown) {
+  if (hasConfirmableIdentity(row.captureTeardown) || !row.captureTeardown) {
     return NaN;
   }
   return (
@@ -446,8 +477,13 @@ async function confirmOrphanedCapture(
   row: VideoRecordingRecord,
   deps: RecordingTeardownRedriveDeps,
   waitForExpiry: boolean,
+  mode: "user" | "background",
 ): Promise<void> {
   const descriptor = row.captureTeardown!;
+  if (descriptor.kind === "ios-host-recorder") {
+    await deps.forceStopOrphanedCapture(undefined, descriptor, { mode });
+    return;
+  }
   if (descriptor.devicePid === undefined) {
     const expiresAt = orphanExpiresAt(row);
     if (!Number.isFinite(expiresAt) || (!waitForExpiry && deps.now() < expiresAt)) {

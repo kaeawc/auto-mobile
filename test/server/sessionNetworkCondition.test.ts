@@ -25,7 +25,7 @@ describe("runSessionNetworkMutation", () => {
       timer,
       persistence,
       () => new FakeDbWriteBarrier(),
-      () => ({ restore: async () => {} }),
+      () => ({ restore: async () => ({ status: "restored" as const }) }),
       () => ({ restore: async () => {} }),
       () => ({ restore: async (profile) => restored.push(profile) }),
     );

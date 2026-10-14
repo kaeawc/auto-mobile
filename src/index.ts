@@ -54,6 +54,7 @@ import {
   setProcessShutdownHandler,
 } from "./processLifecycle";
 import {
+  assertManagedSlotOwnerIdentity,
   assertManagedSlotOwnerRunning,
   assertManagedSlotsSupported,
   type ManagedSlotConfig,
@@ -61,6 +62,7 @@ import {
 import type { ManagedSlotsResult } from "./models/managedSlotsResult";
 import { createStdioShutdownStages, runShutdownCleanupStages } from "./shutdownCleanup";
 import { defaultTimer } from "./utils/SystemTimer";
+import { sweepNativeHelperOrphans } from "./utils/nativeHelpers/sweepNativeHelperOrphans";
 import { startStartupMaintenance } from "./utils/startupMaintenance";
 import { daemonCommandSkipsServerBootstrap } from "./daemon/cli/daemonCommandRouting";
 
@@ -315,9 +317,14 @@ async function main() {
         import("./daemon/lockOwnerGeneration"),
       ]);
       assertManagedSlotOwnerRunning(managedSlotConfig, (pid) => isProcessRunning(pid));
-      ownerGenerationToken = defaultLockOwnerGenerationProbe.current(
-        managedSlotConfig.executionOwnerPid,
+      const ownerIdentityVerdict = assertManagedSlotOwnerIdentity(
+        managedSlotConfig,
+        (pid, recorded) => defaultLockOwnerGenerationProbe.compare(pid, recorded),
       );
+      ownerGenerationToken =
+        ownerIdentityVerdict === "same"
+          ? managedSlotConfig.executionOwnerStartIdentity
+          : defaultLockOwnerGenerationProbe.current(managedSlotConfig.executionOwnerPid);
     }
     if (daemonRequested && daemonCommand === undefined) {
       const { printUnknownDaemonCommand } = await import("./daemon/cli/runDaemonCommand");
@@ -372,6 +379,9 @@ async function main() {
         platform: process.platform,
         startAndroidSweep: () => AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(),
         startIosReap: () => IOSCtrlProxyManager.startOrphanRunnerReapOnStartup(),
+        startNativeHelperSweep: async () => {
+          await sweepNativeHelperOrphans();
+        },
       });
     }
     if (skipDeviceStartupWork) {
@@ -874,17 +884,20 @@ async function startExecutionOwnerWatch(
     { isProcessRunning },
     { defaultTimer },
     { defaultLockOwnerGenerationProbe },
+    { processGenerationReadIsCheap },
   ] = await Promise.all([
     import("./daemon/executionOwnerWatch"),
     import("./utils/processLiveness"),
     import("./utils/SystemTimer"),
     import("./daemon/lockOwnerGeneration"),
+    import("./daemon/processGeneration"),
   ]);
   new ExecutionOwnerWatch(
     {
       launchParentPid,
       ownerPid,
       ownerGenerationToken,
+      generationCheckEvery: processGenerationReadIsCheap() ? 1 : undefined,
       onOwnerLost: () => requestProcessShutdown("execution-owner-lost"),
     },
     { isProcessRunning: (pid) => isProcessRunning(pid), currentParentPid: () => process.ppid },

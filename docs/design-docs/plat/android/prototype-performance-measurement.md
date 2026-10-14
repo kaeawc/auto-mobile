@@ -133,3 +133,28 @@ Count `Prototype.node` slices per frame (per `Choreographer#doFrame`) to measure
 recomposed, which is the epic's target metric. Those inside `Prototype.compose` come from a new render
 model; node-local recompositions can run outside that slice. `Prototype.mapRenderTree` should appear
 at most once per `Prototype.interact`.
+
+## Vertical `scroll` first-show cost (#12139)
+
+`scroll` composes and measures every child up front (`Box(verticalScroll)`); the owner
+decision is to keep every row findable (no `LazyColumn`), so the question was whether that
+costs enough to justify deferring off-screen rows behind same-size placeholders. The gated
+`PrototypeScrollMeasurementTest` (`PROTOTYPE_SCROLL_MEASURE=1`, optional
+`PROTOTYPE_SCROLL_MEASURE_OUT=<file>`) disposes and recomposes a fullscreen scroll of 36 dp rows
+15 times after 5 warm-ups under Robolectric and times setContent through `waitForIdle`
+(first composition plus measure and layout; no draw). Two runs, medians:
+
+| Scenario                                     | Render nodes | Semantics nodes | Median ms | p90 ms    |
+| -------------------------------------------- | ------------ | --------------- | --------- | --------- |
+| trivial column (fixed overhead)              | 2            | 3               | 6.4-7.6   | 7.7-9.6   |
+| 87 rows (largest measured prototype)         | 176          | 90              | 4.1-4.9   | 4.4-8.0   |
+| benchmark list (`benchmark/prototype-frame`) | 335          | 183             | 7.7-7.9   | 12.5-17.4 |
+| 200 rows                                     | 402          | 203             | 4.5-5.0   | 5.7       |
+| 500 rows                                     | 1002         | 503             | 17.6-17.9 | 31.9-35.8 |
+
+The fixed overhead dominates up to a few hundred rows (the trivial case is slower than 87
+rows only because it runs first, cold). The marginal cost is roughly 25-55 us per row on the
+JVM; only 500 rows reaches a median of about 18 ms. Every row text is present in the
+semantics tree in every scenario (asserted). Robolectric numbers are not device frame times:
+the on-device figure for the benchmark list (`scripts/android/prototype-frame-benchmark.sh
+--scenario scroll`) is still owed before any deferral is built.

@@ -1891,7 +1891,7 @@ export class ManagedSlotReconciler {
     this.journal.inFlight.add(entry.id);
     try {
       if (replacing === undefined && this.deps.resourceBudget) {
-        await this.admitFreshCreation(context, entry);
+        await this.admitFreshCreation(context, assignment, entry);
       }
       let provisioned: ManagedSlotProvisionedDevice;
       try {
@@ -2060,6 +2060,7 @@ export class ManagedSlotReconciler {
   /** Reserve total-resource capacity before any native creation. */
   private async admitFreshCreation(
     context: ReconcileContext,
+    assignment: SlotAssignmentRecord,
     entry: SlotJournalEntry,
   ): Promise<void> {
     let admission: ManagedSlotResourceAdmission;
@@ -2072,7 +2073,8 @@ export class ManagedSlotReconciler {
       // Admission can consume the remaining preparation time even when it finds room.
       this.checkBudget(context.request);
     } catch (error) {
-      await this.settleFailedCreate(context, entry, true);
+      const settled = await this.settleFailedCreate(context, entry, true);
+      await this.removeFailedUnboundSlot(context, assignment, settled);
       // Cancellation retains its identity for the reconciler's existing handling.
       throw error;
     }
@@ -2081,14 +2083,15 @@ export class ManagedSlotReconciler {
     }
     // Native creation has not been called: absence is already proven, including when discovery
     // itself is incomplete. Close directly rather than rediscovering a device that never existed.
-    await this.settleFailedCreate(context, entry, true);
+    const settled = await this.settleFailedCreate(context, entry, true);
+    await this.removeFailedUnboundSlot(context, assignment, settled);
     if (admission.kind === "unknown") {
       throw new ReconcileAbort(failure("discovery_incomplete", admission.message));
     }
-    const { limit, usage, retained, evictionFailures } = admission;
+    const { limit, usage, charged, retained, evictionFailures } = admission;
     throw new ReconcileAbort(
       failure("managed_slot_budget_exhausted", "Managed-slot total-resource budget is exhausted.", {
-        budget: { limit, usage, retained, evictionFailures },
+        budget: { limit, usage, charged, retained, evictionFailures },
       }),
     );
   }

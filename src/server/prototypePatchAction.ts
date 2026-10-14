@@ -45,6 +45,8 @@ export interface PrototypePatchDependencies {
   store: Pick<PrototypeStatusStore, "shownSpecs" | "recordPatchedData">;
   transport: Pick<PrototypeTransport, "patch">;
   supportsPatch: () => Promise<boolean>;
+  /** Capability preflight over the fully validated result, before dispatch or host mutation. */
+  refuseSpec?: (spec: PrototypeSpec) => Promise<PrototypeResult | undefined>;
   platform: "android" | "ios";
   queue: PrototypePatchQueue;
   /** Retires the device's cached observation after an applied patch. */
@@ -128,7 +130,11 @@ async function queuedPatch(
   if (!("spec" in applied)) {
     return applied;
   }
+  const refusal = await deps.refuseSpec?.(applied.validated);
   signal?.throwIfAborted();
+  if (refusal) {
+    return failure(refusal.error ?? "Prototype patch refused");
+  }
   const result = await sendPatch(deps, args);
   if (result.delivery === "indeterminate") {
     deps.store.shownSpecs.abandon(deviceId);
@@ -136,18 +142,23 @@ async function queuedPatch(
       `${result.error ?? "Prototype patch failed"} The device may or may not have applied the patch: show the prototype again before the next patch.`,
     );
   }
+  return commitPatch(deps, deviceId, args.id, read.version, applied, result);
+}
+function commitPatch(
+  deps: PrototypePatchDependencies,
+  deviceId: string,
+  id: string,
+  version: number,
+  applied: { spec: Record<string, unknown>; validated: PrototypeSpec },
+  result: PrototypePatchReply,
+): PrototypePatchOutput {
   const fields = prototypePatchReplyFields(result);
   if (!result.success) {
     return { success: false, error: result.error ?? "The device refused the patch.", ...fields };
   }
-  const committed = deps.store.shownSpecs.commitPatch(
-    deviceId,
-    args.id,
-    read.version,
-    applied.spec,
-  );
+  const committed = deps.store.shownSpecs.commitPatch(deviceId, id, version, applied.spec);
   if (committed) {
-    deps.store.recordPatchedData(deviceId, args.id, applied.validated.data);
+    deps.store.recordPatchedData(deviceId, id, applied.validated.data);
   }
   deps.retire(result);
   return {
@@ -156,7 +167,7 @@ async function queuedPatch(
     ...(committed
       ? {}
       : {
-          warning: `A show on this device overlapped this patch, so the host no longer tracks prototype ${args.id}'s spec: show it again before the next patch.`,
+          warning: `A show on this device overlapped this patch, so the host no longer tracks prototype ${id}'s spec: show it again before the next patch.`,
         }),
   };
 }

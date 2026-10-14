@@ -1,0 +1,602 @@
+[
+  {
+    "pattern": "",
+    "value": "",
+    "matches": true
+  },
+  {
+    "pattern": "",
+    "value": "a",
+    "matches": false
+  },
+  {
+    "pattern": "a",
+    "value": "a",
+    "matches": true
+  },
+  {
+    "pattern": "a",
+    "value": "aa",
+    "matches": false
+  },
+  {
+    "pattern": "a",
+    "value": "é",
+    "matches": false
+  },
+  {
+    "pattern": ".",
+    "value": "é",
+    "matches": true
+  },
+  {
+    "pattern": ".",
+    "value": "😀",
+    "matches": true
+  },
+  {
+    "pattern": ".",
+    "value": "\n",
+    "matches": false
+  },
+  {
+    "pattern": "^a$",
+    "value": "a",
+    "matches": true
+  },
+  {
+    "pattern": "^a$",
+    "value": "a\n",
+    "matches": false
+  },
+  {
+    "pattern": "[a-z]+",
+    "value": "abc",
+    "matches": true
+  },
+  {
+    "pattern": "[a-z]+",
+    "value": "ABC",
+    "matches": false
+  },
+  {
+    "pattern": "[^0-9]+",
+    "value": "é😀",
+    "matches": true
+  },
+  {
+    "pattern": "[^0-9]+",
+    "value": "123",
+    "matches": false
+  },
+  {
+    "pattern": "\\d+",
+    "value": "123",
+    "matches": true
+  },
+  {
+    "pattern": "\\d+",
+    "value": "١٢٣",
+    "matches": false
+  },
+  {
+    "pattern": "\\w+",
+    "value": "abc_12",
+    "matches": true
+  },
+  {
+    "pattern": "\\w+",
+    "value": "é",
+    "matches": false
+  },
+  {
+    "pattern": "\\s+",
+    "value": " \t",
+    "matches": true
+  },
+  {
+    "pattern": "\\s+",
+    "value": " ",
+    "matches": false
+  },
+  {
+    "pattern": "\\D+",
+    "value": "abc",
+    "matches": true
+  },
+  {
+    "pattern": "\\D+",
+    "value": "1",
+    "matches": false
+  },
+  {
+    "pattern": "\\W+",
+    "value": "é😀",
+    "matches": true
+  },
+  {
+    "pattern": "\\W+",
+    "value": "a",
+    "matches": false
+  },
+  {
+    "pattern": "\\S+",
+    "value": "é",
+    "matches": true
+  },
+  {
+    "pattern": "\\S+",
+    "value": " ",
+    "matches": true
+  },
+  {
+    "pattern": "[\\dA-F]+",
+    "value": "12AF",
+    "matches": true
+  },
+  {
+    "pattern": "[\\dA-F]+",
+    "value": "G",
+    "matches": false
+  },
+  {
+    "pattern": "[^\\s]+",
+    "value": "é",
+    "matches": true
+  },
+  {
+    "pattern": "[^\\s]+",
+    "value": " ",
+    "matches": false
+  },
+  {
+    "pattern": "[\\S]+",
+    "value": " ",
+    "matches": true
+  },
+  {
+    "pattern": "[\\S]+",
+    "value": " ",
+    "matches": false
+  },
+  {
+    "pattern": "a|bc",
+    "value": "a",
+    "matches": true
+  },
+  {
+    "pattern": "a|bc",
+    "value": "bc",
+    "matches": true
+  },
+  {
+    "pattern": "a|bc",
+    "value": "abc",
+    "matches": false
+  },
+  {
+    "pattern": "(?:ab)+",
+    "value": "abab",
+    "matches": true
+  },
+  {
+    "pattern": "(?:ab)+",
+    "value": "aba",
+    "matches": false
+  },
+  {
+    "pattern": "(ab)?",
+    "value": "",
+    "matches": true
+  },
+  {
+    "pattern": "(ab)?",
+    "value": "ab",
+    "matches": true
+  },
+  {
+    "pattern": "(ab)?",
+    "value": "abab",
+    "matches": false
+  },
+  {
+    "pattern": "a*",
+    "value": "",
+    "matches": true
+  },
+  {
+    "pattern": "a*",
+    "value": "aaa",
+    "matches": true
+  },
+  {
+    "pattern": "a*",
+    "value": "b",
+    "matches": false
+  },
+  {
+    "pattern": "a+",
+    "value": "a",
+    "matches": true
+  },
+  {
+    "pattern": "a+",
+    "value": "aaa",
+    "matches": true
+  },
+  {
+    "pattern": "a+",
+    "value": "",
+    "matches": false
+  },
+  {
+    "pattern": "a?",
+    "value": "",
+    "matches": true
+  },
+  {
+    "pattern": "a?",
+    "value": "a",
+    "matches": true
+  },
+  {
+    "pattern": "a?",
+    "value": "aa",
+    "matches": false
+  },
+  {
+    "pattern": "a{2}",
+    "value": "aa",
+    "matches": true
+  },
+  {
+    "pattern": "a{2}",
+    "value": "a",
+    "matches": false
+  },
+  {
+    "pattern": "a{2,}",
+    "value": "aaa",
+    "matches": true
+  },
+  {
+    "pattern": "a{2,}",
+    "value": "a",
+    "matches": false
+  },
+  {
+    "pattern": "a{2,3}",
+    "value": "aa",
+    "matches": true
+  },
+  {
+    "pattern": "a{2,3}",
+    "value": "aaa",
+    "matches": true
+  },
+  {
+    "pattern": "a{2,3}",
+    "value": "aaaa",
+    "matches": false
+  },
+  {
+    "pattern": "a{0}",
+    "value": "",
+    "matches": true
+  },
+  {
+    "pattern": "a{0}",
+    "value": "a",
+    "matches": false
+  },
+  {
+    "pattern": "a{0,100}",
+    "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "matches": true
+  },
+  {
+    "pattern": "a{0,100}",
+    "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "matches": false
+  },
+  {
+    "pattern": "\\.\\+",
+    "value": ".+",
+    "matches": true
+  },
+  {
+    "pattern": "\\.\\+",
+    "value": "ab",
+    "matches": false
+  },
+  {
+    "pattern": "[a-c-]+",
+    "value": "ab-c",
+    "matches": true
+  },
+  {
+    "pattern": "[a-c-]+",
+    "value": "d",
+    "matches": false
+  },
+  {
+    "pattern": "[😀-🙏]+",
+    "value": "😀",
+    "matches": true
+  },
+  {
+    "pattern": "[😀-🙏]+",
+    "value": "a",
+    "matches": false
+  },
+  {
+    "pattern": "^é|😀$",
+    "value": "é",
+    "matches": true
+  },
+  {
+    "pattern": "^é|😀$",
+    "value": "😀",
+    "matches": true
+  },
+  {
+    "pattern": "^é|😀$",
+    "value": "é😀",
+    "matches": false
+  },
+  {
+    "pattern": "(?:a|b)?",
+    "value": "a",
+    "matches": true
+  },
+  {
+    "pattern": "(?:a|b)?",
+    "value": "b",
+    "matches": true
+  },
+  {
+    "pattern": "(?:a|b)?",
+    "value": "ab",
+    "matches": false
+  },
+  {
+    "pattern": "a(bc)*d",
+    "value": "abcbcd",
+    "matches": true
+  },
+  {
+    "pattern": "a(bc)*d",
+    "value": "abcdx",
+    "matches": false
+  },
+  {
+    "pattern": "[\\s\\d]+",
+    "value": "1 \t",
+    "matches": true
+  },
+  {
+    "pattern": "[\\s\\d]+",
+    "value": "é",
+    "matches": false
+  },
+  {
+    "pattern": "a\\-b",
+    "value": "a-b",
+    "matches": true
+  },
+  {
+    "pattern": "a\\-b",
+    "value": "ab",
+    "matches": false
+  },
+  {
+    "pattern": "\\(a\\)",
+    "value": "(a)",
+    "matches": true
+  },
+  {
+    "pattern": "\\(a\\)",
+    "value": "a",
+    "matches": false
+  },
+  {
+    "pattern": "ab",
+    "value": "ab",
+    "matches": true
+  },
+  {
+    "pattern": "ab",
+    "value": "a",
+    "matches": false
+  },
+  {
+    "pattern": "abc",
+    "value": "abc",
+    "matches": true
+  },
+  {
+    "pattern": "abc",
+    "value": "ab",
+    "matches": false
+  },
+  {
+    "pattern": "é+",
+    "value": "éé",
+    "matches": true
+  },
+  {
+    "pattern": "é+",
+    "value": "e",
+    "matches": false
+  },
+  {
+    "pattern": "😀+",
+    "value": "😀😀",
+    "matches": true
+  },
+  {
+    "pattern": "😀+",
+    "value": "😀a",
+    "matches": false
+  },
+  {
+    "pattern": "\\^\\$",
+    "value": "^$",
+    "matches": true
+  },
+  {
+    "pattern": "\\^\\$",
+    "value": "^",
+    "matches": false
+  },
+  {
+    "pattern": "[A-Z]{2,4}",
+    "value": "ABC",
+    "matches": true
+  },
+  {
+    "pattern": "[A-Z]{2,4}",
+    "value": "a",
+    "matches": false
+  },
+  {
+    "pattern": "[0-9]{5}(-[0-9]{4})?",
+    "value": "12345-6789",
+    "matches": true
+  },
+  {
+    "pattern": "[0-9]{5}(-[0-9]{4})?",
+    "value": "1234",
+    "matches": false
+  },
+  {
+    "pattern": "(ab|cd)",
+    "value": "ab",
+    "matches": true
+  },
+  {
+    "pattern": "(ab|cd)",
+    "value": "abcd",
+    "matches": false
+  },
+  {
+    "pattern": "a{100}",
+    "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "matches": true
+  },
+  {
+    "pattern": "a{100}",
+    "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "matches": false
+  },
+  {
+    "pattern": "a{1,1}",
+    "value": "a",
+    "matches": true
+  },
+  {
+    "pattern": "a{1,1}",
+    "value": "aa",
+    "matches": false
+  },
+  {
+    "pattern": "[\\D]+",
+    "value": "é",
+    "matches": true
+  },
+  {
+    "pattern": "[\\D]+",
+    "value": "1",
+    "matches": false
+  },
+  {
+    "pattern": "[\\W]+",
+    "value": "😀",
+    "matches": true
+  },
+  {
+    "pattern": "[\\W]+",
+    "value": "_",
+    "matches": false
+  },
+  {
+    "pattern": "[^\\S]+",
+    "value": " \t",
+    "matches": true
+  },
+  {
+    "pattern": "[^\\S]+",
+    "value": " ",
+    "matches": false
+  },
+  {
+    "pattern": "(?:a?)",
+    "value": "",
+    "matches": true
+  },
+  {
+    "pattern": "(?:a?)",
+    "value": "aa",
+    "matches": false
+  },
+  {
+    "pattern": "(a)?b+",
+    "value": "abbb",
+    "matches": true
+  },
+  {
+    "pattern": "(a)?b+",
+    "value": "aaab",
+    "matches": false
+  },
+  {
+    "pattern": "[a-zA-Z0-9_]+",
+    "value": "aZ0_",
+    "matches": true
+  },
+  {
+    "pattern": "[a-zA-Z0-9_]+",
+    "value": "é",
+    "matches": false
+  },
+  {
+    "pattern": "\\[x\\]",
+    "value": "[x]",
+    "matches": true
+  },
+  {
+    "pattern": "\\[x\\]",
+    "value": "x",
+    "matches": false
+  },
+  {
+    "pattern": "a/b",
+    "value": "a/b",
+    "matches": true
+  },
+  {
+    "pattern": "a/b",
+    "value": "ab",
+    "matches": false
+  },
+  {
+    "pattern": "\\\\",
+    "value": "\\",
+    "matches": true
+  },
+  {
+    "pattern": "\\\\",
+    "value": "/",
+    "matches": false
+  },
+  {
+    "pattern": "a\\|b",
+    "value": "a|b",
+    "matches": true
+  },
+  {
+    "pattern": "a\\|b",
+    "value": "ab",
+    "matches": false
+  }
+]

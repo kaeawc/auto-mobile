@@ -77,13 +77,31 @@ const prototypeEventEnvelopeSchema = z.object({
 });
 
 /** One `prototype_event` push of a kind this host knows. */
-export const prototypeEventSchema = prototypeEventEnvelopeSchema.extend({
-  kind: z.enum(PROTOTYPE_EVENT_KINDS),
-  name: z.string().nullable(),
-  payload: actionSchema.options[0].shape.payload.unwrap(),
-  state: prototypeSpecSchema.shape.state.unwrap(),
-  pages: z.record(z.string().min(1), z.number().int().nonnegative().max(2147483647)).default({}),
-});
+export const prototypeEventSchema = prototypeEventEnvelopeSchema
+  .extend({
+    kind: z.enum(PROTOTYPE_EVENT_KINDS),
+    validity: z.record(z.string().min(1), z.boolean()).optional(),
+    keys: z.array(z.string().min(1)).min(1).max(8).optional(),
+    name: z.string().nullable(),
+    payload: actionSchema.options[0].shape.payload.unwrap(),
+    state: prototypeSpecSchema.shape.state.unwrap(),
+    pages: z.record(z.string().min(1), z.number().int().nonnegative().max(2147483647)).default({}),
+  })
+  .superRefine((event, context) => {
+    const field =
+      event.kind === "change"
+        ? "validity"
+        : event.kind === "validation_failed"
+          ? "keys"
+          : undefined;
+    if (field !== undefined && event[field] === undefined) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [field],
+        message: `Required for ${event.kind} events`,
+      });
+    }
+  });
 
 /**
  * Decodes one `prototype_event` push; shared by CtrlProxy and the iOS prototype agent transport.

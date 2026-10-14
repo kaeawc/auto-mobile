@@ -1,0 +1,174 @@
+[
+  {
+    "pattern": "(a)\\1",
+    "messageSubstrings": ["Backreferences"]
+  },
+  {
+    "pattern": "\\k<name>",
+    "messageSubstrings": ["Backreferences"]
+  },
+  {
+    "pattern": "(?=a)",
+    "messageSubstrings": ["Lookahead"]
+  },
+  {
+    "pattern": "(?!a)",
+    "messageSubstrings": ["Lookahead"]
+  },
+  {
+    "pattern": "(?<=a)",
+    "messageSubstrings": ["Lookbehind"]
+  },
+  {
+    "pattern": "(?<!a)",
+    "messageSubstrings": ["Lookbehind"]
+  },
+  {
+    "pattern": "(?<name>a)",
+    "messageSubstrings": ["Named groups"]
+  },
+  {
+    "pattern": "a*?",
+    "messageSubstrings": ["Lazy quantifiers"]
+  },
+  {
+    "pattern": "a+?",
+    "messageSubstrings": ["Lazy quantifiers"]
+  },
+  {
+    "pattern": "a??",
+    "messageSubstrings": ["Lazy quantifiers"]
+  },
+  {
+    "pattern": "a{1,2}?",
+    "messageSubstrings": ["Lazy quantifiers"]
+  },
+  {
+    "pattern": "a*+",
+    "messageSubstrings": ["Possessive quantifiers"]
+  },
+  {
+    "pattern": "a++",
+    "messageSubstrings": ["Possessive quantifiers"]
+  },
+  {
+    "pattern": "a?+",
+    "messageSubstrings": ["Possessive quantifiers"]
+  },
+  {
+    "pattern": "a{1,2}+",
+    "messageSubstrings": ["Possessive quantifiers"]
+  },
+  {
+    "pattern": "\\p{L}",
+    "messageSubstrings": ["Unicode property"]
+  },
+  {
+    "pattern": "\\P{L}",
+    "messageSubstrings": ["Unicode property"]
+  },
+  {
+    "pattern": "(?i)a",
+    "messageSubstrings": ["Inline flags"]
+  },
+  {
+    "pattern": "\\b",
+    "messageSubstrings": ["Word boundaries"]
+  },
+  {
+    "pattern": "\\B",
+    "messageSubstrings": ["Word boundaries"]
+  },
+  {
+    "pattern": "\\n",
+    "messageSubstrings": ["Unsupported escape"]
+  },
+  {
+    "pattern": "\\x41",
+    "messageSubstrings": ["Unsupported escape"]
+  },
+  {
+    "pattern": "\\u0041",
+    "messageSubstrings": ["Unsupported escape"]
+  },
+  {
+    "pattern": "(a+)+$",
+    "messageSubstrings": ["Repeated group"]
+  },
+  {
+    "pattern": "(a|a)*",
+    "messageSubstrings": ["Repeated group"]
+  },
+  {
+    "pattern": "(a*)*",
+    "messageSubstrings": ["Repeated group"]
+  },
+  {
+    "pattern": "(a|b)+",
+    "messageSubstrings": ["Repeated group"]
+  },
+  {
+    "pattern": "((ab)+)+",
+    "messageSubstrings": ["Repeated group"]
+  },
+  {
+    "pattern": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "messageSubstrings": ["128 characters"]
+  },
+  {
+    "pattern": "a{1,101}",
+    "messageSubstrings": ["bounds must be <=100"]
+  },
+  {
+    "pattern": "a{101,}",
+    "messageSubstrings": ["bounds must be <=100"]
+  },
+  {
+    "pattern": "a{3,2}",
+    "messageSubstrings": ["minimum exceeds maximum"]
+  },
+  {
+    "pattern": "a{,2}",
+    "messageSubstrings": ["Malformed bounded"]
+  },
+  {
+    "pattern": "[z-a]",
+    "messageSubstrings": ["range is reversed"]
+  },
+  {
+    "pattern": "[\\d-a]",
+    "messageSubstrings": ["literal endpoints"]
+  },
+  {
+    "pattern": "[abc",
+    "messageSubstrings": ["Unclosed character"]
+  },
+  {
+    "pattern": "[]",
+    "messageSubstrings": ["Empty character"]
+  },
+  {
+    "pattern": "(",
+    "messageSubstrings": ["Unclosed group"]
+  },
+  {
+    "pattern": "a)",
+    "messageSubstrings": ["Unmatched closing"]
+  },
+  {
+    "pattern": "a\\",
+    "messageSubstrings": ["Trailing escape"]
+  },
+  {
+    "pattern": "^+",
+    "messageSubstrings": ["Anchor cannot"]
+  },
+  {
+    "pattern": "a**",
+    "messageSubstrings": ["Repeated quantifier"]
+  },
+  {
+    "pattern": "*a",
+    "messageSubstrings": ["Unexpected metacharacter"]
+  }
+]

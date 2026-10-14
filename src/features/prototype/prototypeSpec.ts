@@ -95,6 +95,7 @@ const pointerSchema = z
   .regex(/^(?:\/(?:[^~\/]|~[01])*)+$/);
 
 export type PrototypeCondition =
+  | { valid: string | string[] }
   | { data: string; equals: string | number | boolean }
   | { data: string; notEquals: string | number | boolean }
   | { data: string; gt: number }
@@ -110,6 +111,9 @@ let conditionUnion: z.ZodType<PrototypeCondition> | undefined;
 const conditionSchema: z.ZodType<PrototypeCondition> = z.lazy(
   () =>
     (conditionUnion ??= z.union([
+      z
+        .object({ valid: z.union([stateKeySchema, z.array(stateKeySchema).min(1).max(8)]) })
+        .strict(),
       z.object({ data: pointerSchema, equals: scalarSchema }).strict(),
       z.object({ data: pointerSchema, notEquals: scalarSchema }).strict(),
       z.object({ data: pointerSchema, gt: z.number().finite() }).strict(),
@@ -398,6 +402,7 @@ export const actionSchema = z.discriminatedUnion("type", [
       type: z.enum(["emit"]),
       name: z.string().min(1),
       payload: prototypeJsonSchema.optional(),
+      requireValid: z.array(stateKeySchema).min(1).max(8).optional(),
     })
     .strict(),
   z
@@ -436,6 +441,27 @@ export const actionSchema = z.discriminatedUnion("type", [
     .strict(),
   z.object({ type: z.enum(["dismiss"]) }).strict(),
 ]);
+export const prototypeCheckSchema = z.union([
+  z.object({ message: z.string().min(1), required: z.literal(true) }).strict(),
+  z.object({ message: z.string().min(1), minLength: z.number().finite().int().min(0) }).strict(),
+  z.object({ message: z.string().min(1), maxLength: z.number().finite().int().min(0) }).strict(),
+  z.object({ message: z.string().min(1), min: z.number().finite() }).strict(),
+  z.object({ message: z.string().min(1), max: z.number().finite() }).strict(),
+  z
+    .object({
+      message: z.string().min(1),
+      format: z.enum(["email", "phone", "digits", "decimal", "url"]),
+    })
+    .strict(),
+  z.object({ message: z.string().min(1), pattern: z.string().max(128) }).strict(),
+]);
+export type PrototypeCheck = z.infer<typeof prototypeCheckSchema>;
+const enabledShape = { enabledWhen: conditionSchema.optional() };
+const checksShape = {
+  ...enabledShape,
+  checks: z.array(prototypeCheckSchema).min(1).max(8).optional(),
+  validateOn: z.enum(["change", "blur", "submit"]).optional(),
+};
 const commonNodeShape = {
   id: z.string().min(1).optional(),
   testTag: z.string().min(1).optional(),
@@ -497,6 +523,7 @@ const spacerBaseSchema = z.object({ ...commonNodeShape, type: z.enum(["spacer"])
 const textFieldBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...checksShape,
     type: z.enum(["textField"]),
     stateKey: stateKeySchema,
     placeholder: z.string().optional(),
@@ -505,6 +532,7 @@ const textFieldBaseSchema = z
 const switchBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...checksShape,
     type: z.enum(["switch"]),
     stateKey: stateKeySchema,
     label: z.string().min(1).optional(),
@@ -513,6 +541,7 @@ const switchBaseSchema = z
 const checkboxBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...checksShape,
     type: z.enum(["checkbox"]),
     stateKey: stateKeySchema,
     label: z.string().min(1).optional(),
@@ -521,6 +550,7 @@ const checkboxBaseSchema = z
 const buttonBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...enabledShape,
     type: z.enum(["button"]),
     label: z.string().min(1),
     variant: z.enum(["filled", "tonal", "elevated", "outlined", "text"]).optional(),
@@ -530,6 +560,7 @@ const buttonBaseSchema = z
 const radioGroupBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...checksShape,
     type: z.enum(["radioGroup"]),
     stateKey: stateKeySchema,
     options: z
@@ -556,6 +587,7 @@ const listItemTrailingSchema = z.discriminatedUnion("type", [
 const listItemBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...enabledShape,
     type: z.enum(["listItem"]),
     headline: z.string().min(1),
     supporting: z.string().min(1).optional(),
@@ -566,6 +598,7 @@ const listItemBaseSchema = z
 const sliderBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...checksShape,
     type: z.enum(["slider"]),
     stateKey: stateKeySchema,
     label: z.string().min(1).optional(),
@@ -577,6 +610,7 @@ const sliderBaseSchema = z
 const chipBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...enabledShape,
     type: z.enum(["chip"]),
     label: z.string().min(1),
     variant: z.enum(["assist", "filter", "input", "suggestion"]).optional(),
@@ -603,6 +637,7 @@ const dialogButtonSchema = z
 const iconButtonBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...enabledShape,
     type: z.enum(["iconButton"]),
     icon: iconNameSchema,
     variant: z.enum(["standard", "filled", "tonal", "outlined"]).optional(),
@@ -611,6 +646,7 @@ const iconButtonBaseSchema = z
 const fabBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...enabledShape,
     type: z.enum(["fab"]),
     icon: iconNameSchema,
     label: z.string().min(1).optional(),
@@ -682,6 +718,7 @@ const snackbarBaseSchema = z
 const timePickerBaseSchema = z
   .object({
     ...commonNodeShape,
+    ...checksShape,
     type: z.enum(["timePicker"]),
     hourKey: stateKeyFieldSchema,
     minuteKey: stateKeyFieldSchema,
@@ -689,7 +726,12 @@ const timePickerBaseSchema = z
   })
   .strict();
 const datePickerBaseSchema = z
-  .object({ ...commonNodeShape, type: z.enum(["datePicker"]), stateKey: stateKeyFieldSchema })
+  .object({
+    ...commonNodeShape,
+    ...checksShape,
+    type: z.enum(["datePicker"]),
+    stateKey: stateKeyFieldSchema,
+  })
   .strict();
 const scrollBaseSchema = z
   .object({

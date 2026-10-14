@@ -262,6 +262,8 @@ export class PrototypeEventCoordinator {
       state: event.state,
       pages: event.pages,
       timestamp: event.timestamp,
+      ...(event.validity === undefined ? {} : { validity: event.validity }),
+      ...(event.keys === undefined ? {} : { keys: event.keys }),
     };
     return { event: delivered, ...entry.buffer.status() };
   }

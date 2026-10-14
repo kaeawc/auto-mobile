@@ -4,6 +4,7 @@ import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_THEME_MODES_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import {
   GUIDE_APPEARANCE,
+  GUIDE_CHECKS,
   GUIDE_COMPONENTS,
   GUIDE_COST,
   GUIDE_DATA,
@@ -219,10 +220,12 @@ export function renderPrototypeGuide(): string {
     renderActions(),
     GUIDE_REPEAT,
     GUIDE_DATA,
+    GUIDE_CHECKS,
     GUIDE_PATCH,
     GUIDE_COMPONENTS,
     renderTheme(),
     GUIDE_APPEARANCE,
+    GUIDE_CHECKS,
     renderIcons(),
     renderPlatformDifferences(),
     GUIDE_COST,

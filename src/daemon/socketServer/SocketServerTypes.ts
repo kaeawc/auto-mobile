@@ -90,5 +90,7 @@ export function resolveAuxSocketDir(env: NodeJS.ProcessEnv = process.env): strin
   const override = env.AUTOMOBILE_AUX_SOCKET_DIR?.trim();
   return override
     ? resolvePathFromDaemonLaunchWorkingDirectory(override, env)
-    : path.join(os.homedir(), ".auto-mobile");
+    : // Auxiliary sockets are shared coordination state, with their own override;
+      // AUTOMOBILE_DATA_DIR must not move the socket namespace per agent.
+      path.join(os.homedir(), ".auto-mobile");
 }

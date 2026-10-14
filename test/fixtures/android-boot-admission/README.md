@@ -23,3 +23,17 @@ Fixtures for `src/features/bootAdmission` (#11588).
   This is UPSTREAM DOCUMENTATION, not a capture from a running host; Docker was not running on
   the lane host. Follow-up (#11965): replace with a capture from the project's Alpine image,
   using `cat /proc/<pid>/status` and `/proc/<pid>/cmdline` of a controlled short-lived process.
+
+# Owed: Linux /proc captures (#11998, #11965)
+
+`proc-status-upstream-man-proc_pid_status.txt` is upstream documentation, not
+a capture from a running Linux process. Capture real process fixtures with
+`scripts/capture-proc-fixtures.sh [out-dir]` (default:
+`test/fixtures/android-boot-admission`). The script writes:
+
+- `proc-alpine-status.txt`, `proc-alpine-cmdline.bin`, and `proc-alpine-pid1-status.txt`
+- `proc-debian-status.txt`, `proc-debian-cmdline.bin`, and `proc-debian-pid1-status.txt`
+- `proc-alpine-provenance.txt` and `proc-debian-provenance.txt`
+
+Once captured, `test/features/bootAdmission/procProcessTable.test.ts` must
+switch to these captured files. No capture was made on the lane host.

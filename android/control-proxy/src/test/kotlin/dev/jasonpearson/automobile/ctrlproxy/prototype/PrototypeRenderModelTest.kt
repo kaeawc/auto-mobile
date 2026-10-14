@@ -161,6 +161,26 @@ class PrototypeRenderModelTest {
   }
 
   @Test
+  fun `finite but oversized Compose width is rejected by show and patch validator`() {
+    // PrototypeController.validate uses this validator before mapping or installing content.
+    val encoded =
+      Json.encodeToString(
+        spec(
+          PrototypeTextNode(
+            text = "text",
+            style = PrototypeStyle(width = PrototypeDimension.Dp(1e30)),
+          ),
+        ),
+      )
+    val result = PrototypeSpecValidator.validate(encoded)
+    assertTrue(result is PrototypeSpecValidation.Failure)
+    assertEquals(
+      PrototypeSpecError("root.style.width.dp", "Invalid number value"),
+      (result as PrototypeSpecValidation.Failure).error,
+    )
+  }
+
+  @Test
   fun `unrepresentable Compose size is rejected before content installation`() {
     val error =
       assertThrows(IllegalArgumentException::class.java) {

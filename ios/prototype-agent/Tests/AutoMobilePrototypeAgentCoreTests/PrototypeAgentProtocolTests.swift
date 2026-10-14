@@ -9,6 +9,13 @@ private func line(_ object: [String: Any]) throws -> Data {
 }
 
 final class PrototypeAgentConfigurationTests: XCTestCase {
+    func testTheAgentAdvertisesSfSymbolsWithoutMaterialParity() {
+        XCTAssertEqual(PrototypeAgentProtocol.iconSfSymbolsCapability, "prototype_icon_sf_symbols_v1")
+        XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.iconSfSymbolsCapability))
+        XCTAssertFalse(PrototypeAgentProtocol.capabilities.contains("prototype_icon_set_material_v1"))
+        XCTAssertFalse(PrototypeAgentProtocol.capabilities.contains("prototype_icon_variant_v1"))
+    }
+
     func testWindowChromeCapability() {
         XCTAssertEqual(PrototypeAgentProtocol.windowChromeCapability, "prototype_window_chrome_v1")
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.windowChromeCapability))

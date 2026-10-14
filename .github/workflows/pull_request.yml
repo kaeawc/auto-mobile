@@ -1053,6 +1053,8 @@ jobs:
           else
             # Same pinned bats-core as the full BATS job.
             git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
+            # Tags are mutable; the install runs under sudo, so check the commit.
+            test "$(git -C /tmp/bats-core rev-parse HEAD)" = "eb7f42f8d608ac693d7a4b67474f6714ea68cfc5"
             sudo /tmp/bats-core/install.sh /usr/local
           fi
           if ! command -v shellcheck &>/dev/null; then
@@ -1201,6 +1203,8 @@ jobs:
             # Pin the runner: newer development snapshots can miscount this
             # suite after executing every test, which makes a green run fail.
             git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
+            # Tags are mutable; the install runs under sudo, so check the commit.
+            test "$(git -C /tmp/bats-core rev-parse HEAD)" = "eb7f42f8d608ac693d7a4b67474f6714ea68cfc5"
             sudo /tmp/bats-core/install.sh /usr/local
           fi
           if command -v shellcheck &>/dev/null; then

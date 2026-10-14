@@ -443,3 +443,17 @@ describe("CachingDisplayInventoryProvider", () => {
     expect(reads).toBe(1);
   });
 });
+
+test("cached panels are synchronous, settled only, and disappear on invalidation", async () => {
+  const source = new FakeDisplayInventorySource({ displays, degraded: false });
+  const provider = new CachingDisplayInventoryProvider(source, source, new FakeTimer());
+  expect(provider.cachedPanels(device.deviceId)).toBeUndefined();
+  const pending = provider.hydrate(device, "fingerprint");
+  expect(provider.cachedPanels(device.deviceId)).toBeUndefined();
+  await pending;
+  expect(provider.cachedPanels(device.deviceId)).toEqual(displays.panels);
+  expect(source.reads).toBe(1);
+  provider.invalidate(device.deviceId);
+  expect(provider.cachedPanels(device.deviceId)).toBeUndefined();
+  expect(source.reads).toBe(1);
+});

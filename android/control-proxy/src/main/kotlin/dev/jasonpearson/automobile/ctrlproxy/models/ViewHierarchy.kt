@@ -20,6 +20,7 @@ constructor(
   val userId: Int? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val displayId: Int? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val panelUniqueId: String? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val panelFingerprint: PanelFingerprintInfo? = null,
   val hierarchy: UIElementInfo? = null,
   val windowInfo: WindowInfo? = null,
   val windows: List<WindowInfo>? = null,

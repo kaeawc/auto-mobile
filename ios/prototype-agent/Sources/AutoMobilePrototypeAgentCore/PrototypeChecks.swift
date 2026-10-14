@@ -44,7 +44,7 @@ final class PrototypeValidityContext: Equatable {
 }
 
 enum PrototypeChecks {
-    // ECMAScript whitespace, deliberately distinct from the pattern grammar's ASCII whitespace.
+    /// ECMAScript whitespace, deliberately distinct from the pattern grammar's ASCII whitespace.
     private static let whitespace =
         "\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF"
 
@@ -81,18 +81,30 @@ enum PrototypeChecks {
                 return !PrototypeCheckPattern.wholeMatch("[\(whitespace)]*", text)
             }
         }
-        if value == nil || value == .null || value == .string("") { return true }
+        if value == nil || value == .null || value == .string("") {
+            return true
+        }
         let text = value?.stringValue ?? ""
-        if let min = check.minLength { return text.utf16.count >= min }
-        if let max = check.maxLength { return text.utf16.count <= max }
-        if let pattern = check.pattern { return PrototypeCheckPattern.matches(pattern, text) }
+        if let min = check.minLength {
+            return text.utf16.count >= min
+        }
+        if let max = check.maxLength {
+            return text.utf16.count <= max
+        }
+        if let pattern = check.pattern {
+            return PrototypeCheckPattern.matches(pattern, text)
+        }
         if let format = check.format {
             return formatPasses(text, format: format, maxLength: PrototypeCheckPattern.maxValueLength)
         }
         let number = nodeType == "datePicker" ? textDate(text) : value?.numberValue
         guard let number, number.isFinite else { return false }
-        if let min = check.min { return number >= min }
-        if let max = check.max { return number <= max }
+        if let min = check.min {
+            return number >= min
+        }
+        if let max = check.max {
+            return number <= max
+        }
         return false
     }
 
@@ -115,7 +127,7 @@ enum PrototypeChecks {
         let own = (root.checks?.isEmpty == false) ? root.checkedKeys.map {
             PrototypeCheckBinding(key: $0, nodeType: root.type, checks: root.checks ?? [])
         } : []
-        return own + ((root.children ?? []) + [root.child].compactMap { $0 }).flatMap { bindings(root: $0) }
+        return own + root.childEntries(path: "root").flatMap { bindings(root: $0.node) }
     }
 
     static func validity(_ bindings: [PrototypeCheckBinding], state: [String: JSONValue]) -> [String: Bool] {
@@ -138,14 +150,15 @@ extension Condition {
 }
 
 extension PrototypeNode {
-    var checkedKeys: [String] { [stateKey, hourKey, minuteKey].compactMap { $0 } }
+    var checkedKeys: [String] {
+        [stateKey, hourKey, minuteKey].compactMap { $0 }
+    }
 
     func bindValidity(_ bindings: [PrototypeCheckBinding]) {
         visibleWhen?.bindValidity(bindings)
         enabledWhen?.bindValidity(bindings)
         openWhen?.bindValidity(bindings)
         styleWhen?.forEach { $0.when.bindValidity(bindings) }
-        children?.forEach { $0.bindValidity(bindings) }
-        child?.bindValidity(bindings)
+        childEntries(path: "root").forEach { $0.node.bindValidity(bindings) }
     }
 }

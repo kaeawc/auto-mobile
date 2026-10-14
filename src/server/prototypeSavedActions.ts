@@ -20,7 +20,10 @@ import {
 } from "../features/prototype/prototypeAssetUploader";
 import type { IosPrototypeInstaller } from "../features/prototype/ios/iosPrototypeInstaller";
 import { createDefaultIosPrototypeInstaller } from "../features/prototype/ios/iosPrototypeInstallerFactory";
-import { PrototypeInstallPhysicalDeviceError } from "../features/prototype/ios/iosPrototypeInstallerErrors";
+import {
+  PrototypeInstallPhysicalDeviceError,
+  TemplateResolveError,
+} from "../features/prototype/ios/iosPrototypeInstallerErrors";
 import {
   PROTOTYPE_BUNDLE_ID_PREFIX,
   isPrototypeBundleId,
@@ -30,6 +33,7 @@ import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import type { BootedDevice } from "../models";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 
 export type PrototypeSavedAction = "save" | "listSaved" | "deleteSaved";
 export type PrototypeSavedErrorCode =
@@ -139,14 +143,18 @@ function savedPrototypeRequestFailure(
   signal?: AbortSignal,
 ): PrototypeSavedOutput {
   logger.warn("[prototype] Saved prototype request failed", error);
+  const actionable = toActionableError(
+    action === "save" && signal?.aborted
+      ? new ActionableError("the request was cancelled", { cause: error })
+      : error,
+    "Saved prototype request failed",
+  );
   return {
     success: false,
-    error: toActionableError(
-      action === "save" && signal?.aborted
-        ? new ActionableError("the request was cancelled", { cause: error })
-        : error,
-      "Saved prototype request failed",
-    ).message,
+    error:
+      actionable instanceof TemplateResolveError && actionable.cause !== undefined
+        ? `${actionable.message}: ${errorMessage(actionable.cause)}`
+        : actionable.message,
   };
 }
 function savedPrototypeResult(
@@ -260,9 +268,12 @@ export function createPrototypeSavedPlatformDispatch(dependencies: IosSavedDepen
       | (Pick<ActionableError, "message"> & { errorCode?: PrototypeSavedErrorCode })
       | undefined,
   ): Promise<PrototypeSavedOutput> | PrototypeSavedOutput | undefined => {
+    const error = platformError();
+    if (error) {
+      return prototypePlatformFailure(error);
+    }
     if (device.platform !== "ios" || !isPrototypeSavedAction(args.action)) {
-      const error = platformError();
-      return error ? prototypePlatformFailure(error) : undefined;
+      return undefined;
     }
     return performIosSavedAction(
       backend,
@@ -360,6 +371,12 @@ async function performIosSavedAction(
           return { id: app.bundleId, label: app.displayName ?? slug, slug, pinned: false };
         }),
       };
+    }
+    const bundleId = isPrototypeBundleId(args.id!) ? args.id! : prototypeBundleId(args.id!);
+    const installed = await installer.list(device.deviceId);
+    signal?.throwIfAborted();
+    if (!installed.some((app) => app.bundleId === bundleId)) {
+      return savedPrototypeFailure({ success: false, errorCode: "not_found" });
     }
     await installer.delete(
       device.deviceId,

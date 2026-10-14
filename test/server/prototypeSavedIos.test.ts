@@ -1,12 +1,16 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { prototypeOutputSchema, registerPrototypeTools } from "../../src/server/prototypeTools";
-import type { IosSavedPrototypeInstaller } from "../../src/server/prototypeSavedActions";
+import {
+  savedPrototypeErrorMessages,
+  type IosSavedPrototypeInstaller,
+} from "../../src/server/prototypeSavedActions";
 import {
   IosPrototypeInstaller,
   type InstalledPrototype,
   type PrototypeInstallInput,
 } from "../../src/features/prototype/ios/iosPrototypeInstaller";
 import { PrototypeInstallPhysicalDeviceError } from "../../src/features/prototype/ios/iosPrototypeInstallerErrors";
+import { prototypeViewerTemplateProvider } from "../../src/features/prototype/ios/iosPrototypeInstallerFactory";
 import {
   PROTOTYPE_BUNDLE_ID_PREFIX,
   prototypeBundleId,
@@ -181,6 +185,7 @@ describe("iOS saved prototype tool actions", () => {
       "list",
       "install",
       "list",
+      "list",
       "delete",
       "list",
     ]);
@@ -227,6 +232,49 @@ describe("iOS saved prototype tool actions", () => {
     expect(installer.calls).toEqual([]);
     expect(reader.reads).toEqual([]);
   });
+  test("device persistence is refused before any installer or asset work", async () => {
+    expect(
+      await save({ spec: { ...spec, window: { ...spec.window, persistence: "device" } }, assets }),
+    ).toEqual({
+      success: false,
+      error: 'window.persistence "device" is Android only; omit it on iOS.',
+    });
+    expect(installer.calls).toEqual([]);
+    expect(reader.reads).toEqual([]);
+    expect(observationReads).toEqual([]);
+  });
+  test("app layer remains accepted for iOS save", async () => {
+    const layered = { ...spec, window: { ...spec.window, layer: "app" } };
+    expect(await save({ spec: layered })).toEqual({
+      success: true,
+      saved: { id: spec.id, slug, replaced: false },
+    });
+    expect(installer.installs[0].spec).toEqual(layered);
+  });
+  test("unset viewer template surfaces build and environment instructions in the handler error", async () => {
+    dispose();
+    restore();
+    const operations = new InstallerOperationRecorder();
+    const commands = new FakeHostCommandExecutor();
+    setup(
+      new IosPrototypeInstaller({
+        template: prototypeViewerTemplateProvider({}),
+        files: new FakeInstallerFileSystem(operations),
+        plist: new FakePrototypePlist(operations),
+        icons: new FakePrototypeIconRenderer(operations),
+        commands,
+        simctl: new FakePrototypeSimctl(operations),
+        data: new FakePrototypeDataWriter(operations),
+      }),
+    );
+    expect(await save()).toEqual({
+      success: false,
+      error:
+        "Could not resolve the prototype viewer template: Build the prototype viewer with scripts/ios/prototype-viewer-build.sh and set AUTOMOBILE_IOS_PROTOTYPE_VIEWER_TEMPLATE to the resulting .app path.",
+    });
+    expect(operations.events).toEqual(["list"]);
+    expect(commands.getExecutedCommands()).toEqual([]);
+  });
   test("icon must be uploaded in the same save call", async () => {
     const output = await save({ icon: "logo" });
     expect(output.success).toBe(false);
@@ -262,12 +310,47 @@ describe("iOS saved prototype tool actions", () => {
     });
   });
   test("delete by authored id ignores removeIcon with the iOS warning", async () => {
+    installer.apps = [{ bundleId }];
     expect(await call({ action: "deleteSaved", id: spec.id, removeIcon: true })).toEqual({
       success: true,
       warning:
         "Icon removal does not apply on iOS simulators; deleting the prototype removes its app icon.",
     });
     expect(installer.deletes).toEqual([{ prototypeId: spec.id }]);
+    expect(installer.calls).toEqual(["list", "delete"]);
+  });
+  test.each(["unknown prototype", prototypeBundleId("unknown prototype"), "com.apple.Maps"])(
+    "delete of absent prototype %s returns not_found without uninstalling",
+    async (id) => {
+      installer.apps = [{ bundleId }, { bundleId: "com.apple.Maps" }];
+      expect(await call({ action: "deleteSaved", id, removeIcon: true })).toEqual({
+        success: false,
+        errorCode: "not_found",
+        error: savedPrototypeErrorMessages.not_found,
+      });
+      expect(installer.calls).toEqual(["list"]);
+      expect(installer.deletes).toEqual([]);
+    },
+  );
+  test("deleting the same prototype twice returns not_found on the second request", async () => {
+    await save();
+    expect(await call({ action: "deleteSaved", id: spec.id })).toEqual({ success: true });
+    expect(await call({ action: "deleteSaved", id: spec.id })).toEqual({
+      success: false,
+      errorCode: "not_found",
+      error: savedPrototypeErrorMessages.not_found,
+    });
+    expect(installer.deletes).toEqual([{ prototypeId: spec.id }]);
+  });
+  test("cancellation during the delete lookup does not uninstall", async () => {
+    installer.apps = [{ bundleId }];
+    const controller = new AbortController();
+    installer.afterList = () => controller.abort();
+    expect(
+      (await call({ action: "deleteSaved", id: bundleId }, ios, controller.signal)).success,
+    ).toBe(false);
+    expect(installer.calls).toEqual(["list"]);
+    expect(installer.deletes).toEqual([]);
   });
   test.each(["save", "listSaved", "deleteSaved"] as const)(
     "physical device %s refuses without filesystem events",

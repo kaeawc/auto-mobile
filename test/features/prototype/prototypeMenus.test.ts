@@ -140,7 +140,10 @@ test.each(["menu", "select"])("expands use for %s labels, keys and actions", (ty
 
 // Host capability checks use the same injected transports as data-model refusal tests.
 import { afterEach, beforeEach } from "bun:test";
-import { PROTOTYPE_MENUS_CAPABILITY } from "../../../src/features/observe/android/ctrlProxyProtocol";
+import {
+  PROTOTYPE_MENUS_CAPABILITY,
+  PROTOTYPE_PATCH_CAPABILITY,
+} from "../../../src/features/observe/android/ctrlProxyProtocol";
 import {
   prototypeMenuFields,
   prototypeMenusUnsupportedMessage,
@@ -232,6 +235,63 @@ test.each(["android", "ios"] as const)("pins %s refusal wording", (platform) => 
     `The ${device} does not advertise prototype_menus_v1, so it cannot render the menu or select at root (and 1 more). Nothing was shown. ${update}, or replace menu/select with buttons and radioGroup.`,
   );
 });
+test.each(["android", "ios"] as const)(
+  "%s refuses menu/select replacements before patch dispatch, then accepts with capability",
+  async (platform) => {
+    const device: BootedDevice = {
+      deviceId: `fake-menu-patch-${platform}`,
+      platform,
+      name: "Fake",
+    };
+    const handler = ToolRegistry.getTool("prototype")!.deviceAwareHandler!;
+    client.setSupportedCommands([PROTOTYPE_PATCH_CAPABILITY]);
+    agent.handshake.capabilities.push(PROTOTYPE_PATCH_CAPABILITY);
+    const shown = await handler(device, {
+      action: "show",
+      spec: spec({ type: "column", children: [{ type: "column", id: "target", children: [] }] }),
+    });
+    expect(prototypeOutputSchema.parse(shown.structuredContent).success).toBe(true);
+    const requestsBefore = agent.requests.length;
+    const ops = [
+      {
+        op: "replaceNode",
+        id: "target",
+        node: {
+          type: "column",
+          id: "target",
+          children: [
+            {
+              type: "button",
+              label: "Opaque",
+              onTap: [{ type: "emit", name: "opaque", payload: { type: "menu" } }],
+            },
+          ],
+        },
+      },
+      {
+        op: "replaceNode",
+        id: "target",
+        node: { type: "column", id: "target", children: [menu, select] },
+      },
+    ];
+    const refused = await handler(device, { action: "patch", id: "menus", ops });
+    expect(prototypeOutputSchema.parse(refused.structuredContent)).toMatchObject({
+      success: false,
+      error: new ActionableError(
+        prototypeMenusUnsupportedMessage(
+          ["ops[1].node.children[0]", "ops[1].node.children[1]"],
+          platform,
+        ),
+      ).message,
+    });
+    expect(client.patchRequests).toEqual([]);
+    expect(agent.requests.length).toBe(requestsBefore);
+    client.setSupportedCommands([PROTOTYPE_PATCH_CAPABILITY, PROTOTYPE_MENUS_CAPABILITY]);
+    agent.handshake.capabilities.push(PROTOTYPE_MENUS_CAPABILITY);
+    const accepted = await handler(device, { action: "patch", id: "menus", ops });
+    expect(prototypeOutputSchema.parse(accepted.structuredContent).success).toBe(true);
+  },
+);
 test("only node positions require the menu capability", () => {
   expect(
     prototypeMenuFields(

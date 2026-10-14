@@ -15,7 +15,7 @@ enum PrototypeMenuItem: Decodable {
 
     init(from decoder: Decoder) throws {
         let raw = try JSONValue(from: decoder)
-        try PrototypeMenus.validateItem(raw, path: "items")
+        try PrototypeMenus.validateItem(raw, path: "items", allowEmptyText: true)
         if case let .object(fields) = raw, fields["type"] == .string("divider") {
             self = .divider
         } else {
@@ -29,7 +29,7 @@ enum PrototypeMenuItem: Decodable {
     }
 }
 
-/// New-node checks run on expanded JSON so ignored Codable properties cannot hide malformed items.
+/// Text length is checked before binding; expanded JSON still gets structural and state checks.
 /// Existing node types keep their decoding behaviour.
 enum PrototypeMenus {
     private static func fail(_ path: String, _ message: String) -> DecodingError {
@@ -47,8 +47,10 @@ enum PrototypeMenus {
         }
     }
 
-    private static func string(_ value: JSONValue?, _ path: String) throws -> String {
-        guard let text = value?.stringValue, !text.isEmpty else { throw fail(path, "Invalid string value") }
+    private static func string(_ value: JSONValue?, _ path: String, allowEmpty: Bool = false) throws -> String {
+        guard let text = value?.stringValue, allowEmpty || !text.isEmpty else {
+            throw fail(path, "Invalid string value")
+        }
         return text
     }
 
@@ -63,13 +65,15 @@ enum PrototypeMenus {
         return items
     }
 
-    static func validateItem(_ value: JSONValue, path: String) throws {
+    static func validateItem(_ value: JSONValue, path: String, allowEmptyText: Bool = false) throws {
         let fields = try object(value, path)
         // The contract union tries the entry first: a divider with a label fails at `.type`.
         if fields["type"] == .string("divider"), fields.count == 1 { return }
         try strict(fields, ["label", "icon", "trailingText", "enabled", "onTap"], path)
-        _ = try string(fields["label"], "\(path).label")
-        if let trailing = fields["trailingText"] { _ = try string(trailing, "\(path).trailingText") }
+        _ = try string(fields["label"], "\(path).label", allowEmpty: allowEmptyText)
+        if let trailing = fields["trailingText"] {
+            _ = try string(trailing, "\(path).trailingText", allowEmpty: allowEmptyText)
+        }
         if let icon = fields["icon"] {
             let name = try string(icon, "\(path).icon")
             if PrototypeIconSymbolTable.shared.resolve(name) == .unknown {
@@ -117,6 +121,34 @@ enum PrototypeMenus {
         }
     }
 
+    /// Repeat templates are visited even when they expand to no nodes. Keys and actions are
+    /// checked after expansion, when their repeat placeholders have been bound.
+    static func validateAuthoredText(_ raw: JSONValue, path: String = "root") throws {
+        guard case let .object(fields) = raw else { return }
+        if fields["type"] == .string("menu"), case let .array(items)? = fields["items"] {
+            for (index, item) in items.enumerated() {
+                guard case let .object(entry) = item, entry["type"] != .string("divider") else { continue }
+                let itemPath = "\(path).items[\(index)]"
+                _ = try string(entry["label"], "\(itemPath).label")
+                if let trailing = entry["trailingText"] { _ = try string(trailing, "\(itemPath).trailingText") }
+            }
+        } else if fields["type"] == .string("select") {
+            if let label = fields["label"] { _ = try string(label, "\(path).label") }
+            if case let .array(options)? = fields["options"] {
+                for (index, option) in options.enumerated() {
+                    guard case let .object(entry) = option else { continue }
+                    _ = try string(entry["label"], "\(path).options[\(index)].label")
+                }
+            }
+        }
+        if case let .array(children)? = fields["children"] {
+            for (index, child) in children.enumerated() {
+                try validateAuthoredText(child, path: "\(path).children[\(index)]")
+            }
+        }
+        if let child = fields["child"] { try validateAuthoredText(child, path: "\(path).child") }
+    }
+
     static func validate(_ raw: JSONValue, state: [String: JSONValue], path: String = "root") throws {
         guard case let .object(fields) = raw else { return }
         let type = fields["type"]?.stringValue
@@ -133,7 +165,7 @@ enum PrototypeMenus {
             if type == "menu" {
                 let items = try array(fields["items"], 1 ... 16, "\(path).items")
                 for (index, item) in items.enumerated() {
-                    try validateItem(item, path: "\(path).items[\(index)]")
+                    try validateItem(item, path: "\(path).items[\(index)]", allowEmptyText: true)
                 }
                 let condition = try object(fields["openWhen"], "\(path).openWhen")
                 try strict(condition, ["key", "equals"], "\(path).openWhen")
@@ -147,14 +179,14 @@ enum PrototypeMenus {
             } else {
                 try key(fields["stateKey"], "\(path).stateKey")
                 let options = try array(fields["options"], 2 ... 32, "\(path).options")
-                if let label = fields["label"] { _ = try string(label, "\(path).label") }
+                if let label = fields["label"] { _ = try string(label, "\(path).label", allowEmpty: true) }
                 var values = Set<[UInt16]>()
                 for (index, option) in options.enumerated() {
                     let optionPath = "\(path).options[\(index)]"
                     let fields = try object(option, optionPath)
                     try strict(fields, ["value", "label"], optionPath)
                     let value = try string(fields["value"], "\(optionPath).value")
-                    _ = try string(fields["label"], "\(optionPath).label")
+                    _ = try string(fields["label"], "\(optionPath).label", allowEmpty: true)
                     if !values.insert(Array(value.utf16)).inserted {
                         throw fail("\(optionPath).value", "Duplicate select option value")
                     }

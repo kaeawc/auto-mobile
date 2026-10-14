@@ -212,6 +212,76 @@ final class PrototypeMenusTests: XCTestCase {
         )
     }
 
+    func testRepeatedMenuLabelMayResolveToEmpty() throws {
+        let spec = try decode("""
+        {"id":"m","window":{"placement":{"type":"fullscreen"}},"state":{"open":true},
+         "root":{"type":"column","repeat":{"as":"it","items":[{"l":""}]},"children":[
+           {"type":"menu","openWhen":{"key":"open","equals":true},"items":[{"label":"{it.l}"}]}
+         ]}}
+        """)
+        XCTAssertEqual(spec.root.children?.first?.menuItems?.first?.entry?.label, "")
+    }
+
+    func testRepeatedSelectLabelAndOptionLabelMayResolveToEmpty() throws {
+        let spec = try decode("""
+        {"id":"s","window":{"placement":{"type":"fullscreen"}},"state":{"choice":"a"},
+         "root":{"type":"column","repeat":{"as":"it","items":[{"l":""}]},"children":[
+           {"type":"select","stateKey":"choice","label":"{it.l}",
+            "options":[{"value":"a","label":"{it.l}"},{"value":"b","label":"B"}]}
+         ]}}
+        """)
+        XCTAssertEqual(spec.root.children?.first?.label, "")
+        XCTAssertEqual(spec.root.children?.first?.options?.first?.label, "")
+    }
+
+    func testMenuDataLabelMayResolveToEmpty() throws {
+        let spec = try decode("""
+        {"id":"m","window":{"placement":{"type":"fullscreen"}},"state":{"open":true},"data":{"name":""},
+         "root":{"type":"menu","openWhen":{"key":"open","equals":true},"items":[{"label":"{data:/name}"}]}}
+        """)
+        XCTAssertEqual(spec.root.menuItems?.first?.entry?.label, "")
+    }
+
+    func testMissingDataTrailingTextMayResolveToEmpty() throws {
+        let spec = try decode("""
+        {"id":"m","window":{"placement":{"type":"fullscreen"}},"state":{"open":true},"data":{},
+         "root":{"type":"menu","openWhen":{"key":"open","equals":true},
+                 "items":[{"label":"Go","trailingText":"{data:/missing}"}]}}
+        """)
+        XCTAssertEqual(spec.root.menuItems?.first?.entry?.trailingText, "")
+    }
+
+    func testAuthoredEmptyMenuAndSelectTextStillFailsBeforeBinding() throws {
+        let roots = [
+            (
+                #"{"type":"menu","openWhen":{"key":"open","equals":true},"items":[{"label":""}]}"#,
+                "root.items[0].label"
+            ),
+            (
+                #"{"type":"menu","openWhen":{"key":"open","equals":true},"items":[{"label":"Go","trailingText":""}]}"#,
+                "root.items[0].trailingText"
+            ),
+            (
+                #"{"type":"select","stateKey":"choice","label":"","options":[{"value":"a","label":"A"},{"value":"b","label":"B"}]}"#,
+                "root.label"
+            ),
+            (
+                #"{"type":"select","stateKey":"choice","options":[{"value":"a","label":""},{"value":"b","label":"B"}]}"#,
+                "root.options[0].label"
+            ),
+        ]
+        for (root, path) in roots {
+            XCTAssertThrowsError(try decode("""
+            {"id":"m","window":{"placement":{"type":"fullscreen"}},"state":{"open":true,"choice":"a"},"root":\(root)}
+            """)) { error in
+                guard case let DecodingError.dataCorrupted(context) = error else {
+                    return XCTFail("Unexpected error: \(error)")
+                }
+                XCTAssertEqual(context.debugDescription, "\(path): Invalid string value")
+            }
+        }
+    }
+
     func testSurfaceClampsBothAxesAndResolvesEndForRTL() {
         let window = CGSize(width: 300, height: 400)
         let surface = CGSize(width: 120, height: 160)

@@ -971,10 +971,18 @@ async function menusRefusal(
   args: z.infer<typeof prototypeSchema>,
   signal: AbortSignal | undefined,
 ): Promise<PrototypeResult | undefined> {
-  if (args.action !== "show" || args.spec === undefined) {
-    return undefined;
-  }
-  const fields = prototypeMenuFields(args.spec);
+  const fields =
+    args.action === "show"
+      ? prototypeMenuFields(args.spec)
+      : args.action === "patch"
+        ? (args.ops ?? []).flatMap((op, index) =>
+            op.op === "replaceNode"
+              ? prototypeMenuFields({ root: op.node }).map(
+                  (path) => `ops[${index}].node${path.slice("root".length)}`,
+                )
+              : [],
+          )
+        : [];
   if (fields.length === 0) {
     return undefined;
   }
@@ -1588,6 +1596,10 @@ async function performPrototypeAction(
 ): Promise<PrototypeOutput> {
   if (args.action === "patch") {
     const { store, target, cacheInvalidator } = dependencies;
+    const refusal = await menusRefusal(target, args, signal);
+    if (refusal) {
+      return { success: false, error: refusal.error ?? undefined };
+    }
     return performPrototypePatch(
       {
         store,

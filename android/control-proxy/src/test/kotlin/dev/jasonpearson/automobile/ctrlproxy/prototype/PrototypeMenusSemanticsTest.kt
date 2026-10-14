@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ctrlproxy.prototype
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -106,9 +107,37 @@ class PrototypeMenusSemanticsTest {
   }
 
   @Test
+  fun `an open menu hides page nodes and closing restores them`() {
+    val open = mutableStateOf(true)
+    val spec =
+      PrototypeSpec(
+        "menus",
+        PrototypeWindow(PrototypeFullscreenPlacement()),
+        root =
+          PrototypeColumnNode(
+            children = listOf(PrototypeButtonNode(testTag = "page", label = "Page"), menu()),
+          ),
+      )
+    compose.setContent {
+      CompositionLocalProvider(LocalPrototypeMotion provides false) {
+        val shown = spec.copy(state = mapOf("open" to PrototypeScalar.BooleanValue(open.value)))
+        PrototypeSpecContent(mapPrototypeSpec(shown).root) {
+          interactions += it
+          if (it == PrototypeInteraction.SheetDismiss(condition)) open.value = false
+        }
+      }
+    }
+    compose.onNodeWithTag("page").assertDoesNotExist()
+    compose.onNodeWithTag("menu.0").assertExists()
+    compose.onNodeWithTag("menu:outside").assertHasClickAction().performClick()
+    compose.onNodeWithTag("page").assertExists().assertHasClickAction()
+    compose.onNodeWithTag("menu.0").assertDoesNotExist()
+  }
+
+  @Test
   fun `menu starts at its parent bottom and remains inside the window`() {
     show(menu())
-    val parent = compose.onNodeWithTag("parent").fetchSemanticsNode().boundsInRoot
+    val parent = compose.onNodeWithTag("parent", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
     val surface = compose.onNodeWithTag("menu").fetchSemanticsNode().boundsInRoot
     val window = compose.onRoot().fetchSemanticsNode().boundsInRoot
     assertEquals(parent.bottom, surface.top, 1f)
@@ -120,6 +149,7 @@ class PrototypeMenusSemanticsTest {
   fun `select shows the current label expands and choosing emits Choose then collapses`() {
     show(select())
     compose.onNodeWithTag("choice").assertTextContains("Alpha").performClick()
+    compose.onNodeWithTag("parent").assertExists()
     compose.onNodeWithTag("choice.a").assertTextEquals("Alpha").assertIsSelected()
     compose.onNodeWithTag("choice.b").assertTextEquals("Beta").performClick()
     assertEquals(listOf(PrototypeInteraction.Choose("choice", "b", go)), interactions)

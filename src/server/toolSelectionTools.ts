@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { InvalidToolParamsError } from "./invalidToolParamsError";
 import type { SessionToolSelectionService } from "../features/toolSelection/SessionToolSelectionService";
 import {
   isAlwaysOnTool,
@@ -154,10 +155,10 @@ export function partitionToolSelectionNames(
       !ToolRegistry.isUserConfigurableTool(toolName) && !isRegisteredAlwaysOnTool(toolName),
   );
   if (unknown.length === 1) {
-    throw new ActionableError(`Tool '${unknown[0]}' is not user-configurable.`);
+    throw new InvalidToolParamsError(`Tool '${unknown[0]}' is not user-configurable.`);
   }
   if (unknown.length > 1) {
-    throw new ActionableError(
+    throw new InvalidToolParamsError(
       `Tools ${unknown.map((toolName) => `'${toolName}'`).join(", ")} are not user-configurable.`,
     );
   }

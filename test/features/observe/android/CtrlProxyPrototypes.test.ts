@@ -1,4 +1,5 @@
 import {
+  CtrlProxyPrototypes,
   prototypeSavedReplyFields,
   prototypeSavedUnsupportedMessage,
 } from "../../../../src/features/observe/android/CtrlProxyPrototypes";
@@ -9,7 +10,10 @@ import type { PrototypePatchOp } from "../../../../src/features/prototype/protot
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
 import { MAX_PROTOTYPE_SPEC_BYTES } from "../../../../src/features/prototype/prototypeSpec";
-import type { PrototypeEvent } from "../../../../src/features/observe/android/ctrlProxyProtocol";
+import type {
+  PrototypeEvent,
+  PrototypeResult,
+} from "../../../../src/features/observe/android/ctrlProxyProtocol";
 import { ActionableError } from "../../../../src/models/ActionableError";
 import { PortManager } from "../../../../src/utils/PortManager";
 import { logger } from "../../../../src/utils/logger";
@@ -18,6 +22,8 @@ import { FakeInstalledAppsRepository } from "../../../fakes/FakeInstalledAppsRep
 import { FakeCtrlProxy } from "../../../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeWebSocket } from "../../../fakes/FakeWebSocket";
+import { FakeSavedPrototypeMirror } from "../../../fakes/FakeSavedPrototypeMirror";
+import type { SavedPrototypeMirror } from "../../../../src/features/prototype/savedPrototypeMirror";
 
 const spec = {
   id: "panel",
@@ -43,6 +49,7 @@ async function harness(
     "show_prototype",
     "dismiss_prototype",
   ],
+  mirror?: SavedPrototypeMirror,
 ) {
   PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
   const timer = new FakeTimer();
@@ -55,6 +62,11 @@ async function harness(
     new FakeInstalledAppsRepository(),
   );
   clients.push(client);
+  const extraContext = client["extraDelegateContextFields"].bind(client);
+  client["extraDelegateContextFields"] = () => ({
+    ...extraContext(),
+    savedPrototypeMirror: mirror ? { serial: "prototype-test", mirror } : undefined,
+  });
   await Promise.resolve();
   client["ws"] = socket as unknown as WebSocket;
   spyOn(client, "ensureConnected").mockResolvedValue(true);
@@ -80,6 +92,154 @@ afterEach(async () => {
     await client.close();
   }
   PortManager.setPortAvailabilityCheckerForTesting(null);
+});
+
+describe("saved prototype host recorder", () => {
+  async function recorder(mirror?: SavedPrototypeMirror) {
+    const { client, socket } = await harness(
+      [
+        "full_command_set_v1",
+        "request_id_echo_v1",
+        PROTOTYPE_SAVED_CAPABILITY,
+        "save_prototype",
+        "delete_saved_prototype",
+        "put_prototype_asset",
+        "remove_prototype_asset",
+      ],
+      mirror,
+    );
+    const delegate = new CtrlProxyPrototypes(client["createDelegateContext"]());
+    let reply: PrototypeResult = { success: true, error: null };
+    const send = spyOn(socket, "send").mockImplementation((data) => {
+      const message: { requestId: string } = JSON.parse(String(data));
+      client["requestManager"].resolve(message.requestId, reply);
+    });
+    return {
+      delegate,
+      send,
+      client,
+      reply: (success: boolean, savedId?: string) => {
+        reply = {
+          success,
+          error: success ? null : "refused",
+          ...(savedId ? { saved: { id: savedId, slug: "slug", replaced: false } } : {}),
+        };
+      },
+    };
+  }
+  const asset = { id: "photo", mimeType: "image/png" as const, bytes: new Uint8Array([1, 2]) };
+  test("successful save mirrors tracked strings anywhere in spec plus icon; deletion removes", async () => {
+    const mirror = new FakeSavedPrototypeMirror();
+    const { delegate, send } = await recorder(mirror);
+    try {
+      await delegate.requestPutPrototypeAsset(asset);
+      await delegate.requestPutPrototypeAsset({ ...asset, id: "icon" });
+      await delegate.requestPutPrototypeAsset({ ...asset, id: "unused" });
+      const savedSpec = { ...spec, data: { nested: { values: ["photo"] } } };
+      expect(
+        (await delegate.requestSavePrototype({ spec: savedSpec, label: "Panel", icon: "icon" }))
+          .success,
+      ).toBe(true);
+      expect(await mirror.list("prototype-test")).toEqual([
+        {
+          id: "panel",
+          spec: savedSpec,
+          label: "Panel",
+          icon: "icon",
+          assets: [asset, { ...asset, id: "icon" }],
+        },
+      ]);
+      await delegate.requestDeleteSavedPrototype("panel");
+      expect(await mirror.list("prototype-test")).toEqual([]);
+    } finally {
+      send.mockRestore();
+    }
+  });
+  test("failed save and delete leave mirror unchanged", async () => {
+    const mirror = new FakeSavedPrototypeMirror();
+    const { delegate, send, reply } = await recorder(mirror);
+    try {
+      reply(false);
+      await delegate.requestSavePrototype({ spec, label: "Panel" });
+      expect(await mirror.list("prototype-test")).toEqual([]);
+      reply(true);
+      await delegate.requestSavePrototype({ spec, label: "Panel" });
+      reply(false);
+      await delegate.requestDeleteSavedPrototype("panel");
+      expect(await mirror.list("prototype-test")).toHaveLength(1);
+    } finally {
+      send.mockRestore();
+    }
+  });
+  test("mirror failures warn and preserve successful save and delete results", async () => {
+    const mirror = new FakeSavedPrototypeMirror();
+    mirror.error = new Error("mirror unavailable");
+    const { delegate, send } = await recorder(mirror);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect((await delegate.requestSavePrototype({ spec, label: "Panel" })).success).toBe(true);
+      expect((await delegate.requestDeleteSavedPrototype("panel")).success).toBe(true);
+      expect(warn.mock.calls.filter((call) => call[1] === mirror.error)).toHaveLength(2);
+    } finally {
+      send.mockRestore();
+      warn.mockRestore();
+    }
+  });
+  test("removed assets are recorded as missing and failed uploads are not tracked", async () => {
+    const mirror = new FakeSavedPrototypeMirror();
+    const { delegate, send, reply } = await recorder(mirror);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await delegate.requestPutPrototypeAsset(asset);
+      await delegate.requestRemovePrototypeAsset(asset.id);
+      reply(false);
+      await delegate.requestPutPrototypeAsset({ ...asset, id: "icon" });
+      reply(true);
+      await delegate.requestSavePrototype({
+        spec: { ...spec, root: { type: "image", asset: "photo" } },
+        label: "Panel",
+        icon: "icon",
+      });
+      expect((await mirror.list("prototype-test"))[0].assets).toEqual([
+        { id: "photo" },
+        { id: "icon" },
+      ]);
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      send.mockRestore();
+      warn.mockRestore();
+    }
+  });
+  test("absent mirror context is a no-op", async () => {
+    const { delegate, send } = await recorder();
+    try {
+      expect((await delegate.requestSavePrototype({ spec, label: "Panel" })).success).toBe(true);
+      expect((await delegate.requestDeleteSavedPrototype("panel")).success).toBe(true);
+    } finally {
+      send.mockRestore();
+    }
+  });
+  test("uses saved reply ID, detaches uploaded bytes and keeps an asset after failed removal", async () => {
+    const mirror = new FakeSavedPrototypeMirror();
+    const { delegate, send, reply } = await recorder(mirror);
+    const bytes = Buffer.from([1, 2]);
+    try {
+      await delegate.requestPutPrototypeAsset({ ...asset, bytes });
+      bytes.fill(9);
+      reply(false);
+      await delegate.requestRemovePrototypeAsset(asset.id);
+      reply(true, "saved-id");
+      await delegate.requestSavePrototype({
+        spec: { ...spec, data: { reference: "photo" } },
+        label: "Panel",
+      });
+      const saved = (await mirror.list("prototype-test"))[0];
+      expect(saved.id).toBe("saved-id");
+      expect(saved.assets).toEqual([asset]);
+    } finally {
+      send.mockRestore();
+    }
+  });
 });
 
 describe("CtrlProxy prototypes", () => {

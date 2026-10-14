@@ -171,7 +171,31 @@ function isKnownPrototypeEventKind(kind: string): boolean {
   return (PROTOTYPE_EVENT_KINDS as readonly string[]).includes(kind);
 }
 
+/** Match uploaded IDs throughout JSON; explicit asset values identify untracked references too. */
+function collectPrototypeStrings(
+  value: unknown,
+  strings: Set<string>,
+  references: Set<string>,
+  assetValue = false,
+): void {
+  if (typeof value === "string") {
+    strings.add(value);
+    if (assetValue) {
+      references.add(value);
+    }
+  } else if (Array.isArray(value)) {
+    for (const child of value) {
+      collectPrototypeStrings(child, strings, references, assetValue);
+    }
+  } else if (typeof value === "object" && value !== null) {
+    for (const [key, child] of Object.entries(value)) {
+      collectPrototypeStrings(child, strings, references, assetValue || key === "asset");
+    }
+  }
+}
+
 export class CtrlProxyPrototypes {
+  private readonly uploadedAssets = new Map<string, PrototypeAssetUpload>();
   private readonly listeners = new Set<(event: PrototypeEvent) => void>();
   /** Pushes that arrived with no subscriber; bounded like the device's offline ring. */
   private readonly staged: PrototypeEvent[] = [];
@@ -228,11 +252,15 @@ export class CtrlProxyPrototypes {
         "Invalid saved prototype icon: expected a valid asset id; explicit nulls are rejected",
       );
     }
-    return this.request(
+    const reply = await this.request(
       ctrlProxyRequests.savePrototype({ requestId: "", ...save }),
       timeoutMs,
       perf,
     );
+    if (reply.success && !reply.error) {
+      await this.mirrorSave(save, reply);
+    }
+    return reply;
   }
   requestListSavedPrototypes(
     timeoutMs = 5000,
@@ -248,11 +276,56 @@ export class CtrlProxyPrototypes {
     if (typeof id !== "string" || id.length === 0) {
       throw new ActionableError("Invalid saved prototype id: expected a non-empty string");
     }
-    return this.request(
+    const reply = await this.request(
       ctrlProxyRequests.deleteSavedPrototype({ requestId: "", id }),
       timeoutMs,
       perf,
     );
+    const recorder = this.context.savedPrototypeMirror;
+    if (reply.success && !reply.error && recorder) {
+      try {
+        await recorder.mirror.remove(recorder.serial, id);
+      } catch (error) {
+        logger.warn(`[CTRL_PROXY] Failed to remove saved prototype mirror ${id}`, error);
+      }
+    }
+    return reply;
+  }
+
+  private async mirrorSave(
+    save: { spec: PrototypeSpec; label: string; icon?: string },
+    reply: PrototypeResult,
+  ): Promise<void> {
+    const recorder = this.context.savedPrototypeMirror;
+    if (!recorder) {
+      return;
+    }
+    try {
+      const strings = new Set<string>();
+      const references = new Set<string>();
+      collectPrototypeStrings(save.spec, strings, references);
+      if (save.icon !== undefined) {
+        references.add(save.icon);
+      }
+      const ids = new Set([...strings].filter((id) => this.uploadedAssets.has(id)));
+      for (const id of references) {
+        ids.add(id);
+      }
+      const assets = [...ids].map((id) => {
+        const asset = this.uploadedAssets.get(id);
+        if (!asset) {
+          logger.warn(`[CTRL_PROXY] Saved prototype ${save.spec.id} mirror missing asset ${id}`);
+        }
+        return asset ? { ...asset, bytes: asset.bytes.slice() } : { id };
+      });
+      await recorder.mirror.record(recorder.serial, {
+        id: reply.saved?.id ?? save.spec.id,
+        ...save,
+        assets,
+      });
+    } catch (error) {
+      logger.warn(`[CTRL_PROXY] Failed to mirror saved prototype ${save.spec.id}`, error);
+    }
   }
 
   async requestPatchPrototype(
@@ -339,7 +412,8 @@ export class CtrlProxyPrototypes {
     const dataBase64 = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString(
       "base64",
     );
-    return this.sendAssetRequest(
+    const snapshot = { ...asset, bytes: Uint8Array.from(asset.bytes) };
+    const reply = await this.sendAssetRequest(
       ctrlProxyRequests.putPrototypeAsset({
         requestId: "",
         id: asset.id,
@@ -349,6 +423,10 @@ export class CtrlProxyPrototypes {
       `Upload of prototype asset '${asset.id}'`,
       options,
     );
+    if (reply.success && !reply.error) {
+      this.uploadedAssets.set(asset.id, snapshot);
+    }
+    return reply;
   }
 
   /** Removes one asset. Idempotent on the device: an unknown id still succeeds. */
@@ -360,11 +438,15 @@ export class CtrlProxyPrototypes {
     if (problem !== null) {
       throw new ActionableError(`Invalid prototype asset: ${problem}`);
     }
-    return this.sendAssetRequest(
+    const reply = await this.sendAssetRequest(
       ctrlProxyRequests.removePrototypeAsset({ requestId: "", id }),
       `Removal of prototype asset '${id}'`,
       options,
     );
+    if (reply.success && !reply.error) {
+      this.uploadedAssets.delete(id);
+    }
+    return reply;
   }
 
   private async sendAssetRequest(

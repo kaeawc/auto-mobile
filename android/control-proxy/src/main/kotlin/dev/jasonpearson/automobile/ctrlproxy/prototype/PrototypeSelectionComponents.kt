@@ -165,7 +165,9 @@ internal fun RenderPrototypeSelect(node: PrototypeRenderNode, modifier: Modifier
   val layers = LocalPrototypeMenuLayers.current
   val current = source.options.firstOrNull { it.value == node.selectedValue }?.label.orEmpty()
   androidx.compose.material3.Surface(
-    Modifier.prototypeMenuBounds(node.identity, layers).then(modifier).clickable(role = Role.Button) {
+    Modifier.prototypeMenuBounds(node.identity, layers).then(modifier).clickable(
+      role = Role.Button,
+    ) {
       layers.expandedSelect = if (layers.expandedSelect == node.identity) null else node.identity
     },
     shape = androidx.compose.material3.MaterialTheme.shapes.extraSmall,

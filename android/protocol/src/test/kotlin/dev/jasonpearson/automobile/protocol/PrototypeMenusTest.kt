@@ -35,34 +35,32 @@ class PrototypeMenusTest {
   }
 
   @TestFactory
-  fun `new valid fixtures decode and round trip`() =
-    valid.map { (name, input) ->
-      DynamicTest.dynamicTest(name) {
-        val result = PrototypeSpecValidator.validate(input)
-        assertTrue(result is PrototypeSpecValidation.Success, result.toString())
-        val spec = (result as PrototypeSpecValidation.Success).spec
-        val encoded = Json.encodeToString(PrototypeSpec.serializer(), spec)
-        assertTrue(PrototypeSpecValidator.validate(encoded) is PrototypeSpecValidation.Success)
-        if (name == "menu-overflow") {
-          val menu = (spec.root as PrototypeRowNode).children[1] as PrototypeMenuNode
-          assertEquals(PrototypeMenuDivider, menu.items[1])
-          assertEquals(false, (menu.items[2] as PrototypeMenuEntry).enabled)
-          assertFalse(encoded.contains("PrototypeMenuEntry"))
-        } else assertTrue((spec.root as PrototypeColumnNode).children[0] is PrototypeSelectNode)
-      }
+  fun `new valid fixtures decode and round trip`() = valid.map { (name, input) ->
+    DynamicTest.dynamicTest(name) {
+      val result = PrototypeSpecValidator.validate(input)
+      assertTrue(result is PrototypeSpecValidation.Success, result.toString())
+      val spec = (result as PrototypeSpecValidation.Success).spec
+      val encoded = Json.encodeToString(PrototypeSpec.serializer(), spec)
+      assertTrue(PrototypeSpecValidator.validate(encoded) is PrototypeSpecValidation.Success)
+      if (name == "menu-overflow") {
+        val menu = (spec.root as PrototypeRowNode).children[1] as PrototypeMenuNode
+        assertEquals(PrototypeMenuDivider, menu.items[1])
+        assertEquals(false, (menu.items[2] as PrototypeMenuEntry).enabled)
+        assertFalse(encoded.contains("PrototypeMenuEntry"))
+      } else assertTrue((spec.root as PrototypeColumnNode).children[0] is PrototypeSelectNode)
     }
+  }
 
   @TestFactory
-  fun `new invalid fixtures preserve canonical reasons`() =
-    invalid.map { (name, fixture) ->
-      DynamicTest.dynamicTest(name) {
-        val result = PrototypeSpecValidator.validate(fixture.getValue("spec").toString())
-        assertTrue(result is PrototypeSpecValidation.Failure, result.toString())
-        val error = (result as PrototypeSpecValidation.Failure).error
-        assertEquals(fixture.getValue("expectedPath").jsonPrimitive.content, error.path)
-        assertEquals(fixture.getValue("expectedMessage").jsonPrimitive.content, error.message)
-      }
+  fun `new invalid fixtures preserve canonical reasons`() = invalid.map { (name, fixture) ->
+    DynamicTest.dynamicTest(name) {
+      val result = PrototypeSpecValidator.validate(fixture.getValue("spec").toString())
+      assertTrue(result is PrototypeSpecValidation.Failure, result.toString())
+      val error = (result as PrototypeSpecValidation.Failure).error
+      assertEquals(fixture.getValue("expectedPath").jsonPrimitive.content, error.path)
+      assertEquals(fixture.getValue("expectedMessage").jsonPrimitive.content, error.message)
     }
+  }
 
   @Test
   fun `select permits an unmatched string just like radio group`() {

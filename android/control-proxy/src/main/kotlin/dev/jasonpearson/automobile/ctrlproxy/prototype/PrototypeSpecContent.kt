@@ -140,7 +140,7 @@ fun PrototypeSpecContent(
       val fillsWindow = LocalPrototypeFillsWindow.current
       Box(
         Modifier.onGloballyPositioned { menuLayers.windowBounds = it.boundsInRoot() }
-          .semantics { testTagsAsResourceId = true }
+          .semantics { testTagsAsResourceId = true },
       ) {
         val modals = remember(root) { modalPrototypeSheets(root) }
         // An open dialog is modal: the page behind it leaves the accessibility tree, as it does
@@ -172,14 +172,13 @@ fun PrototypeSpecContent(
           }
         }
         val expanded = menuLayers.expandedSelect
-        val select =
-          expanded?.let { identity ->
-            visiblePrototypeSelect(root, identity)?.takeIf {
-              // A newly opened modal closes a dropdown on the page behind it.
-              modals.none { modal -> modal.role == "dialog" || modal.role == "menu" } ||
-                modals.any { modal -> visiblePrototypeSelect(modal, identity) != null }
-            }
+        val select = expanded?.let { identity ->
+          visiblePrototypeSelect(root, identity)?.takeIf {
+            // A newly opened modal closes a dropdown on the page behind it.
+            modals.none { modal -> modal.role == "dialog" || modal.role == "menu" } ||
+              modals.any { modal -> visiblePrototypeSelect(modal, identity) != null }
           }
+        }
         if (select != null) RenderPrototypeSelectOptions(select, interact)
         else if (expanded != null) SideEffect { menuLayers.expandedSelect = null }
       }

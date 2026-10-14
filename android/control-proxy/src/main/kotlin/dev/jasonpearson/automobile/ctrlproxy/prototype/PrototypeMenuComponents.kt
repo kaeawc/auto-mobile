@@ -99,7 +99,7 @@ internal fun RenderPrototypeMenu(
     Box(
       Modifier.fillMaxSize()
         .clickable { interact(PrototypeInteraction.SheetDismiss(source.openWhen)) }
-        .semantics { node.testTag?.let { testTag = "$it:outside" } }
+        .semantics { node.testTag?.let { testTag = "$it:outside" } },
     )
     PrototypeMenuSurface(anchor, layers, modifier.pointerInput(Unit) { detectTapGestures {} }) {
       source.items.forEachIndexed { index, item ->
@@ -149,7 +149,7 @@ internal fun RenderPrototypeSelectOptions(
     Box(
       Modifier.fillMaxSize()
         .clickable { layers.expandedSelect = null }
-        .semantics { node.testTag?.let { testTag = "$it:outside" } }
+        .semantics { node.testTag?.let { testTag = "$it:outside" } },
     )
     PrototypeMenuSurface(layers.bounds[node.identity] ?: layers.windowBounds, layers, Modifier) {
       source.options.forEach { option ->
@@ -159,7 +159,7 @@ internal fun RenderPrototypeSelectOptions(
             .clickable(role = Role.Button) {
               layers.expandedSelect = null
               interact(
-                PrototypeInteraction.Choose(source.stateKey, option.value, source.onTap.orEmpty())
+                PrototypeInteraction.Choose(source.stateKey, option.value, source.onTap.orEmpty()),
               )
             }
             .semantics {

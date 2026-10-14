@@ -36,9 +36,9 @@ class PrototypeMenusTest {
                 listOf(
                   PrototypeButtonNode(label = "More"),
                   PrototypeMenuNode(openWhen = open, items = listOf(PrototypeMenuEntry("Go"))),
-                )
-            )
-          )
+                ),
+            ),
+          ),
         )
         .root
     val menu = root.children[1]
@@ -62,7 +62,7 @@ class PrototypeMenusTest {
       )
     assertEquals("a", mapPrototypeSpec(runtime.current.spec).root.selectedValue)
     runtime.handle(
-      PrototypeInteraction.Choose("choice", "b", listOf(PrototypeEmitAction("picked")))
+      PrototypeInteraction.Choose("choice", "b", listOf(PrototypeEmitAction("picked"))),
     )
     assertEquals(PrototypeScalar.Text("b"), runtime.current.state["choice"])
     assertEquals(listOf("change", "picked"), events.map { it.name })
@@ -123,12 +123,12 @@ class PrototypeMenusTest {
                       "key" to PrototypeScalar.Text("open"),
                       "choice" to PrototypeScalar.Text("choice"),
                       "label" to PrototypeScalar.Text("Bound"),
-                    )
+                    ),
                   ),
                   "item",
                 ),
-            )
-          )
+            ),
+          ),
         )
         .root
     val boundMenu = root.children[0].source as PrototypeMenuNode

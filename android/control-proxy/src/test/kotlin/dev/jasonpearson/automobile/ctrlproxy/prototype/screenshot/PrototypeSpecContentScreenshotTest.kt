@@ -427,7 +427,7 @@ class PrototypeSpecContentScreenshotTest {
         val layers = remember { PrototypeMenuLayers().apply { expandedSelect = node.identity } }
         CompositionLocalProvider(LocalPrototypeMenuLayers provides layers) {
           Box(
-            Modifier.fillMaxSize().onGloballyPositioned { layers.windowBounds = it.boundsInRoot() }
+            Modifier.fillMaxSize().onGloballyPositioned { layers.windowBounds = it.boundsInRoot() },
           ) {
             RenderPrototypeSelect(node, Modifier)
             RenderPrototypeSelectOptions(node) {}

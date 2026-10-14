@@ -51,7 +51,7 @@ data class PrototypeRenderNode(
   val identity: String = "root",
   val page: Int = 0,
   val selection: Int = 0,
-  /** Whether a `bottomSheet`, `dialog` or `snackbar` is open (its `openWhen` holds). */
+  /** Whether a modal is open (`openWhen`) or a search bar is expanded (`activeKey`). */
   val sheetOpen: Boolean = false,
   /** The bound boolean of a `switch` or `checkbox`; false for every other role. */
   val checked: Boolean = false,
@@ -172,7 +172,14 @@ internal class PrototypeNodeMapping(
     val entries = cache?.children(node, path) ?: validatedPrototypeChildren(node, path)
     val role = prototypeNodeRole(node)
     val text = prototypeNodeText(node, state, localState, inPager)
-    val children = entries.map { (child, childPath) ->
+    val visibleEntries =
+      if (
+        node is PrototypeSearchBarNode &&
+          state[node.activeKey] != PrototypeScalar.BooleanValue(true)
+      )
+        emptyList()
+      else entries
+    val children = visibleEntries.map { (child, childPath) ->
       map(child, childPath, if (inPager) localState else null)
     }
     val pager =
@@ -271,6 +278,7 @@ private fun prototypeNodeRole(node: PrototypeNode): String =
     is PrototypeIconNode -> "icon"
     is PrototypeSpacerNode -> "spacer"
     is PrototypeTextFieldNode -> "textField"
+    is PrototypeSearchBarNode -> "searchBar"
     is PrototypeSwitchNode -> "switch"
     is PrototypeCheckboxNode -> "checkbox"
     is PrototypeButtonNode -> "button"
@@ -306,6 +314,7 @@ private fun prototypeNodeText(
   when (node) {
     is PrototypeTextNode -> interpolatePrototypeText(node.text, localState, inPager)
     is PrototypeTextFieldNode -> (state[node.stateKey] as? PrototypeScalar.Text)?.value.orEmpty()
+    is PrototypeSearchBarNode -> (state[node.stateKey] as? PrototypeScalar.Text)?.value.orEmpty()
     is PrototypeSwitchNode -> node.label.orEmpty()
     is PrototypeCheckboxNode -> node.label.orEmpty()
     is PrototypeButtonNode -> node.label
@@ -332,10 +341,11 @@ private fun prototypeNodeIconName(node: PrototypeNode): String? =
     else -> null
   }
 
-/** The boolean condition that opens a `bottomSheet`, `dialog` or `snackbar`; null otherwise. */
+/** A modal open condition or a search bar active condition; null for other nodes. */
 internal fun prototypeOpenWhen(node: PrototypeNode?): PrototypeSheetCondition? =
   when (node) {
     is PrototypeBottomSheetNode -> node.openWhen
+    is PrototypeSearchBarNode -> node.activeKey?.let { PrototypeSheetCondition(it, true) }
     is PrototypeDialogNode -> node.openWhen
     is PrototypeSnackbarNode -> node.openWhen
     else -> null
@@ -627,7 +637,7 @@ fun hasVisibleTextField(root: PrototypeRenderNode): Boolean =
 private fun inlineTextFieldVisible(node: PrototypeRenderNode): Boolean =
   when {
     !node.visible -> false
-    node.role == "textField" -> true
+    node.role in setOf("textField", "searchBar") -> true
     node.role in PROTOTYPE_MODAL_ROLES -> false // Hoisted: only modalPrototypeSheets renders it.
     node.role == "pager" ->
       node.children.getOrNull(node.page)?.let(::inlineTextFieldVisible) == true
@@ -652,7 +662,7 @@ fun modalPrototypeSheets(node: PrototypeRenderNode): List<PrototypeRenderNode> {
 
 /** Roles that compose their children inline through the node renderer; others never draw them. */
 private val PROTOTYPE_INLINE_CONTAINER_ROLES =
-  setOf("box", "row", "column", "flow", "grid", "scroll", "card", "pager")
+  setOf("box", "row", "column", "flow", "grid", "scroll", "card", "pager", "searchBar")
 
 /** A non-root anchored node: drawn in the window-level anchor layer, never in its parent. */
 internal fun isLayeredPrototypeAnchor(node: PrototypeRenderNode): Boolean =

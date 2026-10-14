@@ -199,6 +199,13 @@ function visitObject(
     return fail(path, "Expected object");
   }
   const fields = rule.fields ?? {};
+  if (
+    data.type === "searchBar" &&
+    Object.hasOwn(data, "child") &&
+    !Object.hasOwn(data, "activeKey")
+  ) {
+    return fail(keyPath(path, "child"), "Search bar child requires activeKey");
+  }
   const keys = [...new Set([...Object.keys(data), ...Object.keys(fields)])].sort();
   for (const key of keys) {
     const field = Object.hasOwn(fields, key) ? fields[key] : undefined;
@@ -686,8 +693,15 @@ function componentBindingErrors(
   state: Record<string, unknown>,
 ): PrototypeValidationError | undefined {
   const stored = typeof value.stateKey === "string" ? state[value.stateKey] : undefined;
-  if (value.type === "textField" && typeof stored !== "string") {
+  if ((value.type === "textField" || value.type === "searchBar") && typeof stored !== "string") {
     return fail(`${path}.stateKey`, "Text field requires a string state key");
+  }
+  if (
+    value.type === "searchBar" &&
+    typeof value.activeKey === "string" &&
+    typeof state[value.activeKey] !== "boolean"
+  ) {
+    return fail(`${path}.activeKey`, "Search bar requires a boolean active key");
   }
   if ((value.type === "switch" || value.type === "checkbox") && typeof stored !== "boolean") {
     return fail(`${path}.stateKey`, "Toggle control requires a boolean state key");
@@ -801,7 +815,13 @@ const stateActionTypes: Record<string, { check: (stored: unknown) => boolean; me
 };
 /** Every state key a node binds: `stateKey`, time picker keys, a trailing control, `openWhen`. */
 function boundKeys(value: Record<string, unknown>): string[] {
-  const keys = [value.stateKey, value.hourKey, value.minuteKey, object(value.trailing)?.stateKey];
+  const keys = [
+    value.stateKey,
+    value.activeKey,
+    value.hourKey,
+    value.minuteKey,
+    object(value.trailing)?.stateKey,
+  ];
   const openWhen = Object.hasOwn(MODAL_NAMES, String(value.type))
     ? object(value.openWhen)
     : undefined;

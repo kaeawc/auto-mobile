@@ -67,11 +67,56 @@ struct PrototypeTextFieldView: View {
         _draft = State(initialValue: PrototypeTextDraft(stored: model.state[node.stateKey ?? ""]?.displayString ?? ""))
     }
 
-    var body: some View {
+    @ViewBuilder var body: some View {
         let _: Int = clippingRevision
+        if node.type == "searchBar" {
+            HStack(spacing: 8) {
+                if let symbol = prototypeSymbol(node.leadingIcon) { PrototypeGlyph(symbol: symbol) }
+                field
+                    .submitLabel(.search)
+                    .prototypeIdentifier(node.testTag ?? node.id)
+                    .simultaneousGesture(TapGesture().onEnded { model.activate(.node(node)) })
+                if !draft.text.isEmpty {
+                    Button { draft.type("") } label: {
+                        PrototypeGlyph(symbol: "xmark.circle.fill")
+                            .frame(width: 48, height: 48)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear")
+                    .prototypeIdentifier(node.partIdentifier("clear"))
+                }
+                ForEach(Array((node.trailingActions ?? []).enumerated()), id: \.offset) { index, action in
+                    Button { model.activate(.appBarButton(action)) } label: {
+                        ZStack {
+                            if let symbol = prototypeSymbol(action.icon) { PrototypeGlyph(symbol: symbol) }
+                        }
+                        .frame(width: 48, height: 48)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(action.label)
+                    .prototypeIdentifier(node.partIdentifier("actions.\(index)"))
+                }
+            }
+            .padding(.leading, 16)
+            .frame(minHeight: 56)
+        } else {
+            field
+        }
+    }
+
+    private var field: some View {
         let key = node.stateKey ?? ""
         let stored = model.state[key]?.displayString ?? ""
-        renderedField
+        return Group {
+            if node.type == "searchBar" {
+                TextField(node.placeholder ?? "", text: Binding(get: { draft.text }, set: { draft.type($0) }))
+                    .focused($focused)
+            } else {
+                renderedField
+            }
+        }
             .onChange(of: draft.text) { _, _ in
                 // Read live state: another callback may have changed the captured display value.
                 let stored = model.state[key]?.displayString ?? ""
@@ -89,6 +134,7 @@ struct PrototypeTextFieldView: View {
             }
             .onSubmit {
                 draft.endEditing(stored: model.state[key]?.displayString ?? "")
+                if node.type == "searchBar" { model.run(node.onSubmit ?? []) }
             }
             .onChange(of: stored) { _, value in
                 draft.storedChanged(to: value)

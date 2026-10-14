@@ -17,7 +17,9 @@ export type PrototypePlatformNoteConstruct =
   | "icon.name"
   | "icon.variant"
   | "textField.variant"
-  | "textField.label";
+  | "textField.label"
+  | "searchBar"
+  | "searchBar.icons";
 export type PrototypePlatformNoteEffect = "ignored" | "substituted";
 export interface PrototypePlatformNote {
   platform: "ios";
@@ -96,18 +98,42 @@ interface Occurrence {
   path: string;
   node?: Record<string, unknown>;
   icon?: string;
+  nodeType?: string;
 }
 interface PlatformDifference {
   construct: PrototypePlatformNoteConstruct;
   platform: "ios";
   effect: PrototypePlatformNoteEffect;
-  capability: string;
+  capability?: string;
   detail: string;
   occurrencePath: (site: Occurrence) => string | undefined;
 }
 
+/** Permanent renderer differences, independent of advertised capabilities. */
+export const PROTOTYPE_SEARCH_BAR_PLATFORM_DIFFERENCES: readonly PlatformDifference[] = [
+  {
+    construct: "searchBar",
+    platform: "ios",
+    effect: "substituted",
+    detail:
+      "iOS draws the search field inside the prototype window instead of using SwiftUI .searchable, which requires a NavigationStack; results remain ordinary observable child nodes.",
+    occurrencePath: ({ node, path }) => (node?.type === "searchBar" ? path : undefined),
+  },
+  {
+    construct: "searchBar.icons",
+    platform: "ios",
+    effect: "substituted",
+    detail:
+      "iOS maps searchBar leading and trailing icons to SF Symbols; it never draws Android Material glyphs.",
+    occurrencePath: ({ icon, path, nodeType }) =>
+      icon !== undefined && nodeType === "searchBar" ? path : undefined,
+  },
+];
+
 /** One table drives both show notes and the generated guide. */
-export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly PlatformDifference[] = [
+export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly (PlatformDifference & {
+  capability: string;
+})[] = [
   {
     construct: "node.id",
     platform: "ios",
@@ -240,23 +266,29 @@ const definitions: Record<string, Rule> = contract.definitions;
  * The validator and anchor walkers are private and cannot be reused; this uses their dot/index
  * notation and walks depth first in contract field order. Validated device specs only.
  */
-function occurrences(value: unknown, rule: Rule, path: string, found: Occurrence[]): void {
+function occurrences(
+  value: unknown,
+  rule: Rule,
+  path: string,
+  found: Occurrence[],
+  nodeType?: string,
+): void {
   if (value === undefined || value === null) {
     return;
   }
   switch (rule.kind) {
     case "ref":
-      referenceOccurrences(value, rule.name!, path, found);
+      referenceOccurrences(value, rule.name!, path, found, nodeType);
       break;
     case "array":
       (value as unknown[]).forEach((entry, index) =>
-        occurrences(entry, rule.item!, `${path}[${index}]`, found),
+        occurrences(entry, rule.item!, `${path}[${index}]`, found, nodeType),
       );
       break;
     case "object": {
       const data = value as Record<string, unknown>;
       for (const [key, field] of Object.entries(rule.fields ?? {})) {
-        occurrences(data[key], field.rule, path ? `${path}.${key}` : key, found);
+        occurrences(data[key], field.rule, path ? `${path}.${key}` : key, found, nodeType);
       }
       break;
     }
@@ -264,7 +296,7 @@ function occurrences(value: unknown, rule: Rule, path: string, found: Occurrence
       const data = value as Record<string, unknown>;
       const variant = rule.variants?.[String(data.type)];
       if (variant) {
-        occurrences(value, variant, path, found);
+        occurrences(value, variant, path, found, nodeType);
       }
       break;
     }
@@ -276,14 +308,16 @@ function referenceOccurrences(
   name: string,
   path: string,
   found: Occurrence[],
+  nodeType?: string,
 ): void {
   if (name === "iconName" && typeof value === "string") {
-    found.push({ path, icon: value });
+    found.push({ path, icon: value, nodeType });
   }
   if (name === "node") {
     found.push({ path, node: value as Record<string, unknown> });
+    nodeType = String((value as Record<string, unknown>).type);
   }
-  occurrences(value, definitions[name]!, path, found);
+  occurrences(value, definitions[name]!, path, found, nodeType);
 }
 
 /** Reports the supplied (normally host-expanded device) spec without I/O or mutation. */
@@ -298,9 +332,13 @@ export function prototypePlatformNotes(
   const found: Occurrence[] = [];
   occurrences(spec.root, { kind: "ref", name: "node" }, "root", found);
   const sfSymbols = supports(PROTOTYPE_ICON_SF_SYMBOLS_CAPABILITY);
-  return PROTOTYPE_PLATFORM_DIFFERENCES.flatMap((legacyDifference) => {
+  const differences = [
+    ...PROTOTYPE_PLATFORM_DIFFERENCES,
+    ...PROTOTYPE_SEARCH_BAR_PLATFORM_DIFFERENCES,
+  ];
+  return differences.flatMap((legacyDifference) => {
     const difference = sfSymbols ? sfSymbolDifference(legacyDifference) : legacyDifference;
-    if (supports(difference.capability)) {
+    if (difference.capability && supports(difference.capability)) {
       return [];
     }
     const affected = found.flatMap((site) => {

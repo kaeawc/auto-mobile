@@ -1,4 +1,7 @@
-import { PROTOTYPE_PLATFORM_DIFFERENCES } from "./prototypePlatformNotes";
+import {
+  PROTOTYPE_PLATFORM_DIFFERENCES,
+  PROTOTYPE_SEARCH_BAR_PLATFORM_DIFFERENCES,
+} from "./prototypePlatformNotes";
 import iconSymbols from "../../../schemas/prototype-ios-icon-symbols.json";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
@@ -142,7 +145,7 @@ function renderActions(): string {
   return [
     "## Actions",
     "",
-    "Used in `onTap`, `onLongPress` and `onDoubleTap` lists.",
+    "Used in `onTap`, `onLongPress`, `onDoubleTap` and searchBar `onSubmit` lists.",
     "",
     `Gesture fields are available only on ${code(
       Object.entries(definitions.node.variants ?? {})
@@ -221,6 +224,9 @@ function renderPlatformDifferences(): string {
     ...PROTOTYPE_PLATFORM_DIFFERENCES.filter(({ construct }) => !construct.startsWith("icon.")).map(
       ({ construct, platform, effect, capability, detail }) =>
         `- \`${construct}\`: ${platform}, ${effect}. ${detail} A successful show lists affected paths under \`platformNotes\`; lifted by \`${capability}\`.`,
+    ),
+    ...PROTOTYPE_SEARCH_BAR_PLATFORM_DIFFERENCES.map(
+      ({ construct, detail }) => `- \`${construct}\`: ${detail}`,
     ),
   ].join("\n");
 }

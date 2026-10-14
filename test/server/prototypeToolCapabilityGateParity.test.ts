@@ -18,7 +18,7 @@ const label = { type: "text", id: "label", text: "Hello" };
 const base = {
   id: "parity",
   window: { placement: { type: "fullscreen" } },
-  state: { liked: false, name: "Ada" },
+  state: { liked: false, name: "Ada", query: "", active: false },
   root: { type: "column", children: [label] },
 };
 const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
@@ -47,6 +47,13 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
     ...label,
     onLongPress: [{ type: "emit", name: "long" }],
     onDoubleTap: [{ type: "emit", name: "double" }],
+  }),
+  prototype_search_bar_v1: fixture({
+    type: "searchBar",
+    id: "label",
+    stateKey: "query",
+    activeKey: "active",
+    child: label,
   }),
 };
 function fixture(root: Record<string, unknown>) {

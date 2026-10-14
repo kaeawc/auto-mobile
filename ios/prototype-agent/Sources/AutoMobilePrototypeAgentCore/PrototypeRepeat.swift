@@ -104,6 +104,9 @@ enum PrototypeRepeat {
             string("title", in: &fields)
             part("navigationIcon", in: &fields)
             list("actions", in: &fields)
+        case .string("searchBar")?:
+            string("placeholder", in: &fields)
+            list("trailingActions", in: &fields)
         case .string("dialog")?:
             string("title", in: &fields)
             string("text", in: &fields)
@@ -180,6 +183,11 @@ private struct Instance {
         case "topAppBar":
             bindPart("navigationIcon", in: &fields)
             bindList("actions", in: &fields) { bindPartFields(&$0) }
+        case "searchBar":
+            bindList("trailingActions", in: &fields) { bindPartFields(&$0) }
+            if case let .array(actions)? = fields["onSubmit"] {
+                fields["onSubmit"] = .array(actions.map(bindAction))
+            }
         case "dialog":
             bindPart("confirm", in: &fields)
             bindPart("dismiss", in: &fields)
@@ -193,7 +201,7 @@ private struct Instance {
     /// State-key fields bind to text (#11051): the node's own keys, a list item's trailing control
     /// and a sheet, dialog or snackbar `openWhen`. Condition and action keys bind with their owners.
     private func bindStateKeys(_ fields: inout [String: JSONValue]) {
-        for key in ["stateKey", "hourKey", "minuteKey"] {
+        for key in ["stateKey", "hourKey", "minuteKey", "activeKey"] {
             bindString(key, in: &fields)
         }
         for (part, key) in [("trailing", "stateKey"), ("openWhen", "key")] {

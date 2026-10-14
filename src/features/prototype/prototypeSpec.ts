@@ -647,6 +647,19 @@ const actionListSchema = z.array(actionSchema).min(1).max(32);
 const appBarActionSchema = z
   .object({ icon: iconNameSchema, label: z.string().min(1), onTap: actionListSchema.optional() })
   .strict();
+const searchBarBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["searchBar"]),
+    stateKey: stateKeySchema,
+    placeholder: textFieldBaseSchema.shape.placeholder,
+    leadingIcon: iconNameSchema.optional(),
+    trailingActions: z.array(appBarActionSchema).min(1).max(2).optional(),
+    activeKey: stateKeySchema.optional(),
+    variant: z.enum(["bar", "docked"]).optional(),
+    onSubmit: actionListSchema.optional(),
+  })
+  .strict();
 // A dialog or snackbar button: a tap closes its container, then runs `onTap`.
 const dialogButtonSchema = z
   .object({ label: z.string().min(1), onTap: actionListSchema.optional() })
@@ -811,6 +824,7 @@ export type PrototypeNode =
   | z.infer<typeof iconBaseSchema>
   | z.infer<typeof spacerBaseSchema>
   | z.infer<typeof textFieldBaseSchema>
+  | (z.infer<typeof searchBarBaseSchema> & { child?: PrototypeNode })
   | z.infer<typeof switchBaseSchema>
   | z.infer<typeof checkboxBaseSchema>
   | z.infer<typeof buttonBaseSchema>
@@ -849,6 +863,7 @@ export const prototypeNodeSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown
       iconBaseSchema,
       spacerBaseSchema,
       textFieldBaseSchema,
+      searchBarBaseSchema.extend({ child: z.lazy(() => prototypeNodeSchema).optional() }),
       switchBaseSchema,
       checkboxBaseSchema,
       buttonBaseSchema,
@@ -982,6 +997,7 @@ export const PROTOTYPE_NODE_TYPES = [
   "icon",
   "spacer",
   "textField",
+  "searchBar",
   "switch",
   "checkbox",
   "button",

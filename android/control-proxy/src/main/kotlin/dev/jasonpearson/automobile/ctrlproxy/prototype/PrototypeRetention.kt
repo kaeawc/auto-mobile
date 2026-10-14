@@ -27,6 +27,7 @@ private val RETENTION_INLINE_ROLES =
 private val RETENTION_EXCLUDED_ROLES =
   setOf(
     "textField",
+    "searchBar",
     "pager",
     "timePicker",
     "datePicker",

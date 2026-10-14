@@ -233,7 +233,7 @@ struct NodeView: View {
     private var handlesOwnTap: Bool {
         [
             "switch", "checkbox", "button", "slider", "chip", "radioGroup", "listItem", "iconButton",
-            "fab", "segmentedButton", "topAppBar", "timePicker", "datePicker", "dialog", "snackbar",
+            "fab", "segmentedButton", "topAppBar", "timePicker", "datePicker", "dialog", "snackbar", "searchBar",
         ].contains(node.type)
     }
 
@@ -292,6 +292,8 @@ struct NodeView: View {
             iconView
         case "spacer":
             Color.clear.frame(width: 0, height: 0)
+        case "searchBar":
+            PrototypeSearchBarView(node: node, model: model, style: style)
         case "textField":
             PrototypeTextFieldView(node: node, model: model)
         case "switch":
@@ -739,7 +741,8 @@ struct NodeView: View {
                 style: style
             ))
             .modifier(IdentifierModifier(
-                identifier: node.testTag ?? node.id,
+                // The search bar's editable field owns the node identifier.
+                identifier: node.type == "searchBar" ? nil : node.testTag ?? node.id,
                 label: accessibilityLabelOverride,
                 grouping: grouping
             ))

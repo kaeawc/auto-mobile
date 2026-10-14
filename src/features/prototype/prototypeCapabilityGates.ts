@@ -4,6 +4,7 @@ import {
   PROTOTYPE_FLOW_GRID_CAPABILITY,
   PROTOTYPE_PAGER_OPTIONS_CAPABILITY,
   PROTOTYPE_GESTURES_CAPABILITY,
+  PROTOTYPE_SEARCH_BAR_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
 import {
   prototypeThemeModeFields,
@@ -21,6 +22,10 @@ import {
   prototypePagerOptionsUnsupportedMessage,
 } from "./prototypePagerOptions";
 import { prototypeGestureFields, prototypeGesturesUnsupportedMessage } from "./prototypeGestures";
+import {
+  prototypeSearchBarFields,
+  prototypeSearchBarUnsupportedMessage,
+} from "./prototypeSearchBar";
 
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
@@ -59,6 +64,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_GESTURES_CAPABILITY,
     fields: prototypeGestureFields,
     unsupportedMessage: prototypeGesturesUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_SEARCH_BAR_CAPABILITY,
+    fields: prototypeSearchBarFields,
+    unsupportedMessage: prototypeSearchBarUnsupportedMessage,
   },
 ];
 

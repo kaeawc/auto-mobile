@@ -186,6 +186,7 @@ private let prototypeInlineContainerTypes: Set<String> = [
     "card",
     "pager",
     "bottomSheet",
+    "searchBar",
 ]
 
 extension PrototypeNode {
@@ -242,6 +243,7 @@ extension PrototypeNode {
         }
         guard prototypeInlineContainerTypes.contains(type) else { return [] }
         if type == "bottomSheet", !(openWhen?.holds(state) ?? false) { return [] }
+        if type == "searchBar", !searchBarActive(state: state) { return [] }
         var entries = childEntries(path: path)
         if type == "pager" {
             // The renderer's clamp: a page past the end shows the last one.

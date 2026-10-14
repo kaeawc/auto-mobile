@@ -50,6 +50,20 @@ function spec(root: Record<string, unknown>, state: Record<string, unknown> = {}
 }
 
 describe("prototype node contract parity", () => {
+  test("searchBar exposes its exact wire fields in both contracts", () => {
+    const candidate = spec(
+      {
+        type: "searchBar",
+        stateKey: "query",
+        activeKey: "active",
+        child: { type: "text", text: "Result" },
+      },
+      { query: "", active: true },
+    );
+    expect(validatePrototypeSpec(candidate).success).toBe(true);
+    expect(prototypeSpecSchema.safeParse(candidate).success).toBe(true);
+    expect(contractNodes.searchBar).toBeDefined();
+  });
   test("the Zod schema and the shared contract list the same node types", () => {
     expect([...zodNodeShapes().keys()].sort()).toEqual([...PROTOTYPE_NODE_TYPES].sort());
     expect(Object.keys(contractNodes).sort()).toEqual([...PROTOTYPE_NODE_TYPES].sort());

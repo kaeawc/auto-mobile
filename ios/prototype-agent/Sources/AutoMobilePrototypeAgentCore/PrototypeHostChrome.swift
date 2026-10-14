@@ -74,7 +74,8 @@ extension PrototypePalette {
 extension PrototypeNode {
     /// Whether a `textField` is anywhere in this subtree, so focusing it is what the author meant.
     var containsTextField: Bool {
-        type == "textField" || ((children ?? []) + [child].compactMap(\.self)).contains { $0.containsTextField }
+        ["textField", "searchBar"].contains(type) || ((children ?? []) + [child].compactMap(\.self))
+            .contains { $0.containsTextField }
     }
 }
 

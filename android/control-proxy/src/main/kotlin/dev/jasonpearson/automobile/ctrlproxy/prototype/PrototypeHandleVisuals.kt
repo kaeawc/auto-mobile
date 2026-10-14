@@ -9,7 +9,7 @@ internal fun prototypeNodeTappable(node: PrototypeRenderNode): Boolean =
   (!node.source?.onTap.isNullOrEmpty() ||
     !node.source?.onLongPress.isNullOrEmpty() ||
     !node.source?.onDoubleTap.isNullOrEmpty()) &&
-    node.role != "textField" &&
+    node.role !in setOf("textField", "searchBar") &&
     node.role !in PROTOTYPE_MODAL_ROLES &&
     node.role !in PROTOTYPE_COMPONENT_ROLES &&
     node.role !in PROTOTYPE_SELECTION_ROLES &&

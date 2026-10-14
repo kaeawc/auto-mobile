@@ -581,6 +581,19 @@ private fun RenderPrototypeNodeContent(
     "progress" -> RenderPrototypeProgress(node, modifier)
     "timePicker" -> RenderPrototypeTimePicker(node, modifier, interact)
     "datePicker" -> RenderPrototypeDatePicker(node, modifier, interact)
+    "searchBar" ->
+      RenderPrototypeSearchBar(node, modifier, interact) {
+        node.children.forEach { child ->
+          key(child.identity) {
+            RenderPrototypeNode(
+              child,
+              interact,
+              columnWeight(child),
+              child.weightAxis(PrototypeWeightAxis.VERTICAL),
+            )
+          }
+        }
+      }
     "textField" -> RenderPrototypeTextField(node, modifier, interact)
     "switch",
     "checkbox" -> RenderPrototypeToggle(node, modifier, interact)
@@ -615,13 +628,114 @@ private fun RenderPrototypeTextField(
   interact: (PrototypeInteraction) -> Unit,
 ) {
   val source = node.source as? PrototypeTextFieldNode ?: return
+  RenderPrototypeEditableField(node, source.stateKey, source.onTap.orEmpty(), modifier, interact) {
+    shown,
+    change,
+    fieldModifier,
+    presses ->
+    val onValueChange: (String) -> Unit = { value ->
+      change(prototypeTextFieldClip(value, source.maxLength))
+    }
+    val label: (@Composable () -> Unit)? = source.label?.let { text -> { Text(text) } }
+    val counter = prototypeTextFieldCounter(shown, source.maxLength)
+    val supportingText: (@Composable () -> Unit)? =
+      if (source.supportingText != null || counter != null) {
+        {
+          Row(Modifier.fillMaxWidth()) {
+            Text(source.supportingText.orEmpty(), Modifier.weight(1f))
+            if (counter != null) Text(counter)
+          }
+        }
+      } else null
+    val keyboardOptions =
+      if (source.keyboardType == null && source.secure != true) KeyboardOptions.Default
+      else
+        KeyboardOptions(
+          keyboardType = prototypeTextFieldKeyboardType(source.keyboardType, source.secure),
+        )
+    val visualTransformation =
+      if (prototypeTextFieldSecure(source.secure, source.keyboardType)) PasswordVisualTransformation()
+      else VisualTransformation.None
+    val multiline = source.multiline
+    // Omit line options for legacy fields: Compose's default is a growing field.
+    if (source.variant == "outlined") {
+      if (multiline == null) {
+        OutlinedTextField(
+          value = shown,
+          onValueChange = onValueChange,
+          modifier = fieldModifier,
+          interactionSource = presses,
+          placeholder = { Text(source.placeholder.orEmpty()) },
+          label = label,
+          supportingText = supportingText,
+          keyboardOptions = keyboardOptions,
+          visualTransformation = visualTransformation,
+        )
+      } else {
+        OutlinedTextField(
+          value = shown,
+          onValueChange = onValueChange,
+          modifier = fieldModifier,
+          interactionSource = presses,
+          placeholder = { Text(source.placeholder.orEmpty()) },
+          label = label,
+          supportingText = supportingText,
+          keyboardOptions = keyboardOptions,
+          visualTransformation = visualTransformation,
+          singleLine = !multiline,
+          minLines = source.minLines ?: 1,
+          maxLines = source.maxLines ?: Int.MAX_VALUE,
+        )
+      }
+    } else {
+      if (multiline == null) {
+        TextField(
+          value = shown,
+          onValueChange = onValueChange,
+          modifier = fieldModifier,
+          interactionSource = presses,
+          placeholder = { Text(source.placeholder.orEmpty()) },
+          label = label,
+          supportingText = supportingText,
+          keyboardOptions = keyboardOptions,
+          visualTransformation = visualTransformation,
+        )
+      } else {
+        TextField(
+          value = shown,
+          onValueChange = onValueChange,
+          modifier = fieldModifier,
+          interactionSource = presses,
+          placeholder = { Text(source.placeholder.orEmpty()) },
+          label = label,
+          supportingText = supportingText,
+          keyboardOptions = keyboardOptions,
+          visualTransformation = visualTransformation,
+          singleLine = !multiline,
+          minLines = source.minLines ?: 1,
+          maxLines = source.maxLines ?: Int.MAX_VALUE,
+        )
+      }
+    }
+  }
+}
+
+/** One edit/reconciliation and action path for every editable prototype field. */
+@Composable
+internal fun RenderPrototypeEditableField(
+  node: PrototypeRenderNode,
+  stateKey: String,
+  actions: List<PrototypeAction>,
+  modifier: Modifier,
+  interact: (PrototypeInteraction) -> Unit,
+  field: @Composable (String, (String) -> Unit, Modifier, MutableInteractionSource) -> Unit,
+) {
   val presses = remember { MutableInteractionSource() }
   val focus = remember { FocusRequester() }
-  val actions = source.onTap.orEmpty()
   // The shown value is local state, updated synchronously by the IME's own edits; the controller
   // is told afterwards. Binding it to node.text would show the controller's lagging echo, so fast
   // commitText input could be applied against a stale value.
-  val epoch = LocalPrototypeTextEpochs.current[source.stateKey] ?: 0
+  val epoch = LocalPrototypeTextEpochs.current[stateKey] ?: 0
   val sync = remember { PrototypeTextFieldSync(node.text, epoch) }
   var shown by remember { mutableStateOf(sync.text) }
   LaunchedEffect(node.text, epoch) { if (sync.observe(node.text, epoch)) shown = sync.text }
@@ -640,94 +754,17 @@ private fun RenderPrototypeTextField(
         true
       }
     }
-  val onValueChange: (String) -> Unit = { value ->
-    val clipped = prototypeTextFieldClip(value, source.maxLength)
-    if (sync.edit(clipped)) {
-      shown = clipped
-      interact(PrototypeInteraction.TextChange(source.stateKey, clipped, sync.epoch))
-    }
-  }
-  val label: (@Composable () -> Unit)? = source.label?.let { text -> { Text(text) } }
-  val counter = prototypeTextFieldCounter(shown, source.maxLength)
-  val supportingText: (@Composable () -> Unit)? =
-    if (source.supportingText != null || counter != null) {
-      {
-        Row(Modifier.fillMaxWidth()) {
-          Text(source.supportingText.orEmpty(), Modifier.weight(1f))
-          if (counter != null) Text(counter)
-        }
+  field(
+    shown,
+    { value ->
+      if (sync.edit(value)) {
+        shown = value
+        interact(PrototypeInteraction.TextChange(stateKey, value, sync.epoch))
       }
-    } else null
-  val keyboardOptions =
-    if (source.keyboardType == null && source.secure != true) KeyboardOptions.Default
-    else
-      KeyboardOptions(
-        keyboardType = prototypeTextFieldKeyboardType(source.keyboardType, source.secure),
-      )
-  val visualTransformation =
-    if (prototypeTextFieldSecure(source.secure, source.keyboardType)) PasswordVisualTransformation()
-    else VisualTransformation.None
-  val multiline = source.multiline
-  // Omit line options for legacy fields: Compose's default is a growing field.
-  if (source.variant == "outlined") {
-    if (multiline == null) {
-      OutlinedTextField(
-        value = shown,
-        onValueChange = onValueChange,
-        modifier = fieldModifier,
-        interactionSource = presses,
-        placeholder = { Text(source.placeholder.orEmpty()) },
-        label = label,
-        supportingText = supportingText,
-        keyboardOptions = keyboardOptions,
-        visualTransformation = visualTransformation,
-      )
-    } else {
-      OutlinedTextField(
-        value = shown,
-        onValueChange = onValueChange,
-        modifier = fieldModifier,
-        interactionSource = presses,
-        placeholder = { Text(source.placeholder.orEmpty()) },
-        label = label,
-        supportingText = supportingText,
-        keyboardOptions = keyboardOptions,
-        visualTransformation = visualTransformation,
-        singleLine = !multiline,
-        minLines = source.minLines ?: 1,
-        maxLines = source.maxLines ?: Int.MAX_VALUE,
-      )
-    }
-  } else {
-    if (multiline == null) {
-      TextField(
-        value = shown,
-        onValueChange = onValueChange,
-        modifier = fieldModifier,
-        interactionSource = presses,
-        placeholder = { Text(source.placeholder.orEmpty()) },
-        label = label,
-        supportingText = supportingText,
-        keyboardOptions = keyboardOptions,
-        visualTransformation = visualTransformation,
-      )
-    } else {
-      TextField(
-        value = shown,
-        onValueChange = onValueChange,
-        modifier = fieldModifier,
-        interactionSource = presses,
-        placeholder = { Text(source.placeholder.orEmpty()) },
-        label = label,
-        supportingText = supportingText,
-        keyboardOptions = keyboardOptions,
-        visualTransformation = visualTransformation,
-        singleLine = !multiline,
-        minLines = source.minLines ?: 1,
-        maxLines = source.maxLines ?: Int.MAX_VALUE,
-      )
-    }
-  }
+    },
+    fieldModifier,
+    presses,
+  )
 }
 
 /** Retains neighbours only when cross-axis filling and bounded height allow it. */
@@ -1080,11 +1117,14 @@ private fun prototypeNodeModifier(
       node.testTag?.let { testTag = it }
     }
   } else if (
-    !isSemanticsFreeContainer(node, tappable, description, state) &&
+    node.role != "searchBar" &&
+      !isSemanticsFreeContainer(node, tappable, description, state) &&
       (handleVisual || !isDecorativePrototypeVisual(node, tappable))
   ) {
     modifier = modifier.semantics {
-      if (node.role != "textField" && node.role !in SEMANTICS_FREE_CONTAINERS) {
+      if (
+        node.role !in setOf("textField", "searchBar") && node.role !in SEMANTICS_FREE_CONTAINERS
+      ) {
         text = AnnotatedString(node.text)
       }
       this[PrototypeRole] = node.role

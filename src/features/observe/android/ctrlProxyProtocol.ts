@@ -1012,6 +1012,8 @@ export const PROTOTYPE_TEXT_FIELD_OPTIONS_CAPABILITY = "prototype_text_field_opt
 
 /** Resolves read-only prototype data, JSON Pointer bindings and stable repeat keys. */
 export const PROTOTYPE_DATA_MODEL_CAPABILITY = "prototype_data_model_v1";
+/** Editable in-tree search field with active results and submit/trailing actions. */
+export const PROTOTYPE_SEARCH_BAR_CAPABILITY = "prototype_search_bar_v1";
 
 /** Runs long-press and double-tap action lists on generic prototype gesture nodes. */
 export const PROTOTYPE_GESTURES_CAPABILITY = "prototype_gestures_v1";

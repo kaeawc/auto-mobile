@@ -9,6 +9,11 @@ import Foundation
 let prototypeModalTypes: Set<String> = ["dialog", "snackbar"]
 
 extension PrototypeNode {
+    /// Focus does not change expansion; only the authored boolean state does.
+    func searchBarActive(state: [String: JSONValue]) -> Bool {
+        activeKey.flatMap { state[$0]?.boolValue } ?? false
+    }
+
     /// The accessibility identifier: `testTag`, else `id`.
     var identifier: String? {
         testTag ?? id
@@ -48,7 +53,7 @@ extension PrototypeNode {
             let page = id.flatMap { pages[$0] } ?? 0
             nested = nested.indices.contains(page) ? [nested[page]] : []
         }
-        if let child { nested.append(child) }
+        if let child, type != "searchBar" || searchBarActive(state: state) { nested.append(child) }
         return (modal ? [self] : []) + nested.flatMap { $0.openModals(state: state, pages: pages) }
     }
 
@@ -68,7 +73,8 @@ extension PrototypeNode {
     func tapTarget(identifier wanted: String, state: [String: JSONValue]) -> PrototypeTapTarget? {
         if identifier == wanted { return .node(self) }
         if let part = part(named: wanted, state: state) { return part }
-        for node in (children ?? []) + [child].compactMap({ $0 }) {
+        let nestedChild = type == "searchBar" && !searchBarActive(state: state) ? nil : child
+        for node in (children ?? []) + [nestedChild].compactMap({ $0 }) {
             if let match = node.tapTarget(identifier: wanted, state: state) { return match }
         }
         return nil
@@ -81,6 +87,8 @@ extension PrototypeNode {
         case "dialog", "snackbar":
             guard openWhen?.holds(state) ?? false else { return nil }
             return modalButton(named: name).map { .modalButton(self, $0) }
+        case "searchBar":
+            return indexedButton(named: name, actions: trailingActions).map { .appBarButton($0) }
         case "topAppBar":
             return appBarButton(named: name).map { .appBarButton($0) }
         case "radioGroup", "segmentedButton":
@@ -103,6 +111,10 @@ extension PrototypeNode {
     /// `navigation`, or `actions.<index>`.
     private func appBarButton(named name: String) -> PrototypeAppBarAction? {
         if name == "navigation" { return navigationIcon }
+        return indexedButton(named: name, actions: actions)
+    }
+
+    private func indexedButton(named name: String, actions: [PrototypeAppBarAction]?) -> PrototypeAppBarAction? {
         guard name.hasPrefix("actions."), let index = Int(name.dropFirst("actions.".count)),
               let actions, actions.indices.contains(index) else { return nil }
         return actions[index]

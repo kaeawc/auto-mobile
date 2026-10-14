@@ -26,6 +26,16 @@ class PrototypePlacementTest {
   }
 
   @Test
+  fun `surface ids name windows while direct callers keep the legacy title`() {
+    val placement = PrototypePlacement.Fullscreen(Color.Black)
+    assertEquals(PROTOTYPE_WINDOW_TITLE, prototypeLayoutParams(placement, false, 1f, 30).title)
+    assertEquals(
+      "AutoMobile Prototype:a",
+      prototypeLayoutParams(placement, false, 1f, 30, surfaceId = "a").title,
+    )
+  }
+
+  @Test
   fun `fullscreen blocks entire display with optional scrim`() {
     val params = build(PrototypePlacement.Fullscreen(Color.Black.copy(alpha = 0.4f)))
     assertEquals(LayoutParams.MATCH_PARENT, params.width)

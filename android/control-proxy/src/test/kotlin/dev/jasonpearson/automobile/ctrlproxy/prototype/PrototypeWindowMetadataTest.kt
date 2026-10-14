@@ -45,6 +45,32 @@ class PrototypeWindowMetadataTest {
     prototypeWindowMetadata(mapPrototypeSpec(spec), dismissBarOpaque)
 
   @Test
+  fun `prototype titles carry only nonempty ids and still require the window type and owner`() {
+    val type = AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY
+    assertEquals(PROTOTYPE_WINDOW_TITLE, prototypeWindowTitle(null))
+    assertEquals("AutoMobile Prototype:a", prototypeWindowTitle("a"))
+    for ((title, id) in
+      listOf(
+        PROTOTYPE_WINDOW_TITLE to null,
+        "AutoMobile Prototype:a" to "a",
+        "AutoMobile Prototype:a:b" to "a:b",
+      )) {
+      assertEquals(id, prototypeIdOfTitle(title))
+      assertTrue(hasPrototypeTitle(type, title))
+      assertTrue(isPrototypeWindow(type, title, "own", "own"))
+      assertTrue(hasPrototypeTitle(AccessibilityWindowInfo.TYPE_SYSTEM, title))
+      assertFalse(hasPrototypeTitle(AccessibilityWindowInfo.TYPE_APPLICATION, title))
+      assertFalse(isPrototypeWindow(type, title, "other", "own"))
+    }
+    for (title in
+      listOf(null, "AutoMobile Prototype:", "AutoMobile Prototype Foo", "AutoMobile Highlight")) {
+      assertNull(prototypeIdOfTitle(title))
+      assertFalse(hasPrototypeTitle(type, title))
+      assertFalse(isPrototypeWindow(type, title, "own", "own"))
+    }
+  }
+
+  @Test
   fun `the translucent fullscreen dismiss bar keeps a fullscreen window from reporting opaque`() {
     assertEquals(
       PrototypeWindowMetadata("fullscreen", false),

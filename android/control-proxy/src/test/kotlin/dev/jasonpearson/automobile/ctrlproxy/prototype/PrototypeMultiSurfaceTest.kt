@@ -137,6 +137,69 @@ class PrototypeMultiSurfaceTest {
   }
 
   @Test
+  fun `metadata attributes two then three surfaces and survives middle dismissal`() = runTest {
+    val full =
+      spec("full")
+        .copy(
+          root =
+            PrototypeBoxNode(
+              style =
+                PrototypeStyle(
+                  width = PrototypeDimension.Fill,
+                  height = PrototypeDimension.Fill,
+                  background = PrototypeModeValue.Single("#FF101010"),
+                ),
+              children = emptyList(),
+            ),
+        )
+    val sheet =
+      spec("sheet")
+        .copy(
+          window =
+            PrototypeWindow(
+              PrototypeSheetPlacement(edge = "bottom", height = 100.0),
+              opacity = 80,
+            ),
+        )
+    val floating =
+      spec("floating")
+        .copy(
+          window =
+            PrototypeWindow(
+              PrototypeFloatingPlacement("center", PrototypeOffset(0.0, 0.0)),
+              opacity = 50,
+            ),
+        )
+    controller.show("full", full, replaceOthers = false)
+    controller.show("sheet", sheet, replaceOthers = false)
+    assertEquals("fullscreen", controller.windowMetadata("full")?.placement)
+    assertEquals(true, controller.windowMetadata("full")?.opaque)
+    assertEquals("sheet", controller.windowMetadata("sheet")?.placement)
+    assertEquals(false, controller.windowMetadata("sheet")?.opaque)
+    assertEquals(controller.windowMetadata("sheet"), controller.windowMetadata(null))
+    controller.show("floating", floating, replaceOthers = false)
+    assertEquals(listOf("full", "sheet", "floating"), hosts.map { it.requests.last().surfaceId })
+    assertEquals("floating", controller.windowMetadata("floating")?.placement)
+    assertEquals(false, controller.windowMetadata("floating")?.opaque)
+    assertEquals("fullscreen", controller.windowMetadata("full")?.placement)
+    assertEquals(true, controller.windowMetadata("full")?.opaque)
+    assertEquals("sheet", controller.windowMetadata("sheet")?.placement)
+    assertEquals(false, controller.windowMetadata("sheet")?.opaque)
+    assertEquals(controller.windowMetadata("floating"), controller.windowMetadata(null))
+    assertNull(controller.windowMetadata("missing"))
+    hosts[1].isShowing = false
+    assertNull(controller.windowMetadata("sheet"))
+    hosts[1].isShowing = true
+    controller.dismiss("dismiss", "sheet", null)
+    assertNull(controller.windowMetadata("sheet"))
+    assertEquals("fullscreen", controller.windowMetadata("full")?.placement)
+    assertEquals(true, controller.windowMetadata("full")?.opaque)
+    assertEquals("floating", controller.windowMetadata("floating")?.placement)
+    assertEquals(false, controller.windowMetadata("floating")?.opaque)
+    assertEquals(controller.windowMetadata("floating"), controller.windowMetadata())
+  }
+
+  @Test
   fun `three added surfaces have separate hosts runtimes state and sequences`() = runTest {
     val a = show("a")
     val b = show("b")
@@ -162,6 +225,21 @@ class PrototypeMultiSurfaceTest {
     assertNull(b.current.state["label"])
     assertNull(c.current.state["label"])
     assertEquals(listOf(3L, 1L, 1L), status().map { it.lastSequence })
+  }
+
+  @Test
+  fun `default show reuses the host with the replacement surface id and metadata`() = runTest {
+    controller.show("a", spec("a"))
+    assertTrue(results.last().first)
+    assertNotNull(controller.windowMetadata("a"))
+    controller.show("b", spec("b"))
+    assertTrue(results.last().first)
+    val reusedHost = hosts.single()
+    assertEquals(listOf("show", "replace"), reusedHost.calls)
+    assertEquals(listOf("a", "b"), reusedHost.requests.map { it.surfaceId })
+    assertEquals("b", reusedHost.requests.last().surfaceId)
+    assertNotNull(controller.windowMetadata("b"))
+    assertNull(controller.windowMetadata("a"))
   }
 
   @Test

@@ -239,6 +239,8 @@ export interface ViewHierarchyWindowInfo {
    * bounds whatever it paints (#10715).
    */
   prototypePlacement?: PrototypePlacement;
+  /** Identifies which prototype the window draws when several are showing. */
+  prototypeId?: string;
   /**
    * Whether that prototype's rendered surface is fully opaque (window opacity 100 and an opaque
    * root or scrim). Absent when unknown or from an older APK.

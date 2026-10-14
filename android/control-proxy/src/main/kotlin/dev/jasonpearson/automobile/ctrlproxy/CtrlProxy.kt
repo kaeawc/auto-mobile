@@ -93,6 +93,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.hasPrototypeTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.imeLiftPx
 import dev.jasonpearson.automobile.ctrlproxy.prototype.isPrototypeWindow
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeForegroundFromWindows
+import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeIdOfTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeWindowOnScreen
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
 import dev.jasonpearson.automobile.protocol.AnrData
@@ -1050,7 +1051,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
             packageName,
           ) && ::prototypeController.isInitialized
         )
-          prototypeController.windowMetadata()
+          prototypeController.windowMetadata(prototypeIdOfTitle(title))
         else null
       },
     )

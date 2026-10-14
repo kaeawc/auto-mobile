@@ -568,6 +568,12 @@ export interface SlotRegistry {
    * converge on the same row. Requires a valid scope.
    */
   initSlot(key: SlotKey, init: SlotInit): Promise<InitSlotResult>;
+  /** Delete only the exact unbound provisioning row, without an execution owner or open journal. */
+  removeUnboundSlot(
+    key: SlotKey,
+    expected: { generation: number; stableDeviceId: null },
+  ): Promise<boolean>;
+
   /**
    * Change the slot's device binding (`generation + 1`). Refused unless the slot still holds
    * `expected`, and refused when the device belongs to another slot. A device in the free pool is

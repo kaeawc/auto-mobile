@@ -428,7 +428,7 @@ describe("ManagedSlotReconciler", () => {
       const result = expectFailed(await reconciler.reconcile(request()));
 
       expect(result.failure.code).toBe("capacity_exhausted");
-      expect(result.assignment).toMatchObject({ generation: 0, stableDeviceId: null });
+      expect(result.assignment).toBeNull();
     });
 
     test("keeps a typed provision capacity_exhausted refusal typed (#11236)", async () => {
@@ -692,6 +692,65 @@ describe("ManagedSlotReconciler", () => {
       expect(result.disposition).toBe("created");
       expect(result.device.stableId).not.toBe("UDID-LEFTOVER");
       expect(provisioner.released).toEqual([]);
+    });
+  });
+
+  test("a failed fresh creation removes its never-bound slot and retry creates", async () => {
+    provisioner.failWith = (call) =>
+      call.mode === "create"
+        ? new ProvisionDeviceError("platform_command_failed", "nope")
+        : undefined;
+
+    const failed = expectFailed(await reconciler.reconcile(request()));
+
+    expect(failed.failure.code).toBe("provision_failed");
+    expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+    expect(await registry.getSlotJournal(1)).toMatchObject({ phase: "rolled_back" });
+    expect(await registry.getAssignment(key)).toBeNull();
+
+    provisioner.failWith = undefined;
+    const retry = expectReady(await reconciler.reconcile(request()));
+    expect(retry.disposition).toBe("created");
+    expect(retry.assignment.generation).toBe(1);
+  });
+
+  test("a registry cleanup failure preserves the original provisioning failure", async () => {
+    provisioner.failWith = () =>
+      new ProvisionDeviceError("platform_command_failed", "original failure");
+    registry.removeUnboundSlot = async () => {
+      throw new Error("registry unavailable");
+    };
+
+    const failed = expectFailed(await reconciler.reconcile(request()));
+
+    expect(failed.failure).toMatchObject({
+      code: "provision_failed",
+      provision: { code: "platform_command_failed" },
+    });
+    expect(await registry.getSlotJournal(1)).toMatchObject({ phase: "rolled_back" });
+    expect(await registry.getAssignment(key)).toMatchObject({
+      generation: 0,
+      state: "provisioning",
+    });
+  });
+
+  test("a failed fresh creation keeps its slot when absence is unproven", async () => {
+    provisioner.failWith = (call) => {
+      if (call.mode !== "create") {
+        return undefined;
+      }
+      inventory.complete = false;
+      return new ProvisionDeviceError("platform_command_failed", "nope");
+    };
+
+    const failed = expectFailed(await reconciler.reconcile(request()));
+
+    expect(failed.failure.code).toBe("provision_failed");
+    expect(await registry.listOpenSlotJournal(key)).toHaveLength(1);
+    expect(await registry.getAssignment(key)).toMatchObject({
+      generation: 0,
+      stableDeviceId: null,
+      state: "provisioning",
     });
   });
 

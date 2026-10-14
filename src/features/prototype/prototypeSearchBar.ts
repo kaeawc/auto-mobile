@@ -1,24 +1,31 @@
 import { PROTOTYPE_SEARCH_BAR_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
-import type { PrototypeNode, PrototypeSpec } from "./prototypeSpec";
+import { record } from "./prototypeTemplate";
 
 /** Node paths in tree order, including results and repeat templates; no I/O or mutation. */
 export function prototypeSearchBarFields(spec: unknown): string[] {
-  if (typeof spec !== "object" || spec === null || !("root" in spec)) {
+  const root = record(record(spec)?.root);
+  if (!root) {
     return [];
   }
   const fields: string[] = [];
-  const visit = (node: PrototypeNode, path: string): void => {
+  const visit = (node: Record<string, unknown>, path: string): void => {
     if (node.type === "searchBar") {
       fields.push(path);
     }
-    if ("child" in node && node.child) {
-      visit(node.child, `${path}.child`);
+    const child = record(node.child);
+    if (child) {
+      visit(child, `${path}.child`);
     }
-    if ("children" in node) {
-      node.children.forEach((child, index) => visit(child, `${path}.children[${index}]`));
+    if (Array.isArray(node.children)) {
+      node.children.forEach((value, index) => {
+        const child = record(value);
+        if (child) {
+          visit(child, `${path}.children[${index}]`);
+        }
+      });
     }
   };
-  visit((spec as PrototypeSpec).root, "root");
+  visit(root, "root");
   return fields;
 }
 

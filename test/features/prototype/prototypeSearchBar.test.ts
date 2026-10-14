@@ -46,6 +46,18 @@ test("fields identify nodes depth-first through both child slots without mutatin
   expect(JSON.stringify(spec)).toBe(before);
 });
 
+test("fields return empty for malformed specs and skip malformed children", () => {
+  for (const malformed of [
+    { root: null },
+    { root: "x" },
+    { root: { type: "column", children: "x" } },
+    { root: { type: "column", children: [null] } },
+    { root: { type: "column", child: 5 } },
+  ]) {
+    expect(prototypeSearchBarFields(malformed)).toEqual([]);
+  }
+});
+
 test.each(["android", "ios"] as const)(
   "%s refusal names capability, first path, count and update",
   (platform) => {

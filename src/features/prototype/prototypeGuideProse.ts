@@ -268,6 +268,8 @@ What the device reports (\`prototype_appearance_v1\`; absent on a device without
   \`appearance_changed\` event with a null \`name\` and the payload \`{mode, source}\`, and refreshes
   \`status\`. Wait for it with \`awaitEvent\` and \`kind: "appearance_changed"\`. Nothing is sent when
   the mode stays the same, nor for the show itself, whose result already carries the mode.
+
+Input and state changes (text input, toggles, sliders etc.) arrive as kind \`emit\` with \`eventName\` \`change\` (there is no separate \`change\` kind), with payload \`{key,value}\` for one changed key or \`{keys,values}\` for several.
 `;
 
 export const GUIDE_COST = `## Runtime cost

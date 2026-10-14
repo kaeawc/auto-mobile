@@ -6,16 +6,15 @@ internal fun prototypeTextFieldSecure(secure: Boolean?, keyboardType: String?): 
   secure == true || keyboardType == "password"
 
 internal fun prototypeTextFieldKeyboardType(type: String?, secure: Boolean?): KeyboardType =
-  if (prototypeTextFieldSecure(secure, type)) KeyboardType.Password
-  else
-    when (type) {
-      "number" -> KeyboardType.Number
-      "decimal" -> KeyboardType.Decimal
-      "email" -> KeyboardType.Email
-      "phone" -> KeyboardType.Phone
-      "url" -> KeyboardType.Uri
-      else -> KeyboardType.Text
-    }
+  when (type) {
+    "password" -> KeyboardType.Password
+    "number" -> if (secure == true) KeyboardType.NumberPassword else KeyboardType.Number
+    "decimal" -> KeyboardType.Decimal
+    "email" -> KeyboardType.Email
+    "phone" -> KeyboardType.Phone
+    "url" -> KeyboardType.Uri
+    else -> if (secure == true) KeyboardType.Password else KeyboardType.Text
+  }
 
 /** Limits UTF-16 code units without cutting an intact surrogate pair in half. */
 internal fun prototypeTextFieldClip(value: String, maxLength: Int?): String {

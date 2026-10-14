@@ -41,4 +41,11 @@ struct PrototypeTextFieldOptions {
     func counterText(for text: String) -> String? {
         maxLength.map { "\(text.utf16.count)/\($0)" }
     }
+
+    static func accessibilityHint(supportingText: String?, count: Int, maxLength: Int?) -> String {
+        guard let maxLength else { return supportingText ?? "" }
+        let counter = "\(count) of \(maxLength) characters"
+        guard let supportingText, !supportingText.isEmpty else { return counter }
+        return "\(supportingText). \(counter)"
+    }
 }

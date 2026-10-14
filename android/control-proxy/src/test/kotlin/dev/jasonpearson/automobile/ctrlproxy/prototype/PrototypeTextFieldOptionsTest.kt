@@ -21,7 +21,28 @@ class PrototypeTextFieldOptionsTest {
     for ((type, expected) in cases) {
       assertEquals(expected, prototypeTextFieldKeyboardType(type, null))
       assertEquals(expected, prototypeTextFieldKeyboardType(type, false))
-      assertEquals(KeyboardType.Password, prototypeTextFieldKeyboardType(type, true))
+    }
+  }
+
+  @Test
+  fun `secure number uses the numeric password keyboard`() {
+    assertEquals(KeyboardType.NumberPassword, prototypeTextFieldKeyboardType("number", true))
+  }
+
+  @Test
+  fun `secure input preserves other authored keyboards`() {
+    val cases =
+      mapOf(
+        null to KeyboardType.Password,
+        "text" to KeyboardType.Password,
+        "password" to KeyboardType.Password,
+        "decimal" to KeyboardType.Decimal,
+        "email" to KeyboardType.Email,
+        "phone" to KeyboardType.Phone,
+        "url" to KeyboardType.Uri,
+      )
+    for ((type, expected) in cases) {
+      assertEquals(expected, prototypeTextFieldKeyboardType(type, true))
     }
   }
 

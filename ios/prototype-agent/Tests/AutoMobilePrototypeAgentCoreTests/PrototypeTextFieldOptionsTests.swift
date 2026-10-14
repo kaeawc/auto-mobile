@@ -99,6 +99,29 @@ final class PrototypeTextFieldOptionsTests: XCTestCase {
         XCTAssertEqual(try options(",\"maxLength\":1").clip("😀"), "")
     }
 
+    func testAccessibilityHintPreservesSupportingTextWithoutALimit() {
+        XCTAssertEqual(PrototypeTextFieldOptions.accessibilityHint(supportingText: nil, count: 3, maxLength: nil), "")
+        XCTAssertEqual(
+            PrototypeTextFieldOptions.accessibilityHint(supportingText: "Your name", count: 3, maxLength: nil),
+            "Your name"
+        )
+    }
+
+    func testAccessibilityHintAddsCounterAfterSupportingText() {
+        XCTAssertEqual(
+            PrototypeTextFieldOptions.accessibilityHint(supportingText: "Your name", count: 3, maxLength: 4),
+            "Your name. 3 of 4 characters"
+        )
+        XCTAssertEqual(
+            PrototypeTextFieldOptions.accessibilityHint(supportingText: nil, count: 0, maxLength: 4),
+            "0 of 4 characters"
+        )
+        XCTAssertEqual(
+            PrototypeTextFieldOptions.accessibilityHint(supportingText: "", count: "😀".utf16.count, maxLength: 4),
+            "2 of 4 characters"
+        )
+    }
+
     func testCapabilityIsAdvertisedAdditively() {
         XCTAssertEqual(PrototypeAgentProtocol.textFieldOptionsCapability, "prototype_text_field_options_v1")
         XCTAssertTrue(PrototypeAgentProtocol.capabilities.contains(PrototypeAgentProtocol.textFieldOptionsCapability))

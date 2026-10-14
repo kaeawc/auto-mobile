@@ -58,6 +58,7 @@ struct PrototypeTextFieldView: View {
     let node: PrototypeNode
     let model: PrototypeModel
     @State private var draft: PrototypeTextDraft
+    @State private var clippingRevision = 0
     @FocusState private var focused: Bool
 
     init(node: PrototypeNode, model: PrototypeModel) {
@@ -67,6 +68,7 @@ struct PrototypeTextFieldView: View {
     }
 
     var body: some View {
+        let _: Int = clippingRevision
         let key = node.stateKey ?? ""
         let stored = model.state[key]?.displayString ?? ""
         renderedField
@@ -97,7 +99,14 @@ struct PrototypeTextFieldView: View {
     }
 
     private var textBinding: Binding<String> {
-        Binding(get: { draft.text }, set: { draft.type(options.clip($0)) })
+        Binding(get: { options.clip(draft.text) }, set: { raw in
+            let clipped = options.clip(raw)
+            draft.type(clipped)
+            // Repaint even when overflow clips to the existing draft, without replacing the focused field.
+            if clipped != raw {
+                clippingRevision += 1
+            }
+        })
     }
 
     private var keyboardType: UIKeyboardType {
@@ -137,12 +146,17 @@ struct PrototypeTextFieldView: View {
     }
 
     @ViewBuilder private var accessibleInput: some View {
+        let hint = PrototypeTextFieldOptions.accessibilityHint(
+            supportingText: options.supportingAccessibilityValue,
+            count: options.clip(draft.text).utf16.count,
+            maxLength: options.maxLength
+        )
         // Leave the native placeholder label intact when neither override is authored.
         if let label = node.contentDescription ?? node.label {
             configuredInput.accessibilityLabel(label)
-                .accessibilityHint(options.supportingAccessibilityValue ?? "")
+                .accessibilityHint(hint)
         } else {
-            configuredInput.accessibilityHint(options.supportingAccessibilityValue ?? "")
+            configuredInput.accessibilityHint(hint)
         }
     }
 
@@ -186,11 +200,12 @@ struct PrototypeTextFieldView: View {
                         }
                         Spacer(minLength: 8)
                         if let counter = options.counterText(for: draft.text) {
-                            Text(counter)
+                            Text(counter).accessibilityHidden(true)
                         }
                     }
                     .font(.caption)
                     .foregroundColor(colors.contentVariant)
+                    .accessibilityHidden(true)
                 }
             }
         } else {

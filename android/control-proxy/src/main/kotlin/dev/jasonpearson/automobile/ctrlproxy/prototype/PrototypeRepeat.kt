@@ -70,10 +70,12 @@ private fun PrototypeNode.repeatSpec(): PrototypeRepeat? =
 
 /**
  * The children [node] renders, with `repeat` expanded before layout: the template children are
- * instantiated once per item, in item order, each bound to its item and `{index}`. Instance
- * children live under `path.repeat[item].children[template]`, so a row keeps its identity (and its
- * Compose key) for as long as it keeps its index. Without a `repeat` this is the plain child list.
- * Pass [bind] false to walk the shape only (limit guards) without copying any node.
+ * instantiated once per item, in item order. With [bind] true, each child is bound to its item and
+ * `{index}` and lives under `path.repeat[key].children[template]`, using `repeat.key` when present
+ * and falling back to its index, so a row keeps its identity (and its Compose key). Pass [bind]
+ * false to walk the shape only (limit guards and anchor validation) without copying any node;
+ * these walks always use `path.repeat[index].children[template]` to preserve validation paths.
+ * Without a `repeat` this is the plain child list.
  */
 internal fun prototypeChildEntries(
   node: PrototypeNode,
@@ -91,10 +93,13 @@ internal fun prototypeChildEntries(
   }
   return repeat.items.flatMapIndexed { itemIndex, item ->
     val instance = RepeatInstance(repeat.`as`, item, itemIndex)
+    val identity =
+      if (bind) repeat.key?.let { item[it]?.renderedText() } ?: itemIndex.toString()
+      else itemIndex.toString()
     children.mapIndexed { index, child ->
       PrototypeChildEntry(
         if (bind) child.bound(instance) else child,
-        "$path.repeat[$itemIndex].children[$index]",
+        "$path.repeat[$identity].children[$index]",
       )
     }
   }

@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypeResult
 import dev.jasonpearson.automobile.protocol.PrototypeScalar
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
@@ -15,6 +16,25 @@ import org.junit.Test
 
 class PrototypeResultFrameTest {
   private val json = Json { classDiscriminator = "type" }
+
+  @Test
+  fun `patch conflict carries revision and scalar state in the same result frame`() {
+    val conflict = PrototypePatchConflict(8L, mapOf("flag" to PrototypeScalar.BooleanValue(true)))
+    val frame = prototypeResultFrame("patch", false, "conflict", revision = 8L, conflict = conflict)
+    val parsed = json.parseToJsonElement(frame).jsonObject
+    assertEquals(JsonPrimitive(8L), parsed["revision"])
+    assertEquals(
+      json.parseToJsonElement("""{"revision":8,"state":{"flag":true}}"""),
+      parsed["conflict"],
+    )
+    val decoded = json.decodeFromString<WebSocketResponse>(frame) as PrototypeResult
+    assertEquals(conflict, decoded.conflict)
+    assertFalse(decoded.success)
+    val success =
+      json.parseToJsonElement(prototypeResultFrame("patch", true, null, revision = 9L)).jsonObject
+    assertEquals(JsonPrimitive(9L), success["revision"])
+    assertFalse("conflict" in success)
+  }
 
   @Test
   fun `a result without missing assets keeps the frame legacy peers expect`() {

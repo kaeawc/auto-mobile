@@ -29,7 +29,7 @@ import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
 import { DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD } from "./constants";
-import { DaemonHandshakeMismatchError } from "./client";
+import { DaemonHandshakeMismatchError, DaemonUnavailableError } from "./client";
 import { McpTimeoutError } from "./McpTimeoutError";
 import { MANAGED_EXECUTION_RELEASE_TIMEOUT_MS } from "./managedExecutionLiveness";
 
@@ -131,6 +131,21 @@ function classifyError(error: unknown, signal: AbortSignal | undefined): Managed
     return failure(
       "contract_unsupported",
       `Managed slot acquisition refused a daemon ${error.failure.reason} mismatch: ${errorMessage(error)}`,
+      false,
+      "Restart the daemon from this client's installation (`auto-mobile --daemon restart`) so frontend and daemon match; nothing was changed.",
+    );
+  }
+  // Match structurally to avoid an import cycle with daemonMcpProxy, which imports this module.
+  if (
+    error instanceof DaemonUnavailableError &&
+    (error.name === "DaemonVersionMismatchError" || error.name === "DaemonBuildMismatchError") &&
+    "reason" in error &&
+    typeof error.reason === "string" &&
+    error.reason !== "cooldown"
+  ) {
+    return failure(
+      "contract_unsupported",
+      `Managed slot acquisition refused a daemon mismatch (${error.reason}): ${errorMessage(error)}`,
       false,
       "Restart the daemon from this client's installation (`auto-mobile --daemon restart`) so frontend and daemon match; nothing was changed.",
     );

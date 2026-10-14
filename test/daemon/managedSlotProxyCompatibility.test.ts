@@ -2,6 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { DaemonHandshakeMismatchError } from "../../src/daemon/client";
 import { DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD } from "../../src/daemon/constants";
 import {
+  DaemonBuildMismatchError,
+  DaemonVersionMismatchError,
+} from "../../src/daemon/daemonMcpProxy";
+import {
   acquireManagedSlotsThroughDaemon,
   type ManagedSlotProxyAcquisitionPorts,
 } from "../../src/daemon/managedSlotProxyAcquisition";
@@ -68,6 +72,85 @@ async function acquire(harness: ReturnType<typeof rig>) {
 }
 
 describe("managed slot proxy compatibility", () => {
+  test.each([
+    ...(["daemonNewer", "autoStartDisabled", "nonNumeric", "restartMismatch"] as const).map(
+      (reason) =>
+        new DaemonVersionMismatchError({
+          clientVersion: "0.0.70",
+          daemonVersion:
+            reason === "daemonNewer" ? "0.0.71" : reason === "nonNumeric" ? "dev" : "0.0.68",
+          reason,
+          detail: "version differs at connect",
+          clientBuild: { buildId: "new", entryScript: "/new" },
+          daemonBuild: { buildId: "old", entryScript: "/old" },
+        }),
+    ),
+    ...(["autoStartDisabled", "restartMismatch"] as const).map(
+      (reason) =>
+        new DaemonBuildMismatchError({
+          client: { buildId: "new", entryScript: "/new" },
+          daemon: { buildId: "old", entryScript: "/old" },
+          reason,
+          detail: "build differs at connect",
+        }),
+    ),
+  ])("a connect-time $name ($reason) is terminal before any daemon call", async (error) => {
+    const harness = rig(["managed-slots/v1"]);
+    harness.ports.ensureConnected = async () => {
+      throw error;
+    };
+    const result = await acquire(harness);
+    expect(result).toMatchObject({
+      outcome: "failed",
+      slots: [],
+      failure: { code: "contract_unsupported", retryable: false },
+    });
+    expect(result.failure?.message).toContain(error.reason);
+    expect(result.failure?.message).toContain(error.message);
+    expect(result.failure?.nextAction).toBe(
+      "Restart the daemon from this client's installation (`auto-mobile --daemon restart`) so frontend and daemon match; nothing was changed.",
+    );
+    expect(harness.calls).toEqual([]);
+    expect(harness.tracked).toEqual([]);
+    expect(harness.held).toEqual([]);
+    expect(harness.releases).toBe(0);
+  });
+
+  test.each([
+    new DaemonVersionMismatchError({
+      clientVersion: "0.0.70",
+      daemonVersion: "0.0.68",
+      reason: "cooldown",
+      detail: "restart is in cooldown",
+      retryAfterMs: 100,
+      clientBuild: { buildId: "new", entryScript: "/new" },
+      daemonBuild: { buildId: "old", entryScript: "/old" },
+    }),
+    new DaemonBuildMismatchError({
+      client: { buildId: "new", entryScript: "/new" },
+      daemon: { buildId: "old", entryScript: "/old" },
+      reason: "cooldown",
+      detail: "restart is in cooldown",
+      retryAfterMs: 100,
+    }),
+  ])("a connect-time $name cooldown remains retryable", async (error) => {
+    const harness = rig(["managed-slots/v1"]);
+    harness.ports.ensureConnected = async () => {
+      throw error;
+    };
+    const result = await acquire(harness);
+    expect(result).toMatchObject({
+      outcome: "failed",
+      slots: [],
+      failure: { code: "daemon_unavailable", retryable: true },
+    });
+    expect(result.failure?.message).toContain(error.message);
+    expect(harness.calls).toEqual([]);
+    expect(harness.tracked).toEqual([]);
+    expect(harness.held).toEqual([]);
+    expect(harness.releases).toBe(0);
+  });
+
   test.each(["version", "build"] as const)(
     "a %s handshake mismatch is terminal before acquisition",
     async (reason) => {

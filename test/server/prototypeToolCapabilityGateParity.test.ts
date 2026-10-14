@@ -18,7 +18,7 @@ const label = { type: "text", id: "label", text: "Hello" };
 const base = {
   id: "parity",
   window: { placement: { type: "fullscreen" } },
-  state: { liked: false },
+  state: { liked: false, name: "Ada" },
   root: { type: "column", children: [label] },
 };
 const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
@@ -27,10 +27,20 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
     style: { background: { light: "#FFFFFF", dark: "#000000" } },
   }),
   prototype_data_model_v1: fixture({ ...label, text: "{data:/x}" }),
+  prototype_text_field_options_v1: fixture({
+    type: "textField",
+    id: "label",
+    stateKey: "name",
+    label: "Liked",
+  }),
 };
-function fixture(root: typeof label & Record<string, unknown>) {
+function fixture(root: Record<string, unknown>) {
   return {
-    minimalSpec: { ...base, root: { ...base.root, children: [root] } },
+    minimalSpec: {
+      ...base,
+      state: base.state,
+      root: { ...base.root, children: [root] },
+    },
     ops: [{ op: "replaceNode", id: "label", node: root }],
   };
 }
@@ -53,7 +63,12 @@ function setup() {
   agent = new FakePrototypeAgentClient({
     agentVersion: "test",
     protocolVersion: 1,
-    capabilities: [...FAKE_PROTOTYPE_AGENT_CAPABILITIES, "prototype_patch_v1"],
+    capabilities: [
+      ...FAKE_PROTOTYPE_AGENT_CAPABILITIES.filter(
+        (capability) => capability !== "prototype_text_field_options_v1",
+      ),
+      "prototype_patch_v1",
+    ],
   });
   store = new InMemoryPrototypeStatusStore(timer);
   unsubscribe = registerPrototypeTools({

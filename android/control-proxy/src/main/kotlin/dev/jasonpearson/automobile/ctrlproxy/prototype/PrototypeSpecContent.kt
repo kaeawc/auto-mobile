@@ -14,6 +14,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -41,6 +42,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -607,19 +610,94 @@ private fun RenderPrototypeTextField(
         true
       }
     }
-  // Material's editable field supplies SetText semantics and the keyboard input connection.
-  TextField(
-    shown,
-    { value ->
-      if (sync.edit(value)) {
-        shown = value
-        interact(PrototypeInteraction.TextChange(source.stateKey, value, sync.epoch))
+  val onValueChange: (String) -> Unit = { value ->
+    val clipped = prototypeTextFieldClip(value, source.maxLength)
+    if (sync.edit(clipped)) {
+      shown = clipped
+      interact(PrototypeInteraction.TextChange(source.stateKey, clipped, sync.epoch))
+    }
+  }
+  val label: (@Composable () -> Unit)? = source.label?.let { text -> { Text(text) } }
+  val counter = prototypeTextFieldCounter(shown, source.maxLength)
+  val supportingText: (@Composable () -> Unit)? =
+    if (source.supportingText != null || counter != null) {
+      {
+        Row(Modifier.fillMaxWidth()) {
+          Text(source.supportingText.orEmpty(), Modifier.weight(1f))
+          if (counter != null) Text(counter)
+        }
       }
-    },
-    modifier = fieldModifier,
-    interactionSource = presses,
-    placeholder = { Text(source.placeholder.orEmpty()) },
-  )
+    } else null
+  val keyboardOptions =
+    if (source.keyboardType == null && source.secure != true) KeyboardOptions.Default
+    else
+      KeyboardOptions(
+        keyboardType = prototypeTextFieldKeyboardType(source.keyboardType, source.secure),
+      )
+  val visualTransformation =
+    if (prototypeTextFieldSecure(source.secure, source.keyboardType)) PasswordVisualTransformation()
+    else VisualTransformation.None
+  val multiline = source.multiline
+  // Omit line options for legacy fields: Compose's default is a growing field.
+  if (source.variant == "outlined") {
+    if (multiline == null) {
+      OutlinedTextField(
+        value = shown,
+        onValueChange = onValueChange,
+        modifier = fieldModifier,
+        interactionSource = presses,
+        placeholder = { Text(source.placeholder.orEmpty()) },
+        label = label,
+        supportingText = supportingText,
+        keyboardOptions = keyboardOptions,
+        visualTransformation = visualTransformation,
+      )
+    } else {
+      OutlinedTextField(
+        value = shown,
+        onValueChange = onValueChange,
+        modifier = fieldModifier,
+        interactionSource = presses,
+        placeholder = { Text(source.placeholder.orEmpty()) },
+        label = label,
+        supportingText = supportingText,
+        keyboardOptions = keyboardOptions,
+        visualTransformation = visualTransformation,
+        singleLine = !multiline,
+        minLines = source.minLines ?: 1,
+        maxLines = source.maxLines ?: Int.MAX_VALUE,
+      )
+    }
+  } else {
+    if (multiline == null) {
+      TextField(
+        value = shown,
+        onValueChange = onValueChange,
+        modifier = fieldModifier,
+        interactionSource = presses,
+        placeholder = { Text(source.placeholder.orEmpty()) },
+        label = label,
+        supportingText = supportingText,
+        keyboardOptions = keyboardOptions,
+        visualTransformation = visualTransformation,
+      )
+    } else {
+      TextField(
+        value = shown,
+        onValueChange = onValueChange,
+        modifier = fieldModifier,
+        interactionSource = presses,
+        placeholder = { Text(source.placeholder.orEmpty()) },
+        label = label,
+        supportingText = supportingText,
+        keyboardOptions = keyboardOptions,
+        visualTransformation = visualTransformation,
+        singleLine = !multiline,
+        minLines = source.minLines ?: 1,
+        maxLines = source.maxLines ?: Int.MAX_VALUE,
+      )
+    }
+  }
 }
 
 /** Keeps at most one page before and one after current, only with fill and bounded height. */

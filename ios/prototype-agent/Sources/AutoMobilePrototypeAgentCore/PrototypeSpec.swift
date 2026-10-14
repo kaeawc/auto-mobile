@@ -600,6 +600,14 @@ final class PrototypeNode: Decodable {
     let supporting: String?
     let leadingIcon: String?
     let trailing: PrototypeListItemTrailing?
+    /// Text field input and supporting-line options (#12066); cross-field rules belong to the host.
+    let supportingText: String?
+    let keyboardType: String?
+    let secure: Bool?
+    let multiline: Bool?
+    let minLines: Int?
+    let maxLines: Int?
+    let maxLength: Int?
 
     /// Android's `resolvePrototypeStyle`: every `styleWhen` entry whose condition holds is merged over
     /// `style` in authored order, so a later matching entry wins per property. Nil when the node has

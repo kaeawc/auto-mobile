@@ -475,7 +475,7 @@ layout room.
 | `image`           | Required opaque `asset` string; optional `contentScale`: `fit` (default), `crop`, `fill`.                                                                                                                                                   |
 | `icon`            | Required built-in `name` below; optional `variant` (`filled`, `outlined`, `rounded`, `sharp`, `twoTone`).                                                                                                                                   |
 | `spacer`          | No node-specific properties; size comes from style.                                                                                                                                                                                         |
-| `textField`       | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty.                                                                                                                                 |
+| `textField`       | Required `stateKey` naming an initialized string state value; optional `placeholder` string, default empty; `label`, `variant`, `supportingText`, `keyboardType`, `secure`, `multiline`, `minLines`, `maxLines`, `maxLength` (see Text field options).                                                                                                                                 |
 | `switch`          | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                                                                                                                   |
 | `checkbox`        | Required `stateKey` naming an initialized boolean state value; optional nonempty `label`.                                                                                                                                                   |
 | `button`          | Required nonempty `label`; optional `variant`: `filled` (default), `tonal`, `elevated`, `outlined`, `text`; optional leading `icon` (built-in name). Taps run `onTap`.                                                                      |
@@ -639,6 +639,24 @@ Known divergence: the iOS agent formats a non-integral number with Swift's own
 description, which switches to an exponent earlier and pads it (`0.00001` shows as
 `1e-05`). Integral numbers agree on all three. Prefer integral state for numbers a
 prototype shows, or keep display text in a string key.
+
+## Text field options
+
+`textField` binds an initialized string state key. Optional `label` is a nonempty floating
+label; `variant` is `filled` (default) or `outlined`; nonempty `supportingText` appears below
+the field. `keyboardType` is `text` (default), `number`, `decimal`, `email`, `phone`, `url`,
+or `password`. `secure` masks text; `multiline` enables multiple lines. `minLines` and
+`maxLines` are integers in 1..20, permitted only with `multiline: true`; `minLines` cannot
+exceed `maxLines`. Multiline text cannot use `secure: true` or `keyboardType: "password"`.
+`maxLength` is an integer in 1..10000 and shows a character counter; the initial bound
+value cannot exceed it (UTF-16 length).
+
+All these options require `prototype_text_field_options_v1`. A device without the capability
+is refused before uploads or show; nothing is shown. Update CtrlProxy, or relaunch the iOS
+app with `launchApp prototype: true`, or drop the textField options.
+
+Open question: a `secure` field's value still lives in state and in `change` events/`inspect`;
+this slice does not redact it.
 
 ## Style
 

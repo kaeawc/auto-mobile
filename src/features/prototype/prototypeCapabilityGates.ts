@@ -7,6 +7,11 @@ import {
   prototypeThemeModesUnsupportedMessage,
 } from "./prototypeThemeModes";
 import { prototypeDataModelFields, prototypeDataModelUnsupportedMessage } from "./prototypeData";
+import { PROTOTYPE_TEXT_FIELD_OPTIONS_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
+import {
+  prototypeTextFieldOptionFields,
+  prototypeTextFieldOptionsUnsupportedMessage,
+} from "./prototypeTextFieldOptions";
 
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
@@ -25,6 +30,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_DATA_MODEL_CAPABILITY,
     fields: prototypeDataModelFields,
     unsupportedMessage: prototypeDataModelUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_TEXT_FIELD_OPTIONS_CAPABILITY,
+    fields: prototypeTextFieldOptionFields,
+    unsupportedMessage: prototypeTextFieldOptionsUnsupportedMessage,
   },
 ];
 

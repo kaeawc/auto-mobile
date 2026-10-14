@@ -507,6 +507,18 @@ Swift dictionary keys compare by canonical equivalence, unlike the host and Andr
 The agent re-checks data depth and array limits in the host's traversal order. It does not duplicate
 the host validator's data byte-cost rule; the existing 1 MiB whole-spec byte cap still bounds input.
 
+## Text field options
+
+Text fields render via SwiftUI and require `prototype_text_field_options_v1` for the
+optional host contract fields. The agent draws `variant: "outlined"` as a rounded outline
+around a standard SwiftUI TextField and draws a floating `label` as a non-animating caption
+above it. These substituted constructs produce `textField.variant` and `textField.label`
+platformNotes until `prototype_text_field_material_style_v1` is advertised (iOS does not
+advertise it today). `maxLength` draws a counter and produces no platform note.
+
+Open question: secure values remain in state and `change` events/`inspect`; this slice
+does not redact them. Platform implementation follows in a later pass.
+
 ## Saved prototype on-disk layout (#12254)
 
 One saved prototype lives in the viewer app container:

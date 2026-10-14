@@ -1,6 +1,7 @@
 import iconSymbols from "../../../schemas/prototype-ios-icon-symbols.json";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
+  PROTOTYPE_TEXT_FIELD_MATERIAL_STYLE_CAPABILITY,
   PROTOTYPE_BOTTOM_SHEET_DRAG_CAPABILITY,
   PROTOTYPE_ICON_SET_MATERIAL_CAPABILITY,
   PROTOTYPE_ICON_SF_SYMBOLS_CAPABILITY,
@@ -14,7 +15,9 @@ export type PrototypePlatformNoteConstruct =
   | "bottomSheet.dismissOnSwipe"
   | "bottomSheet.detents"
   | "icon.name"
-  | "icon.variant";
+  | "icon.variant"
+  | "textField.variant"
+  | "textField.label";
 export type PrototypePlatformNoteEffect = "ignored" | "substituted";
 export interface PrototypePlatformNote {
   platform: "ios";
@@ -158,6 +161,26 @@ export const PROTOTYPE_PLATFORM_DIFFERENCES: readonly PlatformDifference[] = [
       "This iOS agent lacks prototype_icon_sf_symbols_v1 and ignores icon variants; relaunch with a current agent. Android draws the requested Material style.",
     occurrencePath: ({ node, path }) =>
       node?.type === "icon" && node.variant !== undefined ? `${path}.variant` : undefined,
+  },
+  {
+    construct: "textField.variant",
+    platform: "ios",
+    effect: "substituted",
+    capability: PROTOTYPE_TEXT_FIELD_MATERIAL_STYLE_CAPABILITY,
+    detail:
+      "iOS has no native outlined text field; the agent draws a rounded outline around a standard SwiftUI TextField. Android draws the Material outlined field.",
+    occurrencePath: ({ node, path }) =>
+      node?.type === "textField" && node.variant === "outlined" ? `${path}.variant` : undefined,
+  },
+  {
+    construct: "textField.label",
+    platform: "ios",
+    effect: "substituted",
+    capability: PROTOTYPE_TEXT_FIELD_MATERIAL_STYLE_CAPABILITY,
+    detail:
+      "iOS has no native floating label; the agent draws the label as a caption above the field that does not animate. Android draws the Material floating label.",
+    occurrencePath: ({ node, path }) =>
+      node?.type === "textField" && node.label !== undefined ? `${path}.label` : undefined,
   },
 ];
 

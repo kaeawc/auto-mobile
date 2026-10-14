@@ -643,7 +643,7 @@ response size, so use it only when the client needs image bytes in the tool resu
 ### prototype
 
 Data, `repeat.items {path}`, `repeat.key`, `{data:/pointer}` text and `{data: pointer}` conditions
-require `prototype_data_model_v1`; the host refuses an unsupported device before uploads or show.
+require `prototype_data_model_v1`; the host refuses an unsupported device before uploads or show. Text field options (label, variant, supportingText, keyboardType, secure, multiline, minLines, maxLines, maxLength) similarly require `prototype_text_field_options_v1`; without it nothing is shown.
 Data is agent-owned read-only nested content; state remains user-owned scalars. Bindings resolve
 once per show on the device; `status` remembers shown data beside state, `inspect` reports and
 adopts it, and dismiss clears it. See the [data model contract](design-docs/plat/android/prototype-ux.md#data-model-11673).

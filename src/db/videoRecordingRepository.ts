@@ -134,11 +134,20 @@ function parseDisplayMetadata<T>(value: string | null): T | undefined {
   }
 }
 
-const captureTeardownSchema = z.object({
-  kind: z.literal("android-screenrecord"),
-  deviceTempPath: z.string().min(1),
-  devicePid: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
-});
+const captureTeardownSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("android-screenrecord"),
+    deviceTempPath: z.string().min(1),
+    devicePid: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+  }),
+  z.object({
+    kind: z.literal("ios-host-recorder"),
+    hostPid: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    hostStartToken: z.string().min(1),
+    udid: z.string().min(1),
+    capturePath: z.string().optional(),
+  }),
+]);
 
 function parseCaptureTeardown(value: string | null): VideoCaptureTeardownDescriptor | undefined {
   if (value === null) {

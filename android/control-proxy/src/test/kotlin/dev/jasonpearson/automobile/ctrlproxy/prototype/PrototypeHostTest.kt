@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.app.Activity
+import android.graphics.PixelFormat
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -112,6 +113,7 @@ class PrototypeHostTest {
       DefaultPrototypeHost(
         RuntimeEnvironment.getApplication(),
         manager,
+        isViewAttached = manager::isViewAttached,
         sdkInt = 30,
         mainThread = main,
         settleTimer = timer,
@@ -512,6 +514,21 @@ class PrototypeHostTest {
   }
 
   @Test
+  fun `idle relayout skips window updates and a density change updates once`() = runTest {
+    assertTrue(
+      host.show(PrototypeRequest(PrototypePlacement.Sheet(PrototypePlacement.Edge.BOTTOM, 20f))),
+    )
+    repeat(100) { assertTrue(host.relayout()) }
+    assertTrue(manager.updated.isEmpty())
+    density = 3f
+    assertTrue(host.relayout())
+    assertEquals(1, manager.updated.size)
+    assertEquals(60, manager.updated.single().height)
+    assertTrue(host.relayout())
+    assertEquals(1, manager.updated.size)
+  }
+
+  @Test
   fun `relayout refreshes density without recreating view owner or composition and keeps touch through`() =
     runTest {
       host.show(
@@ -769,7 +786,8 @@ class PrototypeHostTest {
 
   @Test
   fun `retryable update failure and normal dismiss do not report a lost window`() = runTest {
-    host.show()
+    host.show(PrototypeRequest(PrototypePlacement.Sheet(PrototypePlacement.Edge.BOTTOM, 20f)))
+    density = 3f
     manager.failUpdate = true
     assertFalse(host.relayout())
     assertTrue(host.isShowing)
@@ -807,6 +825,41 @@ class PrototypeHostTest {
     assertEquals(0, manager.updated.size)
     assertEquals(0, manager.removals)
   }
+
+  @Test
+  fun `opaque fullscreen opacity changes update the window format only when opacity crosses full`() =
+    runTest {
+      assertTrue(host.show(chromelessRequest().copy(opaqueSurface = true)))
+      assertEquals(PixelFormat.OPAQUE, manager.added.single().format)
+      assertEquals(0, manager.updated.size)
+
+      host.setOpacity(90)
+      assertEquals(1, manager.updated.size)
+      assertEquals(PixelFormat.TRANSLUCENT, manager.updated.last().format)
+
+      host.setOpacity(100)
+      assertEquals(2, manager.updated.size)
+      assertEquals(PixelFormat.OPAQUE, manager.updated.last().format)
+
+      host.setOpacity(100)
+      assertEquals(2, manager.updated.size)
+      assertEquals(1, manager.added.size)
+      assertEquals(0, manager.removals)
+    }
+
+  @Test
+  fun `translucent fullscreen opacity changes apply content without updating the window`() =
+    runTest {
+      assertTrue(host.show(chromelessRequest().copy(opaqueSurface = true, opacityPercent = 90)))
+      assertEquals(PixelFormat.TRANSLUCENT, manager.added.single().format)
+
+      host.setOpacity(80)
+      host.setOpacity(0)
+      host.setOpacity(90)
+      assertEquals(0, manager.updated.size)
+      assertEquals(1, manager.added.size)
+      assertEquals(0, manager.removals)
+    }
 
   @Test
   fun `opacity rejects invalid requests and setter values`() = runTest {
@@ -1228,6 +1281,7 @@ class PrototypeHostTest {
     DefaultPrototypeHost(
       RuntimeEnvironment.getApplication(),
       manager,
+      isViewAttached = manager::isViewAttached,
       sdkInt = sdk,
       mainThread = main,
       settleTimer = timer,

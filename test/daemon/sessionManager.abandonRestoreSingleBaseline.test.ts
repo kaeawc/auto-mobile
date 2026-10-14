@@ -30,7 +30,12 @@ for (const reason of ["keep-screen-awake", "biometric-enrollment", "network-cond
       timer,
       new FakeDeviceSessionPersistence(),
       () => new FakeDbWriteBarrier(),
-      () => ({ restore }),
+      () => ({
+        restore: async (state) => {
+          await restore(state);
+          return { status: "restored" as const };
+        },
+      }),
       () => ({ restore }),
       { networkCondition: () => ({ restore }) },
     );

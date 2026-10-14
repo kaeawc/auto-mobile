@@ -791,7 +791,7 @@ internal class PrototypeComposeView(
     child: View,
     event: android.view.accessibility.AccessibilityEvent,
   ): Boolean {
-    if (!isCoalescibleAccessibilityEvent(event.eventType)) {
+    if (!isCoalescibleAccessibilityEvent(event.eventType, event.contentChangeTypes)) {
       return super.onRequestSendAccessibilityEvent(child, event)
     }
     when (accessibilityCoalescer.onCoalescible()) {

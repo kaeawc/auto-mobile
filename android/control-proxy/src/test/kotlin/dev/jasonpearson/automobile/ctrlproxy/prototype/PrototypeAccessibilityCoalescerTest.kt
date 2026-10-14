@@ -75,12 +75,76 @@ class PrototypeAccessibilityCoalescerTest {
   }
 
   @Test
-  fun `only content changes and scrolling are coalescible`() {
-    assertTrue(isCoalescibleAccessibilityEvent(AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED))
-    assertTrue(isCoalescibleAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_SCROLLED))
-    assertFalse(isCoalescibleAccessibilityEvent(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED))
-    assertFalse(isCoalescibleAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_FOCUSED))
-    assertFalse(isCoalescibleAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED))
-    assertFalse(isCoalescibleAccessibilityEvent(AccessibilityEvent.TYPE_WINDOWS_CHANGED))
+  fun `scrolling ignores content change types`() {
+    for (changeTypes in listOf(0, AccessibilityEvent.CONTENT_CHANGE_TYPE_TEXT, -1)) {
+      assertTrue(
+        isCoalescibleAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_SCROLLED, changeTypes),
+      )
+    }
+  }
+
+  @Test
+  fun `undefined and subtree content changes are coalescible`() {
+    for (changeTypes in listOf(0, AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE)) {
+      assertTrue(
+        isCoalescibleAccessibilityEvent(
+          AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+          changeTypes,
+        ),
+      )
+    }
+  }
+
+  @Test
+  fun `announcement content changes pass through even when combined with subtree`() {
+    val announcementTypes =
+      listOf(
+        AccessibilityEvent.CONTENT_CHANGE_TYPE_TEXT,
+        AccessibilityEvent.CONTENT_CHANGE_TYPE_PANE_TITLE,
+        AccessibilityEvent.CONTENT_CHANGE_TYPE_PANE_APPEARED,
+        AccessibilityEvent.CONTENT_CHANGE_TYPE_PANE_DISAPPEARED,
+        AccessibilityEvent.CONTENT_CHANGE_TYPE_STATE_DESCRIPTION,
+        AccessibilityEvent.CONTENT_CHANGE_TYPE_CONTENT_DESCRIPTION,
+      )
+    for (changeTypes in announcementTypes) {
+      assertFalse(
+        isCoalescibleAccessibilityEvent(
+          AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+          changeTypes,
+        ),
+      )
+      assertFalse(
+        isCoalescibleAccessibilityEvent(
+          AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+          changeTypes or AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE,
+        ),
+      )
+    }
+  }
+
+  @Test
+  fun `unknown content change bits pass through`() {
+    assertFalse(
+      isCoalescibleAccessibilityEvent(
+        AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+        Int.MIN_VALUE,
+      ),
+    )
+  }
+
+  @Test
+  fun `other event types always pass through`() {
+    for (eventType in
+      listOf(
+        AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+        AccessibilityEvent.TYPE_VIEW_FOCUSED,
+        AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED,
+        AccessibilityEvent.TYPE_WINDOWS_CHANGED,
+      )) {
+      assertFalse(isCoalescibleAccessibilityEvent(eventType, 0))
+      assertFalse(
+        isCoalescibleAccessibilityEvent(eventType, AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE),
+      )
+    }
   }
 }

@@ -54,6 +54,7 @@ import {
   setProcessShutdownHandler,
 } from "./processLifecycle";
 import {
+  assertManagedSlotOwnerIdentity,
   assertManagedSlotOwnerRunning,
   assertManagedSlotsSupported,
   type ManagedSlotConfig,
@@ -316,9 +317,14 @@ async function main() {
         import("./daemon/lockOwnerGeneration"),
       ]);
       assertManagedSlotOwnerRunning(managedSlotConfig, (pid) => isProcessRunning(pid));
-      ownerGenerationToken = defaultLockOwnerGenerationProbe.current(
-        managedSlotConfig.executionOwnerPid,
+      const ownerIdentityVerdict = assertManagedSlotOwnerIdentity(
+        managedSlotConfig,
+        (pid, recorded) => defaultLockOwnerGenerationProbe.compare(pid, recorded),
       );
+      ownerGenerationToken =
+        ownerIdentityVerdict === "same"
+          ? managedSlotConfig.executionOwnerStartIdentity
+          : defaultLockOwnerGenerationProbe.current(managedSlotConfig.executionOwnerPid);
     }
     if (daemonRequested && daemonCommand === undefined) {
       const { printUnknownDaemonCommand } = await import("./daemon/cli/runDaemonCommand");

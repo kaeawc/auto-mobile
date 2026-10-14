@@ -154,4 +154,42 @@ describe("prototype tool platform notes", () => {
       root: { type: "icon", name: "alarm_add" },
     });
   });
+  test("gesture shows report system timing on iOS only, including expanded components", async () => {
+    agent.handshake.capabilities.push("prototype_gestures_v1");
+    client.setSupportedCommands(["prototype_gestures_v1", "prototype_persistence_replay_v1"]);
+    const authored = {
+      ...spec,
+      components: {
+        tile: {
+          root: {
+            type: "text",
+            text: "Press",
+            onLongPress: [{ type: "emit", name: "long" }],
+            onDoubleTap: [{ type: "emit", name: "double" }],
+          },
+        },
+      },
+      root: { type: "use", component: "tile" },
+    };
+    const { payload } = await call({ action: "show", spec: authored });
+    expect(payload.success).toBe(true);
+    expect(payload.platformNotes).toMatchObject([
+      {
+        platform: "ios",
+        construct: "node.gestures",
+        effect: "substituted",
+        paths: ["root.onLongPress", "root.onDoubleTap"],
+      },
+    ]);
+    expect(payload.platformNotes?.[0].detail).toContain("0.5 s");
+    expect(payload.platformNotes?.[0].detail).toContain("0.4 s");
+    expect(payload.platformNotes?.[0].detail).toContain("double-tap window is the system's");
+    expect((await call({ action: "show", spec: authored }, android)).raw).not.toHaveProperty(
+      "platformNotes",
+    );
+    agent.queueReplies({ success: false, error: "Device refused" });
+    expect((await call({ action: "show", spec: authored })).raw).not.toHaveProperty(
+      "platformNotes",
+    );
+  });
 });

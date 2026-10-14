@@ -1,5 +1,17 @@
 import { MAX_PROTOTYPE_PATCH_OPS } from "./prototypePatch";
 import { MAX_PROTOTYPE_SPEC_BYTES } from "./prototypeSpec";
+export const GUIDE_GESTURES = `## Gestures
+
+\`onLongPress\` and \`onDoubleTap\` run their action lists exactly like \`onTap\`, with no new
+event kind. A node with either list is interactive even without \`onTap\`. All three may coexist;
+when \`onDoubleTap\` is present, the single tap fires only after the system double-tap window elapses.
+Repeat item and component prop placeholders bind in these lists just as they do in \`onTap\`.
+Use \`tapOn\` with \`action: "longPress"|"doubleTap"\` and \`layer: "prototype"\` to drive them
+by coordinate gesture; no new MCP tool is needed. Long-press uses the platform default threshold
+(about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s); the double-tap window is
+the system's. The host refuses unsupported agents before sending a show.
+`;
+
 /**
  * Hand-written authoring prose for the `automobile:prototype` resource. Everything that names a
  * limit, node type, action, theme role or icon is generated from the spec contract in
@@ -324,7 +336,7 @@ Authoring choices:
   one is not composed until it is swiped to.
 - **\`pressScale\`.** On Android it adds an animated press state and a graphics layer to each
   tappable node that sets it, so put it on buttons, not on every row. On iOS every node with
-  \`onTap\` already has the press gesture, a minimum touch target and a scale effect whether or
+  \`onTap\`, \`onLongPress\` or \`onDoubleTap\` already has the press gesture, a minimum touch target and a scale effect whether or
   not it sets \`pressScale\`, so \`pressScale\` adds nothing there.
 - **Images.** On Android each \`image\` node is a sub-composition that asks the image cache for a
   bitmap sized to the node, so many small images in a list cost more than one strip image. Decode

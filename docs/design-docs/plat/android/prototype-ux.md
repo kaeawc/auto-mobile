@@ -1551,3 +1551,17 @@ asset strings and count nav images as spec image uses; #9296 must remove its
 `specVersion` proposal. #9295's root-level opacity wording maps to
 `window.opacity`, and its focusability wording follows the later device findings.
 No sibling issues are edited as part of this implementation.
+
+## Prototype gesture action lists
+
+`onLongPress` and `onDoubleTap` are optional action lists (1–32 actions, the same union as
+`onTap`) on box, row, column, text, image, icon and card only. They require
+`prototype_gestures_v1`; the host refuses a show on an older CtrlProxy or iOS agent before sending
+it. Each gesture runs its actions like a tap, with no new event kind. Either list makes a node
+interactive even without `onTap`. All three lists may coexist; with `onDoubleTap`, a single tap
+fires only after the system double-tap window elapses. Long-press uses the platform default
+(about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s).
+
+`tapOn` with `action: "longPress"|"doubleTap"` and `layer: "prototype"` drives them by
+coordinate gesture; no new MCP tool is needed. Repeat and component action placeholders bind
+as they do for `onTap`.

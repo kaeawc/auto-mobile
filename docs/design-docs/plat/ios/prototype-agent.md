@@ -504,3 +504,17 @@ Two data keys that are canonically equivalent Unicode strings collapse into one 
 Swift dictionary keys compare by canonical equivalence, unlike the host and Android.
 The agent re-checks data depth and array limits in the host's traversal order. It does not duplicate
 the host validator's data byte-cost rule; the existing 1 MiB whole-spec byte cap still bounds input.
+
+## Prototype gesture action lists
+
+`onLongPress` and `onDoubleTap` are optional action lists (1–32 actions, the same union as
+`onTap`) on box, row, column, text, image, icon and card only. They require
+`prototype_gestures_v1`; the host refuses a show on an older CtrlProxy or iOS agent before sending
+it. Each gesture runs its actions like a tap, with no new event kind. Either list makes a node
+interactive even without `onTap`. All three lists may coexist; with `onDoubleTap`, a single tap
+fires only after the system double-tap window elapses. Long-press uses the platform default
+(about 0.5 s on iOS versus the Android long-press timeout, about 0.4 s).
+
+`tapOn` with `action: "longPress"|"doubleTap"` and `layer: "prototype"` drives them by
+coordinate gesture; no new MCP tool is needed. Repeat and component action placeholders bind
+as they do for `onTap`.

@@ -21,6 +21,15 @@ type Reply = Partial<Omit<PrototypeAgentResult, "type" | "requestId">> | Error;
 /** In-memory injected-agent connection: records requests, answers from a queue, pushes events. */
 export class FakePrototypeAgentClient implements PrototypeAgentClient {
   readonly requests: Array<{ type: PrototypeAgentRequestType; body: PrototypeAgentMessage }> = [];
+  readonly patchRequests: PrototypeAgentMessage[] = [];
+  private patchReply?: Reply;
+  private patchHold?: Promise<Reply>;
+  setPatchResult(reply: Reply): void {
+    this.patchReply = reply;
+  }
+  holdPatchReply(reply: Promise<Reply>): void {
+    this.patchHold = reply;
+  }
   closed = false;
   private readonly replies: Reply[] = [];
   private readonly eventListeners = new Set<(event: PrototypeAgentMessage) => void>();
@@ -44,7 +53,18 @@ export class FakePrototypeAgentClient implements PrototypeAgentClient {
     body: PrototypeAgentMessage = {},
   ): Promise<PrototypeAgentResult> {
     this.requests.push({ type, body });
-    const reply = this.replies.shift() ?? {};
+    if (type === "patch_prototype") {
+      this.patchRequests.push(structuredClone(body));
+    }
+    const hold = type === "patch_prototype" ? this.patchHold : undefined;
+    if (hold) {
+      this.patchHold = undefined;
+    }
+    const reply = hold
+      ? await hold
+      : type === "patch_prototype" && this.patchReply
+        ? this.patchReply
+        : (this.replies.shift() ?? {});
     if (reply instanceof Error) {
       throw reply;
     }

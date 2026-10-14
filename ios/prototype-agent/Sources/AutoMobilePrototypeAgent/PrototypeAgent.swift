@@ -13,6 +13,14 @@ public func amPrototypeAgentStart() {
     }
 }
 
+/// The viewer selects persistence before the singleton is first constructed.
+@_cdecl("am_prototype_agent_start_standalone")
+public func amPrototypeAgentStartStandalone() {
+    DispatchQueue.main.async {
+        PrototypeAgent.bootStandalone()
+    }
+}
+
 /// A distinct selector target keeps each scene registration's identity and synchronous delivery.
 @MainActor
 private final class PrototypeSceneActivationObserver: NSObject {
@@ -58,9 +66,28 @@ final class PassthroughWindow: UIWindow {
 
 @MainActor
 final class PrototypeAgent: NSObject {
-    static let shared = PrototypeAgent()
+    private static var instance: PrototypeAgent?
+    static var shared: PrototypeAgent {
+        if let instance { return instance }
+        let agent = PrototypeAgent(mode: .session)
+        instance = agent
+        return agent
+    }
 
-    let model = PrototypeModel()
+    static func bootStandalone() {
+        if instance == nil { instance = PrototypeAgent(mode: .standalone) }
+        shared.boot()
+    }
+
+    let model: PrototypeModel
+    private var outbox: PrototypeEventOutbox<[String: Any]>
+
+    init(mode: PrototypeLifecycleMode = .session) {
+        model = PrototypeModel(mode: mode)
+        outbox = PrototypeEventOutbox(mode: mode)
+        super.init()
+    }
+
     private var window: PassthroughWindow?
     private var server: PrototypeServer?
     private var layers: PrototypeLayersViewController?
@@ -101,11 +128,16 @@ final class PrototypeAgent: NSObject {
         )
         let server = PrototypeServer(
             configuration: configuration,
-            capabilities: PrototypeTestHooks.capabilities(enabled: testHooksEnabled)
+            capabilities: model.mode.advertising(PrototypeTestHooks.capabilities(enabled: testHooksEnabled))
         ) { [weak self] message, reply in
             self?.handle(message, reply: reply)
         }
-        model.onEvent = { [weak server] event in server?.broadcast(event) }
+        model.onEvent = { [weak self, weak server] event in
+            guard let self else { return }
+            for pending in outbox.publish(event) {
+                server?.broadcast(pending)
+            }
+        }
         server.onClientCountChanged = { [weak self] count in self?.clientCountChanged(count) }
         model.onVisibilityChange = { [weak self] visible in self?.setVisible(visible) }
         model.onEndEditing = { [weak self] in _ = self?.window?.endEditing(true) }
@@ -387,9 +419,26 @@ final class PrototypeAgent: NSObject {
                 if let id = message["id"] as? String { model.removeAsset(id) }
                 result(true)
             case "get_prototype_status":
+                for pending in outbox.drainForInspect() {
+                    server?.broadcast(pending)
+                }
                 var status = model.status()
                 status["visible"] = window?.isHidden == false
+                if model.mode == .standalone {
+                    status["persistent"] = true
+                    status["droppedEvents"] = outbox.droppedEvents
+                }
                 result(true, extra: ["status": status])
+            case "inspect_prototypes" where model.mode == .standalone:
+                for pending in outbox.drainForInspect() {
+                    server?.broadcast(pending)
+                }
+                var status = model.status()
+                status["persistent"] = true
+                result(true, extra: [
+                    "prototypes": model.session.isShown ? [status] : [],
+                    "droppedEvents": outbox.droppedEvents,
+                ])
             case PrototypeAgentProtocol.hideForCaptureRequest:
                 hideForCapture(
                     deadlineMs: PrototypeCaptureHold
@@ -414,6 +463,9 @@ final class PrototypeAgent: NSObject {
     private func clientCountChanged(_ count: Int) {
         connectedClients = count
         if count < 1 { model.hostDisconnected() }
+        for pending in outbox.clientCountChanged(count) {
+            server?.broadcast(pending)
+        }
     }
 
     // MARK: Hide for capture

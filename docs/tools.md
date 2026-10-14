@@ -662,10 +662,19 @@ percentage from 0 to 100, default 100; show the spec again to change it.
 
 Android saved prototypes require `prototype_saved_v1`: `save` takes `spec`, optional `assets`,
 `label` (defaults to `spec.id`, 1–120 characters) and `icon` (an asset uploaded in the same call).
-`listSaved` reads saved entries; `deleteSaved` requires `id`. iOS refuses all three with
-`unsupported_platform`; a missing Android capability returns `unsupported_capability`.
+`listSaved` reads saved entries; `deleteSaved` requires `id`. A missing Android capability
+returns `unsupported_capability`. On iOS simulators these actions use the host installer,
+without a prototype agent connection. Physical iOS devices return `unsupported_platform`.
+The viewer template comes from the verified release asset, or from `AUTOMOBILE_IOS_PROTOTYPE_VIEWER`
+(build it with `scripts/ios/prototype-viewer-build.sh`).
+The same `icon` asset id uses bytes uploaded in `assets` in that call; omit it for the default icon.
+iOS `listSaved` returns bundle ids (accepted by `deleteSaved`), labels and slugs, with
+`pinned:false` and no `savedAt` because the simulator cannot recover the save time.
+`deleteSaved` also accepts the authored prototype id on iOS.
 Pinning (`pin:true`, optionally `autoConfirm:true`) and icon removal (`removeIcon:true`) are
-not available yet: save still succeeds with `pinned:"unsupported"`, and deletion warns that
+not available yet: save still succeeds with `pinned:"unsupported"`. iOS places the app icon
+on the home screen; deleting the prototype removes it, and `removeIcon:true` warns that
+separate icon removal does not apply. On Android deletion warns that
 an earlier pinned icon may remain and can be removed by hand. A deleted prototype's disabled
 home-screen icon may remain. Store failures return actionable errors with `errorCode`:
 `invalid_id`, `invalid_label`, `spec_too_large`, `invalid_spec`, `invalid_asset_id`,

@@ -28,6 +28,19 @@ Minimal spec:
 
 A \`{key}\` placeholder in a \`text\` node reads the state value of that key.
 
+## Saved prototypes
+
+Use \`save\` with \`spec\`, optional \`assets\`, \`label\` (defaults to \`spec.id\`) and
+\`icon\` (an asset id uploaded in \`assets\` in that same call). Android needs
+\`prototype_saved_v1\`. On iOS this is simulator only and needs no prototype agent:
+the viewer template is resolved from the verified release asset, or from
+\`AUTOMOBILE_IOS_PROTOTYPE_VIEWER\` (build it with \`scripts/ios/prototype-viewer-build.sh\`).
+Omit \`icon\` for the default app icon. Pinning returns \`pinned:"unsupported"\`; the iOS
+app icon is already on the home screen. \`listSaved\` on iOS returns bundle ids accepted by
+\`deleteSaved\`, with \`pinned:false\` and no \`savedAt\` (the save time cannot be recovered).
+\`deleteSaved\` also accepts the authored id; it removes the iOS app icon, so
+\`removeIcon:true\` is ignored with a warning.
+
 ## Fullscreen host chrome
 
 \`window.chrome\` is \`"none"\` (default) or \`"bar"\`, fullscreen only, on a device advertising

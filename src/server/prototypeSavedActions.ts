@@ -9,9 +9,25 @@ import {
 } from "../features/observe/android/ctrlProxyProtocol";
 import { prototypeSavedUnsupportedMessage } from "../features/observe/android/CtrlProxyPrototypes";
 import type { AndroidPrototypeTransport } from "../features/prototype/androidPrototypeTransport";
-import type { PrototypeSpec } from "../features/prototype/prototypeSpec";
+import type { PrototypeSpec, PrototypeJson } from "../features/prototype/prototypeSpec";
 import { hasElementAnchors } from "../features/prototype/prototypeAnchors";
-import type { UploadedPrototypeAsset } from "../features/prototype/prototypeAssetUploader";
+import {
+  preparePrototypeAssets,
+  type PrototypeAssetSource,
+  type PrototypeAssetFileReader,
+  type PrototypeObservationScreenshotReader,
+  type UploadedPrototypeAsset,
+} from "../features/prototype/prototypeAssetUploader";
+import type { IosPrototypeInstaller } from "../features/prototype/ios/iosPrototypeInstaller";
+import { createDefaultIosPrototypeInstaller } from "../features/prototype/ios/iosPrototypeInstallerFactory";
+import { PrototypeInstallPhysicalDeviceError } from "../features/prototype/ios/iosPrototypeInstallerErrors";
+import {
+  PROTOTYPE_BUNDLE_ID_PREFIX,
+  isPrototypeBundleId,
+  prototypeBundleId,
+} from "../features/prototype/ios/iosPrototypeBundleId";
+import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
+import type { BootedDevice } from "../models";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import { logger } from "../utils/logger";
 
@@ -25,7 +41,7 @@ export interface PrototypeSavedOutput {
   error?: string;
   errorCode?: PrototypeSavedErrorCode;
   saved?: SavedPrototypeInfo;
-  savedPrototypes?: SavedPrototypeEntry[];
+  savedPrototypes?: (Omit<SavedPrototypeEntry, "savedAt"> & { savedAt?: number })[];
   pinned?: "unsupported";
   warning?: string;
   uploadedAssets?: UploadedPrototypeAsset[];
@@ -39,6 +55,7 @@ export interface PrototypeSavedArgs {
   id?: string;
   removeIcon?: true;
   timeoutMs?: number;
+  assets?: readonly PrototypeAssetSource[];
 }
 export interface PrototypeSavedDependencies {
   client: Pick<AndroidPrototypeTransport, "save" | "listSaved" | "deleteSaved" | "supportsCommand">;
@@ -86,13 +103,6 @@ export function savedPrototypeFailure(result: PrototypeResult): PrototypeSavedOu
 }
 export function isPrototypeSavedAction(action: string): action is PrototypeSavedAction {
   return action === "save" || action === "listSaved" || action === "deleteSaved";
-}
-export function savedPrototypePlatformRefusal(): PrototypeSavedOutput {
-  return {
-    success: false,
-    errorCode: "unsupported_platform",
-    error: "Saved prototypes are Android only for now; iOS support is not available yet.",
-  };
 }
 const requestTypes: Record<PrototypeSavedAction, string> = {
   save: "save_prototype",
@@ -230,17 +240,151 @@ export function validatePrototypeSavedInput(
     });
   }
 }
-export function prototypeSavedPlatformError(
-  platform: string,
-  action: string,
-): (ActionableError & { errorCode: PrototypeSavedErrorCode }) | undefined {
-  if (platform !== "ios" || !isPrototypeSavedAction(action)) {
-    return undefined;
+export type IosSavedPrototypeInstaller = Pick<IosPrototypeInstaller, "install" | "list" | "delete">;
+
+interface IosSavedDependencies {
+  installer?: IosSavedPrototypeInstaller;
+  assetFileReader: PrototypeAssetFileReader;
+  observationScreenshotReader: PrototypeObservationScreenshotReader;
+}
+
+/** Intercept saved iOS actions, otherwise retain the existing platform validation. */
+export function createPrototypeSavedPlatformDispatch(dependencies: IosSavedDependencies) {
+  let installer = dependencies.installer;
+  const backend = () => (installer ??= createDefaultIosPrototypeInstaller());
+  return (
+    device: BootedDevice,
+    args: Omit<PrototypeSavedArgs, "action"> & { action: string },
+    signal: AbortSignal | undefined,
+    platformError: () =>
+      | (Pick<ActionableError, "message"> & { errorCode?: PrototypeSavedErrorCode })
+      | undefined,
+  ): Promise<PrototypeSavedOutput> | PrototypeSavedOutput | undefined => {
+    if (device.platform !== "ios" || !isPrototypeSavedAction(args.action)) {
+      const error = platformError();
+      return error ? prototypePlatformFailure(error) : undefined;
+    }
+    return performIosSavedAction(
+      backend,
+      device,
+      { ...args, action: args.action },
+      dependencies,
+      signal,
+    );
+  };
+}
+
+async function saveIosPrototype(
+  backend: () => IosSavedPrototypeInstaller,
+  udid: string,
+  args: PrototypeSavedArgs,
+  readers: IosSavedDependencies,
+  signal?: AbortSignal,
+): Promise<PrototypeSavedOutput> {
+  const prepared = await preparePrototypeAssets(
+    args.assets ?? [],
+    readers.assetFileReader,
+    readers.observationScreenshotReader,
+  );
+  signal?.throwIfAborted();
+  if ("error" in prepared) {
+    return savedPrototypeFailure({
+      success: false,
+      error: `${prepared.error} The prototype was not saved.`,
+    });
   }
-  const refusal = savedPrototypePlatformRefusal();
-  return Object.assign(new ActionableError(refusal.error!), {
-    errorCode: "unsupported_platform" as const,
+  const spec = args.spec!; // Shared schema validation and component expansion ran before dispatch.
+  const bundleId = prototypeBundleId(spec.id);
+  const icon = prepared.assets.find((asset) => asset.id === args.icon);
+  const installer = backend();
+  const installed = await installer.list(udid);
+  const replaced = installed.some((app) => app.bundleId === bundleId);
+  signal?.throwIfAborted();
+  await installer.install({
+    udid,
+    prototypeId: spec.id,
+    label: args.label ?? spec.id,
+    spec: spec as PrototypeJson,
+    assets: prepared.assets,
+    ...(icon ? { icon: { image: Buffer.from(icon.bytes) } } : {}),
   });
+  return {
+    ...savedPrototypeSuccess(args, {
+      success: true,
+      saved: {
+        id: spec.id,
+        slug: bundleId.slice(PROTOTYPE_BUNDLE_ID_PREFIX.length),
+        replaced,
+      },
+    }),
+    ...(args.pin
+      ? {
+          warning:
+            "Pinning is not available on iOS simulators; the app icon is on the home screen.",
+        }
+      : {}),
+    ...(prepared.assets.length
+      ? {
+          uploadedAssets: prepared.assets.map((asset) => ({
+            id: asset.id,
+            mimeType: asset.mimeType,
+            bytes: asset.bytes.length,
+          })),
+        }
+      : {}),
+  };
+}
+
+async function performIosSavedAction(
+  backend: () => IosSavedPrototypeInstaller,
+  device: BootedDevice,
+  args: PrototypeSavedArgs,
+  readers: IosSavedDependencies,
+  signal?: AbortSignal,
+): Promise<PrototypeSavedOutput> {
+  try {
+    if (resolveIosDeviceKind(device) !== "simulator") {
+      throw new PrototypeInstallPhysicalDeviceError();
+    }
+    signal?.throwIfAborted();
+    if (args.action === "save") {
+      return await saveIosPrototype(backend, device.deviceId, args, readers, signal);
+    }
+    const installer = backend();
+    if (args.action === "listSaved") {
+      const installed = await installer.list(device.deviceId);
+      return {
+        success: true,
+        savedPrototypes: installed.map((app) => {
+          const slug = app.bundleId.slice(PROTOTYPE_BUNDLE_ID_PREFIX.length);
+          return { id: app.bundleId, label: app.displayName ?? slug, slug, pinned: false };
+        }),
+      };
+    }
+    await installer.delete(
+      device.deviceId,
+      isPrototypeBundleId(args.id!) ? args.id! : { prototypeId: args.id! },
+    );
+    return {
+      success: true,
+      ...(args.removeIcon
+        ? {
+            warning:
+              "Icon removal does not apply on iOS simulators; deleting the prototype removes its app icon.",
+          }
+        : {}),
+    };
+  } catch (error) {
+    if (error instanceof PrototypeInstallPhysicalDeviceError) {
+      logger.warn("[prototype] Saved prototype requires an iOS simulator", error);
+      return {
+        success: false,
+        errorCode: "unsupported_platform",
+        error: "Saved prototypes need an iOS simulator. Target one with deviceId or sessionUuid.",
+      };
+    }
+    return savedPrototypeRequestFailure(error, args.action, signal);
+  }
 }
 
 /** Dispatches saved actions without adding decisions to the shared tool handler. */

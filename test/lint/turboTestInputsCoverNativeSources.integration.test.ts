@@ -83,8 +83,10 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     // generateMdmProfile.test.ts reads the bundle identifiers from the network-filter
     // Info.plists to pin the profile payloads to the shipped app.
     "ios/network-filter/Packaging/**",
-    // prototypePlatformNotes.test.ts reads the Swift sfSymbols table to pin the mapped icon names.
-    "ios/prototype-agent/Sources/AutoMobilePrototypeAgent/PrototypeRenderer.swift",
+    // Prototype icon tests read the Swift capability declaration, generated symbol data and doc.
+    "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
+    "ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeIconSymbolData.swift",
+    "ios/prototype-agent/ICON-SYMBOLS.md",
   ] as const;
 
   interface TurboConfig {

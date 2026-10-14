@@ -453,8 +453,8 @@ export interface OpenSqliteSlotRegistryOptions extends SqliteSlotRegistryOptions
  * statement, filesystem and error-handling overhead mean these are not hard wall-clock deadlines;
  * waiting for another opener's migration file lock yields asynchronously. A healthy
  * peer's few short statements and FULL-sync commit (one fsync) have room to finish, while a slow
- * disk or prolonged lock yields a retryable refusal well below the per-daemon DB's
- * {@link SQLITE_BUSY_TIMEOUT_MS}. Callers retry after yielding the event loop. Two connections in
+ * disk or prolonged lock yields a retryable refusal after one short wait, matching the app DB's
+ * per-attempt timeout. Callers retry after yielding the event loop. Two connections in
  * one process cannot release each other's lock during this synchronous wait; waiting longer only
  * stalls them. A single uncontended connection never waits. Keep transactions short (#12104).
  */
@@ -674,6 +674,31 @@ export class SqliteSlotRegistry implements SlotRegistry {
       };
       await trx.insertInto("slot_assignments").values(row).execute();
       return { kind: "ready", assignment: toAssignment(row), created: true };
+    });
+  }
+
+  async removeUnboundSlot(
+    key: SlotKey,
+    expected: { generation: number; stableDeviceId: null },
+  ): Promise<boolean> {
+    assertValidSlotKey(key);
+    return this.db.transaction().execute(async (trx) => {
+      if (await this.readOpenJournal(trx, key)) {
+        return false;
+      }
+      const deleted = await trx
+        .deleteFrom("slot_assignments")
+        .where("scope_key", "=", key.scopeKey)
+        .where("slot_index", "=", key.slotIndex)
+        .where("generation", "=", expected.generation)
+        .where("stable_device_id", "is", null)
+        .where("state", "=", "provisioning")
+        .where("exec_owner_daemon_id", "is", null)
+        .where("exec_owner_pid", "is", null)
+        .where("exec_owner_process_token", "is", null)
+        .where("exec_session_uuid", "is", null)
+        .executeTakeFirst();
+      return deleted.numDeletedRows > 0n;
     });
   }
 

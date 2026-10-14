@@ -22,7 +22,7 @@ import { logger } from "../utils/logger";
 /** How often the owner is checked. With a ~1.5 s bounded release this keeps death-to-release ≲ 2.5 s. */
 export const EXECUTION_OWNER_CHECK_INTERVAL_MS = 1_000;
 
-/** Bound synchronous OS identity reads while probing PID liveness on every check. */
+/** Identity cadence when the reader uses synchronous ps; PID liveness is checked every time. */
 export const EXECUTION_OWNER_GENERATION_CHECK_EVERY = 5;
 
 /** The pid that adopts orphans; a launch parent of 1 means the launcher was already gone. */
@@ -49,6 +49,7 @@ export interface ExecutionOwnerWatchOptions {
   ownerGenerationToken?: string;
   onOwnerLost: (reason: ExecutionOwnerLossReason) => void | Promise<void>;
   intervalMs?: number;
+  generationCheckEvery?: number;
 }
 
 export class ExecutionOwnerWatch {
@@ -56,6 +57,7 @@ export class ExecutionOwnerWatch {
   private lost: ExecutionOwnerLossReason | undefined;
   private readonly ownerPid: number;
   private readonly intervalMs: number;
+  private readonly generationCheckEvery: number;
   private ownerGenerationToken: string | undefined;
   private checks = 0;
 
@@ -68,6 +70,9 @@ export class ExecutionOwnerWatch {
     this.ownerGenerationToken = options.ownerGenerationToken;
     this.ownerPid = options.ownerPid ?? options.launchParentPid;
     this.intervalMs = options.intervalMs ?? EXECUTION_OWNER_CHECK_INTERVAL_MS;
+    const cadence = options.generationCheckEvery ?? EXECUTION_OWNER_GENERATION_CHECK_EVERY;
+    this.generationCheckEvery =
+      Number.isInteger(cadence) && cadence >= 1 ? cadence : EXECUTION_OWNER_GENERATION_CHECK_EVERY;
   }
 
   /** Start checking; also checks once now, so an owner already gone at launch is caught. */
@@ -144,7 +149,7 @@ export class ExecutionOwnerWatch {
       return "owner-exited";
     }
     this.checks++;
-    return this.checks % EXECUTION_OWNER_GENERATION_CHECK_EVERY === 0 && this.generationChanged()
+    return this.checks % this.generationCheckEvery === 0 && this.generationChanged()
       ? "owner-exited"
       : undefined;
   }
@@ -160,6 +165,10 @@ export class ExecutionOwnerWatch {
 
   private generationChanged(): boolean {
     if (this.ownerGenerationToken === undefined) {
+      // Retry relies on seeing the PID running at every one-second check since startup,
+      // without reuse within one interval (measured on macOS: ~95,500 spawns / 69 s).
+      // Capture only: the newly observed identity is compared on a subsequent check.
+      this.captureGeneration();
       return false;
     }
     try {

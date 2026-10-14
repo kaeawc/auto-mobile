@@ -51,6 +51,12 @@ describe("automobile:prototype resource", () => {
     }
   });
 
+  test("explains the default iOS icon form and closest Android match", () => {
+    expect(renderPrototypeGuide()).toContain(
+      'With no variant, iOS draws the name\'s default SF Symbol, which is often the outline form; pass `variant: "filled"` on an `icon` node for the closest match to Android where the table has a filled form.',
+    );
+  });
+
   test("mentions every node type, action type and theme role in the contract", () => {
     const guide = renderPrototypeGuide();
     const defs = contract.definitions as unknown as Record<

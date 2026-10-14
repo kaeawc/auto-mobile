@@ -42,7 +42,7 @@ final class PrototypeThemeModesTests: XCTestCase {
             "restore_after_capture", "screenshot_hide_prototype_v1", "prototype_inspect_v1",
             "prototype_theme_modes_v1", "prototype_appearance_v1", "prototype_window_chrome_v1",
             "prototype_icon_sf_symbols_v1",
-            "prototype_data_model_v1",
+            "prototype_data_model_v1", "prototype_emit_context_v1",
         ])
     }
 

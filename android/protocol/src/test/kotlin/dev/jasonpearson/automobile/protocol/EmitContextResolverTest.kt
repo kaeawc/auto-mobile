@@ -67,6 +67,21 @@ class EmitContextResolverTest {
   }
 
   @Test
+  fun truncationUsesUnsignedUtf8InsteadOfUtf16NameOrder() {
+    val bmp = "\uE000"
+    val supplementary = "\uD800\uDC00"
+    val value = JsonPrimitive("x".repeat(4085))
+    val bindings =
+      linkedMapOf(
+        supplementary to JsonObject(mapOf("value" to JsonPrimitive(1))),
+        bmp to JsonObject(mapOf("value" to value)),
+      )
+    val result = EmitContextResolver.resolve(bindings, FakeInputs(fixtures.first().second))
+    assertEquals(JsonObject(mapOf(bmp to value)), result.context)
+    assertEquals(true, result.contextTruncated)
+  }
+
+  @Test
   fun decodedBindingsRetainDeclarationOrderAndArbitraryNames() {
     val decoded =
       Json.decodeFromJsonElement(PrototypeAction.serializer(), orderedEmit) as PrototypeEmitAction

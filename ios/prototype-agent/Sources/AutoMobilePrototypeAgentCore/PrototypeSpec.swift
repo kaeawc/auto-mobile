@@ -118,6 +118,7 @@ struct PrototypeSpec: Decodable {
         let raw = try container.decode(JSONValue.self, forKey: .root)
         try PrototypeLimits.guardAuthoredTree(raw)
         try PrototypeLimits.guardRepeatPathCells(raw, data: data)
+        try PrototypeRepeat.validateEmitContexts(raw, data: data)
         let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
         try PrototypeLimits.guardTree(resolved)
         root = try JSONDecoder().decode(
@@ -395,6 +396,7 @@ struct PrototypeAction: Decodable {
     let type: String
     let name: String?
     let payload: JSONValue?
+    let context: PrototypeEmitContext?
     let pager: String?
     let page: JSONValue?
     let key: String?

@@ -44,7 +44,9 @@ export function resolveEmitContext(
   }
   // Stop at the first overflowing entry, even if a later entry would fit.
   const prefix: [string, PrototypeJson][] = [];
-  for (const entry of entries) {
+  for (const entry of entries.sort(([left], [right]) =>
+    Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8")),
+  )) {
     prefix.push(entry);
     if (
       Buffer.byteLength(JSON.stringify(Object.fromEntries(prefix)), "utf8") >

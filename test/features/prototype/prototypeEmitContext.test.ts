@@ -124,6 +124,7 @@ test("guide documents context wire, atomic reads and limits", () => {
     "MAX_PROTOTYPE_EMIT_CONTEXT_ENTRIES",
     "{item: field}",
     "{index: true}",
+    "ascending name (byte-wise UTF-8 order)",
   ]) {
     expect(guide).toContain(text);
   }
@@ -190,4 +191,12 @@ test("component binding preserves extra binding keys for strict validation", () 
     root: { type: "use", component: "row" },
   };
   expect(validatePrototypeSpec(spec).success).toBe(false);
+});
+
+test("truncation compares unsigned UTF-8 name bytes rather than UTF-16 units", () => {
+  const result = resolveEmitContext(
+    { "\u{10000}": { value: 1 }, "\uE000": { value: "x".repeat(4085) } },
+    { state: {}, pages: {} },
+  );
+  expect(result).toEqual({ context: { "\uE000": "x".repeat(4085) }, contextTruncated: true });
 });

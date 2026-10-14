@@ -30,6 +30,7 @@ enum PrototypeAgentProtocol {
         windowChromeCapability,
         iconSfSymbolsCapability,
         dataModelCapability,
+        emitContextCapability,
     ]
     /// A same-id `show_prototype` replaces the prototype in place keeping pager pages, and
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
@@ -71,6 +72,8 @@ enum PrototypeAgentProtocol {
     /// Read-only data (#11673): resolves path repeats, authored text and data conditions once per
     /// show before repeat expansion. Status reports the shown data alongside state.
     static let dataModelCapability = "prototype_data_model_v1"
+    // ORCHESTRATOR-CHOSEN gate; fold into PROTOTYPE_SPEC_CAPABILITY_GATES when it lands
+    static let emitContextCapability = "prototype_emit_context_v1"
     /// Draws icons from schemas/prototype-ios-icon-symbols.json and honours filled/outlined
     /// icon variants where the table has those forms.
     static let iconSfSymbolsCapability = "prototype_icon_sf_symbols_v1"

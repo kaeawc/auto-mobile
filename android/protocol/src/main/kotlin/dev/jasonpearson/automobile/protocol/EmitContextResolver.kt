@@ -36,7 +36,8 @@ object EmitContextResolver {
     val complete = JsonObject(entries.toMap(LinkedHashMap()))
     if (fits(complete)) return ResolvedEmitContext(complete)
     val prefix = linkedMapOf<String, JsonElement>()
-    for ((name, value) in entries) {
+    for ((name, value) in
+      entries.sortedWith { left, right -> compareNames(left.first, right.first) }) {
       prefix[name] = value
       if (!fits(JsonObject(prefix))) {
         prefix.remove(name)
@@ -52,6 +53,17 @@ object EmitContextResolver {
     return if (value is PrototypeScalar.Numeric)
       Json.parseToJsonElement(PrototypeRepeatTemplate.rendered(encoded.jsonPrimitive))
     else encoded
+  }
+
+  /** Unsigned UTF-8 bytes, independent of UTF-16 String ordering. */
+  private fun compareNames(left: String, right: String): Int {
+    val a = left.toByteArray(Charsets.UTF_8)
+    val b = right.toByteArray(Charsets.UTF_8)
+    for (index in 0 until minOf(a.size, b.size)) {
+      val difference = (a[index].toInt() and 0xff) - (b[index].toInt() and 0xff)
+      if (difference != 0) return difference
+    }
+    return a.size - b.size
   }
 
   private fun fits(context: JsonObject): Boolean =

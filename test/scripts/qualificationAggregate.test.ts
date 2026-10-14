@@ -213,7 +213,7 @@ describe("qualification aggregation", () => {
     expect(aggregateResults({ files: [...files].reverse(), identity: null }).markdown).toBe(md);
     expect(md).toStartWith("# Managed-slot qualification summary\n");
     const native = md.split("## Native observations")[1].split("## Injected faults")[0];
-    expect(native.indexOf("host.a.case")).toBeLessThan(native.indexOf("host.z.case"));
+    expect(native.indexOf("| host | a.case |")).toBeLessThan(native.indexOf("| host | z.case |"));
     expect(native).not.toContain("fault.case");
     expect(native).not.toContain("gap.case");
     expect(
@@ -225,6 +225,12 @@ describe("qualification aggregation", () => {
     expect(md).toContain("## Deterministic tests\n\nNone.");
     expect(md).toContain("No host \\| native boundary");
     expect(md).toContain("No artifact identity supplied — results are not bound to an artifact.");
+    const smoke = aggregateResults({
+      files: [file(fixture("host.smoke"))],
+      identity: null,
+    }).markdown;
+    expect(smoke).toContain("| host | host.smoke |");
+    expect(smoke).not.toContain("host.host.smoke");
     expect(md).not.toContain("## Validation errors");
     expect(md).not.toContain("## Warnings");
   });

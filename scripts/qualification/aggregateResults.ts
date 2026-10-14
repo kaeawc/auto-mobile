@@ -43,6 +43,7 @@ function table(headers: string[], rows: Array<Array<string | number | null>>): s
 }
 function caseSection(title: string, results: CaseResult[], boundary = false): string {
   const headers = [
+    "Platform",
     "Case",
     "Matrix item",
     "Outcome",
@@ -53,7 +54,8 @@ function caseSection(title: string, results: CaseResult[], boundary = false): st
     ...(boundary ? ["Boundary"] : []),
   ];
   const rows = results.map((result) => [
-    `${result.platform}.${result.caseId}`,
+    result.platform,
+    result.caseId,
     result.matrixItem,
     result.outcome,
     result.timings.durationMs,

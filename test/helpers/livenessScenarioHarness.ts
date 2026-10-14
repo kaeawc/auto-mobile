@@ -1193,6 +1193,7 @@ export class LivenessScenario {
         getPooledDevices: () => this.deviceIds.map((id) => this.device(id) as never),
         getCurrentDevice: () => undefined,
         getSessionForDevice: (deviceId) => manager.getSessionForDevice(deviceId) ?? null,
+        getSessionManager: () => manager,
       },
       {
         getConfig: async () => config as never,

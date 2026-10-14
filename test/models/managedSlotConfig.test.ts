@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, spyOn, test } from "bun:test";
 import {
+  assertManagedSlotOwnerIdentity,
   assertManagedSlotOwnerRunning,
   MANAGED_SLOTS_PROXY_WIRED,
   MANAGED_SLOTS_V1_CAPABILITY,
@@ -18,6 +19,7 @@ import {
   androidProvisionDeviceSpecSchema,
   iosProvisionDeviceSpecSchema,
 } from "../../src/server/provisionDeviceSpecSchemas";
+import { logger } from "../../src/utils/logger";
 
 const androidRequest = {
   slotIndex: 0,
@@ -294,6 +296,95 @@ describe("executionOwnerPid", () => {
     expect(
       codeOf(() => assertManagedSlotOwnerRunning(parseManagedSlotConfig(validConfig), () => false)),
     ).toBeUndefined();
+  });
+});
+
+describe("executionOwnerStartIdentity", () => {
+  const base = parseManagedSlotConfig(validConfig);
+  const owner = {
+    ...base,
+    executionOwnerPid: 4242,
+    executionOwnerStartIdentity: "linux:boot-id:12345",
+  };
+
+  test("parses an opaque identity with its owner PID", () => {
+    expect(parseManagedSlotConfig(owner).executionOwnerStartIdentity).toBe(
+      owner.executionOwnerStartIdentity,
+    );
+  });
+
+  test("rejects identity without an owner PID", () => {
+    const config = {
+      ...validConfig,
+      executionOwnerStartIdentity: owner.executionOwnerStartIdentity,
+    };
+    expect(codeOf(() => parseManagedSlotConfig(config))).toBe("managed_slot_config_invalid");
+    expect(() => parseManagedSlotConfig(config)).toThrow(
+      "executionOwnerStartIdentity requires executionOwnerPid",
+    );
+  });
+
+  test.each(["", "x".repeat(257)])("rejects invalid identity length %p", (identity) => {
+    expect(
+      codeOf(() => parseManagedSlotConfig({ ...owner, executionOwnerStartIdentity: identity })),
+    ).toBe("managed_slot_config_invalid");
+  });
+
+  test("refuses a different process and names the PID", () => {
+    expect(codeOf(() => assertManagedSlotOwnerIdentity(owner, () => "different"))).toBe(
+      "managed_slot_config_invalid",
+    );
+    expect(() => assertManagedSlotOwnerIdentity(owner, () => "different")).toThrow(
+      "executionOwnerPid 4242 no longer names the process described by executionOwnerStartIdentity (the PID was reused)",
+    );
+  });
+
+  test("returns same and compares exactly the declared PID and identity", () => {
+    const compare = mock(() => "same" as const);
+    expect(assertManagedSlotOwnerIdentity(owner, compare)).toBe("same");
+    expect(compare.mock.calls).toEqual([[4242, owner.executionOwnerStartIdentity]]);
+  });
+
+  test("returns unknown and warns when comparison is unavailable", () => {
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(assertManagedSlotOwnerIdentity(owner, () => "unknown")).toBe("unknown");
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain("trusting the PID alone");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("logs a throwing comparison and returns unknown", () => {
+    const error = new Error("identity unreadable");
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      expect(
+        assertManagedSlotOwnerIdentity(owner, () => {
+          throw error;
+        }),
+      ).toBe("unknown");
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[1]).toBe(error);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("skips comparison when config, PID, or identity is omitted", () => {
+    const compare = mock(() => "same" as const);
+    expect(assertManagedSlotOwnerIdentity(undefined, compare)).toBeUndefined();
+    expect(
+      assertManagedSlotOwnerIdentity({ ...base, executionOwnerPid: 4242 }, compare),
+    ).toBeUndefined();
+    expect(
+      assertManagedSlotOwnerIdentity(
+        { ...base, executionOwnerStartIdentity: owner.executionOwnerStartIdentity },
+        compare,
+      ),
+    ).toBeUndefined();
+    expect(compare).toHaveBeenCalledTimes(0);
   });
 });
 

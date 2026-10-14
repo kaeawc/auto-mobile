@@ -44,6 +44,20 @@ import { PortManager } from "../../../src/utils/PortManager";
 import { logger } from "../../../src/utils/logger";
 import { FakeDeviceWindowCacheInvalidator } from "../../fakes/FakeDeviceWindowCacheInvalidator";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
+import {
+  getObserveCacheStore,
+  setObserveCacheStore,
+} from "../../../src/features/observe/cache/ObserveCacheRegistry";
+
+let previousObserveCacheStore: ReturnType<typeof getObserveCacheStore>;
+beforeEach(() => {
+  previousObserveCacheStore = getObserveCacheStore();
+  // Launch invalidation records pending window resolution in the shared registry.
+  setObserveCacheStore(new FakeObserveCacheStore());
+});
+afterEach(() => {
+  setObserveCacheStore(previousObserveCacheStore);
+});
 
 describe("LaunchApp", () => {
   let device: BootedDevice;

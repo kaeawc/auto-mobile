@@ -20,7 +20,7 @@ describe("runSessionBiometricMutation", () => {
       timer,
       new FakeDeviceSessionPersistence(),
       () => new FakeDbWriteBarrier(),
-      () => ({ restore: async () => {} }),
+      () => ({ restore: async () => ({ status: "restored" as const }) }),
       () => ({ restore: async (enrollment) => restored.push(enrollment) }),
     );
     const started = Promise.withResolvers<void>();
@@ -59,7 +59,7 @@ describe("runSessionBiometricMutation", () => {
       new FakeTimer(),
       new FakeDeviceSessionPersistence(),
       () => new FakeDbWriteBarrier(),
-      () => ({ restore: async () => {} }),
+      () => ({ restore: async () => ({ status: "restored" as const }) }),
       () => ({ restore: async (enrollment) => restored.push(enrollment) }),
     );
     const finished = Promise.withResolvers<void>();
@@ -103,7 +103,7 @@ describe("runSessionBiometricMutation", () => {
       new FakeTimer(),
       new FakeDeviceSessionPersistence(),
       () => new FakeDbWriteBarrier(),
-      () => ({ restore: async () => {} }),
+      () => ({ restore: async () => ({ status: "restored" as const }) }),
       () => ({ restore: async (enrollment) => restored.push(enrollment) }),
     );
     try {

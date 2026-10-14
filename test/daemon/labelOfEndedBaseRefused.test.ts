@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   SessionManager,
   TerminalSessionError,
@@ -15,6 +15,16 @@ import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersiste
 import { FakeTimer } from "../fakes/FakeTimer";
 import { drainMicrotasks, FAKE_TIMER_QUIET_TURNS } from "../helpers/fakeTimerStepping";
 import { asPlanAllocation } from "../helpers/planLabelAllocation";
+import { snapshotPlatformDeviceManagerFactory } from "../helpers/platformDeviceManagerSnapshot";
+
+let restoreFactory: (() => void) | undefined;
+beforeEach(() => {
+  restoreFactory = snapshotPlatformDeviceManagerFactory();
+});
+afterEach(() => {
+  restoreFactory?.();
+  restoreFactory = undefined;
+});
 
 // #11640, owner decision 2026-10-11: the base's end ends its labels. A plan's derived
 // `<base>:<label>` session whose base has ended, or is past its idle deadline and not yet scanned,

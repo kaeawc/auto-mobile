@@ -3569,6 +3569,7 @@ export class SessionManager {
       return await this.withinCreateDeadline(sessionId, assignedDevice, pendingCreation.promise);
     }
 
+    this.keepAwakeRestoreReports.delete(sessionId);
     const now = this.sessionNow();
     const persistedRecovery = this.pendingPersistedRecoveries.get(sessionId);
     const creatorSource = this.creatorSourceForCreation(sessionId, persistenceSource);
@@ -9447,12 +9448,6 @@ export class SessionManager {
     }
   }
 
-  private recordFailedKeepAwakeRestore(sessionId: string, error: unknown): void {
-    if (error instanceof KeepAwakeRestoreError) {
-      this.recordKeepAwakeRestoreReport(sessionId, error.report);
-    }
-  }
-
   private async restoreKeepScreenAwakeTarget(target: KeepScreenAwakeRestoreTarget): Promise<void> {
     if (!this.restoreIncarnationIsCurrent(target)) {
       return;
@@ -9470,7 +9465,7 @@ export class SessionManager {
           .then((outcome) => {
             identitySignal.throwIfAborted();
             if (outcome.status === "failed") {
-              throw new KeepAwakeRestoreError(
+              const error = new KeepAwakeRestoreError(
                 outcome.failures.map(({ setting, error }) => `${setting}: ${error}`).join("; ") +
                   (outcome.baselineSettings?.length
                     ? `; baseline applied: ${outcome.baselineSettings.map(({ setting, value }) => `${setting}=${value}`).join(", ")}`
@@ -9480,6 +9475,8 @@ export class SessionManager {
                   settings: [...outcome.failures, ...(outcome.baselineSettings ?? [])],
                 },
               );
+              this.recordKeepAwakeRestoreReport(target.sessionId, error.report);
+              throw error;
             }
             this.keepAwakeRestoreReports.delete(target.sessionId);
             if (outcome.status === "restored_to_baseline") {
@@ -9506,7 +9503,6 @@ export class SessionManager {
     let lastError = initialError;
     for (let attempt = 1; attempt <= KEEP_SCREEN_AWAKE_RESTORE_RETRY_ATTEMPTS; attempt++) {
       if (forced()) {
-        this.recordFailedKeepAwakeRestore(target.sessionId, lastError);
         // The device may belong to the next owner: never retry against it (#11058).
         logger.warn(
           `Not retrying the keep-awake restore for session ${target.sessionId} after a forced release: ${lastError}`,
@@ -9515,7 +9511,6 @@ export class SessionManager {
       }
       await this.timer.sleep(KEEP_SCREEN_AWAKE_RESTORE_RETRY_DELAY_MS);
       if (forced() || !this.restoreIncarnationIsCurrent(target)) {
-        this.recordFailedKeepAwakeRestore(target.sessionId, lastError);
         return;
       }
       try {
@@ -9529,7 +9524,6 @@ export class SessionManager {
         );
       }
     }
-    this.recordFailedKeepAwakeRestore(target.sessionId, lastError);
     logger.warn(
       `Gave up restoring keep-awake state for session ${target.sessionId} after ` +
         `${KEEP_SCREEN_AWAKE_RESTORE_RETRY_ATTEMPTS} retries; device ${target.deviceId} ` +

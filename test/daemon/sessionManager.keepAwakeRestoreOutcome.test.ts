@@ -81,8 +81,8 @@ async function harness(failures: number, baseline = false, mixedFailure = false)
     await timer.advanceTimeAsync(ms, () => drainUntilQuiescent(timer));
     await drainUntilQuiescent(timer);
   };
-  const release = async () => {
-    await manager.releaseSession("old");
+  const release = async (reason = "explicit-release") => {
+    await manager.releaseSession("old", reason);
     await pool.releaseDevice(device.deviceId, "old");
     await step(0);
   };
@@ -112,19 +112,27 @@ beforeAll(async () => {
   fixtures.set("mixed", await harness(1, false, true));
   fixtures.set("mixed-final", await harness(Infinity, false, true));
   fixtures.set("retry-baseline", await harness(1, true));
+  fixtures.set("reuse", await harness(0, true));
   for (const baseline of [false, true]) {
     fixtures.set(String(baseline), await harness(0, baseline));
   }
 });
 
 test.each([1, 2])(
-  "failed outcome retries %i times and completes without a marker",
+  "first failure is reported while %i retries are pending, then success clears it",
   async (failures) => {
     const h = fixtures.get(String(failures))!;
     h.warn.mockClear();
     await h.release();
     expect(h.calls).toBe(1);
-    expect(h.manager.getKeepAwakeRestoreReport("old")).toBeUndefined();
+    expect(h.timer.getPendingSleepCount()).toBeGreaterThan(0);
+    expect(h.manager.getKeepAwakeRestoreReport("old")).toEqual({
+      status: "failed",
+      settings: [
+        { setting: "screen_off_timeout", error: "restore unavailable" },
+        { setting: "stay_on_while_plugged_in", error: "write rejected" },
+      ],
+    });
     for (let attempt = 0; attempt < failures; attempt++) {
       await h.step(250);
     }
@@ -217,9 +225,16 @@ test("mixed failure reports the baseline writes in the retry error", async () =>
 test("final mixed failure includes both errors and successful baseline writes", async () => {
   const h = fixtures.get("mixed-final")!;
   await h.release();
-  expect(h.manager.getKeepAwakeRestoreReport("old")).toBeUndefined();
+  const failedReport = {
+    status: "failed",
+    settings: [
+      { setting: "screen_off_timeout", error: "restore unavailable" },
+      { setting: "stay_on_while_plugged_in", value: "0" },
+    ],
+  };
+  expect(h.manager.getKeepAwakeRestoreReport("old")).toEqual(failedReport);
   await h.step(250);
-  expect(h.manager.getKeepAwakeRestoreReport("old")).toBeUndefined();
+  expect(h.manager.getKeepAwakeRestoreReport("old")).toEqual(failedReport);
   await h.step(250);
   expect(h.manager.getKeepAwakeRestoreReport("old")).toEqual({
     status: "failed",
@@ -233,10 +248,19 @@ test("final mixed failure includes both errors and successful baseline writes", 
 test("a retry restoring to baseline reports the final baseline", async () => {
   const h = fixtures.get("retry-baseline")!;
   await h.release();
-  expect(h.manager.getKeepAwakeRestoreReport("old")).toBeUndefined();
+  expect(h.manager.getKeepAwakeRestoreReport("old")?.status).toBe("failed");
   await h.step(250);
   expect(h.manager.getKeepAwakeRestoreReport("old")).toEqual({
     status: "restored_to_baseline",
     settings: [{ setting: "screen_off_timeout", value: "60000" }],
   });
+});
+
+test("creating a new incarnation of a reported session id clears its report", async () => {
+  const h = fixtures.get("reuse")!;
+  await h.release("device-restart:fake-device");
+  expect(h.manager.getKeepAwakeRestoreReport("old")?.status).toBe("restored_to_baseline");
+  await h.manager.createSession("old", device.deviceId, "android");
+  expect(h.manager.hasSession("old")).toBe(true);
+  expect(h.manager.getKeepAwakeRestoreReport("old")).toBeUndefined();
 });

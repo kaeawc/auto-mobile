@@ -210,6 +210,14 @@ describe.each([false, true])("terminal release retry (autolock=%s)", (autolock) 
             ...(reported ? { keepAwakeRestore: report } : {}),
           },
         });
+        expect(await release()).toEqual({
+          success: true,
+          result: {
+            message: `Session ${sessionId} already released or never existed`,
+            alreadyReleased: true,
+            ...(reported ? { keepAwakeRestore: report } : {}),
+          },
+        });
       } finally {
         getter.mockRestore();
       }

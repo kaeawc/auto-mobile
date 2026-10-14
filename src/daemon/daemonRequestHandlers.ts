@@ -1802,6 +1802,14 @@ function bindManagedConnection(
   state.getManagedConnectionScopes?.().bind(socketSessionId, { scopeKey, sessionUuids });
 }
 
+function keepAwakeRestoreResult(
+  manager: ReturnType<DaemonStateAccess["getSessionManager"]>,
+  sessionId: string,
+) {
+  const keepAwakeRestore = manager.getKeepAwakeRestoreReport?.(sessionId);
+  return keepAwakeRestore ? { keepAwakeRestore } : {};
+}
+
 /**
  * An unknown id stays idempotent for programmatic callers (the desktop releases sessions a
  * restarted daemon forgot). A caller that sets `requireKnown` (the `--daemon release-session`
@@ -1857,6 +1865,7 @@ async function releaseUnknownSession(
     result: {
       message: `Session ${sessionId} already released or never existed`,
       alreadyReleased: true,
+      ...keepAwakeRestoreResult(manager, sessionId),
     },
   };
 }
@@ -1898,14 +1907,13 @@ async function releaseBoundSession(
       return deviceId;
     },
   });
-  const keepAwakeRestore = manager.getKeepAwakeRestoreReport?.(sessionId);
   return {
     success: true,
     result: {
       message: `Session ${sessionId} released`,
       device: deviceId,
       alreadyReleased: false,
-      ...(keepAwakeRestore ? { keepAwakeRestore } : {}),
+      ...keepAwakeRestoreResult(manager, sessionId),
     },
   };
 }

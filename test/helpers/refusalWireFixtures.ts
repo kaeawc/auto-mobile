@@ -791,6 +791,16 @@ function budgetSlotFailure(): ManagedSlotsFailure {
             lastError: "native delete keeps failing",
           },
         ],
+        charged: [
+          { platform: "android", stableDeviceId: "active-device", kind: "assigned_active" },
+          { platform: "android", stableDeviceId: "amslot-kept", kind: "deletion_stuck" },
+          {
+            platform: "android",
+            stableDeviceId: "amslot-stuck",
+            kind: "deletion_stuck",
+            uncounted: true,
+          },
+        ],
         evictionFailures: [
           { platform: "android", stableDeviceId: "amslot-kept", message: "delete failed" },
         ],

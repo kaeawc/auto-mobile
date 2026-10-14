@@ -469,7 +469,11 @@ private fun RenderPrototypeNodeContent(
         }
       }
     "flow" ->
-      PrototypeFlowLayout(containerModifier, node.style.source) {
+      PrototypeFlowLayout(
+        containerModifier,
+        node.style.source,
+        (checkNotNull(node.source) as PrototypeFlowNode).maxLines,
+      ) {
         node.children.forEach { key(it.identity) { RenderPrototypeNode(it, interact) } }
       }
     "grid" ->

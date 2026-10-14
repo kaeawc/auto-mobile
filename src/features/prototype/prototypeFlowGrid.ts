@@ -1,7 +1,7 @@
 import { PROTOTYPE_FLOW_GRID_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { record } from "./prototypeTemplate";
 
-/** Paths of wrapping containers in the expanded spec, in document order. */
+/** Paths of fields requiring flow/grid support in the expanded spec, in document order. */
 export function prototypeFlowGridFields(spec: unknown): string[] {
   return nodeFields(record(spec)?.root, "root");
 }
@@ -13,6 +13,13 @@ function nodeFields(value: unknown, path: string): string[] {
   }
   return [
     ...(node.type === "flow" || node.type === "grid" ? [path] : []),
+    ...(node.span !== undefined ? [`${path}.span`] : []),
+    ...(record(node.style)?.runSpacing !== undefined ? [`${path}.style.runSpacing`] : []),
+    ...(Array.isArray(node.styleWhen) ? node.styleWhen : []).flatMap((entry, index) =>
+      record(record(entry)?.style)?.runSpacing !== undefined
+        ? [`${path}.styleWhen[${index}].style.runSpacing`]
+        : [],
+    ),
     ...(Array.isArray(node.children) ? node.children : []).flatMap((child, index) =>
       nodeFields(child, `${path}.children[${index}]`),
     ),
@@ -30,5 +37,10 @@ export function prototypeFlowGridUnsupportedMessage(
     platform === "ios"
       ? "Relaunch the app with launchApp prototype: true to load the agent built for this AutoMobile version"
       : "Update the connected CtrlProxy";
-  return `The ${device} does not advertise ${PROTOTYPE_FLOW_GRID_CAPABILITY}, so it cannot draw the flow or grid node at ${fields[0]}${more}. Nothing was shown. ${update}, or replace flow/grid with row/column/box containers.`;
+  const feature = fields[0]?.endsWith(".runSpacing")
+    ? "runSpacing value"
+    : fields[0]?.endsWith(".span")
+      ? "span value"
+      : "flow or grid node";
+  return `The ${device} does not advertise ${PROTOTYPE_FLOW_GRID_CAPABILITY}, so it cannot draw the ${feature} at ${fields[0]}${more}. Nothing was shown. ${update}, or replace flow/grid with row/column/box containers and remove runSpacing/span.`;
 }

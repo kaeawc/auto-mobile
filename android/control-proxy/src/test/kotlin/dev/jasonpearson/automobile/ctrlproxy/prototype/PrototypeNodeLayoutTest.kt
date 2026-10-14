@@ -73,6 +73,37 @@ class PrototypeNodeLayoutTest {
     value * RuntimeEnvironment.getApplication().resources.displayMetrics.density
 
   @Test
+  fun `flow reports one line height while measuring and placing overflow children`() {
+    val root =
+      render(
+        PrototypeFlowNode(
+          testTag = "flow",
+          maxLines = 1,
+          style =
+            PrototypeStyle(width = PrototypeDimension.Dp(80.0), spacing = 4.0, runSpacing = 6.0),
+          children =
+            (0 until 4).map {
+              PrototypeBoxNode(
+                testTag = "flow-$it",
+                style =
+                  PrototypeStyle(
+                    width = PrototypeDimension.Dp(70.0),
+                    height = PrototypeDimension.Dp(20.0),
+                  ),
+                children = emptyList(),
+              )
+            },
+        ),
+      )
+    assertEquals(dp(20f), root.tagged("flow").size.height.toFloat(), 1f)
+    for (index in 0 until 4) {
+      val child = root.tagged("flow-$index")
+      assertEquals(dp(20f), child.size.height.toFloat(), 1f)
+      assertEquals(dp(index * 26f), child.positionInRoot.y, 1f)
+    }
+  }
+
+  @Test
   fun `grid measures equal columns and wraps a span that does not fit`() {
     // Semantic bounds describe the drawn child, so fill the slot rather than wrap empty content.
     val cellStyle =

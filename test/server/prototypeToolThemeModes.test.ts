@@ -136,6 +136,36 @@ describe("prototype show with per-mode spec forms (#11218)", () => {
     },
   );
 
+  test.each([
+    ["root.style.runSpacing", { style: { runSpacing: 0 } }],
+    [
+      "root.styleWhen[0].style.runSpacing",
+      { styleWhen: [{ when: { key: "active", equals: true }, style: { runSpacing: 2 } }] },
+    ],
+  ])("ordinary row with %s requires flow/grid capability", async (field, styles) => {
+    const spec = {
+      ...plain,
+      state: { active: true },
+      root: { type: "row", children: [plain.root], ...styles },
+    };
+    client.setSupportedCommands([]);
+    for (const device of [android, ios]) {
+      const result = await call(device, spec);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain(PROTOTYPE_FLOW_GRID_CAPABILITY);
+      expect(result.error).toContain(`runSpacing value at ${field}`);
+      expect(result.error).toContain("Nothing was shown.");
+    }
+    expect(client.getPrototypeHistory()).toEqual([]);
+    expect(agentShows()).toEqual([]);
+    client.setSupportedCommands([PROTOTYPE_FLOW_GRID_CAPABILITY]);
+    expect((await call(android, spec)).success).toBe(true);
+    unsubscribe();
+    register([...FAKE_PROTOTYPE_AGENT_CAPABILITIES, PROTOTYPE_FLOW_GRID_CAPABILITY]);
+    expect((await call(ios, spec)).success).toBe(true);
+    expect(agentShows()).toMatchObject([{ body: { spec } }]);
+  });
+
   test("component flow is refused after expansion before any asset upload", async () => {
     client.setSupportedCommands([]);
     const result = await call(android, {

@@ -70,6 +70,7 @@ class PrototypeContainerSemanticsTest {
         ),
       )
     assertEquals("flow", root.tagged("flow").config[PrototypeRole])
+    assertEquals(root.tagged("flow-0").size.height, root.tagged("flow").size.height)
     for (index in 0 until 8) assertTrue(
       root.tagged("flow-$index").config.contains(SemanticsProperties.Text),
     )

@@ -102,7 +102,7 @@ test("expanded component wrapping nodes and repeat data bindings retain their fi
   const result = validatePrototypeSpec(candidate);
   expect(result.success).toBe(true);
   if (result.success) {
-    expect(prototypeFlowGridFields(result.data)).toEqual(["root"]);
+    expect(prototypeFlowGridFields(result.data)).toEqual(["root", "root.children[0].span"]);
   }
 });
 
@@ -116,4 +116,21 @@ test("capability detection walks children and child in document order", () => {
     ),
   ).toEqual(["root.child", "root.child.children[0]"]);
   expect(prototypeFlowGridFields(spec(text))).toEqual([]);
+});
+
+test("capability detection finds runSpacing on ordinary nodes and conditional styles", () => {
+  const candidate = spec({
+    type: "row",
+    style: { runSpacing: 0 },
+    styleWhen: [{ when: { key: "active", equals: true }, style: { runSpacing: 2 } }],
+    children: [{ type: "scroll", child: { ...text, style: { runSpacing: 3 } } }],
+  });
+  expect(validatePrototypeSpec({ ...candidate, state: { active: true } }).success).toBe(true);
+  expect(prototypeFlowGridFields(candidate)).toEqual([
+    "root.style.runSpacing",
+    "root.styleWhen[0].style.runSpacing",
+    "root.children[0].child.style.runSpacing",
+  ]);
+  expect(prototypeFlowGridFields(spec({ ...text, span: 1 }))).toEqual(["root.span"]);
+  expect(prototypeFlowGridFields(spec({ ...text, style: { spacing: 2 } }))).toEqual([]);
 });

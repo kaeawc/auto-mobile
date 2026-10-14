@@ -937,7 +937,7 @@ function appLayerGrant(
   };
 }
 
-/** Refuses wrapping containers before sending a spec or uploading assets. */
+/** Refuses flow/grid nodes and fields before sending a spec or uploading assets. */
 async function flowGridRefusal(
   target: PrototypeTarget,
   args: z.infer<typeof prototypeSchema>,

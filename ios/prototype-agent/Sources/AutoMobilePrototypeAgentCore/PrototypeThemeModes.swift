@@ -129,7 +129,9 @@ extension NavItem {
     func visual(dark: Bool, available: Set<String>) -> PrototypeNavVisual {
         let id = image?.value(dark: dark)
         if let id, available.contains(id) { return .image(id) }
-        if let icon { return .icon(icon) }
+        if let icon {
+            return PrototypeIconSymbolTable.shared.resolve(icon) == .unknown ? .placeholder : .icon(icon)
+        }
         return id == nil ? .none : .placeholder
     }
 }

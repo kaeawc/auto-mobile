@@ -1,3 +1,4 @@
+import { PROTOTYPE_ICON_SF_SYMBOLS_CAPABILITY } from "../../../src/features/observe/android/ctrlProxyProtocol";
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
@@ -14,13 +15,11 @@ import {
 
 const swift = readFileSync(
   new URL(
-    "../../../ios/prototype-agent/Sources/AutoMobilePrototypeAgent/PrototypeRenderer.swift",
+    "../../../ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeAgentProtocol.swift",
     import.meta.url,
   ),
   "utf8",
 );
-const symbolBody = swift.match(/private let sfSymbols: \[String: String\] = \[([\s\S]*?)\n\]/)![1];
-const swiftKeys = [...symbolBody.matchAll(/"([^"]+)"\s*:/g)].map((match) => match[1]);
 const noCapabilities = () => false;
 const specFor = (root: PrototypeNode): PrototypeSpec => ({
   id: "panel",
@@ -110,9 +109,14 @@ describe("prototype platform notes", () => {
     expect(prototypePlatformNotes(clean, "ios", noCapabilities)).toEqual([]);
     expect(prototypePlatformNotes(spec, "ios", () => true)).toEqual([]);
   });
-  test("pins exactly the 55 iOS mapped names to the Swift source", () => {
+  test("pins the SF Symbols capability to the agent without advertising Material parity", () => {
     expect(IOS_PROTOTYPE_MAPPED_ICON_NAMES.size).toBe(55);
-    expect(new Set(swiftKeys)).toEqual(IOS_PROTOTYPE_MAPPED_ICON_NAMES);
+    expect(swift).toContain(
+      `static let iconSfSymbolsCapability = "${PROTOTYPE_ICON_SF_SYMBOLS_CAPABILITY}"`,
+    );
+    expect(swift).toContain("        iconSfSymbolsCapability,");
+    expect(swift).not.toContain("prototype_icon_set_material_v1");
+    expect(swift).not.toContain("prototype_icon_variant_v1");
   });
   test("caps paths at 20, keeps total and all distinct sorted icon values", () => {
     const many = specFor({
@@ -219,10 +223,117 @@ describe("prototype platform notes", () => {
     const guide = renderPrototypeGuide();
     expect(guide).toContain("## Platform differences");
     expect(guide).toContain("platformNotes");
+    expect(guide).toContain("iOS draws SF Symbols:");
+    expect(guide).toContain("filled/outlined map where a form exists");
+    expect(guide).toContain("rounded/sharp/twoTone");
     for (const difference of PROTOTYPE_PLATFORM_DIFFERENCES) {
       expect(guide).toContain(`\`${difference.construct}\``);
-      expect(guide).toContain(difference.detail);
+      if (!difference.construct.startsWith("icon.")) {
+        expect(guide).toContain(difference.detail);
+      }
       expect(guide).toContain(difference.capability);
     }
+  });
+});
+
+const currentAgent = (name: string) => name === PROTOTYPE_ICON_SF_SYMBOLS_CAPABILITY;
+describe("SF Symbols agent platform notes", () => {
+  test("notes unmapped names with values and leaves mapped defaults alone", () => {
+    const notes = prototypePlatformNotes(
+      specFor({ type: "icon", name: "android" }),
+      "ios",
+      currentAgent,
+    );
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({
+      construct: "icon.name",
+      effect: "substituted",
+      paths: ["root.name"],
+      values: ["android"],
+    });
+    expect(notes[0].detail).toContain("no SF Symbol equivalent");
+    expect(
+      prototypePlatformNotes(specFor({ type: "icon", name: "ac_unit" }), "ios", currentAgent),
+    ).toEqual([]);
+  });
+  test.each(["filled", "outlined"] as const)("%s with a form needs no note", (variant) => {
+    expect(
+      prototypePlatformNotes(specFor({ type: "icon", name: "home", variant }), "ios", currentAgent),
+    ).toEqual([]);
+  });
+  test.each(["filled", "outlined", "rounded", "sharp", "twoTone"] as const)(
+    "%s without an SF form substitutes the default",
+    (variant) => {
+      const notes = prototypePlatformNotes(
+        specFor({ type: "icon", name: "wifi", variant }),
+        "ios",
+        currentAgent,
+      );
+      expect(notes).toHaveLength(1);
+      expect(notes[0]).toMatchObject({
+        construct: "icon.variant",
+        effect: "substituted",
+        paths: ["root.variant"],
+      });
+    },
+  );
+  test.each(["rounded", "sharp", "twoTone"] as const)(
+    "%s substitutes even for a fill/outline pair",
+    (variant) => {
+      expect(
+        prototypePlatformNotes(
+          specFor({ type: "icon", name: "home", variant }),
+          "ios",
+          currentAgent,
+        )[0]?.construct,
+      ).toBe("icon.variant");
+    },
+  );
+  test("an unmapped variant is covered only by the name note", () => {
+    const notes = prototypePlatformNotes(
+      specFor({ type: "icon", name: "android", variant: "filled" }),
+      "ios",
+      currentAgent,
+    );
+    expect(notes.map((note) => note.construct)).toEqual(["icon.name"]);
+  });
+  test("container variants are not icon variants", () => {
+    expect(
+      prototypePlatformNotes(
+        specFor({ type: "iconButton", icon: "wifi", variant: "outlined" }),
+        "ios",
+        currentAgent,
+      ),
+    ).toEqual([]);
+  });
+  test("Material parity capabilities still lift both notes", () => {
+    const notes = prototypePlatformNotes(
+      specFor({ type: "icon", name: "android", variant: "sharp" }),
+      "ios",
+      (name) =>
+        currentAgent(name) ||
+        name === "prototype_icon_set_material_v1" ||
+        name === "prototype_icon_variant_v1",
+    );
+    expect(notes).toEqual([]);
+    expect(
+      prototypePlatformNotes(
+        specFor({ type: "icon", name: "wifi", variant: "sharp" }),
+        "ios",
+        (name) => currentAgent(name) || name === "prototype_icon_variant_v1",
+      ),
+    ).toEqual([]);
+  });
+  test("caps current-agent paths and keeps all distinct names", () => {
+    const root: PrototypeNode = {
+      type: "column",
+      children: Array.from({ length: 22 }, (_, index) => ({
+        type: "icon",
+        name: index === 21 ? "facebook" : "android",
+      })),
+    };
+    const notes = prototypePlatformNotes(specFor(root), "ios", currentAgent);
+    expect(notes[0]).toMatchObject({ total: 22, values: ["android", "facebook"] });
+    expect(notes[0].paths).toHaveLength(20);
   });
 });

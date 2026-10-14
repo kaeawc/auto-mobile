@@ -120,8 +120,10 @@ struct PrototypeSpec: Decodable {
         try PrototypeLimits.guardRepeatPathCells(raw, data: data)
         let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
         try PrototypeLimits.guardTree(resolved)
+        let expanded = PrototypeRepeat.expand(resolved)
+        try PrototypePagerOptions.validate(expanded)
         root = try JSONDecoder().decode(
-            PrototypeNode.self, from: JSONEncoder().encode(PrototypeRepeat.expand(resolved))
+            PrototypeNode.self, from: JSONEncoder().encode(expanded)
         )
         // There is no Swift twin of the host validator, so the forms `prototype_theme_modes_v1`
         // added are checked here: a malformed one fails the show instead of drawing a fallback.
@@ -559,6 +561,10 @@ final class PrototypeNode: Decodable {
     let stateKey: String?
     let placeholder: String?
     let axis: String?
+    /// Pager-only layout options; absent fields retain the legacy horizontal pager.
+    let pageSpacing: Double?
+    let peek: PrototypePagerPeek?
+    let pageSize: PrototypePagerPageSize?
     let items: [NavItem]?
     let pager: String?
     let scrollable: Bool?

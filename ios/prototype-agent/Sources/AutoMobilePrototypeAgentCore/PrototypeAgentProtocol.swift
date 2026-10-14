@@ -26,6 +26,7 @@ enum PrototypeAgentProtocol {
         screenshotHideCapability,
         inspectCapability,
         themeModesCapability,
+        pagerOptionsCapability,
         appearanceCapability,
         windowChromeCapability,
         iconSfSymbolsCapability,
@@ -58,6 +59,9 @@ enum PrototypeAgentProtocol {
     /// spec that uses one on an agent that does not advertise it. Same name as the CtrlProxy
     /// capability.
     static let themeModesCapability = "prototype_theme_modes_v1"
+    /// Draws pager axis, pageSpacing, peek and pageSize natively. The host refuses a spec that
+    /// uses one on an agent that does not advertise it. Same name as the CtrlProxy capability.
+    static let pagerOptionsCapability = "prototype_pager_options_v1"
     /// Appearance (#11222): `show_prototype` takes `appearance` (`device`, `light` or `dark`), the
     /// show result and `get_prototype_status` report `appearance: {mode, source, deviceDark}`, and
     /// any change of the shown prototype's mode (the device flipping, or state moving the inferred

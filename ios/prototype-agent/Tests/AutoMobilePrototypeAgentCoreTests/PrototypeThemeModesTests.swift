@@ -5,10 +5,7 @@ import XCTest
 /// and the on-device check that stands in for the host validator the agent does not have.
 final class PrototypeThemeModesTests: XCTestCase {
     private var fixtures: URL {
-        URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("test/fixtures/prototype-spec")
+        PrototypeSpecFixtures.directory
     }
 
     private func spec(_ json: String) throws -> PrototypeSpec {
@@ -17,10 +14,7 @@ final class PrototypeThemeModesTests: XCTestCase {
 
     /// The `spec` of an `invalid/<name>.json` fixture, which wraps it with its `expectedPath`.
     private func decodeInvalid(_ name: String) throws -> PrototypeSpec {
-        let data = try Data(contentsOf: fixtures.appendingPathComponent("invalid/\(name).json"))
-        let wrapper = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any], name)
-        let spec = try XCTUnwrap(wrapper["spec"], name)
-        return try JSONDecoder().decode(PrototypeSpec.self, from: JSONSerialization.data(withJSONObject: spec))
+        try PrototypeSpecFixtures.invalid(name).decode()
     }
 
     private func gradient(_ json: String) throws -> PrototypeGradient {
@@ -40,7 +34,8 @@ final class PrototypeThemeModesTests: XCTestCase {
             "show_prototype", "dismiss_prototype", "put_prototype_asset", "remove_prototype_asset",
             "get_prototype_status", "prototype_show_in_place_v1", "prototype_anchor_v1", "hide_for_capture",
             "restore_after_capture", "screenshot_hide_prototype_v1", "prototype_inspect_v1",
-            "prototype_theme_modes_v1", "prototype_appearance_v1", "prototype_window_chrome_v1",
+            "prototype_theme_modes_v1", "prototype_pager_options_v1", "prototype_appearance_v1",
+            "prototype_window_chrome_v1",
             "prototype_icon_sf_symbols_v1",
             "prototype_data_model_v1",
         ])

@@ -28,6 +28,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.center
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.DefaultShadowColor
 import androidx.compose.ui.graphics.LinearGradientShader
 import androidx.compose.ui.graphics.RadialGradientShader
@@ -41,6 +42,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -74,6 +79,52 @@ internal val LocalPrototypeRenderWorkProbe =
   staticCompositionLocalOf<((PrototypeRenderWork, String) -> Unit)?> { null }
 
 val PrototypeRole = SemanticsPropertyKey<String>("PrototypeRole")
+
+/** Font assets are remembered once per distinct authored family, outside the string builder. */
+@Composable
+private fun prototypeAnnotatedText(
+  spans: List<PrototypeRenderSpan>,
+  interact: (PrototypeInteraction) -> Unit,
+): AnnotatedString {
+  val families = mutableMapOf<PrototypeFontFamily, FontFamily>()
+  for (span in spans.distinctBy { it.style.source.fontFamily }) {
+    val family = span.style.source.fontFamily ?: continue
+    key(family) { families[family] = rememberPrototypeFontFamily(span.style) }
+  }
+  val styles = spans.map { span ->
+    val rendered = span.style
+    val source = rendered.source
+    SpanStyle(
+      color = prototypeThemedColor(rendered.color, source.color) ?: rendered.color,
+      background =
+        prototypeThemedColor(rendered.background, source.background) ?: Color.Unspecified,
+      fontSize = source.textSize?.toFloat()?.sp ?: TextUnit.Unspecified,
+      fontWeight = if (source.fontWeight != null) rendered.fontWeight else null,
+      fontStyle = if (source.fontStyle != null) rendered.fontStyle else null,
+      textDecoration = if (source.textDecoration != null) rendered.textDecoration else null,
+      letterSpacing = source.letterSpacing?.toFloat()?.sp ?: TextUnit.Unspecified,
+      fontFamily = source.fontFamily?.let { families[it] },
+    )
+  }
+  return buildAnnotatedString {
+    spans.forEachIndexed { index, span ->
+      val start = length
+      append(span.text)
+      addStyle(styles[index], start, length)
+      span.onTap?.let { actions ->
+        addLink(
+          LinkAnnotation.Clickable(
+            tag = "span-$index",
+            styles = null,
+            linkInteractionListener = { interact(PrototypeInteraction.Tap(actions)) },
+          ),
+          start,
+          length,
+        )
+      }
+    }
+  }
+}
 
 /** Compose owns gesture mechanics only; all authored state/actions go through the pure runtime. */
 @Composable
@@ -471,29 +522,61 @@ private fun RenderPrototypeNodeContent(
       val textColor =
         if (source.color == null && role != null) MaterialTheme.colorScheme.onSurface
         else prototypeThemedColor(node.style.color, source.color) ?: node.style.color
-      Text(
-        node.text,
-        modifier,
-        color = textColor,
-        // sp, so prototype text follows the system font scale like the app it prototypes (#10436).
-        // A `textStyle` role supplies size, weight and family; explicit style fields still win.
-        fontSize =
-          source.textSize?.toFloat()?.sp ?: if (role == null) 14.sp else TextUnit.Unspecified,
-        fontWeight = if (role == null || source.fontWeight != null) node.style.fontWeight else null,
-        // Only an authored family overrides; otherwise the text inherits the theme's family through
-        // its role or the themed body style, as plain text in the prototyped app would (#10561).
-        fontFamily =
-          if (source.fontFamily != null) rememberPrototypeFontFamily(node.style) else null,
-        // Authored-only, like fontWeight: an unset property keeps what the role or theme gives.
-        fontStyle = if (source.fontStyle != null) node.style.fontStyle else null,
-        letterSpacing = source.letterSpacing?.toFloat()?.sp ?: TextUnit.Unspecified,
-        textDecoration = if (source.textDecoration != null) node.style.textDecoration else null,
-        textAlign = node.style.textAlign,
-        lineHeight = source.lineHeight?.toFloat()?.sp ?: TextUnit.Unspecified,
-        overflow = node.style.overflow,
-        maxLines = source.maxLines ?: Int.MAX_VALUE,
-        style = role ?: LocalTextStyle.current,
-      )
+      if (node.spans == null) {
+        Text(
+          node.text,
+          modifier,
+          color = textColor,
+          // sp, so prototype text follows the system font scale like the app it prototypes
+          // (#10436).
+          // A `textStyle` role supplies size, weight and family; explicit style fields still win.
+          fontSize =
+            source.textSize?.toFloat()?.sp ?: if (role == null) 14.sp else TextUnit.Unspecified,
+          fontWeight =
+            if (role == null || source.fontWeight != null) node.style.fontWeight else null,
+          // Only an authored family overrides; otherwise the text inherits the theme's family
+          // through
+          // its role or the themed body style, as plain text in the prototyped app would (#10561).
+          fontFamily =
+            if (source.fontFamily != null) rememberPrototypeFontFamily(node.style) else null,
+          // Authored-only, like fontWeight: an unset property keeps what the role or theme gives.
+          fontStyle = if (source.fontStyle != null) node.style.fontStyle else null,
+          letterSpacing = source.letterSpacing?.toFloat()?.sp ?: TextUnit.Unspecified,
+          textDecoration = if (source.textDecoration != null) node.style.textDecoration else null,
+          textAlign = node.style.textAlign,
+          lineHeight = source.lineHeight?.toFloat()?.sp ?: TextUnit.Unspecified,
+          overflow = node.style.overflow,
+          maxLines = source.maxLines ?: Int.MAX_VALUE,
+          style = role ?: LocalTextStyle.current,
+        )
+      } else {
+        Text(
+          prototypeAnnotatedText(node.spans, interact),
+          modifier,
+          color = textColor,
+          // sp, so prototype text follows the system font scale like the app it prototypes
+          // (#10436).
+          // A `textStyle` role supplies size, weight and family; explicit style fields still win.
+          fontSize =
+            source.textSize?.toFloat()?.sp ?: if (role == null) 14.sp else TextUnit.Unspecified,
+          fontWeight =
+            if (role == null || source.fontWeight != null) node.style.fontWeight else null,
+          // Only an authored family overrides; otherwise the text inherits the theme's family
+          // through
+          // its role or the themed body style, as plain text in the prototyped app would (#10561).
+          fontFamily =
+            if (source.fontFamily != null) rememberPrototypeFontFamily(node.style) else null,
+          // Authored-only, like fontWeight: an unset property keeps what the role or theme gives.
+          fontStyle = if (source.fontStyle != null) node.style.fontStyle else null,
+          letterSpacing = source.letterSpacing?.toFloat()?.sp ?: TextUnit.Unspecified,
+          textDecoration = if (source.textDecoration != null) node.style.textDecoration else null,
+          textAlign = node.style.textAlign,
+          lineHeight = source.lineHeight?.toFloat()?.sp ?: TextUnit.Unspecified,
+          overflow = node.style.overflow,
+          maxLines = source.maxLines ?: Int.MAX_VALUE,
+          style = role ?: LocalTextStyle.current,
+        )
+      }
     }
     "icon" -> {
       val variant = (node.source as? PrototypeIconNode)?.variant
@@ -911,7 +994,12 @@ private fun prototypeNodeModifier(
       (handleVisual || !isDecorativePrototypeVisual(node, tappable))
   ) {
     modifier = modifier.semantics {
-      if (node.role != "textField" && node.role !in SEMANTICS_FREE_CONTAINERS) {
+      if (
+        node.role != "textField" &&
+          node.role !in SEMANTICS_FREE_CONTAINERS &&
+          !(node.role == "text" && node.spans != null)
+      ) {
+        // Rich text keeps Text's own AnnotatedString semantics, including its link annotations.
         text = AnnotatedString(node.text)
       }
       this[PrototypeRole] = node.role

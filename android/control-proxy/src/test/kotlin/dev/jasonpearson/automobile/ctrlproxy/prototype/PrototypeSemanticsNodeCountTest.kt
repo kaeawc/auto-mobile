@@ -146,6 +146,33 @@ class PrototypeSemanticsNodeCountTest {
   }
 
   @Test
+  fun `rich text semantics preserve the tappable span link annotation`() {
+    val spec =
+      semanticsSpec(
+        PrototypeTextNode(
+          testTag = "rich-text",
+          spans =
+            listOf(
+              PrototypeTextSpan("Read "),
+              PrototypeTextSpan("terms", onTap = listOf(PrototypeEmitAction("open"))),
+            ),
+        ),
+      )
+    PrototypeSemanticsRender(spec).use { rendered ->
+      val node =
+        rendered.nodes.single {
+          it.config.getOrNull(SemanticsProperties.TestTag) == "rich-text"
+        }
+      val text = node.config[SemanticsProperties.Text].single()
+      assertEquals("Read terms", text.text)
+      val links = text.getLinkAnnotations(0, text.length)
+      assertEquals(1, links.size)
+      assertEquals(5, links.single().start)
+      assertEquals(10, links.single().end)
+    }
+  }
+
+  @Test
   fun `benchmark node counts and decorative images are pinned`() {
     PrototypeSemanticsRender(benchmarkSemanticsSpec()).use { rendered ->
       assertCounts(rendered, BENCHMARK_SEMANTICS_NODES, BENCHMARK_ROLE_NODES)

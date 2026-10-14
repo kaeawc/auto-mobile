@@ -250,6 +250,12 @@ internal object PrototypeBindableFields {
         field(node, "text", path, PrototypeBindableKind.TEXT)?.let {
           return it
         }
+        for ((span, spanPath) in objects(node, "spans", path)) {
+          (field(span, "text", spanPath, PrototypeBindableKind.TEXT) ?: actions(span, spanPath))
+            ?.let {
+              return it
+            }
+        }
       }
       return component(node, path)
         ?: condition(node["visibleWhen"], "$path.visibleWhen")

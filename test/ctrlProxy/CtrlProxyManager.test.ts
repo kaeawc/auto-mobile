@@ -26,6 +26,9 @@ import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { logger } from "../../src/utils/logger";
 import { DeviceLostError } from "../../src/models/DeviceLostError";
 import { AdbDeviceOfflineError } from "../../src/utils/android-cmdline-tools/AdbDeviceHealth";
+import { FakeSavedPrototypeMirror } from "../fakes/FakeSavedPrototypeMirror";
+import { NoOpPerformanceTracker } from "../../src/utils/PerformanceTracker";
+import type { SavedPrototypeRestoreReport } from "../../src/features/prototype/savedPrototypeRestore";
 
 // Captured on a bound API 36 / Android 16 google_apis arm64 emulator. No older
 // API-level dumpsys captures exist in this repository; variants below are
@@ -93,6 +96,183 @@ describe("CtrlProxyManager", function () {
   let prefetchCacheDir: string;
   let apkPayload: Buffer;
   const scratch = useScratchRoot("ctrlproxy-manager-test-");
+
+  describe("saved prototype reinstall recovery", () => {
+    function reinstallHarness() {
+      const mirror = new FakeSavedPrototypeMirror();
+      const adb = new FakeAdbExecutor();
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        adb,
+        new FakeTimer(),
+      );
+      manager.setSavedPrototypeMirrorForTesting(mirror);
+      const order: string[] = [];
+      const warn = spyOn(logger, "warn").mockImplementation((message) => {
+        order.push(`warn:${message}`);
+      });
+      const uninstall = spyOn(manager, "executeApkStage").mockImplementation(async (command) => {
+        order.push(command);
+        return { stdout: "Success", stderr: "" };
+      });
+      const install = spyOn(manager, "install").mockImplementation(async () => {
+        order.push("install");
+      });
+      const enable = spyOn(manager, "enable").mockImplementation(async () => {
+        order.push("enable");
+      });
+      const report: SavedPrototypeRestoreReport = { restored: ["panel"], skipped: [], failed: [] };
+      let restoreCalls = 0;
+      manager.setSavedPrototypeRestorerForTesting(async (serial, usedMirror) => {
+        expect(serial).toBe(testDevice.deviceId);
+        expect(usedMirror).toBe(mirror);
+        restoreCalls++;
+        order.push("restore");
+        return report;
+      });
+      const invoke = (installed = true, force = true) =>
+        manager["installDownloadedApkGuarded"](
+          "/fake.apk",
+          { status: "not_installed" },
+          installed,
+          force,
+          new NoOpPerformanceTracker(),
+        );
+      const record = () =>
+        mirror.record(testDevice.deviceId, {
+          id: "panel",
+          label: "My panel",
+          spec: {
+            id: "panel",
+            window: { placement: { type: "fullscreen" } },
+            root: { type: "text", text: "Hello" },
+          },
+          assets: [],
+        });
+      return {
+        manager,
+        mirror,
+        report,
+        order,
+        invoke,
+        record,
+        restoreCalls: () => restoreCalls,
+        uninstall,
+        install,
+        cleanup: () => {
+          warn.mockRestore();
+          uninstall.mockRestore();
+          install.mockRestore();
+          enable.mockRestore();
+        },
+      };
+    }
+    test("warns before uninstall and restores after enable with the report attached", async () => {
+      const h = reinstallHarness();
+      try {
+        await h.record();
+        const result = await h.invoke();
+        expect(result.status).toBe("reinstalled");
+        expect(result.savedPrototypeRestore).toEqual(h.report);
+        expect(h.order[0]).toContain("panel (My panel)");
+        expect(h.order[0]).toContain("Uninstall will delete");
+        expect(h.order[1]).toContain("pm uninstall");
+        expect(h.order.slice(2)).toEqual(["install", "enable", "restore"]);
+      } finally {
+        h.cleanup();
+      }
+    });
+    test("signature mismatch restores mirrored entries after the uninstall fallback", async () => {
+      const h = reinstallHarness();
+      try {
+        await h.record();
+        h.uninstall.mockImplementation(async (command) => {
+          h.order.push(command);
+          if (command.startsWith("install -r -d")) {
+            throw new Error(
+              "Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE: signatures do not match]",
+            );
+          }
+          return { stdout: "Success", stderr: "" };
+        });
+        const result = await h.invoke(true, false);
+        expect(result.status).toBe("reinstalled");
+        expect(result.savedPrototypeRestore).toEqual(h.report);
+        expect(h.restoreCalls()).toBe(1);
+        const warning = h.order.findIndex((call) => call.includes("Uninstall will delete"));
+        const uninstall = h.order.findIndex((call) => call.includes("pm uninstall"));
+        expect(warning).toBeLessThan(uninstall);
+        expect(h.order.slice(-3)).toEqual(["install", "enable", "restore"]);
+      } finally {
+        h.cleanup();
+      }
+    });
+    test.each(["throws", "failure"])(
+      "restore %s preserves reinstalled status and warns with failed IDs",
+      async (mode) => {
+        const h = reinstallHarness();
+        try {
+          await h.record();
+          h.manager.setSavedPrototypeRestorerForTesting(async () => {
+            if (mode === "throws") {
+              throw new Error("restore exploded");
+            }
+            return {
+              restored: [],
+              skipped: [],
+              failed: [{ id: "panel", code: "asset_unavailable", reason: "missing asset" }],
+            };
+          });
+          const result = await h.invoke();
+          expect(result.status).toBe("reinstalled");
+          expect(result.savedPrototypeRestore?.failed[0]).toMatchObject(
+            mode === "throws"
+              ? { id: "*", code: "restore_failed", reason: "restore exploded" }
+              : { id: "panel", code: "asset_unavailable" },
+          );
+          expect(h.order.at(-1)).toContain(
+            mode === "throws" ? "failed for: *" : "failed for: panel",
+          );
+        } finally {
+          h.cleanup();
+        }
+      },
+    );
+    test.each(["empty", "upgrade", "fresh", "failed reinstall", "unreadable mirror"])(
+      "does not restore on %s",
+      async (mode) => {
+        const h = reinstallHarness();
+        try {
+          if (mode !== "empty") {
+            await h.record();
+          }
+          if (mode === "failed reinstall") {
+            h.install.mockRejectedValue(new Error("install failed"));
+          }
+          if (mode === "unreadable mirror") {
+            h.mirror.error = new Error("mirror unavailable");
+          }
+          const result = await h.invoke(mode !== "fresh", mode !== "upgrade");
+          expect(h.restoreCalls()).toBe(0);
+          expect(result.savedPrototypeRestore).toBeUndefined();
+          expect(result.status).toBe(
+            mode === "upgrade"
+              ? "upgraded"
+              : mode === "fresh"
+                ? "installed"
+                : mode === "failed reinstall"
+                  ? "failed"
+                  : "reinstalled",
+          );
+          if (mode === "unreadable mirror") {
+            expect(h.order[0]).toContain("Cannot inspect saved prototype mirror");
+          }
+        } finally {
+          h.cleanup();
+        }
+      },
+    );
+  });
 
   // CI's per-test time includes beforeEach/afterEach but not beforeAll, so the immutable APK
   // fixture (a deflated zip of random bytes) is built once for the whole file.

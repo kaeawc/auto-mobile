@@ -24,6 +24,17 @@ WORKFLOW=".github/workflows/android-api37-emulator-tests.yml"
   grep -q "contains(github.event.pull_request.labels.\*.name, 'run-api37')" "${WORKFLOW}"
 }
 
+@test "concurrency isolates unrelated labels and event types" {
+  grep -qF "github.event.label.name != 'run-api37'" "${WORKFLOW}"
+  grep -qF 'github.event_name' "${WORKFLOW}"
+}
+
+@test "pull request guard checks fork, label, and repository" {
+  grep -qF 'github.event.pull_request.head.repo.full_name == github.repository' "${WORKFLOW}"
+  grep -qF "github.event.label.name == 'run-api37'" "${WORKFLOW}"
+  grep -qF "github.repository == 'kaeawc/auto-mobile'" "${WORKFLOW}"
+}
+
 @test "API 37 is passed to the shared action and the combined suite script runs" {
   grep -q '^          api_level: "37"$' "${WORKFLOW}"
   grep -q 'uses: ./.github/actions/android-emulator' "${WORKFLOW}"
@@ -45,6 +56,8 @@ WORKFLOW=".github/workflows/android-api37-emulator-tests.yml"
 }
 
 @test "workflow has no pull_request_target trigger or needs dependency" {
-  ! grep -q 'pull_request_target' "${WORKFLOW}"
-  ! grep -q '^    needs:' "${WORKFLOW}"
+  run grep -q 'pull_request_target' "${WORKFLOW}"
+  [ "${status}" -eq 1 ]
+  run grep -q '^    needs:' "${WORKFLOW}"
+  [ "${status}" -eq 1 ]
 }

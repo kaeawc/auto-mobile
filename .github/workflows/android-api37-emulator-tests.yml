@@ -18,7 +18,8 @@ permissions:
   checks: write
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Unrelated label events get unique groups, and event_name keeps dispatch separate from nightly runs.
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ (github.event.action == 'labeled' && github.event.label.name != 'run-api37') && github.run_id || 'run' }}
   cancel-in-progress: true
 
 jobs:

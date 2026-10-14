@@ -206,7 +206,7 @@
     "oxc-parser": "0.153.0",
     "oxfmt": "0.72.0",
     "oxlint": "1.87.0",
-    "oxlint-tsgolint": "7.0.2003",
+    "oxlint-tsgolint": "7.0.2004",
     "pixelmatch": "^8.0.0",
     "pngjs": "^7.0.0",
     "reflect-metadata": "^0.2.2",

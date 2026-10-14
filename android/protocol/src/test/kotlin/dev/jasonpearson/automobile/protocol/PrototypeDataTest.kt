@@ -264,6 +264,10 @@ class PrototypeDataTest {
     val actual =
       mapOf(
         "MAX_PROTOTYPE_REPEAT_PATH_CELLS" to PrototypeSpecValidator.MAX_PROTOTYPE_REPEAT_PATH_CELLS,
+        "MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH" to
+          PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH,
+        "MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL" to
+          PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_TOTAL,
         "MAX_PROTOTYPE_DATA_BYTES" to PrototypeSpecValidator.MAX_PROTOTYPE_DATA_BYTES,
         "MAX_PROTOTYPE_DATA_DEPTH" to PrototypeSpecValidator.MAX_PROTOTYPE_DATA_DEPTH,
         "MAX_PROTOTYPE_DATA_ARRAY_ITEMS" to PrototypeSpecValidator.MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
@@ -372,6 +376,286 @@ class PrototypeDataTest {
     assertTrue(projected.all { it === projected.first() })
     assertNotSame(projected.first(), arrays(PrototypeDataResolver.resolveRoot(root, data)).first())
     assertEquals(root, source["root"])
+  }
+
+  @Test
+  fun `data amplification is rejected without building the replacement`() {
+    val input =
+      substitutionSpec(
+        substitutionText("{data:/b}".repeat(80_000)),
+        data = buildJsonObject { put("b", "x".repeat(200_000)) },
+      )
+    assertSubstitutionError(input, "root.text")
+  }
+
+  @Test
+  fun `data substitution boundary`() {
+    for (length in listOf(16_384, 16_385)) {
+      val input =
+        substitutionSpec(
+          substitutionText("{data:/b}"),
+          data = buildJsonObject { put("b", "x".repeat(length)) },
+        )
+      if (length == 16_384) assertSubstitutionValid(input)
+      else assertSubstitutionError(input, "root.text")
+    }
+  }
+
+  @Test
+  fun `repeat text emit and operand are capped`() {
+    val replacement = "{item.b}{item.b}"
+    val cases =
+      listOf(
+        substitutionText(replacement) to "text",
+        substitutionAction("emit", "name", replacement) to "onTap[0].name",
+        substitutionAction("setState", "value", replacement) to "onTap[0].value",
+      )
+    for ((child, field) in cases) {
+      val input =
+        substitutionSpec(
+          substitutionList(child, listOf("x".repeat(8193))),
+          state = buildJsonObject { put("k", "") },
+        )
+      assertSubstitutionError(input, "root.children[0].$field")
+    }
+  }
+
+  @Test
+  fun `repeat key amplification uses the fixed error before binding`() {
+    val child = substitutionAction("toggle", "key", "{item.b}".repeat(2000))
+    assertSubstitutionError(
+      substitutionSpec(substitutionList(child, listOf("x".repeat(100_000)))),
+      "root.children[0].onTap[0].key",
+    )
+  }
+
+  @Test
+  fun `repeat counts index and each item's own rendered length`() {
+    val indices = substitutionList(substitutionText("{index}".repeat(8193)), List(11) { "" })
+    assertSubstitutionError(substitutionSpec(indices), "root.children[0].text")
+    val items =
+      substitutionList(substitutionText("{item.b}{item.b}"), listOf("s", "x".repeat(8193)))
+    assertSubstitutionError(substitutionSpec(items), "root.children[0].text")
+  }
+
+  @Test
+  fun `data cascades into repeat and path items use the same bound`() {
+    val root = substitutionList(substitutionText("{data:/t}"), listOf("x".repeat(8193)))
+    assertSubstitutionError(
+      substitutionSpec(root, data = buildJsonObject { put("t", "{item.b}{item.b}") }),
+      "root.children[0].text",
+    )
+    val pathRoot =
+      JsonObject(
+        root +
+          mapOf(
+            "repeat" to
+              buildJsonObject {
+                put("items", buildJsonObject { put("path", "/rows") })
+                put("as", "item")
+              },
+            "children" to JsonArray(listOf(substitutionText("{item.b}{item.b}"))),
+          ),
+      )
+    val data = buildJsonObject {
+      put("rows", JsonArray(listOf(buildJsonObject { put("b", "x".repeat(8193)) })))
+    }
+    assertSubstitutionError(substitutionSpec(pathRoot, data = data), "root.children[0].text")
+  }
+
+  @Test
+  fun `literal characters and mutable state replacements do not count`() {
+    val inputs =
+      listOf(
+        substitutionSpec(substitutionText("x".repeat(20_000))),
+        substitutionSpec(
+          substitutionText("x".repeat(20_000) + "{data:/s}"),
+          data = buildJsonObject { put("s", "short") },
+        ),
+        substitutionSpec(
+          substitutionText("{b}".repeat(1000)),
+          state = buildJsonObject { put("b", "x".repeat(100_000)) },
+        ),
+      )
+    inputs.forEach(::assertSubstitutionValid)
+  }
+
+  @Test
+  fun `unknown authored repeat fields win before the length error`() {
+    val input =
+      substitutionSpec(
+        substitutionList(substitutionText("{item.missing}{data:/b}"), listOf("")),
+        data = buildJsonObject { put("b", "x".repeat(16_385)) },
+      )
+    val result = PrototypeSpecValidator.validate(input.toString())
+    assertTrue(result is PrototypeSpecValidation.Failure, result.toString())
+    assertEquals(
+      PrototypeSpecError("root.children[0].text", "Unknown repeat field \"missing\""),
+      (result as PrototypeSpecValidation.Failure).error,
+    )
+  }
+
+  @Test
+  fun `condition operands share the exact substituted text total`() {
+    val operand = buildJsonObject {
+      put("key", "k")
+      put("equals", "{item.b}y")
+    }
+    val condition = buildJsonObject {
+      put(
+        "all",
+        JsonArray(List(16) { buildJsonObject { put("any", JsonArray(List(16) { operand })) } }),
+      )
+    }
+    val child = JsonObject(substitutionText("t") + ("visibleWhen" to condition))
+    val root = substitutionList(child, listOf("x".repeat(16375)))
+    val state = buildJsonObject { put("k", "") }
+    assertSubstitutionValid(substitutionSpec(root, state = state))
+    val extra = JsonObject(substitutionText("t") + ("visibleWhen" to operand))
+    val crossed = JsonObject(root + ("children" to JsonArray(listOf(child, extra))))
+    val unknown = substitutionText("{item.missing}{data:/s}")
+    val unknownRoot = JsonObject(root + ("children" to JsonArray(listOf(child, unknown))))
+    assertEquals(
+      PrototypeSpecError("root.children[1].text", "Unknown repeat field \"missing\""),
+      PrototypeRepeatValidator.validate(
+        substitutionSpec(unknownRoot, data = buildJsonObject { put("s", "") }, state = state),
+      ),
+    )
+    assertEquals(
+      PrototypeSpecError(
+        "root.children[1].visibleWhen.equals",
+        "Substituted text total limit exceeded",
+      ),
+      PrototypeRepeatValidator.validate(substitutionSpec(crossed, state = state)),
+    )
+  }
+
+  @Test
+  fun `data resolved text is charged per repeat item`() {
+    val child = substitutionText("{data:/b}")
+    val root = buildJsonObject {
+      put("type", "column")
+      put(
+        "repeat",
+        buildJsonObject {
+          put("as", "i")
+          put("items", JsonArray(List(128) { buildJsonObject {} }))
+        },
+      )
+      put("children", JsonArray(listOf(child)))
+    }
+    val data = buildJsonObject { put("b", "x".repeat(16375)) }
+    assertSubstitutionValid(substitutionSpec(root, data = data))
+    val crossed = JsonObject(root + ("children" to JsonArray(listOf(child, child))))
+    assertEquals(
+      PrototypeSpecError("root.children[1].text", "Substituted text total limit exceeded"),
+      PrototypeRepeatValidator.validate(substitutionSpec(crossed, data = data)),
+    )
+  }
+
+  @Test
+  fun `literal text inside a repeat is not charged`() {
+    val child = substitutionText("x".repeat(16384))
+    val root = buildJsonObject {
+      put("type", "column")
+      put(
+        "repeat",
+        buildJsonObject {
+          put("as", "i")
+          put("items", JsonArray(List(128) { buildJsonObject {} }))
+        },
+      )
+      put("children", JsonArray(listOf(child, child)))
+    }
+    assertSubstitutionValid(substitutionSpec(root))
+  }
+
+  @Test
+  fun `repeat total charges each item in order`() {
+    val root = buildJsonObject {
+      put("type", "column")
+      put(
+        "repeat",
+        buildJsonObject {
+          put("as", "i")
+          put("items", JsonArray(List(4) { buildJsonObject { put("b", "x".repeat(16379)) } }))
+        },
+      )
+      put("children", JsonArray(List(64) { substitutionText("{i.b}") }))
+    }
+    assertSubstitutionValid(substitutionSpec(root))
+    val crossed =
+      JsonObject(root + ("children" to JsonArray(List(65) { substitutionText("{i.b}") })))
+    assertEquals(
+      PrototypeSpecError("root.children[64].text", "Substituted text total limit exceeded"),
+      PrototypeRepeatValidator.validate(substitutionSpec(crossed)),
+    )
+  }
+
+  @Test
+  fun `per field substitution error wins before the total charge`() {
+    assertSubstitutionError(
+      substitutionSpec(
+        substitutionList(substitutionText("{item.b}{item.b}"), listOf("x".repeat(8193))),
+      ),
+      "root.children[0].text",
+    )
+  }
+
+  private fun substitutionText(text: String): JsonObject = buildJsonObject {
+    put("type", "text")
+    put("text", text)
+  }
+
+  private fun substitutionAction(type: String, field: String, value: String): JsonObject {
+    val action = buildJsonObject {
+      put("type", type)
+      if (type == "setState") put("key", "k")
+      put(field, value)
+    }
+    return JsonObject(substitutionText("tap") + ("onTap" to JsonArray(listOf(action))))
+  }
+
+  private fun substitutionList(child: JsonObject, values: List<String>): JsonObject =
+    buildJsonObject {
+      put("type", "column")
+      put(
+        "repeat",
+        buildJsonObject {
+          put("items", JsonArray(values.map { buildJsonObject { put("b", it) } }))
+          put("as", "item")
+        },
+      )
+      put("children", JsonArray(listOf(child)))
+    }
+
+  private fun substitutionSpec(
+    root: JsonObject,
+    data: JsonObject? = null,
+    state: JsonObject? = null,
+  ): JsonObject = buildJsonObject {
+    put("id", "substituted")
+    put(
+      "window",
+      buildJsonObject { put("placement", buildJsonObject { put("type", "fullscreen") }) },
+    )
+    put("root", root)
+    if (data != null) put("data", data)
+    if (state != null) put("state", state)
+  }
+
+  private fun assertSubstitutionValid(input: JsonObject) {
+    val result = PrototypeSpecValidator.validate(input.toString())
+    assertTrue(result is PrototypeSpecValidation.Success, result.toString())
+  }
+
+  private fun assertSubstitutionError(input: JsonObject, path: String) {
+    val result = PrototypeSpecValidator.validate(input.toString())
+    assertTrue(result is PrototypeSpecValidation.Failure, result.toString())
+    assertEquals(
+      PrototypeSpecError(path, "Substituted text length limit exceeded"),
+      (result as PrototypeSpecValidation.Failure).error,
+    )
   }
 
   private data class ConditionCase(val condition: JsonObject, val holds: Boolean)

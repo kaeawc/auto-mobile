@@ -33,6 +33,25 @@ const iosDevice: BootedDevice = {
 };
 
 class FakeReadinessClient implements ReadinessClient, ReadinessIosClient {
+  closed = false;
+  holds = 0;
+  onConnect?: () => void;
+  getForwardFailureCause?: () => string | undefined;
+
+  isClosed(): boolean {
+    return this.closed;
+  }
+  beginReadinessHold(): () => void {
+    this.holds++;
+    let released = false;
+    return () => {
+      if (!released) {
+        released = true;
+        this.holds--;
+      }
+    };
+  }
+
   connected = true;
   healthResults: boolean[] = [true];
   connectionResults: boolean[] = [true];
@@ -53,6 +72,7 @@ class FakeReadinessClient implements ReadinessClient, ReadinessIosClient {
 
   async waitForConnection(): Promise<boolean> {
     this.connectionCalls++;
+    this.onConnect?.();
     const connected = this.connectionResults.shift() ?? false;
     this.connected = connected;
     return connected;
@@ -237,6 +257,7 @@ function createService(
     androidClient?: FakeReadinessClient;
     iosManager?: FakeIosManager;
     iosClient?: FakeReadinessClient;
+    getAndroidClient?: (device: BootedDevice) => FakeReadinessClient;
     getIosClient?: (device: BootedDevice, port: number) => FakeReadinessClient;
     autoAdvance?: boolean;
     awaitIosStartupMaintenance?: () => Promise<void>;
@@ -274,7 +295,7 @@ function createService(
       timer,
       getAndroidFrameworkReadiness: options.getAndroidFrameworkReadiness,
       getAndroidManager: () => androidManager,
-      getAndroidClient: () => androidClient,
+      getAndroidClient: options.getAndroidClient ?? (() => androidClient),
       getIosManager: () => iosManager,
       getIosClient: options.getIosClient ?? (() => iosClient),
       checkIosOverride: async () => ({ present: false, usable: true }),
@@ -2572,3 +2593,146 @@ test.each(["android", "ios"] as const)(
     release();
   },
 );
+
+describe("Android readiness client lifetime", () => {
+  test("moves the readiness hold when a client closes mid-readiness", async () => {
+    const old = new FakeReadinessClient();
+    old.connected = false;
+    old.connectionResults = [];
+    old.onConnect = () => {
+      expect(old.holds).toBe(1);
+      old.closed = true;
+    };
+    const replacement = new FakeReadinessClient();
+    replacement.connected = false;
+    replacement.onConnect = () => expect(replacement.holds).toBe(1);
+    let resolutions = 0;
+    const { service, timer } = createService({
+      getAndroidClient: () => (++resolutions === 1 ? old : replacement),
+    });
+    await service.ensureReady({
+      device: androidDevice(),
+      requestedIdentity: "platform=android",
+      totalDeadlineMs: 10_000,
+      readinessTimeoutMs: 10_000,
+    });
+    expect(resolutions).toBe(2);
+    expect(old.connectionCalls).toBe(1);
+    expect(replacement.connectionCalls).toBe(1);
+    expect(timer.now()).toBeLessThan(1_000);
+    expect(old.holds).toBe(0);
+    expect(replacement.holds).toBe(0);
+  });
+
+  test("fails promptly when resolving again still returns a closed client", async () => {
+    const client = new FakeReadinessClient();
+    client.closed = true;
+    client.connected = false;
+    const cause = "CtrlProxy client was closed before an adb forward was established";
+    client.getForwardFailureCause = () => cause;
+    let resolutions = 0;
+    const { service, timer } = createService({
+      getAndroidClient: () => {
+        resolutions++;
+        return client;
+      },
+    });
+    const error = await service
+      .ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android",
+        totalDeadlineMs: 10_000,
+        readinessTimeoutMs: 10_000,
+      })
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    const failure = error as RunnerReadinessError;
+    expect(failure.failureKind).toBe("ctrlproxy_forward_unavailable");
+    expect(failure.message.startsWith(cause)).toBe(true);
+    expect(failure.message).not.toContain("crashed or unbound");
+    expect(failure.deadlineExhausted).toBe(false);
+    expect(timer.now()).toBeLessThan(1_000);
+    expect(client.connectionCalls).toBe(0);
+    expect(resolutions).toBe(2);
+    expect(client.holds).toBe(0);
+  });
+
+  test("iOS readiness does not acquire an Android readiness hold or re-resolve its client", async () => {
+    const client = new FakeReadinessClient();
+    client.closed = true;
+    client.connected = false;
+    client.onConnect = () => expect(client.holds).toBe(0);
+    const { service } = createService({
+      iosClient: client,
+      getAndroidClient: () => {
+        throw new Error("unexpected Android resolution");
+      },
+    });
+    await service.ensureReady({
+      device: iosDevice,
+      requestedIdentity: "platform=ios",
+      totalDeadlineMs: 1_000,
+      readinessTimeoutMs: 1_000,
+    });
+    expect(client.connectionCalls).toBe(1);
+    expect(client.holds).toBe(0);
+  });
+
+  test("forwarding lease conflict keeps priority over the forward setup diagnostic", async () => {
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    client.connectionResults = [];
+    client.getForwardFailureCause = () => "Failed to establish adb forward";
+    client.getLastConnectionFailureMessage = () => "Another daemon owns CtrlProxy forwarding";
+    client.isLastConnectionFailureForwardingLeaseConflict = () => true;
+    const { service } = createService({ androidClient: client });
+    const error = await service
+      .ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 1_000,
+      })
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(RunnerReadinessError);
+    const failure = error as RunnerReadinessError;
+    expect(failure.message).toContain("Another daemon owns CtrlProxy forwarding");
+    expect(failure.failureKind).toBeUndefined();
+    expect(failure.deadlineExhausted).toBe(false);
+    expect(client.holds).toBe(0);
+  });
+
+  for (const forwardCause of [undefined, "Failed to establish adb forward for emulator-5554"]) {
+    test(`deadline diagnostic preserves the forward cause: ${forwardCause !== undefined}`, async () => {
+      const client = new FakeReadinessClient();
+      client.connected = false;
+      client.connectionResults = [];
+      client.getForwardFailureCause = () => forwardCause;
+      const manager = new FakeAndroidManager();
+      manager.accessibilityServiceHealthy = false;
+      const { service } = createService({ androidClient: client, androidManager: manager });
+      const error = await service
+        .ensureReady({
+          device: androidDevice(),
+          requestedIdentity: "platform=android",
+          totalDeadlineMs: 1_000,
+          readinessTimeoutMs: 1_000,
+        })
+        .catch((thrown: unknown) => thrown);
+      expect(error).toBeInstanceOf(RunnerReadinessError);
+      const failure = error as RunnerReadinessError;
+      expect(failure.deadlineExhausted).toBe(true);
+      expect(failure.code).toBe("timeout");
+      expect(failure.retryable).toBe(true);
+      expect(failure.failureKind).toBe(forwardCause ? "ctrlproxy_forward_unavailable" : undefined);
+      if (forwardCause) {
+        expect(failure.message.startsWith(forwardCause)).toBe(true);
+      } else {
+        expect(failure.message).toContain(
+          "accessibility service was crashed or unbound; rebind attempted",
+        );
+      }
+      expect(client.holds).toBe(0);
+    });
+  }
+});

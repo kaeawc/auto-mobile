@@ -473,9 +473,10 @@ class SavedPrototypeStoreTest {
     }
     val replacing = store(files = files)
     assertTrue(saved(replacing, request().copy(label = "New")).replaced)
-    assertTrue(leftover!!.exists())
+    val cleanupLeftover = requireNotNull(leftover)
+    assertTrue(cleanupLeftover.exists())
     assertTrue(replacing.delete("panel"))
-    assertTrue(leftover!!.exists())
+    assertTrue(cleanupLeftover.exists())
     val fresh = store(files = files)
     assertSame(SavedPrototypeLoadResult.NotFound, fresh.load("panel"))
     assertTrue(fresh.list().isEmpty())

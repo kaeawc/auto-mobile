@@ -78,6 +78,7 @@ export interface PrototypeTextFieldBindings {
   forDevice(
     deviceId: string,
   ): { prototypeId: string; keys: ReadonlyMap<string, string> } | undefined;
+  forget(deviceId: string): void;
   clear(): void;
 }
 
@@ -92,6 +93,9 @@ export class InMemoryPrototypeTextFieldBindings implements PrototypeTextFieldBin
   forDevice(deviceId: string) {
     return this.devices.get(deviceId);
   }
+  forget(deviceId: string): void {
+    this.devices.delete(deviceId);
+  }
   clear(): void {
     this.devices.clear();
   }
@@ -105,10 +109,18 @@ export function recordPrototypeTextShow(
   deviceId: string,
   action: string,
   spec: PrototypeSpec | undefined,
-  accepted: boolean,
+  outcome: { accepted: boolean; sent: boolean; id?: string; all?: boolean },
 ): void {
-  if (action === "show" && accepted && spec) {
+  if (action === "show" && outcome.accepted && spec) {
     prototypeTextFieldBindings.record(deviceId, spec);
+  } else if (action === "show" && outcome.sent) {
+    prototypeTextFieldBindings.forget(deviceId);
+  } else if (
+    action === "dismiss" &&
+    outcome.accepted &&
+    (outcome.all || prototypeTextFieldBindings.forDevice(deviceId)?.prototypeId === outcome.id)
+  ) {
+    prototypeTextFieldBindings.forget(deviceId);
   }
 }
 
@@ -236,7 +248,11 @@ function holdsText(
   reading: Extract<PrototypeTextReading, { kind: "value" }>,
   text: string,
   operation: "insert" | "replace",
+  before?: PrototypeTextReading,
 ): boolean {
+  if (operation === "insert" && before?.kind === "value" && reading.value === before.value) {
+    return false;
+  }
   const matches = (sent: string) =>
     operation === "replace" ? reading.value === sent : reading.value.includes(sent);
   return (
@@ -244,7 +260,8 @@ function holdsText(
     (text.endsWith("\n") && matches(text.slice(0, -1))) ||
     (reading.source === "state" &&
       reading.numericValue !== undefined &&
-      Number(text) === reading.numericValue)
+      /^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(text.endsWith("\n") ? text.slice(0, -1) : text) &&
+      Number(text.trim()) === reading.numericValue)
   );
 }
 
@@ -256,6 +273,7 @@ export async function verifyPrototypeTextTarget(options: {
   operation: "insert" | "replace";
   timer: Timer;
   settleMs: number;
+  before?: PrototypeTextReading;
   signal?: AbortSignal;
 }): Promise<{
   success: boolean;
@@ -280,7 +298,7 @@ export async function verifyPrototypeTextTarget(options: {
           warning: `Typed text was not verified against the prototype: ${reading.reason}`,
         };
       }
-      if (holdsText(reading, text, operation)) {
+      if (holdsText(reading, text, operation, options.before)) {
         return { success: true };
       }
       if (attempt === 2) {

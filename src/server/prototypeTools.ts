@@ -1549,7 +1549,12 @@ async function performMutation(
       device.deviceId,
       sendArgs.action,
       sendArgs.spec as PrototypeSpec | undefined,
-      result.success && !isSuperseded(commits, scope, target, generation),
+      {
+        accepted: result.success && !isSuperseded(commits, scope, target, generation),
+        sent: ordering.sent,
+        id: sendArgs.id,
+        all: sendArgs.all,
+      },
     );
     const placed = {
       ...placedDisplay(args, shown, comparable, result.success),
@@ -1575,6 +1580,13 @@ async function performMutation(
       ...platformNotesOutput(sendArgs, device, prototypeTarget, result.success),
       ...missingAssetsOutput(result, [warning, placed.warning], legacy),
     };
+  } catch (error) {
+    recordPrototypeTextShow(device.deviceId, args.action, undefined, {
+      accepted: false,
+      sent: ordering.sent,
+    });
+    // Rethrow the original error to preserve abort and ActionableError identity after binding cleanup.
+    throw error;
   } finally {
     settleGeneration(ordering);
   }

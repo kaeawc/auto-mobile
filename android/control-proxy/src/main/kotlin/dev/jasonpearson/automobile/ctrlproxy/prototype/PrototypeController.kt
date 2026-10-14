@@ -22,6 +22,22 @@ const val DEFAULT_CTRL_PROXY_PACKAGE = "dev.jasonpearson.automobile.ctrlproxy"
 fun interface PrototypeResultSink {
   suspend fun send(requestId: String?, success: Boolean, error: String?)
 
+  suspend fun sendSaved(
+    requestId: String?,
+    saved: dev.jasonpearson.automobile.protocol.SavedPrototypeInfo,
+  ) = send(requestId, true, null)
+
+  suspend fun sendSavedList(
+    requestId: String?,
+    entries: List<dev.jasonpearson.automobile.protocol.SavedPrototypeEntry>,
+  ) = send(requestId, true, null)
+
+  suspend fun sendRefusal(
+    requestId: String?,
+    code: dev.jasonpearson.automobile.protocol.SavedPrototypeErrorCode,
+    error: String,
+  ) = send(requestId, false, error)
+
   /**
    * A successful `show_prototype` that references assets the device does not have: a warning
    * carried by the same single `prototype_result`, so the host can re-upload. Sinks that predate it

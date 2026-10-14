@@ -173,6 +173,17 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     dataBase64: String,
   ) {}
 
+  override fun savePrototype(
+    requestId: String?,
+    spec: PrototypeSpec,
+    label: String,
+    icon: String?,
+  ) {}
+
+  override fun listSavedPrototypes(requestId: String?) {}
+
+  override fun deleteSavedPrototype(requestId: String?, id: String) {}
+
   override fun removePrototypeAsset(requestId: String?, id: String) {}
 
   override fun listPreferenceFiles(requestId: String?, packageName: String) {}
@@ -537,6 +548,18 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     mimeType: String,
     dataBase64: String,
   ) = record("putPrototypeAsset", requestId, id, mimeType, dataBase64)
+
+  override fun savePrototype(
+    requestId: String?,
+    spec: PrototypeSpec,
+    label: String,
+    icon: String?,
+  ) = record("savePrototype", requestId, spec, label, icon)
+
+  override fun listSavedPrototypes(requestId: String?) = record("listSavedPrototypes", requestId)
+
+  override fun deleteSavedPrototype(requestId: String?, id: String) =
+    record("deleteSavedPrototype", requestId, id)
 
   override fun removePrototypeAsset(requestId: String?, id: String) =
     record("removePrototypeAsset", requestId, id)

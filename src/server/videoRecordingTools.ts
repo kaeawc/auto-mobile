@@ -16,6 +16,7 @@ import {
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
 import {
+  adoptOrphanCaptureArtifact,
   getVideoRecordingMetadata,
   initializeRecordingTeardownRedriveState,
   getStartupOrphanCaptures,
@@ -941,6 +942,21 @@ async function finalizedStopResponse(
   });
 }
 
+function startupOrphanStopWarning(
+  planned: VideoRecordingRecord | null,
+  descriptor: VideoRecordingRecord["captureTeardown"],
+  adopted: VideoRecordingMetadata | undefined,
+  metadata: VideoRecordingMetadata,
+): string {
+  let warning = "The capture was interrupted by a daemon restart and its recorder was stopped.";
+  if (adopted) {
+    warning += ` The planned .${planned!.format} was never written; the raw .${adopted.format} capture is returned instead.`;
+  } else if (descriptor?.kind === "ios-host-recorder" && metadata.sizeBytes === 0) {
+    warning += " No recording file was found.";
+  }
+  return warning;
+}
+
 async function tryStopStartupOrphan(
   recordingId: string,
   ownerSessionUuid?: string,
@@ -959,14 +975,22 @@ async function tryStopStartupOrphan(
       requesterSessionUuid: ownerSessionUuid,
       requesterMcpSessionId,
     });
+    const { recordingRepository } = await initializeRecordingTeardownRedriveState();
+    // Stopping acknowledges and clears the descriptor, so retain its raw artifact path first.
+    const planned = await recordingRepository.getRecording(recordingId);
+    const descriptor = planned?.captureTeardown;
+    const capturePath =
+      descriptor?.kind === "ios-host-recorder" ? descriptor.capturePath : undefined;
     try {
       await orphans!.stop(orphan.deviceId, recordingId);
     } catch (error) {
       throw new OrphanRecorderActiveError(orphan.deviceId, [recordingId], error);
     }
     await interruptVideoRecording(recordingId);
-    const metadata = await getVideoRecordingMetadata(recordingId);
-    const { recordingRepository } = await initializeRecordingTeardownRedriveState();
+    const adopted = capturePath
+      ? await adoptOrphanCaptureArtifact(recordingId, capturePath)
+      : undefined;
+    const metadata = adopted ?? (await getVideoRecordingMetadata(recordingId));
     const row = await recordingRepository.getRecording(recordingId);
     if (!metadata || !row) {
       throw new ActionableError(
@@ -976,7 +1000,7 @@ async function tryStopStartupOrphan(
     return {
       ...stopResultEntry(metadata, row),
       status: "interrupted",
-      warning: "The capture was interrupted by a daemon restart and its recorder was stopped.",
+      warning: startupOrphanStopWarning(planned, descriptor, adopted, metadata),
     };
   }
   return undefined;

@@ -22,6 +22,38 @@ class WebSocketRequestTest {
   }
 
   @Test
+  fun `patch prototype decodes its correlated payload`() {
+    val literal =
+      """{"type":"patch_prototype","requestId":"r9","id":"orders","baseRevision":12,"ops":[{"op":"replace","path":"/data/cartCount","value":2}]}"""
+    val request = assertIs<PatchPrototype>(json.decodeFromString<WebSocketRequest>(literal))
+    assertEquals("r9", request.requestId)
+    assertEquals("orders", request.id)
+    assertEquals(12L, request.baseRevision)
+    assertEquals(
+      Json.parseToJsonElement("""[{"op":"replace","path":"/data/cartCount","value":2}]"""),
+      request.ops,
+    )
+    val absent =
+      assertIs<PatchPrototype>(
+        json.decodeFromString<WebSocketRequest>(
+          """{"type":"patch_prototype","id":"orders","ops":[]}""",
+        ),
+      )
+    assertNull(absent.baseRevision)
+  }
+
+  @Test
+  fun `patch prototype requires id and ops`() {
+    for (literal in
+      listOf(
+        """{"type":"patch_prototype","ops":[]}""",
+        """{"type":"patch_prototype","id":"orders"}""",
+      )) {
+      assertFailsWith<SerializationException> { json.decodeFromString<WebSocketRequest>(literal) }
+    }
+  }
+
+  @Test
   fun `commit trace opt in round trips and omission stays false`() {
     val legacy = """{"type":"request_commit_text","text":"value"}"""
     val absent = assertIs<RequestCommitText>(json.decodeFromString<WebSocketRequest>(legacy))

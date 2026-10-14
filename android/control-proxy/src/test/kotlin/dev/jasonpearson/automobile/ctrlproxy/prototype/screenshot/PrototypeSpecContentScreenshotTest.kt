@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype.screenshot
 
 import android.app.Application
+import dev.jasonpearson.automobile.protocol.*
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -27,6 +28,28 @@ class PrototypeSpecContentScreenshotTest {
 
   private companion object {
     val OPEN = JsonPrimitive(true)
+  }
+
+  // Pending until the Linux recording workflow produces these new pager-option baselines.
+  @Test fun peekPager() = prototypeScreenshotTest("pager_peek", pagerOptionSpec(0), pending = true)
+
+  @Test
+  fun verticalPager() =
+    prototypeScreenshotTest("pager_vertical", pagerOptionSpec(1), pending = true)
+
+  private fun pagerOptionSpec(index: Int): PrototypeSpec {
+    val spec = validPrototypeFixture("pager-options")
+    val pager = (spec.root as PrototypeColumnNode).children[index] as PrototypePagerNode
+    return spec.copy(
+      root =
+        pager.copy(
+          style =
+            PrototypeStyle(
+              width = PrototypeDimension.Dp(300.0),
+              height = PrototypeDimension.Dp(240.0),
+            ),
+        ),
+    )
   }
 
   // Pending: #11298 changed the image placeholder colours (surfaceVariant instead of LightGray), so

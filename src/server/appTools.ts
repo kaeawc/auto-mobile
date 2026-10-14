@@ -72,6 +72,7 @@ import { resolveIosDeviceKind } from "../utils/ios-cmdline-tools/IosDeviceKind";
 import {
   createPrototypeViewerAttacher,
   prototypeViewerConnections,
+  type PrototypeViewerLaunchAttacher,
   type PrototypeViewerConnections,
 } from "../features/prototype/ios/prototypeViewerAttach";
 
@@ -164,7 +165,7 @@ export interface LaunchAppToolDependencies {
   idGenerator: IdGenerator;
   /** Agent records shared by launchApp, terminateApp and the prototype tool. */
   prototypeAgentRegistry: PrototypeAgentRegistry;
-  prototypeViewerAttacher: { attach(device: BootedDevice, bundleId: string): Promise<unknown> };
+  prototypeViewerAttacher: PrototypeViewerLaunchAttacher;
   prototypeViewerConnections: Pick<PrototypeViewerConnections, "release" | "releaseDevice">;
   timer: Timer;
   /** Created on first `prototype: true`, so a normal launch never resolves the agent dylib. */

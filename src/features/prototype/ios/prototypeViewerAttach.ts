@@ -33,6 +33,10 @@ export interface PrototypeViewerRecord {
   client: PrototypeAgentClient;
 }
 
+export interface PrototypeViewerLaunchAttacher {
+  attach(device: BootedDevice, bundleId: string): Promise<unknown>;
+}
+
 /** One attached viewer per device; an old connection's close cannot remove its replacement. */
 export class PrototypeViewerConnections implements PrototypeAgentConnections {
   private readonly records = new Map<string, PrototypeViewerRecord>();
@@ -152,7 +156,7 @@ class BufferedViewerClient implements PrototypeAgentClient {
   }
 }
 
-export class PrototypeViewerAttacher {
+export class PrototypeViewerAttacher implements PrototypeViewerLaunchAttacher {
   private readonly inFlight = new Map<string, Promise<PrototypeAgentClient>>();
   constructor(private readonly deps: PrototypeViewerAttacherDependencies) {}
 

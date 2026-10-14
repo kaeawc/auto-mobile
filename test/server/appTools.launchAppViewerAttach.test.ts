@@ -18,6 +18,9 @@ import { FakePrototypeAgentClient } from "../fakes/FakePrototypeAgentInjection";
 import { FakePrototypeViewerAttacher } from "../fakes/FakePrototypeViewerAttacher";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { logger } from "../../src/utils/logger";
+import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+
+isolateToolRegistry();
 
 const SIMULATOR: BootedDevice = {
   deviceId: "11111111-2222-3333-4444-555555555555",

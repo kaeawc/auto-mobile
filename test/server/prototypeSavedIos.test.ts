@@ -10,7 +10,7 @@ import {
   type PrototypeInstallInput,
 } from "../../src/features/prototype/ios/iosPrototypeInstaller";
 import { PrototypeInstallPhysicalDeviceError } from "../../src/features/prototype/ios/iosPrototypeInstallerErrors";
-import { prototypeViewerTemplateProvider } from "../../src/features/prototype/ios/iosPrototypeInstallerFactory";
+import { PrototypeViewerTemplateProvider } from "../../src/features/prototype/ios/iosPrototypeViewerTemplateProvider";
 import {
   PROTOTYPE_BUNDLE_ID_PREFIX,
   prototypeBundleId,
@@ -243,6 +243,25 @@ describe("iOS saved prototype tool actions", () => {
     expect(reader.reads).toEqual([]);
     expect(observationReads).toEqual([]);
   });
+  test("element anchors are refused before any installer or asset work", async () => {
+    const anchored = {
+      ...spec,
+      root: {
+        type: "text" as const,
+        text: "Hello",
+        anchor: {
+          type: "element" as const,
+          selector: { text: "Continue" },
+          alignment: "cover" as const,
+        },
+      },
+    };
+    const output = await save({ spec: anchored, assets });
+    expect(output).toMatchObject({ success: false, errorCode: "invalid_spec" });
+    expect(output.error?.toLowerCase()).toContain("element anchors");
+    expect(installer.calls).toEqual([]);
+    expect(reader.reads).toEqual([]);
+  });
   test("app layer remains accepted for iOS save", async () => {
     const layered = { ...spec, window: { ...spec.window, layer: "app" } };
     expect(await save({ spec: layered })).toEqual({
@@ -258,7 +277,9 @@ describe("iOS saved prototype tool actions", () => {
     const commands = new FakeHostCommandExecutor();
     setup(
       new IosPrototypeInstaller({
-        template: prototypeViewerTemplateProvider({}),
+        template: new PrototypeViewerTemplateProvider({
+          env: { AUTOMOBILE_IOS_PROTOTYPE_VIEWER: "/nonexistent/PrototypeViewer.app" },
+        }),
         files: new FakeInstallerFileSystem(operations),
         plist: new FakePrototypePlist(operations),
         icons: new FakePrototypeIconRenderer(operations),
@@ -270,7 +291,7 @@ describe("iOS saved prototype tool actions", () => {
     expect(await save()).toEqual({
       success: false,
       error:
-        "Could not resolve the prototype viewer template: Build the prototype viewer with scripts/ios/prototype-viewer-build.sh and set AUTOMOBILE_IOS_PROTOTYPE_VIEWER_TEMPLATE to the resulting .app path.",
+        "Could not resolve the prototype viewer template: The prototype viewer configured by AUTOMOBILE_IOS_PROTOTYPE_VIEWER must be an existing app directory containing Info.plist: /nonexistent/PrototypeViewer.app. Build one with scripts/ios/prototype-viewer-build.sh and set AUTOMOBILE_IOS_PROTOTYPE_VIEWER to the resulting PrototypeViewer.app.",
     });
     expect(operations.events).toEqual(["list"]);
     expect(commands.getExecutedCommands()).toEqual([]);

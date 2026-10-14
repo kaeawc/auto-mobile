@@ -1,3 +1,4 @@
+import type { RecordingCodecProbe } from "../../src/features/video/recordingCodec";
 import type {
   OrphanCaptureStopOptions,
   VideoCaptureTeardownDescriptor,
@@ -45,6 +46,24 @@ const device: BootedDevice = { deviceId: "emulator-5554", platform: "android", n
 const OWNER = "owner-session";
 const OTHER = "other-session";
 
+class FakeCodecProbe implements RecordingCodecProbe {
+  codecCalls: string[] = [];
+  durationCalls: string[] = [];
+  result: string | undefined = "hevc";
+  duration: number | undefined = 1234;
+
+  async codec(filePath: string): Promise<string | undefined> {
+    this.codecCalls.push(filePath);
+    return this.result;
+  }
+
+  async durationMs(filePath: string): Promise<number | undefined> {
+    this.durationCalls.push(filePath);
+    return this.duration;
+  }
+}
+
+let codecProbe: FakeCodecProbe;
 let timer: FakeTimer;
 let backend: FakeVideoCaptureBackend;
 let repository: FakeVideoRecordingRepository;
@@ -72,6 +91,7 @@ beforeAll(() => {
 });
 
 beforeEach(async () => {
+  codecProbe = new FakeCodecProbe();
   timer = new FakeTimer();
   backend = new FakeVideoCaptureBackend();
   backend.setNowProvider(() => new Date(timer.now()));
@@ -98,6 +118,7 @@ beforeEach(async () => {
     timer,
     now: () => new Date(timer.now()),
     statFileSize: async () => 9,
+    codecProbe,
     retentionPolicy: { ttlMs: 0, sweepIntervalMs: 300_000, inProgressCheckIntervalMs: 300_000 },
   });
   await videoManager.initializeRecordingTeardownRedriveState();
@@ -204,10 +225,14 @@ test("owner stops the only startup orphan without an id exactly once", async () 
   expect(payload.recordings).toHaveLength(1);
   expect(payload.recordings[0]).toMatchObject({
     recordingId: "startup-orphan",
+    filePath: "/unused/orphan.mp4",
+    sizeBytes: 9,
+    codec: "unknown",
     status: "interrupted",
     warning: "The capture was interrupted by a daemon restart and its recorder was stopped.",
   });
   expect(stops).toBe(1);
+  expect(codecProbe.codecCalls).toEqual([]);
   expect(videoManager.getStartupOrphanCaptures()!.list(device.deviceId)).toEqual([]);
   const again = await outcome({ action: "stop", sessionUuid: OWNER });
   expect(again.error?.message).toContain("No active video recording found for device.");
@@ -404,4 +429,176 @@ test("iOS host startup orphan is stopped without an id through redrive and permi
   for (const recordingId of service.listActiveRecordingIds()) {
     await service.forceStopRecording(recordingId);
   }
+});
+
+async function retainRawHostOrphan(capturePath = "/kept/raw.mov") {
+  const control = new FakeHostRecorderProcessControl();
+  control.onSignal = () => {
+    control.running = false;
+  };
+  const ffmpeg = new FfmpegVideoProcessingBackend(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    timer,
+    undefined,
+    undefined,
+    undefined,
+    () => "generation-a",
+    control,
+  );
+  await retainStartupOrphan(
+    (target, descriptor, options) => ffmpeg.forceStopOrphanedCapture(target, descriptor, options),
+    {
+      kind: "ios-host-recorder",
+      hostPid: 42,
+      hostStartToken: "generation-a",
+      udid: device.deviceId,
+      capturePath,
+    },
+  );
+  return control;
+}
+
+test.each([undefined, "startup-orphan"])(
+  "iOS startup orphan returns its raw capture when planned output is absent (id=%s)",
+  async (recordingId) => {
+    await setVideoRecordingManagerDependencies({
+      statFileSize: async (filePath) => (filePath === "/kept/raw.mov" ? 321 : 0),
+    });
+    const control = await retainRawHostOrphan();
+    const stopped = await outcome(
+      { action: "stop", sessionUuid: OWNER, recordingId },
+      { ...device, platform: "ios" },
+    );
+    expect(stopped.error).toBeUndefined();
+    const entry = JSON.parse(stopped.response!.content[0].text).recordings[0];
+    expect(entry).toMatchObject({
+      filePath: "/kept/raw.mov",
+      sizeBytes: 321,
+      codec: "hevc",
+      videoDurationMs: 1234,
+      status: "interrupted",
+    });
+    expect(entry.warning).toContain(
+      "The capture was interrupted by a daemon restart and its recorder was stopped.",
+    );
+    expect(entry.warning).toContain("raw .mov capture");
+    expect(await repository.getRecording("startup-orphan")).toMatchObject({
+      filePath: "/kept/raw.mov",
+      fileName: "raw.mov",
+      format: "mov",
+      sizeBytes: 321,
+      codec: "hevc",
+      status: "interrupted",
+    });
+    expect(codecProbe.codecCalls).toEqual(["/kept/raw.mov"]);
+    expect(codecProbe.durationCalls).toEqual(["/kept/raw.mov"]);
+    expect(control.signals).toEqual([[42, "SIGINT"]]);
+  },
+);
+
+test("iOS startup orphan with neither file warns and preserves its planned artifact", async () => {
+  await setVideoRecordingManagerDependencies({ statFileSize: async () => 0 });
+  await retainRawHostOrphan();
+  const before = await repository.getRecording("startup-orphan");
+  const stopped = await outcome(
+    { action: "stop", sessionUuid: OWNER },
+    { ...device, platform: "ios" },
+  );
+  expect(stopped.error).toBeUndefined();
+  const entry = JSON.parse(stopped.response!.content[0].text).recordings[0];
+  expect(entry.sizeBytes).toBe(0);
+  expect(entry.warning).toContain(
+    "The capture was interrupted by a daemon restart and its recorder was stopped.",
+  );
+  expect(entry.warning).toContain("No recording file was found");
+  expect(await repository.getRecording("startup-orphan")).toMatchObject({
+    filePath: before!.filePath,
+    fileName: before!.fileName,
+    format: before!.format,
+    sizeBytes: 0,
+  });
+  expect(codecProbe.codecCalls).toEqual([]);
+});
+
+test("raw orphan capture without a probeable codec is not adopted", async () => {
+  codecProbe.result = undefined;
+  codecProbe.duration = undefined;
+  await setVideoRecordingManagerDependencies({
+    statFileSize: async (filePath) => (filePath === "/kept/raw.mov" ? 321 : 0),
+  });
+  await retainRawHostOrphan();
+  const before = await repository.getRecording("startup-orphan");
+  const stopped = await outcome(
+    { action: "stop", sessionUuid: OWNER },
+    { ...device, platform: "ios" },
+  );
+  expect(stopped.error).toBeUndefined();
+  const entry = JSON.parse(stopped.response!.content[0].text).recordings[0];
+  expect(entry.filePath).toBe(before!.filePath);
+  expect(entry.sizeBytes).toBe(0);
+  expect(entry.codec).toBe("unknown");
+  expect(entry.videoDurationMs).toBeUndefined();
+  expect(entry.warning).toContain("No recording file was found");
+  expect(await repository.getRecording("startup-orphan")).toEqual({
+    ...before,
+    status: "interrupted",
+    captureTeardown: undefined,
+    endedAt: new Date(timer.now()).toISOString(),
+    durationMs: 0,
+  });
+  expect(codecProbe.codecCalls).toEqual(["/kept/raw.mov"]);
+  expect(codecProbe.durationCalls).toEqual([]);
+  expect(logger.warn).toHaveBeenCalledWith(
+    "[VideoRecording] Could not probe the raw orphan capture at /kept/raw.mov",
+  );
+});
+
+test("raw orphan capture with an unsupported container warns without adoption", async () => {
+  await setVideoRecordingManagerDependencies({
+    statFileSize: async (filePath) => (filePath === "/kept/raw.avi" ? 321 : 0),
+  });
+  const control = await retainRawHostOrphan("/kept/raw.avi");
+  const before = await repository.getRecording("startup-orphan");
+  const stopped = await outcome(
+    { action: "stop", sessionUuid: OWNER },
+    { ...device, platform: "ios" },
+  );
+  expect(stopped.error).toBeUndefined();
+  const entry = JSON.parse(stopped.response!.content[0].text).recordings[0];
+  expect(entry.filePath).toBe(before!.filePath);
+  expect(entry.sizeBytes).toBe(0);
+  expect(entry.warning).toContain("No recording file was found");
+  expect(await repository.getRecording("startup-orphan")).toEqual({
+    ...before,
+    status: "interrupted",
+    captureTeardown: undefined,
+    endedAt: new Date(timer.now()).toISOString(),
+    durationMs: 0,
+  });
+  expect(codecProbe.codecCalls).toEqual([]);
+  expect(logger.warn).toHaveBeenCalledWith(
+    "[VideoRecording] Unsupported orphan capture container: avi",
+  );
+  expect(control.signals).toEqual([[42, "SIGINT"]]);
+});
+
+test("an existing planned iOS artifact is preserved without probing the raw capture", async () => {
+  await retainRawHostOrphan();
+  const stopped = await outcome(
+    { action: "stop", sessionUuid: OWNER },
+    { ...device, platform: "ios" },
+  );
+  expect(stopped.error).toBeUndefined();
+  const entry = JSON.parse(stopped.response!.content[0].text).recordings[0];
+  expect(entry.filePath).toBe("/unused/orphan.mp4");
+  expect(entry.sizeBytes).toBe(9);
+  expect(entry.warning).toBe(
+    "The capture was interrupted by a daemon restart and its recorder was stopped.",
+  );
+  expect((await repository.getRecording("startup-orphan"))?.format).toBe("mp4");
+  expect(codecProbe.codecCalls).toEqual([]);
 });

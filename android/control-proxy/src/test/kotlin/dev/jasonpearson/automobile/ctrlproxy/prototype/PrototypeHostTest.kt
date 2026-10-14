@@ -609,6 +609,48 @@ class PrototypeHostTest {
   }
 
   @Test
+  fun `raising a surface adds above siblings before retiring its prior window`() = runTest {
+    host.show()
+    val oldView = checkNotNull(manager.view)
+    val oldOwner = checkNotNull(oldView.findViewTreeLifecycleOwner())
+    history.clear()
+    assertTrue(host.replace(PrototypeRequest(bringToFront = true)))
+    assertEquals(listOf("add", "remove", "hook"), history)
+    assertNotSame(oldView, manager.view)
+    assertEquals(Lifecycle.State.DESTROYED, oldOwner.lifecycle.currentState)
+    assertEquals(2, manager.added.size)
+    assertTrue(host.isShowing)
+  }
+
+  @Test
+  fun `a rejected raise leaves the previous window available`() = runTest {
+    host.show()
+    val owner = checkNotNull(manager.view?.findViewTreeLifecycleOwner())
+    manager.failAdd = true
+    assertFalse(host.replace(PrototypeRequest(bringToFront = true)))
+    assertTrue(host.isShowing)
+    assertEquals(Lifecycle.State.RESUMED, owner.lifecycle.currentState)
+    assertEquals(0, manager.removals)
+    assertEquals(1, manager.added.size)
+  }
+
+  @Test
+  fun `request-local foreground blocking hides only that surface`() = runTest {
+    var suspended = false
+    val request = PrototypeRequest(isSuspended = { suspended })
+    assertTrue(host.show(request))
+    suspended = true
+    assertTrue(host.relayout())
+    assertFalse(host.isShowing)
+    assertFalse(host.show(request))
+    suspended = false
+    assertTrue(host.show(request))
+    suspended = true
+    assertTrue(host.relayout())
+    assertFalse(host.isShowing)
+  }
+
+  @Test
   fun `replace without a window shows it`() = runTest {
     assertTrue(host.replace(PrototypeRequest()))
     assertEquals(1, manager.added.size)

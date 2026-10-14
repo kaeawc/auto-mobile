@@ -152,7 +152,10 @@ function savedPrototypeRequestFailure(
   return {
     success: false,
     error:
-      actionable instanceof TemplateResolveError && actionable.cause !== undefined
+      // TemplateResolveError already embeds an ActionableError cause in its message.
+      actionable instanceof TemplateResolveError &&
+      actionable.cause !== undefined &&
+      !(actionable.cause instanceof ActionableError)
         ? `${actionable.message}: ${errorMessage(actionable.cause)}`
         : actionable.message,
   };
@@ -176,12 +179,7 @@ export async function performPrototypeSavedAction(
       };
     }
     if (args.action === "save" && hasElementAnchors(args.spec!)) {
-      return savedPrototypeFailure({
-        success: false,
-        errorCode: "invalid_spec",
-        error:
-          'Element anchors are resolved against the live screen and are not supported in a saved prototype; use {type:"bounds",bounds:{x,y,width,height}} anchors (dp) instead. Nothing was uploaded or saved.',
-      });
+      return savedElementAnchorFailure();
     }
     if (args.action === "listSaved") {
       const result = await deps.client.listSaved(args.timeoutMs);
@@ -285,6 +283,16 @@ export function createPrototypeSavedPlatformDispatch(dependencies: IosSavedDepen
   };
 }
 
+/** Element anchors resolve against the live screen, so a saved prototype cannot carry them. */
+function savedElementAnchorFailure(): PrototypeSavedOutput {
+  return savedPrototypeFailure({
+    success: false,
+    errorCode: "invalid_spec",
+    error:
+      'Element anchors are resolved against the live screen and are not supported in a saved prototype; use {type:"bounds",bounds:{x,y,width,height}} anchors (dp) instead. Nothing was uploaded or saved.',
+  });
+}
+
 async function saveIosPrototype(
   backend: () => IosSavedPrototypeInstaller,
   udid: string,
@@ -292,6 +300,9 @@ async function saveIosPrototype(
   readers: IosSavedDependencies,
   signal?: AbortSignal,
 ): Promise<PrototypeSavedOutput> {
+  if (hasElementAnchors(args.spec!)) {
+    return savedElementAnchorFailure();
+  }
   const prepared = await preparePrototypeAssets(
     args.assets ?? [],
     readers.assetFileReader,

@@ -15,6 +15,12 @@ the two. The spec is
 \`{id, window, theme?, data?, state?, motion?, root}\`. State values are flat scalars (string, finite
 number, boolean). State keys match \`[A-Za-z_][A-Za-z0-9_]{0,63}\`.
 
+On Android, \`show replaceOthers: false\` retains other prototype windows, up to four distinct ids
+(requires \`prototype_multi_surface_v1\`); a fifth is refused listing the shown ids. A same-id show
+with false replaces only that prototype; omitted or true replaces other ids. \`dismiss {id}\` removes
+one, \`dismiss {all: true}\` removes all, and \`status\` lists every shown id. \`inspect\` reconciles
+the full list. iOS refuses false and shows one prototype at a time.
+
 Minimal spec:
 
 \`\`\`json
@@ -448,7 +454,7 @@ key since that revision, returning the current revision and those keys' values.
 
 There are at most ${MAX_PROTOTYPE_PATCH_OPS} ops, the frame is capped at ${MAX_PROTOTYPE_SPEC_BYTES / (1024 * 1024)} MiB, and the resulting whole
 spec must satisfy every spec/data limit, including node count and depth. The
-host tracks a cloned copy of the device spec from the last acknowledged show,
+host tracks a cloned copy of each id's device spec from its last acknowledged show,
 with components expanded and anchors resolved. It applies ops to a copy and
 runs the full validator before sending. Errors preserve deterministic paths.
 The host validates state ops against the agent-declared state and leaves value
@@ -459,8 +465,9 @@ patch refuse as busy. Shows are not delayed by patches. If a dispatched show
 and an acknowledged patch overlap, their device-side order is unknown: the host
 forgets its spec, warns, and requires a further successful show before patching.
 A failed dispatched show, dismissed event, successful dismiss, session release,
-device removal or unbinding also ends tracking. An adopted different id ends
-tracking; inspecting the same tracked id retains it. A transport failure after
+device removal or unbinding also ends tracking. Inspect retains each reported tracked id
+and drops missing ids; adopted siblings do not end its tracking. A fifth-surface refusal
+with \`replaceOthers: false\` also retains the acknowledged specs. A transport failure after
 patch dispatch is indeterminate and requires a new show. An atomic device
 refusal leaves the tracked copy unchanged. A successful patch refreshes shown
 status data without changing \`lastResult\`, timestamps or event snapshots.

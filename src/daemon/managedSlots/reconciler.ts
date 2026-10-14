@@ -1870,14 +1870,25 @@ export class ManagedSlotReconciler {
     options: { capacityAsserted?: boolean } = {},
   ): Promise<ReadyResult> {
     const { request } = context;
-    this.checkBudget(request);
     if (replacing === undefined) {
-      await this.assertCreatable(context);
-    }
-    // A replacement asserted capacity before deleting, counting the slot its old device frees;
-    // asking again here could refuse after the deletion while that device is still being counted.
-    if (!options.capacityAsserted) {
-      await this.assertBootCapacity(request);
+      try {
+        this.checkBudget(request);
+        await this.assertCreatable(context);
+        if (!options.capacityAsserted) {
+          await this.assertBootCapacity(request);
+        }
+      } catch (error) {
+        // No provisioning or journal entry exists yet; preserve the original refusal unchanged.
+        await this.removeNeverBoundSlot(context, assignment, "pre-provision refusal");
+        throw error;
+      }
+    } else {
+      this.checkBudget(request);
+      // A replacement asserted capacity before deleting, counting the slot its old device frees;
+      // asking again here could refuse after deletion while that device is still being counted.
+      if (!options.capacityAsserted) {
+        await this.assertBootCapacity(request);
+      }
     }
     const name = managedSlotDeviceName(
       request.key,
@@ -2101,11 +2112,18 @@ export class ManagedSlotReconciler {
     assignment: SlotAssignmentRecord,
     settled: SlotJournalEntry | undefined,
   ): Promise<void> {
-    if (
-      assignment.generation !== 0 ||
-      assignment.stableDeviceId !== null ||
-      settled?.phase !== "rolled_back"
-    ) {
+    if (settled?.phase !== "rolled_back") {
+      return;
+    }
+    await this.removeNeverBoundSlot(context, assignment, `failed creation entry ${settled.id}`);
+  }
+
+  private async removeNeverBoundSlot(
+    context: ReconcileContext,
+    assignment: SlotAssignmentRecord,
+    reason: string,
+  ): Promise<void> {
+    if (assignment.generation !== 0 || assignment.stableDeviceId !== null) {
       return;
     }
     try {
@@ -2115,8 +2133,7 @@ export class ManagedSlotReconciler {
       });
     } catch (error) {
       logger.warn(
-        `[ManagedSlots] removing never-bound slot after failed creation entry ${settled.id} failed: ` +
-          errorMessage(error),
+        `[ManagedSlots] removing never-bound slot after ${reason} failed: ${errorMessage(error)}`,
         error,
       );
     }

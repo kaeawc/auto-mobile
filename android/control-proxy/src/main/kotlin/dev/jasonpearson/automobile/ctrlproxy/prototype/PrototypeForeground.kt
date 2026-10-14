@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
 import android.view.accessibility.AccessibilityWindowInfo
+import java.lang.ref.WeakReference
 
 /** How long a foreground change must hold before the prototype hides or comes back (#10261). */
 const val PROTOTYPE_FOREGROUND_DEBOUNCE_MILLIS = 400L
@@ -69,6 +70,9 @@ interface PrototypeForegroundScope {
   /** True while the prototype's app is not in front; the window is hidden and untouchable. */
   val suspended: Boolean
 
+  /** Independent scoping for another window, fed by the same foreground event source. */
+  fun fork(): PrototypeForegroundScope = this
+
   /** A show: tie the prototype to the app now in front and clear any suspension. */
   fun anchor()
 
@@ -110,6 +114,14 @@ class PrototypeForegroundTracker(
   private val onChanged: suspend () -> Unit = {},
 ) : PrototypeForegroundScope {
   private val lock = Any()
+  private val children = mutableListOf<WeakReference<PrototypeForegroundTracker>>()
+
+  override fun fork(): PrototypeForegroundScope =
+    synchronized(lock) {
+      PrototypeForegroundTracker(scheduler, ownPackage, debounceMillis, foregroundNow, onChanged)
+        .also { children.add(WeakReference(it)) }
+    }
+
   private var anchor: String? = null
   private var pendingTarget: Boolean? = null
   private var pending: PrototypeScheduledTask? = null
@@ -147,6 +159,12 @@ class PrototypeForegroundTracker(
 
   /** Feed every window-state/windows-changed event with its package and window type. */
   fun onWindowEvent(packageName: String?, windowType: Int?) {
+    val scopes =
+      synchronized(lock) {
+        children.removeAll { it.get() == null }
+        children.mapNotNull { it.get() }
+      }
+    scopes.forEach { it.onWindowEvent(packageName, windowType) }
     val candidate = prototypeForegroundCandidate(packageName, windowType, ownPackage) ?: return
     synchronized(lock) {
       val scoped = anchor ?: return

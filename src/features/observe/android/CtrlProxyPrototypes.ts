@@ -171,31 +171,34 @@ function isKnownPrototypeEventKind(kind: string): boolean {
   return (PROTOTYPE_EVENT_KINDS as readonly string[]).includes(kind);
 }
 
-/** Match uploaded IDs throughout JSON; explicit asset values identify untracked references too. */
+/** Match cached IDs throughout JSON; asset and image values identify uncached references too. */
 function collectPrototypeStrings(
   value: unknown,
   strings: Set<string>,
   references: Set<string>,
   assetValue = false,
+  arbitraryJson = false,
 ): void {
   if (typeof value === "string") {
     strings.add(value);
-    if (assetValue) {
+    if (assetValue && !arbitraryJson) {
       references.add(value);
     }
-  } else if (Array.isArray(value)) {
-    for (const child of value) {
-      collectPrototypeStrings(child, strings, references, assetValue);
-    }
   } else if (typeof value === "object" && value !== null) {
+    // Object.entries also traverses array elements without changing subtree context.
     for (const [key, child] of Object.entries(value)) {
-      collectPrototypeStrings(child, strings, references, assetValue || key === "asset");
+      collectPrototypeStrings(
+        child,
+        strings,
+        references,
+        assetValue || ["asset", "image"].includes(key),
+        arbitraryJson || ["state", "payload"].includes(key),
+      );
     }
   }
 }
 
 export class CtrlProxyPrototypes {
-  private readonly uploadedAssets = new Map<string, PrototypeAssetUpload>();
   private readonly listeners = new Set<(event: PrototypeEvent) => void>();
   /** Pushes that arrived with no subscriber; bounded like the device's offline ring. */
   private readonly staged: PrototypeEvent[] = [];
@@ -232,7 +235,7 @@ export class CtrlProxyPrototypes {
     );
   }
 
-  /** Assets must already be uploaded with requestPutPrototypeAsset in this same session. */
+  /** Assets must already be uploaded to the device with requestPutPrototypeAsset. */
   async requestSavePrototype(
     save: { spec: PrototypeSpec; label: string; icon?: string },
     timeoutMs = 5000,
@@ -307,17 +310,42 @@ export class CtrlProxyPrototypes {
       if (save.icon !== undefined) {
         references.add(save.icon);
       }
-      const ids = new Set([...strings].filter((id) => this.uploadedAssets.has(id)));
+      const cached = this.context.prototypeAssetCache;
+      let known: ReadonlySet<string> = new Set<string>();
+      try {
+        if (cached) {
+          known = await cached.cache.ids(cached.serial);
+        }
+      } catch (error) {
+        logger.warn(
+          `[CTRL_PROXY] Saved prototype ${reply.saved?.id ?? save.spec.id} cannot list cached assets`,
+          error,
+        );
+      }
+      const ids = new Set([...strings].filter((id) => known.has(id)));
       for (const id of references) {
         ids.add(id);
       }
-      const assets = [...ids].map((id) => {
-        const asset = this.uploadedAssets.get(id);
-        if (!asset) {
-          logger.warn(`[CTRL_PROXY] Saved prototype ${save.spec.id} mirror missing asset ${id}`);
-        }
-        return asset ? { ...asset, bytes: asset.bytes.slice() } : { id };
-      });
+      const assets = await Promise.all(
+        [...ids].map(async (id) => {
+          let asset: PrototypeAssetUpload | undefined;
+          try {
+            asset = cached ? await cached.cache.get(cached.serial, id) : undefined;
+          } catch (error) {
+            logger.warn(
+              `[CTRL_PROXY] Saved prototype ${reply.saved?.id ?? save.spec.id} mirror cannot read asset ${id}`,
+              error,
+            );
+            return { id };
+          }
+          if (!asset) {
+            logger.warn(
+              `[CTRL_PROXY] Saved prototype ${reply.saved?.id ?? save.spec.id} mirror missing asset ${id}`,
+            );
+          }
+          return asset ? { ...asset, bytes: asset.bytes.slice() } : { id };
+        }),
+      );
       await recorder.mirror.record(recorder.serial, {
         id: reply.saved?.id ?? save.spec.id,
         ...save,
@@ -424,7 +452,14 @@ export class CtrlProxyPrototypes {
       options,
     );
     if (reply.success && !reply.error) {
-      this.uploadedAssets.set(asset.id, snapshot);
+      const cached = this.context.prototypeAssetCache;
+      if (cached) {
+        try {
+          await cached.cache.put(cached.serial, snapshot);
+        } catch (error) {
+          logger.warn(`[CTRL_PROXY] Failed to cache prototype asset ${asset.id}`, error);
+        }
+      }
     }
     return reply;
   }
@@ -444,7 +479,14 @@ export class CtrlProxyPrototypes {
       options,
     );
     if (reply.success && !reply.error) {
-      this.uploadedAssets.delete(id);
+      const cached = this.context.prototypeAssetCache;
+      if (cached) {
+        try {
+          await cached.cache.remove(cached.serial, id);
+        } catch (error) {
+          logger.warn(`[CTRL_PROXY] Failed to remove cached prototype asset ${id}`, error);
+        }
+      }
     }
     return reply;
   }

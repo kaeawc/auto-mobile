@@ -64,6 +64,7 @@ import type { DaemonResponse } from "../../src/daemon/types";
 import { ViewerReadOnlyError } from "../../src/daemon/streamSubscriptionPolicy";
 import {
   AndroidAvdIdentityUnresolvedError,
+  AndroidDeviceIdentityUnresolvedError,
   AndroidAvdIdentityConflictError,
   DeviceBootTimeoutError,
 } from "../../src/devices/deviceBootService";
@@ -107,6 +108,7 @@ import {
   DeviceAssignedToManagedSlotError,
   DeviceOutsideManagedSlotsError,
   ManagedSlotDiscoveryIncompleteError,
+  ManagedSlotRegistrySchemaUnsupportedError,
   ManagedSlotOwnershipUnconfirmedError,
   ManagedSlotOwnershipLostError,
 } from "../../src/daemon/managedSlots/managedSlotRefusal";
@@ -343,6 +345,16 @@ export function overloadRefusalError(): McpOverloadError {
 
 /** One entry per wire code, each produced by the builder the daemon itself calls. */
 const BUILDERS: readonly FixtureEntry[] = [
+  [
+    "target_identity_unresolved",
+    "AndroidAvdIdentityUnresolvedError via shapeToolCallError",
+    () => shaped(new AndroidAvdIdentityUnresolvedError("Pixel_8_API_35", [DEVICE])),
+  ],
+  [
+    "target_identity_unresolved.device",
+    "AndroidDeviceIdentityUnresolvedError via shapeToolCallError",
+    () => shaped(new AndroidDeviceIdentityUnresolvedError(DEVICE)),
+  ],
   [
     "orphan_recorder_active",
     "OrphanRecorderActiveError via shapeToolCallError",
@@ -686,6 +698,7 @@ export const MANAGED_SLOT_FIXTURE_PREFIX = "managed_slot_acquisition_failed.";
 const OWN_FAILURE_RETRYABLE: Readonly<Record<ManagedSlotAcquisitionOwnFailureCode, boolean>> = {
   managed_slot_config_invalid: false,
   contract_unsupported: false,
+  registry_schema_unsupported: false,
   managed_slot_group_unsupported: false,
   managed_slots_unsupported: false,
   scope_invalidated: false,
@@ -1093,8 +1106,7 @@ const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
     "daemon_handoff_interrupted",
     () => new DaemonHandoffInterruptionError("Daemon handoff interrupted the in-flight request"),
   ],
-  // shapeToolCallError returns plain Error: text; no top-level JSON refusal. Inline
-  // deleteDevice/provisionDevice target_identity_unresolved literals have no shared capture builder.
+  // The same retryable identity refusal is shaped by shapeToolCallError on the tool boundary.
   [
     "target_identity_unresolved",
     () => new AndroidAvdIdentityUnresolvedError("Pixel_8_API_35", [DEVICE]),
@@ -1324,6 +1336,10 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
   string
 >([
   [
+    ManagedSlotRegistrySchemaUnsupportedError,
+    "internal registry-open refusal; ManagedSlotAcquisition maps it to the fixture-covered registry_schema_unsupported acquisition failure before serialization",
+  ],
+  [
     HostBootAdmissionRegistryError,
     "internal host-lock failure; AndroidBootAdmissionGate maps it to discovery_incomplete before the wire",
   ],
@@ -1404,6 +1420,8 @@ export const EXEMPT_REFUSAL_ERROR_CLASSES: ReadonlyMap<Error["constructor"], str
 
 /** Codes that exist as named constants but never reach a client as a typed JSON refusal. */
 export const UNFIXTURED_REFUSAL_CODES: Readonly<Record<string, string>> = {
+  registry_schema_unsupported:
+    "internal registry-open code mapped to the acquisition failure fixtured under managed_slot_acquisition_failed.registry_schema_unsupported",
   daemon_session_not_found:
     "a daemon socket response field (`code` beside `error`) for an unknown session, not an MCP tool result body",
   bound_session_lost:

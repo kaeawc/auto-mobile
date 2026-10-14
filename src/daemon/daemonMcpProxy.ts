@@ -325,7 +325,7 @@ interface StallHandoverRecord {
    * found replaced, or when its identity was never reported (#10989).
    */
   probeDaemonInstance?: string;
-  /** First instance-change answer; marks a managed session reclaiming without a daemon pin. */
+  /** First instance-change answer; marks a handed-over session reclaiming without a daemon pin. */
   managedReclaimSince?: number;
   /**
    * First awaitable not-found from an answering daemon process; silence never resets it.
@@ -1519,6 +1519,8 @@ export class DaemonMcpProxy {
       proxyJudged?: true;
     }
   >();
+  /** Plain restart losses remain fenced by UUID after their stall handovers end (#12282). */
+  private readonly plainRestartSessionLosses = new Map<string, string>();
   /** Bounded per-session recovery when heartbeat acknowledgements stop (#10053). */
   private readonly livenessRecovery: LivenessRecovery;
   /** The call-wait bound of the current stretch of liveness recovery (#10508). */
@@ -5568,6 +5570,23 @@ export class DaemonMcpProxy {
     this.throwIfFencedForCaller(explicitSessionUuid);
   }
 
+  private throwIfPlainRestartSessionLost(sessionUuid?: string): void {
+    if (sessionUuid === undefined) {
+      return;
+    }
+    const reason = this.plainRestartSessionLosses.get(sessionUuid);
+    if (reason === undefined) {
+      return;
+    }
+    const terminal = this.terminalBoundSession;
+    const release =
+      this.pendingHeldSessionPlatformLosses.get(sessionUuid)?.release ??
+      (terminal?.sessionUuid === sessionUuid ? terminal.release : undefined);
+    const answer = new DaemonBoundSessionExpiredError(sessionUuid, reason, release);
+    this.noteReleaseSurfacedBy(answer);
+    throw answer;
+  }
+
   // Surface a terminal fence to a caller, distinguishing whether the caller
   // referenced the fenced session. A client-declared binding (explicit
   // `sessionUuid`, or the same UUID named again) — or any explicit reference to
@@ -5583,6 +5602,7 @@ export class DaemonMcpProxy {
   // semantics for every binding — and self-heals: the next call reaches this gate
   // and gets the provenance-aware error.
   private throwIfFencedForCaller(explicitSessionUuid?: string): void {
+    this.throwIfPlainRestartSessionLost(explicitSessionUuid);
     const terminal = this.terminalBoundSession;
     if (!terminal) {
       return;
@@ -5947,6 +5967,9 @@ export class DaemonMcpProxy {
    * for the connection.
    */
   private throwIfBoundSessionFenced(allowReleasedSession = false, namedSessionUuid?: string): void {
+    if (!allowReleasedSession) {
+      this.throwIfPlainRestartSessionLost(namedSessionUuid);
+    }
     if (
       this.terminalBoundSession &&
       !allowReleasedSession &&
@@ -6248,6 +6271,7 @@ export class DaemonMcpProxy {
     }
     this.claimableSessions.add(sessionId);
     this.pendingHeldSessionPlatformLosses.delete(sessionId);
+    this.plainRestartSessionLosses.delete(sessionId);
     this.ownedDeviceSessions.add(sessionId);
     this.rememberSessionDevice(sessionId, session.deviceId);
     if (session.platform !== undefined) {
@@ -6984,8 +7008,8 @@ export class DaemonMcpProxy {
    * forgiveness keeps them, but they lapse a lease later unless their owner heartbeats again. Each
    * handed-over session is heartbeated with the same owner token, observation-only and pinned to
    * the daemon process that stalled; the first acknowledgement resumes it. A restarted daemon
-   * refuses the pinned heartbeat without changing anything. Plain sessions stay the harness's to
-   * resume; managed sessions reclaim themselves. Keep the heartbeat cadence: a restarted daemon
+   * refuses the pinned heartbeat without changing anything; both plain and managed sessions then
+   * reclaim themselves. Keep the heartbeat cadence: a restarted daemon
    * only waits lease + suspect grace for its owner, so reclaim must land within one keeper interval.
    */
   private async probeStalledSessions(): Promise<void> {
@@ -7056,7 +7080,7 @@ export class DaemonMcpProxy {
     if (isDaemonInstanceChangedError(error)) {
       const wasPinned = record.probeDaemonInstance !== undefined;
       record.probeDaemonInstance = undefined;
-      if (this.managedExecutionSessions.has(sessionUuid) && wasPinned) {
+      if (wasPinned) {
         record.managedReclaimSince = this.timer.now();
         await this.probeStalledSession(sessionUuid, record);
         return;
@@ -7074,14 +7098,12 @@ export class DaemonMcpProxy {
         this.awaitManagedReclaimNotFound(sessionUuid, record, error)
       ) {
         // The successor may not have rehydrated this session yet; keep the same probe cadence.
-        logger.debug(
-          `[DaemonMcpProxy] Managed session ${sessionUuid} is still awaiting rehydration`,
-        );
+        logger.debug(`[DaemonMcpProxy] Session ${sessionUuid} is still awaiting rehydration`);
         return;
       }
       // The daemon answered that the session is gone or owned by another token: the next call
       // that reaches it reports the loss once.
-      this.endLostSessionHandover(sessionUuid, releaseReason);
+      this.endLostSessionHandover(sessionUuid, releaseReason, error);
       return;
     }
     // Expected while the daemon is still stalled; the next probe round asks again.
@@ -7098,10 +7120,10 @@ export class DaemonMcpProxy {
   ): boolean {
     const releaseReason = releaseReasonFromError(error);
     if (
-      !this.managedExecutionSessions.has(sessionUuid) ||
+      (!this.managedExecutionSessions.has(sessionUuid) &&
+        (record.managedReclaimSince === undefined || releaseReason !== undefined)) ||
       record.handover.code !== DAEMON_STALLED_CODE ||
-      isLivenessOwnershipLostError(error) ||
-      isLivenessOwnerConflictError(error) ||
+      // Typed ownership losses have different codes and fail this not-found check too.
       !this.isDaemonSessionNotFoundError(error) ||
       (releaseReason !== undefined && !isRecoverableDaemonHandoffReason(releaseReason))
     ) {
@@ -7134,6 +7156,7 @@ export class DaemonMcpProxy {
     }
     this.stallHandovers.delete(sessionUuid);
     this.pendingHeldSessionPlatformLosses.delete(sessionUuid);
+    this.plainRestartSessionLosses.delete(sessionUuid);
     this.resumedStallNotices.set(sessionUuid, {
       handover: record.handover,
       ...(restart ? { restart } : {}),
@@ -7209,7 +7232,7 @@ export class DaemonMcpProxy {
         this.isDefinitiveSessionLoss(error) &&
         !this.awaitManagedReclaimNotFound(sessionUuid, record, error)
       ) {
-        this.endLostSessionHandover(sessionUuid, releaseReasonFromError(error));
+        this.endLostSessionHandover(sessionUuid, releaseReasonFromError(error), error);
         this.reportPendingSessionLoss(args);
         return;
       }
@@ -7260,9 +7283,13 @@ export class DaemonMcpProxy {
   private endLostSessionHandover(
     sessionUuid: string,
     releaseReason = SESSION_NOT_FOUND_REASON,
+    error?: unknown,
   ): void {
     const record = this.stallHandovers.get(sessionUuid);
     if (!record) {
+      return;
+    }
+    if (this.endPlainRestartSessionHandover(sessionUuid, record, releaseReason, error)) {
       return;
     }
     // A delivered proxy_stalled already reported this definitive loss. daemon_stalled did not.
@@ -7294,6 +7321,38 @@ export class DaemonMcpProxy {
     this.ownedDeviceSessions.delete(sessionUuid);
     this.claimableSessions.delete(sessionUuid);
     this.recordTerminalStallLoss(sessionUuid, releaseReason);
+  }
+
+  /** A plain successor's definitive release uses terminal ownership loss, with no stall push. */
+  private endPlainRestartSessionHandover(
+    sessionUuid: string,
+    record: StallHandoverRecord,
+    releaseReason: string,
+    error: unknown,
+  ): boolean {
+    if (this.managedExecutionSessions.has(sessionUuid)) {
+      return false;
+    }
+    const answeringDaemonInstance = daemonInstanceFromError(error);
+    const restarted =
+      record.managedReclaimSince !== undefined ||
+      (answeringDaemonInstance !== undefined &&
+        answeringDaemonInstance !== record.stalledDaemonInstance);
+    if (!restarted) {
+      return false;
+    }
+    this.plainRestartSessionLosses.set(sessionUuid, releaseReason);
+    this.recordHeldSessionTerminalLoss(sessionUuid, releaseReason);
+    if (this.terminalBoundSession?.sessionUuid === sessionUuid) {
+      this.fenceBoundSessionUuid(sessionUuid, releaseReason);
+    }
+    this.forgetSessionLivenessState(sessionUuid);
+    this.ownedDeviceSessions.delete(sessionUuid);
+    this.claimableSessions.delete(sessionUuid);
+    if (!this.hasProbeableStall()) {
+      void this.stallResumeProbe.stop();
+    }
+    return true;
   }
 
   private recordTerminalStallLoss(sessionUuid: string, releaseReason: string): void {
@@ -7662,6 +7721,7 @@ export class DaemonMcpProxy {
   private holdPreviousBinding(nextSessionUuid: string): void {
     const previous = this.boundSessionUuid;
     this.pendingHeldSessionPlatformLosses.delete(nextSessionUuid);
+    this.plainRestartSessionLosses.delete(nextSessionUuid);
     this.otherHeldSessions.delete(nextSessionUuid);
     this.latestBindingConflict = undefined;
     // Only a session this proxy claims stays held: an args-named one was never heartbeated (#10664).
@@ -7962,6 +8022,7 @@ export class DaemonMcpProxy {
     ) {
       this.otherHeldSessions.set(sessionUuid, { claimSent: false, lastUsedAt: this.timer.now() });
       this.pendingHeldSessionPlatformLosses.delete(sessionUuid);
+      this.plainRestartSessionLosses.delete(sessionUuid);
     }
     this.syncHeartbeatKeeper();
   }
@@ -8443,6 +8504,7 @@ export class DaemonMcpProxy {
   // its provenance (issue #5689).
   private updateBoundSessionUuid(sessionUuid: string): void {
     this.pendingHeldSessionPlatformLosses.delete(sessionUuid);
+    this.plainRestartSessionLosses.delete(sessionUuid);
     // A held session that becomes the binding again keeps its idle clock: the call that named it
     // may be a read, and the daemon's echo already credited it when it was use (#11348).
     const heldLastUsedAt = this.otherHeldSessions.get(sessionUuid)?.lastUsedAt;
@@ -8979,6 +9041,7 @@ export class DaemonMcpProxy {
     this.resumedStallNotices.clear();
     this.pendingSessionLosses.clear();
     this.pendingHeldSessionPlatformLosses.clear();
+    this.plainRestartSessionLosses.clear();
     this.livenessHandoverListeners.clear();
     this.ownedDeviceSessions.clear();
     this.terminalBoundSession = undefined;

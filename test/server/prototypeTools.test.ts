@@ -116,7 +116,7 @@ describe("prototype MCP tool", () => {
 
   test("an unknown action names the supported actions", async () => {
     const { payload } = await call({ action: "explode" });
-    expect(payload.error).toContain("show, dismiss, status, inspect or awaitEvent");
+    expect(payload.error).toContain("show, patch, dismiss, status, inspect or awaitEvent");
   });
 
   test.each([

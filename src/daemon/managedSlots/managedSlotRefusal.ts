@@ -15,6 +15,34 @@ export const DEVICE_ASSIGNED_TO_MANAGED_SLOT_CODE = "device_assigned_to_managed_
  */
 export const MANAGED_SLOT_DISCOVERY_INCOMPLETE_CODE = "discovery_incomplete";
 
+/** This daemon does not understand the schema written by a newer registry owner. */
+export const MANAGED_SLOT_REGISTRY_SCHEMA_UNSUPPORTED_CODE = "registry_schema_unsupported";
+
+export class ManagedSlotRegistrySchemaUnsupportedError extends ActionableError {
+  readonly code = MANAGED_SLOT_REGISTRY_SCHEMA_UNSUPPORTED_CODE;
+  readonly retryable = false;
+
+  constructor(
+    readonly dbPath: string,
+    readonly unknownMigrations: readonly string[],
+  ) {
+    super(
+      `The managed slot registry at ${dbPath} contains migrations unknown to this daemon: ` +
+        `${unknownMigrations.join(", ")}; nothing was changed.`,
+    );
+    this.name = "ManagedSlotRegistrySchemaUnsupportedError";
+  }
+
+  toPayload(): Record<string, unknown> {
+    return {
+      code: this.code,
+      retryable: this.retryable,
+      dbPath: this.dbPath,
+      unknownMigrations: this.unknownMigrations,
+    };
+  }
+}
+
 /** Retry hint while the registry is unreadable. */
 export const MANAGED_SLOT_DISCOVERY_RETRY_AFTER_MS = 2_000;
 

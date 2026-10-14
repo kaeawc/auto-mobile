@@ -242,7 +242,7 @@ describe("KeepScreenAwakeManager", () => {
       () => failingSettingsClient,
     );
 
-    await mgr.restore({
+    const outcome = await mgr.restore({
       applied: true,
       method: "settings",
       originalStayOnWhilePluggedIn: "0",
@@ -250,6 +250,7 @@ describe("KeepScreenAwakeManager", () => {
       appliedSettings: { stayOnWhilePluggedIn: true, screenOffTimeout: true },
     });
 
+    expect(outcome).toEqual({ status: "restored" });
     expect(adb.called("settings put global stay_on_while_plugged_in 0")).toBe(true);
     expect(adb.called("settings put system screen_off_timeout 60000")).toBe(true);
   });
@@ -262,7 +263,10 @@ describe("KeepScreenAwakeManager", () => {
       () => failingSettingsClient,
     );
 
-    await mgr.restore({ applied: false, skipReason: "disabled" });
+    expect(await mgr.restore({ applied: false, skipReason: "disabled" })).toEqual({
+      status: "skipped",
+      reason: "not_applied",
+    });
 
     expect(adb.calls.length).toBe(0);
   });
@@ -357,8 +361,7 @@ describe("KeepScreenAwakeManager restore branches", () => {
     {
       name: "missing original and unknown svc",
       state: { applied: true, method: "svc" },
-      calls: [],
-      warnings: ["prior state unknown"],
+      calls: [`${setting} 0`, disable],
     },
     {
       name: "missing original and enabled svc",
@@ -418,7 +421,7 @@ describe("KeepScreenAwakeManager restore branches", () => {
       state: { applied: true, method: "svc", originalStayOnWhilePluggedIn: "unknown" },
       reject: [setting],
       calls: [`${setting} unknown`],
-      warnings: ["Failed to restore global", "prior state unknown"],
+      warnings: ["Failed to restore global", "original value unparseable"],
     },
     {
       name: "disabled setting and svc disable both fail",
@@ -483,6 +486,190 @@ describe("KeepScreenAwakeManager restore branches", () => {
       makeFactory(adb),
       () => failingSettingsClient,
     ).restore({ applied: true, method: "svc", svcWasEnabled: false });
+    expect(adb.calls).toEqual([]);
+  });
+});
+
+describe("typed restore outcomes", () => {
+  const stayOn = "shell settings put global stay_on_while_plugged_in 7";
+  const timeout = "shell settings put system screen_off_timeout 60000";
+  const disable = "shell svc power stayon false";
+  const settingsState: KeepScreenAwakeState = {
+    applied: true,
+    method: "settings",
+    originalStayOnWhilePluggedIn: "7",
+    originalScreenOffTimeout: "60000",
+    appliedSettings: { stayOnWhilePluggedIn: true, screenOffTimeout: true },
+  };
+  test.each([
+    {
+      name: "svc enabled setting failure",
+      state: { applied: true, method: "svc", originalStayOnWhilePluggedIn: "7" },
+      reject: [stayOn],
+      failures: [
+        { setting: "stay_on_while_plugged_in", error: `fake adb: command failed: ${stayOn}` },
+      ],
+    },
+    {
+      name: "svc disable failure",
+      state: { applied: true, method: "svc", svcWasEnabled: false },
+      reject: [disable],
+      failures: [{ setting: "svc_stayon", error: `fake adb: command failed: ${disable}` }],
+    },
+    {
+      name: "timeout failure only",
+      state: settingsState,
+      reject: [timeout],
+      failures: [{ setting: "screen_off_timeout", error: `fake adb: command failed: ${timeout}` }],
+    },
+    {
+      name: "both settings fail",
+      state: settingsState,
+      reject: [stayOn, timeout],
+      failures: [
+        { setting: "stay_on_while_plugged_in", error: `fake adb: command failed: ${stayOn}` },
+        { setting: "screen_off_timeout", error: `fake adb: command failed: ${timeout}` },
+      ],
+    },
+  ] as Array<{
+    name: string;
+    state: KeepScreenAwakeState;
+    reject: string[];
+    failures: Array<{ setting: string; error: string }>;
+  }>)("$name", async ({ state, reject, failures }) => {
+    const adb = new FakeAdb({ reject });
+    const mgr = new KeepScreenAwakeManager(
+      physicalDevice,
+      makeFactory(adb),
+      () => failingSettingsClient,
+    );
+    expect(await mgr.restore(state)).toEqual({ status: "failed", failures });
+    if (state.method === "settings") {
+      expect(adb.calls).toEqual([stayOn, timeout]);
+    }
+  });
+  const baselineStayOn = "shell settings put global stay_on_while_plugged_in 0";
+  const unknownSettings: KeepScreenAwakeState = {
+    applied: true,
+    method: "settings",
+    appliedSettings: { stayOnWhilePluggedIn: true, screenOffTimeout: true },
+  };
+  test.each([
+    {
+      name: "unknown svc prior resets both baselines",
+      state: { applied: true, method: "svc" },
+      calls: [baselineStayOn, disable],
+      settings: [
+        { setting: "stay_on_while_plugged_in", value: "0" },
+        { setting: "svc_stayon", value: "svc stayon false" },
+      ],
+    },
+    {
+      name: "unknown settings priors reset both baselines",
+      state: unknownSettings,
+      calls: [baselineStayOn, timeout],
+      settings: [
+        { setting: "stay_on_while_plugged_in", value: "0" },
+        { setting: "screen_off_timeout", value: "60000" },
+      ],
+    },
+    {
+      name: "known stay-on restores while unknown timeout resets",
+      state: { ...unknownSettings, originalStayOnWhilePluggedIn: "7" },
+      calls: [stayOn, timeout],
+      settings: [{ setting: "screen_off_timeout", value: "60000" }],
+    },
+  ] satisfies Array<{
+    name: string;
+    state: KeepScreenAwakeState;
+    calls: string[];
+    settings: Array<{ setting: string; value: string }>;
+  }>)("$name", async ({ state, calls, settings }) => {
+    const adb = new FakeAdb();
+    const mgr = new KeepScreenAwakeManager(
+      physicalDevice,
+      makeFactory(adb),
+      () => failingSettingsClient,
+    );
+    expect(await mgr.restore(state)).toEqual({ status: "restored_to_baseline", settings });
+    expect(adb.calls).toEqual(calls);
+  });
+
+  test.each([
+    {
+      name: "baseline write failure",
+      state: unknownSettings,
+      reject: [baselineStayOn, timeout],
+      baselineSettings: [],
+    },
+    {
+      name: "baseline plus known restore failure",
+      state: { ...unknownSettings, originalScreenOffTimeout: "60000" },
+      reject: [timeout],
+      baselineSettings: [{ setting: "stay_on_while_plugged_in", value: "0" }],
+    },
+    {
+      name: "svc baseline write failure",
+      state: { applied: true, method: "svc" },
+      reject: [baselineStayOn],
+      baselineSettings: [{ setting: "svc_stayon", value: "svc stayon false" }],
+    },
+    {
+      name: "svc disable failure after baseline",
+      state: { applied: true, method: "svc" },
+      reject: [disable],
+      baselineSettings: [{ setting: "stay_on_while_plugged_in", value: "0" }],
+    },
+  ] satisfies Array<{
+    name: string;
+    state: KeepScreenAwakeState;
+    reject: string[];
+    baselineSettings: Array<{ setting: string; value: string }>;
+  }>)("$name", async ({ state, reject, baselineSettings }) => {
+    const adb = new FakeAdb({ reject });
+    const mgr = new KeepScreenAwakeManager(
+      physicalDevice,
+      makeFactory(adb),
+      () => failingSettingsClient,
+    );
+    const failures = reject.map((command) => ({
+      setting:
+        command === disable
+          ? "svc_stayon"
+          : command === timeout
+            ? "screen_off_timeout"
+            : "stay_on_while_plugged_in",
+      error: `fake adb: command failed: ${command}`,
+    }));
+    expect(await mgr.restore(state)).toEqual({
+      status: "failed",
+      failures,
+      ...(baselineSettings.length ? { baselineSettings } : {}),
+    });
+  });
+
+  test("baseline writes use a11y with the setting value types before adb", async () => {
+    const adb = new FakeAdb();
+    const puts: Parameters<KeepScreenAwakeSettingsClient["requestSettingsPut"]>[] = [];
+    const client: KeepScreenAwakeSettingsClient = {
+      requestSettingsGet: failingSettingsClient.requestSettingsGet,
+      requestSettingsPut: async (...args) => {
+        puts.push(args);
+        return { success: true };
+      },
+    };
+    const mgr = new KeepScreenAwakeManager(physicalDevice, makeFactory(adb), () => client);
+    expect(await mgr.restore(unknownSettings)).toEqual({
+      status: "restored_to_baseline",
+      settings: [
+        { setting: "stay_on_while_plugged_in", value: "0" },
+        { setting: "screen_off_timeout", value: "60000" },
+      ],
+    });
+    expect(puts).toEqual([
+      ["global", "stay_on_while_plugged_in", "0", "int"],
+      ["system", "screen_off_timeout", "60000", "long"],
+    ]);
     expect(adb.calls).toEqual([]);
   });
 });

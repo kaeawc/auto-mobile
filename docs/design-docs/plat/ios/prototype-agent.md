@@ -489,13 +489,15 @@ The agent advertises `prototype_data_model_v1` for the shared
 [data model contract](../android/prototype-ux.md#data-model-11673). The host refuses data-model
 shows on an agent without it, before uploads or show. The core resolves bindings once per show:
 path repeats become projected literal items, authored text placeholders become scalar text, and
-data conditions become constant conditions. Decode first guards data, then the authored tree with
-two independent node budgets: ordinary nodes and nonempty literal-repeat instances use the
-expanded budget, while path-bound, empty, or malformed repeat templates are visited once under
-the authored-template budget; both enforce the same depth limit before the cell guard or resolver
-recurses. It then guards `MAX_PROTOTYPE_REPEAT_PATH_CELLS` in container pre-order, resolves bindings
-with projected items cached per pointer, guards the resolved tree to count every instance, and
-finally expands repeats.
+data conditions become constant conditions. Decode first guards data, then refuses non-object
+authored children before checking two independent node budgets (ordinary nodes and nonempty literal-repeat instances use the expanded budget;
+path-bound, empty, or malformed templates use the authored-template budget once) and the depth
+limit. It guards `MAX_PROTOTYPE_REPEAT_PATH_CELLS` in container pre-order, then checks
+substituted text against both the per-field limit and the 4,194,304 UTF-16 rebuilt-text total per show
+(inside a repeat, a data-resolved field is also charged once per item, even without repeat placeholders;
+purely literal fields and state placeholders are not charged) and refuses nested repeats before resolving bindings with projected items cached
+per pointer, guarding the resolved tree, and expanding repeats. State placeholders are clamped at
+substitution to the shared UTF-16 substituted-text limit; literals do not consume that budget.
 State interpolation then uses the ordinary expanded tree. `repeat.key` is accepted and kept during
 resolution, but rows retain positional identity until keyed patching (#11675).
 
@@ -504,3 +506,42 @@ Two data keys that are canonically equivalent Unicode strings collapse into one 
 Swift dictionary keys compare by canonical equivalence, unlike the host and Android.
 The agent re-checks data depth and array limits in the host's traversal order. It does not duplicate
 the host validator's data byte-cost rule; the existing 1 MiB whole-spec byte cap still bounds input.
+
+## Saved prototype on-disk layout (#12254)
+
+One saved prototype lives in the viewer app container:
+
+```text
+Documents/prototype/
+  manifest.json
+  spec.json
+  assets/<sha256>.png|jpg|webp
+  fonts/<sha256>.ttf|otf
+```
+
+Version 1 has the strict manifest shape
+`{"formatVersion":1,"specFile":"spec.json","assets":[{"id":"image","file":"assets/<sha256>.png","sha256":"<sha256>","mediaType":"image/png"}],"fonts":[]}`.
+Both arrays are always present. SHA-256 is lowercase hexadecimal over file bytes;
+identical bytes with the same media type share one content-addressed file. Paths
+must exactly match the media type, folder and hash. IDs are unique across both arrays.
+The shared asset contract caps count, per-file size and total bytes; spec and
+manifest caps are 1 MiB and 256 KiB respectively.
+
+The host writer stages a sibling `.tmp-<token>` directory, writes the manifest last,
+then renames into place. Replacement first backs up the old directory to
+`.old-<token>` and restores it if the commit rename fails. Callers serialize writes.
+The reader refuses unknown versions before validating version-specific fields and
+never changes any files. A bad manifest, spec, count or verified-byte total is corrupt;
+missing, unreadable, unsafe, empty/oversized or hash-mismatched assets are omitted
+from the verified snapshot and reported as sorted problems. The viewer can use its
+missing-asset placeholder and expose those problems through `inspect`.
+
+Unlike Android's many slug directories, iOS stores one prototype and has no manifest
+id, label or savedAt. Asset failures leave the prototype loadable; reading never
+repairs or deletes it. The writer permits spec references absent from the request;
+the reader reports these as missing manifest entries. The installer is separate (#12256).
+
+The implementations are `src/features/prototype/savedPrototypeLayout.ts` and
+`ios/prototype-agent/Sources/AutoMobilePrototypeAgentCore/PrototypeSavedLayout.swift`.
+Both test suites consume `test/fixtures/prototype-saved-layout/layout.json`, including
+the same expected manifest and file hashes. Fixture binaries are generated at test time.

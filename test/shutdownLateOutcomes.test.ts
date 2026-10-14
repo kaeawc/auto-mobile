@@ -290,12 +290,12 @@ describe("late outcomes of abandoned shutdown stages (#11601)", () => {
 
 describe("daemon exit code by when a shutdown stage settles (#11601)", () => {
   // One slow stage that may write; every other stage finishes at once. Its deadline is the sum
-  // of the budgets up to its own (2,300 ms). The first settle stage gives up at 7,500 ms, the
-  // database stage runs, and the late settle stage gives up at 8,125 ms — which is where the
+  // of the budgets up to its own (2,300 ms). The first settle stage gives up at 7,520 ms, the
+  // database stage runs, and the late settle stage gives up at 8,145 ms — which is where the
   // sequence ends when work is still running.
   const slowStage: DaemonShutdownStageName = "active capture and iOS CtrlProxy children";
   const timedOut = `Shutdown cleanup stage ${slowStage} timed out after 2300ms waiting on a fake wedge; continuing shutdown`;
-  const stillRunning = `Shutdown stage(s) still running 5200ms after being abandoned: ${slowStage}`;
+  const stillRunning = `Shutdown stage(s) still running 5220ms after being abandoned: ${slowStage}`;
   const closeSkipped = `Skipping database close because abandoned shutdown stage(s) are still running: ${slowStage}`;
   const failed = `Shutdown cleanup stage ${slowStage} failed`;
   const failedLate = `Shutdown cleanup stage ${slowStage} failed after being abandoned at its deadline`;
@@ -392,7 +392,7 @@ describe("daemon exit code by when a shutdown stage settles (#11601)", () => {
       outcome: "resolves",
       when: "after the sequence ended, before the process limit",
       exitCode: 1,
-      exitedAtMs: 8_125,
+      exitedAtMs: 8_145,
       databaseClosed: false,
       warnings: [timedOut, stillRunning, closeSkipped],
     },
@@ -401,7 +401,7 @@ describe("daemon exit code by when a shutdown stage settles (#11601)", () => {
       outcome: "rejects",
       when: "after the sequence ended, before the process limit",
       exitCode: 1,
-      exitedAtMs: 8_125,
+      exitedAtMs: 8_145,
       databaseClosed: false,
       warnings: [timedOut, stillRunning, closeSkipped, failedAfterExit],
     },
@@ -410,7 +410,7 @@ describe("daemon exit code by when a shutdown stage settles (#11601)", () => {
       outcome: "resolves",
       when: "never",
       exitCode: 1,
-      exitedAtMs: 8_125,
+      exitedAtMs: 8_145,
       databaseClosed: false,
       warnings: [timedOut, stillRunning, closeSkipped],
     },

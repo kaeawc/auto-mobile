@@ -474,6 +474,45 @@ class PrototypeRenderModelTest {
   }
 
   @Test
+  fun `interpolation substitutes exactly the limit and preserves oversized tokens`() {
+    val limit = PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH
+    val exact = "x".repeat(limit)
+    assertEquals(exact, interpolatePrototypeText("{b}", mapOf("b" to PrototypeScalar.Text(exact))))
+    assertEquals(
+      "{b}",
+      interpolatePrototypeText("{b}", mapOf("b" to PrototypeScalar.Text(exact + "x"))),
+    )
+  }
+
+  @Test
+  fun `interpolation accumulates replacement lengths per call`() {
+    val value = "x".repeat(8193)
+    assertEquals(
+      value + "{b}",
+      interpolatePrototypeText("{b}{b}", mapOf("b" to PrototypeScalar.Text(value))),
+    )
+  }
+
+  @Test
+  fun `interpolation allows short replacements after an oversized token`() {
+    val state =
+      mapOf(
+        "b" to PrototypeScalar.Text("x".repeat(16_385)),
+        "s" to PrototypeScalar.Text("short"),
+      )
+    assertEquals("{b}short", interpolatePrototypeText("{b}{s}", state))
+  }
+
+  @Test
+  fun `interpolation literal characters do not count toward the limit`() {
+    val literal = "x".repeat(20_000)
+    assertEquals(
+      literal + "short",
+      interpolatePrototypeText(literal + "{s}", mapOf("s" to PrototypeScalar.Text("short"))),
+    )
+  }
+
+  @Test
   fun `placement opacity and alpha first colors map without a display`() {
     assertEquals(100, mapPrototypeSpec(spec(PrototypeSpacerNode())).opacityPercent)
     val window = PrototypeWindow(PrototypeFullscreenPlacement("#80123456"), 37)

@@ -19,6 +19,7 @@ import { errorMessage } from "../../src/utils/describeUnknownError";
 import { logger } from "../../src/utils/logger";
 import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessService";
 import { typedRefusalFields } from "../../src/models/typedRefusalFields";
+import { ActionableError } from "../../src/models/ActionableError";
 
 import { DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS } from "../../src/daemon/deviceAcquisitionRefusals";
 
@@ -33,6 +34,28 @@ describe("shapeToolCallError", () => {
 
   afterEach(() => {
     errorSpy.mockRestore();
+  });
+
+  test("an unrelated structurally coded actionable error stays plain text", () => {
+    const error = Object.assign(new ActionableError("x"), { code: "some_code", retryable: true });
+    expect(shapeToolCallError(error, context).content[0].text).toBe("Error: x");
+    expect(isTypedToolRefusal(error)).toBe(false);
+  });
+
+  test("an actionable timeout exposes only its code and retryable fields", () => {
+    const error = Object.assign(new ActionableError("x"), {
+      code: "timeout",
+      retryable: true,
+      nextAction: "retry",
+      details: { extra: true },
+    });
+    expect(isTypedToolRefusal(error)).toBe(true);
+    expect(JSON.parse(shapeToolCallError(error, context).content[0].text)).toEqual({
+      success: false,
+      error: "x",
+      code: "timeout",
+      retryable: true,
+    });
   });
 
   test("a recovery-held session is a typed retryable refusal on every tool boundary", () => {

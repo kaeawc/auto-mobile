@@ -18845,7 +18845,7 @@
                 "layer": {
                   "type": "string",
                   "enum": ["app", "system"],
-                  "description": "system (default): above system UI. app: just above apps, so the shade, keyboard and screenshot preview draw over it; needs SYSTEM_ALERT_WINDOW, granted with appops at show time"
+                  "description": "system (default): above system UI. app: just above apps, so the shade, keyboard and screenshot preview draw over it; needs SYSTEM_ALERT_WINDOW, granted with appops at show time; some system apps (for example Settings) hide app-layer prototypes; the show result then carries visible: false"
                 },
                 "persistence": {
                   "type": "string",
@@ -22269,8 +22269,18 @@
             "type": "string"
           }
         },
+        "visible": {
+          "description": "show with window.layer \"app\" on Android: no prototype window was on screen after the show; absent when visible or not checked",
+          "type": "boolean",
+          "const": false
+        },
+        "notVisibleReason": {
+          "description": "show with window.layer \"app\" on Android: why visible is false. no_prototype_window_on_screen: the window was created but the screen does not show it, usually because the app in front hides app-layer windows; absent when visible or not checked",
+          "type": "string",
+          "enum": ["no_prototype_window_on_screen"]
+        },
         "warning": {
-          "description": "show succeeded or awaitEvent timed out, and it needs attention: names what to do about missingAssets, that display was ignored by a same-id show, or (awaitEvent timeout) that the prototype is hidden because its app is not in front",
+          "description": "show succeeded or awaitEvent timed out, and it needs attention: names what to do about missingAssets, that display was ignored by a same-id show, that an Android app-layer prototype is not on screen, or (awaitEvent timeout) that the prototype is hidden because its app is not in front",
           "type": "string"
         },
         "anchors": {

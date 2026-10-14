@@ -1,10 +1,14 @@
-import { readProcessGenerationTokenForPid } from "../../daemon/daemonFiles";
+import {
+  compareProcessGenerationTokens,
+  readProcessGenerationTokenForPid,
+} from "../../daemon/daemonFiles";
 import { logger } from "../logger";
 import { isProcessRunning } from "../processLiveness";
 
 export interface NativeHelperProcessControl {
   isRunning(pid: number): boolean;
   readStartIdentity(pid: number): string | undefined;
+  compareStartIdentity(recorded: string, current: string): "same" | "different" | "incomparable";
   signal(pid: number, signal: NodeJS.Signals, options: { group: boolean }): void;
 }
 
@@ -14,6 +18,9 @@ export class DefaultNativeHelperProcessControl implements NativeHelperProcessCon
   }
   readStartIdentity(pid: number): string | undefined {
     return readProcessGenerationTokenForPid(pid);
+  }
+  compareStartIdentity(recorded: string, current: string): "same" | "different" | "incomparable" {
+    return compareProcessGenerationTokens(recorded, current);
   }
   signal(pid: number, signal: NodeJS.Signals, options: { group: boolean }): void {
     if (!Number.isSafeInteger(pid) || pid <= 1 || pid === process.pid) {

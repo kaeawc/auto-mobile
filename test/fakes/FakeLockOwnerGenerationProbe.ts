@@ -9,6 +9,7 @@ export class FakeLockOwnerGenerationProbe implements LockOwnerGenerationProbe {
   currentError?: Error;
   compareError?: Error;
   onCurrent?: (pid: number) => void;
+  onCompare?: (pid: number, recorded: string) => LockOwnerGenerationVerdict;
   currentCalls: number[] = [];
   compareCalls: { pid: number; recorded: string }[] = [];
 
@@ -26,6 +27,6 @@ export class FakeLockOwnerGenerationProbe implements LockOwnerGenerationProbe {
     if (this.compareError) {
       throw this.compareError;
     }
-    return this.verdict;
+    return this.onCompare?.(pid, recorded) ?? this.verdict;
   }
 }

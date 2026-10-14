@@ -8,6 +8,7 @@ import { ProcessTableReader } from "../features/bootAdmission/processTableRetry"
 import { nodeProcFs } from "../features/bootAdmission/procProcessTable";
 import { DefaultHostCommandExecutor } from "../utils/HostCommandExecutor";
 import { managedSlotPoolGate } from "../daemon/managedSlots/managedSlotPoolGate";
+import { defaultLockOwnerGenerationProbe } from "../daemon/lockOwnerGeneration";
 import type { QrPosterWriter } from "../utils/qr/QrPosterWriter";
 import {
   DefaultDeviceResourceObserver,
@@ -3526,6 +3527,7 @@ function createAndroidEmulatorProcessStopper(): EmulatorProcessStopper {
       },
     },
     timer,
+    { processGeneration: defaultLockOwnerGenerationProbe },
   );
 }
 

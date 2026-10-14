@@ -5,12 +5,16 @@ import android.content.Intent
 import android.content.pm.ShortcutManager
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.drawable.Icon
 import androidx.test.core.app.ApplicationProvider
 import java.io.ByteArrayOutputStream
+import kotlinx.coroutines.CancellationException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -18,6 +22,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.util.ReflectionHelpers
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30])
@@ -69,6 +74,103 @@ class AndroidPinnedShortcutPlatformTest {
       )
     assertFalse(guarded.requestPin(PrototypeShortcut("panel", "Panel", "Panel", null)))
     assertFalse(guarded.update(PrototypeShortcut("panel", "Panel", "Panel", null)))
+    guarded.enable(PrototypeShortcut("panel", "Panel", "Panel", null))
+  }
+
+  @Test
+  fun `new pin renders fallback but null icon updates omit icon without rendering`() {
+    var renders = 0
+    val guarded =
+      AndroidPinnedShortcutPlatform(
+        context,
+        icons =
+          ShortcutIconRenderer { _, _ ->
+            renders++
+            Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888)
+          },
+      )
+    val shortcut = PrototypeShortcut("panel", "Panel", "Panel", null)
+    assertTrue(guarded.requestPin(shortcut))
+    assertNotNull(ReflectionHelpers.getField<Icon?>(manager.pinnedShortcuts.single(), "mIcon"))
+    assertEquals(1, renders)
+    assertTrue(guarded.update(shortcut))
+    // The shadow stores the submitted update, without Android's field-merging semantics.
+    assertNull(ReflectionHelpers.getField<Icon?>(manager.pinnedShortcuts.single(), "mIcon"))
+    assertEquals(1, renders)
+    assertTrue(guarded.update(PrototypeShortcut("panel", "Panel", "Panel", byteArrayOf(1))))
+    assertNotNull(ReflectionHelpers.getField<Icon?>(manager.pinnedShortcuts.single(), "mIcon"))
+    assertEquals(2, renders)
+  }
+
+  @Test
+  fun `enable builds label and intent without rendering and restores a disabled pinned shortcut`() {
+    val shortcut = PrototypeShortcut("panel", "Panel", "Panel", null)
+    assertTrue(platform.requestPin(shortcut))
+    manager.disableShortcuts(listOf("panel"))
+    assertEquals(setOf("panel"), platform.pinnedIds())
+    assertThrows(IllegalArgumentException::class.java) { platform.requestPin(shortcut) }
+    val intentIds = mutableListOf<String>()
+    val guarded =
+      AndroidPinnedShortcutPlatform(
+        context,
+        ShortcutIntentFactory { id ->
+          intentIds += id
+          SavedPrototypeShortcutIntents(context).intentFor(id)
+        },
+        ShortcutIconRenderer { _, _ -> error("Enable must not render icons") },
+      )
+    guarded.enable(PrototypeShortcut("panel", "Updated", "Updated panel", byteArrayOf(1)))
+    assertEquals(listOf("panel"), intentIds)
+    assertTrue(platform.requestPin(shortcut))
+  }
+
+  @Test
+  fun `intent and renderer illegal state failures are wrapped before requesting pin`() {
+    val failure = IllegalStateException("cannot build")
+    val brokenIntents =
+      AndroidPinnedShortcutPlatform(context, ShortcutIntentFactory { throw failure })
+    val brokenIcons =
+      AndroidPinnedShortcutPlatform(context, icons = ShortcutIconRenderer { _, _ -> throw failure })
+    val shortcut = PrototypeShortcut("panel", "Panel", "Panel", null)
+    for (broken in listOf(brokenIntents, brokenIcons)) {
+      val error = assertThrows(IllegalArgumentException::class.java) { broken.requestPin(shortcut) }
+      assertEquals(failure, error.cause)
+      assertTrue(PinnedPrototypeShortcuts(broken).pin("panel", "Panel", null) is PinOutcome.Failed)
+    }
+    assertTrue(manager.pinnedShortcuts.isEmpty())
+  }
+
+  @Test
+  fun `shortcut building cancellation is never wrapped`() {
+    val broken =
+      AndroidPinnedShortcutPlatform(
+        context,
+        icons = ShortcutIconRenderer { _, _ -> throw CancellationException("cancelled") },
+      )
+    assertThrows(CancellationException::class.java) {
+      PinnedPrototypeShortcuts(broken).pin("panel", "Panel", null)
+    }
+  }
+
+  @Test
+  @GraphicsMode(GraphicsMode.Mode.NATIVE)
+  fun `transparent PNG corner uses a white background`() {
+    val source = Bitmap.createBitmap(4, 4, Bitmap.Config.ARGB_8888)
+    source.eraseColor(Color.TRANSPARENT)
+    source.setPixel(3, 3, Color.BLUE)
+    val bytes =
+      ByteArrayOutputStream()
+        .also { source.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        .toByteArray()
+    source.recycle()
+    val bitmap = AndroidShortcutIconRenderer(context).render(bytes, "Panel")
+    try {
+      assertEquals(Color.WHITE, bitmap.getPixel(0, 0))
+      assertEquals(Color.WHITE, bitmap.getPixel(bitmap.width / 3, bitmap.height / 3))
+      assertEquals(255, Color.alpha(bitmap.getPixel(bitmap.width / 2, bitmap.height / 2)))
+    } finally {
+      bitmap.recycle()
+    }
   }
 
   @Test

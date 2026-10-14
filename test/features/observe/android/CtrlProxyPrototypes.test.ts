@@ -1199,6 +1199,12 @@ const savedRequests = [
     params: { id: "panel", icon: "hero" },
     reply: { pin: { id: "panel", status: "requested" } },
   },
+  ...(["updated", "rate_limited"] as const).map((shortcut) => ({
+    type: "pin_saved_prototype",
+    run: (client: AndroidCtrlProxyClient) => client.requestPinSavedPrototype("panel"),
+    params: { id: "panel" },
+    reply: { pin: { id: "panel", status: "already_pinned", shortcut } },
+  })),
   {
     type: "save_prototype",
     run: (client: AndroidCtrlProxyClient) =>
@@ -1396,6 +1402,8 @@ describe("saved shortcut reply validation", () => {
     expect(prototypeSavedReplyFields({ saved: { ...savedInfo, shortcut } })).toEqual({
       saved: { ...savedInfo, shortcut },
     });
+    const pin = { id: "panel", status: "already_pinned", shortcut };
+    expect(prototypeSavedReplyFields({ pin })).toEqual({ pin });
   });
   test.each([null, "future", 3, { status: "requested" }, { id: "panel", status: "future" }])(
     "drops malformed pin %p",
@@ -1409,6 +1417,8 @@ describe("saved shortcut reply validation", () => {
       expect(prototypeSavedReplyFields({ saved: { ...savedInfo, shortcut } })).toEqual({
         saved: savedInfo,
       });
+      const pin = { id: "panel", status: "already_pinned" };
+      expect(prototypeSavedReplyFields({ pin: { ...pin, shortcut } })).toEqual({ pin });
     },
   );
   test.each(["pin_unsupported", "device_locked", "pin_failed"])("accepts %s", (errorCode) => {
@@ -1442,7 +1452,10 @@ describe("saved shortcut reply validation", () => {
   });
   test("fake records pin requests and returns configured result", async () => {
     const fake = new FakeCtrlProxy();
-    const result = { success: true, pin: { id: "panel", status: "already_pinned" as const } };
+    const result = {
+      success: true,
+      pin: { id: "panel", status: "already_pinned" as const, shortcut: "rate_limited" as const },
+    };
     fake.setPinResult(result);
     expect(await fake.requestPinSavedPrototype("panel", "hero")).toEqual(result);
     expect(await fake.requestPinSavedPrototype("panel")).toEqual(result);

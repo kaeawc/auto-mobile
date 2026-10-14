@@ -777,7 +777,13 @@ data class SavedPrototypeInfo(
   @EncodeDefault(EncodeDefault.Mode.NEVER) val shortcut: SavedPrototypeShortcutUpdate? = null,
 )
 
-@Serializable data class SavedPrototypePinInfo(val id: String, val status: SavedPrototypePinStatus)
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+data class SavedPrototypePinInfo(
+  val id: String,
+  val status: SavedPrototypePinStatus,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val shortcut: SavedPrototypeShortcutUpdate? = null,
+)
 
 @Serializable
 enum class SavedPrototypePinStatus {

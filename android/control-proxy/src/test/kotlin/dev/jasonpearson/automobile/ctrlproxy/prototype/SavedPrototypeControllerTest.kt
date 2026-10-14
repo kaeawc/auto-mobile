@@ -68,14 +68,17 @@ class SavedPrototypeControllerTest {
       }
     }
 
-  private fun TestScope.controller(backing: SavedPrototypeStore = store) =
+  private fun TestScope.controller(
+    backing: SavedPrototypeStore = store,
+    shortcutPinner: PrototypeShortcutPinner = pinner,
+  ) =
     SavedPrototypeController(
       backing,
       assets,
       shortcuts,
       sink,
       StandardTestDispatcher(testScheduler),
-      pinner,
+      shortcutPinner,
     )
 
   private fun onlyReply(id: String): PrototypeResult {
@@ -274,13 +277,21 @@ class SavedPrototypeControllerTest {
     for ((outcome, status) in
       listOf(
         PinOutcome.Requested to SavedPrototypePinStatus.REQUESTED,
+        PinOutcome.AlreadyPinned(ShortcutUpdate.UPDATED) to SavedPrototypePinStatus.ALREADY_PINNED,
         PinOutcome.AlreadyPinned(ShortcutUpdate.RATE_LIMITED) to
           SavedPrototypePinStatus.ALREADY_PINNED,
       )) {
       replies.clear()
       pinner.outcome = outcome
       controller.pin("pin", "panel", "icon")
-      assertEquals(SavedPrototypePinInfo("panel", status), onlyReply("pin").pin)
+      val update =
+        when (outcome) {
+          is PinOutcome.AlreadyPinned ->
+            if (outcome.update == ShortcutUpdate.UPDATED) SavedPrototypeShortcutUpdate.UPDATED
+            else SavedPrototypeShortcutUpdate.RATE_LIMITED
+          else -> null
+        }
+      assertEquals(SavedPrototypePinInfo("panel", status, update), onlyReply("pin").pin)
       assertEquals("Saved label", pinner.pins.last().shortLabel)
       assertArrayEquals(byteArrayOf(7), pinner.pins.last().iconBytes)
     }
@@ -345,7 +356,8 @@ class SavedPrototypeControllerTest {
     assets.bytes["icon"] = byteArrayOf(9)
     val controller = controller()
     controller.save("first", spec, "Panel", "icon")
-    assertTrue(pinner.updates.isEmpty())
+    assertEquals(1, pinner.updates.size)
+    assertEquals(null, onlyReply("first").saved?.shortcut)
     for ((update, expected) in
       listOf(
         ShortcutUpdate.UPDATED to SavedPrototypeShortcutUpdate.UPDATED,
@@ -373,6 +385,40 @@ class SavedPrototypeControllerTest {
       assertEquals("cancelled", error.message)
     }
     assertTrue(replies.isEmpty())
+  }
+
+  @Test
+  fun `first save reports a pinned shortcut update even without replacing storage`() = runTest {
+    pinner.updateResult = ShortcutUpdate.UPDATED
+    controller().save("first", spec, "Panel", null)
+    assertEquals(
+      SavedPrototypeInfo("panel", "fake-0", false, SavedPrototypeShortcutUpdate.UPDATED),
+      onlyReply("first").saved,
+    )
+    assertEquals(1, pinner.updates.size)
+    assertEquals("Panel", pinner.updates.single().shortLabel)
+  }
+
+  @Test
+  fun `delete then save re enables and updates the still pinned shortcut`() = runTest {
+    val platform = FakePinnedShortcutPlatform().apply { pinned = setOf("panel") }
+    shortcuts.onDisable = { ids -> platform.disabled.addAll(ids) }
+    val controller = controller(shortcutPinner = PinnedPrototypeShortcuts(platform))
+    controller.save("first", spec, "Panel", null)
+    replies.clear()
+    controller.delete("delete", "panel")
+    assertTrue(onlyReply("delete").success)
+    assertEquals(setOf("panel"), platform.disabled)
+    platform.enabled.clear()
+    platform.updates.clear()
+    replies.clear()
+    controller.save("resave", spec, "Restored", null)
+    assertFalse(checkNotNull(onlyReply("resave").saved).replaced)
+    assertEquals(SavedPrototypeShortcutUpdate.UPDATED, replies.single().saved?.shortcut)
+    assertTrue(platform.disabled.isEmpty())
+    assertEquals(listOf("panel"), platform.enabled.map { it.id })
+    assertEquals("Restored", platform.updates.single().shortLabel)
+    assertTrue(platform.requests.isEmpty())
   }
 
   private fun failingStore(error: Exception): SavedPrototypeStore =
@@ -406,6 +452,7 @@ internal class FakeSavedPrototypeShortcuts : SavedPrototypeShortcuts {
   var reads = 0
   var failure: Exception? = null
   val disabled = mutableListOf<Pair<List<String>, String>>()
+  var onDisable: (List<String>) -> Unit = {}
 
   override fun pinnedIds(): Set<String> {
     reads++
@@ -416,6 +463,7 @@ internal class FakeSavedPrototypeShortcuts : SavedPrototypeShortcuts {
   override fun disable(ids: List<String>, message: String) {
     failure?.let { throw it }
     disabled += ids to message
+    onDisable(ids)
   }
 }
 

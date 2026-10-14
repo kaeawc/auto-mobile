@@ -14,10 +14,12 @@ interface PinnedShortcutPlatform {
 
   fun pinnedIds(): Set<String>
 
+  fun enable(shortcut: PrototypeShortcut)
+
   /** True when the launcher dialog was raised; may throw when backgrounded or locked. */
   fun requestPin(shortcut: PrototypeShortcut): Boolean
 
-  /** False when the system rate limits the update. */
+  /** False when rate limited. Null icon bytes preserve the pinned shortcut's existing icon. */
   fun update(shortcut: PrototypeShortcut): Boolean
 }
 
@@ -64,19 +66,23 @@ class PinnedPrototypeShortcuts(private val platform: PinnedShortcutPlatform) :
       } else {
         val shortcut = shortcut(id, label, iconBytes)
         if (shortcut.id in platform.pinnedIds()) {
+          platform.enable(shortcut)
           PinOutcome.AlreadyPinned(update(shortcut))
-        } else if (platform.requestPin(shortcut)) {
-          PinOutcome.Requested
         } else {
-          PinOutcome.Failed("Launcher refused the pin request")
+          try {
+            if (platform.requestPin(shortcut)) PinOutcome.Requested
+            else PinOutcome.Failed("Launcher refused the pin request")
+          } catch (error: CancellationException) {
+            throw error
+          } catch (error: IllegalStateException) {
+            PinOutcome.DeviceLocked(
+              "Wake and unlock the device, keep CtrlProxy in the foreground, and retry",
+            )
+          }
         }
       }
     } catch (error: CancellationException) {
       throw error
-    } catch (error: IllegalStateException) {
-      PinOutcome.DeviceLocked(
-        "Wake and unlock the device, keep CtrlProxy in the foreground, and retry",
-      )
     } catch (error: Exception) {
       PinOutcome.Failed(error.message ?: error.javaClass.simpleName)
     }
@@ -84,7 +90,10 @@ class PinnedPrototypeShortcuts(private val platform: PinnedShortcutPlatform) :
   override fun updateIfPinned(id: String, label: String, iconBytes: ByteArray?): ShortcutUpdate? =
     try {
       val shortcut = shortcut(id, label, iconBytes)
-      if (shortcut.id in platform.pinnedIds()) update(shortcut) else null
+      if (shortcut.id in platform.pinnedIds()) {
+        platform.enable(shortcut)
+        update(shortcut)
+      } else null
     } catch (error: CancellationException) {
       throw error
     } catch (error: Exception) {
@@ -105,7 +114,18 @@ class PinnedPrototypeShortcuts(private val platform: PinnedShortcutPlatform) :
 }
 
 internal fun shortLabelFor(label: String, fallback: String): String =
-  label.trim().ifBlank { fallback }.take(10)
+  boundedLabel(label.trim().ifBlank { fallback }, 10)
 
 internal fun longLabelFor(label: String, fallback: String): String =
-  label.trim().ifBlank { fallback }.take(25)
+  boundedLabel(label.trim().ifBlank { fallback }, 25)
+
+private fun boundedLabel(label: String, limit: Int): String {
+  var end = minOf(label.length, limit)
+  if (
+    end < label.length &&
+      Character.isHighSurrogate(label[end - 1]) &&
+      Character.isLowSurrogate(label[end])
+  )
+    end--
+  return label.substring(0, end)
+}

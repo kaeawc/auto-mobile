@@ -9,7 +9,6 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
-import android.net.Uri
 import android.os.Build
 import android.util.Log
 import androidx.core.content.pm.ShortcutInfoCompat
@@ -23,20 +22,10 @@ fun interface ShortcutIntentFactory {
   fun intentFor(id: String): Intent
 }
 
-/**
- * Once the viewer lands, use SavedPrototypeLaunch.intent(context,
- * id).setAction(Intent.ACTION_VIEW).
- */
+/** SavedPrototypeLaunch intent plus ACTION_VIEW, which pinned shortcuts require. */
 class SavedPrototypeShortcutIntents(private val context: Context) : ShortcutIntentFactory {
   override fun intentFor(id: String): Intent =
-    Intent()
-      .setClassName(
-        context.packageName,
-        "dev.jasonpearson.automobile.ctrlproxy.prototype.SavedPrototypeActivity",
-      )
-      .setAction(Intent.ACTION_VIEW)
-      .setData(Uri.Builder().scheme("automobile-saved-prototype").appendPath(id).build())
-      .addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT)
+    SavedPrototypeLaunch.intent(context, id).setAction(Intent.ACTION_VIEW)
 }
 
 fun interface ShortcutIconRenderer {
@@ -69,7 +58,10 @@ class AndroidShortcutIconRenderer(private val context: Context) : ShortcutIconRe
     val decoded = iconBytes?.let { decode(it, edge) }
     if (decoded != null) {
       try {
-        canvas.drawColor(decoded.getPixel(0, 0) or (0xff shl 24))
+        val background = decoded.getPixel(0, 0)
+        canvas.drawColor(
+          if (Color.alpha(background) == 0) Color.WHITE else background or (0xff shl 24),
+        )
         val side = min(decoded.width, decoded.height)
         val left = (decoded.width - side) / 2
         val top = (decoded.height - side) / 2
@@ -132,23 +124,48 @@ class AndroidPinnedShortcutPlatform(
 
   override fun requestPin(shortcut: PrototypeShortcut): Boolean =
     if (Build.VERSION.SDK_INT < 26) false
-    else logged { ShortcutManagerCompat.requestPinShortcut(context, info(shortcut), null) }
+    else {
+      val info = info(shortcut, includeIcon = true)
+      logged { ShortcutManagerCompat.requestPinShortcut(context, info, null) }
+    }
+
+  override fun enable(shortcut: PrototypeShortcut) {
+    if (Build.VERSION.SDK_INT >= 26) {
+      logged {
+        ShortcutManagerCompat.enableShortcuts(context, listOf(info(shortcut, includeIcon = false)))
+      }
+    }
+  }
 
   override fun update(shortcut: PrototypeShortcut): Boolean =
     if (Build.VERSION.SDK_INT < 26) false
-    else logged { ShortcutManagerCompat.updateShortcuts(context, listOf(info(shortcut))) }
+    else
+      logged {
+        ShortcutManagerCompat.updateShortcuts(
+          context,
+          listOf(info(shortcut, includeIcon = shortcut.iconBytes != null)),
+        )
+      }
 
-  private fun info(shortcut: PrototypeShortcut): ShortcutInfoCompat =
-    ShortcutInfoCompat.Builder(context, shortcut.id)
-      .setShortLabel(shortcut.shortLabel)
-      .setLongLabel(shortcut.longLabel)
-      .setIntent(intents.intentFor(shortcut.id))
-      .setIcon(
-        IconCompat.createWithAdaptiveBitmap(
-          icons.render(shortcut.iconBytes, shortcut.longLabel),
-        ),
-      )
-      .build()
+  private fun info(shortcut: PrototypeShortcut, includeIcon: Boolean): ShortcutInfoCompat =
+    try {
+      val builder =
+        ShortcutInfoCompat.Builder(context, shortcut.id)
+          .setShortLabel(shortcut.shortLabel)
+          .setLongLabel(shortcut.longLabel)
+          .setIntent(intents.intentFor(shortcut.id))
+      if (includeIcon) {
+        builder.setIcon(
+          IconCompat.createWithAdaptiveBitmap(icons.render(shortcut.iconBytes, shortcut.longLabel)),
+        )
+      }
+      builder.build()
+    } catch (error: CancellationException) {
+      throw error
+    } catch (error: Exception) {
+      Log.w("PinnedPrototypeShortcuts", "Cannot build launcher shortcut", error)
+      throw IllegalArgumentException("Cannot build launcher shortcut", error)
+    }
 
   private inline fun <T> logged(action: () -> T): T =
     try {

@@ -71,7 +71,11 @@ const savedInfoSchema = z.object({
   replaced: z.boolean(),
   shortcut: z.unknown().optional(),
 });
-const pinInfoSchema = z.object({ id: z.string(), status: z.enum(["requested", "already_pinned"]) });
+const pinInfoSchema = z.object({
+  id: z.string(),
+  status: z.enum(["requested", "already_pinned"]),
+  shortcut: z.unknown().optional(),
+});
 const savedEntrySchema = z.object({
   id: z.string(),
   label: z.string(),
@@ -96,13 +100,22 @@ export function prototypeSavedReplyFields(
   }
   const saved = savedInfoSchema.safeParse(envelope.data.saved);
   const pin = pinInfoSchema.safeParse(envelope.data.pin);
+  const pinShortcut = shortcutUpdateSchema.safeParse(pin.success ? pin.data.shortcut : undefined);
   const shortcut = shortcutUpdateSchema.safeParse(saved.success ? saved.data.shortcut : undefined);
   const savedPrototypes = z.array(savedEntrySchema).safeParse(envelope.data.savedPrototypes);
   if (envelope.data.savedPrototypes !== undefined && !savedPrototypes.success) {
     logger.warn("[CTRL_PROXY] Dropping malformed savedPrototypes", savedPrototypes.error);
   }
   return {
-    ...(pin.success ? { pin: pin.data } : {}),
+    ...(pin.success
+      ? {
+          pin: {
+            id: pin.data.id,
+            status: pin.data.status,
+            ...(pinShortcut.success ? { shortcut: pinShortcut.data } : {}),
+          },
+        }
+      : {}),
     ...(saved.success
       ? {
           saved: {

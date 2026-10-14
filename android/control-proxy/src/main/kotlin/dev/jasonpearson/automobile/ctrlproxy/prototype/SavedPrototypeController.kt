@@ -63,7 +63,12 @@ class SavedPrototypeController(
               PrototypeResult(
                 timestamp = 0,
                 success = true,
-                pin = SavedPrototypePinInfo(id, SavedPrototypePinStatus.ALREADY_PINNED),
+                pin =
+                  SavedPrototypePinInfo(
+                    id,
+                    SavedPrototypePinStatus.ALREADY_PINNED,
+                    outcome.update.savedUpdate(),
+                  ),
               )
             is PinOutcome.Unsupported ->
               refusal(SavedPrototypeErrorCode.PIN_UNSUPPORTED, outcome.message)
@@ -141,13 +146,7 @@ class SavedPrototypeController(
               result.id,
               result.slug,
               result.replaced,
-              if (result.replaced)
-                updatePinned(
-                  result.id,
-                  label,
-                  copied.firstOrNull { it.id == icon }?.bytes,
-                )
-              else null,
+              updatePinned(result.id, label, copied.firstOrNull { it.id == icon }?.bytes),
             ),
         )
       is SavedPrototypeSaveResult.Rejected -> refusal(result.reason.errorCode(), result.message)
@@ -160,16 +159,18 @@ class SavedPrototypeController(
     bytes: ByteArray?,
   ): SavedPrototypeShortcutUpdate? =
     try {
-      when (pinner.updateIfPinned(id, label, bytes)) {
-        ShortcutUpdate.UPDATED -> SavedPrototypeShortcutUpdate.UPDATED
-        ShortcutUpdate.RATE_LIMITED -> SavedPrototypeShortcutUpdate.RATE_LIMITED
-        null -> null
-      }
+      pinner.updateIfPinned(id, label, bytes)?.savedUpdate()
     } catch (error: CancellationException) {
       throw error
     } catch (error: Exception) {
       Log.w(TAG, "Cannot update pinned prototype shortcut", error)
       null
+    }
+
+  private fun ShortcutUpdate.savedUpdate(): SavedPrototypeShortcutUpdate =
+    when (this) {
+      ShortcutUpdate.UPDATED -> SavedPrototypeShortcutUpdate.UPDATED
+      ShortcutUpdate.RATE_LIMITED -> SavedPrototypeShortcutUpdate.RATE_LIMITED
     }
 
   private fun pinnedIds(): Set<String> =

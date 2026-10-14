@@ -528,6 +528,7 @@ export interface PinSavedPrototypeMessage {
 export interface SavedPrototypePinInfo {
   id: string;
   status: "requested" | "already_pinned";
+  shortcut?: SavedPrototypeShortcutUpdate;
 }
 export type SavedPrototypeShortcutUpdate = "updated" | "rate_limited";
 export interface SavedPrototypeInfo {

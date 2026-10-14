@@ -60,6 +60,7 @@ enum PrototypeStateValidator {
         actions += node.confirm?.onTap ?? []
         actions += node.dismiss?.onTap ?? []
         actions += node.action?.onTap ?? []
+        actions += (node.menuItems ?? []).flatMap { $0.entry?.onTap ?? [] }
         node.children?.forEach { collect($0, nodes: &nodes, actions: &actions) }
         if let child = node.child { collect(child, nodes: &nodes, actions: &actions) }
     }
@@ -75,7 +76,7 @@ enum PrototypeStateValidator {
             return stored?.stringValue == nil ? "Text field requires a string state key" : nil
         case "switch", "checkbox":
             return stored?.boolValue == nil ? "Toggle control requires a boolean state key" : nil
-        case "radioGroup", "segmentedButton":
+        case "radioGroup", "segmentedButton", "select":
             return radioGroupError(node, stored)
         case "tabBar", "bottomNav":
             guard let number = stored?.numberValue, number.isFinite, number >= 0,
@@ -148,11 +149,17 @@ enum PrototypeStateValidator {
     }
 
     private static func radioGroupError(_ node: PrototypeNode, _ stored: JSONValue?) -> String? {
-        let name = node.type == "segmentedButton" ? "Segmented button" : "Radio group"
+        let name = node.type == "select" ? "Select" : node.type == "segmentedButton" ? "Segmented button" : "Radio group"
         guard stored?.stringValue != nil else { return "\(name) requires a string state key" }
         var values = Set<String>()
-        for option in node.options ?? [] where !values.insert(option.value).inserted {
-            return "Duplicate radio option value"
+        var selectValues = Set<[UInt16]>()
+        for option in node.options ?? [] {
+            let inserted = node.type == "select"
+                ? selectValues.insert(Array(option.value.utf16)).inserted
+                : values.insert(option.value).inserted
+            if !inserted {
+                return node.type == "select" ? "Duplicate select option value" : "Duplicate radio option value"
+            }
         }
         return nil
     }
@@ -181,7 +188,7 @@ enum PrototypeStateValidator {
 
     /// Nodes opened by a boolean `openWhen` key; an existing key must hold a boolean.
     private static func openWhenError(_ node: PrototypeNode, _ state: [String: JSONValue]) -> String? {
-        let names = ["bottomSheet": "Sheet", "dialog": "Dialog", "snackbar": "Snackbar"]
+        let names = ["bottomSheet": "Sheet", "dialog": "Dialog", "snackbar": "Snackbar", "menu": "Menu"]
         guard let name = names[node.type], let key = node.openWhen?.key, let stored = state[key] else { return nil }
         return stored.boolValue == nil ? "\(name) requires a boolean state key" : nil
     }

@@ -120,8 +120,10 @@ struct PrototypeSpec: Decodable {
         try PrototypeLimits.guardRepeatPathCells(raw, data: data)
         let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
         try PrototypeLimits.guardTree(resolved)
+        let expanded = PrototypeRepeat.expand(resolved)
+        try PrototypeMenus.validate(expanded, state: state ?? [:])
         root = try JSONDecoder().decode(
-            PrototypeNode.self, from: JSONEncoder().encode(PrototypeRepeat.expand(resolved))
+            PrototypeNode.self, from: JSONEncoder().encode(expanded)
         )
         // There is no Swift twin of the host validator, so the forms `prototype_theme_modes_v1`
         // added are checked here: a malformed one fails the show instead of drawing a fallback.
@@ -560,6 +562,8 @@ final class PrototypeNode: Decodable {
     let placeholder: String?
     let axis: String?
     let items: [NavItem]?
+    /// Menu entries decoded from the same `items` JSON key, preserving navigation items.
+    let menuItems: [PrototypeMenuItem]?
     let pager: String?
     let scrollable: Bool?
     let openWhen: Condition?
@@ -598,6 +602,77 @@ final class PrototypeNode: Decodable {
     let supporting: String?
     let leadingIcon: String?
     let trailing: PrototypeListItemTrailing?
+
+    private enum CodingKeys: String, CodingKey {
+        case type, id, testTag, onTap, style, styleWhen, visibleWhen, transition
+        case safeAreaPadding, anchor, children, child, text, contentDescription, asset, contentScale
+        case name, label, variant, stateKey, placeholder, axis, items, pager
+        case scrollable, openWhen, detents, scrim, dragHandle, options, icon, size
+        case orientation, min, max, step, title, navigationIcon, actions, confirm
+        case dismiss, action, durationMs, hourKey, minuteKey, is24Hour, headline, supporting
+        case leadingIcon, trailing
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedType = try container.decode(String.self, forKey: .type)
+        type = decodedType
+        id = try container.decodeIfPresent(String.self, forKey: .id)
+        testTag = try container.decodeIfPresent(String.self, forKey: .testTag)
+        onTap = try container.decodeIfPresent([PrototypeAction].self, forKey: .onTap)
+        style = try container.decodeIfPresent(Style.self, forKey: .style)
+        styleWhen = try container.decodeIfPresent([StyleWhen].self, forKey: .styleWhen)
+        visibleWhen = try container.decodeIfPresent(Condition.self, forKey: .visibleWhen)
+        transition = try container.decodeIfPresent(String.self, forKey: .transition)
+        safeAreaPadding = try container.decodeIfPresent(SafeAreaPadding.self, forKey: .safeAreaPadding)
+        anchor = try container.decodeIfPresent(PrototypeAnchor.self, forKey: .anchor)
+        children = try container.decodeIfPresent([PrototypeNode].self, forKey: .children)
+        child = try container.decodeIfPresent(PrototypeNode.self, forKey: .child)
+        text = try container.decodeIfPresent(String.self, forKey: .text)
+        contentDescription = try container.decodeIfPresent(String.self, forKey: .contentDescription)
+        asset = try container.decodeIfPresent(PrototypeModeValue.self, forKey: .asset)
+        contentScale = try container.decodeIfPresent(String.self, forKey: .contentScale)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        label = try container.decodeIfPresent(String.self, forKey: .label)
+        variant = try container.decodeIfPresent(String.self, forKey: .variant)
+        stateKey = try container.decodeIfPresent(String.self, forKey: .stateKey)
+        placeholder = try container.decodeIfPresent(String.self, forKey: .placeholder)
+        axis = try container.decodeIfPresent(String.self, forKey: .axis)
+        if decodedType == "menu" {
+            items = nil
+            menuItems = try container.decode([PrototypeMenuItem].self, forKey: .items)
+        } else {
+            items = try container.decodeIfPresent([NavItem].self, forKey: .items)
+            menuItems = nil
+        }
+        pager = try container.decodeIfPresent(String.self, forKey: .pager)
+        scrollable = try container.decodeIfPresent(Bool.self, forKey: .scrollable)
+        openWhen = try container.decodeIfPresent(Condition.self, forKey: .openWhen)
+        detents = try container.decodeIfPresent([Detent].self, forKey: .detents)
+        scrim = try container.decodeIfPresent(PrototypeModeValue.self, forKey: .scrim)
+        dragHandle = try container.decodeIfPresent(Bool.self, forKey: .dragHandle)
+        options = try container.decodeIfPresent([PrototypeOption].self, forKey: .options)
+        icon = try container.decodeIfPresent(String.self, forKey: .icon)
+        size = try container.decodeIfPresent(String.self, forKey: .size)
+        orientation = try container.decodeIfPresent(String.self, forKey: .orientation)
+        min = try container.decodeIfPresent(Double.self, forKey: .min)
+        max = try container.decodeIfPresent(Double.self, forKey: .max)
+        step = try container.decodeIfPresent(Double.self, forKey: .step)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        navigationIcon = try container.decodeIfPresent(PrototypeAppBarAction.self, forKey: .navigationIcon)
+        actions = try container.decodeIfPresent([PrototypeAppBarAction].self, forKey: .actions)
+        confirm = try container.decodeIfPresent(PrototypeDialogButton.self, forKey: .confirm)
+        dismiss = try container.decodeIfPresent(PrototypeDialogButton.self, forKey: .dismiss)
+        action = try container.decodeIfPresent(PrototypeDialogButton.self, forKey: .action)
+        durationMs = try container.decodeIfPresent(Int.self, forKey: .durationMs)
+        hourKey = try container.decodeIfPresent(String.self, forKey: .hourKey)
+        minuteKey = try container.decodeIfPresent(String.self, forKey: .minuteKey)
+        is24Hour = try container.decodeIfPresent(Bool.self, forKey: .is24Hour)
+        headline = try container.decodeIfPresent(String.self, forKey: .headline)
+        supporting = try container.decodeIfPresent(String.self, forKey: .supporting)
+        leadingIcon = try container.decodeIfPresent(String.self, forKey: .leadingIcon)
+        trailing = try container.decodeIfPresent(PrototypeListItemTrailing.self, forKey: .trailing)
+    }
 
     /// Android's `resolvePrototypeStyle`: every `styleWhen` entry whose condition holds is merged over
     /// `style` in authored order, so a later matching entry wins per property. Nil when the node has

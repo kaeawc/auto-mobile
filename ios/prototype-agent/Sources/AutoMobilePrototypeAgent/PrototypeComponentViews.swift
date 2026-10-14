@@ -775,7 +775,10 @@ struct PrototypeModalLayer: View {
         let modals = model.spec?.root.openModals(state: model.state, pages: model.pages) ?? []
         ZStack {
             ForEach(Array(modals.enumerated()), id: \.offset) { index, node in
-                if node.type == "dialog" {
+                if node.type == "menu" {
+                    PrototypeMenuOverlay(node: node, model: model)
+                        .reportFrame(key: "modal.\(index)", model: model)
+                } else if node.type == "dialog" {
                     ZStack {
                         colors.scrim
                             .contentShape(Rectangle())
@@ -804,6 +807,13 @@ struct PrototypeModalLayer: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay {
+            if let selected = model.expandedSelect,
+               model.spec?.root.visibleSelect(selected, state: model.state, pages: model.pages) == true {
+                PrototypeSelectOverlay(node: selected, model: model)
+                    .reportFrame(key: "modal.select", model: model)
+            }
+        }
         .onChange(of: modals.dialogIdentities) { before, _ in
             if prototypeModalChangeEndsEditing(from: before, to: modals) { model.endEditing() }
         }

@@ -82,8 +82,13 @@ describe("prototype saved actions", () => {
     dispose();
     restore();
   });
-  async function call(input: unknown, device = android) {
-    const result = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
+  async function call(input: unknown, device = android, signal?: AbortSignal) {
+    const result = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(
+      device,
+      input,
+      undefined,
+      signal,
+    );
     return prototypeOutputSchema.parse(result.structuredContent);
   }
   const save = (extra: Record<string, unknown> = {}) => call({ action: "save", spec, ...extra });
@@ -102,6 +107,45 @@ describe("prototype saved actions", () => {
     });
     expect(proxy.saveRequests).toEqual([{ spec, label: "demo" }]);
   });
+  test("save sends host-expanded component nodes", async () => {
+    expect(
+      await save({
+        spec: {
+          ...spec,
+          components: { greeting: { root: { type: "text", text: "Hello {props.name}" } } },
+          root: { type: "use", component: "greeting", props: { name: "Ada" } },
+        },
+      }),
+    ).toMatchObject({ success: true });
+    expect(proxy.saveRequests).toEqual([
+      { spec: { ...spec, root: { type: "text", text: "Hello Ada" } }, label: "demo" },
+    ]);
+  });
+  test.each([false, true])(
+    "cancelled save afterUpload=%s sends no save request",
+    async (afterUpload) => {
+      const controller = new AbortController();
+      if (afterUpload) {
+        const put = proxy.requestPutPrototypeAsset.bind(proxy);
+        proxy.requestPutPrototypeAsset = async (...args) => {
+          const result = await put(...args);
+          controller.abort(new Error("caller stopped"));
+          return result;
+        };
+      } else {
+        controller.abort();
+      }
+      const output = await call(
+        { action: "save", spec, ...(afterUpload ? { assets } : {}) },
+        android,
+        controller.signal,
+      );
+      expect(output.success).toBe(false);
+      expect(output.error).toContain("the request was cancelled");
+      expect(proxy.getPrototypeAssetHistory()).toHaveLength(afterUpload ? 1 : 0);
+      expect(proxy.saveRequests).toEqual([]);
+    },
+  );
   test("label and icon forwarded after assets upload", async () => {
     const order: string[] = [];
     const put = proxy.requestPutPrototypeAsset.bind(proxy);
@@ -123,10 +167,18 @@ describe("prototype saved actions", () => {
     expect(proxy.saveRequests).toEqual([{ spec, label: "My demo", icon: "logo" }]);
   });
   test("upload failure ends save", async () => {
-    proxy.setFailureMode("requestPutPrototypeAsset", new Error("upload failed"));
-    const output = await save({ assets });
+    reader.addFile("/img/second.png", png);
+    const put = proxy.requestPutPrototypeAsset.bind(proxy);
+    proxy.requestPutPrototypeAsset = async (...args) => {
+      if (args[0].id === "second") {
+        throw new Error("upload failed");
+      }
+      return put(...args);
+    };
+    const output = await save({ assets: [...assets, { id: "second", path: "/img/second.png" }] });
     expect(output.success).toBe(false);
     expect(output.error).toContain("The prototype was not saved.");
+    expect(output.uploadedAssets).toEqual([{ id: "logo", bytes: 12, mimeType: "image/png" }]);
     expect(proxy.saveRequests).toEqual([]);
   });
   test.each(["save", "listSaved", "deleteSaved"] as const)(

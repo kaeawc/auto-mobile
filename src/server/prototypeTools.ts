@@ -2798,11 +2798,14 @@ export function registerPrototypeTools(dependencies: PrototypeToolDependencies =
     return responseFor(
       await dispatchPrototypeSavedAction(
         { ...args, action: args.action, spec: args.spec as PrototypeSpec | undefined },
-        () => ({
-          client: target.android!,
-          stageAssets: () =>
-            stageAssets(target, args, assetReaders, combineWithAmbientAbort(signal)),
-        }),
+        () => {
+          const savedSignal = combineWithAmbientAbort(signal);
+          return {
+            client: target.android!,
+            signal: savedSignal,
+            stageAssets: () => stageAssets(target, args, assetReaders, savedSignal),
+          };
+        },
         (action) =>
           performPrototypeAction(
             handlerDependencies,

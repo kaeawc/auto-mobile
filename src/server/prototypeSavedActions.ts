@@ -42,6 +42,7 @@ export interface PrototypeSavedArgs {
 export interface PrototypeSavedDependencies {
   client: Pick<AndroidPrototypeTransport, "save" | "listSaved" | "deleteSaved" | "supportsCommand">;
   stageAssets: () => Promise<{ uploaded: UploadedPrototypeAsset[]; failure?: PrototypeResult }>;
+  signal?: AbortSignal;
 }
 export const savedPrototypeErrorMessages: Record<SavedPrototypeErrorCode, string> = {
   invalid_id: "Use a valid saved prototype id.",
@@ -117,6 +118,28 @@ export function savedPrototypeSuccess(
       : {}),
   };
 }
+function savedPrototypeRequestFailure(
+  error: unknown,
+  action: PrototypeSavedAction,
+  signal?: AbortSignal,
+): PrototypeSavedOutput {
+  logger.warn("[prototype] Saved prototype request failed", error);
+  return {
+    success: false,
+    error: toActionableError(
+      action === "save" && signal?.aborted
+        ? new ActionableError("the request was cancelled", { cause: error })
+        : error,
+      "Saved prototype request failed",
+    ).message,
+  };
+}
+function savedPrototypeResult(
+  args: PrototypeSavedArgs,
+  result: PrototypeResult,
+): PrototypeSavedOutput {
+  return result.success ? savedPrototypeSuccess(args, result) : savedPrototypeFailure(result);
+}
 export async function performPrototypeSavedAction(
   deps: PrototypeSavedDependencies,
   args: PrototypeSavedArgs,
@@ -131,13 +154,14 @@ export async function performPrototypeSavedAction(
     }
     if (args.action === "listSaved") {
       const result = await deps.client.listSaved(args.timeoutMs);
-      return result.success ? savedPrototypeSuccess(args, result) : savedPrototypeFailure(result);
+      return savedPrototypeResult(args, result);
     }
     if (args.action === "deleteSaved") {
       const result = await deps.client.deleteSaved(args.id!, args.timeoutMs);
-      return result.success ? savedPrototypeSuccess(args, result) : savedPrototypeFailure(result);
+      return savedPrototypeResult(args, result);
     }
     const staged = await deps.stageAssets();
+    deps.signal?.throwIfAborted();
     const uploaded = staged.uploaded.length ? { uploadedAssets: staged.uploaded } : {};
     if (staged.failure) {
       return { ...savedPrototypeFailure(staged.failure), ...uploaded };
@@ -151,15 +175,11 @@ export async function performPrototypeSavedAction(
       args.timeoutMs,
     );
     return {
-      ...(result.success ? savedPrototypeSuccess(args, result) : savedPrototypeFailure(result)),
+      ...savedPrototypeResult(args, result),
       ...uploaded,
     };
   } catch (error) {
-    logger.warn("[prototype] Saved prototype request failed", error);
-    return {
-      success: false,
-      error: toActionableError(error, "Saved prototype request failed").message,
-    };
+    return savedPrototypeRequestFailure(error, args.action, deps.signal);
   }
 }
 

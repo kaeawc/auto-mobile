@@ -747,14 +747,7 @@ export class CtrlProxyPrototypes {
   }
 
   private requireMultiSurfaceSupport(
-    message:
-      | ShowPrototypeMessage
-      | DismissPrototypeMessage
-      | InspectPrototypesMessage
-      | PatchPrototypeMessage
-      | SavePrototypeMessage
-      | ListSavedPrototypesMessage
-      | DeleteSavedPrototypeMessage,
+    message: { readonly type: string; readonly replaceOthers?: boolean },
     supports: (command: string) => boolean | undefined,
   ): void {
     if (

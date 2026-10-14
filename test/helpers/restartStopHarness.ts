@@ -134,7 +134,7 @@ export function restartStopHarness() {
       timer,
       persistence,
       () => new FakeDbWriteBarrier(),
-      () => ({ restore: async () => {} }),
+      () => ({ restore: async () => ({ status: "restored" as const }) }),
     );
     sessions.attachDaemonSessionId("stop-hold-daemon");
     const journalFiles = new FakeTerminalReleaseJournalFileSystem();

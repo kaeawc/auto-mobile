@@ -29,6 +29,7 @@ import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
 import { DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD } from "./constants";
+import { DaemonHandshakeMismatchError, DaemonUnavailableError } from "./client";
 import { McpTimeoutError } from "./McpTimeoutError";
 import { MANAGED_EXECUTION_RELEASE_TIMEOUT_MS } from "./managedExecutionLiveness";
 
@@ -109,6 +110,33 @@ function isManagedSlotsResult(value: unknown): value is ManagedSlotsResult {
   );
 }
 
+function incompatibleDaemonFailure(error: unknown): ManagedSlotsFailure | undefined {
+  if (error instanceof DaemonHandshakeMismatchError) {
+    return failure(
+      "contract_unsupported",
+      `Managed slot acquisition refused a daemon ${error.failure.reason} mismatch: ${errorMessage(error)}`,
+      false,
+      "Restart the daemon from this client's installation (`auto-mobile --daemon restart`) so frontend and daemon match; nothing was changed.",
+    );
+  }
+  // Match structurally to avoid an import cycle with daemonMcpProxy, which imports this module.
+  if (
+    error instanceof DaemonUnavailableError &&
+    (error.name === "DaemonVersionMismatchError" || error.name === "DaemonBuildMismatchError") &&
+    "reason" in error &&
+    typeof error.reason === "string" &&
+    error.reason !== "cooldown"
+  ) {
+    return failure(
+      "contract_unsupported",
+      `Managed slot acquisition refused a daemon mismatch (${error.reason}): ${errorMessage(error)}`,
+      false,
+      "Restart the daemon from this client's installation (`auto-mobile --daemon restart`) so frontend and daemon match; nothing was changed.",
+    );
+  }
+  return undefined;
+}
+
 function classifyError(error: unknown, signal: AbortSignal | undefined): ManagedSlotsFailure {
   if (signal?.aborted) {
     return failure(
@@ -125,6 +153,10 @@ function classifyError(error: unknown, signal: AbortSignal | undefined): Managed
       true,
       "Retry with a longer preparationTimeoutMs, and set the MCP init timeout at or above it.",
     );
+  }
+  const incompatibleDaemon = incompatibleDaemonFailure(error);
+  if (incompatibleDaemon) {
+    return incompatibleDaemon;
   }
   const code = (error as { code?: unknown } | null)?.code;
   if (typeof code === "string" && CONFIG_ERROR_CODES.has(code)) {
@@ -206,11 +238,14 @@ export async function acquireManagedSlotsThroughDaemon(
     if (preparationMs <= 0) {
       throw timeoutError();
     }
+    // The runner's start identity is proxy-only; older daemons reject unknown config keys.
+    const { executionOwnerStartIdentity: _executionOwnerStartIdentity, ...daemonConfig } = config;
+    void _executionOwnerStartIdentity;
     const reply = await ports.callDaemonMethod(
       DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD,
       {
         // The daemon's deadline is what is left of this one after connecting.
-        config: { ...config, preparationTimeoutMs: preparationMs },
+        config: { ...daemonConfig, preparationTimeoutMs: preparationMs },
         livenessOwnerToken: ports.livenessOwnerToken,
       },
       { timeoutMs: Math.max(1, remaining()), signal },

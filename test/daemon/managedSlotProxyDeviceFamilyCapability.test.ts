@@ -90,6 +90,27 @@ async function acquire(config: ManagedSlotConfig, harness: ReturnType<typeof rig
 }
 
 describe("managed slot proxy deviceFamily capability", () => {
+  test("forwards the owner PID but omits its proxy-only start identity", async () => {
+    const harness = rig({ capabilities: OLD_CAPABILITIES });
+    const base = configFor("ios");
+    const config = {
+      ...base,
+      executionOwnerPid: 4242,
+      executionOwnerStartIdentity: "linux:boot-id:12345",
+    };
+    expect((await acquire(config, harness)).outcome).toBe("ready");
+    const call = harness.calls.find(
+      (entry) => entry.method === DAEMON_ACQUIRE_MANAGED_SLOTS_METHOD,
+    );
+    expect(call?.params.config).toEqual({
+      ...base,
+      executionOwnerPid: 4242,
+      preparationTimeoutMs: 75,
+    });
+    expect(call?.params.config).not.toHaveProperty("executionOwnerStartIdentity");
+    expect(config.executionOwnerStartIdentity).toBe("linux:boot-id:12345");
+  });
+
   test.each([
     ["ios", "phone"],
     ["android", "tablet"],

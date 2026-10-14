@@ -271,3 +271,16 @@ describe("IosPrototypeTransport", () => {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 });
+
+test("Android patch transport forwards the request and timeout", async () => {
+  const proxy = new FakeCtrlProxy(new FakeTimer());
+  const transport = new AndroidPrototypeTransport(proxy);
+  const patch = { id: "panel", ops: [{ op: "remove" as const, path: "/data" }] };
+  proxy.setPatchResult({ success: true, revision: 2 });
+  expect(await transport.patch(patch, 250)).toEqual({
+    success: true,
+    revision: 2,
+    delivery: "answered",
+  });
+  expect(proxy.patchRequests).toEqual([patch]);
+});

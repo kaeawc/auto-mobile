@@ -233,7 +233,7 @@ struct NodeView: View {
     private var handlesOwnTap: Bool {
         [
             "switch", "checkbox", "button", "slider", "chip", "radioGroup", "listItem", "iconButton",
-            "fab", "segmentedButton", "topAppBar", "timePicker", "datePicker", "dialog", "snackbar", "searchBar",
+            "fab", "segmentedButton", "topAppBar", "timePicker", "datePicker", "dialog", "snackbar", "searchBar", "menu", "select",
         ].contains(node.type)
     }
 
@@ -347,6 +347,10 @@ struct NodeView: View {
                 title: interpolated(node.title),
                 text: node.text.map(interpolated)
             )
+        case "menu":
+            PrototypeMenuView(node: node, model: model)
+        case "select":
+            PrototypeSelectView(node: node, model: model)
         case "snackbar":
             PrototypeSnackbarView(node: node, model: model, text: interpolated(node.text))
         default:
@@ -786,6 +790,7 @@ struct NodeView: View {
             )
             .offset(x: style?.offset?.x ?? 0, y: style?.offset?.y ?? 0)
             .opacity(style?.alpha ?? 1)
+            .modifier(PrototypeMenuBoundsReporter(node: node, model: model))
             .modifier(TapModifier(
                 actions: handlesOwnTap ? nil : node.onTap,
                 longPress: handlesOwnTap ? nil : node.onLongPress,

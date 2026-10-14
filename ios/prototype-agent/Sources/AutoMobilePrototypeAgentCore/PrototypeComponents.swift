@@ -6,7 +6,7 @@ import Foundation
 // so the renderer and the `simulate_tap` test hook share one implementation.
 
 /// Node types drawn above the whole author tree while their `openWhen` holds, never inline.
-let prototypeModalTypes: Set<String> = ["dialog", "snackbar"]
+let prototypeModalTypes: Set<String> = ["dialog", "snackbar", "menu"]
 
 extension PrototypeNode {
     /// Focus does not change expansion; only the authored boolean state does.
@@ -60,7 +60,7 @@ extension PrototypeNode {
     /// Whether an open dialog makes the page behind it inert (hidden from accessibility); a
     /// snackbar does not block the page, as on Android.
     func blocksPage(state: [String: JSONValue], pages: [String: Int]) -> Bool {
-        openModals(state: state, pages: pages).contains { $0.type == "dialog" }
+        openModals(state: state, pages: pages).contains { ["dialog", "menu"].contains($0.type) }
     }
 
     /// How the page and the anchor layer expose their nodes to accessibility under this root.
@@ -89,9 +89,14 @@ extension PrototypeNode {
             return modalButton(named: name).map { .modalButton(self, $0) }
         case "searchBar":
             return indexedButton(named: name, actions: trailingActions).map { .appBarButton($0) }
+        case "menu":
+            guard openWhen?.holds(state) ?? false, let index = Int(name), String(index) == name,
+                  let menuItems, menuItems.indices.contains(index),
+                  case let .item(item) = menuItems[index], item.enabled != false else { return nil }
+            return .menuItem(self, item)
         case "topAppBar":
             return appBarButton(named: name).map { .appBarButton($0) }
-        case "radioGroup", "segmentedButton":
+        case "radioGroup", "segmentedButton", "select":
             return options?.first { $0.value == name }.map { .option(self, $0) }
         default:
             return nil
@@ -126,6 +131,7 @@ enum PrototypeTapTarget {
     case node(PrototypeNode)
     /// A `dialog` confirm/dismiss button or the `snackbar` action.
     case modalButton(PrototypeNode, PrototypeDialogButton)
+    case menuItem(PrototypeNode, PrototypeMenuEntry)
     /// A `topAppBar` navigation icon or action.
     case appBarButton(PrototypeAppBarAction)
     /// One `radioGroup` or `segmentedButton` option.
@@ -141,6 +147,9 @@ extension PrototypeSession {
             if let key = node.toggleKey { return toggle(key: key, then: node.onTap ?? []) }
             guard let actions = node.onTap, !actions.isEmpty else { return nil }
             return run(actions)
+        case let .menuItem(node, item):
+            guard item.enabled != false else { return nil }
+            return closeModal(node, then: item.onTap ?? [])
         case let .modalButton(node, button):
             return closeModal(node, then: button.onTap ?? [])
         case let .appBarButton(button):

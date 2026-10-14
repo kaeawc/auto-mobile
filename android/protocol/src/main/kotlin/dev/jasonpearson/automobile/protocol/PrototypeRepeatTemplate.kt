@@ -218,6 +218,16 @@ internal object PrototypeBindableFields {
       when ((node["type"] as? JsonPrimitive)?.content) {
         "button",
         "fab" -> field(node, "label", path, PrototypeBindableKind.TEXT)
+        "menu" ->
+          objects(node, "items", path).firstNotNullOfOrNull { (entry, entryPath) ->
+            part(entry, entryPath)
+              ?: field(entry, "trailingText", entryPath, PrototypeBindableKind.TEXT)
+          }
+        "select" ->
+          field(node, "label", path, PrototypeBindableKind.TEXT)
+            ?: objects(node, "options", path).firstNotNullOfOrNull { (option, optionPath) ->
+              field(option, "label", optionPath, PrototypeBindableKind.TEXT)
+            }
         "segmentedButton" ->
           objects(node, "options", path).firstNotNullOfOrNull { (option, optionPath) ->
             field(option, "label", optionPath, PrototypeBindableKind.TEXT)

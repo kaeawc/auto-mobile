@@ -6,6 +6,7 @@ import {
   PROTOTYPE_GESTURES_CAPABILITY,
   PROTOTYPE_SEARCH_BAR_CAPABILITY,
   PROTOTYPE_RICH_TEXT_CAPABILITY,
+  PROTOTYPE_MENUS_CAPABILITY,
 } from "../observe/android/ctrlProxyProtocol";
 import {
   prototypeThemeModeFields,
@@ -28,6 +29,7 @@ import {
   prototypeSearchBarUnsupportedMessage,
 } from "./prototypeSearchBar";
 import { prototypeRichTextFields, prototypeRichTextUnsupportedMessage } from "./prototypeRichText";
+import { prototypeMenuFields, prototypeMenusUnsupportedMessage } from "./prototypeData";
 
 interface PrototypeSpecCapabilityGate {
   readonly capability: string;
@@ -76,6 +78,11 @@ export const PROTOTYPE_SPEC_CAPABILITY_GATES: readonly PrototypeSpecCapabilityGa
     capability: PROTOTYPE_RICH_TEXT_CAPABILITY,
     fields: prototypeRichTextFields,
     unsupportedMessage: prototypeRichTextUnsupportedMessage,
+  },
+  {
+    capability: PROTOTYPE_MENUS_CAPABILITY,
+    fields: prototypeMenuFields,
+    unsupportedMessage: prototypeMenusUnsupportedMessage,
   },
 ];
 

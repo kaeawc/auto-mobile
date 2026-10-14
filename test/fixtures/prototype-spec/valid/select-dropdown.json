@@ -1,0 +1,37 @@
+{
+  "id": "menus",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "open": false,
+    "choice": "a"
+  },
+  "root": {
+    "type": "column",
+    "children": [
+      {
+        "type": "select",
+        "testTag": "choice",
+        "stateKey": "choice",
+        "label": "Choice",
+        "options": [
+          {
+            "value": "a",
+            "label": "A"
+          },
+          {
+            "value": "b",
+            "label": "B"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "text": "Selected: {choice}"
+      }
+    ]
+  }
+}

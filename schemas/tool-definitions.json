@@ -21049,6 +21049,77 @@
                     },
                     "type": {
                       "type": "string",
+                      "enum": ["select"]
+                    },
+                    "stateKey": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap/items/anyOf/2/properties/key"
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "value": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "label": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": ["value", "label"],
+                        "additionalProperties": false
+                      },
+                      "minItems": 2,
+                      "maxItems": 32
+                    }
+                  },
+                  "required": ["type", "stateKey", "options"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
                       "enum": ["listItem"]
                     },
                     "headline": {
@@ -21753,7 +21824,7 @@
                       "additionalProperties": false
                     },
                     "dismiss": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/26/properties/confirm"
+                      "$ref": "#/properties/spec/properties/root/anyOf/27/properties/confirm"
                     },
                     "child": {
                       "$ref": "#/properties/spec/properties/root"
@@ -21800,17 +21871,107 @@
                     },
                     "type": {
                       "type": "string",
+                      "enum": ["menu"]
+                    },
+                    "openWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/27/properties/openWhen"
+                    },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "label": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/27/properties/confirm/properties/label"
+                              },
+                              "onTap": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/27/properties/confirm/properties/onTap"
+                              },
+                              "icon": {
+                                "$ref": "#/properties/spec/properties/root/anyOf/7/properties/name"
+                              },
+                              "trailingText": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "enabled": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["label"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "divider"
+                              }
+                            },
+                            "required": ["type"],
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "minItems": 1,
+                      "maxItems": 16
+                    }
+                  },
+                  "required": ["type", "openWhen", "items"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "span": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/span"
+                    },
+                    "id": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/id"
+                    },
+                    "testTag": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/testTag"
+                    },
+                    "contentDescription": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/contentDescription"
+                    },
+                    "onTap": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/onTap"
+                    },
+                    "style": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/style"
+                    },
+                    "styleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/styleWhen"
+                    },
+                    "visibleWhen": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/visibleWhen"
+                    },
+                    "transition": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/transition"
+                    },
+                    "anchor": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/anchor"
+                    },
+                    "safeAreaPadding": {
+                      "$ref": "#/properties/spec/properties/root/anyOf/0/properties/safeAreaPadding"
+                    },
+                    "type": {
+                      "type": "string",
                       "enum": ["snackbar"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/26/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/27/properties/openWhen"
                     },
                     "text": {
                       "type": "string",
                       "minLength": 1
                     },
                     "action": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/26/properties/confirm"
+                      "$ref": "#/properties/spec/properties/root/anyOf/27/properties/confirm"
                     },
                     "durationMs": {
                       "type": "integer",
@@ -22027,10 +22188,10 @@
                       "type": "object",
                       "properties": {
                         "start": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/31/properties/pageSpacing"
+                          "$ref": "#/properties/spec/properties/root/anyOf/33/properties/pageSpacing"
                         },
                         "end": {
-                          "$ref": "#/properties/spec/properties/root/anyOf/31/properties/pageSpacing"
+                          "$ref": "#/properties/spec/properties/root/anyOf/33/properties/pageSpacing"
                         }
                       },
                       "additionalProperties": false
@@ -22185,7 +22346,7 @@
                     "items": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/properties/spec/properties/root/anyOf/32/properties/items/items"
+                        "$ref": "#/properties/spec/properties/root/anyOf/34/properties/items/items"
                       },
                       "minItems": 2,
                       "maxItems": 5
@@ -22242,7 +22403,7 @@
                       "enum": ["bottomSheet"]
                     },
                     "openWhen": {
-                      "$ref": "#/properties/spec/properties/root/anyOf/26/properties/openWhen"
+                      "$ref": "#/properties/spec/properties/root/anyOf/27/properties/openWhen"
                     },
                     "detents": {
                       "type": "array",
@@ -22765,7 +22926,9 @@
                   "node.gestures",
                   "searchBar",
                   "searchBar.icons",
-                  "rich-text-links"
+                  "rich-text-links",
+                  "menu",
+                  "select"
                 ]
               },
               "effect": {

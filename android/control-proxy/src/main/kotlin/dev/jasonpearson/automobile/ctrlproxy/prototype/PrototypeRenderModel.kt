@@ -286,6 +286,8 @@ private fun prototypeNodeRole(node: PrototypeNode): String =
     is PrototypeCheckboxNode -> "checkbox"
     is PrototypeButtonNode -> "button"
     is PrototypeRadioGroupNode -> "radioGroup"
+    is PrototypeSelectNode -> "select"
+    is PrototypeMenuNode -> "menu"
     is PrototypeListItemNode -> "listItem"
     is PrototypeSliderNode -> "slider"
     is PrototypeChipNode -> "chip"
@@ -351,6 +353,7 @@ internal fun prototypeOpenWhen(node: PrototypeNode?): PrototypeSheetCondition? =
     is PrototypeBottomSheetNode -> node.openWhen
     is PrototypeSearchBarNode -> node.activeKey?.let { PrototypeSheetCondition(it, true) }
     is PrototypeDialogNode -> node.openWhen
+    is PrototypeMenuNode -> node.openWhen
     is PrototypeSnackbarNode -> node.openWhen
     else -> null
   }
@@ -359,6 +362,7 @@ internal fun prototypeOpenWhen(node: PrototypeNode?): PrototypeSheetCondition? =
 private fun prototypeSelectionKey(node: PrototypeNode): String? =
   when (node) {
     is PrototypeRadioGroupNode -> node.stateKey
+    is PrototypeSelectNode -> node.stateKey
     is PrototypeSegmentedButtonNode -> node.stateKey
     is PrototypeDatePickerNode -> node.stateKey
     else -> null
@@ -683,7 +687,7 @@ private fun inlineTextFieldVisible(node: PrototypeRenderNode): Boolean =
   }
 
 /** Roles drawn above the whole author tree while their `openWhen` holds, never inline. */
-internal val PROTOTYPE_MODAL_ROLES = setOf("bottomSheet", "dialog", "snackbar")
+internal val PROTOTYPE_MODAL_ROLES = setOf("bottomSheet", "dialog", "snackbar", "menu")
 
 /**
  * Open sheets, dialogs and snackbars are rendered last, in tree order, so a modal scrim covers the

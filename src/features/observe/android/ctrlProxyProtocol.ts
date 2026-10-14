@@ -1010,6 +1010,9 @@ export const PROTOTYPE_ANCHOR_CAPABILITY = "prototype_anchor_v1";
 /** Renders text field options; an older device decodes and ignores or misdraws the options. */
 export const PROTOTYPE_TEXT_FIELD_OPTIONS_CAPABILITY = "prototype_text_field_options_v1";
 
+/** In-window menu and select nodes. */
+export const PROTOTYPE_MENUS_CAPABILITY = "prototype_menus_v1";
+
 /** Resolves read-only prototype data, JSON Pointer bindings and stable repeat keys. */
 export const PROTOTYPE_DATA_MODEL_CAPABILITY = "prototype_data_model_v1";
 /** Editable in-tree search field with active results and submit/trailing actions. */

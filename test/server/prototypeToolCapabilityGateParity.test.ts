@@ -56,6 +56,12 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[] }> = {
     child: label,
   }),
   prototype_rich_text_v1: fixture({ type: "text", id: "label", spans: [{ text: "Hello" }] }),
+  prototype_menus_v1: fixture({
+    type: "menu",
+    id: "label",
+    openWhen: { key: "liked", equals: true },
+    items: [{ label: "Open" }],
+  }),
 };
 function fixture(root: Record<string, unknown>) {
   return {

@@ -108,6 +108,17 @@ enum PrototypeRepeat {
             }
         case .string("button")?, .string("fab")?: string("label", in: &fields)
         case .string("segmentedButton")?: list("options", in: &fields)
+        case .string("select")?:
+            string("label", in: &fields)
+            list("options", in: &fields)
+        case .string("menu")?:
+            guard case let .array(items)? = fields["items"] else { break }
+            fields["items"] = .array(items.map { item in
+                guard case var .object(entry) = item else { return item }
+                string("label", in: &entry)
+                string("trailingText", in: &entry)
+                return .object(entry)
+            })
         case .string("topAppBar")?:
             string("title", in: &fields)
             part("navigationIcon", in: &fields)
@@ -199,6 +210,8 @@ private struct Instance {
             if case let .array(actions)? = fields["onSubmit"] {
                 fields["onSubmit"] = .array(actions.map(bindAction))
             }
+        case "menu":
+            bindList("items", in: &fields) { bindPartFields(&$0) }
         case "dialog":
             bindPart("confirm", in: &fields)
             bindPart("dismiss", in: &fields)

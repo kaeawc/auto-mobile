@@ -36,6 +36,7 @@ enum PrototypeAgentProtocol {
         gesturesCapability,
         searchBarCapability,
         richTextCapability,
+        menusCapability,
     ]
     /// A same-id `show_prototype` replaces the prototype in place keeping pager pages, and
     /// `reset: true` starts it fresh. Same name as the CtrlProxy capability; the host refuses
@@ -91,6 +92,8 @@ enum PrototypeAgentProtocol {
     static let searchBarCapability = "prototype_search_bar_v1"
     /// Styled text runs with optional inline actions.
     static let richTextCapability = "prototype_rich_text_v1"
+    /// In-window menus and exposed select option lists.
+    static let menusCapability = "prototype_menus_v1"
     /// Draws icons from schemas/prototype-ios-icon-symbols.json and honours filled/outlined
     /// icon variants where the table has those forms.
     static let iconSfSymbolsCapability = "prototype_icon_sf_symbols_v1"

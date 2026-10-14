@@ -6,7 +6,10 @@ enum AccessibilityGrouping: Equatable, Sendable {
 
 /// Composite containers preserve each child's identifier; tappable layouts become one element.
 func prototypeAccessibilityGrouping(type: String, tappable: Bool) -> AccessibilityGrouping {
-    if ["radioGroup", "segmentedButton", "topAppBar", "searchBar", "dialog", "snackbar", "bottomSheet"].contains(type) {
+    if [
+        "radioGroup", "segmentedButton", "select", "menu", "topAppBar", "searchBar", "dialog", "snackbar",
+        "bottomSheet",
+    ].contains(type) {
         return .contain
     }
     guard ["box", "row", "column", "flow", "grid", "scroll", "pager", "card"].contains(type) else { return .leaf }

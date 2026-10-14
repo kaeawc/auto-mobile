@@ -114,6 +114,20 @@ The device implementations ship separately: without the capability a device keep
 explicit \`none\` is refused, and omitted chrome or \`bar\` succeeds. A successful fullscreen
 show and subsequent host-local status report the effective value as \`lastResult.chrome\`;
 it is absent for sheet/floating windows, dismiss, failed show and adopted prototypes.
+
+
+## Menu and select
+
+\`menu\` and \`select\` require \`prototype_menus_v1\`; the host refuses them before showing or uploading assets when the connected renderer lacks it.
+
+A \`menu\` requires \`openWhen: {key, equals}\` with a boolean equality and 1–16 strict \`items\`. Each item is \`{label, icon?, trailingText?, enabled?, onTap?}\` or exactly \`{type:"divider"}\`. Labels and trailing text are nonempty, icons use the existing icon names, and \`onTap\` has 1–32 existing actions. A disabled item is dimmed, cannot be tapped and does not close the menu. Dividers are neither focusable nor tappable. The elevated surface is anchored to its parent’s bottom end and clamped inside the window. An enabled item or outside tap writes \`!equals\` to the open key; item actions run after closing.
+
+A \`select\` requires a string \`stateKey\` and 2–32 \`{value,label}\` options with unique nonempty values and nonempty labels; its optional label is nonempty. It shows the current option’s label, or empty text when no option matches, and a trailing expand indicator. Expansion is local view state. Choosing an option writes the string key, emits the same \`change\` payload as \`radioGroup\`, and collapses the list. Tapping the field again or outside also collapses it. Both nodes support repeat templates and reusable \`use\` components: state keys, menu item labels/trailing text/actions and select labels/option labels bind placeholders.
+
+Rendering stays inside the prototype window on both platforms so \`observe\` and \`tapOn\` reach the normal hierarchy. Android uses an in-window surface rather than a separate DropdownMenu/Popup window. iOS uses an in-window list rather than system SwiftUI Menu/Picker popups; successful iOS shows report this substitution in \`platformNotes\`. Menu icons use the existing SF Symbols mapping on iOS.
+
+The select field and menu surface carry the node \`testTag\`. Select option rows use \`<testTag>.<value>\`; menu item rows use \`<testTag>.<index>\`, with zero-based positions including dividers. Android adds row tags only when \`testTag\` is set; iOS falls back to \`(testTag ?? id).<value>\` or \`(testTag ?? id).<index>\`.
+
 `;
 
 export const GUIDE_REPEAT = `## Lists: repeat
@@ -159,7 +173,7 @@ Grammar:
 - Literal items are objects of scalar fields (no nesting); \`as\` is a state-key-shaped identifier.
   A state key cannot hold a list.
 - Placeholders are bound in a template child's \`text\`, the label/title/text fields of components
-  (button, fab, segmentedButton options, topAppBar, dialog, snackbar), state condition operands
+  (button, fab, segmentedButton options, topAppBar, dialog, menu item labels/trailingText, select labels/options, snackbar), state condition operands
   (\`equals\`/\`notEquals\` strings), \`setState.value\` and \`emit.name\`. \`emit.payload\` is not bound.
   Anything else, including a \`{key}\` state placeholder and other braces, is left untouched.
 - State keys bind too: \`stateKey\`, \`hourKey\`/\`minuteKey\`, a list item's trailing \`stateKey\`,
@@ -222,7 +236,7 @@ are rejected; a missing text path renders empty.
   its rendered values must be unique, for literal lists too.
 - \`{data:/pointer}\` binds only the text-kind fields repeat already binds: text, button/FAB labels,
   segmented option labels, app bar title/navigation/action labels, dialog title/text/button labels,
-  and snackbar text/action label. Missing, object or array values become empty text. Other braces
+  menu item labels/trailing text, select labels/option labels, and snackbar text/action label. Missing, object or array values become empty text. Other braces
   stay literal. A data string is inserted as plain text before repeat and state binding, so
   \`{item.x}\`, \`{index}\` or \`{key}\` inside it bind afterwards exactly like authored text.
   Data values cannot be escaped; inserted strings are never scanned again for data placeholders.

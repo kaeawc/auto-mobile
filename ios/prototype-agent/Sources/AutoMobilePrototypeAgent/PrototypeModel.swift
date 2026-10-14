@@ -11,6 +11,9 @@ final class PrototypeModel {
     private(set) var spec: PrototypeSpec?
     /// Ends surviving text drafts even when a replacing show leaves their stored value unchanged.
     private(set) var showRevision = 0
+    /// Transient presentation only; never written to or reported as spec state.
+    var expandedSelect: PrototypeNode?
+    var menuBounds: [ObjectIdentifier: CGRect] = [:]
     private(set) var state: [String: JSONValue] = [:]
     private(set) var pages: [String: Int] = [:]
     private(set) var appearance: PrototypeAppearance?
@@ -29,6 +32,16 @@ final class PrototypeModel {
         // of an unchanged (non-Equatable) spec merely by copying the session back.
         if replacingSpec || session.isShown != next.isShown { spec = next.spec }
         session = next
+        if let selected = expandedSelect {
+            let root = next.spec?.root
+            let blocker = root?.openModals(state: next.state, pages: next.pages)
+                .last { ["dialog", "menu"].contains($0.type) }
+            if root?.visibleSelect(selected, state: next.state, pages: next.pages) != true ||
+                (blocker != nil && blocker?.visibleSelect(selected, state: next.state, pages: next.pages) != true)
+            {
+                expandedSelect = nil
+            }
+        }
         escapeReveal.sync(hasEscape: hasEscape, shown: next.isShown)
         if state != next.state { state = next.state }
         if pages != next.pages { pages = next.pages }
@@ -156,6 +169,7 @@ final class PrototypeModel {
         var next = session
         next.show(spec, reset: reset, appearance: appearance, specBytes: specBytes)
         publish(next, replacingSpec: true)
+        expandedSelect = nil
         showRevision += 1
         syncSnackbarTimeouts()
         // An accepted show, including a same-id replace, is activity.

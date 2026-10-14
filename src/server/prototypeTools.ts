@@ -681,6 +681,8 @@ export const prototypeOutputSchema = z.object({
           "searchBar",
           "searchBar.icons",
           "rich-text-links",
+          "menu",
+          "select",
         ]),
         effect: z.enum(["ignored", "substituted"]),
         paths: z.array(z.string()).max(20),

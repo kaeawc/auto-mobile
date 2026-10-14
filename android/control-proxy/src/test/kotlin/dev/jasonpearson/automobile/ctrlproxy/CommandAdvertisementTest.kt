@@ -49,6 +49,7 @@ class CommandAdvertisementTest {
       "prototype_anchor_v1",
       "prototype_window_metadata_v1",
       "screenshot_hide_prototype_v1",
+      "prototype_menus_v1",
       "full_command_set_v1",
       "request_id_echo_v1",
     )
@@ -91,6 +92,7 @@ class CommandAdvertisementTest {
       assertTrue(commands.contains("prototype_patch_v1"))
       assertTrue(commands.contains("network_mock_rules_report_v1"))
       assertTrue(commands.contains("prototype_window_metadata_v1"))
+      assertTrue(commands.contains("prototype_menus_v1"))
       assertTrue(commands.contains("screenshot_hide_prototype_v1"))
       assertTrue(commands.contains("sdk_capabilities_user_id_v1"))
       assertEquals(commands.size, commands.toSet().size)

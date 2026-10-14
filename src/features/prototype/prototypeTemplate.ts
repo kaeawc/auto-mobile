@@ -245,6 +245,19 @@ const COMPONENT_FIELDS: Record<string, (node: Raw, path: string, visit: FieldVis
     mapObject(node, "confirm", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
     mapObject(node, "dismiss", path, (entry, entryPath) => mapPart(entry, entryPath, visit));
   },
+  menu: (node, path, visit) => {
+    mapList(node, "items", path, (entry, entryPath) => {
+      mapField(entry, "trailingText", entryPath, "text", visit);
+      return mapPart(entry, entryPath, visit);
+    });
+  },
+  select: (node, path, visit) => {
+    mapField(node, "label", path, "text", visit);
+    mapList(node, "options", path, (entry, entryPath) => {
+      mapField(entry, "label", entryPath, "text", visit);
+      return entry;
+    });
+  },
   snackbar: (node, path, visit) => {
     mapField(node, "text", path, "text", visit);
     mapObject(node, "action", path, (entry, entryPath) => mapPart(entry, entryPath, visit));

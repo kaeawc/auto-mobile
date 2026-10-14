@@ -4,7 +4,10 @@ import {
   PROTOTYPE_SPEC_CAPABILITY_GATES,
 } from "../../../src/features/prototype/prototypeCapabilityGates";
 import { prototypeThemeModesUnsupportedMessage } from "../../../src/features/prototype/prototypeThemeModes";
-import { prototypeDataModelUnsupportedMessage } from "../../../src/features/prototype/prototypeData";
+import {
+  prototypeDataModelUnsupportedMessage,
+  prototypeMenusUnsupportedMessage,
+} from "../../../src/features/prototype/prototypeData";
 import { prototypeTextFieldOptionsUnsupportedMessage } from "../../../src/features/prototype/prototypeTextFieldOptions";
 import { prototypeFlowGridUnsupportedMessage } from "../../../src/features/prototype/prototypeFlowGrid";
 import { prototypePagerOptionsUnsupportedMessage } from "../../../src/features/prototype/prototypePagerOptions";
@@ -34,6 +37,7 @@ test("required gates report fields and original messages", () => {
         { type: "textField", label: "Name" },
         { type: "grid", columns: 2 },
         { type: "searchBar", id: "search" },
+        { type: "menu", id: "more", items: [{ label: "Open" }] },
       ],
     },
   };
@@ -46,6 +50,7 @@ test("required gates report fields and original messages", () => {
     "prototype_gestures_v1",
     "prototype_search_bar_v1",
     "prototype_rich_text_v1",
+    "prototype_menus_v1",
   ]);
   expect(required.map((gate) => gate.fields)).toEqual([
     ["root.children[0].style.background"],
@@ -55,6 +60,7 @@ test("required gates report fields and original messages", () => {
     ["root.onLongPress", "root.onDoubleTap"],
     ["root.children[3]"],
     ["components.rich.root.spans"],
+    ["root.children[4]"],
   ]);
   expect(required.map((gate) => gate.unsupportedMessage)).toEqual([
     prototypeThemeModesUnsupportedMessage,
@@ -64,6 +70,7 @@ test("required gates report fields and original messages", () => {
     prototypeGesturesUnsupportedMessage,
     prototypeSearchBarUnsupportedMessage,
     prototypeRichTextUnsupportedMessage,
+    prototypeMenusUnsupportedMessage,
   ]);
   expect(
     PROTOTYPE_SPEC_CAPABILITY_GATES.map((gate) => gate.fields(spec)).filter((f) => f.length > 0),

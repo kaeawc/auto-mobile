@@ -613,6 +613,18 @@ const radioGroupBaseSchema = z
       .max(16),
   })
   .strict();
+const selectBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["select"]),
+    stateKey: stateKeySchema,
+    label: z.string().min(1).optional(),
+    options: z
+      .array(z.object({ value: z.string().min(1), label: z.string().min(1) }).strict())
+      .min(2)
+      .max(32),
+  })
+  .strict();
 const listItemTrailingSchema = z.discriminatedUnion("type", [
   z
     .object({
@@ -758,6 +770,24 @@ const dialogBaseSchema = z
     dismiss: dialogButtonSchema.optional(),
   })
   .strict();
+const menuItemSchema = z.union([
+  dialogButtonSchema
+    .extend({
+      icon: iconNameSchema.optional(),
+      trailingText: z.string().min(1).optional(),
+      enabled: z.boolean().optional(),
+    })
+    .strict(),
+  z.object({ type: z.literal("divider") }).strict(),
+]);
+const menuBaseSchema = z
+  .object({
+    ...commonNodeShape,
+    type: z.enum(["menu"]),
+    openWhen: sheetConditionSchema,
+    items: z.array(menuItemSchema).min(1).max(16),
+  })
+  .strict();
 const snackbarBaseSchema = z
   .object({
     ...commonNodeShape,
@@ -854,6 +884,7 @@ export type PrototypeNode =
   | z.infer<typeof checkboxBaseSchema>
   | z.infer<typeof buttonBaseSchema>
   | z.infer<typeof radioGroupBaseSchema>
+  | z.infer<typeof selectBaseSchema>
   | z.infer<typeof listItemBaseSchema>
   | z.infer<typeof sliderBaseSchema>
   | z.infer<typeof chipBaseSchema>
@@ -866,6 +897,7 @@ export type PrototypeNode =
   | z.infer<typeof badgeBaseSchema>
   | z.infer<typeof progressBaseSchema>
   | (z.infer<typeof dialogBaseSchema> & { child?: PrototypeNode })
+  | z.infer<typeof menuBaseSchema>
   | z.infer<typeof snackbarBaseSchema>
   | z.infer<typeof timePickerBaseSchema>
   | z.infer<typeof datePickerBaseSchema>
@@ -893,6 +925,7 @@ const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
       checkboxBaseSchema,
       buttonBaseSchema,
       radioGroupBaseSchema,
+      selectBaseSchema,
       listItemBaseSchema,
       sliderBaseSchema,
       chipBaseSchema,
@@ -905,6 +938,7 @@ const prototypeNodeBaseSchema: z.ZodType<PrototypeNode, z.ZodTypeDef, unknown> =
       badgeBaseSchema,
       progressBaseSchema,
       dialogBaseSchema.extend({ child: z.lazy(() => prototypeNodeSchema).optional() }),
+      menuBaseSchema,
       snackbarBaseSchema,
       timePickerBaseSchema,
       datePickerBaseSchema,
@@ -1040,6 +1074,7 @@ export const PROTOTYPE_NODE_TYPES = [
   "checkbox",
   "button",
   "radioGroup",
+  "select",
   "listItem",
   "slider",
   "chip",
@@ -1052,6 +1087,7 @@ export const PROTOTYPE_NODE_TYPES = [
   "badge",
   "progress",
   "dialog",
+  "menu",
   "snackbar",
   "timePicker",
   "datePicker",

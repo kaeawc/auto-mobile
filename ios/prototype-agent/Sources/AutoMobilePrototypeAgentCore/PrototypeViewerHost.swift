@@ -182,25 +182,36 @@ enum PrototypeViewerHostCapabilities {
 
 struct PrototypeViewerSaveBack {
     private let savedSpecId: String?
-    private let path: String
+    private let layoutDirectory: URL
     private let files: any PrototypeEndpointFiles
+    private let layoutExists: (URL) -> Bool
 
-    init(savedSpecId: String?, path: String, files: any PrototypeEndpointFiles = FoundationPrototypeEndpointFiles()) {
+    init(
+        savedSpecId: String?, layoutDirectory: URL,
+        files: any PrototypeEndpointFiles = FoundationPrototypeEndpointFiles(),
+        layoutExists: @escaping (URL) -> Bool = {
+            FileManager.default.fileExists(atPath: $0.appendingPathComponent(PrototypeSavedLayout.manifestName).path)
+        }
+    ) {
         self.savedSpecId = savedSpecId
-        self.path = path
+        self.layoutDirectory = layoutDirectory
         self.files = files
+        self.layoutExists = layoutExists
     }
 
     @discardableResult
     func persistIfSaved(specId: String, specJSON: Any) -> Bool {
-        guard specId == savedSpecId else { return false }
+        guard specId == savedSpecId, layoutExists(layoutDirectory) else { return false }
         guard JSONSerialization.isValidJSONObject([specJSON]) else {
             NSLog("[AutoMobilePrototypeAgent] could not save invalid viewer JSON")
             return false
         }
         do {
             let data = try JSONSerialization.data(withJSONObject: specJSON, options: .fragmentsAllowed)
-            try files.writeAtomically(data, to: path, mode: 0o600)
+            guard data.count <= PrototypeSavedLayoutLimits().maxSpecBytes else { return false }
+            try files.writeAtomically(
+                data, to: layoutDirectory.appendingPathComponent(PrototypeSavedLayout.specName).path, mode: 0o600
+            )
             return true
         } catch {
             NSLog(

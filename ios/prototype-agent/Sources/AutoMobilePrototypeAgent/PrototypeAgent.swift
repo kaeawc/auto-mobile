@@ -88,13 +88,13 @@ final class PrototypeAgent: NSObject {
         agent.boot()
     }
 
-    static func bootViewerHost(model: PrototypeModel, container: String, savedSpecId: String?, specPath: String) {
+    static func bootViewerHost(model: PrototypeModel, container: String, savedSpecId: String?, layoutDirectory: URL) {
         guard instance == nil else { return }
         let agent = PrototypeAgent(model: model)
         instance = agent
         agent.viewerHosted = true
         agent.booted = true
-        agent.viewerSaveBack = PrototypeViewerSaveBack(savedSpecId: savedSpecId, path: specPath)
+        agent.viewerSaveBack = PrototypeViewerSaveBack(savedSpecId: savedSpecId, layoutDirectory: layoutDirectory)
         let publisher = PrototypeEndpointPublisher(root: container)
         agent.viewerEndpoint = publisher
         let server = PrototypeServer(

@@ -78,6 +78,7 @@ final class PrototypeViewerLayoutTests: XCTestCase {
         let launch = PrototypeViewerLayoutLoader(reader: reader, fallback: fallback, registrar: registrar)
             .load(directory: directory)
         guard case let .loaded(spec, bytes) = launch.content else { return XCTFail("Expected saved layout") }
+        XCTAssertTrue(launch.fromSavedLayout)
         XCTAssertEqual(spec.id, "saved")
         XCTAssertEqual(bytes, try prototypeViewerCompactSpecBytes(value.specData))
         XCTAssertLessThan(bytes, value.specData.count)
@@ -104,6 +105,7 @@ final class PrototypeViewerLayoutTests: XCTestCase {
         let launch = PrototypeViewerLayoutLoader(
             reader: FakeReader(.loaded(value)), fallback: FakeFallback(), registrar: registrar
         ).load(directory: directory)
+        XCTAssertTrue(launch.fromSavedLayout)
         XCTAssertEqual(Set(registrar.images.keys), ["badImage", "image"])
         XCTAssertEqual(Set(registrar.fonts.keys), ["badFont", "font"])
         XCTAssertEqual(launch.registeredImageIds, ["image"])
@@ -138,6 +140,7 @@ final class PrototypeViewerLayoutTests: XCTestCase {
         ).load(directory: directory)
         guard case let .loaded(spec, bytes) = launch.content else { return XCTFail("Expected bundled demo") }
         XCTAssertEqual(spec.id, "saved")
+        XCTAssertFalse(launch.fromSavedLayout)
         XCTAssertEqual(bytes, 123)
         XCTAssertEqual(fallback.calls, 1)
         XCTAssertTrue(launch.registeredImageIds.isEmpty)
@@ -148,6 +151,7 @@ final class PrototypeViewerLayoutTests: XCTestCase {
             reader: FakeReader(.notFound), fallback: absent, registrar: registrar
         ).load(directory: directory)
         guard case .none = empty.content else { return XCTFail("Expected none") }
+        XCTAssertFalse(empty.fromSavedLayout)
         XCTAssertEqual(absent.calls, 1)
         XCTAssertTrue(registrar.images.isEmpty)
         XCTAssertTrue(registrar.fonts.isEmpty)
@@ -161,11 +165,13 @@ final class PrototypeViewerLayoutTests: XCTestCase {
             reader: FakeReader(.unsupportedFormat(version: 2)), fallback: fallback, registrar: registrar
         ).load(directory: directory)
         guard case let .unsupportedFormat(version) = unsupported.content else { return XCTFail("Expected unsupported") }
+        XCTAssertFalse(unsupported.fromSavedLayout)
         XCTAssertEqual(version, 2)
         let corrupt = PrototypeViewerLayoutLoader(
             reader: FakeReader(.corrupt("x")), fallback: fallback, registrar: registrar
         ).load(directory: directory)
         guard case let .corrupt(message) = corrupt.content else { return XCTFail("Expected corrupt") }
+        XCTAssertFalse(corrupt.fromSavedLayout)
         XCTAssertEqual(message, "x")
         XCTAssertEqual(fallback.calls, 0)
         XCTAssertTrue(registrar.images.isEmpty)
@@ -184,6 +190,7 @@ final class PrototypeViewerLayoutTests: XCTestCase {
             reader: FakeReader(.loaded(value)), fallback: fallback, registrar: registrar
         ).load(directory: directory)
         guard case let .invalid(path, message) = launch.content else { return XCTFail("Expected invalid anchor") }
+        XCTAssertFalse(launch.fromSavedLayout)
         XCTAssertEqual(path, "root.anchor")
         XCTAssertEqual(message, "Element anchors must be resolved to bounds by the host")
         XCTAssertEqual(fallback.calls, 0)

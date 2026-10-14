@@ -10,6 +10,14 @@ private final class ViewerHostFiles: PrototypeEndpointFiles {
 
     var writes: [Write] = []
     var removals: [String] = []
+    var manifestExists = true
+    var checkedDirectories: [URL] = []
+
+    func layoutExists(_ directory: URL) -> Bool {
+        checkedDirectories.append(directory)
+        return manifestExists
+    }
+
     var failWrite = false
     var failRemove = false
 
@@ -142,8 +150,8 @@ final class PrototypeViewerHostTests: XCTestCase {
         let files = ViewerHostFiles()
         let save = PrototypeViewerSaveBack(
             savedSpecId: "saved",
-            path: "/container/Documents/prototype.json",
-            files: files
+            layoutDirectory: URL(fileURLWithPath: "/container/Documents/prototype"),
+            files: files, layoutExists: files.layoutExists
         )
         let spec: [String: Any] = ["id": "saved", "root": ["type": "text", "text": "updated"]]
         XCTAssertFalse(save.persistIfSaved(specId: "other", specJSON: spec))
@@ -151,7 +159,7 @@ final class PrototypeViewerHostTests: XCTestCase {
         XCTAssertTrue(save.persistIfSaved(specId: "saved", specJSON: spec))
         XCTAssertEqual(files.writes.count, 1)
         let write = try XCTUnwrap(files.writes.first)
-        XCTAssertEqual(write.path, "/container/Documents/prototype.json")
+        XCTAssertEqual(write.path, "/container/Documents/prototype/spec.json")
         XCTAssertEqual(write.mode, 0o600)
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: write.data) as? [String: Any])
         XCTAssertEqual(object["id"] as? String, "saved")
@@ -160,14 +168,24 @@ final class PrototypeViewerHostTests: XCTestCase {
 
     func testSaveBackWithoutSavedIDDoesNothing() {
         let files = ViewerHostFiles()
-        let save = PrototypeViewerSaveBack(savedSpecId: nil, path: "/spec", files: files)
+        let save = PrototypeViewerSaveBack(
+            savedSpecId: nil,
+            layoutDirectory: URL(fileURLWithPath: "/container/Documents/prototype"),
+            files: files,
+            layoutExists: files.layoutExists
+        )
         XCTAssertFalse(save.persistIfSaved(specId: "new", specJSON: ["id": "new"]))
         XCTAssertTrue(files.writes.isEmpty)
     }
 
     func testSaveBackFailureDoesNotThrowOrWrite() {
         let files = ViewerHostFiles()
-        let save = PrototypeViewerSaveBack(savedSpecId: "saved", path: "/spec", files: files)
+        let save = PrototypeViewerSaveBack(
+            savedSpecId: "saved",
+            layoutDirectory: URL(fileURLWithPath: "/container/Documents/prototype"),
+            files: files,
+            layoutExists: files.layoutExists
+        )
         files.failWrite = true
         XCTAssertFalse(save.persistIfSaved(specId: "saved", specJSON: ["id": "saved"]))
         files.failWrite = false
@@ -176,6 +194,33 @@ final class PrototypeViewerHostTests: XCTestCase {
             XCTAssertFalse(save.persistIfSaved(specId: "saved", specJSON: ["value": value]))
         }
         XCTAssertTrue(files.writes.isEmpty)
+    }
+
+    func testSaveBackWithoutManifestDoesNotWrite() {
+        let files = ViewerHostFiles()
+        files.manifestExists = false
+        let directory = URL(fileURLWithPath: "/container/Documents/prototype")
+        let save = PrototypeViewerSaveBack(
+            savedSpecId: "saved", layoutDirectory: directory,
+            files: files, layoutExists: files.layoutExists
+        )
+        XCTAssertFalse(save.persistIfSaved(specId: "saved", specJSON: ["id": "saved"]))
+        XCTAssertEqual(files.checkedDirectories, [directory])
+        XCTAssertTrue(files.writes.isEmpty)
+        XCTAssertTrue(files.removals.isEmpty)
+    }
+
+    func testSaveBackOversizedSpecDoesNotWrite() {
+        let files = ViewerHostFiles()
+        let save = PrototypeViewerSaveBack(
+            savedSpecId: "saved", layoutDirectory: URL(fileURLWithPath: "/container/Documents/prototype"),
+            files: files, layoutExists: files.layoutExists
+        )
+        // JSON quotes make the encoded data one byte larger than the saved-layout cap.
+        let spec = String(repeating: "x", count: PrototypeSavedLayoutLimits().maxSpecBytes - 1)
+        XCTAssertFalse(save.persistIfSaved(specId: "saved", specJSON: spec))
+        XCTAssertTrue(files.writes.isEmpty)
+        XCTAssertTrue(files.removals.isEmpty)
     }
 
     func testFoundationEndpointWriteIsPrivateAndAtomicallyReplaces() throws {
@@ -203,7 +248,12 @@ final class PrototypeViewerHostTests: XCTestCase {
 
     func testSaveBackAllowsJSONFragments() throws {
         let files = ViewerHostFiles()
-        let save = PrototypeViewerSaveBack(savedSpecId: "saved", path: "/spec", files: files)
+        let save = PrototypeViewerSaveBack(
+            savedSpecId: "saved",
+            layoutDirectory: URL(fileURLWithPath: "/container/Documents/prototype"),
+            files: files,
+            layoutExists: files.layoutExists
+        )
         XCTAssertTrue(save.persistIfSaved(specId: "saved", specJSON: "fragment"))
         let write = try XCTUnwrap(files.writes.first)
         XCTAssertEqual(String(data: write.data, encoding: .utf8), "\"fragment\"")

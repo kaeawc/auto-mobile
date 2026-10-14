@@ -12,16 +12,18 @@ struct PrototypeViewerApp: App {
 
     init() {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        let layoutDirectory = (documents ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Documents"))
+            .appendingPathComponent(PrototypeViewerLayoutLoader.documentsDirectoryName)
         let locations = Bundle.main.path(forResource: "prototype", ofType: "json").map { [$0] } ?? []
         let model = PrototypeModel(mode: .standalone)
         model.setDeviceDark(UITraitCollection.current.userInterfaceStyle == .dark)
         let fallback = PrototypeViewerSpecLoader(reader: PrototypeViewerFileReader(), locations: locations)
         let launch: PrototypeViewerLaunch
-        if let documents {
+        if documents != nil {
             launch = PrototypeViewerLayoutLoader(
                 reader: PrototypeViewerLayoutReader(), fallback: fallback,
                 registrar: PrototypeViewerAssetRegistrar(model: model)
-            ).load(directory: documents.appendingPathComponent(PrototypeViewerLayoutLoader.documentsDirectoryName))
+            ).load(directory: layoutDirectory)
         } else {
             launch = PrototypeViewerLaunch(
                 content: fallback.load(), registeredImageIds: [], fontFaces: [:], problems: []
@@ -33,11 +35,13 @@ struct PrototypeViewerApp: App {
         if case let .loaded(spec, bytes) = launch.content { model.show(spec, specBytes: bytes) }
         _model = State(initialValue: model)
         let savedSpecId: String?
-        if case let .loaded(spec, _) = content { savedSpecId = spec.id } else { savedSpecId = nil }
-        let specPath = (documents ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Documents"))
-            .appendingPathComponent(PrototypeViewerSpecLoader.documentsFileName).path
+        if launch.fromSavedLayout, case let .loaded(spec, _) = content {
+            savedSpecId = spec.id
+        } else {
+            savedSpecId = nil
+        }
         PrototypeAgent.bootViewerHost(
-            model: model, container: NSHomeDirectory(), savedSpecId: savedSpecId, specPath: specPath
+            model: model, container: NSHomeDirectory(), savedSpecId: savedSpecId, layoutDirectory: layoutDirectory
         )
         _ = Self.terminationObserver
     }

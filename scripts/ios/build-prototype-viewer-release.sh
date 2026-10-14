@@ -15,6 +15,6 @@ trap 'rm -rf "${work_dir}"' EXIT
 
 bash "${repo_root}/scripts/ios/prototype-viewer-build.sh" "${work_dir}" >/dev/null
 # Write a fresh archive so a previous output cannot retain extra entries.
-ditto -c -k --keepParent "${work_dir}/PrototypeViewer.app" "${work_dir}/viewer.zip"
+ditto -c -k --norsrc --noextattr --keepParent "${work_dir}/PrototypeViewer.app" "${work_dir}/viewer.zip"
 mv -f "${work_dir}/viewer.zip" "${output_path}"
 echo "${output_path}"

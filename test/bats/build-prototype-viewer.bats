@@ -8,6 +8,7 @@ setup() {
   cp "${REPO_ROOT}/scripts/ios/build-prototype-viewer-release.sh" "${FIXTURE}/scripts/ios/"
   SCRIPT="${FIXTURE}/scripts/ios/build-prototype-viewer-release.sh"
   export BUILD_LOG="${BATS_TEST_TMPDIR}/build.log"
+  export DITTO_LOG="${BATS_TEST_TMPDIR}/ditto.log"
   cat > "${FIXTURE}/scripts/ios/prototype-viewer-build.sh" <<'SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -25,11 +26,12 @@ SCRIPT
   cat > "${MOCK_BIN}/ditto" <<'SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
-[[ "$1 $2 $3" == '-c -k --keepParent' ]]
-[[ "$(basename "$4")" == PrototypeViewer.app ]]
-[[ -x "$4/PrototypeViewer" && -s "$4/signature" ]]
+printf '%s\n' "$@" > "$DITTO_LOG"
+[[ "$1 $2 $3 $4 $5" == '-c -k --norsrc --noextattr --keepParent' ]]
+[[ "$(basename "$6")" == PrototypeViewer.app ]]
+[[ -x "$6/PrototypeViewer" && -s "$6/signature" ]]
 [[ "${BUILD_TEST_FAILURE:-}" != archive ]] || exit 1
-printf 'archive\n' > "$5"
+printf 'archive\n' > "$7"
 SCRIPT
   chmod +x "${MOCK_BIN}/ditto"
   export PATH="${MOCK_BIN}:${PATH}"
@@ -42,6 +44,13 @@ SCRIPT
   [ -s "${BATS_TEST_TMPDIR}/caller/out space/viewer.zip" ]
   [[ "$output" == *'/out space/viewer.zip' ]]
   [ ! -e "$(cat "$BUILD_LOG")" ]
+}
+
+@test "disables resource forks and extended attributes when packaging the signed app" {
+  run bash "$SCRIPT" "${BATS_TEST_TMPDIR}/viewer.zip"
+  [ "$status" -eq 0 ]
+  packaging_flags="$(sed -n '1,5p' "$DITTO_LOG")"
+  [ "$packaging_flags" = $'-c\n-k\n--norsrc\n--noextattr\n--keepParent' ]
 }
 
 @test "propagates missing build tool, architecture, signature and archive failures and cleans scratch" {

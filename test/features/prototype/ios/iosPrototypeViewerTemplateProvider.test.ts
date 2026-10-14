@@ -64,11 +64,13 @@ describe("PrototypeViewerTemplateProvider", () => {
       env: { AUTOMOBILE_VERSION: "0.0.84" },
       ...overrides,
     };
-    const app = path.join(cacheDir, "PrototypeViewer.app");
-    const archive = path.join(cacheDir, PROTOTYPE_VIEWER_ARCHIVE_FILENAME);
-    const metadata = path.join(cacheDir, PROTOTYPE_VIEWER_METADATA_FILENAME);
-    function makeApp(name = "PrototypeViewer.app") {
-      const dir = path.join(cacheDir, name);
+    const pinDir = path.join(cacheDir, deps.expectedChecksum.toLowerCase());
+    mkdirSync(pinDir, { recursive: true });
+    const app = path.join(pinDir, "PrototypeViewer.app");
+    const archive = path.join(pinDir, PROTOTYPE_VIEWER_ARCHIVE_FILENAME);
+    const metadata = path.join(pinDir, PROTOTYPE_VIEWER_METADATA_FILENAME);
+    function makeApp(name?: string) {
+      const dir = name === undefined ? app : path.join(cacheDir, name);
       mkdirSync(dir, { recursive: true });
       writeFileSync(path.join(dir, "Info.plist"), "plist");
       return dir;
@@ -80,6 +82,7 @@ describe("PrototypeViewerTemplateProvider", () => {
     }
     return {
       cacheDir,
+      pinDir,
       downloader,
       checksumCalculator,
       timer,
@@ -165,7 +168,7 @@ describe("PrototypeViewerTemplateProvider", () => {
   });
 
   test("cache hit rehashes the archive case-insensitively with zero downloads", async () => {
-    const h = harness();
+    const h = harness({ expectedChecksum: pin.toUpperCase() });
     h.seedCache(pin.toUpperCase());
     expect(await h.provider().resolveDetailed()).toEqual({ path: h.app, source: "cache" });
     expect(h.checksumCalculator.computedFiles).toEqual([h.archive]);
@@ -239,7 +242,7 @@ describe("PrototypeViewerTemplateProvider", () => {
     }
     expect((await provider.resolveDetailed()).source).toBe("cache");
     expect(h.downloader.downloadedUrls).toHaveLength(1);
-    expect(readdirSync(h.cacheDir).sort()).toEqual(
+    expect(readdirSync(h.pinDir).sort()).toEqual(
       [
         PROTOTYPE_VIEWER_METADATA_FILENAME,
         PROTOTYPE_VIEWER_ARCHIVE_FILENAME,
@@ -266,7 +269,7 @@ describe("PrototypeViewerTemplateProvider", () => {
     expect(error.actual).toBe("b".repeat(64));
     expect(error.message).toContain(pin);
     expect(error.message).toContain(error.actual);
-    expect(readdirSync(h.cacheDir)).toEqual([path.basename(other)]);
+    expect(readdirSync(h.pinDir)).toEqual([path.basename(other)]);
   });
 
   test.each([
@@ -277,6 +280,10 @@ describe("PrototypeViewerTemplateProvider", () => {
     "wrong-name",
     "missing-plist",
     "missing-executable",
+    "__MACOSX/PrototypeViewer.app/._Info.plist",
+    "PrototypeViewer.app/__MACOSX/file",
+    "PrototypeViewer.app/._Info.plist",
+    "PrototypeViewer.app/nested/._x",
   ])("refuses archive %s before publication", async (kind) => {
     const h = harness();
     const normal = ["PrototypeViewer.app/Info.plist", "PrototypeViewer.app/PrototypeViewer"];
@@ -295,7 +302,7 @@ describe("PrototypeViewerTemplateProvider", () => {
                     : [...normal, kind],
           );
     await expect(h.provider().resolve()).rejects.toBeInstanceOf(errors.PrototypeViewerExtractError);
-    expect(readdirSync(h.cacheDir)).toEqual([]);
+    expect(readdirSync(h.pinDir)).toEqual([]);
     expect(existsSync(path.join(path.dirname(h.cacheDir), "evil"))).toBe(false);
   });
 
@@ -311,7 +318,7 @@ describe("PrototypeViewerTemplateProvider", () => {
     }
     expect(error.cause).toBe(cause);
     expect(error.message).toContain(url);
-    expect(readdirSync(h.cacheDir)).toEqual([]);
+    expect(readdirSync(h.pinDir)).toEqual([]);
     h.downloader.shouldThrow = null;
     expect((await provider.resolveDetailed()).source).toBe("download");
   });
@@ -331,7 +338,7 @@ describe("PrototypeViewerTemplateProvider", () => {
     h.timer.advanceTime(10);
     await expect(pending).rejects.toBeInstanceOf(errors.PrototypeViewerDownloadError);
     await expect(pending).rejects.toThrow("Timed out");
-    expect(readdirSync(h.cacheDir)).toEqual([]);
+    expect(readdirSync(h.pinDir)).toEqual([]);
     expect(h.timer.getPendingTimeoutCount()).toBe(0);
   });
 
@@ -342,21 +349,150 @@ describe("PrototypeViewerTemplateProvider", () => {
     expect(h.downloader.downloadedUrls).toHaveLength(1);
   });
 
-  test("stale cache is replaced with a fully staged app on a new pin", async () => {
+  test("pin-A remains untouched while pin-B publishes without a sidecar", async () => {
     const h = harness();
-    h.seedCache("old-pin");
+    const oldPayload = Buffer.from("old-archive-A");
+    h.seedCache(pin, oldPayload.length);
+    writeFileSync(h.archive, oldPayload);
+    writeFileSync(path.join(h.app, "Info.plist"), "OLD-A");
+    const oldMetadata = readFileSync(h.metadata);
+    const oldArchive = readFileSync(h.archive);
+    const nextPin = "b".repeat(64);
+    const nextDir = path.join(h.cacheDir, nextPin);
+    const nextApp = path.join(nextDir, "PrototypeViewer.app");
+    const nextMetadata = path.join(nextDir, PROTOTYPE_VIEWER_METADATA_FILENAME);
+    const nextChecksum = new FakeChecksumCalculator();
+    nextChecksum.checksum = nextPin;
+    let observed = false;
+    const nextProvider = new PrototypeViewerTemplateProvider({
+      ...h.deps,
+      expectedChecksum: nextPin.toUpperCase(),
+      checksumCalculator: nextChecksum,
+      renameFile: async (from, to) => {
+        expect(path.dirname(from)).toStartWith(nextDir);
+        expect(existsSync(nextMetadata)).toBe(false);
+        await fs.rename(from, to);
+        if (to === nextApp) {
+          observed = true;
+          expect(existsSync(nextMetadata)).toBe(false);
+          expect(readFileSync(path.join(to, "Info.plist"), "utf8")).toBe("fixture");
+          const old = await h.provider().resolveDetailed();
+          expect(old).toEqual({ path: h.app, source: "cache" });
+          expect(readFileSync(path.join(old.path, "Info.plist"), "utf8")).toBe("OLD-A");
+        }
+      },
+    });
+    expect(await nextProvider.resolve()).toBe(nextApp);
+    expect(observed).toBe(true);
+    expect(readFileSync(h.metadata)).toEqual(oldMetadata);
+    expect(readFileSync(h.archive)).toEqual(oldArchive);
+    expect(readFileSync(path.join(h.app, "Info.plist"), "utf8")).toBe("OLD-A");
+    expect(readdirSync(h.cacheDir).sort()).toEqual([pin, nextPin]);
+    expect(h.downloader.downloadedUrls).toEqual([url]);
+  });
+
+  test.each(["ENOTEMPTY", "EEXIST", "EPERM", "EBUSY"])(
+    "overlapping same-pin publisher reuses a verified winner on %s",
+    async (code) => {
+      const h = harness();
+      const published: string[] = [];
+      const winnerMetadata = JSON.stringify({
+        sha256: pin,
+        size: payload.length,
+        downloadedAt: 42,
+      });
+      h.deps.renameFile = async (_from, to) => {
+        published.push(to);
+        expect(to).toBe(h.app);
+        expect(existsSync(h.metadata)).toBe(false);
+        // Another provider publishes between this attempt's cache miss and app rename.
+        h.seedCache();
+        writeFileSync(path.join(h.app, "Info.plist"), "winner");
+        writeFileSync(h.metadata, winnerMetadata);
+        throw Object.assign(new Error("concurrent app publication"), { code });
+      };
+      expect(await h.provider().resolve()).toBe(h.app);
+      expect(published).toEqual([h.app]);
+      expect(readFileSync(path.join(h.app, "Info.plist"), "utf8")).toBe("winner");
+      expect(readFileSync(h.metadata, "utf8")).toBe(winnerMetadata);
+      expect(readFileSync(h.archive)).toEqual(payload);
+      expect(readdirSync(h.pinDir).sort()).toEqual(
+        [
+          PROTOTYPE_VIEWER_METADATA_FILENAME,
+          PROTOTYPE_VIEWER_ARCHIVE_FILENAME,
+          "PrototypeViewer.app",
+        ].sort(),
+      );
+    },
+  );
+
+  test("winner completed during download is reused before invalidating its sidecar", async () => {
+    const h = harness();
+    h.downloader.download = async (_url, destination) => {
+      writeFileSync(destination, payload);
+      h.seedCache();
+      writeFileSync(path.join(h.app, "Info.plist"), "winner");
+    };
+    h.deps.renameFile = async () => {
+      throw new Error("a verified winner must not be replaced");
+    };
+    expect(await h.provider().resolve()).toBe(h.app);
+    expect(readFileSync(path.join(h.app, "Info.plist"), "utf8")).toBe("winner");
+    expect(JSON.parse(readFileSync(h.metadata, "utf8")).version).toBe("old");
+    expect(readdirSync(h.pinDir).sort()).toEqual(
+      [
+        PROTOTYPE_VIEWER_METADATA_FILENAME,
+        PROTOTYPE_VIEWER_ARCHIVE_FILENAME,
+        "PrototypeViewer.app",
+      ].sort(),
+    );
+  });
+
+  test("unusable app is removed only after a rename conflict; sidecar is invalidated first", async () => {
+    const h = harness();
+    h.seedCache(pin, 1);
     writeFileSync(path.join(h.app, "stale"), "old");
+    let appRenames = 0;
     h.deps.renameFile = async (from, to) => {
+      expect(existsSync(h.metadata)).toBe(false);
       if (to === h.app) {
-        expect(existsSync(to)).toBe(false);
+        appRenames++;
+        expect(existsSync(to)).toBe(appRenames === 1);
         expect(existsSync(path.join(from, "Info.plist"))).toBe(true);
-        expect(existsSync(path.join(from, "PrototypeViewer"))).toBe(true);
+        if (appRenames === 1) {
+          throw Object.assign(new Error("stale directory"), { code: "ENOTEMPTY" });
+        }
       }
       await fs.rename(from, to);
     };
     expect(await h.provider().resolve()).toBe(h.app);
+    expect(appRenames).toBe(2);
     expect(existsSync(path.join(h.app, "stale"))).toBe(false);
     expect(JSON.parse(readFileSync(h.metadata, "utf8")).sha256).toBe(pin);
+  });
+
+  test("failed stale-app rename retry preserves artifacts this attempt did not publish", async () => {
+    const h = harness();
+    h.seedCache(pin, 1);
+    let appRenames = 0;
+    h.deps.renameFile = async () => {
+      appRenames++;
+      if (appRenames === 2) {
+        h.makeApp();
+        writeFileSync(path.join(h.app, "other"), "other attempt");
+      }
+      throw Object.assign(new Error("busy directory"), { code: "EBUSY" });
+    };
+    await expect(h.provider().resolve()).rejects.toBeInstanceOf(
+      errors.PrototypeViewerDownloadError,
+    );
+    expect(appRenames).toBe(2);
+    expect(readFileSync(path.join(h.app, "other"), "utf8")).toBe("other attempt");
+    expect(readFileSync(h.archive)).toEqual(payload);
+    expect(existsSync(h.metadata)).toBe(false);
+    expect(readdirSync(h.pinDir).sort()).toEqual(
+      [PROTOTYPE_VIEWER_ARCHIVE_FILENAME, "PrototypeViewer.app"].sort(),
+    );
   });
 
   test.each(["app", "archive", "sidecar"])(
@@ -375,7 +511,7 @@ describe("PrototypeViewerTemplateProvider", () => {
       await expect(h.provider().resolve()).rejects.toBeInstanceOf(
         errors.PrototypeViewerDownloadError,
       );
-      expect(readdirSync(h.cacheDir)).toEqual([]);
+      expect(readdirSync(h.pinDir)).toEqual([]);
     },
   );
 

@@ -116,7 +116,7 @@ export class PrototypeViewerTemplateProvider implements TemplateProvider {
       throw new PrototypeViewerUnsupportedVersionError(resolvePinnedVersion(this.env));
     }
     if (await this.isCacheUsable(expected)) {
-      return { path: this.appPath, source: "cache" };
+      return { path: this.cachePaths(expected).app, source: "cache" };
     }
     if (isTruthyEnvValue(this.env[SKIP_IOS_PROTOTYPE_VIEWER_DOWNLOAD_ENV])) {
       throw new PrototypeViewerDownloadDisabledError();
@@ -136,28 +136,29 @@ export class PrototypeViewerTemplateProvider implements TemplateProvider {
     return { path: candidate, source };
   }
 
-  private get appPath(): string {
-    return path.join(this.cacheDir, APP_NAME);
-  }
-  private get archivePath(): string {
-    return path.join(this.cacheDir, PROTOTYPE_VIEWER_ARCHIVE_FILENAME);
-  }
-  private get metadataPath(): string {
-    return path.join(this.cacheDir, PROTOTYPE_VIEWER_METADATA_FILENAME);
+  private cachePaths(expected: string) {
+    const directory = path.join(this.cacheDir, expected.toLowerCase());
+    return {
+      directory,
+      app: path.join(directory, APP_NAME),
+      archive: path.join(directory, PROTOTYPE_VIEWER_ARCHIVE_FILENAME),
+      metadata: path.join(directory, PROTOTYPE_VIEWER_METADATA_FILENAME),
+    };
   }
 
   private async isCacheUsable(expected: string): Promise<boolean> {
+    const paths = this.cachePaths(expected);
     try {
-      const metadata: unknown = JSON.parse(await fs.readFile(this.metadataPath, "utf8"));
+      const metadata: unknown = JSON.parse(await fs.readFile(paths.metadata, "utf8"));
       if (!isCacheMetadata(metadata) || metadata.sha256.toLowerCase() !== expected.toLowerCase()) {
         return false;
       }
-      const stats = await fs.stat(this.archivePath);
+      const stats = await fs.stat(paths.archive);
       if (!stats.isFile() || stats.size !== metadata.size) {
         return false;
       }
-      const { checksum } = await this.checksumCalculator.computeFileSha256(this.archivePath);
-      return checksum.toLowerCase() === expected.toLowerCase() && (await isApp(this.appPath));
+      const { checksum } = await this.checksumCalculator.computeFileSha256(paths.archive);
+      return checksum.toLowerCase() === expected.toLowerCase() && (await isApp(paths.app));
     } catch (error) {
       // Missing/corrupt cache files are expected on first use or after interrupted publication.
       logger.debug("[PROTOTYPE_VIEWER] No usable cached archive", { error: errorMessage(error) });
@@ -189,18 +190,47 @@ export class PrototypeViewerTemplateProvider implements TemplateProvider {
     }
   }
 
+  private async publishApp(staging: string, expected: string): Promise<boolean> {
+    const paths = this.cachePaths(expected);
+    if (await this.isCacheUsable(expected)) {
+      return false;
+    }
+    // Invalidate before replacing any artifact: interrupted publication must fail closed.
+    await fs.rm(paths.metadata, { recursive: true, force: true });
+    try {
+      await this.renameFile(path.join(staging, APP_NAME), paths.app);
+    } catch (error) {
+      if (
+        typeof error !== "object" ||
+        error === null ||
+        !("code" in error) ||
+        typeof error.code !== "string" ||
+        !["ENOTEMPTY", "EEXIST", "EPERM", "EBUSY"].includes(error.code)
+      ) {
+        throw error;
+      }
+      // A competing same-pin provider may have completed while this attempt staged its app.
+      if (await this.isCacheUsable(expected)) {
+        return false;
+      }
+      await fs.rm(paths.app, { recursive: true, force: true });
+      await this.renameFile(path.join(staging, APP_NAME), paths.app);
+    }
+    return true;
+  }
+
   private async download(expected: string): Promise<string> {
-    const partial = `${this.archivePath}.${this.idGenerator.next()}.download`;
-    const staging = path.join(this.cacheDir, `extract.${this.idGenerator.next()}`);
+    const paths = this.cachePaths(expected);
+    const partial = `${paths.archive}.${this.idGenerator.next()}.download`;
+    const staging = path.join(paths.directory, `extract.${this.idGenerator.next()}`);
     const url = this.deps.releaseUrl ?? resolvePrototypeViewerUrl(this.env);
     let appPublished = false;
     let archivePublished = false;
     try {
       if (this.deps.cacheDir === undefined) {
         ensureSecureTempDirSync(CACHE_SUBDIR);
-      } else {
-        await fs.mkdir(this.cacheDir, { recursive: true, mode: 0o700 });
       }
+      await fs.mkdir(paths.directory, { recursive: true, mode: 0o700 });
       await this.downloadBytes(url, partial);
       await fs.chmod(partial, 0o600);
       const { checksum: actual } = await this.checksumCalculator.computeFileSha256(partial);
@@ -210,13 +240,14 @@ export class PrototypeViewerTemplateProvider implements TemplateProvider {
       const { size } = await fs.stat(partial);
       await this.extract(partial, staging);
       // A complete staged app is moved in one rename; no partially extracted app is public.
-      await fs.rm(this.appPath, { recursive: true, force: true });
-      await this.renameFile(path.join(staging, APP_NAME), this.appPath);
-      appPublished = true;
-      await this.renameFile(partial, this.archivePath);
+      appPublished = await this.publishApp(staging, expected);
+      if (!appPublished) {
+        return paths.app;
+      }
+      await this.renameFile(partial, paths.archive);
       archivePublished = true;
       await fs.writeFile(
-        this.metadataPath,
+        paths.metadata,
         JSON.stringify({
           version: resolvePinnedVersion(this.env),
           sha256: actual,
@@ -225,17 +256,16 @@ export class PrototypeViewerTemplateProvider implements TemplateProvider {
         } satisfies PrototypeViewerMetadata),
         { encoding: "utf8", mode: 0o600 },
       );
-      await fs.chmod(this.metadataPath, 0o600);
-      return this.appPath;
+      await fs.chmod(paths.metadata, 0o600);
+      return paths.app;
     } catch (error) {
       // Only remove artifacts published by this attempt; an earlier cache may still exist.
       await Promise.all([
-        fs.rm(partial, { force: true }),
-        ...(appPublished ? [fs.rm(this.appPath, { recursive: true, force: true })] : []),
+        ...(appPublished ? [fs.rm(paths.app, { recursive: true, force: true })] : []),
         ...(archivePublished
           ? [
-              fs.rm(this.archivePath, { force: true }),
-              fs.rm(this.metadataPath, { recursive: true, force: true }),
+              fs.rm(paths.archive, { force: true }),
+              fs.rm(paths.metadata, { recursive: true, force: true }),
             ]
           : []),
       ]);
@@ -251,7 +281,10 @@ export class PrototypeViewerTemplateProvider implements TemplateProvider {
         error,
       );
     } finally {
-      await fs.rm(staging, { recursive: true, force: true });
+      await Promise.all([
+        fs.rm(partial, { force: true }),
+        fs.rm(staging, { recursive: true, force: true }),
+      ]);
     }
   }
 
@@ -265,7 +298,12 @@ export class PrototypeViewerTemplateProvider implements TemplateProvider {
         entries.some(
           (entry) =>
             !entry.entryName.startsWith(`${APP_NAME}/`) ||
-            entry.entryName.split(/[\\/]/).includes("..") ||
+            entry.entryName
+              .split(/[\\/]/)
+              .some(
+                (component) =>
+                  component === ".." || component === "__MACOSX" || component.startsWith("._"),
+              ) ||
             entry.entryName.includes("\\") ||
             (entry.entryName === `${APP_NAME}/` && !entry.isDirectory),
         )

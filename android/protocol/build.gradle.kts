@@ -1,3 +1,4 @@
+import org.gradle.api.tasks.PathSensitivity
 import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
@@ -21,8 +22,12 @@ dependencies {
   testImplementation(libs.junit.jupiter)
 }
 
-tasks.test {
+tasks.withType<Test>().configureEach {
   useJUnitPlatform()
+  inputs
+    .dir(layout.projectDirectory.dir("../../test/fixtures/prototype-spec"))
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+    .withPropertyName("prototypeSpecFixtures")
 }
 
 // Version comes from root project's gradle.properties (VERSION_NAME)

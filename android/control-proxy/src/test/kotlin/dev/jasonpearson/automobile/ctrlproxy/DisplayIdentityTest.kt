@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import java.lang.reflect.InvocationTargetException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -37,6 +38,29 @@ class DisplayIdentityTest {
   }
 
   private class FakeDisplay(var id: String)
+
+  @Test
+  fun `repeated transient failures are logged once without disabling reads`() {
+    var calls = 0
+    val errors = mutableListOf<Throwable>()
+    val failure = InvocationTargetException(IllegalArgumentException("temporary target failure"))
+    val resolver =
+      PanelUniqueIdResolver<FakeDisplay>(
+        lookup = {
+          { display ->
+            calls++
+            if (calls <= 100) throw failure
+            display.id
+          }
+        },
+        onTransientFailure = { errors.add(it) },
+      )
+    val display = FakeDisplay("local:1")
+    repeat(100) { assertNull(resolver.resolve(display)) }
+    assertEquals(listOf(failure), errors)
+    assertEquals("local:1", resolver.resolve(display))
+    assertEquals(101, calls)
+  }
 
   @Test
   fun `denied lookup is cached and reported once`() {
@@ -112,7 +136,7 @@ class DisplayIdentityTest {
   }
 
   @Test
-  fun `third invocation failure permanently disables the accessor`() {
+  fun `third access failure permanently disables the accessor`() {
     var lookups = 0
     var invocations = 0
     val errors = mutableListOf<Throwable?>()
@@ -139,6 +163,62 @@ class DisplayIdentityTest {
     assertEquals(3, invocations)
     assertEquals(1, errors.size)
     assertSame(denial, errors.single())
+  }
+
+  @Test
+  fun `third transient invocation failure leaves the accessor available`() {
+    var lookups = 0
+    var invocations = 0
+    var unavailable = 0
+    val resolver =
+      PanelUniqueIdResolver<FakeDisplay>(
+        lookup = {
+          lookups++
+          val read: (FakeDisplay) -> String? = { display ->
+            invocations++
+            if (invocations == 3) throw InvocationTargetException(RuntimeException("temporary"))
+            display.id
+          }
+          read
+        },
+        onUnavailable = { unavailable++ },
+      )
+    val display = FakeDisplay("local:1")
+    repeat(2) { assertEquals("local:1", resolver.resolve(display)) }
+    assertNull(resolver.resolve(display))
+    assertEquals("local:1", resolver.resolve(display))
+    assertEquals(1, lookups)
+    assertEquals(4, invocations)
+    assertEquals(0, unavailable)
+  }
+
+  @Test
+  fun `wrapped access failures and linkage failures latch once`() {
+    listOf(
+        IllegalArgumentException("wrong receiver"),
+        IllegalAccessException("denied"),
+        SecurityException("denied"),
+        LinkageError("denied"),
+        InvocationTargetException(SecurityException("denied")),
+        InvocationTargetException(LinkageError("denied")),
+      )
+      .forEach { failure ->
+        var calls = 0
+        var unavailable = 0
+        val resolver =
+          PanelUniqueIdResolver<FakeDisplay>(
+            lookup = {
+              { _ ->
+                calls++
+                throw failure
+              }
+            },
+            onUnavailable = { unavailable++ },
+          )
+        repeat(4) { assertNull(resolver.resolve(FakeDisplay("local:1"))) }
+        assertEquals(1, calls)
+        assertEquals(1, unavailable)
+      }
   }
 
   @Test

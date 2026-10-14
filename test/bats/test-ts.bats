@@ -142,7 +142,9 @@ if [[ "$1" == */scripts/lib/runner-calibration.ts ]]; then
       printf '%s|%s\n' "$4" "$3" >> "$STUB_PROBE_RECORD"
     fi
     if [[ -n "${STUB_PROBE_EXIT:-}" ]]; then exit "$STUB_PROBE_EXIT"; fi
-    printf '%s\t%s\t25\n' "$4" "${STUB_PROBE_MS:-10}" >> "$3"
+    probe_ms="${STUB_PROBE_MS:-10}"
+    if [[ "$4" == *" attempt 2 "* ]]; then probe_ms="${STUB_PROBE_RETRY_MS:-$probe_ms}"; fi
+    printf '%s\t%s\t25\n' "$4" "$probe_ms" >> "$3"
     exit 0
   fi
   if [[ "$2" == measure ]]; then
@@ -906,6 +908,96 @@ bun_test_invocations() {
   [[ "$output" == *"==> TypeScript unit shard 1/1 (attempt 1 of 2, retried)"* ]]
   [ -f "$SHARD_SCRATCH/test-ts-unit-shards/shard-0.attempt-1.log" ]
   [ -s "$report_dir/shard-0.xml" ]
+}
+
+@test "a starved shard timeout skips the same-runner retry and fails with 124" {
+  run_retry_lane STUB_BUN_EXITS="124 0" STUB_PROBE_MS=200 \
+    AUTOMOBILE_UNIT_JUNIT_DIR="$BATS_TEST_TMPDIR/contended-reports"
+  [ "$status" -eq 124 ]
+  [ "$(bun_test_invocations)" -eq 1 ]
+  [[ "$output" == *"RUNNER-CONTENDED: unit shard 0 hit its 180s wall-clock budget on a starved runner (probe slowdown 8x >= 2.5x); not retrying on the same runner. Re-run the job to get a fresh runner."* ]]
+  [[ "$output" != *"RETRY:"* ]]
+  [[ "$output" == *"retried=0"* ]]
+  [[ "$output" != *"::error"* ]]
+}
+
+@test "contention threshold accepts decimals and includes equality" {
+  run_retry_lane STUB_BUN_EXITS="124 0" STUB_PROBE_MS=200 AUTOMOBILE_UNIT_CONTENDED_SLOWDOWN=8.5
+  [ "$status" -eq 0 ]
+  [ "$(bun_test_invocations)" -eq 2 ]
+  [[ "$output" != *"RUNNER-CONTENDED:"* ]]
+
+  : > "$BUN_ARGS_FILE"
+  run_retry_lane STUB_BUN_EXITS="124 0" STUB_PROBE_MS=200 AUTOMOBILE_UNIT_CONTENDED_SLOWDOWN=8
+  [ "$status" -eq 124 ]
+  [ "$(bun_test_invocations)" -eq 1 ]
+  [[ "$output" == *"probe slowdown 8x >= 8x"* ]]
+}
+
+@test "incident-scale contention skips retry while 2x slowdown still retries" {
+  run_retry_lane STUB_BUN_EXITS="124 0" STUB_PROBE_MS=88
+  [ "$status" -eq 124 ]
+  [ "$(bun_test_invocations)" -eq 1 ]
+  [[ "$output" == *"probe slowdown 3.52x >= 2.5x"* ]]
+  [[ "$output" == *"RUNNER-CONTENDED:"* ]]
+  [[ "$output" != *"RETRY:"* ]]
+
+  : > "$BUN_ARGS_FILE"
+  run_retry_lane STUB_BUN_EXITS="124 0" STUB_PROBE_MS=50
+  [ "$status" -eq 0 ]
+  [ "$(bun_test_invocations)" -eq 2 ]
+  [[ "$output" == *"RETRY:"* ]]
+  [[ "$output" != *"RUNNER-CONTENDED:"* ]]
+}
+
+@test "invalid contention thresholds are rejected before tests launch" {
+  for threshold in 0 -1 nope NaN Infinity 0.0; do
+    run_retry_lane AUTOMOBILE_UNIT_CONTENDED_SLOWDOWN="$threshold"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"AUTOMOBILE_UNIT_CONTENDED_SLOWDOWN must be a positive number"* ]]
+    [ "$(bun_test_invocations)" -eq 0 ]
+  done
+}
+
+@test "a starved timeout emits an Actions error and summary once" {
+  summary="$BATS_TEST_TMPDIR/contended-summary.md"
+  run_retry_lane STUB_BUN_EXITS="124 0" STUB_PROBE_MS=200 GITHUB_ACTIONS=true GITHUB_STEP_SUMMARY="$summary"
+  [ "$status" -eq 124 ]
+  [ "$(bun_test_invocations)" -eq 1 ]
+  [[ "$output" == *"::error title=Unit shard runner contended::RUNNER-CONTENDED: unit shard 0"* ]]
+  [ "$(grep -c '^RUNNER-CONTENDED:' "$summary")" -eq 1 ]
+}
+
+@test "a final timeout reports contention with retries disabled or after a retry" {
+  run_retry_lane STUB_BUN_EXITS="124" STUB_PROBE_MS=200 AUTOMOBILE_UNIT_SHARD_RETRIES=0
+  [ "$status" -eq 124 ]
+  [ "$(bun_test_invocations)" -eq 1 ]
+  [[ "$output" == *"RUNNER-CONTENDED: unit shard 0 hit its 180s wall-clock budget on a starved runner"* ]]
+
+  : > "$BUN_ARGS_FILE"
+  run_retry_lane STUB_BUN_EXITS="124 124" STUB_PROBE_MS=10 STUB_PROBE_RETRY_MS=200
+  [ "$status" -eq 124 ]
+  [ "$(bun_test_invocations)" -eq 2 ]
+  [[ "$output" == *"RUNNER-CONTENDED: unit shard 0 hit its 180s wall-clock budget after a retry on a starved runner"* ]]
+}
+
+@test "missing calibration keeps retries and contention does not affect other exits" {
+  run_retry_lane STUB_BUN_EXITS="124 0" AUTOMOBILE_RUNNER_CALIBRATION=0
+  [ "$status" -eq 0 ]
+  [ "$(bun_test_invocations)" -eq 2 ]
+  [[ "$output" != *"RUNNER-CONTENDED:"* ]]
+
+  : > "$BUN_ARGS_FILE"
+  run_retry_lane STUB_BUN_EXITS="143 0" STUB_PROBE_MS=200
+  [ "$status" -eq 0 ]
+  [ "$(bun_test_invocations)" -eq 2 ]
+  [[ "$output" != *"RUNNER-CONTENDED:"* ]]
+
+  : > "$BUN_ARGS_FILE"
+  run_retry_lane STUB_BUN_EXITS="1" STUB_PROBE_MS=200
+  [ "$status" -eq 1 ]
+  [ "$(bun_test_invocations)" -eq 1 ]
+  [[ "$output" != *"RUNNER-CONTENDED:"* ]]
 }
 
 @test "a shard retry deletes that shard's stale reports but not another shard's" {

@@ -38,6 +38,13 @@ describe("resolveAuxSocketDir", () => {
     expect(resolveAuxSocketDir({})).toBe(path.join(os.homedir(), ".auto-mobile"));
   });
 
+  test("AUTOMOBILE_DATA_DIR does not move auxiliary sockets", () => {
+    testOverrides.auxSocketDir = undefined;
+    expect(resolveAuxSocketDir({ AUTOMOBILE_DATA_DIR: "/x" })).toBe(
+      path.join(os.homedir(), ".auto-mobile"),
+    );
+  });
+
   test("uses the environment directory when the test override is cleared", () => {
     testOverrides.auxSocketDir = undefined;
     expect(resolveAuxSocketDir({ AUTOMOBILE_AUX_SOCKET_DIR: "/isolated-daemon" })).toBe(

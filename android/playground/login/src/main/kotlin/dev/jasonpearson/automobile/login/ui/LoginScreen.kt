@@ -33,6 +33,7 @@ import dev.jasonpearson.automobile.design.system.theme.AutoMobileTheme
 import dev.jasonpearson.automobile.login.R
 import dev.jasonpearson.automobile.login.data.LoginRepository
 import dev.jasonpearson.automobile.sdk.TrackRecomposition
+import dev.jasonpearson.automobile.storage.UserPreferences
 import kotlinx.coroutines.delay
 
 /**
@@ -158,12 +159,16 @@ fun LoginScreenCore(
  * Login screen composable with dependency injection for use in playground app. This version handles
  * creating the ViewModel and managing user preferences.
  *
- * @param userPreferences The user preferences to update on successful login
+ * @param userPreferences The user preferences to mark authenticated on successful login
  * @param onNavigateToHome Callback invoked when login is successful to navigate to home
  * @param onGuestMode Callback invoked when guest mode is selected
  */
 @Composable
-fun LoginScreen(userPreferences: Any, onNavigateToHome: () -> Unit, onGuestMode: () -> Unit = {}) {
+fun LoginScreen(
+  userPreferences: UserPreferences,
+  onNavigateToHome: () -> Unit,
+  onGuestMode: () -> Unit = {},
+) {
   TrackRecomposition(id = "screen.login", composableName = "LoginScreen") {
     val context = LocalContext.current
     val viewModelFactory = remember { LoginViewModelFactory(LoginRepository(context)) }
@@ -181,16 +186,8 @@ fun LoginScreen(userPreferences: Any, onNavigateToHome: () -> Unit, onGuestMode:
         loginError = null
         showErrorMessage = false
 
-        // Mark user as authenticated using reflection to avoid tight coupling
-        try {
-          val isAuthenticatedField = userPreferences::class.java.getDeclaredField("isAuthenticated")
-          isAuthenticatedField.isAccessible = true
-          isAuthenticatedField.setBoolean(userPreferences, true)
-          onNavigateToHome()
-        } catch (e: Exception) {
-          loginError = "Authentication successful but navigation failed"
-          showErrorMessage = true
-        }
+        userPreferences.isAuthenticated = true
+        onNavigateToHome()
       },
       onLoginError = { errorString ->
         // Handle login error - show error message instead of crashing

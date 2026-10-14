@@ -67,6 +67,7 @@ class DatabaseInspectorProvider : ContentProvider() {
       val driver = DatabaseInspector.getDriver(extras?.getString("storeName"))
       val response =
         when (method) {
+          "getReadOnlyCapability" -> JSONObject().put("readOnlyEnforced", true)
           "listDatabases" -> handleListDatabases(driver)
           "listTables" -> handleListTables(driver, extras)
           "getTableData" -> handleGetTableData(driver, extras)

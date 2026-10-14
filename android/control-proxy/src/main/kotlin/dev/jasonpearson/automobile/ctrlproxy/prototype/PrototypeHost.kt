@@ -111,6 +111,11 @@ data class PrototypeRequest(
   val theme: StateFlow<PrototypeShownTheme>? = null,
   /** Direct host callers retain the legacy bar; the controller resolves the spec default. */
   val chrome: PrototypeWindowChrome = PrototypeWindowChrome.BAR,
+  /**
+   * The authored surface alone hides the whole window in every reachable mode. The theme is live,
+   * so this must account for all reachable palettes, not just the currently shown one.
+   */
+  val opaqueSurface: Boolean = false,
   val onHostDismiss: suspend () -> Unit = {},
   val content: @Composable () -> Unit = { PrototypeTestContent() },
 ) {
@@ -327,6 +332,7 @@ class DefaultPrototypeHost(
           sdkInt,
           request.layer,
           imeLift(request),
+          opaque = prototypeWindowOpaque(request),
         )
       if (touchThroughToken != null) {
         params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -497,6 +503,7 @@ class DefaultPrototypeHost(
         sdkInt,
         current.request.layer,
         imeLift(current.request),
+        opaque = prototypeWindowOpaque(current.request),
       )
     current.anchoredOrigin?.let { applyAnchoredOrigin(params, it) }
     if (touchThroughToken != null)
@@ -541,7 +548,12 @@ class DefaultPrototypeHost(
     require(percent in 0..100) { "Opacity must be in 0..100" }
     mainThread.onMain {
       window?.let {
-        it.request = it.request.copy(opacityPercent = percent)
+        val previousRequest = it.request
+        val newRequest = previousRequest.copy(opacityPercent = percent)
+        it.request = newRequest
+        if (prototypeWindowOpaque(previousRequest) != prototypeWindowOpaque(newRequest)) {
+          relayoutOnMain(it)
+        }
         applyContent(it)
       }
     }
@@ -745,8 +757,14 @@ internal class PrototypeComposeView(
   escapeSchedulerFactory: (View) -> PrototypeEscapeScheduler = ::viewPrototypeEscapeScheduler,
   touchSlop: Int = ViewConfiguration.get(context).scaledTouchSlop,
   private val dispatchToContent: ((MotionEvent) -> Boolean)? = null,
+  accessibilitySchedulerFactory: (View) -> PrototypeEscapeScheduler =
+    ::viewPrototypeEscapeScheduler,
+  nowMs: () -> Long = android.os.SystemClock::uptimeMillis,
 ) : AbstractComposeView(context) {
   private val content = mutableStateOf<(@Composable () -> Unit)?>(null)
+  private val accessibilityCoalescer = PrototypeAccessibilityCoalescer(nowMs)
+  private val accessibilityScheduler = accessibilitySchedulerFactory(this)
+  private var cancelAccessibilityTrailing: (() -> Unit)? = null
   val escapeState = PrototypeEscapeState()
   private var escapeActive = false
   private var lastTouch: MotionEvent? = null
@@ -781,11 +799,44 @@ internal class PrototypeComposeView(
   }
 
   override fun onDetachedFromWindow() {
+    cancelAccessibilityTrailing?.invoke()
+    cancelAccessibilityTrailing = null
+    accessibilityCoalescer.reset()
     escapeTracker.reset()
     lastTouch?.recycle()
     lastTouch = null
     escapeState.hide()
     super.onDetachedFromWindow()
+  }
+
+  override fun onRequestSendAccessibilityEvent(
+    child: View,
+    event: android.view.accessibility.AccessibilityEvent,
+  ): Boolean {
+    if (!isCoalescibleAccessibilityEvent(event.eventType, event.contentChangeTypes)) {
+      return super.onRequestSendAccessibilityEvent(child, event)
+    }
+    when (accessibilityCoalescer.onCoalescible()) {
+      PrototypeAccessibilityCoalescer.Action.EMIT_NOW -> emitAccessibilitySubtreeChanged()
+      PrototypeAccessibilityCoalescer.Action.SCHEDULE_TRAILING -> {
+        cancelAccessibilityTrailing =
+          accessibilityScheduler.schedule(accessibilityCoalescer.remainingMs()) {
+            cancelAccessibilityTrailing = null
+            accessibilityCoalescer.onTrailingFired()
+            emitAccessibilitySubtreeChanged()
+          }
+      }
+      PrototypeAccessibilityCoalescer.Action.NONE -> Unit
+    }
+    return false
+  }
+
+  private fun emitAccessibilitySubtreeChanged() {
+    notifySubtreeAccessibilityStateChanged(
+      this,
+      this,
+      android.view.accessibility.AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE,
+    )
   }
 
   override fun dispatchTouchEvent(event: MotionEvent): Boolean {
@@ -883,6 +934,12 @@ data class PrototypeHostChrome(
   val closeVisible: Boolean = false,
   val escape: Boolean = false,
 )
+
+internal fun prototypeWindowOpaque(request: PrototypeRequest): Boolean =
+  request.opaqueSurface &&
+    request.placement is PrototypePlacement.Fullscreen &&
+    request.opacityPercent == 100 &&
+    !prototypeHostChrome(request).dismissVisible
 
 fun prototypeHostChrome(request: PrototypeRequest): PrototypeHostChrome {
   val fullscreen = request.placement is PrototypePlacement.Fullscreen

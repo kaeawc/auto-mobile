@@ -3,4 +3,12 @@
   <string name="accessibility_service_name">AutoMobile CtrlProxy</string>
   <string name="accessibility_service_description">Extracts active window view hierarchy information to provide fast UI inspection for AutoMobile</string>
   <string name="ime_label">AutoMobile CtrlProxy Keyboard</string>
+  <string name="saved_prototype_not_saved">This prototype is no longer saved</string>
+  <string name="saved_prototype_missing_id">No prototype was selected</string>
+  <string name="saved_prototype_corrupt">This saved prototype can\'t be opened</string>
+  <string name="saved_prototype_unsupported">This prototype was saved by a newer version</string>
+  <string name="saved_prototype_locked">Unlock your device to open this prototype</string>
+  <string name="saved_prototype_error_body">Close this window and try opening the prototype again.</string>
+  <string name="saved_prototype_version">Saved format version: %1$d</string>
+  <string name="saved_prototype_close">Close</string>
 </resources>

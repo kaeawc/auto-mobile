@@ -252,6 +252,127 @@ posixTest("serve answers a call, records notifications and closes via fake clien
     f.timer.reset();
   }
 });
+posixTest("serve marks only the request whose client call spans host sleep", async () => {
+  const f = fixture();
+  f.files.set(
+    join(dir, "in", "1.json"),
+    JSON.stringify({ id: "slept", op: "call", tool: "observe", args: {} }),
+  );
+  let slept = false;
+  f.client.callTool = async () => {
+    if (!slept) {
+      slept = true;
+      f.timer.simulateHostSleep(60_000);
+    }
+    return { ok: true };
+  };
+  const writeJson = f.deps.writeJson;
+  f.deps.writeJson = (path, value) => {
+    writeJson(path, value);
+    if (path === join(dir, "out", "1.json")) {
+      f.files.set(
+        join(dir, "in", "2.json"),
+        JSON.stringify({ id: "awake", op: "call", tool: "observe", args: {} }),
+      );
+    }
+    if (path === join(dir, "out", "2.json")) {
+      f.files.set(join(dir, "in", "3.json"), JSON.stringify({ id: "close", op: "close" }));
+    }
+  };
+  f.timer.enableAutoAdvance();
+  try {
+    expect(await runServe(parsed(["serve", "--dir", dir]), f.deps)).toBe(0);
+    const slept = JSON.parse(f.files.get(join(dir, "out", "1.json"))!);
+    const awake = JSON.parse(f.files.get(join(dir, "out", "2.json"))!);
+    expect(slept).toMatchObject({ invalid: "host-slept", hostSleptMs: 60_000 });
+    expect(awake).not.toHaveProperty("invalid");
+    expect(awake).not.toHaveProperty("hostSleptMs");
+    expect(f.files.get(join(dir, "events.jsonl"))).toContain(
+      '"kind":"host_slept","id":"slept","sleptMs":60000',
+    );
+    expect(JSON.parse(f.files.get(join(dir, "host-sleep.json"))!)).toEqual({
+      invalidIds: ["slept"],
+      lines: ["host-slept: 1 evidence row(s) invalid", "  - slept"],
+    });
+  } finally {
+    f.timer.reset();
+  }
+});
+posixTest(
+  "serve marks overlapping requests when one sample detects their shared sleep",
+  async () => {
+    const f = fixture();
+    f.files.set(
+      join(dir, "in", "1.json"),
+      JSON.stringify({ id: "A", op: "call", tool: "observe", args: {} }),
+    );
+    f.files.set(
+      join(dir, "in", "2.json"),
+      JSON.stringify({ id: "B", op: "call", tool: "observe", args: {} }),
+    );
+    let finishA!: (value: unknown) => void;
+    f.client.callTool = async () => {
+      if (!finishA) {
+        f.timer.advanceTime(10);
+        return await new Promise((resolveCall) => {
+          finishA = resolveCall;
+        });
+      }
+      f.timer.simulateHostSleep(60_000);
+      finishA({ ok: true });
+      return { ok: true };
+    };
+    const writeJson = f.deps.writeJson;
+    f.deps.writeJson = (path, value) => {
+      writeJson(path, value);
+      if (path === join(dir, "out", "2.json")) {
+        f.files.set(join(dir, "in", "3.json"), JSON.stringify({ id: "close", op: "close" }));
+      }
+    };
+    f.timer.enableAutoAdvance();
+    try {
+      expect(await runServe(parsed(["serve", "--dir", dir]), f.deps)).toBe(0);
+      expect(JSON.parse(f.files.get(join(dir, "out", "1.json"))!).invalid).toBe("host-slept");
+      expect(JSON.parse(f.files.get(join(dir, "out", "2.json"))!).invalid).toBe("host-slept");
+      expect(JSON.parse(f.files.get(join(dir, "host-sleep.json"))!).invalidIds).toEqual(["A", "B"]);
+    } finally {
+      f.timer.reset();
+    }
+  },
+);
+posixTest("serve does not mark a request for a sleep detected at its start", async () => {
+  const f = fixture();
+  f.files.set(
+    join(dir, "in", "1.json"),
+    JSON.stringify({ id: "awake", op: "call", tool: "observe", args: {} }),
+  );
+  const listFiles = f.deps.listFiles;
+  let slept = false;
+  f.deps.listFiles = (path) => {
+    if (!slept && path === join(dir, "in")) {
+      slept = true;
+      f.timer.simulateHostSleep(60_000);
+    }
+    return listFiles(path);
+  };
+  const writeJson = f.deps.writeJson;
+  f.deps.writeJson = (path, value) => {
+    writeJson(path, value);
+    if (path === join(dir, "out", "1.json")) {
+      f.files.set(join(dir, "in", "2.json"), JSON.stringify({ id: "close", op: "close" }));
+    }
+  };
+  f.timer.enableAutoAdvance();
+  try {
+    expect(await runServe(parsed(["serve", "--dir", dir]), f.deps)).toBe(0);
+    const response = JSON.parse(f.files.get(join(dir, "out", "1.json"))!);
+    expect(response).not.toHaveProperty("invalid");
+    expect(response).not.toHaveProperty("hostSleptMs");
+    expect(f.files.get(join(dir, "host-sleep.json"))).toBeUndefined();
+  } finally {
+    f.timer.reset();
+  }
+});
 posixTest("serve starts requests concurrently and guards inbox device starts too", async () => {
   const f = fixture();
   let resolveCall!: (value: unknown) => void;

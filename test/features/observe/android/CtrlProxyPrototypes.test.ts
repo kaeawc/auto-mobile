@@ -4,11 +4,15 @@ import {
   prototypeSavedUnsupportedMessage,
 } from "../../../../src/features/observe/android/CtrlProxyPrototypes";
 import { PROTOTYPE_SAVED_CAPABILITY } from "../../../../src/features/observe/android/ctrlProxyProtocol";
-import { PROTOTYPE_PATCH_CAPABILITY } from "../../../../src/features/observe/android/ctrlProxyProtocol";
+import {
+  PROTOTYPE_PATCH_CAPABILITY,
+  PROTOTYPE_MULTI_SURFACE_CAPABILITY,
+} from "../../../../src/features/observe/android/ctrlProxyProtocol";
 import { prototypePatchUnsupportedMessage } from "../../../../src/features/prototype/prototypePatchWire";
 import type { PrototypePatchOp } from "../../../../src/features/prototype/prototypePatch";
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
+import { MAX_PROTOTYPE_ASSET_ID_LENGTH } from "../../../../src/features/prototype/prototypeAssets";
 import { MAX_PROTOTYPE_SPEC_BYTES } from "../../../../src/features/prototype/prototypeSpec";
 import type {
   PrototypeEvent,
@@ -855,6 +859,62 @@ describe("CtrlProxy prototypes", () => {
     }
   });
 
+  test.each([undefined, true, false])(
+    "replaceOthers %p is sent only when false",
+    async (replaceOthers) => {
+      const { client, socket, receive } = await harness([
+        "full_command_set_v1",
+        "request_id_echo_v1",
+        "show_prototype",
+        PROTOTYPE_MULTI_SURFACE_CAPABILITY,
+      ]);
+      const frames: Record<string, unknown>[] = [];
+      const send = spyOn(socket, "send").mockImplementation((data) => {
+        const frame = JSON.parse(String(data));
+        frames.push(frame);
+        void receive({
+          type: "prototype_result",
+          requestId: frame.requestId,
+          timestamp: 42,
+          success: true,
+        });
+      });
+      try {
+        expect(
+          await client.requestShowPrototype(spec, 5000, undefined, undefined, undefined, {
+            replaceOthers,
+          }),
+        ).toMatchObject({ success: true });
+        expect(frames).toHaveLength(1);
+        expect(Object.hasOwn(frames[0], "replaceOthers")).toBe(replaceOthers === false);
+        if (replaceOthers === false) {
+          expect(frames[0].replaceOthers).toBe(false);
+        }
+      } finally {
+        send.mockRestore();
+      }
+    },
+  );
+
+  test.each([null, ["full_command_set_v1", "request_id_echo_v1", "show_prototype"]])(
+    "replaceOthers false without the flag refuses before a device request (%j)",
+    async (commands) => {
+      const { client, socket } = await harness(commands);
+      const send = spyOn(socket, "send");
+      try {
+        await expectRefusal(
+          client.requestShowPrototype(spec, 5000, undefined, undefined, undefined, {
+            replaceOthers: false,
+          }),
+          "replaceOthers:false",
+        );
+        expect(send).not.toHaveBeenCalled();
+      } finally {
+        send.mockRestore();
+      }
+    },
+  );
+
   test("fake records prototype calls, configures results, and emits until unsubscribe", async () => {
     const fake = new FakeCtrlProxy(new FakeTimer());
     const failure = { success: false, error: "configured" };
@@ -1187,10 +1247,23 @@ const savedCommands = [
   "save_prototype",
   "list_saved_prototypes",
   "delete_saved_prototype",
+  "pin_saved_prototype",
 ];
 const savedInfo = { id: "panel", slug: "panel", replaced: false };
 const savedEntries = [{ id: "panel", label: "Panel", slug: "panel", savedAt: 42, pinned: true }];
 const savedRequests = [
+  {
+    type: "pin_saved_prototype",
+    run: (client: AndroidCtrlProxyClient) => client.requestPinSavedPrototype("panel", "hero"),
+    params: { id: "panel", icon: "hero" },
+    reply: { pin: { id: "panel", status: "requested" } },
+  },
+  ...(["updated", "rate_limited"] as const).map((shortcut) => ({
+    type: "pin_saved_prototype",
+    run: (client: AndroidCtrlProxyClient) => client.requestPinSavedPrototype("panel"),
+    params: { id: "panel" },
+    reply: { pin: { id: "panel", status: "already_pinned", shortcut } },
+  })),
   {
     type: "save_prototype",
     run: (client: AndroidCtrlProxyClient) =>
@@ -1375,5 +1448,76 @@ describe("CtrlProxy saved prototype transport", () => {
     expect(fake.saveRequests).toEqual([save]);
     expect(fake.listCalls).toBe(1);
     expect(fake.deleteRequests).toEqual(["panel"]);
+  });
+});
+
+describe("saved shortcut reply validation", () => {
+  test.each(["requested", "already_pinned"])("accepts pin status %s", (status) => {
+    expect(prototypeSavedReplyFields({ pin: { id: "panel", status } })).toEqual({
+      pin: { id: "panel", status },
+    });
+  });
+  test.each(["updated", "rate_limited"])("accepts shortcut update %s", (shortcut) => {
+    expect(prototypeSavedReplyFields({ saved: { ...savedInfo, shortcut } })).toEqual({
+      saved: { ...savedInfo, shortcut },
+    });
+    const pin = { id: "panel", status: "already_pinned", shortcut };
+    expect(prototypeSavedReplyFields({ pin })).toEqual({ pin });
+  });
+  test.each([null, "future", 3, { status: "requested" }, { id: "panel", status: "future" }])(
+    "drops malformed pin %p",
+    (pin) => {
+      expect(prototypeSavedReplyFields({ pin })).toEqual({});
+    },
+  );
+  test.each([null, "future", 3, {}])(
+    "drops malformed shortcut %p while retaining saved info",
+    (shortcut) => {
+      expect(prototypeSavedReplyFields({ saved: { ...savedInfo, shortcut } })).toEqual({
+        saved: savedInfo,
+      });
+      const pin = { id: "panel", status: "already_pinned" };
+      expect(prototypeSavedReplyFields({ pin: { ...pin, shortcut } })).toEqual({ pin });
+    },
+  );
+  test.each(["pin_unsupported", "device_locked", "pin_failed"])("accepts %s", (errorCode) => {
+    expect(prototypeSavedReplyFields({ errorCode })).toEqual({ errorCode });
+  });
+  test.each([
+    { id: "", icon: undefined },
+    { id: "panel", icon: "" },
+    { id: "panel", icon: "x".repeat(MAX_PROTOTYPE_ASSET_ID_LENGTH + 1) },
+  ])("refuses invalid pin %p before connecting", async ({ id, icon }) => {
+    const { client, socket } = await harness([...savedCommands, PROTOTYPE_SAVED_CAPABILITY]);
+    const connect = spyOn(client, "ensureConnected");
+    const send = spyOn(socket, "send");
+    try {
+      await expect(client.requestPinSavedPrototype(id, icon)).rejects.toBeInstanceOf(
+        ActionableError,
+      );
+      expect(connect).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      connect.mockRestore();
+      send.mockRestore();
+    }
+  });
+  test.each([null, 4])("refuses non-string pin icon %p", async (icon) => {
+    const { client } = await harness([...savedCommands, PROTOTYPE_SAVED_CAPABILITY]);
+    // @ts-expect-error Exercise invalid runtime input.
+    await expect(client.requestPinSavedPrototype("panel", icon)).rejects.toBeInstanceOf(
+      ActionableError,
+    );
+  });
+  test("fake records pin requests and returns configured result", async () => {
+    const fake = new FakeCtrlProxy();
+    const result = {
+      success: true,
+      pin: { id: "panel", status: "already_pinned" as const, shortcut: "rate_limited" as const },
+    };
+    fake.setPinResult(result);
+    expect(await fake.requestPinSavedPrototype("panel", "hero")).toEqual(result);
+    expect(await fake.requestPinSavedPrototype("panel")).toEqual(result);
+    expect(fake.pinRequests).toEqual([{ id: "panel", icon: "hero" }, { id: "panel" }]);
   });
 });

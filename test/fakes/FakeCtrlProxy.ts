@@ -1,3 +1,4 @@
+import type { PrototypeShowOverrides } from "../../src/features/prototype/PrototypeTransport";
 import type {
   PrototypePatchReply,
   PrototypePatchRequest,
@@ -115,6 +116,21 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   }
 
   readonly saveRequests: { spec: PrototypeSpec; label: string; icon?: string }[] = [];
+  readonly pinRequests: { id: string; icon?: string }[] = [];
+  private pinResult: PrototypeResult = { success: true };
+  setPinResult(result: PrototypeResult): void {
+    this.pinResult = result;
+  }
+  async requestPinSavedPrototype(
+    id: string,
+    icon?: string,
+    _timeoutMs?: number,
+    _perf?: PerformanceTracker,
+  ): Promise<PrototypeResult> {
+    this.pinRequests.push({ id, ...(icon === undefined ? {} : { icon }) });
+    this.checkFailure("requestPinSavedPrototype");
+    return this.pinResult;
+  }
   readonly deleteRequests: string[] = [];
   listCalls = 0;
   private saveResult: PrototypeResult = { success: true };
@@ -192,6 +208,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
         perf?: PerformanceTracker;
         displayId?: number;
         reset?: boolean;
+        replaceOthers?: boolean;
         appearance?: PrototypeAppearanceOverride;
       }
     | { method: "dismiss"; target: PrototypeDismiss; timeoutMs: number; perf?: PerformanceTracker }
@@ -223,9 +240,10 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     perf?: PerformanceTracker,
     displayId?: number,
     reset?: boolean,
-    appearance?: PrototypeAppearanceOverride,
+    appearance?: PrototypeAppearanceOverride | PrototypeShowOverrides,
   ): Promise<PrototypeResult> {
     this.checkFailure("requestShowPrototype");
+    const overrides = typeof appearance === "string" ? { appearance } : appearance;
     this.prototypeHistory.push({
       method: "show",
       spec,
@@ -233,7 +251,8 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
       perf,
       ...(displayId === undefined ? {} : { displayId }),
       ...(reset === undefined ? {} : { reset }),
-      ...(appearance === undefined ? {} : { appearance }),
+      ...(overrides?.appearance === undefined ? {} : { appearance: overrides.appearance }),
+      ...(overrides?.replaceOthers === false ? { replaceOthers: false } : {}),
     });
     const hold = this.showHold;
     this.showHold = undefined;

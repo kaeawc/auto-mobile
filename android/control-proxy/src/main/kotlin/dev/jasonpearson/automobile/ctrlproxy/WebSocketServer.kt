@@ -143,6 +143,7 @@ class WebSocketServer(
         "save_prototype",
         "list_saved_prototypes",
         "delete_saved_prototype",
+        "pin_saved_prototype",
       ) + prototypeAssetRequestTypes
 
     /** Requests whose payload is typed user input, which may be a password. */
@@ -349,6 +350,9 @@ class WebSocketServer(
     // show_prototype honours displayId. Hosts must not send it to a device lacking this flag: the
     // decoder ignores unknown fields, so the prototype would silently land on the default display.
     if (sdkInt() >= GestureDisplayRouting.DISPLAY_API) add("prototype_display_id_v1")
+    // ORCHESTRATOR-CHOSEN: to be folded into the PROTOTYPE_SPEC_CAPABILITY_GATES registry.
+    // show_prototype honours replaceOthers=false and addresses up to four independent surfaces.
+    add("prototype_multi_surface_v1")
     // Prototype specs honour window.layer and window.persistence. The request decoder ignores
     // unknown
     // spec fields, so an older device would silently show a session-scoped system-layer prototype.

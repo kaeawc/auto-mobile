@@ -1195,6 +1195,9 @@ class CtrlProxyMessageHandlerTest {
     assertEquals("panel", (lastCall.second[1] as PrototypeSpec).id)
     assertEquals(PrototypeTextNode(text = "Hello"), (lastCall.second[1] as PrototypeSpec).root)
     assertEquals(false, lastCall.second[3])
+    assertEquals(true, lastCall.second[5])
+    dispatch("""{"type":"show_prototype","requestId":"add","spec":$spec,"replaceOthers":false}""")
+    assertEquals(false, lastCall.second[5])
     dispatch("""{"type":"show_prototype","requestId":"r","spec":$spec,"reset":true}""")
     assertEquals("showPrototype", lastCall.first)
     assertEquals(true, lastCall.second[3])
@@ -1290,6 +1293,11 @@ class CtrlProxyMessageHandlerTest {
       listOf(null, json.decodeFromString<PrototypeSpec>(spec), "Panel", null),
       lastCall.second,
     )
+    dispatch("""{"type":"pin_saved_prototype","requestId":"pin","id":"panel","icon":"icon"}""")
+    assertEquals("pinSavedPrototype", lastCall.first)
+    assertEquals(listOf("pin", "panel", "icon"), lastCall.second)
+    dispatch("""{"type":"pin_saved_prototype","id":"panel"}""")
+    assertEquals(listOf(null, "panel", null), lastCall.second)
     dispatch("""{"type":"list_saved_prototypes","requestId":"list"}""")
     assertEquals("listSavedPrototypes", lastCall.first)
     assertEquals(listOf("list"), lastCall.second)

@@ -180,6 +180,7 @@ const KOTLIN_SERIAL_NAMES = [
   "inspect_prototypes",
   "patch_prototype",
   "save_prototype",
+  "pin_saved_prototype",
   "list_saved_prototypes",
   "delete_saved_prototype",
   "put_prototype_asset",
@@ -413,6 +414,14 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
         ctrlProxyRequests.listSavedPrototypes({ requestId: "r11" }),
       ),
       expected: '{"type":"list_saved_prototypes","requestId":"r11"}',
+    },
+    {
+      builder: "pinSavedPrototype",
+      name: "saved id and icon",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.pinSavedPrototype({ requestId: "pin", id: "panel", icon: "hero" }),
+      ),
+      expected: '{"type":"pin_saved_prototype","requestId":"pin","id":"panel","icon":"hero"}',
     },
     {
       builder: "deleteSavedPrototype",
@@ -1119,9 +1128,9 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
   // total builder count is pinned. Ship builder #45 without a row and this fails — not a silently
   // uncovered send site. `request_two_finger_swipe` has no builder here by design (it goes through
   // the shared sendCommand path, asserted in CtrlProxyGestures.test.ts), so it is not a builder key.
-  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 52", () => {
+  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 53", () => {
     const builderNames = Object.keys(ctrlProxyRequests);
-    expect(builderNames.length).toBe(52);
+    expect(builderNames.length).toBe(53);
     const covered = new Set(cases.map((row) => row.builder));
     expect([...covered].sort()).toEqual([...builderNames].sort());
   });
@@ -1164,6 +1173,9 @@ test("IME trace opt-in serializes after the timeout", () => {
 // SavedPrototypeErrorCode @SerialName values, in declaration order.
 test("saved prototype error codes match Kotlin", () => {
   const kotlinCodes = [
+    "pin_unsupported",
+    "device_locked",
+    "pin_failed",
     "invalid_id",
     "invalid_label",
     "spec_too_large",
@@ -1190,4 +1202,18 @@ test("saved prototype error codes match Kotlin", () => {
   for (const code of ["future", null, 1, undefined]) {
     expect(isSavedPrototypeErrorCode(code)).toBe(false);
   }
+});
+
+test("pin builder omits absent icon and participates in supported requests", () => {
+  expect(
+    serializeCtrlProxyRequest(
+      ctrlProxyRequests.pinSavedPrototype({ requestId: "pin", id: "panel" }),
+    ),
+  ).toBe('{"type":"pin_saved_prototype","requestId":"pin","id":"panel"}');
+  expect(
+    serializeCtrlProxyRequest(
+      ctrlProxyRequests.pinSavedPrototype({ requestId: "pin", id: "panel", icon: "hero" }),
+    ),
+  ).toBe('{"type":"pin_saved_prototype","requestId":"pin","id":"panel","icon":"hero"}');
+  expect(KNOWN_REQUEST_TYPES).toContain("pin_saved_prototype");
 });

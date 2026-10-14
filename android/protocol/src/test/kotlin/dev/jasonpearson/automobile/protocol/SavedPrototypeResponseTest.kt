@@ -12,6 +12,72 @@ class SavedPrototypeResponseTest {
   private val json = Json { encodeDefaults = true }
 
   @Test
+  fun `already pinned update outcome round trips and null shortcut stays omitted`() {
+    for (update in SavedPrototypeShortcutUpdate.entries) {
+      val result =
+        PrototypeResult(
+          42,
+          "pin",
+          true,
+          pin = SavedPrototypePinInfo("panel", SavedPrototypePinStatus.ALREADY_PINNED, update),
+        )
+      val literal = json.encodeToString<WebSocketResponse>(result)
+      assertEquals(
+        update.name.lowercase(),
+        Json.parseToJsonElement(literal)
+          .jsonObject
+          .getValue("pin")
+          .jsonObject
+          .getValue("shortcut")
+          .jsonPrimitive
+          .content,
+      )
+      assertEquals(result, json.decodeFromString<WebSocketResponse>(literal))
+    }
+    for (status in SavedPrototypePinStatus.entries) {
+      val pin = SavedPrototypePinInfo("panel", status)
+      val literal = json.encodeToString(pin)
+      assertFalse("shortcut" in Json.parseToJsonElement(literal).jsonObject)
+      assertEquals(pin, json.decodeFromString<SavedPrototypePinInfo>(literal))
+    }
+  }
+
+  @Test
+  fun `pin status and shortcut update serialize snake case`() {
+    for (status in SavedPrototypePinStatus.entries) {
+      val result = PrototypeResult(42, "pin", true, pin = SavedPrototypePinInfo("panel", status))
+      val literal = json.encodeToString<WebSocketResponse>(result)
+      assertEquals(
+        status.name.lowercase(),
+        Json.parseToJsonElement(literal)
+          .jsonObject
+          .getValue("pin")
+          .jsonObject
+          .getValue("status")
+          .jsonPrimitive
+          .content,
+      )
+      assertEquals(result, json.decodeFromString<WebSocketResponse>(literal))
+    }
+    for (update in SavedPrototypeShortcutUpdate.entries) {
+      val saved = SavedPrototypeInfo("panel", "slug", true, update)
+      assertEquals(
+        update.name.lowercase(),
+        Json.parseToJsonElement(json.encodeToString(saved))
+          .jsonObject
+          .getValue("shortcut")
+          .jsonPrimitive
+          .content,
+      )
+    }
+    assertFalse(
+      "shortcut" in
+        Json.parseToJsonElement(json.encodeToString(SavedPrototypeInfo("panel", "slug", false)))
+          .jsonObject,
+    )
+  }
+
+  @Test
   fun `legacy prototype result remains byte identical with null saved fields`() {
     assertEquals(
       """{"type":"prototype_result","timestamp":42,"requestId":"r","success":true,"error":null}""",

@@ -642,6 +642,13 @@ response size, so use it only when the client needs image bytes in the tool resu
 
 ### prototype
 
+On Android, `show replaceOthers: false` retains other prototype windows (requires
+`prototype_multi_surface_v1`), up to four distinct ids; a fifth is refused listing the shown ids.
+A same-id show with false replaces only that prototype; omitted or true replaces the other ids.
+`dismiss {id}` removes one, `dismiss {all: true}` removes all, and `status` lists every shown id.
+`inspect` reconciles the full list. iOS shows one prototype at a time and refuses false.
+See [multiple surfaces (phase 1)](design-docs/plat/android/prototype-ux.md#multiple-surfaces-phase-1).
+
 Data, `repeat.items {path}`, `repeat.key`, `{data:/pointer}` text and `{data: pointer}` conditions
 require `prototype_data_model_v1`; the host refuses an unsupported device before uploads or show.
 Data is agent-owned read-only nested content; state remains user-owned scalars. Bindings resolve
@@ -680,7 +687,7 @@ authoritative: values the user changed by tapping or typing are not carried
 over unless the spec includes them, and the rebuilt tree starts any text field
 from the spec's value. `reset: true` starts it fresh instead: pages come from
 the spec and `display` is resolved again. A show with a different id, or with
-nothing on screen, replaces any other prototype as before. A CtrlProxy that
+nothing on screen, replaces any other prototype by default (`replaceOthers: false` retains them). A CtrlProxy that
 predates in-place replacement ignores `reset` and always starts fresh.
 
 Two optional window fields need a CtrlProxy advertising
@@ -842,7 +849,7 @@ key since that revision, returning the current revision and those keys' values.
 
 There are at most 64 ops, the frame is capped at 1 MiB, and the resulting whole
 spec must satisfy every spec/data limit, including node count and depth. The
-host tracks a cloned copy of the device spec from the last acknowledged show,
+host tracks a cloned copy of each id's device spec from its last acknowledged show,
 with components expanded and anchors resolved. It applies ops to a copy and
 runs the full validator before sending. Errors preserve deterministic paths.
 The host validates state ops against the agent-declared state and leaves value
@@ -853,8 +860,9 @@ patch refuse as busy. Shows are not delayed by patches. If a dispatched show
 and an acknowledged patch overlap, their device-side order is unknown: the host
 forgets its spec, warns, and requires a further successful show before patching.
 A failed dispatched show, dismissed event, successful dismiss, session release,
-device removal or unbinding also ends tracking. An adopted different id ends
-tracking; inspecting the same tracked id retains it. A timeout or connection loss after
+device removal or unbinding also ends tracking. Inspect retains each reported tracked id
+and drops missing ids; adopted siblings do not end its tracking. A fifth-surface refusal
+with `replaceOthers: false` also retains the acknowledged specs. A timeout or connection loss after
 patch dispatch is indeterminate and requires a new show. A failure before dispatch
 keeps the tracked copy. An atomic device
 refusal leaves the tracked copy unchanged. A successful patch refreshes shown
@@ -983,7 +991,7 @@ CtrlProxy restart restarts a re-shown id at 1), while the cumulative `droppedCou
 is kept until explicit dismiss or scope release. Events carry only id, sequence and
 timestamp, so a late event from the previous showing cannot be told apart from the new
 showing's and is accepted if it arrives after the new show. A successful show of
-another id replaces the device's prototype: the replaced prototype's waiters settle with
+another id replaces other prototypes by default (`replaceOthers: false` retains them): the replaced prototypes' waiters settle with
 `reason: "dismissed"` and its buffers are removed. A terminal `dismissed` event remains
 buffered until consumed or the next explicit show/dismiss. Consuming it clears all
 remaining pending events and, once no waiter remains, removes the entry, so a later

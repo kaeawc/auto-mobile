@@ -78,6 +78,15 @@ class PrototypeHideForCaptureTest {
     if (manager.view!!.visibility == View.VISIBLE) "visible" else "hidden"
 
   @Test
+  fun `capture never restores a surface suspended by its own foreground scope`() = runTest {
+    var suspended = false
+    assertTrue(host.show(PrototypeRequest(isSuspended = { suspended })))
+    host.withHiddenForCapture { suspended = true }
+    assertFalse(host.isShowing)
+    assertEquals(1, manager.removals)
+  }
+
+  @Test
   fun `hides, waits for frames, captures, then restores`() = runTest {
     host.show()
     history.clear()

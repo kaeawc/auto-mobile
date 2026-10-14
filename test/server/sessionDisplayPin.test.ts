@@ -32,6 +32,7 @@ import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { snapshotPlatformDeviceManagerFactory } from "../helpers/platformDeviceManagerSnapshot";
 import { DeviceSessionManager } from "../../src/devices/DeviceSessionManager";
 import {
   createJSONToolResponse,
@@ -74,7 +75,7 @@ let timer: FakeTimer;
 let sessions: SessionManager;
 let pool: DevicePool;
 let provider: FakeDisplayInventoryProvider;
-let previousFactory: ReturnType<typeof PlatformDeviceManagerFactory.getInstance>;
+let restoreFactory: () => void;
 
 beforeEach(async () => {
   timer = new FakeTimer();
@@ -84,7 +85,7 @@ beforeEach(async () => {
     () => new FakeDbWriteBarrier(),
   );
   const utils = new FakeDeviceUtils();
-  previousFactory = PlatformDeviceManagerFactory.getInstance();
+  restoreFactory = snapshotPlatformDeviceManagerFactory();
   PlatformDeviceManagerFactory.setInstance(utils);
   pool = new DevicePool(
     createDevicePoolDependencies(sessions, "test-pin-daemon", { timer, deviceManager: utils }),
@@ -103,7 +104,7 @@ afterEach(() => {
   sessions.stopCleanupTimer();
   DaemonState.getInstance().reset();
   ToolRegistry.clearTools();
-  PlatformDeviceManagerFactory.setInstance(previousFactory);
+  restoreFactory();
 });
 
 async function select(display?: unknown) {

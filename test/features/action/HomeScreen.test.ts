@@ -11,6 +11,11 @@ import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
+import {
+  getObserveCacheStore,
+  setObserveCacheStore,
+} from "../../../src/features/observe/cache/ObserveCacheRegistry";
 import type { ActiveWindowInfo } from "../../../src/models/ActiveWindowInfo";
 import type { Window as WindowInterface } from "../../../src/features/observe/interfaces/Window";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
@@ -88,8 +93,12 @@ describe("HomeScreen", () => {
   let fakeAwaitIdle: FakeAwaitIdle;
   let fakeTimer: FakeTimer;
   let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
+  let previousObserveCacheStore: ReturnType<typeof getObserveCacheStore>;
 
   beforeEach(() => {
+    previousObserveCacheStore = getObserveCacheStore();
+    // Foreground changes leave a pending resolution on the store; keep it local to this test.
+    setObserveCacheStore(new FakeObserveCacheStore());
     clearResolvedHomePackageCache("test-device");
     // Create fakes for testing
     fakeAdb = new FakeAdbExecutor();
@@ -132,6 +141,7 @@ describe("HomeScreen", () => {
   });
 
   afterEach(() => {
+    setObserveCacheStore(previousObserveCacheStore);
     getInstanceSpy?.mockRestore();
     getInstanceSpy = null;
     AndroidCtrlProxyClient.resetInstances();

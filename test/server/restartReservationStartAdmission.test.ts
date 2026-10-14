@@ -117,7 +117,7 @@ describe("start admission and owner resume for restart reservations", () => {
       timer,
       persistence,
       () => new FakeDbWriteBarrier(),
-      () => ({ restore: async () => {} }),
+      () => ({ restore: async () => ({ status: "restored" as const }) }),
     );
     sessions.attachDaemonSessionId("restart-start-daemon");
     sessions.stopCleanupTimer();

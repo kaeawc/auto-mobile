@@ -133,8 +133,8 @@ describe("restart matrix: owner reconnect x shutdown kind x sessions (no call in
               }
             }
 
-            // At 7 s recovery has handed over. An ordinary proxy's pinned probe sees the new
-            // process and stops: reconnecting alone cannot reclaim before the owner timeout.
+            // At 7 s recovery has handed over, but the plain proxy's probe reclaims from the
+            // successor inside its lease + grace owner window, keeping every session (#12282).
             const returnedInsideRecovery = returnsAtMs === 1_000;
             if (returnedInsideRecovery) {
               expect(lapsedAt).toBeUndefined();
@@ -144,7 +144,10 @@ describe("restart matrix: owner reconnect x shutdown kind x sessions (no call in
               expect(run.scenario.driven.map((ran) => ran.sessionUuid)).toEqual(sessions);
               return;
             }
-            if (returnsAtMs === undefined || returnsAtMs === 7_000) {
+            if (returnsAtMs === 7_000) {
+              expect(lapsedAt).toBeUndefined();
+            }
+            if (returnsAtMs === undefined) {
               expect(lapsedAt).toBe(RELEASED_BY_MS);
             }
             run.ownerReturns();

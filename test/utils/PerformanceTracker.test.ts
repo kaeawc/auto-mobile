@@ -315,9 +315,16 @@ describe("PerformanceTracker", function () {
   });
 
   describe("Global debug-perf state", function () {
+    let previousDebugPerfEnabled: boolean;
+
     beforeEach(function () {
+      previousDebugPerfEnabled = isDebugPerfEnabled();
       // Reset state before each test
       setDebugPerfEnabled(false);
+    });
+
+    afterEach(function () {
+      setDebugPerfEnabled(previousDebugPerfEnabled);
     });
 
     test("should default to false", function () {

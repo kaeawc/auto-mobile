@@ -8,7 +8,10 @@ import {
   shouldUseCiIosBootRecovery,
 } from "../../src/devices/deviceBootRecovery";
 import type { DeviceInfo } from "../../src/models";
-import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
+import {
+  SimulatorStillShuttingDownError,
+  SimCtlClient,
+} from "../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { createExecResult } from "../../src/utils/execResult";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -180,3 +183,30 @@ describe("CI iOS boot recovery", () => {
     expect(calls).toEqual([]);
   });
 });
+
+for (const stillShuttingDown of [true, false]) {
+  it(`shutdown ${stillShuttingDown ? "still pending" : "generic failure"} preserves the CI recovery policy`, async () => {
+    const first = new Error("first boot failure");
+    let boots = 0;
+    let erases = 0;
+    const recovery = new CiIosBootRecovery({
+      ownedSimulatorName: owned.name,
+      shutdown: async () => {
+        throw stillShuttingDown
+          ? new SimulatorStillShuttingDownError(owned.deviceId!, owned.name, "Shutting Down", 5000)
+          : new Error("shutdown command failed");
+      },
+      erase: async () => {
+        erases++;
+      },
+    });
+    await expect(
+      recovery.run(owned, async () => {
+        boots++;
+        throw boots === 1 ? first : new Error("retry failed");
+      }),
+    ).rejects.toBe(first);
+    expect(erases).toBe(stillShuttingDown ? 0 : 1);
+    expect(boots).toBe(stillShuttingDown ? 1 : 2);
+  });
+}

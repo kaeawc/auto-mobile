@@ -140,6 +140,8 @@ export function configureSqliteDatabase(
 }
 
 // Database file location (defaults to ~/.auto-mobile/auto-mobile.db)
+// Keep the database home-relative: AUTOMOBILE_DATA_DIR is per-agent state, while
+// the DB has its own AUTOMOBILE_DB_DIR / AUTOMOBILE_DB_PATH overrides.
 const DEFAULT_DB_DIR = path.join(os.homedir(), ".auto-mobile");
 // @deprecated AUTO_MOBILE_DB_PATH - use AUTOMOBILE_DB_PATH instead
 // @deprecated AUTO_MOBILE_DB_DIR - use AUTOMOBILE_DB_DIR instead

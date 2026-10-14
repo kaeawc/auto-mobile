@@ -396,6 +396,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   // before untracking, and must not reach the supervisor: its onExit would abort
   // the shared start and schedule a restart racing the relaunch.
   private readonly retiredRunnerPids = new Set<number>();
+  private readonly runnerGenerationTokens = new Map<number, string>();
   // Service ports a forced restart retired because this daemon judged the runner
   // on them unhealthy (#11205). Killing the daemon's xcodebuild does not kill the
   // in-simulator runner it hosted (launchd_sim owns it), so a stalled runner can
@@ -520,6 +521,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         const retainRunner = this.retainRunnerTrackingOnSupervisorExit;
         this.retainRunnerTrackingOnSupervisorExit = false;
         if (!retainRunner) {
+          if (this.xcTestProcessId !== null) {
+            this.runnerGenerationTokens.delete(this.xcTestProcessId);
+          }
           this.xcTestProcessId = null;
           this.xcTestProcess = null;
         }
@@ -927,6 +931,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     const stopTunnel = this.tunnelClient.prepareForcedStop();
 
     const runnerPid = this.xcTestProcessId;
+    const expectedGenerationToken =
+      runnerPid !== null ? this.runnerGenerationTokens.get(runnerPid) : undefined;
+    if (runnerPid !== null) {
+      this.runnerGenerationTokens.delete(runnerPid);
+    }
     this.xcTestProcessId = null;
     this.xcTestProcess = null;
     this.clearCaches();
@@ -961,6 +970,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           .terminateProcessTree(runnerPid, deadline, {
             skipGraceful: true,
             expectedDeviceId: this.device.deviceId,
+            expectedGenerationToken,
             preKillDeadlineMs,
           })
           .catch((error) => {
@@ -1643,6 +1653,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
               `(exited/PID-reused); un-tracking without terminating`,
           );
         }
+        this.runnerGenerationTokens.delete(hungPid);
         this.xcTestProcessId = null;
         this.xcTestProcess = null;
         // Host-control mode has no local child-exit event to clear these as a side
@@ -1808,7 +1819,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       // signaling only it would orphan the xcodebuild child, which keeps the
       // hung in-sim runner alive to be re-adopted or contend the port on the
       // next start (#2834 review).
-      await this.processClient.terminateProcessTree(hungPid);
+      await this.processClient.terminateProcessTree(hungPid, undefined, {
+        expectedGenerationToken: this.runnerGenerationTokens.get(hungPid),
+      });
     }
   }
 
@@ -1870,6 +1883,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         await this.stopIproxyTunnel({ clearDevicePort: true });
       }
 
+      if (this.xcTestProcessId !== null) {
+        this.runnerGenerationTokens.delete(this.xcTestProcessId);
+      }
       this.xcTestProcessId = null;
       this.xcTestProcess = null;
       this.clearCaches();
@@ -1943,7 +1959,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     let runnerTerminationError: unknown;
     try {
       if (await this.isOwnRunnerProcessAlive(retiringPid)) {
-        await this.processClient.terminateProcessTree(retiringPid, deadline);
+        await this.processClient.terminateProcessTree(retiringPid, deadline, {
+          expectedGenerationToken: this.runnerGenerationTokens.get(retiringPid),
+        });
       } else {
         logger.debug(
           `[IOSCtrlProxy] Tracked runner PID ${retiringPid} is not an owned CtrlProxy runner; ` +
@@ -1963,6 +1981,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       this.xcTestProcess === retiringChild &&
       this.runnerAbortController === retiringController
     ) {
+      this.runnerGenerationTokens.delete(retiringPid);
       this.xcTestProcessId = null;
       this.xcTestProcess = null;
     }
@@ -2135,6 +2154,13 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     if (child.pid) {
       // A reused PID belongs to this new runner, not to a retired one.
       this.retiredRunnerPids.delete(child.pid);
+      const token = this.processClient.captureProcessGeneration(child.pid);
+      // Unavailable launch tokens retain PID-only behavior. Remote-runner PIDs
+      // are tracked separately and must never be sampled in this host's namespace.
+      this.runnerGenerationTokens.delete(child.pid);
+      if (token !== undefined) {
+        this.runnerGenerationTokens.set(child.pid, token);
+      }
       this.xcTestProcessId = child.pid;
       this.xcTestProcess = child;
       logger.info(`[IOSCtrlProxy] Started xcodebuild test with PID ${child.pid}`);
@@ -2625,6 +2651,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     }
     if (event === "exit") {
       this.retiredRunnerPids.delete(child.pid);
+      this.runnerGenerationTokens.delete(child.pid);
     }
     logger.debug(`[IOSCtrlProxy] Ignoring ${event} from retired xcodebuild PID ${child.pid}`);
     return true;
@@ -3140,6 +3167,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         );
       }
       if (this.xcTestProcessId === pid) {
+        if (pid !== null) {
+          this.runnerGenerationTokens.delete(pid);
+        }
         this.xcTestProcessId = null;
         this.xcTestProcess = null;
       }
@@ -4059,16 +4089,24 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       this.xcTestProcessId = null;
       this.xcTestProcess = null;
       try {
-        await this.processClient.terminateProcessTree(retiringPid);
+        await this.processClient.terminateProcessTree(retiringPid, undefined, {
+          expectedGenerationToken: this.runnerGenerationTokens.get(retiringPid),
+        });
       } catch (error) {
         this.xcTestProcessId = retiringPid;
         this.xcTestProcess = retiringChild;
+        logger.warn(
+          `[IOSCtrlProxy] Failed to terminate runner before replacement: ${errorMessage(error)}`,
+          error,
+        );
         throw toActionableError(
           error,
           `Failed to terminate CtrlProxy runner PID ${retiringPid} before starting a replacement`,
         );
       }
+      this.runnerGenerationTokens.delete(retiringPid);
     } else if (retiringPid !== null && this.xcTestProcessId === retiringPid) {
+      this.runnerGenerationTokens.delete(retiringPid);
       this.xcTestProcessId = null;
       this.xcTestProcess = null;
     }

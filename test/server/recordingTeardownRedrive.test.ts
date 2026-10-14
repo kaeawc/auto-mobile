@@ -90,7 +90,7 @@ describe("restart recorder teardown redrive", () => {
       getDevice: () => device,
       getDeviceIncarnation: () => 1 as number | undefined,
       forceStopOrphanedCapture: async (
-        _device: typeof device,
+        _device: typeof device | undefined,
         _descriptor: VideoCaptureTeardownDescriptor,
       ) => {},
       now: () => timer.now(),

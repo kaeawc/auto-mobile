@@ -4,6 +4,8 @@ import { logger } from "../utils/logger";
 import { isProcessRunning } from "../utils/processLiveness";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import type { Timer } from "../utils/SystemTimer";
+import type { LockOwnerGenerationProbe } from "../utils/fileLock";
+import { defaultLockOwnerGenerationProbe } from "../daemon/lockOwnerGeneration";
 
 export const COLD_BOOT_SETTLEMENT_GRACE_MS = 1_000;
 /** Cadence of the liveness re-check on an emulator that survived SIGTERM and SIGKILL (#9920). */
@@ -129,7 +131,7 @@ function unrefTimer(handle: NodeJS.Timeout): void {
 
 /**
  * Resolves once a process that survived SIGTERM and SIGKILL is gone: either its
- * `exit` event fires, or a periodic liveness probe by pid finds it absent (an
+ * `exit` event fires, or a periodic probe finds its pid absent or recycled (an
  * unkillable process, or one whose exit event was missed, would otherwise keep
  * the AVD's lifecycle lease forever, #9920). The re-check timer is unref'd and
  * cleared as soon as the watch settles, so it can never hold the daemon open.
@@ -141,8 +143,13 @@ export function watchSurvivingProcess(
   label: string,
   timer: TerminationTimer,
   isRunning: (pid: number) => boolean = isProcessRunning,
+  processGeneration: Pick<
+    LockOwnerGenerationProbe,
+    "current" | "compare"
+  > = defaultLockOwnerGenerationProbe,
 ): Promise<void> {
   const pid = processHandle.pid;
+  const token = pid === undefined ? undefined : processGeneration.current(pid);
   return new Promise<void>((resolve) => {
     let pending: NodeJS.Timeout | undefined;
     let settled = false;
@@ -161,6 +168,14 @@ export function watchSurvivingProcess(
     const recheck = () => {
       pending = undefined;
       if (settled) {
+        return;
+      }
+      // No token or an unknown/unreadable comparison preserves PID-only behavior.
+      if (token !== undefined && processGeneration.compare(pid, token) === "different") {
+        logger.warn(
+          `[ColdBoot] Cold boot ${label} process ${pid} now names a different process; releasing its AVD`,
+        );
+        finish();
         return;
       }
       if (!isRunning(pid)) {
@@ -191,6 +206,7 @@ export interface OwnedEmulatorTerminationOptions {
   /** Marks the AVD's lease as held by a process that survived both signals. */
   markHeldByUnkillableProcess?: (pid: number | undefined) => void;
   isProcessRunning?: (pid: number) => boolean;
+  processGeneration?: Pick<LockOwnerGenerationProbe, "current" | "compare">;
 }
 
 /**
@@ -225,7 +241,14 @@ export async function terminateOwnedEmulatorProcess(
     `[startDevice] Emulator process ${handle.pid ?? "unknown"} for ${label} survived ` +
       "SIGTERM and SIGKILL; holding the AVD lifecycle lease until it is gone",
   );
-  const gone = watchSurvivingProcess(handle, exited, label, timer, options.isProcessRunning);
+  const gone = watchSurvivingProcess(
+    handle,
+    exited,
+    label,
+    timer,
+    options.isProcessRunning,
+    options.processGeneration,
+  );
   options.markHeldByUnkillableProcess?.(handle.pid);
   return { state: "survived", gone };
 }

@@ -9,6 +9,10 @@ import {
   type ManagedSlotReconcileResult,
   chooseIosDeviceType,
 } from "../../../src/daemon/managedSlots/reconciler";
+import type {
+  ManagedSlotResourceAdmission,
+  ManagedSlotResourceBudget,
+} from "../../../src/daemon/managedSlots/managedSlotResourceBudget";
 import { InFlightSlotReservations } from "../../../src/daemon/managedSlots/slotOwnerLiveness";
 import {
   MANAGED_SLOT_ABANDONED_SCOPE_THRESHOLD_MS,
@@ -712,6 +716,187 @@ describe("ManagedSlotReconciler", () => {
     const retry = expectReady(await reconciler.reconcile(request()));
     expect(retry.disposition).toBe("created");
     expect(retry.assignment.generation).toBe(1);
+  });
+
+  describe("fresh creation admission cleanup", () => {
+    let admission: ManagedSlotResourceAdmission;
+    let budget: ManagedSlotResourceBudget;
+
+    beforeEach(() => {
+      admission = {
+        kind: "exhausted",
+        limit: 1,
+        usage: {
+          total: 2,
+          active: 0,
+          assignedIdle: 0,
+          cached: 1,
+          preparing: 1,
+          deleting: 0,
+          orphaned: 0,
+        },
+        retained: [{ stableDeviceId: "held", reason: "session_holds_device" }],
+        evictionFailures: [],
+      };
+      budget = { admitCreation: async () => admission };
+      reconciler = new ManagedSlotReconciler({
+        registry,
+        inventory,
+        matcher,
+        resolver: new DefaultManagedSpecResolver(),
+        provisioner,
+        deleter,
+        claims,
+        capacity,
+        timer,
+        resourceBudget: budget,
+        idGenerator: new FakeIdGenerator(),
+        isExecOwnerLive: () => true,
+      });
+    });
+
+    test("budget refusal removes the never-bound slot and retry creates after capacity frees", async () => {
+      const failed = expectFailed(await reconciler.reconcile(request()));
+      expect(failed.failure).toEqual({
+        code: "managed_slot_budget_exhausted",
+        retryable: true,
+        message: "Managed-slot total-resource budget is exhausted.",
+        nextAction:
+          "Reset or release managed slot scopes that are no longer needed, or raise AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES, then retry.",
+        budget: {
+          limit: 1,
+          usage: {
+            total: 2,
+            active: 0,
+            assignedIdle: 0,
+            cached: 1,
+            preparing: 1,
+            deleting: 0,
+            orphaned: 0,
+          },
+          retained: [{ stableDeviceId: "held", reason: "session_holds_device" }],
+          evictionFailures: [],
+        },
+      });
+      expect(provisioner.calls).toEqual([]);
+      expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+      expect(await registry.getSlotJournal(1)).toMatchObject({ phase: "rolled_back" });
+      expect(await registry.getAssignment(key)).toBeNull();
+      admission = { kind: "admitted", enforced: false };
+      const retry = expectReady(await reconciler.reconcile(request()));
+      expect(retry.disposition).toBe("created");
+      expect(retry.assignment.generation).toBe(1);
+    });
+
+    test("unknown admission removes the never-bound slot", async () => {
+      admission = { kind: "unknown", message: "inventory unavailable" };
+      const failed = expectFailed(await reconciler.reconcile(request()));
+      expect(failed.failure).toEqual({
+        code: "discovery_incomplete",
+        retryable: true,
+        message: "inventory unavailable",
+        nextAction: "Retry once device discovery completes; nothing destructive was done.",
+      });
+      expect(provisioner.calls).toEqual([]);
+      expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+      expect(await registry.getSlotJournal(1)).toMatchObject({ phase: "rolled_back" });
+      expect(await registry.getAssignment(key)).toBeNull();
+    });
+
+    test("thrown admission error removes the never-bound slot and propagates unchanged", async () => {
+      const original = new Error("admission unavailable");
+      budget.admitCreation = async () => {
+        throw original;
+      };
+      expect(await reconciler.reconcile(request()).catch((error: unknown) => error)).toBe(original);
+      expect(provisioner.calls).toEqual([]);
+      expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+      expect(await registry.getSlotJournal(1)).toMatchObject({ phase: "rolled_back" });
+      expect(await registry.getAssignment(key)).toBeNull();
+    });
+
+    test("cancellation during admission removes the never-bound slot", async () => {
+      const controller = new AbortController();
+      budget.admitCreation = async () => {
+        controller.abort();
+        return { kind: "admitted", enforced: false };
+      };
+      const failed = expectFailed(
+        await reconciler.reconcile(request(SPEC_18, { signal: controller.signal })),
+      );
+      expect(failed.failure).toEqual({
+        code: "cancelled",
+        retryable: true,
+        message: "Slot preparation was cancelled.",
+        nextAction: "The preparation was cancelled; retry when needed.",
+      });
+      expect(provisioner.calls).toEqual([]);
+      expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+      expect(await registry.getSlotJournal(1)).toMatchObject({ phase: "rolled_back" });
+      expect(await registry.getAssignment(key)).toBeNull();
+    });
+
+    test("admission refusal keeps an unbound slot with a prior generation", async () => {
+      await registry.initSlot(key, { role: "app", platform: "ios", requestedSpec: SPEC_18 });
+      await registry.commitBinding(
+        key,
+        { generation: 0, stableDeviceId: null },
+        {
+          stableDeviceId: null,
+          deviceName: null,
+          resolvedSpec: null,
+          specFingerprint: null,
+          state: "provisioning",
+        },
+      );
+      const before = await registry.getAssignment(key);
+      const failed = expectFailed(await reconciler.reconcile(request()));
+      expect(failed.failure.code).toBe("managed_slot_budget_exhausted");
+      expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+      expect(await registry.getAssignment(key)).toEqual(before);
+    });
+
+    test("replacement capacity refusal keeps the bound slot intact", async () => {
+      admission = { kind: "admitted", enforced: false };
+      await seedAssigned(SPEC_17);
+      const before = await registry.getAssignment(key);
+      admission = { kind: "unknown", message: "must not admit replacement" };
+      capacity.result = { kind: "exhausted", limit: 1, booted: 2, retryAfterMs: 5_000 };
+      const failed = expectFailed(await reconciler.reconcile(request()));
+      expect(failed.failure.code).toBe("capacity_exhausted");
+      expect(await registry.getAssignment(key)).toEqual(before);
+      expect(deleter.calls).toEqual([]);
+    });
+
+    test("registry removal failure preserves the original admission refusal", async () => {
+      let removals = 0;
+      registry.removeUnboundSlot = async () => {
+        removals += 1;
+        throw new Error("registry unavailable");
+      };
+      const failed = expectFailed(await reconciler.reconcile(request()));
+      expect(failed.failure.code).toBe("managed_slot_budget_exhausted");
+      expect(failed.failure.budget).toEqual({
+        limit: 1,
+        usage: {
+          total: 2,
+          active: 0,
+          assignedIdle: 0,
+          cached: 1,
+          preparing: 1,
+          deleting: 0,
+          orphaned: 0,
+        },
+        retained: [{ stableDeviceId: "held", reason: "session_holds_device" }],
+        evictionFailures: [],
+      });
+      expect(await registry.listOpenSlotJournal(key)).toEqual([]);
+      expect(await registry.getAssignment(key)).toMatchObject({
+        generation: 0,
+        stableDeviceId: null,
+      });
+      expect(removals).toBe(1);
+    });
   });
 
   test("a registry cleanup failure preserves the original provisioning failure", async () => {

@@ -2,6 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { CTRL_PROXY_PACKAGE } from "../../../src/ctrlProxy/constants";
 import {
   assertAppGestureNotUnderPrototype,
+  assertGestureOnLayer,
+  layerGestureRefusal,
+  focusedFieldLayerRefusal,
   hasOwnPrototype,
   ownPrototypeCoversPoint,
   scopeHierarchyForSelector,
@@ -331,4 +334,42 @@ describe("a highlight window with no prototype (#11346)", () => {
     expect(scopeHierarchyToLayer(hierarchy, "app")).toBe(hierarchy);
     expect(() => scopeHierarchyForSelector(hierarchy, "prototype")).toThrow(ActionableError);
   });
+});
+
+describe("suspended prototype pins", () => {
+  test("an existing prototype window wins over the suspended flag", () => {
+    const hierarchy = capturedPrototypeHierarchy({ fullScreen: true });
+    hierarchy.prototypeSuspended = true;
+    expect(() => scopeHierarchyForSelector(hierarchy, "prototype")).not.toThrow();
+    expect(() =>
+      assertGestureOnLayer(hierarchy, "prototype", [{ x: 10, y: 10 }], "swipe"),
+    ).not.toThrow();
+  });
+  test("no prototype stays an untyped ActionableError with the original text", () => {
+    try {
+      scopeHierarchyForSelector(convertedCapture(), "prototype");
+      throw new Error("expected refusal");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ActionableError);
+      expect((error as Error).message).toBe(
+        'layer "prototype" was requested, but no AutoMobile prototype is showing. Show the prototype first, or omit layer to search the whole screen.',
+      );
+      expect("code" in (error as ActionableError)).toBe(false);
+    }
+  });
+});
+
+// Both string-returning consumers keep their existing result contract (#12204).
+test("gesture and focused-field string refusals describe suspension", () => {
+  const hierarchy = convertedCapture();
+  hierarchy.prototypeSuspended = true;
+  for (const refusal of [
+    layerGestureRefusal(hierarchy, "prototype", [{ x: 10, y: 10 }], "tap"),
+    focusedFieldLayerRefusal(hierarchy, "prototype", "select all text"),
+  ]) {
+    expect(refusal).toContain(
+      "the AutoMobile prototype is hidden because the app it was shown over is not in front",
+    );
+    expect(refusal).toContain("Bring that app back to the foreground");
+  }
 });

@@ -818,7 +818,7 @@ const windowSchema = z
       .enum(["app", "system"])
       .optional()
       .describe(
-        "system (default): above system UI. app: just above apps, so the shade, keyboard and screenshot preview draw over it; needs SYSTEM_ALERT_WINDOW, granted with appops at show time",
+        "system (default): above system UI. app: just above apps, so the shade, keyboard and screenshot preview draw over it; needs SYSTEM_ALERT_WINDOW, granted with appops at show time; some system apps (for example Settings) hide app-layer prototypes; the show result then carries visible: false",
       ),
     persistence: z
       .enum(["session", "device"])

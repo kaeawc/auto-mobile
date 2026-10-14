@@ -277,7 +277,7 @@ class PrototypePatchRuntimeTest {
       )
       assertFalse(results.last().success)
       assertEquals(
-        "root.children[3].style.elevation: Size cannot be represented in Compose dp",
+        "root.children[3].style.elevation: Invalid number value",
         results.last().error,
       )
       assertEquals(before.revision, results.last().revision)

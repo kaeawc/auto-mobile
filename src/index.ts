@@ -62,6 +62,7 @@ import {
 import type { ManagedSlotsResult } from "./models/managedSlotsResult";
 import { createStdioShutdownStages, runShutdownCleanupStages } from "./shutdownCleanup";
 import { defaultTimer } from "./utils/SystemTimer";
+import { sweepNativeHelperOrphans } from "./utils/nativeHelpers/sweepNativeHelperOrphans";
 import { startStartupMaintenance } from "./utils/startupMaintenance";
 import { daemonCommandSkipsServerBootstrap } from "./daemon/cli/daemonCommandRouting";
 
@@ -378,6 +379,9 @@ async function main() {
         platform: process.platform,
         startAndroidSweep: () => AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(),
         startIosReap: () => IOSCtrlProxyManager.startOrphanRunnerReapOnStartup(),
+        startNativeHelperSweep: async () => {
+          await sweepNativeHelperOrphans();
+        },
       });
     }
     if (skipDeviceStartupWork) {

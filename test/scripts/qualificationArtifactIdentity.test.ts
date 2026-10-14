@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
+import { gzipSync } from "node:zlib";
 import {
   identifyArtifact,
   parseIdentityArgs,
@@ -23,6 +24,24 @@ const release: ReleaseChecksumEntry = {
   runnerSha256: "3".repeat(64),
   runnerSha256Target: "xctest",
 };
+function packageTarball(files: Map<string, Uint8Array>): Uint8Array {
+  const entries = [...files].map(([path, data]) => {
+    const header = Buffer.alloc(512);
+    header.write(`package/${path.slice(root.length + 1)}`, 0, 100);
+    header.write("0000644\0", 100);
+    header.write("0000000\0", 108);
+    header.write("0000000\0", 116);
+    header.write(`${data.length.toString(8).padStart(11, "0")}\0`, 124);
+    header.fill(32, 148, 156);
+    header.write("0", 156);
+    header.write("ustar\0", 257);
+    header.write("00", 263);
+    const checksum = header.reduce((sum, byte) => sum + byte, 0);
+    header.write(`${checksum.toString(8).padStart(6, "0")}\0 `, 148);
+    return Buffer.concat([header, data, Buffer.alloc((512 - (data.length % 512)) % 512)]);
+  });
+  return gzipSync(Buffer.concat([...entries, Buffer.alloc(1024)]));
+}
 function fixture() {
   const files = new Map<string, Uint8Array>();
   const put = (path: string, text: string | Uint8Array) =>
@@ -103,7 +122,16 @@ describe("artifact identity", () => {
     const f = fixture();
     f.put(join(root, ".git"), "gitdir: /repo");
     f.files.delete(join(root, "dist/src/index.js"));
+    let listCalls = 0;
+    f.ports.listFiles = () => {
+      listCalls++;
+      return [];
+    };
     const record = identify(f.ports);
+    expect(listCalls).toBe(0);
+    expect(record.checks.map(({ id }) => id)).toEqual(["package_root", "not_source_checkout"]);
+    expect(record.package.contentSha256).toBeNull();
+    expect(record.package.fileCount).toBe(0);
     expect(record.verdict).toBe("refused");
     expect(check(record, "not_source_checkout")).toMatchObject({ status: "fail" });
     expect(check(record, "not_source_checkout").detail).toContain("unbuilt source checkout");
@@ -127,7 +155,7 @@ describe("artifact identity", () => {
     expect(record.source.evidence).toBe("release-tag");
     expect(check(record, "source_sha").status).toBe("fail");
     expect(check(record, "source_sha").detail).toContain(oldSha);
-    expect(check(record, "source_sha").detail).toContain(currentSha);
+    expect(check(record, "source_sha").detail).toContain(`but qualification expects ${currentSha}`);
     expect(check(record, "managed_slot_contract").status).toBe("warn");
     expect(check(record, "build_info").status).toBe("warn");
     expect(f.gitCalls[0]).toEqual({
@@ -143,6 +171,8 @@ describe("artifact identity", () => {
     );
     expect(record.verdict).toBe("identified");
     expect(record.proofLevel).toBe("local-build");
+    expect(check(record, "source_sha").detail).toContain("matching expected B51BFE5");
+    expect(check(record, "source_sha").detail).not.toContain("but qualification expects");
     expect(record.managedSlotContract).toEqual({
       present: true,
       contractVersions: [1],
@@ -198,13 +228,14 @@ describe("artifact identity", () => {
   });
   test("computes SRI and sha1, promotes only verified tarballs, and refuses mismatch", () => {
     const f = fixture();
-    const bytes = new TextEncoder().encode("tarball");
+    const bytes = packageTarball(f.files);
     f.put("/artifact.tgz", bytes);
     const integrity = `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
     const options = { packageDir: root, tarball: "/artifact.tgz", expectedIntegrity: integrity };
     const verified = identifyArtifact(options, f.ports);
     expect(verified.verdict).toBe("identified");
     expect(verified.proofLevel).toBe("published-package");
+    expect(check(verified, "tarball_contents").status).toBe("pass");
     expect(verified.tarball?.integrity).toBe(integrity);
     expect(verified.tarball?.shasum).toBe(createHash("sha1").update(bytes).digest("hex"));
     const mismatch = identifyArtifact({ ...options, expectedIntegrity: "sha512-wrong" }, f.ports);
@@ -213,6 +244,72 @@ describe("artifact identity", () => {
     const unverified = identifyArtifact({ ...options, expectedIntegrity: undefined }, f.ports);
     expect(check(unverified, "tarball_integrity").status).toBe("warn");
     expect(unverified.proofLevel).toBe("local-build");
+  });
+  test("refuses directory contents that differ from the integrity-verified tarball", () => {
+    const f = fixture();
+    const bytes = packageTarball(f.files);
+    f.put("/artifact.tgz", bytes);
+    f.put(join(root, "dist/src/index.js"), "changed bundle");
+    const record = identifyArtifact(
+      {
+        packageDir: root,
+        tarball: "/artifact.tgz",
+        expectedIntegrity: `sha512-${createHash("sha512").update(bytes).digest("base64")}`,
+      },
+      f.ports,
+    );
+    expect(check(record, "tarball_integrity").status).toBe("pass");
+    expect(check(record, "tarball_contents").status).toBe("fail");
+    expect(check(record, "tarball_contents").detail).toContain("dist/src/index.js");
+    expect(record.verdict).toBe("refused");
+    expect(record.proofLevel).toBe("local-build");
+  });
+  test("allows extra files only beneath node_modules path segments", () => {
+    const f = fixture();
+    const bytes = packageTarball(f.files);
+    f.put("/artifact.tgz", bytes);
+    const options = {
+      packageDir: root,
+      tarball: "/artifact.tgz",
+      expectedIntegrity: `sha512-${createHash("sha512").update(bytes).digest("base64")}`,
+    };
+    f.put(join(root, "node_modules/x/index.js"), "dependency");
+    f.put(join(root, "dist/node_modules/y/index.js"), "nested dependency");
+    const allowed = identifyArtifact(options, f.ports);
+    expect(allowed.verdict).toBe("identified");
+    expect(allowed.proofLevel).toBe("published-package");
+    expect(check(allowed, "tarball_contents").detail).toContain(
+      "2 extra node_modules files allowed",
+    );
+    f.put(join(root, "dist/extra.js"), "extra");
+    const refused = identifyArtifact(options, f.ports);
+    expect(refused.verdict).toBe("refused");
+    expect(refused.proofLevel).toBe("local-build");
+    expect(check(refused, "tarball_contents")).toMatchObject({ status: "fail" });
+    expect(check(refused, "tarball_contents").detail).toContain("dist/extra.js");
+  });
+  test("reports missing files and caps differing paths at ten with a total", () => {
+    const f = fixture();
+    const bytes = packageTarball(f.files);
+    f.put("/artifact.tgz", bytes);
+    f.files.delete(join(root, "dist/src/index.js"));
+    for (let i = 0; i < 12; i++) {
+      f.put(join(root, `extra-${i}.txt`), "extra");
+    }
+    const record = identifyArtifact({ packageDir: root, tarball: "/artifact.tgz" }, f.ports);
+    const detail = check(record, "tarball_contents").detail;
+    expect(detail).toContain("13 differing/missing/extra paths");
+    expect(detail).toContain("dist/src/index.js");
+    expect(detail.split(": ")[1].split("; ")[0].split(", ")).toHaveLength(10);
+    expect(record.verdict).toBe("refused");
+  });
+  test("turns a corrupt tarball into a failed contents check", () => {
+    const f = fixture();
+    f.put("/artifact.tgz", "invalid gzip");
+    const record = identifyArtifact({ packageDir: root, tarball: "/artifact.tgz" }, f.ports);
+    expect(check(record, "tarball_contents").status).toBe("fail");
+    expect(check(record, "tarball_contents").detail).toContain("Unable to read gzip tar archive");
+    expect(record.verdict).toBe("refused");
   });
   test("reports matching APK and mismatching IPA, without independently hashing runner", () => {
     const f = fixture();

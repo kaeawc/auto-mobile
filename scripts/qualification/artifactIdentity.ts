@@ -18,6 +18,7 @@ import {
   findMissingPackedAssets,
 } from "../build/packed-runtime-assets";
 import type { BuildInfo } from "../release/write-build-info";
+import { readTarGzEntries } from "./tarEntries";
 
 export type CheckStatus = "pass" | "warn" | "fail";
 export interface IdentityCheck {
@@ -182,7 +183,9 @@ function identifySource(
     ? `package ${record.package.version} was built from ${source.sha}`
     : "source SHA unknown";
   if (expected) {
-    detail += ` but qualification expects ${options.expectSourceSha}`;
+    detail += mismatch
+      ? ` but qualification expects ${options.expectSourceSha}`
+      : ` matching expected ${options.expectSourceSha}`;
   }
   if (disagreement) {
     detail += `; build-info SHA ${source.sha} differs from release tag ${source.tag} SHA ${tagSha}`;
@@ -272,6 +275,7 @@ function identifyTarball(
   record: ArtifactIdentityRecord,
   options: ArtifactIdentityOptions,
   ports: ArtifactIdentityPorts,
+  fileHashes: ReadonlyMap<string, string>,
 ): void {
   if (!options.tarball) {
     return;
@@ -297,7 +301,50 @@ function identifyTarball(
       ? `Computed ${integrity}; expected ${options.expectedIntegrity}`
       : `compare with npm view ${DAEMON_PACKAGE_NAME}@${record.package.version} dist.integrity`,
   );
-  if (status === "pass") {
+  let contentsPass = false;
+  try {
+    const entries = readTarGzEntries(bytes);
+    const tarPaths = new Set<string>();
+    const differences = new Set<string>();
+    for (const entry of entries) {
+      const path = entry.path.slice("package/".length);
+      if (
+        !entry.path.startsWith("package/") ||
+        !path ||
+        path.split("/").some((part) => part === ".." || part === "." || part === "") ||
+        path.includes("\\") ||
+        tarPaths.has(path)
+      ) {
+        throw new Error(`Invalid or duplicate npm tarball path: ${entry.path}`);
+      }
+      tarPaths.add(path);
+      if (fileHashes.get(path) !== createHash("sha256").update(entry.data).digest("hex")) {
+        differences.add(path);
+      }
+    }
+    let dependencyExtras = 0;
+    for (const path of fileHashes.keys()) {
+      if (!tarPaths.has(path)) {
+        if (path.split("/").slice(0, -1).includes("node_modules")) {
+          dependencyExtras++;
+        } else {
+          differences.add(path);
+        }
+      }
+    }
+    contentsPass = differences.size === 0;
+    check(
+      record,
+      "tarball_contents",
+      contentsPass ? "pass" : "fail",
+      `${differences.size} differing/missing/extra paths${differences.size ? `: ${[...differences].slice(0, 10).join(", ")}` : ""}; ${dependencyExtras} extra node_modules files allowed`,
+    );
+  } catch (error) {
+    const detail = `Tarball contents verification failed: ${error instanceof Error ? error.message : String(error)}`;
+    console.warn(detail);
+    check(record, "tarball_contents", "fail", detail);
+  }
+  if (status === "pass" && contentsPass) {
     record.proofLevel = "published-package";
   }
 }
@@ -346,6 +393,10 @@ export function identifyArtifact(
       ? `${built ? "source checkout" : "unbuilt source checkout"}; run bun run build && npm pack, then install or extract the tarball and pass that directory (plus --tarball)`
       : "Installed or extracted package directory",
   );
+  if (source) {
+    record.verdict = "refused";
+    return record;
+  }
   const files = ports.listFiles(root).slice().sort();
   const missing = findMissingPackedAssets(files, REQUIRED_PACKED_RUNTIME_ASSETS);
   check(
@@ -356,14 +407,15 @@ export function identifyArtifact(
       ? `Missing packed runtime assets: ${missing.join(", ")}`
       : "Required packed runtime assets present",
   );
-  const manifest = files
-    .map(
-      (file) =>
-        `${createHash("sha256")
-          .update(ports.readBytes(join(root, file)))
-          .digest("hex")}  ${file}\n`,
-    )
-    .join("");
+  const fileHashes = new Map(
+    files.map((file) => [
+      file,
+      createHash("sha256")
+        .update(ports.readBytes(join(root, file)))
+        .digest("hex"),
+    ]),
+  );
+  const manifest = files.map((file) => `${fileHashes.get(file)}  ${file}\n`).join("");
   record.package.contentSha256 = createHash("sha256").update(manifest, "utf8").digest("hex");
   record.package.fileCount = files.length;
   check(
@@ -372,7 +424,7 @@ export function identifyArtifact(
     "pass",
     `${files.length} files; SHA-256 ${record.package.contentSha256}`,
   );
-  identifyTarball(record, options, ports);
+  identifyTarball(record, options, ports, fileHashes);
   const infoPath = join(root, "dist/build-info.json");
   const info = ports.exists(infoPath) ? (JSON.parse(ports.readText(infoPath)) as BuildInfo) : null;
   const badInfo =

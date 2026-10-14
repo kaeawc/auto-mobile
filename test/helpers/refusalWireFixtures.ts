@@ -34,6 +34,7 @@ import {
 } from "../../src/daemon/deviceAcquisitionRefusals";
 import { IOS_SIM_MAX_BOOTED_ENV } from "../../src/features/iosSimFleet/capacityPolicy";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
+import { unsupportedIosButtonResult } from "../../src/features/action/PressButton";
 import {
   MCP_OVERLOAD_ERROR_CODE,
   MCP_QUEUE_TIMEOUT_ERROR_CODE,
@@ -947,7 +948,8 @@ export type RefusalSurface =
   | "request-failure-fields"
   | "liveness-handover"
   | "managed-slots-response"
-  | "provision-envelope";
+  | "provision-envelope"
+  | "press-button-result";
 
 /** Asynchronous real-wire captures: their owning test always checks the committed bytes. */
 export const EXTERNALLY_CAPTURED_SURFACE_FIXTURES = [
@@ -1269,6 +1271,12 @@ export function buildRefusalSurfaceFixtures(): RefusalSurfaceFixture[] {
       name: "daemon_overloaded",
       builder: "mcpRequestFailureDetails",
       payload: socketFrame(overloadRefusalError()),
+    },
+    {
+      surface: "press-button-result",
+      name: "unsupported_button",
+      builder: "PressButton.unsupportedIosButtonResult",
+      payload: unsupportedIosButtonResult("menu", "iOS has no menu hardware button"),
     },
     ...SOCKET_FRAME_ERRORS.map(([name, error]): RefusalSurfaceFixture => ({
       surface: "socket-frame",

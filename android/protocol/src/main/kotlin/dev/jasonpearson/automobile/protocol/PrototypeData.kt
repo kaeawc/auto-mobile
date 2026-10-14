@@ -1,6 +1,18 @@
 package dev.jasonpearson.automobile.protocol
 
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 
 /** RFC 6901 pointers relative to the read-only data object. Invalid input is always missing. */
 object PrototypeDataPointer {
@@ -202,6 +214,7 @@ object PrototypeDataResolver {
         own.mapValues { (key, value) ->
           when (key) {
             "repeat" -> resolveRepeat(value, repeats)
+            "enabledWhen",
             "visibleWhen" -> resolveCondition(value, data)
             "styleWhen" -> resolveStyles(value, data)
             else -> value
@@ -329,6 +342,7 @@ object PrototypeDataResolver {
     val own =
       (node["repeat"] as? JsonObject)?.get("items") is JsonObject ||
         textBound ||
+        conditionBound(node["enabledWhen"]) ||
         conditionBound(node["visibleWhen"]) ||
         stylesBound
     val child = node["child"] as? JsonObject

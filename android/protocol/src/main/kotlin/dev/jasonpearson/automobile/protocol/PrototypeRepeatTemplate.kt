@@ -150,9 +150,21 @@ internal object PrototypeBindableFields {
         (entry as? JsonObject)?.let { it to "$path.$key[$index]" }
       }
 
+    fun keyList(data: JsonObject, key: String, path: String): T? {
+      val values = data[key]
+      return if (values is JsonArray)
+        values.withIndex().firstNotNullOfOrNull { (index, value) ->
+          visit(value, "$path.$key[$index]", PrototypeBindableKind.KEY)
+        }
+      else field(data, key, path, PrototypeBindableKind.KEY)
+    }
+
     fun condition(value: JsonElement?, path: String): T? {
       val condition = value as? JsonObject ?: return null
       field(condition, "key", path, PrototypeBindableKind.KEY)?.let {
+        return it
+      }
+      keyList(condition, "valid", path)?.let {
         return it
       }
       val operandKind =
@@ -182,7 +194,9 @@ internal object PrototypeBindableFields {
         "setState" ->
           field(action, "key", path, PrototypeBindableKind.KEY)
             ?: field(action, "value", path, PrototypeBindableKind.OPERAND)
-        "emit" -> field(action, "name", path, PrototypeBindableKind.EMIT_NAME)
+        "emit" ->
+          field(action, "name", path, PrototypeBindableKind.EMIT_NAME)
+            ?: keyList(action, "requireValid", path)
         "toggle",
         "increment",
         "decrement" -> field(action, "key", path, PrototypeBindableKind.KEY)
@@ -252,6 +266,10 @@ internal object PrototypeBindableFields {
         }
       }
       return component(node, path)
+        ?: condition(node["enabledWhen"], "$path.enabledWhen")
+        ?: objects(node, "checks", path).firstNotNullOfOrNull { (entry, entryPath) ->
+          field(entry, "message", entryPath, PrototypeBindableKind.TEXT)
+        }
         ?: condition(node["visibleWhen"], "$path.visibleWhen")
         ?: objects(node, "styleWhen", path).firstNotNullOfOrNull { (entry, entryPath) ->
           condition(entry["when"], "$entryPath.when")
@@ -520,12 +538,20 @@ internal object PrototypeRepeatValidator {
   private val checkedKeyFields = listOf("key", "stateKey", "hourKey", "minuteKey")
 
   /** The state-key values the validator type-checks: node keys and an action's `key`. */
-  private fun checkedKeys(value: JsonObject): List<String> =
-    checkedKeyFields.mapNotNull { value.text(it) } +
+  private fun checkedKeys(value: JsonObject): List<String> {
+    val keys = mutableListOf<String>()
+    PrototypeBindableFields.first<Boolean>(value, "") { field, _, kind ->
+      if (kind == PrototypeBindableKind.KEY) field.string()?.let(keys::add)
+      null
+    }
+    keys.addAll((value["requireValid"] as? JsonArray).orEmpty().mapNotNull { it.string() })
+    return keys +
+      checkedKeyFields.mapNotNull { value.text(it) } +
       listOfNotNull(
         (value["trailing"] as? JsonObject)?.text("stateKey"),
         (value["openWhen"] as? JsonObject)?.text("key"),
       )
+  }
 
   private fun bindKeys(value: JsonObject, scope: Scope, item: JsonObject, index: Int): JsonObject {
     fun JsonObject.bound(field: String): JsonObject {
@@ -535,7 +561,38 @@ internal object PrototypeRepeatValidator {
           (field to JsonPrimitive(PrototypeRepeatTemplate.bind(text, scope.alias, item, index))),
       )
     }
-    var bound = value
+    val replacements = mutableMapOf<String, JsonElement>()
+    PrototypeBindableFields.first<Boolean>(value, "") { field, path, kind ->
+      if (kind == PrototypeBindableKind.KEY)
+        field.string()?.let {
+          replacements[path] =
+            JsonPrimitive(PrototypeRepeatTemplate.bind(it, scope.alias, item, index))
+        }
+      null
+    }
+    fun replace(element: JsonElement, path: String): JsonElement =
+      replacements[path]
+        ?: when (element) {
+          is JsonObject ->
+            JsonObject(element.mapValues { (key, child) -> replace(child, "$path.$key") })
+          is JsonArray -> JsonArray(element.mapIndexed { i, child -> replace(child, "$path[$i]") })
+          else -> element
+        }
+    var bound = replace(value, "") as JsonObject
+    (bound["requireValid"] as? JsonArray)?.let { keys ->
+      bound =
+        JsonObject(
+          bound +
+            ("requireValid" to
+              JsonArray(
+                keys.map { key ->
+                  key.string()?.let {
+                    JsonPrimitive(PrototypeRepeatTemplate.bind(it, scope.alias, item, index))
+                  } ?: key
+                },
+              )),
+        )
+    }
     for (field in checkedKeyFields) bound = bound.bound(field)
     (bound["trailing"] as? JsonObject)?.let {
       bound = JsonObject(bound + ("trailing" to it.bound("stateKey")))

@@ -2,7 +2,18 @@ package dev.jasonpearson.automobile.protocol
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.double
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 
 @Serializable
 data class PrototypeOffset(
@@ -46,6 +57,7 @@ data class PrototypeCondition(
   val any: List<PrototypeCondition>? = null,
   val not: PrototypeCondition? = null,
   val data: String? = null,
+  val valid: PrototypeValidityKeys? = null,
 )
 
 @Serializable
@@ -263,6 +275,7 @@ data class PrototypeFloatingPlacement(
 data class PrototypeEmitAction(
   val name: String,
   val payload: JsonElement? = null,
+  val requireValid: List<String>? = null,
 ) : PrototypeAction()
 
 @SerialName("setPage")
@@ -442,6 +455,9 @@ data class PrototypeTextFieldNode(
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val stateKey: String,
   val placeholder: String? = null,
+  val enabledWhen: PrototypeCondition? = null,
+  val checks: List<PrototypeCheck>? = null,
+  val validateOn: PrototypeValidateOn? = null,
 ) : PrototypeNode()
 
 @SerialName("switch")
@@ -459,6 +475,9 @@ data class PrototypeSwitchNode(
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val stateKey: String,
   val label: String? = null,
+  val enabledWhen: PrototypeCondition? = null,
+  val checks: List<PrototypeCheck>? = null,
+  val validateOn: PrototypeValidateOn? = null,
 ) : PrototypeNode()
 
 @SerialName("checkbox")
@@ -476,6 +495,9 @@ data class PrototypeCheckboxNode(
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val stateKey: String,
   val label: String? = null,
+  val enabledWhen: PrototypeCondition? = null,
+  val checks: List<PrototypeCheck>? = null,
+  val validateOn: PrototypeValidateOn? = null,
 ) : PrototypeNode()
 
 @SerialName("button")
@@ -494,6 +516,7 @@ data class PrototypeButtonNode(
   val label: String,
   val variant: String = "filled",
   val icon: String? = null,
+  val enabledWhen: PrototypeCondition? = null,
 ) : PrototypeNode()
 
 @Serializable data class PrototypeRadioOption(val value: String, val label: String)
@@ -513,6 +536,9 @@ data class PrototypeRadioGroupNode(
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val stateKey: String,
   val options: List<PrototypeRadioOption>,
+  val enabledWhen: PrototypeCondition? = null,
+  val checks: List<PrototypeCheck>? = null,
+  val validateOn: PrototypeValidateOn? = null,
 ) : PrototypeNode()
 
 /** The control at the end of a `listItem`: a bound switch or checkbox, or a decorative icon. */
@@ -547,6 +573,7 @@ data class PrototypeListItemNode(
   val supporting: String? = null,
   val leadingIcon: String? = null,
   val trailing: PrototypeListItemTrailing? = null,
+  val enabledWhen: PrototypeCondition? = null,
 ) : PrototypeNode()
 
 @SerialName("slider")
@@ -567,6 +594,9 @@ data class PrototypeSliderNode(
   val min: Double,
   val max: Double,
   val step: Double? = null,
+  val enabledWhen: PrototypeCondition? = null,
+  val checks: List<PrototypeCheck>? = null,
+  val validateOn: PrototypeValidateOn? = null,
 ) : PrototypeNode()
 
 @SerialName("chip")
@@ -585,6 +615,7 @@ data class PrototypeChipNode(
   val label: String,
   val variant: String? = null,
   val stateKey: String? = null,
+  val enabledWhen: PrototypeCondition? = null,
 ) : PrototypeNode()
 
 @SerialName("card")
@@ -632,6 +663,7 @@ data class PrototypeIconButtonNode(
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val icon: String,
   val variant: String = "standard",
+  val enabledWhen: PrototypeCondition? = null,
 ) : PrototypeNode()
 
 /** A floating action button; a `label` makes it an extended FAB, which has no `size`. */
@@ -651,6 +683,7 @@ data class PrototypeFabNode(
   val icon: String,
   val label: String? = null,
   val size: String = "regular",
+  val enabledWhen: PrototypeCondition? = null,
 ) : PrototypeNode()
 
 /** A single-select Material segmented button bound to a string state key, like a `radioGroup`. */
@@ -814,6 +847,9 @@ data class PrototypeTimePickerNode(
   val hourKey: String,
   val minuteKey: String,
   val is24Hour: Boolean? = null,
+  val enabledWhen: PrototypeCondition? = null,
+  val checks: List<PrototypeCheck>? = null,
+  val validateOn: PrototypeValidateOn? = null,
 ) : PrototypeNode()
 
 /** A Material date picker bound to a `YYYY-MM-DD` string state key. */
@@ -831,6 +867,9 @@ data class PrototypeDatePickerNode(
   override val anchor: PrototypeAnchor? = null,
   override val safeAreaPadding: PrototypeSafeAreaPadding? = null,
   val stateKey: String,
+  val enabledWhen: PrototypeCondition? = null,
+  val checks: List<PrototypeCheck>? = null,
+  val validateOn: PrototypeValidateOn? = null,
 ) : PrototypeNode()
 
 @SerialName("scroll")
@@ -1022,3 +1061,103 @@ data class PrototypeSpec(
   val motion: String? = null,
   val data: JsonObject? = null,
 )
+
+@Serializable
+enum class PrototypeValidateOn {
+  @SerialName("change") CHANGE,
+  @SerialName("blur") BLUR,
+  @SerialName("submit") SUBMIT,
+}
+
+@Serializable
+enum class PrototypeCheckFormat {
+  @SerialName("email") EMAIL,
+  @SerialName("phone") PHONE,
+  @SerialName("digits") DIGITS,
+  @SerialName("decimal") DECIMAL,
+  @SerialName("url") URL,
+}
+
+/** The untagged wire union preserves the authored check kind and message. */
+@Serializable(with = PrototypeCheckSerializer::class)
+sealed class PrototypeCheck {
+  abstract val message: String
+
+  data class Required(override val message: String, val required: Boolean = true) : PrototypeCheck()
+
+  data class MinLength(val minLength: Double, override val message: String) : PrototypeCheck()
+
+  data class MaxLength(val maxLength: Double, override val message: String) : PrototypeCheck()
+
+  data class Min(val min: Double, override val message: String) : PrototypeCheck()
+
+  data class Max(val max: Double, override val message: String) : PrototypeCheck()
+
+  data class Format(val format: PrototypeCheckFormat, override val message: String) :
+    PrototypeCheck()
+
+  data class Pattern(val pattern: String, override val message: String) : PrototypeCheck()
+}
+
+object PrototypeCheckSerializer : PrototypeJsonValueSerializer<PrototypeCheck>("PrototypeCheck") {
+  override fun fromJson(value: JsonElement): PrototypeCheck {
+    val data = value.jsonObject
+    val message = data.getValue("message").jsonPrimitive.content
+    val kind = data.keys.single { it != "message" }
+    val operand = data.getValue(kind).jsonPrimitive
+    return when (kind) {
+      "required" -> PrototypeCheck.Required(message, operand.boolean)
+      "minLength" -> PrototypeCheck.MinLength(operand.double, message)
+      "maxLength" -> PrototypeCheck.MaxLength(operand.double, message)
+      "min" -> PrototypeCheck.Min(operand.double, message)
+      "max" -> PrototypeCheck.Max(operand.double, message)
+      "format" ->
+        PrototypeCheck.Format(PrototypeSpecValidator.json.decodeFromJsonElement(operand), message)
+      "pattern" -> PrototypeCheck.Pattern(operand.content, message)
+      else -> throw kotlinx.serialization.SerializationException("Unknown check kind")
+    }
+  }
+
+  override fun toJson(value: PrototypeCheck): JsonElement = buildJsonObject {
+    put("message", value.message)
+    when (value) {
+      is PrototypeCheck.Required -> put("required", value.required)
+      is PrototypeCheck.MinLength -> put("minLength", value.minLength)
+      is PrototypeCheck.MaxLength -> put("maxLength", value.maxLength)
+      is PrototypeCheck.Min -> put("min", value.min)
+      is PrototypeCheck.Max -> put("max", value.max)
+      is PrototypeCheck.Format ->
+        put("format", PrototypeSpecValidator.json.encodeToJsonElement(value.format))
+      is PrototypeCheck.Pattern -> put("pattern", value.pattern)
+    }
+  }
+}
+
+/** A single checked key or an authored list; round trips retain the selected wire form. */
+@Serializable(with = PrototypeValidityKeysSerializer::class)
+sealed class PrototypeValidityKeys {
+  data class Single(val key: String) : PrototypeValidityKeys()
+
+  data class Multiple(val keys: List<String>) : PrototypeValidityKeys()
+
+  fun keys(): List<String> =
+    when (this) {
+      is Single -> listOf(key)
+      is Multiple -> keys
+    }
+}
+
+object PrototypeValidityKeysSerializer :
+  PrototypeJsonValueSerializer<PrototypeValidityKeys>("PrototypeValidityKeys") {
+  override fun fromJson(value: JsonElement): PrototypeValidityKeys =
+    when (value) {
+      is JsonArray -> PrototypeValidityKeys.Multiple(value.map { it.jsonPrimitive.content })
+      else -> PrototypeValidityKeys.Single(value.jsonPrimitive.content)
+    }
+
+  override fun toJson(value: PrototypeValidityKeys): JsonElement =
+    when (value) {
+      is PrototypeValidityKeys.Single -> JsonPrimitive(value.key)
+      is PrototypeValidityKeys.Multiple -> JsonArray(value.keys.map(::JsonPrimitive))
+    }
+}

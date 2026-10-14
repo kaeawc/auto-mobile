@@ -814,9 +814,14 @@ data class PrototypeStatusEntry(
   @EncodeDefault(EncodeDefault.Mode.NEVER) val data: JsonObject? = null,
 )
 
+/** Input validation vocabulary understood by this protocol version. */
+const val PROTOTYPE_CHECKS_CAPABILITY = "prototype_checks_v1"
+
 @Serializable
 enum class PrototypeEventKind {
   @SerialName("emit") EMIT,
+  @SerialName("change") CHANGE,
+  @SerialName("validation_failed") VALIDATION_FAILED,
   /** A pager settled on another page: `name` is the pager id, the payload the new page index. */
   @SerialName("page_changed") PAGE_CHANGED,
   @SerialName("dismissed") DISMISSED,
@@ -843,6 +848,8 @@ data class PrototypeEvent(
   val payload: JsonElement?,
   val state: Map<String, PrototypeScalar>,
   val pages: Map<String, Int> = emptyMap(),
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val validity: Map<String, Boolean>? = null,
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val keys: List<String>? = null,
 ) : WebSocketResponse()
 
 // =============================================================================

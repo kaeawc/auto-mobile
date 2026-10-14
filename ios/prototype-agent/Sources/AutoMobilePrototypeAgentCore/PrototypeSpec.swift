@@ -581,6 +581,8 @@ final class PrototypeNode: Decodable {
     let detents: [Detent]?
     let scrim: PrototypeModeValue?
     let dragHandle: Bool?
+    /// Swipe dismissal is enabled when omitted, as on Android.
+    let dismissOnSwipe: Bool?
     /// `radioGroup` and `segmentedButton` choices.
     let options: [PrototypeOption]?
     /// Built-in icon name of a `button`, `iconButton`, `fab` or `dialog`.

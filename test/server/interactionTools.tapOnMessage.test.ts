@@ -1,7 +1,8 @@
+import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { recordObservationRead } from "../../src/features/observe/observationReadScope";
 import { z } from "zod/v4";
 import { FakeTapStrategy } from "../fakes/FakeTapStrategy";
-import { TapOnElement } from "../../src/features/action/TapOnElement";
+import { TapOnElement, tapResolvedLayer } from "../../src/features/action/TapOnElement";
 import { DefaultElementParser } from "../../src/features/utility/ElementParser";
 import { FakeElementSelector } from "../fakes/FakeElementSelector";
 import { imeOcclusionHierarchy } from "../fixtures/observe/imeOcclusion";
@@ -281,6 +282,20 @@ describe("tapOnHandler (registered handler wiring)", () => {
       element: { bounds: { left: 0, top: 0, right: 0, bottom: 0 } },
       ...overrides,
     }) as TapOnElementResult;
+
+  test("tapOn result with internal layer metadata passes the MCP SDK schema", async () => {
+    const result = { ...fakeResult({ success: true }), [tapResolvedLayer]: "prototype" as const };
+    setTapOnElementFactory(() => ({ execute: async () => result }));
+    const response = await tapOnHandler(fakeDevice, args);
+
+    expect(CallToolResultSchema.parse(response).structuredContent).toEqual(
+      response.structuredContent,
+    );
+    expect(
+      Reflect.ownKeys(response.structuredContent).every((key) => typeof key === "string"),
+    ).toBe(true);
+    expect(result[tapResolvedLayer]).toBe("prototype");
+  });
 
   const parseMessage = (response: { content: Array<{ type: string; text: string }> }): string =>
     (JSON.parse(response.content[0].text) as { message: string }).message;

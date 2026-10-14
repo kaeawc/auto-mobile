@@ -33,7 +33,12 @@ for (const route of ["direct", "autolock", "setActiveDevice"] as const) {
           timer,
           new FakeDeviceSessionPersistence(),
           () => new FakeDbWriteBarrier(),
-          () => ({ restore }),
+          () => ({
+            restore: async () => {
+              await restore();
+              return { status: "restored" as const };
+            },
+          }),
           () => ({ restore }),
           () => ({ restore }),
         );

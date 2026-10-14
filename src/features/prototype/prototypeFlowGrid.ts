@@ -1,9 +1,11 @@
 import { PROTOTYPE_FLOW_GRID_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { record } from "./prototypeTemplate";
+import { expandPrototypeComponents } from "./prototypeComponents";
 
 /** Paths of fields requiring flow/grid support in the expanded spec, in document order. */
 export function prototypeFlowGridFields(spec: unknown): string[] {
-  return nodeFields(record(spec)?.root, "root");
+  const expanded = expandPrototypeComponents(spec);
+  return nodeFields(record(expanded.success ? expanded.spec : spec)?.root, "root");
 }
 
 function nodeFields(value: unknown, path: string): string[] {

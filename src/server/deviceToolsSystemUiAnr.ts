@@ -15,6 +15,7 @@ import type {
   isUnknownAndroidRuntimeName,
   runWithinShutdownDeadline,
 } from "./deviceTools";
+import { getHostEmulatorProcessStopper } from "../devices/hostEmulatorProcessStopper";
 import { getShutdownInitiatingExecutionId } from "./deviceToolsShutdown";
 import type {
   shouldClearIntentionalShutdownAfterFailure,
@@ -206,7 +207,12 @@ async function restartAndroidForSystemUiAnr(
   requestSignalBeforeKill: AbortSignal | undefined,
 ): Promise<SystemUiAnrRecoveryResult> {
   const { boot, bootService, args, totalDeadlineMs, signal, progress, devicePool } = context;
-  await shutdownAndroidForSystemUiAnr(context, state.shutdown, requestSignalBeforeKill);
+  await shutdownAndroidForSystemUiAnr(
+    context,
+    state.shutdown,
+    requestSignalBeforeKill,
+    state.sourceImage.name,
+  );
   state.shutdownWasConfirmed = true;
   state.replacementBoot = carryCreatedByCall(
     await bootSystemUiAnrReplacement(
@@ -358,7 +364,8 @@ async function reserveSystemUiAnrShutdown(
 async function shutdownAndroidForSystemUiAnr(
   context: SystemUiAnrRebootContext,
   shutdown: SystemUiAnrShutdownState,
-  requestSignalBeforeKill?: AbortSignal,
+  requestSignalBeforeKill: AbortSignal | undefined,
+  expectedAvdName: string,
 ): Promise<void> {
   const {
     boot: { device },
@@ -378,7 +385,18 @@ async function shutdownAndroidForSystemUiAnr(
       operation: async (shutdownSignal, timeoutMs) => {
         shutdownSignal.throwIfAborted();
         requestSignalBeforeKill?.throwIfAborted();
-        shutdown.command = deviceManager.killDevice(device, { signal: shutdownSignal, timeoutMs });
+        shutdown.command = deviceManager.killDevice(device, {
+          signal: shutdownSignal,
+          timeoutMs,
+          ...(device.platform === "android"
+            ? {
+                processStop: {
+                  stopper: getHostEmulatorProcessStopper(timer),
+                  expectedAvdName,
+                },
+              }
+            : {}),
+        });
         return await shutdown.command;
       },
       timeoutMs: undefined,

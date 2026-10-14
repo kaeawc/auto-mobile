@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { recordObservationRead } from "../../../src/features/observe/observationReadScope";
@@ -37,7 +37,7 @@ function createCommand(viewHierarchy: ViewHierarchyResult) {
   spyOn(command, "observedInteraction").mockImplementation(async (block) =>
     block(recordObservationRead(observation)),
   );
-  return { command, service, viewHierarchy };
+  return { command, service, viewHierarchy, timer };
 }
 
 function prototypeBounds(hierarchy: ViewHierarchyResult) {
@@ -134,5 +134,54 @@ describe("tapOn layer (#9305)", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("layer cannot be used with accessibilityLink or subtext");
     expect(service.getTapHistory()).toEqual([]);
+  });
+});
+
+describe("prototype layer waits for its window", () => {
+  let context: ReturnType<typeof createCommand>;
+  let hierarchy: ViewHierarchyResult;
+  beforeEach(() => {
+    context = createCommand(capturedTwoWindowHierarchy());
+    hierarchy = capturedPrototypeHierarchy();
+  });
+
+  test("a later capture supplies a tappable prototype", async () => {
+    const { command, service, viewHierarchy } = context;
+    let requests = 0;
+    spyOn(command, "refreshViewHierarchy").mockImplementation(async () => {
+      requests += 1;
+      return requests === 1 ? viewHierarchy : hierarchy;
+    });
+    const result = await command.execute({ action: "tap", text: "Settings", layer: "prototype" });
+    expect(result.success).toBe(true);
+    expect(result.searchUntil?.requestCount).toBeGreaterThanOrEqual(1);
+    expect(service.getTapHistory()[0].y).toBeGreaterThanOrEqual(prototypeBounds(hierarchy).top);
+  });
+  test("absent window polls to the deadline then preserves the refusal", async () => {
+    const { command, service, timer, viewHierarchy } = context;
+    const refresh = spyOn(command, "refreshViewHierarchy").mockResolvedValue(viewHierarchy);
+    const started = timer.now();
+    const result = await command.execute({
+      action: "tap",
+      text: "Settings",
+      layer: "prototype",
+      searchUntil: { duration: 200 },
+    });
+    expect(result.error).toBe(
+      'Failed to perform tap on element: layer "prototype" was requested, but no AutoMobile prototype is showing. Show the prototype first, or omit layer to search the whole screen.',
+    );
+    expect(refresh.mock.calls.length).toBeGreaterThan(0);
+    expect(timer.now() - started).toBeGreaterThan(0);
+    expect(timer.now() - started).toBeLessThanOrEqual(200);
+    expect(service.getTapHistory()).toEqual([]);
+  });
+  test("suspended prototype refuses with no refresh", async () => {
+    const { command, viewHierarchy } = context;
+    viewHierarchy.prototypeSuspended = true;
+    const refresh = spyOn(command, "refreshViewHierarchy");
+    const result = await command.execute({ action: "tap", text: "Settings", layer: "prototype" });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("not in front");
+    expect(refresh.mock.calls.length).toBe(0);
   });
 });

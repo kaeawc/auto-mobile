@@ -230,7 +230,7 @@ import {
   registerRecordingSessionCleanup,
 } from "../server/recordingSessionCleanup";
 import { redriveUnconfirmedCaptureTeardowns } from "../server/recordingTeardownRedrive";
-import { PlatformVideoCaptureBackend } from "../features/video/PlatformVideoCaptureBackend";
+import { HybridVideoCaptureBackend } from "../features/video/HybridVideoCaptureBackend";
 import { resolveToolSelectionBaseSessionUuid } from "../features/toolSelection/selectionSessionResolver";
 import {
   awaitInFlightMigrations,
@@ -1738,7 +1738,7 @@ export class Daemon {
       redriveRecorderTeardowns: async () => {
         try {
           const state = await initializeRecordingTeardownRedriveState();
-          const backend = new PlatformVideoCaptureBackend();
+          const backend = new HybridVideoCaptureBackend();
           return await redriveUnconfirmedCaptureTeardowns(this.sessionManager, {
             recordingRepository: state.recordingRepository,
             liveDaemonSessionIds: new Set(
@@ -1758,8 +1758,10 @@ export class Daemon {
                 ? { deviceId: device.id, name: device.name, platform: device.platform }
                 : undefined;
             },
-            forceStopOrphanedCapture: (device, descriptor) =>
-              backend.forceStopOrphanedCapture(device, descriptor),
+            forceStopOrphanedCapture: (device, descriptor, options) =>
+              options
+                ? backend.forceStopOrphanedCapture(device, descriptor, options)
+                : backend.forceStopOrphanedCapture(device, descriptor),
             now: () => this.timer.now(),
             timer: this.timer,
           });

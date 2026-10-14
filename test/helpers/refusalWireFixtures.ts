@@ -1,3 +1,4 @@
+import { PrototypeHiddenError } from "../../src/features/prototype/prototypeHidden";
 import { PrototypeSuspendedError } from "../../src/features/prototype/prototypeSuspended";
 import { OrphanRecorderActiveError } from "../../src/server/orphanRecorderRefusal";
 import { HostBootAdmissionRegistryError } from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
@@ -428,6 +429,11 @@ const BUILDERS: readonly FixtureEntry[] = [
     () => shaped(deviceAssignedToOtherSessionError(DEVICE, "holder-session", SESSION)),
   ],
   [
+    "prototype_hidden",
+    "PrototypeHiddenError via shapeToolCallError",
+    () => shaped(new PrototypeHiddenError("app_layer_window_hidden")),
+  ],
+  [
     "prototype_suspended",
     "PrototypeSuspendedError via shapeToolCallError",
     () => shaped(new PrototypeSuspendedError()),
@@ -810,6 +816,16 @@ function budgetSlotFailure(): ManagedSlotsFailure {
             lastError: "native delete keeps failing",
           },
         ],
+        charged: [
+          { platform: "android", stableDeviceId: "active-device", kind: "assigned_active" },
+          { platform: "android", stableDeviceId: "amslot-kept", kind: "deletion_stuck" },
+          {
+            platform: "android",
+            stableDeviceId: "amslot-stuck",
+            kind: "deletion_stuck",
+            uncounted: true,
+          },
+        ],
         evictionFailures: [
           { platform: "android", stableDeviceId: "amslot-kept", message: "delete failed" },
         ],
@@ -1080,6 +1096,7 @@ function terminalAtAdmission(releaseReason: SessionReleaseReason): TerminalSessi
 }
 
 const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
+  ["prototype_hidden", () => new PrototypeHiddenError("app_layer_window_hidden")],
   ["prototype_suspended", () => new PrototypeSuspendedError()],
   ["device_unhealthy", () => unhealthyRefusal()],
   ["device_unhealthy.permanent", () => unhealthyRefusal("permanent")],

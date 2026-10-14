@@ -93,7 +93,7 @@ describe("restart-hold owner starts a different AVD that boots on the reserved s
       timer,
       persistence,
       () => new FakeDbWriteBarrier(),
-      () => ({ restore: async () => {} }),
+      () => ({ restore: async () => ({ status: "restored" as const }) }),
     );
     sessions.attachDaemonSessionId("restart-start-daemon");
     sessions.stopCleanupTimer();

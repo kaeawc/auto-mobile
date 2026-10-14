@@ -179,9 +179,11 @@ describe("DevicePool autolock", () => {
     });
     let restoreCalls = 0;
     const restorer: KeepScreenAwakeRestorer = {
-      async restore(): Promise<void> {
+      async restore(): Promise<{ status: "restored" }> {
         restoreCalls++;
         await restoreFinished;
+
+        return { status: "restored" as const };
       },
     };
     const restoringManager = new SessionManager(
@@ -595,9 +597,11 @@ describe("DevicePool autolock", () => {
         new FakeDeviceSessionPersistence(),
         () => new FakeDbWriteBarrier(),
         () => ({
-          restore: async (): Promise<void> => {
+          restore: async (): Promise<{ status: "restored" }> => {
             restoreStarted();
             await restoration;
+
+            return { status: "restored" as const };
           },
         }),
       );
@@ -659,9 +663,11 @@ describe("DevicePool autolock", () => {
         new FakeDeviceSessionPersistence(),
         () => new FakeDbWriteBarrier(),
         () => ({
-          restore: async (): Promise<void> => {
+          restore: async (): Promise<{ status: "restored" }> => {
             restoreStarted();
             await restoration;
+
+            return { status: "restored" as const };
           },
         }),
       );

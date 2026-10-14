@@ -53,7 +53,12 @@ import { logger } from "../utils/logger";
 import { readEnvPositiveInteger } from "../utils/envNumbers";
 import { isDeviceLossCancellationReason } from "../utils/deviceLossCancellationReason";
 import { BootedDevice, Platform } from "../models";
-import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
+import {
+  KeepScreenAwakeManager,
+  KeepScreenAwakeState,
+  type KeepScreenAwakeRestoreOutcome,
+  type KeepAwakeRestoreReport,
+} from "../utils/KeepScreenAwakeManager";
 import {
   DeviceSessionNotActiveError,
   DeviceSessionRepository,
@@ -185,7 +190,7 @@ export class SessionActivityPersistenceError extends ActionableError {
  * payload to `restore` — the behavioral half of the #2973 typed-slot round trip.
  */
 export interface KeepScreenAwakeRestorer {
-  restore(state: KeepScreenAwakeState): Promise<void>;
+  restore(state: KeepScreenAwakeState): Promise<KeepScreenAwakeRestoreOutcome>;
 }
 
 /** Original simulator enrollment restored when a session releases its device. */
@@ -200,6 +205,17 @@ interface ReleaseTeardownStage {
   setup?: boolean;
   pending: Promise<void> | null;
   abandon?: () => void;
+}
+
+/** Preserve typed restore evidence through the existing bounded retry path. */
+class KeepAwakeRestoreError extends Error {
+  constructor(
+    message: string,
+    readonly report: KeepAwakeRestoreReport,
+  ) {
+    super(message);
+    this.name = "KeepAwakeRestoreError";
+  }
 }
 
 /** Keep-awake restore resolved before any await, like the biometric target below. */
@@ -1832,6 +1848,7 @@ export class SessionManager {
       deviceId: string;
     }
   >();
+  private readonly keepAwakeRestoreReports = new Map<string, KeepAwakeRestoreReport>();
   private readonly terminalReleaseSnapshots: Map<string, SessionReleaseSnapshot> = new Map();
   private readonly pendingNonTerminalReleaseSnapshots: Map<string, SessionReleaseSnapshot> =
     new Map();
@@ -3552,6 +3569,7 @@ export class SessionManager {
       return await this.withinCreateDeadline(sessionId, assignedDevice, pendingCreation.promise);
     }
 
+    this.keepAwakeRestoreReports.delete(sessionId);
     const now = this.sessionNow();
     const persistedRecovery = this.pendingPersistedRecoveries.get(sessionId);
     const creatorSource = this.creatorSourceForCreation(sessionId, persistenceSource);
@@ -9415,6 +9433,21 @@ export class SessionManager {
     };
   }
 
+  getKeepAwakeRestoreReport(sessionId: string): KeepAwakeRestoreReport | undefined {
+    return this.keepAwakeRestoreReports.get(sessionId);
+  }
+
+  private recordKeepAwakeRestoreReport(sessionId: string, report: KeepAwakeRestoreReport): void {
+    this.keepAwakeRestoreReports.delete(sessionId);
+    this.keepAwakeRestoreReports.set(sessionId, report);
+    if (this.keepAwakeRestoreReports.size > 64) {
+      const oldest = this.keepAwakeRestoreReports.keys().next().value;
+      if (oldest !== undefined) {
+        this.keepAwakeRestoreReports.delete(oldest);
+      }
+    }
+  }
+
   private async restoreKeepScreenAwakeTarget(target: KeepScreenAwakeRestoreTarget): Promise<void> {
     if (!this.restoreIncarnationIsCurrent(target)) {
       return;
@@ -9429,7 +9462,33 @@ export class SessionManager {
       (_signal, identitySignal) =>
         this.keepScreenAwakeRestorerFactory(device)
           .restore(target.state)
-          .then(() => identitySignal.throwIfAborted()),
+          .then((outcome) => {
+            identitySignal.throwIfAborted();
+            if (outcome.status === "failed") {
+              const error = new KeepAwakeRestoreError(
+                outcome.failures.map(({ setting, error }) => `${setting}: ${error}`).join("; ") +
+                  (outcome.baselineSettings?.length
+                    ? `; baseline applied: ${outcome.baselineSettings.map(({ setting, value }) => `${setting}=${value}`).join(", ")}`
+                    : ""),
+                {
+                  status: "failed",
+                  settings: [...outcome.failures, ...(outcome.baselineSettings ?? [])],
+                },
+              );
+              this.recordKeepAwakeRestoreReport(target.sessionId, error.report);
+              throw error;
+            }
+            this.keepAwakeRestoreReports.delete(target.sessionId);
+            if (outcome.status === "restored_to_baseline") {
+              this.recordKeepAwakeRestoreReport(target.sessionId, {
+                status: outcome.status,
+                settings: [...outcome.settings],
+              });
+              logger.warn(
+                `Keep-awake baseline applied for session ${target.sessionId}, device ${target.deviceId}: ${outcome.settings.map(({ setting, value }) => `${setting}=${value}`).join(", ")}`,
+              );
+            }
+          }),
       target.restoreGeneration,
     );
     this.clearRestoreHealth(target, "keep-screen-awake");
@@ -11803,7 +11862,11 @@ export class SessionManager {
       return;
     }
     const now = this.sessionNow();
+    const previousHeartbeat = session.lastHeartbeat;
     session.lastHeartbeat = now;
+    logger.debug(
+      `Heartbeat accepted for session ${sessionId}; previous heartbeat age=${Math.max(0, now - previousHeartbeat)}ms`,
+    );
     // Only a heartbeat advances the owner lease; both the socket and HTTP routes admit one only
     // from the owner (or a tokenless client on a session no proxy owns).
     session.lastOwnerHeartbeat = now;
@@ -12500,10 +12563,11 @@ export class SessionManager {
    * `gapBeganAt`, when given, narrows full lease forgiveness (#11080) to owners live at the
    * gap's start (`ownerLeaseLiveAt`). A live owner is forgiven in full however long the gap.
    * An owned session whose socket was connected at that instant also receives awake-stall credit
-   * (#11992), capped in total between raw owner heartbeats at MAX_CREDIBLE_DAEMON_STALL_MS (30 s).
+   * (#11992), capped in total between raw owner heartbeats at 600 s if still connected at resume,
+   * otherwise MAX_CREDIBLE_DAEMON_STALL_MS (30 s).
    * Sleep contributes no credit to this extra rule. Without another owner heartbeat, even an
    * always-open socket is released once its raw heartbeat age exceeds heartbeatTimeoutMs +
-   * SUSPECT_GRACE_MS + MAX_CREDIBLE_DAEMON_STALL_MS, plus one scan. With no late tick, the existing
+   * SUSPECT_GRACE_MS + that cap, plus one scan. With no late tick, the existing
    * lease + grace + one scan bound is unchanged (10 s at defaults). Returns sessions considered.
    *
    * Observer registrations are excused the same gap under the same rule (#11554): it is handed

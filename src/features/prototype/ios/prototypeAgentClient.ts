@@ -46,6 +46,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 /** Request types the host may send; the agent lists the ones it handles in `capabilities`. */
 export type PrototypeAgentRequestType =
   | "show_prototype"
+  | "patch_prototype"
   | "dismiss_prototype"
   | "put_prototype_asset"
   | "remove_prototype_asset"

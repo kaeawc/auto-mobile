@@ -55,6 +55,8 @@ enum PrototypeStateValidator {
     private static func collect(_ node: PrototypeNode, nodes: inout [PrototypeNode], actions: inout [PrototypeAction]) {
         nodes.append(node)
         actions += node.onTap ?? []
+        actions += node.onLongPress ?? []
+        actions += node.onDoubleTap ?? []
         actions += node.navigationIcon?.onTap ?? []
         actions += (node.actions ?? []).flatMap { $0.onTap ?? [] }
         actions += node.confirm?.onTap ?? []

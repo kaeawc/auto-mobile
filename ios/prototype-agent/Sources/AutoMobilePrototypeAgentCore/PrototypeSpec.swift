@@ -532,6 +532,8 @@ final class PrototypeNode: Decodable {
     let id: String?
     let testTag: String?
     let onTap: [PrototypeAction]?
+    let onLongPress: [PrototypeAction]?
+    let onDoubleTap: [PrototypeAction]?
     let style: Style?
     let styleWhen: [StyleWhen]?
     let visibleWhen: Condition?
@@ -598,6 +600,11 @@ final class PrototypeNode: Decodable {
     let supporting: String?
     let leadingIcon: String?
     let trailing: PrototypeListItemTrailing?
+
+    /// Gesture-only nodes have the same touch target and accessibility semantics as tap nodes.
+    var isInteractive: Bool {
+        onTap != nil || onLongPress != nil || onDoubleTap != nil
+    }
 
     /// Android's `resolvePrototypeStyle`: every `styleWhen` entry whose condition holds is merged over
     /// `style` in authored order, so a later matching entry wins per property. Nil when the node has

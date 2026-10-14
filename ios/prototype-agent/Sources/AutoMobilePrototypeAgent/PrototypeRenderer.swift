@@ -422,7 +422,7 @@ struct NodeView: View {
         return node.accessibilityLabel(
             state: model.state,
             pager: pagerPosition,
-            tappable: node.onTap != nil
+            tappable: node.isInteractive
         )
     }
 
@@ -715,7 +715,13 @@ struct NodeView: View {
             )
             .offset(x: style?.offset?.x ?? 0, y: style?.offset?.y ?? 0)
             .opacity(style?.alpha ?? 1)
-            .modifier(TapModifier(actions: handlesOwnTap ? nil : node.onTap, model: model, style: style))
+            .modifier(TapModifier(
+                actions: handlesOwnTap ? nil : node.onTap,
+                longPress: handlesOwnTap ? nil : node.onLongPress,
+                doubleTap: handlesOwnTap ? nil : node.onDoubleTap,
+                model: model,
+                style: style
+            ))
             .modifier(IdentifierModifier(
                 identifier: node.testTag ?? node.id,
                 label: accessibilityLabelOverride,
@@ -726,7 +732,7 @@ struct NodeView: View {
     /// Containers get their own accessibility element so a testTag names the container instead of
     /// being copied onto every descendant. A tappable container reads as one button.
     private var grouping: AccessibilityGrouping {
-        prototypeAccessibilityGrouping(type: node.type, tappable: node.onTap != nil)
+        prototypeAccessibilityGrouping(type: node.type, tappable: node.isInteractive)
     }
 
     private var contentAlignment: Alignment {
@@ -796,6 +802,8 @@ private struct SizeModifier: ViewModifier {
 @MainActor
 private struct TapModifier: ViewModifier {
     let actions: [PrototypeAction]?
+    let longPress: [PrototypeAction]?
+    let doubleTap: [PrototypeAction]?
     let model: PrototypeModel
     let style: Style?
 
@@ -803,24 +811,53 @@ private struct TapModifier: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
-        if let actions {
+        if actions != nil || longPress != nil || doubleTap != nil {
             let scale = style?.scale(pressed: pressed) ?? 1
             // Spec `motion: "none"` snaps like Reduce Motion (#10885).
             let spring = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
                 .pressScaleDuration.map { Animation.spring(duration: $0) }
             // Whole padded frame is tappable, with a 44 pt minimum target (Android bug #10435).
+            tapped(
+                content
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+                    // Scales the drawn node only; motion off snaps instead of springing.
+                    .scaleEffect(scale)
+                    .animation(spring, value: scale)
+            )
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0, maximumDistance: 10)
+                    .updating($pressed) { _, state, _ in state = true }
+            )
+            .accessibilityAddTraits(.isButton)
+        } else {
             content
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
-                // Scales the drawn node only; motion off snaps instead of springing.
-                .scaleEffect(scale)
-                .animation(spring, value: scale)
-                .onTapGesture { model.run(actions) }
-                .simultaneousGesture(
-                    LongPressGesture(minimumDuration: 0, maximumDistance: 10)
-                        .updating($pressed) { _, state, _ in state = true }
-                )
-                .accessibilityAddTraits(.isButton)
+        }
+    }
+
+    @ViewBuilder
+    private func tapped(_ content: some View) -> some View {
+        if let actions {
+            // When present, double tap is installed first; single tap waits for the system double-tap window.
+            doubleTapped(content).onTapGesture { model.run(actions) }
+        } else {
+            doubleTapped(content)
+        }
+    }
+
+    @ViewBuilder
+    private func doubleTapped(_ content: some View) -> some View {
+        if let doubleTap {
+            longPressed(content).onTapGesture(count: 2) { model.run(doubleTap) }
+        } else {
+            longPressed(content)
+        }
+    }
+
+    @ViewBuilder
+    private func longPressed(_ content: some View) -> some View {
+        if let longPress {
+            content.onLongPressGesture { model.run(longPress) }
         } else {
             content
         }

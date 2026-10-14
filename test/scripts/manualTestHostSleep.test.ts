@@ -50,12 +50,18 @@ test("detector is unavailable when monotonic time includes sleep or is absent", 
 
 test("pmset parser reads offset timestamps and only sleep or wake categories", () => {
   const events = parsePmsetSleepWake(`${capture}\nAssertions\nWake Requests`);
-  expect(events).toHaveLength(20);
-  expect(events[0]).toEqual({ atMs: ms("2026-10-13T15:38:46-04:00"), kind: "wake" });
+  // The fixture has 16 Sleep/Wake/DarkWake category rows; its 8 Wake Requests rows are excluded.
+  expect(events).toHaveLength(16);
+  expect(events[0]).toEqual({ atMs: ms("2026-10-13T16:37:48-04:00"), kind: "wake" });
   expect(events.at(-1)).toEqual({ atMs: ms("2026-10-14T07:20:24-04:00"), kind: "wake" });
   expect(parsePmsetSleepWake("bad timestamp Sleep\n2026-10-14 06:09:22 -0400 Assertions")).toEqual(
     [],
   );
+  expect(
+    parsePmsetSleepWake(
+      "2026-10-14 06:09:22 -0400 Wake Requests\n2026-10-14 06:09:23 -0400 WakeTime\n2026-10-14 06:09:24 -0400 WakeDetails",
+    ),
+  ).toEqual([]);
 });
 
 test("pmset events pair and clip sleep intervals to the requested window", () => {
@@ -79,7 +85,45 @@ test("pmset events pair and clip sleep intervals to the requested window", () =>
   });
 });
 
-test("rows overlapping a sleep interval are copied and marked, including boundaries", () => {
+test("Wake Requests does not end the fixture sleep interval", () => {
+  const intervals = sleepIntervalsFromEvents(
+    parsePmsetSleepWake(capture),
+    ms("2026-10-14T06:00:00-04:00"),
+    ms("2026-10-14T07:00:00-04:00"),
+  );
+  expect(intervals).toContainEqual({
+    startMs: ms("2026-10-14T06:09:22-04:00"),
+    endMs: ms("2026-10-14T06:26:02-04:00"),
+    source: "pmset",
+  });
+  expect(
+    markRowsHostSlept(
+      [
+        {
+          id: "asleep",
+          startedAt: "2026-10-14T06:15:00-04:00",
+          endedAt: "2026-10-14T06:15:00-04:00",
+        },
+      ],
+      intervals,
+    )[0]?.invalid,
+  ).toBe("host-slept");
+});
+
+test("zero-length sleep intervals are dropped after clipping", () => {
+  expect(
+    sleepIntervalsFromEvents(
+      [
+        { atMs: 10, kind: "sleep" },
+        { atMs: 20, kind: "wake" },
+      ],
+      20,
+      30,
+    ),
+  ).toEqual([]);
+});
+
+test("rows overlapping a sleep interval are copied and marked with exclusive boundaries", () => {
   const rows = [
     { id: "overlap", startedAt: "1970-01-01T00:00:05Z", endedAt: "1970-01-01T00:00:11Z" },
     { id: "before", startedAt: "1970-01-01T00:00:00Z", endedAt: "1970-01-01T00:00:09Z" },
@@ -87,19 +131,25 @@ test("rows overlapping a sleep interval are copied and marked, including boundar
     { id: "invalid-time", startedAt: "bad", endedAt: "bad" },
   ];
   const marked = markRowsHostSlept(rows, [{ startMs: 10000, endMs: 20000, source: "clock" }]);
-  expect(marked.map((row) => row.invalid)).toEqual([
-    "host-slept",
-    undefined,
-    "host-slept",
-    undefined,
-  ]);
+  expect(marked.map((row) => row.invalid)).toEqual(["host-slept", undefined, undefined, undefined]);
   expect(marked[0]).not.toBe(rows[0]);
   expect(summarizeHostSleepRows(marked)).toEqual([
-    "host-slept: 2 evidence row(s) invalid",
+    "host-slept: 1 evidence row(s) invalid",
     "  - overlap",
-    "  - boundary",
   ]);
   expect(summarizeHostSleepRows(rows)).toEqual([]);
+});
+
+test("a sleep ending exactly when a row starts does not mark it", () => {
+  const rows = [
+    { id: "after", startedAt: "1970-01-01T00:00:20Z", endedAt: "1970-01-01T00:00:21Z" },
+    { id: "point-inside", startedAt: "1970-01-01T00:00:15Z", endedAt: "1970-01-01T00:00:15Z" },
+  ];
+  expect(
+    markRowsHostSlept(rows, [{ startMs: 10000, endMs: 20000, source: "clock" }]).map(
+      (row) => row.invalid,
+    ),
+  ).toEqual([undefined, "host-slept"]);
 });
 
 test("pmset reader reports parsed intervals, exit failures, and thrown errors", async () => {

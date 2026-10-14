@@ -52,7 +52,9 @@ export function parsePmsetSleepWake(text: string): SleepWakeEvent[] {
   const events: SleepWakeEvent[] = [];
   for (const line of text.split(/\r?\n/)) {
     const match =
-      /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) ([+-]\d{4})\s+(Sleep|Wake|DarkWake)\b/.exec(line);
+      /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) ([+-]\d{4})\s+(Sleep|DarkWake|Wake)(?!\s+Requests)\s/.exec(
+        line,
+      );
     if (!match) {
       continue;
     }
@@ -82,6 +84,7 @@ export function sleepIntervalsFromEvents(
     }
   }
   if (asleepAt !== undefined) {
+    // A truncated pmset log can make this clipped trailing interval over-report sleep.
     addClippedInterval(intervals, asleepAt, windowEndMs, windowStartMs, windowEndMs);
   }
   return intervals;
@@ -96,7 +99,7 @@ function addClippedInterval(
 ): void {
   const start = Math.max(startMs, windowStartMs);
   const end = Math.min(endMs, windowEndMs);
-  if (start <= end && end >= windowStartMs && start <= windowEndMs) {
+  if (end > start && end >= windowStartMs && start <= windowEndMs) {
     intervals.push({ startMs: start, endMs: end, source: "pmset" });
   }
 }
@@ -111,7 +114,7 @@ export function markRowsHostSlept<T extends { startedAt: string; endedAt: string
     if (
       !Number.isFinite(start) ||
       !Number.isFinite(end) ||
-      !intervals.some((interval) => start <= interval.endMs && end >= interval.startMs)
+      !intervals.some((interval) => start < interval.endMs && end > interval.startMs)
     ) {
       return { ...row };
     }

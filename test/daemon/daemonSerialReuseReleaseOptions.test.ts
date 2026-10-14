@@ -45,6 +45,7 @@ async function fixture() {
     keepScreenAwakeRestorerFactory: (device: BootedDevice) => ({
       restore: async () => {
         restores.push(device.deviceId);
+        return { status: "restored" as const };
       },
     }),
   });

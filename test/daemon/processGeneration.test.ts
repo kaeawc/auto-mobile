@@ -9,6 +9,8 @@ import {
   darwinProcessGenerationToken,
   readDarwinProcessGenerationToken,
 } from "../../src/daemon/processGeneration";
+import * as processGeneration from "../../src/daemon/processGeneration";
+import { DARWIN_SYSCTL_START_FIXTURES } from "./darwinSysctlStartFixtures";
 import { FakeTimer } from "../fakes/FakeTimer";
 import {
   CAPTURED_START_EPOCH_MS,
@@ -329,5 +331,133 @@ describe("current daemon process generation tokens", () => {
     expect(provider()).toBeUndefined();
     expect(provider()).toBeUndefined();
     expect(reads).toBe(1);
+  });
+});
+
+describe("Darwin sysctl process starts", () => {
+  const {
+    formatDarwinLstartUtc,
+    decodeDarwinKinfoProcStartSeconds,
+    createDarwinProcessGenerationTokenReader,
+    DARWIN_PS_LSTART_ENV,
+  } = processGeneration;
+  const samples = DARWIN_SYSCTL_START_FIXTURES.samples;
+
+  test.each(samples)("formats captured epoch $startSeconds as canonical ps lstart", (sample) => {
+    expect(formatDarwinLstartUtc(sample.startSeconds)).toBe(
+      sample.psLstartUtc.trim().replace(/\s+/g, " "),
+    );
+  });
+
+  test.each([0, -1, NaN, Infinity, 1.5, Number.MAX_SAFE_INTEGER])(
+    "rejects invalid epoch %s",
+    (seconds) => {
+      expect(formatDarwinLstartUtc(seconds)).toBeUndefined();
+    },
+  );
+
+  test.each(samples)("decodes captured kinfo_proc head $kinfoProcHead16Hex", (sample) => {
+    const buffer = new Uint8Array(648);
+    buffer.set(Buffer.from(sample.kinfoProcHead16Hex, "hex"));
+    expect(decodeDarwinKinfoProcStartSeconds(buffer, sample.kinfoProcLength)).toBe(
+      sample.startSeconds,
+    );
+    // A view may start inside its backing buffer.
+    const backing = new Uint8Array(660);
+    backing.set(buffer, 12);
+    expect(decodeDarwinKinfoProcStartSeconds(backing.subarray(12), 648)).toBe(sample.startSeconds);
+  });
+
+  test("rejects short, absent, negative and unsafe kinfo_proc starts", () => {
+    const buffer = new Uint8Array(648);
+    const view = new DataView(buffer.buffer);
+    view.setBigInt64(0, 1790840741n, true);
+    expect(decodeDarwinKinfoProcStartSeconds(buffer, 0)).toBeUndefined();
+    expect(decodeDarwinKinfoProcStartSeconds(buffer, 8)).toBeUndefined();
+    expect(decodeDarwinKinfoProcStartSeconds(buffer.subarray(0, 8), 648)).toBeUndefined();
+    for (const seconds of [0n, -1n, 9007199254740992n]) {
+      view.setBigInt64(0, seconds, true);
+      expect(decodeDarwinKinfoProcStartSeconds(buffer, 648)).toBeUndefined();
+    }
+  });
+
+  test.each(samples)(
+    "sysctl and explicit ps tokens are byte-identical for $startSeconds",
+    (sample) => {
+      const startPids: number[] = [];
+      let psCalls = 0;
+      const reader = createDarwinProcessGenerationTokenReader({
+        startReader: {
+          readStartSeconds: (pid) => {
+            startPids.push(pid);
+            return sample.startSeconds;
+          },
+        },
+        captureDisabled: () => false,
+        runCommand: () => {
+          psCalls++;
+          return "unexpected";
+        },
+      });
+      const expected = darwinProcessGenerationToken(sample.psLstartUtc);
+      expect(reader(42)).toBe(expected);
+      expect(startPids).toEqual([42]);
+      expect(psCalls).toBe(0);
+      expect(
+        readDarwinProcessGenerationToken(42, () => {
+          psCalls++;
+          return sample.psLstartUtc;
+        }),
+      ).toBe(expected);
+      expect(psCalls).toBe(1);
+    },
+  );
+
+  test.each(["undefined", "throws", "invalid", "disabled"])(
+    "uses pinned ps fallback when start is %s",
+    (kind) => {
+      let startCalls = 0;
+      let psCalls = 0;
+      const sample = samples[0];
+      const reader = createDarwinProcessGenerationTokenReader({
+        startReader: {
+          readStartSeconds: () => {
+            startCalls++;
+            if (kind === "throws") {
+              throw new Error("sysctl unavailable");
+            }
+            return kind === "invalid" ? 1.5 : undefined;
+          },
+        },
+        captureDisabled: () => kind === "disabled",
+        runCommand: (command, args, options) => {
+          psCalls++;
+          expect(command).toBe("ps");
+          expect(args).toEqual(["-p", "42", "-o", "lstart="]);
+          expect(options.timeout).toBe(1000);
+          expect(options.env).toMatchObject(DARWIN_PS_LSTART_ENV);
+          return sample.psLstartUtc;
+        },
+      });
+      expect(reader(42)).toBe(darwinProcessGenerationToken(sample.psLstartUtc));
+      expect(startCalls).toBe(kind === "disabled" ? 0 : 1);
+      expect(psCalls).toBe(1);
+    },
+  );
+
+  test("an unavailable ps fallback retains the optional-token contract", () => {
+    const reader = createDarwinProcessGenerationTokenReader({
+      startReader: { readStartSeconds: () => undefined },
+      captureDisabled: () => false,
+      runCommand: () => {
+        throw new Error("ps unavailable");
+      },
+    });
+    expect(reader(42)).toBeUndefined();
+  });
+
+  test("cheap reads are available on Linux and unavailable on unsupported platforms", () => {
+    expect(processGeneration.processGenerationReadIsCheap("linux")).toBe(true);
+    expect(processGeneration.processGenerationReadIsCheap("win32")).toBe(false);
   });
 });

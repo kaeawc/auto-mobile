@@ -7045,15 +7045,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
    */
   private fun performInstalledPackages(requestId: String?, includeSystem: Boolean, userId: Int?) {
     val startTime = System.currentTimeMillis()
-    // Why: android.os.UserHandle.myUserId() is technically @hide but stable; fall back
-    // to userSerialNumber via UserManager if reflection ever breaks.
-    val currentUserId =
-      try {
-        val cls = Class.forName("android.os.UserHandle")
-        (cls.getDeclaredMethod("myUserId").invoke(null) as Int)
-      } catch (e: Exception) {
-        0
-      }
+    val currentUserId = CurrentUserId.current()
     if (userId != null && userId != currentUserId) {
       kotlinx.coroutines.runBlocking {
         broadcastInstalledPackagesResult(

@@ -228,6 +228,7 @@ for module_path in "${modules[@]+"${modules[@]}"}"; do
   if [[ "${module_path}" == ":build-logic" ]]; then
     # build-logic is a kotlin-dsl-only build with no detekt plugin applied.
     compile_tasks+=("${module_path}:compileKotlin")
+    test_tasks+=("${module_path}:test")
   else
     if [[ "${detekt_config_changed}" == "false" ]]; then
       detekt_tasks+=("${module_path}:detekt")

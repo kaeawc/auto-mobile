@@ -25,6 +25,10 @@ import { FakeWebSocket } from "../../../fakes/FakeWebSocket";
 import { FakeSavedPrototypeMirror } from "../../../fakes/FakeSavedPrototypeMirror";
 import type { SavedPrototypeMirror } from "../../../../src/features/prototype/savedPrototypeMirror";
 
+import { FilePrototypeAssetCache } from "../../../../src/features/prototype/prototypeAssetCache";
+import { FakeMirrorFileSystem } from "../../../fakes/FakeMirrorFileSystem";
+import { FakePrototypeAssetCache } from "../../../fakes/FakePrototypeAssetCache";
+
 const spec = {
   id: "panel",
   window: { placement: { type: "fullscreen" as const }, opacity: 90 },
@@ -50,6 +54,7 @@ async function harness(
     "dismiss_prototype",
   ],
   mirror?: SavedPrototypeMirror,
+  cache: FakePrototypeAssetCache | undefined = new FakePrototypeAssetCache(),
 ) {
   PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
   const timer = new FakeTimer();
@@ -66,6 +71,7 @@ async function harness(
   client["extraDelegateContextFields"] = () => ({
     ...extraContext(),
     savedPrototypeMirror: mirror ? { serial: "prototype-test", mirror } : undefined,
+    prototypeAssetCache: cache ? { serial: "prototype-test", cache } : undefined,
   });
   await Promise.resolve();
   client["ws"] = socket as unknown as WebSocket;
@@ -95,7 +101,7 @@ afterEach(async () => {
 });
 
 describe("saved prototype host recorder", () => {
-  async function recorder(mirror?: SavedPrototypeMirror) {
+  async function recorder(mirror?: SavedPrototypeMirror, cache = new FakePrototypeAssetCache()) {
     const { client, socket } = await harness(
       [
         "full_command_set_v1",
@@ -107,6 +113,7 @@ describe("saved prototype host recorder", () => {
         "remove_prototype_asset",
       ],
       mirror,
+      cache,
     );
     const delegate = new CtrlProxyPrototypes(client["createDelegateContext"]());
     let reply: PrototypeResult = { success: true, error: null };
@@ -128,6 +135,223 @@ describe("saved prototype host recorder", () => {
     };
   }
   const asset = { id: "photo", mimeType: "image/png" as const, bytes: new Uint8Array([1, 2]) };
+  test.each(["get", "ids"])("cache %s failure still records the mirror", async (operation) => {
+    const mirror = new FakeSavedPrototypeMirror();
+    const cache = new FakePrototypeAssetCache();
+    const { delegate, send, reply } = await recorder(mirror, cache);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await cache.put("prototype-test", asset);
+      const error = new Error("cache read failed");
+      if (operation === "get") {
+        cache.getErrors.set("missing", error);
+      } else {
+        cache.idsError = error;
+      }
+      reply(true, "saved-id");
+      await delegate.requestSavePrototype({
+        spec: {
+          ...spec,
+          root: {
+            type: "tabBar",
+            stateKey: "tab",
+            items: [{ label: "Photo", image: { light: "photo", dark: "missing" } }],
+          },
+          state: { tab: 0 },
+        },
+        label: "Panel",
+      });
+      expect((await mirror.list("prototype-test"))[0].assets).toEqual([asset, { id: "missing" }]);
+      expect(
+        warn.mock.calls.some(
+          ([message, cause]) =>
+            String(message).includes("saved-id") &&
+            cause === error &&
+            (operation === "ids" || String(message).includes("missing")),
+        ),
+      ).toBe(true);
+    } finally {
+      send.mockRestore();
+      warn.mockRestore();
+    }
+  });
+  test("throwing cache root still records explicit assets as missing", async () => {
+    const mirror = new FakeSavedPrototypeMirror();
+    const { client, send, reply } = await recorder(mirror);
+    const context = client["createDelegateContext"]();
+    const error = new Error("root unavailable");
+    context.prototypeAssetCache = {
+      serial: "prototype-test",
+      cache: new FilePrototypeAssetCache(
+        new FakeMirrorFileSystem(),
+        () => {
+          throw error;
+        },
+        () => 0,
+      ),
+    };
+    const delegate = new CtrlProxyPrototypes(context);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      reply(true, "saved-id");
+      await delegate.requestSavePrototype({
+        spec: { ...spec, root: { type: "image", asset: "photo" } },
+        label: "Panel",
+      });
+      expect((await mirror.list("prototype-test"))[0].assets).toEqual([{ id: "photo" }]);
+      expect(
+        warn.mock.calls.filter(
+          ([message, cause]) => String(message).includes("saved-id") && cause === error,
+        ),
+      ).toHaveLength(2);
+    } finally {
+      send.mockRestore();
+      warn.mockRestore();
+    }
+  });
+  test.each([false, true])(
+    "arbitrary state and action payload keys only match cached ids (%p)",
+    async (cached) => {
+      const mirror = new FakeSavedPrototypeMirror();
+      const cache = new FakePrototypeAssetCache();
+      const { delegate, send } = await recorder(mirror, cache);
+      try {
+        if (cached) {
+          await cache.put("prototype-test", asset);
+        }
+        await delegate.requestSavePrototype({
+          spec: {
+            ...spec,
+            state: { image: "https://state", asset: "photo" },
+            root: {
+              type: "button",
+              label: "Send",
+              onTap: [
+                {
+                  type: "emit",
+                  name: "send",
+                  payload: {
+                    image: "https://payload",
+                    nested: [{ asset: "payload-asset", image: "photo" }],
+                  },
+                },
+              ],
+            },
+          },
+          label: "Panel",
+        });
+        expect((await mirror.list("prototype-test"))[0].assets).toEqual(cached ? [asset] : []);
+      } finally {
+        send.mockRestore();
+      }
+    },
+  );
+  test.each([
+    { type: "image" as const, asset: "photo" },
+    { type: "tabBar" as const, stateKey: "tab", items: [{ label: "Photo", image: "photo" }] },
+    {
+      type: "tabBar" as const,
+      stateKey: "tab",
+      items: [{ label: "Photo", image: { light: "photo", dark: "dark" } }],
+    },
+  ])("new delegate retains cached references after restart: %j", async (root) => {
+    const mirror = new FakeSavedPrototypeMirror();
+    const cache = new FakePrototypeAssetCache();
+    const first = await recorder(mirror, cache);
+    const second = await recorder(mirror, cache);
+    try {
+      await first.delegate.requestPutPrototypeAsset(asset);
+      await first.delegate.requestPutPrototypeAsset({ ...asset, id: "dark" });
+      await second.delegate.requestSavePrototype({
+        spec: { ...spec, state: { tab: 0 }, root },
+        label: "Panel",
+      });
+      const assets = (await mirror.list("prototype-test"))[0].assets;
+      expect(assets).toContainEqual(asset);
+      if (typeof root === "object" && "items" in root && typeof root.items[0].image === "object") {
+        expect(assets).toContainEqual({ ...asset, id: "dark" });
+      }
+    } finally {
+      first.send.mockRestore();
+      second.send.mockRestore();
+    }
+  });
+  test("unknown image is recorded missing and warned with saved id", async () => {
+    const mirror = new FakeSavedPrototypeMirror();
+    const { delegate, send, reply } = await recorder(mirror);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      reply(true, "saved-id");
+      await delegate.requestSavePrototype({
+        spec: {
+          ...spec,
+          state: { tab: 0 },
+          root: { type: "tabBar", stateKey: "tab", items: [{ label: "Photo", image: "unknown" }] },
+        },
+        label: "Panel",
+      });
+      expect((await mirror.list("prototype-test"))[0].assets).toEqual([{ id: "unknown" }]);
+      expect(
+        warn.mock.calls.some(
+          ([message]) =>
+            String(message).includes("saved-id") && String(message).includes("unknown"),
+        ),
+      ).toBe(true);
+    } finally {
+      send.mockRestore();
+      warn.mockRestore();
+    }
+  });
+  test("absent cache records all explicit references as missing after upload", async () => {
+    const mirror = new FakeSavedPrototypeMirror();
+    const { delegate, client, send } = await recorder(mirror);
+    const context = client["createDelegateContext"]();
+    delete context.prototypeAssetCache;
+    const withoutCache = new CtrlProxyPrototypes(context);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await delegate.requestPutPrototypeAsset(asset);
+      await withoutCache.requestSavePrototype({
+        spec: {
+          ...spec,
+          state: { tab: 0 },
+          root: {
+            type: "tabBar",
+            stateKey: "tab",
+            items: [{ label: "Photo", image: { light: "photo", dark: "dark" } }],
+          },
+        },
+        label: "Panel",
+        icon: "icon",
+      });
+      expect((await mirror.list("prototype-test"))[0].assets).toEqual([
+        { id: "photo" },
+        { id: "dark" },
+        { id: "icon" },
+      ]);
+      expect(warn).toHaveBeenCalledTimes(3);
+    } finally {
+      send.mockRestore();
+      warn.mockRestore();
+    }
+  });
+  test("successful removal deletes cache and failed cache put preserves upload success", async () => {
+    const cache = new FakePrototypeAssetCache();
+    const { delegate, send } = await recorder(undefined, cache);
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      await delegate.requestPutPrototypeAsset(asset);
+      expect(await cache.get("prototype-test", "photo")).toEqual(asset);
+      await delegate.requestRemovePrototypeAsset("photo");
+      expect(await cache.get("prototype-test", "photo")).toBeUndefined();
+      cache.putError = new Error("cache unavailable");
+      expect((await delegate.requestPutPrototypeAsset(asset)).success).toBe(true);
+      expect(warn.mock.calls.some((call) => call[1] === cache.putError)).toBe(true);
+    } finally {
+      send.mockRestore();
+      warn.mockRestore();
+    }
+  });
   test("successful save mirrors tracked strings anywhere in spec plus icon; deletion removes", async () => {
     const mirror = new FakeSavedPrototypeMirror();
     const { delegate, send } = await recorder(mirror);

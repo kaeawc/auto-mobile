@@ -222,6 +222,19 @@ describe("uploadPrototypeAssets", () => {
     expect(outcome.error).not.toContain("was not shown");
   });
 
+  test("a failed save upload says the prototype was not saved", async () => {
+    const client = newClient();
+    client.setPrototypeAssetResult({
+      success: false,
+      error: "store full",
+      dispatched: true,
+      acknowledged: true,
+    });
+    const outcome = await uploadPrototypeAssets(client, assets("a"), { action: "save" });
+    expect(outcome.error).toContain("The prototype was not saved.");
+    expect(outcome.error).not.toContain("The new spec was not sent");
+  });
+
   test("a device refusal stops the run and names the assets already stored", async () => {
     const client = newClient();
     let calls = 0;

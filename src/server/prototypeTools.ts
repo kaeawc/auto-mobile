@@ -1253,7 +1253,7 @@ async function stageAssets(
   const outcome = await uploadPrototypeAssets(
     prototypeAssetPutClient(target.transport),
     prepared.assets,
-    { signal, action: "show" },
+    { signal, action: args.action === "save" ? "save" : "show" },
   );
   return {
     uploaded: outcome.uploaded,
@@ -1263,13 +1263,7 @@ async function stageAssets(
       : {
           failure: {
             success: false,
-            error:
-              args.action === "save"
-                ? outcome.error?.replace(
-                    "The new spec was not sent; a prototype already showing stays as it was.",
-                    "The prototype was not saved.",
-                  )
-                : outcome.error,
+            error: outcome.error,
           },
         }),
   };

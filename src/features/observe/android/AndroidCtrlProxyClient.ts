@@ -238,6 +238,7 @@ import {
 
 // Import types
 import type { DelegateContext } from "../shared/types";
+import { defaultPrototypeAssetCache } from "../../prototype/prototypeAssetCache";
 import { defaultSavedPrototypeMirror } from "../../prototype/savedPrototypeMirror";
 import type {
   HierarchyDelegateContext,
@@ -2540,6 +2541,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   protected override extraDelegateContextFields(): Partial<DelegateContext> {
     return {
+      prototypeAssetCache: { serial: this.device.deviceId, cache: defaultPrototypeAssetCache() },
       savedPrototypeMirror: { serial: this.device.deviceId, mirror: defaultSavedPrototypeMirror() },
       isCommandSupported: (messageType) =>
         messageType === PROTOTYPE_SAVED_CAPABILITY

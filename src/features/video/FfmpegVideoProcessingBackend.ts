@@ -1,4 +1,10 @@
 import { toActionableError } from "../../models/ActionableError";
+import { readProcessGenerationTokenForPid } from "../../daemon/daemonFiles";
+import {
+  forceStopHostRecorder,
+  defaultHostRecorderProcessControl,
+  type HostRecorderProcessControl,
+} from "./hostRecorderTeardown";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { platform } from "node:os";
 import path from "node:path";
@@ -44,6 +50,7 @@ import {
   type RecordingResult,
   type VideoCaptureBackend,
   type VideoCaptureConfig,
+  type VideoCaptureTeardownDescriptor,
 } from "./VideoRecorderService";
 
 export { PROCESS_EXIT_TIMEOUT_MS, waitForExit };
@@ -211,6 +218,7 @@ interface FfmpegBackendHandle {
   captureTracker: ProcessTracker;
   ffmpegTracker?: ProcessTracker;
   capturePath?: string;
+  captureTeardown?: VideoCaptureTeardownDescriptor;
   config: VideoCaptureConfig;
 }
 
@@ -569,7 +577,57 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       return metadata ? { width: metadata.pixelWidth, height: metadata.pixelHeight } : null;
     },
     private readonly recordingFileProbe: RecordingFileProbe = defaultRecordingFileProbe,
+    private readonly readHostStartToken: (
+      pid: number,
+    ) => string | undefined = readProcessGenerationTokenForPid,
+    private readonly hostRecorderControl: HostRecorderProcessControl = defaultHostRecorderProcessControl,
   ) {}
+
+  describeCaptureTeardown(handle: RecordingHandle): VideoCaptureTeardownDescriptor | undefined {
+    const backendHandle = handle.backendHandle as FfmpegBackendHandle | undefined;
+    if (backendHandle?.kind !== "ffmpeg" || backendHandle.platform !== "ios") {
+      return undefined;
+    }
+    // Stop/finalization can describe this handle again after its PID has been recycled.
+    if (backendHandle.captureTeardown) {
+      return backendHandle.captureTeardown;
+    }
+    const hostPid = backendHandle.captureTracker.process.pid;
+    const udid = backendHandle.config.device?.deviceId;
+    try {
+      const hostStartToken = hostPid === undefined ? undefined : this.readHostStartToken(hostPid);
+      if (!hostPid || !hostStartToken || !udid) {
+        logger.warn(
+          "[FfmpegVideo] Cannot persist iOS host recorder teardown identity: pid, start token or udid unreadable",
+        );
+        return undefined;
+      }
+      backendHandle.captureTeardown = {
+        kind: "ios-host-recorder",
+        hostPid,
+        hostStartToken,
+        udid,
+        capturePath: backendHandle.capturePath,
+      };
+      return backendHandle.captureTeardown;
+    } catch (error) {
+      logger.warn("[FfmpegVideo] Cannot read iOS host recorder start token", error);
+      return undefined;
+    }
+  }
+
+  async forceStopOrphanedCapture(
+    _device: BootedDevice | undefined,
+    descriptor: VideoCaptureTeardownDescriptor,
+  ): Promise<void> {
+    if (descriptor.kind !== "ios-host-recorder") {
+      throw new ActionableError("FFmpeg orphan teardown requires an iOS host recorder identity.");
+    }
+    await forceStopHostRecorder(descriptor, {
+      control: this.hostRecorderControl,
+      timer: this.timer,
+    });
+  }
 
   async start(config: VideoCaptureConfig): Promise<RecordingHandle> {
     const device = config.device;

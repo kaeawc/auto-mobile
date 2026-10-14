@@ -161,6 +161,7 @@ test/features/screen-stream/ScreenCaptureHelperProvider.integration.test.ts | sa
 test/features/shared/GenericThresholdManager.integration.test.ts | safe | createTestDatabase; static threshold calculation only L220
 test/features/toolSelection/SqliteSessionToolSelectionRepository.integration.test.ts | safe | createTestDatabase in-memory L5
 test/features/video/FfmpegVideoProcessingBackend.integration.test.ts | unsafe | node:child_process spawn/spawnSync of ffmpeg and ffprobe L15/L60
+test/features/video/hostRecorderTeardown.integration.test.ts | unsafe | spawns a real child process and signals it
 test/features/webrtc/WebRtcPublisher.loopback.integration.test.ts | unsafe | env-gated L24; real werift ICE/DTLS I/O when enabled
 test/fixtures/integrationRunnerProbe.integration.test.ts | safe | returns at once unless STALL_PID_FILE is set L8
 test/helpers/navigationTestHarness.integration.test.ts | safe | in-memory nav manager harness over createTestDatabase

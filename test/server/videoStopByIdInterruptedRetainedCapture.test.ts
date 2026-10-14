@@ -1,3 +1,7 @@
+import type { VideoCaptureTeardownDescriptor } from "../../src/features/video/VideoRecorderService";
+import { HybridVideoCaptureBackend } from "../../src/features/video/HybridVideoCaptureBackend";
+import { FfmpegVideoProcessingBackend } from "../../src/features/video/FfmpegVideoProcessingBackend";
+import { FakeHostRecorderProcessControl } from "../fakes/FakeHostRecorderProcessControl";
 import { OrphanRecorderActiveError } from "../../src/server/orphanRecorderRefusal";
 import * as videoManager from "../../src/server/videoRecordingManager";
 import { redriveUnconfirmedCaptureTeardowns } from "../../src/server/recordingTeardownRedrive";
@@ -56,9 +60,9 @@ let deviceHeld: boolean;
 let owningConnection: string | undefined;
 
 const handler = () => ToolRegistry.getTool("videoRecording")!.deviceAwareHandler!;
-const outcome = (args: Record<string, unknown>) =>
+const outcome = (args: Record<string, unknown>, target: BootedDevice = device) =>
   Promise.resolve()
-    .then(() => handler()(device, args))
+    .then(() => handler()(target, args))
     .then(
       (response) => ({ response, error: undefined as (Error & { code?: string }) | undefined }),
       (error: Error & { code?: string }) => ({ response: undefined, error }),
@@ -340,8 +344,17 @@ async function insertStartupRow(status: "recording" | "interrupted" = "recording
     captureTeardown: orphanDescriptor,
   });
 }
-async function retainStartupOrphan(forceStop: () => Promise<void>) {
+async function retainStartupOrphan(
+  forceStop: (
+    device: BootedDevice | undefined,
+    descriptor: VideoCaptureTeardownDescriptor,
+  ) => Promise<void>,
+  captureTeardown?: VideoCaptureTeardownDescriptor,
+) {
   await insertStartupRow();
+  if (captureTeardown) {
+    await repository.updateRecording("startup-orphan", { captureTeardown, platform: "ios" });
+  }
   const manager = new SessionManager(
     timer,
     new FakeDeviceSessionPersistence(),
@@ -520,4 +533,58 @@ test("R6b unconfirmed stop refreshes this process's descriptor", async () => {
   await expect(videoManager.stopVideoRecording(active.recordingId)).rejects.toThrow();
   expect((await repository.getRecording(active.recordingId))?.captureTeardown).toEqual(refreshed);
   expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
+});
+
+test("iOS host startup orphan is stopped by id through redrive and permits a following start", async () => {
+  const iosDevice: BootedDevice = { ...device, platform: "ios" };
+  const host = {
+    kind: "ios-host-recorder" as const,
+    hostPid: 42,
+    hostStartToken: "generation-a",
+    udid: device.deviceId,
+    capturePath: "/kept/raw.mov",
+  };
+  const control = new FakeHostRecorderProcessControl();
+  control.onSignal = () => {
+    control.running = false;
+  };
+  const ffmpeg = new FfmpegVideoProcessingBackend(
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    timer,
+    undefined,
+    undefined,
+    undefined,
+    () => "generation-a",
+    control,
+  );
+  const hybrid = new HybridVideoCaptureBackend(ffmpeg, backend);
+  await retainStartupOrphan(async (target, descriptor) => {
+    expect(target).toBeUndefined();
+    expect(descriptor).toEqual(host);
+    await hybrid.forceStopOrphanedCapture(target, descriptor);
+  }, host);
+  const stopped = await outcome(
+    { action: "stop", sessionUuid: OWNER, recordingId: "startup-orphan" },
+    iosDevice,
+  );
+  expect(stopped.error).toBeUndefined();
+  const payload = JSON.parse(stopped.response!.content[0].text);
+  expect(payload.recordings[0]).toMatchObject({
+    recordingId: "startup-orphan",
+    status: "interrupted",
+  });
+  expect(control.signals).toEqual([[42, "SIGINT"]]);
+  expect((await repository.getRecording("startup-orphan"))?.captureTeardown).toBeUndefined();
+  expect(videoManager.getStartupOrphanCaptures()!.list(device.deviceId)).toEqual([]);
+  const next = await outcome({ action: "start", sessionUuid: OWNER }, iosDevice);
+  expect(next.error).toBeUndefined();
+  expect(backend.startCalls).toHaveLength(1);
+  expect(backend.startCalls[0]?.device?.platform).toBe("ios");
+  for (const recordingId of service.listActiveRecordingIds()) {
+    await service.forceStopRecording(recordingId);
+  }
 });

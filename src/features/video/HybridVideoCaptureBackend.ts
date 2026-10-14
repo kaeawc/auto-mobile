@@ -80,6 +80,21 @@ export class HybridVideoCaptureBackend implements VideoCaptureBackend {
     return this.backendFor(hybridHandle.backend).describeCaptureTeardown?.(hybridHandle.handle);
   }
 
+  async forceStopOrphanedCapture(
+    device: BootedDevice | undefined,
+    descriptor: VideoCaptureTeardownDescriptor,
+  ): Promise<void> {
+    const backend =
+      descriptor.kind === "ios-host-recorder" ? this.ffmpegBackend : this.platformBackend;
+    if (descriptor.kind === "android-screenrecord" && !device) {
+      throw new ActionableError("Device is required to stop an orphan Android recorder.");
+    }
+    if (!backend.forceStopOrphanedCapture) {
+      throw new ActionableError("Selected backend does not support orphan capture teardown.");
+    }
+    await backend.forceStopOrphanedCapture(device, descriptor);
+  }
+
   async stop(handle: RecordingHandle): Promise<RecordingResult> {
     const hybridHandle = handle.backendHandle as HybridBackendHandle | undefined;
     if (!hybridHandle || hybridHandle.kind !== "hybrid") {

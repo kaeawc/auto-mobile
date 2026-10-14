@@ -61,12 +61,22 @@ export interface VideoCaptureConfig extends VideoRecordingConfig {
   physicalDisplayId?: string;
 }
 
-/** Durable identity for an Android recorder that may outlive its daemon. */
-export interface VideoCaptureTeardownDescriptor {
-  kind: "android-screenrecord";
-  devicePid?: number;
-  deviceTempPath: string;
-}
+/** Durable identities for capture processes that may outlive their daemon. */
+export type VideoCaptureTeardownDescriptor =
+  | {
+      kind: "android-screenrecord";
+      devicePid?: number;
+      deviceTempPath: string;
+    }
+  | {
+      kind: "ios-host-recorder";
+      hostPid: number;
+      hostStartToken: string;
+      udid: string;
+      capturePath?: string;
+      /** Host captures never have an Android device process identity. */
+      devicePid?: never;
+    };
 
 export interface RecordingHandle {
   recordingId: string;
@@ -184,6 +194,10 @@ export interface ForceStopOptions {
 
 export interface VideoCaptureBackend {
   describeCaptureTeardown?(handle: RecordingHandle): VideoCaptureTeardownDescriptor | undefined;
+  forceStopOrphanedCapture?(
+    device: BootedDevice | undefined,
+    descriptor: VideoCaptureTeardownDescriptor,
+  ): Promise<void>;
   start(config: VideoCaptureConfig): Promise<RecordingHandle>;
   stop(handle: RecordingHandle): Promise<RecordingResult>;
   forceStop?(handle: RecordingHandle, options?: ForceStopOptions): Promise<void>;

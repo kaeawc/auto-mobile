@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { HybridVideoCaptureBackend } from "../../../src/features/video/HybridVideoCaptureBackend";
 import {
+  DEFAULT_VIDEO_RECORDING_CONFIG,
   VideoCaptureStartCleanupError,
   type RecordingHandle,
   type RecordingResult,
   type VideoCaptureBackend,
   type VideoCaptureConfig,
+  type VideoCaptureTeardownDescriptor,
 } from "../../../src/features/video/VideoRecorderService";
 import type { BootedDevice } from "../../../src/models";
 
@@ -14,6 +16,17 @@ class FakeBackend implements VideoCaptureBackend {
   startCalls: VideoCaptureConfig[] = [];
   stopCalls: RecordingHandle[] = [];
   forceStopCalls: RecordingHandle[] = [];
+  orphanStopCalls: Array<[BootedDevice | undefined, VideoCaptureTeardownDescriptor]> = [];
+  descriptor?: VideoCaptureTeardownDescriptor;
+  describeCaptureTeardown(_handle: RecordingHandle): VideoCaptureTeardownDescriptor | undefined {
+    return this.descriptor;
+  }
+  async forceStopOrphanedCapture(
+    device: BootedDevice | undefined,
+    descriptor: VideoCaptureTeardownDescriptor,
+  ): Promise<void> {
+    this.orphanStopCalls.push([device, descriptor]);
+  }
   constructor(name: string) {
     this.name = name;
   }
@@ -255,4 +268,50 @@ describe("HybridVideoCaptureBackend - Unit Tests", function () {
     expect(ffmpegBackend.stopCalls.length).toBe(1);
     expect(platformBackend.stopCalls.length).toBe(0);
   });
+});
+
+test("hybrid orphan teardown dispatches by descriptor kind", async () => {
+  const ffmpeg = new FakeBackend("ffmpeg");
+  const platform = new FakeBackend("platform");
+  const hybrid = new HybridVideoCaptureBackend(ffmpeg, platform);
+  const host = {
+    kind: "ios-host-recorder" as const,
+    hostPid: 42,
+    hostStartToken: "generation-a",
+    udid: "sim-id",
+  };
+  const android = {
+    kind: "android-screenrecord" as const,
+    devicePid: 43,
+    deviceTempPath: "/sdcard/raw.mp4",
+  };
+  const device = { deviceId: "android", platform: "android" as const, name: "Fake" };
+  await hybrid.forceStopOrphanedCapture(undefined, host);
+  await hybrid.forceStopOrphanedCapture(device, android);
+  expect(ffmpeg.orphanStopCalls).toEqual([[undefined, host]]);
+  expect(platform.orphanStopCalls).toEqual([[device, android]]);
+  await expect(hybrid.forceStopOrphanedCapture(undefined, android)).rejects.toThrow();
+  expect(platform.orphanStopCalls).toHaveLength(1);
+});
+
+test("hybrid passes the iOS host descriptor through its wrapped FFmpeg handle", async () => {
+  const ffmpeg = new FakeBackend("ffmpeg");
+  ffmpeg.descriptor = {
+    kind: "ios-host-recorder",
+    hostPid: 42,
+    hostStartToken: "generation-a",
+    udid: "11111111-1111-1111-1111-111111111111",
+    capturePath: "/kept/raw.mov",
+  };
+  const hybrid = new HybridVideoCaptureBackend(ffmpeg, new FakeBackend("platform"));
+  const handle = await hybrid.start({
+    ...DEFAULT_VIDEO_RECORDING_CONFIG,
+    recordingId: "rec",
+    outputDirectory: "/kept",
+    outputPath: "/kept/rec.mp4",
+    fileName: "rec.mp4",
+    startedAt: "invalid",
+    device: { deviceId: ffmpeg.descriptor.udid, platform: "ios", name: "Fake simulator" },
+  });
+  expect(hybrid.describeCaptureTeardown(handle)).toEqual(ffmpeg.descriptor);
 });

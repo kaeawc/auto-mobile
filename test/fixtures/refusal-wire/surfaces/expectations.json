@@ -381,7 +381,13 @@
       "fields": {
         "code": "target_identity_unresolved",
         "retryable": true,
-        "acquireNewSession": false
+        "acquireNewSession": false,
+        "retryAfterMs": 1000,
+        "details": {
+          "candidateSerials": ["emulator-5554"],
+          "deviceId": "emulator-5554",
+          "avdName": "Pixel_8_API_35"
+        }
       }
     },
     "webrtc-stream-response.viewer_read_only": {

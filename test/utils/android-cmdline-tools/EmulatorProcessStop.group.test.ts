@@ -10,6 +10,7 @@ import {
 } from "../../fakes/FakeEmulatorProcessStopper";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { logger } from "../../../src/utils/logger";
+import { FakeLockOwnerGenerationProbe } from "../../fakes/FakeLockOwnerGenerationProbe";
 
 const command = "qemu-system-aarch64 -avd Pixel -port 5554";
 const target = { serial: "emulator-5554", avdName: "Pixel" };
@@ -43,15 +44,104 @@ class GroupSignaler extends FakeEmulatorProcessSignaler implements EmulatorProce
     }
   }
 }
-function fixture() {
+function fixture(processGeneration?: FakeLockOwnerGenerationProbe) {
   const table = new FakeEmulatorProcessTableSource();
   table.rows = [{ pid: 42, ppid: 1, command }];
   const signaler = new GroupSignaler();
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  const stopper = new ProcessTableEmulatorProcessStopper(table, signaler, timer, { ownPid: 99 });
+  const stopper = new ProcessTableEmulatorProcessStopper(table, signaler, timer, {
+    ownPid: 99,
+    processGeneration,
+  });
   return { table, signaler, timer, stopper };
 }
+test("own group generation change during escalation read withholds every KILL", async () => {
+  const generation = new FakeLockOwnerGenerationProbe();
+  const f = fixture(generation);
+  f.signaler.exitOn = "SIGKILL";
+  generation.onCompare = () => (f.table.calls.length === 2 ? "different" : "same");
+  expect(await f.stopper.stop(target, { deadlineMs: 30_000 })).toEqual({
+    kind: "stopped",
+    pid: 42,
+    signal: "SIGTERM",
+  });
+  expect(f.table.calls).toHaveLength(2);
+  expect(generation.compareCalls.at(-1)).toEqual({ pid: 42, recorded: generation.token });
+  expect(f.signaler.groups).toEqual([{ pgid: 42, signal: "SIGTERM" }]);
+  expect(f.signaler.signals).toEqual([]);
+});
+test("own group generation change after TERM stops waiting without escalation", async () => {
+  const generation = new FakeLockOwnerGenerationProbe();
+  generation.verdict = "same";
+  const f = fixture(generation);
+  f.signaler.exitOn = "SIGKILL";
+  const send = f.signaler.signalGroup.bind(f.signaler);
+  f.signaler.signalGroup = (pgid, signal) => {
+    send(pgid, signal);
+    generation.verdict = "different";
+  };
+  expect(await f.stopper.stop(target, { deadlineMs: 30_000 })).toEqual({
+    kind: "stopped",
+    pid: 42,
+    signal: "SIGTERM",
+  });
+  expect(f.table.calls).toHaveLength(1);
+  expect(f.timer.getSleepHistory()).toEqual([]);
+  expect(generation.compareCalls).toEqual([{ pid: 42, recorded: generation.token }]);
+  expect(f.signaler.groups).toEqual([{ pgid: 42, signal: "SIGTERM" }]);
+  expect(f.signaler.signals).toEqual([]);
+});
+test("generation capture follows group proof and sends TERM before yielding", async () => {
+  const generation = new FakeLockOwnerGenerationProbe();
+  const f = fixture(generation);
+  const order: string[] = [];
+  f.signaler.resolveOwnGroup = async () => {
+    order.push("probe-start");
+    await Promise.resolve();
+    generation.token = "after-probe";
+    order.push("probe-done");
+    return { kind: "own-group", pgid: 42 };
+  };
+  generation.onCurrent = () => {
+    order.push(`capture:${generation.token}`);
+    queueMicrotask(() => order.push("capture-microtask"));
+  };
+  const send = f.signaler.signalGroup.bind(f.signaler);
+  f.signaler.signalGroup = (pgid, signal) => {
+    order.push(signal);
+    send(pgid, signal);
+  };
+  expect(await f.stopper.stop(target, { deadlineMs: 30_000 })).toEqual({
+    kind: "stopped",
+    pid: 42,
+    signal: "SIGTERM",
+  });
+  expect(order).toEqual([
+    "probe-start",
+    "probe-done",
+    "capture:after-probe",
+    "SIGTERM",
+    "capture-microtask",
+  ]);
+  expect(generation.currentCalls).toEqual([42]);
+  expect(f.signaler.signals).toEqual([]);
+});
+test("absent group proof skips generation capture and every signal", async () => {
+  const generation = new FakeLockOwnerGenerationProbe();
+  const f = fixture(generation);
+  f.signaler.probe = { kind: "absent" };
+  expect(await f.stopper.stop(target, { deadlineMs: 30_000 })).toEqual({
+    kind: "stopped",
+    pid: 42,
+    signal: "SIGTERM",
+  });
+  expect(generation.currentCalls).toEqual([]);
+  expect(generation.compareCalls).toEqual([]);
+  expect(f.signaler.groups).toEqual([]);
+  expect(f.signaler.signals).toEqual([]);
+  expect(f.signaler.probes).toEqual([]);
+});
 for (const exitOn of ["SIGTERM", "SIGKILL"] as const) {
   test(`own group receives ${exitOn} without any pid signal`, async () => {
     const f = fixture();

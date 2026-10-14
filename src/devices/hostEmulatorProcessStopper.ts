@@ -1,4 +1,5 @@
 import { ActionableError } from "../models/ActionableError";
+import { defaultLockOwnerGenerationProbe } from "../daemon/lockOwnerGeneration";
 import { ProcessTableReader } from "../features/bootAdmission/processTableRetry";
 import { nodeProcFs } from "../features/bootAdmission/procProcessTable";
 import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../utils/HostCommandExecutor";
@@ -6,6 +7,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import type { LockOwnerGenerationProbe } from "../utils/fileLock";
 import {
   ProcessTableEmulatorProcessStopper,
   isSafeEmulatorProcessPid,
@@ -154,20 +156,41 @@ export class HostEmulatorProcessSignaler implements EmulatorProcessSignaler {
 
 const hostStoppers = new WeakMap<Timer, EmulatorProcessStopper>();
 
+/** Build the shared host fallback with injectable command, time, and generation seams. */
+export function createHostEmulatorProcessStopper(deps: {
+  executor: HostCommandExecutor;
+  timer: Timer;
+  processGeneration?: LockOwnerGenerationProbe;
+  ownPid?: number;
+  platform?: NodeJS.Platform;
+}): EmulatorProcessStopper {
+  const platform = deps.platform ?? process.platform;
+  return new ProcessTableEmulatorProcessStopper(
+    new ProcessTableReader(deps.executor, {
+      timer: deps.timer,
+      processTableSupported: platform !== "win32",
+      procFs: platform === "linux" ? nodeProcFs : undefined,
+    }),
+    new HostEmulatorProcessSignaler(deps.executor, deps.timer, {
+      ownPid: deps.ownPid,
+      platform,
+    }),
+    deps.timer,
+    {
+      ownPid: deps.ownPid,
+      processGeneration: deps.processGeneration ?? defaultLockOwnerGenerationProbe,
+    },
+  );
+}
+
 /** One fallback per timer; construction is lazy and never starts a command. */
 export function getHostEmulatorProcessStopper(timer: Timer = defaultTimer): EmulatorProcessStopper {
   let hostStopper = hostStoppers.get(timer);
   if (!hostStopper) {
-    const executor = new DefaultHostCommandExecutor();
-    hostStopper = new ProcessTableEmulatorProcessStopper(
-      new ProcessTableReader(executor, {
-        timer,
-        processTableSupported: process.platform !== "win32",
-        procFs: process.platform === "linux" ? nodeProcFs : undefined,
-      }),
-      new HostEmulatorProcessSignaler(executor, timer),
+    hostStopper = createHostEmulatorProcessStopper({
+      executor: new DefaultHostCommandExecutor(),
       timer,
-    );
+    });
     hostStoppers.set(timer, hostStopper);
   }
   return hostStopper;

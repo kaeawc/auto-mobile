@@ -156,6 +156,7 @@ import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import type { DevicePool, DeviceReadinessReservation, PooledDevice } from "../daemon/devicePool";
 import {
   AndroidAvdIdentityConflictError,
+  AndroidDeviceIdentityUnresolvedError,
   AndroidBootedDeviceDiscoveryIncompleteError,
   BootedDeviceDiscoveryIncompleteError,
   DeviceBootService,
@@ -4898,17 +4899,19 @@ export async function resolveAndroidStartStableDeviceLifecycleTarget(
     }
     return undefined;
   }
+  if (stableIds.size !== 1) {
+    throw new ActionableError(
+      `Cannot uniquely resolve Android device '${deviceId}' for lifecycle coordination.`,
+    );
+  }
   if (
-    stableIds.size !== 1 ||
     bootedMatches.some(
       (device) =>
         isUnknownAndroidRuntimeName(device) &&
         !getValidatedPooledAndroidAvdName(device, devicePool),
     )
   ) {
-    throw new ActionableError(
-      `Cannot uniquely resolve Android device '${deviceId}' for lifecycle coordination.`,
-    );
+    throw new AndroidDeviceIdentityUnresolvedError(deviceId);
   }
   return { platform: "android", stableId: [...stableIds][0] };
 }

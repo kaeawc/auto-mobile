@@ -1,6 +1,7 @@
 import { expect, test, spyOn } from "bun:test";
 import {
   HostEmulatorProcessSignaler,
+  createHostEmulatorProcessStopper,
   getHostEmulatorProcessStopper,
 } from "../../src/devices/hostEmulatorProcessStopper";
 import {
@@ -12,7 +13,87 @@ import { FakeHostCommandExecutor } from "../fakes/FakeHostCommandExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { createExecResult } from "../../src/utils/execResult";
 import { logger } from "../../src/utils/logger";
+import { ProcessTableReader } from "../../src/features/bootAdmission/processTableRetry";
+import { defaultLockOwnerGenerationProbe } from "../../src/daemon/lockOwnerGeneration";
+import { FakeLockOwnerGenerationProbe } from "../fakes/FakeLockOwnerGenerationProbe";
 const command = "/My SDK/emulator/qemu-system-aarch64 -avd Pixel -port 5554";
+for (const group of ["own-group", "shared"] as const) {
+  test(`factory generation guard withholds ${group} KILL for a recycled pid`, async () => {
+    const f = fixture(`42 42 ${command}\n99 ${group === "own-group" ? 99 : 42} bun daemon`);
+    let tableReads = 0;
+    f.executor.executeCommand = async (_file, args) => {
+      if (args?.includes("-axo")) {
+        tableReads++;
+        return createExecResult(`42 1 100 0.0 ${command}`, "");
+      }
+      return createExecResult(
+        `42 42 ${command}\n99 ${group === "own-group" ? 99 : 42} bun daemon`,
+        "",
+      );
+    };
+    const generation = new FakeLockOwnerGenerationProbe();
+    generation.onCompare = () => (tableReads === 2 ? "different" : "same");
+    const kill = spyOn(process, "kill").mockImplementation(() => true);
+    try {
+      const stopper = createHostEmulatorProcessStopper({
+        executor: f.executor,
+        timer: f.timer,
+        processGeneration: generation,
+        ownPid: 99,
+        platform: "darwin",
+      });
+      expect(
+        await stopper.stop({ serial: "emulator-5554", avdName: "Pixel" }, { deadlineMs: 30_000 }),
+      ).toEqual({
+        kind: "stopped",
+        pid: 42,
+        signal: "SIGTERM",
+      });
+      expect(tableReads).toBe(2);
+      expect(generation.currentCalls).toEqual([42]);
+      expect(generation.compareCalls.at(-1)).toEqual({ pid: 42, recorded: generation.token });
+      expect(kill.mock.calls.filter(([, signal]) => signal !== 0)).toEqual([
+        [group === "own-group" ? -42 : 42, "SIGTERM"],
+      ]);
+    } finally {
+      kill.mockRestore();
+    }
+  });
+}
+test("memoized host stopper captures and compares the default generation probe", async () => {
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const table = spyOn(ProcessTableReader.prototype, "read").mockResolvedValue({
+    value: [{ pid: 42, ppid: 1, command }],
+  });
+  const group = spyOn(HostEmulatorProcessSignaler.prototype, "resolveOwnGroup").mockResolvedValue({
+    kind: "own-group",
+    pgid: 42,
+  });
+  const kill = spyOn(process, "kill").mockImplementation(() => true);
+  const current = spyOn(defaultLockOwnerGenerationProbe, "current").mockReturnValue("recorded");
+  const compare = spyOn(defaultLockOwnerGenerationProbe, "compare").mockReturnValue("different");
+  try {
+    const stopper = getHostEmulatorProcessStopper(timer);
+    expect(
+      await stopper.stop({ serial: "emulator-5554", avdName: "Pixel" }, { deadlineMs: 30_000 }),
+    ).toEqual({ kind: "stopped", pid: 42, signal: "SIGTERM" });
+    expect(current.mock.calls).toEqual([[42]]);
+    expect(compare.mock.calls).toEqual([[42, "recorded"]]);
+    expect(kill.mock.calls).toEqual([
+      [-42, "SIGTERM"],
+      [42, 0],
+    ]);
+    expect(table).toHaveBeenCalledTimes(1);
+    expect(group).toHaveBeenCalledTimes(1);
+  } finally {
+    compare.mockRestore();
+    current.mockRestore();
+    kill.mockRestore();
+    group.mockRestore();
+    table.mockRestore();
+  }
+});
 function fixture(stdout: string, platform: NodeJS.Platform = "darwin") {
   const executor = new FakeHostCommandExecutor();
   executor.setDefaultResponse(createExecResult(stdout, ""));

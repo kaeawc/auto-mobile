@@ -31,6 +31,81 @@ class FakeExitingHostCommandExecutor extends FakeHostCommandExecutor {
 }
 
 describe("IosCtrlProxyProcessClient", () => {
+  test("captures a runner's launch generation through the injected probe", () => {
+    const generation = new FakeLockOwnerGenerationProbe();
+    const client = new IosCtrlProxyProcessClient(new FakeHostCommandExecutor(), new FakeTimer(), {
+      processGeneration: generation,
+    });
+    expect(client.captureProcessGeneration(42)).toBe(generation.token);
+    expect(generation.currentCalls).toEqual([42]);
+  });
+
+  test.each(["different", "same", "unknown"] as const)(
+    "launch-token preflight respects %s before descendant discovery",
+    async (verdict) => {
+      const host = new FakeExitingHostCommandExecutor();
+      const generation = new FakeLockOwnerGenerationProbe();
+      generation.verdict = verdict;
+      host.setCommandResponse("ps -axo pid=,ppid=", result("42 1\n43 42\n"));
+      host.exitedPids.add(42);
+      host.exitedPids.add(43);
+      const client = new IosCtrlProxyProcessClient(host, new FakeTimer(), {
+        processGeneration: generation,
+      });
+
+      await client.terminateProcessTree(42, undefined, {
+        skipGraceful: true,
+        expectedGenerationToken: "launch-token",
+      });
+
+      expect(generation.compareCalls[0]).toEqual({ pid: 42, recorded: "launch-token" });
+      const commands = host.getExecutedCommands();
+      if (verdict === "different") {
+        expect(commands).toEqual([]);
+        expect(generation.currentCalls).toEqual([]);
+      } else {
+        expect(commands).toContain("ps -axo pid=,ppid=");
+        expect(commands.filter((command) => /^kill -(TERM|KILL)/.test(command))).toEqual([
+          "kill -KILL -- -42",
+          "kill -KILL 42",
+          "kill -KILL 43",
+        ]);
+      }
+    },
+  );
+
+  test.each([false, true])(
+    "uses the launch token when the root changes after preflight (skipGraceful=%s)",
+    async (skipGraceful) => {
+      const host = new FakeHostCommandExecutor();
+      const generation = new FakeLockOwnerGenerationProbe();
+      generation.token = "entry-token";
+      generation.onCompare = (_pid, recorded) =>
+        recorded === "launch-token" && host.getExecutedCommands().length > 0 ? "different" : "same";
+      host.setCommandResponse("ps -axo pid=,ppid=", result("42 1\n"));
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const client = new IosCtrlProxyProcessClient(host, timer, {
+        processGeneration: generation,
+        releaseAttempts: 1,
+        releaseGraceMs: 1,
+      });
+
+      await client.terminateProcessTree(42, undefined, {
+        skipGraceful,
+        expectedGenerationToken: "launch-token",
+      });
+
+      expect(
+        host.getExecutedCommands().filter((command) => /^kill -(TERM|KILL)/.test(command)),
+      ).toEqual([]);
+      expect(generation.compareCalls).toEqual([
+        { pid: 42, recorded: "launch-token" },
+        { pid: 42, recorded: "launch-token" },
+      ]);
+    },
+  );
+
   test.each(["different", "unknown", "unavailable"] as const)(
     "forced process tree termination respects %s generation",
     async (verdict) => {

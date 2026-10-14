@@ -2,6 +2,7 @@ import type { DispatchedRequestHold } from "../../daemon/dispatchedRequestHold";
 import type { IOSDispatchResult } from "../observe/ios/CtrlProxyDispatch";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { unsupportedPlatformError } from "../../models/ActionableError";
+import { typedRefusalFields } from "../../models/typedRefusalFields";
 import { errorMessage } from "../../utils/describeUnknownError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
@@ -17,6 +18,17 @@ import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { HomeScreen } from "./HomeScreen";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
+
+export function unsupportedIosButtonResult(button: string, error: string): PressButtonResult {
+  return {
+    success: false,
+    button,
+    keyCode: -1,
+    code: "unsupported_button",
+    retryable: false,
+    error,
+  };
+}
 
 export class PressButton extends BaseVisualChange {
   constructor(
@@ -138,10 +150,14 @@ export class PressButton extends BaseVisualChange {
     } catch (error) {
       throwIfAborted(signal);
       logger.warn(`Failed to press ${button}: ${errorMessage(error)}`, error);
+      const refusal = typedRefusalFields(error);
       return {
         success: false,
         button,
         keyCode: -1,
+        ...(refusal
+          ? { code: refusal.code, retryable: refusal.retryable }
+          : { code: "press_failed", retryable: false }),
         error: `Failed to press button: ${errorMessage(error)}`,
       };
     } finally {
@@ -473,6 +489,8 @@ export class PressButton extends BaseVisualChange {
             success: false,
             button,
             keyCode: -1,
+            code: "indeterminate_outcome",
+            retryable: false,
             error: `Button press outcome is indeterminate: the request was dispatched but no result was confirmed (${result.error ?? "unknown error"}). The press may have been applied. Do not retry automatically. Observe before retrying.`,
           };
         }
@@ -480,6 +498,8 @@ export class PressButton extends BaseVisualChange {
           success: false,
           button,
           keyCode: -1,
+          code: "press_failed",
+          retryable: false,
           error:
             result.error ??
             (PressButton.IOS_HARDWARE_BUTTONS.has(normalizedButton)
@@ -491,20 +511,10 @@ export class PressButton extends BaseVisualChange {
     }
 
     if (normalizedButton === "menu") {
-      return {
-        success: false,
-        button,
-        keyCode: -1,
-        error: "iOS has no menu hardware button",
-      };
+      return unsupportedIosButtonResult(button, "iOS has no menu hardware button");
     }
 
-    return {
-      success: false,
-      button,
-      keyCode: -1,
-      error: `Unsupported iOS button: ${button}`,
-    };
+    return unsupportedIosButtonResult(button, `Unsupported iOS button: ${button}`);
   }
 
   private async executeiOSNavigationButton(

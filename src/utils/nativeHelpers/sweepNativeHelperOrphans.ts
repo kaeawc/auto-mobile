@@ -77,15 +77,16 @@ export async function finishHelperStop(
     );
   }
   if (!control.isRunning(record.pid)) {
-    store.remove(record.pid);
+    store.remove(record.pid, record.startIdentity);
     return "reaped";
   }
   const identity = control.readStartIdentity(record.pid);
   if (
-    identity !== record.startIdentity &&
-    (identity !== undefined || !options.retainUnverifiableRecord)
+    (identity === undefined && !options.retainUnverifiableRecord) ||
+    (identity !== undefined &&
+      control.compareStartIdentity(record.startIdentity, identity) === "different")
   ) {
-    store.remove(record.pid);
+    store.remove(record.pid, record.startIdentity);
     return "staleRecordsRemoved";
   }
   log.warn(
@@ -134,7 +135,10 @@ function ownerIsAlive(record: NativeHelperRecord, control: NativeHelperProcessCo
     return false;
   }
   const identity = control.readStartIdentity(record.ownerPid);
-  return identity === undefined || identity === record.ownerStartIdentity;
+  return (
+    identity === undefined ||
+    control.compareStartIdentity(record.ownerStartIdentity, identity) !== "different"
+  );
 }
 
 function resolveSweepOptions(
@@ -164,13 +168,25 @@ async function sweepRecord(
   if (ownerIsAlive(record, control)) {
     return "skippedLiveOwner";
   }
-  if (!helperIdentityMatches(record, control)) {
-    store.remove(record.pid);
+  const running = control.isRunning(record.pid);
+  const identity = running ? control.readStartIdentity(record.pid) : undefined;
+  if (
+    !running ||
+    (identity !== undefined &&
+      control.compareStartIdentity(record.startIdentity, identity) === "different")
+  ) {
+    store.remove(record.pid, record.startIdentity);
     return "staleRecordsRemoved";
+  }
+  if (identity !== record.startIdentity) {
+    options.logger.warn(
+      `[NATIVE_HELPERS] Cannot verify helper ${record.pid} identity; retaining record`,
+    );
+    return "failed";
   }
   if (cleanupNow(timer) >= deadline) {
     return undefined;
   }
   control.signal(record.pid, "SIGTERM", { group: record.processGroup });
-  return finishHelperStop(record, options, deadline);
+  return finishHelperStop(record, { ...options, retainUnverifiableRecord: true }, deadline);
 }

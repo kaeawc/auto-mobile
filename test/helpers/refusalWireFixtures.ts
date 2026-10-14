@@ -1,3 +1,4 @@
+import { PrototypeHiddenError } from "../../src/features/prototype/prototypeHidden";
 import { PrototypeSuspendedError } from "../../src/features/prototype/prototypeSuspended";
 import { OrphanRecorderActiveError } from "../../src/server/orphanRecorderRefusal";
 import { HostBootAdmissionRegistryError } from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
@@ -33,6 +34,7 @@ import {
 } from "../../src/daemon/deviceAcquisitionRefusals";
 import { IOS_SIM_MAX_BOOTED_ENV } from "../../src/features/iosSimFleet/capacityPolicy";
 import { InputDeviceOwnedError } from "../../src/daemon/inputDeviceOwnership";
+import { unsupportedIosButtonResult } from "../../src/features/action/PressButton";
 import {
   MCP_OVERLOAD_ERROR_CODE,
   MCP_QUEUE_TIMEOUT_ERROR_CODE,
@@ -150,6 +152,7 @@ import {
   DEFAULT_PROVISION_DEVICE_RETRYABILITY,
   type ProvisionDeviceFailureCode,
 } from "../../src/devices/exactDeviceProvisioning";
+import { SdkTooOldError, MINIMUM_READ_ONLY_SDK_VERSION } from "../../src/models/SdkTooOldError";
 import { AppNotRunningError } from "../../src/models/AppNotRunningError";
 import { shapeToolCallError } from "../../src/server/shapeToolCallError";
 import { deviceLossOutcomeFromError } from "../../src/server/deviceLossOutcome";
@@ -427,9 +430,19 @@ const BUILDERS: readonly FixtureEntry[] = [
     () => shaped(deviceAssignedToOtherSessionError(DEVICE, "holder-session", SESSION)),
   ],
   [
+    "prototype_hidden",
+    "PrototypeHiddenError via shapeToolCallError",
+    () => shaped(new PrototypeHiddenError("app_layer_window_hidden")),
+  ],
+  [
     "prototype_suspended",
     "PrototypeSuspendedError via shapeToolCallError",
     () => shaped(new PrototypeSuspendedError()),
+  ],
+  [
+    "sdk_too_old",
+    "SdkTooOldError via shapeToolCallError",
+    () => shaped(new SdkTooOldError("com.example.app", DEVICE, MINIMUM_READ_ONLY_SDK_VERSION)),
   ],
   [
     "app_not_running",
@@ -935,7 +948,8 @@ export type RefusalSurface =
   | "request-failure-fields"
   | "liveness-handover"
   | "managed-slots-response"
-  | "provision-envelope";
+  | "provision-envelope"
+  | "press-button-result";
 
 /** Asynchronous real-wire captures: their owning test always checks the committed bytes. */
 export const EXTERNALLY_CAPTURED_SURFACE_FIXTURES = [
@@ -1084,6 +1098,7 @@ function terminalAtAdmission(releaseReason: SessionReleaseReason): TerminalSessi
 }
 
 const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
+  ["prototype_hidden", () => new PrototypeHiddenError("app_layer_window_hidden")],
   ["prototype_suspended", () => new PrototypeSuspendedError()],
   ["device_unhealthy", () => unhealthyRefusal()],
   ["device_unhealthy.permanent", () => unhealthyRefusal("permanent")],
@@ -1256,6 +1271,12 @@ export function buildRefusalSurfaceFixtures(): RefusalSurfaceFixture[] {
       name: "daemon_overloaded",
       builder: "mcpRequestFailureDetails",
       payload: socketFrame(overloadRefusalError()),
+    },
+    {
+      surface: "press-button-result",
+      name: "unsupported_button",
+      builder: "PressButton.unsupportedIosButtonResult",
+      payload: unsupportedIosButtonResult("menu", "iOS has no menu hardware button"),
     },
     ...SOCKET_FRAME_ERRORS.map(([name, error]): RefusalSurfaceFixture => ({
       surface: "socket-frame",

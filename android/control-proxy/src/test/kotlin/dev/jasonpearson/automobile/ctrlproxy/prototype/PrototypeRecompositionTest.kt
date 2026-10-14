@@ -13,10 +13,12 @@ import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
 import dev.jasonpearson.automobile.protocol.*
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.*
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -55,6 +57,110 @@ class PrototypeRecompositionTest {
   private fun toggle(runtime: PrototypeRuntime) {
     compose.runOnIdle { runTest { controller.interact(runtime, PrototypeInteraction.Toggle("a")) } }
     compose.waitForIdle()
+  }
+
+  private fun patchData(ops: String) {
+    compose.runOnIdle {
+      runTest { controller.patch("patch", "panel", null, Json.parseToJsonElement(ops).jsonArray) }
+    }
+    compose.waitForIdle()
+  }
+
+  @Test
+  fun `patching one keyed data row recomposes only that rows identities`() {
+    val root =
+      PrototypeColumnNode(
+        repeat = PrototypeRepeat(emptyList(), "item", itemsPath = "/items", key = "id"),
+        children =
+          listOf(PrototypeBoxNode(children = listOf(PrototypeTextNode(text = "{item.title}")))),
+      )
+    val data =
+      Json.parseToJsonElement(
+          """{"items":[{"id":"a","title":"A"},{"id":"b","title":"B"},{"id":"c","title":"C"},{"id":"d","title":"D"}]}""",
+        )
+        .jsonObject
+    runTest { controller.show("show", spec(root).copy(data = data)) }
+    val runtime = checkNotNull(controller.activeRuntime)
+    val counts = mutableMapOf<String, Int>()
+    val probe: (String) -> Unit = { identity -> counts[identity] = (counts[identity] ?: 0) + 1 }
+    compose.setContent {
+      CompositionLocalProvider(LocalPrototypeCompositionProbe provides probe) {
+        PrototypeRuntimeContent(runtime) { controller.interact(runtime, it) }
+      }
+    }
+    compose.waitForIdle()
+    val before = counts.toMap()
+    patchData("""[{"op":"replace","path":"/data/items/1/title","value":"B changed"}]""")
+    compose.onNodeWithText("B changed").assertIsDisplayed()
+    compose.runOnIdle {
+      for (key in listOf("a", "c", "d")) {
+        val row = "root.repeat[$key].children[0]"
+        assertNotNull(before[row])
+        assertEquals(row, before[row], counts[row])
+        assertEquals(row, before["$row.children[0]"], counts["$row.children[0]"])
+      }
+      val changed = "root.repeat[b].children[0]"
+      assertEquals(checkNotNull(before[changed]) + 1, counts[changed])
+      assertEquals(checkNotNull(before["$changed.children[0]"]) + 1, counts["$changed.children[0]"])
+    }
+  }
+
+  @Test
+  fun `reordered keyed fields retain typed state focus and skip moved unchanged rows`() {
+    val root =
+      PrototypeColumnNode(
+        repeat = PrototypeRepeat(emptyList(), "item", itemsPath = "/items", key = "id"),
+        children = listOf(PrototypeTextFieldNode(stateKey = "note_{item.id}")),
+      )
+    val data = Json.parseToJsonElement("""{"items":[{"id":"a"},{"id":"b"}]}""").jsonObject
+    val state =
+      mapOf("note_a" to PrototypeScalar.Text("A note"), "note_b" to PrototypeScalar.Text("B note"))
+    runTest { controller.show("show", spec(root).copy(state = state, data = data)) }
+    val runtime = checkNotNull(controller.activeRuntime)
+    val counts = mutableMapOf<String, Int>()
+    val probe: (String) -> Unit = { identity -> counts[identity] = (counts[identity] ?: 0) + 1 }
+    compose.setContent {
+      CompositionLocalProvider(LocalPrototypeCompositionProbe provides probe) {
+        PrototypeRuntimeContent(runtime) { controller.interact(runtime, it) }
+      }
+    }
+    compose.onNodeWithText("A note").performClick().performTextReplacement("A typed")
+    compose.waitForIdle()
+    val before = counts.toMap()
+    patchData("""[{"op":"replace","path":"/data","value":{"items":[{"id":"b"},{"id":"a"}]}}]""")
+    compose.onNodeWithText("A typed").assertIsFocused().assertTextEquals("A typed")
+    compose.onNodeWithText("B note").assertTextEquals("B note")
+    compose.runOnIdle {
+      for (key in listOf("a", "b")) {
+        val row = "root.repeat[$key].children[0]"
+        assertNotNull(before[row])
+        assertEquals(row, before[row], counts[row])
+      }
+      assertEquals(PrototypeScalar.Text("A typed"), runtime.current.state["note_a"])
+    }
+  }
+
+  @Test
+  fun `data only patch keeps unrelated fields focus and live typed text`() {
+    val root =
+      PrototypeColumnNode(
+        children =
+          listOf(
+            PrototypeTextNode(testTag = "data", text = "{data:/title}"),
+            PrototypeTextFieldNode(testTag = "field", stateKey = "query"),
+          ),
+      )
+    runTest {
+      controller.show("show", spec(root).copy(data = buildJsonObject { put("title", "old") }))
+    }
+    val runtime = checkNotNull(controller.activeRuntime)
+    compose.setContent { PrototypeRuntimeContent(runtime) { controller.interact(runtime, it) } }
+    compose.onNodeWithTag("field").performClick().performTextReplacement("kept typed")
+    compose.waitForIdle()
+    patchData("""[{"op":"replace","path":"/data/title","value":"new"}]""")
+    compose.onNodeWithTag("data").assertTextEquals("new")
+    compose.onNodeWithTag("field").assertIsFocused().assertTextEquals("kept typed")
+    assertEquals(PrototypeScalar.Text("kept typed"), runtime.current.state["query"])
   }
 
   @Test

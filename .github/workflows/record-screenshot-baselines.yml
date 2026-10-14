@@ -54,6 +54,21 @@ jobs:
       SCREENSHOT_TEST_DIR: ${{ inputs.module == 'control-proxy' && 'android/control-proxy/src/test/kotlin/dev/jasonpearson/automobile/ctrlproxy/prototype/screenshot' || 'android/desktop-core/src/test/kotlin/dev/jasonpearson/automobile/desktop/core/screenshot' }}
       BASELINE_DIR: ${{ inputs.module == 'control-proxy' && 'android/control-proxy/src/test/resources/screenshots/prototype' || 'android/desktop-core/src/test/resources/screenshots' }}
     steps:
+      # test_filter is free text that is spliced into the gradle-flags JSON
+      # below and echoed by gradle-task-run, so reject anything that is not a
+      # plain Gradle --tests pattern before any step can see it. Read through
+      # the environment so the check itself cannot be injected.
+      - name: "Validate test_filter"
+        shell: bash
+        env:
+          TEST_FILTER: ${{ inputs.test_filter }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TEST_FILTER" =~ ^[A-Za-z0-9_.*-]+$ ]]; then
+            echo "::error::test_filter must match ^[A-Za-z0-9_.*-]+\$ (a Gradle --tests pattern)"
+            exit 1
+          fi
+
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
@@ -128,6 +143,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
           COMMIT_SCOPE: ${{ inputs.module == 'control-proxy' && 'prototype' || 'desktop' }}
+          MODULE: ${{ inputs.module }}
+          TEST_FILTER: ${{ inputs.test_filter }}
         run: |
           set -euo pipefail
 
@@ -152,7 +169,7 @@ jobs:
             --base main \
             --head "$branch" \
             --title "test($COMMIT_SCOPE): record screenshot baselines" \
-            --body "Automated screenshot baseline recording from the \`Record Desktop Screenshot Baselines\` workflow (run \`${GITHUB_RUN_ID}\`, module \`${{ inputs.module }}\`, filter \`${{ inputs.test_filter }}\`).
+            --body "Automated screenshot baseline recording from the \`Record Desktop Screenshot Baselines\` workflow (run \`${GITHUB_RUN_ID}\`, module \`${MODULE}\`, filter \`${TEST_FILTER}\`).
 
           Recorded on \`ubuntu-latest\` (the reference OS). **Review the PNGs visually** before merging — they are the source of truth for future screenshot comparisons.
 

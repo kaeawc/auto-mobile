@@ -64,6 +64,7 @@ import type { DaemonResponse } from "../../src/daemon/types";
 import { ViewerReadOnlyError } from "../../src/daemon/streamSubscriptionPolicy";
 import {
   AndroidAvdIdentityUnresolvedError,
+  AndroidDeviceIdentityUnresolvedError,
   AndroidAvdIdentityConflictError,
   DeviceBootTimeoutError,
 } from "../../src/devices/deviceBootService";
@@ -343,6 +344,16 @@ export function overloadRefusalError(): McpOverloadError {
 
 /** One entry per wire code, each produced by the builder the daemon itself calls. */
 const BUILDERS: readonly FixtureEntry[] = [
+  [
+    "target_identity_unresolved",
+    "AndroidAvdIdentityUnresolvedError via shapeToolCallError",
+    () => shaped(new AndroidAvdIdentityUnresolvedError("Pixel_8_API_35", [DEVICE])),
+  ],
+  [
+    "target_identity_unresolved.device",
+    "AndroidDeviceIdentityUnresolvedError via shapeToolCallError",
+    () => shaped(new AndroidDeviceIdentityUnresolvedError(DEVICE)),
+  ],
   [
     "orphan_recorder_active",
     "OrphanRecorderActiveError via shapeToolCallError",
@@ -1083,8 +1094,7 @@ const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
     "daemon_handoff_interrupted",
     () => new DaemonHandoffInterruptionError("Daemon handoff interrupted the in-flight request"),
   ],
-  // shapeToolCallError returns plain Error: text; no top-level JSON refusal. Inline
-  // deleteDevice/provisionDevice target_identity_unresolved literals have no shared capture builder.
+  // The same retryable identity refusal is shaped by shapeToolCallError on the tool boundary.
   [
     "target_identity_unresolved",
     () => new AndroidAvdIdentityUnresolvedError("Pixel_8_API_35", [DEVICE]),

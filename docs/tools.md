@@ -1612,9 +1612,9 @@ the Android package name or iOS bundle ID. `clearKeyValueFile.fileName` and
 
 On iOS Simulator, a stored TCC Photos grant is not proof of effective full
 read/write authorization. `getAppPermissions` reports it as `unknown` with
-`verified: false`; `setAppPermissions` reports a dispatched Photos grant as an
-unverified failure. Verification is unavailable from the host without app
-instrumentation: launch the app and check
+`verified: false`; `setAppPermissions` reports a dispatched Photos grant as
+success with `applied: true`, `verified: false`, and a warning. Verification is
+unavailable from the host without app instrumentation: launch the app and check
 `PHPhotoLibrary authorizationStatusForAccessLevel:ReadWrite`. Add-only access is
 insufficient. Physical-device permission limits are unchanged.
 

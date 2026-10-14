@@ -631,13 +631,45 @@ describe("AppPermissions", () => {
       action: "grant",
       permissions: ["photos"],
     });
-    expect(setResult).toMatchObject({ success: false, changedCount: 0, failedCount: 1 });
+    expect(setResult).toMatchObject({ success: true, changedCount: 1, failedCount: 0 });
     expect(setResult.operations[0]).toMatchObject({
-      success: false,
-      changedCount: 0,
-      failedCount: 1,
-      result: { permission: "photos", success: false, applied: true, verified: false },
+      success: true,
+      changedCount: 1,
+      failedCount: 0,
+      warning: expect.stringContaining("Photos grant was dispatched via simctl"),
+      result: { permission: "photos", success: true, applied: true, verified: false },
     });
+    expect(setResult.warnings).toEqual([setResult.operations[0].warning]);
+    expect(setResult).not.toHaveProperty("error");
+    expect(setResult.operations[0]).not.toHaveProperty("error");
+    expect(setResult.operations[0].result).not.toHaveProperty("error");
+  });
+
+  test("surfaces Photos readback failure as facade warnings after a successful grant", async () => {
+    const permissions = new AppPermissions(iosSimulator, {
+      simctl: new FakeSimCtlClient(),
+      tccReader: {
+        readPermissions: async () => {
+          throw new Error("TCC unavailable");
+        },
+      },
+    });
+    const result = await permissions.setPermissions("com.example.app", {
+      action: "grant",
+      permissions: ["photos"],
+    });
+    expect(result).toMatchObject({ success: true, changedCount: 1, failedCount: 0 });
+    expect(result.operations[0]).toMatchObject({
+      success: true,
+      changedCount: 1,
+      failedCount: 0,
+      warning: expect.stringContaining("Photos grant was dispatched via simctl"),
+      result: { success: true, applied: true, verified: false },
+    });
+    expect(result.warnings).toEqual([result.operations[0].warning]);
+    expect(result).not.toHaveProperty("error");
+    expect(result.operations[0]).not.toHaveProperty("error");
+    expect(result.operations[0].result).not.toHaveProperty("error");
   });
 
   test("routes reset on a physical iOS device through the CtrlProxy runner", async () => {

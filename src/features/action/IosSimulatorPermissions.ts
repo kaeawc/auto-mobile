@@ -28,6 +28,7 @@ export interface IosSimulatorPermissionCommandResult {
   stdout?: string;
   stderr?: string;
   error?: string;
+  warning?: string;
 }
 
 export interface IosSimulatorPermissionMutationResult {
@@ -39,6 +40,7 @@ export interface IosSimulatorPermissionMutationResult {
   changedCount: number;
   failedCount: number;
   results: IosSimulatorPermissionCommandResult[];
+  warnings?: string[];
   error?: string;
 }
 
@@ -119,7 +121,7 @@ export function classifyIosSimulatorPermission(
   return { state };
 }
 
-const PHOTOS_GRANT_UNVERIFIED_ERROR =
+const PHOTOS_GRANT_UNVERIFIED_WARNING =
   "Photos grant was dispatched via simctl but effective full read/write Photos access could not be verified; add-only is insufficient; verify by launching the app and checking PHPhotoLibrary authorizationStatusForAccessLevel:ReadWrite";
 
 export class IosSimulatorPermissions {
@@ -234,7 +236,7 @@ export class IosSimulatorPermissions {
     const commandError = results.find(
       (result) => !result.success && result.verified !== false,
     )?.error;
-    const unverifiedError = results.find((result) => result.verified === false)?.error;
+    const warnings = results.flatMap((result) => (result.warning ? [result.warning] : []));
 
     return {
       success: failedCount === 0,
@@ -245,12 +247,10 @@ export class IosSimulatorPermissions {
       changedCount: results.length - failedCount,
       failedCount,
       results,
+      ...(warnings.length > 0 ? { warnings } : {}),
       ...(failedCount > 0
         ? {
-            error:
-              commandError ??
-              unverifiedError ??
-              `One or more iOS simulator permissions failed to ${action}`,
+            error: commandError ?? `One or more iOS simulator permissions failed to ${action}`,
           }
         : {}),
     };
@@ -260,13 +260,13 @@ export class IosSimulatorPermissions {
     appId: string,
     permission: string,
   ): Promise<
-    Pick<IosSimulatorPermissionCommandResult, "success" | "applied" | "verified" | "error">
+    Pick<IosSimulatorPermissionCommandResult, "success" | "applied" | "verified" | "warning">
   > {
     const unverified = {
-      success: false,
+      success: true,
       applied: true,
       verified: false,
-      error: PHOTOS_GRANT_UNVERIFIED_ERROR,
+      warning: PHOTOS_GRANT_UNVERIFIED_WARNING,
     };
     try {
       const rows = await this.tccReader.readPermissions(this.device.deviceId, appId, [permission]);

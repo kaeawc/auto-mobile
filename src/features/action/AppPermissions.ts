@@ -119,7 +119,7 @@ export interface SetAppPermissionsResult {
   failedCount: number;
   operations: AppPermissionOperationResult[];
   error?: string;
-  /** Operation warnings (e.g. an unverified outcome); present only on Android when any exist. */
+  /** Operation warnings (e.g. an unverified outcome); present on Android or iOS simulator Photos grants when any exist. */
   warnings?: string[];
 }
 
@@ -232,8 +232,10 @@ export class AppPermissions {
         failedCount: permissionResult.success ? 0 : 1,
         result: permissionResult,
         ...(permissionResult.error ? { error: permissionResult.error } : {}),
+        ...(permissionResult.warning ? { warning: permissionResult.warning } : {}),
       })),
       ...(result.error ? { error: result.error } : {}),
+      ...(result.warnings ? { warnings: result.warnings } : {}),
     };
   }
 

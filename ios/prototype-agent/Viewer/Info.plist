@@ -4,7 +4,9 @@
      The plist is the only name source: no InfoPlist.strings.
      Overwrite loose PrototypeViewerIcon60x60@2x.png (120x120) and
      PrototypeViewerIcon60x60@3x.png (180x180) in place.
-     Write the spec to Documents/prototype.json in the data container obtained with
+     Write the saved layout to Documents/prototype/ in the data container:
+     manifest.json, spec.json, assets/<sha256>.<ext>, fonts/<sha256>.<ext> (formatVersion 1).
+     The bundled prototype.json is only the template demo fallback. Obtain the container with
      simctl get_app_container <udid> <bundle-id> data.
      Then codesign --force --sign - the .app and simctl install.
      Executable name and bundle layout must not change.

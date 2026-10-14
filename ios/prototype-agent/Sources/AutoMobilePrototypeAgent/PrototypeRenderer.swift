@@ -451,8 +451,13 @@ struct NodeView: View {
         }
         // Scaled with Dynamic Type, unlike the Android bug #10436.
         let scaled = UIFontMetrics.default.scaledValue(for: resolved.size)
-        var text = Text(interpolatedText)
-            .font(.system(size: scaled, weight: weight, design: design))
+        let font: Font
+        if let id = resolved.fontAsset, let face = model.fontFaces[id] {
+            font = .custom(face, size: scaled).weight(weight)
+        } else {
+            font = .system(size: scaled, weight: weight, design: design)
+        }
+        var text = Text(interpolatedText).font(font)
         if style?.fontStyle == "italic" { text = text.italic() }
         let decoration = style?.textDecoration
         if decoration == "underline" || decoration == "underlineLineThrough" { text = text.underline() }

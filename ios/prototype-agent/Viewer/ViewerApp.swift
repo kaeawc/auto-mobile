@@ -1,3 +1,4 @@
+import CoreText
 import SwiftUI
 import UIKit
 
@@ -9,16 +10,25 @@ struct PrototypeViewerApp: App {
 
     init() {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-        var locations = documents
-            .map { [$0.appendingPathComponent(PrototypeViewerSpecLoader.documentsFileName).path] } ?? []
-        if let bundled = Bundle.main.path(forResource: "prototype", ofType: "json") {
-            locations.append(bundled)
-        }
-        let content = PrototypeViewerSpecLoader(reader: PrototypeViewerFileReader(), locations: locations).load()
-        self.content = content
+        let locations = Bundle.main.path(forResource: "prototype", ofType: "json").map { [$0] } ?? []
         let model = PrototypeModel(mode: .standalone)
         model.setDeviceDark(UITraitCollection.current.userInterfaceStyle == .dark)
-        if case let .loaded(spec, bytes) = content { model.show(spec, specBytes: bytes) }
+        let fallback = PrototypeViewerSpecLoader(reader: PrototypeViewerFileReader(), locations: locations)
+        let launch: PrototypeViewerLaunch
+        if let documents {
+            launch = PrototypeViewerLayoutLoader(
+                reader: PrototypeViewerLayoutReader(), fallback: fallback,
+                registrar: PrototypeViewerAssetRegistrar(model: model)
+            ).load(directory: documents.appendingPathComponent(PrototypeViewerLayoutLoader.documentsDirectoryName))
+        } else {
+            launch = PrototypeViewerLaunch(
+                content: fallback.load(), registeredImageIds: [], fontFaces: [:], problems: []
+            )
+        }
+        content = launch.content
+        model.fontFaces = launch.fontFaces
+        model.assetProblems = launch.problems
+        if case let .loaded(spec, bytes) = launch.content { model.show(spec, specBytes: bytes) }
         _model = State(initialValue: model)
     }
 
@@ -39,6 +49,26 @@ struct PrototypeViewerApp: App {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
                 }
+            case let .unsupportedFormat(version):
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Unsupported prototype format").font(.headline)
+                        Text("Version \(version); expected \(PrototypeSavedLayout.formatVersion)")
+                    }
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+                }
+            case let .corrupt(message):
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Prototype data is corrupt").font(.headline)
+                        Text(message)
+                    }
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+                }
             case let .loaded(spec, bytes):
                 ViewerRenderer(model: model)
                     // Dismissal withdraws hit rects. Recreate the hosts so unchanged geometry
@@ -50,6 +80,33 @@ struct PrototypeViewerApp: App {
                     }
             }
         }
+    }
+}
+
+@MainActor
+private struct PrototypeViewerAssetRegistrar: PrototypeAssetRegistering {
+    let model: PrototypeModel
+
+    func registerImage(id: String, data: Data) -> Bool {
+        guard let image = UIImage(data: data) else { return false }
+        model.putAsset(id, image)
+        return true
+    }
+
+    func registerFont(id: String, data: Data) -> String? {
+        guard let provider = CGDataProvider(data: data as CFData),
+              let font = CGFont(provider), let name = font.postScriptName
+        else { return nil }
+        var error: Unmanaged<CFError>?
+        let registered = CTFontManagerRegisterGraphicsFont(font, &error)
+        let registrationError = error?.takeRetainedValue()
+        guard registered || registrationError.map({
+            CFErrorGetDomain($0) as String == kCTFontManagerErrorDomain as String &&
+                CFErrorGetCode($0) == CTFontManagerError.alreadyRegistered.rawValue
+        }) == true else { return nil }
+        let face = name as String
+        model.fontFaces[id] = face
+        return face
     }
 }
 

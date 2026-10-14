@@ -518,10 +518,9 @@ final class PrototypeAgent: NSObject {
         updateAccessibility(session: model.session)
     }
 
-    /// One warning per shown spec: an uploaded font cannot be loaded on iOS, so its text uses the
-    /// system font. The ids also come back in `missingAssets`, like any asset the host has not sent.
+    /// One warning per shown spec for font assets without a registered face.
     private func warnAboutFontAssets(for spec: PrototypeSpec) {
-        let fonts = model.fontAssets()
+        let fonts = model.fontAssets().filter { model.fontFaces[$0] == nil }
         guard !fonts.isEmpty else { return }
         prototypeLog.warning(
             "prototype \(spec.id, privacy: .public): fontFamily asset unsupported on iOS, using system font for \(fonts.joined(separator: ","), privacy: .public)"

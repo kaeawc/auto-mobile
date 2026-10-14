@@ -87,6 +87,40 @@ function harness(exitCode = 0) {
   return { files, calls, ports, options };
 }
 describe("qualification case runner", () => {
+  test.each(["local-build", "published-package"] as const)(
+    "%s refuses missing identity before spawning",
+    async (proofLevel) => {
+      const h = harness();
+      expect(() =>
+        parseRunCaseArgs([
+          ...flags.map((value) => (value === "source-tests" ? proofLevel : value)),
+          "--",
+          "bun",
+        ]),
+      ).toThrow("--identity");
+      await expect(runCase({ ...h.options(), proofLevel }, h.ports)).rejects.toThrow("--identity");
+      expect(h.calls).toEqual([]);
+      expect(h.files.size).toBe(0);
+    },
+  );
+  test.each(["local-build", "published-package"] as const)(
+    "parses and runs %s with a binding identity",
+    async (proofLevel) => {
+      const h = harness();
+      h.files.set("identity.json", JSON.stringify({ ...identity(), proofLevel }));
+      const options = parseRunCaseArgs([
+        ...flags.map((value) => (value === "source-tests" ? proofLevel : value)),
+        "--identity",
+        "identity.json",
+        "--",
+        "bun",
+      ]);
+      const { result } = await runCase({ ...options, cwd: resolve("/repo") }, h.ports);
+      expect(result.proofLevel).toBe(proofLevel);
+      expect(result.artifact.sourceSha).toBe("a".repeat(40));
+      expect(h.calls).toHaveLength(1);
+    },
+  );
   test("passing command records fake timing, post-command hash and validated JSON", async () => {
     const h = harness();
     const { result, exitCode } = await runCase(

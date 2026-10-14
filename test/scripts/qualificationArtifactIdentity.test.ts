@@ -84,6 +84,7 @@ function fixture() {
         .filter((path) => path.startsWith(`${dir.replaceAll("\\", "/")}/`))
         .map((path) => path.slice(dir.length + 1))
         .sort(),
+    listNonRegular: () => [],
     git: (args, cwd) => {
       gitCalls.push({ args, cwd });
       return { exitCode: 0, stdout: `${oldSha}\n` };
@@ -179,14 +180,52 @@ describe("artifact identity", () => {
       capabilities: ["managed-slots/v1", "managed-slots/v1.deviceFamily"],
     });
   });
-  test("refuses build-info and tag disagreement", () => {
+  test("warns on local build-info and tag disagreement", () => {
     const f = fixture();
     f.buildInfo(currentSha);
     const record = identify(f.ports);
-    expect(record.verdict).toBe("refused");
+    expect(record.verdict).toBe("identified");
     expect(record.source.evidence).toBe("build-info");
+    expect(check(record, "source_sha").status).toBe("warn");
+    expect(check(record, "source_sha").detail).toContain(
+      `version 0.0.84 is also release tag 0.0.84 at ${oldSha}; this build (${currentSha}) is not that release`,
+    );
+    expect(
+      check(
+        identifyArtifact({ packageDir: root, repoDir: "/repo", expectSourceSha: oldSha }, f.ports),
+        "source_sha",
+      ).status,
+    ).toBe("fail");
+  });
+  test("refuses release-tag disagreement after awarding exact published proof", () => {
+    const f = fixture();
+    f.buildInfo(currentSha);
+    const bytes = packageTarball(f.files);
+    f.put("/artifact.tgz", bytes);
+    const record = identifyArtifact(
+      {
+        packageDir: root,
+        repoDir: "/repo",
+        tarball: "/artifact.tgz",
+        expectedIntegrity: `sha512-${createHash("sha512").update(bytes).digest("base64")}`,
+      },
+      f.ports,
+    );
+    expect(record.proofLevel).toBe("published-package");
+    expect(check(record, "tarball_contents").status).toBe("pass");
     expect(check(record, "source_sha").status).toBe("fail");
-    expect(check(record, "source_sha").detail).toContain(oldSha);
+    expect(record.verdict).toBe("refused");
+  });
+  test("dirty build warning lists at most ten dirty paths", () => {
+    const f = fixture();
+    f.buildInfo(oldSha, true);
+    const path = join(root, "dist/build-info.json");
+    const info = JSON.parse(f.ports.readText(path));
+    info.sourceDirtyPaths = Array.from({ length: 12 }, (_, index) => `dirty-${index}`);
+    f.put(path, JSON.stringify(info));
+    const detail = check(identify(f.ports), "build_info").detail;
+    expect(detail).toContain(info.sourceDirtyPaths.slice(0, 10).join(", "));
+    expect(detail).not.toContain("dirty-10");
   });
   test("uses build-info without a repo and warns on dirty builds", () => {
     const f = fixture();
@@ -277,7 +316,9 @@ describe("artifact identity", () => {
     f.put(join(root, "dist/node_modules/y/index.js"), "nested dependency");
     const allowed = identifyArtifact(options, f.ports);
     expect(allowed.verdict).toBe("identified");
-    expect(allowed.proofLevel).toBe("published-package");
+    expect(allowed.proofLevel).toBe("local-build");
+    expect(check(allowed, "published_exactness").status).toBe("warn");
+    expect(check(allowed, "published_exactness").detail).toContain("node_modules/x/index.js");
     expect(check(allowed, "tarball_contents").detail).toContain(
       "2 extra node_modules files allowed",
     );
@@ -287,6 +328,31 @@ describe("artifact identity", () => {
     expect(refused.proofLevel).toBe("local-build");
     expect(check(refused, "tarball_contents")).toMatchObject({ status: "fail" });
     expect(check(refused, "tarball_contents").detail).toContain("dist/extra.js");
+  });
+  test("refuses non-regular dist entries and counts allowed bin links without published proof", () => {
+    const f = fixture();
+    const bytes = packageTarball(f.files);
+    f.put("/artifact.tgz", bytes);
+    const options = {
+      packageDir: root,
+      tarball: "/artifact.tgz",
+      expectedIntegrity: `sha512-${createHash("sha512").update(bytes).digest("base64")}`,
+    };
+    f.ports.listNonRegular = () => ["dist/evil.js", "dist/evildir", "dist/pipe"];
+    const refused = identifyArtifact(options, f.ports);
+    expect(check(refused, "package_file_types").status).toBe("fail");
+    expect(check(refused, "package_file_types").detail).toContain("dist/evildir");
+    expect(refused.verdict).toBe("refused");
+    expect(refused.proofLevel).toBe("local-build");
+    f.ports.listNonRegular = () => ["node_modules/.bin/x", "dist/node_modules/.bin/y"];
+    const allowed = identifyArtifact(options, f.ports);
+    expect(check(allowed, "package_file_types")).toMatchObject({ status: "pass" });
+    expect(check(allowed, "package_file_types").detail).toContain("2");
+    expect(allowed.verdict).toBe("identified");
+    expect(allowed.proofLevel).toBe("local-build");
+    expect(check(allowed, "published_exactness").status).toBe("warn");
+    f.ports.listNonRegular = () => ["node_modules/.bin-evil/x"];
+    expect(check(identifyArtifact(options, f.ports), "package_file_types").status).toBe("fail");
   });
   test("reports missing files and caps differing paths at ten with a total", () => {
     const f = fixture();

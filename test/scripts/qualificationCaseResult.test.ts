@@ -14,7 +14,7 @@ function fixture(): CaseResult {
     matrixItem: 1,
     platform: "android",
     proofLevel: "local-build",
-    artifact: { packageVersion: null, sourceSha: null, integrity: null },
+    artifact: { packageVersion: "0.0.84", sourceSha: "a".repeat(40), integrity: null },
     command: { argv: ["bun", "case.ts"], cwd: "." },
     outcome: "pass",
     observation: { kind: "native" },
@@ -84,6 +84,37 @@ describe("qualification case format", () => {
     result.timings.finishedAt = "2026-10-14T01:00:00.000+02:00";
     expect(() => parseCaseResult(result)).toThrow("finishedAt");
   });
+  test.each(["packageVersion", "sourceSha"] as const)(
+    "built proof requires artifact.%s",
+    (field) => {
+      for (const proofLevel of ["local-build", "published-package"] as const) {
+        const result = fixture();
+        result.proofLevel = proofLevel;
+        result.artifact.integrity = "sha512-test";
+        result.artifact[field] = null;
+        expect(() => parseCaseResult(result)).toThrow(`artifact.${field}`);
+      }
+    },
+  );
+  test("published proof requires integrity; source tests may remain unbound", () => {
+    expect(() => parseCaseResult({ ...fixture(), proofLevel: "published-package" })).toThrow(
+      "artifact.integrity",
+    );
+    const source = {
+      ...fixture(),
+      proofLevel: "source-tests",
+      observation: { kind: "deterministic-test" },
+      artifact: { packageVersion: null, sourceSha: null, integrity: null },
+    };
+    expect(parseCaseResult(source).artifact).toEqual(source.artifact);
+    expect(
+      parseCaseResult({
+        ...fixture(),
+        proofLevel: "published-package",
+        artifact: { ...fixture().artifact, integrity: "sha512-test" },
+      }).proofLevel,
+    ).toBe("published-package");
+  });
   test.each(["..", "../log", "a/..", "a/../b", "~/log", "a/~b", "C:\\log", "/log", ""])(
     "rejects unsafe path %s",
     (path) => {
@@ -105,6 +136,8 @@ describe("qualification case format", () => {
       "at or after startedAt",
       "may exceed budgetMs",
       "non-empty for blocked or not-exercised",
+      "local-build and published-package require non-null packageVersion and sourceSha",
+      "published-package also requires non-null integrity",
     ]) {
       expect(text).toContain(rule);
     }

@@ -19,6 +19,7 @@ export interface BuildInfo {
   sourceSha: string | null;
   sourceShaFrom: "git" | "env" | null;
   sourceDirty: boolean | null;
+  sourceDirtyPaths: string[] | null;
   nativeResources: BuildInfoNativeResources | null;
   nativeResourcesFrom: "release-registry" | "nightly" | null;
 }
@@ -37,7 +38,25 @@ export function collectBuildInfo(ports: BuildInfoPorts): BuildInfo {
   const envSha = ports.env.GITHUB_SHA?.trim();
   const fromGit = head.exitCode === 0 && /^[a-f\d]{40}$/i.test(gitSha);
   const sourceSha = fromGit ? gitSha : envSha && /^[a-f\d]{40}$/i.test(envSha) ? envSha : null;
-  const status = ports.git(["status", "--porcelain", "--untracked-files=no"]);
+  const status = ports.git(["status", "--porcelain", "-z", "--untracked-files=no"]);
+  const dirtyPaths: string[] = [];
+  const statusEntries = status.stdout.split("\0");
+  for (let index = 0; index < statusEntries.length; index++) {
+    const entry = statusEntries[index];
+    if (!entry) {
+      continue;
+    }
+    dirtyPaths.push(entry.slice(3));
+    // Porcelain -z puts a rename/copy's original path in the next NUL-delimited entry.
+    if (entry.slice(0, 2).includes("R") || entry.slice(0, 2).includes("C")) {
+      dirtyPaths.push(statusEntries[++index]);
+    }
+  }
+  // npm prepublishOnly rewrites the tracked root README before prepack; that is not source dirt.
+  const sourceDirtyPaths =
+    status.exitCode === 0
+      ? [...new Set(dirtyPaths.filter((path) => path && path !== "README.md"))].sort().slice(0, 50)
+      : null;
   const release = ports.registry.find((entry) => entry.version === pkg.version);
   const entry = release ?? ports.nightly;
   const resources = Object.fromEntries(
@@ -47,10 +66,12 @@ export function collectBuildInfo(ports: BuildInfoPorts): BuildInfo {
   );
   return {
     schemaVersion: 1,
-    ...pkg,
+    name: pkg.name,
+    version: pkg.version,
     sourceSha: sourceSha?.toLowerCase() ?? null,
     sourceShaFrom: fromGit ? "git" : sourceSha ? "env" : null,
-    sourceDirty: status.exitCode === 0 ? status.stdout.trim().length > 0 : null,
+    sourceDirty: sourceDirtyPaths === null ? null : sourceDirtyPaths.length > 0,
+    sourceDirtyPaths,
     nativeResources: Object.keys(resources).length ? resources : null,
     nativeResourcesFrom: Object.keys(resources).length
       ? release

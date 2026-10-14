@@ -33,6 +33,15 @@ registry's `dist.integrity`. The identifier checks package contents against the
 tarball, required runtime assets, source SHA, native-resource checksum pins and
 the shipped managed-slot contract. It refuses a source checkout even if built.
 
+`package_file_types` refuses symlinks and other non-regular entries outside
+`node_modules/.bin/`; links in that directory are counted. `published_exactness`
+warns when extra files (including allowed `node_modules/` files) or any non-regular
+entries prevent published proof: use an exact `tar -xzf` extraction.
+
+A local build whose source SHA differs from the release tag for the same version
+receives a warning that it is not that release. That disagreement fails published
+proof; `--expect-source-sha` mismatches always fail.
+
 `dist/build-info.json` exists in packages packed after this change. Older packages
 fall back to a release tag resolved in `--repo`. Version `0.0.84` resolves to
 `b51bfe50dfeb608ed838acf89481b70652084b81`, so
@@ -95,6 +104,10 @@ Injected faults are never native observations; the schema rejects `native` at
 never serials or UDIDs. Sanitize command arguments, paths and log contents too;
 the schema cannot infer identifiers embedded in free text.
 
+The observation label is declared by the operator and reviewed in the summary;
+the schema blocks only `native` at `source-tests` level and cannot detect a
+mislabelled case.
+
 The runner validates before execution, records repo-relative cwd, command timing,
 evidence SHA-256s when files exist, and the command's exit status. Missing evidence
 has a null hash. `--not-exercised` records the intended command without running it
@@ -140,7 +153,7 @@ synthetic fixture text.
 | `execution_policy_failed`            | yes       | fail                | Retry; the session could not be held for the execution. (src/daemon/managedSlots/managedSlotAcquisition.ts)                                                              |
 | `liveness_owner_conflict`            | yes       | fail                | Retry; another owner claimed the slot's session. (src/daemon/managedSlots/managedSlotAcquisition.ts)                                                                     |
 | `managed_slot_config_invalid`        | no        | fail                | Fix the managed slot config; nothing changed. (src/daemon/managedSlotProxyAcquisition.ts)                                                                                |
-| `managed_slot_group_unsupported`     | no        | fail                | Not retryable; fix the launch configuration. (src/models/managedSlotConfig.ts: groups larger than one slot/device are not supported)                                     |
+| `managed_slot_group_unsupported`     | no        | fail                | "managed slot groups larger than 1 slot/device are not supported"; not retryable. (src/models/managedSlotConfig.ts)                                                      |
 | `managed_slots_unsupported`          | no        | fail                | managed slots not yet supported by this build; remove --managed-slot-config / AUTOMOBILE_MANAGED_SLOT_CONFIG to run an unmanaged proxy (src/models/managedSlotConfig.ts) |
 | `managed_slot_budget_exhausted`      | yes       | fail                | Reset or release managed slot scopes that are no longer needed, or raise AUTOMOBILE_MANAGED_SLOT_MAX_DEVICES, then retry. (src/daemon/managedSlots/reconciler.ts)        |
 | `provision_failed`                   | no        | fail                | Inspect the provision failure code; retry if it is retryable. (src/daemon/managedSlots/reconciler.ts)                                                                    |
@@ -159,8 +172,8 @@ synthetic fixture text.
 | `device_assigned_to_managed_slot`    | no        | fail                | It stays reserved while idle; use another device, or reset the slot's scope to release it.                                                                               |
 | `device_outside_managed_slots`       | no        | fail                | Slot devices are acquired, started, stopped and deleted only by managed slot acquisition and release. Reads stay open; use a separate MCP connection for anything else.  |
 | `managed_slot_ownership_unconfirmed` | yes       | retry               | Slot ownership is not recorded for this daemon yet (the managed slot registry is busy or the slot is not ready); retry shortly.                                          |
-| `managed_execution_ended`            | no        | fail                | relaunch_execution                                                                                                                                                       |
-| `session_ownership_lost`             | no        | acquire-new-session | acquire_new_session                                                                                                                                                      |
+| `managed_execution_ended`            | no        | fail                | "device calls are refused until the runner relaunches the execution; reads that name a deviceId still work." (`relaunch_execution`) (src/server/deviceSessionResult.ts)  |
+| `session_ownership_lost`             | no        | acquire-new-session | "Acquire a new device with getAndroid or getApple." (`acquire_new_session`) (src/daemon/managedSlots/managedSlotRefusal.ts)                                              |
 
 ## What qualification still requires
 

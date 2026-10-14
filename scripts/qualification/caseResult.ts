@@ -9,7 +9,8 @@ const nonEmpty = z.string().min(1);
 // POSIX only, with no parent segment or home expansion, including embedded ~.
 const relativePath = nonEmpty.regex(/^(?!\/)(?!.*\\)(?!.*~)(?!.*(?:^|\/)\.\.(?:\/|$)).+$/);
 const duration = z.number().int().nonnegative();
-export const caseResultSchema = z
+// CLI metadata is validated before an identity is read; it is not yet artifact-bound evidence.
+export const caseMetadataSchema = z
   .object({
     schemaVersion: z.literal(1),
     caseId: z
@@ -32,7 +33,10 @@ export const caseResultSchema = z
           .regex(/^sha512-/)
           .nullable(),
       })
-      .strict(),
+      .strict()
+      .describe(
+        "local-build and published-package require non-null packageVersion and sourceSha; published-package also requires non-null integrity.",
+      ),
     command: z.object({ argv: z.array(nonEmpty).min(1), cwd: relativePath }).strict(),
     outcome: z.enum(["pass", "fail", "blocked", "not-exercised"]),
     observation: z
@@ -115,6 +119,24 @@ export const caseResultSchema = z
       });
     }
   });
+
+export const caseResultSchema = caseMetadataSchema.superRefine((result, ctx) => {
+  const required =
+    result.proofLevel === "published-package"
+      ? (["packageVersion", "sourceSha", "integrity"] as const)
+      : result.proofLevel === "local-build"
+        ? (["packageVersion", "sourceSha"] as const)
+        : [];
+  for (const field of required) {
+    if (result.artifact[field] === null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["artifact", field],
+        message: `${result.proofLevel} requires non-null artifact.${field}`,
+      });
+    }
+  }
+});
 
 export type CaseResult = z.infer<typeof caseResultSchema>;
 export function parseCaseResult(value: unknown): CaseResult {

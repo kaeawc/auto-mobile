@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 /** Usage: bun scripts/qualification/artifactIdentity.ts --package-dir <installed-or-extracted-dir> [--tarball <tgz>] [--expected-integrity <sri>] [--repo <dir>] [--expect-source-sha <sha>] [--native-assets-dir <dir>] [--out <file>]. */
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import {
@@ -81,6 +81,7 @@ export interface ArtifactIdentityPorts {
   readText(path: string): string;
   readBytes(path: string): Uint8Array;
   listFiles(root: string): string[];
+  listNonRegular(root: string): string[];
   git(args: readonly string[], cwd: string): { exitCode: number; stdout: string };
   registry: readonly ReleaseChecksumEntry[];
 }
@@ -188,12 +189,16 @@ function identifySource(
       : ` matching expected ${options.expectSourceSha}`;
   }
   if (disagreement) {
-    detail += `; build-info SHA ${source.sha} differs from release tag ${source.tag} SHA ${tagSha}`;
+    detail += `; version ${record.package.version} is also release tag ${source.tag} at ${tagSha}; this build (${source.sha}) is not that release`;
   }
   check(
     record,
     "source_sha",
-    disagreement || mismatch ? "fail" : source.sha ? "pass" : "warn",
+    mismatch || (disagreement && record.proofLevel === "published-package")
+      ? "fail"
+      : disagreement || !source.sha
+        ? "warn"
+        : "pass",
     detail,
   );
 }
@@ -276,6 +281,7 @@ function identifyTarball(
   options: ArtifactIdentityOptions,
   ports: ArtifactIdentityPorts,
   fileHashes: ReadonlyMap<string, string>,
+  nonRegular: readonly string[],
 ): void {
   if (!options.tarball) {
     return;
@@ -302,6 +308,7 @@ function identifyTarball(
       : `compare with npm view ${DAEMON_PACKAGE_NAME}@${record.package.version} dist.integrity`,
   );
   let contentsPass = false;
+  let exactExtraction = false;
   try {
     const entries = readTarGzEntries(bytes);
     const tarPaths = new Set<string>();
@@ -323,8 +330,10 @@ function identifyTarball(
       }
     }
     let dependencyExtras = 0;
+    const extras: string[] = [];
     for (const path of fileHashes.keys()) {
       if (!tarPaths.has(path)) {
+        extras.push(path);
         if (path.split("/").slice(0, -1).includes("node_modules")) {
           dependencyExtras++;
         } else {
@@ -333,18 +342,27 @@ function identifyTarball(
       }
     }
     contentsPass = differences.size === 0;
+    exactExtraction = extras.length === 0 && nonRegular.length === 0;
     check(
       record,
       "tarball_contents",
       contentsPass ? "pass" : "fail",
       `${differences.size} differing/missing/extra paths${differences.size ? `: ${[...differences].slice(0, 10).join(", ")}` : ""}; ${dependencyExtras} extra node_modules files allowed`,
     );
+    if (!exactExtraction) {
+      check(
+        record,
+        "published_exactness",
+        "warn",
+        `Published proof requires an exact tar -xzf extraction; ${extras.length} extra files${extras.length ? `: ${extras.slice(0, 10).join(", ")}` : ""}; ${nonRegular.length} non-regular entries${nonRegular.length ? `: ${nonRegular.slice(0, 10).join(", ")}` : ""}`,
+      );
+    }
   } catch (error) {
     const detail = `Tarball contents verification failed: ${error instanceof Error ? error.message : String(error)}`;
     console.warn(detail);
     check(record, "tarball_contents", "fail", detail);
   }
-  if (status === "pass" && contentsPass) {
+  if (status === "pass" && contentsPass && exactExtraction) {
     record.proofLevel = "published-package";
   }
 }
@@ -398,6 +416,22 @@ export function identifyArtifact(
     return record;
   }
   const files = ports.listFiles(root).slice().sort();
+  const nonRegular = ports.listNonRegular(root).slice().sort();
+  const disallowed = nonRegular.filter(
+    (path) =>
+      !path
+        .split("/")
+        .some(
+          (part, index, parts) =>
+            part === "node_modules" && parts[index + 1] === ".bin" && index + 2 < parts.length,
+        ),
+  );
+  check(
+    record,
+    "package_file_types",
+    disallowed.length ? "fail" : "pass",
+    `${nonRegular.length} non-regular entries; ${nonRegular.length - disallowed.length} under node_modules/.bin/ allowed${disallowed.length ? `; refused: ${disallowed.slice(0, 10).join(", ")}` : ""}`,
+  );
   const missing = findMissingPackedAssets(files, REQUIRED_PACKED_RUNTIME_ASSETS);
   check(
     record,
@@ -424,7 +458,7 @@ export function identifyArtifact(
     "pass",
     `${files.length} files; SHA-256 ${record.package.contentSha256}`,
   );
-  identifyTarball(record, options, ports, fileHashes);
+  identifyTarball(record, options, ports, fileHashes, nonRegular);
   const infoPath = join(root, "dist/build-info.json");
   const info = ports.exists(infoPath) ? (JSON.parse(ports.readText(infoPath)) as BuildInfo) : null;
   const badInfo =
@@ -442,7 +476,7 @@ export function identifyArtifact(
       : !info
         ? "package predates build-info; source SHA falls back to the release tag"
         : info.sourceDirty
-          ? "Build has tracked-file changes"
+          ? `Build has tracked-file changes${info.sourceDirtyPaths?.length ? `: ${info.sourceDirtyPaths.slice(0, 10).join(", ")}` : ""}`
           : "Build info matches package",
   );
   identifySource(record, info, options, ports);
@@ -495,6 +529,27 @@ function listFiles(root: string): string[] {
   return files.sort();
 }
 
+function listNonRegular(root: string): string[] {
+  if (!existsSync(root)) {
+    return [];
+  }
+  const paths: string[] = [];
+  const visit = (dir: string, prefix: string): void => {
+    for (const entry of sortedReaddirEntriesSync(dir)) {
+      const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const absolute = join(dir, entry.name);
+      const stat = lstatSync(absolute);
+      if (entry.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile())) {
+        paths.push(path);
+      } else if (stat.isDirectory()) {
+        visit(absolute, path);
+      }
+    }
+  };
+  visit(root, "");
+  return paths.sort();
+}
+
 if (import.meta.main) {
   try {
     const options = parseIdentityArgs(process.argv.slice(2));
@@ -503,6 +558,7 @@ if (import.meta.main) {
       readText: (path) => readFileSync(path, "utf8"),
       readBytes: (path) => readFileSync(path),
       listFiles,
+      listNonRegular,
       git: (args, cwd) => {
         try {
           const result = Bun.spawnSync(["git", ...args], { cwd });

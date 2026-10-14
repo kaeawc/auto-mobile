@@ -21,6 +21,7 @@ export interface AggregateReport {
 }
 const platforms = ["android", "host", "ios"] as const;
 const outcomes = ["pass", "fail", "blocked", "not-exercised"] as const;
+const proofLevels = ["source-tests", "local-build", "published-package"] as const;
 function compare(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
@@ -147,10 +148,10 @@ function checkIdentity(
       });
     }
   }
-  if (result.proofLevel === "published-package" && identity.proofLevel !== "published-package") {
+  if (proofLevels.indexOf(result.proofLevel) > proofLevels.indexOf(identity.proofLevel)) {
     report.errors.push({
       file,
-      message: "published-package result requires a published-package identity",
+      message: `${result.proofLevel} result exceeds ${identity.proofLevel} identity proof level`,
     });
   }
 }
@@ -167,6 +168,7 @@ export function aggregateResults(input: AggregateInput): AggregateReport {
     report.errors.push({ file: "identity", message: "Artifact identity verdict is refused" });
   }
   const seen = new Set<string>();
+  const bindings = new Map<string, { value: string; file: string }>();
   for (const file of [...input.files].sort((a, b) => compare(a.name, b.name))) {
     let result: CaseResult;
     try {
@@ -182,6 +184,20 @@ export function aggregateResults(input: AggregateInput): AggregateReport {
             : String(error);
       report.errors.push({ file: file.name, message });
       continue;
+    }
+    for (const field of ["packageVersion", "sourceSha", "integrity"] as const) {
+      const value = result.artifact[field];
+      const previous = bindings.get(field);
+      if (value !== null) {
+        if (previous && previous.value !== value) {
+          report.errors.push({
+            file: file.name,
+            message: `mixed artifacts: ${field} ${previous.value} vs ${value} (${previous.file}, ${file.name})`,
+          });
+        } else if (!previous) {
+          bindings.set(field, { value, file: file.name });
+        }
+      }
     }
     const key = `${result.platform}:${result.caseId}`;
     if (seen.has(key)) {

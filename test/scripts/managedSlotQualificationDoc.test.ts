@@ -1,22 +1,27 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 
 interface RefusalPayload {
   code?: string;
   retryable?: boolean;
+  message?: string;
+  nextAction?: string;
   error?:
     | string
     | {
         code: string;
         retryable?: boolean;
-        acquisitionFailure?: { code: string; retryable: boolean };
+        message?: string;
+        nextAction?: string;
+        acquisitionFailure?: { code: string; retryable: boolean; nextAction?: string };
       };
 }
 describe("managed-slot qualification documentation", () => {
   let doc: string;
   let nav: string;
   let compatibility: Array<{ id: string; supported: boolean; outcome: string; verifiedBy: string }>;
-  let expected: Array<{ code: string; retryable: boolean; client: string }>;
+  let expected: Array<{ code: string; retryable: boolean; client: string; guidance?: string }>;
+  let sourceReferences: Array<{ path: string; exists: boolean }>;
   let rows: string[][];
   let compatibilityRows: string[][];
   beforeAll(() => {
@@ -68,12 +73,21 @@ describe("managed-slot qualification documentation", () => {
       const error = typeof payload.error === "object" ? payload.error : payload;
       const client = expectations.codes[key].expected;
       if (typeof payload.error === "object" && payload.error.acquisitionFailure) {
-        expected.push({ ...payload.error.acquisitionFailure, client });
+        expected.push({
+          ...payload.error.acquisitionFailure,
+          client,
+          guidance: payload.error.acquisitionFailure.nextAction,
+        });
       }
       if (!error.code) {
         throw new Error(`Missing refusal code in ${name}`);
       }
-      expected.push({ code: error.code, retryable: error.retryable ?? false, client });
+      expected.push({
+        code: error.code,
+        retryable: error.retryable ?? false,
+        client,
+        guidance: error.nextAction ?? payload.message,
+      });
     }
     rows = doc
       .split("## Retry and recovery by failure code")[1]
@@ -86,6 +100,12 @@ describe("managed-slot qualification documentation", () => {
           .slice(1, -1)
           .map((cell) => cell.trim()),
       );
+    sourceReferences = rows.flatMap((row) =>
+      [...row[3].matchAll(/\((src\/[^)\s:]+)(?:[^)]*)\)/g)].map((match) => ({
+        path: match[1],
+        exists: existsSync(new URL(match[1], root)),
+      })),
+    );
   });
   test("exactly one table row per typed code, matching all refusal fixtures", () => {
     const codes = [...new Set(expected.map((row) => row.code))].sort();
@@ -96,6 +116,15 @@ describe("managed-slot qualification documentation", () => {
       expect(matching[0][1]).toBe(item.retryable ? "yes" : "no");
       expect(matching[0][2]).toBe(item.client);
       expect(matching[0][3].length).toBeGreaterThan(0);
+      if (item.guidance && item.guidance !== "Retry." && !item.guidance.endsWith("fixture")) {
+        expect(matching[0][3]).toContain(item.guidance);
+      }
+    }
+  });
+  test("every parenthesized source path exists", () => {
+    expect(sourceReferences.length).toBeGreaterThan(0);
+    for (const reference of sourceReferences) {
+      expect(reference.exists, reference.path).toBe(true);
     }
   });
   test("navigation immediately follows managed device slots", () => {

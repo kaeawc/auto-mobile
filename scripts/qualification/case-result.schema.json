@@ -36,6 +36,7 @@
       "enum": ["source-tests", "local-build", "published-package"]
     },
     "artifact": {
+      "description": "local-build and published-package require non-null packageVersion and sourceSha; published-package also requires non-null integrity.",
       "type": "object",
       "properties": {
         "packageVersion": {

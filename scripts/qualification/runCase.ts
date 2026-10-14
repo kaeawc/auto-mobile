@@ -6,7 +6,7 @@ import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { UsageError, type ArtifactIdentityRecord } from "./artifactIdentity";
-import { parseCaseResult, type CaseResult } from "./caseResult";
+import { caseMetadataSchema, parseCaseResult, type CaseResult } from "./caseResult";
 
 export interface RunCasePorts {
   now(): number;
@@ -35,9 +35,9 @@ export interface RunCaseOptions {
   cwd: string;
 }
 
-function validate(value: unknown): CaseResult {
+function validate(value: unknown, metadataOnly = false): CaseResult {
   try {
-    return parseCaseResult(value);
+    return metadataOnly ? caseMetadataSchema.parse(value) : parseCaseResult(value);
   } catch (error) {
     throw new UsageError(
       `Invalid case result: ${error instanceof Error ? error.message : String(error)}`,
@@ -82,6 +82,12 @@ export function parseRunCaseArgs(argv: readonly string[]): RunCaseOptions {
   if (!values.out) {
     throw new UsageError("--out is required");
   }
+  if (
+    ["local-build", "published-package"].includes(values["proof-level"] ?? "") &&
+    !values.identity
+  ) {
+    throw new UsageError("Built and published proof levels require --identity");
+  }
   const injected = values.observation === "injected-fault";
   if (
     injected
@@ -92,43 +98,46 @@ export function parseRunCaseArgs(argv: readonly string[]): RunCaseOptions {
       "--fault-mechanism and --fault are required iff --observation injected-fault",
     );
   }
-  const record = validate({
-    schemaVersion: 1,
-    caseId: values["case-id"],
-    title: values.title,
-    platform: values.platform,
-    proofLevel: values["proof-level"],
-    matrixItem: values["matrix-item"] === undefined ? null : Number(values["matrix-item"]),
-    artifact: { packageVersion: null, sourceSha: null, integrity: null },
-    command: { argv: argv.slice(separator + 1), cwd: "." },
-    outcome: values["not-exercised"] ? "not-exercised" : "pass",
-    observation: injected
-      ? { kind: values.observation, mechanism: values["fault-mechanism"], fault: values.fault }
-      : { kind: values.observation },
-    timings: {
-      startedAt: "1970-01-01T00:00:00.000Z",
-      finishedAt: "1970-01-01T00:00:00.000Z",
-      durationMs: 0,
-      operations: [],
+  const record = validate(
+    {
+      schemaVersion: 1,
+      caseId: values["case-id"],
+      title: values.title,
+      platform: values.platform,
+      proofLevel: values["proof-level"],
+      matrixItem: values["matrix-item"] === undefined ? null : Number(values["matrix-item"]),
+      artifact: { packageVersion: null, sourceSha: null, integrity: null },
+      command: { argv: argv.slice(separator + 1), cwd: "." },
+      outcome: values["not-exercised"] ? "not-exercised" : "pass",
+      observation: injected
+        ? { kind: values.observation, mechanism: values["fault-mechanism"], fault: values.fault }
+        : { kind: values.observation },
+      timings: {
+        startedAt: "1970-01-01T00:00:00.000Z",
+        finishedAt: "1970-01-01T00:00:00.000Z",
+        durationMs: 0,
+        operations: [],
+      },
+      evidence: (values.evidence ?? []).map((entry) => {
+        const colon = entry.lastIndexOf(":");
+        if (colon < 1) {
+          throw new UsageError("--evidence must be <path>:<kind>");
+        }
+        return { path: entry.slice(0, colon), kind: entry.slice(colon + 1), sha256: null };
+      }),
+      fixtures: (values.fixture ?? []).map((entry) => {
+        const equals = entry.indexOf("=");
+        if (equals < 1) {
+          throw new UsageError("--fixture must be <role>=<fixture-id>");
+        }
+        return { role: entry.slice(0, equals), id: entry.slice(equals + 1) };
+      }),
+      failureCode: values["failure-code"] ?? null,
+      boundary: values.boundary ?? null,
+      notes: values.notes ?? null,
     },
-    evidence: (values.evidence ?? []).map((entry) => {
-      const colon = entry.lastIndexOf(":");
-      if (colon < 1) {
-        throw new UsageError("--evidence must be <path>:<kind>");
-      }
-      return { path: entry.slice(0, colon), kind: entry.slice(colon + 1), sha256: null };
-    }),
-    fixtures: (values.fixture ?? []).map((entry) => {
-      const equals = entry.indexOf("=");
-      if (equals < 1) {
-        throw new UsageError("--fixture must be <role>=<fixture-id>");
-      }
-      return { role: entry.slice(0, equals), id: entry.slice(equals + 1) };
-    }),
-    failureCode: values["failure-code"] ?? null,
-    boundary: values.boundary ?? null,
-    notes: values.notes ?? null,
-  });
+    true,
+  );
   return {
     ...record,
     evidence: record.evidence,
@@ -144,6 +153,9 @@ export async function runCase(
   options: RunCaseOptions,
   ports: RunCasePorts,
 ): Promise<{ result: CaseResult; exitCode: number }> {
+  if (options.proofLevel !== "source-tests" && !options.identity) {
+    throw new UsageError("Built and published proof levels require --identity");
+  }
   let artifact: CaseResult["artifact"] = { packageVersion: null, sourceSha: null, integrity: null };
   if (options.identity) {
     const identity = JSON.parse(ports.readText(options.identity)) as ArtifactIdentityRecord;

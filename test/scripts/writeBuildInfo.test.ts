@@ -30,6 +30,7 @@ describe("collectBuildInfo", () => {
       sourceSha: sha,
       sourceShaFrom: "git",
       sourceDirty: false,
+      sourceDirtyPaths: [],
       nativeResources: { apkSha256: release.apkSha256, runnerSha256: release.runnerSha256 },
       nativeResourcesFrom: "release-registry",
     });
@@ -41,6 +42,7 @@ describe("collectBuildInfo", () => {
     expect(result.sourceSha).toBe(sha);
     expect(result.sourceShaFrom).toBe("env");
     expect(result.sourceDirty).toBeNull();
+    expect(result.sourceDirtyPaths).toBeNull();
   });
   test("records null provenance without git or valid environment SHA", () => {
     for (const env of [{}, { GITHUB_SHA: "invalid" }]) {
@@ -63,12 +65,67 @@ describe("collectBuildInfo", () => {
       ports({
         git: (args) => {
           calls.push(args);
-          return { exitCode: 0, stdout: args[0] === "rev-parse" ? sha : " M package.json\n" };
+          return { exitCode: 0, stdout: args[0] === "rev-parse" ? sha : " M package.json\0" };
         },
       }),
     );
     expect(result.sourceDirty).toBe(true);
-    expect(calls[1]).toEqual(["status", "--porcelain", "--untracked-files=no"]);
+    expect(result.sourceDirtyPaths).toEqual(["package.json"]);
+    expect(calls[1]).toEqual(["status", "--porcelain", "-z", "--untracked-files=no"]);
+  });
+  test("emits exactly the BuildInfo keys even when package JSON contains private fields", () => {
+    const result = collectBuildInfo(
+      ports({
+        readPackageJson: () => ({
+          name: "@kaeawc/auto-mobile",
+          version: "1.2.3",
+          scripts: { test: "bun test" },
+          contributors: [{ email: "private@example.test" }],
+          dependencies: {},
+        }),
+      }),
+    );
+    expect(Object.keys(result).sort()).toEqual(
+      [
+        "schemaVersion",
+        "name",
+        "version",
+        "sourceSha",
+        "sourceShaFrom",
+        "sourceDirty",
+        "sourceDirtyPaths",
+        "nativeResources",
+        "nativeResourcesFrom",
+      ].sort(),
+    );
+  });
+  test("ignores exactly the README publish rewrite, preserving other tracked paths", () => {
+    let status = " M README.md\0";
+    const input = ports({
+      git: (args) => ({ exitCode: 0, stdout: args[0] === "rev-parse" ? sha : status }),
+    });
+    expect(collectBuildInfo(input)).toMatchObject({ sourceDirty: false, sourceDirtyPaths: [] });
+    status += " M docs/README.md\0 M file with spaces.ts\0R  renamed.ts\0old.ts\0";
+    expect(collectBuildInfo(input)).toMatchObject({
+      sourceDirty: true,
+      sourceDirtyPaths: ["docs/README.md", "file with spaces.ts", "old.ts", "renamed.ts"],
+    });
+  });
+  test("sorts and caps dirty path evidence at 50", () => {
+    const paths = Array.from(
+      { length: 52 },
+      (_, index) => `file-${String(index).padStart(2, "0")}`,
+    ).reverse();
+    const result = collectBuildInfo(
+      ports({
+        git: (args) => ({
+          exitCode: 0,
+          stdout: args[0] === "rev-parse" ? sha : paths.map((path) => ` M ${path}\0`).join(""),
+        }),
+      }),
+    );
+    expect(result.sourceDirty).toBe(true);
+    expect(result.sourceDirtyPaths).toEqual(paths.sort().slice(0, 50));
   });
   test("is reproducible without timestamps and reports absent native checksums", () => {
     const input = ports({

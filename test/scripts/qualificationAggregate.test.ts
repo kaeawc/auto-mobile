@@ -71,6 +71,53 @@ function file(result: CaseResult, name = `${result.caseId}.json`) {
 }
 describe("qualification aggregation", () => {
   test.each(["packageVersion", "sourceSha", "integrity"] as const)(
+    "rejects mixed %s across results without identity",
+    (field) => {
+      const a = fixture("a.case");
+      const b = fixture("b.case");
+      b.artifact[field] =
+        field === "sourceSha" ? "b".repeat(40) : field === "integrity" ? "sha512-other" : "other";
+      const report = aggregateResults({
+        files: [file(b, "b.json"), file(a, "a.json")],
+        identity: null,
+      });
+      expect(report.errors).toEqual([
+        {
+          file: "b.json",
+          message: `mixed artifacts: ${field} ${a.artifact[field]} vs ${b.artifact[field]} (a.json, b.json)`,
+        },
+      ]);
+    },
+  );
+  test("compares bindings on source tests too, while ignoring null fields", () => {
+    const a: CaseResult = {
+      ...fixture("a.case"),
+      proofLevel: "source-tests",
+      observation: { kind: "deterministic-test" },
+      artifact: { packageVersion: null, sourceSha: null, integrity: null },
+    };
+    const b = fixture("b.case");
+    const files = [file(a), file(b)];
+    expect(aggregateResults({ files, identity: null }).errors).toEqual([]);
+    a.artifact = { ...b.artifact, sourceSha: "c".repeat(40) };
+    expect(
+      aggregateResults({ files: [file(a), file(b)], identity: identity() }).errors.some((error) =>
+        error.message.startsWith("mixed artifacts: sourceSha"),
+      ),
+    ).toBe(true);
+  });
+  test.each(["source-tests", "local-build"] as const)(
+    "%s does not exceed a local-build identity",
+    (proofLevel) => {
+      const result = {
+        ...fixture(),
+        proofLevel,
+        observation: { kind: "deterministic-test" as const },
+      };
+      expect(aggregateResults({ files: [file(result)], identity: identity() }).errors).toEqual([]);
+    },
+  );
+  test.each(["packageVersion", "sourceSha", "integrity"] as const)(
     "rejects mixed artifact %s",
     (key) => {
       const result = fixture();
@@ -126,7 +173,9 @@ describe("qualification aggregation", () => {
       files: [file({ ...fixture(), proofLevel: "published-package" })],
       identity: identity(),
     });
-    expect(report.errors[0].message).toContain("published-package identity");
+    expect(report.errors[0].message).toContain(
+      "published-package result exceeds local-build identity",
+    );
     expect(
       aggregateResults({ files: [], identity: { ...identity(), verdict: "refused" } }).errors,
     ).toEqual([{ file: "identity", message: "Artifact identity verdict is refused" }]);
@@ -134,6 +183,8 @@ describe("qualification aggregation", () => {
   test("warns about missing artifact fields and over-budget operations", () => {
     const result = fixture();
     result.artifact = { packageVersion: null, sourceSha: null, integrity: null };
+    result.proofLevel = "source-tests";
+    result.observation = { kind: "deterministic-test" };
     result.timings.operations = [
       { name: "boot", durationMs: 11, budgetMs: 10 },
       { name: "ready", durationMs: 10, budgetMs: 10 },

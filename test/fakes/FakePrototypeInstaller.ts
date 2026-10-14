@@ -1,3 +1,4 @@
+import type { PrototypeAssetUpload } from "../../src/features/prototype/prototypeAssets";
 import type { PrototypeJson } from "../../src/features/prototype/prototypeSpec";
 import type {
   DataContainerWriter,
@@ -123,10 +124,18 @@ export class FakePrototypeSimctl implements PrototypeSimctl {
 }
 
 export class FakePrototypeDataWriter implements DataContainerWriter {
-  writes: Array<{ containerPath: string; spec: PrototypeJson }> = [];
+  writes: Array<{
+    containerPath: string;
+    spec: PrototypeJson;
+    assets?: readonly PrototypeAssetUpload[];
+  }> = [];
   constructor(private readonly operations: InstallerOperationRecorder) {}
-  async write(containerPath: string, spec: PrototypeJson): Promise<void> {
+  async write(
+    containerPath: string,
+    spec: PrototypeJson,
+    assets?: readonly PrototypeAssetUpload[],
+  ): Promise<void> {
     this.operations.record("data");
-    this.writes.push({ containerPath, spec });
+    this.writes.push({ containerPath, spec, assets });
   }
 }

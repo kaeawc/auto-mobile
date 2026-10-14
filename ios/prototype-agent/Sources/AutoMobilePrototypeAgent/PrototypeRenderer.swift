@@ -125,30 +125,26 @@ func swiftUIAlignment(_ name: String?) -> Alignment {
     }
 }
 
-/// SF Symbol for a built-in (Material) icon name; unknown names draw a placeholder.
-func prototypeSymbol(_ name: String?, fallback: String = "questionmark.square") -> String {
-    name.flatMap { sfSymbols[$0] } ?? fallback
+/// A contract name without an SF equivalent uses the shared placeholder; unknown names draw no glyph.
+@MainActor
+func prototypeSymbol(_ name: String?, variant: String? = nil) -> String? {
+    PrototypeIconSymbolTable.shared.symbolName(for: name, variant: variant) {
+        PrototypeSymbolAvailability.isAvailable($0)
+    }
 }
 
-private let sfSymbols: [String: String] = [
-    "home": "house", "search": "magnifyingglass", "settings": "gearshape", "person": "person",
-    "favorite": "heart", "add": "plus", "close": "xmark", "check": "checkmark",
-    "arrow_back": "arrow.left", "arrow_forward": "arrow.right", "chevron_left": "chevron.left",
-    "chevron_right": "chevron.right", "menu": "line.3.horizontal", "more_vert": "ellipsis",
-    "share": "square.and.arrow.up", "edit": "pencil", "delete": "trash", "info": "info.circle",
-    "warning": "exclamationmark.triangle", "notifications": "bell", "star": "star",
-    "shopping_cart": "cart", "help": "questionmark.circle", "refresh": "arrow.clockwise",
-    "done": "checkmark.circle", "cancel": "xmark.circle", "play_arrow": "play.fill",
-    "pause": "pause.fill", "stop": "stop.fill", "mail": "envelope", "phone": "phone",
-    "location_on": "mappin.and.ellipse", "calendar_today": "calendar", "visibility": "eye",
-    "lock": "lock", "logout": "rectangle.portrait.and.arrow.right",
-    "alarm": "alarm", "schedule": "clock", "event": "calendar", "today": "calendar",
-    "remove": "minus", "expand_more": "chevron.down", "expand_less": "chevron.up",
-    "more_horiz": "ellipsis", "account_circle": "person.crop.circle", "send": "paperplane",
-    "bookmark": "bookmark", "thumb_up": "hand.thumbsup", "photo_camera": "camera",
-    "image": "photo", "music_note": "music.note", "wifi": "wifi", "sort": "arrow.up.arrow.down",
-    "filter_list": "line.3.horizontal.decrease", "content_copy": "doc.on.doc",
-]
+/// UIKit lookups are cached on the renderer's main actor, including failed lookups.
+@MainActor
+private enum PrototypeSymbolAvailability {
+    private static var symbols: [String: Bool] = [:]
+
+    static func isAvailable(_ symbol: String) -> Bool {
+        if let cached = symbols[symbol] { return cached }
+        let available = UIImage(systemName: symbol) != nil
+        symbols[symbol] = available
+        return available
+    }
+}
 
 @MainActor
 struct NodeView: View {
@@ -395,15 +391,27 @@ struct NodeView: View {
     }
 
     @ViewBuilder private var iconView: some View {
-        let symbol = sfSymbols[node.name ?? ""] ?? "questionmark.square"
-        if accessibilityLabelOverride == nil {
-            PrototypeGlyph(symbol: symbol)
-                .font(.system(size: style?.textSize ?? 24))
-                .foregroundColor(palette.color(style?.color) ?? contentColor)
+        if let symbol = prototypeSymbol(node.name, variant: node.variant) {
+            if accessibilityLabelOverride == nil {
+                PrototypeGlyph(symbol: symbol)
+                    .font(.system(size: style?.textSize ?? 24))
+                    .foregroundColor(palette.color(style?.color) ?? contentColor)
+            } else {
+                Image(systemName: symbol)
+                    .font(.system(size: style?.textSize ?? 24))
+                    .foregroundColor(palette.color(style?.color) ?? contentColor)
+            }
         } else {
-            Image(systemName: symbol)
-                .font(.system(size: style?.textSize ?? 24))
-                .foregroundColor(palette.color(style?.color) ?? contentColor)
+            Rectangle()
+                .fill(
+                    style?.background == nil
+                        ? palette.placeholderFill.map { Color($0) } ?? Color.gray.opacity(0.3)
+                        : .clear
+                )
+                .frame(idealWidth: 24, idealHeight: 24)
+                .fixedSize(horizontal: style?.width == nil, vertical: style?.height == nil)
+                .accessibilityHidden(accessibilityLabelOverride == nil)
+                .accessibilityAddTraits(accessibilityLabelOverride == nil ? [] : .isImage)
         }
     }
 
@@ -526,11 +534,11 @@ struct NodeView: View {
     /// Filled (default), tonal, elevated, outlined or text, with an optional leading icon.
     @ViewBuilder private var buttonView: some View {
         let button = Button { model.run(node.onTap ?? []) } label: {
-            if let icon = node.icon {
+            if let symbol = prototypeSymbol(node.icon) {
                 // The icon is decoration: a hidden glyph, so the button is one element named by
                 // its label rather than also exposing the icon's name (#10899).
                 HStack(spacing: 6) {
-                    PrototypeGlyph(symbol: prototypeSymbol(icon))
+                    PrototypeGlyph(symbol: symbol)
                     buttonLabel
                 }
             } else {
@@ -599,7 +607,9 @@ struct NodeView: View {
                     .accessibilityHidden(true)
             }
         case let .icon(name):
-            PrototypeGlyph(symbol: sfSymbols[name] ?? "circle")
+            if let symbol = prototypeSymbol(name) {
+                PrototypeGlyph(symbol: symbol)
+            }
         case .placeholder:
             Rectangle().fill(palette.placeholderFill.map { Color($0) } ?? Color.gray.opacity(0.3))
                 .frame(width: 24, height: 24)

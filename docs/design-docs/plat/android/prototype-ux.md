@@ -1564,6 +1564,12 @@ data via `Intent.filterEquals`, giving each id its own task while reusing the
 same id's task. Shortcut publishing may add flags; shortcut removal is deferred
 to #12265.
 
+A document relaunch calls `onNewIntent`, updates the activity's intent and reloads
+the saved entry. It closes the previous runtime without emitting a dismissal,
+then renders the latest snapshot or the corresponding typed error screen if the
+entry was deleted or cannot be opened. A different id delivered to the activity
+also reloads. Handled configuration changes preserve the live runtime state.
+
 The activity is `exported=false` with no intent filter. App-owned launches,
 including our pinned shortcut intents launched with the app's identity, can
 open it; other apps cannot render saved content or probe ids. An exported
@@ -1577,6 +1583,9 @@ app-private `filesDir/saved-prototypes` directory. Locked storage is checked
 before constructing or calling the store. Missing ids, deleted entries, corrupt
 content, unsupported format versions and locked storage have typed screens;
 raw storage messages and paths never reach the UI.
+The Locked screen is defensive: the app is not `directBootAware`, so this
+activity cannot start before the device's first unlock. The storage check also
+covers unavailable credential storage, such as a locked work profile.
 
 The existing runtime and Compose renderer run in an activity window without
 accessibility service state, overlay ownership, idle timeout, disconnect
@@ -1584,5 +1593,7 @@ dismissal or foreground-app scoping. Back, authored dismiss and HostDismiss
 finish the activity and emit exactly one `dismissed` event with reason `user`.
 A system process kill emits nothing. Offline events enter the process-level
 `SavedPrototypeEvents.buffer`; a registered delivery consumes an event only when
-it returns true. Future replay must synchronize on the buffer while draining or
+it returns true. Sequence numbers are allocated per prototype id for the process
+lifetime and continue across activity recreation and document relaunch. Future
+replay must synchronize on the buffer while draining or
 restoring it. The bounded buffer is in memory and does not survive process death.

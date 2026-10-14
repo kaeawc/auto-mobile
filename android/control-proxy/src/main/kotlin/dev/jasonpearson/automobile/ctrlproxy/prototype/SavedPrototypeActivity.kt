@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.ctrlproxy.prototype
 
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -36,7 +37,8 @@ import kotlinx.coroutines.withContext
 
 /**
  * Standalone activity renderer: no service, idle timer, disconnect or foreground-app scoping. Back
- * and authored dismissal emit one user dismissal. System process death emits nothing.
+ * and authored dismissal emit one user dismissal. System process death emits nothing. Document
+ * relaunches reload the saved snapshot, closing the previous runtime without an event.
  */
 class SavedPrototypeActivity : ComponentActivity() {
   private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -45,7 +47,6 @@ class SavedPrototypeActivity : ComponentActivity() {
   private var runtime: PrototypeRuntime? = null
   private var images: PrototypeImageCache? = null
   private var fonts: PrototypeFontCache? = null
-  private var sequence = 0L
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -62,21 +63,40 @@ class SavedPrototypeActivity : ComponentActivity() {
         val current = runtime
         if (state is SavedPrototypeScreenState.Ready && current != null) {
           Surface(Modifier.fillMaxSize().testTag("saved-prototype-state-ready")) {
-            PrototypeRuntimeContent(current, images, fonts) { interact(it) }
+            PrototypeRuntimeContent(current, images, fonts) { interact(it, current) }
           }
         } else SavedPrototypeStatus(state) { finish() }
       }
     }
+    reload(intent)
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    reload(intent)
+  }
+
+  private fun reload(intent: Intent?) {
+    val id = SavedPrototypeLaunch.idFrom(intent)
     scope.launch {
-      val loadedState = withContext(SavedPrototypeActivityDependencies.ioDispatcher) { loadState() }
-      if (isFinishing) return@launch
-      if (loadedState is SavedPrototypeScreenState.Ready) prepareRuntime(loadedState.loaded)
-      state = loadedState
+      interactions.withLock {
+        if (isFinishing) return@withLock
+        runtime?.close()
+        runtime = null
+        images = null
+        fonts = null
+        state = SavedPrototypeScreenState.Loading
+        val loadedState =
+          withContext(SavedPrototypeActivityDependencies.ioDispatcher) { loadState(id) }
+        if (isFinishing) return@withLock
+        if (loadedState is SavedPrototypeScreenState.Ready) prepareRuntime(loadedState.loaded)
+        state = loadedState
+      }
     }
   }
 
-  private suspend fun loadState(): SavedPrototypeScreenState {
-    val id = SavedPrototypeLaunch.idFrom(intent)
+  private suspend fun loadState(id: String?): SavedPrototypeScreenState {
     if (id.isNullOrBlank()) return SavedPrototypeScreenState.MissingId
     return try {
       if (!SavedPrototypeActivityDependencies.isUserUnlocked(this)) SavedPrototypeScreenState.Locked
@@ -103,7 +123,7 @@ class SavedPrototypeActivity : ComponentActivity() {
         loaded.spec,
         SavedPrototypeActivityDependencies.eventSink,
         SavedPrototypeActivityDependencies.clock,
-        nextSequence = { ++sequence },
+        nextSequence = { SavedPrototypeEvents.nextSequence(loaded.spec.id) },
         requestDismiss = {
           finish()
           true
@@ -111,7 +131,11 @@ class SavedPrototypeActivity : ComponentActivity() {
       )
   }
 
-  internal suspend fun interact(interaction: PrototypeInteraction) = interactions.withLock {
+  internal suspend fun interact(
+    interaction: PrototypeInteraction,
+    target: PrototypeRuntime? = runtime,
+  ) = interactions.withLock {
+    if (target !== runtime) return@withLock
     try {
       runtime?.handle(interaction)
     } catch (error: CancellationException) {

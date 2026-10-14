@@ -20,6 +20,24 @@ fun interface SavedPrototypeEventDelivery {
 object SavedPrototypeEvents {
   val buffer = PrototypeOfflineEventBuffer()
   @Volatile var delivery: SavedPrototypeEventDelivery? = null
+  private val sequences = mutableMapOf<String, Long>()
+
+  /**
+   * Activity recreation and document relaunch never rewind a prototype's process-level sequence.
+   */
+  fun nextSequence(id: String): Long =
+    synchronized(buffer) {
+      val next = (sequences[id] ?: 0L) + 1
+      sequences[id] = next
+      next
+    }
+
+  internal fun reset() =
+    synchronized(buffer) {
+      delivery = null
+      buffer.drain()
+      sequences.clear()
+    }
 
   fun send(event: PrototypeEvent) =
     synchronized(buffer) {
@@ -35,15 +53,17 @@ object SavedPrototypeEvents {
 }
 
 internal object SavedPrototypeActivityDependencies {
+  @Volatile
   var store: (Context) -> SavedPrototypeStore = {
     SavedPrototypeStores.inDirectory(savedPrototypeRoot(it))
   }
+  @Volatile
   var isUserUnlocked: (Context) -> Boolean = {
     it.getSystemService(UserManager::class.java)?.isUserUnlocked == true
   }
-  var ioDispatcher: CoroutineDispatcher = Dispatchers.IO
-  var clock: () -> Long = System::currentTimeMillis
-  var eventSink: PrototypeEventSink = PrototypeEventSink { SavedPrototypeEvents.send(it) }
+  @Volatile var ioDispatcher: CoroutineDispatcher = Dispatchers.IO
+  @Volatile var clock: () -> Long = System::currentTimeMillis
+  @Volatile var eventSink: PrototypeEventSink = PrototypeEventSink { SavedPrototypeEvents.send(it) }
 
   fun reset() {
     store = { SavedPrototypeStores.inDirectory(savedPrototypeRoot(it)) }

@@ -13,6 +13,7 @@ import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import dev.jasonpearson.automobile.protocol.PrototypeButtonNode
 import dev.jasonpearson.automobile.protocol.PrototypeDismissAction
+import dev.jasonpearson.automobile.protocol.PrototypeEmitAction
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
 import dev.jasonpearson.automobile.protocol.PrototypeEventKind
 import kotlinx.coroutines.Dispatchers
@@ -48,8 +49,7 @@ class SavedPrototypeActivityTest {
     SavedPrototypeActivityDependencies.isUserUnlocked = { true }
     SavedPrototypeActivityDependencies.ioDispatcher = Dispatchers.Unconfined
     SavedPrototypeActivityDependencies.clock = { 42L }
-    SavedPrototypeEvents.delivery = null
-    SavedPrototypeEvents.buffer.drain()
+    SavedPrototypeEvents.reset()
     store.stored["panel"] = savedPrototypeFixture()
   }
 
@@ -57,8 +57,7 @@ class SavedPrototypeActivityTest {
   fun reset() {
     controllers.forEach { it.pause().stop().destroy() }
     SavedPrototypeActivityDependencies.reset()
-    SavedPrototypeEvents.delivery = null
-    SavedPrototypeEvents.buffer.drain()
+    SavedPrototypeEvents.reset()
   }
 
   private fun launch(
@@ -144,6 +143,92 @@ class SavedPrototypeActivityTest {
     assertEquals(listOf("first", "second"), events.map { it.name })
     assertEquals(listOf(1L, 2L), events.map { it.sequence })
     assertEquals(listOf(42L, 42L), events.map { it.timestamp })
+  }
+
+  @Test
+  fun `second activity instance continues the same prototype sequence`() {
+    val first = launch()
+    click(first, "saved-node")
+    controllers.removeAt(0).pause().stop().destroy()
+    compose.waitForIdle()
+
+    val second = launch()
+    click(second, "saved-node")
+    val events = SavedPrototypeEvents.buffer.drain()
+    assertEquals(listOf("panel", "panel", "panel", "panel"), events.map { it.id })
+    assertEquals(listOf(1L, 2L, 3L, 4L), events.map { it.sequence })
+    assertEquals(listOf("first", "second", "first", "second"), events.map { it.name })
+    assertEquals(listOf(42L, 42L, 42L, 42L), events.map { it.timestamp })
+  }
+
+  @Test
+  fun `document relaunch reloads replaced content without a dismissal`() {
+    val activity = launch()
+    click(activity, "saved-node")
+    val original = store.stored.getValue("panel")
+    val button = original.spec.root as PrototypeButtonNode
+    store.stored["panel"] =
+      SavedPrototypeLoadResult.Loaded(
+        original.id,
+        original.label,
+        original.slug,
+        original.savedAt,
+        original.spec.copy(
+          root =
+            button.copy(label = "Updated button", onTap = listOf(PrototypeEmitAction("updated"))),
+        ),
+        "",
+        emptyMap(),
+      )
+    val intent = SavedPrototypeLaunch.intent(context, "panel")
+    controllers.single().newIntent(intent)
+    compose.waitForIdle()
+
+    assertEquals(intent, activity.intent)
+    assertTrue(root(activity).hasText("Updated button"))
+    assertFalse(root(activity).hasText("Saved button"))
+    assertFalse(activity.isFinishing)
+    assertEquals(listOf("panel", "panel"), store.loadCalls)
+    click(activity, "saved-node")
+    val events = SavedPrototypeEvents.buffer.drain()
+    assertEquals(listOf("first", "second", "updated"), events.map { it.name })
+    assertEquals(
+      listOf(PrototypeEventKind.EMIT, PrototypeEventKind.EMIT, PrototypeEventKind.EMIT),
+      events.map { it.kind },
+    )
+    assertEquals(listOf(1L, 2L, 3L), events.map { it.sequence })
+  }
+
+  @Test
+  fun `document relaunch of a deleted entry shows not saved and closes without an event`() {
+    val activity = launch()
+    assertTrue(store.delete("panel"))
+    controllers.single().newIntent(SavedPrototypeLaunch.intent(context, "panel"))
+    compose.waitForIdle()
+
+    assertEquals(listOf("panel", "panel"), store.loadCalls)
+    assertFalse(root(activity).hasText("Saved button"))
+    assertErrorCloses(activity, "not-saved", "This prototype is no longer saved")
+  }
+
+  @Test
+  fun `new intent for another id reloads and uses an independent sequence`() {
+    val activity = launch()
+    click(activity, "saved-node")
+    store.stored["other"] =
+      savedPrototypeFixture(id = "other", actions = listOf(PrototypeEmitAction("other")))
+    val intent = SavedPrototypeLaunch.intent(context, "other")
+    controllers.single().newIntent(intent)
+    compose.waitForIdle()
+
+    assertEquals(intent, activity.intent)
+    assertEquals(listOf("panel", "other"), store.loadCalls)
+    assertFalse(activity.isFinishing)
+    click(activity, "saved-node")
+    val events = SavedPrototypeEvents.buffer.drain()
+    assertEquals(listOf("panel", "panel", "other"), events.map { it.id })
+    assertEquals(listOf("first", "second", "other"), events.map { it.name })
+    assertEquals(listOf(1L, 2L, 1L), events.map { it.sequence })
   }
 
   @Test

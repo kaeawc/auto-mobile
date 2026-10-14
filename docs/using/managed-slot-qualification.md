@@ -51,7 +51,7 @@ verified by the identity tool.
 
 ## Contract and compatibility
 
-[schemas/managed-slot-contract.json](../../schemas/managed-slot-contract.json)
+[schemas/managed-slot-contract.json](https://github.com/kaeawc/auto-mobile/blob/main/schemas/managed-slot-contract.json)
 is also shipped in the package. These rows describe its compatibility boundary;
 `native-qualification` identifies evidence still owed, not a passing test.
 

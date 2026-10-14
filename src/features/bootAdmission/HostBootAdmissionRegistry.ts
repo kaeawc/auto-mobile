@@ -4,8 +4,10 @@ import { ActionableError } from "../../models/ActionableError";
 export interface HostBootAdmissionRecord {
   id: string;
   ownerPid: number;
+  ownerGenerationToken?: string;
   deviceId?: string;
   processId?: number;
+  processGenerationToken?: string;
   /** Absolute boot-budget deadline, including the period before hand-off. Absent on legacy records. */
   admittedUntilMs?: number;
   handedOffUntilMs?: number;

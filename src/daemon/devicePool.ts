@@ -1,3 +1,4 @@
+import { getHostEmulatorProcessStopper } from "../devices/hostEmulatorProcessStopper";
 import { OwnerConnectionIntervals } from "./connectedOwnerStallExcuse";
 import { holderReleaseRemainingMs } from "./holderReleaseRemaining";
 import {
@@ -5601,6 +5602,10 @@ export class DevicePool {
           return "same-avd";
         }
         await this.deviceManager.killDevice(matchingAvd, {
+          processStop: {
+            stopper: getHostEmulatorProcessStopper(this.timer),
+            expectedAvdName: avdName,
+          },
           timeoutMs: Math.max(1, deadlineMs - this.timer.now()),
           signal,
         });
@@ -5662,7 +5667,15 @@ export class DevicePool {
     }
     await this.deviceManager.killDevice(
       { deviceId, name: avdName, platform: "android" },
-      { timeoutMs: Math.max(1, deadlineMs - this.timer.now()), signal, force: true },
+      {
+        timeoutMs: Math.max(1, deadlineMs - this.timer.now()),
+        signal,
+        force: true,
+        processStop: {
+          stopper: getHostEmulatorProcessStopper(this.timer),
+          expectedAvdName: avdName,
+        },
+      },
     );
     signal.throwIfAborted();
     return await this.confirmRecoveryStop(avdName, deviceId, discover, signal, deadlineMs);

@@ -735,8 +735,14 @@ internal class PrototypeComposeView(
   escapeSchedulerFactory: (View) -> PrototypeEscapeScheduler = ::viewPrototypeEscapeScheduler,
   touchSlop: Int = ViewConfiguration.get(context).scaledTouchSlop,
   private val dispatchToContent: ((MotionEvent) -> Boolean)? = null,
+  accessibilitySchedulerFactory: (View) -> PrototypeEscapeScheduler =
+    ::viewPrototypeEscapeScheduler,
+  nowMs: () -> Long = android.os.SystemClock::uptimeMillis,
 ) : AbstractComposeView(context) {
   private val content = mutableStateOf<(@Composable () -> Unit)?>(null)
+  private val accessibilityCoalescer = PrototypeAccessibilityCoalescer(nowMs)
+  private val accessibilityScheduler = accessibilitySchedulerFactory(this)
+  private var cancelAccessibilityTrailing: (() -> Unit)? = null
   val escapeState = PrototypeEscapeState()
   private var escapeActive = false
   private var lastTouch: MotionEvent? = null
@@ -771,11 +777,44 @@ internal class PrototypeComposeView(
   }
 
   override fun onDetachedFromWindow() {
+    cancelAccessibilityTrailing?.invoke()
+    cancelAccessibilityTrailing = null
+    accessibilityCoalescer.reset()
     escapeTracker.reset()
     lastTouch?.recycle()
     lastTouch = null
     escapeState.hide()
     super.onDetachedFromWindow()
+  }
+
+  override fun onRequestSendAccessibilityEvent(
+    child: View,
+    event: android.view.accessibility.AccessibilityEvent,
+  ): Boolean {
+    if (!isCoalescibleAccessibilityEvent(event.eventType)) {
+      return super.onRequestSendAccessibilityEvent(child, event)
+    }
+    when (accessibilityCoalescer.onCoalescible()) {
+      PrototypeAccessibilityCoalescer.Action.EMIT_NOW -> emitAccessibilitySubtreeChanged()
+      PrototypeAccessibilityCoalescer.Action.SCHEDULE_TRAILING -> {
+        cancelAccessibilityTrailing =
+          accessibilityScheduler.schedule(accessibilityCoalescer.remainingMs()) {
+            cancelAccessibilityTrailing = null
+            accessibilityCoalescer.onTrailingFired()
+            emitAccessibilitySubtreeChanged()
+          }
+      }
+      PrototypeAccessibilityCoalescer.Action.NONE -> Unit
+    }
+    return false
+  }
+
+  private fun emitAccessibilitySubtreeChanged() {
+    notifySubtreeAccessibilityStateChanged(
+      this,
+      this,
+      android.view.accessibility.AccessibilityEvent.CONTENT_CHANGE_TYPE_SUBTREE,
+    )
   }
 
   override fun dispatchTouchEvent(event: MotionEvent): Boolean {

@@ -508,8 +508,8 @@ function solidPng(width: number, height: number, value: number): Buffer {
 describe("Screenshot comparison characterization", () => {
   test.each([
     { fast: false, threshold: 0.1, value: 255, difference: 4 },
-    { fast: false, threshold: 0.1, value: 35, difference: 4 },
-    { fast: true, threshold: 0.1, value: 35, difference: 0 },
+    { fast: false, threshold: 0.1, value: 30, difference: 4 },
+    { fast: true, threshold: 0.1, value: 30, difference: 0 },
     { fast: true, threshold: 0.5, value: 100, difference: 4 },
     { fast: true, threshold: 0.1, value: 0, difference: 0 },
   ])(

@@ -332,17 +332,18 @@ class PrototypeRuntime(
   }
 
   /** [from] with [values] written, or [IllegalArgumentException] when the result is not valid. */
-  private fun validated(from: PrototypeSpec, values: Map<String, PrototypeScalar>): PrototypeSpec {
-    val spec = from.copy(state = from.state.orEmpty() + values)
-    val validator =
-      stateWriteValidator
-        ?: prepareStateWrites(from).also {
-          stateWriteValidator = it
-        }
-    val error = validator.validate(checkNotNull(spec.state))
-    require(error == null) { error.toString() }
-    return spec
-  }
+  private fun validated(from: PrototypeSpec, values: Map<String, PrototypeScalar>): PrototypeSpec =
+    PrototypeTrace.section(PrototypeTrace.VALIDATE_STATE_WRITE) {
+      val spec = from.copy(state = from.state.orEmpty() + values)
+      val validator =
+        stateWriteValidator
+          ?: PrototypeTrace.section(PrototypeTrace.PREPARE_STATE_WRITES) {
+            prepareStateWrites(from).also { stateWriteValidator = it }
+          }
+      val error = validator.validate(checkNotNull(spec.state))
+      require(error == null) { error.toString() }
+      spec
+    }
 
   /**
    * An edit the validator rejects (e.g. the spec size cap) leaves the state untouched, so the field

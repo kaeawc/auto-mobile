@@ -1,9 +1,13 @@
 import { expect, describe, test, beforeEach, spyOn } from "bun:test";
-import { Simctl } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
+import {
+  Simctl,
+  SimulatorStillShuttingDownError,
+} from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { BootedDevice, ExecResult } from "../../../src/models";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { createExecResult } from "../../../src/utils/execResult";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
+import { drainUntil, settleByFakeEvents } from "../../helpers/fakeTimerStepping";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSimulatorDeviceTypeProfiles } from "../../fakes/FakeSimulatorDeviceTypeProfiles";
 import { logger } from "../../../src/utils/logger";
@@ -1120,6 +1124,187 @@ describe("Simctl", function () {
       expect(listCalls).toBe(1);
       expect(firstDevices.map((device) => device.deviceId)).toEqual(["test-ios-device-id"]);
       expect(secondDevices.map((device) => device.deviceId)).toEqual(["test-ios-device-id"]);
+    });
+
+    test.each(["Booted", "Shutting Down", "Creating"])(
+      "confirms shutdown after three initial %s reads",
+      async function (initialState) {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        let reads = 0;
+        mockExecAsync = async (file, args) => {
+          if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+            reads++;
+            return createExecResult(
+              simulatorListPayload([
+                {
+                  udid: mockDevice.deviceId,
+                  name: mockDevice.name,
+                  state: reads <= 3 ? initialState : "Shutdown",
+                  isAvailable: true,
+                },
+              ]),
+              "",
+            );
+          }
+          return createExecResult("", "");
+        };
+        simctl = new Simctl(null, mockExecAsync, timer);
+        await expect(simctl.killSimulator(mockDevice)).resolves.toBeUndefined();
+        expect(reads).toBe(10);
+        expect(timer.getSleepHistory()).toEqual(Array(10).fill(1_000));
+      },
+    );
+
+    test.each(["pid", "empty", "failed", "timeout"])(
+      "reports still shutting down with a bounded %s process probe",
+      async function (probe) {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const commands: string[][] = [];
+        const debug = spyOn(logger, "debug");
+        const warn = spyOn(logger, "warn");
+        mockExecAsync = async (file, args) => {
+          commands.push([file, ...args]);
+          if (file === "pgrep") {
+            if (probe === "failed") {
+              throw new Error("pgrep exited 1");
+            }
+            if (probe === "timeout") {
+              return await new Promise<ExecResult>(() => {});
+            }
+            return createExecResult(probe === "pid" ? "4321\n" : "", "");
+          }
+          return createExecResult(
+            simulatorListPayload([
+              {
+                udid: mockDevice.deviceId,
+                name: mockDevice.name,
+                state: "Booted",
+                isAvailable: true,
+              },
+            ]),
+            "",
+          );
+        };
+        simctl = new Simctl(null, mockExecAsync, timer);
+        try {
+          const error = await simctl.killSimulator(mockDevice, { timeoutMs: 25 }).then(
+            () => undefined,
+            (failure: unknown) => failure,
+          );
+          expect(error).toBeInstanceOf(SimulatorStillShuttingDownError);
+          if (!(error instanceof SimulatorStillShuttingDownError)) {
+            throw new Error("Expected typed shutdown failure");
+          }
+          expect(error.udid).toBe(mockDevice.deviceId);
+          expect(error.deviceName).toBe(mockDevice.name);
+          expect(error.lastState).toBe("Booted");
+          expect(error.waitedMs).toBe(10_000);
+          expect(error.launchdSimPid).toBe(probe === "pid" ? 4321 : undefined);
+          expect(error.message).toContain("still Booted after 10000 ms");
+          expect(error.message).toContain("shutdown may still complete");
+          expect(error.message).toContain("Retrying is safe");
+          expect(error.message).toContain("xcrun simctl list devices");
+          expect(error.message).toContain("application displaying the device");
+          expect(error.message).not.toContain("revived");
+          if (probe === "pid") {
+            expect(error.message).toContain("launchd_sim process is pid 4321");
+            expect(error.message).toContain("did not signal it, CoreSimulator may respawn it");
+          }
+          expect(commands).toEqual([
+            ["xcrun", "simctl", "shutdown", mockDevice.deviceId],
+            ...Array.from({ length: 10 }, () => [
+              ["xcrun", "simctl", "list", "devices", "--json"],
+              ["xcrun", "simctl", "io", mockDevice.deviceId, "enumerate"],
+            ]).flat(),
+            [
+              "pgrep",
+              "-f",
+              `launchd_sim .*CoreSimulator/Devices/${mockDevice.deviceId}/data/var/run/launchd_bootstrap[.]plist`,
+            ],
+          ]);
+          expect(timer.getSleepHistory()).toEqual(Array(10).fill(1_000));
+          expect(timer.now()).toBe(probe === "timeout" ? 12_000 : 10_000);
+          if (probe === "timeout") {
+            expect(warn).toHaveBeenCalledWith(expect.stringContaining("process probe timed out"));
+          }
+          if (probe === "failed") {
+            expect(debug).toHaveBeenCalledWith(expect.stringContaining("pgrep exited 1"));
+          }
+        } finally {
+          debug.mockRestore();
+          warn.mockRestore();
+        }
+      },
+    );
+
+    test.each(["sleep", "read", "pid"])(
+      "propagates caller abort during shutdown %s",
+      async function (phase) {
+        const timer = new FakeTimer();
+        const controller = new AbortController();
+        const reason = new Error("caller cancelled shutdown");
+        if (phase === "pid") {
+          timer.setTimeout(() => controller.abort(reason), 10_500);
+        }
+        const commands: string[] = [];
+        mockExecAsync = async (file, args) => {
+          commands.push(file);
+          if ((phase === "read" && args.includes("list")) || file === "pgrep") {
+            return await new Promise<ExecResult>(() => {});
+          }
+          return createExecResult(
+            simulatorListPayload([
+              {
+                udid: mockDevice.deviceId,
+                name: mockDevice.name,
+                state: "Booted",
+                isAvailable: true,
+              },
+            ]),
+            "",
+          );
+        };
+        simctl = new Simctl(null, mockExecAsync, timer);
+        const shutdown = simctl.killSimulator(mockDevice, { signal: controller.signal });
+        const rejection = shutdown.then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+        if (phase !== "pid") {
+          await drainUntil(
+            () => (phase === "sleep" ? timer.getPendingSleepCount() > 0 : commands.length > 1),
+            { description: "shutdown poll" },
+          );
+          timer.advanceTime(500);
+          controller.abort(reason);
+        }
+        const rejected =
+          phase === "pid"
+            ? await settleByFakeEvents(timer, rejection, { description: "shutdown pid abort" })
+            : await rejection;
+        expect(rejected).toBe(reason);
+        expect(timer.now()).toBe(phase === "pid" ? 10_500 : 500);
+        expect(commands.includes("pgrep")).toBe(phase === "pid");
+      },
+    );
+
+    test("a simulator no longer listed keeps the existing unknown-state failure", async function () {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      mockExecAsync = async () => createExecResult(simulatorListPayload([]), "");
+      simctl = new Simctl(null, mockExecAsync, timer);
+      const error = await simctl.killSimulator(mockDevice).then(
+        () => undefined,
+        (failure: unknown) => failure,
+      );
+      expect(error).not.toBeInstanceOf(SimulatorStillShuttingDownError);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain(
+        "did not remain Shutdown after shutdown (state: unknown)",
+      );
+      expect(timer.now()).toBe(10_000);
     });
 
     test("settled shutdown never reads with an exhausted timeout budget", async function () {

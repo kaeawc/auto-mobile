@@ -2765,6 +2765,7 @@ export class DefaultPlanLifecycleManager implements PlanLifecycleManager {
           }
         },
         PLAN_APP_CLEANUP_RETRY_DEADLINE_MS,
+        `${config.appId}:${config.clearAppData ? "clearAppData" : "terminateApp"}`,
       );
     }
   }

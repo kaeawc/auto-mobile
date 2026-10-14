@@ -1,0 +1,19 @@
+{
+  "spec": {
+    "id": "orders",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "text",
+      "text": "Hello"
+    },
+    "data": {
+      "a": null
+    }
+  },
+  "expectedPath": "data.a",
+  "expectedMessage": "Invalid data value"
+}

@@ -27,9 +27,6 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -298,9 +295,7 @@ internal fun PrototypeNavigationIcon(item: PrototypeItem) {
 @Composable
 private fun NavigationPlaceholder() {
   Box(
-    Modifier.size(24.dp)
-      .background(prototypePlaceholderColor(MaterialTheme.colorScheme))
-      .semantics { role = Role.Image },
+    Modifier.size(24.dp).background(prototypePlaceholderColor(MaterialTheme.colorScheme)),
   )
 }
 

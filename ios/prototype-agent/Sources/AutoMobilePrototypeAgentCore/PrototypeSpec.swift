@@ -81,6 +81,7 @@ struct PrototypeSpec: Decodable {
     let id: String
     let window: WindowSpec
     let state: [String: JSONValue]?
+    let data: [String: JSONValue]?
     let theme: PrototypeTheme?
     /// `none` keeps every visibility and page change instant; `standard` (the default) animates them
     /// unless the system reduces motion (#10442). See `PrototypeMotion`.
@@ -89,7 +90,7 @@ struct PrototypeSpec: Decodable {
     let root: PrototypeNode
 
     private enum CodingKeys: String, CodingKey {
-        case id, window, state, theme, motion, root
+        case id, window, state, data, theme, motion, root
     }
 
     init(from decoder: Decoder) throws {
@@ -106,11 +107,22 @@ struct PrototypeSpec: Decodable {
                 debugDescription: "State value for \"\(offending)\" must be a string, number or boolean"
             )
         }
+        if container.contains(.data) {
+            data = try container.decode([String: JSONValue].self, forKey: .data)
+        } else {
+            data = nil
+        }
+        if let data { try PrototypeLimits.guardData(data) }
         theme = try container.decodeIfPresent(PrototypeTheme.self, forKey: .theme)
         motion = try container.decodeIfPresent(String.self, forKey: .motion)
         let raw = try container.decode(JSONValue.self, forKey: .root)
         try PrototypeLimits.guardTree(raw)
-        root = try JSONDecoder().decode(PrototypeNode.self, from: JSONEncoder().encode(PrototypeRepeat.expand(raw)))
+        try PrototypeLimits.guardRepeatPathCells(raw, data: data)
+        let resolved = PrototypeDataResolver.resolveRoot(raw, data: data)
+        try PrototypeLimits.guardTree(resolved)
+        root = try JSONDecoder().decode(
+            PrototypeNode.self, from: JSONEncoder().encode(PrototypeRepeat.expand(resolved))
+        )
         // There is no Swift twin of the host validator, so the forms `prototype_theme_modes_v1`
         // added are checked here: a malformed one fails the show instead of drawing a fallback.
         try PrototypeThemeModes.validate(placement: window.placement, root: root)

@@ -1,0 +1,27 @@
+{
+  "id": "orders",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "root": {
+    "type": "column",
+    "repeat": {
+      "items": [
+        {
+          "id": 7,
+          "title": "Latte"
+        }
+      ],
+      "as": "item",
+      "key": "id"
+    },
+    "children": [
+      {
+        "type": "text",
+        "text": "{item.title}"
+      }
+    ]
+  }
+}

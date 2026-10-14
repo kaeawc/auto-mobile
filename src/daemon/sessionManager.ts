@@ -9437,12 +9437,15 @@ export class SessionManager {
             identitySignal.throwIfAborted();
             if (outcome.status === "failed") {
               throw new Error(
-                outcome.failures.map(({ setting, error }) => `${setting}: ${error}`).join("; "),
+                outcome.failures.map(({ setting, error }) => `${setting}: ${error}`).join("; ") +
+                  (outcome.baselineSettings?.length
+                    ? `; baseline applied: ${outcome.baselineSettings.map(({ setting, value }) => `${setting}=${value}`).join(", ")}`
+                    : ""),
               );
             }
-            if (outcome.status === "skipped" && outcome.reason === "unknown_prior_state") {
+            if (outcome.status === "restored_to_baseline") {
               logger.warn(
-                `Skipped keep-awake restore for session ${target.sessionId}, device ${target.deviceId}, setting ${outcome.setting}: prior state unknown`,
+                `Keep-awake baseline applied for session ${target.sessionId}, device ${target.deviceId}: ${outcome.settings.map(({ setting, value }) => `${setting}=${value}`).join(", ")}`,
               );
             }
           }),

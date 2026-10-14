@@ -33,11 +33,18 @@ export type KeepScreenAwakeState = {
   };
 };
 
+type BaselineSetting = {
+  setting: "svc_stayon" | "stay_on_while_plugged_in" | "screen_off_timeout";
+  value: string;
+};
+
 export type KeepScreenAwakeRestoreOutcome =
   | { status: "restored" }
-  | { status: "skipped"; reason: "not_applied" | "unknown_prior_state"; setting?: string }
+  | { status: "restored_to_baseline"; settings: ReadonlyArray<BaselineSetting> }
+  | { status: "skipped"; reason: "not_applied" }
   | {
       status: "failed";
+      baselineSettings?: ReadonlyArray<BaselineSetting>;
       failures: ReadonlyArray<{
         setting: "svc_stayon" | "stay_on_while_plugged_in" | "screen_off_timeout";
         error: string;
@@ -48,6 +55,8 @@ type DeviceType = "emulator" | "physical" | "unknown";
 
 const STAY_ON_WHILE_PLUGGED_IN_MASK = "7";
 const MAX_SCREEN_OFF_TIMEOUT_MS = "2147483647";
+const DEFAULT_STAY_ON_WHILE_PLUGGED_IN = "0";
+const DEFAULT_SCREEN_OFF_TIMEOUT_MS = "60000";
 
 export class KeepScreenAwakeManager {
   private device: BootedDevice;
@@ -136,7 +145,7 @@ export class KeepScreenAwakeManager {
     const failures: Array<
       Extract<KeepScreenAwakeRestoreOutcome, { status: "failed" }>["failures"][number]
     > = [];
-    let result: KeepScreenAwakeRestoreOutcome = { status: "restored" };
+    const baselineSettings: BaselineSetting[] = [];
     for (const [applied, scope, key, originalValue, valueType] of [
       [
         state.appliedSettings.stayOnWhilePluggedIn,
@@ -159,11 +168,11 @@ export class KeepScreenAwakeManager {
       const outcome = await this.restoreSetting(scope, key, originalValue, valueType);
       if (outcome.status === "failed") {
         failures.push(...outcome.failures);
-      } else if (outcome.status === "skipped") {
-        result = outcome;
+      } else if (outcome.status === "restored_to_baseline") {
+        baselineSettings.push(...outcome.settings);
       }
     }
-    return failures.length ? { status: "failed", failures } : result;
+    return this.restoreOutcome(failures, baselineSettings);
   }
 
   private async restoreSvcStayon(
@@ -184,7 +193,7 @@ export class KeepScreenAwakeManager {
       if (originalEnabled !== false) {
         if (originalEnabled === undefined) {
           logger.warn(
-            `[KeepScreenAwake] Skipping svc stayon restore on ${this.device.deviceId}: prior state unknown`,
+            `[KeepScreenAwake] Failed svc stayon restore on ${this.device.deviceId}: original value unparseable`,
           );
         }
         return outcome;
@@ -192,14 +201,7 @@ export class KeepScreenAwakeManager {
       settingFailure = outcome;
     } else {
       if (state.svcWasEnabled === undefined) {
-        logger.warn(
-          `[KeepScreenAwake] Skipping svc stayon restore on ${this.device.deviceId}: prior state unknown`,
-        );
-        return {
-          status: "skipped",
-          reason: "unknown_prior_state",
-          setting: "stay_on_while_plugged_in",
-        };
+        return this.restoreUnknownSvcStayon();
       }
       if (state.svcWasEnabled) {
         return { status: "restored" };
@@ -220,6 +222,46 @@ export class KeepScreenAwakeManager {
         ],
       };
     }
+  }
+
+  /** Unknown svc state needs both a known setting value and the svc disable command. */
+  private async restoreUnknownSvcStayon(): Promise<KeepScreenAwakeRestoreOutcome> {
+    const outcome = await this.restoreSetting(
+      "global",
+      "stay_on_while_plugged_in",
+      undefined,
+      "int",
+    );
+    const baselineSettings: BaselineSetting[] =
+      outcome.status === "restored_to_baseline" ? [...outcome.settings] : [];
+    const failures = outcome.status === "failed" ? [...outcome.failures] : [];
+    try {
+      await this.adb.executeCommand("shell svc power stayon false");
+      baselineSettings.push({ setting: "svc_stayon", value: "svc stayon false" });
+    } catch (error) {
+      logger.warn(
+        `[KeepScreenAwake] Failed to disable svc stayon on ${this.device.deviceId}: ${error}`,
+        error,
+      );
+      failures.push({ setting: "svc_stayon", error: errorMessage(error) });
+    }
+    return this.restoreOutcome(failures, baselineSettings);
+  }
+
+  private restoreOutcome(
+    failures: Extract<KeepScreenAwakeRestoreOutcome, { status: "failed" }>["failures"],
+    baselineSettings: ReadonlyArray<BaselineSetting>,
+  ): KeepScreenAwakeRestoreOutcome {
+    if (failures.length) {
+      return {
+        status: "failed",
+        failures,
+        ...(baselineSettings.length ? { baselineSettings } : {}),
+      };
+    }
+    return baselineSettings.length
+      ? { status: "restored_to_baseline", settings: baselineSettings }
+      : { status: "restored" };
   }
 
   private async detectDeviceType(): Promise<DeviceType> {
@@ -430,20 +472,20 @@ export class KeepScreenAwakeManager {
     originalValue?: string | null,
     valueType: "int" | "long" = "int",
   ): Promise<KeepScreenAwakeRestoreOutcome> {
-    if (originalValue === undefined) {
-      logger.warn(
-        `[KeepScreenAwake] Missing original ${scope} ${key} for ${this.device.deviceId}; skipping restore`,
-      );
-      return { status: "skipped", reason: "unknown_prior_state", setting: key };
-    }
+    const baselineValue =
+      key === "stay_on_while_plugged_in"
+        ? DEFAULT_STAY_ON_WHILE_PLUGGED_IN
+        : DEFAULT_SCREEN_OFF_TIMEOUT_MS;
 
     try {
       if (originalValue === null) {
         await this.deleteSetting(scope, key);
       } else {
-        await this.putSetting(scope, key, originalValue, valueType);
+        await this.putSetting(scope, key, originalValue ?? baselineValue, valueType);
       }
-      return { status: "restored" };
+      return originalValue === undefined
+        ? { status: "restored_to_baseline", settings: [{ setting: key, value: baselineValue }] }
+        : { status: "restored" };
     } catch (error) {
       logger.warn(
         `[KeepScreenAwake] Failed to restore ${scope} ${key} on ${this.device.deviceId}: ${error}`,

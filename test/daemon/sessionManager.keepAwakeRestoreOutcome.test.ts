@@ -20,7 +20,7 @@ afterAll(() => {
   PlatformDeviceManagerFactory.reset();
 });
 
-async function harness(failures: number, skipped = false) {
+async function harness(failures: number, baseline = false, mixedFailure = false) {
   const timer = new FakeTimer();
   const markers = new FakeDeviceHealthMarkers(timer);
   const warn = spyOn(logger, "warn").mockImplementation(() => {});
@@ -36,17 +36,21 @@ async function harness(failures: number, skipped = false) {
         if (remainingFailures-- > 0) {
           return {
             status: "failed" as const,
+            ...(mixedFailure
+              ? { baselineSettings: [{ setting: "stay_on_while_plugged_in" as const, value: "0" }] }
+              : {}),
             failures: [
               { setting: "screen_off_timeout" as const, error: "restore unavailable" },
-              { setting: "stay_on_while_plugged_in" as const, error: "write rejected" },
+              ...(!mixedFailure
+                ? [{ setting: "stay_on_while_plugged_in" as const, error: "write rejected" }]
+                : []),
             ],
           };
         }
-        if (skipped) {
+        if (baseline) {
           return {
-            status: "skipped" as const,
-            reason: "unknown_prior_state" as const,
-            setting: "screen_off_timeout",
+            status: "restored_to_baseline" as const,
+            settings: [{ setting: "screen_off_timeout" as const, value: "60000" }],
           };
         }
         return { status: "restored" as const };
@@ -105,8 +109,9 @@ beforeAll(async () => {
   for (const failures of [1, 2, Infinity]) {
     fixtures.set(String(failures), await harness(failures));
   }
-  for (const skipped of [false, true]) {
-    fixtures.set(String(skipped), await harness(0, skipped));
+  fixtures.set("mixed", await harness(1, false, true));
+  for (const baseline of [false, true]) {
+    fixtures.set(String(baseline), await harness(0, baseline));
   }
 });
 
@@ -154,24 +159,37 @@ test("bounded failed outcomes mark the slot unhealthy until recovery restores it
 });
 
 test.each([false, true])(
-  "restored or skipped outcome never retries (skipped=%s)",
-  async (skipped) => {
-    const h = fixtures.get(String(skipped))!;
+  "restored or baseline outcome never retries (baseline=%s)",
+  async (baseline) => {
+    const h = fixtures.get(String(baseline))!;
     h.warn.mockClear();
     await h.release();
     await h.step(500);
     expect(h.calls).toBe(1);
     expect(h.pool.getDeviceHealthMarker(device.deviceId)).toBeUndefined();
     expect(await h.pool.assignDeviceToSession("next", "android")).toBe(device.deviceId);
-    if (skipped) {
+    if (baseline) {
       expect(
         h.warn.mock.calls.some(
           ([message]) =>
-            String(message).includes("Skipped keep-awake restore for session old") &&
+            String(message).includes("Keep-awake baseline applied for session old") &&
             String(message).includes(device.deviceId) &&
-            String(message).includes("screen_off_timeout"),
+            String(message).includes("screen_off_timeout=60000"),
         ),
       ).toBe(true);
     }
   },
 );
+
+test("mixed failure reports the baseline writes in the retry error", async () => {
+  const h = fixtures.get("mixed")!;
+  h.warn.mockClear();
+  await h.release();
+  expect(
+    h.warn.mock.calls.some(([message]) =>
+      String(message).includes("baseline applied: stay_on_while_plugged_in=0"),
+    ),
+  ).toBe(true);
+  await h.step(250);
+  expect(h.calls).toBe(2);
+});

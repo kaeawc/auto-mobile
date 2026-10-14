@@ -108,7 +108,7 @@ enum PrototypeMenus {
                 let page = fields["page"]
                 let number = page?.numberValue
                 guard page == .string("next") || page == .string("prev") ||
-                    (number.map { $0 >= 0 && $0 <= 2147483647 && $0.rounded(.down) == $0 } ?? false)
+                    (number.map { $0 >= 0 && $0 <= 2_147_483_647 && $0.rounded(.down) == $0 } ?? false)
                 else { throw fail("\(path).page", "Invalid value") }
             case "dismiss": keys = ["type"]
             default: throw fail("\(path).type", "Invalid string value")
@@ -125,10 +125,16 @@ enum PrototypeMenus {
                 "type", "id", "testTag", "contentDescription", "onTap", "style", "styleWhen",
                 "visibleWhen", "transition", "anchor", "safeAreaPadding",
             ]
-            try strict(fields, common.union(type == "menu" ? ["items", "openWhen"] : ["options", "stateKey", "label"]), path)
+            try strict(
+                fields,
+                common.union(type == "menu" ? ["items", "openWhen"] : ["options", "stateKey", "label"]),
+                path
+            )
             if type == "menu" {
                 let items = try array(fields["items"], 1 ... 16, "\(path).items")
-                for (index, item) in items.enumerated() { try validateItem(item, path: "\(path).items[\(index)]") }
+                for (index, item) in items.enumerated() {
+                    try validateItem(item, path: "\(path).items[\(index)]")
+                }
                 let condition = try object(fields["openWhen"], "\(path).openWhen")
                 try strict(condition, ["key", "equals"], "\(path).openWhen")
                 try key(condition["key"], "\(path).openWhen.key")
@@ -169,7 +175,10 @@ enum PrototypeMenus {
     /// Bottom-end alignment in window-local coordinates, clamped on both axes.
     static func origin(anchor: CGRect, surface: CGSize, window: CGSize, rightToLeft: Bool = false) -> CGPoint {
         CGPoint(
-            x: min(max(0, rightToLeft ? anchor.minX : anchor.maxX - surface.width), max(0, window.width - surface.width)),
+            x: min(
+                max(0, rightToLeft ? anchor.minX : anchor.maxX - surface.width),
+                max(0, window.width - surface.width)
+            ),
             y: min(max(0, anchor.maxY), max(0, window.height - surface.height))
         )
     }

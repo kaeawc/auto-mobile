@@ -149,7 +149,8 @@ enum PrototypeStateValidator {
     }
 
     private static func radioGroupError(_ node: PrototypeNode, _ stored: JSONValue?) -> String? {
-        let name = node.type == "select" ? "Select" : node.type == "segmentedButton" ? "Segmented button" : "Radio group"
+        let name = node.type == "select" ? "Select" : node
+            .type == "segmentedButton" ? "Segmented button" : "Radio group"
         guard stored?.stringValue != nil else { return "\(name) requires a string state key" }
         var values = Set<String>()
         var selectValues = Set<[UInt16]>()

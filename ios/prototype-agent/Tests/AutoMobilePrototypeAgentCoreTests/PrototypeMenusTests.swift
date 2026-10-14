@@ -14,7 +14,10 @@ final class PrototypeMenusTests: XCTestCase {
     }
 
     private func fixture(_ name: String) throws -> PrototypeSpec {
-        try JSONDecoder().decode(PrototypeSpec.self, from: Data(contentsOf: fixtures.appendingPathComponent("valid/\(name).json")))
+        try JSONDecoder().decode(
+            PrototypeSpec.self,
+            from: Data(contentsOf: fixtures.appendingPathComponent("valid/\(name).json"))
+        )
     }
 
     private func assertInvalid(_ name: String, file: StaticString = #filePath, line: UInt = #line) throws {
@@ -23,18 +26,37 @@ final class PrototypeMenusTests: XCTestCase {
             let expectedPath: String
             let expectedMessage: String
         }
-        let wrapper = try JSONDecoder().decode(Invalid.self, from: Data(contentsOf: fixtures.appendingPathComponent("invalid/\(name).json")))
+        let wrapper = try JSONDecoder().decode(
+            Invalid.self,
+            from: Data(contentsOf: fixtures.appendingPathComponent("invalid/\(name).json"))
+        )
         let data = try JSONEncoder().encode(wrapper.spec)
-        XCTAssertThrowsError(try JSONDecoder().decode(PrototypeSpec.self, from: data), name, file: file, line: line) { error in
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(PrototypeSpec.self, from: data),
+            name,
+            file: file,
+            line: line
+        ) { error in
             guard case let DecodingError.dataCorrupted(context) = error else {
                 return XCTFail("\(name): \(error)", file: file, line: line)
             }
-            XCTAssertEqual(context.debugDescription, "\(wrapper.expectedPath): \(wrapper.expectedMessage)", file: file, line: line)
+            XCTAssertEqual(
+                context.debugDescription,
+                "\(wrapper.expectedPath): \(wrapper.expectedMessage)",
+                file: file,
+                line: line
+            )
         }
     }
 
     func testMenuStructuralFixturesPinTheSharedPathsAndMessages() throws {
-        for name in ["menu-no-items", "menu-too-many-items", "menu-item-unknown-field", "menu-divider-with-label", "menu-empty-label"] {
+        for name in [
+            "menu-no-items",
+            "menu-too-many-items",
+            "menu-item-unknown-field",
+            "menu-divider-with-label",
+            "menu-empty-label",
+        ] {
             try assertInvalid(name)
         }
     }
@@ -53,7 +75,8 @@ final class PrototypeMenusTests: XCTestCase {
         XCTAssertEqual(Set(names), Set([
             "menu-no-items.json", "menu-too-many-items.json", "menu-item-unknown-field.json",
             "menu-divider-with-label.json", "menu-empty-label.json", "menu-open-state-type.json",
-            "select-one-option.json", "select-33-options.json", "select-duplicate-values.json", "select-state-type.json",
+            "select-one-option.json", "select-33-options.json", "select-duplicate-values.json",
+            "select-state-type.json",
         ]))
     }
 
@@ -127,7 +150,10 @@ final class PrototypeMenusTests: XCTestCase {
         XCTAssertEqual(events.map(\.name), ["change"])
         XCTAssertEqual(events.first?.payload, .object(["key": .string("choice"), "value": .string("b")]))
         XCTAssertEqual(session.activate(target)?.count, 0)
-        XCTAssertEqual(PrototypeStateValidator.rejection(root: spec.root, state: ["choice": .number(1)]), "Select requires a string state key")
+        XCTAssertEqual(
+            PrototypeStateValidator.rejection(root: spec.root, state: ["choice": .number(1)]),
+            "Select requires a string state key"
+        )
         // Like radioGroup, a string need not be one of the options.
         XCTAssertNil(PrototypeStateValidator.rejection(root: spec.root, state: ["choice": .string("other")]))
     }
@@ -148,7 +174,10 @@ final class PrototypeMenusTests: XCTestCase {
         XCTAssertEqual(session.activate(target)?.count, 0)
         XCTAssertEqual(session.state["open"], .bool(true))
         XCTAssertEqual(session.state["choice"], .string("a"))
-        XCTAssertEqual(PrototypeStateValidator.rejection(root: spec.root, state: ["open": .string("x"), "choice": .string("a")]), "Menu requires a boolean state key")
+        XCTAssertEqual(
+            PrototypeStateValidator.rejection(root: spec.root, state: ["open": .string("x"), "choice": .string("a")]),
+            "Menu requires a boolean state key"
+        )
     }
 
     func testMenuAndSelectRepeatBindings() throws {
@@ -174,7 +203,8 @@ final class PrototypeMenusTests: XCTestCase {
 
     func testRuntimeSelectValidationRejectsDuplicateValues() throws {
         let node = try JSONDecoder().decode(PrototypeNode.self, from: Data(
-            #"{"type":"select","stateKey":"choice","options":[{"value":"a","label":"A"},{"value":"a","label":"Again"}]}"#.utf8
+            #"{"type":"select","stateKey":"choice","options":[{"value":"a","label":"A"},{"value":"a","label":"Again"}]}"#
+                .utf8
         ))
         XCTAssertEqual(
             PrototypeStateValidator.rejection(root: node, state: ["choice": .string("a")]),
@@ -185,10 +215,30 @@ final class PrototypeMenusTests: XCTestCase {
     func testSurfaceClampsBothAxesAndResolvesEndForRTL() {
         let window = CGSize(width: 300, height: 400)
         let surface = CGSize(width: 120, height: 160)
-        XCTAssertEqual(PrototypeMenus.origin(anchor: CGRect(x: 20, y: 30, width: 200, height: 40), surface: surface, window: window), CGPoint(x: 100, y: 70))
-        XCTAssertEqual(PrototypeMenus.origin(anchor: CGRect(x: 20, y: 30, width: 200, height: 40), surface: surface, window: window, rightToLeft: true), CGPoint(x: 20, y: 70))
-        XCTAssertEqual(PrototypeMenus.origin(anchor: CGRect(x: 400, y: 500, width: 100, height: 100), surface: surface, window: window), CGPoint(x: 180, y: 240))
-        XCTAssertEqual(PrototypeMenus.origin(anchor: .zero, surface: CGSize(width: 500, height: 600), window: window), .zero)
+        XCTAssertEqual(
+            PrototypeMenus
+                .origin(anchor: CGRect(x: 20, y: 30, width: 200, height: 40), surface: surface, window: window),
+            CGPoint(x: 100, y: 70)
+        )
+        XCTAssertEqual(
+            PrototypeMenus
+                .origin(
+                    anchor: CGRect(x: 20, y: 30, width: 200, height: 40),
+                    surface: surface,
+                    window: window,
+                    rightToLeft: true
+                ),
+            CGPoint(x: 20, y: 70)
+        )
+        XCTAssertEqual(
+            PrototypeMenus
+                .origin(anchor: CGRect(x: 400, y: 500, width: 100, height: 100), surface: surface, window: window),
+            CGPoint(x: 180, y: 240)
+        )
+        XCTAssertEqual(
+            PrototypeMenus.origin(anchor: .zero, surface: CGSize(width: 500, height: 600), window: window),
+            .zero
+        )
     }
 
     func testCapabilityAndTransientSelectVisibility() throws {

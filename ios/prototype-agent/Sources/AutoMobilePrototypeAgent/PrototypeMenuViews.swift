@@ -76,8 +76,17 @@ private struct PrototypeMenuPlacement: Layout {
         for subview in subviews {
             let proposal = ProposedViewSize(width: min(280, bounds.width), height: bounds.height)
             let size = subview.sizeThatFits(proposal)
-            let origin = PrototypeMenus.origin(anchor: anchor, surface: size, window: bounds.size, rightToLeft: rightToLeft)
-            subview.place(at: CGPoint(x: bounds.minX + origin.x, y: bounds.minY + origin.y), anchor: .topLeading, proposal: proposal)
+            let origin = PrototypeMenus.origin(
+                anchor: anchor,
+                surface: size,
+                window: bounds.size,
+                rightToLeft: rightToLeft
+            )
+            subview.place(
+                at: CGPoint(x: bounds.minX + origin.x, y: bounds.minY + origin.y),
+                anchor: .topLeading,
+                proposal: proposal
+            )
         }
     }
 }
@@ -93,7 +102,10 @@ struct PrototypeMenuOverlay: View {
             Color.clear.contentShape(Rectangle())
                 .onTapGesture { model.closeModal(node) }
                 .accessibilityHidden(true)
-            PrototypeMenuSurface(anchor: parent.flatMap { model.menuBounds[ObjectIdentifier($0)] }, identifier: node.identifier) {
+            PrototypeMenuSurface(
+                anchor: parent.flatMap { model.menuBounds[ObjectIdentifier($0)] },
+                identifier: node.identifier
+            ) {
                 PrototypeMenuView(node: node, model: model)
             }
         }
@@ -154,7 +166,9 @@ struct PrototypeSelectView: View {
                     Text(selected.isEmpty ? " " : selected)
                 }
                 Spacer(minLength: 12)
-                if let symbol = prototypeSymbol("expand_more") { PrototypeGlyph(symbol: symbol).accessibilityHidden(true) }
+                if let symbol = prototypeSymbol("expand_more") {
+                    PrototypeGlyph(symbol: symbol).accessibilityHidden(true)
+                }
             }
             .padding(12)
             .frame(minHeight: 48)
@@ -189,7 +203,10 @@ struct PrototypeSelectOverlay: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .accessibilityAddTraits(node.stateKey.flatMap { model.state[$0]?.stringValue } == option.value ? .isSelected : [])
+                    .accessibilityAddTraits(
+                        node.stateKey.flatMap { model.state[$0]?.stringValue } == option
+                            .value ? .isSelected : []
+                    )
                     .prototypeIdentifier(node.partIdentifier(option.value))
                 }
             }

@@ -809,7 +809,8 @@ struct PrototypeModalLayer: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay {
             if let selected = model.expandedSelect,
-               model.spec?.root.visibleSelect(selected, state: model.state, pages: model.pages) == true {
+               model.spec?.root.visibleSelect(selected, state: model.state, pages: model.pages) == true
+            {
                 PrototypeSelectOverlay(node: selected, model: model)
                     .reportFrame(key: "modal.select", model: model)
             }

@@ -34,9 +34,11 @@ final class PrototypeModel {
         session = next
         if let selected = expandedSelect {
             let root = next.spec?.root
-            let blocker = root?.openModals(state: next.state, pages: next.pages).last { ["dialog", "menu"].contains($0.type) }
+            let blocker = root?.openModals(state: next.state, pages: next.pages)
+                .last { ["dialog", "menu"].contains($0.type) }
             if root?.visibleSelect(selected, state: next.state, pages: next.pages) != true ||
-                (blocker != nil && blocker?.visibleSelect(selected, state: next.state, pages: next.pages) != true) {
+                (blocker != nil && blocker?.visibleSelect(selected, state: next.state, pages: next.pages) != true)
+            {
                 expandedSelect = nil
             }
         }

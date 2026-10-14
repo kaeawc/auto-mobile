@@ -8,8 +8,13 @@ export class FakeNativeHelperRecordStore implements NativeHelperRecordStore {
   write(record: NativeHelperRecord): void {
     this.records.set(record.pid, { ...record });
   }
-  remove(pid: number): void {
-    this.records.delete(pid);
+  remove(pid: number, expectedStartIdentity?: string): void {
+    if (
+      expectedStartIdentity === undefined ||
+      this.records.get(pid)?.startIdentity === expectedStartIdentity
+    ) {
+      this.records.delete(pid);
+    }
   }
   list(): NativeHelperRecord[] {
     return [...this.records.values()];

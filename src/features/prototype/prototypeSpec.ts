@@ -54,8 +54,8 @@ const offsetSchema = z
   .strict();
 const boundsSchema = z
   .object({
-    x: z.number().finite(),
-    y: z.number().finite(),
+    x: z.number().finite().min(-10000).max(10000),
+    y: z.number().finite().min(-10000).max(10000),
     width: z.number().finite().min(0).max(10000),
     height: z.number().finite().min(0).max(10000),
   })

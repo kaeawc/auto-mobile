@@ -1,0 +1,20 @@
+{
+  "spec": {
+    "id": 5,
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "spacer",
+      "style": {
+        "width": {
+          "dp": 1e30
+        }
+      }
+    }
+  },
+  "expectedPath": "id",
+  "expectedMessage": "Invalid string value"
+}

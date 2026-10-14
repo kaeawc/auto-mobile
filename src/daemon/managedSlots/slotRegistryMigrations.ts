@@ -1,8 +1,9 @@
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { Migrator, type Migration, type MigrationProvider } from "kysely/migration";
 import { ActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { selectMigrationLock } from "../../db/migrationLock";
+import { ManagedSlotRegistrySchemaUnsupportedError } from "./managedSlotRefusal";
 import * as slotRegistry000 from "./migrations/2026_10_09_000_slot_registry";
 import * as slotRegistry001 from "./migrations/2026_10_09_001_slot_owner_fencing";
 import * as slotJournal002 from "./migrations/2026_10_09_002_slot_journal";
@@ -28,6 +29,25 @@ export const slotRegistryMigrationProvider: MigrationProvider = {
   getMigrations: async () => ({ ...SLOT_REGISTRY_MIGRATIONS }),
 };
 
+/** Read only: refuse newer schemas before Kysely can create or update bookkeeping. */
+async function assertSupportedRegistrySchema<DB>(db: Kysely<DB>, dbPath: string): Promise<void> {
+  const table = await sql<{ name: string }>`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'kysely_migration'
+  `.execute(db);
+  if (table.rows.length === 0) {
+    return;
+  }
+  const executed = await sql<{
+    name: string;
+  }>`SELECT name FROM kysely_migration ORDER BY name`.execute(db);
+  const unknownMigrations = executed.rows
+    .map(({ name }) => name)
+    .filter((name) => !Object.hasOwn(SLOT_REGISTRY_MIGRATIONS, name));
+  if (unknownMigrations.length > 0) {
+    throw new ManagedSlotRegistrySchemaUnsupportedError(dbPath, unknownMigrations);
+  }
+}
+
 /**
  * Probe with reads only: Kysely's getMigrations does not create missing bookkeeping tables, and
  * reports their migrations as unexecuted. A migrated WAL registry can open behind a peer writer.
@@ -35,6 +55,7 @@ export const slotRegistryMigrationProvider: MigrationProvider = {
  * rechecks under that lock and the registry's transactional-DDL adapter keeps the changes atomic.
  */
 export async function migrateSlotRegistry<DB>(db: Kysely<DB>, dbPath: string): Promise<void> {
+  await assertSupportedRegistrySchema(db, dbPath);
   const migrator = new Migrator({ db, provider: slotRegistryMigrationProvider });
   if ((await migrator.getMigrations()).every((migration) => migration.executedAt !== undefined)) {
     return;
@@ -42,6 +63,7 @@ export async function migrateSlotRegistry<DB>(db: Kysely<DB>, dbPath: string): P
   const lock = selectMigrationLock(dbPath);
   await lock.acquire();
   try {
+    await assertSupportedRegistrySchema(db, dbPath);
     const { error } = await migrator.migrateToLatest();
     if (error) {
       throw new ActionableError(

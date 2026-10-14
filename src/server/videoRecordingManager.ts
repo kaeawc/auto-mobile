@@ -509,10 +509,12 @@ async function refreshCaptureTeardown(
         return;
       }
     }
+    const descriptor = deps.videoRecorderService.getCaptureTeardown(recordingId);
     await deps.recordingRepository.updateRecording(recordingId, {
-      captureTeardown: hostOnlyRecordingTeardowns.has(recordingId)
-        ? undefined
-        : deps.videoRecorderService.getCaptureTeardown(recordingId),
+      captureTeardown:
+        hostOnlyRecordingTeardowns.has(recordingId) && descriptor?.kind !== "ios-host-recorder"
+          ? undefined
+          : descriptor,
     });
   } catch (error) {
     logger.warn(
@@ -1846,7 +1848,7 @@ async function abandonActiveVideoRecording(
   deps: VideoRecordingManagerDependencies,
 ): Promise<StopVideoRecordingResult> {
   const owner = recordingOwners.get(recordingId);
-  // The serial's new occupant must never inherit a descriptor, even if host reaping fails.
+  // Retire device-bound identities; keep host identities until their stop is confirmed.
   await refreshCaptureTeardown(recordingId, deps);
   if (deps.videoRecorderService.listActiveRecordingIds().includes(recordingId)) {
     try {

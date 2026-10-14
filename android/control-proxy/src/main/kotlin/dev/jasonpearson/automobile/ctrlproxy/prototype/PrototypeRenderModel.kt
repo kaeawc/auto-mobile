@@ -361,6 +361,7 @@ fun interpolatePrototypeText(
   inPager: Boolean = false,
 ): String {
   val out = StringBuilder(text.length)
+  var substitutedLength = 0
   var index = 0
   while (index < text.length) {
     val end = interpolationTokenEnd(text, index)
@@ -368,7 +369,18 @@ fun interpolatePrototypeText(
       out.append(text[index])
       index++
     } else {
-      out.append(resolveInterpolation(text.substring(index, end), state, inPager))
+      val token = text.substring(index, end)
+      val value = resolveInterpolation(token, state, inPager)
+      if (
+        value != null &&
+          value.length <=
+            PrototypeSpecValidator.MAX_PROTOTYPE_SUBSTITUTED_TEXT_LENGTH - substitutedLength
+      ) {
+        out.append(value)
+        substitutedLength += value.length
+      } else {
+        out.append(token)
+      }
       index = end
     }
   }
@@ -396,10 +408,10 @@ private fun resolveInterpolation(
   token: String,
   state: Map<String, PrototypeScalar>,
   inPager: Boolean,
-): String {
+): String? {
   val key = token.substring(1, token.length - 1)
-  if (!inPager && (key == "page" || key == "pageCount")) return token
-  return state[key]?.renderedText() ?: token
+  if (!inPager && (key == "page" || key == "pageCount")) return null
+  return state[key]?.renderedText()
 }
 
 private val PROTOTYPE_COLOR_PATTERN = Regex("#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?")

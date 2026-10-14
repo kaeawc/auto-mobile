@@ -1,3 +1,4 @@
+import type { PrototypeHiddenReason } from "../../prototype/prototypeHidden";
 import type { PanelFingerprint } from "../../../models/DisplayPanel";
 /**
  * Shared types for CtrlProxyClient delegates.
@@ -118,6 +119,7 @@ export interface AccessibilityNodeSelector {
  */
 export interface AccessibilityHierarchy {
   prototypeSuspended?: boolean;
+  prototypeHiddenReason?: PrototypeHiddenReason;
   displayId?: number | null;
   panelUniqueId?: string | null;
   panelFingerprint?: PanelFingerprint;

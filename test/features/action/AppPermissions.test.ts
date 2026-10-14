@@ -602,6 +602,44 @@ describe("AppPermissions", () => {
     ]);
   });
 
+  test("passes simulator Photos verification metadata through the facade", async () => {
+    const simctl = new FakeSimCtlClient();
+    // Issue-reported TCC values; no real simulator capture is available.
+    const tccReader: TccPermissionReader = {
+      readPermissions: async () => [
+        {
+          service: "kTCCServicePhotos",
+          client: "com.example.app",
+          auth_value: 2,
+          allowed: null,
+          prompt_count: null,
+        },
+      ],
+    };
+    const permissions = new AppPermissions(iosSimulator, { simctl, tccReader });
+    const getResult = await permissions.getPermissions("com.example.app", {
+      permissions: ["photos"],
+    });
+    expect(getResult.permissions[0]).toMatchObject({
+      state: "unknown",
+      source: "iosTcc",
+      authValue: 2,
+      verified: false,
+      reason: expect.stringContaining("native PHPhotoLibrary"),
+    });
+    const setResult = await permissions.setPermissions("com.example.app", {
+      action: "grant",
+      permissions: ["photos"],
+    });
+    expect(setResult).toMatchObject({ success: false, changedCount: 0, failedCount: 1 });
+    expect(setResult.operations[0]).toMatchObject({
+      success: false,
+      changedCount: 0,
+      failedCount: 1,
+      result: { permission: "photos", success: false, applied: true, verified: false },
+    });
+  });
+
   test("routes reset on a physical iOS device through the CtrlProxy runner", async () => {
     const iosPhysicalClient = new RecordingPhysicalPrivacyClient();
     const permissions = new AppPermissions(iosPhysical, { iosPhysicalClient });

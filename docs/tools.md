@@ -1610,6 +1610,14 @@ the Android package name or iOS bundle ID. `clearKeyValueFile.fileName` and
 `removeKeyValue.fileName` are deprecated aliases for the store selector `name`.
 `setAppPermissions.action` selects `grant`, `revoke`, or `reset`.
 
+On iOS Simulator, a stored TCC Photos grant is not proof of effective full
+read/write authorization. `getAppPermissions` reports it as `unknown` with
+`verified: false`; `setAppPermissions` reports a dispatched Photos grant as an
+unverified failure. Verification is unavailable from the host without app
+instrumentation: launch the app and check
+`PHPhotoLibrary authorizationStatusForAccessLevel:ReadWrite`. Add-only access is
+insufficient. Physical-device permission limits are unchanged.
+
 `resetKeychain` requires `appId` and `confirm: true`. On iOS Simulator the reset
 erases every app's Keychain, regardless of `appId`.
 

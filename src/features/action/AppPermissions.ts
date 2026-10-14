@@ -91,6 +91,8 @@ export interface AppPermissionStateResult {
   state: AppPermissionState;
   service?: string;
   source: "androidRuntime" | "iosTcc";
+  verified?: boolean;
+  reason?: string;
   authValue?: number;
   raw?: Record<string, string | number | boolean | null>;
 }
@@ -448,6 +450,8 @@ export class AppPermissions {
         service: permission.service,
         state: permission.state,
         source: "iosTcc",
+        ...(permission.verified === undefined ? {} : { verified: permission.verified }),
+        ...(permission.reason === undefined ? {} : { reason: permission.reason }),
         ...(permission.authValue === undefined ? {} : { authValue: permission.authValue }),
         ...(permission.raw ? { raw: permission.raw } : {}),
       })),

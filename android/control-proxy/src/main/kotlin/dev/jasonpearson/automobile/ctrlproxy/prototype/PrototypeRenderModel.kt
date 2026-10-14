@@ -115,10 +115,11 @@ fun mapPrototypeSpec(
   pages: Map<String, Int> = emptyMap(),
 ): PrototypeRenderModel =
   PrototypeTrace.section(PrototypeTrace.MAP_PROTOTYPE_SPEC) {
-    guardPrototypeTree(spec.root)
+    val resolved = PrototypeDataResolver.resolve(spec)
+    guardPrototypeTree(resolved.root)
     prototypeRenderModel(
-      spec,
-      PrototypeNodeMapping(spec.state.orEmpty(), pages).map(spec.root, "root"),
+      resolved,
+      PrototypeNodeMapping(resolved.state.orEmpty(), pages).map(resolved.root, "root"),
     )
   }
 

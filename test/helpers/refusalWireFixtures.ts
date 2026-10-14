@@ -1,3 +1,4 @@
+import { PrototypeSuspendedError } from "../../src/features/prototype/prototypeSuspended";
 import { OrphanRecorderActiveError } from "../../src/server/orphanRecorderRefusal";
 import { HostBootAdmissionRegistryError } from "../../src/features/bootAdmission/HostBootAdmissionRegistry";
 import { StageSessionDownloadsRefusal } from "../../src/server/downloadsFixtureService";
@@ -412,6 +413,11 @@ const BUILDERS: readonly FixtureEntry[] = [
     "device_owned_by_other_session",
     "deviceAssignedToOtherSessionError via shapeToolCallError",
     () => shaped(deviceAssignedToOtherSessionError(DEVICE, "holder-session", SESSION)),
+  ],
+  [
+    "prototype_suspended",
+    "PrototypeSuspendedError via shapeToolCallError",
+    () => shaped(new PrototypeSuspendedError()),
   ],
   [
     "app_not_running",
@@ -1055,6 +1061,7 @@ function terminalAtAdmission(releaseReason: SessionReleaseReason): TerminalSessi
 }
 
 const SOCKET_FRAME_ERRORS: readonly (readonly [string, () => Error])[] = [
+  ["prototype_suspended", () => new PrototypeSuspendedError()],
   ["device_unhealthy", () => unhealthyRefusal()],
   ["device_unhealthy.permanent", () => unhealthyRefusal("permanent")],
   [

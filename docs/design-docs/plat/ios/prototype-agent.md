@@ -488,11 +488,13 @@ The agent advertises `prototype_data_model_v1` for the shared
 [data model contract](../android/prototype-ux.md#data-model-11673). The host refuses data-model
 shows on an agent without it, before uploads or show. The core resolves bindings once per show:
 path repeats become projected literal items, authored text placeholders become scalar text, and
-data conditions become constant conditions. Decode first guards data, then the authored tree
-(including one visit to each path-bound repeat template), then `MAX_PROTOTYPE_REPEAT_PATH_CELLS`
-in container pre-order. It resolves bindings with projected items cached per pointer, guards the
-resolved tree to count every instance, and finally expands repeats. The authored guard bounds
-node count and depth before either the cell guard or resolver recurses.
+data conditions become constant conditions. Decode first guards data, then the authored tree with
+two independent node budgets: ordinary nodes and nonempty literal-repeat instances use the
+expanded budget, while path-bound, empty, or malformed repeat templates are visited once under
+the authored-template budget; both enforce the same depth limit before the cell guard or resolver
+recurses. It then guards `MAX_PROTOTYPE_REPEAT_PATH_CELLS` in container pre-order, resolves bindings
+with projected items cached per pointer, guards the resolved tree to count every instance, and
+finally expands repeats.
 State interpolation then uses the ordinary expanded tree. `repeat.key` is accepted and kept during
 resolution, but rows retain positional identity until keyed patching (#11675).
 
